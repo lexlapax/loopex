@@ -53,7 +53,7 @@ turn's reply settles. Nothing on this table is published from a mutation reply.
 | Prompt admitted | `prompt_admitted_v2` — command digest, run id, content, the run's bounds and context ceiling | `user.message_appended`, echoed as `> ...` |
 | Request staged | `model_request_committed` (canonical request bytes and their digest, applied steer, context receipt) **and** `model_attempt_opened_v1`, one transaction | `run.started`, on the first turn only |
 | Model called | nothing | streamed text, transient |
-| Reply settled | `model_attempt_settled_v1` | `assistant.message_appended` |
+| Reply settled | `model_attempt_settled_v2` | `assistant.message_appended` |
 | Tool authorized | `effect_intent_committed` — the whole executor job **and** the host grant | `tool.started` |
 | Tool finished | `executor_receipt_committed` | `tool.finished` with the outcome and any artifact references |
 | Tool never ran | `tool_result_committed` | `tool.finished` carrying the reason, so a started call always finishes |
@@ -127,6 +127,9 @@ unproven effect deliberately leaves its entry open — and an open entry left
 stranded quarantines the root until it is reconciled. Treat that directory as one
 intact administrative unit; the full disposition is in
 [What local execution can reach](tools-and-policy.md#operator-tools-reach).
+The same quarantine remains when a bounded artifact-store worker cannot be
+confirmed stopped: no receipt is published while that worker may still publish
+its result.
 
 <a id="technical-run-bounds"></a>
 ## The Numbers You Control
@@ -186,7 +189,9 @@ group is gone. Confirmation means running
 a program — `/bin/ps` by default — and an image where that program is elsewhere
 can confirm nothing, so every command is reported `outcome_unknown`. Each receipt
 records which program was asked, the period it ran under as `cleanup_grace_ms`,
-and its own write bound as `receipt_retention_bound_ms`.
+and its own write bound as `receipt_retention_bound_ms`. The program must emit
+the full `-e -o pid= -o pgid=` table: the runtime parses exact PGID equality and
+requires the probe's Port carrier PID-equals-PGID row before absence is accepted.
 
 An interrupt becomes the ordinary public abort. However many signals arrive, one
 stop is submitted under one identity; acceptance extends the backstop exactly
@@ -202,6 +207,17 @@ never halted after the fact.
 Concept: [Where resume and cancel pick up](how-a-run-works.md#concept-run-again).
 
 What a crash costs depends on which record had landed.
+
+New writers settle every attempt with `model_attempt_settled_v2`, including an
+already open version-1 attempt, without redispatch. A version-1 prefix remains
+readable except `unreadable_model_answer` with reported accounting, which fails
+as `ambiguous_legacy_provider_accounting`. A later version-1 settlement after
+version 2 is invalid history. Neither reader rewrites committed accounting or
+reconstructs missing provenance. The old reader refuses version 2 before owner
+readiness and semantic work; fenced ownership administration may already have
+committed. Rollback therefore requires stopped owners and a complete backup,
+and supports only histories without version 2. See
+[ADR 0021](../adr/0021-compacted-provider-accounting-provenance-technical.md#technical-adr-0021-consequences).
 
 | Crashed at | What survives | What resume does |
 | --- | --- | --- |
@@ -224,11 +240,21 @@ prompt admitted after you decided is not silenced by a decision that predates it
 **Activation is a one-use capability.** It is runtime-local, non-serializable,
 and usable only by its current holder; it never enters a record, an event, a
 snapshot, a progress item, or a diagnostic. The holder is the process that asked
-for the preparation until it hands the capability on, which `resume` does as
-part of installing its interrupt handler: from then on a holder process the
-handler owns holds it, and a preparer that dies afterwards takes nothing with
-it. It has four states — prepared, spent, abandoned, fenced — and only *spent*
-schedules anything. `resume` installs the interrupt handler sized by the period
+for the preparation until `resume` starts a temporary lifetime guard. That guard
+monitors the installer before creating a linked and monitored holder, waits for
+the holder to acknowledge its own guard monitor, and only then unlinks the pair
+into a one-way lifetime. `resume` then arms that guard against the exact signal
+manager, installs the visible handler, and asks the session coordinator to hand
+the capability to that exact guarded holder. The coordinator decides the handoff
+and sends its verdict to the installer; the installer forwards it to the guard,
+and the coordinator records the holder and returns `:ok` only after that guard
+acknowledges it.
+Installer death before holder readiness or before verdict forwarding fails
+closed. After forwarding, ordered delivery makes the handoff independent of the
+installer even if its reply is lost. Manager, coordinator, or holder loss ends
+the exact authority rather than authorizing a substitute. The capability has
+four states — prepared, spent, abandoned, fenced
+— and only *spent* schedules anything. `resume` installs the interrupt handler sized by the period
 this session committed (a period the sizing formula refuses would leave a fixed
 ten-second backstop, and no such period can be committed), hands the
 capability to its holder, and asks that
@@ -292,11 +318,12 @@ expiry, and fencing token. A missing binding and a wrong one are distinguished. 
 job that fails any of this runs nothing, and the refusal is published durably
 before the caller hears about it.
 
-**Nothing about the credential is on disk.** It is read from
-`LOOPEX_PROVIDER_API_KEY` by the model adapter and by nothing else, and passed as
-a per-request option rather than stored in application state. It reaches no
-journal record, no receipt, no artifact, no public event, no progress item, and
-no diagnostic.
+**Nothing about the credential is on disk.** The host adapter reads
+`LOOPEX_PROVIDER_API_KEY` only for the provider call. A short-lived sender
+materializes it only after the configured private companion proves its protected
+entry and build identity, and the companion uses it as a per-request option. It
+is not stored in application state and reaches no journal record, receipt,
+artifact, public event, progress item, or diagnostic.
 
 Every executor spawn removes that name explicitly, and the model-supplied command
 then crosses `/usr/bin/env -i` and receives `PATH=/usr/bin:/bin` and nothing
@@ -304,12 +331,17 @@ else. Each receipt records the constructed environment's variable names and
 whether the credential was present, so the claim is journalled rather than
 asserted.
 
-Provider failures are bounded before they can carry it anywhere. Every error from
-the provider call is classified to `model_call_failed`, and the diagnostic text
-kept internally has the credential's bytes substituted out *before* it is
-truncated. Every raise, throw, and exit under that call is caught, and the call
-runs in a monitored worker so a crash that arrives as a link signal is contained
-too. An interrupted stream is an error, never a partial reply.
+Provider failures are bounded before they can carry it anywhere. The companion
+suppresses its raw diagnostics before ReqLLM starts, and the parent receives only
+the classified literal `model_call_failed`, never provider diagnostic text.
+Before Control is asked to authorize the attempt, the coordinator starts a
+dormant lifetime guard under the owner generation's private supervisor.
+The exact permitted worker asks that guard to create a linked callback. Catchable
+failures are normalized inside the callback;
+the guard traps asynchronous linked exits, cannot finish before the callback, and
+stops it if the worker or coordinator ends. Every terminal path awaits that
+guard, and abrupt owner loss cannot advance to a successor while the supervisor
+is still stopping it. An interrupted stream is an error, never a partial reply.
 
 The shipped composition selects `anthropic:claude-haiku-4-5` and resolves its
 endpoint from the adapter's bundled catalog, without a network call and without

@@ -41,6 +41,18 @@ defmodule LoopexCliTest do
     :persistent_term.erase({AllowAll, :announced})
     :persistent_term.erase({ShellAllowlist, :notice})
     on_exit(&LoopexCli.release_placement/0)
+
+    # Each case represents a terminal lifetime, but shares this test VM's event
+    # manager. Tear down only after that terminal process has actually exited;
+    # ADR 0020 deliberately refuses replacement by the following case.
+    terminal = self()
+
+    on_exit(fn ->
+      down = Process.monitor(terminal)
+      assert_receive {:DOWN, ^down, :process, ^terminal, _reason}, 1_000
+      restore_signal_handlers()
+    end)
+
     :ok
   end
 
@@ -267,10 +279,16 @@ defmodule LoopexCliTest do
   end
 
   defp await_group_gone(group, attempts \\ 600) do
-    {output, _status} = System.cmd("/bin/ps", ["-o", "pid=", "-g", Integer.to_string(group)])
+    {output, status} = System.cmd("/bin/ps", ["-e", "-o", "pid=", "-o", "pgid="])
+
+    members =
+      for line <- String.split(output, "\n", trim: true),
+          [pid, pgid] = String.split(line),
+          String.to_integer(pgid) == group,
+          do: String.to_integer(pid)
 
     cond do
-      String.trim(output) == "" -> true
+      status == 0 and members == [] -> true
       attempts > 0 -> Process.sleep(25) && await_group_gone(group, attempts - 1)
       true -> false
     end
@@ -971,6 +989,10 @@ defmodule LoopexCliTest do
            "the command left no writer marker, so nothing here would need recovering"
 
     assert :ok = LoopexCli.release_placement()
+    # The killed composition models the end of this command's VM, including
+    # its handler. The next command gets a fresh initial installation rather
+    # than silently replacing the previous terminal's handler.
+    restore_signal_handlers()
     File.read!(marker)
   end
 
@@ -3064,8 +3086,27 @@ defmodule LoopexCliTest do
   end
 
   defp restore_signal_handlers do
+    holders =
+      :erl_signal_server
+      |> :sys.get_state()
+      |> Enum.flat_map(fn
+        {Interrupt, _id, %{holder: holder}} when is_pid(holder) ->
+          [{holder, Process.monitor(holder)}]
+
+        _other ->
+          []
+      end)
+
     _ = :gen_event.delete_handler(:erl_signal_server, Interrupt, [])
-    _ = :gen_event.add_handler(:erl_signal_server, :erl_signal_handler, [])
+    refute Interrupt in :gen_event.which_handlers(:erl_signal_server)
+
+    for {holder, monitor} <- holders do
+      assert_receive {:DOWN, ^monitor, :process, ^holder, _reason}, 1_000
+    end
+
+    unless :erl_signal_handler in :gen_event.which_handlers(:erl_signal_server),
+      do: :gen_event.add_handler(:erl_signal_server, :erl_signal_handler, [])
+
     :ok
   end
 

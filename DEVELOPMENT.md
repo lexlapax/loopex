@@ -38,6 +38,16 @@ that calls Mix, and several do.
 Adding another development dependency requires the ordinary dependency
 decision.
 
+The reference local executor has a separate **runtime** prerequisite:
+executable `/bin/bash` for its internal supervision scripts on Darwin and Linux.
+Model-supplied raw commands still use `/bin/sh`, and argv commands remain literal.
+Core and custom executors do not acquire this requirement. This is the
+[maintainer-approved repair choice](docs/developer/agent-context-map.md#disposition-local-executor-bash-2026-09-07),
+documented in [Accepted ADR 0022](docs/adr/0022-local-executor-supervision-shell.md#concept),
+not an inference from the bootstrap's Bash dependency. An incompatible shell is
+not a fallback. See the [operator prerequisite](docs/operator/tools-and-policy.md#operator-local-supervision-shell)
+before running the reference stack.
+
 The M1 gate's stronger filesystem and containment lane additionally requires
 `stat`, `find`, `sort`, `comm`, `od`, `mktemp`, `cp`, `uname`, `/usr/bin/env`,
 `/usr/bin/id`, `/usr/bin/locale`, and either `shasum` or `sha256sum`. The runner probes and validates
@@ -165,6 +175,46 @@ package payloads cannot supply the marker themselves. No ambient `deps/` tree
 is consulted.
 Later project callbacks and task definitions remain trusted candidate code
 reviewed independently; they are not claimed as mechanically absent.
+
+## Provider Companion and Rollback Probes
+
+The reference CLI build also builds its private provider companion from a clean
+source checkout. Compilation and companion artifacts use the effective Mix
+build directory, including `MIX_BUILD_ROOT` or `MIX_BUILD_PATH`; the command
+embeds that exact companion path and build identity. Runtime never searches a
+workspace for a companion. The operator build command and relocation constraint
+are in [Coding sessions](docs/operator/coding-sessions.md#operator-sessions-running).
+
+The accounting compatibility probe is
+`scripts/provider-accounting-rollback.exs`. Run each mode in a separate VM, from
+the source checkout whose binary is under examination, using an absolute path
+to this script. Each writer takes a fresh directory created with `mktemp -d`;
+never point it at operator state. Stop the writer before invoking a reader.
+
+```text
+MIX_ENV=test mix run --no-start <absolute-script> write-v1 <fresh-v1-root>
+MIX_ENV=test mix run --no-start <absolute-script> read-v1 <same-v1-root>
+MIX_ENV=test mix run --no-start <absolute-script> write-v2 <fresh-v2-root>
+MIX_ENV=test mix run --no-start <absolute-script> read-v2-refused <same-v2-root>
+```
+
+Run the first two modes with the genuine pre-version-2 source binary. Run the
+third with the new writer and the fourth with that old binary. Unset
+`LOOPEX_PROVIDER_API_KEY`, `ANTHROPIC_API_KEY`, and `OPENAI_API_KEY`; the model is
+scripted and no tool effect is requested. Preserve each exact source SHA and
+toolchain in the evidence. The probe does not rewrite a settlement kind to
+manufacture an old journal: each writer must emit the version its mode names.
+It keeps one stable runtime placement across writer and reader, copies the whole
+store log before recovery, checks the existing history remains byte-equivalent,
+and allows only fenced ownership-administration records afterward. No model or
+executor dispatch, public event, or semantic record may follow the incompatible
+reader's refusal. The version-1 positive control must pass before counting a
+version-2 refusal as compatibility evidence.
+
+`--no-start` avoids starting an old provider application merely to inspect
+accounting recovery. The script starts the real local Store and runtime itself.
+This is rollback evidence, not an in-place journal migration or permission to
+use an older reader on an operator's live state.
 
 ## Implementation Posture
 

@@ -12,8 +12,9 @@ runtime. Part of the [documentation index](../README.md).
 | [Coding sessions](coding-sessions.md#concept) | Running, streaming, steering, resuming, and stopping a coding task with the `loopex` command; the project-resource trust decision; the configuration a resumed session recovers; and what stopping does and does not promise. |
 | [Tools and policy](tools-and-policy.md#concept) | The four coding tools, what local execution can reach, how `--policy` selects host authority, artifacts and how to read one back, and what the local store keeps on disk. |
 
-Loopex is not packaged or released yet. These runbooks describe the source-tree
-runtime and command and do not create a public compatibility or support promise.
+Loopex is not packaged or published for consumers. The `v0.0.0-m2` source-only
+milestone tag is not a package release or compatibility promise. These runbooks
+describe the source-tree runtime and command.
 Start with [running a task](coding-sessions.md#operator-sessions-running) for the
 `loopex` command M2 delivers, or with
 [what M1 delivers](runtime.md#operator-runtime-available) and

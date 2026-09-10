@@ -20,12 +20,13 @@ Evidence is unpaired: it is a log, not a Concept and Technical depth pair.
 | [M0 toolchain matrix](M0-toolchain-matrix.md) | Every gate run of the two locked toolchain pairs, in both orders and each after itself, with the revision they were taken at. |
 | [M1 negative demonstrations](M1-negative-demonstrations.md) | Five required safeguards disabled one at a time, each with its locked selector failure and exact restored artifact digest. |
 | [M2 recorded limitations](M2-recorded-limitations.md) | Known non-conformances carried by M2, each with its reason, observable consequence, and disposing authority. |
+| [M2 source-baseline review follow-up](M2-ff17990-review-followup.md) | Complete ff17990 finding reconciliation, accepted repair decisions, scoped implementation evidence, and the remaining final-source review sequence. |
 | [M2 corpus classification](M2-corpus-classification.md) | Retained classification of the post-integration reds into regression, supersession, and test-support defect, behind the tenth recorded override. |
 | [M1 toolchain matrix](M1-toolchain-matrix.md) | Source-candidate metadata, Darwin floor/current and Linux-current M1 captures, and inherited M0 floor/current proofs. |
 | [M2 negative demonstrations](M2-negative-demonstrations.md) | The ordered safeguards required by the active M2 gate, disabled one at a time with each locked selector failure and exact restored artifact digest. |
 | [M2 coding demonstration](M2-coding-demonstration.md) | The attended real-provider coding task through the shipped command, and what its capture can and cannot establish. |
 | [M2 real-call attestations](M2-real-call-attestations.md) | Provider-supplied response identifiers and reported usage for each of the three real-provider roles. |
-- [M2 post-closure real-call attestations](M2-post-closure-attestations.md) — the three real-provider roles retaken on the post-hotfix candidate with Mint 1.10.0, with the account lookup
+| [M2 post-closure real-call attestations](M2-post-closure-attestations.md) | Additive retakes of the three real-provider roles on post-closure source candidates with Mint 1.10.0, including the separately recorded provider-account lookup state. |
 | [M2 toolchain matrix](M2-toolchain-matrix.md) | Source-candidate metadata and the floor, current, and Linux-current M2 captures. |
 
 ## Related

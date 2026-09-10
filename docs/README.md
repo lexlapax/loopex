@@ -60,6 +60,10 @@ pairing, link, review, code-documentation, and enforcement contracts.
 | 0016 — configured cancellation observation | [Decision](adr/0016-configured-cancellation-observation.md#concept) | [Technical depth](adr/0016-configured-cancellation-observation-technical.md#technical-depth) |
 | 0017 — durable context and record admission budgets | [Decision](adr/0017-durable-context-admission-budget.md#concept) | [Technical depth](adr/0017-durable-context-admission-budget-technical.md#technical-depth) |
 | 0018 — provider attempt authority and recovery | [Decision](adr/0018-provider-attempt-authority-and-recovery.md#concept) | [Technical depth](adr/0018-provider-attempt-authority-and-recovery-technical.md#technical-depth) |
+| 0019 — host-owned provider protection | [Decision](adr/0019-host-owned-provider-protection.md#concept) | [Technical depth](adr/0019-host-owned-provider-protection-technical.md#technical-depth) |
+| 0020 — explicit prepared handoff | [Decision](adr/0020-explicit-prepared-handoff.md#concept) | [Technical depth](adr/0020-explicit-prepared-handoff-technical.md#technical-depth) |
+| 0021 — compacted provider-accounting provenance | [Decision](adr/0021-compacted-provider-accounting-provenance.md#concept) | [Technical depth](adr/0021-compacted-provider-accounting-provenance-technical.md#technical-depth) |
+| 0022 — local executor supervision shell | [Decision](adr/0022-local-executor-supervision-shell.md#concept) | [Technical depth](adr/0022-local-executor-supervision-shell-technical.md#technical-depth) |
 
 An ADR pair is one decision. Its status and governance record live in the
 Concept file and bind both files when accepted.

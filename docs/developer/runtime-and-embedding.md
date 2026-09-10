@@ -147,6 +147,70 @@ that a turn may carry several tool calls, and that a call is dispatched only
 after the host policy allows it. The stage-by-stage ordering is in
 [Agent loop and tools](agent-loop-and-tools.md#technical-depth).
 
+Provider dispatch has two deadline fences around its one-use permit. Control
+allocates the permit only after rebuilding the committed attempt binding and
+takes its final clock sample immediately before sending it. The receiving
+worker compares the committed deadline again immediately after receiving that
+exact permit and before entering the adapter. Equality means the deadline has
+been reached. A permit delivered late is retained conservatively as possibly
+dispatched, never retried, and never turned into a provider call outside the
+committed authority. The Store read that rebuilds the binding runs in a reader
+owned by a separate guardian that monitors Control. Timeout cancellation or
+Control death kills and awaits that exact reader, and a successful result is
+forwarded only after the reader has exited. The adapter's result remains inside
+its worker-provenance wrapper until admission, so its data cannot impersonate
+the receiver's private deadline observation.
+
+Before Control is asked to authorize that permit, the coordinator creates and
+retains a dormant provider lifetime guard under the owner generation's private
+supervisor, bound to the exact permit worker. The guard starts no adapter work
+until that worker receives its permit and asks it to create a linked callback.
+Catchable failures normalize inside the callback;
+the trapping guard reduces asynchronous linked exits to the same fixed private
+failure, waits for a successful callback to exit before forwarding its result,
+and cannot finish while the callback lives. An adapter may synchronously register
+one private resource guardian before releasing transport work. The reference
+adapter uses that handle for an independent OS guardian retaining one companion
+BEAM and its process group. ReqLLM and its transport processes run only in the
+companion; protected entry suppresses child diagnostics without changing the
+parent's Logger, application group leaders, or ReqLLM supervisor. Core's retaining
+guard, rather than the short-lived adapter callback, owns resource lifetime.
+Cleanup uses the already declared period and committed deadline; Core waits for
+the registered resource process to exit, not merely for an acknowledgement.
+Terminal data is not proof of process-group cessation. Every terminal path stops
+and awaits both lifetime layers, and the generation barrier cannot fall during
+abrupt owner loss until that supervisor has proved them down. Explicit host launch
+settings are required; no ambient worker discovery or shared-VM fallback exists.
+
+The adapter's complete raw reply, including every raw usage key and value, must
+pass the Store's bounded plain-data admission and full canonical validation
+before accounting. Store or canonical refusal yields an unreadable result and
+charges the run's remaining allowance as estimated, even if one raw usage member
+looks valid. Missing or invalid usage in an otherwise canonical reply has the
+same accounting result. Only after full canonical success, when the complete
+durable settlement itself fails the Store-size preflight, may the compact
+unreadable settlement retain already validated reported usage.
+
+The local executor separates queue ownership from effect authority. Its first
+serialized decision reserves or joins a job but grants no permission to run.
+The same server answers a second permit request only after checking the exact
+live reservation holder, repeating complete root reconciliation after bounded
+pre-start validation, and validating the job, grant, lease, and deadline. For
+new work it publishes the durable open entry and marker and installs the exact
+operation-owner token under the same root claim before returning a successful
+permit; a joiner never owns or erases that token. If publication stops between
+the open entry and marker, no owner token is installed and the unresolved entry
+quarantines the root. A close that only partly changes the
+ledger restores the open authority before releasing the claim or retains the
+claim and quarantines the root when restoration cannot be proved, so unrelated
+work cannot turn an ambiguous prior effect into permission. A missing or
+oversized job identity is refused before ledger or reservation work. Filesystem
+effects run under an owner-aware worker bound to the Local instance that
+admitted them. Command launch also monitors the execute caller before the child
+announces readiness, and a command's potentially proved result is checked
+against the Local owner again after cleanup, so neither start nor final proof can
+outlive its exact authority.
+
 All durable and public boundary data is bounded plain data. Provider structs,
 PIDs, functions, arbitrary terms, credentials, and implementation types remain
 inside their owning edge or transient runtime process.
@@ -191,37 +255,70 @@ transaction never anchors past what its first read may deliver.
 
 Recovery that may race an operator interrupt is deliberately two phase.
 `prepare_resume_session/3` and `prepare_resume_known_session/4` return either a
-replayed result or an opaque one-use activation capability while ordinary work
-remains paused. The caller then invokes `activate_resume/1` or
-`abandon_resume/1`, or hands the capability to another process with
-`transfer_resume/2`, which only the current holder may do and which the
-coordinator acknowledges before answering. All three wait for the coordinator's
-answer rather than expiring
-on a bound: the message carrying either call is not withdrawn when its caller
-stops waiting, so an expired call would report the session unavailable while the
-coordinator went on to spend the very activation the caller was told it had not
-got. Neither proposes a Store mutation, so waiting commits nothing, and a
-coordinator that has died refuses through its own exit.
+replayed result or an opaque one-use activation capability while recovered work
+remains paused. The coordinator monitors the initial preparer before returning
+that capability; preparer loss permanently abandons unspent authority. Only the
+current holder may activate, abandon, or transfer it.
+
+`transfer_resume/2` preserves ordinary transfer and its PID domain. The
+coordinator records the new holder before replying. It never selects another
+protocol from ambient process state. Loss of the caller before its reply leaves
+the result unknown to that caller.
+
+`transfer_resume(activation, holder, {participant, correlation})` explicitly
+adds a local lifetime participant under
+[ADR 0020](../adr/0020-explicit-prepared-handoff.md#concept). The calling holder,
+receiving holder, participant and coordinator must be distinct local processes;
+correlation is a fresh local reference. Malformed or aliased roles and non-local
+correlation references return `invalid_resume_handoff`; a non-local role returns
+`non_local_resume_participant` before liveness checks or mutation. The full
+independently implementable message protocol is documented on
+`Loopex.ResumeActivation.transfer/3` and in
+[the technical decision](../adr/0020-explicit-prepared-handoff-technical.md#technical-adr-0020-decision).
+No CLI implementation or private capability inspection is needed to implement
+that participant.
+
+The participant establishes its preparer, holder and host dependencies before
+the receiving holder becomes reachable. The coordinator prepares one exact
+relationship asynchronously, then sends an authorization through the calling
+holder. Acceptance of the forwarded authorization by the participant is the
+lifetime linearization: it retires the preparer dependency and acknowledges to
+the coordinator. Forwarded authorization and later preparer death are consumed
+in sender order. The coordinator records the acknowledged holder before
+returning `:ok`, preserving every intervening abort or owner fence. Initial
+preparer death cannot revoke a handoff whose participant already accepted it,
+even when the public reply is lost.
+
 `LoopexCli.Interrupt.install_prepared(attachment, cleanup_ms, activation)`
-installs an interrupt owner and, in the same step, hands the capability to a
-holder process started for that one purpose; it returns the owner's
-acknowledgement, `:ok`, or the owner's refusal, and a caller that continues
-past a refusal as though the capability had moved has a defect of its own.
-`LoopexCli.Interrupt.activate_prepared(activation)` and
-`LoopexCli.Interrupt.abandon_prepared(activation)` present the capability from
-that holder and wait for the owner's answer without a bound, as the facade
-entries do; a holder that dies without answering is reported by its own name,
-never as a refusal. The holder is deliberately not the signal server: a
-blocked signal server could handle no signal, so the holder blocks instead and
-the handler keeps submitting the abort and arming the backstop. A signal's
-abort and an activation still cannot both win, because the owner fences the
-capability on an admitted abort and refuses a later activation as fenced. A
-preparer that dies after the acknowledgement leaves a live holder; one that
-dies before it leaves a capability no live process can present; removing the
-handler stops its holder, and the owner then pauses the recovered work for
-good rather than strand a capability nobody can present. The shipped `resume`
-command routes through that installation and, where the owner refuses the
-activation, gives the capability up through the handler before it reports.
+supplies its guard as that participant. The guard monitors the installer before
+creating its linked, monitored holder, and arms the exact signal manager before
+installation exposes the holder. The link also ends a blocked holder if the
+guard dies. Handler installation atomically claims one manager-local identity.
+A duplicate returns `interrupt_already_installed`, disposes its own candidate
+participants, and preserves the incumbent attachment, holder, abort identity
+and backstop. Initial installation maintains signal coverage while removing
+the default termination handler. There is no dynamic replacement or predecessor
+drain.
+
+Installation propagates `:ok`, definitive refusal, or `{:unresolved, reason}`.
+An unresolved result keeps recovery fenced and lifetime cleanup active; the
+command reports uncertainty and does not activate or retry speculatively.
+Activation and abandonment presentations wait for exact owner results in the
+holder, while their read-only holder lookup has an independent bounded wait and
+reports unavailable on expiry. A suspended manager is not an absent manager.
+Holder or coordinator loss during a presentation is unresolved, because stopping
+a presenter cannot withdraw a request already received by the owner.
+
+The signal manager remains responsive while the holder waits: signals submit
+the ordinary abort asynchronously and arm the configured backstop. Orderly
+handler removal releases its holder asynchronously; abrupt exact-manager or
+coordinator loss independently ends even an idle holder. These losses abandon
+only still-prepared authority. A session whose activation already succeeded
+owns its admitted work and is not terminated by holder cleanup. No transient
+capability, PID, reference, or participant value enters durable or printable
+public data. Rollback terminates the transient command participants before
+restarting a coherent prior composition; it never translates a live capability
+or undoes an admitted activation or abort.
 
 ### Reference Composition
 
@@ -313,10 +410,11 @@ coordinator therefore solicits its own query at activation, asks the executor
 through the optional `Loopex.Executor.retained_receipt/2` callback, and validates the
 answer exactly as it validates a host's: a retained receipt commits the receipt
 fact and the run continues; `:absent`, `{:error, :effect_unresolved}` (an
-admitted effect no live instance is settling), and `{:error, :effect_settling}`
-(a receipt whose open entry still stands) each commit `outcome_unknown`, since
-the process that could have finished them is gone once a prepared resume is
-activated, and the root's quarantine stands until an operator clears it; an
+admitted job this Local does not hold, with an open entry and no final receipt),
+and `{:error, :effect_settling}` (a receipt whose open entry still stands) each
+commit `outcome_unknown`, because none is a final fact from which this recovered
+owner may resume or re-dispatch, and the root's quarantine stands until an
+operator clears it; an
 executor that does not export the callback, answers `{:error, :effect_in_flight}`
 for a job it still holds or any other error, or returns a receipt that does not
 bind to the journaled job leaves the work pending for the host, which then

@@ -14,10 +14,11 @@ durable session truth, no cursor truth, no store access, and no authority
 decision. If the command disappeared, everything it does would still be
 reachable.
 
-This is a working milestone surface. It is not packaged, not installed, not
-released, and carries no compatibility promise. An M1-era session data root is
-**not** readable by M2: the durable record shape changed, and M2 will not open
-one. Start a new state root rather than pointing M2 at an M1 directory.
+This is a working milestone surface. It is not packaged or installed, and the
+`v0.0.0-m2` source-only milestone tag carries no compatibility promise. An
+M1-era session data root is **not** readable by M2: the durable record shape
+changed, and M2 will not open one. Start a new state root rather than pointing
+M2 at an M1 directory.
 
 Tools, host policy, and artifacts:
 [Tools and policy](tools-and-policy.md#concept). Developer detail:
@@ -35,8 +36,12 @@ cd ~/code/my-project
 ~/code/loopex/apps/loopex_cli/bin/loopex run --policy allow-all "add a changelog entry for the parser fix"
 ```
 
-The build writes a self-contained `loopex` escript beside the application, and
-`bin/loopex` is a small launcher that runs it. **Run the launcher, not the
+The build writes the `loopex` escript beside the application and also builds its
+private `loopex_provider` companion under `_build/prod`, recording the companion's
+absolute interpreter/path and digests in the command. Keep that companion at its
+configured path; copying only the command does not relocate the provider. The
+source checkout must be clean for this identity-bound build. `bin/loopex` is a
+small launcher that runs the command. **Run the launcher, not the
 escript.** The emulator reserves `SIGINT` for its own break handler and refuses
 to hand it to a signal handler at all, so a `Ctrl-C` delivered straight to the
 escript ends the operating-system process without stopping the run through the
@@ -45,8 +50,12 @@ that was mid-write stays mid-write, and nothing is reported. The launcher traps
 the interrupt outside the emulator and forwards the stop the escript already
 knows how to make. Copy the pair together, keeping the launcher's
 `../loopex` layout, or point `LOOPEX_ESCRIPT` at the escript and put the launcher
-anywhere on your `PATH`. It reads the provider credential from
-`LOOPEX_PROVIDER_API_KEY`.
+anywhere on your `PATH`; this moves only command startup, not the companion's
+embedded location. The reference adapter reads the provider credential from
+`LOOPEX_PROVIDER_API_KEY` after its isolated child is ready. Empty credentials or
+values above 65,536 bytes refuse. A missing or mismatched companion refuses
+instead of running provider code inside the command's VM. Embedders can supply
+different explicit companion paths; runtime never searches a workspace for one.
 
 `--policy` is required and has no default. Nothing runs a tool until you have
 named the authority that governs it; see
@@ -398,10 +407,21 @@ loopex: `loopex resume` continues reading from the durable record
 uses `install(attachment, cleanup_ms)` for an ordinary active run, and
 `install_prepared(attachment, cleanup_ms, activation)` for recovered work that
 must remain paused until the interrupt owner decides whether to activate it.
-`loopex resume` uses the prepared entry: it installs the handler carrying the
-activation and, in the same step, hands the capability to a holder process the
-handler owns, so there is no interval in which recovered work is running and
-the runtime's default handler is still the one installed. The command then asks
+`loopex resume` uses the prepared entry. Its installer first starts a temporary
+lifetime guard, which monitors the installer before it creates the holder. The
+holder starts linked and monitored, acknowledges that guard, and is only then
+unlinked into the one-way relationship that makes installer loss kill the holder
+without letting holder loss kill the installer. The command then installs the
+handler carrying the activation, arms that guard against the exact signal
+manager, and makes the handler visible before asking the session coordinator to
+hand the capability to that exact holder. The coordinator decides the transfer
+and sends its verdict to the installer; the installer forwards it to the exact
+guard, whose acknowledgement precedes the coordinator recording the holder and
+reporting success. There is no
+interval in which recovered work is running and the runtime's default handler is
+still the one installed. Installer death before holder readiness or before
+forwarding fails closed. After forwarding, ordered delivery makes the handoff
+independent of the installer even if its reply is lost. The command then asks
 that holder to start the work and waits for the answer without a bound. The
 signal server itself is never blocked by that wait, so a signal arriving
 meanwhile still submits the ordinary abort and arms the backstop; the abort
@@ -461,13 +481,22 @@ ignores the first signal is killed when the period is spent, and a group that
 cannot be confirmed gone makes the run's outcome `outcome_unknown` rather than
 `cancelled`.
 
+Spilling truncated output into the artifact store is part of that settlement.
+If its worker cannot be confirmed stopped at lease loss or at its bound, Loopex
+does not write a receipt that could race the late publication. The job remains
+open and quarantines the state root until it is reconciled.
+
 Confirming that a group is gone means running a program, and Loopex runs
 `/bin/ps`. On an image that ships `ps` somewhere else, or not at all, nothing can
 be confirmed and every command is reported `outcome_unknown` — correct, and
 useless. A host embedding Loopex names the program
 (`Loopex.Executor.Local.start_link(process_probe: "/usr/bin/ps")`), and every
 receipt records which program was asked, so an unproven outcome says what could
-not confirm it.
+not confirm it. A replacement must implement the same
+`-e -o pid= -o pgid=` table dialect. Loopex parses exact PGID equality and
+requires the probe's own Port carrier to appear as its PID-equals-PGID witness in
+the table, so an empty or
+malformed answer confirms nothing.
 
 The period is yours to choose. `loopex run --cleanup-grace-ms 8000` declares it
 for that session, and the run's ending reports whichever period applied, so an

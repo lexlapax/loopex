@@ -379,9 +379,14 @@ defmodule Loopex.Runtime do
   defp finish_attachment(runtime, session_id, generation, options) do
     case dispatcher_call(runtime, {:attach, runtime.token, session_id, options}, :infinity) do
       {:ok, attachment} ->
+        # Concept: attachment registration answers with its actual outcome.
+        # Technical depth: Dispatcher has already created the attachment, and
+        # this Control call installs its routing. A caller timeout cannot revoke
+        # either mutation or truthfully report that the attachment failed.
         case control_call(
                runtime,
-               {:finish_attach, runtime.token, session_id, generation, options, attachment}
+               {:finish_attach, runtime.token, session_id, generation, options, attachment},
+               :infinity
              ) do
           {:ok, installed} -> build_attachment(runtime, session_id, installed)
           {:error, reason} -> {:error, reason}

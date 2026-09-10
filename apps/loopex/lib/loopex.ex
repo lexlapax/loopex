@@ -441,4 +441,26 @@ defmodule Loopex do
   """
   @spec transfer_resume(ResumeActivation.t(), pid()) :: :ok | {:error, term()}
   def transfer_resume(activation, holder), do: ResumeActivation.transfer(activation, holder)
+
+  @doc """
+  ## Concept
+
+  Hands a prepared capability to a local holder whose lifetime is protected by
+  an explicit participant. The ordinary two-argument transfer remains available.
+
+  ## Technical depth
+
+  Delegates to `Loopex.ResumeActivation.transfer/3`, which documents the complete
+  participant protocol. The caller, holder, participant and coordinator must be
+  distinct local processes, and the correlation must be a fresh reference.
+  `:ok` proves the coordinator recorded the acknowledged handoff; an error proves
+  refusal, while `{:unresolved, reason}` leaves recovery fenced because a lost
+  response cannot prove whether the lifetime handoff occurred. Never retry or
+  activate speculatively after uncertainty. These local values are never durable
+  or printable public data.
+  """
+  @spec transfer_resume(ResumeActivation.t(), pid(), {pid(), reference()}) ::
+          :ok | {:error, atom()} | {:unresolved, atom()}
+  def transfer_resume(activation, holder, participant),
+    do: ResumeActivation.transfer(activation, holder, participant)
 end

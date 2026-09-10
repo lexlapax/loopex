@@ -512,6 +512,7 @@ defmodule LoopexCli do
     case Interrupt.install_prepared(attachment, grace_ms, activation) do
       :ok -> start_recovered_work(attachment, activation)
       {:error, reason} -> refuse_handoff(reason, activation)
+      {:unresolved, reason} -> {:error, reason}
     end
   end
 
@@ -543,6 +544,15 @@ defmodule LoopexCli do
     case activate(activation) do
       {:ok, _session_id} ->
         Render.stream(attachment)
+
+      {:unresolved, reason} ->
+        {:error, reason}
+
+      {:error, :prepared_activation_unavailable} = unavailable ->
+        # The holder lookup expired before this presentation was sent. That
+        # observation neither resolves another pending action nor authorizes
+        # retry or compensating abandonment.
+        unavailable
 
       {:error, reason} ->
         _ = facade(Interrupt, :abandon_prepared, [activation])
@@ -867,6 +877,7 @@ defmodule LoopexCli do
           project_manifest: manifest,
           project_decision: decision,
           progress_to: self(),
+          provider_launch: LoopexCli.ProviderLaunch.options(),
           recover_stale_writer: true
         ] ++ cleanup ++ context
       )

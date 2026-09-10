@@ -42,6 +42,74 @@ defmodule Loopex.SessionLifecycleTest do
     fixture
   end
 
+  test "attachment finalization waits for its actual result after a delayed control turn",
+       fixture do
+    session_id = create_session!(fixture, "delayed-attachment")
+    {:ok, %{control: control, dispatcher: dispatcher}} = Runtime.children(fixture.runtime)
+    :ok = :sys.suspend(dispatcher)
+
+    try do
+      caller =
+        Task.async(fn ->
+          Loopex.attach(fixture.runtime, session_id, request_id: "delayed-attachment-request")
+        end)
+
+      assert eventually(fn ->
+               {:messages, messages} = Process.info(dispatcher, :messages)
+
+               Enum.any?(messages, fn
+                 {:"$gen_call", _from, {:attach, _token, ^session_id, _options}} -> true
+                 _other -> false
+               end)
+             end)
+
+      # The first Control query has completed. Hold only the mutating final
+      # registration, after Dispatcher has installed its side of the attachment.
+      :ok = :sys.suspend(control)
+      :ok = :sys.resume(dispatcher)
+
+      assert eventually(fn ->
+               {:messages, messages} = Process.info(control, :messages)
+
+               Enum.any?(messages, fn
+                 {:"$gen_call", _from,
+                  {:finish_attach, _token, ^session_id, _generation, _options, _attachment}} ->
+                   true
+
+                 _other ->
+                   false
+               end)
+             end)
+
+      # This deliberately crosses the old five-second call timeout. Silence
+      # alone is not a mutation verdict: after releasing Control, require the
+      # actual success and prove that the returned attachment routes a command.
+      assert Task.yield(caller, 5_500) == nil
+      :ok = :sys.resume(control)
+      assert {:ok, attachment} = Task.await(caller, 5_000)
+
+      assert {:accepted, "after-delayed-attachment"} =
+               Loopex.command(attachment, %{
+                 type: :prompt,
+                 command_id: "after-delayed-attachment",
+                 content: "the attachment was installed"
+               })
+
+      assert {:ok, ^attachment} =
+               Loopex.attach(fixture.runtime, session_id,
+                 request_id: "delayed-attachment-request"
+               )
+    after
+      for process <- [control, dispatcher] do
+        try do
+          :sys.resume(process)
+        catch
+          :exit, _reason -> :ok
+        end
+      end
+    end
+  end
+
   # Concept: the two ways an ownership question can fail to be a "yes" are not
   # the same answer, and neither of them is latency.
   #

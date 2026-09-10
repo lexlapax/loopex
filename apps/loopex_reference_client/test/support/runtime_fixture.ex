@@ -1,3 +1,5 @@
+Code.require_file("../../../loopex_llm_reqllm/test/support/provider_build_fixture.exs", __DIR__)
+
 defmodule Loopex.ReferenceClientTestModel do
   @behaviour Loopex.Model
 
@@ -64,11 +66,14 @@ defmodule Loopex.ReferenceClientTestModel do
 end
 
 defmodule Loopex.ReferenceClientRuntimeFixture do
+  alias Loopex.Executor
   alias Loopex.Executor.Local
   alias Loopex.Executor.Local.WorkspaceLease
   alias Loopex.ReferenceClient
   alias Loopex.Store
   alias Loopex.Store.Local, as: LocalStore
+
+  @demo_tool_wall_time_ms 30_000
 
   def start(label, model_module, model_options \\ [], options \\ []) do
     root =
@@ -78,6 +83,9 @@ defmodule Loopex.ReferenceClientRuntimeFixture do
           "loopex-reference-#{label}-#{System.unique_integer([:positive])}"
         )
       end)
+
+    {model_options, sampling_options} =
+      model_configuration(model_module, model_options, root, not Keyword.has_key?(options, :root))
 
     workspace = Path.join(root, "workspace")
     ledger = Path.join(root, "executor-ledger")
@@ -130,11 +138,17 @@ defmodule Loopex.ReferenceClientRuntimeFixture do
       "effect_class" => "workspace_write",
       "idempotency_class" => "reconcile_then_retry",
       "budgets" => %{
-        "wall_time_ms" => 30_000,
+        "wall_time_ms" => @demo_tool_wall_time_ms,
         "output_bytes" => 1_048_576,
         "artifact_bytes" => 1_048_576
       }
     }
+
+    executor_reference =
+      case Keyword.get(options, :executor_reference_builder) do
+        nil -> executor
+        builder when is_function(builder, 1) -> builder.(executor)
+      end
 
     runtime_options = [
       context_token_budget: 8_192,
@@ -143,11 +157,11 @@ defmodule Loopex.ReferenceClientRuntimeFixture do
       model: %{
         module: model_module,
         model: model_spec(model_module),
-        options: Keyword.put_new(model_options, :max_tokens, 256)
+        options: model_options
       },
       executor: %{
         module: Keyword.get(options, :executor_module, Local),
-        reference: executor,
+        reference: executor_reference,
         identity: "executor-local",
         epoch: 11,
         fencing_token: fence,
@@ -162,6 +176,7 @@ defmodule Loopex.ReferenceClientRuntimeFixture do
       fault_to: Keyword.get(options, :fault_to)
     ]
 
+    runtime_options = runtime_options ++ sampling_options
     {:ok, client} = ReferenceClient.start(runtime_options)
 
     %{
@@ -212,6 +227,92 @@ defmodule Loopex.ReferenceClientRuntimeFixture do
     end
   end
 
+  # Concept: the recovery fault boundary waits for the complete valid tool
+  # lifetime rather than an arbitrary fraction of it.
+  #
+  # Technical depth: the demonstration tool is a controlled process with its
+  # own wall bound. A successful answer may then spend the committed cleanup
+  # period confirming the process group and the separate receipt-retention
+  # reserve before Core can emit the fault hook. The former three-second receive
+  # raced that healthy path under suite load. This helper derives its ceiling
+  # from the same public cancellation formula, fails early if the run terminates
+  # without the hook, and reports the observable runtime and executor state if
+  # the complete bound expires.
+  def await_executor_receipt_fault(fixture) do
+    grace_ms =
+      Keyword.get(
+        fixture.runtime_options,
+        :cleanup_grace_ms,
+        Executor.default_cleanup_grace_ms()
+      )
+
+    {:ok, bounds} = Executor.cancellation_bounds(grace_ms)
+
+    timeout_ms =
+      @demo_tool_wall_time_ms + bounds.executor_observe_ms + bounds.receipt_retention_ms
+
+    await_executor_receipt_fault(
+      fixture,
+      System.monotonic_time(:millisecond) + timeout_ms,
+      timeout_ms
+    )
+  end
+
+  defp await_executor_receipt_fault(fixture, deadline, timeout_ms) do
+    remaining = max(deadline - System.monotonic_time(:millisecond), 0)
+
+    receive do
+      {:loopex_fault, :after_executor_receipt_before_fact, _coordinator, _reference, _receipt} =
+          fault ->
+        fault
+    after
+      min(remaining, 100) ->
+        status = safely(fn -> ReferenceClient.status(fixture.client) end)
+
+        cond do
+          terminal_without_fault?(status) ->
+            raise_fault_wait("run terminated without the recovery fault", fixture, status)
+
+          remaining == 0 ->
+            raise_fault_wait(
+              "recovery fault did not arrive within #{timeout_ms} ms",
+              fixture,
+              status
+            )
+
+          true ->
+            await_executor_receipt_fault(fixture, deadline, timeout_ms)
+        end
+    end
+  end
+
+  defp terminal_without_fault?({:ok, %{active_run_id: nil, pending_work_ids: []}}), do: true
+  defp terminal_without_fault?(_status), do: false
+
+  defp raise_fault_wait(reason, fixture, status) do
+    stats = safely(fn -> Local.stats(fixture.executor) end)
+
+    receipts =
+      case stats do
+        %{dispatches: dispatches} when is_map(dispatches) ->
+          Map.new(dispatches, fn {job_id, _count} ->
+            {job_id, safely(fn -> Local.receipt(fixture.executor, job_id) end)}
+          end)
+
+        _unavailable ->
+          :unavailable
+      end
+
+    raise "#{reason}; status=#{inspect(status)} stats=#{inspect(stats)} " <>
+            "receipts=#{inspect(receipts)}"
+  end
+
+  defp safely(fun) do
+    fun.()
+  catch
+    kind, reason -> {kind, reason}
+  end
+
   def stop_runtime(fixture) do
     if Loopex.Runtime.alive?(fixture.client.runtime), do: ReferenceClient.stop(fixture.client)
     fixture
@@ -258,6 +359,29 @@ defmodule Loopex.ReferenceClientRuntimeFixture do
 
   defp model_spec(Loopex.LLM.ReqLLM), do: Loopex.LLM.ReqLLM.default_model()
   defp model_spec(_module), do: "deterministic:test"
+
+  # Concept: real calls use the trusted companion, with sampling owned by Core.
+  # Technical depth: build before Store/executor startup; demo-only tool inputs
+  # never enter the adapter's closed launch options. The deterministic branch
+  # retains its existing options and max_tokens default without a build.
+  defp model_configuration(Loopex.LLM.ReqLLM, options, root, owns_root?) do
+    # Technical depth: an automatically named root has no outer cleanup owner
+    # until start/4 returns. Exclusive creation makes pre-resource failure
+    # cleanup safe; explicit trace roots remain their caller's responsibility.
+    if owns_root?, do: File.mkdir!(root)
+
+    try do
+      launch = Loopex.LLM.ReqLLM.ProviderBuildFixture.options!(root)
+      {launch, [sampling: %{"max_tokens" => Keyword.get(options, :max_tokens, 256)}]}
+    rescue
+      error ->
+        if owns_root?, do: File.rm_rf!(root)
+        reraise error, __STACKTRACE__
+    end
+  end
+
+  defp model_configuration(_module, options, _root, _owns_root?),
+    do: {Keyword.put_new(options, :max_tokens, 256), []}
 
   defp load_pages(loader, position, accumulated) do
     case loader.(position) do

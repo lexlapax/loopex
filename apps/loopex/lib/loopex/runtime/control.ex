@@ -38,12 +38,11 @@ defmodule Loopex.Runtime.Control do
 
   @max_identifier_bytes 256
 
-  # Technical depth: the bound Control is willing to spend waiting for the one
-  # single-row page that rebuilds a provider attempt binding. It is a local
-  # store read of one record, so a second is already generous, while every
-  # committed run deadline this could be authorizing against is far larger --
-  # the bound can therefore expire only when the store is not answering, and it
-  # never becomes the reason an attempt inside its own authority is refused.
+  # Technical depth: this is Control's private responsiveness bound for the one
+  # single-row page that rebuilds a provider attempt binding. It is deliberately
+  # independent of the run deadline: expiry proves only that the Store did not
+  # answer inside Control's local allowance, so it refuses without manufacturing
+  # a dispatch verdict.
   @position_read_timeout_ms 1_000
 
   @doc """
@@ -202,6 +201,12 @@ defmodule Loopex.Runtime.Control do
        context_token_budget: Keyword.fetch!(options, :context_token_budget),
        progress_to: Keyword.get(options, :progress_to),
        diagnostics_to: Keyword.get(options, :diagnostics_to),
+       # Concept: every provider-permit decision reads one runtime-local wall clock.
+       #
+       # Technical depth: the function stays in private process state so the exact
+       # send boundary can be exercised deterministically without widening runtime
+       # configuration or changing production's System clock.
+       wall_clock: fn -> System.system_time(:millisecond) end,
        lane: OwnerLane.new(Keyword.fetch!(options, :store)),
        sessions: %{},
        monitor_to_session: %{},
@@ -359,36 +364,36 @@ defmodule Loopex.Runtime.Control do
   # and the send happen together, so a succession linearizes either entirely
   # before the send or entirely after it. A refusal here is ephemeral: it is the
   # coordinator's to retain durably, and only while that coordinator is still
-  # authoritative.
+  # authoritative. Exact already-spent bindings refuse from local state before
+  # a Store read; re-presenting one cannot spend another serialized read wait.
   #
   # The deadline is checked twice on purpose. The first check refuses an already
-  # expired attempt before Control spends a Store read on it. The second is the
-  # one dispatch linearization depends on: ADR 0018 requires every member of the
-  # authorization to equal its registered state *at the instant of the send*, and
-  # only the last check before the spend can say that about the clock. With the
-  # deadline established once, before the read, an attempt with ten milliseconds
-  # of authority left and a read that took longer than that was still handed a
-  # permit, and the worker -- which deliberately carries no bound of its own --
-  # called the provider after the authority it was dispatched under had expired.
-  # Every other member is immutable for the duration of this serialized handler,
-  # so only time has to be re-established; a refusal here is the same ephemeral
-  # `:deadline_elapsed` the first check gives, and nothing has been sent, so the
-  # coordinator settles it as ADR 0018's exact pre-transport `not_dispatched`.
+  # expired attempt before Control spends a Store read on it. The final helper
+  # samples the clock only after the permit tuple and spent-map update have been
+  # allocated, then sends directly when that sample is still inside the bound.
+  # That removes every controllable check-to-send action from this process, but
+  # a clock read and an Erlang send are not one atomic instruction: Control can
+  # still be preempted between them. The worker therefore applies the same
+  # committed deadline after receiving the permit and immediately before calling
+  # the adapter. A refusal from this helper is exact pre-transport evidence and
+  # settles `not_dispatched`; a refusal at the receiver comes after a possible
+  # send and settles conservatively as `dispatched_or_unknown`.
   def handle_call({:provider_dispatch, binding, authority}, {caller, _tag}, state) do
     with {:ok, session_id} <- provider_binding_session(binding),
          {:ok, entry} <- provider_current_owner(state, session_id, authority, caller),
          :ok <- provider_position_current(entry, authority),
          :ok <- provider_worker_ready(authority),
-         :ok <- provider_before_deadline(authority),
-         :ok <- provider_position_binding(state, session_id, authority, binding),
+         :ok <- provider_before_deadline(authority, state.wall_clock),
          :ok <- provider_attempt_unspent(state, binding),
-         :ok <- provider_before_deadline(authority) do
+         :ok <- provider_position_binding(state, session_id, authority, binding) do
       %{worker: worker, permit_reference: reference} = authority
+      permit = {:loopex_provider_permit, reference, binding}
       spent = Map.put(state.spent_attempts, binding, {worker, reference})
 
-      send(worker, {:loopex_provider_permit, reference, binding})
-
-      {:reply, {:ok, :dispatched}, %{state | spent_attempts: spent}}
+      case send_provider_permit_before_deadline(worker, permit, authority, state.wall_clock) do
+        :ok -> {:reply, {:ok, :dispatched}, %{state | spent_attempts: spent}}
+        {:error, reason} -> {:reply, {:error, reason}, state}
+      end
     else
       {:error, reason} -> {:reply, {:error, reason}, state}
     end
@@ -1221,13 +1226,31 @@ defmodule Loopex.Runtime.Control do
 
   defp provider_worker_ready(_authority), do: {:error, :provider_worker_unavailable}
 
-  defp provider_before_deadline(%{deadline: deadline}) when is_integer(deadline) do
-    if System.system_time(:millisecond) < deadline,
+  defp provider_before_deadline(%{deadline: deadline}, wall_clock)
+       when is_integer(deadline) and is_function(wall_clock, 0) do
+    if wall_clock.() < deadline,
       do: :ok,
       else: {:error, :deadline_elapsed}
   end
 
-  defp provider_before_deadline(_authority), do: {:error, :deadline_elapsed}
+  defp provider_before_deadline(_authority, _wall_clock), do: {:error, :deadline_elapsed}
+
+  # Technical depth: callers allocate the message and the state they will
+  # publish before entering this helper. Its only successful-path actions are
+  # the final clock sample, comparison, and direct send; the receiver-side fence
+  # covers the irreducible scheduler boundary between that sample and the send.
+  defp send_provider_permit_before_deadline(worker, permit, %{deadline: deadline}, wall_clock)
+       when is_pid(worker) and is_integer(deadline) and is_function(wall_clock, 0) do
+    if wall_clock.() < deadline do
+      send(worker, permit)
+      :ok
+    else
+      {:error, :deadline_elapsed}
+    end
+  end
+
+  defp send_provider_permit_before_deadline(_worker, _permit, _authority, _wall_clock),
+    do: {:error, :deadline_elapsed}
 
   # Concept: the permit names the attempt the journal committed, never the
   # attempt the caller described.
@@ -1254,9 +1277,8 @@ defmodule Loopex.Runtime.Control do
   # read costs one single-row Store page, bounded in both senses by
   # `bounded_position_read/3`, inside Control's serialized handler, which is the
   # price of comparing against durable truth rather than against the argument
-  # being checked. An exact re-presentation still reaches
-  # `provider_attempt_unspent/2` so it keeps reporting that refusal by its own
-  # name.
+  # being checked. An exact already-spent re-presentation is refused by
+  # `provider_attempt_unspent/2` before this read, retaining its own refusal name.
   defp provider_position_binding(state, session_id, %{journal_version: version}, binding)
        when is_integer(version) and version > 0 do
     with {:ok, [%{journal_version: ^version, payload: payload}]} <-
@@ -1282,35 +1304,41 @@ defmodule Loopex.Runtime.Control do
   # authority, before the deadline was re-established. The read therefore runs in
   # a monitored throwaway process and is awaited for `@position_read_timeout_ms`.
   # An exhausted bound is not a verdict about the row -- it is the absence of
-  # one -- so it refuses exactly as an unreadable row does. The reader is killed
-  # and its death awaited before returning, because signals from one process
-  # arrive in order: once the `DOWN` is in hand, either the answer is already in
-  # this mailbox and is flushed here, or it can never arrive, and no late page
-  # can surface as an unmatched message in a later Control handler. An adapter
-  # that raises or exits is contained the same way instead of taking the whole
-  # runtime's Control down with it.
+  # one -- so it refuses exactly as an unreadable row does. A separate guardian
+  # owns the Store-call worker and monitors Control itself. Timeout cancellation
+  # and Control death both make the guardian kill and await that worker; a result
+  # is forwarded only after the worker has exited. That keeps a blocked adapter
+  # from surviving the private authority process that requested its read, while
+  # preserving the rule that a missing answer is never a dispatch verdict. An
+  # adapter that raises or exits is contained the same way instead of taking the
+  # whole runtime's Control down with it.
   defp bounded_position_read(store, session_id, version) do
-    parent = self()
+    control = self()
     tag = make_ref()
 
-    {reader, monitor} =
+    {guardian, monitor} =
       spawn_monitor(fn ->
-        send(parent, {tag, Store.load_records(store, session_id, version - 1, 1)})
+        guard_position_read(control, tag, fn ->
+          Store.load_records(store, session_id, version - 1, 1)
+        end)
       end)
 
     receive do
       {^tag, result} ->
-        Process.demonitor(monitor, [:flush])
+        receive do
+          {:DOWN, ^monitor, :process, ^guardian, _reason} -> :ok
+        end
+
         result
 
-      {:DOWN, ^monitor, :process, ^reader, _reason} ->
+      {:DOWN, ^monitor, :process, ^guardian, _reason} ->
         :unavailable
     after
       @position_read_timeout_ms ->
-        Process.exit(reader, :kill)
+        send(guardian, {:cancel_position_read, tag})
 
         receive do
-          {:DOWN, ^monitor, :process, ^reader, _reason} -> :ok
+          {:DOWN, ^monitor, :process, ^guardian, _reason} -> :ok
         end
 
         receive do
@@ -1320,6 +1348,65 @@ defmodule Loopex.Runtime.Control do
         end
 
         :unavailable
+    end
+  end
+
+  defp guard_position_read(control, tag, read) do
+    control_monitor = Process.monitor(control)
+    guardian = self()
+    result_tag = make_ref()
+
+    {reader, reader_monitor} =
+      spawn_monitor(fn ->
+        result = read.()
+        send(guardian, {result_tag, result})
+      end)
+
+    await_position_read(
+      control,
+      control_monitor,
+      tag,
+      reader,
+      reader_monitor,
+      result_tag
+    )
+  end
+
+  defp await_position_read(
+         control,
+         control_monitor,
+         tag,
+         reader,
+         reader_monitor,
+         result_tag
+       ) do
+    receive do
+      {^result_tag, result} ->
+        receive do
+          {:DOWN, ^reader_monitor, :process, ^reader, _reason} -> :ok
+        end
+
+        Process.demonitor(control_monitor, [:flush])
+        send(control, {tag, result})
+
+      {:DOWN, ^reader_monitor, :process, ^reader, _reason} ->
+        Process.demonitor(control_monitor, [:flush])
+        :ok
+
+      {:DOWN, ^control_monitor, :process, ^control, _reason} ->
+        stop_position_reader(reader, reader_monitor)
+
+      {:cancel_position_read, ^tag} ->
+        Process.demonitor(control_monitor, [:flush])
+        stop_position_reader(reader, reader_monitor)
+    end
+  end
+
+  defp stop_position_reader(reader, monitor) do
+    Process.exit(reader, :kill)
+
+    receive do
+      {:DOWN, ^monitor, :process, ^reader, _reason} -> :ok
     end
   end
 

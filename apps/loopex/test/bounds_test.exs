@@ -65,6 +65,9 @@ defmodule Loopex.BoundsTest do
     assert :continue = decide(declared(%{max_turns: 3}), turn_number: 2)
     assert :continue = decide(declared(%{token_budget: 1_000}), tokens: 999)
     assert :continue = decide(declared(%{deadline_ms: 10_000}), now: 9_999)
+
+    assert Bounds.deadline_reached?(10_000, 10_000)
+    refute Bounds.deadline_reached?(9_999, 10_000)
   end
 
   test "bounds are consulted in a fixed order when more than one is reached" do

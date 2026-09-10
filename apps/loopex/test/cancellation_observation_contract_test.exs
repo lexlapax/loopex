@@ -514,6 +514,29 @@ defmodule Loopex.CancellationObservationContractTest do
   end
 
   test "genesis and effect intent are measured before owner or executor authority" do
+    # The Store facade validates again at transaction time, so the observable
+    # refusal below remains safe even if the earlier effect-intent preflight is
+    # deleted. ADR 0016 deliberately requires the complete record to be measured
+    # before its transaction, however, and that ordering is a code-structure
+    # property. Protect it explicitly instead of pretending the later Store
+    # refusal proves which boundary measured first.
+    session_state_source =
+      File.read!(Path.expand("../lib/loopex/runtime/session_state.ex", __DIR__))
+
+    [effect_intent_body] =
+      Regex.run(
+        ~r/def propose_effect_intent\(%__MODULE__\{} = state, run_id, job, grant\).*?\n  end\n\n  @doc false/s,
+        session_state_source
+      )
+
+    assert effect_intent_body =~ "case Store.validate_private_record(record) do",
+           "effect-intent construction no longer preflights the complete Store record before " <>
+             "proposing its transaction"
+
+    assert effect_intent_body =~
+             ~r/Store\.validate_private_record\(record\).*?internal_proposal\(/s,
+           "effect-intent transaction construction now precedes its complete-record preflight"
+
     {store_pid, store} = M1RuntimeTestStore.start_store(label: "genesis-preflight")
     on_exit(fn -> stop_process(store_pid) end)
 

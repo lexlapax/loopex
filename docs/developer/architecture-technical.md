@@ -116,9 +116,37 @@ attempt-open row at that journal position, so the caller's map is compared and
 never trusted — re-establishes the deadline after that read and immediately
 before the send, since the read is a Store call that takes time the deadline
 does not stop for, and then spends and sends together, so a succession
-linearizes entirely before or entirely after the send. The read is bounded at
-one second; a read that does not answer refuses the permit rather than holding
-Control, so a slow store costs one attempt, never the runtime. The binding is
+linearizes entirely before or entirely after the send. The receiver checks the
+same committed deadline immediately after the exact permit arrives and before
+adapter entry. A late permit is therefore retained conservatively as possibly
+dispatched without making the provider call or minting retry authority. Adapter
+results remain inside their worker-provenance wrapper until admission, so their
+data cannot impersonate that private deadline observation.
+
+The coordinator creates and retains a dormant provider lifetime guard under the
+owner generation's private supervisor before it asks Control to spend that
+identity. The guard binds the exact permit worker but starts no callback until
+that worker receives the exact permit and passes its deadline fence. The worker
+then asks the guard to create a linked adapter callback. Catchable callback
+failures normalize there; the trapping guard reduces asynchronous linked exits
+to the same fixed private failure. A successful result is not forwarded until
+the callback exits normally, and the guard cannot finish while its callback
+lives. The callback may synchronously register one adapter-private resource
+guardian before releasing provider work; both the guard and permit worker retain
+the stop handle. ReqLLM uses it to own its linked and spawned StreamServer,
+externally supervised transport task, and private descendants to a fixed point,
+with a delivery barrier for every dead tracee. Cleanup acknowledgement is not
+enough: Core also waits for the registered guardian to exit. Worker, coordinator,
+deadline, discard, and supersession endings stop and await both layers. On abrupt
+owner loss, the owner-group barrier cannot finish stopping that private supervisor
+until the callback and registered resource are down, so no provider process
+detaches from the attempt it belongs to.
+
+The binding read is bounded at one second and runs in a reader owned by a
+guardian that monitors Control. A timeout or Control death kills and awaits the
+exact reader, while a successful result reaches Control only after the reader is
+down. A slow store therefore costs one attempt without holding or outliving
+Control. The binding is
 `session_id`, `run_id`, `turn_id`, `operation_id`, `attempt`, and
 `staged_request_digest`. Spent identities are dropped only when control stops
 holding the session at all; dropping them at succession would hand a successor a
@@ -207,7 +235,8 @@ kinds its replay filter accepts:
 | `deadline_staging_failed_v1` | A request whose derived deadline could not be staged: the clock domain or the overflow that refused it. |
 | `model_request_committed` | The exact staged request bytes, its `staged_request_digest`, the applied steer, and the context receipt. |
 | `model_attempt_opened_v1` | `run_id`, `turn_id`, `operation_id`, `attempt`, `staged_request_digest`. |
-| `model_attempt_settled_v1` | Those five plus `transport`, `termination`, `conversation`, `next`, `result`, `accounting`. |
+| `model_attempt_settled_v2` | Those five plus `transport`, `termination`, `conversation`, `next`, `result`, `accounting`; unreadable results retain explicit accounting evidence. |
+| `model_attempt_settled_v1` | Legacy settlement with the same root keys; accepted only before the first version-2 settlement and without ambiguous unreadable reported accounting. |
 | `model_termination_admitted_v1` | Those five plus `cause`, `deadline`, `observed`. |
 | `effect_intent_committed` | The tool operation's intent, durable before dispatch. |
 | `executor_receipt_committed` | The receipt matched against the dispatched job. |
@@ -218,6 +247,24 @@ kinds its replay filter accepts:
 `executor_receipt_candidate` is not committed. It is the kind a projected receipt
 is validated under so an oversized or non-plain receipt becomes a truthful
 unproven outcome rather than an exception that kills the owner.
+
+Version-2 unreadable results carry either exact `accounting_evidence: {kind:
+none}` or `validated_reply_compaction_v1` with normalized `usage`, `dimension`,
+`observed`, and `limit`. Bytes retain the Store-normalized full settlement's
+exact external-term size above 65,536; depth retains the first rejected depth,
+13 against 12. Reported accounting equals both retained usage members. The live
+writer measures the actual full verdict, including its next action, before
+compacting, and preflights the compact record and terminal independently.
+
+Replay validates those retained relations without rebuilding the discarded
+reply or contacting a provider. A terminal settlement and its exact consecutive
+`run_terminal_committed` apply accounting, conversation, and outbox effects
+together; an incomplete or mismatched pair refuses recovery. Unknown commits
+re-present the already normalized transaction and its original identity.
+Legacy unreadable reported accounting refuses specifically as
+`ambiguous_legacy_provider_accounting`. The complete shapes and compatibility
+boundary are in
+[ADR 0021](../adr/0021-compacted-provider-accounting-provenance-technical.md#technical-adr-0021-decision).
 
 Public event kinds are `run.started`, `run.finished`, `user.message_appended`,
 `assistant.message_appended`, `tool.started`, `tool.finished`, `steer.resolved`,
@@ -252,17 +299,19 @@ sequenceDiagram
     ST-->>S: committed
     S->>W: start worker blocked on its permit reference
     S->>C: provider_dispatch with binding and authority
-    C->>W: one-use permit for that exact binding
-    W->>M: complete with request, options, progress
+    C->>W: one-use permit after final pre-send deadline sample
+    W->>W: check the same committed deadline after receipt
+    W->>M: complete with request, options, progress only while current
     M-->>W: complete reply, or a classified failure
     W-->>S: attempt evidence
-    S->>ST: model_attempt_settled_v1 plus assistant.message_appended
+    S->>ST: model_attempt_settled_v2 plus assistant.message_appended
     ST-->>S: committed
     S->>P: decide for the head tool call
     P-->>S: allow with context, or a closed deny category
     S->>ST: effect_intent_committed plus tool.started
     ST-->>S: committed
     S->>X: execute with job, grant, options, progress
+    X->>X: reserve or join without authority; reconcile and permit exact live holder
     X-->>S: receipt, or an error declaring effect-start
     S->>ST: executor_receipt_committed plus tool.finished
     ST-->>S: committed
@@ -363,7 +412,7 @@ Concept: [Five replaceable boundaries](architecture.md#concept-arch-ports).
 | --- | --- |
 | `Loopex.Store` | `transact/2`, `transaction_status/4`, `runtime_command/2`, `ownership_head/3`, `load_records/4`, `load_events/4` |
 | `Loopex.Model` | `complete/3` |
-| `Loopex.Executor` | `execute/5`, `cancel/2` |
+| `Loopex.Executor` | `execute/5`, `cancel/2`, optional `retained_receipt/2` |
 | `Loopex.ArtifactStore` | `put/3`, `fetch/2`, `stat/2`, `describe/2` |
 | `Loopex.Policy` | `decide/1` |
 
@@ -456,12 +505,19 @@ the lease ends the owned process group or abandons the filesystem effect, and th
 job is retained as unproven rather than complete. Exact duplicate jobs return the
 retained receipt without another start.
 
-Credentials stay on the host side of the line. The reference model adapter reads
-`LOOPEX_PROVIDER_API_KEY`, passes it as a per-request option, and never returns,
-logs, or writes it; no other provider variable is consulted, so a key that
-happens to sit in the operator's environment cannot be spent by accident. Its
-classified failures carry the literal `"model_call_failed"` and no provider term,
-so nothing rides out on the failure plane.
+Credentials stay at the provider boundary. The reference adapter reads only
+`LOOPEX_PROVIDER_API_KEY`; a short-lived sender materializes it after the
+configured companion has proved its protected entry and build identity. Neither
+the initial process image nor its arguments carry the credential. The companion
+uses it as a per-request option, with child diagnostics suppressed before ReqLLM
+starts. Its classified failures carry the literal `"model_call_failed"` and no
+provider term. The parent installs no primary Logger filter or credential
+registry and changes no application group leader. An independent guardian owns
+the companion's process group, including descendants, until cleanup is proved
+under the existing committed bounds. A terminal channel result alone is not
+cleanup proof. Missing configuration or mismatched worker bytes refuse before
+credential delivery; there is no shared-VM fallback. These boundaries are fixed
+by [ADR 0019](../adr/0019-host-owned-provider-protection.md#concept).
 
 ## Where Each Concern Lives
 

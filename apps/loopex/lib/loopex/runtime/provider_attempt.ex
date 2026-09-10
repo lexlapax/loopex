@@ -13,7 +13,9 @@ defmodule Loopex.Runtime.ProviderAttempt do
   records retain.
 
   Fixed by
-  [ADR 0018](../../../../docs/adr/0018-provider-attempt-authority-and-recovery.md#concept).
+  [ADR 0018](../../../../docs/adr/0018-provider-attempt-authority-and-recovery.md#concept)
+  and its versioned accounting provenance in
+  [ADR 0021](../../../../docs/adr/0021-compacted-provider-accounting-provenance.md#concept).
 
   ## Technical depth
 
@@ -21,16 +23,18 @@ defmodule Loopex.Runtime.ProviderAttempt do
   coordinator that proposes them both read the key sets from this module, so a
   member cannot be added on one side of the journal and missed on the other.
 
-  Reply projection is retention, not reconstruction: the nine-key callback map
-  is validated, its echoed request bytes are compared with the committed request
-  and then excluded, and the remaining eight members are retained
-  byte-for-byte. Nothing here canonicalises, truncates, or regenerates a value,
-  because a member this module rebuilt would read back correct while the bytes
-  the provider actually produced were gone.
+  Reply projection is retention, not reconstruction: every newly supplied raw
+  member is admitted before projection, the echoed request bytes are compared
+  with the committed request and excluded, and usage is reduced to ADR 0018's
+  closed accounting classification. The other projected members are retained
+  byte-for-byte. Nothing here truncates or regenerates a retained value, because
+  a member this module rebuilt would read back correct while the bytes the
+  provider actually produced were gone.
   """
 
   @opened_kind "model_attempt_opened_v1"
-  @settled_kind "model_attempt_settled_v1"
+  @settled_kind "model_attempt_settled_v2"
+  @legacy_settled_kind "model_attempt_settled_v1"
   @termination_kind "model_termination_admitted_v1"
 
   @opened_keys ["run_id", "turn_id", "operation_id", "attempt", "staged_request_digest"]
@@ -91,12 +95,12 @@ defmodule Loopex.Runtime.ProviderAttempt do
   @max_reply_bytes Loopex.Store.max_item_bytes()
 
   @echoed_request_key "canonical_request_bytes"
-  @usage_key "usage"
 
-  # Technical depth: the two root members held out of the reply's Store
-  # admission, in both the atom and binary spellings an adapter may use. Neither
-  # is retained as supplied; `admitted_raw_reply/1` records why each is out.
-  @unmeasured_reply_keys [:canonical_request_bytes, @echoed_request_key, :usage, @usage_key]
+  # Technical depth: the echoed request is the sole root member held out of the
+  # reply's Store admission, in both spellings an adapter may use. It was
+  # already admitted with the staged request and is not retained with the
+  # reply; `admitted_raw_reply/1` records the separate bound that protects it.
+  @unmeasured_reply_keys [:canonical_request_bytes, @echoed_request_key]
 
   @attempt_limit 2
 
@@ -291,10 +295,16 @@ defmodule Loopex.Runtime.ProviderAttempt do
   """
   @spec validate_settled(map()) :: :ok | {:error, term()}
   def validate_settled(record) when is_map(record) do
-    with :ok <- exact_keys(record, @settled_keys),
+    with kind when kind in [@legacy_settled_kind, @settled_kind] <-
+           Map.get(record, :kind, Map.get(record, "kind")),
+         :ok <- exact_keys(record, @settled_keys),
          :ok <- validate_identity(record),
-         :ok <- validate_verdict(record) do
+         :ok <- validate_verdict(record, kind),
+         :ok <- legacy_accounting(record, kind) do
       :ok
+    else
+      {:error, reason} -> {:error, reason}
+      _other -> {:error, :invalid_attempt_settlement}
     end
   end
 
@@ -343,12 +353,12 @@ defmodule Loopex.Runtime.ProviderAttempt do
   The echoed `canonical_request_bytes` is compared byte-for-byte with the
   already committed request and then excluded from that measurement, so a
   staged request and a durable reply that each fit their own record do not have
-  to fit one item together. `usage` is excluded too, because the reply retains
-  `normalize_usage/1`'s classification of it rather than the supplied map, and
-  ADR 0018 requires a malformed one to be classified rather than refused. Every
-  other member is retained exactly as supplied, after key normalisation only:
-  atom and binary keys both reach the same closed set, and a collision between
-  them refuses the reply.
+  to fit one item together. Every other supplied member, including every raw
+  usage key and value, passes Store admission before key normalisation or
+  projection. Usage classification then retains only ADR 0018's closed reported
+  or unreported shape; every other member is retained exactly as supplied after
+  key normalisation. Atom and binary keys both reach the same closed set, and a
+  collision between them refuses the reply.
   """
   @spec canonical_reply(term(), map()) :: {:ok, map()} | {:error, term()}
   def canonical_reply(reply, request) when is_map(reply) and not is_struct(reply) do
@@ -433,7 +443,7 @@ defmodule Loopex.Runtime.ProviderAttempt do
   # ones, because the record is also the migration boundary: a member added by a
   # later version must fail the exact key set above, not slip through a
   # permissive branch here.
-  defp validate_verdict(record) do
+  defp validate_verdict(record, kind) do
     transport = record["transport"]
     termination = record["termination"]
     conversation = record["conversation"]
@@ -445,7 +455,7 @@ defmodule Loopex.Runtime.ProviderAttempt do
          true <- termination in [nil, "abort", "deadline", "owner_loss"],
          true <- conversation in ["canonical", "evidence_only", "none"],
          true <- next in ["retry", "continue", "terminal"],
-         :ok <- validate_result(result),
+         :ok <- validate_result(result, kind),
          :ok <- validate_accounting(accounting),
          :ok <-
            validate_combination(
@@ -464,8 +474,8 @@ defmodule Loopex.Runtime.ProviderAttempt do
     end
   end
 
-  defp validate_result(%{"kind" => "reply", "reply" => reply} = result)
-       when map_size(result) == 2 do
+  defp validate_result(%{"kind" => "reply", "reply" => reply} = result, _kind)
+       when map_size(result) == 2 and is_map(reply) and map_size(reply) == 8 do
     with :ok <- exact_keys(reply, @reply_keys),
          {:ok, _identity} <- reply_identity(Map.get(reply, "identity")),
          {:ok, _calls} <- reply_tool_calls(Map.get(reply, "tool_calls")),
@@ -482,12 +492,67 @@ defmodule Loopex.Runtime.ProviderAttempt do
     end
   end
 
-  defp validate_result(%{"kind" => "error", "category" => category} = result)
-       when map_size(result) == 2 and
-              category in ["model_call_failed", "unreadable_model_answer"],
+  defp validate_result(%{"kind" => "error", "category" => "model_call_failed"} = result, _kind)
+       when map_size(result) == 2,
        do: :ok
 
-  defp validate_result(_result), do: {:error, :invalid_attempt_settlement}
+  defp validate_result(
+         %{"kind" => "error", "category" => "unreadable_model_answer"} = result,
+         @legacy_settled_kind
+       )
+       when map_size(result) == 2,
+       do: :ok
+
+  defp validate_result(
+         %{
+           "kind" => "error",
+           "category" => "unreadable_model_answer",
+           "accounting_evidence" => evidence
+         } = result,
+         @settled_kind
+       )
+       when map_size(result) == 3,
+       do: validate_accounting_evidence(evidence)
+
+  defp validate_result(_result, _kind), do: {:error, :invalid_attempt_settlement}
+
+  defp validate_accounting_evidence(%{"kind" => "none"} = evidence)
+       when map_size(evidence) == 1,
+       do: :ok
+
+  defp validate_accounting_evidence(
+         %{
+           "kind" => "validated_reply_compaction_v1",
+           "usage" => usage,
+           "dimension" => dimension,
+           "observed" => observed,
+           "limit" => limit
+         } = evidence
+       )
+       when map_size(evidence) == 5 do
+    with :ok <- validate_usage_shape(usage),
+         true <- uint64?(observed) and uint64?(limit),
+         true <-
+           (dimension == "record_bytes" and limit == 65_536 and observed > limit) or
+             (dimension == "record_depth" and limit == 12 and observed == 13) do
+      :ok
+    else
+      _other -> {:error, :invalid_attempt_settlement}
+    end
+  end
+
+  defp validate_accounting_evidence(_evidence), do: {:error, :invalid_attempt_settlement}
+
+  defp legacy_accounting(
+         %{
+           "result" => %{"kind" => "error", "category" => "unreadable_model_answer"},
+           "accounting" => %{"source" => "reported"}
+         },
+         @legacy_settled_kind
+       ),
+       do: {:error, :ambiguous_legacy_provider_accounting}
+
+  defp legacy_accounting(_record, _kind), do: :ok
 
   defp validate_usage_shape(
          %{"status" => "reported", "input_tokens" => i, "output_tokens" => o} = u
@@ -561,9 +626,9 @@ defmodule Loopex.Runtime.ProviderAttempt do
   #
   # A reply's accounting is `reported` exactly when the reply carries complete
   # reported usage, which combination 1 fixes and `reported_matches?/2` then
-  # ties to the exact figures. Combination 5 is the one cell with a choice:
-  # compaction removed the reply the numbers came from, so the record can no
-  # longer say whether usage was available, and both sources stay admissible.
+  # ties to the exact figures. ADR 0021 additionally ties a compact reply's
+  # accounting to its retained usage. Legacy unreadable reported pairs reach
+  # their specific ambiguity refusal only after the old cell is validated.
   defp settlement_cell(attempt, "not_dispatched", termination, %{
          "kind" => "error",
          "category" => "model_call_failed"
@@ -606,6 +671,24 @@ defmodule Loopex.Runtime.ProviderAttempt do
 
   defp settlement_cell(_attempt, "dispatched_or_unknown", termination, %{
          "kind" => "error",
+         "category" => "unreadable_model_answer",
+         "accounting_evidence" => evidence
+       })
+       when termination in [nil, "abort", "deadline"] do
+    source =
+      case evidence do
+        %{"kind" => "validated_reply_compaction_v1", "usage" => %{"status" => "reported"}} ->
+          "reported"
+
+        _other ->
+          "estimated"
+      end
+
+    {:ok, "none", "terminal", [source]}
+  end
+
+  defp settlement_cell(_attempt, "dispatched_or_unknown", termination, %{
+         "kind" => "error",
          "category" => "unreadable_model_answer"
        })
        when termination in [nil, "abort", "deadline"],
@@ -627,21 +710,22 @@ defmodule Loopex.Runtime.ProviderAttempt do
       }
   end
 
-  # Concept: the compact unreadable answer is the one result that may carry
-  # reported usage without a retained reply to show it against.
-  #
-  # Technical depth: ADR 0018 combination 5 says the compacted record
-  # "preserves complete reported usage when available", and compaction is
-  # exactly what removed the reply those numbers came from. Refusing the pair
-  # here would make a record Core itself built self-invalid and cost the run its
-  # verdict over an answer the provider did charge for. The licence is narrow on
-  # purpose: `model_call_failed` names an attempt with no readable answer at
-  # all, keeps combination 3's estimated remaining allowance, and still has no
-  # way to claim a reported figure.
   defp reported_matches?(
-         %{"kind" => "error", "category" => "unreadable_model_answer"},
-         _accounting
+         %{
+           "accounting_evidence" => %{"kind" => "validated_reply_compaction_v1", "usage" => usage}
+         },
+         accounting
        ),
+       do: reported_matches?(%{"kind" => "reply", "reply" => %{"usage" => usage}}, accounting)
+
+  # Concept: legacy ambiguity is named separately from malformed history.
+  # Technical depth: only the exact two-key v1 result reaches this branch;
+  # `legacy_accounting/2` refuses it after validating the old combination.
+  defp reported_matches?(
+         %{"kind" => "error", "category" => "unreadable_model_answer"} = result,
+         _accounting
+       )
+       when map_size(result) == 2,
        do: true
 
   defp reported_matches?(_result, _accounting), do: false
@@ -702,8 +786,8 @@ defmodule Loopex.Runtime.ProviderAttempt do
   # the Store refuses still reached projection. M2's row-one obligation is that
   # "every raw model-reply candidate first satisfies the Store's plain-data,
   # depth, item, and byte ceilings", so the raw answer is measured by the
-  # Store's own item admission, `Loopex.Store.admit_bounded/1`, with the two
-  # members below excluded. That measure is a pre-filter, not the record
+  # Store's own item admission, `Loopex.Store.admit_bounded/1`, with the echoed
+  # request member below excluded. That measure is a pre-filter, not the record
   # verdict: the retained settlement carries the record's kind and the
   # normalized usage besides, so a reply measuring just under the ceiling here
   # can still be a record the Store refuses, and whether the whole record fits
@@ -713,24 +797,23 @@ defmodule Loopex.Runtime.ProviderAttempt do
   # have been measured. Every refusal becomes ADR 0018 combination 5's
   # `unreadable_model_answer`, the one category this boundary may report.
   #
-  # Two root members stay outside that admission, because neither is retained as
-  # supplied and each is already closed.
+  # One root member stays outside that admission because it is not retained as
+  # supplied and already has its own bound.
   #
   # `canonical_request_bytes` is excluded from reply-size measurement by
   # ADR 0018 -- the committed request already fit its own record -- so it is
   # charged against its own allowance here instead, which also keeps the
   # byte-for-byte comparison further down from being handed an unbounded binary.
   #
-  # `usage` is replaced wholesale by `normalize_usage/1`'s closed two- or
-  # three-key classification, and the path that does it is bounded without this
-  # admission: `stringify/1` refuses a map above `max_item_cardinality/0`
-  # members, `subset_keys/2` then admits only `input_tokens` and
-  # `output_tokens`, and their values are read but never descended into. It must
-  # also stay outside, because ADR 0018 combination 1 requires a present but
-  # negative, non-integer, oversized, or wholly non-map usage to be classified
-  # rather than to refuse an otherwise canonical reply, and several of those
-  # shapes -- a bare atom most plainly -- are not plain data the Store admits.
-  defp admitted_raw_reply(reply) do
+  # Usage is retained only after normalization, but that does not make its raw
+  # subtree free input. Letting its keys and values bypass this pass allowed a
+  # provider to hand projection a value far beyond the Store byte ceiling or a
+  # key the Store would refuse. Plain admitted negative, non-integer, absent,
+  # and uint64-overflow members still reach `normalize_usage/1` and keep ADR
+  # 0018's exact accounting classifications. A non-plain raw term is an
+  # unreadable reply before projection like the same term in every other field.
+  @doc false
+  def admitted_raw_reply(reply) do
     with :ok <- admitted_echoed_request(reply) do
       case Loopex.Store.admit_bounded(Map.drop(reply, @unmeasured_reply_keys)) do
         {:ok, _bytes} -> :ok
@@ -836,11 +919,12 @@ defmodule Loopex.Runtime.ProviderAttempt do
   # drops, because dropping it retains a usage the provider did not state and
   # lets an arbitrary provider term reach the Store measurement in the members
   # around it. Absence stays legal -- the pair classifies to `missing` or
-  # `partial` -- and a present but negative, non-integer, or oversized value
-  # stays a classification rather than a refusal, since ADR 0018 combination 1
-  # keeps such a reply canonical on the exact remaining allowance. A usage that
-  # is not a map at all is classified `malformed` for the same reason; it names
-  # no key to close.
+  # `partial` -- and an admitted plain-data value that is negative,
+  # non-integer, or above uint64 stays a classification rather than a refusal,
+  # since ADR 0018 combination 1 keeps such a reply canonical on the exact
+  # remaining allowance. An admitted plain-data usage value that is not a map
+  # is likewise classified `malformed`; non-plain terms have already been
+  # refused by the raw Store admission.
   defp reply_usage(usage) when is_map(usage) and not is_struct(usage) do
     with {:ok, encoded} <- stringify(usage),
          :ok <- subset_keys(encoded, @usage_keys) do
@@ -922,11 +1006,12 @@ defmodule Loopex.Runtime.ProviderAttempt do
   # `:absent` meant missing, `%{"input_tokens" => :absent, "output_tokens" => 10}`
   # read as a reply that stated no input count, so an unreadable pair was
   # classified `partial` rather than `malformed` -- a true category replaced by a
-  # false one on the record the operator reads. The Store admission in
-  # `admitted_raw_reply/1` cannot catch it either, because `usage` is
-  # deliberately outside that walk. Wrapping every supplied term instead makes
-  # the two cases structurally different: no map member can be `:absent`, because
-  # every supplied term arrives inside `{:present, term}`.
+  # false one on the record the operator reads. The raw Store admission now
+  # refuses that atom before projection, but `normalize_usage/1` remains a
+  # public classifier and must keep omitted and supplied terms structurally
+  # distinct. Wrapping every supplied term does that: no supplied map member can
+  # become the internal bare `:absent` marker, because it arrives inside
+  # `{:present, term}`.
   defp usage_member(usage, name) do
     cond do
       Map.has_key?(usage, name) ->

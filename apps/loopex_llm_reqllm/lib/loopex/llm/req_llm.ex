@@ -2,88 +2,48 @@ defmodule Loopex.LLM.ReqLLM do
   @moduledoc """
   ## Concept
 
-  The reference model adapter. It maps one canonical model request onto ReqLLM
-  and maps the provider's answer back to plain data, which is the whole of
-  outcome 7: proving a real model call completes *from the adapter application*
-  rather than from core.
+  The reference model adapter runs each provider invocation in one host-owned
+  companion BEAM. The parent maps a committed request and transient progress
+  onto a bounded private channel; provider dependencies and credentials stay in
+  the child. Starting this adapter never changes parent Logger configuration,
+  application group leaders, or a shared ReqLLM supervisor.
 
-  Two directions are kept clean. Nothing about Loopex sessions, operations,
-  durability, or policy appears here — the caller passes a model identity and a
-  prompt and receives text, identity, and usage. Nothing about ReqLLM, Req,
-  Finch, or a provider's wire format leaves this module: `ReqLLM` structs are
-  accepted and read here and never returned, so a host or a later core boundary
-  sees only bounded serializable maps and strings.
+  Hosts supply the trusted interpreter, worker artifact, and matching digests
+  explicitly. Missing configuration refuses before dispatch. The sole credential
+  source remains `LOOPEX_PROVIDER_API_KEY`; the launcher excludes it from the
+  first image, and a short-lived host sender reads it only after child readiness.
 
-  A stream that did not finish is a failure and not a shorter answer. A provider
-  that emits some text and then loses its connection, is rate limited, or stops
-  mid tool call has produced no assistant message, so this adapter returns an
-  error and the coordinator abandons that attempt. It never hands back the
-  fragment that did arrive as though the model had said it and stopped.
-
-  The credential arrives only from the `LOOPEX_PROVIDER_API_KEY` environment
-  variable, is handed to ReqLLM as a per-request option, and is never returned,
-  logged, or written anywhere. No other provider variable is consulted, so a key
-  that happens to sit in the operator's environment cannot be spent by this lane
-  by accident.
-
-  A failure says one more thing than that it failed: whether the provider was
-  reached at all. This adapter refuses locally — no credential, a request it will
-  not send, a model it cannot resolve, a deadline already spent — before it hands
-  anything to the provider library, and only those refusals are reported as
-  `not_dispatched`. From the handoff onward every ending is
-  `dispatched_or_unknown`, including the endings that look local: a library
-  error, an unfinished stream, a timeout, a crash, or a library result that calls
-  itself undispatched. The caller may open a second attempt on the first kind and
-  must never open one on the second, so this classification is what stands
-  between an ambiguous attempt and a second bill.
-
-  Neither classified failure carries a reason. Both carry the literal
-  `"model_call_failed"`, so no provider term, credential, or tenant identifier
-  rides out of this module on the failure plane at all.
+  A complete reply crosses as bounded plain data. Partial streams, lost replies,
+  channel failures after possible request delivery, and unproved cleanup never
+  become successful short answers or permission to retry.
 
   ## Technical depth
 
-  `ReqLLM` here is the top-level library module `Elixir.ReqLLM`; Elixir resolves
-  aliases from the root, so the trailing segment of this module's own name does
-  not shadow it.
+  `complete/3` uses the configured bridge. `complete_prompt/3` builds a bounded
+  standalone request and requires the same explicit launch configuration plus a
+  cleanup period. The legacy bare-model `complete/2` has no such configuration
+  and always refuses; there is no shared-VM fallback or ambient worker discovery.
 
-  The credential is passed as `api_key:` on the call rather than through
-  `ReqLLM.put_key/2` or ReqLLM's own environment lookup. A per-request option is
-  scoped to the one request, leaves no value in application environment for
-  another process to read, and — because ReqLLM's key resolution prefers the
-  explicit option — removes any path by which a differently named provider
-  variable already present in the environment could satisfy the call instead.
+  The companion starts ReqLLM only after protected entry and performs one
+  `ReqLLM.stream_text/3` handoff with dependency retry disabled. A proved local
+  pre-transport refusal is `{:error, {:not_dispatched, "model_call_failed"}}`.
+  From possible invocation delivery onward, uncertainty is
+  `{:error, {:dispatched_or_unknown, "model_call_failed"}}`; no raw provider
+  reason leaves the child. An unreadable raw reply uses the Core-owned admission
+  rule, not a lossy bridge reconstruction.
 
-  Model identity is resolved through `ReqLLM.model/1`, which reads the bundled
-  LLMDB catalog with no network access and no credential. That resolution is
-  therefore usable as an ordinary untagged test: it proves the pinned reference
-  model spec still names a real catalog entry without spending a token. The
-  endpoint recorded is the catalog's base URL when it carries one and the
-  provider module's default otherwise, which is an endpoint *class* — a
-  non-secret host, never a credentialed URL.
+  Catalog lookup and already-open stream conversion remain ordinary adapter
+  utilities. They neither launch a worker nor acquire a credential. The latter
+  suppresses failure details rather than reading an ambient secret to redact
+  them. `scrub_error/2` remains an explicit-value utility, not credential access.
 
-  Provider failures are reduced to a bounded, scrubbed string rather than passed
-  through as a term. A provider error can carry request context, so the raw term
-  is inspected with hard limits and the credential value is substituted out
-  before it can reach a caller, a report, or an operator's terminal. The gate
-  runner redacts its captured output as well; these are two independent planes
-  and each needs its own containment.
-
-  The classification boundary is one position in the code: the
-  `ReqLLM.stream_text/3` call in `dispatch/6`. Everything above it is computed
-  from the committed request, the environment, and the bundled catalog, with no
-  transport constructed and no bytes handed over. Everything from that call
-  onward is ambiguous by construction, which is why the tag is decided by where
-  the adapter stands and never by reading the value that came back — a library
-  that answers `not_dispatched` after invocation is answering about its own last
-  step, not about the handoff that already happened.
-
-  `complete/2` builds its own request and is classified the same way, so a caller
-  holding no committed request still learns whether its attempt was spent.
+  The private worker build, host configuration, and cleanup protocol are defined
+  by ADR 0019. They change no Model callback, Core permit, or accounting authority.
   """
 
   @behaviour Loopex.Model
 
+  alias Loopex.LLM.ReqLLM.{ProviderBridge, ProviderConfiguration}
   alias Loopex.Model
 
   @credential_variable "LOOPEX_PROVIDER_API_KEY"
@@ -94,7 +54,7 @@ defmodule Loopex.LLM.ReqLLM do
   #
   # Technical depth: an operator whose credential belongs elsewhere overrides
   # the spec at the call site rather than editing this constant, because
-  # `complete/2` takes the spec as an argument.
+  # `complete_prompt/3` takes the spec as an argument.
   @default_model "anthropic:claude-haiku-4-5"
 
   # Concept: one short answer is all the outcome needs; a ceiling keeps the
@@ -144,16 +104,13 @@ defmodule Loopex.LLM.ReqLLM do
   where the provider reported none, so no provider struct crosses the boundary.
 
   `provider_response_id` is the provider's own identifier for the response, taken
-  from the `request-id` header the provider returns per call. It is the one field
-  in a reply that a deterministic adapter cannot invent, because it exists in the
-  provider's account and can be looked up there. That is what makes it the anchor
-  of the milestone's real-call evidence, and it is `nil` wherever the provider
-  supplied none rather than being filled in with a plausible value.
-
-  A streamed call cannot carry the provider's assembled *message* identifier: the
-  library keeps only usage from the provider's opening event and discards the
-  rest. The per-call request identifier survives streaming and is the identifier
-  the provider's own account and support surface use, so it is the one retained.
+  from the provider's per-call request identifier header (`request-id` or
+  `x-request-id`), not an assembled message identifier. It is `nil` wherever the
+  provider supplied none rather than being filled in with a plausible value.
+  The field and its spelling alone do not prove a provider call: a deterministic
+  adapter can fabricate an identifier. Retained real-call evidence needs the
+  separate provider-account or support lookup required by its evidence contract;
+  an unavailable lookup remains unavailable evidence.
 
   `staged_request_digest` names the request bytes core committed before this
   dispatch. It is spelled the way the reply this adapter actually returns spells
@@ -162,8 +119,9 @@ defmodule Loopex.LLM.ReqLLM do
 
   `delta_count` and `streamed` are the attempt-private evidence `Loopex.Model`
   requires of every reply: what this adapter emitted and whether it streamed at
-  all. They belong to the type because the coordinator closes the attempt's
-  progress domain with them.
+  all. These producer facts survive private-channel backpressure unchanged.
+  The coordinator's transient domain closes with its own accepted-item count,
+  which can be smaller when the best-effort channel dropped a delta.
   """
   @type reply :: %{
           text: String.t(),
@@ -236,31 +194,45 @@ defmodule Loopex.LLM.ReqLLM do
   @doc """
   ## Concept
 
-  Builds and dispatches one request from a bare model name and prompt.
+  The legacy bare-model convenience entry refuses without host configuration.
 
   ## Technical depth
 
-  A convenience for callers that hold no committed request, used by the
-  credential-free adapter lane. It declares its own sampling bound explicitly,
-  because there is no default anywhere and a request without one is refused.
-
-  A request this function could not even build is a refusal before any handoff,
-  so it is classified `not_dispatched` like every other local refusal rather than
-  reported in a second shape only this arity uses.
+  Use `complete_prompt/3` with explicit worker paths, digests, and cleanup
+  period. This arity cannot infer those choices or fall back to an unsafe
+  shared-VM invocation.
   """
-  @spec complete(String.t(), String.t()) ::
-          {:ok, reply()}
-          | {:error, {:not_dispatched, String.t()}}
-          | {:error, {:dispatched_or_unknown, String.t()}}
-  def complete(model_spec, prompt) when is_binary(model_spec) and is_binary(prompt) do
+  @spec complete(String.t(), String.t()) :: {:error, {:not_dispatched, String.t()}}
+  def complete(model_spec, prompt) when is_binary(model_spec) and is_binary(prompt),
+    do: {:error, {:not_dispatched, @call_failed}}
+
+  @doc """
+  ## Concept
+
+  Builds and dispatches one request with explicit host-owned provider protection.
+
+  ## Technical depth
+
+  Standalone callers supply the same launch options as the Model callback and
+  an explicit cleanup period. The request uses a 64-token output allowance and
+  a 60-second deadline. A managed runtime instead supplies its own committed
+  request, deadline, and cleanup period through `complete/3`.
+  """
+  @spec complete_prompt(String.t(), String.t(), keyword()) ::
+          {:ok, reply()} | {:error, {:not_dispatched | :dispatched_or_unknown, String.t()}}
+  def complete_prompt(model_spec, prompt, options)
+      when is_binary(model_spec) and is_binary(prompt) and is_list(options) do
     case Model.request(model_spec, [%{"role" => "user", "content" => prompt}],
            sampling: %{"max_tokens" => @max_tokens},
            deadline: System.system_time(:millisecond) + 60_000
          ) do
-      {:ok, request} -> complete(request, [], Model.discard_progress())
+      {:ok, request} -> complete(request, options, Model.discard_progress())
       _refused -> {:error, {:not_dispatched, @call_failed}}
     end
   end
+
+  def complete_prompt(_model_spec, _prompt, _options),
+    do: {:error, {:not_dispatched, @call_failed}}
 
   @doc """
   ## Concept
@@ -269,15 +241,16 @@ defmodule Loopex.LLM.ReqLLM do
 
   ## Technical depth
 
-  This adapter streams. Every chunk the provider sends is emitted through
-  `progress` as it arrives and accumulated at the same time, so the reply this
-  returns is assembled from exactly the chunks the deltas carried and replays
-  them byte for byte. `delta_count` is what was emitted and `streamed` is true,
-  so the coordinator closes that attempt's domain with a truthful count.
+  This adapter streams. The child accumulates the complete reply and offers
+  deltas through a bounded, lossy progress channel. A saturated reader can miss
+  deltas without shortening that reply or blocking cleanup. `delta_count` names
+  what the producer emitted, not what a particular consumer received; Core owns
+  the accepted count and closure of its separate transient stream domain.
 
-  The stream is consumed once. Usage and the per-call request identifier come
-  from the metadata the provider sends after the content, so they are read once
-  the stream is drained rather than beside it.
+  The stream is consumed once. Usage and the per-call request identifier are read
+  from completed stream metadata after the content has drained. That ordering
+  describes this adapter's read, not when the provider originally sent each
+  metadata field.
 
   A stream that failed, was cut off, or produced a reply that could not be
   assembled is `{:error, {:dispatched_or_unknown, "model_call_failed"}}` instead
@@ -289,7 +262,7 @@ defmodule Loopex.LLM.ReqLLM do
   core committed, a message it cannot render, an absent credential, a model it
   cannot resolve, a tool definition it will not send, a deadline already spent —
   is `{:error, {:not_dispatched, "model_call_failed"}}`, and every one of those
-  refusals happens before the provider library is called.
+  refusals happens before provider transport is entered.
   """
   @impl Loopex.Model
   @spec complete(Model.request(), keyword(), Model.progress_fun()) ::
@@ -298,32 +271,58 @@ defmodule Loopex.LLM.ReqLLM do
           | {:error, {:dispatched_or_unknown, String.t()}}
   def complete(request, options, progress)
       when is_map(request) and is_list(options) and is_function(progress, 1) do
-    case staged(request) do
-      {:ok, context, identity, call_options, credential} ->
-        dispatch(request, context, identity, call_options, credential, progress)
+    with {:ok, configuration} <- ProviderConfiguration.validate(options),
+         :ok <- Model.validate_request(request) do
+      ProviderBridge.complete(request, configuration, progress)
+    else
+      _refused -> {:error, {:not_dispatched, @call_failed}}
+    end
+  end
+
+  def complete(_request, _options, _progress),
+    do: {:error, {:not_dispatched, @call_failed}}
+
+  # Concept: the private companion makes one provider invocation after its
+  # protected channel is ready. No parent credential registry participates.
+  # Technical depth: preflight and invocation have separate exception scopes.
+  # Once `started` is called, no dependency result or exception can reclassify
+  # the call as not dispatched. This entry has no production host-VM caller.
+  @doc false
+  def worker_invoke(request, credential, progress, started)
+      when is_binary(credential) and is_function(progress, 1) and is_function(started, 0) do
+    case worker_preflight(request, credential) do
+      {:ok, context, identity, options} ->
+        try do
+          started.()
+
+          case handoff(request, context, identity, options, credential, progress) do
+            {:ok, reply} -> {:ok, reply}
+            _failed -> {:error, {:dispatched_or_unknown, @call_failed}}
+          end
+        rescue
+          _error -> {:error, {:dispatched_or_unknown, @call_failed}}
+        catch
+          _class, _reason -> {:error, {:dispatched_or_unknown, @call_failed}}
+        end
 
       _refused ->
         {:error, {:not_dispatched, @call_failed}}
     end
   end
 
-  # Concept: everything one call needs, gathered while a refusal is still
-  # provably a refusal.
-  #
-  # Technical depth: each step reads the committed request, the environment, or
-  # the bundled catalog. None of them constructs a transport or hands a byte to
-  # one, which is what entitles their failures to the `not_dispatched` tag; the
-  # transport bound belongs here for the same reason, because a deadline already
-  # spent is discovered before the call rather than during it.
-  defp staged(request) do
-    with :ok <- Model.validate_request(request),
+  defp worker_preflight(request, credential) do
+    with true <- byte_size(credential) in 1..65_536,
+         :ok <- Model.validate_request(request),
          {:ok, context} <- context_of(request),
-         {:ok, credential} <- credential(),
          {:ok, identity} <- identity(request.model),
          {:ok, tools} <- provider_tools(Model.model_facing_tools(request)),
-         {:ok, call_options} <- call_options(request, credential, tools) do
-      {:ok, context, identity, call_options, credential}
+         {:ok, options} <- call_options(request, credential, tools) do
+      {:ok, context, identity, options}
     end
+  rescue
+    _error -> :refused
+  catch
+    _class, _reason -> :refused
   end
 
   # Concept: the run's own deadline bounds the transport, rather than a number
@@ -339,11 +338,13 @@ defmodule Loopex.LLM.ReqLLM do
   #
   # The remaining time on the committed deadline is what goes to the transport,
   # so the transport bound is the run's bound. It cannot outlast the deadline
-  # because it is derived from it, and it cannot cut a call short of the
-  # deadline either. A deadline already reached yields the floor rather than a
-  # negative or zero timeout, because a call dispatched at all is owed a bounded
-  # attempt to fail in; the coordinator, not this adapter, decides that a run
-  # past its deadline stops.
+  # because it is derived from it. A deadline already reached refuses before
+  # handoff rather than supplying a negative or zero library timeout. The
+  # coordinator still owns the run-terminal decision.
+  #
+  # ReqLLM's own retry loop is disabled. Core owns retry authority and issues a
+  # new one-use permit only after an exact pre-transport refusal; letting the
+  # transport library retry would spend one durable attempt more than once.
   @doc """
   ## Concept
 
@@ -370,7 +371,8 @@ defmodule Loopex.LLM.ReqLLM do
          api_key: credential,
          max_tokens: Model.max_tokens(request),
          tools: tools,
-         receive_timeout: bound
+         receive_timeout: bound,
+         max_retries: 0
        ]}
     end
   end
@@ -391,39 +393,6 @@ defmodule Loopex.LLM.ReqLLM do
     case request.deadline - System.system_time(:millisecond) do
       remaining when remaining > 0 -> {:ok, remaining}
       _elapsed -> {:error, :deadline_elapsed}
-    end
-  end
-
-  # Concept: the credential is read here and nowhere else, and an absent or
-  # empty value is an absence rather than a call with a blank key.
-  defp credential do
-    case System.get_env(@credential_variable) do
-      value when is_binary(value) and value != "" -> {:ok, value}
-      _absent -> {:error, {:credential_unset, @credential_variable}}
-    end
-  end
-
-  # Concept: the answer reaches the operator as the provider produces it.
-  #
-  # Technical depth: this adapter used to call the non-streaming form and declare
-  # `streamed: false` with no deltas, which the port admits as conformant. It was
-  # conformant and it was also the reason nothing an operator ran ever streamed,
-  # while the runtime, the stream domains, their closure items and the terminal
-  # all carried the path.
-  #
-  # The stream is consumed exactly once. Every chunk is emitted through the
-  # progress function the coordinator supplied — closed over that attempt's
-  # stream domain — and accumulated at the same time, so the reply this returns
-  # is assembled from the same chunks the deltas carried and replays them byte
-  # for byte. Usage and the provider's response identifier come from the metadata
-  # the provider sends after the content, which is why they are read once the
-  # stream is drained rather than beside it.
-  defp dispatch(request, context, identity, call_options, credential, progress) do
-    case isolated(fn ->
-           handoff(request, context, identity, call_options, credential, progress)
-         end) do
-      {:ok, reply} -> {:ok, reply}
-      _ambiguous -> {:error, {:dispatched_or_unknown, @call_failed}}
     end
   end
 
@@ -456,11 +425,8 @@ defmodule Loopex.LLM.ReqLLM do
   # rather than reporting the reason keeps the same bounded classification the
   # branches below already produce.
   #
-  # This does not make `isolated/1` redundant. A `try` catches only what is
-  # raised inside this process's own call stack; the exit signal the library's
-  # linked stream server sends is delivered to the process rather than to this
-  # frame, and it is still the monitored worker that turns that death into an
-  # answer.
+  # The companion's OS lifetime owns linked dependency deaths; the host bridge
+  # classifies loss of that child as uncertainty without receiving a crash term.
   defp handoff(request, context, identity, call_options, credential, progress) do
     case ReqLLM.stream_text(request.model, context, call_options) do
       {:ok, response} -> drain(response, request, identity, progress, credential)
@@ -471,34 +437,6 @@ defmodule Loopex.LLM.ReqLLM do
   catch
     _thrown -> :provider_call_failed
     :exit, _reason -> :provider_call_failed
-  end
-
-  # Concept: a crash inside the provider library is an answer, not the end of the
-  # process that asked.
-  #
-  # Technical depth: the library links its stream server to whoever opens it, so
-  # a throw or an exit raised while the request is being built travels back along
-  # that link and kills the caller before it can classify anything -- and an
-  # attempt whose caller died reports nothing at all, which is the one outcome
-  # ADR 0018 cannot use. The worker is monitored and not linked, so that death
-  # arrives as a `DOWN` this function reads and turns into ambiguity.
-  #
-  # The worker carries no timeout of its own. The transport bound derived from
-  # the run's committed deadline is the only bound in this path; a second one
-  # invented here would be exactly the undeclared bound that one replaced, and it
-  # would fire on a call the run still had time for.
-  defp isolated(call) do
-    owner = self()
-    {worker, monitor} = spawn_monitor(fn -> send(owner, {__MODULE__, self(), call.()}) end)
-
-    receive do
-      {__MODULE__, ^worker, outcome} ->
-        Process.demonitor(monitor, [:flush])
-        outcome
-
-      {:DOWN, ^monitor, :process, ^worker, _reason} ->
-        :provider_call_crashed
-    end
   end
 
   @doc """
@@ -512,18 +450,15 @@ defmodule Loopex.LLM.ReqLLM do
 
   This is the whole of the adapter's streaming behaviour that needs no network:
   which chunks become which deltas, how the reply is assembled from exactly those
-  chunks, and which endings are failures rather than shorter answers. `dispatch`
-  calls it with the stream ReqLLM opened; the streaming conformance suite calls
-  it with a stream it built itself, so the shipped adapter is judged by the same
-  suite as every other one instead of being exempt for needing a credential.
+  chunks, and which endings are failures rather than shorter answers. Both this
+  helper and the child's transport path call the same drain implementation. The
+  conformance suite supplies an already-open stream and proves conversion, not
+  network dispatch or provider-process cleanup.
 
   The response is a `ReqLLM.StreamResponse` — accepted and read here, never
-  returned. Errors are already bounded and scrubbed, so a caller may report them
-  without inspecting a provider term: every reason is capped at the same byte
-  bound `complete/3` applies, and the credential this adapter would itself call
-  with is substituted out of it. A caller that opened its own stream under some
-  other secret is the only case that cannot be covered, because that value is
-  never one this adapter is told.
+  returned. Failure categories stay bounded; all failure details are replaced
+  by the fixed `"model_call_failed"` literal. This helper reads no credential
+  and cannot know which secret its caller used to open an arbitrary stream.
   """
   @spec reply_from_stream(
           ReqLLM.StreamResponse.t(),
@@ -533,23 +468,9 @@ defmodule Loopex.LLM.ReqLLM do
         ) :: {:ok, reply()} | {:error, term()}
   def reply_from_stream(response, request, identity, progress)
       when is_map(request) and is_map(identity) and is_function(progress, 1) do
-    drain(response, request, identity, progress, ambient_credential())
-  end
-
-  # Concept: the credential to keep out of a reason, where there is one to keep
-  # out.
-  #
-  # Technical depth: this path passed `nil` unconditionally while the function
-  # documented scrubbed errors, which made the claim true only for a caller that
-  # had no credential set at all. The bound never depended on a secret; only the
-  # substitution does, and the substitution needs a value to look for. This is
-  # the same read `staged/1` makes, so what is substituted is exactly the value
-  # a real call would have been made with, and an unset variable stays `nil` and
-  # leaves the deterministic lane byte-identical.
-  defp ambient_credential do
-    case credential() do
-      {:ok, value} -> value
-      _absent -> nil
+    case drain(response, request, identity, progress, nil) do
+      {:ok, reply} -> {:ok, reply}
+      {:error, {category, _raw_reason}} -> {:error, {category, @call_failed}}
     end
   end
 
@@ -622,7 +543,7 @@ defmodule Loopex.LLM.ReqLLM do
     %{
       text: text,
       identity: identity,
-      provider_response_id: provider_request_id(metadata),
+      provider_response_id: provider_request_id(metadata, identity),
       usage: %{
         input_tokens: Map.get(reported, :input_tokens),
         output_tokens: Map.get(reported, :output_tokens)
@@ -905,18 +826,26 @@ defmodule Loopex.LLM.ReqLLM do
   # Technical depth: a streamed call cannot carry the assembled message
   # identifier, because the library keeps only usage from the provider's
   # `message_start` event and discards the rest. What survives is the response's
-  # own `request-id` header, which the provider issues per call and which is the
-  # identifier its account and its support surface use -- so it is the one an
-  # auditor looks a retained claim up by, and the attestation declares its form.
+  # own per-call request identifier header. Anthropic calls it `request-id` and
+  # OpenAI calls it `x-request-id`; both are the identifiers their account and
+  # support surfaces use. The attestation declares the concrete form it retained.
   #
-  # A provider that returns no such header yields `nil` rather than a
-  # manufactured substitute, and an evidence claim built from replies carrying
-  # none is refused rather than recorded.
-  defp provider_request_id(metadata) do
-    metadata
-    |> Map.get(:headers, [])
-    |> header("request-id")
-    |> bounded_response_id()
+  # The resolved provider chooses the header. A gateway may add unrelated
+  # request identifiers, so preferring whichever recognised spelling happens to
+  # appear first can retain an identifier that does not exist in the provider's
+  # account. An unknown provider has no declared account-header contract here
+  # and therefore yields `nil`. A provider that returns no valid value under its
+  # own header likewise yields `nil` rather than a manufactured substitute, and
+  # an evidence claim built from replies carrying none is refused rather than
+  # recorded.
+  defp provider_request_id(metadata, identity) do
+    headers = Map.get(metadata, :headers, [])
+
+    case Map.get(identity, :provider) do
+      "anthropic" -> headers |> header("request-id") |> bounded_response_id()
+      "openai" -> headers |> header("x-request-id") |> bounded_response_id()
+      _unknown -> nil
+    end
   end
 
   # Concept: a header that cannot be the provider's identifier is an absence
@@ -988,10 +917,11 @@ defmodule Loopex.LLM.ReqLLM do
         {:cont, {:ok, [ReqLLM.Context.assistant(text) | acc]}}
 
       calls ->
-        # The provider's encoder accepts a plain map with the arguments already
-        # decoded, so nothing here has to encode JSON. That matters: the ADR 0002
-        # floor has neither `:json` nor `JSON`, and adding an encoder to reach a
-        # provider would be an external dependency this edge is not permitted.
+        # ReqLLM's public context constructor normalizes the provider-neutral
+        # maps into its ToolCall shape before a provider encoder sees them. The
+        # arguments stay decoded here: the dependency owns its own wire encoding,
+        # and this adapter needs no second JSON implementation to reach a
+        # provider.
         rendered =
           Enum.map(calls, fn call ->
             %{
@@ -1003,8 +933,7 @@ defmodule Loopex.LLM.ReqLLM do
 
         parts = if text in [nil, ""], do: [], else: [ReqLLM.Message.ContentPart.text(text)]
 
-        {:cont,
-         {:ok, [%ReqLLM.Message{role: :assistant, content: parts, tool_calls: rendered} | acc]}}
+        {:cont, {:ok, [ReqLLM.Context.assistant(parts, tool_calls: rendered) | acc]}}
     end
   end
 

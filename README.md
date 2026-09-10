@@ -48,13 +48,27 @@ the terminal, and yesterday's session can be found and continued. Those bytes
 are part of the closed product baseline; the marked status capsule above and
 the canonical plan register carry the milestone state.
 
-Loopex remains source-tree milestone work, not
-an installable package, release, or frozen public API. Start with the
+Loopex remains source-tree milestone work, not an installable package or frozen
+public API. The annotated tag `v0.0.0-m2` is reserved for the exact integrated
+M2 source snapshot only. Start with the
 [coding sessions guide](docs/operator/coding-sessions.md#concept) for the `loopex`
 command, or the [operator runtime guide](docs/operator/runtime.md#concept) for the
 embedded runtime beneath it and run the complete source-tree loop, or use the
 [developer embedding guide](docs/developer/runtime-and-embedding.md#concept) to
 understand the composition and commit ordering.
+
+The post-closure repair line implements the accepted follow-up decisions for a
+private provider process, explicit local recovery handoff, versioned provider
+accounting, and bounded executor receipts. The
+[repair record](docs/evidence/M2-ff17990-review-followup.md#completion-order)
+must name the exact-source qualification and independent integration-review
+disposition used for integration. Those repairs do not publish a package or
+label a public surface.
+
+The repaired reference local executor requires `/bin/bash` for its internal
+supervision on Darwin and Linux; raw commands still use `/bin/sh`. See the
+[runtime prerequisite](docs/operator/tools-and-policy.md#operator-local-supervision-shell)
+before using the reference stack. Core and custom executors are unaffected.
 
 The [roadmap](docs/roadmap.md#concept) is non-normative capability guidance;
 [CHANGELOG.md](CHANGELOG.md) records what changed.

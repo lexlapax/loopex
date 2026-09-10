@@ -1,3 +1,5 @@
+Code.require_file("support/provider_build_fixture.exs", __DIR__)
+
 defmodule Loopex.LLM.ReqLLM.ProviderTest do
   @moduledoc """
   ## Concept
@@ -17,6 +19,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderTest do
   use ExUnit.Case, async: false
 
   alias Loopex.LLM.ReqLLM, as: Adapter
+  alias Loopex.LLM.ReqLLM.ProviderBuildFixture
 
   @prompt "Reply with exactly one word: loopex"
 
@@ -24,7 +27,14 @@ defmodule Loopex.LLM.ReqLLM.ProviderTest do
   test "one real model call completes through the model boundary" do
     model_spec = Adapter.default_model()
 
-    case Adapter.complete(model_spec, @prompt) do
+    root =
+      Path.join(System.tmp_dir!(), "loopex-real-provider-#{System.unique_integer([:positive])}")
+
+    File.mkdir!(root)
+    on_exit(fn -> File.rm_rf!(root) end)
+    options = ProviderBuildFixture.options!(root) ++ [cleanup_grace_ms: 2_000]
+
+    case Adapter.complete_prompt(model_spec, @prompt, options) do
       {:ok, reply} ->
         # Concept: retained non-secret identity. The credential never appears
         # here; provider, model, and endpoint class are what a reviewer needs to
