@@ -139,6 +139,10 @@ the unexported value reaches only the real selector and the existing required
 inherited credential lanes. Diagnostic roles accept no provider input. The
 aggregate emits each predecessor's existing input format; it does not change
 that predecessor's credential contract. No mixed-file exclusion inventory is locked.
+The inherited real-provider lanes use the reference model
+`anthropic:claude-haiku-4-5`; the credential must belong to that Anthropic
+provider. Confirm the pinned model/provider before supplying a key. The
+provider-neutral input variable does not make other providers' keys compatible.
 
 ## Protected Outcome Obligations
 
