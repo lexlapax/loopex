@@ -213,11 +213,13 @@ defmodule Loopex.Checks.History do
   #
   # Technical depth: only links to the reserved override-disposition anchor
   # prefix invoke this rule. Every such local target must contain the visible
-  # anchor exactly once at the accepted revision and at each direct parent. That
-  # makes an absent record and a record first added by the transition mechanically
-  # distinct from a reviewed standalone disposition. The committed walk resolves
-  # targets from Git; the synthetic working-tree child reads the same current
-  # Markdown inventory as the rest of the status check.
+  # anchor exactly once at the accepted revision and in every direct parent that
+  # already cites that same override. At least one parent must carry both the
+  # citation and anchor. That admits an ordinary integration merge whose unrelated
+  # main parent predates the milestone, while preventing an unrelated parent from
+  # laundering a citation whose own lineage lacks the standalone record. The
+  # committed walk resolves targets from Git; the synthetic working-tree child
+  # reads the same current Markdown inventory as the rest of the status check.
   defp require_override_dispositions!(name, state, revision, parents, governed, resolve_file) do
     accepted? = plan_accepted?(Map.get(governed, "docs/plans/#{name}.md"), name, revision)
 
@@ -227,13 +229,22 @@ defmodule Loopex.Checks.History do
       |> Enum.each(fn {target, fragment} ->
         require_override_anchor!(target, fragment, revision, name, governed, resolve_file)
 
-        if parents == [] do
+        citing_parents =
+          Enum.filter(parents, fn parent ->
+            parent
+            |> override_parent_documents(name, resolve_file)
+            |> override_disposition_links(name)
+            |> Enum.member?({target, fragment})
+          end)
+
+        if citing_parents == [] do
           raise Invalid,
                 "#{@index} at #{revision}: `#{name}` cites override disposition " <>
-                  "#{target}##{fragment}, but no parent carries the standalone record"
+                  "#{target}##{fragment}, but no parent carries both the prior citation " <>
+                  "and standalone record"
         end
 
-        Enum.each(parents, fn parent ->
+        Enum.each(citing_parents, fn parent ->
           require_override_anchor!(target, fragment, parent, name, governed, resolve_file,
             transition: revision
           )
@@ -242,6 +253,17 @@ defmodule Loopex.Checks.History do
     end
 
     :ok
+  end
+
+  defp override_parent_documents(parent, name, resolve_file) do
+    Map.new(
+      [
+        "docs/plans/#{name}.md",
+        "docs/plans/#{name}-technical.md",
+        "docs/plans/#{name}-gate.md"
+      ],
+      fn path -> {path, resolve_file && resolve_file.(parent, path)} end
+    )
   end
 
   defp override_disposition_links(governed, name) do
@@ -298,19 +320,31 @@ defmodule Loopex.Checks.History do
 
     count = if text == nil, do: 0, else: visible_anchor_count(text, target, fragment)
 
-    if count != 1 do
-      case Keyword.get(options, :transition) do
-        nil ->
-          raise Invalid,
-                "#{@index} at #{at}: `#{name}` cites missing override disposition " <>
-                  "#{target}##{fragment}"
+    case {count, Keyword.get(options, :transition)} do
+      {1, _transition} ->
+        :ok
 
-        transition ->
-          raise Invalid,
-                "#{@index} at #{transition}: `#{name}` cites override disposition " <>
-                  "#{target}##{fragment} first added by that transition; the standalone " <>
-                  "record and exact-SHA review must predate dependent work"
-      end
+      {0, nil} ->
+        raise Invalid,
+              "#{@index} at #{at}: `#{name}` cites missing override disposition " <>
+                "#{target}##{fragment}"
+
+      {0, transition} ->
+        raise Invalid,
+              "#{@index} at #{transition}: `#{name}` cites override disposition " <>
+                "#{target}##{fragment} first added by that transition; the standalone " <>
+                "record and exact-SHA review must predate dependent work"
+
+      {duplicates, nil} ->
+        raise Invalid,
+              "#{@index} at #{at}: `#{name}` cites duplicate override disposition " <>
+                "#{target}##{fragment} (#{duplicates} anchors)"
+
+      {duplicates, transition} ->
+        raise Invalid,
+              "#{@index} at #{transition}: `#{name}` cites override disposition " <>
+                "#{target}##{fragment}, but parent #{at} carries #{duplicates} anchors; " <>
+                "one reviewed standalone record is required"
     end
 
     :ok

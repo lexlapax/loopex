@@ -22,10 +22,12 @@ Retire a spent worker/reference only after its matching settlement is committed
 and the session's authorization domain records it as closed. With no live
 attempt the domain permits none. With a successor attempt it permits only that
 exact committed attempt; a missing spent-set entry is never sufficient. Domain
-retirement on session release retains existing owner-epoch fencing. Control
-restart reconstructs the same refusal from durable truth before issuing any
-permit. Do not invent a permanent tombstone per historic attempt, which merely
-moves the unbounded set.
+retirement on session release retains existing owner-epoch fencing. An attempt
+closed only by a run terminal, with no matching committed settlement, does not
+satisfy the earlier retirement predicate and remains retained until session
+release. Control restart reconstructs the same refusal from durable truth before
+issuing any permit. Do not invent a permanent tombstone per historic attempt,
+which merely moves the unbounded set.
 
 ### Required proof
 

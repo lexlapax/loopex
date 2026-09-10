@@ -2556,31 +2556,65 @@ defmodule LoopexCliTest do
   # extension. The test name below remains the historical locked selector identity.
   #
   # Technical depth: the explicit scoped override is recorded at
-  # docs/developer/agent-context-map.md#disposition-m3-cli-extension-override-2026-09-09.
-  # Skill is optional before implementation; repeated dispatch heads count as one
-  # command. Further extensions require an explicit override of this permitted set.
+  # docs/developer/agent-context-map.md#override-disposition-m3-cli-extension-ratification-2026-09-10.
+  # Skill is optional before implementation. Ordinary and guarded literal heads
+  # count once per command; guarded dynamic heads and dispatch-to-dispatch remaps
+  # are refused because either could hide a command from the inventory.
   test "the command exposes exactly run sessions resume cancel and artifact and no wire or line framing surface" do
     source = File.read!(app_path("lib/loopex_cli.ex"))
     {:ok, ast} = Code.string_to_quoted(source)
-
-    commands =
-      ast
-      |> function_heads(:dispatch, 2)
-      |> Enum.flat_map(fn
-        [command | _rest] when is_binary(command) -> [command]
-        [{:|, _metadata, [command, _tail]}] when is_binary(command) -> [command]
-        _other -> []
-      end)
-      |> MapSet.new()
+    surface = dispatch_surface(ast)
 
     required = MapSet.new(~w(artifact cancel resume run sessions))
     permitted_extensions = MapSet.new(~w(skill))
 
-    assert MapSet.subset?(required, commands),
-           "missing required CLI commands: #{inspect(MapSet.difference(required, commands))}"
+    assert surface.dynamic_guarded_heads == [],
+           "guarded dispatch/2 heads must name a literal command: #{inspect(surface.dynamic_guarded_heads)}"
 
-    assert MapSet.subset?(commands, MapSet.union(required, permitted_extensions)),
-           "unapproved CLI commands: #{inspect(MapSet.difference(commands, MapSet.union(required, permitted_extensions)))}"
+    assert surface.recursive_calls == [],
+           "dispatch/2 bodies must not remap into dispatch/2: #{inspect(surface.recursive_calls)}"
+
+    assert MapSet.subset?(required, surface.commands),
+           "missing required CLI commands: #{inspect(MapSet.difference(required, surface.commands))}"
+
+    assert MapSet.subset?(surface.commands, MapSet.union(required, permitted_extensions)),
+           "unapproved CLI commands: #{inspect(MapSet.difference(surface.commands, MapSet.union(required, permitted_extensions)))}"
+
+    # These mutations prove the inventory cannot be bypassed by the two AST
+    # shapes that the earlier source scan omitted. Repeated ordinary and guarded
+    # literal heads still describe one command.
+    guarded_literal =
+      dispatch_surface(
+        quote do
+          def dispatch(["run" | rest], options), do: {:ordinary, rest, options}
+
+          def dispatch(["run" | rest], options) when rest != [],
+            do: {:guarded, rest, options}
+        end
+      )
+
+    assert guarded_literal.commands == MapSet.new(["run"])
+    assert guarded_literal.dynamic_guarded_heads == []
+
+    dynamic_guarded =
+      dispatch_surface(
+        quote do
+          def dispatch([command | rest], options) when command == "hidden",
+            do: {:hidden, rest, options}
+        end
+      )
+
+    assert length(dynamic_guarded.dynamic_guarded_heads) == 1
+
+    remapped =
+      dispatch_surface(
+        quote do
+          def dispatch([unknown | rest], options),
+            do: dispatch([unknown | rest], options)
+        end
+      )
+
+    assert length(remapped.recursive_calls) == 1
   end
 
   test "a dropped stream closure leaves the terminal falling back to the durable record without inferring abandonment or starting a timer" do
@@ -3066,18 +3100,98 @@ defmodule LoopexCliTest do
     end
   end
 
-  defp function_heads(ast, name, arity) do
-    {_ast, heads} =
+  defp dispatch_surface(ast) do
+    clauses = function_clauses(ast, :dispatch, 2)
+
+    commands =
+      clauses
+      |> Enum.flat_map(fn clause ->
+        case literal_dispatch_command(hd(clause.arguments)) do
+          {:ok, command} -> [command]
+          :dynamic_or_fallback -> []
+        end
+      end)
+      |> MapSet.new()
+
+    dynamic_guarded_heads =
+      Enum.flat_map(clauses, fn clause ->
+        case {clause.guarded?, literal_dispatch_command(hd(clause.arguments))} do
+          {true, :dynamic_or_fallback} -> [Macro.to_string(clause.head)]
+          _other -> []
+        end
+      end)
+
+    recursive_calls =
+      Enum.flat_map(clauses, fn clause ->
+        clause.body
+        |> dispatch_calls(2)
+        |> Enum.map(&%{head: Macro.to_string(clause.head), call: Macro.to_string(&1)})
+      end)
+
+    %{
+      commands: commands,
+      dynamic_guarded_heads: dynamic_guarded_heads,
+      recursive_calls: recursive_calls
+    }
+  end
+
+  defp function_clauses(ast, name, arity) do
+    {_ast, clauses} =
       Macro.prewalk(ast, [], fn
-        {:def, _metadata, [{^name, _call_metadata, arguments}, _body]} = node, acc
-        when length(arguments) == arity ->
-          {node, [hd(arguments) | acc]}
+        {:def, _metadata, [head, definition]} = node, acc ->
+          case function_head(head, name, arity) do
+            {:ok, arguments, guarded?} ->
+              body = Keyword.fetch!(definition, :do)
+              clause = %{arguments: arguments, body: body, guarded?: guarded?, head: head}
+              {node, [clause | acc]}
+
+            :other ->
+              {node, acc}
+          end
 
         node, acc ->
           {node, acc}
       end)
 
-    heads
+    Enum.reverse(clauses)
+  end
+
+  defp function_head({:when, _metadata, [call | _guards]}, name, arity) do
+    case function_head(call, name, arity) do
+      {:ok, arguments, false} -> {:ok, arguments, true}
+      :other -> :other
+    end
+  end
+
+  defp function_head({name, _metadata, arguments}, name, arity)
+       when is_list(arguments) and length(arguments) == arity,
+       do: {:ok, arguments, false}
+
+  defp function_head(_head, _name, _arity), do: :other
+
+  defp literal_dispatch_command([{:|, _metadata, [command, _tail]}])
+       when is_binary(command),
+       do: {:ok, command}
+
+  defp literal_dispatch_command([command | _rest]) when is_binary(command), do: {:ok, command}
+  defp literal_dispatch_command(_pattern), do: :dynamic_or_fallback
+
+  defp dispatch_calls(ast, arity) do
+    {_ast, calls} =
+      Macro.prewalk(ast, [], fn
+        {:dispatch, _metadata, arguments} = node, acc
+        when is_list(arguments) and length(arguments) == arity ->
+          {node, [node | acc]}
+
+        {{:., _dot_metadata, [_receiver, :dispatch]}, _call_metadata, arguments} = node, acc
+        when is_list(arguments) and length(arguments) == arity ->
+          {node, [node | acc]}
+
+        node, acc ->
+          {node, acc}
+      end)
+
+    Enum.reverse(calls)
   end
 
   # Concept: put the runtime's own signal handler back.

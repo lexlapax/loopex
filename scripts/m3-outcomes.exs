@@ -7,12 +7,22 @@
       id: 1,
       selectors: [
         %{
+          path: "apps/loopex/test/resource_acquisition_test.exs",
+          names: [
+            "runtime acquisition commits command intent and bound attempt before the authorized hand starts",
+            "lost replies open effects and Store commit unknown reconcile without blind retry or false terminal truth"
+          ]
+        },
+        %{
+          path: "apps/loopex_executor_local/test/resource_acquisition_test.exs",
+          names: [
+            "the local hand one shot guard binds canonical grant lease executor epoch fence budgets and exact anonymous HTTPS Git identities"
+          ]
+        },
+        %{
           path: "apps/loopex_composition/test/skill_acquisition_test.exs",
           names: [
-            "pinned Git import retains the exact tree and complete file identities",
-            "import uses the authorized executor with closed configuration and bounded cancellation",
-            "links escapes unsupported files and exceeded pack limits refuse before publication",
-            "interrupted installation preserves the previous pack and executes no downloaded content"
+            "publication cuts and competing prepared attempts never replace a destination preserve prior committed provenance and attach remote identity only after verified Store terminal"
           ]
         }
       ]
@@ -26,9 +36,10 @@
             "catalog selected instructions and manifested supporting blocks stage in durable order",
             "only settled operator commands change the next run selection",
             "changed or revoked manifest identity withholds resources without stopping ordinary coding",
-            "hostile skill metadata changes neither tool registry policy result nor grants",
-            "resource admission measures all dimensions and maximal receipts before dispatch",
-            "recovery preserves exact staged resource bytes without refetch or ambiguous redispatch"
+            "hostile skill metadata changes neither tool registry policy result grants nor administrative acquisition state",
+            "resource admission reserves exact candidate receipt metadata and applies every fixed first failure dimension before resource reads or dispatch",
+            "recovery preserves exact staged resource bytes without refetch or ambiguous redispatch",
+            "one runtime core snapshot serves one workspace while sessions retain only identities and staged bytes"
           ]
         }
       ]
@@ -39,7 +50,7 @@
         %{
           path: "apps/loopex_cli/test/foundation_workflow_test.exs",
           names: [
-            "embedding and the source built CLI complete the same skill tool and full artifact workflow",
+            "embedding and the source built CLI use the same administrative acquisition skill tool and full artifact workflow",
             "trusted launch and fresh process recovery preserve resource and provider configuration",
             "new readers preserve genuine M2 history and old readers refuse new records before effects"
           ]
@@ -78,6 +89,12 @@
       id: 5,
       selectors: [
         %{
+          path: "apps/loopex/test/history_anchoring_test.exs",
+          names: [
+            "an M3 override disposition anchor predates acceptance"
+          ]
+        },
+        %{
           path: "apps/loopex/test/m3_gate_support_test.exs",
           names: [
             "checkpoint routing selects all outcomes for unknown and shared paths",
@@ -95,7 +112,7 @@
   real: %{
     path: "apps/loopex_cli/test/foundation_workflow_real_test.exs",
     names: [
-      "public pinned Git import and a real provider complete the admitted skill tool and artifact workflow"
+      "attended public HTTPS Git acquisition uses the authorized local hand and a real provider completes the admitted skill tool and artifact workflow"
     ]
   }
 }

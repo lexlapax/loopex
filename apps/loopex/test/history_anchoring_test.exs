@@ -1500,10 +1500,39 @@ defmodule Loopex.HistoryAnchoringTest do
                {sha("b"), [sha("a")], accepted}
              ])
 
+    unrelated = m3_prerequisite_files("Open", nil, :link) |> Map.put(@context_path, before)
+
+    assert :ok ==
+             prerequisite_history([
+               {sha("a"), [], unrelated},
+               {sha("b"), [], open},
+               {sha("c"), [sha("a"), sha("b")], accepted}
+             ])
+
+    cited_without_record = m3_override_files("Open", before)
+    unrelated_with_record = Map.put(unrelated, @context_path, recorded)
+
+    assert_raise Invalid, ~r/first added by that transition/, fn ->
+      prerequisite_history([
+        {sha("a"), [], cited_without_record},
+        {sha("b"), [], unrelated_with_record},
+        {sha("c"), [sha("a"), sha("b")], accepted}
+      ])
+    end
+
     missing = m3_override_files("Accepted", before)
 
     assert_raise Invalid, ~r/cites missing override disposition/, fn ->
       prerequisite_history([{sha("a"), [], missing}])
+    end
+
+    duplicate = m3_override_files("Accepted", recorded <> recorded)
+
+    assert_raise Invalid, ~r/cites duplicate override disposition/, fn ->
+      prerequisite_history([
+        {sha("a"), [], m3_override_files("Open", recorded)},
+        {sha("b"), [sha("a")], duplicate}
+      ])
     end
 
     added_by_transition = m3_override_files("Accepted", recorded)

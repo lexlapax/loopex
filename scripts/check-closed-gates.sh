@@ -6,7 +6,12 @@ set +x
 set +a
 export LC_ALL=C
 fail() { printf 'Closed gates UNAVAILABLE: %s\n' "$*" >&2; exit 2; }
-[ "${LOOPEX_M3_BOOTSTRAP_ACTIVE:-}" != 1 ] || fail 'bootstrap must not invoke the closed-gate aggregate'
+if [ "${LOOPEX_M3_BOOTSTRAP_ACTIVE:-}" = 1 ]; then
+  if [ "${LOOPEX_M3_BOOTSTRAP_SENTINEL_FD:-}" = 9 ]; then
+    printf '%s\n' aggregate-invoked >&9 || fail 'bootstrap invocation sentinel is unavailable'
+  fi
+  fail 'bootstrap must not invoke the closed-gate aggregate'
+fi
 [ "${LOOPEX_PROVIDER_API_KEY+x}" != x ] || fail 'provider input must use the bounded stdin frame'
 unset OPENAI_API_KEY ANTHROPIC_API_KEY GEMINI_API_KEY GOOGLE_API_KEY AZURE_OPENAI_API_KEY
 caller=all

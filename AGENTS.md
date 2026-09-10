@@ -195,10 +195,11 @@ permanent product limit when a successor change is explicitly approved. Keep
 historical selector identifiers where needed for unchanged runners and explain
 their current assertions beside the test and in the disposition. Changed
 digest-bound bytes still require an explicit binding route. An approval may cover
-several named holders, but each holder records its replacement binding through
-that holder's own commit and receives its own status check and exact-SHA review
-before the next holder proceeds. In this contract, a validated binding route
-means that per-holder sequence has completed. An override is never a blanket
+several holders only when its disposition names every current holder. Each holder
+records its replacement binding through that holder's own commit and receives
+its own status check and exact-SHA review before the next holder proceeds. In
+this contract, a validated binding route means that per-holder sequence has
+completed. An override is never a blanket
 instruction to ignore a hash mismatch or report an unrun check as passing.
 Include any necessary enforcement change in the same reviewable work rather than
 seeking repeated approval of the named exception.
@@ -235,6 +236,7 @@ known limitation, or deferring it to a later milestone without that packet is
 handing over an unresolved observation, whichever section the sentence appears
 in.
 
+<a id="milestones-and-gates"></a>
 ## Milestones and Gates
 
 **Vocabulary.** A *capability rung* is one of the non-normative questions in the

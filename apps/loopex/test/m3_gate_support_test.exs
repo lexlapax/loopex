@@ -5,10 +5,26 @@ defmodule Loopex.M3GateSupportTest do
   alias Loopex.M3Gate.Support
 
   test "checkpoint routing selects all outcomes for unknown and shared paths" do
+    assert Support.select_outcomes(["apps/loopex/test/history_anchoring_test.exs"]) == [5]
+
     assert Support.select_outcomes(["apps/loopex_composition/test/skill_acquisition_test.exs"]) ==
              [1, 3]
 
     assert Support.select_outcomes(["apps/loopex/lib/loopex/skill_catalog.ex"]) == [2, 3]
+
+    assert Support.select_outcomes(["apps/loopex/test/resource_acquisition_test.exs"]) == [1]
+
+    assert Support.select_outcomes([
+             "apps/loopex_executor_local/test/resource_acquisition_test.exs"
+           ]) == [1]
+
+    assert Support.select_outcomes([
+             "apps/loopex/lib/loopex/resource_acquisition/request.ex"
+           ]) == [1, 3]
+
+    assert Support.select_outcomes([
+             "apps/loopex_executor_local/lib/loopex_executor_local/resource_acquisition.ex"
+           ]) == [1, 3]
 
     assert Support.select_outcomes(["apps/loopex_composition/lib/importer.ex"]) == [1, 2, 3, 4, 5]
 
@@ -42,7 +58,7 @@ defmodule Loopex.M3GateSupportTest do
 
     assert Support.select_outcomes(["new-unclassified-file"]) == [1, 2, 3, 4, 5]
 
-    assert Support.select_outcomes(["apps/loopex/test/closed_gate_aggregate_test.exs"]) == [
+    assert Support.select_outcomes(["apps/loopex/test/future_shared_boundary_test.exs"]) == [
              1,
              2,
              3,
@@ -173,7 +189,25 @@ defmodule Loopex.M3GateSupportTest do
     assert output =~ "bootstrap must not invoke the closed-gate aggregate"
 
     assert File.read!(Path.join(repository, "scripts/check-m3-gate.sh")) =~
-             "LOOPEX_M3_BOOTSTRAP_ACTIVE=1"
+             "LOOPEX_M3_BOOTSTRAP_SENTINEL_FD=9"
+
+    sentinel = Path.join(root, "bootstrap-backedge-ledger")
+
+    {output, 0} =
+      System.cmd(
+        "bash",
+        [
+          "-c",
+          "exec 9>\"$1\"; target=$2; env LOOPEX_M3_BOOTSTRAP_ACTIVE=1 LOOPEX_M3_BOOTSTRAP_SENTINEL_FD=9 \"$target\" --list --before M3 >/dev/null 2>&1 || :",
+          "m3-bootstrap-sentinel",
+          sentinel,
+          Path.join(repository, "scripts/check-closed-gates.sh")
+        ],
+        stderr_to_stdout: true
+      )
+
+    assert output == ""
+    assert File.read!(sentinel) == "aggregate-invoked\n"
   end
 
   test "unavailable comparison commits never become an empty change set" do

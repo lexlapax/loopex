@@ -250,7 +250,12 @@ run_step mix test --exclude real_provider --seed 3107
 run_step mix format --check-formatted
 run_step mix loopex.docs_check
 run_step mix loopex.deps_budget
-run_step env LOOPEX_M3_BOOTSTRAP_ACTIVE=1 bash scripts/check-bootstrap.sh
+: > "$task_root/bootstrap-backedge-ledger"
+exec 9>"$task_root/bootstrap-backedge-ledger"
+run_step env LOOPEX_M3_BOOTSTRAP_ACTIVE=1 LOOPEX_M3_BOOTSTRAP_SENTINEL_FD=9 \
+  bash scripts/check-bootstrap.sh
+exec 9>&-
+[ ! -s "$task_root/bootstrap-backedge-ledger" ] || die 'bootstrap invoked the closed-gate aggregate'
 # Restore the operator's nonsecret package caches for immutable inherited gates;
 # their own runners establish their locked isolation and credential boundaries.
 result=0

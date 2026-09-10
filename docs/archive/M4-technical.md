@@ -33,20 +33,27 @@ future edits: proposed Elixir 1.18.5/OTP 27.3.4 and current 1.20.3/29.0.5, with
 real matrix evidence. Inventory every Closed holder of changed artifacts on the
 exact integrated M3 base. M0/M1/M2 are known floor holders; include M3 if its gate
 binds the pins or affected machinery. Use each holder's v2 proposal/rebind by
-default, or an expressly scoped maintainer override covering the named holders,
-replacement bindings and validation. One approval may cover a coherent batch;
-do not demand repeated approval of the same exception. The override must have
-a supported binding route and cannot simply ignore current hash mismatches.
-Without such approval, retain the default transaction and its required evidence.
-Prior Acceptance/Closure rows stay immutable. Moving this cost from M3 does not
-remove it, and no floor change is made by this draft.
+default. An expressly scoped maintainer override may replace only the development-
+time holder transaction or procedure; it cannot replace ADR 0026 acceptance, an
+accepted ADR decision, or a released public contract. One explicit instruction
+may name a coherent set of holders, replacement bindings and validation without
+repeatedly asking for the same decision, but the operative disposition is first
+recorded and independently reviewed in its own commit. Each affected holder then
+lands its replacement row in that holder's own commit, names the override and
+holder, passes status validation, and receives exact-SHA read-only review before
+the next holder proceeds. No override ignores a stale hash or rewrites a prior
+Acceptance/Closure row. Without such approval, retain the default transaction and
+its required evidence. Moving this cost from M3 does not remove it, and no floor
+change is made by this archived draft.
 
 The ninth app, dependency inventory and source VERSION 0.1.0 also require their
-actual holders' transactions or the explicitly approved override route. Where the same holder binds several planned
-changes, review the complete coherent proposal together rather than lock known
-future edits and repeat the transaction. Do not combine unrelated decisions or
-skip any holder. All replacement bindings settle before M4 acceptance; publication
-and compatibility freezes still require separate authority.
+actual holders' transactions or the explicitly approved development-time override
+route above. Where the same holder binds several planned changes, review the
+complete coherent proposal together rather than lock known future edits and
+repeat the transaction. Do not combine unrelated decisions, combine different
+holders' replacement commits, or skip any holder. All replacement bindings settle
+before M4 acceptance; publication and compatibility freezes still require
+separate authority.
 
 M3 owns resource admission, inherited-gate enforcement and the three repairs.
 M4 adds core defer/answer and ArtifactStore ranges before the app-server maps
@@ -78,7 +85,19 @@ Use the existing command identity for `admit_resources`, `activate_skill` and
 `respond_interaction`; request IDs never enter journals or asynchronous facts.
 M3 resource queries and M4's ADR 0028 facade range query supply the results. Client trust
 answers are evidence presented to host policy, not a way to name arbitrary
-filesystem roots or import a URL. Acquisition remains an explicit host workflow.
+filesystem roots or import a URL. Acquisition remains M3's operator-only
+runtime-control and authorized-hand workflow; M4 adds no acquisition wire method.
+The host alone supplies M3's exact bound-manifest/current-attestation envelope
+as immutable process-start configuration. The app-server retains it without
+starting or attaching a runtime until protocol initialization succeeds. It then
+starts or attaches that runtime, allows M3's pre-child binding transaction to
+settle, and only afterwards accepts the first post-initialization request. A
+missing, malformed or incompatible initialization produces zero runtime
+attachment, binding transaction or other durable mutation. Exact match permits
+ordinary service; changed or unavailable source permits only the inherited
+recovery operations. No
+initialization field, request, interaction answer, or client schema may select or
+weaken that mode.
 
 Initialization negotiates `loopex.experimental/1`, exact schema digest and
 server-enforced ceilings. The complete request method table, closed enum sets,
@@ -103,7 +122,7 @@ Concept: [Outcomes](M4.md#concept-plan-outcomes).
 | --- | --- |
 | 1 | Independent raw-byte client launches actual server process, exact init/schema/limits vector, refusal before init, no durable work on malformed startup |
 | 2 | Identical command corpus through facade/wire; independent variation of request and command identity; snapshot-before-live; committed admission before correlated delivery; command replay after disconnect |
-| 3 | Durable interaction request/answer/policy/intent cuts, fixed timestamps through commit_unknown, expiry/abort/restart races and policy identity; catalog and selected content identity preserved; stale/missing trust withholds content; manual-only restriction; interaction answer admission separately observed from policy authorization and tool receipt; wire-selected policy/module/root refused |
+| 3 | Durable interaction request/answer/policy/intent cuts, fixed timestamps through commit_unknown, expiry/abort/restart races and policy identity; catalog and selected content identity preserved; M3 bound-manifest/current-attestation and recovery-only mode preserved across process restart; stale/missing trust withholds content; manual-only restriction; interaction answer admission separately observed from policy authorization and tool receipt; wire-selected policy/module/root/snapshot/attestation/mode refused |
 | 4 | ADR 0028 full-object verification and range allocation proved at ArtifactStore and facade, object and range digests distinguished; oversized/fragmented/multiple frames; malformed UTF-8/duplicate keys/depth; slow reader; bounded queue; late progress; stdout contamination; actual process-tree cleanup |
 | 5 | TypeScript drives skill/interaction/tool/artifact with real Store and executor; real-provider task separately attended; abrupt kill and fresh-process resume; graceful EOF case remains distinct |
 | 6 | Elixir, Python and TypeScript clients execute the same positive/negative vectors without importing the server codec; exact source/schema/client versions and toolchain/platform identities |
@@ -139,8 +158,9 @@ Concept: [Scope](M4.md#concept-plan-scope).
 All surfaces remain experimental. Exact generation/schema agreement is required;
 there is no mixed-generation promise, public-protocol freeze or daemon claim.
 Unknown mutating discriminants refuse. ADR 0024 adds versioned core interaction
-records; the app-server itself writes no private record. M3 resource semantics
-remain intact. Source VERSION is distinct
+records; the app-server itself writes no private record. M3 snapshot binding,
+current-attestation, recovery-only, acquisition provenance, and separate fresh-
+runtime use semantics remain intact. Source VERSION is distinct
 from protocol generation, journal version, provider build and schema digest.
 
 <a id="technical-plan-migration"></a>
@@ -148,10 +168,12 @@ from protocol generation, journal version, provider build and schema digest.
 
 Concept: [Scope](M4.md#concept-plan-scope).
 
-Prove new readers on genuine M3 histories, interaction recovery on M4 records
-and old readers refusing unknown interaction records before effects. Retain an
-old-format positive control and old root/binary pair; removing the server does
-not make an interaction-bearing root readable by M3. Resource behavior and
+Prove new readers on genuine resource-enabled M3 histories and genuine resource-
+disabled M2-form histories, interaction recovery on M4 records, and old readers
+refusing unknown interaction records before effects. Retain both positive
+controls and their matching old root/binary pairs; removing the server does not
+make an interaction-bearing root readable by M3. An M4 host preserves the exact
+M3 launch envelope and recovery-only behavior across server restart. Resource behavior and
 existing artifact formats remain unchanged. Range capability removal restores
 the previous full-object API without rewriting artifacts. Restore floor/version/
 inventory protections through governed transactions. No in-place downgrade,

@@ -19,9 +19,14 @@ after the archived scaffold is reconstructed when M4 opens.
 <a id="amendment-transaction-v1"></a>
 
 After eventual acceptance, amendments follow the direct proposal/rebind
-transaction unless the maintainer explicitly approves a named procedural
-override under AGENTS.md. Historical bindings and unaffected evidence stay
-enforced. No acceptance or amendment is recorded by this unopened draft.
+transaction by default. A maintainer override may replace only a named
+development-time transaction or procedure; its disposition lands alone and
+receives exact-SHA read-only review before dependent work. It cannot replace an
+accepted ADR decision or released public contract. Each changed digest holder
+still lands its replacement row through that holder's own status-checked,
+exact-SHA-reviewed commit before the next holder proceeds. Historical bindings
+and unaffected evidence stay enforced. No acceptance, amendment or override is
+recorded by this unopened draft.
 
 ## Opening and Readiness
 
@@ -52,10 +57,12 @@ Before acceptance:
    Use the
    existing standalone result channel. Do not build a second result/evidence
    framework.
-5. Settle all floor/inventory/version holder transactions or explicitly approved
-   replacement binding routes, including M3 if it binds changed artifacts, before M4 binds
-   their replacement bytes. Run fresh exact-candidate review after prerequisites
-   and executable readiness are complete.
+5. Settle all floor/inventory/version holder transactions or an explicitly
+   approved development-time procedural replacement, including M3 if it binds
+   changed artifacts, before M4 binds replacement bytes. Name every holder and
+   complete its own replacement commit, status check and exact-SHA review in
+   sequence. Run fresh exact-candidate review after prerequisites and executable
+   readiness are complete.
 
 The old raw probe is historical design material, not current executable proof
 of skills, interactions, the TypeScript workflow or artifact integrity.
@@ -66,10 +73,14 @@ Neither document presence nor acceptance state can satisfy the new opening.
 A separate program, without loading the product codec, observes:
 
 - exact `loopex.experimental/1`, schema digest, capabilities and bounded limits;
-- no durable mutation before initialization and snapshot/cursor before live work;
+- host configuration retained without runtime start/attachment or durable
+  mutation before successful initialization; malformed/missing initialization
+  yields zero M3 snapshot-binding transaction; after initialization the binding
+  settles before the first request, and snapshot/cursor precedes live work;
 - distinct transport request, durable command and interaction identities;
 - command-bound admission before correlated asynchronous delivery;
-- unchanged M3 catalog/selection identity and actual staged skill-use evidence;
+- unchanged M3 catalog/selection identity, host-only bound-manifest/current-
+  attestation input, recovery-only enforcement and actual staged skill-use evidence;
 - pending interaction, committed response, host-policy resolution and completed
   tool receipt for the exact tool call;
 - bounded artifact reconstruction with distinct full-object and range hashes;
@@ -106,7 +117,7 @@ Focused results never claim full completion or excuse an observed red.
 | Inspection | Exact plan/gate/schema/vector identities; status/topology; facade/dependency constraints; no product claim |
 | 1 — Initialization | `apps/loopex_app_server/test/initialization_test.exs`: negotiation, mutation-before-init refusal, duplicate init, stdout purity and real process boundary |
 | 2 — Session mapping | `apps/loopex_app_server/test/session_mapping_test.exs`: same corpus facade/wire, independent identity variation, idempotency, admission vs completion, snapshot/live ordering |
-| 3 — Foundation mapping | `apps/loopex/test/interaction_lifecycle_test.exs`, `apps/loopex_app_server/test/foundation_mapping_test.exs`: durable request/answer/policy/intent cuts, fixed timestamps through uncertain commits, expiry/abort/restart races; exact resources, missing/stale trust, manual-only selection, interaction/policy separation, wire cannot select roots/modules/profiles or grant |
+| 3 — Foundation mapping | `apps/loopex/test/interaction_lifecycle_test.exs`, `apps/loopex_app_server/test/foundation_mapping_test.exs`: durable request/answer/policy/intent cuts, fixed timestamps through uncertain commits, expiry/abort/restart races; exact resources, M3 bound-manifest/current-attestation and recovery-only behavior, resource-enabled and resource-disabled old-root controls, missing/stale trust, manual-only selection, interaction/policy separation, wire cannot acquire/import, select roots/modules/profiles/snapshots/attestations/modes or grant |
 | 4 — Delivery | `apps/loopex_store_local/test/artifact_range_test.exs`, `apps/loopex_app_server/test/delivery_bounds_test.exs`: range integrity/allocation, malformed UTF-8, duplicate keys, nesting, fragmented/multiple/oversized frames, blocked reader, detach cursor, late progress and actual cleanup |
 | 5 — External workflow | `apps/loopex_app_server/test/external_workflow_test.exs`: TypeScript skill → approval → actual tool → artifact → abrupt restart, plus separate graceful EOF behavior |
 | 6 — Conformance | `apps/loopex_protocol/test/public_schema_conformance_test.exs`: independently executed Elixir, Python and TypeScript clients over canonical positive/negative vectors |
