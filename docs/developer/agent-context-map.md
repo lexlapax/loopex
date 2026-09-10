@@ -37,7 +37,7 @@ separate decision duty when a founding boundary or invariant would change.
 | Runtime instances, supervision, reducer | [Runtime ownership](../vision.md#concept-vision-runtime-supervision) | [Supervision and reducer mechanics](../vision-technical.md#technical-vision-runtime-supervision) | Multi-instance supervision, pure reducer, bounded journal transaction; use the [M1 runtime and embedding guide](runtime-and-embedding.md#concept) for the implemented single-machine surface. |
 | Transactions, operations, recovery, cancellation | [Recovery truth](../vision.md#concept-vision-recovery-truth) | [Transaction and recovery mechanics](../vision-technical.md#technical-vision-recovery-truth) | `commit_unknown`, operation lifecycle, reconciliation, outcome algebra. |
 | Agent loop, queues, tool ordering | [Loop semantics](../vision.md#concept-vision-loop-semantics) | [Loop mechanics](../vision-technical.md#technical-vision-loop-semantics) | One run per session, input classes, ordering, and split payloads. |
-| Public protocol, events, attachments | [Public protocol](../vision.md#concept-vision-public-protocol) | [Protocol mechanics](../vision-technical.md#technical-vision-public-protocol) | Stream planes, envelopes, attach behavior, and authority boundaries; the headless protocol proposals are [ADR 0019](../adr/0019-experimental-public-session-protocol.md#concept) and [ADR 0020](../adr/0020-durable-interaction-lifecycle-and-host-policy-authority.md#concept), neither accepted, drafted against the retained [`M4` plan](../archive/M4.md). |
+| Public protocol, events, attachments | [Public protocol](../vision.md#concept-vision-public-protocol) | [Protocol mechanics](../vision-technical.md#technical-vision-public-protocol) | Stream planes, envelopes, attach behavior, and authority boundaries; the headless protocol proposal is [ADR 0023](../adr/0023-experimental-public-session-protocol.md#concept); [ADR 0024](../adr/0024-durable-interaction-lifecycle-and-host-policy-authority.md#concept) moves durable interactions into M3. Both remain Proposed; the external consumer remains the unopened [`M4` plan](../archive/M4.md). |
 | Journal, stores, branches, compaction, artifacts | [Sessions and storage](../vision.md#concept-vision-sessions-storage) | [Storage mechanics](../vision-technical.md#technical-vision-sessions-storage) | Recovery surfaces, private adapters, store decision, protection. |
 | Model boundary and continuation | [Model boundary](../vision.md#concept-vision-model-boundary) | [Model mechanics](../vision-technical.md#technical-vision-model-boundary) | Canonical types, `Loopex.LLM`, reference adapter, native sidecar. |
 | Context pipeline | [Model boundary](../vision.md#concept-vision-model-boundary) | [Context-pipeline mechanics](../vision-technical.md#technical-vision-model-boundary) | The sole seam for memory, retrieval, prompts, provenance, and receipts. |
@@ -1442,3 +1442,143 @@ the same candidate.
 **Scope of this record.** It closes `M2` and authorizes integration of the
 milestone branch to `main` by merge, preserving every bound candidate. It
 authorizes no release, tag, or publication.
+
+<a id="disposition-adrs-0019-0021-2026-09-07"></a>
+## ADRs 0019–0021 Acceptance and Repair Implementation
+
+On 2026-09-07 the maintainer explicitly accepted all three ADR pairs at candidate
+`b7f97092f7b6d6661e66bc775fd88195b92b67a0` and separately directed implementation,
+testing, and preparation for release review. The acceptance binds these Proposed
+bytes, not a later edited decision:
+
+| ADR | Concept SHA-256 | Technical depth SHA-256 |
+| --- | --- | --- |
+| 0019 | `b743931ccc7435ad4a90973ee6b623fea2afa1133ecaf8733a10a0512605f9dc` | `26ea8ac60e6f4a006018afdd4ffe24308b4e2184c67e175d9cd555a268030c6f` |
+| 0020 | `cbaee4ffc0a96658e42d769f5467501ab23d5d42dd09d0ac15a7919d8d329370` | `ee44044c2daece3bc74a7f89ddf549a97f579e19d5ae16ffb630e2500239f8fb` |
+| 0021 | `ce25d99eb282c732a16d938d2385a7d75dffb30a9099183a8340a03b8a607bd4` | `7041508edcaeaa53a39647cf524fc489470f46dba08c5dfff462c297e5f010d3` |
+
+ADR 0019 accepts the separate, host-owned one-invocation provider process,
+explicit companion configuration and direct-call migration, bounded credential
+handoff, and lifetime/evidence requirements. ADR 0020 accepts the explicit local
+prepared-handoff participant and atomic duplicate installation refusal. ADR 0021
+accepts versioned compact-accounting provenance and its narrow legacy-history
+refusal. These are three accepted decisions, not a claim their implementation
+is already conformant.
+
+**Accounting correction.** Override 21's blanket-conservative description does
+not state ADR 0018 combination 5 correctly. A raw-admitted, validated reply
+whose complete settlement does not fit preserves its complete reported usage;
+prevalidation unreadable input has no such evidence and estimates the remaining
+allowance. ADR 0021 preserves that policy and changes only its named record,
+validation, and legacy-compatibility clauses. The historical override and accepted
+ADR 0018 bytes remain unmodified; their earlier source ranges are not extended.
+
+**Implementation scope.** The current instruction authorizes these post-closure
+repairs and their documentation, conformance, mutation, and source-bound live
+evidence on `codex/m2-release-repair`, notwithstanding the generic Closed-register
+capsule's planning-only projection. Preserve M2's Closed state and its accepted
+plan/gate history. This does not waive a required gate, authorize changing its
+locked bytes, or dispose of an unresolved blocking finding. A required gate
+change still needs its own holder transaction and explicit acceptance.
+
+**Transition scope.** Within each ADR pair the acceptance commit changes only
+the Concept status and governance row; Technical depth bytes are unchanged.
+The same commit updates the two ADR indexes and this one new disposition, not
+an earlier disposition. It changes no product, plan, gate, or lifecycle bytes.
+Independent exact-diff review remains required before integration. The separate
+implementation instruction grants no tag, publication, final release approval,
+or approval of an unseen integration candidate. Final source and evidence must
+be offered for release review before those decisions.
+
+<a id="disposition-local-executor-bash-2026-09-07"></a>
+## Local Executor Bash Requirement and Repair Instruction
+
+On 2026-09-07, after the native Linux launch-input and helper-group failures were
+presented with alternatives, the maintainer answered **Yes** to the explicit
+question: may the reference local executor require `/bin/bash` for its internal
+supervision scripts, keeping model commands on `/bin/sh` and Core and custom
+executors independent, and may the repair and qualification be completed?
+
+That current decision authorizes this narrowly scoped runtime dependency,
+implementation, truthful documentation and serial cross-platform tests on
+`codex/m2-release-repair`. Preserve the existing carrier/guard ownership,
+credential boundaries, cleanup protocol and bounds. No POSIX-only fallback,
+shared-group redesign, Linux exclusion, gate weakening or retry waiver was
+approved. Bash in development prerequisites is not the source of this authority.
+
+[ADR 0022](../adr/0022-local-executor-supervision-shell.md#concept) records the
+choice and its technical consequences as a Proposed pair. This instruction does
+not accept unseen ADR bytes or fill that pair's governance row. Exact-pair
+acceptance and independent final-source review remain separate. It changes no
+earlier disposition, M2 lifecycle, accepted plan/gate or integration baseline,
+and grants no merge, tag, publication or release approval.
+
+<a id="disposition-m0-gate-generation-6-2026-09-07"></a>
+## M0 Gate Generation 6 Acceptance
+
+On 2026-09-07 (America/Los_Angeles), after receiving the independent exact-SHA
+review, the maintainer explicitly accepted M0 gate generation 6 at proposal
+`f49be58ddfc13dae3d7cb3443363da162f90be31` and directed completion of the remaining
+M2 repair and qualification work. The accepted gate digest is
+`sha256:5f89d8be79c466e2b68e1660668b7a0723940c7480583c495372ddbd14f37ee8`.
+
+The decision accepts the four occurrence-specific child-environment allowances,
+their fail-closed checker, and the two real-boundary conformance observations
+exactly as specified by Amendment 6. It does not broaden those allowances to
+files or other constructions. The interpreter-invocation scan and shadowed
+bootstrap absence proof retain their prior coverage; the amendment narrows only
+the named textual search-path rule and records its limits.
+
+The independent report, `M0-GEN6-f49be58-REVIEW.md`, has SHA-256
+`0e53a408463884aad34f6419ccc83dcd0b886dd43a61af3e88006131c2d2d650`.
+It recommends acceptance with no blocking or high finding. Its simulated rebind
+is diagnostic evidence only, not an accepted transition or a passing result at
+the proposal. The actual rebind still owes exact-transition review, status,
+bootstrap and inherited-gate verification.
+
+This disposition accepts generation 6 alone under `amendment-transaction-v2`.
+Its immediate-child transition changes only the generation-6 row in
+`docs/plans/M0.md` and adds this new disposition to this existing document.
+M0's historical Acceptance and Closure, all earlier dispositions, the gate and
+bound artifacts, normative envelopes, register and lifecycle states remain
+unchanged. M0 and M2 remain Closed. This record does not accept ADR 0022, waive
+required evidence or gates, approve an unseen integration or release candidate,
+or authorize a tag or publication. The separate instruction to finish M2 does
+not substitute for final source-bound evidence and independent release review.
+
+<a id="disposition-adr-0022-acceptance-2026-09-08"></a>
+## ADR 0022 Exact-Pair Acceptance
+
+On 2026-09-08 (America/Los_Angeles), the maintainer answered **Yes** to the
+explicit question accepting ADR 0022 at candidate
+`4c75ae3f81f3caefe7745c40a5b24e9133255e57`: require Bash for the reference local
+executor's internal supervision while model-supplied raw commands remain on
+`/bin/sh`. Core and third-party executors acquire no Bash prerequisite. This
+records exact-pair acceptance, separately from the earlier implementation-only
+instruction and the M0 generation-6 disposition.
+
+The bound Proposed pair is:
+
+- Concept: `sha256:d76b4996903e60a99bffcc35d31a0b0226f7123ce502b7e9a54ee7a8cd303edd`.
+- Technical depth: `sha256:5822d3fc93548a7d3c707fb82fc1d62d1a9932d9668c8d6e28defb28fda23467`.
+
+The independent exact-candidate static review recommended acceptance with no
+concrete text/code conflict. It distinguished existing Darwin and native Linux
+qualification evidence from new execution at this candidate; acceptance does
+not turn those historical results into later-source runs or universal platform
+coverage.
+
+Within the pair, this administrative transition changes only the Concept status
+and Acceptance row; the Technical depth file remains byte-identical to the
+candidate. It also updates ADR 0022's index status and explanation, the two
+current guidance links' status labels in `DEVELOPMENT.md` and
+`docs/operator/tools-and-policy.md`, and adds this one standalone disposition.
+It changes no earlier disposition, product, gate, bound artifact, normative
+plan envelope, register, or milestone lifecycle. Independent exact-transition
+review remains required before integration.
+
+This decision accepts ADR 0022 alone. It does not waive the unexplained M2
+coding-tools gate failure, provider-account verification, or any other required
+evidence; it does not approve an unseen integration or release candidate, merge,
+tag, or publication. M2 remains Closed, with post-closure source qualification
+and independent release review still outstanding.

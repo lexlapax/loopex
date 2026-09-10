@@ -162,6 +162,7 @@ defmodule Loopex.Runtime.SessionState do
           steer: map(),
           follow_up: map() | nil,
           charged: map(),
+          provider_settlement_version: 1 | 2,
           expected_events: [map()]
         }
 
@@ -192,6 +193,9 @@ defmodule Loopex.Runtime.SessionState do
             steer: %{},
             follow_up: nil,
             charged: %{},
+            # ADR 0021 permits one v1 prefix, then v2 exclusively. This is
+            # reconstructed from settled rows, never from runtime configuration.
+            provider_settlement_version: 1,
             # The cleanup period this session declares, which ADR 0009 makes a
             # session configuration value with a default rather than something
             # read back from whatever the hand happened to report. The run's
@@ -251,6 +255,7 @@ defmodule Loopex.Runtime.SessionState do
          # still installed means the terminal row that completes the pair is
          # missing, which is incomplete history rather than a run to resume.
          nil <- state.context_refusal,
+         :ok <- complete_attempt_pair(state),
          {:ok, event_sequence} <- replay_event_sequences(events),
          true <- expected_public_history?(events, state.expected_events),
          {:ok, projection} <- replay_projection(events, event_sequence),
@@ -988,29 +993,41 @@ defmodule Loopex.Runtime.SessionState do
       "next" => next,
       "result" => result,
       "accounting" => accounting,
-      kind: "model_attempt_settled_v1"
+      kind: ProviderAttempt.settled_kind()
     }
 
-    records =
-      if next == "terminal" do
-        [
-          settlement,
-          run_terminal_record(state, run_id, attempt_terminal(termination, result), %{
-            bound: termination == "deadline" && "deadline",
-            observed: termination == "deadline" && Map.get(state.deadlines, run_id),
-            declared_limit: termination == "deadline" && Map.get(state.deadlines, run_id),
-            reason: terminal_reason(result)
-          })
-        ]
-      else
-        [settlement]
-      end
+    with {:ok, settlement} <- fit_attempt_settlement(settlement),
+         {:ok, records} <- attempt_settlement_records(state, run_id, settlement),
+         {:ok, proposal} <-
+           internal_proposal(
+             state,
+             stable_id("model-attempt-settled", run_id, {request.staged_request_digest, attempt}),
+             records
+           ),
+         {:ok, events} <- admit_attempt_items(:event, proposal.events) do
+      {:ok, %{proposal | events: events}}
+    end
+  end
 
-    internal_proposal(
-      state,
-      stable_id("model-attempt-settled", run_id, {request.staged_request_digest, attempt}),
-      records
-    )
+  defp attempt_settlement_records(state, run_id, %{"next" => "terminal"} = settlement) do
+    with {:ok, [terminal]} <-
+           admit_attempt_items(:record, [attempt_terminal_record(state, run_id, settlement)]) do
+      {:ok, [settlement, terminal]}
+    end
+  end
+
+  defp attempt_settlement_records(_state, _run_id, settlement), do: {:ok, [settlement]}
+
+  defp attempt_terminal_record(state, run_id, settlement) do
+    termination = settlement["termination"]
+    result = settlement["result"]
+
+    run_terminal_record(state, run_id, attempt_terminal(termination, result), %{
+      bound: termination == "deadline" && "deadline",
+      observed: termination == "deadline" && Map.get(state.deadlines, run_id),
+      declared_limit: termination == "deadline" && Map.get(state.deadlines, run_id),
+      reason: terminal_reason(result)
+    })
   end
 
   # Concept: the first committed of abort, deadline, and settlement classifies
@@ -1032,104 +1049,95 @@ defmodule Loopex.Runtime.SessionState do
   defp attempt_transport(:not_dispatched), do: "not_dispatched"
   defp attempt_transport(_other), do: "dispatched_or_unknown"
 
-  # Concept: a reply that cannot be retained truthfully becomes the compact
-  # unreadable answer, and it keeps whatever complete usage the provider did
-  # report.
-  #
-  # Technical depth: the settlement is preflighted at its exact retained size
-  # before it is proposed. A reply that passed validation but whose complete
-  # settlement does not fit is compacted here rather than discovered at the
-  # Store boundary, where the run would have no verdict at all.
-  #
-  # Both ways a reply can fail to be retained land in the same compact record.
-  # ADR 0018 combination 5 is the only combination that names
-  # `unreadable_model_answer`, and it is the answer this runtime could not read,
-  # whether it contradicted itself or would not fit; combination 3's
-  # `model_call_failed` names an attempt that returned no answer at all -- a
-  # live ambiguous error or a recovered open attempt -- and takes the estimated
-  # remaining allowance because there is no reported figure to keep. Complete
-  # usage the provider did report survives either compaction, because
-  # combination 5 "preserves complete reported usage when available"; the
-  # validated reply supplies it where canonicalization succeeded, and the raw
-  # answer's normalized usage supplies it where canonicalization refused the
-  # reply before there was a validated one.
-  #
-  # The raw answer reaches `canonical_reply/2` unmeasured on purpose: that
-  # function admits it against ADR 0017's plain-data, depth, cardinality and
-  # byte ceilings before it projects anything, which is the order M2's row-one
-  # obligation fixes. Measuring here instead would put the settlement check
-  # after a projection that has already walked and copied the whole answer. The
-  # settlement measurement below stays where it is, because the ceiling that
-  # decides what is retained applies to the record, not to the reply.
+  # Concept: only an admitted canonical reply supplies accounting evidence.
+  # Technical depth: raw Store admission precedes projection inside
+  # `canonical_reply/2`; malformed or refused input retains explicit `none`.
   defp attempt_result(work, {:reply, raw}, termination) do
     case ProviderAttempt.canonical_reply(raw, work.request) do
       {:ok, reply} ->
         result = %{"kind" => "reply", "reply" => reply}
         conversation = if termination, do: "evidence_only", else: "canonical"
 
-        if reply_settlement_fits?(work, result, reply["usage"], termination, conversation) do
-          {result, conversation, reply["usage"]}
-        else
-          {unreadable_result(), "none", reply["usage"]}
-        end
+        {result, conversation, reply["usage"]}
 
       {:error, _reason} ->
-        {unreadable_result(), "none", raw_reply_usage(raw)}
+        {unreadable_result(%{"kind" => "none"}), "none", nil}
     end
   end
 
   defp attempt_result(_work, _outcome, _termination),
     do: {%{"kind" => "error", "category" => "model_call_failed"}, "none", nil}
 
-  defp unreadable_result, do: %{"kind" => "error", "category" => "unreadable_model_answer"}
-
-  # Concept: the compact answer is preflighted against the same ceiling the
-  # complete one is measured with.
-  #
-  # Technical depth: measured on the intended settlement rather than the reply,
-  # since the Store retains the record. The paired terminal is a separate item
-  # and is measured on its own.
-  #
-  # The candidate carries the termination and conversation this settlement will
-  # actually commit, not a fixed pair. A settlement terminated by an admitted
-  # abort or deadline is longer than an unterminated canonical one -- `nil`
-  # against `"deadline"`, `"canonical"` against `"evidence_only"` -- so
-  # preflighting the shorter pair admits, at the exact byte ceiling, a record
-  # the Store then refuses. ADR 0018 requires that refusal never be discovered
-  # there, because the run would be left with no verdict at all. `next` stays
-  # `"terminal"` because it is the longest of the three values the member can
-  # take, and the member is not settled until the result it depends on is
-  # chosen.
-  defp reply_settlement_fits?(work, result, usage, termination, conversation) do
-    candidate = %{
-      "run_id" => work.run_id,
-      "turn_id" => work.turn_id,
-      "operation_id" => model_operation_id(work.run_id, work.turn_number),
-      "attempt" => work.model_attempt,
-      "staged_request_digest" => work.request.staged_request_digest,
-      "transport" => "dispatched_or_unknown",
-      "termination" => termination,
-      "conversation" => conversation,
-      "next" => "terminal",
-      "result" => result,
-      "accounting" => attempt_accounting("dispatched_or_unknown", usage),
-      kind: "model_attempt_settled_v1"
+  defp unreadable_result(evidence),
+    do: %{
+      "kind" => "error",
+      "category" => "unreadable_model_answer",
+      "accounting_evidence" => evidence
     }
 
+  # Concept: the retained compact provenance describes this exact full verdict.
+  # Technical depth: only Store byte/depth overages authorize omission. Usage
+  # comes from the same immutable canonical reply inside the measured record;
+  # its actual next action is measured, and compaction selects terminal even
+  # when that full reply would have continued into tools. Every retained item
+  # is normalized before transaction construction, so unknown-commit retries
+  # retain these bytes without revisiting the discarded reply.
+  defp fit_attempt_settlement(candidate) do
     case Store.normalize_and_measure_item(:record, candidate) do
-      {:ok, _normalized, bytes} -> bytes <= Store.max_item_bytes()
-      {:error, _refused} -> false
+      {:ok, normalized, bytes} when bytes <= 65_536 ->
+        {:ok, normalized}
+
+      {:ok, _normalized, bytes} ->
+        compact_attempt_settlement(candidate, "record_bytes", bytes, 65_536)
+
+      {:error, {:item_structure_exceeded, :depth, 13, 12}} ->
+        compact_attempt_settlement(candidate, "record_depth", 13, 12)
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
-  defp raw_reply_usage(raw) when is_map(raw) and not is_struct(raw) do
-    case Map.get(raw, :usage, Map.get(raw, "usage", :absent)) do
-      :absent -> nil
-      usage -> ProviderAttempt.normalize_usage(usage)
-    end
+  defp compact_attempt_settlement(
+         %{"result" => %{"kind" => "reply", "reply" => reply}} = candidate,
+         dimension,
+         observed,
+         limit
+       ) do
+    evidence = %{
+      "kind" => "validated_reply_compaction_v1",
+      "usage" => reply["usage"],
+      "dimension" => dimension,
+      "observed" => observed,
+      "limit" => limit
+    }
+
+    compact = %{
+      candidate
+      | "result" => unreadable_result(evidence),
+        "conversation" => "none",
+        "next" => "terminal"
+    }
+
+    with {:ok, [normalized]} <- admit_attempt_items(:record, [compact]), do: {:ok, normalized}
   end
 
-  defp raw_reply_usage(_raw), do: nil
+  defp compact_attempt_settlement(_candidate, _dimension, _observed, _limit),
+    do: {:error, :invalid_attempt_settlement}
+
+  defp admit_attempt_items(plane, items) do
+    Enum.reduce_while(items, {:ok, []}, fn item, {:ok, acc} ->
+      case Store.normalize_and_measure_item(plane, item) do
+        {:ok, normalized, bytes} when bytes <= 65_536 -> {:cont, {:ok, [normalized | acc]}}
+        {:ok, _normalized, bytes} -> {:halt, {:error, {:item_too_large, bytes, 65_536}}}
+        {:error, reason} -> {:halt, {:error, reason}}
+      end
+    end)
+    |> case do
+      {:ok, reversed} -> {:ok, Enum.reverse(reversed)}
+      {:error, reason} -> {:error, reason}
+    end
+  end
 
   defp attempt_accounting("not_dispatched", _usage),
     do: %{"source" => "none", "basis" => "not_dispatched"}
@@ -1566,6 +1574,29 @@ defmodule Loopex.Runtime.SessionState do
     end
   end
 
+  defp replay_record(state, %{payload: %{kind: kind}} = record) do
+    if is_nil(pending_attempt_settlement(state)) or kind == "run_terminal_committed" do
+      replay_admitted_record(state, record)
+    else
+      {:error, :incomplete_model_attempt_settlement_pair}
+    end
+  end
+
+  defp replay_record(_state, _record), do: {:error, :invalid_private_history}
+
+  defp pending_attempt_settlement(state) do
+    Enum.find_value(state.pending_work, fn
+      {_run_id, %{stage: "model_attempt_pending_terminal", settlement: settlement}} -> settlement
+      _other -> nil
+    end)
+  end
+
+  defp complete_attempt_pair(state) do
+    if is_nil(pending_attempt_settlement(state)),
+      do: :ok,
+      else: {:error, :incomplete_model_attempt_settlement_pair}
+  end
+
   # Concept: the session's cleanup period is reconstructed from the record that
   # committed it, never supplied by whatever process happens to be recovering.
   #
@@ -1575,7 +1606,7 @@ defmodule Loopex.Runtime.SessionState do
   # upgrade old bytes by supplying a default, and refuses an unknown key, an
   # empty configuration, or a value outside the positive unsigned 64-bit domain
   # rather than recovering a session whose committed period nobody can name.
-  defp replay_record(
+  defp replay_admitted_record(
          %{journal_version: 0} = state,
          %{
            journal_version: 1,
@@ -1590,7 +1621,7 @@ defmodule Loopex.Runtime.SessionState do
     end
   end
 
-  defp replay_record(
+  defp replay_admitted_record(
          state,
          %{
            journal_version: version,
@@ -1623,7 +1654,7 @@ defmodule Loopex.Runtime.SessionState do
     end
   end
 
-  defp replay_record(
+  defp replay_admitted_record(
          state,
          %{
            journal_version: version,
@@ -1651,7 +1682,7 @@ defmodule Loopex.Runtime.SessionState do
     end
   end
 
-  defp replay_record(
+  defp replay_admitted_record(
          state,
          %{
            journal_version: version,
@@ -1666,6 +1697,7 @@ defmodule Loopex.Runtime.SessionState do
               "model_request_committed",
               "model_attempt_opened_v1",
               "model_attempt_settled_v1",
+              "model_attempt_settled_v2",
               "model_termination_admitted_v1",
               "effect_intent_committed",
               "executor_receipt_committed",
@@ -1693,7 +1725,7 @@ defmodule Loopex.Runtime.SessionState do
     end
   end
 
-  defp replay_record(_state, _record), do: {:error, :invalid_private_history}
+  defp replay_admitted_record(_state, _record), do: {:error, :invalid_private_history}
 
   defp genesis_cleanup_grace(
          %{"options" => options, "runtime_configuration" => configuration} = payload
@@ -2125,14 +2157,23 @@ defmodule Loopex.Runtime.SessionState do
   # exact consecutive `run_terminal_committed` applies the accounting,
   # conversation, and ending together. `retry` and `continue` settlements are
   # complete in one row because neither ends the run.
-  defp apply_internal_record(state, %{kind: "model_attempt_settled_v1"} = record) do
+  defp apply_internal_record(state, %{kind: kind} = record)
+       when kind in ["model_attempt_settled_v1", "model_attempt_settled_v2"] do
     with :ok <- ProviderAttempt.validate_settled(record),
+         :ok <- settlement_version_order(state, kind),
          run_id = record["run_id"],
          %{stage: "model_attempt_open", request: request} = work <-
            Map.get(state.pending_work, run_id),
          true <- attempt_identity_matches?(record, run_id, work, request),
          true <- settlement_termination_agrees?(state, run_id, work, record) do
-      apply_attempt_settlement(state, run_id, work, record)
+      version = if kind == "model_attempt_settled_v2", do: 2, else: 1
+
+      apply_attempt_settlement(
+        %{state | provider_settlement_version: version},
+        run_id,
+        work,
+        record
+      )
     else
       {:error, reason} -> {:error, reason}
       _other -> {:error, :invalid_model_attempt_settlement_transition}
@@ -2367,7 +2408,7 @@ defmodule Loopex.Runtime.SessionState do
     # settlement to its consecutive terminal row, so this is where the deferred
     # accounting, conversation, and stage transition are applied. A terminal
     # arriving against any other stage is the ordinary ending it always was.
-    with {:ok, state, work, settled_events} <- complete_pending_terminal(state, run_id),
+    with {:ok, state, work, settled_events} <- complete_pending_terminal(state, run_id, record),
          %{stage: stage} <- work,
          true <-
            outcome in ["completed", "bound_reached", "outcome_unknown", "cancelled", "failed"],
@@ -2741,6 +2782,11 @@ defmodule Loopex.Runtime.SessionState do
       Map.get(work, :model_termination) != "deadline"
   end
 
+  defp settlement_version_order(%{provider_settlement_version: 2}, "model_attempt_settled_v1"),
+    do: {:error, :provider_settlement_version_downgrade}
+
+  defp settlement_version_order(_state, _kind), do: :ok
+
   defp apply_attempt_settlement(state, run_id, work, %{"next" => "retry"} = record) do
     next_work =
       work
@@ -2770,16 +2816,20 @@ defmodule Loopex.Runtime.SessionState do
   # projection can see. This is where that verdict finally lands, inside the
   # same transaction as the ending it belongs to, so a page boundary between the
   # two rows exposes no half-applied run.
-  defp complete_pending_terminal(state, run_id) do
+  defp complete_pending_terminal(state, run_id, terminal) do
     case Map.get(state.pending_work, run_id) do
       %{stage: "model_attempt_pending_terminal", settlement: settlement} = work ->
-        case apply_settled_verdict(state, run_id, Map.delete(work, :settlement), settlement) do
-          {:ok, next, events} -> {:ok, next, Map.get(next.pending_work, run_id), events}
+        with true <- terminal == attempt_terminal_record(state, run_id, settlement),
+             {:ok, next, events} <-
+               apply_settled_verdict(state, run_id, Map.delete(work, :settlement), settlement) do
+          {:ok, next, Map.get(next.pending_work, run_id), events}
+        else
           {:error, reason} -> {:error, reason}
+          _other -> {:error, :invalid_model_attempt_settlement_pair}
         end
 
       %{} = work ->
-        {:ok, state, work, []}
+        with :ok <- complete_attempt_pair(state), do: {:ok, state, work, []}
 
       _absent ->
         {:error, :invalid_run_terminal_transition}

@@ -50,8 +50,12 @@ defmodule Loopex.Executor.Local.CodingTools do
 
   alias Loopex.ArtifactStore
 
-  @read_bytes 65_536
-  @output_bytes 65_536
+  # Leave three quarters of the Store's private-record ceiling for the durable
+  # receipt and the next staged-context envelope. The executor still measures
+  # the exact receipt before admission and narrows further for unusually large
+  # valid identity fields.
+  @read_bytes 16_384
+  @output_bytes 16_384
 
   @definitions [
     %{

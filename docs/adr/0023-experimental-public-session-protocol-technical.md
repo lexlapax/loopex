@@ -1,14 +1,14 @@
-# 0019: Technical depth
+# 0023: Technical depth
 
 <a id="technical-depth"></a>
 ## Technical depth
 
-Concept: [Experimental public session protocol](0019-experimental-public-session-protocol.md#concept).
+Concept: [Experimental public session protocol](0023-experimental-public-session-protocol.md#concept).
 
-<a id="technical-adr-0019-context"></a>
+<a id="technical-adr-0023-context"></a>
 ## Boundary and Ownership Problem
 
-Concept: [Context](0019-experimental-public-session-protocol.md#concept-adr-0019-context).
+Concept: [Context](0023-experimental-public-session-protocol.md#concept-adr-0023-context).
 
 The public Elixir facade already orders durable commands against one coordinator.
 The protocol layer must preserve that ordering while adding only parsing,
@@ -16,10 +16,10 @@ correlation, projection, and bounded delivery. Any path from the app-server to a
 coordinator, Store, model, executor, journal, or cursor implementation other than
 through the public facade is a second runtime surface and fails conformance.
 
-<a id="technical-adr-0019-decision"></a>
+<a id="technical-adr-0023-decision"></a>
 ## Exact Protocol Contract
 
-Concept: [Decision](0019-experimental-public-session-protocol.md#concept-adr-0019-decision).
+Concept: [Decision](0023-experimental-public-session-protocol.md#concept-adr-0023-decision).
 
 ### Framing and initialization
 
@@ -66,10 +66,15 @@ The generation contains methods for `session.create`, `session.list`,
 `session.resume`, `session.inspect`, `session.attach`, `session.prompt`,
 `session.steer`, `session.follow_up`, `session.abort`,
 `session.respond_interaction`, `project_resources.inspect`,
-`project_resources.decide`, and `artifact.read`. Artifact reads use opaque
-references plus bounded offset and length and return a digest, total size,
-returned range, and bytes in a declared transfer encoding. They never expose or
-accept a filesystem path.
+`project_resources.decide`, `resources.catalog`, `resources.read`,
+`session.admit_resources`, `session.activate_skill`, and `artifact.read`.
+The project_resources pair preserves the existing root AGENTS.md trust class;
+resources.catalog/read map M3's resource_catalog/read_resource facade queries,
+and the two session methods map M3's exact admission/selection commands. No
+wire method fetches arbitrary URLs or selects a host resource root.
+Artifact reads map M3's read_artifact query: opaque use reference plus bounded
+offset/length, separate full-object and returned-range digests, total size,
+returned range and bytes in a declared transfer encoding. They expose no path.
 
 `session.create` admits the durable creation command and returns the new session
 identity; it does not attach. `session.attach` is connection-local and returns
@@ -106,10 +111,10 @@ acquire ownership. M4 promises neither live attachment replay across process
 loss nor controller takeover; the new attachment starts again from a current
 snapshot and cursor.
 
-<a id="technical-adr-0019-consequences"></a>
+<a id="technical-adr-0023-consequences"></a>
 ## Evidence and Operational Consequences
 
-Concept: [Consequences](0019-experimental-public-session-protocol.md#concept-adr-0019-consequences).
+Concept: [Consequences](0023-experimental-public-session-protocol.md#concept-adr-0023-consequences).
 
 Acceptance evidence includes exact schema and vector digests; facade-versus-wire
 semantic parity; a raw external-process transcript proving admission before
@@ -123,14 +128,14 @@ A real-provider task is driven entirely through the app-server and retains the
 same provider evidence limitations M2 states. No offline gate claims that a
 credential's presence proves a network request.
 
-<a id="technical-adr-0019-compatibility"></a>
+<a id="technical-adr-0023-compatibility"></a>
 ## Rollback Mechanics
 
-Concept: [Compatibility, migration, and rollback](0019-experimental-public-session-protocol.md#concept-adr-0019-compatibility).
+Concept: [Compatibility, migration, and rollback](0023-experimental-public-session-protocol.md#concept-adr-0023-compatibility).
 
 The schema manifest maps one generation to exact schema and vector digests.
-Rollback before closure removes the ninth application, its direct codec
-dependency, and those generated/reference artifacts together. `loopex_protocol`
+Rollback before closure removes the ninth application and its schema/client
+artifacts together. The codec uses stdlib JSON and adds no external dependency. `loopex_protocol`
 may retain private implementation helpers only if they expose no unaccepted wire
 contract. `VERSION=0.1.0` is applied at the closure rejoin, after the separately
 approved inherited gate generations can validate the canonical version rather

@@ -1,7 +1,7 @@
 <a id="technical-depth"></a>
 ## Technical depth
 
-Concept: [Milestone purpose and outcomes](M4.md#concept).
+Concept: [Headless external consumption](M4.md#concept).
 
 <!-- loopex:plan-technical-envelope:start -->
 ## Normative Technical Envelope
@@ -9,240 +9,171 @@ Concept: [Milestone purpose and outcomes](M4.md#concept).
 <a id="technical-plan-prerequisites"></a>
 ### Prerequisites and Acceptance Points
 
-Concept: [Milestone scope](M4.md#concept-plan-scope).
+Concept: [Scope](M4.md#concept-plan-scope).
 
-Concept: [Milestone non-goals](M4.md#concept-plan-non-goals).
+Concept: [non-goals](M4.md#concept-plan-non-goals).
 
-This Open plan is planning-only. M2 remains `Accepted` and is the sole product
-implementation authority. M4 acceptance, integration, and implementation are
-refused until M2 is Closed and integrated to `main`; this branch then absorbs
-that exact product base, proves all inherited gates green and the distinct M4
-red, and receives a fresh exact-SHA review.
+M4 is unopened. While M3 is Open there is no second planning lookahead. After
+M3's accepted governance checkpoint is integrated, the one-successor lookahead
+rule may be used exactly as AGENTS.md defines. M4 cannot be accepted or
+implemented until M3 is Closed and integrated. Move this triple into docs/plans
+only when opening it, absorb the exact permitted base without discarding bound
+history, complete its executable contract/vector tests and obtain fresh review.
+At final acceptance all inherited gates are green and the M4 boundary remains
+truthfully red for missing external behavior.
 
-Two proposed decisions are prerequisites for accepting this plan pair:
+[Proposed ADR 0023](../adr/0023-experimental-public-session-protocol.md#concept)
+must be accepted before M4. ADRs 0024–0028 and M3's actual resource, interaction,
+artifact and launch interfaces are inherited prerequisites, not M4 deliverables.
+Before acceptance reconcile the entire schema with those implemented interfaces;
+no TODO member or unimplemented method earns an advertised capability.
 
-- **ADR 0019 — Experimental public session protocol.** Owns transport-neutral
-  DTOs, stdio JSONL framing, initialization and capability negotiation, identity
-  separation, record families, error and unknown-value behavior, resource
-  bounds, app-server ownership, and source-version versus protocol-version
-  identity.
-- **ADR 0020 — Durable interaction lifecycle and host-policy authority.** Owns
-  `interaction_id`, durable states and records, response admission, expiry,
-  abort/deadline races, restart reconstruction, and the rule that an answer is
-  policy evidence and not a grant.
+The ninth application and dependency-inventory changes, and the source VERSION
+change to 0.1.0, require the applicable Closed M1/M2 gate generations. Resolve
+the holder inventory on the exact M3 base, include any M3-bound artifact holder,
+and settle each transaction sequentially before binding those bytes in M4.
+Do not freeze an inventory that the milestone already promises to replace.
+Publication/tag/release and each compatibility freeze remain separate decisions.
 
-Four further decisions remain separate from plan acceptance:
-
-1. Closed M1 and M2 gate generations must be explicitly approved before the
-   ninth application and dependency-budget changes can rebind their protected
-   inventory and direction evidence.
-2. Closed M1 and M2 gate generations must be explicitly approved before source
-   `VERSION=0.1.0`; the replacement must validate real-path identities against
-   the candidate's canonical `VERSION`, not merely substitute one literal for
-   another.
-3. M4 acceptance and any governance-only integration remain maintainer
-   decisions after the required rebase and fresh review.
-4. Publication, tag, package, release, compatibility freeze, or any M4 deferral
-   remains separately approval-gated and is not implied by M4 closure.
-5. The closed-gate aggregate this milestone owns must have its own invocation
-   structurally verified, either by placing invocation in a repository
-   entrypoint that owns the rule, or by a check that fails when a milestone gate
-   omits its one mandatory call. Without that it is `M2`'s waiver with more
-   machinery. The obligation originates in the `M2` disposition anchored
-   `disposition-m2-inherited-gate-enforcement-2026-08-27` in the agent context
-   map, which is not reachable from this branch until it absorbs `M2`'s closed
-   base; link it there once it is.
-6. The `M0` gate reports any outcome-1 command failure as
-   `the effective formatter configuration does not cover application sources`,
-   so an unrelated crash reads as a formatter problem. Observed 2026-08-27: a
-   floor-toolchain run over current-pair build artifacts died in
-   `Protocol.extract_from_beam/2` with `:badarg`, because `check-m0-gate.sh`
-   sets no `MIX_BUILD_ROOT` and OTP 26 cannot read an OTP 29 beam. The verdict
-   named the formatter. `M0` is Closed, so correcting the label is an
-   `amendment-transaction-v2` gate generation; it is folded into the closed-gate
-   aggregate above rather than opened on its own, because that work reaches these
-   gates anyway. Until then the workaround is to clear `_build` between toolchain
-   pairs, and to read the stack above the verdict rather than the verdict.
-7. Raising the bootstrap runtime floor is an amendment to accepted ADR 0002,
-   never an edit to a gate or to `.tool-versions`. ADR 0002 derives the pins
-   from upstream rather than choosing them: the floor is the lowest Elixir
-   1.17.x with the lowest OTP 26.x that Elixir's compatibility table supports,
-   and the current pair is the newest released Elixir with its newest supported
-   OTP. Because Elixir supports the three most recent OTP releases, the two
-   pairs can share no OTP version, so the floor cannot be set equal to the
-   current pair without collapsing the matrix to a single toolchain and losing
-   every lane that could detect toolchain sensitivity. Raising the floor family
-   is the available move; setting floor equal to current is not.
-8. Accepted ADR 0009 requires the tool cleanup grace period to be a declared
-   session configuration value with a default, reported in the terminal
-   outcome's evidence. `M2` implements it as a `cleanup_grace_ms` start option
-   of `Loopex.Executor.Local`, with `process_probe` beside it, both recorded on
-   every retained receipt and readable from the running executor. Three things
-   the ADR asks for are absent and are this milestone's to supply: the shipped
-   `loopex_composition` neither accepts nor forwards either value, so a
-   reference embedder and a command-line operator both get the defaults;
-   `SessionState.decode_receipt/1` omits them from its field list, so neither
-   survives reconstruction from the journal; and no run terminal projects the
-   period. Closing this is a session-configuration decision rather than an
-   executor one, so it carries whatever amendment to ADR 0009 the final shape
-   requires — including the possibility that the right answer is to narrow the
-   ADR instead, which is a decision this milestone must take explicitly rather
-   than inherit. The `M2` disposition is anchored
-   `cleanup-grace-not-session-visible` in `docs/evidence/M2-recorded-limitations.md`,
-   which is not reachable from this branch until it absorbs `M2`'s closed base;
-   link it there once it is.
-
-Deferred decisions and trigger points:
-
-| Deferred decision | Trigger |
-| --- | --- |
-| Generic context pipeline | Before the first registered provider, transformer, selector, or observer; M4 only projects M2's fixed project-resource stage |
-| Generic transport behavior | After a second real transport exists and supplies common evidence |
-| Daemon lifetime, controller leases, concurrent clients, takeover, and service authentication | M4, before any background or multi-client host ships |
-| Persistent-store migration and downgrade | Before any installed data or daemon Store compatibility claim |
-| Public protocol compatibility range | Before publication or a claim that different generations interoperate |
-| Bootstrap runtime floor family, by amendment to accepted ADR 0002 | Before this plan pair is accepted, and in any case before the first released support statement, after which raising it is a breaking change requiring migration under the 0.x compatibility policy |
-| Whether the cleanup period and process probe become session configuration reported on the terminal, or ADR 0009 narrows to executor configuration | Before `M4` closes, because the app server is the surface that would carry them to a client and the shape cannot be settled twice |
+M3 owns floor settlement, inherited-gate enforcement, context/dispatcher/permit
+repairs and cleanup/configuration consistency. M4 does not carry duplicate
+versions of those workstreams. A newly observed inherited defect is reproduced
+at the exact base with the same command/signature and dispositioned through
+its owner; a protocol workaround cannot conceal it.
 
 <a id="technical-plan-ownership"></a>
-### Ownership, Decision Owners, and Rejoin Barriers
+### Ownership and Rejoin
 
-Concept: [Milestone scope](M4.md#concept-plan-scope).
+Concept: [Scope](M4.md#concept-plan-scope).
 
-`loopex_protocol` owns transport-neutral plain DTOs, validators, schemas, and
-vectors. `loopex` owns interaction truth, policy resumption, snapshots, event
-cursors, and every durable command. `loopex_app_server` owns only process
-lifetime, framing, connection-local correlation, the bounded writer, stderr
-diagnostics, trusted launch-configuration intake, and mapping to the public
-facade. It receives the required policy implementation and its bounded identity
-from the launcher, supplies no fallback, and accepts no wire policy selector.
-`loopex_composition` retains the reference adapter wiring. Sample clients own no
-normative semantics.
+| Component | Owns | Cannot own |
+| --- | --- | --- |
+| `loopex_protocol` | Bounded DTOs, validators, schemas, vectors and capability identity | JSON implementation, runtime or authority |
+| `loopex` | M3 facade, session input, interactions, resource admission, artifact-use authorization and truth | Framing or connection policy |
+| `loopex_app_server` | Foreground lifetime, UTF-8 JSONL framing, request correlation, bounded writer and facade mapping | Store/coordinator calls, a second loop, resource parsing, policy selection |
+| `loopex_composition` | Trusted startup wiring, provider companion, explicit prepared handoff and host resource roots | Wire-supplied implementation selection |
+| TypeScript consumer | User workflow and local output presentation | Normative session, trust or policy semantics |
 
-Identity ownership is exact:
+The ordered rejoin is contracts → thin server and client workflow → remaining
+method/delivery coverage → integrated audit → independent review. Protocol and
+consumer work may develop together against fixed vectors; the integrator owns
+one candidate and the real-process rejoin. Prove resource selection, defer,
+response, authorized effect, artifact integrity and abrupt restart before
+building further UI or generalized transports.
 
-| Identity | Owner and guarantee |
-| --- | --- |
-| `request_id` | App-server connection; ephemeral correlation, never durable authority |
-| `command_id` | Session command; durable idempotency under the one serial owner |
-| `interaction_id` | Session interaction; durable suspended-decision identity |
-| `session_id`, `run_id`, `turn_id` | Existing M2 durable semantics |
-| `event_sequence` | Durable per-session event cursor |
-| `stream_domain_id` | Transient attempt-progress domain, never journal truth |
-| artifact reference | Opaque artifact-store retrieval reference, never a path |
-| source `VERSION` | Repository version train, never protocol compatibility |
+Use the existing command identity for `admit_resources`, `activate_skill` and
+`respond_interaction`; request IDs never enter journals or asynchronous facts.
+M3's resource queries and read_artifact API supply the results. Client trust
+answers are evidence presented to host policy, not a way to name arbitrary
+filesystem roots or import a URL. Acquisition remains an explicit host workflow.
 
-The rejoin barrier is A → B → C → D. A is dependency-free and runtime-free. B
-imports no app-server or codec. C depends inward on the public facade and
-composition, never on internals. D executes consumers against the exact schema
-and may not widen it. One integrator owns the candidate, gate evidence, and
-post-rejoin checks.
+Initialization negotiates `loopex.experimental/1`, exact schema digest and
+server-enforced ceilings. The complete request method table, closed enum sets,
+unknown-field policy, numeric representation and every collection/string/frame
+bound live in ADR 0023 and canonical schema/vector bytes. Duplicate-key refusal
+must be tested before semantic decoding; an ordinary map decoder cannot recover
+lost duplicate-key evidence. Stdlib JSON at the accepted floor is the codec;
+no external dependency is added to the app-server.
+
+A foreground app-server loss invokes the inherited host shutdown/recovery
+contract. Explicit graceful EOF can cancel its owned run; abrupt loss leaves
+only what the journal proves. Neither attachment nor transport reconnection
+recreates an expired, denied or cancelled interaction. The same cancellation,
+provider-protection and executor process-tree guarantees as the CLI must hold.
 
 <a id="technical-plan-evidence"></a>
 ### Evidence Obligations and Mapping
 
-Concept: [Milestone outcomes](M4.md#concept-plan-outcomes).
+Concept: [Outcomes](M4.md#concept-plan-outcomes).
 
-Every protected selector runs through the repository's authoritative standalone
-ExUnit channel with exact case identities, states, minima, seed, owner and
-dependency closure. The M4 gate also re-runs all inherited Closed gates after
-the M2 product base is integrated. During this lookahead it instead proves the
-accepted M2 opening red and the distinct M4 red as separate commands.
-
-| Outcome | Required proof beyond its selector |
+| Outcome | Mandatory proof beyond a unit test |
 | --- | --- |
-| 1 | Gate-owned raw-byte client launches a separate BEAM process; no product code or product codec judges stdout; exact initialization/schema/capability/limit vector; no mutation before success |
-| 2 | Same command corpus through facade and wire; explicit attachment yields snapshot/cursor before commands; exact request, command, and session identities bind admission; gap-free durable events and admission are observed before progress and terminal output; each identity kind's replay rule is varied independently |
-| 3 | Snapshot/cursor/live-event ordering properties, stream-domain gap and missing-closure fallback, kill and fresh-process resume, no attachment-survival claim |
-| 4 | Exact manifest projection, positive/stale/missing decisions, changed workspace invalidation, withheld-content task completion, and separation from policy defer and grants |
-| 5 | Chunk/range reconstruction and digest equality, opaque-reference negatives, no path, bounded frame under oversized output |
-| 6 | Failure before/after interaction commit, answer admission, policy result, grant/intent commit, and publication; M2 one-shot defer refusal beside M4 interaction-aware evaluation; restart binding identity and all competing transitions; wire-cannot-select-policy and answer-cannot-grant properties; observed authorized tool result after resolution |
-| 7 | Invalid UTF-8, duplicate keys, excessive nesting, fragmented and multiple frames per read, oversized input/output, blocked reader, stdout contamination, process loss and cleanup |
-| 8 | Exact schema/vector manifest plus executed Elixir, Python, and JavaScript standard-library clients at named versions; missing interpreter is unavailable evidence, never PASS |
+| 1 | Independent raw-byte client launches actual server process, exact init/schema/limits vector, refusal before init, no durable work on malformed startup |
+| 2 | Identical command corpus through facade/wire; independent variation of request and command identity; snapshot-before-live; committed admission before correlated delivery; command replay after disconnect |
+| 3 | Catalog and selected content identity preserved; stale/missing trust withholds content; manual-only restriction; interaction answer admission separately observed from policy authorization and tool receipt; wire-selected policy/module/root refused |
+| 4 | M3 range verification reused, object and range digests distinguished; oversized/fragmented/multiple frames; malformed UTF-8/duplicate keys/depth; slow reader; bounded queue; late progress; stdout contamination; actual process-tree cleanup |
+| 5 | TypeScript drives skill/interaction/tool/artifact with real Store and executor; real-provider task separately attended; abrupt kill and fresh-process resume; graceful EOF case remains distinct |
+| 6 | Elixir, Python and TypeScript clients execute the same positive/negative vectors without importing the server codec; exact source/schema/client versions and toolchain/platform identities |
 
-Mandatory closure evidence additionally includes one real-provider, real-tool
-coding task driven entirely by a non-Elixir client through the shipped
-app-server; an interaction suspend/restart/respond trace; protocol and schema
-digests; provider/adapter/executor identity under M2's disclosed attestation
-limit; toolchain/platform matrix; and a negative dependency/facade demonstration.
+The existing raw-process probe witnesses the initial protocol/interaction
+subset, not complete skills support. Extend its vectors and the integrated
+client fixture after M3 contracts settle; complete and lock them while M4 is
+Open. An echo server cannot pass because admissions, event order, exact
+interaction/tool identity, real artifact bytes and fresh settled snapshots are
+required. Parsing fixture-shaped output is not full JSON conformance.
 
-The raw probe is a bounded ordered-state check over canonical response records,
-not a general JSON conformance claim. Product selectors and golden vectors own
-order-independent semantic parsing. A server that merely echoes frames cannot
-pass because the probe requires explicit attachment, exact command-bound
-admission, kind-complete zero-based domain progress anchored to an already
-observed durable event, byte-identical-only duplicate events with globally
-unique event IDs, a policy interaction and admitted response, a completed tool
-result carrying that interaction's exact `tool_call_id`, gap-free canonical
-`run.finished` then `session.settled` events, and a fresh settled attachment for
-the same session.
+Every protected selector uses the existing authoritative standalone ExUnit
+channel. Preserve the inherited repair manifest rather than re-listing old case
+counts in this draft. The complete gate runs inherited predecessors, protected
+selectors, whole suite, language clients and retained-evidence validation. Its
+scaffolding may be exercised now, but no M4 opening/acceptance proof is claimed
+by keeping draft files or obtaining the M2-era EOF observation.
+
+Apply the M3 [integrated audit](../plans/M3-technical.md#technical-plan-evidence)
+to direct facade, CLI, wire, recovery child and actual built server/companion.
+Test every transaction/lifetime cut and each decoder-side negative at the
+receiver, not just the encoder. Run actual Darwin floor/current and Linux
+current lanes early. A repeated finding class triggers a full adjacent-path
+audit. Final exact-source evidence and independent review remain mandatory;
+no fixed review-round limit or retry-to-green rule.
 
 <a id="technical-plan-compatibility"></a>
 ### Compatibility
 
-Concept: [Milestone scope](M4.md#concept-plan-scope).
+Concept: [Scope](M4.md#concept-plan-scope).
 
-The protocol is experimental and requires exact generation and schema-digest
-agreement. Unknown output fields follow the one negotiated generation's reader
-rule; unknown mutating discriminants are always refused. No cross-generation,
-network, daemon, installed-data, or package compatibility is claimed. Existing
-M2 embedded and command surfaces remain peers and keep their semantics.
+All surfaces remain experimental. Exact generation/schema agreement is required;
+there is no mixed-generation promise, public-protocol freeze or daemon claim.
+Unknown mutating discriminants refuse. The app-server adds no durable record
+family; interactions/resources already belong to M3. Source VERSION is distinct
+from protocol generation, journal version, provider build and schema digest.
 
 <a id="technical-plan-migration"></a>
 ### Migration and Rollback
 
-Concept: [Milestone scope](M4.md#concept-plan-scope).
+Concept: [Scope](M4.md#concept-plan-scope).
 
-M2 evidence roots are not migrated. M4's private Store catalogue adds
-interaction records additively, and an M2 binary is not promised to reopen an
-M4 root containing them. Before closure, rollback removes interaction state,
-app-server, direct codec declaration, schema bundle, clients, and `VERSION`
-change together and discards M4 evidence roots. No in-place downgrade is
-claimed.
-
-Process restart recovery is not Store migration: a new M4 process resumes the
-same M4 data through the public facade. Any installed-data promise, new Store,
-or daemon migration requires a later accepted decision.
+Prove fresh-process restart on actual M3-format data and old-reader controls for
+any separately accepted new format. M4 cannot silently add a Store schema to
+support its mapping. Removing the experimental server/client leaves M3's
+embedded/terminal capabilities and data intact. Restore any version/inventory
+protection through governed transactions; never delete historical authority.
+No installed-data migration, in-place downgrade or service installation claim.
 
 <a id="technical-plan-packaging"></a>
 ### Packaging
 
-Concept: [Milestone scope](M4.md#concept-plan-scope).
+Concept: [Scope](M4.md#concept-plan-scope).
 
-The new `loopex_app_server` is the ninth umbrella application with role
-`:client`. It declares production dependencies on `:loopex`,
-`:loopex_protocol`, and `:loopex_composition`, takes no external dependency because
-the standard-library `JSON` module covers the codec, depends on no other client, and exposes one source-built foreground entrypoint. The human
-command remains a peer and has no new external dependency.
+Add exactly `loopex_app_server`, the ninth application with role `:client`,
+depending inward on core, protocol and composition. It adds zero external
+production dependencies; existing ReqLLM edge dependencies remain permitted.
+Core and protocol remain stdlib-only. The floor decision makes the stdlib JSON
+codec available; duplicate-key and all other strictness requirements remain
+independent tests.
 
-At the closure rejoin, all application versions and the root `VERSION` become
-exactly `0.1.0` under the separately approved gate generations. The app-server
-is not published, packaged, tagged, or installed as a service. Elixir, Python,
-and JavaScript sample clients are source fixtures/examples and use only their
-language standard libraries.
+Supply a source-built foreground entrypoint and one TypeScript example, plus
+small Elixir/Python conformance clients. Pin Node/TypeScript execution and Python
+versions in the M4 gate before acceptance; these are isolated client-validation
+prerequisites, not a new bootstrap or production dependency. Prefer Node's
+supported native type stripping and dependency-free TypeScript; if the accepted
+runtime cannot execute it, settle the validation-toolchain decision before
+acceptance rather than download a compiler during a gate.
+
+At the separately approved version transition set source VERSION/application
+versions to 0.1.0. Build the server and provider companion together and run
+outside the checkout; retain exact artifact identities. No publication, tag,
+package or service install follows from closure alone.
 
 <a id="technical-plan-minimalism"></a>
 ### Proportional Minimalism Budget
 
-Concept: [Milestone scope](M4.md#concept-plan-scope).
+Concept: [Scope](M4.md#concept-plan-scope).
 
-Justified permanent growth is one application, one direct external dependency,
-one transport mapping, one interaction reducer slice, exact schemas/vectors,
-and three small clients. The following negative constraints are gate-locked:
-
-- exactly nine umbrella applications and no new application role;
-- exactly one direct external production dependency owned only by
-  `loopex_app_server`;
-- no generic transport behavior, transport registry, socket abstraction,
-  daemon supervisor, connection lease, second loop, or second session reducer;
-- `loopex_protocol` and core remain dependency-free and contain no JSON term;
-- app-server modules have no direct coordinator, Store, model, executor,
-  journal, cursor, or human-command dependency;
-- each sample client is one file using its language standard library;
-- artifact bytes are chunked and no frame, queue, identifier, string,
-  collection, diagnostic, or wait is unbounded.
-
-Raw line count is a review signal, not a substitute for those structural
-ceilings. A reusable abstraction needs a second real consumer before it enters
-this milestone.
+One application, one stdio mapping, bounded schemas/vectors and the small client
+workflow justify growth. No new role or external production dependency; no
+transport registry, socket abstraction, daemon supervisor, duplicate resource
+resolver, second interaction reducer, direct Store/model/executor dependency or
+private coordinator shortcut. Artifact verification and launch configuration
+reuse M3. Raw line count is a review signal; behavior and measured limits govern.
 <!-- loopex:plan-technical-envelope:end -->

@@ -99,10 +99,30 @@ defmodule Loopex.Executor.Local.CodingToolsTest.BlockingStore do
   alias LoopexProtocol.Canonical
 
   @impl Loopex.ArtifactStore
-  def put({owner, delay}, bytes, %{media_type: media_type, role: role, metadata: metadata}) do
+  def put({owner, delay}, bytes, %{media_type: media_type, role: role, metadata: metadata})
+      when is_integer(delay) and delay >= 0 do
     send(owner, :retention_started)
     Process.sleep(delay)
 
+    retained_reference(bytes, media_type, role, metadata)
+  end
+
+  def put(
+        {owner, {:hold, reference}},
+        bytes,
+        %{media_type: media_type, role: role, metadata: metadata}
+      ) do
+    send(owner, {:retention_started, reference, self()})
+
+    receive do
+      {:release_retention, ^reference} ->
+        retained_reference(bytes, media_type, role, metadata)
+    end
+  end
+
+  def put(:fail, _bytes, _use), do: {:error, :deliberate_retention_unavailable}
+
+  defp retained_reference(bytes, media_type, role, metadata) do
     digest = Canonical.digest_bytes(bytes)
     object = %{digest: digest, size: byte_size(bytes), locator: digest}
 
@@ -182,12 +202,36 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
 
   use ExUnit.Case, async: false
 
+  # Concept: a completed failing suite reports enough non-secret context to be
+  # reproduced instead of turning a randomized gate refusal into a blind retry.
+  #
+  # Technical depth: the authoritative runner still owns every case verdict.
+  # This callback reports only the configured seed and suite-wide failure count;
+  # it does not name a case, print assertion values, change selection, or turn a
+  # failure into a pass. A runner or VM that cannot finish remains undiagnosed.
+  ExUnit.after_suite(fn %{failures: failures} ->
+    try do
+      if failures > 0 do
+        seed = ExUnit.configuration()[:seed]
+
+        IO.puts(
+          :stderr,
+          "LOOPEX_TEST_DIAGNOSTIC registered_by=coding_tools_test.exs seed=#{seed} " <>
+            "suite_failures=#{failures}"
+        )
+      end
+    catch
+      _kind, _reason -> :ok
+    end
+  end)
+
   import ExUnit.CaptureLog
   import Loopex.Executor.Local.CodingToolsTest.RetainedManualProbe
 
   alias Loopex.ArtifactStore
   alias Loopex.Executor.Local
   alias Loopex.Executor.Local.CodingTools
+  alias Loopex.Executor.Local.Ledger
   alias Loopex.Executor.Local.WorkspaceLease
 
   @fence 7
@@ -251,7 +295,120 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
         artifacts: artifacts
       )
 
+    # The processes were started with the test as their link owner. A normal
+    # test-process exit does not terminate a non-trapping linked process, so a
+    # successful case must reap both explicitly or later randomized cases can
+    # inherit idle executors and workspace-lease holders.
+    on_exit(fn ->
+      stop_test_process(executor)
+      stop_test_process(lease)
+    end)
+
     {executor, lease_id, lease, ledger}
+  end
+
+  defp stop_test_process(pid) when is_pid(pid) do
+    if Process.alive?(pid) do
+      Process.unlink(pid)
+      monitor = Process.monitor(pid)
+      Process.exit(pid, :kill)
+
+      receive do
+        {:DOWN, ^monitor, :process, ^pid, _reason} -> :ok
+      after
+        2_000 -> raise "test-owned process did not terminate: #{inspect(pid)}"
+      end
+    end
+  end
+
+  defp restore_environment(name, nil), do: System.delete_env(name)
+  defp restore_environment(name, value), do: System.put_env(name, value)
+
+  defp recording_store do
+    {:ok, store} = Loopex.Executor.Local.CodingToolsTest.RecordingStore.start()
+
+    on_exit(fn -> stop_test_process(store) end)
+
+    store
+  end
+
+  # Concept: a deadline case advances only after the real effect boundary it is
+  # about has been observed.
+  #
+  # Technical depth: the normal `:both` advance moves the two halves from one
+  # atomically selected offset, preserving the paired-clock contract. A case for
+  # the dual-fence rule may instead advance either half alone to prove neither
+  # clock can extend the other. The wall base is deliberately ten seconds ahead
+  # of the host clock: after the controlled effect fence is crossed, receipt
+  # retention still has real time to finish and is not made an accidental second
+  # deadline assertion.
+  defp controlled_deadline_clock do
+    {:ok, clock_state} = Agent.start_link(fn -> {0, 0} end)
+    on_exit(fn -> stop_test_process(clock_state) end)
+    wall = System.system_time(:millisecond) + 10_000
+    monotonic = System.monotonic_time(:millisecond)
+
+    clock = fn ->
+      Agent.get(clock_state, fn {wall_offset, monotonic_offset} ->
+        {wall + wall_offset, monotonic + monotonic_offset}
+      end)
+    end
+
+    advance = fn
+      :wall, milliseconds ->
+        Agent.update(clock_state, fn {_wall_offset, monotonic_offset} ->
+          {milliseconds, monotonic_offset}
+        end)
+
+      :monotonic, milliseconds ->
+        Agent.update(clock_state, fn {wall_offset, _monotonic_offset} ->
+          {wall_offset, milliseconds}
+        end)
+
+      :both, milliseconds ->
+        Agent.update(clock_state, fn _offsets -> {milliseconds, milliseconds} end)
+    end
+
+    {clock, wall, advance}
+  end
+
+  defp await_progress_bytes(tag, required, timeout_ms) do
+    stop = System.monotonic_time(:millisecond) + timeout_ms
+    await_progress_bytes(tag, required, stop, 0)
+  end
+
+  defp await_progress_bytes(_tag, required, _stop, observed) when observed >= required,
+    do: observed
+
+  defp await_progress_bytes(tag, required, stop, observed) do
+    remaining = max(stop - System.monotonic_time(:millisecond), 0)
+
+    receive do
+      {^tag, bytes} when is_integer(bytes) and bytes > 0 ->
+        await_progress_bytes(tag, required, stop, observed + bytes)
+    after
+      remaining -> observed
+    end
+  end
+
+  defp await_progress_text(tag, expected, timeout_ms) do
+    stop = System.monotonic_time(:millisecond) + timeout_ms
+    await_progress_text(tag, expected, stop, "")
+  end
+
+  defp await_progress_text(tag, expected, stop, observed) do
+    if String.contains?(observed, expected) do
+      observed
+    else
+      remaining = max(stop - System.monotonic_time(:millisecond), 0)
+
+      receive do
+        {^tag, chunk} when is_binary(chunk) ->
+          await_progress_text(tag, expected, stop, observed <> chunk)
+      after
+        remaining -> observed
+      end
+    end
   end
 
   # Concept: wait for a path the executor creates, rather than for a duration
@@ -268,12 +425,92 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     await_path(check, stop, check.())
   end
 
+  defp await_positive_integer_file(path, deadline_ms) do
+    await_path(
+      fn ->
+        with {:ok, bytes} <- File.read(path),
+             {integer, ""} when integer > 0 <- bytes |> String.trim() |> Integer.parse() do
+          {:ok, integer}
+        else
+          _not_complete -> :error
+        end
+      end,
+      deadline_ms
+    )
+  end
+
+  defp release_held_group(release_path, group_path) do
+    File.write!(release_path, "dispose held process group")
+
+    case await_positive_integer_file(group_path, 500) do
+      {:ok, group} ->
+        case await_path(
+               fn -> if process_group_empty?(group), do: {:ok, group}, else: :error end,
+               5_000
+             ) do
+          {:ok, ^group} -> :ok
+          :error -> raise "test-held process group did not terminate after release: #{group}"
+        end
+
+      :error ->
+        # A fixture that failed before publishing its group has no numeric
+        # authority this teardown may signal or claim to have observed.
+        :ok
+    end
+  end
+
   defp await_path(_check, _stop, {:ok, found}), do: {:ok, found}
 
   defp await_path(check, stop, :error) do
     if System.monotonic_time(:millisecond) > stop,
       do: :error,
       else: await_path(check, stop, check.())
+  end
+
+  defp await_queued_message(pid, predicate, deadline_ms) do
+    stop = System.monotonic_time(:millisecond) + deadline_ms
+    await_queued_message(pid, predicate, stop, Process.info(pid, :messages))
+  end
+
+  defp await_queued_message(pid, predicate, stop, {:messages, messages}) do
+    if Enum.any?(messages, predicate) do
+      :ok
+    else
+      await_queued_message_retry(pid, predicate, stop)
+    end
+  end
+
+  defp await_queued_message(pid, predicate, stop, _gone) do
+    await_queued_message_retry(pid, predicate, stop)
+  end
+
+  defp await_queued_message_retry(pid, predicate, stop) do
+    if System.monotonic_time(:millisecond) >= stop do
+      :timeout
+    else
+      Process.sleep(1)
+      await_queued_message(pid, predicate, stop, Process.info(pid, :messages))
+    end
+  end
+
+  defp resume_if_suspended(pid) when is_pid(pid) do
+    if Process.alive?(pid) do
+      try do
+        :erlang.resume_process(pid)
+      catch
+        :error, :badarg -> :ok
+      end
+    end
+  end
+
+  defp monitored_guardian(waiter, excluded) do
+    waiter
+    |> Process.info(:monitors)
+    |> elem(1)
+    |> Enum.find_value(fn
+      {:process, pid} -> if pid in excluded, do: nil, else: pid
+      _other -> nil
+    end)
   end
 
   defp staging_file(ledger) do
@@ -287,6 +524,12 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
       {:error, _reason} ->
         :error
     end
+  end
+
+  defp retained_receipt!(ledger, job_id) do
+    name = (:crypto.hash(:sha256, job_id) |> Base.encode16(case: :lower)) <> ".receipt"
+    bytes = File.read!(Path.join(ledger, name))
+    :erlang.binary_to_term(bytes, [:safe])
   end
 
   defp run(root, tool_id, arguments, overrides \\ %{}) do
@@ -387,6 +630,11 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
         ledger_root: ledger
       )
 
+    on_exit(fn ->
+      stop_test_process(executor)
+      stop_test_process(lease)
+    end)
+
     {executor, lease_id}
   end
 
@@ -399,6 +647,16 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
   end
 
   defp executor_with_options(root, extra) do
+    {executor, lease_id, _lease} = executor_lease_with_options(root, extra)
+    {executor, lease_id}
+  end
+
+  defp executor_lease_with_options(root, extra) do
+    {executor, lease_id, lease, _ledger} = executor_lease_ledger_with_options(root, extra)
+    {executor, lease_id, lease}
+  end
+
+  defp executor_lease_ledger_with_options(root, extra) do
     lease_id = "lease-#{System.unique_integer([:positive])}"
     {:ok, lease} = WorkspaceLease.start_link(id: lease_id, path: root, fencing_token: @fence)
 
@@ -416,7 +674,12 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
         ] ++ extra
       )
 
-    {executor, lease_id}
+    on_exit(fn ->
+      stop_test_process(executor)
+      stop_test_process(lease)
+    end)
+
+    {executor, lease_id, lease, ledger}
   end
 
   # A command whose backgrounded group member refuses to go on `TERM`, so the
@@ -480,6 +743,14 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     assert truncated =~ "truncated"
     assert truncated =~ "#{limit + 500} bytes"
     assert byte_size(truncated) < limit + 200
+
+    # Exactly at the boundary is complete. This is the branch a strict `<`
+    # comparison gets wrong while every smaller/greater-than-bound case passes.
+    exact = String.duplicate("x", limit)
+    File.write!(Path.join(root, "exact.txt"), exact)
+
+    assert {:ok, %{outcome: :completed, output: ^exact, artifacts: []}} =
+             run(root, "loopex.read", %{"path" => "exact.txt"})
   end
 
   test "write creates or replaces a file beneath the workspace root and refuses static escapes" do
@@ -644,7 +915,9 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
                "command" => "no_such_command_#{System.unique_integer([:positive])}"
              })
 
-    assert missing =~ "exited with status"
+    # Retain the shell's command-not-found status, not merely a nonzero note.
+    # Mapping 127 to 126 must not turn absence into an execution-permission error.
+    assert missing =~ "[loopex: the command exited with status 127.]"
 
     # Success is unchanged: a command that exited zero is still `:completed` and
     # carries no status note, because a note on every result is noise a model
@@ -915,8 +1188,77 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     refute Enum.map_join(events, & &1.chunk) =~ "loopex-pgid:"
   end
 
+  test "a blocked progress callback cannot keep an owned command beyond cancellation" do
+    # Concept: progress is advisory delivery from the effect; it cannot become
+    # authority for the effect to outlive cancellation.
+    #
+    # Technical depth: the callback blocks before returning `:ok`, while the real
+    # child waits on a file the case controls. If the launch owner invokes the
+    # callback itself, cancellation queues behind that invocation and the child
+    # writes after the release file appears. Forwarding progress to the execute
+    # caller leaves the owner free to terminate and confirm its captured group.
+    root = workspace()
+    parent = self()
+    release = Path.join(root, "release-blocked-progress")
+    escaped = Path.join(root, "escaped-blocked-progress")
+    job_id = "blocked-progress-#{System.unique_integer([:positive])}"
+    {executor, lease_id} = executor_for(root)
+
+    progress = fn _event ->
+      send(parent, {:blocked_progress_callback, self()})
+
+      receive do
+        :release_blocked_progress -> :ok
+      end
+    end
+
+    task =
+      Task.async(fn ->
+        run(
+          root,
+          "loopex.bash",
+          %{
+            "command" =>
+              "printf streamed; while [ ! -f #{shell_path(release)} ]; do sleep 0.01; done; " <>
+                "printf escaped > #{shell_path(escaped)}; sleep 20"
+          },
+          %{
+            progress: progress,
+            executor: executor,
+            lease_id: lease_id,
+            job_id: job_id,
+            cleanup_grace_ms: 400
+          }
+        )
+      end)
+
+    callback =
+      receive do
+        {:blocked_progress_callback, pid} -> pid
+      after
+        2_000 -> flunk("the command emitted no progress to block")
+      end
+
+    try do
+      assert Local.cancel(executor, job_id) in [{:ok, :cleaned}, {:ok, :unconfirmed}]
+      File.write!(release, "continue")
+      Process.sleep(250)
+
+      refute File.exists?(escaped),
+             "the command acted while its process owner was blocked in a progress callback"
+    after
+      send(callback, :release_blocked_progress)
+    end
+
+    assert {:ok, receipt} = Task.await(task, 5_000)
+    assert receipt.outcome != :completed
+  end
+
   test "a coding tool command receives a constructed provider credential free environment and its receipt records that declared environment" do
     root = workspace()
+
+    previous_provider = System.get_env("LOOPEX_PROVIDER_API_KEY")
+    previous_unrelated = System.get_env("LOOPEX_SENTINEL_UNRELATED")
 
     # The credential is exported exactly as an operator must export it for the
     # command to run at all, so this is the environment a real session has.
@@ -924,8 +1266,8 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     System.put_env("LOOPEX_SENTINEL_UNRELATED", "also-not-for-a-child")
 
     on_exit(fn ->
-      System.delete_env("LOOPEX_PROVIDER_API_KEY")
-      System.delete_env("LOOPEX_SENTINEL_UNRELATED")
+      restore_environment("LOOPEX_PROVIDER_API_KEY", previous_provider)
+      restore_environment("LOOPEX_SENTINEL_UNRELATED", previous_unrelated)
     end)
 
     assert {:ok, receipt} =
@@ -1009,7 +1351,7 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
 
   test "output beyond a tool's bound spills through the artifact store and the model sees a bounded notice naming it" do
     root = workspace()
-    {:ok, store} = Loopex.Executor.Local.CodingToolsTest.RecordingStore.start()
+    store = recording_store()
 
     {executor, lease_id} =
       executor_for(root, %{
@@ -1061,6 +1403,29 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
 
     assert quiet.artifacts == []
     assert quiet.output == "short"
+
+    # A failed store must not merely omit a reference. The bounded reply tells
+    # the operator that the unseen suffix was not retained, so they do not read
+    # a truncation marker as an invitation to retrieve bytes that do not exist.
+    # Removing the explicit retention-unavailable suffix leaves the safety fact
+    # (no reference) intact and must still fail this locked case.
+    {failing_executor, failing_lease_id} =
+      executor_for(root, %{
+        module: Loopex.Executor.Local.CodingToolsTest.BlockingStore,
+        handle: :fail
+      })
+
+    assert {:ok, unretained} =
+             run(root, "loopex.read", %{"path" => "large.txt"}, %{
+               executor: failing_executor,
+               lease_id: failing_lease_id
+             })
+
+    assert unretained.outcome == :completed
+    assert unretained.artifacts == []
+    assert unretained.output =~ "retention unavailable"
+    assert unretained.output =~ "nothing beyond it was retained"
+    assert byte_size(unretained.output) <= CodingTools.limits().read_bytes
   end
 
   test "a shell job obeys the smaller declared output ceiling and spills the complete bytes" do
@@ -1074,7 +1439,7 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     # it had shown less. Deleting the minimum calculation must make this case lose
     # both its artifact and its bounded model-facing result.
     root = workspace()
-    {:ok, store} = Loopex.Executor.Local.CodingToolsTest.RecordingStore.start()
+    store = recording_store()
 
     {executor, lease_id} =
       executor_for(root, %{
@@ -1132,7 +1497,7 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     # and lets RecordingStore observe an over-ceiling artifact.
     root = workspace()
     marker = Path.join(root, "ran-past-artifact-ceiling")
-    {:ok, store} = Loopex.Executor.Local.CodingToolsTest.RecordingStore.start()
+    store = recording_store()
 
     {executor, lease_id} =
       executor_for(root, %{
@@ -1183,25 +1548,50 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     root = workspace()
     output_limit = 1_024
 
-    assert {:ok, receipt} =
-             run(
-               root,
-               "loopex.bash",
-               %{
-                 "argv" => [
-                   "/bin/sh",
-                   "-c",
-                   "yes partial-output | head -c 16384; sleep 10"
-                 ]
-               },
-               %{
-                 run_deadline: System.system_time(:millisecond) + 400,
-                 resource_budgets: %{
-                   "max_output_bytes" => output_limit,
-                   "max_wall_time_ms" => 30_000
-                 }
-               }
-             )
+    {clock, wall, advance} = controlled_deadline_clock()
+    {executor, lease_id} = executor_with_options(root, clock_provider: clock)
+    observer = self()
+    progress_tag = make_ref()
+
+    progress = fn event ->
+      send(observer, {progress_tag, byte_size(event.chunk)})
+      :ok
+    end
+
+    running =
+      Task.async(fn ->
+        run(
+          root,
+          "loopex.bash",
+          %{
+            "argv" => [
+              "/bin/sh",
+              "-c",
+              "yes partial-output | head -c 16384; sleep 10"
+            ]
+          },
+          %{
+            executor: executor,
+            lease_id: lease_id,
+            execute_options: [notify: observer],
+            progress: progress,
+            run_deadline: wall + 400,
+            resource_budgets: %{
+              "max_output_bytes" => output_limit,
+              "max_wall_time_ms" => 30_000
+            }
+          }
+        )
+      end)
+
+    assert_receive {:executor_process_started, _job_id, "loopex.bash", _environment}, 5_000
+
+    assert await_progress_bytes(progress_tag, output_limit + 1, 5_000) > output_limit,
+           "the command did not produce enough real output to exercise deadline truncation"
+
+    advance.(:both, 401)
+
+    assert {:ok, receipt} = Task.await(running, 10_000)
 
     assert receipt.outcome in [:cancelled, :outcome_unknown]
     assert byte_size(receipt.output) <= output_limit
@@ -1219,7 +1609,7 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     # The identity check carries the measured size into the open, and the read is
     # independently capped in case the file grows after that measurement.
     root = workspace()
-    {:ok, store} = Loopex.Executor.Local.CodingToolsTest.RecordingStore.start()
+    store = recording_store()
 
     {executor, lease_id} =
       executor_for(root, %{
@@ -1311,23 +1701,21 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     # without a deadline first, which establishes that it does write the marker
     # when nothing stops it.
     #
-    # This command keeps the port's output pipe, which a background descendant
-    # inherits, so the job does not end until that descendant does: the receipt
-    # is produced with the group already quiescent and the marker already
-    # written. The deadline run below is the one that has to end a survivor.
+    # First prove the child is capable of the delayed write when it remains the
+    # foreground command. The guarded background form below must not be allowed
+    # to perform that same write after its direct command has exited.
     reachable = Path.join(root, "reachable.txt")
 
     assert {:ok, %{outcome: :completed}} =
              run(root, "loopex.bash", %{
-               "command" => "( sleep 1; echo survived > #{reachable} ) & exit 0"
+               "command" => "sleep 1; echo survived > #{reachable}"
              })
 
-    Process.sleep(2_500)
     assert File.exists?(reachable), "the descendant never writes its marker even when left alone"
 
-    # A command whose child outlives its leader: the leader exits immediately and
-    # the descendant keeps writing. Killing only the leader would leave the
-    # descendant running with nobody's name on it.
+    # A command whose child would outlive its direct parent: the direct child
+    # exits immediately and the descendant keeps writing unless the launch-owned
+    # guard ends the rest of its still-anchored group before releasing itself.
     marker = Path.join(root, "survivor.txt")
 
     assert {:ok, %{outcome: outcome}} =
@@ -1335,10 +1723,10 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
                root,
                "loopex.bash",
                %{"command" => "( sleep 1; echo survived > #{marker} ) & exit 0"},
-               %{run_deadline: System.system_time(:millisecond) + 400}
+               %{}
              )
 
-    assert outcome in [:completed, :cancelled, :outcome_unknown]
+    assert outcome == :completed
 
     Process.sleep(2_500)
     refute File.exists?(marker), "a descendant survived its job's process group"
@@ -1387,29 +1775,61 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
 
   test "a long running job carries the run deadline is terminated at expiry and its cleanup is confirmed before the run commits its bound" do
     root = workspace()
-    started = System.monotonic_time(:millisecond)
+    # Either half of the paired authority fence ends the job. Advancing both
+    # would let a `max/2` mutation replace `min/2` undetected, because both
+    # remaining values would still agree.
+    for expired <- [:wall, :monotonic] do
+      {clock, wall, advance} = controlled_deadline_clock()
+      {executor, lease_id} = executor_with_options(root, clock_provider: clock)
+      observer = self()
+      progress_tag = make_ref()
 
-    assert {:ok, %{outcome: outcome, output: output}} =
-             run(
-               root,
-               "loopex.bash",
-               %{"command" => "sleep 30"},
-               %{run_deadline: System.system_time(:millisecond) + 300}
-             )
+      progress = fn event ->
+        send(observer, {progress_tag, event.chunk})
+        :ok
+      end
 
-    elapsed = System.monotonic_time(:millisecond) - started
+      started = System.monotonic_time(:millisecond)
 
-    # It ended at the deadline rather than running its full sleep.
-    assert elapsed < 5_000, "the job outlived its deadline"
+      running =
+        Task.async(fn ->
+          run(root, "loopex.bash", %{"command" => "printf ready; sleep 30"}, %{
+            executor: executor,
+            lease_id: lease_id,
+            execute_options: [notify: observer],
+            progress: progress,
+            run_deadline: wall + 300
+          })
+        end)
 
-    # And it says which happened: cleanup confirmed, or honestly unknown.
-    assert outcome in [:cancelled, :outcome_unknown]
-    assert output =~ "deadline passed"
+      assert_receive {:executor_process_started, _job_id, "loopex.bash", _environment}, 5_000
+      assert await_progress_text(progress_tag, "ready", 5_000) =~ "ready"
+      advance.(expired, 301)
 
-    if outcome == :cancelled do
-      assert output =~ "confirmed cleaned"
-    else
-      assert output =~ "could not be confirmed"
+      answer = Task.yield(running, 5_000)
+
+      if is_nil(answer) do
+        advance.(:both, 301)
+        Task.shutdown(running, 5_000)
+      end
+
+      assert {:ok, {:ok, %{outcome: outcome, output: output}}} = answer,
+             "the #{expired} fence expired but the other clock kept the job alive"
+
+      elapsed = System.monotonic_time(:millisecond) - started
+
+      # It ended at the deadline rather than running its full sleep.
+      assert elapsed < 5_000, "the job outlived its #{expired} deadline fence"
+
+      # And it says which happened: cleanup confirmed, or honestly unknown.
+      assert outcome in [:cancelled, :outcome_unknown]
+      assert output =~ "deadline passed"
+
+      if outcome == :cancelled do
+        assert output =~ "confirmed cleaned"
+      else
+        assert output =~ "could not be confirmed"
+      end
     end
 
     # The artifact ceiling and the output ceiling are declared rather than
@@ -1554,18 +1974,33 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     root = workspace()
     {executor, lease_id, lease} = executor_and_lease(root)
     marker = Path.join(root, "after-the-lease.txt")
+    ready = Path.join(root, "lease-loss-command-ready.txt")
+    release = Path.join(root, "release-lease-loss-command.txt")
 
     running =
       Task.async(fn ->
         run(
           root,
           "loopex.bash",
-          %{"command" => "sleep 3; echo survived > #{marker}"},
-          %{executor: executor, lease_id: lease_id}
+          %{
+            "command" =>
+              "printf '%200s' x; ps -o pgid= -p $$ | tr -d ' ' > #{shell_path(ready)}; " <>
+                "while [ ! -f #{shell_path(release)} ]; do :; done; " <>
+                "echo survived > #{shell_path(marker)}"
+          },
+          %{
+            executor: executor,
+            lease_id: lease_id,
+            resource_budgets: %{"max_output_bytes" => 256}
+          }
         )
       end)
 
-    Process.sleep(800)
+    on_exit(fn ->
+      release_held_group(release, ready)
+    end)
+
+    assert {:ok, _group} = await_positive_integer_file(ready, 5_000)
     GenServer.stop(lease)
 
     assert {:ok, receipt} = Task.await(running, 30_000)
@@ -1574,11 +2009,15 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     # executor stopped the work inside a workspace it still holds, which is
     # exactly what is no longer true.
     assert receipt.outcome == :outcome_unknown
+    assert receipt.cleanup_confirmation == :confirmed
+    assert byte_size(receipt.output) <= 256
     assert receipt.output =~ "workspace lease was lost"
     assert receipt.output =~ "unproven"
+    assert {:ok, ^receipt} = Local.receipt(executor, receipt.job_id)
 
     # And the command was actually ended, rather than merely reported on.
-    Process.sleep(3_500)
+    File.write!(release, "continue")
+    Process.sleep(1_000)
     refute File.exists?(marker), "the command outlived the lease that authorised it"
 
     # A filesystem tool holds the same claim, so losing it ends that work too.
@@ -1600,6 +2039,7 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
 
     assert {:ok, edited} = Task.await(editing, 30_000)
     assert edited.outcome == :outcome_unknown
+    assert edited.cleanup_confirmation == :confirmed
     assert edited.output =~ "workspace lease was lost"
   end
 
@@ -1636,6 +2076,11 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     assert unbounded > 1_000,
            "this operation is too fast for the deadline below to prove anything"
 
+    # Compose the executor before opening the short real-time window. There is
+    # no filesystem-body callback to pause a real edit, so the measured operation
+    # remains real-path timing evidence; startup is not allowed to consume the
+    # window it is intended to exercise.
+    {bounded_executor, bounded_lease_id} = executor_for(root)
     started = System.monotonic_time(:millisecond)
 
     assert {:ok, receipt} =
@@ -1644,6 +2089,8 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
                "loopex.edit",
                %{"path" => "wide.txt", "old" => "qqqqqqqq", "new" => "x"},
                %{
+                 executor: bounded_executor,
+                 lease_id: bounded_lease_id,
                  run_deadline: System.system_time(:millisecond) + 300
                }
              )
@@ -1658,6 +2105,7 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     # An `edit` that was stopped part way may or may not have reached the file,
     # so the receipt says unproven rather than picking a verdict.
     assert receipt.outcome == :outcome_unknown
+    assert receipt.cleanup_confirmation == :confirmed
 
     # Concept: a path that cannot be opened within any bound is refused before
     # it is opened, not abandoned afterwards.
@@ -1675,11 +2123,15 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     pipe = Path.join(root, "pipe")
     File.rm_rf!(pipe)
     {_output, 0} = System.cmd("/usr/bin/mkfifo", [pipe])
+    {clock, wall, _advance} = controlled_deadline_clock()
+    {fifo_executor, fifo_lease_id} = executor_with_options(root, clock_provider: clock)
     fifo_started = System.monotonic_time(:millisecond)
 
     assert {:ok, piped} =
              run(root, "loopex.read", %{"path" => "pipe"}, %{
-               run_deadline: System.system_time(:millisecond) + 200
+               executor: fifo_executor,
+               lease_id: fifo_lease_id,
+               run_deadline: wall + 200
              })
 
     assert System.monotonic_time(:millisecond) - fifo_started < 1_000
@@ -1938,11 +2390,12 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     # job's full lifetime, and the receipt is the end of that lifetime.
     root = workspace()
     delay = 4_000
+    reference = make_ref()
 
     {executor, lease_id, lease} =
       executor_and_lease(root, %{
         module: Loopex.Executor.Local.CodingToolsTest.BlockingStore,
-        handle: {self(), delay}
+        handle: {self(), {:hold, reference}}
       })
 
     File.write!(
@@ -1958,11 +2411,19 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
         })
       end)
 
-    assert_receive :retention_started, 10_000
+    assert_receive {:retention_started, ^reference, retention_worker}, 10_000
+    retention_monitor = Process.monitor(retention_worker)
+
+    on_exit(fn ->
+      send(retention_worker, {:release_retention, reference})
+      Process.demonitor(retention_monitor, [:flush])
+    end)
+
     started = System.monotonic_time(:millisecond)
     GenServer.stop(lease)
 
     assert {:ok, receipt} = Task.await(running, 60_000)
+    assert_receive {:DOWN, ^retention_monitor, :process, ^retention_worker, _reason}, 2_000
     elapsed = System.monotonic_time(:millisecond) - started
 
     # The retention is abandoned when the claim goes, rather than noticed once it
@@ -1971,9 +2432,11 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
            "the lease loss was only noticed after the blocking retention returned"
 
     assert receipt.outcome == :outcome_unknown
+    assert receipt.cleanup_confirmation == :confirmed
     assert receipt.output =~ "workspace lease was lost"
     assert receipt.output =~ "unproven"
     assert receipt.artifacts == []
+    assert {:ok, ^receipt} = Local.receipt(executor, receipt.job_id)
   end
 
   test "a command that backgrounds work and exits is not completed until its group is quiescent" do
@@ -2038,17 +2501,28 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     # nothing here proved that a lease lost after the command exited was reported
     # at all.
     #
-    # The instant this case aims at is opened by the group itself rather than by
-    # a guess about how slow the sequence is. The backgrounded subshell ignores
-    # `TERM`, so it is still there when the cooperative grace is measured and the
-    # sequence must sit through that grace before it kills the group -- half the
-    # configured cleanup period, which is seconds rather than the tens of
-    # milliseconds a group that dies on the first signal costs. Aiming at the
-    # latter is what made this case depend on the sequence being slow, and it
-    # became a false negative the moment the sequence stopped wasting time.
+    # The instant this case aims at is opened by the cleanup's real process-table
+    # query rather than by a guess about how slow the sequence is. The
+    # backgrounded subshell confirms its TERM disposition before the launcher
+    # exits, and a transparent probe then announces the post-status cleanup query
+    # and waits for the case to revoke the lease before executing the real ps.
     root = workspace()
     marker = Path.join(root, "launcher-exited.txt")
-    {executor, lease_id, lease} = executor_and_lease(root)
+    child_ready = Path.join(root, "resistant-child-ready.txt")
+    probe_started = Path.join(root, "cleanup-probe-started.txt")
+    release_probe = Path.join(root, "release-cleanup-probe.txt")
+    probe = Path.join(root, "held-ps")
+
+    File.write!(
+      probe,
+      "#!/bin/sh\n: > #{shell_path(probe_started)}\n" <>
+        "while [ ! -f #{shell_path(release_probe)} ]; do :; done\nexec /bin/ps \"$@\"\n"
+    )
+
+    File.chmod!(probe, 0o700)
+
+    {executor, lease_id, lease} =
+      executor_lease_with_options(root, cleanup_grace_ms: 5_000, process_probe: probe)
 
     running =
       Task.async(fn ->
@@ -2057,7 +2531,9 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
           "loopex.bash",
           %{
             "command" =>
-              "( trap \"\" TERM; sleep 30 ) >/dev/null 2>&1 & " <>
+              "( trap \"\" TERM; printf ready > #{shell_path(child_ready)}; sleep 30 ) " <>
+                ">/dev/null 2>&1 & " <>
+                "while [ ! -f #{shell_path(child_ready)} ]; do :; done; " <>
                 "printf x > launcher-exited.txt; exit 0"
           },
           %{executor: executor, lease_id: lease_id}
@@ -2071,22 +2547,34 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
              ),
            "the launcher never announced that it was about to exit"
 
-    # The launcher exits immediately after the marker, and the quiescence
-    # sequence that follows it is held by the cooperative grace for as long as
-    # the group refuses to go.
-    Process.sleep(30)
+    assert {:ok, _probe} =
+             await_path(
+               fn -> if File.exists?(probe_started), do: {:ok, probe_started}, else: :error end,
+               20_000
+             ),
+           "process-group cleanup never reached its first real process-table query"
+
+    # The transparent process probe is invoked only after the command status was
+    # parsed and cleanup began. Holding that exact query lets the case revoke the
+    # lease in the cleanup phase without guessing how long the phase takes.
     GenServer.stop(lease)
+    File.write!(release_probe, "continue")
 
     assert {:ok, receipt} = Task.await(running, 60_000)
 
     assert receipt.outcome == :outcome_unknown,
            "a lease lost after the command exited was reported as #{inspect(receipt.outcome)}"
 
+    assert receipt.cleanup_confirmation == :confirmed,
+           "confirmed process-group cleanup was erased by the later lease loss"
+
     assert receipt.output =~ "workspace lease was lost"
     assert receipt.output =~ "unproven"
 
-    # The reply and the durable record are the same fact, not two.
-    assert {:ok, %{outcome: :outcome_unknown}} = Local.receipt(executor, receipt.job_id)
+    # The returned and retained bytes are the same fact. Confirmed process-group
+    # cleanup permits the open authority to be removed even though lease loss
+    # makes the operation outcome unknown.
+    assert {:ok, ^receipt} = Local.receipt(executor, receipt.job_id)
   end
 
   test "a lease lost while a job's receipt is being retained is reported unproven" do
@@ -2147,15 +2635,17 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     assert receipt.outcome == :outcome_unknown,
            "a lease lost while the receipt was being retained was reported as #{inspect(receipt.outcome)}"
 
+    assert receipt.cleanup_confirmation == :confirmed,
+           "the childless filesystem tool lost its independent cleanup fact"
+
     assert receipt.output =~ "workspace lease was lost"
     assert receipt.output =~ "unproven"
 
-    # The durable receipt is the plane a recovering coordinator reads, so the
-    # replacement has to have overwritten the one the abandoned write may have
-    # left behind.
-    assert {:ok, durable} = Local.receipt(executor, receipt.job_id)
-    assert durable.outcome == :outcome_unknown
-    assert durable.output == receipt.output
+    # The replacement has to have overwritten the one the abandoned write may
+    # have left behind. This childless effect was positively stopped, so the
+    # independent cleanup fact permits its open authority to be removed.
+    assert retained_receipt!(ledger, receipt.job_id) == receipt
+    assert {:ok, ^receipt} = Local.receipt(executor, receipt.job_id)
 
     # Nothing half-written is left in the ledger.
     assert {:ok, entries} = File.ls(ledger)
@@ -2163,38 +2653,39 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
   end
 
   test "a process group is confirmed clean only by a ps that answered" do
-    # Concept: silence from a program that died is not an answer.
+    # Concept: absence from a complete process table is evidence; silence from a
+    # different program or one that died is not.
     #
-    # Technical depth: the confirmation discarded `ps`'s exit status, so any
-    # empty response read as an empty group -- and that single boolean is what
-    # stands between `:completed` and `:outcome_unknown`, and between `cancel/2`
-    # reporting `:cleaned` and `:unconfirmed`. A program killed by a signal
-    # reports empty output with an abnormal status, which read as proof.
-    #
-    # The status cannot simply be required to be zero, and the first assertion is
-    # why: measured against the toolchain this suite runs on, an empty group is
-    # reported with status 1. A rule that demanded zero would refuse every
-    # honest confirmation this executor makes.
-    group = ephemeral_process_group()
+    # Technical depth: BSD `ps -g` selects a process group while procps `-g`
+    # selects a session. Production asks for every PID and PGID and filters the
+    # exact second column itself. The helper guard is a known witness in its own
+    # group, so an arbitrary configured program such as `/usr/bin/true` cannot
+    # pass by returning empty output and zero.
+    witness = 700
+    absent_group = 900
+    table = "  42    42\n 700   700\n"
 
-    assert Local.group_answered_empty?(
-             System.cmd("/bin/ps", ["-o", "pid=", "-g", Integer.to_string(group)],
-               stderr_to_stdout: true
-             )
-           ),
-           "a group with no members is no longer confirmed clean"
+    assert Local.process_group_answered_empty?({table, 0}, absent_group, witness)
 
-    # The two answers `ps` gives: members listed, and none matched.
-    refute Local.group_answered_empty?({"48965\n", 0})
-    assert Local.group_answered_empty?({"", 1})
+    refute Local.process_group_answered_empty?(
+             {table <> " 48965   900\n", 0},
+             absent_group,
+             witness
+           )
 
-    # A `ps` that was killed says nothing at all, and nothing is not proof.
-    refute Local.group_answered_empty?({"", 137})
-    refute Local.group_answered_empty?({"", 2})
+    refute Local.process_group_answered_empty?({"", 0}, absent_group, witness),
+           "an empty answer from an arbitrary configured executable proved quiescence"
 
-    # Its own diagnostics arrive on the same stream this executor captures, so
-    # an error is already non-empty.
-    refute Local.group_answered_empty?({"ps: process group too large: 999999\n", 1})
+    refute Local.process_group_answered_empty?({table, 1}, absent_group, witness)
+    refute Local.process_group_answered_empty?({table, 137}, absent_group, witness)
+
+    refute Local.process_group_answered_empty?(
+             {"not a process table\n", 0},
+             absent_group,
+             witness
+           )
+
+    refute Local.process_group_answered_empty?(:no_answer, absent_group, witness)
   end
 
   retained_manual_probe(
@@ -2335,12 +2826,15 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     # shell and the recorder sees only what this executor constructed.
     root = workspace()
 
+    previous_provider = System.get_env("LOOPEX_PROVIDER_API_KEY")
+    previous_unrelated = System.get_env("LOOPEX_SENTINEL_UNRELATED")
+
     System.put_env("LOOPEX_PROVIDER_API_KEY", "sk-sentinel-first-child")
     System.put_env("LOOPEX_SENTINEL_UNRELATED", "also-not-for-a-first-child")
 
     on_exit(fn ->
-      System.delete_env("LOOPEX_PROVIDER_API_KEY")
-      System.delete_env("LOOPEX_SENTINEL_UNRELATED")
+      restore_environment("LOOPEX_PROVIDER_API_KEY", previous_provider)
+      restore_environment("LOOPEX_SENTINEL_UNRELATED", previous_unrelated)
     end)
 
     recorded = Path.join(root, "first-child-environment.txt")
@@ -2512,47 +3006,63 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     # assembled their own option list, and the option that removes the provider
     # credential could be dropped from one of them without any case noticing.
     #
-    # There are three spawns and they are not interchangeable. One is the job
-    # launcher, now built in a single place so that one observation covers every
-    # job. The other two run `ps` and `kill` on this executor's own behalf; they
-    # take no workspace and no operator input, but they are still images the
-    # operating system loads while this process holds the provider credential,
-    # so the loader reaches them on exactly the same terms. The invariant is
-    # therefore about every spawn rather than about how many there are: none of
-    # them may omit the central environment override that explicitly removes the
-    # named credential.
+    # There is one spawn boundary. Jobs and bounded cleanup probes both reach
+    # `open_launcher/4`, so the production-path observation above covers every
+    # first image. A separate direct helper spawn is precisely how environment
+    # handling and process authority drifted before: no call site may bypass the
+    # common option list or turn a sampled PID into permission for a later
+    # `/bin/kill`.
     #
     # Reading the source is the only way to ask a question of that shape. A
     # behavioural case can prove what one spawn does and can never prove that no
     # other spawn exists.
     source = File.read!(Path.expand("../lib/executor.ex", __DIR__))
 
-    spawns =
-      source
-      |> String.split(~r/^\s*Port\.open\(\s*$/m)
-      |> Enum.drop(1)
-      |> Enum.map(&(&1 |> String.split(~r/^\s*\)\s*$/m) |> hd()))
+    # Count syntax nodes, not line layout: an extra one-line Port.open must not
+    # disappear from this structural inventory. The primitive spelling is
+    # counted too, so replacing the wrapper cannot bypass the same inventory.
+    {_source_ast, spawns} =
+      Macro.prewalk(Code.string_to_quoted!(source), [], fn
+        {{:., _, [{:__aliases__, _, [:Port]}, :open]}, _, [_, _]} = call, found ->
+          {call, [call | found]}
 
-    assert length(spawns) == 3,
+        {{:., _, [:erlang, :open_port]}, _, [_, _]} = call, found ->
+          {call, [call | found]}
+
+        node, found ->
+          {node, found}
+      end)
+
+    assert length(spawns) == 1,
            "this executor now opens #{length(spawns)} ports; every one of them is an image the " <>
              "loader reaches, so each needs its own constructed environment and this case needs " <>
              "to have been told about it"
 
-    # The job launcher reaches its `env:` through `launcher_port_options/2`,
-    # which the probe case above observes behaviourally at the spawn; the two
-    # helpers carry theirs literally. What no spawn may do is name neither.
+    # Every caller reaches its `env:` through `launcher_port_options/2`, which
+    # the probe case above observes behaviourally at the spawn.
     assert source =~ "options = launcher_port_options(environment, workspace)",
            "the job launcher no longer derives the option list whose environment the " <>
              "production-path probe observes"
 
-    assert Enum.count(spawns, &String.contains?(&1, "++ options")) == 1,
-           "the single job-launch port no longer receives the production option list"
+    assert Enum.count(spawns, fn
+             {{:., _, _}, _, [_program, {:++, _, [_arguments, {:options, _, _}]}]} -> true
+             _other -> false
+           end) == 1,
+           "the single launch port no longer receives the production option list"
 
-    assert Enum.count(
-             spawns,
-             &String.contains?(&1, "env: spawn_environment(demonstration_environment())")
-           ) == 2,
-           "each helper spawn must use the central provider-credential removal path"
+    assert source =~
+             ~r/defp guarded_answer_within\(program, arguments, bound\).*?process_launcher\(%\{helper: \[program \| arguments\]\}, environment\).*?open_launcher\(launcher, command_arguments, environment/s,
+           "bounded helpers no longer use the same guarded launcher and environment boundary"
+
+    refute source =~ ~s|{:spawn_executable, ~c"/bin/kill"}|,
+           "a helper timeout turned a sampled numeric PID into signal authority"
+
+    refute source =~ "defp signal_helper(",
+           "a second process can still deliver a late signal to a sampled helper PID"
+
+    assert source =~
+             ~r/defp finish_guarded_helper.*?1 <- occurrences\(output, acknowledgement\)/s,
+           "a queued helper KILL can be mistaken for one the live guard processed"
 
     # The job launcher's option list is built once. A second construction of it
     # is how the two spawn sites drifted apart before, and it is also how a
@@ -2571,33 +3081,58 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     # three alternatives -- the store answering, the worker dying, and the lease
     # holder going down. The run's committed instant was not among them, so a
     # store that blocked carried the whole job past its deadline and the receipt
-    # still said `completed`. A `loopex.read` whose deadline was three hundred
-    # milliseconds away spilled into a store that delayed four seconds and
-    # returned after about four seconds.
+    # still said `completed`. The fixture now holds the real store call until the
+    # executor ends it, and announces entry before the test accepts the result;
+    # a skipped retention can no longer masquerade as deadline handling.
     root = workspace()
-    delay = 4_000
+    run_span = 3_000
+    cleanup_grace = 32_000
+    reference = make_ref()
 
     {executor, lease_id} =
-      executor_for(root, %{
-        module: Loopex.Executor.Local.CodingToolsTest.BlockingStore,
-        handle: {self(), delay}
-      })
+      executor_with_options(
+        root,
+        cleanup_grace_ms: cleanup_grace,
+        artifacts: %{
+          module: Loopex.Executor.Local.CodingToolsTest.BlockingStore,
+          handle: {self(), {:hold, reference}}
+        }
+      )
 
     full = String.duplicate("x", CodingTools.limits().read_bytes + 5_000)
     File.write!(Path.join(root, "large.txt"), full)
 
+    run_deadline = System.system_time(:millisecond) + run_span
     started = System.monotonic_time(:millisecond)
 
-    assert {:ok, receipt} =
-             run(root, "loopex.read", %{"path" => "large.txt"}, %{
-               executor: executor,
-               lease_id: lease_id,
-               run_deadline: System.system_time(:millisecond) + 300
-             })
+    running =
+      Task.async(fn ->
+        run(root, "loopex.read", %{"path" => "large.txt"}, %{
+          executor: executor,
+          lease_id: lease_id,
+          cleanup_grace_ms: cleanup_grace,
+          run_deadline: run_deadline
+        })
+      end)
+
+    assert_receive {:retention_started, ^reference, retention_worker}, 5_000
+
+    assert System.system_time(:millisecond) < run_deadline,
+           "the fixture reached retention only after the run deadline"
+
+    retention_monitor = Process.monitor(retention_worker)
+
+    on_exit(fn ->
+      send(retention_worker, {:release_retention, reference})
+      Process.demonitor(retention_monitor, [:flush])
+    end)
+
+    assert {:ok, receipt} = Task.await(running, 10_000)
+    assert_receive {:DOWN, ^retention_monitor, :process, ^retention_worker, _reason}, 2_000
 
     elapsed = System.monotonic_time(:millisecond) - started
 
-    assert elapsed < div(delay, 2),
+    assert elapsed < run_span + 2_000,
            "the run outlived its deadline waiting for a store it cannot bound"
 
     # Concept: the effect is exactly as proved as it was; what was lost is the
@@ -2611,7 +3146,7 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     assert receipt.outcome == :completed
     assert receipt.artifacts == []
     assert receipt.output =~ "truncated"
-    assert receipt.output =~ "run deadline"
+    assert receipt.output =~ "deadline passed"
     assert String.starts_with?(receipt.output, binary_part(full, 0, 100))
   end
 
@@ -2682,7 +3217,7 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     source = File.read!(Path.expand("../lib/executor.ex", __DIR__))
 
     assert source =~
-             ~r/with :ok <- write_synced_receipt\(temporary, bytes\),\n\s+:ok <- File\.rename\(temporary, path\),\n\s+:ok <- sync_parent_directory\(path\)/,
+             ~r/with true <- byte_size\(bytes\) <= @max_receipt_bytes,\n\s+:ok <- write_synced_receipt\(temporary, bytes\),\n\s+:ok <- File\.rename\(temporary, path\),\n\s+:ok <- sync_parent_directory\(path\)/,
            "receipt publication no longer orders file sync, rename, and directory sync"
 
     assert source =~
@@ -2693,12 +3228,668 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
              ~r/defp sync_parent_directory\(path\).*?:file\.open\(directory, \[:raw, :read, :directory\]\).*?:file\.sync\(file\)/s,
            "the directory entry is not synced after publication"
 
+    [terminal_read] =
+      Regex.run(
+        ~r/defp final_receipt_under_claim\(ledger, root, job_id, wait\) do\n(.*?)\n  end\n/s,
+        source,
+        capture: :all_but_first
+      )
+
+    assert terminal_read =~ "Ledger.with_claim(ledger",
+           "the terminal receipt and open-authority index are no longer read under one " <>
+             "root-wide first-writer claim: #{terminal_read}"
+
+    assert terminal_read =~ "final_receipt(claimed, root, job_id)",
+           "the claimed ledger snapshot is not the one used to decide terminal receipt truth: " <>
+             terminal_read
+
     root = workspace()
 
     assert {:ok, receipt} =
              run(root, "loopex.write", %{"path" => "durable.txt", "content" => "durable"})
 
     assert receipt.outcome == :completed
+  end
+
+  test "a bounded result completed under a live lease remains admitted after later lease loss" do
+    # Concept: later scheduling cannot reverse authority that covered completed
+    # work.
+    #
+    # Technical depth: the worker result and the lease monitor are independent
+    # signal paths. Suspend the exact waiter, let its worker finish and queue the
+    # successful value with its completion-bound lease fact, then kill the lease
+    # before the waiter can inspect either message. Re-sampling in the waiter
+    # would falsely abandon work that completed while its lease was live.
+    root = workspace()
+    {_executor, _lease_id, lease} = executor_and_lease(root)
+    Process.unlink(lease)
+    parent = self()
+
+    waiter =
+      spawn(fn ->
+        monitor = Process.monitor(lease)
+
+        result =
+          Local.bounded_work(
+            fn ->
+              send(parent, {:bounded_worker_ready, self()})
+
+              receive do
+                :finish_bounded_work -> :retained
+              end
+            end,
+            5_000,
+            {monitor, lease}
+          )
+
+        send(parent, {:bounded_waiter_result, result})
+      end)
+
+    on_exit(fn ->
+      resume_if_suspended(waiter)
+      if Process.alive?(waiter), do: Process.exit(waiter, :kill)
+    end)
+
+    assert_receive {:bounded_worker_ready, worker}, 2_000
+    assert :erlang.suspend_process(waiter)
+    send(worker, :finish_bounded_work)
+
+    assert :ok =
+             await_queued_message(
+               waiter,
+               fn
+                 {tag, {:done, :retained}} when is_reference(tag) ->
+                   true
+
+                 _other ->
+                   false
+               end,
+               2_000
+             )
+
+    lease_monitor = Process.monitor(lease)
+    Process.exit(lease, :kill)
+    assert_receive {:DOWN, ^lease_monitor, :process, ^lease, :killed}, 2_000
+
+    assert :erlang.resume_process(waiter)
+
+    assert_receive {:bounded_waiter_result, {:done, :retained}}, 2_000
+    refute Process.alive?(worker), "bounded work returned before its effect process stopped"
+  end
+
+  test "a lease certified result survives lease loss queued ahead of guardian observation" do
+    # Concept: completion under a live lease is not reversed by a later revocation.
+    #
+    # Technical depth: suspend the sole decider, let the effect obtain its
+    # certificate from the live lease and exit, then revoke the lease before the
+    # guardian can inspect either signal. Re-sampling lease liveness in the
+    # guardian makes this valid result fail; the lease-authored certificate does
+    # not.
+    root = workspace()
+    {_executor, _lease_id, lease} = executor_and_lease(root)
+    Process.unlink(lease)
+    parent = self()
+
+    waiter =
+      spawn(fn ->
+        result =
+          Local.bounded_work(
+            fn ->
+              send(parent, {:lease_certificate_effect, self()})
+
+              receive do
+                :finish_with_lease -> :lease_certified
+              end
+            end,
+            5_000,
+            {Process.monitor(lease), lease}
+          )
+
+        send(parent, {:lease_certificate_result, result})
+      end)
+
+    assert_receive {:lease_certificate_effect, effect}, 2_000
+    guardian = monitored_guardian(waiter, [lease, effect])
+    assert is_pid(guardian)
+
+    on_exit(fn ->
+      resume_if_suspended(guardian)
+      if Process.alive?(waiter), do: Process.exit(waiter, :kill)
+      if Process.alive?(lease), do: Process.exit(lease, :kill)
+    end)
+
+    assert :erlang.suspend_process(guardian)
+    effect_monitor = Process.monitor(effect)
+    send(effect, :finish_with_lease)
+    assert_receive {:DOWN, ^effect_monitor, :process, ^effect, :normal}, 2_000
+
+    assert :ok =
+             await_queued_message(
+               guardian,
+               fn
+                 {:EXIT, ^effect, :normal} -> true
+                 _other -> false
+               end,
+               2_000
+             )
+
+    lease_monitor = Process.monitor(lease)
+    Process.exit(lease, :kill)
+    assert_receive {:DOWN, ^lease_monitor, :process, ^lease, :killed}, 2_000
+    assert :erlang.resume_process(guardian)
+
+    assert_receive {:lease_certificate_result, {:done, :lease_certified}}, 2_000
+  end
+
+  test "lease loss before certification cannot admit a result that work already returned" do
+    # Concept: returned bytes are not a completion unless the workspace claim
+    # certifies that it still covers their boundary.
+    #
+    # Technical depth: suspend the lease itself so the effect's certification
+    # call is queued, then revoke it. A direct liveness sample in the effect can
+    # falsely report done here; serialization inside the lease leaves the result
+    # explicitly unproven.
+    root = workspace()
+    {_executor, _lease_id, lease} = executor_and_lease(root)
+    Process.unlink(lease)
+    parent = self()
+
+    waiter =
+      spawn(fn ->
+        result =
+          Local.bounded_work(
+            fn ->
+              send(parent, {:uncertified_effect, self()})
+
+              receive do
+                :return_before_certification -> :uncertified_result
+              end
+            end,
+            5_000,
+            {Process.monitor(lease), lease}
+          )
+
+        send(parent, {:uncertified_result, result})
+      end)
+
+    assert_receive {:uncertified_effect, effect}, 2_000
+
+    on_exit(fn ->
+      resume_if_suspended(lease)
+      if Process.alive?(waiter), do: Process.exit(waiter, :kill)
+      if Process.alive?(lease), do: Process.exit(lease, :kill)
+    end)
+
+    assert :erlang.suspend_process(lease)
+    send(effect, :return_before_certification)
+
+    assert :ok =
+             await_queued_message(
+               lease,
+               fn
+                 {:"$gen_call", _from, {:certify_completion, _table, _tag, _owner}} ->
+                   true
+
+                 _other ->
+                   false
+               end,
+               2_000
+             )
+
+    lease_monitor = Process.monitor(lease)
+    Process.exit(lease, :kill)
+    assert_receive {:DOWN, ^lease_monitor, :process, ^lease, :killed}, 2_000
+
+    assert_receive {:uncertified_result,
+                    {:abandoned, :workspace_lease_lost, true, {:late, :uncertified_result}}},
+                   2_000
+  end
+
+  test "a result certified inside its bound survives guardian observation after the bound" do
+    # The effect stages its bound fact before the lease serializes the completion
+    # certificate, and a delayed guardian does not re-sample either fact.
+    root = workspace()
+    {_executor, _lease_id, lease} = executor_and_lease(root)
+    parent = self()
+
+    waiter =
+      spawn(fn ->
+        result =
+          Local.bounded_work(
+            fn ->
+              send(parent, {:bound_certificate_effect, self()})
+
+              receive do
+                :finish_inside_bound -> :inside_bound
+              end
+            end,
+            3_000,
+            {Process.monitor(lease), lease}
+          )
+
+        send(parent, {:bound_certificate_result, result})
+      end)
+
+    assert_receive {:bound_certificate_effect, effect}, 2_000
+    guardian = monitored_guardian(waiter, [lease, effect])
+    assert is_pid(guardian)
+
+    on_exit(fn ->
+      resume_if_suspended(guardian)
+      if Process.alive?(waiter), do: Process.exit(waiter, :kill)
+    end)
+
+    assert :erlang.suspend_process(guardian)
+    effect_monitor = Process.monitor(effect)
+    send(effect, :finish_inside_bound)
+    assert_receive {:DOWN, ^effect_monitor, :process, ^effect, :normal}, 2_000
+    Process.sleep(3_100)
+    assert :erlang.resume_process(guardian)
+
+    assert_receive {:bound_certificate_result, {:done, :inside_bound}}, 2_000
+  end
+
+  test "a result reaching certification after its bound is not admitted" do
+    # Suspending the guardian keeps it from killing the worker first, so this
+    # drives the completion certificate's own bound decision rather than merely
+    # the guardian timer.
+    root = workspace()
+    {_executor, _lease_id, lease} = executor_and_lease(root)
+    parent = self()
+
+    waiter =
+      spawn(fn ->
+        result =
+          Local.bounded_work(
+            fn ->
+              send(parent, {:late_bound_effect, self()})
+
+              receive do
+                :finish_after_bound -> :after_bound
+              end
+            end,
+            2_000,
+            {Process.monitor(lease), lease}
+          )
+
+        send(parent, {:late_bound_result, result})
+      end)
+
+    assert_receive {:late_bound_effect, effect}, 2_000
+    guardian = monitored_guardian(waiter, [lease, effect])
+    assert is_pid(guardian)
+
+    on_exit(fn ->
+      resume_if_suspended(guardian)
+      if Process.alive?(waiter), do: Process.exit(waiter, :kill)
+    end)
+
+    assert :erlang.suspend_process(guardian)
+    Process.sleep(2_100)
+    effect_monitor = Process.monitor(effect)
+    send(effect, :finish_after_bound)
+    assert_receive {:DOWN, ^effect_monitor, :process, ^effect, :normal}, 2_000
+
+    assert :ok =
+             await_queued_message(
+               guardian,
+               fn
+                 {:EXIT, ^effect, :normal} -> true
+                 _other -> false
+               end,
+               2_000
+             )
+
+    assert :erlang.resume_process(guardian)
+
+    assert_receive {:late_bound_result,
+                    {:abandoned, :bound_reached, true, {:late, :after_bound}}},
+                   2_000
+  end
+
+  test "a dead lease refuses bounded work before its effect can start" do
+    # Concept: work is not started merely so it can be rejected afterwards.
+    #
+    # Technical depth: the unrelated monitor reference proves the boundary's own
+    # preflight checks the lease pid. Returning a late result here would mean the
+    # effect ran after its authority was already known to be gone.
+    root = workspace()
+    {_executor, _lease_id, lease} = executor_and_lease(root)
+    Process.unlink(lease)
+    death = Process.monitor(lease)
+    Process.exit(lease, :kill)
+    assert_receive {:DOWN, ^death, :process, ^lease, :killed}, 2_000
+
+    assert {:abandoned, :workspace_lease_lost, true, :none} =
+             Local.bounded_work(fn -> flunk("effect started under a dead lease") end, 5_000, {
+               make_ref(),
+               lease
+             })
+  end
+
+  test "guardian death reaps a trapping bounded effect before reporting an unproven result" do
+    # Concept: the process reporting the verdict may fail, but the work it owned
+    # still may not escape.
+    #
+    # Technical depth: the effect traps ordinary linked exits, so killing only
+    # its guardian leaves it live. The caller's fallback monitor must issue an
+    # untrappable kill, confirm that exact effect down, and return a distinct
+    # guardian failure rather than a successful or ordinarily failed operation.
+    root = workspace()
+    marker = Path.join(root, "guardian-survivor.txt")
+    {_executor, _lease_id, lease} = executor_and_lease(root)
+    parent = self()
+
+    source = File.read!(Path.expand("../lib/executor.ex", __DIR__))
+
+    assert source =~
+             ~r/effect =\n\s*spawn_link\(fn ->.*?send\(caller, \{guardian_tag, :guardian_effect, guardian, effect\}\)/s,
+           "the effect is not linked to its guardian before the caller learns its identity"
+
+    waiter =
+      spawn(fn ->
+        lease_monitor = Process.monitor(lease)
+
+        result =
+          Local.bounded_work(
+            fn ->
+              Process.flag(:trap_exit, true)
+              send(parent, {:guardian_effect_ready, self()})
+
+              receive do
+                :continue_after_guardian -> File.write(marker, "escaped")
+              end
+            end,
+            5_000,
+            {lease_monitor, lease}
+          )
+
+        send(parent, {:guardian_waiter_result, result})
+      end)
+
+    assert_receive {:guardian_effect_ready, effect}, 2_000
+
+    guardian = monitored_guardian(waiter, [lease, effect])
+
+    assert is_pid(guardian), "the bounded-work caller did not monitor its guardian"
+
+    on_exit(fn ->
+      if Process.alive?(waiter), do: Process.exit(waiter, :kill)
+      if Process.alive?(guardian), do: Process.exit(guardian, :kill)
+      if Process.alive?(effect), do: Process.exit(effect, :kill)
+    end)
+
+    effect_monitor = Process.monitor(effect)
+    Process.exit(guardian, :kill)
+
+    assert_receive {:DOWN, ^effect_monitor, :process, ^effect, :killed}, 2_000
+    assert_receive {:guardian_waiter_result, {:guardian_stopped, :killed, true}}, 2_000
+
+    send(effect, :continue_after_guardian)
+    refute File.exists?(marker)
+  end
+
+  test "a guarded filesystem result completed under a live lease survives later lease loss" do
+    # The owner-aware boundary has a separate result receiver. Exercise the same
+    # completion-before-later-loss ordering there so one branch cannot regain a
+    # waiter-time liveness sample while the retention branch stays correct.
+    root = workspace()
+    {executor, _lease_id, lease} = executor_and_lease(root)
+    Process.unlink(lease)
+    parent = self()
+
+    waiter =
+      spawn(fn ->
+        monitor = Process.monitor(lease)
+
+        result =
+          Local.bounded_work(
+            fn ->
+              send(parent, {:guarded_worker_ready, self()})
+
+              receive do
+                :finish_guarded_work -> :effect_result
+              end
+            end,
+            5_000,
+            {monitor, lease},
+            executor
+          )
+
+        send(parent, {:guarded_waiter_result, result})
+      end)
+
+    on_exit(fn ->
+      resume_if_suspended(waiter)
+      if Process.alive?(waiter), do: Process.exit(waiter, :kill)
+    end)
+
+    assert_receive {:guarded_worker_ready, worker}, 2_000
+    assert :erlang.suspend_process(waiter)
+    send(worker, :finish_guarded_work)
+
+    assert :ok =
+             await_queued_message(
+               waiter,
+               fn
+                 {tag, {:done, :effect_result}} when is_reference(tag) ->
+                   true
+
+                 _other ->
+                   false
+               end,
+               2_000
+             )
+
+    lease_monitor = Process.monitor(lease)
+    Process.exit(lease, :kill)
+    assert_receive {:DOWN, ^lease_monitor, :process, ^lease, :killed}, 2_000
+
+    assert :erlang.resume_process(waiter)
+
+    assert_receive {:guarded_waiter_result, {:done, :effect_result}}, 2_000
+    refute Process.alive?(worker), "guarded work returned before its effect process stopped"
+  end
+
+  test "a guarded result completed under its owner survives later owner loss" do
+    # Concept: authority loss cannot retroactively reverse work that completed
+    # while that authority still existed.
+    #
+    # Technical depth: suspend the guardian after the effect starts, let the
+    # effect bind its completion certificate, and only then stop the owner. The
+    # guardian sees the queued result after the owner is dead; a waiter-time
+    # Process.alive?/1 sample would reject it, while the completion-bound owner
+    # fact admits it.
+    root = workspace()
+    {executor, _lease_id, lease} = executor_and_lease(root)
+    Process.unlink(executor)
+    Process.unlink(lease)
+    parent = self()
+
+    waiter =
+      spawn(fn ->
+        lease_monitor = Process.monitor(lease)
+
+        result =
+          Local.bounded_work(
+            fn ->
+              send(parent, {:owner_certificate_effect_ready, self()})
+
+              receive do
+                :finish_under_owner -> :owner_bound_result
+              end
+            end,
+            5_000,
+            {lease_monitor, lease},
+            executor
+          )
+
+        send(parent, {:owner_certificate_result, result})
+      end)
+
+    assert_receive {:owner_certificate_effect_ready, effect}, 2_000
+
+    guardian = monitored_guardian(waiter, [lease, effect])
+
+    assert is_pid(guardian)
+
+    on_exit(fn ->
+      if Process.alive?(guardian) and
+           Process.info(guardian, :status) == {:status, :suspended},
+         do: :erlang.resume_process(guardian)
+
+      if Process.alive?(waiter), do: Process.exit(waiter, :kill)
+    end)
+
+    assert :erlang.suspend_process(guardian)
+    effect_monitor = Process.monitor(effect)
+    send(effect, :finish_under_owner)
+    assert_receive {:DOWN, ^effect_monitor, :process, ^effect, :normal}, 2_000
+
+    assert :ok =
+             await_queued_message(
+               guardian,
+               fn
+                 {:EXIT, ^effect, :normal} -> true
+                 _other -> false
+               end,
+               2_000
+             )
+
+    Process.exit(executor, :kill)
+    assert :erlang.resume_process(guardian)
+
+    assert_receive {:owner_certificate_result, {:done, :owner_bound_result}}, 2_000
+  end
+
+  test "owner loss before certification cannot be hidden by a queued result" do
+    # Suspend the decider, revoke the Local owner, and only then let the effect
+    # return. The lease-authored certificate records the dead owner even if the
+    # effect EXIT is the first signal the guardian later reads.
+    root = workspace()
+    {executor, _lease_id, lease} = executor_and_lease(root)
+    Process.unlink(executor)
+    parent = self()
+
+    waiter =
+      spawn(fn ->
+        result =
+          Local.bounded_work(
+            fn ->
+              send(parent, {:owner_negative_effect, self()})
+
+              receive do
+                :finish_without_owner -> :ownerless_result
+              end
+            end,
+            5_000,
+            {Process.monitor(lease), lease},
+            executor
+          )
+
+        send(parent, {:owner_negative_result, result})
+      end)
+
+    assert_receive {:owner_negative_effect, effect}, 2_000
+    guardian = monitored_guardian(waiter, [lease, effect])
+    assert is_pid(guardian)
+
+    on_exit(fn ->
+      resume_if_suspended(guardian)
+      if Process.alive?(waiter), do: Process.exit(waiter, :kill)
+      if Process.alive?(executor), do: Process.exit(executor, :kill)
+    end)
+
+    assert :erlang.suspend_process(guardian)
+    owner_monitor = Process.monitor(executor)
+    Process.exit(executor, :kill)
+    assert_receive {:DOWN, ^owner_monitor, :process, ^executor, :killed}, 2_000
+    effect_monitor = Process.monitor(effect)
+    send(effect, :finish_without_owner)
+    assert_receive {:DOWN, ^effect_monitor, :process, ^effect, :normal}, 2_000
+
+    assert :ok =
+             await_queued_message(
+               guardian,
+               fn
+                 {:EXIT, ^effect, :normal} -> true
+                 _other -> false
+               end,
+               2_000
+             )
+
+    assert :erlang.resume_process(guardian)
+
+    assert_receive {:owner_negative_result,
+                    {:abandoned, :effect_owner_lost, true, {:late, :ownerless_result}}},
+                   2_000
+  end
+
+  test "bounded work caller loss reaps its exact effect before the guardian exits" do
+    # Concept: a caller that can no longer settle a result cannot leave its
+    # effect running without an observer.
+    #
+    # Technical depth: the effect traps ordinary exits and is not linked to the
+    # caller. Only the guardian's caller monitor and exact untrappable reap can
+    # stop it. Deleting that branch lets the later marker appear.
+    root = workspace()
+    marker = Path.join(root, "caller-loss-survivor.txt")
+    {_executor, _lease_id, lease} = executor_and_lease(root)
+    parent = self()
+
+    waiter =
+      spawn(fn ->
+        Local.bounded_work(
+          fn ->
+            Process.flag(:trap_exit, true)
+            send(parent, {:caller_loss_effect, self()})
+
+            receive do
+              :write_after_caller -> File.write(marker, "escaped")
+            end
+          end,
+          5_000,
+          {Process.monitor(lease), lease}
+        )
+      end)
+
+    assert_receive {:caller_loss_effect, effect}, 2_000
+    guardian = monitored_guardian(waiter, [lease, effect])
+    assert is_pid(guardian)
+    effect_monitor = Process.monitor(effect)
+    guardian_monitor = Process.monitor(guardian)
+
+    on_exit(fn ->
+      if Process.alive?(waiter), do: Process.exit(waiter, :kill)
+      if Process.alive?(guardian), do: Process.exit(guardian, :kill)
+      if Process.alive?(effect), do: Process.exit(effect, :kill)
+    end)
+
+    Process.exit(waiter, :kill)
+    assert_receive {:DOWN, ^effect_monitor, :process, ^effect, :killed}, 2_000
+    assert_receive {:DOWN, ^guardian_monitor, :process, ^guardian, :normal}, 2_000
+
+    send(effect, :write_after_caller)
+    refute File.exists?(marker)
+  end
+
+  test "a dead lease refuses owner guarded work before its effect can start" do
+    # The owner-aware form has the same preflight. A live Local owner cannot
+    # substitute for the workspace claim the effect also requires.
+    root = workspace()
+    {executor, _lease_id, lease} = executor_and_lease(root)
+    Process.unlink(lease)
+    death = Process.monitor(lease)
+    Process.exit(lease, :kill)
+    assert_receive {:DOWN, ^death, :process, ^lease, :killed}, 2_000
+
+    assert {:abandoned, :workspace_lease_lost, true, :none} =
+             Local.bounded_work(
+               fn -> flunk("guarded effect started under a dead lease") end,
+               5_000,
+               {make_ref(), lease},
+               executor
+             )
   end
 
   test "work this executor cannot bound is abandoned at its bound and a program that never answers confirms nothing" do
@@ -2711,7 +3902,7 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     # reported durable and the branch that decides whether a process group is
     # confirmed clean would otherwise rest on waits no case can enter. Both
     # mechanisms are exposed and asked directly, exactly as
-    # `group_answered_empty?/1` is.
+    # `process_group_answered_empty?/3` is.
     root = workspace()
     {_executor, _lease_id, lease} = executor_and_lease(root)
     monitor = Process.monitor(lease)
@@ -2750,7 +3941,7 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     # And a non-answer is not an empty process group. It reaches the same rule
     # that already refuses a `ps` killed by a signal, because silence from a
     # program that never spoke is the weaker fact of the two.
-    refute Local.group_answered_empty?(:no_answer)
+    refute Local.process_group_answered_empty?(:no_answer, 900, 700)
 
     # A program that cannot be run at all arrives as the same non-answer, which
     # is what the removed rescue used to produce.
@@ -2773,77 +3964,49 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     # second delay ran for five seconds under a run deadline three hundred
     # milliseconds away and reported `:completed`.
     #
-    # The outcome is `:outcome_unknown` rather than a cancellation because this
-    # path captures no process group: closing the port releases the child without
-    # proving it stopped or that its write did not land.
+    # The demonstration now uses the same owned process-group launcher as bash.
+    # Reaching the deadline while the lease still holds therefore produces a
+    # proved cancellation with confirmed cleanup rather than an unknown effect.
     root = workspace()
     delay = 5_000
 
-    started = System.monotonic_time(:millisecond)
+    {clock, wall, advance} = controlled_deadline_clock()
+    {executor, lease_id} = executor_with_options(root, clock_provider: clock)
+    observer = self()
 
-    assert {:ok, receipt} =
-             run(
-               root,
-               "loopex.demo.wait_write",
-               %{"relative_path" => "delayed.txt", "content" => "late", "delay_ms" => delay},
-               %{run_deadline: System.system_time(:millisecond) + 300}
-             )
+    running =
+      Task.async(fn ->
+        run(
+          root,
+          "loopex.demo.wait_write",
+          %{"relative_path" => "delayed.txt", "content" => "late", "delay_ms" => delay},
+          %{
+            executor: executor,
+            lease_id: lease_id,
+            execute_options: [notify: observer],
+            run_deadline: wall + 300
+          }
+        )
+      end)
 
-    elapsed = System.monotonic_time(:millisecond) - started
+    assert_receive {:executor_process_started, _job_id, "loopex.demo.wait_write", _environment},
+                   5_000
 
-    assert elapsed < div(delay, 2),
-           "the demonstration launcher outlived the run's committed deadline"
+    advance.(:both, 301)
 
-    assert receipt.outcome == :outcome_unknown
+    assert {:ok, receipt} = Task.await(running, 10_000)
+
+    # The substituted paired clock, the cancelled terminal and the eventual
+    # absence of the delayed effect are the ordering proof. A tighter elapsed
+    # wall-time assertion measures scheduler and cleanup-probe load instead of
+    # the committed clock and can reject these same facts on a busy host.
+    assert receipt.outcome == :cancelled
+    assert receipt.cleanup_confirmation == :confirmed
     assert receipt.output =~ "run deadline"
-    assert receipt.output =~ "unproven"
-  end
+    assert receipt.output =~ "confirmed cleaned"
 
-  # Concept: a real process group identifier that no longer has any members.
-  #
-  # Technical depth: taken from a child that led its own group and has since
-  # exited, so the confirmation above is asked about the same kind of identifier
-  # the executor asks about rather than an invented number, which `ps` reports
-  # differently.
-  defp ephemeral_process_group do
-    port =
-      Port.open({:spawn_executable, ~c"/bin/sh"}, [
-        :binary,
-        :exit_status,
-        :use_stdio,
-        :stderr_to_stdout,
-        :hide,
-        args: [~c"-c", ~c"ps -o pgid= -p $$ | tr -d ' '; exit 0"]
-      ])
-
-    group =
-      receive do
-        {^port, {:data, data}} -> data |> String.trim() |> String.to_integer()
-      after
-        10_000 -> flunk("the probe child never reported its process group")
-      end
-
-    receive do
-      {^port, {:exit_status, _status}} -> :ok
-    after
-      10_000 -> flunk("the probe child never exited")
-    end
-
-    assert {:ok, :empty} =
-             await_path(
-               fn ->
-                 case System.cmd("/bin/ps", ["-o", "pid=", "-g", Integer.to_string(group)],
-                        stderr_to_stdout: true
-                      ) do
-                   {"", _status} -> {:ok, :empty}
-                   {_survivors, _status} -> :error
-                 end
-               end,
-               10_000
-             ),
-           "the probe child's group still has members"
-
-    group
+    Process.sleep(delay + 500)
+    refute File.exists?(Path.join(root, "delayed.txt"))
   end
 
   test "the cleanup budget is one configured period with a declared default and every receipt records it" do
@@ -2957,7 +4120,9 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     grace = 800
     reserve = div(grace, 4)
 
-    {executor, lease_id} = executor_with_grace(root, grace)
+    {executor, lease_id, _lease, ledger} =
+      executor_lease_ledger_with_options(root, cleanup_grace_ms: grace)
+
     where = %{executor: executor, lease_id: lease_id, cleanup_grace_ms: grace}
 
     assert {:ok, quiet} =
@@ -2989,6 +4154,51 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     assert {:ok, retained} = Local.receipt(executor, cleaned.job_id)
     assert retained.receipt_retention_bound_ms == reserve
     assert retained.cleanup_grace_ms == grace
+
+    # A retained file is not terminal truth by itself. The receipt and the
+    # root's open-authority index must be read under one claim so a peer cannot
+    # admit or settle the same job between those observations. Hold that claim
+    # from a second prepared reader: the executor must report bounded ledger
+    # unavailability rather than reading the already-present receipt unlocked.
+    # Replacing `final_receipt_under_claim/4` with a direct `final_receipt/3`
+    # makes this assertion return `{:ok, retained}` immediately.
+    assert {:ok, prepared} = Ledger.prepare(ledger, "executor-local", grace)
+    parent = self()
+
+    holder =
+      spawn(fn ->
+        Ledger.with_claim(prepared, fn ->
+          send(parent, {:receipt_claim_held, self()})
+
+          receive do
+            :release_receipt_claim -> :ok
+          end
+        end)
+      end)
+
+    on_exit(fn ->
+      if Process.alive?(holder) do
+        monitor = Process.monitor(holder)
+        send(holder, :release_receipt_claim)
+
+        receive do
+          {:DOWN, ^monitor, :process, ^holder, _reason} -> :ok
+        after
+          2_000 -> raise "receipt-claim holder did not release its root-wide claim"
+        end
+      end
+    end)
+
+    assert_receive {:receipt_claim_held, ^holder}, 2_000
+
+    assert Local.receipt(executor, cleaned.job_id) ==
+             {:error, {:ledger_unavailable, :root_claim_held}},
+           "a terminal receipt was read outside the root-wide first-writer claim"
+
+    claim_released = Process.monitor(holder)
+    send(holder, :release_receipt_claim)
+    assert_receive {:DOWN, ^claim_released, :process, ^holder, :normal}, 2_000
+    assert {:ok, ^retained} = Local.receipt(executor, cleaned.job_id)
   end
 
   test "the configured cleanup budget bounds the whole termination sequence rather than each step of it" do
@@ -3362,13 +4572,14 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     # assertion fail.
     root = workspace()
     ready = Path.join(root, "owner-death-ready")
+    release = Path.join(root, "owner-death-release")
     survived = Path.join(root, "owner-death-survived")
     job_id = "owner-death-#{System.unique_integer([:positive])}"
     {executor, lease_id} = executor_for(root)
     Process.unlink(executor)
     owner = self()
 
-    {_caller, caller_monitor} =
+    {caller, caller_monitor} =
       spawn_monitor(fn ->
         answer =
           try do
@@ -3379,9 +4590,11 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
                 "argv" => [
                   "/bin/sh",
                   "-c",
-                  "printf ready > \"$1\"; sleep 1; printf survived > \"$2\"",
+                  "ps -o pgid= -p $$ | tr -d ' ' > \"$1\"; " <>
+                    "while [ ! -f \"$2\" ]; do :; done; printf survived > \"$3\"",
                   "loopex-owner-death",
                   ready,
+                  release,
                   survived
                 ]
               },
@@ -3394,8 +4607,12 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
         send(owner, {:owner_death_execute_answer, answer})
       end)
 
-    assert {:ok, ^ready} =
-             await_path(fn -> if File.exists?(ready), do: {:ok, ready}, else: :error end, 5_000)
+    on_exit(fn ->
+      release_held_group(release, ready)
+      if Process.alive?(caller), do: stop_test_process(caller)
+    end)
+
+    assert {:ok, group} = await_positive_integer_file(ready, 5_000)
 
     Process.exit(executor, :kill)
 
@@ -3403,10 +4620,81 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     assert_receive {:owner_death_execute_answer, {:ok, %{outcome: :outcome_unknown}}}, 5_000
     assert_receive {:DOWN, ^caller_monitor, :process, _caller, :normal}, 5_000
 
-    Process.sleep(1_200)
+    assert {:ok, ^group} =
+             await_path(
+               fn -> if process_group_empty?(group), do: {:ok, group}, else: :error end,
+               5_000
+             ),
+           "the dead executor's Port-owned guard did not reap its captured group"
+
+    File.write!(release, "continue")
+    Process.sleep(250)
 
     refute File.exists?(survived),
            "a command owned by the dead executor continued and wrote after its owner vanished"
+  end
+
+  test "a command owner crash closes control and the live guard reaps its silent group" do
+    # Concept: the operating-system guard, not the BEAM worker's continued
+    # existence, is the final owner of a command that has already started.
+    #
+    # Technical depth: an abrupt worker exit closes the Port's control stdin.
+    # The guard must observe that EOF while the command is silent and terminate
+    # the group it still anchors. Merely returning an unconfirmed receipt is not
+    # enough: without the concurrent control read, the silent descendant below
+    # remains in the operating-system process table after the worker and receipt
+    # owner have both moved on.
+    root = workspace()
+    ready = Path.join(root, "port-owner-crash-ready")
+    job_id = "port-owner-crash-#{System.unique_integer([:positive])}"
+    {executor, lease_id} = executor_for(root)
+
+    running =
+      Task.async(fn ->
+        run(
+          root,
+          "loopex.bash",
+          %{
+            "command" =>
+              "(printf ready > #{shell_path(ready)}; while :; do :; done) & while :; do :; done"
+          },
+          %{executor: executor, lease_id: lease_id, job_id: job_id, cleanup_grace_ms: 600}
+        )
+      end)
+
+    assert {:ok, ^ready} =
+             await_path(fn -> if File.exists?(ready), do: {:ok, ready}, else: :error end, 5_000)
+
+    {:dictionary, dictionary} = Process.info(executor, :dictionary)
+    table = Keyword.fetch!(dictionary, :loopex_inflight_table)
+    authority_key = {:loopex_process_authority, job_id}
+
+    assert {:ok, worker} =
+             await_path(
+               fn ->
+                 case :ets.lookup(table, authority_key) do
+                   [{^authority_key, worker, 600}] when is_pid(worker) -> {:ok, worker}
+                   _not_published -> :error
+                 end
+               end,
+               5_000
+             )
+
+    assert [{^job_id, group}] = :ets.lookup(table, job_id)
+    assert is_integer(group) and group > 1
+
+    Process.exit(worker, :kill)
+
+    assert {:ok, receipt} = Task.await(running, 5_000)
+    assert receipt.outcome == :outcome_unknown
+    assert receipt.cleanup_confirmation == :unconfirmed
+
+    assert {:ok, ^group} =
+             await_path(
+               fn -> if process_group_empty?(group), do: {:ok, group}, else: :error end,
+               5_000
+             ),
+           "the Port-owned guard did not reap the group after control stdin closed"
   end
 
   test "each of the three quiescence answers reaches a distinct outcome and only one is proved" do
@@ -3590,14 +4878,41 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     # A probe that is not there is the reachable form of "the confirmation could
     # not run", exactly as it is for the quiescence path.
     root = workspace()
-    {blind, blind_lease} = executor_with_probe(root, "/nonexistent/loopex-ps")
 
-    assert {:ok, receipt} =
-             run(root, "loopex.bash", %{"command" => "sleep 20"}, %{
-               executor: blind,
-               lease_id: blind_lease,
-               run_deadline: System.system_time(:millisecond) + 400
-             })
+    {clock, wall, advance} = controlled_deadline_clock()
+
+    {blind, blind_lease} =
+      executor_with_options(
+        root,
+        cleanup_grace_ms: 3_000,
+        process_probe: "/nonexistent/loopex-ps",
+        clock_provider: clock
+      )
+
+    observer = self()
+    progress_tag = make_ref()
+
+    progress = fn event ->
+      send(observer, {progress_tag, event.chunk})
+      :ok
+    end
+
+    running =
+      Task.async(fn ->
+        run(root, "loopex.bash", %{"command" => "printf ready; sleep 20"}, %{
+          executor: blind,
+          lease_id: blind_lease,
+          execute_options: [notify: observer],
+          progress: progress,
+          run_deadline: wall + 400
+        })
+      end)
+
+    assert_receive {:executor_process_started, _job_id, "loopex.bash", _environment}, 5_000
+    assert await_progress_text(progress_tag, "ready", 5_000) =~ "ready"
+    advance.(:both, 401)
+
+    assert {:ok, receipt} = Task.await(running, 10_000)
 
     assert receipt.outcome == :outcome_unknown,
            "a deadline stop that could confirm nothing was reported #{receipt.outcome}"
@@ -3749,14 +5064,19 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
 
     {answered_ms, answer} =
       elapsed(fn ->
-        Local.answer_within("/bin/sh", ["-c", "sleep 2; printf x > #{written}"], 150)
+        Local.answer_within(
+          "/bin/sh",
+          ["-c", "(sleep 1; printf x > #{shell_path(written)}) & sleep 20"],
+          150
+        )
       end)
 
     assert answer == :no_answer
     assert answered_ms < 1_500, "the bound was not honoured: #{answered_ms}ms"
 
-    # Long enough that the helper would have finished if it were still alive.
-    Process.sleep(3_000)
+    # The writer is a descendant rather than the direct helper shell. Killing
+    # only that shell would leave the writer alive and make this assertion fail.
+    Process.sleep(1_500)
 
     refute File.exists?(written),
            "the helper outlived its bound and completed its work afterwards"
@@ -3765,5 +5085,681 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     # abandonment path and not the ordinary one.
     assert {output, 0} = Local.answer_within("/bin/sh", ["-c", "printf answered"], 5_000)
     assert output == "answered"
+  end
+
+  test "raw and argv commands receive no private supervision descriptors or control input" do
+    root = workspace()
+    ordinary = Path.join(root, "ordinary-descriptor.txt")
+    File.write!(ordinary, "non-secret descriptor control")
+
+    probe = ~S"""
+    third=closed
+    fourth=closed
+    (: <&3) 2>/dev/null && third=open
+    (: <&4) 2>/dev/null && fourth=open
+    input=other
+    [ /dev/fd/0 -ef /dev/null ] && input=null
+    printf 'descriptors:%s:%s;input:%s\n' "$third" "$fourth" "$input"
+    """
+
+    # Concept: descriptor presence is observed without reading control bytes.
+    # Technical depth: ordinary file descriptors are the positive control; the
+    # real raw and argv paths must then expose only their null standard input.
+    assert {"descriptors:open:open;input:null\n", 0} =
+             System.cmd("/bin/sh", [
+               "-c",
+               "exec </dev/null 3<#{shell_path(ordinary)} 4<#{shell_path(ordinary)}\n" <> probe
+             ])
+
+    for arguments <- [%{"command" => probe}, %{"argv" => ["/bin/sh", "-c", probe]}] do
+      assert {:ok, receipt} = run(root, "loopex.bash", arguments)
+      assert receipt.outcome == :completed
+      assert receipt.cleanup_confirmation == :confirmed
+      assert receipt.output == "descriptors:closed:closed;input:null\n"
+    end
+  end
+
+  test "commands and bounded helpers retain their actual distinct supervision groups" do
+    root = workspace()
+
+    probe = ~S"""
+    cursor=$$
+    depth=0
+    while [ "$depth" -lt 4 ]; do
+      row=$(/bin/ps -p "$cursor" -o pid= -o ppid= -o pgid=) || exit 91
+      printf '%s\n' "$row"
+      set -- $row
+      [ "$#" -eq 3 ] || exit 92
+      cursor=$2
+      depth=$((depth + 1))
+    done
+    """
+
+    # Concept: the helper carrier survives outside its guard's final-KILL group.
+    # Technical depth: inspect the live command, status wrapper, guard and
+    # carrier through their actual parent chain; `set -m` returning zero is not
+    # a process-group witness. These observations never authorize a signal. A
+    # later process-table probe can conservatively refuse to certify quiescence;
+    # that changes the receipt outcome, not the four rows this command observed.
+    # Other protected cases prove ordinary completion and cleanup, so this case
+    # keeps its narrower job: the real supervision topology on both launch forms.
+    for arguments <- [%{"command" => probe}, %{"argv" => ["/bin/sh", "-c", probe]}] do
+      assert {:ok, receipt} = run(root, "loopex.bash", arguments)
+
+      assert receipt.outcome in [:completed, :outcome_unknown]
+
+      case receipt.outcome do
+        :completed ->
+          assert receipt.cleanup_confirmation == :confirmed
+
+        :outcome_unknown ->
+          assert receipt.cleanup_confirmation == :unconfirmed
+          assert receipt.output =~ "group could not be confirmed cleaned"
+      end
+
+      [command, status, guard, carrier] = observed_supervision_chain(receipt.output)
+      assert command.parent == status.pid
+      assert status.parent == guard.pid
+      assert guard.parent == carrier.pid
+      assert Enum.all?([command, status, guard, carrier], &(&1.group == carrier.pid))
+    end
+
+    assert {output, 0} = Local.answer_within("/bin/sh", ["-c", probe], 5_000)
+    [command, status, guard, carrier] = observed_supervision_chain(output)
+    assert command.parent == status.pid
+    assert status.parent == guard.pid
+    assert guard.parent == carrier.pid
+    assert Enum.all?([command, status, guard], &(&1.group == guard.pid))
+    assert carrier.group == carrier.pid
+    refute carrier.group == guard.group
+  end
+
+  defp observed_supervision_chain(output) do
+    for row <- output |> String.split("\n", trim: true) |> Enum.take(4) do
+      [pid, parent, group] = row |> String.split() |> Enum.map(&String.to_integer/1)
+      %{pid: pid, parent: parent, group: group}
+    end
+  end
+
+  test "an ordinary high exit status survives raw argv and bounded helper supervision" do
+    root = workspace()
+    command = "printf entered; exit 200"
+
+    # Concept: an ordinary high exit code remains the command's exact result.
+    # Technical depth: every path proves finite command entry and status 200;
+    # this case sends no signals and makes no concurrent-interruption claim.
+    for arguments <- [%{"command" => command}, %{"argv" => ["/bin/sh", "-c", command]}] do
+      assert {:ok, receipt} = run(root, "loopex.bash", arguments)
+      assert receipt.outcome == :failed
+      assert receipt.cleanup_confirmation == :confirmed
+      assert receipt.output == "entered\n[loopex: the command exited with status 200.]"
+    end
+
+    assert {"entered", 200} = Local.answer_within("/bin/sh", ["-c", command], 5_000)
+  end
+
+  test "the launch guard preserves fast command status and remains the only group signal authority" do
+    root = workspace()
+    {executor, lease_id} = executor_for(root)
+
+    # A fast status wrapper may still be present in the first process-table
+    # sample taken after its authenticated frame arrives. Exercise that narrow
+    # ordering repeatedly through one real executor: the wrapper is terminal
+    # protocol evidence, never unfinished model work.
+    for _iteration <- 1..12 do
+      assert {:ok, succeeded} =
+               run(
+                 root,
+                 "loopex.bash",
+                 %{"argv" => ["/usr/bin/true"]},
+                 %{executor: executor, lease_id: lease_id}
+               )
+
+      assert succeeded.outcome == :completed
+      assert succeeded.cleanup_confirmation == :confirmed
+    end
+
+    assert {:ok, failed} =
+             run(
+               root,
+               "loopex.bash",
+               %{"argv" => ["/usr/bin/false"]},
+               %{executor: executor, lease_id: lease_id}
+             )
+
+    assert failed.outcome == :failed
+    assert failed.cleanup_confirmation == :confirmed
+    assert failed.output =~ "status 1"
+
+    frame = "\nloopex-command-status:loopex-protocol-probe:"
+
+    assert Local.guard_protocol_probe([
+             frame <> "wrap",
+             "per:23\n" <> frame <> "status:0\n"
+           ]) == :valid
+
+    assert Local.guard_protocol_probe([
+             frame <> "status:0\n",
+             frame <> "status:0\n",
+             frame <> "wrapper:23\n"
+           ]) == :invalid
+
+    assert Local.guard_protocol_probe([
+             frame <> "wrapper:23\n",
+             frame <> "wrapper:24\n",
+             frame <> "status:0\n"
+           ]) == :invalid
+
+    assert Local.guard_protocol_probe([
+             frame <> "status:not-an-integer\n",
+             frame <> "wrapper:23\n"
+           ]) == :invalid
+
+    # Concept: the Port's operating-system child is an authority object, not a
+    # sampled number. It stays alive until this runtime has either released an
+    # already-quiescent group or sent the group's one final KILL.
+    #
+    # Technical depth: the fast commands above kill the common wait-loop mutant:
+    # checking `kill -0` before the first unconditional `wait` skips a child that
+    # already exited and reports the wrapper's sentinel status. The structural
+    # half covers the authority transitions that are otherwise deliberately hard
+    # to race in a deterministic case. It also makes each requested mutant local:
+    # restoring an exec launcher removes the waiting guard, releasing before the
+    # quiescence check changes the order, signalling a released guard fails the
+    # live-state guard, counting the guard as a survivor changes the exact ps
+    # answer, and admitting a missing/duplicate control frame breaks the final
+    # protocol conjunction.
+    {"/usr/bin/env", vector} = Local.launcher_vector(%{argv: ["/usr/bin/true"]})
+    carrier = Enum.at(vector, Enum.find_index(vector, &(&1 == "-c")) + 1)
+    script = Enum.at(vector, Enum.find_index(vector, &(&1 == "loopex-port-carrier")) + 1)
+
+    assert carrier =~
+             ~r/mode=\$1.*?exec 4<&0.*?if \[ "\$mode" = helper \]; then.*?set -m.*?\/bin\/bash -c "\$guard_script" "\$guard_name" "\$carrier_pid" "\$@" <&4 4<&- &.*?set \+m.*?else.*?\/bin\/bash -c "\$guard_script" "\$guard_name" "\$carrier_pid" "\$@" <&4 4<&- &.*?exec <\/dev\/null 4<&-/s
+
+    assert Enum.at(vector, Enum.find_index(vector, &(&1 == "-c")) - 1) == "/bin/bash"
+    assert script =~ ~S|/bin/sh -c "$command" 3>&- </dev/null &|
+
+    assert carrier =~
+             ~r/if \[ "\$mode" != helper \]; then.*?kill -s TERM -- -"\$carrier_pid".*?kill -s KILL -- -"\$carrier_pid"/s,
+           "the carrier no longer reaps its still-anchored command group after guard loss"
+
+    refute carrier =~ ~r/guard_group=.*?kill -(?:s )?(?:TERM|KILL) -- -"\$guard_group"/s,
+           "the helper carrier signals a detached sampled group after its guard has exited"
+
+    assert carrier =~ ~r/trap ':' TERM\n[ \t]*if \[ "\$mode" = helper \]; then/
+
+    assert carrier =~
+             ~r/guard_pid=\$!\n[ \t]*fi\n[ \t]*trap '' TERM\n[ \t]*exec <\/dev\/null 4<&-\n[ \t]*wait "\$guard_pid" 2>\/dev\/null\n[ \t]*guard_status=\$\?/
+
+    refute carrier =~ "wait_interrupted"
+
+    assert script =~ "IFS= read -r init"
+    assert script =~ "IFS= read -r permit"
+
+    assert script =~
+             ~r/carrier_group=\$1.*?if \[ "\$mode" = helper \]; then\s+group_id=\$\$\s+else\s+group_id=\$carrier_group/s
+
+    refute script =~ ~r/group_id=\$\(.*?ps /s
+    assert script =~ "while IFS= read -r control"
+
+    assert script =~
+             ~r/command_pid=\$!\n\s+trap '' TERM\n\s+wait "\$command_pid"\n\s+command_status=\$\?/
+
+    assert script =~
+             ~S|"$token" "$command_status"|,
+           "the authenticated status frame does not report the waited command status"
+
+    assert script =~
+             ~S|"$token" "$status_pid"|,
+           "the live guard does not authenticate the exact terminal wrapper it spawned"
+
+    refute script =~ "wait_interrupted"
+    refute script =~ "$(jobs -p)"
+    refute script =~ ~r/kill -(?:0|-?s 0)(?: --)? "\$command_pid"/
+    assert script =~ "trap - HUP INT PIPE\n  trap ':' TERM"
+
+    assert script =~
+             ~r/'loopex-signal:'"\$token"':TERM'\).*?trap '' TERM.*?kill -s TERM -- -"\$group_id".*?trap 'guard_abort' TERM/s,
+           "a cooperative group TERM no longer masks an external owner-loss TERM permanently"
+
+    assert script =~
+             ~r/'loopex-signal:'"\$token"':KILL'\).*?if \[ "\$mode" = helper \]; then.*?loopex-signal-accepted:%s:KILL.*?kill -s KILL -- -"\$group_id"/s,
+           "the live guard no longer acknowledges and performs the final group KILL"
+
+    assert script =~ "guard_abort"
+    assert script =~ "trap 'guard_abort' HUP INT PIPE TERM"
+
+    assert script =~
+             ~r/guard_abort\(\) \{\s+trap '' TERM\s+\[ -n "\$group_id" \] && kill -s TERM -- -"\$group_id"/,
+           "the abort trap can recurse on the group TERM it sends itself"
+
+    assert script =~ ~r/\*\) guard_abort ;;/
+    refute script =~ "exec \"$@\""
+
+    # The unpredictable token is supplied only after Port.open; neither launcher
+    # form can disclose it to the model command in argv or environment.
+    refute Enum.any?(vector, &String.starts_with?(&1, "loopex-init:"))
+    refute Enum.any?(vector, &String.starts_with?(&1, "loopex-run:"))
+
+    source = File.read!(Path.expand("../lib/executor.ex", __DIR__))
+
+    [signal_boundary] =
+      Regex.run(
+        ~r/defp signal_guard_group\(guard, signal\).*?\n  end\n\n  defp launch_guard_live/s,
+        source
+      )
+
+    assert signal_boundary =~ "if launch_guard_live?(guard)"
+
+    assert signal_boundary =~
+             ~S|safe_port_command(guard.port, "#{@guard_signal}:#{guard.token}:#{signal_name}\n")|,
+           "a group signal is no longer actuated by its live Port-owned guard"
+
+    refute signal_boundary =~ "/bin/kill",
+           "the runtime turned a sampled numeric group into signal authority"
+
+    [waiting_close] =
+      Regex.run(
+        ~r/defp close_waiting_guard\(port, token\).*?\n  end\n\n  # Concept:/s,
+        source
+      )
+
+    assert waiting_close =~
+             ~S|safe_port_command(port, "#{@guard_abort}:#{token}\n")|
+
+    refute waiting_close =~ "abandon_helper",
+           "a pre-permit refusal signals a sampled process identifier"
+
+    assert source =~
+             ~r/defp quiesce_launch_guard.*?if guard_children_gone\?\(guard, episode\) do.*?release_launch_guard\(guard, episode, status_known\?\)/s,
+           "the normal path can release the guard without first proving group quiescence"
+
+    assert source =~
+             ~r/defp release_launch_guard\(guard, _episode, status_known\?\) do.*?if status_known\? and launch_guard_live\?\(guard\) do\s+sent = safe_port_command/s,
+           "the guard can be released without authenticated status or live Port authority"
+
+    assert source =~
+             ~r/defp guard_answered_alone\?.*?fixed_members =\s+if carrier_in_group,\s+do: \[anchor_pid, carrier_pid\],\s+else: \[anchor_pid\].*?members == fixed_members or.*?members == Enum\.sort\(\[terminal_wrapper_pid \| fixed_members\]\)/s,
+           "normal completion neither admits its authenticated terminal wrapper nor excludes other command members"
+
+    assert source =~
+             ~r/defp launch_guard_live\?\(%\{state: :live, port: port, os_pid: os_pid\}\).*?Port\.info\(port, :os_pid\) == \{:os_pid, os_pid\}/s,
+           "a released or killed guard can still authorize a group signal"
+
+    assert source =~
+             ~r/protocol_proved =\s+collector\.protocol_valid and collector\.guard\.announced and\s+is_integer\(collector\.guard\.terminal_wrapper_pid\) and guard_exit_proved/s,
+           "missing, forged, or duplicate guard control evidence can be reported confirmed"
+
+    assert source =~
+             ~r/defp collect_guard_frame\(_collector, _duplicate_or_invalid\), do: :error/,
+           "a duplicate authenticated command-status fact does not invalidate the protocol"
+
+    assert source =~
+             ~r/_invalid_frame ->\s+\{:ok, %\{collector \| control_buffer: <<>>, protocol_valid: false\}\}/s,
+           "a malformed authenticated command-status frame does not invalidate the protocol"
+
+    assert source =~
+             ~r/defp launch_guard_exit_proved\?.*?:release_sent ->\s+is_integer\(collector\.command_status\) and status == 0.*?:kill_sent ->\s+status != 0.*?_missing_transition ->\s+false/s,
+           "normal release is not status-bound, or an unowned guard exit is treated as proof"
+  end
+
+  test "a malformed control message makes the live guard reap its admitted group" do
+    # Concept: malformed control is a refusal and cleanup event, never a way to
+    # release an already-admitted command from its Port-owned guard.
+    #
+    # Technical depth: exiting the guard directly from the catch-all branch
+    # leaves the status wrapper and command alive in the captured group. Drive
+    # the shipped guard program over a real Port, admit a TERM-resistant child,
+    # and hold a write behind an external release. Positive process-table
+    # emptiness plus the still-absent write prove that the malformed line ran the
+    # signal path rather than merely closing the control reader.
+    root = workspace()
+    ready = Path.join(root, "malformed-control-ready")
+    release = Path.join(root, "malformed-control-release")
+    survived = Path.join(root, "malformed-control-survived")
+
+    command =
+      "trap '' TERM; ps -o pgid= -p $$ | tr -d ' ' > #{shell_path(ready)}; " <>
+        "while [ ! -f #{shell_path(release)} ]; do :; done; " <>
+        "printf survived > #{shell_path(survived)}"
+
+    {launcher, vector} = Local.launcher_vector(%{command: command})
+
+    port =
+      Port.open(
+        {:spawn_executable, String.to_charlist(launcher)},
+        [
+          :binary,
+          :exit_status,
+          :use_stdio,
+          :stderr_to_stdout,
+          :hide,
+          args: Enum.map(vector, &String.to_charlist/1),
+          env: [
+            {~c"LOOPEX_PROVIDER_API_KEY", false},
+            {~c"ANTHROPIC_API_KEY", false}
+          ],
+          cd: String.to_charlist(root)
+        ]
+      )
+
+    on_exit(fn ->
+      release_held_group(release, ready)
+      close_test_port(port)
+    end)
+
+    token = "malformed-control-case"
+    assert Port.command(port, "loopex-init:#{token}\n")
+    assert Port.command(port, "loopex-run:#{token}\n")
+    assert {:ok, group} = await_positive_integer_file(ready, 5_000)
+    assert Port.command(port, "not-a-valid-control-message\n")
+
+    assert {:ok, ^group} =
+             await_path(
+               fn -> if process_group_empty?(group), do: {:ok, group}, else: :error end,
+               5_000
+             ),
+           "malformed control closed the Port but left its admitted group alive"
+
+    File.write!(release, "continue")
+    Process.sleep(250)
+
+    refute File.exists?(survived),
+           "malformed control let work escape after the Port-owned guard exited"
+  end
+
+  test "tool output cannot forge the private command status frame" do
+    # Concept: text from a tool remains text; it cannot decide the tool's exit
+    # status by imitating a private protocol prefix.
+    #
+    # Technical depth: the command does not know the random token delivered over
+    # control stdin. A collector that matches the visible prefix alone consumes
+    # the forged zero, conflicts with the wrapper's real status frame, and loses
+    # the proved status seven. Exact token binding keeps the bytes and verdict.
+    root = workspace()
+
+    assert {:ok, receipt} =
+             run(root, "loopex.bash", %{
+               "command" => "printf '\\nloopex-command-status:0\\n'; exit 7"
+             })
+
+    assert receipt.outcome == :failed
+    assert receipt.cleanup_confirmation == :confirmed
+    assert receipt.output =~ "\nloopex-command-status:0\n"
+    assert receipt.output =~ "status 7"
+  end
+
+  test "final KILL proves captured-group cleanup but an unsolicited guard exit proves nothing" do
+    root = workspace()
+    {executor, lease_id} = executor_with_grace(root, 600)
+    ready = Path.join(root, "term-resistant-ready")
+    job_id = "term-resistant-#{System.unique_integer([:positive])}"
+
+    running =
+      Task.async(fn ->
+        run(
+          root,
+          "loopex.bash",
+          %{
+            "command" =>
+              "printf 'hello\\n'; trap '' TERM; printf ready > #{shell_path(ready)}; while :; do sleep 1; done"
+          },
+          %{executor: executor, lease_id: lease_id, job_id: job_id, cleanup_grace_ms: 600}
+        )
+      end)
+
+    assert wait_for_file(ready), "the TERM-resistant command never started"
+
+    # The command cannot report its own status after KILL takes the complete
+    # group, including the guard. Cleanup nevertheless has two positive facts:
+    # KILL was sent over the exact live Port channel to its token-bound guard,
+    # and a later ps found the captured group empty. A direct-child status is
+    # mandatory for ordinary release, not for forced cancellation's cleanup truth.
+    assert Local.cancel(executor, job_id) == {:ok, :cleaned}
+    assert {:ok, killed} = Task.await(running, 5_000)
+    assert killed.outcome == :cancelled
+    assert killed.cleanup_confirmation == :confirmed
+    assert String.starts_with?(killed.output, "hello\n")
+
+    # A model command can end its grandparent guard by pid, but that act grants this
+    # runtime no cleanup authority and supplies no authenticated status frame.
+    # The Port's nonzero exit while its guard is still in :live is therefore an
+    # observation of loss, never a successful KILL transition.
+    lost_guard = Path.join(root, "unsolicited-guard-pid")
+    lost_group = Path.join(root, "unsolicited-guard-group")
+    release_guard = Path.join(root, "release-unsolicited-guard-descendant")
+    survived_guard = Path.join(root, "unsolicited-guard-descendant-survived")
+    {clock, wall, _advance} = controlled_deadline_clock()
+
+    {lost_executor, lost_lease_id} =
+      executor_with_options(root, cleanup_grace_ms: 600, clock_provider: clock)
+
+    on_exit(fn -> release_held_group(release_guard, lost_group) end)
+
+    assert {:ok, lost} =
+             run(
+               root,
+               "loopex.bash",
+               %{
+                 "command" =>
+                   "status_pid=$(/bin/ps -o ppid= -p $$ | /usr/bin/tr -d ' '); " <>
+                     "guard_pid=$(/bin/ps -o ppid= -p \"$status_pid\" | /usr/bin/tr -d ' '); " <>
+                     "group=$(/bin/ps -o pgid= -p $$ | /usr/bin/tr -d ' '); " <>
+                     "(while [ ! -f #{shell_path(release_guard)} ]; do :; done; " <>
+                     "printf escaped > #{shell_path(survived_guard)}) & " <>
+                     "printf '%s' \"$group\" > #{shell_path(lost_group)}; " <>
+                     "printf '%s' \"$guard_pid\" > #{shell_path(lost_guard)}; " <>
+                     "printf '\\nloopex-command-status:'; kill -KILL \"$guard_pid\""
+               },
+               %{
+                 executor: lost_executor,
+                 lease_id: lost_lease_id,
+                 cleanup_grace_ms: 600,
+                 run_deadline: wall + 2_000
+               }
+             )
+
+    assert lost.outcome == :outcome_unknown
+    assert lost.cleanup_confirmation == :unconfirmed
+    assert lost.output =~ "\nloopex-command-status:"
+    assert lost.output =~ "effect is complete is unproven"
+
+    guard_pid = lost_guard |> File.read!() |> String.to_integer()
+    assert wait_for_os_pid_exit(guard_pid, 200), "the sabotaged finite workload leaked"
+
+    group = lost_group |> File.read!() |> String.trim() |> String.to_integer()
+
+    assert {:ok, ^group} =
+             await_path(
+               fn -> if process_group_empty?(group), do: {:ok, group}, else: :error end,
+               5_000
+             ),
+           "the carrier reported guard loss while the captured group remained alive"
+
+    File.write!(release_guard, "continue")
+    Process.sleep(250)
+
+    refute File.exists?(survived_guard),
+           "the carrier let work survive after its launch guard was killed"
+  end
+
+  test "a TERM-interrupted wrapper waits for its owned shell job rather than rechecking its pid" do
+    # Concept: cooperative cancellation preserves the command's own TERM
+    # handler and waits for that actual child before confirming cleanup.
+    #
+    # Technical depth: this retained cancellation case exercises real group
+    # TERM, not a sampled PID probe. The wrapper now shields its owned-child
+    # wait after forking; the command must still observe TERM and emit its own
+    # handler marker before exiting. The command waits in a shell builtin loop,
+    # so observation is not coupled to an external `sleep` being scheduled and
+    # reaped before the shell can run its trap. The public receipt must confirm
+    # cleanup under the unchanged configured period.
+    root = workspace()
+    ready = Path.join(root, "term-interrupted-wrapper-ready")
+    job_id = "term-interrupted-wrapper-#{System.unique_integer([:positive])}"
+    {executor, lease_id} = executor_with_grace(root, 2_000)
+
+    running =
+      Task.async(fn ->
+        run(
+          root,
+          "loopex.bash",
+          %{
+            "command" =>
+              "trap 'printf term-handled; exit 7' TERM; printf ready > #{shell_path(ready)}; while :; do :; done"
+          },
+          %{executor: executor, lease_id: lease_id, job_id: job_id, cleanup_grace_ms: 2_000}
+        )
+      end)
+
+    assert wait_for_file(ready), "the cooperative command never reached its TERM wait"
+    assert Local.cancel(executor, job_id) == {:ok, :cleaned}
+
+    assert {:ok, receipt} = Task.await(running, 5_000)
+    assert receipt.outcome == :cancelled
+    assert receipt.cleanup_confirmation == :confirmed
+    assert receipt.output =~ "term-handled"
+  end
+
+  test "post-fork waiter shielding preserves default and explicit command TERM dispositions" do
+    root = workspace()
+
+    # These actual argv children are independent controls for fork ordering.
+    # An ignored TERM inherited before launch would let the first command
+    # continue and prevent the second noninteractive shell installing its trap.
+    # They do not reproduce the negative wait-status schedule by themselves.
+    assert {:ok, default} =
+             run(root, "loopex.bash", %{
+               "argv" => ["/bin/bash", "-c", "kill -TERM $$; printf term-was-ignored"]
+             })
+
+    assert default.outcome == :failed
+    assert default.cleanup_confirmation == :confirmed
+    assert default.output =~ "status 143"
+    refute default.output =~ "term-was-ignored"
+
+    assert {:ok, handled} =
+             run(root, "loopex.bash", %{
+               "argv" => ["/bin/bash", "-c", "trap 'exit 7' TERM; kill -TERM $$; exit 9"]
+             })
+
+    assert handled.outcome == :failed
+    assert handled.cleanup_confirmation == :confirmed
+    assert handled.output =~ "status 7"
+  end
+
+  test "a reentrant progress callback restores the outer job's complete execution context" do
+    root = workspace()
+    {executor, lease_id} = executor_with_grace(root, 5_000)
+    result_key = {:loopex_reentrant_context, make_ref()}
+
+    keys = [
+      :loopex_cleanup_grace_ms,
+      :loopex_process_probe,
+      :loopex_inflight_table,
+      :loopex_effect_owner,
+      :loopex_cleanup_episode,
+      :loopex_retention_episode,
+      :loopex_admission
+    ]
+
+    snapshot = fn ->
+      missing = make_ref()
+
+      Map.new(keys, fn key ->
+        case Process.get(key, missing) do
+          ^missing -> {key, :absent}
+          value -> {key, {:present, value}}
+        end
+      end)
+    end
+
+    progress = fn event ->
+      before = snapshot.()
+
+      nested =
+        run(root, "loopex.write", %{"path" => "nested.txt", "content" => "nested"}, %{
+          executor: executor,
+          lease_id: lease_id,
+          cleanup_grace_ms: 8_000
+        })
+
+      Process.put(result_key, {before, snapshot.(), nested, event})
+      :ok
+    end
+
+    assert {:ok, outer} =
+             run(root, "loopex.bash", %{"command" => "printf outer"}, %{
+               executor: executor,
+               lease_id: lease_id,
+               cleanup_grace_ms: 800,
+               progress: progress
+             })
+
+    assert {before, after_nested, {:ok, nested}, event} = Process.delete(result_key)
+    assert before == after_nested
+    assert before.loopex_cleanup_grace_ms == {:present, 800}
+    assert before.loopex_process_probe == {:present, "/bin/ps"}
+    assert match?({:present, table} when is_reference(table), before.loopex_inflight_table)
+    assert before.loopex_effect_owner == {:present, executor}
+    assert before.loopex_cleanup_episode == :absent
+    assert before.loopex_retention_episode == :absent
+    assert {:present, %{observed_at_ms: observed_at_ms}} = before.loopex_admission
+
+    assert nested.outcome == :completed
+    assert nested.cleanup_grace_ms == 8_000
+    assert File.read!(Path.join(root, "nested.txt")) == "nested"
+
+    assert outer.outcome == :completed
+    assert outer.output == "outer"
+    assert outer.cleanup_grace_ms == 800
+    assert outer.receipt_retention_bound_ms == 200
+    assert outer.observed_at_ms == observed_at_ms
+    assert event.chunk == "outer"
+
+    # The outer run's own dynamic frame is removed only after its receipt is
+    # retained; the callback's test-private result is the only value left here.
+    Enum.each(keys, fn key -> refute Process.get(key) end)
+  end
+
+  defp shell_path(path), do: "'" <> String.replace(path, "'", "'\\''") <> "'"
+
+  defp process_group_empty?(group) when is_integer(group) do
+    case System.cmd("/bin/ps", ["-e", "-o", "pid=", "-o", "pgid="], stderr_to_stdout: true) do
+      {output, 0} ->
+        output
+        |> String.split("\n", trim: true)
+        |> Enum.all?(fn line ->
+          case String.split(line) do
+            [_pid, row_group] -> row_group != Integer.to_string(group)
+            _malformed -> false
+          end
+        end)
+
+      {_output, _status} ->
+        false
+    end
+  end
+
+  defp close_test_port(port) do
+    Port.close(port)
+    :ok
+  rescue
+    ArgumentError -> :ok
+  catch
+    _kind, _reason -> :ok
+  end
+
+  defp wait_for_os_pid_exit(_os_pid, 0), do: false
+
+  defp wait_for_os_pid_exit(os_pid, attempts) do
+    case System.cmd("/bin/kill", ["-0", Integer.to_string(os_pid)], stderr_to_stdout: true) do
+      {_output, 0} ->
+        Process.sleep(10)
+        wait_for_os_pid_exit(os_pid, attempts - 1)
+
+      {_output, _status} ->
+        true
+    end
   end
 end

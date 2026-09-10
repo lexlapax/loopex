@@ -35,6 +35,11 @@ journal after the registry that held them has changed. Registration is
 append-only and scoped to one runtime; being registered and being offered to a
 model are separate facts.
 
+The reference local executor requires `/bin/bash` for its internal supervision
+scripts, while raw tool commands stay on `/bin/sh` and argv calls remain literal.
+This prerequisite belongs to the concrete adapter, not Core or custom executors;
+see the [operator setup boundary](../operator/tools-and-policy.md#operator-local-supervision-shell).
+
 None of these surfaces is frozen or labelled:
 [Compatibility surfaces](compatibility-surfaces.md#concept).
 
@@ -255,10 +260,39 @@ The staged digest is identity, not dispatch authority. First staging commits
 without its consecutive open row exposes no dispatchable request. After the
 open fact is durable, Runtime Control validates the complete current owner,
 operation, attempt, digest, journal position, worker, permit reference, and
-deadline, then sends one fresh permit directly to that worker. That send is the
-provider-dispatch linearization point. The spent attempt identity survives
+deadline, samples the deadline again immediately before sending one fresh permit
+directly to that worker, and spends the attempt with that send. The receiving
+worker compares the same committed deadline immediately after receiving the
+permit and before entering the adapter. The send remains the
+provider-dispatch linearization point: a permit that arrives late is retained as
+possibly dispatched and is never retried, even though the receiver makes no
+provider call. The spent attempt identity survives
 owner and worker replacement, so no timeout, lost reply, dead worker, or
 successor can mint a second call for it.
+
+The Store read that rebuilds the committed binding is owned by a guardian that
+monitors Runtime Control. A timeout or Control death kills and awaits the exact
+reader, and its successful result is forwarded only after that reader exits. A
+model result likewise retains its worker-provenance wrapper through admission,
+so adapter data cannot impersonate the receiver's private deadline result.
+
+The coordinator also starts and retains a dormant provider lifetime guard under
+the owner generation's private supervisor before Control is asked to authorize
+the attempt. The guard binds the exact permit worker and starts no adapter work
+until that worker receives its permit and asks the guard to create a linked
+callback. Catchable failures normalize inside that callback;
+the trapping guard converts an asynchronous linked exit into the same fixed
+private result. It waits for a successful callback to exit before forwarding the
+result and cannot finish while the callback lives. An adapter can register a
+private resource guardian before it releases provider work; the permit worker
+retains the same stop handle independently. The ReqLLM guardian owns the linked
+and spawned transport tree through per-process trace-delivery barriers, including
+the externally supervised HTTP task and any private descendants, and suppresses
+direct provider IO. It does not acknowledge cleanup until every retained process
+is down. Every terminal path stops and awaits the retained guard and resource;
+on abrupt owner loss, the generation barrier cannot fall until its private
+supervisor has proved both down. Neither worker nor coordinator loss therefore
+leaves detached provider work, and no provider value can forge `not_dispatched`.
 
 A conforming adapter may report `not_dispatched` only before it invokes or
 hands bytes to provider transport. The coordinator proves the same fact for one
@@ -277,6 +311,15 @@ effect that reconciliation can complete safely. A successful reply carries a
 closed provider-neutral identity, normalized usage, tool calls, stream facts,
 response identifier, and the exact staged digest; raw provider structures and
 reasons cross no Core, Store, public, progress, diagnostic, or fixture plane.
+The reference adapter isolates provider dependencies and credential-bearing work
+in one host-owned companion BEAM per invocation, as defined by
+[ADR 0019](../adr/0019-host-owned-provider-protection.md#concept). Its protected entry
+suppresses that child's Logger and direct IO before starting ReqLLM; the parent
+installs no credential registry, Logger filter, or shared group-leader change.
+An independent process guardian owns the worker group through result retention
+and cleanup. The private channel carries bounded plain data, not provider
+exceptions or runtime terms. Missing explicit launch configuration refuses before
+dispatch; it never falls back to executing ReqLLM in the embedding VM.
 
 A settlement is four closed enumerations and one result. `transport` is
 `not_dispatched` or `dispatched_or_unknown`; `termination` is absent, `abort`,
@@ -307,9 +350,13 @@ error category. A run's usage map is also closed to `input_tokens` and
 `output_tokens`: an adapter that reports any other key produces
 `unreadable_model_answer` rather than having an unrecognised number silently
 ignored, while omitting either key stays legal and normalizes as unreported.
-A reply Core cannot canonicalize settles under that same category and keeps the
-provider's complete reported usage, because an answer that could not be read is
-still an answer that was billed.
+A reply Core cannot canonicalize settles under that same category and contributes
+no reported usage, even when one raw member looks like a valid pair. Every
+extra, missing, colliding, or invalid usage shape likewise charges the run's
+remaining allowance as estimated, because the answer may still have been billed
+but Core cannot vouch for a partial projection. A fully canonical reply that is
+compacted only because its complete durable settlement does not fit retains its
+already validated reported usage.
 
 ### Declared Bounds and the Split Deadline
 
@@ -335,12 +382,18 @@ own is `completed` and stays `completed`. A non-integer `deadline` raises rather
 than returning `:continue`, because Elixir orders numbers below atoms and
 `now >= nil` would make an uncommitted deadline a silently unreachable bound.
 
-Provider accounting settles atomically with the attempt result. A reply with a
-complete valid input/output pair charges those exact reported values. Missing,
-partial, malformed, negative, non-integer, or unsigned-64-overflow usage is
-normalized as unreported; every possibly dispatched attempt with unreported
-usage charges exactly the run's remaining cumulative allowance. Exact
-pretransport `not_dispatched` proof charges nothing. The settlement, accounting,
+Provider accounting settles atomically with the attempt result. The complete raw
+reply passes Store bounded-plain-data admission before full canonical projection.
+Missing or partial usage, and Store-admitted values with malformed, negative,
+non-integer or unsigned-64-overflow numeric shapes, are unreported in an
+otherwise canonical reply. Extra usage keys instead reject the reply as
+`unreadable_model_answer`; an extra,
+colliding, non-plain, or invalid sibling that rejects the reply cannot leave its
+usage independently reportable. Every possibly dispatched attempt in either
+class charges exactly the run's remaining cumulative allowance as estimated.
+Only a fully validated canonical reply whose complete settlement later fails the
+Store-size preflight preserves its reported usage in the compact settlement.
+Exact pretransport `not_dispatched` proof charges nothing. The settlement, accounting,
 conversation disposition, retry/continue/terminal choice, and paired run
 terminal where one is owed are one Store transaction, so commit-unknown replay
 cannot apply cost without outcome or make retry authority reappear. Estimated
@@ -559,6 +612,14 @@ artifact list, which is true rather than a silent absence. The shipped
 composition always supplies a store, so an operator using `loopex` does not take
 that path.
 
+Artifact retention is part of settlement and runs in a monitored worker under
+the workspace lease and the run's remaining bound. A store refusal or a worker
+confirmed stopped loses only retrieval, as above. If the worker cannot be
+confirmed stopped, the executor cannot know whether it may still publish after
+returning. It therefore writes no receipt, clears no open authority, and reports
+`receipt_not_retained`; the existing durable open entry quarantines the root for
+reconciliation.
+
 `CodingTools.present/1` remains conformance-only: nothing in the production path
 calls it.
 
@@ -569,10 +630,17 @@ declarations in the reserved namespace:
 
 | `tool_id` | Effect class | Idempotency | Output ceiling |
 | --- | --- | --- | --- |
-| `loopex.read` | `read_only` | `safe_retry` | 65536 bytes |
+| `loopex.read` | `read_only` | `safe_retry` | 16384 bytes |
 | `loopex.write` | `workspace_write` | `safe_retry` | 4096 bytes |
 | `loopex.edit` | `workspace_write` | `never_blind_retry` | 4096 bytes |
-| `loopex.bash` | `process` | `never_blind_retry` | 65536 bytes |
+| `loopex.bash` | `process` | `never_blind_retry` | 16384 bytes |
+
+The two largest inline ceilings reserve three quarters of the Store's
+65,536-byte private record for the executor receipt and the next staged-context
+envelope. Local reserves capacity for the receipt before admitting an effect and
+measures the complete receipt before retaining it; valid identity fields may
+narrow the visible prefix further when they consume more than that reserved
+headroom.
 
 Containment is checked against the *resolved* path, not the requested one.
 `resolve/2` resolves the workspace root, expands the requested path against it,
@@ -590,22 +658,49 @@ ambiguous and reports the nearest line it did find. `bash` takes either an argv
 vector, passed through without a shell, or an explicit raw `command`, which asks
 for a shell and gets one; collapsing the two would surprise a caller who supplied
 arguments safely. A job dispatched past its effective deadline is refused before it begins rather
-than interrupted while running: the three filesystem tools cannot be interrupted
-once started, so `run_coding_tool/5` compares the instant against the clock and
-returns `the effective deadline passed before this tool began`. No process is
-terminated because none was started. `bash` is the tool whose deadline governs a
-running child, and its expiry enters the termination and cleanup-confirmation
-sequence.
+than interrupted while running: the three filesystem tools do not use deadline
+expiry as a mid-call verdict, so `run_coding_tool/5` compares the instant against
+the clock and returns `the effective deadline passed before this tool began`. No
+process is terminated because none was started. `bash` is the tool whose deadline
+governs a running child, and its expiry enters the termination and
+cleanup-confirmation sequence. Independently, loss of the Local instance that
+admitted a filesystem effect terminates its owner-aware worker and reports the
+effect unproven.
 
 The three filesystem tools start no operating-system process.
-A child runs in a process group of its own, established by the spawn itself
-rather than by any helper program, announces the group the operating system
-actually assigned before doing anything else, and is terminated by group rather
-than by leader. No launcher in the executor's chain may fork or replace that
-identity: the Port, command, and descendants that remain in the inherited group
-keep one owned group from spawn through receipt, so exit status, termination,
-and cleanup confirmation all describe the same work. A descendant that calls
-`setsid` or `setpgid` can deliberately leave that boundary, as ADR 0009 records.
+A credential-clean Port carrier opens first and starts the token-bound launch
+guard. Both internal scripts use absolute `/bin/bash`, independently of the raw
+command's `/bin/sh` interpreter. The carrier preserves its control input before
+asynchronous guard launch and closes the redundant descriptor in both processes;
+the model command receives neither that input nor the private status descriptor.
+There is no interpreter-selection option or fallback. The
+[implementation disposition](agent-context-map.md#disposition-local-executor-bash-2026-09-07)
+authorizes this scoped repair; [ADR 0022](../adr/0022-local-executor-supervision-shell.md#concept)
+is Accepted through its exact-pair disposition.
+In command mode, the carrier leads the Port-created process group and the
+guard, status wrapper, command, and remaining descendants share that group. The
+guard receives private control and signals the group it is still a member of, so
+the runtime never turns a sampled numeric process-group identifier into later
+signal authority. In bounded-helper mode, job control places the guard in its
+own guard-led group; the carrier stays outside that group, survives the guard's
+final KILL, and relays the guard's protocol evidence through the Port. A helper
+answer is usable only after the guard acknowledges the private final-KILL command
+and the carrier reports the resulting Port exit; a timeout requests the same
+cleanup and remains a non-answer. Neither path delegates a late signal to a
+second process holding a sampled helper PID. A descendant that calls `setsid` or
+`setpgid` can deliberately leave the applicable group boundary, as ADR 0009
+records.
+Group confirmation invokes the configured process probe with the portable
+`-e -o pid= -o pgid=` table shape and selects exact PGID equality in the
+runtime. A zero-status table is usable only when it also contains the probe's
+own Port carrier as a PID-equals-PGID witness; an empty or malformed response and
+the incompatible BSD/procps meanings of filtered `ps -g` therefore cannot turn
+silence into confirmed cleanup.
+The status wrapper and its parent guard are separate operating-system writers.
+An ordinary release is sent only after the collector has already parsed the
+wrapper's authenticated frame. A cleanup path that sees group quiescence before
+those bytes instead uses the live guard's final KILL, so cross-writer message
+arrival cannot turn an unproved release into a result.
 The effective deadline of a job is the earlier of the run's deadline and the
 tool's own wall-time budget.
 
@@ -755,11 +850,13 @@ facts, so a successor resumes from the journal rather than from anyone's memory:
    ordered transaction before any adapter sees them.
 2. `model_attempt_open` — start a worker that cannot call the adapter until
    Runtime Control validates the current owner, attempt, journal position,
-   worker, fresh reference, and deadline and sends that worker its one-use
-   permit. The send opens exactly one attempt-scoped model stream domain and is
-   the provider-dispatch linearization point.
+   worker, fresh reference, and deadline, takes a final pre-send clock sample,
+   and sends that worker its one-use permit. The worker checks the same deadline
+   again immediately after receipt and before adapter entry. The send opens
+   exactly one attempt-scoped model stream domain and is the provider-dispatch
+   linearization point even where late receipt prevents the provider call.
 3. On reply or failure — validate the provider-neutral result and atomically
-   commit `model_attempt_settled_v1` with its accounting, conversation
+   commit `model_attempt_settled_v2` with its accounting, conversation
    disposition, and retry/continue/terminal choice. A valid canonical reply
    closes from its own `delta_count` and commits the assistant message and
    event. Exact pretransport `not_dispatched` on attempt one charges nothing and
@@ -775,10 +872,16 @@ facts, so a successor resumes from the journal rather than from anyone's memory:
    dispatch. That record emits `tool.started`. A denial, an unresolvable name,
    or a passed deadline commits a terminal `tool_result_committed` record
    instead, which emits `tool.finished`, and the loop continues.
-5. `effect_dispatched` — the executor revalidates job, grant, lease, audience,
-   expiry, epoch, identity, and fence at its final pre-start boundary, runs, and
-   retains its receipt. This state is never restarted by recovery; an intent
-   without a fact is reconciled.
+5. `effect_dispatched` — the Local executor first reserves or joins the job
+   without granting effect authority, then answers one serialized permit request
+   only after revalidating the exact live reservation holder, complete shared
+   root, job, grant, lease, audience, expiry, epoch, identity, and fence, then
+   repeating the complete root snapshot after any blocking validation. Successful
+   new work publishes admission and the operation-owner token under the same
+   claim, runs under that exact Local authority, and retains its receipt. A stop
+   between open-entry and marker publication installs no token and leaves
+   quarantine truth instead of a permit. This state is never restarted by
+   recovery; an intent without a fact is reconciled.
 6. On receipt — one `executor_receipt_committed` record matches the receipt
    against the dispatched job, appends the `tool_result` element, and emits
    `tool.finished`. The turn returns to `effect_pending` while calls remain and

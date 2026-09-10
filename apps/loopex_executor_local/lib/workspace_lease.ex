@@ -46,6 +46,33 @@ defmodule Loopex.Executor.Local.WorkspaceLease do
     end
   end
 
+  @doc """
+  ## Concept
+
+  Records that one bounded effect reached its completion boundary while this
+  workspace lease was still live.
+
+  ## Technical depth
+
+  The effect has already placed its potentially large result in an ephemeral ETS
+  row whose table identifier is held only by the bounded-work processes. The
+  table is public solely so this separate lease process can update it. This call
+  changes only the row's small certificate fields, inside the lease holder
+  itself, so lease death and completion cannot be decided by the arrival order
+  of independent messages. The caller supplies the owner and already-sampled
+  bound fact; a failure to update the row certifies nothing.
+  """
+  @spec certify_completion(pid(), :ets.tid(), reference(), pid() | nil) ::
+          :ok | {:error, :workspace_lease_lost | :completion_certificate_unavailable}
+  def certify_completion(pid, table, tag, owner)
+      when is_pid(pid) and is_reference(tag) and (is_pid(owner) or is_nil(owner)) do
+    try do
+      GenServer.call(pid, {:certify_completion, table, tag, owner}, :infinity)
+    catch
+      :exit, _reason -> {:error, :workspace_lease_lost}
+    end
+  end
+
   @impl GenServer
   def init(options) do
     id = Keyword.fetch!(options, :id)
@@ -67,6 +94,28 @@ defmodule Loopex.Executor.Local.WorkspaceLease do
 
   def handle_call({:resolve, _wrong}, _from, state),
     do: {:reply, {:error, :workspace_lease_mismatch}, state}
+
+  def handle_call({:certify_completion, table, tag, owner}, _from, state) do
+    certified =
+      try do
+        owner_held = not is_pid(owner) or Process.alive?(owner)
+
+        case :ets.update_element(table, tag, [
+               {2, :certified},
+               {3, true},
+               {4, owner_held}
+             ]) do
+          true -> :ok
+          false -> {:error, :completion_certificate_unavailable}
+        end
+      rescue
+        ArgumentError -> {:error, :completion_certificate_unavailable}
+      catch
+        _kind, _reason -> {:error, :completion_certificate_unavailable}
+      end
+
+    {:reply, certified, state}
+  end
 
   @impl GenServer
   def format_status(status) do

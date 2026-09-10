@@ -82,7 +82,7 @@ defmodule Loopex.ReferenceClient.RealModelSessionTest do
     results =
       Enum.filter(
         records,
-        &(&1.payload.kind == "model_attempt_settled_v1" and
+        &(&1.payload.kind == "model_attempt_settled_v2" and
             &1.payload["conversation"] == "canonical")
       )
 

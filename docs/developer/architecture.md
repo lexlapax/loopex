@@ -126,6 +126,14 @@ emits nothing, returns the same reply, and is conformant. Fixed by
 [ADR 0010](../adr/0010-provider-continuation-and-context-staging.md#concept) and
 [ADR 0011](../adr/0011-session-input-algebra-and-streaming.md#concept).
 
+Provider accounting preserves the validated reply's usage even when its full
+settlement cannot fit the Store. That compact record retains the normalized
+usage and the exact byte or depth refusal observation; rejected raw replies
+retain no validated evidence and consume estimated remaining allowance. New
+settlements use version 2. Replay accepts an unambiguous version-1 prefix, then
+version 2 exclusively, under
+[ADR 0021](../adr/0021-compacted-provider-accounting-provenance.md#concept).
+
 **Executor** is the authority and effect-start boundary. It defines one
 transport-neutral job, the host-grant bindings an executor revalidates
 immediately before an effect, and the cancellation callback. It also declares,
@@ -237,16 +245,29 @@ by a pure reducer that performs no input or output, so replaying the same record
 in the same order always produces the same state — which is what makes a restart
 a recovery rather than a guess.
 
-**Workers** return evidence and nothing else. A provider call and an executor
-call each run in a supervised task; neither may mutate session state, publish a
-durable fact, or decide its own admission. A worker that dies has produced no
-truth, and the coordinator settles the attempt it opened rather than inheriting a
-claim from a process that is gone.
+**Workers** return evidence and nothing else. An executor call runs in a
+supervised task. A provider operation occupies two sibling children under the
+owner generation's private task supervisor: a dormant guard and the worker that
+waits for the exact permit. Only that permitted worker asks the guard to create
+its linked adapter callback. Terminal paths stop and await the guard, which
+cannot finish before the callback, and abrupt owner loss cannot advance past the
+generation barrier while any of the three lives. Neither worker, guard, nor
+callback may mutate
+session state, publish a durable fact, or decide its own admission. A process
+that dies contributes no raw provider evidence. The guard returns only a fixed
+private failure, which the coordinator settles conservatively for the attempt it
+opened rather than inheriting a claim from a process that is gone.
 
 Ownership can move while work is in flight, and the design assumes it will. A
 superseded coordinator can never newly commit, its ephemeral refusals are its own
 to retain only while it is still authoritative, and it stops only once every
-in-flight call, pending cleanup, and open stream it owns has settled.
+in-flight call, open stream, executor reserve, and model reserve it owns has
+settled, every pending cleanup has either settled or been closed as
+abandoned, and no fault hook is still pending. A cleanup whose model worker
+the supersession itself terminated is
+closed that way at once, since a superseded owner commits nothing, while an
+executor cleanup keeps its worker alive until it answers, so a superseded owner
+lives exactly as long as that effectful work does.
 
 Technical depth: [Succession, the post-commit fence, and the invariants](architecture-technical.md#technical-arch-session-owner).
 

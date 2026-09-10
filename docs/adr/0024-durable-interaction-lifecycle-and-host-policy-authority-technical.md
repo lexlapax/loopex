@@ -1,27 +1,27 @@
-# 0020: Technical depth
+# 0024: Technical depth
 
 <a id="technical-depth"></a>
 ## Technical depth
 
-Concept: [Durable interaction lifecycle and host-policy authority](0020-durable-interaction-lifecycle-and-host-policy-authority.md#concept).
+Concept: [Durable interaction lifecycle and host-policy authority](0024-durable-interaction-lifecycle-and-host-policy-authority.md#concept).
 
-<a id="technical-adr-0020-context"></a>
+<a id="technical-adr-0024-context"></a>
 ## Missing Durable Decision Point
 
-Concept: [Context](0020-durable-interaction-lifecycle-and-host-policy-authority.md#concept-adr-0020-context).
+Concept: [Context](0024-durable-interaction-lifecycle-and-host-policy-authority.md#concept-adr-0024-context).
 
 ADR 0009's policy callback already returns allow, deny, or a bounded defer
 request. M2's locked one-shot `Loopex.Policy.decide/2` projection maps defer to
-`{:deny, :interaction_unsupported}`. M4 preserves that projection and adds the
+`{:deny, :interaction_unsupported}`. M3 preserves that projection and adds the
 durable evaluator that can admit the existing defer branch. All state
 transitions remain session commands under the one serial owner. The app-server
 projects state and submits answers; it is never the interaction store or policy
 authority.
 
-<a id="technical-adr-0020-decision"></a>
+<a id="technical-adr-0024-decision"></a>
 ## Exact State and Race Contract
 
-Concept: [Decision](0020-durable-interaction-lifecycle-and-host-policy-authority.md#concept-adr-0020-decision).
+Concept: [Decision](0024-durable-interaction-lifecycle-and-host-policy-authority.md#concept-adr-0024-decision).
 
 ### State
 
@@ -40,7 +40,7 @@ contracts.
 
 ### Policy evaluation and bounded answer shape
 
-`Loopex.Policy.decide/2` retains M2's fail-closed result for every defer. M4 adds
+`Loopex.Policy.decide/2` retains M2's fail-closed result for every defer. M3 adds
 `Loopex.Policy.evaluate/2` around the same host `module.decide/1` callback. The
 new evaluator validates ADR 0009's existing return algebra without collapsing a
 valid defer. Initial evaluation receives ADR 0009's exact policy request.
@@ -50,7 +50,7 @@ fixed atom keys the accepted M2 behavior already uses; no atom comes from
 protocol input. No second callback or callback
 arity is introduced.
 
-M4's admitted `interaction_request` is the smallest proven question family:
+M3's admitted `interaction_request` is the smallest proven question family:
 `kind` is exactly `choice`; `prompt` is non-empty UTF-8 of at most 2 KiB;
 `choices` contains one to eight entries with a unique 1–64 byte binary `id` and
 a non-empty UTF-8 `label` of at most 256 bytes; and `expires_in_ms` is an integer
@@ -93,6 +93,11 @@ the journal. The first eligible committed transition wins. A later response is
 stale and cannot reopen the record. If deadline cleanup truth is insufficient,
 ADR 0010's `outcome_unknown` wins over a clean bound claim.
 
+Creation time, effective expiry, transaction ID and mutation digest are chosen
+once before the transaction is attempted. Resolve commit_unknown using that
+same preimage; never recompute expiry from a later clock. Another defer creates
+a separate identity and time only in its own committed transition.
+
 ### Recovery
 
 Owner succession scans for `pending` and `answered` interactions. `pending`
@@ -103,10 +108,14 @@ committed result is retried only because policy evaluation is non-authorizing
 until its result and any grant/intent commit; an executor effect is never blindly
 retried.
 
-<a id="technical-adr-0020-consequences"></a>
+Graceful shutdown that cancels a run leaves its interaction cancelled. The
+restart proof uses abrupt process loss with a retained pending/answered record;
+it cannot reopen a question already resolved by cancellation.
+
+<a id="technical-adr-0024-consequences"></a>
 ## Evidence Consequences
 
-Concept: [Consequences](0020-durable-interaction-lifecycle-and-host-policy-authority.md#concept-adr-0020-consequences).
+Concept: [Consequences](0024-durable-interaction-lifecycle-and-host-policy-authority.md#concept-adr-0024-consequences).
 
 Conformance injects failure before and after interaction commit, answer
 admission, policy result, grant/intent commit, and publication. It covers
@@ -117,18 +126,19 @@ content, request IDs, metadata, event order, and answer shape and proves none ca
 mint or widen a grant without a committed host-policy allow.
 
 The inherited M2 case continues to prove that `Loopex.Policy.decide/2` refuses a
-defer. M4 separately proves `evaluate/2`, byte-identical original request replay,
-the exact response-member construction, a wire policy-selection refusal,
+defer. M3 separately proves `evaluate/2`, byte-identical original request replay,
+the exact response-member construction, facade-level policy-selection refusal,
 malformed defer and answer negatives, restart binding mismatch, and that only
-the configured policy's committed allow creates the grant and intent.
+the configured policy's committed allow creates the grant and intent. M4 adds
+the wire policy-selection refusal over this already-proved authority boundary.
 
-<a id="technical-adr-0020-compatibility"></a>
+<a id="technical-adr-0024-compatibility"></a>
 ## Format and Rollback
 
-Concept: [Compatibility, migration, and rollback](0020-durable-interaction-lifecycle-and-host-policy-authority.md#concept-adr-0020-compatibility).
+Concept: [Compatibility, migration, and rollback](0024-durable-interaction-lifecycle-and-host-policy-authority.md#concept-adr-0024-compatibility).
 
 The Store catalogue adds versioned private interaction and policy-resolution
 records plus public requested/resolved/expired/cancelled events. Rollback before
-closure discards M4 evidence roots and removes those record readers and writers
+closure discards M3 evidence roots and removes those record readers and writers
 together. No in-place downgrade claim is made. Packaging and publication remain
 outside this decision.

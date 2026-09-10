@@ -3,6 +3,7 @@ defmodule Loopex.Executor.LocalTest do
 
   alias Loopex.Executor
   alias Loopex.Executor.Local
+  alias Loopex.Executor.Local.Ledger
   alias Loopex.Executor.Local.WorkspaceLease
 
   @oracle MapSet.new([
@@ -22,10 +23,49 @@ defmodule Loopex.Executor.LocalTest do
     assert MapSet.new(Executor.required_grant_bindings()) == @oracle
   end
 
+  test "a malformed job is refused without reserving an empty identity" do
+    fixture = fixture("malformed-job")
+    on_exit(fn -> stop_fixture(fixture) end)
+
+    refusal = {:error, {:refused_before_effect, :canonical_job_request_mismatch}}
+
+    assert ^refusal = Local.execute(fixture.executor, %{}, %{})
+
+    # The serialized boundary itself refuses the missing identity. Observing it
+    # directly makes the no-reservation half non-vacuous: a path that briefly
+    # reserves under "" and releases after the public call would otherwise look
+    # identical once `execute/3` returns.
+    assert ^refusal = GenServer.call(fixture.executor, {:reserve, %{}})
+
+    assert Process.alive?(fixture.executor)
+    assert %{dispatches: %{}} = Local.stats(fixture.executor)
+    refute Map.has_key?(:sys.get_state(fixture.executor).reserved, "")
+    assert Local.receipt(fixture.executor, "") == :absent
+  end
+
+  test "an oversized job identity is refused before ledger lookup or reservation" do
+    fixture = fixture("oversized-job-identity")
+    on_exit(fn -> stop_fixture(fixture) end)
+
+    job_id = String.duplicate("x", 8_193)
+    invalid_job = %{job_id: job_id}
+    refusal = {:error, {:refused_before_effect, :canonical_job_request_mismatch}}
+
+    assert ^refusal = Local.execute(fixture.executor, invalid_job, %{})
+
+    # The public answer alone cannot distinguish this early refusal from a
+    # reservation followed by full permit validation. The serialized boundary
+    # must itself refuse the identifier before it reaches ledger path/key work.
+    assert ^refusal = GenServer.call(fixture.executor, {:reserve, invalid_job})
+
+    assert Process.alive?(fixture.executor)
+    assert %{dispatches: %{}} = Local.stats(fixture.executor)
+    refute Map.has_key?(:sys.get_state(fixture.executor).reserved, job_id)
+  end
+
   test "each missing and wrong grant binding is refused before process start" do
     fixture = fixture("negative-bindings")
     on_exit(fn -> stop_fixture(fixture) end)
-    {job, grant} = job_and_grant(fixture, "negative", "loopex.demo.write")
 
     # The refusal wears the tag that says it preceded the effect. That is the
     # half of this case's name a bare reason cannot carry: `refused before
@@ -33,15 +73,25 @@ defmodule Loopex.Executor.LocalTest do
     # make it is the executor that did or did not start something. A caller
     # reading these bare would be inferring it.
     for field <- Executor.required_grant_bindings() do
+      {missing_job, missing_grant} =
+        job_and_grant(fixture, "negative-missing-#{field}", "loopex.demo.write")
+
       assert {:error, {:refused_before_effect, {:missing_binding, ^field}}} =
-               Local.execute(fixture.executor, job, Map.delete(grant, field))
+               Local.execute(fixture.executor, missing_job, Map.delete(missing_grant, field))
+
+      {wrong_job, wrong_grant} =
+        job_and_grant(fixture, "negative-wrong-#{field}", "loopex.demo.write")
 
       assert {:error, {:refused_before_effect, {:binding_mismatch, ^field}}} =
-               Local.execute(fixture.executor, job, Map.put(grant, field, wrong(field, grant)))
+               Local.execute(
+                 fixture.executor,
+                 wrong_job,
+                 Map.put(wrong_grant, field, wrong(field, wrong_grant))
+               )
     end
 
     assert %{dispatches: %{}} = Local.stats(fixture.executor)
-    refute File.exists?(Path.join(fixture.workspace, "negative.txt"))
+    assert File.ls!(fixture.workspace) == []
   end
 
   test "only an explicit host-policy allow decision can issue or widen a grant" do
@@ -76,6 +126,47 @@ defmodule Loopex.Executor.LocalTest do
     assert {:error, {:refused_before_effect, :canonical_job_request_mismatch}} =
              Local.execute(fixture.executor, altered, grant)
 
+    # The attempt-local deadline is outside the digest, but it is still a
+    # required bounded job fact. Missing, malformed, and run-widening values all
+    # refuse at the same serialized boundary before a reservation or effect can
+    # exist. Without a positive dispatch-local wall ceiling, equality to the run
+    # deadline is independently reproducible too.
+    bounded_fields =
+      job
+      |> Map.from_struct()
+      |> Map.drop([:canonical_request_bytes, :canonical_request_digest, :effective_job_deadline])
+      |> Map.put(:resource_budgets, %{
+        "max_output_bytes" => 1_048_576,
+        "max_wall_time_ms" => 1_000
+      })
+
+    assert {:ok, bounded_job} = Executor.job(bounded_fields)
+    assert :ok = Executor.validate_job(bounded_job)
+
+    assert {:ok, bounded_grant} =
+             Executor.issue_grant({:host_policy, :allow}, bounded_job, grant.expiry)
+
+    invalid_deadlines = [
+      Map.delete(bounded_job, :effective_job_deadline),
+      %{bounded_job | effective_job_deadline: "later"},
+      %{bounded_job | effective_job_deadline: bounded_job.run_deadline + 1}
+    ]
+
+    for malformed <- invalid_deadlines do
+      assert {:error, :canonical_job_request_mismatch} = Executor.validate_job(malformed)
+
+      assert {:error, {:refused_before_effect, :canonical_job_request_mismatch}} =
+               Local.execute(fixture.executor, malformed, bounded_grant)
+    end
+
+    shortened_without_ceiling = %{job | effective_job_deadline: job.run_deadline - 1}
+
+    assert {:error, :canonical_job_request_mismatch} =
+             Executor.validate_job(shortened_without_ceiling)
+
+    assert {:error, {:refused_before_effect, :canonical_job_request_mismatch}} =
+             Local.execute(fixture.executor, shortened_without_ceiling, grant)
+
     assert %{dispatches: %{}} = Local.stats(fixture.executor)
 
     assert {:ok, receipt} = Local.execute(fixture.executor, job, grant)
@@ -97,7 +188,25 @@ defmodule Loopex.Executor.LocalTest do
   test "the workspace lease is held for the job lifetime and loss kills owned work with retained evidence" do
     fixture = fixture("lease-loss")
     on_exit(fn -> stop_fixture(fixture) end)
-    {job, grant} = job_and_grant(fixture, "lease-loss", "loopex.demo.wait_write")
+    {default_job, default_grant} = job_and_grant(fixture, "lease-loss", "loopex.demo.wait_write")
+
+    # Concept: lease loss ends this real job under its own committed period.
+    # Technical depth: the unchanged five-second observation must cover both
+    # cleanup and retention. The default permits five seconds plus 1,250ms of
+    # retention, so this case instead commits 1,000ms plus 250ms. Rebuild the
+    # request and grant; changing the executor's startup default cannot change
+    # an already-digested job. RUN-sent is a post-permit boundary, not a witness
+    # that the demo interpreter has reached its sleep.
+    assert {:ok, job} =
+             default_job
+             |> Map.from_struct()
+             |> Map.put(:cleanup_grace_ms, 1_000)
+             |> Executor.job()
+
+    assert {:ok, grant} =
+             Executor.issue_grant({:host_policy, :allow}, job, default_grant.expiry)
+
+    assert job.cleanup_grace_ms == 1_000
     parent = self()
 
     task =
@@ -111,9 +220,34 @@ defmodule Loopex.Executor.LocalTest do
     GenServer.stop(fixture.lease, :normal)
 
     assert {:ok, receipt} = Task.await(task, 5_000)
-    assert receipt.outcome == :cancelled_workspace_lease_lost
+
+    # The lease ended before the receipt existed, so the effect is unproven even
+    # though the owned process group was positively stopped. Those are separate
+    # facts: losing authority cannot erase the cleanup proof.
+    assert receipt.outcome == :outcome_unknown
+
+    assert receipt.cleanup_confirmation == :confirmed,
+           "lease-loss cleanup was not proved: #{inspect(receipt)}"
+
     assert receipt.provider_credential_present == false
+    assert receipt.cleanup_grace_ms == 1_000
+    assert receipt.receipt_retention_bound_ms == 250
+    assert receipt.canonical_request_digest == job.canonical_request_digest
+
+    # Confirmed cleanup permits the open authority to be removed, so the durable
+    # receipt is also the final recovery answer.
+    receipt_name =
+      (:crypto.hash(:sha256, job.job_id) |> Base.encode16(case: :lower)) <> ".receipt"
+
+    assert {:ok, retained_bytes} = File.read(Path.join(fixture.ledger, receipt_name))
+    assert :erlang.binary_to_term(retained_bytes, [:safe]) == receipt
     assert {:ok, ^receipt} = Local.receipt(fixture.executor, job.job_id)
+
+    # The demo waits five seconds before writing. Waiting beyond that declared
+    # horizon proves the owned effect was actually stopped rather than merely
+    # checking before a surviving child had time to act.
+    Process.sleep(5_500)
+
     refute File.exists?(Path.join(fixture.workspace, "lease-loss.txt"))
   end
 
@@ -133,7 +267,12 @@ defmodule Loopex.Executor.LocalTest do
       end)
 
     assert_receive {:starting_worker, ^worker}, 1_000
-    true = :ets.insert(table, {"starting-job", {:starting, worker}})
+
+    true =
+      :ets.insert(table, [
+        {"starting-job", {:starting, worker}},
+        {{:loopex_process_authority, "starting-job"}, worker, 5}
+      ])
 
     assert Local.cancel(worker, "starting-job") == {:ok, :unconfirmed}
 
@@ -141,6 +280,361 @@ defmodule Loopex.Executor.LocalTest do
     send(worker, :stop)
     assert_receive {:DOWN, ^monitor, :process, ^worker, :normal}, 1_000
     :ets.delete(table)
+  end
+
+  test "cancellation reaches the live launch owner with the job's committed period" do
+    # Concept: the process that captured the group remains the only authority
+    # allowed to signal it; a numeric observation in another process is not.
+    #
+    # Technical depth: the primary row deliberately carries a group that has no
+    # relation to the worker. A cancellation implementation that signals the
+    # number directly can still answer `cleaned` when that group is absent, so the
+    # decisive assertion is that the live owner receives the caller's exact
+    # cleanup episode with the period published for this job rather than the
+    # executor's default. Carrying the absolute instant matters too: queueing at
+    # the owner spends this one episode and cannot open another full period.
+    table = :ets.new(:owned_cancel_test, [:set, :public])
+    parent = self()
+    job_id = "owned-cancel-job"
+    grace = 17
+    probe = "/fixture/process-probe"
+
+    worker =
+      spawn(fn ->
+        Process.put(:loopex_inflight_table, table)
+        Process.put(:loopex_process_probe, probe)
+        send(parent, {:owned_cancel_worker, self()})
+
+        receive do
+          {:loopex_cancel_pending, token, from, {received_until, received_grace, received_probe}} ->
+            send(
+              parent,
+              {:owned_cancel_received, self(), received_until, received_grace, received_probe}
+            )
+
+            send(from, {:loopex_cancel_result, token, {:ok, :cleaned}})
+        end
+      end)
+
+    assert_receive {:owned_cancel_worker, ^worker}, 1_000
+
+    true =
+      :ets.insert(table, [
+        {job_id, 4_294_967_000},
+        {{:loopex_process_authority, job_id}, worker, grace}
+      ])
+
+    started = System.monotonic_time(:millisecond)
+    monitor = Process.monitor(worker)
+    assert Local.cancel(worker, job_id) == {:ok, :cleaned}
+
+    assert_receive {:owned_cancel_received, ^worker, received_until, ^grace, ^probe}, 1_000
+    assert received_until >= started + grace
+    assert received_until <= System.monotonic_time(:millisecond) + grace
+    assert_receive {:DOWN, ^monitor, :process, ^worker, :normal}, 1_000
+
+    source = File.read!(Path.expand("../lib/executor.ex", __DIR__))
+
+    [cancel_branch] =
+      Regex.run(
+        ~r/\{:loopex_cancel_pending, token, caller, episode\} ->(.*?)\{:DOWN, \^owner_monitor/s,
+        source,
+        capture: :all_but_first
+      )
+
+    assert cancel_branch =~ "finish_guarded_output("
+    assert cancel_branch =~ "episode,"
+    assert cancel_branch =~ ":terminate"
+    refute cancel_branch =~ "cancellation_episode("
+    :ets.delete(table)
+  end
+
+  test "a command worker exits before run when its execute caller dies" do
+    # Concept: a command worker that has only announced readiness cannot survive
+    # the caller responsible for sending its run signal.
+    #
+    # Technical depth: the caller intercepts readiness, publishes the same
+    # `{:starting, worker}` entry production publishes, and deliberately withholds
+    # `:run`. Its `DOWN` must make the production handshake remove that entry and
+    # end the worker. Sending the withheld signal afterwards proves no effect can
+    # occur later.
+    fixture = fixture("caller-lost-before-run")
+    on_exit(fn -> stop_fixture(fixture) end)
+
+    parent = self()
+    tag = make_ref()
+    job_id = "job-caller-lost-before-run"
+    target = Path.join(fixture.workspace, "caller-lost-before-run.txt")
+    table = :ets.new(:caller_lost_before_run, [:set, :public])
+
+    caller =
+      spawn(fn ->
+        receive do
+          {^tag, :worker_ready, worker} ->
+            true =
+              :ets.insert(table, [
+                {job_id, {:starting, worker}},
+                {{:loopex_process_authority, job_id}, worker, fixture.grace}
+              ])
+
+            send(parent, {tag, :worker_ready_intercepted, self(), worker})
+
+            receive do
+              {^tag, :release_run} -> send(worker, {tag, :run})
+            end
+        end
+      end)
+
+    {worker, worker_monitor} =
+      spawn_monitor(fn ->
+        Process.put(:loopex_inflight_table, table)
+
+        case Local.await_owned_process_start(caller, fixture.executor, tag, job_id) do
+          {:run, _owner} -> File.write!(target, "escaped")
+          :stop -> :ok
+        end
+      end)
+
+    on_exit(fn ->
+      if Process.alive?(caller), do: Process.exit(caller, :kill)
+      if Process.alive?(worker), do: Process.exit(worker, :kill)
+    end)
+
+    assert_receive {^tag, :worker_ready_intercepted, ^caller, ^worker}, 2_000
+    assert :ets.lookup(table, job_id) == [{job_id, {:starting, worker}}]
+
+    assert :ets.lookup(table, {:loopex_process_authority, job_id}) == [
+             {{:loopex_process_authority, job_id}, worker, fixture.grace}
+           ]
+
+    caller_monitor = Process.monitor(caller)
+    Process.exit(caller, :kill)
+    assert_receive {:DOWN, ^caller_monitor, :process, ^caller, :killed}, 2_000
+    assert_receive {:DOWN, ^worker_monitor, :process, ^worker, :normal}, 2_000
+
+    assert :ets.lookup(table, job_id) == []
+    assert :ets.lookup(table, {:loopex_process_authority, job_id}) == []
+    send(worker, {tag, :run})
+    refute File.exists?(target), "the command worker acted after its execute caller died"
+  end
+
+  test "a command worker refuses a queued run after Local authority is already dead" do
+    # Concept: a queued permit is not authority after the Local instance that
+    # issued it has died.
+    #
+    # Technical depth: the caller's `:run` and the guard monitor's `:DOWN`
+    # arrive from different senders, so their mailbox order cannot decide which
+    # fact happened first. Suspend the worker, queue `:run`, kill the exact
+    # guard, and resume only after its death is established. The worker must
+    # validate the guard at the point it consumes `:run`; merely selecting the
+    # first mailbox entry writes the marker under dead authority.
+    fixture = fixture("guard-lost-before-run")
+    on_exit(fn -> stop_fixture(fixture) end)
+    Process.unlink(fixture.executor)
+
+    parent = self()
+    tag = make_ref()
+    job_id = "job-guard-lost-before-run"
+    target = Path.join(fixture.workspace, "guard-lost-before-run.txt")
+    table = :ets.new(:guard_lost_before_run, [:set, :public])
+
+    {worker, worker_monitor} =
+      spawn_monitor(fn ->
+        Process.put(:loopex_inflight_table, table)
+
+        case Local.await_owned_process_start(parent, fixture.executor, tag, job_id) do
+          {:run, _owner} -> File.write!(target, "escaped")
+          :stop -> :ok
+        end
+      end)
+
+    on_exit(fn ->
+      resume_if_suspended(worker)
+      if Process.alive?(worker), do: Process.exit(worker, :kill)
+    end)
+
+    assert_receive {^tag, :worker_ready, ^worker}, 2_000
+
+    true =
+      :ets.insert(table, [
+        {job_id, {:starting, worker}},
+        {{:loopex_process_authority, job_id}, worker, fixture.grace}
+      ])
+
+    assert :erlang.suspend_process(worker)
+
+    # Queue the caller's message first, then make it stale before the worker can
+    # consume it. This fixes the otherwise scheduler-dependent cross-sender
+    # ordering at one deterministic point.
+    send(worker, {tag, :run})
+    guard_monitor = Process.monitor(fixture.executor)
+    Process.exit(fixture.executor, :kill)
+    assert_receive {:DOWN, ^guard_monitor, :process, _guard, :killed}, 2_000
+
+    assert :erlang.resume_process(worker)
+    assert_receive {:DOWN, ^worker_monitor, :process, ^worker, :normal}, 2_000
+
+    assert :ets.lookup(table, job_id) == []
+    assert :ets.lookup(table, {:loopex_process_authority, job_id}) == []
+
+    refute File.exists?(target),
+           "the command worker consumed a stale run permit after Local authority died"
+  end
+
+  test "a queued port exit cannot outrun Local authority lost before effect completion" do
+    # Concept: a command result becomes proved only while the Local hand that
+    # admitted it is still authoritative.
+    #
+    # Technical depth: port exit and owner `:DOWN` are independent signal paths.
+    # Hold the real command worker while its real child is still blocked, inject
+    # the exact port-exit tuple ahead of the monitor signal, then kill Local
+    # before the child can finish. This is deterministic fault injection for the
+    # otherwise scheduler-dependent cross-source ordering. Accepting the queued
+    # exit without rechecking owner liveness kills the group and reports
+    # `completed` even though authority ended first. The correct result remains
+    # `outcome_unknown`; cleanup can prove the group ended but cannot recreate
+    # the dead receipt owner.
+    fixture = fixture("owner-lost-after-port-exit")
+    on_exit(fn -> stop_fixture(fixture) end)
+    Process.unlink(fixture.executor)
+
+    target = Path.join(fixture.workspace, "command-finished.txt")
+    ready = Path.join(fixture.workspace, "command-ready.txt")
+
+    arguments = %{
+      "argv" => [
+        "/bin/sh",
+        "-c",
+        "printf ready > \"$1\"; while :; do sleep 1; done; printf finished > \"$2\"",
+        "loopex-owner-exit",
+        ready,
+        target
+      ]
+    }
+
+    {job, grant} =
+      job_and_grant(fixture, "owner-lost-after-port-exit", "loopex.bash", arguments)
+
+    parent = self()
+
+    running =
+      Task.async(fn -> Local.execute(fixture.executor, job, grant, notify: parent) end)
+
+    on_exit(fn ->
+      case await_command_worker(running.pid, 1) do
+        nil -> :ok
+        worker -> resume_if_suspended(worker)
+      end
+
+      if Process.alive?(running.pid), do: Task.shutdown(running, :brutal_kill)
+    end)
+
+    assert_receive {:executor_process_started, job_id, "loopex.bash", ["PATH"]}, 2_000
+    assert job_id == job.job_id
+    assert await_file(ready), "the real child did not begin its blocked effect"
+
+    worker = await_command_worker(running.pid)
+    assert is_pid(worker), "the execute caller did not monitor its command worker"
+    port = command_port(worker)
+    assert is_port(port), "the command worker did not own its real port"
+    assert :erlang.suspend_process(worker)
+
+    # The OS child is deliberately still live here. This exact signal shape is
+    # queued first solely to force the adverse mailbox order; the owner dies
+    # before production quiesces the group and fixes the result.
+    send(worker, {port, {:exit_status, 0}})
+
+    owner_monitor = Process.monitor(fixture.executor)
+    Process.exit(fixture.executor, :kill)
+    assert_receive {:DOWN, ^owner_monitor, :process, _owner, :killed}, 2_000
+
+    assert :erlang.resume_process(worker)
+
+    assert {:ok, %{outcome: :outcome_unknown}} = Task.await(running, 5_000)
+
+    refute File.exists?(target),
+           "the child finished an effect after the Local authority that owned it died"
+  end
+
+  test "command dispatch uses the caller-monitored pre-run handshake" do
+    # Concept: every production command worker watches its execute caller before
+    # it announces readiness.
+    #
+    # Technical depth: the behavioral case above proves the handshake boundary;
+    # this compiled-code assertion proves `run_owned_process/10` routes its worker
+    # through that boundary and that the boundary installs both monitors before
+    # announcing readiness. Bypassing it with the former inline receive or
+    # announcing before either monitor makes this assertion fail without a
+    # scheduler race.
+    module = Local
+
+    assert {:ok, {^module, [{:abstract_code, {:raw_abstract_v1, forms}}]}} =
+             :beam_lib.chunks(:code.which(module), [:abstract_code])
+
+    assert run_owned_process =
+             Enum.find(forms, &match?({:function, _, :run_owned_process, 10, _}, &1))
+
+    helper_calls =
+      matching_terms(run_owned_process, fn
+        {:call, _, {:atom, _, :await_owned_process_start}, [_, _, _, _]} -> true
+        _other -> false
+      end)
+
+    assert length(helper_calls) == 1,
+           "run_owned_process/10 must call await_owned_process_start/4 exactly once"
+
+    refute contains_term?(run_owned_process, fn
+             {:call, _, callee, [_recipient, message]} ->
+               send_call?(callee) and abstract_atom?(message, :worker_ready)
+
+             _other ->
+               false
+           end),
+           "run_owned_process/10 still announces worker readiness outside the handshake"
+
+    assert {:function, _, :await_owned_process_start, 4,
+            [
+              {:clause, _,
+               [
+                 {:var, _, caller_name},
+                 {:var, _, guard_name},
+                 {:var, _, tag_name},
+                 {:var, _, _job_id_name}
+               ], _, handshake_body}
+            ]} = Enum.find(forms, &match?({:function, _, :await_owned_process_start, 4, _}, &1))
+
+    assert [guard_monitor, caller_monitor, ready_announcement | _rest] = handshake_body
+
+    assert match?(
+             {:match, _, {:var, _, _},
+              {:call, _, {:remote, _, {:atom, _, :erlang}, {:atom, _, :monitor}},
+               [{:atom, _, :process}, {:var, _, ^guard_name}]}},
+             guard_monitor
+           ),
+           "the handshake did not monitor Local authority before readiness"
+
+    assert match?(
+             {:match, _, {:var, _, _},
+              {:call, _, {:remote, _, {:atom, _, :erlang}, {:atom, _, :monitor}},
+               [{:atom, _, :process}, {:var, _, ^caller_name}]}},
+             caller_monitor
+           ),
+           "the handshake did not monitor its execute caller before readiness"
+
+    assert match?(
+             {:call, _, {:remote, _, {:atom, _, :erlang}, {:atom, _, :send}},
+              [
+                {:var, _, ^caller_name},
+                {:tuple, _,
+                 [
+                   {:var, _, ^tag_name},
+                   {:atom, _, :worker_ready},
+                   {:call, _, {:remote, _, {:atom, _, :erlang}, {:atom, _, :self}}, []}
+                 ]}
+              ]},
+             ready_announcement
+           ),
+           "the handshake announced readiness before both owner monitors existed"
   end
 
   test "the executor starts one credential-free OS tool that writes the expected workspace bytes and retains its receipt" do
@@ -213,7 +707,847 @@ defmodule Loopex.Executor.LocalTest do
     end
   end
 
-  defp fixture(label) do
+  # Concept: a pre-admission reservation belongs to the process that asked for
+  # it, does not outlive that process, and does not yet claim an effect in flight.
+  #
+  # Technical depth: the reserve call used to run under the default five-second
+  # bound while the server could spend exactly five seconds waiting for the root
+  # claim, so an expired caller left a reservation nothing released and the job
+  # read as in flight forever. The caller is now monitored, and the call bound
+  # outlives the claim wait. The first case kills a reserving caller; the second
+  # holds the root claim for longer than the old bound and proves the caller is
+  # answered, not exited.
+  test "a pre-admission reservation dies with the process that asked for it" do
+    fixture = fixture("reservation-owner")
+    on_exit(fn -> stop_fixture(fixture) end)
+    {job, _grant} = job_and_grant(fixture, "owner", "loopex.demo.write")
+    parent = self()
+
+    reserver =
+      spawn(fn ->
+        send(parent, {:reserved, GenServer.call(fixture.executor, {:reserve, job})})
+        receive do: (:release_me -> :ok)
+      end)
+
+    assert_receive {:reserved, {:ok, _placement}}, 5_000
+    assert await_reservation_count(fixture.executor, job.job_id, 1, 2_000)
+    assert :absent = Local.receipt(fixture.executor, job.job_id)
+
+    Process.exit(reserver, :kill)
+
+    assert await_reservation_count(fixture.executor, job.job_id, 0, 2_000),
+           "the reservation outlived the process that asked for it"
+
+    assert :absent = Local.receipt(fixture.executor, job.job_id)
+  end
+
+  test "same-job join reservations remain exact until each holder releases or dies" do
+    # Concept: several callers may wait to join one durable operation. Finishing
+    # one waiter says nothing about the other live waiters, and none of them
+    # impersonates the operation's effect owner.
+    #
+    # Technical depth: the reservation table used one `job_id => caller` entry
+    # but installed one monitor per call. A later same-job reservation overwrote
+    # the caller, and either `release` or `DOWN` removed the job plus every monitor
+    # carrying that ID. This case obtains three exact reservations, releases one,
+    # kills another, and uses the surviving holder as the observable fact. Each
+    # holder receives an opaque private reference, so cleanup can remove only the
+    # reservation it owns without weakening the durable duplicate-effect fence.
+    # The manually admitted entry has no effect owner in this instance, making
+    # `effect_unresolved` the truthful receipt answer throughout.
+    fixture = fixture("same-job-holders")
+    on_exit(fn -> stop_fixture(fixture) end)
+    {job, _grant} = job_and_grant(fixture, "same-job-holders", "loopex.demo.write")
+    parent = self()
+
+    assert {:ok, prepared} = Ledger.prepare(fixture.ledger, "executor-local", 5_000)
+
+    assert :ok =
+             Ledger.with_claim(prepared, fn ->
+               Ledger.admit(
+                 prepared,
+                 Ledger.marker(job),
+                 Ledger.open_entry(job, "executor-local")
+               )
+             end)
+
+    holders =
+      for label <- [:released, :dead, :survivor], into: %{} do
+        pid =
+          spawn(fn ->
+            result = GenServer.call(fixture.executor, {:reserve, job})
+            send(parent, {:holder_reserved, label, self(), result})
+            reservation_holder(fixture.executor, job.job_id, label, result, parent)
+          end)
+
+        {label, pid}
+      end
+
+    reservations =
+      for label <- [:released, :dead, :survivor], into: %{} do
+        pid = Map.fetch!(holders, label)
+        assert_receive {:holder_reserved, ^label, ^pid, {:ok, placement}}, 5_000
+        {label, Map.fetch!(placement, :reservation_ref)}
+      end
+
+    assert reservations |> Map.values() |> MapSet.new() |> MapSet.size() == 3
+    assert await_reservation_count(fixture.executor, job.job_id, 3, 2_000)
+    assert {:error, :effect_unresolved} = Local.receipt(fixture.executor, job.job_id)
+
+    send(holders.released, {:release, reservations.released})
+    assert_receive {:holder_released, :released}, 1_000
+    assert await_reservation_count(fixture.executor, job.job_id, 2, 2_000)
+    assert {:error, :effect_unresolved} = Local.receipt(fixture.executor, job.job_id)
+
+    Process.exit(holders.dead, :kill)
+
+    assert await_reservation_count(fixture.executor, job.job_id, 1, 2_000),
+           "the dead holder's reservation was not removed independently"
+
+    assert {:error, :effect_unresolved} = Local.receipt(fixture.executor, job.job_id)
+
+    send(holders.survivor, {:release, reservations.survivor})
+    assert_receive {:holder_released, :survivor}, 1_000
+    assert await_reservation_count(fixture.executor, job.job_id, 0, 2_000)
+
+    assert Local.receipt(fixture.executor, job.job_id) == {:error, :effect_unresolved},
+           "the open effect did not become unresolved after its last exact holder released"
+  end
+
+  test "a same-digest admission joins before a duplicate caller's grant is revalidated" do
+    # Concept: once durable truth says an effect may have begun, a later caller's
+    # stale grant cannot turn that operation back into a proved pre-effect
+    # refusal.
+    #
+    # Technical depth: the old permit path validated the duplicate first, tried
+    # to write a refusal over the admission, ignored the ledger conflict, and
+    # returned the refusal tag anyway. This case installs the exact admission,
+    # then presents a deliberately invalid grant through the real permit
+    # boundary. The matching marker must decide `:join` before ephemeral grant
+    # validation, and the admission record must remain the durable answer.
+    fixture = fixture("admission-before-revalidation")
+    on_exit(fn -> stop_fixture(fixture) end)
+    {job, grant} = job_and_grant(fixture, "admission-before-revalidation", "loopex.demo.write")
+    {:ok, prepared} = Ledger.prepare(fixture.ledger, "executor-local", 5_000)
+
+    assert :ok =
+             Ledger.with_claim(prepared, fn ->
+               Ledger.admit(
+                 prepared,
+                 Ledger.marker(job),
+                 Ledger.open_entry(job, "executor-local")
+               )
+             end)
+
+    assert {:ok, placement} = GenServer.call(fixture.executor, {:reserve, job}, 10_000)
+    reservation_ref = Map.fetch!(placement, :reservation_ref)
+    stale_grant = Map.put(grant, :expiry, 0)
+
+    assert {:ok, %{decision: :join}} =
+             GenServer.call(
+               fixture.executor,
+               {:permit, job, stale_grant, reservation_ref},
+               10_000
+             )
+
+    assert {:ok, %{ledger_kind: "local_effect_admission_v1"}} =
+             Ledger.read_marker(prepared, job.job_id)
+
+    GenServer.cast(fixture.executor, {:release, job.job_id, reservation_ref})
+  end
+
+  test "a live join waiter does not impersonate an effect owner after that owner dies" do
+    # Concept: a caller waiting to join one admitted operation is not evidence
+    # that this executor still owns the effect. If the actual effect owner dies,
+    # the durable open entry becomes unresolved and keeps the root quarantined
+    # even while the join waiter remains alive.
+    #
+    # Technical depth: every caller first receives a reservation token, but only
+    # the token whose `admit/2` publishes the marker and open entry may become an
+    # effect owner. This case holds that owner inside a delayed real tool, keeps
+    # one same-job joiner polling, and exercises release and `DOWN` on two more
+    # join-only tokens before killing the owner. Counting every reservation as
+    # effectful then lies twice: receipt lookup reports `effect_in_flight`, and
+    # reconciliation excludes the open entry so an unrelated effect is admitted.
+    # Exact owner state must instead disappear on that token's `DOWN` without
+    # removing the polling joiner's independent reservation.
+    fixture = fixture("dead-owner-live-joiner")
+    on_exit(fn -> stop_fixture(fixture) end)
+    {job, grant} = job_and_grant(fixture, "dead-owner-live-joiner", "loopex.demo.wait_write")
+    parent = self()
+
+    owner =
+      Task.async(fn -> Local.execute(fixture.executor, job, grant, notify: parent) end)
+
+    assert_receive {:executor_process_started, job_id, "loopex.demo.wait_write", ["PATH"]},
+                   5_000
+
+    assert job_id == job.job_id
+
+    joiner = Task.async(fn -> Local.execute(fixture.executor, job, grant) end)
+
+    released_joiner =
+      spawn(fn ->
+        result = GenServer.call(fixture.executor, {:reserve, job})
+        send(parent, {:holder_reserved, :owner_test_release, self(), result})
+
+        reservation_holder(
+          fixture.executor,
+          job.job_id,
+          :owner_test_release,
+          result,
+          parent
+        )
+      end)
+
+    dead_joiner =
+      spawn(fn ->
+        result = GenServer.call(fixture.executor, {:reserve, job})
+        send(parent, {:holder_reserved, :owner_test_dead, self(), result})
+        reservation_holder(fixture.executor, job.job_id, :owner_test_dead, result, parent)
+      end)
+
+    assert_receive {:holder_reserved, :owner_test_release, ^released_joiner,
+                    {:ok, released_placement}},
+                   5_000
+
+    released_ref = Map.fetch!(released_placement, :reservation_ref)
+
+    assert_receive {:holder_reserved, :owner_test_dead, ^dead_joiner, {:ok, _dead_placement}},
+                   5_000
+
+    try do
+      assert await_reservation_count(fixture.executor, job.job_id, 4, 2_000),
+             "the same-job joiners never obtained independent reservations"
+
+      send(released_joiner, {:release, released_ref})
+      assert_receive {:holder_released, :owner_test_release}, 1_000
+
+      assert await_reservation_count(fixture.executor, job.job_id, 3, 2_000),
+             "releasing one joiner erased another same-job holder"
+
+      assert {:error, :effect_in_flight} = Local.receipt(fixture.executor, job.job_id)
+
+      Process.exit(dead_joiner, :kill)
+
+      assert await_reservation_count(fixture.executor, job.job_id, 2, 2_000),
+             "a joiner's DOWN erased another same-job holder"
+
+      assert {:error, :effect_in_flight} = Local.receipt(fixture.executor, job.job_id)
+
+      _owner_result = Task.shutdown(owner, :brutal_kill)
+
+      assert await_reservation_count(fixture.executor, job.job_id, 1, 2_000),
+             "the dead effect owner's reservation was not removed independently"
+
+      assert Process.alive?(joiner.pid), "the same-job joiner did not remain live"
+
+      {unrelated, unrelated_grant} =
+        job_and_grant(fixture, "after-dead-owner", "loopex.demo.write")
+
+      unrelated_result = Local.execute(fixture.executor, unrelated, unrelated_grant)
+      receipt_result = Local.receipt(fixture.executor, job.job_id)
+
+      assert unrelated_result == {:error, {:reconciliation_required, 1}},
+             "a join-only reservation hid the dead owner's unresolved open authority"
+
+      assert receipt_result == {:error, :effect_unresolved},
+             "the live joiner was reported as the dead operation's effect owner"
+
+      assert {:ok, prepared} = Ledger.prepare(fixture.ledger, "executor-local", 5_000)
+      assert Ledger.open?(prepared, job.job_id)
+    after
+      if Process.alive?(owner.pid), do: Task.shutdown(owner, :brutal_kill)
+      if Process.alive?(joiner.pid), do: Task.shutdown(joiner, :brutal_kill)
+      if Process.alive?(released_joiner), do: Process.exit(released_joiner, :kill)
+      if Process.alive?(dead_joiner), do: Process.exit(dead_joiner, :kill)
+    end
+  end
+
+  test "a pre-reserved unrelated job is rechecked after an effect owner dies" do
+    # Concept: queueing a job while this root is healthy is not permission to
+    # run it after the root acquires unresolved effect authority.
+    #
+    # Technical depth: A owns an admitted delayed effect while B obtains only a
+    # reservation. The same B holder asks for the later permit after A dies, so
+    # this reaches the final authority boundary rather than merely failing a
+    # caller-token check. A permit that trusts the earlier reservation admits B;
+    # a permit that repeats root reconciliation refuses it before any marker,
+    # owner token, dispatch count, or filesystem effect exists.
+    fixture = fixture("pre-reserved-after-owner-loss")
+    on_exit(fn -> stop_fixture(fixture) end)
+
+    {owned, owned_grant} =
+      job_and_grant(fixture, "pre-reserved-owner", "loopex.demo.wait_write")
+
+    {queued, queued_grant} =
+      job_and_grant(fixture, "pre-reserved-unrelated", "loopex.demo.write")
+
+    parent = self()
+
+    owner =
+      Task.async(fn ->
+        Local.execute(fixture.executor, owned, owned_grant, notify: parent)
+      end)
+
+    assert_receive {:executor_process_started, owned_job_id, "loopex.demo.wait_write", ["PATH"]},
+                   5_000
+
+    assert owned_job_id == owned.job_id
+
+    queued_holder =
+      spawn(fn ->
+        result = GenServer.call(fixture.executor, {:reserve, queued}, 10_000)
+        send(parent, {:unrelated_reserved, self(), result})
+
+        case result do
+          {:ok, placement} ->
+            reservation_ref = Map.fetch!(placement, :reservation_ref)
+
+            receive do
+              :request_permit ->
+                permit =
+                  GenServer.call(
+                    fixture.executor,
+                    {:permit, queued, queued_grant, reservation_ref},
+                    15_000
+                  )
+
+                GenServer.cast(fixture.executor, {:release, queued.job_id, reservation_ref})
+                _barrier = GenServer.call(fixture.executor, :stats)
+                send(parent, {:unrelated_permit, self(), permit})
+            end
+
+          _not_reserved ->
+            :ok
+        end
+      end)
+
+    assert_receive {:unrelated_reserved, ^queued_holder, {:ok, _placement}}, 5_000
+    assert await_reservation_count(fixture.executor, queued.job_id, 1, 2_000)
+
+    try do
+      _owner_result = Task.shutdown(owner, :brutal_kill)
+
+      assert await_reservation_count(fixture.executor, owned.job_id, 0, 2_000),
+             "the admitted owner's reservation did not leave with its process"
+
+      assert await_reservation_count(fixture.executor, queued.job_id, 1, 2_000),
+             "the unrelated queued holder lost its reservation before asking for a permit"
+
+      assert Local.receipt(fixture.executor, owned.job_id) == {:error, :effect_unresolved}
+
+      send(queued_holder, :request_permit)
+
+      assert_receive {:unrelated_permit, ^queued_holder, {:error, {:reconciliation_required, 1}}},
+                     15_000
+
+      assert %{dispatches: dispatches} = Local.stats(fixture.executor)
+      refute Map.has_key?(dispatches, queued.job_id)
+
+      assert {:ok, prepared} = Ledger.prepare(fixture.ledger, "executor-local", 5_000)
+      assert Ledger.read_marker(prepared, queued.job_id) == :absent
+      refute Ledger.open?(prepared, queued.job_id)
+      assert Ledger.open?(prepared, owned.job_id)
+      refute File.exists?(Path.join(fixture.workspace, "pre-reserved-unrelated.txt"))
+    after
+      if Process.alive?(owner.pid), do: Task.shutdown(owner, :brutal_kill)
+      if Process.alive?(queued_holder), do: Process.exit(queued_holder, :kill)
+    end
+  end
+
+  test "a permit repeats root reconciliation after blocking final validation" do
+    # Concept: a healthy root observed before validation is not permission to
+    # ignore effect authority that becomes unresolved while validation waits.
+    #
+    # Technical depth: A owns an admitted delayed effect. B enters its permit
+    # decision while A is live, then blocks in the real workspace-lease resolve
+    # after that first root snapshot. Killing A's exact reservation holder there
+    # queues its `DOWN` behind B's serialized call, so only a post-validation
+    # snapshot that samples live operation holders can see A's open entry as
+    # unresolved. Without that second snapshot B receives an admitted permit.
+    fixture = fixture("post-validation-reconciliation")
+    on_exit(fn -> stop_fixture(fixture) end)
+
+    {owned, owned_grant} =
+      job_and_grant(fixture, "post-validation-owner", "loopex.demo.wait_write")
+
+    {queued, queued_grant} =
+      job_and_grant(fixture, "post-validation-unrelated", "loopex.demo.write")
+
+    parent = self()
+
+    owner =
+      Task.async(fn ->
+        Local.execute(fixture.executor, owned, owned_grant, notify: parent)
+      end)
+
+    assert_receive {:executor_process_started, owned_job_id, "loopex.demo.wait_write", ["PATH"]},
+                   5_000
+
+    assert owned_job_id == owned.job_id
+
+    queued_holder =
+      spawn(fn ->
+        {:ok, placement} = GenServer.call(fixture.executor, {:reserve, queued}, 10_000)
+        reservation_ref = Map.fetch!(placement, :reservation_ref)
+        send(parent, {:post_validation_reserved, self()})
+
+        receive do
+          :request_permit ->
+            answer =
+              GenServer.call(
+                fixture.executor,
+                {:permit, queued, queued_grant, reservation_ref},
+                15_000
+              )
+
+            GenServer.cast(fixture.executor, {:release, queued.job_id, reservation_ref})
+            send(parent, {:post_validation_permit, self(), answer})
+        end
+      end)
+
+    assert_receive {:post_validation_reserved, ^queued_holder}, 5_000
+    :erlang.suspend_process(fixture.lease)
+
+    try do
+      send(queued_holder, :request_permit)
+
+      assert await_queued_call(fixture.lease),
+             "the permit never reached its blocking final lease validation"
+
+      _owner_result = Task.shutdown(owner, :brutal_kill)
+      refute Process.alive?(owner.pid), "the admitted effect owner remained live"
+
+      :erlang.resume_process(fixture.lease)
+
+      assert_receive {:post_validation_permit, ^queued_holder,
+                      {:error, {:reconciliation_required, 1}}},
+                     15_000
+
+      _permit_barrier = Local.stats(fixture.executor)
+      assert %{dispatches: dispatches} = Local.stats(fixture.executor)
+      refute Map.has_key?(dispatches, queued.job_id)
+
+      assert {:ok, prepared} = Ledger.prepare(fixture.ledger, "executor-local", 5_000)
+      assert Ledger.read_marker(prepared, queued.job_id) == :absent
+      refute Ledger.open?(prepared, queued.job_id)
+      assert Ledger.open?(prepared, owned.job_id)
+      refute File.exists?(Path.join(fixture.workspace, "post-validation-unrelated.txt"))
+    after
+      if Process.alive?(fixture.lease) and
+           Process.info(fixture.lease, :status) == {:status, :suspended},
+         do: :erlang.resume_process(fixture.lease)
+
+      if Process.alive?(owner.pid), do: Task.shutdown(owner, :brutal_kill)
+      if Process.alive?(queued_holder), do: Process.exit(queued_holder, :kill)
+    end
+  end
+
+  # Concept: malformed durable authority is unavailability, never evidence that
+  # this root is clear to run another effect.
+  #
+  # Technical depth: `reconcile/2` returns the open-snapshot error directly. A
+  # fail-open branch that turns that error into `nil` admits this job and writes
+  # its file, so the case drives the real reserve/permit boundary and checks both
+  # the exact refusal and absence of every new-effect artifact.
+  test "a malformed open authority snapshot cannot become permission" do
+    fixture = fixture("malformed-open-snapshot")
+    on_exit(fn -> stop_fixture(fixture) end)
+    {job, grant} = job_and_grant(fixture, "malformed-open-snapshot", "loopex.demo.write")
+
+    assert {:ok, placement} = GenServer.call(fixture.executor, {:reserve, job}, 10_000)
+    reservation_ref = Map.fetch!(placement, :reservation_ref)
+
+    File.write!(Path.join([fixture.ledger, "open", "malformed"]), "not a ledger record")
+
+    assert GenServer.call(
+             fixture.executor,
+             {:permit, job, grant, reservation_ref},
+             10_000
+           ) == {:error, {:ledger_unavailable, :malformed_record}}
+
+    GenServer.cast(fixture.executor, {:release, job.job_id, reservation_ref})
+    _release_barrier = Local.stats(fixture.executor)
+
+    assert {:ok, prepared} = Ledger.prepare(fixture.ledger, "executor-local", 5_000)
+    assert Ledger.read_marker(prepared, job.job_id) == :absent
+    refute Ledger.open?(prepared, job.job_id)
+    refute File.exists?(Path.join(fixture.workspace, "malformed-open-snapshot.txt"))
+  end
+
+  # Concept: every unresolved open operation contributes to the quarantine; a
+  # root does not become usable merely because more than one needs repair.
+  #
+  # Technical depth: two valid foreign admissions are installed under one real
+  # root claim. A shortcut that treats a list with two or more members as clear
+  # admits the unrelated effect, while the correct snapshot reports the exact
+  # unresolved count and publishes nothing for the new job.
+  test "several unresolved open authorities preserve their exact quarantine count" do
+    fixture = fixture("several-unresolved-open")
+    on_exit(fn -> stop_fixture(fixture) end)
+
+    {first, _first_grant} = job_and_grant(fixture, "unresolved-first", "loopex.demo.write")
+    {second, _second_grant} = job_and_grant(fixture, "unresolved-second", "loopex.demo.write")
+    {job, grant} = job_and_grant(fixture, "after-several-unresolved", "loopex.demo.write")
+    assert {:ok, prepared} = Ledger.prepare(fixture.ledger, "executor-local", 5_000)
+
+    assert :ok =
+             Ledger.with_claim(prepared, fn ->
+               with :ok <-
+                      Ledger.admit(
+                        prepared,
+                        Ledger.marker(first),
+                        Ledger.open_entry(first, "foreign-executor")
+                      ) do
+                 Ledger.admit(
+                   prepared,
+                   Ledger.marker(second),
+                   Ledger.open_entry(second, "foreign-executor")
+                 )
+               end
+             end)
+
+    assert Local.execute(fixture.executor, job, grant) ==
+             {:error, {:reconciliation_required, 2}}
+
+    assert Ledger.read_marker(prepared, job.job_id) == :absent
+    refute Ledger.open?(prepared, job.job_id)
+    refute File.exists?(Path.join(fixture.workspace, "after-several-unresolved.txt"))
+  end
+
+  # Concept: the quarantine count describes only unresolved authority. Work
+  # still owned by this exact Local instance remains protected, but it is not an
+  # operator reconciliation item.
+  #
+  # Technical depth: one delayed job supplies a live operation-owner token while
+  # one foreign open entry is installed beside it. Counting the complete
+  # snapshot instead of the filtered unresolved set reports two and misdirects
+  # recovery; the correct refusal reports one and starts no third effect.
+  test "live owned work does not inflate the unresolved quarantine count" do
+    fixture = fixture("exact-unresolved-count")
+    on_exit(fn -> stop_fixture(fixture) end)
+
+    {owned, owned_grant} =
+      job_and_grant(fixture, "exact-count-owned", "loopex.demo.wait_write", %{
+        "relative_path" => "exact-count-owned.txt",
+        "content" => "bytes-exact-count-owned",
+        "delay_ms" => 30_000
+      })
+
+    {foreign, _foreign_grant} =
+      job_and_grant(fixture, "exact-count-foreign", "loopex.demo.write")
+
+    {job, grant} = job_and_grant(fixture, "exact-count-new", "loopex.demo.write")
+    parent = self()
+
+    owner =
+      Task.async(fn ->
+        Local.execute(fixture.executor, owned, owned_grant, notify: parent)
+      end)
+
+    assert_receive {:executor_process_started, owned_job_id, "loopex.demo.wait_write", ["PATH"]},
+                   5_000
+
+    assert owned_job_id == owned.job_id
+
+    try do
+      assert {:ok, prepared} = Ledger.prepare(fixture.ledger, "executor-local", 5_000)
+
+      assert :ok =
+               Ledger.with_claim(prepared, fn ->
+                 Ledger.admit(
+                   prepared,
+                   Ledger.marker(foreign),
+                   Ledger.open_entry(foreign, "foreign-executor")
+                 )
+               end)
+
+      assert Local.execute(fixture.executor, job, grant) ==
+               {:error, {:reconciliation_required, 1}}
+
+      assert Ledger.read_marker(prepared, job.job_id) == :absent
+      refute Ledger.open?(prepared, job.job_id)
+      assert Ledger.open?(prepared, owned.job_id)
+      assert Ledger.open?(prepared, foreign.job_id)
+      refute File.exists?(Path.join(fixture.workspace, "exact-count-new.txt"))
+    after
+      if Process.alive?(owner.pid), do: Task.shutdown(owner, :brutal_kill)
+    end
+  end
+
+  test "a permit whose holder dies during final validation starts no effect" do
+    # Concept: the process that owns a queued reservation must still be alive
+    # when the final permit is fixed; a dead caller cannot leave runnable work.
+    #
+    # Technical depth: suspending the lease holds the permit handler inside its
+    # last bounded validation after it acquired the root claim. The holder dies
+    # there, before the server can process its queued `DOWN`. Live-holder checks
+    # after validation and at owner-token insertion must therefore observe the
+    # process itself, withhold the permit, and leave no durable admission.
+    fixture = fixture("permit-holder-dies")
+    on_exit(fn -> stop_fixture(fixture) end)
+    {job, grant} = job_and_grant(fixture, "permit-holder-dies", "loopex.demo.write")
+    parent = self()
+
+    holder =
+      spawn(fn ->
+        {:ok, placement} = GenServer.call(fixture.executor, {:reserve, job}, 10_000)
+        reservation_ref = Map.fetch!(placement, :reservation_ref)
+        send(parent, {:permit_holder_reserved, self(), reservation_ref})
+
+        receive do
+          :request_permit ->
+            GenServer.call(
+              fixture.executor,
+              {:permit, job, grant, reservation_ref},
+              15_000
+            )
+        end
+      end)
+
+    assert_receive {:permit_holder_reserved, ^holder, _reservation_ref}, 5_000
+    :erlang.suspend_process(fixture.lease)
+
+    try do
+      send(holder, :request_permit)
+
+      assert await_queued_call(fixture.lease),
+             "the permit never reached the final workspace-lease validation"
+
+      Process.exit(holder, :kill)
+      :erlang.resume_process(fixture.lease)
+
+      _permit_barrier = Local.stats(fixture.executor)
+
+      assert await_reservation_count(fixture.executor, job.job_id, 0, 2_000)
+      assert Local.receipt(fixture.executor, job.job_id) == :absent
+      assert %{dispatches: dispatches} = Local.stats(fixture.executor)
+      refute Map.has_key?(dispatches, job.job_id)
+
+      assert {:ok, prepared} = Ledger.prepare(fixture.ledger, "executor-local", 5_000)
+      assert Ledger.read_marker(prepared, job.job_id) == :absent
+      refute Ledger.open?(prepared, job.job_id)
+      refute File.exists?(Path.join(fixture.workspace, "permit-holder-dies.txt"))
+    after
+      if Process.alive?(fixture.lease) and
+           Process.info(fixture.lease, :status) == {:status, :suspended},
+         do: :erlang.resume_process(fixture.lease)
+
+      if Process.alive?(holder), do: Process.exit(holder, :kill)
+    end
+  end
+
+  test "a queued permit cannot ignore an operation whose settlement became quarantined" do
+    # Concept: once an operation stops being live and its open authority remains,
+    # an already-queued unrelated permit must see the quarantine before it can
+    # start another effect.
+    #
+    # Technical depth: settlement runs in the caller while permits serialize in
+    # the executor. The close seam holds A's root claim as B's permit queues, then
+    # fails without removing A's open entry. If A's owner token survives until a
+    # later release cast, B runs first and excludes that open entry as though A
+    # were still live. Removing the exact owner token when settlement begins
+    # makes the open entry visible to B's first post-claim reconciliation.
+    parent = self()
+
+    close = fn _ledger, job_id ->
+      send(parent, {:quarantine_close_started, job_id, self()})
+
+      receive do
+        {:finish_quarantine_close, ^job_id} -> {:error, :forced_close_failure}
+      end
+    end
+
+    fixture = fixture("queued-permit-after-quarantine", open_authority_close: close)
+    on_exit(fn -> stop_fixture(fixture) end)
+
+    {owned, owned_grant} =
+      job_and_grant(fixture, "quarantined-owner", "loopex.demo.write")
+
+    {queued, queued_grant} =
+      job_and_grant(fixture, "queued-after-quarantine", "loopex.demo.write")
+
+    queued_holder =
+      spawn(fn ->
+        {:ok, placement} = GenServer.call(fixture.executor, {:reserve, queued}, 10_000)
+        reservation_ref = Map.fetch!(placement, :reservation_ref)
+        send(parent, {:quarantine_waiter_reserved, self()})
+
+        receive do
+          :request_quarantined_permit ->
+            send(parent, {:quarantine_waiter_calling, self()})
+
+            answer =
+              GenServer.call(
+                fixture.executor,
+                {:permit, queued, queued_grant, reservation_ref},
+                15_000
+              )
+
+            send(parent, {:quarantine_waiter_answer, self(), answer})
+        end
+      end)
+
+    assert_receive {:quarantine_waiter_reserved, ^queued_holder}, 5_000
+
+    owner =
+      spawn(fn ->
+        result = Local.execute(fixture.executor, owned, owned_grant)
+        send(parent, {:quarantined_owner_result, self(), result})
+
+        receive do
+          :release_quarantined_owner -> :ok
+        end
+      end)
+
+    on_exit(fn ->
+      if Process.alive?(owner), do: Process.exit(owner, :kill)
+    end)
+
+    assert_receive {:quarantine_close_started, owned_job_id, close_worker}, 5_000
+    assert owned_job_id == owned.job_id
+
+    send(queued_holder, :request_quarantined_permit)
+    assert_receive {:quarantine_waiter_calling, ^queued_holder}, 2_000
+
+    # Give the holder a scheduler turn to enter its synchronous call. The
+    # executor either has that call queued or has already taken it and is waiting
+    # for the root claim held by A; both establish the ordering this case needs.
+    Process.sleep(25)
+    refute_received {:quarantine_waiter_answer, ^queued_holder, _answer}
+
+    send(close_worker, {:finish_quarantine_close, owned.job_id})
+
+    assert_receive {:quarantined_owner_result, ^owner,
+                    {:error,
+                     {:effect_settling, {:open_authority_not_removed, :forced_close_failure}}}},
+                   15_000
+
+    assert_receive {:quarantine_waiter_answer, ^queued_holder, queued_answer}, 15_000
+
+    assert queued_answer == {:error, {:reconciliation_required, 1}},
+           "the queued permit ignored the quarantined operation: #{inspect(queued_answer)}"
+
+    refute File.exists?(Path.join(fixture.workspace, "queued-after-quarantine.txt"))
+    send(owner, :release_quarantined_owner)
+  end
+
+  test "owner-aware bounded work stops a filesystem effect when Local authority is lost" do
+    # Concept: losing the Local hand ends a filesystem effect worker; a blocked
+    # caller is not the authority that keeps it alive.
+    #
+    # Technical depth: this asks the exposed owner-aware boundary directly with
+    # a closure whose file effect is held behind a test-owned message. Killing the
+    # exact Local owner must kill and confirm that closure before answering. The
+    # separate wiring case below proves production filesystem dispatch selects
+    # this boundary, without adding a caller-controlled switch to shipped code.
+    fixture = fixture("filesystem-owner-loss")
+    on_exit(fn -> stop_fixture(fixture) end)
+    Process.unlink(fixture.executor)
+
+    parent = self()
+    target = Path.join(fixture.workspace, "filesystem-owner-loss.txt")
+    barrier_ref = make_ref()
+
+    running =
+      Task.async(fn ->
+        lease_monitor = Process.monitor(fixture.lease)
+
+        try do
+          Local.bounded_work(
+            fn ->
+              send(parent, {barrier_ref, :filesystem_worker_ready, self()})
+
+              receive do
+                {^barrier_ref, :perform_effect} -> File.write!(target, "escaped")
+              end
+            end,
+            30_000,
+            {lease_monitor, fixture.lease},
+            fixture.executor
+          )
+        after
+          Process.demonitor(lease_monitor, [:flush])
+        end
+      end)
+
+    assert_receive {^barrier_ref, :filesystem_worker_ready, effect_worker}, 2_000
+    effect_monitor = Process.monitor(effect_worker)
+    executor_monitor = Process.monitor(fixture.executor)
+    Process.exit(fixture.executor, :kill)
+    assert_receive {:DOWN, ^executor_monitor, :process, _executor, :killed}, 2_000
+
+    assert {:abandoned, :effect_owner_lost, true, :none} = Task.await(running, 2_000)
+    assert_receive {:DOWN, ^effect_monitor, :process, ^effect_worker, :killed}, 2_000
+
+    send(effect_worker, {barrier_ref, :perform_effect})
+    refute File.exists?(target), "the filesystem worker acted after its Local owner died"
+  end
+
+  test "filesystem dispatch selects the owner-aware bounded work boundary" do
+    # Concept: every production filesystem effect is guarded by the Local
+    # authority that admitted it.
+    #
+    # Technical depth: the behavioral case above proves the owner-aware guardian;
+    # this compiled-code assertion proves `run_bounded_tool/6` supplies
+    # `effect_owner/0` as its fourth argument. Inspecting BEAM abstract code keeps
+    # the proof deterministic while avoiding a test-only branch in production.
+    module = Local
+
+    assert {:ok, {^module, [{:abstract_code, {:raw_abstract_v1, forms}}]}} =
+             :beam_lib.chunks(:code.which(module), [:abstract_code])
+
+    assert run_bounded_tool =
+             Enum.find(forms, &match?({:function, _, :run_bounded_tool, 6, _}, &1))
+
+    guarded_calls =
+      matching_terms(run_bounded_tool, fn
+        {:call, _, {:atom, _, :bounded_guardian_with_remaining}, _arguments} -> true
+        _other -> false
+      end)
+
+    assert [guarded_call] = guarded_calls
+
+    assert match?(
+             {:call, _, {:atom, _, :bounded_guardian_with_remaining},
+              [_, _, _, {:call, _, {:atom, _, :effect_owner}, []}]},
+             guarded_call
+           ),
+           "run_bounded_tool/6 did not call the guardian with effect_owner/0"
+  end
+
+  test "a reserve blocked by a held claim is answered inside its own bound" do
+    fixture = fixture("reservation-claim")
+    on_exit(fn -> stop_fixture(fixture) end)
+    {job, grant} = job_and_grant(fixture, "claim", "loopex.demo.write")
+    {:ok, prepared} = Ledger.prepare(fixture.ledger, "executor-local", 5_000)
+    parent = self()
+
+    holder =
+      Task.async(fn ->
+        Ledger.with_claim(prepared, fn ->
+          send(parent, :reservation_claim_held)
+          Process.sleep(6_500)
+        end)
+      end)
+
+    assert_receive :reservation_claim_held, 1_000
+    started = System.monotonic_time(:millisecond)
+    result = Local.execute(fixture.executor, job, grant)
+    elapsed = System.monotonic_time(:millisecond) - started
+
+    assert {:error, {:ledger_unavailable, :root_claim_held}} = result
+    assert elapsed < 9_000, "the caller waited #{elapsed} ms instead of being answered"
+
+    assert elapsed >= 4_500,
+           "the server answered after #{elapsed} ms without spending its claim wait"
+
+    Task.await(holder, 10_000)
+    assert :absent = Local.receipt(fixture.executor, job.job_id)
+  end
+
+  defp fixture(label, extra \\ []) do
     root =
       Path.join(
         System.tmp_dir!(),
@@ -231,11 +1565,13 @@ defmodule Loopex.Executor.LocalTest do
 
     {:ok, executor} =
       Local.start_link(
-        identity: "executor-local",
-        epoch: 7,
-        fencing_token: fence,
-        workspace_leases: %{lease_id => lease},
-        ledger_root: ledger
+        [
+          identity: "executor-local",
+          epoch: 7,
+          fencing_token: fence,
+          workspace_leases: %{lease_id => lease},
+          ledger_root: ledger
+        ] ++ extra
       )
 
     %{
@@ -245,17 +1581,68 @@ defmodule Loopex.Executor.LocalTest do
       lease_id: lease_id,
       fence: fence,
       lease: lease,
-      executor: executor
+      executor: executor,
+      grace: Keyword.get(extra, :cleanup_grace_ms, Executor.default_cleanup_grace_ms())
     }
   end
 
-  defp job_and_grant(fixture, label, tool_id) do
+  defp reservation_holder(executor, job_id, label, {:ok, _placement}, parent) do
+    receive do
+      {:release, reservation_ref} ->
+        GenServer.cast(executor, {:release, job_id, reservation_ref})
+        _barrier = GenServer.call(executor, :stats)
+        send(parent, {:holder_released, label})
+    end
+  end
+
+  defp reservation_holder(_executor, _job_id, _label, _answer, _parent), do: :ok
+
+  defp await_reservation_count(executor, job_id, expected, timeout_ms) do
+    deadline = System.monotonic_time(:millisecond) + timeout_ms
+    await_reservation_count_until(executor, job_id, expected, deadline)
+  end
+
+  defp await_reservation_count_until(executor, job_id, expected, deadline) do
+    holders = executor |> :sys.get_state() |> Map.fetch!(:reserved) |> Map.get(job_id)
+
+    count = if match?(%MapSet{}, holders), do: MapSet.size(holders), else: 0
+
+    if count == expected do
+      true
+    else
+      if System.monotonic_time(:millisecond) < deadline do
+        Process.sleep(5)
+        await_reservation_count_until(executor, job_id, expected, deadline)
+      else
+        false
+      end
+    end
+  end
+
+  defp await_queued_call(pid, attempts \\ 200)
+  defp await_queued_call(_pid, 0), do: false
+
+  defp await_queued_call(pid, attempts) do
+    queued? =
+      case Process.info(pid, :messages) do
+        {:messages, messages} -> Enum.any?(messages, &match?({:"$gen_call", _from, _}, &1))
+        _dead -> false
+      end
+
+    if queued? do
+      true
+    else
+      Process.sleep(5)
+      await_queued_call(pid, attempts - 1)
+    end
+  end
+
+  defp job_and_grant(fixture, label, tool_id),
+    do: job_and_grant(fixture, label, tool_id, tool_arguments(label, tool_id))
+
+  defp job_and_grant(fixture, label, tool_id, arguments) do
     {:ok, tool} = Local.tool(tool_id)
     now = System.system_time(:millisecond)
-
-    arguments =
-      %{"relative_path" => "#{label}.txt", "content" => "bytes-#{label}"}
-      |> maybe_delay(tool_id)
 
     fields = %{
       protocol_version: 1,
@@ -289,8 +1676,67 @@ defmodule Loopex.Executor.LocalTest do
     {job, grant}
   end
 
+  defp await_command_worker(caller, attempts \\ 200)
+  defp await_command_worker(_caller, 0), do: nil
+
+  defp await_command_worker(caller, attempts) do
+    worker =
+      case Process.info(caller, :monitors) do
+        {:monitors, monitors} ->
+          Enum.find_value(monitors, fn
+            {:process, pid} -> if is_port(command_port(pid)), do: pid
+            _other -> nil
+          end)
+
+        _dead ->
+          nil
+      end
+
+    if worker do
+      worker
+    else
+      Process.sleep(5)
+      await_command_worker(caller, attempts - 1)
+    end
+  end
+
+  defp command_port(pid) when is_pid(pid) do
+    case Process.info(pid, :links) do
+      {:links, links} -> Enum.find(links, &is_port/1)
+      _dead -> nil
+    end
+  end
+
+  defp await_file(path, attempts \\ 400)
+  defp await_file(_path, 0), do: false
+
+  defp await_file(path, attempts) do
+    if File.exists?(path) do
+      true
+    else
+      Process.sleep(5)
+      await_file(path, attempts - 1)
+    end
+  end
+
+  defp resume_if_suspended(pid) do
+    if Process.alive?(pid) and Process.info(pid, :status) == {:status, :suspended} do
+      :erlang.resume_process(pid)
+    else
+      :ok
+    end
+  end
+
   defp maybe_delay(arguments, "loopex.demo.wait_write"), do: Map.put(arguments, "delay_ms", 5_000)
   defp maybe_delay(arguments, _tool), do: arguments
+
+  defp tool_arguments(label, "loopex.write"),
+    do: %{"path" => "#{label}.txt", "content" => "bytes-#{label}"}
+
+  defp tool_arguments(label, tool_id) do
+    %{"relative_path" => "#{label}.txt", "content" => "bytes-#{label}"}
+    |> maybe_delay(tool_id)
+  end
 
   defp wrong(:attempt, grant), do: grant.attempt + 1
   defp wrong(:expiry, _grant), do: System.system_time(:millisecond) - 1
@@ -301,6 +1747,47 @@ defmodule Loopex.Executor.LocalTest do
       value when is_binary(value) -> value <> "-wrong"
       _other -> "wrong"
     end
+  end
+
+  defp contains_term?(term, predicate) do
+    predicate.(term) or
+      case term do
+        tuple when is_tuple(tuple) ->
+          tuple |> Tuple.to_list() |> Enum.any?(&contains_term?(&1, predicate))
+
+        list when is_list(list) ->
+          Enum.any?(list, &contains_term?(&1, predicate))
+
+        _leaf ->
+          false
+      end
+  end
+
+  defp matching_terms(term, predicate) do
+    own = if predicate.(term), do: [term], else: []
+
+    children =
+      case term do
+        tuple when is_tuple(tuple) -> Tuple.to_list(tuple)
+        list when is_list(list) -> list
+        _leaf -> []
+      end
+
+    own ++ Enum.flat_map(children, &matching_terms(&1, predicate))
+  end
+
+  defp send_call?({:atom, _, :send}), do: true
+
+  defp send_call?({:remote, _, {:atom, _, :erlang}, {:atom, _, :send}}),
+    do: true
+
+  defp send_call?(_callee), do: false
+
+  defp abstract_atom?(term, value) do
+    contains_term?(term, fn
+      {:atom, _, ^value} -> true
+      _other -> false
+    end)
   end
 
   defp stop_fixture(fixture) do

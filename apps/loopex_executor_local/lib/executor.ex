@@ -9,8 +9,8 @@ defmodule Loopex.Executor.Local do
 
   ## Technical depth
 
-  One GenServer serializes final validation and process start. The fixed tool
-  registry is code-owned rather than model-owned. `/usr/bin/env -i` constructs
+  One GenServer serializes final validation and the durable effect permit. The
+  fixed tool registry is code-owned rather than model-owned. `/usr/bin/env -i` constructs
   the child environment from nothing, then a fixed shell program receives only
   validated bounded arguments. The lease is monitored for every job's full
   lifetime: losing it ends the owned process group or abandons the filesystem
@@ -30,6 +30,53 @@ defmodule Loopex.Executor.Local do
 
   @max_output_bytes 1_048_576
   @max_progress_chunk_bytes 65_536
+  @max_receipt_bytes Loopex.Store.max_item_bytes()
+  @max_job_id_bytes 8_192
+  @receipt_digest ~r/\A[0-9a-f]{64}\z/
+  @receipt_environment_name ~r/\A[A-Za-z_][A-Za-z0-9_]*\z/
+  @receipt_outcomes [
+    :completed,
+    :failed,
+    :cancelled,
+    :outcome_unknown
+  ]
+  @receipt_terminal_variants [
+    {:completed, :confirmed},
+    {:failed, :confirmed},
+    {:cancelled, :confirmed},
+    {:outcome_unknown, :confirmed},
+    {:outcome_unknown, :unconfirmed}
+  ]
+  @receipt_fields [
+    :protocol_version,
+    :job_id,
+    :operation_id,
+    :attempt,
+    :session_id,
+    :run_id,
+    :turn_id,
+    :tool_call_id,
+    :session_epoch_at_dispatch,
+    :executor_epoch,
+    :executor_identity,
+    :canonical_request_digest,
+    :fencing_token,
+    :tool_id,
+    :tool_version,
+    :outcome,
+    :output,
+    :progress_count,
+    :observed_at_ms,
+    :child_environment_names,
+    :provider_credential_present,
+    :cleanup_grace_ms,
+    :cleanup_confirmation,
+    :receipt_retention_bound_ms,
+    :process_probe,
+    :effective_deadline_ms,
+    :run_deadline_ms,
+    :artifacts
+  ]
 
   # Concept: the declared grace the cancellation sequence gets once the run's own
   # instant has passed, and the only number any of that work is measured against.
@@ -70,6 +117,9 @@ defmodule Loopex.Executor.Local do
   # executor then reports every command unproven with nothing to say why. Naming
   # it is also what makes the unconfirmed branch reachable: a case can compose an
   # executor whose probe is not there, which no case could do with a literal.
+  # A configured replacement implements the same `-e -o pid= -o pgid=` table
+  # dialect. The runtime parses and witnesses that table itself; it never relies
+  # on the incompatible BSD/procps meanings of a filtering flag.
   #
   # The reserve exists because one declared period taken first-come means the
   # last step gets whatever the earlier ones left -- and a job that spent its
@@ -137,11 +187,13 @@ defmodule Loopex.Executor.Local do
   # the moment it is signalled -- pays one look rather than the whole window.
   @cooperative_poll_ms 25
 
-  # The wait for a cleanup helper's own kill to be reported. It is a fixed bound
-  # for the same reason `@abandon_confirmation_ms` is: it is asked only once a
-  # bound has already been exceeded, and `kill(2)` either returns at once or the
-  # process running it is itself the thing that has stopped answering.
+  # The wait for a cleanup helper's Port-owned guard to report its final exit.
+  # It is a fixed bound for the same reason `@abandon_confirmation_ms` is: it is
+  # asked only after the helper has answered or its own bound has expired, and a
+  # token-bound KILL has already been delivered to the still-live guard.
   @helper_signal_ms 250
+  @helper_control_bytes 256
+  @launch_guard_handshake_ms 5_000
 
   # The wait for a killed worker to be confirmed dead. It is a fixed bound rather
   # than a deadline for the same reason: it is asked only once a bound has
@@ -154,6 +206,24 @@ defmodule Loopex.Executor.Local do
   @credential_name "LOOPEX_PROVIDER_API_KEY"
   @search_path_name "PATH"
   @search_path_value "/usr/bin:/bin"
+  @guard_preamble "loopex-guard"
+  @guard_init "loopex-init"
+  @guard_run "loopex-run"
+  @guard_abort "loopex-abort"
+  @guard_status "loopex-command-status"
+  @guard_signal_ack "loopex-signal-accepted"
+  @guard_signal "loopex-signal"
+  @guard_release "loopex-release"
+
+  @job_context_keys [
+    :loopex_cleanup_grace_ms,
+    :loopex_process_probe,
+    :loopex_inflight_table,
+    :loopex_effect_owner,
+    :loopex_cleanup_episode,
+    :loopex_retention_episode,
+    :loopex_admission
+  ]
 
   @group_terminated_note "\n[loopex: the command exited while members of its own process " <>
                            "group were still running. The group was terminated and is " <>
@@ -162,21 +232,6 @@ defmodule Loopex.Executor.Local do
   @group_unconfirmed_note "\n[loopex: the command exited while members of its own process " <>
                             "group were still running, and the group could not be confirmed " <>
                             "cleaned. Whether its effect is complete is unproven.]"
-
-  @deadline_released_note "\n[loopex: the run deadline passed while this tool was running. " <>
-                            "This path captures no process group, so the child was released " <>
-                            "rather than confirmed stopped and whether its effect landed is " <>
-                            "unproven.]"
-
-  @cancelled_released_note "\n[loopex: this job was cancelled while its child was running. " <>
-                             "This path captures no process group, so the child was released " <>
-                             "rather than confirmed stopped and whether its effect landed is " <>
-                             "unproven.]"
-
-  @open_authority_note "\n[loopex: this job's open authority could not be removed after its " <>
-                         "receipt was retained, so this executor's state root stays " <>
-                         "quarantined until an operator reconciles it, and this job's " <>
-                         "cleanup is reported unconfirmed.]"
 
   @lease_lost_note "\n[loopex: the workspace lease was lost before this job's receipt was " <>
                      "durably retained. Whether its effect landed in the workspace this job " <>
@@ -220,11 +275,11 @@ defmodule Loopex.Executor.Local do
   The serialized owner decides *whether* this job may proceed; the caller then
   performs the work. ADR 0016 names the effect boundary as the serialized
   transition that reserves exact worker authority immediately before its single
-  permit, and that is exactly what crosses the GenServer here: the quarantine
-  check, the retained-receipt decision, and the in-memory reservation. Prestart
-  validation, the durable admission publication under the root claim, the effect,
-  its receipt, and the removal of this job's open authority all run in the
-  calling process.
+  permit. The initial call decides quarantine, retained receipt, or queueing.
+  Immediately before the effect, a second call repeats reconciliation, performs
+  final validation, publishes durable admission under the root claim, and fixes
+  the exact operation owner. The effect, receipt, and removal of its open
+  authority remain in the calling process.
 
   That placement is not a detail. A serialized owner that also *ran* every effect
   was unavailable for the whole length of the longest job it had admitted, so a
@@ -251,19 +306,31 @@ defmodule Loopex.Executor.Local do
     progress = progress || Executor.discard_progress()
     job_id = Map.get(job, :job_id, "")
 
-    case GenServer.call(executor, {:reserve, job}) do
-      {:ok, placement} ->
-        try do
-          run_reserved(placement, job, grant, options, progress)
-        after
-          GenServer.cast(executor, {:release, job_id})
+    # Concept: admission returns the owner's actual decision to its waiting caller.
+    #
+    # Technical depth: queueing and ledger IO have no summed bound here, so an
+    # unrelated observation timeout cannot stand in for that decision. The root
+    # claim wait, job deadline, and live-owner fences still bound permission;
+    # waiting grants no extra effect authority, and server exit still ends the call.
+    case Executor.validate_job(job) do
+      :ok ->
+        case GenServer.call(executor, {:reserve, job}, :infinity) do
+          {:ok, %{reservation_ref: reservation_ref} = placement} ->
+            try do
+              run_reserved(placement, job, grant, options, progress)
+            after
+              GenServer.cast(executor, {:release, job_id, reservation_ref})
+            end
+
+          {:retained, receipt} ->
+            {:ok, receipt}
+
+          {:error, reason} ->
+            {:error, reason}
         end
 
-      {:retained, receipt} ->
-        {:ok, receipt}
-
-      {:error, reason} ->
-        {:error, reason}
+      {:error, _invalid_job} ->
+        refused_before_effect(:canonical_job_request_mismatch)
     end
   end
 
@@ -274,40 +341,27 @@ defmodule Loopex.Executor.Local do
 
   ## Technical depth
 
-  Runs in the caller rather than in this executor's GenServer, because that
-  server is blocked for the duration of the job being cancelled. The operating
+  Runs in the caller rather than serializing process cleanup through this
+  executor's GenServer. That server owns only the short reserve and permit
+  decisions; the requesting caller performs the admitted work. The operating
   system effect still belongs to this application — the hand owns effects, and
-  this is the hand's code — but it must not be queued behind the very work it is
-  meant to end.
+  this is the hand's code — while cancellation remains independently reachable
+  from the process doing that work.
 
-  Signals the job's owned process group and then confirms by looking for
-  survivors. A job this instance has no record of is decided by the root every
-  instance shares rather than by this one's memory. An unavailable executor
-  proves nothing, because its process-local ledger may have disappeared with
-  work still in flight.
+  Routes the request to the live launch owner that holds the captured process
+  group, the job's committed cleanup period, and the probe. That owner signals
+  and confirms its own group; a cached numeric identifier never becomes signal
+  authority in a different process. An absent or unavailable owner proves
+  nothing because work or unresolved durable authority may still exist.
   """
   @impl Loopex.Executor
   @spec cancel(t(), binary()) :: {:ok, :cleaned} | {:ok, :unconfirmed}
   def cancel(executor, job_id) when is_pid(executor) and is_binary(job_id) do
     case lookup_inflight(executor, job_id) do
-      {:ok, group, default, probe, ledger} ->
-        # The cancellation is its own cleanup episode, so its one absolute
-        # instant opens here rather than being inherited from a job whose own
-        # deadline may be minutes away. It takes the whole period rather than the
-        # period less the receipt's share, because a cancellation writes no
-        # receipt: it answers its caller and the job's own path retains the
-        # record.
-        episode = cancellation_episode(committed_grace(ledger, job_id, default), probe)
-        terminate_group(group, episode)
-
-        if confirm_group_terminated(group, episode),
-          do: {:ok, :cleaned},
-          else: {:ok, :unconfirmed}
-
-      {:starting, worker, default, probe, ledger} ->
-        cancel_starting_job(
+      {:owned, worker, grace, probe} ->
+        cancel_owned_job(
           worker,
-          cancellation_episode(committed_grace(ledger, job_id, default), probe)
+          cancellation_episode(grace, probe)
         )
 
       # Concept: an identity nothing here has ever heard of is an identity this
@@ -316,7 +370,7 @@ defmodule Loopex.Executor.Local do
       #
       # Technical depth: ADR 0016 clause 4 -- "An absent ID has no request digest
       # and answers unconfirmed without durable cancellation state." This branch
-      # read the shared root and answered `{:ok, :cleaned}` wherever the root held
+      # once read the shared root and answered `{:ok, :cleaned}` wherever the root held
       # no open entry for the identity. That treated absence as a positive claim
       # in the one place the ADR forbids it: `cleaned` is reserved for a matching
       # durable refusal or an independently confirmed cleanup, and an ID with no
@@ -326,62 +380,13 @@ defmodule Loopex.Executor.Local do
       # still be running. The open-entry read is gone rather than inverted,
       # because both of its answers are `unconfirmed` and a read whose result
       # cannot change the answer is a claim to authority this branch does not
-      # have. `committed_grace/3` still reads the root, because the period a
-      # cancellation spends is a different question from what it may assert.
+      # have. A live launch owner carries its job's committed cleanup period
+      # separately, so root contention cannot substitute an executor default.
       :absent ->
         {:ok, :unconfirmed}
 
       :executor_unavailable ->
         {:ok, :unconfirmed}
-    end
-  end
-
-  # Concept: the period a cancellation spends is the period the cancelled job
-  # committed, not the period this executor happened to be started with.
-  #
-  # Technical depth: ADR 0016 makes the committed value the one Local uses for
-  # the job being cancelled, and the open-authority entry is where that value is
-  # durably recorded for exactly this job -- which is also what lets an instance
-  # spend the right period for a job another instance admitted. The start default
-  # stands only where no committed value can be read: a root that is unavailable
-  # or holds no entry for this identity. That is a fallback for an unreadable
-  # root rather than a second source of truth.
-  defp committed_grace(ledger, job_id, default) do
-    case open_authority(ledger, job_id) do
-      {:ok, %{"cleanup_grace_ms" => grace}} -> grace
-      _no_committed_value -> default
-    end
-  end
-
-  # Concept: one closed reading of the shared root, taken while nothing may
-  # change it.
-  #
-  # Technical depth: ADR 0016 requires every decision that reads open authority
-  # to acquire the root-wide claim, read one complete bounded snapshot while
-  # mutation is excluded, and fix its decision before releasing it; no unlocked
-  # observation is cancellation authority. The claim is not waited for, because a
-  # cancellation carries no deadline of its own to spend on contention, and
-  # refusal is unavailability rather than permission either way.
-  defp open_authority(nil, _job_id), do: :unavailable
-
-  defp open_authority(ledger, job_id) do
-    answer =
-      Ledger.with_claim(ledger, fn ->
-        case Ledger.open_snapshot(ledger) do
-          {:ok, entries} ->
-            case Enum.find(entries, &(&1["job_id"] == job_id)) do
-              nil -> :absent
-              entry -> {:ok, entry}
-            end
-
-          {:error, _unreadable} ->
-            :unavailable
-        end
-      end)
-
-    case answer do
-      {:error, _claim_unavailable} -> :unavailable
-      settled -> settled
     end
   end
 
@@ -391,15 +396,18 @@ defmodule Loopex.Executor.Local do
   # Technical depth: ADR 0016 admits `1..2^64-1` and states that timer
   # implementation limits do not silently cap it. A `receive ... after` above
   # 2^32-1 raises `:timeout_value` instead of waiting, so the accepted maximum
-  # crashed whoever called `cancel/2` rather than bounding this wait. The wait is
-  # measured against the cancellation episode's one absolute instant in slices no
-  # larger than `@timer_slice_ms`, which changes how the wait is implemented and
-  # not how long it is. The episode is created by the caller so that both
-  # branches of one cancellation open exactly one instant between them.
-  defp cancel_starting_job(worker, {until, grace, probe}) do
+  # crashed whoever called `cancel/2` rather than bounding this wait. This caller's
+  # wait is measured against one absolute instant in slices no larger than
+  # `@timer_slice_ms`, which changes how the wait is implemented and not how long
+  # it is. The caller opens the cleanup episode before enqueueing the request and
+  # the live launch owner consumes that exact instant. A second request queues
+  # behind the first and the owner exits after reporting its single terminal
+  # result, so neither queueing nor concurrent callers can refresh the group's
+  # cleanup deadline.
+  defp cancel_owned_job(worker, {until, _grace, _probe} = episode) do
     token = make_ref()
     monitor = Process.monitor(worker)
-    send(worker, {:loopex_cancel_pending, token, self(), grace, probe})
+    send(worker, {:loopex_cancel_pending, token, self(), episode})
     await_cancel_result(worker, monitor, token, until)
   end
 
@@ -507,22 +515,18 @@ defmodule Loopex.Executor.Local do
       {:dictionary, dictionary} ->
         table = Keyword.get(dictionary, :loopex_inflight_table)
 
-        grace =
-          Keyword.get(
-            dictionary,
-            :loopex_cleanup_grace_ms,
-            Executor.default_cleanup_grace_ms()
-          )
-
         probe = Keyword.get(dictionary, :loopex_process_probe, @default_process_probe)
-        ledger = table && ledger_authority(table)
+        authority = table && process_authority(table, job_id)
 
-        case table && :ets.lookup(table, job_id) do
-          [{^job_id, {:starting, worker}}] when is_pid(worker) ->
-            {:starting, worker, grace, probe, ledger}
+        case {table && :ets.lookup(table, job_id), authority} do
+          {[{^job_id, {:starting, worker}}], {worker, grace}}
+          when is_pid(worker) and is_integer(grace) and grace > 0 ->
+            {:owned, worker, grace, probe}
 
-          [{^job_id, group}] when is_integer(group) and group > 1 ->
-            {:ok, group, grace, probe, ledger}
+          {[{^job_id, group}], {worker, grace}}
+          when is_integer(group) and group > 1 and is_pid(worker) and is_integer(grace) and
+                 grace > 0 ->
+            {:owned, worker, grace, probe}
 
           _absent ->
             :absent
@@ -532,28 +536,117 @@ defmodule Loopex.Executor.Local do
     ArgumentError -> :executor_unavailable
   end
 
-  # Concept: the root authority a cancellation reads is kept where this
-  # executor's other cancellation state is kept, and not where a crash prints
-  # it.
-  #
-  # Technical depth: `cancel/2` runs in its caller, so it reaches this
-  # executor's state without calling it -- the period, the probe and the
-  # in-flight table are already read that way. The prepared ledger authority
-  # cannot join them in the process dictionary: `proc_lib` crash reports carry a
-  # process's whole dictionary, and ADR 0016 keeps the root path, generation
-  # digest, and root binding out of every log and diagnostic plane. The
-  # executor's own in-flight table is the same private per-instance state,
-  # readable without waiting for the server, and is not dumped anywhere. The key
-  # is an atom and every job identity is a binary, so the two cannot collide.
-  @ledger_authority_key :loopex_ledger_authority
+  @operation_owner_key :loopex_operation_owner
+  @process_authority_key :loopex_process_authority
 
-  defp ledger_authority(table) do
-    case :ets.lookup(table, @ledger_authority_key) do
-      [{@ledger_authority_key, ledger}] -> ledger
+  # The worker pid, not the numeric group observation beside it, is cancellation
+  # authority. The committed job period travels with that pid so root-claim
+  # contention cannot substitute an executor default.
+  defp process_authority(table, job_id) do
+    key = {@process_authority_key, job_id}
+
+    case :ets.lookup(table, key) do
+      [{^key, worker, grace}] -> {worker, grace}
       _absent -> nil
     end
   rescue
     ArgumentError -> nil
+  end
+
+  # Concept: one exact reservation token owns an admitted operation; join
+  # waiters remain reservations and never become effect evidence.
+  #
+  # Technical depth: the token is inserted into this executor's private table
+  # while `open_admission/4` still holds the root claim, after the marker and open
+  # entry are durable and before the effect permit returns. A GenServer message
+  # here would either leave an observable open-without-owner gap after claim
+  # release or deadlock behind a receipt call waiting for the claim. The tuple
+  # key cannot collide with binary in-flight job keys or the atom ledger key.
+  # Release and `DOWN` delete the exact `{key, reference}` object, so a joiner's
+  # cleanup cannot erase the owner.
+  defp claim_operation_owner(state, job_id, reservation_ref, caller) do
+    if reservation_owned?(state, job_id, reservation_ref, caller) do
+      key = {@operation_owner_key, job_id}
+      entry = {key, reservation_ref}
+
+      case :ets.lookup(state.inflight_table, key) do
+        [^entry] ->
+          :ok
+
+        [] ->
+          if :ets.insert_new(state.inflight_table, entry),
+            do: :ok,
+            else: {:error, {:ledger_unavailable, :operation_owner_unavailable}}
+
+        _other ->
+          {:error, {:ledger_unavailable, :operation_owner_unavailable}}
+      end
+    else
+      {:error, {:ledger_unavailable, :operation_owner_unavailable}}
+    end
+  rescue
+    ArgumentError -> {:error, {:ledger_unavailable, :operation_owner_unavailable}}
+  end
+
+  defp operation_owner?(state, job_id) do
+    key = {@operation_owner_key, job_id}
+
+    case :ets.lookup(state.inflight_table, key) do
+      [{^key, reservation_ref}] -> reservation_held?(state, job_id, reservation_ref)
+      _absent -> false
+    end
+  rescue
+    ArgumentError -> false
+  end
+
+  defp operation_owner_jobs(state) do
+    :ets.foldl(
+      fn
+        {{@operation_owner_key, job_id}, reservation_ref}, jobs ->
+          if reservation_held?(state, job_id, reservation_ref), do: [job_id | jobs], else: jobs
+
+        _entry, jobs ->
+          jobs
+      end,
+      [],
+      state.inflight_table
+    )
+  rescue
+    ArgumentError -> []
+  end
+
+  # Concept: an unsupported holder is not live local effect authority.
+  # Technical depth: Process.alive?/1 raises for a non-local PID. Refusing that
+  # holder must not terminate the Local owner of other already admitted jobs.
+  defp reservation_held?(state, job_id, reservation_ref) do
+    held? =
+      state.reserved
+      |> Map.get(job_id, MapSet.new())
+      |> MapSet.member?(reservation_ref)
+
+    held? and
+      Enum.any?(state.reservation_monitors, fn
+        {_monitor, {^job_id, ^reservation_ref, holder}} ->
+          is_pid(holder) and node(holder) == node() and Process.alive?(holder)
+
+        _other ->
+          false
+      end)
+  end
+
+  defp reservation_owned?(state, job_id, reservation_ref, caller) do
+    reservation_held?(state, job_id, reservation_ref) and
+      Enum.any?(state.reservation_monitors, fn
+        {_monitor, {^job_id, ^reservation_ref, ^caller}} -> true
+        _other -> false
+      end)
+  end
+
+  defp forget_operation_owner(table, job_id, reservation_ref) do
+    :ets.delete_object(table, {{@operation_owner_key, job_id}, reservation_ref})
+    :ok
+  rescue
+    ArgumentError -> :ok
   end
 
   # Concept: a job's process cleanup is one episode with one instant, opened the
@@ -605,12 +698,14 @@ defmodule Loopex.Executor.Local do
   # the sum of its phases while its receipt declared one bound, which is the
   # thing the comment on `settle_receipt/4` already claimed was impossible.
   #
-  # The allowance is the committed quarter the receipt declares, and the instant
-  # is opened lazily by the first phase that needs it, so a settlement that
-  # retains nothing starts no clock. It is memoized in the process that owns the
-  # job for the reason the cleanup episode is: it is that job's own state, every
-  # phase must reach it without being threaded through the functions between
-  # them, and a VM-global name would collide between two executors in one VM.
+  # The allowance is the committed quarter the receipt declares. Its instant is
+  # opened immediately after the effect result exists and before receipt
+  # preparation starts, even where there is no artifact to spill: preparation is
+  # part of retention, not free work outside its bound. It is memoized in the
+  # process that owns the job for the reason the cleanup episode is: it is that
+  # job's own state, every phase must reach it without being threaded through the
+  # functions between them, and a VM-global name would collide between two
+  # executors in one VM.
   defp retention_until do
     case Process.get(:loopex_retention_episode) do
       nil ->
@@ -622,8 +717,6 @@ defmodule Loopex.Executor.Local do
         until
     end
   end
-
-  defp retention_remaining, do: cleanup_remaining(retention_until())
 
   defp close_retention_episode, do: Process.delete(:loopex_retention_episode)
 
@@ -772,8 +865,9 @@ defmodule Loopex.Executor.Local do
     #
     # Technical depth: ADR 0016 requires the wall and monotonic instants used to
     # derive a job's effect-action deadline to come from one sample, so the two
-    # cannot be taken either side of a scheduling gap. This is a reversible edge
-    # seam and enters no job, ledger record, receipt, event, or public API.
+    # cannot be taken either side of a scheduling gap. This is a trusted-local
+    # start option, not a portable Executor port field; it enters no job,
+    # ledger record, receipt or event.
     clock_provider = Keyword.get(options, :clock_provider, &paired_now/0)
 
     # Concept: the one call that removes an open entry, from a place a case can
@@ -783,8 +877,9 @@ defmodule Loopex.Executor.Local do
     # the filesystem offers no way to make either of them slow on demand, so
     # without this seam no case can prove that bound exists rather than merely
     # passing when the unlink is fast. It is the same kind of reversible edge seam
-    # the paired clock is, defaults to `Ledger.close_open/2`, and enters no job,
-    # ledger record, receipt, event, or public API.
+    # the paired clock is and defaults to `Ledger.close_open/2`. The trusted-local
+    # start option carries executable host authority; it enters no job, ledger
+    # record, receipt, event or portable Executor port field.
     open_authority_close = Keyword.get(options, :open_authority_close, &Ledger.close_open/2)
 
     valid =
@@ -802,13 +897,9 @@ defmodule Loopex.Executor.Local do
       # Concept: the configured period is kept where the code that cleans up can
       # read it, including the code that runs outside this server.
       #
-      # Technical depth: `cancel/2` deliberately runs in its caller rather than in
-      # this server, because this server is blocked for the duration of the job
-      # being cancelled -- so it cannot ask for the period through a call it would
-      # queue behind that job. It reads it from this process's dictionary exactly
-      # as it already reads the in-flight table, and for the same reason: state
-      # this process owns, read without waiting for it to be free, and never under
-      # a VM-global name that two executors in one VM would collide on.
+      # Technical depth: the startup value remains readable here for host
+      # introspection. Each admitted launch separately publishes its job's exact
+      # committed value with its live owner, which is what `cancel/2` consumes.
       Process.put(:loopex_cleanup_grace_ms, cleanup_grace_ms)
       Process.put(:loopex_process_probe, process_probe)
 
@@ -820,9 +911,9 @@ defmodule Loopex.Executor.Local do
       # one job. It used to be created lazily by whoever ran the first effect,
       # which was this server only because this server ran every effect. Creating
       # it here makes that independent of where the work runs, and the table is
-      # public so a caller performing an effect can register the group it owns.
+      # public so a caller performing an effect can register the live launch
+      # owner and the group that owner alone may signal.
       table = inflight_table()
-      :ets.insert(table, {@ledger_authority_key, ledger})
 
       {:ok,
        %{
@@ -839,6 +930,7 @@ defmodule Loopex.Executor.Local do
          process_probe: process_probe,
          inflight_table: table,
          reserved: %{},
+         reservation_monitors: %{},
          dispatches: %{}
        }}
     else
@@ -869,12 +961,14 @@ defmodule Loopex.Executor.Local do
   #
   # `resolved` is the exact set of open entries that are not evidence of anything
   # unresolved: the request being decided, whose own entry means it is already
-  # admitted and must be joined rather than refused, and every job this instance
-  # currently holds reserved, whose entry means work in flight here. Reading a
-  # live entry as an abandoned one would make a root unusable the moment it
-  # carried two concurrent jobs, and would refuse the second instance of the pair
-  # that ADR 0016 requires to join a single operation. Everything else is a peer's
-  # authority this instance cannot resolve, and that is exactly what quarantines.
+  # admitted and must be joined rather than refused, and every operation this
+  # instance actually owns. A join waiter is deliberately absent: after the
+  # operation owner dies, its durable entry must quarantine unrelated work even
+  # while that waiter keeps polling. Reading a live owner's entry as abandoned
+  # would make a root unusable the moment it carried two concurrent jobs and
+  # would refuse the second instance of the pair ADR 0016 requires to join.
+  # Everything else is authority this instance cannot resolve, and that is
+  # exactly what quarantines.
   defp reconcile(ledger, resolved) do
     case Ledger.open_snapshot(ledger) do
       {:ok, entries} ->
@@ -897,26 +991,15 @@ defmodule Loopex.Executor.Local do
   # authority is still on the root is not this job's final answer either.
   #
   # Technical depth: `:absent` is what ends a recovered run `outcome_unknown`,
-  # so a lookup that arrives while the job is reserved here answers
-  # `effect_in_flight` instead. The reservation table is this server's own
-  # state, read without waiting on the job, which runs in its caller. Every other
-  # answer joins a terminal to an open entry, which ADR 0016 clause 7 decides
-  # under the root claim from one bounded snapshot, so a peer's settlement cannot
-  # publish or remove anything between the two reads this answer combines.
+  # so a lookup that arrives while this instance still owns the admitted effect
+  # answers `effect_in_flight` instead. A reservation alone can belong to a join
+  # waiter and is not ownership evidence; only the exact token that won durable
+  # admission enters the operation-owner table. Every other answer joins a
+  # terminal to an open entry, which ADR 0016 clause 7 decides under the root
+  # claim from one bounded snapshot, so a peer's settlement cannot publish or
+  # remove anything between the two reads this answer combines.
   def handle_call({:receipt, job_id}, _from, state) do
-    if Map.has_key?(state.reserved, job_id) do
-      {:reply, {:error, :effect_in_flight}, state}
-    else
-      answer =
-        final_receipt_under_claim(
-          state.ledger,
-          state.ledger_root,
-          job_id,
-          @receipt_claim_wait_ms
-        )
-
-      {:reply, answer, state}
-    end
+    {:reply, local_receipt_under_claim(state, job_id, @receipt_claim_wait_ms), state}
   end
 
   def handle_call(:stats, _from, state),
@@ -932,19 +1015,76 @@ defmodule Loopex.Executor.Local do
   #
   # Technical depth: a quarantined root refuses everything; a retained receipt
   # for this exact request is replayed and a conflicting one refuses; anything
-  # else is reserved to the caller, which then owns the waiting. The reservation
-  # records who holds the job so `stats/1` and the release below describe live
-  # work rather than work this server is performing.
-  def handle_call({:reserve, job}, {caller, _tag}, state) do
-    job_id = Map.get(job, :job_id, "")
-
+  # else is reserved to the caller, which then owns the waiting. Each reservation
+  # records its exact live holder so receipt lookup and release below describe
+  # work still held here rather than work this server is performing.
+  # A missing or oversized identity cannot name durable truth and is refused
+  # without reaching the ledger or entering the reservation map. The complete
+  # immutable JobRequest was already validated at the callback boundary before
+  # either retained replay or admission join. Ephemeral grant and lease
+  # validation deliberately remain after marker resolution, so a valid
+  # same-digest admission still joins before a duplicate caller's current
+  # authority is revalidated.
+  def handle_call({:reserve, %{job_id: job_id} = job}, {caller, _tag}, state)
+      when is_binary(job_id) and byte_size(job_id) in 1..@max_job_id_bytes do
     case reserve_decision(state, job, job_id) do
+      # Technical depth: every call gets an opaque reference and its own caller
+      # monitor. Several callers can therefore join one durable job without a
+      # release or `DOWN` for one erasing another. Reservation says only that the
+      # caller is deciding or joining; the admission winner separately installs
+      # the one token that says this instance owns the effect.
       :reserve ->
-        {:reply, {:ok, placement(state)},
-         %{state | reserved: Map.put(state.reserved, job_id, caller)}}
+        reservation_ref = make_ref()
+        monitor = Process.monitor(caller)
+        holders = Map.get(state.reserved, job_id, MapSet.new())
+
+        {:reply, {:ok, placement(state, reservation_ref)},
+         %{
+           state
+           | reserved: Map.put(state.reserved, job_id, MapSet.put(holders, reservation_ref)),
+             reservation_monitors:
+               Map.put(state.reservation_monitors, monitor, {job_id, reservation_ref, caller})
+         }}
 
       answer ->
         {:reply, answer, state}
+    end
+  end
+
+  def handle_call({:reserve, _invalid_job}, _from, state),
+    do: {:reply, refused_before_effect(:canonical_job_request_mismatch), state}
+
+  # Concept: a reservation queues or joins work; this second decision is the
+  # only permission for its holder to begin an effect.
+  #
+  # Technical depth: the request is handled by the same server that observes
+  # reservation-owner `DOWN` messages. While it holds the root claim it verifies
+  # the exact live holder, validates the job and grant, re-runs complete root
+  # reconciliation at the final boundary, resolves the durable marker, and for new work installs the
+  # operation-owner token. No reservation becomes a permit after the relevant
+  # holder loss is observed; a liveness sample is not atomic with a later death.
+  # The reply carries only the private values the caller needs after permission;
+  # the server never blocks for the duration of the tool.
+  def handle_call({:permit, job, grant, reservation_ref}, {caller, _tag}, state) do
+    job_id = Map.get(job, :job_id, "")
+
+    if reservation_owned?(state, job_id, reservation_ref, caller) do
+      case permit_reserved(state, job, grant, reservation_ref, caller) do
+        {:ok, permit} ->
+          dispatches =
+            if match?({:admitted, _admission}, permit.decision) do
+              Map.update(state.dispatches, job_id, 1, fn count -> count + 1 end)
+            else
+              state.dispatches
+            end
+
+          {:reply, {:ok, permit}, %{state | dispatches: dispatches}}
+
+        {:error, reason} ->
+          {:reply, {:error, reason}, state}
+      end
+    else
+      {:reply, refused_before_effect(:effect_start_authority_unavailable), state}
     end
   end
 
@@ -965,7 +1105,9 @@ defmodule Loopex.Executor.Local do
   defp reserve_decision(state, job, job_id) do
     Ledger.with_claim(
       state.ledger,
-      fn ->
+      fn claimed ->
+        state = %{state | ledger: claimed}
+
         case reconcile(state.ledger, resolved_jobs(state, job_id)) do
           nil -> settled_or_reserved(state, job, job_id)
           quarantine -> {:error, quarantine}
@@ -975,27 +1117,174 @@ defmodule Loopex.Executor.Local do
     )
   end
 
+  # Concept: the effect permit is fixed from one current view of this root and
+  # one current validation of the request.
+  #
+  # Technical depth: queueing occurred earlier and grants no authority. This
+  # second root-claim transaction validates the request, then repeats
+  # reconciliation after every potentially blocking validation step and resolves
+  # the marker without an unlocked gap. The live exact holder is checked after
+  # the claim wait, after final validation, and once more when the operation-owner token is installed.
+  # A caller lost during publication can leave only unresolved durable authority,
+  # never a permit to run an effect. A validation refusal is written while the
+  # same claim is held.
+  # Only a newly admitted operation increments dispatch evidence; a join merely
+  # waits for the one existing operation's receipt.
+  defp permit_reserved(state, job, grant, reservation_ref, caller) do
+    Ledger.with_claim(
+      state.ledger,
+      fn claimed ->
+        state = %{state | ledger: claimed}
+        job_id = Map.get(job, :job_id, "")
+
+        if reservation_owned?(state, job_id, reservation_ref, caller) do
+          validate_and_permit(state, job, grant, reservation_ref, caller)
+        else
+          refused_before_effect(:effect_start_authority_unavailable)
+        end
+      end,
+      claim_wait(job)
+    )
+  end
+
+  defp validate_and_permit(state, job, grant, reservation_ref, caller) do
+    case permit_marker_decision(state, job, reservation_ref, caller) do
+      :new ->
+        validate_new_permit(state, job, grant, reservation_ref, caller)
+
+      :join ->
+        {:ok,
+         %{
+           decision: :join,
+           tool: nil,
+           lease_pid: nil,
+           workspace: nil,
+           arguments: nil,
+           receipt_output_limit: nil
+         }}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  # Concept: durable identity is decided before ephemeral start validation.
+  #
+  # Technical depth: a same-digest admission already proves that one effect may
+  # have begun. Revalidating the duplicate caller's current grant or lease first
+  # let a now-expired duplicate report `refused_before_effect`; the ledger
+  # correctly refused to overwrite its admission, but that conflict was ignored.
+  # Under the root claim, resolve the existing marker first. Only true absence
+  # reaches validation for a new effect; a matching admission joins, a refusal
+  # replays, and a conflicting digest conflicts.
+  defp permit_marker_decision(state, job, reservation_ref, caller) do
+    job_id = Map.get(job, :job_id, "")
+
+    if reservation_owned?(state, job_id, reservation_ref, caller) do
+      case reconcile(state.ledger, resolved_jobs(state, job_id)) do
+        nil -> existing_marker_decision(state, job)
+        quarantine -> {:error, quarantine}
+      end
+    else
+      refused_before_effect(:effect_start_authority_unavailable)
+    end
+  end
+
+  defp existing_marker_decision(state, job) do
+    case Ledger.read_marker(state.ledger, job) do
+      :absent ->
+        :new
+
+      {:ok, record} ->
+        if Map.get(record, :ledger_kind) == Ledger.refusal_kind(),
+          do: {:error, {:refused_before_effect, refusal_reason(record)}},
+          else: :join
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp validate_new_permit(state, job, grant, reservation_ref, caller) do
+    case final_prestart_validation(state, job, grant) do
+      {:ok, tool, lease_pid, workspace, arguments} ->
+        case final_root_reconciliation(state, job, reservation_ref, caller) do
+          :ok ->
+            case open_admission(state, job, reservation_ref, caller, tool, arguments) do
+              {:ok, admission, receipt_output_limit} ->
+                {:ok,
+                 %{
+                   decision: {:admitted, admission},
+                   tool: tool,
+                   lease_pid: lease_pid,
+                   workspace: workspace,
+                   arguments: arguments,
+                   receipt_output_limit: receipt_output_limit
+                 }}
+
+              {:error, reason} ->
+                {:error, reason}
+            end
+
+          {:error, reason} ->
+            {:error, reason}
+        end
+
+      {:error, {:refused_before_effect, reason} = refusal} ->
+        refusal_result(state, job, reason, refusal)
+    end
+  end
+
+  # Concept: validation can wait, and authority that was live before that wait
+  # may be unresolved by the time it ends.
+  #
+  # Technical depth: the Local server holds the root claim while it calls the
+  # bounded lease boundary, so reservation-owner `DOWN` messages cannot update
+  # its maps during that call. `operation_owner_jobs/1` deliberately samples the
+  # exact holder processes instead. Repeating the complete snapshot here, after
+  # validation and immediately before durable admission, exposes an open entry
+  # whose holder died in that interval. The current reservation is checked in
+  # the same step; neither a stale caller nor newly unresolved effect truth can
+  # become a permit merely because the earlier snapshot was healthy.
+  defp final_root_reconciliation(state, job, reservation_ref, caller) do
+    if reservation_owned?(state, job.job_id, reservation_ref, caller) do
+      case reconcile(state.ledger, resolved_jobs(state, job.job_id)) do
+        nil -> :ok
+        quarantine -> {:error, quarantine}
+      end
+    else
+      refused_before_effect(:effect_start_authority_unavailable)
+    end
+  end
+
   defp resolved_jobs(state, job_id),
-    do: MapSet.new([job_id | Map.keys(state.reserved)])
+    do: MapSet.new([job_id | operation_owner_jobs(state)])
 
   # Concept: this request replays a terminal only where that terminal is final,
   # and joins the one operation where it is not.
   #
   # Technical depth: the caller already holds the root claim, so the receipt and
   # this job's open entry are read as one snapshot. A receipt whose entry is still
-  # there is `effect_settling`: its bytes may yet be replaced by the quarantined
-  # form, and handing them back as a replay would report a completion that is
-  # about to reverse. An entry with no receipt is this exact request already
+  # there is `effect_settling`: the operation and cleanup facts remain provisional
+  # until disposal succeeds, and handing them back as a replay would report a
+  # final completion while the root still says settlement is unresolved. An entry with no receipt is this exact request already
   # admitted somewhere, which ADR 0016 requires to be joined rather than refused,
-  # so the caller is reserved and `admit/2` resolves it from the marker into a
+  # so the caller is reserved and the permit decision resolves its marker into a
   # join. Only the true absence starts a new effect.
   defp settled_or_reserved(state, job, job_id) do
     case final_receipt(state.ledger, state.ledger_root, job_id) do
       {:ok, receipt} ->
-        if Map.get(receipt, :canonical_request_digest) ==
-             Map.get(job, :canonical_request_digest),
-           do: {:retained, receipt},
-           else: {:error, :job_id_conflict}
+        cond do
+          Map.get(receipt, :canonical_request_digest) !=
+              Map.get(job, :canonical_request_digest) ->
+            {:error, :job_id_conflict}
+
+          retained_receipt_matches_job?(receipt, job) ->
+            {:retained, receipt}
+
+          true ->
+            {:error, :invalid_retained_receipt}
+        end
 
       :absent ->
         :reserve
@@ -1005,6 +1294,45 @@ defmodule Loopex.Executor.Local do
 
       {:error, reason} ->
         {:error, reason}
+    end
+  end
+
+  defp retained_receipt_matches_job?(receipt, job) do
+    comparisons = [
+      {:protocol_version, :protocol_version},
+      {:job_id, :job_id},
+      {:operation_id, :operation_id},
+      {:attempt, :attempt},
+      {:session_id, :session_id},
+      {:run_id, :run_id},
+      {:turn_id, :turn_id},
+      {:tool_call_id, :tool_call_id},
+      {:session_epoch_at_dispatch, :origin_session_epoch},
+      {:executor_epoch, :origin_executor_epoch},
+      {:executor_identity, :executor_identity},
+      {:canonical_request_digest, :canonical_request_digest},
+      {:fencing_token, :fencing_token},
+      {:tool_id, :tool_id},
+      {:tool_version, :tool_version},
+      {:cleanup_grace_ms, :cleanup_grace_ms},
+      {:run_deadline_ms, :run_deadline}
+    ]
+
+    Enum.all?(comparisons, fn {receipt_field, job_field} ->
+      Map.get(receipt, receipt_field) == Map.get(job, job_field)
+    end) and retained_output_matches_job?(receipt, job)
+  end
+
+  defp retained_output_matches_job?(receipt, job) do
+    case resolve_tool(job) do
+      {:ok, %{coding: _definition} = tool} ->
+        byte_size(receipt.output) <= effective_output_limits(job, tool).output
+
+      {:ok, _demonstration_tool} ->
+        byte_size(receipt.output) <= @max_output_bytes
+
+      {:error, _reason} ->
+        false
     end
   end
 
@@ -1026,31 +1354,22 @@ defmodule Loopex.Executor.Local do
   # server needs to stay the authority.
   #
   # Technical depth: identity, epoch, fence, leases, ledger root and authority,
-  # clock, artifact store, configured period and probe, plus the in-flight table
-  # and this server's own pid. The reservation map and the dispatch counts stay
-  # here, because they are facts about the executor rather than about the job. It
-  # carries the same member names the serialized state used, so every function
-  # below reads one shape whichever process it runs in.
-  defp placement(state) do
+  # clock, artifact store, configured period and probe, plus the in-flight table,
+  # this server's own pid, and the opaque reference needed to release this one
+  # holder. The reservation and monitor maps and the dispatch counts stay here,
+  # because they are executor-wide facts rather than job placement. The result
+  # otherwise carries the same member names the serialized state used, so every
+  # function below reads one shape whichever process it runs in.
+  defp placement(state, reservation_ref) do
     state
-    |> Map.drop([:reserved, :dispatches])
+    |> Map.drop([:reserved, :reservation_monitors, :dispatches])
     |> Map.put(:executor, self())
+    |> Map.put(:reservation_ref, reservation_ref)
   end
 
   @impl GenServer
-  def handle_cast({:release, job_id}, state),
-    do: {:noreply, %{state | reserved: Map.delete(state.reserved, job_id)}}
-
-  # Concept: a job is counted as dispatched once it has been durably admitted,
-  # never merely because someone asked for it.
-  #
-  # Technical depth: the count is the executor's own evidence of what it let
-  # start, so a pre-effect refusal must leave it untouched. The caller reports
-  # admission from the process that obtained it, and message order from that one
-  # caller keeps the count settled before any answer that reads it.
-  def handle_cast({:admitted, job_id}, state) do
-    {:noreply, update_in(state.dispatches, &Map.update(&1, job_id, 1, fn count -> count + 1 end))}
-  end
+  def handle_cast({:release, job_id, reservation_ref}, state),
+    do: {:noreply, drop_reservation(state, job_id, reservation_ref)}
 
   # Concept: a message that arrives after the job it belongs to is over is
   # dropped, not treated as a fault.
@@ -1061,7 +1380,46 @@ defmodule Loopex.Executor.Local do
   # this clause the default implementation logs each one as an unexpected
   # message, which turns a bounded abandonment into noise in an operator's log.
   @impl GenServer
+  def handle_info({:DOWN, monitor, :process, _pid, _reason}, state) do
+    case Map.pop(state.reservation_monitors, monitor) do
+      {nil, _monitors} ->
+        {:noreply, state}
+
+      {{job_id, reservation_ref, _holder}, monitors} ->
+        {:noreply,
+         drop_reservation(%{state | reservation_monitors: monitors}, job_id, reservation_ref)}
+    end
+  end
+
   def handle_info(_message, state), do: {:noreply, state}
+
+  defp drop_reservation(state, job_id, reservation_ref) do
+    {gone, monitors} =
+      Enum.split_with(state.reservation_monitors, fn
+        {_monitor, {^job_id, ^reservation_ref, _holder}} -> true
+        _other -> false
+      end)
+
+    Enum.each(gone, fn {monitor, _job_id} -> Process.demonitor(monitor, [:flush]) end)
+
+    holders =
+      state.reserved
+      |> Map.get(job_id, MapSet.new())
+      |> MapSet.delete(reservation_ref)
+
+    reserved =
+      if MapSet.size(holders) == 0,
+        do: Map.delete(state.reserved, job_id),
+        else: Map.put(state.reserved, job_id, holders)
+
+    forget_operation_owner(state.inflight_table, job_id, reservation_ref)
+
+    %{
+      state
+      | reserved: reserved,
+        reservation_monitors: Map.new(monitors)
+    }
+  end
 
   @impl GenServer
   def format_status(status) do
@@ -1161,39 +1519,88 @@ defmodule Loopex.Executor.Local do
   # a launch-owned guard watches the process whose authority admitted the work,
   # so losing that authority still ends the captured group.
   defp run_reserved(placement, job, grant, options, progress) do
+    prior_context = snapshot_job_context()
+
     Process.put(:loopex_cleanup_grace_ms, job_cleanup_grace_ms(placement, job))
     Process.put(:loopex_process_probe, placement.process_probe)
     Process.put(:loopex_inflight_table, placement.inflight_table)
     Process.put(:loopex_effect_owner, placement.executor)
     close_cleanup_episode()
     close_retention_episode()
+    Process.delete(:loopex_admission)
 
     try do
-      case final_prestart_validation(placement, job, grant) do
-        {:ok, tool, lease_pid, workspace, arguments} ->
+      case request_effect_permit(placement, job, grant) do
+        {:ok,
+         %{
+           decision: decision,
+           tool: tool,
+           lease_pid: lease_pid,
+           workspace: workspace,
+           arguments: arguments,
+           receipt_output_limit: receipt_output_limit
+         }} ->
           admitted_execute(
             placement,
             job,
+            decision,
             tool,
             lease_pid,
             workspace,
             arguments,
+            receipt_output_limit,
             options,
             progress
           )
 
-        {:error, {:refused_before_effect, reason}} ->
-          publish_refusal(placement, job, reason)
-          {:error, {:refused_before_effect, reason}}
+        {:error, reason} ->
+          {:error, reason}
       end
     after
-      close_cleanup_episode()
-      close_retention_episode()
-      Process.delete(:loopex_cleanup_grace_ms)
-      Process.delete(:loopex_process_probe)
-      Process.delete(:loopex_inflight_table)
-      Process.delete(:loopex_effect_owner)
+      restore_job_context(prior_context)
     end
+  end
+
+  # Concept: a synchronous progress callback may run another Local job in the
+  # same BEAM process without stealing the outer job's authority or allowance.
+  #
+  # Technical depth: process-dictionary state is dynamically scoped, not local
+  # to a function invocation. Unconditionally deleting these values in `after`
+  # made a reentrant execute erase the outer admission sample, cleanup period,
+  # probe, in-flight table, effect owner, and any already-open episode. Snapshot
+  # exact presence as well as value (a present `nil` is not absence), install the
+  # nested job's context, and restore the prior frame on every exit.
+  defp snapshot_job_context do
+    missing = make_ref()
+
+    Enum.map(@job_context_keys, fn key ->
+      case Process.get(key, missing) do
+        ^missing -> {key, :absent}
+        value -> {key, {:present, value}}
+      end
+    end)
+  end
+
+  defp restore_job_context(context) do
+    Enum.each(context, fn
+      {key, :absent} -> Process.delete(key)
+      {key, {:present, value}} -> Process.put(key, value)
+    end)
+
+    :ok
+  end
+
+  # Concept: the caller observes the actual permit decision after publication.
+  #
+  # Technical depth: as with reservation, waiting does not extend the job's
+  # deadline or bypass final validation. If the holder dies during publication,
+  # the final live-holder check still withholds the effect permit.
+  defp request_effect_permit(placement, job, grant) do
+    GenServer.call(
+      placement.executor,
+      {:permit, job, grant, placement.reservation_ref},
+      :infinity
+    )
   end
 
   # Concept: every cleanup and retention window this job spends is derived from
@@ -1226,18 +1633,51 @@ defmodule Loopex.Executor.Local do
   # operation. `observed_at_ms` is the wall half of the one paired sample taken
   # here and is carried to terminal construction rather than resampled, so the
   # receipt reports when the effect was admitted and not when it finished.
-  defp admitted_execute(placement, job, tool, lease_pid, workspace, arguments, options, progress) do
-    case admit(placement, job) do
-      {:ok, admission} ->
-        GenServer.cast(placement.executor, {:admitted, job.job_id})
+  defp admitted_execute(
+         placement,
+         job,
+         decision,
+         tool,
+         lease_pid,
+         workspace,
+         arguments,
+         receipt_output_limit,
+         options,
+         progress
+       ) do
+    case decision do
+      {:admitted, admission} ->
         lease = {Process.monitor(lease_pid), lease_pid}
         Process.put(:loopex_admission, admission)
 
         try do
-          receipt =
-            run_tool(placement, job, tool, workspace, arguments, options, lease, progress)
+          case run_tool(
+                 placement,
+                 job,
+                 tool,
+                 workspace,
+                 arguments,
+                 receipt_output_limit,
+                 options,
+                 lease,
+                 progress
+               ) do
+            {:settle, receipt} ->
+              settle_receipt(placement, job, receipt, lease)
 
-          settle_receipt(placement, job, receipt, lease)
+            {:settlement_unconfirmed, reason} ->
+              # No receipt can truthfully summarize a retention worker that may
+              # still publish. Drop transient ownership so reconciliation sees
+              # the durable open entry, but leave that entry in place to
+              # quarantine the root.
+              forget_operation_owner(
+                placement.inflight_table,
+                job.job_id,
+                placement.reservation_ref
+              )
+
+              {:error, {:receipt_not_retained, reason}}
+          end
         after
           Process.delete(:loopex_admission)
           Process.demonitor(elem(lease, 0), [:flush])
@@ -1245,12 +1685,6 @@ defmodule Loopex.Executor.Local do
 
       :join ->
         join_admitted_operation(placement, job)
-
-      {:error, {:refused_before_effect, _reason} = refusal} ->
-        {:error, refusal}
-
-      {:error, reason} ->
-        {:error, reason}
     end
   end
 
@@ -1269,9 +1703,10 @@ defmodule Loopex.Executor.Local do
   # is unconfirmed deliberately leaves the entry, and therefore quarantines the
   # root until an operator reconciles it.
   #
-  # Under that one claim the order is: retain the receipt, remove the open entry,
-  # and -- only where the removal failed -- replace the receipt with the
-  # quarantined `outcome_unknown` form. That order is safe because
+  # Under that one claim the order is: retain the receipt, then remove the open
+  # entry. A failed removal preserves the receipt's proved operation and cleanup
+  # facts but returns no final answer; the surviving or restored open entry keeps
+  # those bytes provisional. That order is safe because
   # `final_receipt/3` makes a receipt final only once its open entry is gone and
   # every reader honours it, so what a peer can observe is:
   #
@@ -1285,10 +1720,11 @@ defmodule Loopex.Executor.Local do
   #   * after the entry is gone: receipt present, entry absent, which is the one
   #     final answer -- and by then no writer will touch those bytes again.
   #
-  # Both earlier orders lost something this one does not. Retaining first and
-  # taking the claim only to remove let a peer read `completed`/`confirmed` and
-  # then watch it become `outcome_unknown`/`unconfirmed`, because the reader
-  # ignored the open entry. Removing first and retaining afterwards left a root
+  # Both earlier orders lost something this one does not. Retaining first while a
+  # reader ignored the open entry exposed provisional `completed`/`confirmed`
+  # bytes as final. Rewriting those bytes on removal failure then falsified facts
+  # the effect boundary had already proved. Removing first and retaining
+  # afterwards left a root
   # carrying neither an open entry nor a receipt whenever the write, rename, or
   # sync failed: nothing warned the next executor, and unrelated effects were
   # admitted on a root whose effect never reached a durable terminal. Here a
@@ -1296,12 +1732,21 @@ defmodule Loopex.Executor.Local do
   # the open entry exactly where it is, so the quarantine stands and the caller is
   # told `{:receipt_not_retained, reason}`.
   defp settle_receipt(placement, job, receipt, lease) do
-    case Ledger.with_claim(
+    # The effect has answered; its open entry is now settling, not live authority
+    # that may be excluded from another job's reconciliation. Remove the exact
+    # owner token before waiting for the root claim. Otherwise a permit already
+    # queued in the executor can run before this caller's later release cast and
+    # mistake a failed/quarantined settlement for an active operation it may
+    # ignore.
+    forget_operation_owner(placement.inflight_table, job.job_id, placement.reservation_ref)
+
+    case Ledger.with_claim_until(
            placement.ledger,
            fn -> publish_settlement(placement, job, receipt, lease) end,
-           claim_bound()
+           claim_deadline()
          ) do
       {:ok, retained} -> {:ok, retained}
+      {:error, {:effect_settling, _reason} = unsettled} -> {:error, unsettled}
       {:error, reason} -> {:error, {:receipt_not_retained, reason}}
     end
   end
@@ -1319,48 +1764,92 @@ defmodule Loopex.Executor.Local do
   # decided about that receipt rather than about the one the settlement began
   # with.
   defp publish_settlement(placement, job, receipt, lease) do
-    bound = retention_remaining()
+    deadline = retention_until()
 
-    case retain_receipt_under_lease(placement.ledger_root, receipt, lease, bound) do
-      {:ok, retained} -> dispose_open_authority(placement, job, retained, lease)
-      {:error, reason} -> {:error, reason}
+    case retain_receipt_under_lease(placement.ledger_root, job, receipt, lease, deadline) do
+      {:ok, retained} ->
+        dispose_open_authority(placement, job, retained, lease)
+
+      {:ok, retained, :workspace_lease_lost} ->
+        dispose_open_authority(placement, job, retained, lease)
+
+      {:unconfirmed, reason} ->
+        Ledger.retain_claim({:receipt_retention_unconfirmed, reason})
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
-  # Concept: an entry is removed only under proof, and a removal that did not
-  # happen changes the receipt rather than being discarded.
+  # Concept: an entry is removed only under proof, and an administrative failure
+  # cannot rewrite the operation or cleanup facts the receipt already proved.
   #
   # Technical depth: ADR 0016 removes an open entry only under exact authority
   # proof -- here a confirmed captured-group cleanup receipt -- and otherwise
-  # leaves the root quarantined. The truthful receipt for a job whose authority is
-  # still open reports an unconfirmed cleanup beside `outcome_unknown`: that is
-  # the one pairing the ADR admits, it is what stops a coordinator retrying an
-  # effectful job blindly, and it is what tells an operator there is something on
-  # this root to reconcile. The replacement is written under the same claim as the
-  # bytes it replaces, so no reader saw the confirmed form as final and no reader
-  # can see a half-published pair.
-  #
-  # A replacement that cannot be written is reported rather than swallowed. The
-  # confirmed bytes then stay on a root whose open entry also stays, which every
-  # reader answers `effect_settling` -- unresolved, never a completion -- so the
-  # quarantine still holds and what is lost is the operator's note of why.
-  defp dispose_open_authority(placement, job, retained, lease) do
+  # leaves the root quarantined. Outcome truth and cleanup truth are independent:
+  # an unproven effect may still carry confirmed cleanup when the captured group
+  # is known quiescent, while an uncaptured or unconfirmed group carries
+  # `:unconfirmed`. Either way `outcome_unknown` stops a coordinator blindly
+  # retrying an effectful job, and the retained open entry tells an operator there
+  # is something on this root to reconcile. A failed removal therefore leaves the
+  # original receipt and restored open entry together: readers answer
+  # `effect_settling`, while neither the tool outcome nor confirmed group cleanup
+  # is falsified to describe an administrative problem.
+  defp dispose_open_authority(placement, job, retained, _lease) do
     if retained.cleanup_confirmation == :confirmed do
-      case remove_open_authority(placement, job, lease) do
-        :ok -> {:ok, retained}
-        {:error, _reason} -> quarantine_open_authority(placement, retained, lease)
+      case remove_open_authority(placement, job) do
+        :ok ->
+          {:ok, retained}
+
+        {:unconfirmed, close_reason} ->
+          Ledger.retain_claim({:open_authority_close_unconfirmed, close_reason})
+
+        {:error, close_reason} ->
+          case restore_open_authority(placement, job) do
+            :ok ->
+              {:error, {:effect_settling, {:open_authority_not_removed, close_reason}}}
+
+            {:error, restore_reason} ->
+              Ledger.retain_claim({:open_authority_not_restored, close_reason, restore_reason})
+          end
       end
     else
       {:ok, retained}
     end
   end
 
-  defp quarantine_open_authority(placement, retained, lease) do
-    quarantined = quarantined_receipt(retained)
+  # Concept: a close that did not complete leaves the same open warning the
+  # settlement began with.
+  #
+  # Technical depth: unlink and parent sync are separate filesystem actions, and
+  # a bounded callback can finish the first before it fails or is stopped. The
+  # open record is therefore republished under the still-held root claim before
+  # that claim is released. A removal worker not confirmed dead may still unlink
+  # that restored record, so that path retains the claim without racing it.
+  # Recovery is itself bounded by a share of the one retention allowance; if it
+  # cannot be proved, the caller retains the claim instead, because neither a
+  # missing entry nor an uncertain late worker is effect permission.
+  defp restore_open_authority(placement, job) do
+    open = Ledger.open_entry(job, placement.identity)
 
-    case retain_now(placement.ledger_root, quarantined, lease) do
-      {:ok, receipt} -> {:ok, receipt}
-      {:error, reason} -> {:error, {:open_authority_quarantine_not_retained, reason}}
+    case bound_only_work_until(
+           fn -> Ledger.restore_open(placement.ledger, open) end,
+           restoration_deadline()
+         ) do
+      {:done, result} ->
+        result
+
+      {:stopped, reason} ->
+        {:error, {:open_authority_restore_stopped, reason}}
+
+      {:guardian_stopped, reason, _confirmed} ->
+        {:error, {:open_authority_restore_guardian_stopped, reason}}
+
+      {:abandoned, _stopped, {:late, :ok}} ->
+        :ok
+
+      {:abandoned, _stopped, _unfinished} ->
+        {:error, :bound_reached}
     end
   end
 
@@ -1381,11 +1870,12 @@ defmodule Loopex.Executor.Local do
   # of that allowance is the hard stop on the work done under it.
   #
   # An exhausted allowance is the same answer as a failed unlink, because it is
-  # the same fact -- this executor did not prove the entry gone -- and the
-  # quarantined receipt is exactly the warning about it. A worker killed at the
-  # bound while the settlement holds the claim leaves that claim behind, which is
-  # bounded unavailability the ADR already admits; reaping it would turn a timeout
-  # into permission.
+  # the same fact -- this executor did not prove the entry gone. The unchanged
+  # open entry is the quarantine warning; rewriting a proved tool result would
+  # turn an administrative failure into false operation history. A worker killed
+  # at the bound while the settlement holds the claim leaves that claim behind,
+  # which is bounded unavailability the ADR already admits; reaping it would turn
+  # a timeout into permission.
   #
   # The workspace lease is not reported from here any more. Retention runs first
   # again and is therefore the phase that waits on the `:DOWN`, so a lease lost
@@ -1398,30 +1888,43 @@ defmodule Loopex.Executor.Local do
   # the reason the paired clock is a provider: the outer bound around the unlink
   # and its parent sync is a claim about calls the filesystem offers no way to
   # delay, so without a seam no case can prove the bound is there. It is a
-  # reversible edge seam, defaults to `Ledger.close_open/2`, and enters no job,
-  # ledger record, receipt, event, or public API.
-  defp remove_open_authority(placement, job, lease) do
-    bound = removal_bound()
-
+  # trusted-local start option, defaults to `Ledger.close_open/2`, and enters no
+  # job, ledger record, receipt, event, or portable executor-port value.
+  defp remove_open_authority(placement, job) do
     removal =
-      bounded_work(
+      bound_only_work_until(
         fn -> placement.open_authority_close.(placement.ledger, job.job_id) end,
-        bound,
-        lease
+        removal_deadline()
       )
 
     case removal do
-      {:done, result} ->
-        result
+      {:done, :ok} ->
+        :ok
 
-      {:abandoned, _cause, _stopped, {:late, :ok}} ->
+      {:done, {:error, _reason} = error} ->
+        error
+
+      {:done, other} ->
+        {:error, {:ledger_unavailable, {:invalid_open_authority_close, other}}}
+
+      {:abandoned, _stopped, {:late, :ok}} ->
         :ok
 
       {:stopped, reason} ->
         {:error, {:ledger_unavailable, {:open_authority_removal_stopped, reason}}}
 
-      {:abandoned, cause, _stopped, _unfinished} ->
-        {:error, {:ledger_unavailable, cause}}
+      {:guardian_stopped, reason, true} ->
+        {:error, {:ledger_unavailable, {:open_authority_removal_guardian_stopped, reason}}}
+
+      {:guardian_stopped, reason, false} ->
+        {:unconfirmed,
+         {:ledger_unavailable, {:open_authority_removal_guardian_unconfirmed, reason}}}
+
+      {:abandoned, false, :none} ->
+        {:unconfirmed, {:ledger_unavailable, :bound_reached}}
+
+      {:abandoned, _stopped, _finished_or_stopped} ->
+        {:error, {:ledger_unavailable, :bound_reached}}
     end
   end
 
@@ -1431,14 +1934,22 @@ defmodule Loopex.Executor.Local do
   # Technical depth: this is the reason `@retention_spill_share` exists for the
   # artifact phase, arriving at the phase after it. Handing the removal the whole
   # remainder makes an unlink that never answers spend every millisecond the
-  # quarantined replacement still needs: that receipt would then be written
-  # against an allowance of zero and abandoned, and exactly the job whose durable
-  # record matters most -- one whose root nothing has resolved -- would produce
-  # none. A share is not a number for the same reason the cooperative one is not:
-  # it cannot drift away from the declared period.
+  # restoration of its open warning still needs. A share is not a number for the
+  # same reason the cooperative one is not: it cannot drift away from the
+  # declared period.
   @removal_share 2
 
-  defp removal_bound, do: div(retention_remaining(), @removal_share)
+  defp removal_deadline do
+    now = cleanup_now_ms()
+    now + div(max(retention_until() - now, 0), @removal_share)
+  end
+
+  @restoration_share 2
+
+  defp restoration_deadline do
+    now = cleanup_now_ms()
+    now + div(max(retention_until() - now, 0), @restoration_share)
+  end
 
   # Concept: waiting for the claim is a phase of the settlement too, and it may
   # not spend what the phases after it need.
@@ -1453,59 +1964,9 @@ defmodule Loopex.Executor.Local do
   # and it is a share for the same reason.
   @claim_share 2
 
-  defp claim_bound, do: div(retention_remaining(), @claim_share)
-
-  # The quarantined form names no ledger reason. Which claim, path, or errno
-  # refused is this executor's private root authority, and a receipt is one of
-  # the planes ADR 0016 keeps it out of; what the reader needs is that this root
-  # holds work nothing has resolved. It is a pure transformation because the
-  # bytes it replaces were never final: the open entry this settlement failed to
-  # remove is still there, so every reader answers `effect_settling` for them and
-  # none could have consumed them as a completion.
-  defp quarantined_receipt(receipt) do
-    %{
-      receipt
-      | outcome: :outcome_unknown,
-        cleanup_confirmation: :unconfirmed,
-        output: receipt.output <> @open_authority_note
-    }
-  end
-
-  # Concept: one serialized decision about whether this exact request may begin.
-  #
-  # Technical depth: the claim orders admission against another executor's
-  # admission, against a refusal, and against a peer's reconciliation read. Inside
-  # it the two independent fences are checked against one paired clock sample: the
-  # wall instant against the job's immutable `effective_job_deadline`, and the
-  # derived monotonic action deadline under checked arithmetic. A sample that
-  # cannot produce a finite action deadline is unavailable authority, never
-  # permission.
-  defp admit(state, job) do
-    Ledger.with_claim(
-      state.ledger,
-      fn ->
-        case Ledger.read_marker(state.ledger, job.job_id) do
-          :absent ->
-            open_admission(state, job)
-
-          {:ok, record} ->
-            cond do
-              record["canonical_request_digest"] != job.canonical_request_digest ->
-                {:error, :job_id_conflict}
-
-              Map.get(record, :ledger_kind) == Ledger.refusal_kind() ->
-                {:error, {:refused_before_effect, refusal_reason(record)}}
-
-              true ->
-                :join
-            end
-
-          {:error, reason} ->
-            {:error, reason}
-        end
-      end,
-      claim_wait(job)
-    )
+  defp claim_deadline do
+    now = cleanup_now_ms()
+    now + div(max(retention_until() - now, 0), @claim_share)
   end
 
   # Concept: the deadline is derived from one sample, and the permit is decided
@@ -1519,22 +1980,27 @@ defmodule Loopex.Executor.Local do
   # action deadline. A backward wall jump between the two therefore cannot extend
   # authority past the monotonic fence, and a forward one expires it by wall
   # truth. Both checks precede the marker, so a job refused here has no admission
-  # to withdraw.
-  defp open_admission(state, job) do
+  # to withdraw. After the durable records, the exact reservation token becomes
+  # the operation owner under the still-held root claim; only then may the one
+  # effect permit return.
+  defp open_admission(state, job, reservation_ref, caller, tool, arguments) do
     with {:ok, wall, monotonic} <- sample(state),
          {:ok, action} <- derive_action_deadline(wall, monotonic, job),
+         {:ok, receipt_output_limit} <-
+           reserve_receipt_output(state, job, tool, arguments, wall),
          :ok <- authorize_effect(state, job, action),
          :ok <-
            Ledger.admit(
              state.ledger,
              Ledger.marker(job),
              Ledger.open_entry(job, state.identity)
-           ) do
-      {:ok, %{wall: wall, monotonic: monotonic, action: action, observed_at_ms: wall}}
+           ),
+         :ok <- claim_operation_owner(state, job.job_id, reservation_ref, caller) do
+      {:ok, %{wall: wall, monotonic: monotonic, action: action, observed_at_ms: wall},
+       receipt_output_limit}
     else
       {:error, {:refused_before_effect, reason}} ->
-        publish_refusal(state, job, reason, :claim_held)
-        {:error, {:refused_before_effect, reason}}
+        refusal_result(state, job, reason, {:refused_before_effect, reason})
 
       {:error, reason} ->
         {:error, reason}
@@ -1591,8 +2057,8 @@ defmodule Loopex.Executor.Local do
   # bounded by the job's own immutable wall deadline, and reaching that bound is
   # an unresolved join rather than a verdict about the effect. The receipt is read
   # the way every other terminal-plus-open decision reads one, so a join cannot
-  # return the confirmed form of a settlement that is still deciding whether to
-  # replace it with the quarantined one. Each poll takes the claim without
+  # return the proved but provisional form of a settlement that has not disposed
+  # of its open authority. Each poll takes the claim without
   # waiting, because this loop already owns the waiting: a claim held by the
   # settlement being joined, an entry still open, and a receipt not yet final are
   # the same fact here, and all three mean poll again until the job's own deadline
@@ -1603,7 +2069,9 @@ defmodule Loopex.Executor.Local do
     else
       case final_receipt_under_claim(state.ledger, state.ledger_root, job.job_id, 0) do
         {:ok, receipt} ->
-          {:ok, receipt}
+          if retained_receipt_matches_job?(receipt, job),
+            do: {:ok, receipt},
+            else: {:error, :invalid_retained_receipt}
 
         unresolved when unresolved in @join_unresolved ->
           Process.sleep(@join_poll_ms)
@@ -1620,10 +2088,19 @@ defmodule Loopex.Executor.Local do
   #
   # Technical depth: a refusal replaces exactly the marker path it names, which
   # is how a pre-marker deadline records the refusal without inventing an
-  # admission. A reason outside the sixteen admitted codes is not journaled: a
+  # admission. The caller already holds the root claim, so refusal publication
+  # stays in the same serialized decision. A reason outside the sixteen admitted codes is not journaled: a
   # record no reader can interpret is not proof of anything, and the caller still
   # receives its truthful pre-effect answer.
-  defp publish_refusal(state, job, reason, claim \\ :take_claim) do
+  defp refusal_result(state, job, reason, refusal) do
+    case publish_refusal(state, job, reason) do
+      :ok -> {:error, refusal}
+      :not_recordable -> {:error, refusal}
+      {:error, ledger_reason} -> {:error, {:refusal_not_retained, ledger_reason}}
+    end
+  end
+
+  defp publish_refusal(state, job, reason) do
     {code, field} =
       case reason do
         {code, field} when is_atom(code) -> {code, field}
@@ -1631,17 +2108,11 @@ defmodule Loopex.Executor.Local do
       end
 
     case durable_refusal(job, code, field) do
-      {:ok, refusal} when claim == :claim_held ->
-        Ledger.refuse(state.ledger, refusal)
-
-      {:ok, refusal} ->
-        Ledger.with_claim(state.ledger, fn -> Ledger.refuse(state.ledger, refusal) end)
-
-      :error ->
-        :ok
+      {:ok, refusal} -> Ledger.refuse(state.ledger, refusal)
+      :error -> :not_recordable
     end
   rescue
-    _malformed_job -> :ok
+    _malformed_job -> :not_recordable
   end
 
   # Concept: a refusal binds the exact request it refused, so a request whose own
@@ -1775,14 +2246,15 @@ defmodule Loopex.Executor.Local do
          %{coding: _definition} = tool,
          workspace,
          arguments,
+         receipt_output_limit,
          options,
          lease,
          progress
        ) do
     deadline = effective_deadline(job, tool)
-    limits = effective_output_limits(job, tool)
+    limits = cap_output_limit(effective_output_limits(job, tool), receipt_output_limit)
 
-    {tool_result, progress_count} =
+    {tool_result, progress_count, cleanup_confirmation} =
       run_coding_tool(
         job,
         tool,
@@ -1796,20 +2268,27 @@ defmodule Loopex.Executor.Local do
         progress_identity(state, job)
       )
 
-    {outcome, output, artifacts} =
-      spill(tool_result, state, job, lease, limits)
+    _retention_deadline = retention_until()
 
-    receipt(
-      state,
-      job,
-      tool,
-      outcome,
-      output,
-      coding_tool_environment(arguments),
-      artifacts,
-      deadline,
-      progress_count
-    )
+    case spill(tool_result, state, job, lease, limits) do
+      {:settlement_unconfirmed, _reason} = unconfirmed ->
+        unconfirmed
+
+      {outcome, output, artifacts} ->
+        {:settle,
+         receipt(
+           state,
+           job,
+           tool,
+           outcome,
+           output,
+           coding_tool_environment(arguments),
+           artifacts,
+           deadline,
+           progress_count,
+           cleanup_confirmation
+         )}
+    end
   end
 
   defp run_tool(
@@ -1818,32 +2297,50 @@ defmodule Loopex.Executor.Local do
          tool,
          workspace,
          arguments,
+         receipt_output_limit,
          options,
-         {monitor, lease_pid},
+         lease,
          _progress
        ) do
-    args = launcher_arguments(arguments)
     deadline = effective_deadline(job, tool)
-    fence = fence(state, deadline)
 
-    port = open_launcher("/usr/bin/env", args, demonstration_environment(), workspace)
+    limits =
+      cap_output_limit(
+        %{output: @max_output_bytes, artifact: @max_output_bytes},
+        receipt_output_limit
+      )
 
-    # Concept: a cancellation must be able to reach this job too.
-    #
-    # Technical depth: this path captures no process group, so it registers the
-    # process holding the Port rather than a group identifier. That is the whole
-    # of what it can offer: `cancel/2` reaches the holder, the Port is released,
-    # and the answer is `unconfirmed`, because releasing a handle is not proof
-    # that the child stopped. Registering nothing at all was worse -- an absent
-    # entry reads as "no such job", which answers `cleaned` for work that was
-    # still running.
-    register_inflight(job.job_id, {:starting, self()})
+    {tool_result, progress_count, cleanup_confirmation} =
+      run_owned_process(
+        job,
+        tool,
+        workspace,
+        demonstration_process_arguments(arguments),
+        options,
+        lease,
+        fence(state, deadline),
+        limits,
+        nil,
+        progress_identity(state, job)
+      )
 
-    notify(options, {:executor_process_started, job.job_id, tool.id, [@search_path_name]})
-    {outcome, output} = await_port(port, monitor, lease_pid, <<>>, fence)
-    forget_inflight(job.job_id)
+    _retention_deadline = retention_until()
 
-    receipt(state, job, tool, outcome, output, demonstration_environment(), [], deadline, 0)
+    {outcome, output, _complete} = normalize_tool_result(tool_result)
+
+    {:settle,
+     receipt(
+       state,
+       job,
+       tool,
+       outcome,
+       output,
+       demonstration_environment(),
+       [],
+       deadline,
+       progress_count,
+       cleanup_confirmation
+     )}
   end
 
   defp progress_identity(state, job) do
@@ -1871,8 +2368,9 @@ defmodule Loopex.Executor.Local do
   # lifetime, and the amended obligation names the end of that lifetime as the
   # point the receipt exists. A receipt that exists only as a term in this
   # server's heap is not one any operator or recovering coordinator can ever
-  # read, so the lifetime ends where the bytes land rather than where the map is
-  # assembled.
+  # read. Bytes written under the still-open authority remain provisional; the
+  # lifetime ends when the lease holder certifies the completed durable write,
+  # after which a later loss cannot reverse it.
   #
   # The previous shape checked the mailbox once with `after 0` and then
   # demonitor-flushed, before the receipt was constructed and long before it was
@@ -1888,19 +2386,31 @@ defmodule Loopex.Executor.Local do
   # The peek that remains is not the guarantee; it is the cheap branch for a DOWN
   # that has already arrived, which lets this executor write the truthful receipt
   # once rather than write a false one and then replace it.
-  defp retain_receipt_under_lease(root, receipt, {monitor, lease_pid} = lease, bound) do
+  defp retain_receipt_under_lease(
+         root,
+         job,
+         receipt,
+         {monitor, lease_pid} = lease,
+         deadline
+       ) do
     receive do
       {:DOWN, ^monitor, :process, ^lease_pid, _reason} ->
-        retain_now(root, unproven_receipt(receipt), lease)
+        retain_after_lease_loss(root, unproven_receipt(job, receipt))
+        |> tag_lease_lost_retention()
     after
-      0 -> stage_and_commit(root, receipt, lease, bound)
+      0 -> stage_and_commit(root, job, receipt, lease, deadline)
     end
   end
 
-  defp stage_and_commit(root, receipt, lease, bound) do
+  defp stage_and_commit(root, job, receipt, {_monitor, lease_pid} = lease, deadline) do
     staging = staging_path(root, receipt)
 
-    case bounded_work(fn -> retain_receipt(root, receipt, staging) end, bound, lease) do
+    case bounded_guardian_until(
+           fn -> retain_receipt(root, receipt, staging) end,
+           deadline,
+           lease_pid,
+           nil
+         ) do
       {:done, :ok} ->
         {:ok, receipt}
 
@@ -1911,8 +2421,15 @@ defmodule Loopex.Executor.Local do
         File.rm(staging)
         {:error, {:receipt_retention_stopped, reason}}
 
+      {:guardian_stopped, reason, true} ->
+        File.rm(staging)
+        {:error, {:receipt_retention_guardian_stopped, reason}}
+
+      {:guardian_stopped, reason, false} ->
+        {:unconfirmed, {:receipt_retention_guardian_unconfirmed, reason}}
+
       {:abandoned, :workspace_lease_lost, stopped, _late} ->
-        abandon_retention(root, receipt, staging, stopped, lease)
+        abandon_retention(root, job, receipt, staging, stopped, lease)
 
       {:abandoned, :bound_reached, stopped, late} ->
         abandon_retention_at_bound(receipt, staging, stopped, late)
@@ -1942,9 +2459,13 @@ defmodule Loopex.Executor.Local do
   # `{:receipt_not_retained, reason}` already says the one true thing.
   defp abandon_retention_at_bound(receipt, _staging, _stopped, {:late, :ok}), do: {:ok, receipt}
 
-  defp abandon_retention_at_bound(_receipt, staging, stopped, _unfinished) do
-    if stopped, do: File.rm(staging)
+  defp abandon_retention_at_bound(_receipt, staging, true, _unfinished) do
+    File.rm(staging)
     {:error, :receipt_retention_abandoned_at_run_deadline}
+  end
+
+  defp abandon_retention_at_bound(_receipt, _staging, false, _unfinished) do
+    {:unconfirmed, :receipt_retention_worker_unconfirmed_at_run_deadline}
   end
 
   # Concept: work this executor did not write and cannot bound is done where it
@@ -1956,91 +2477,558 @@ defmodule Loopex.Executor.Local do
   # executor can state, and each used to sit in its own near-identical wait --
   # which is how two of them ended up with the lease as their only alternative
   # and no bound at all, while the third had both. One mechanism is what keeps
-  # them from drifting apart again: a monitored unlinked worker, four
-  # alternatives, and a confirmed kill.
+  # them from drifting apart again: one monitored guardian, one linked effect,
+  # every authority alternative, and a caller-side reaper if the guardian itself
+  # fails.
   #
-  # The result is delivered as a message tagged with a fresh reference rather
-  # than as an exit reason, so a large value is not copied twice. A late answer
-  # is drained after an abandonment because a result produced in the instant
-  # before the kill would otherwise be left in this server's mailbox, and it is
-  # returned rather than discarded because for the receipt it is the difference
-  # between bytes that reached the ledger and bytes that did not.
+  # The effect writes its potentially large result to ETS, then asks the lease
+  # holder to atomically flip that row from pending to a small completion
+  # certificate. The linked exit proves the effect is stopped without copying
+  # the result in its reason. A lease death before the flip leaves only an
+  # uncertified result; a death after it cannot erase work that was already
+  # complete under authority. A waiter descheduled after that point therefore
+  # cannot reverse the verdict merely because a later DOWN reaches its mailbox
+  # first. Work with no lease uses the same row transition in its own effect.
   #
-  # It is exposed for the reason `group_answered_empty?/1` is. No case can make a
-  # healthy local ledger take longer than the run's remaining time plus the
-  # declared grace, so the branch deciding whether a receipt is reported durable
-  # would otherwise rest on a wait nothing can reach.
+  # It is exposed for the reason `process_group_answered_empty?/3` is. No case can
+  # make a healthy local ledger take longer than the run's remaining time plus
+  # the declared grace, so the branch deciding whether a receipt is reported
+  # durable would otherwise rest on a wait nothing can reach.
   @doc false
   @spec bounded_work((-> term()), non_neg_integer(), {reference(), pid()}) ::
           {:done, term()}
           | {:stopped, term()}
+          | {:guardian_stopped, term(), boolean()}
           | {:abandoned, :workspace_lease_lost | :bound_reached, boolean(),
              :none | {:late, term()}}
-  def bounded_work(work, bound, {monitor, lease_pid})
+  def bounded_work(work, bound, {_monitor, lease_pid})
       when is_function(work, 0) and is_integer(bound) and bound >= 0 do
-    parent = self()
-    tag = make_ref()
+    bounded_guardian(work, bound, lease_pid, nil)
+  end
 
-    {worker, reference} = spawn_monitor(fn -> send(parent, {tag, work.()}) end)
+  @doc false
+  @spec bounded_work((-> term()), non_neg_integer(), {reference(), pid()}, pid()) ::
+          {:done, term()}
+          | {:stopped, term()}
+          | {:guardian_stopped, term(), boolean()}
+          | {:abandoned, :workspace_lease_lost | :effect_owner_lost | :bound_reached, boolean(),
+             :none | {:late, term()}}
+  def bounded_work(work, bound, {_monitor, lease_pid}, owner)
+      when is_function(work, 0) and is_integer(bound) and bound >= 0 and is_pid(owner) do
+    bounded_guardian(work, bound, lease_pid, owner)
+  end
 
-    await_bounded_work(
-      worker,
-      reference,
-      tag,
-      monitor,
+  # Concept: one process decides whether bounded work completed under authority.
+  #
+  # Technical depth: the lease DOWN, deadline, owner DOWN, and effect result are
+  # independent signals. Letting the caller and worker each interpret one of
+  # them made mailbox arrival order a verdict: a durable result could be reversed
+  # by a later DOWN, while a suspended caller let work continue after lease loss.
+  # The guardian owns every alternative and sends one decision. Immediately
+  # after `work/0` returns the effect samples the bound and stages the result;
+  # the live lease holder then certifies that row and samples the Local owner.
+  # Those completion-bound facts, rather than whichever independent signal the
+  # guardian happens to receive first, decide whether the result completed under
+  # authority. Caller loss remains an unconditional abandonment because no
+  # process remains to settle the result.
+  defp bounded_guardian(work, bound, lease_pid, owner) do
+    deadline = System.monotonic_time(:millisecond) + bound
+
+    bounded_guardian_with_remaining(
+      work,
+      fn -> deadline - System.monotonic_time(:millisecond) end,
       lease_pid,
-      System.monotonic_time(:millisecond) + bound
+      owner
     )
   end
 
-  # Concept: one allowance, spent in slices, refreshed by nothing.
-  #
-  # Technical depth: an admitted cleanup period spans the whole positive unsigned
-  # 64-bit range, and a `receive ... after` above the VM's timer ceiling raises
-  # rather than waiting. Each slice recomputes what remains against the same
-  # monotonic instant, so slicing changes how the wait is implemented and not how
-  # long it is; no slice extends the allowance the caller was given.
-  defp await_bounded_work(worker, reference, tag, monitor, lease_pid, deadline) do
-    remaining = max(deadline - System.monotonic_time(:millisecond), 0)
+  defp bounded_guardian_until(work, deadline, lease_pid, owner) do
+    bounded_guardian_with_remaining(
+      work,
+      fn -> deadline - System.monotonic_time(:millisecond) end,
+      lease_pid,
+      owner
+    )
+  end
 
+  defp bounded_guardian_with_remaining(work, remaining, lease_pid, owner) do
+    caller = self()
+    tag = make_ref()
+
+    {guardian, reference} =
+      spawn_monitor(fn ->
+        decision = lease_guarded_work(work, lease_pid, owner, caller, remaining, tag)
+        send(caller, {tag, decision})
+      end)
+
+    await_guardian_decision(guardian, reference, tag, nil, remaining)
+  end
+
+  defp await_guardian_decision(guardian, reference, tag, effect_state, remaining) do
     receive do
-      {^tag, result} ->
+      {^tag, decision} ->
         Process.demonitor(reference, [:flush])
-        {:done, result}
+        demonitor_guardian_effect(effect_state)
+        decision
 
-      {:DOWN, ^reference, :process, ^worker, reason} ->
-        {:stopped, reason}
+      {^tag, :guardian_effect, ^guardian, effect} when is_pid(effect) ->
+        effect_monitor = Process.monitor(effect)
+        send(guardian, {tag, :guardian_armed, effect})
+        await_guardian_decision(guardian, reference, tag, {effect, effect_monitor}, remaining)
 
-      {:DOWN, ^monitor, :process, ^lease_pid, _reason} ->
-        abandon_worker(:workspace_lease_lost, worker, reference, tag)
-    after
-      min(remaining, @timer_slice_ms) ->
-        if System.monotonic_time(:millisecond) >= deadline,
-          do: abandon_worker(:bound_reached, worker, reference, tag),
-          else: await_bounded_work(worker, reference, tag, monitor, lease_pid, deadline)
+      {:DOWN, ^reference, :process, ^guardian, reason} ->
+        {:guardian_stopped, reason, stop_guardian_effect(effect_state, remaining)}
     end
   end
 
-  defp abandon_worker(cause, worker, reference, tag) do
-    Process.exit(worker, :kill)
+  defp lease_guarded_work(work, lease_pid, owner, caller, remaining, guardian_tag) do
+    Process.flag(:trap_exit, true)
+    lease_monitor = if is_pid(lease_pid), do: Process.monitor(lease_pid)
+    caller_monitor = Process.monitor(caller)
+    owner_monitor = if is_pid(owner), do: Process.monitor(owner)
 
-    stopped =
-      receive do
-        {:DOWN, ^reference, :process, ^worker, _reason} -> true
-      after
-        @abandon_confirmation_ms -> false
+    cause =
+      cond do
+        is_pid(lease_pid) and not Process.alive?(lease_pid) -> :workspace_lease_lost
+        is_pid(owner) and not Process.alive?(owner) -> :effect_owner_lost
+        not Process.alive?(caller) -> :effect_owner_lost
+        remaining.() <= 0 -> :bound_reached
+        true -> nil
       end
 
-    if not stopped, do: Process.demonitor(reference, [:flush])
+    if cause do
+      demonitor_phase(lease_monitor, owner_monitor, caller_monitor)
+      {:abandoned, cause, true, :none}
+    else
+      guardian = self()
+      effect_tag = make_ref()
+      result_table = :ets.new(:loopex_bounded_result, [:set, :public])
 
-    late =
-      receive do
-        {^tag, result} -> {:late, result}
-      after
-        0 -> :none
+      effect =
+        spawn_link(fn ->
+          receive do
+            {^effect_tag, :start} ->
+              result = work.()
+              completed_at = System.monotonic_time(:millisecond)
+              bound_held = remaining.() > 0
+
+              true =
+                :ets.insert(
+                  result_table,
+                  {effect_tag, :pending, false, false, bound_held, completed_at, result}
+                )
+
+              case certify_bounded_result(result_table, effect_tag, lease_pid, owner) do
+                :ok ->
+                  :ok
+
+                {:error, reason} ->
+                  exit({:completion_not_certified, reason})
+              end
+          end
+        end)
+
+      send(caller, {guardian_tag, :guardian_effect, guardian, effect})
+
+      arm_lease_guarded_work(
+        effect,
+        effect_tag,
+        result_table,
+        lease_pid,
+        lease_monitor,
+        owner,
+        owner_monitor,
+        caller,
+        caller_monitor,
+        remaining,
+        guardian_tag
+      )
+    end
+  end
+
+  defp arm_lease_guarded_work(
+         effect,
+         effect_tag,
+         result_table,
+         lease_pid,
+         lease_monitor,
+         owner,
+         owner_monitor,
+         caller,
+         caller_monitor,
+         remaining,
+         guardian_tag
+       ) do
+    wait = guardian_effect_wait(remaining)
+
+    receive do
+      {^guardian_tag, :guardian_armed, ^effect} ->
+        cause =
+          cond do
+            is_pid(lease_pid) and not Process.alive?(lease_pid) -> :workspace_lease_lost
+            is_pid(owner) and not Process.alive?(owner) -> :effect_owner_lost
+            not Process.alive?(caller) -> :caller_lost
+            remaining.() <= 0 -> :bound_reached
+            true -> nil
+          end
+
+        if cause do
+          finish_unstarted_phase(
+            cause,
+            effect,
+            result_table,
+            [lease_monitor, owner_monitor, caller_monitor],
+            remaining
+          )
+        else
+          send(effect, {effect_tag, :start})
+
+          await_lease_guarded_work(
+            effect,
+            effect_tag,
+            result_table,
+            lease_pid,
+            lease_monitor,
+            owner,
+            owner_monitor,
+            caller,
+            caller_monitor,
+            remaining
+          )
+        end
+
+      {:DOWN, ^lease_monitor, :process, ^lease_pid, _reason} when is_reference(lease_monitor) ->
+        finish_unstarted_phase(
+          :workspace_lease_lost,
+          effect,
+          result_table,
+          [owner_monitor, caller_monitor],
+          remaining
+        )
+
+      {:DOWN, ^owner_monitor, :process, ^owner, _reason} when is_reference(owner_monitor) ->
+        finish_unstarted_phase(
+          :effect_owner_lost,
+          effect,
+          result_table,
+          [lease_monitor, caller_monitor],
+          remaining
+        )
+
+      {:DOWN, ^caller_monitor, :process, ^caller, _reason} ->
+        finish_unstarted_phase(
+          :caller_lost,
+          effect,
+          result_table,
+          [lease_monitor, owner_monitor],
+          remaining
+        )
+    after
+      wait ->
+        if guardian_stop_due?(remaining) do
+          finish_unstarted_phase(
+            :bound_reached,
+            effect,
+            result_table,
+            [lease_monitor, owner_monitor, caller_monitor],
+            remaining
+          )
+        else
+          arm_lease_guarded_work(
+            effect,
+            effect_tag,
+            result_table,
+            lease_pid,
+            lease_monitor,
+            owner,
+            owner_monitor,
+            caller,
+            caller_monitor,
+            remaining,
+            guardian_tag
+          )
+        end
+    end
+  end
+
+  defp finish_unstarted_phase(cause, effect, result_table, monitors, remaining) do
+    Process.exit(effect, :kill)
+    stopped = await_effect_exit(effect, result_table, remaining)
+    demonitor_phase(monitors)
+    {:abandoned, public_abandonment_cause(cause), stopped, :none}
+  end
+
+  defp await_lease_guarded_work(
+         effect,
+         effect_tag,
+         result_table,
+         lease_pid,
+         lease_monitor,
+         owner,
+         owner_monitor,
+         caller,
+         caller_monitor,
+         remaining
+       ) do
+    wait = guardian_effect_wait(remaining)
+
+    receive do
+      {:DOWN, ^lease_monitor, :process, ^lease_pid, _reason} when is_reference(lease_monitor) ->
+        finish_abandoned_phase(
+          :workspace_lease_lost,
+          effect,
+          effect_tag,
+          result_table,
+          [owner_monitor, caller_monitor],
+          remaining
+        )
+
+      {:DOWN, ^owner_monitor, :process, ^owner, _reason} when is_reference(owner_monitor) ->
+        finish_abandoned_phase(
+          :effect_owner_lost,
+          effect,
+          effect_tag,
+          result_table,
+          [lease_monitor, caller_monitor],
+          remaining
+        )
+
+      {:DOWN, ^caller_monitor, :process, ^caller, _reason} ->
+        finish_abandoned_phase(
+          :caller_lost,
+          effect,
+          effect_tag,
+          result_table,
+          [lease_monitor, owner_monitor],
+          remaining
+        )
+
+      {:EXIT, ^effect, reason} ->
+        demonitor_phase(lease_monitor, owner_monitor, caller_monitor)
+
+        case take_bounded_result(result_table, effect_tag) do
+          {:ok, lease_held, owner_held, bound_held, _completed_at, result} ->
+            cause =
+              cond do
+                not lease_held -> :workspace_lease_lost
+                not owner_held -> :effect_owner_lost
+                not Process.alive?(caller) -> :effect_owner_lost
+                not bound_held -> :bound_reached
+                true -> nil
+              end
+
+            if cause,
+              do: {:abandoned, cause, true, {:late, result}},
+              else: {:done, result}
+
+          {:pending, result} ->
+            case reason do
+              {:completion_not_certified, :workspace_lease_lost} ->
+                {:abandoned, :workspace_lease_lost, true, {:late, result}}
+
+              _other ->
+                {:stopped, reason}
+            end
+
+          :none ->
+            {:stopped, reason}
+        end
+    after
+      wait ->
+        if guardian_stop_due?(remaining) do
+          finish_abandoned_phase(
+            :bound_reached,
+            effect,
+            effect_tag,
+            result_table,
+            [lease_monitor, owner_monitor, caller_monitor],
+            remaining
+          )
+        else
+          await_lease_guarded_work(
+            effect,
+            effect_tag,
+            result_table,
+            lease_pid,
+            lease_monitor,
+            owner,
+            owner_monitor,
+            caller,
+            caller_monitor,
+            remaining
+          )
+        end
+    end
+  end
+
+  defp finish_abandoned_phase(
+         cause,
+         effect,
+         effect_tag,
+         result_table,
+         monitors,
+         remaining
+       ) do
+    Process.exit(effect, :kill)
+    {stopped, late} = await_abandoned_effect(effect, result_table, effect_tag, remaining)
+    demonitor_phase(monitors)
+
+    case {stopped, cause, late} do
+      {true, boundary, {:late, true, true, true, _completed_at, result}}
+      when boundary in [:workspace_lease_lost, :effect_owner_lost, :bound_reached] ->
+        {:done, result}
+
+      {_stopped, _cause, {:late, _lease_held, _owner_held, _bound_held, _completed_at, result}} ->
+        {:abandoned, public_abandonment_cause(cause), stopped, {:late, result}}
+
+      {_stopped, _cause, :none} ->
+        {:abandoned, public_abandonment_cause(cause), stopped, :none}
+    end
+  end
+
+  defp await_abandoned_effect(effect, result_table, effect_tag, remaining) do
+    wait = guardian_confirmation_wait(remaining)
+
+    receive do
+      {:EXIT, ^effect, _reason} ->
+        late =
+          case take_bounded_result(result_table, effect_tag) do
+            {:ok, lease_held, owner_held, bound_held, completed_at, result} ->
+              {:late, lease_held, owner_held, bound_held, completed_at, result}
+
+            {:pending, result} ->
+              {:late, false, false, false, nil, result}
+
+            :none ->
+              :none
+          end
+
+        {true, late}
+    after
+      wait ->
+        :ets.delete(result_table)
+        {false, :none}
+    end
+  end
+
+  defp take_bounded_result(result_table, effect_tag) do
+    result =
+      case :ets.take(result_table, effect_tag) do
+        [
+          {^effect_tag, :certified, lease_held, owner_held, bound_held, completed_at,
+           effect_result}
+        ] ->
+          {:ok, lease_held, owner_held, bound_held, completed_at, effect_result}
+
+        [{^effect_tag, :pending, _lease, _owner, _bound, _completed_at, effect_result}] ->
+          {:pending, effect_result}
+
+        [] ->
+          :none
       end
 
-    {:abandoned, cause, stopped, late}
+    :ets.delete(result_table)
+    result
+  end
+
+  defp certify_bounded_result(result_table, effect_tag, lease_pid, owner)
+       when is_pid(lease_pid) do
+    WorkspaceLease.certify_completion(lease_pid, result_table, effect_tag, owner)
+  end
+
+  defp certify_bounded_result(result_table, effect_tag, nil, owner) do
+    try do
+      owner_held = not is_pid(owner) or Process.alive?(owner)
+
+      case :ets.update_element(result_table, effect_tag, [
+             {2, :certified},
+             {3, true},
+             {4, owner_held}
+           ]) do
+        true -> :ok
+        false -> {:error, :completion_certificate_unavailable}
+      end
+    rescue
+      ArgumentError -> {:error, :completion_certificate_unavailable}
+    catch
+      _kind, _reason -> {:error, :completion_certificate_unavailable}
+    end
+  end
+
+  defp guardian_effect_wait(remaining) do
+    remaining
+    |> then(fn left -> max(left.(), 0) end)
+    |> min(@timer_slice_ms)
+  end
+
+  defp guardian_stop_due?(remaining), do: remaining.() <= 0
+
+  # The kill is issued when effect authority ends. This fixed interval observes
+  # that exact process exit; it grants no further effect or retention work and a
+  # timeout remains unconfirmed rather than becoming a verdict.
+  defp guardian_confirmation_wait(_remaining), do: @abandon_confirmation_ms
+
+  defp await_effect_exit(effect, result_table, remaining) do
+    wait = guardian_confirmation_wait(remaining)
+
+    receive do
+      {:EXIT, ^effect, _reason} ->
+        :ets.delete(result_table)
+        true
+    after
+      wait ->
+        :ets.delete(result_table)
+        false
+    end
+  end
+
+  defp demonitor_phase(first, second, third), do: demonitor_phase([first, second, third])
+
+  defp public_abandonment_cause(:caller_lost), do: :effect_owner_lost
+  defp public_abandonment_cause(cause), do: cause
+
+  defp demonitor_phase(monitors) when is_list(monitors) do
+    Enum.each(monitors, fn
+      monitor when is_reference(monitor) -> Process.demonitor(monitor, [:flush])
+      nil -> :ok
+    end)
+  end
+
+  defp demonitor_guardian_effect({_, monitor}) when is_reference(monitor),
+    do: Process.demonitor(monitor, [:flush])
+
+  defp demonitor_guardian_effect(nil), do: :ok
+
+  defp stop_guardian_effect({effect, monitor}, remaining) do
+    Process.exit(effect, :kill)
+    await_effect_down(effect, monitor, remaining)
+  end
+
+  defp stop_guardian_effect(nil, _remaining), do: false
+
+  defp await_effect_down(effect, monitor, remaining) do
+    wait = guardian_confirmation_wait(remaining)
+
+    receive do
+      {:DOWN, ^monitor, :process, ^effect, _reason} -> true
+    after
+      wait ->
+        Process.demonitor(monitor, [:flush])
+        false
+    end
+  end
+
+  # Post-receipt administration no longer needs the workspace lease, but it
+  # still belongs to the settlement caller and to the one retained allowance.
+  # Reusing the guardian keeps both facts in the process that owns the work: a
+  # caller killed while unlink or restoration blocks cannot leave a detached
+  # filesystem worker to mutate the ledger later.
+  defp bound_only_work_until(work, deadline)
+       when is_function(work, 0) and is_integer(deadline) do
+    case bounded_guardian_until(work, deadline, nil, nil) do
+      {:abandoned, :bound_reached, stopped, late} -> {:abandoned, stopped, late}
+      other -> other
+    end
   end
 
   # Concept: a lease lost while the receipt was being written leaves the effect
@@ -2061,37 +3049,76 @@ defmodule Loopex.Executor.Local do
   # still land after this one, so which receipt is durable is genuinely unknown;
   # saying the receipt was not retained is honest, and claiming an outcome for
   # bytes this executor cannot vouch for is not.
-  defp abandon_retention(root, receipt, staging, stopped, lease) do
+  defp abandon_retention(root, job, receipt, staging, stopped, _lease) do
     if stopped do
       File.rm(staging)
-      retain_now(root, unproven_receipt(receipt), lease)
+
+      retain_after_lease_loss(root, unproven_receipt(job, receipt))
+      |> tag_lease_lost_retention()
     else
-      {:error, :workspace_lease_lost_during_retention}
+      {:unconfirmed, :workspace_lease_lost_with_retention_worker_unconfirmed}
     end
   end
 
-  defp unproven_receipt(receipt),
-    do: %{receipt | outcome: :outcome_unknown, output: receipt.output <> @lease_lost_note}
+  defp tag_lease_lost_retention({:ok, receipt}),
+    do: {:ok, receipt, :workspace_lease_lost}
 
-  # The replacement receipt is written the same way the first attempt was.
-  # Writing it inline would put the last unbounded call in the job exactly where
-  # the lease is already gone and nothing is left to notice a ledger that never
-  # answers. It gets what remains of this settlement's one retention allowance
-  # rather than a second copy of it: it is a later phase of the same settlement,
-  # and ADR 0016 lets no phase refresh that deadline.
-  defp retain_now(root, receipt, lease) do
+  defp tag_lease_lost_retention({:error, _reason} = error), do: error
+  defp tag_lease_lost_retention({:unconfirmed, _reason} = unconfirmed), do: unconfirmed
+
+  # Cleanup confirmation is a separate fact about the captured process group.
+  # Losing the workspace claim makes the effect unproven; it does not erase a
+  # cleanup confirmation already established by the tool boundary.
+  defp unproven_receipt(job, receipt) do
+    output_limit = receipt_output_limit(job, receipt)
+
+    %{
+      receipt
+      | outcome: :outcome_unknown,
+        output: bounded_terminal_output(receipt.output, @lease_lost_note, output_limit)
+    }
+  end
+
+  # Concept: once lease loss has made the effect unproven, the executor still
+  # owes the operator that durable warning.
+  #
+  # Technical depth: ordinary retention uses `bounded_work/3`, whose successful
+  # result is admitted only while the lease process is live. The replacement
+  # written *because* that lease died cannot pass that condition by definition;
+  # it therefore uses the same monotonic bound and worker-stop confirmation but
+  # no lease alternative. This is the only call site allowed to do so, and the
+  # receipt it writes is already downgraded to `outcome_unknown`.
+  defp retain_after_lease_loss(root, receipt) do
     staging = staging_path(root, receipt)
 
-    case bounded_work(
+    case bound_only_work_until(
            fn -> retain_receipt(root, receipt, staging) end,
-           retention_remaining(),
-           lease
+           retention_until()
          ) do
-      {:done, :ok} -> {:ok, receipt}
-      {:done, {:error, reason}} -> {:error, reason}
-      {:stopped, reason} -> {:error, {:receipt_retention_stopped, reason}}
-      {:abandoned, _cause, _stopped, {:late, :ok}} -> {:ok, receipt}
-      {:abandoned, _cause, _stopped, _unfinished} -> {:error, :receipt_retention_abandoned}
+      {:done, :ok} ->
+        {:ok, receipt}
+
+      {:done, {:error, reason}} ->
+        {:error, reason}
+
+      {:stopped, reason} ->
+        {:error, {:receipt_retention_stopped, reason}}
+
+      {:guardian_stopped, reason, true} ->
+        File.rm(staging)
+        {:error, {:receipt_retention_guardian_stopped, reason}}
+
+      {:guardian_stopped, reason, false} ->
+        {:unconfirmed, {:receipt_retention_guardian_unconfirmed, reason}}
+
+      {:abandoned, _stopped, {:late, :ok}} ->
+        {:ok, receipt}
+
+      {:abandoned, true, _unfinished} ->
+        {:error, :receipt_retention_abandoned}
+
+      {:abandoned, false, _unfinished} ->
+        {:unconfirmed, :receipt_retention_worker_unconfirmed}
     end
   end
 
@@ -2131,7 +3158,7 @@ defmodule Loopex.Executor.Local do
          _tool,
          workspace,
          %{kind: kind} = arguments,
-         _options,
+         options,
          lease,
          deadline,
          limits,
@@ -2142,9 +3169,12 @@ defmodule Loopex.Executor.Local do
     remaining = fence_remaining(deadline)
 
     if remaining <= 0 do
-      {{:failed, "the effective deadline passed before this tool began"}, 0}
+      {{:failed, "the effective deadline passed before this tool began"}, 0, :confirmed}
     else
-      {run_bounded_tool(workspace, arguments, remaining, lease, limits), 0}
+      {result, stopped} =
+        run_bounded_tool(workspace, arguments, deadline, lease, limits, options)
+
+      {result, 0, cleanup_fact(stopped)}
     end
   end
 
@@ -2177,30 +3207,45 @@ defmodule Loopex.Executor.Local do
   # Concept: the effect runs where it can be abandoned, and the abandonment is
   # confirmed rather than assumed.
   #
-  # Technical depth: the worker is spawned unlinked and monitored, so neither its
-  # crash nor its kill can reach this executor. Whichever of the four outcomes
-  # arrives first decides the result: the effect's own answer, the worker dying
-  # on its own, the lease holder going down, or the remaining deadline elapsing.
+  # Technical depth: one monitored guardian owns the linked filesystem effect,
+  # the lease, the Local owner, and the deadline. Signal arrival order is not the
+  # verdict: the effect's completion certificate binds the authority facts at the
+  # boundary, and the caller reaps the exact effect if the guardian itself dies.
   #
-  # The mechanics of the wait live in `bounded_work/3`, which the two retentions
-  # that follow the effect use as well.
-  defp run_bounded_tool(workspace, arguments, remaining, lease, limits) do
-    case bounded_work(
+  # The effect uses owner-aware `bounded_work/4`; the two retentions that follow
+  # it use the general `bounded_work/3` boundary because they may finish retaining
+  # already-produced evidence after the Local server disappears.
+  defp run_bounded_tool(
+         workspace,
+         arguments,
+         deadline,
+         {_monitor, lease_pid},
+         limits,
+         _options
+       ) do
+    case bounded_guardian_with_remaining(
            fn -> filesystem_effect(workspace, arguments, limits) end,
-           remaining,
-           lease
+           fn -> fence_remaining(deadline) end,
+           lease_pid,
+           effect_owner()
          ) do
       {:done, result} ->
-        result
+        {result, true}
 
       {:stopped, reason} ->
-        {:failed, "the tool stopped before it produced a result: #{inspect(reason)}"}
+        {abandoned(:worker_stopped, arguments, true, reason), true}
+
+      {:guardian_stopped, reason, confirmed} ->
+        {abandoned(:guardian_stopped, arguments, confirmed, reason), confirmed}
 
       {:abandoned, :workspace_lease_lost, stopped, _late} ->
-        abandoned(:workspace_lease_lost, arguments, stopped)
+        {abandoned(:workspace_lease_lost, arguments, stopped), stopped}
+
+      {:abandoned, :effect_owner_lost, stopped, _late} ->
+        {abandoned(:effect_owner_lost, arguments, stopped), stopped}
 
       {:abandoned, :bound_reached, stopped, _late} ->
-        abandoned(:deadline, arguments, stopped)
+        {abandoned(:deadline, arguments, stopped), stopped}
     end
   end
 
@@ -2218,20 +3263,30 @@ defmodule Loopex.Executor.Local do
   # A worker that does not die is the same kind of fact as a process group that
   # cannot be confirmed cleaned: it may still act, so nothing about the effect is
   # known regardless of which tool it was.
-  defp abandoned(cause, arguments, stopped) do
-    {abandoned_outcome(cause, arguments, stopped), abandoned_message(cause, arguments, stopped)}
+  defp abandoned(cause, arguments, stopped), do: abandoned(cause, arguments, stopped, nil)
+
+  defp abandoned(cause, arguments, stopped, detail) do
+    {abandoned_outcome(cause, arguments, stopped),
+     abandoned_message(cause, arguments, stopped, detail)}
   end
 
   defp abandoned_outcome(_cause, _arguments, false), do: :outcome_unknown
   defp abandoned_outcome(:workspace_lease_lost, _arguments, true), do: :outcome_unknown
+  defp abandoned_outcome(:effect_owner_lost, _arguments, true), do: :outcome_unknown
+  defp abandoned_outcome(:worker_stopped, %{kind: :read}, true), do: :failed
+  defp abandoned_outcome(:worker_stopped, _arguments, true), do: :outcome_unknown
+  defp abandoned_outcome(:guardian_stopped, _arguments, _stopped), do: :outcome_unknown
   defp abandoned_outcome(:deadline, %{kind: :read}, true), do: :failed
   defp abandoned_outcome(:deadline, _arguments, true), do: :outcome_unknown
 
-  defp abandoned_message(cause, arguments, stopped) do
+  defp abandoned_message(cause, arguments, stopped, detail) do
     cause_text =
       case cause do
         :deadline -> "the effective deadline passed while this tool was running"
         :workspace_lease_lost -> "the workspace lease was lost while this tool was running"
+        :effect_owner_lost -> "the Local executor authority was lost while this tool was running"
+        :worker_stopped -> "the filesystem effect worker stopped before reporting its result"
+        :guardian_stopped -> "the filesystem effect guardian stopped before reporting its verdict"
       end
 
     stop_text =
@@ -2239,10 +3294,15 @@ defmodule Loopex.Executor.Local do
         do: " and it was stopped.",
         else: " and it could not be confirmed stopped."
 
-    "[loopex: " <> cause_text <> stop_text <> " " <> effect_text(cause, arguments, stopped) <> "]"
+    detail_text = if is_nil(detail), do: "", else: " (#{inspect(detail)})"
+
+    "[loopex: " <>
+      cause_text <>
+      detail_text <> stop_text <> " " <> effect_text(cause, arguments, stopped) <> "]"
   end
 
   defp effect_text(:deadline, %{kind: :read}, true), do: "Nothing was read."
+  defp effect_text(:worker_stopped, %{kind: :read}, true), do: "Nothing was returned."
 
   defp effect_text(_cause, %{kind: kind}, _stopped),
     do: "Whether #{kind} changed the workspace is unproven."
@@ -2646,16 +3706,25 @@ defmodule Loopex.Executor.Local do
     grace = cleanup_grace_ms()
     probe = process_probe()
 
+    # Progress is delivered by the execute caller, not by the process owner. A
+    # host callback is outside Local's cleanup authority and may block; forwarding
+    # keeps the owner responsive to cancellation, lease loss, and Local death.
+    worker_progress =
+      if is_function(progress, 1) do
+        fn event ->
+          send(caller, {tag, :worker_progress, event})
+          :ok
+        end
+      end
+
     {worker, monitor} =
       spawn_monitor(fn ->
         Process.put(:loopex_inflight_table, table)
         Process.put(:loopex_cleanup_grace_ms, grace)
         Process.put(:loopex_process_probe, probe)
-        guard_monitor = Process.monitor(guard)
-        send(caller, {tag, :worker_ready, self()})
 
-        receive do
-          {^tag, :run} ->
+        case await_owned_process_start(caller, guard, tag, job.job_id) do
+          {:run, owner} ->
             result =
               run_owned_process_worker(
                 job,
@@ -2666,76 +3735,208 @@ defmodule Loopex.Executor.Local do
                 lease,
                 deadline,
                 limits,
-                progress,
+                worker_progress,
                 identity,
-                {guard_monitor, guard}
+                owner
               )
 
             send(caller, {tag, :worker_result, result, not is_nil(cleanup_episode())})
 
-          {:loopex_cancel_pending, token, from, _cancel_grace, _cancel_probe} ->
-            forget_inflight(job.job_id)
-            send(from, {:loopex_cancel_result, token, {:ok, :cleaned}})
-
-            send(
-              caller,
-              {tag, :worker_result,
-               {{:cancelled, "[loopex: the job was cancelled before its process began.]",
-                 :complete}, 0}, false}
-            )
-
-          {:DOWN, ^guard_monitor, :process, ^guard, _reason} ->
+          :stop ->
             :ok
         end
       end)
 
     receive do
       {^tag, :worker_ready, ^worker} ->
-        register_inflight(job.job_id, {:starting, worker})
+        register_starting_process(job.job_id, worker, grace)
         send(worker, {tag, :run})
-        await_owned_process_worker(worker, monitor, tag, job)
+        await_owned_process_worker(worker, monitor, tag, job, progress)
 
       {:DOWN, ^monitor, :process, ^worker, reason} ->
         forget_inflight(job.job_id)
 
         {{:outcome_unknown,
           "[loopex: the process owner stopped before it could report cleanup: " <>
-            inspect(reason) <> "]", :complete}, 0}
+            inspect(reason) <> "]", :complete}, 0, :unconfirmed}
     end
   end
 
-  defp await_owned_process_worker(worker, monitor, tag, job) do
+  # Concept: a command worker that has not received its run signal belongs to
+  # both the Local authority and the execute caller arranging its admission.
+  # Losing either ends that not-yet-started worker without an effect.
+  #
+  # Technical depth: both monitors exist before readiness is announced. The
+  # caller sends `:run` after receiving that announcement, so BEAM signal ordering
+  # makes a prior run signal win over the same caller's later `DOWN`; after that
+  # handoff only the Local authority guards the admitted effect. A caller lost
+  # before sending `:run` removes any `{:starting, worker}` publication and lets
+  # the worker exit. This boundary is exposed because a public caller cannot be
+  # stopped deterministically inside the private ready/run exchange without a
+  # shipped test switch.
+  @doc false
+  @spec await_owned_process_start(pid(), pid(), reference(), binary()) ::
+          {:run, {reference(), pid()}} | :stop
+  def await_owned_process_start(caller, guard, tag, job_id)
+      when is_pid(caller) and is_pid(guard) and is_reference(tag) and is_binary(job_id) do
+    guard_monitor = Process.monitor(guard)
+    caller_monitor = Process.monitor(caller)
+    send(caller, {tag, :worker_ready, self()})
+
     receive do
+      {^tag, :run} ->
+        Process.demonitor(caller_monitor, [:flush])
+
+        # `:run` comes from the execute caller while `:DOWN` comes from the VM's
+        # monitor service. Their arrival order cannot establish whether the
+        # Local authority was still alive when this worker consumed the permit.
+        # Recheck the guarded process itself at that boundary: a queued permit
+        # cannot revive authority that has already ended.
+        if Process.alive?(guard) do
+          {:run, {guard_monitor, guard}}
+        else
+          forget_inflight(job_id)
+          Process.demonitor(guard_monitor, [:flush])
+          send(caller, {tag, :worker_result, prelaunch_owner_lost_result(), false})
+          :stop
+        end
+
+      {:loopex_cancel_pending, token, from, _episode} ->
+        forget_inflight(job_id)
+        send(from, {:loopex_cancel_result, token, {:ok, :cleaned}})
+
+        send(
+          caller,
+          {tag, :worker_result,
+           {{:cancelled, "[loopex: the job was cancelled before its process began.]", :complete},
+            0, :confirmed}, false}
+        )
+
+        :stop
+
+      {:DOWN, ^guard_monitor, :process, ^guard, _reason} ->
+        forget_inflight(job_id)
+        Process.demonitor(caller_monitor, [:flush])
+        send(caller, {tag, :worker_result, prelaunch_owner_lost_result(), false})
+        :stop
+
+      {:DOWN, ^caller_monitor, :process, ^caller, _reason} ->
+        forget_inflight(job_id)
+        Process.demonitor(guard_monitor, [:flush])
+        :stop
+    end
+  end
+
+  defp prelaunch_owner_lost_result do
+    {{:outcome_unknown, "[loopex: the local executor owner stopped before the process began.]",
+      :complete}, 0, :confirmed}
+  end
+
+  defp await_owned_process_worker(worker, monitor, tag, job, progress) do
+    receive do
+      {^tag, :worker_progress, event} when is_function(progress, 1) ->
+        :ok = progress.(event)
+        await_owned_process_worker(worker, monitor, tag, job, progress)
+
       {^tag, :worker_result, result, cleanup_used} ->
         Process.demonitor(monitor, [:flush])
         if cleanup_used, do: Process.put(:loopex_cleanup_episode, cleanup_now_ms())
         result
 
       {:DOWN, ^monitor, :process, ^worker, reason} ->
-        cleanup_worker_failure(job.job_id)
+        confirmed = cleanup_worker_failure(job.job_id)
 
         {{:outcome_unknown,
           "[loopex: the process owner stopped before it could report cleanup: " <>
-            inspect(reason) <> "]", :complete}, 0}
+            inspect(reason) <> "]", :complete}, 0, cleanup_fact(confirmed)}
     end
   end
 
   defp cleanup_worker_failure(job_id) do
-    case :ets.lookup(inflight_table(), job_id) do
-      [{^job_id, group}] when is_integer(group) and group > 1 ->
-        terminate_group(group, job_episode())
-        _confirmed = confirm_group_terminated(group, job_episode())
-
-      _other ->
-        :ok
-    end
-
+    # The launch owner is gone, so its cached numeric group observation can no
+    # longer authorize a signal: the operating system may already have reused
+    # that identifier. Preserve the durable open warning and report cleanup
+    # unconfirmed instead of redirecting cleanup at unrelated work.
     forget_inflight(job_id)
-  rescue
-    ArgumentError -> :ok
+    false
   end
 
   defp run_owned_process_worker(
+         job,
+         tool,
+         workspace,
+         arguments,
+         options,
+         lease,
+         deadline,
+         limits,
+         progress,
+         identity,
+         owner
+       ) do
+    # The serialized permit authorizes one effect only while both fences still
+    # hold at the transition that can actually create it. `Port.open/2` creates a
+    # guard which cannot start the command; the final sample lives immediately
+    # before the token-bound run permit is written to that guard. A check at this
+    # function's entry or before the waiting guard was opened would still leave
+    # setup and a descheduling window between the verdict and the effect.
+    try do
+      run_owned_process_after_fence(
+        job,
+        tool,
+        workspace,
+        arguments,
+        options,
+        lease,
+        deadline,
+        limits,
+        progress,
+        identity,
+        owner
+      )
+    catch
+      :throw, {:loopex_prelaunch_refused, job_id, cause} when job_id == job.job_id ->
+        prelaunch_refusal_result(job, owner, limits.output, cause)
+    end
+  end
+
+  defp prelaunch_refusal_result(job, owner, output_limit, :run_deadline_reached) do
+    forget_inflight(job.job_id)
+
+    finalize_effect_owner_result(
+      {{:cancelled, "[loopex: the run deadline passed before the process began.]", :complete}, 0,
+       :confirmed},
+      owner,
+      output_limit
+    )
+  end
+
+  defp prelaunch_refusal_result(job, owner, output_limit, :workspace_lease_lost) do
+    forget_inflight(job.job_id)
+
+    finalize_effect_owner_result(
+      {{:outcome_unknown,
+        "[loopex: the workspace lease was lost before the process began. No process was started.]",
+        :complete}, 0, :confirmed},
+      owner,
+      output_limit
+    )
+  end
+
+  defp prelaunch_refusal_result(job, _owner, _output_limit, :effect_owner_lost) do
+    forget_inflight(job.job_id)
+    prelaunch_owner_lost_result()
+  end
+
+  defp prelaunch_refusal_result(job, _owner, _output_limit, :launch_guard_unavailable) do
+    forget_inflight(job.job_id)
+
+    {{:outcome_unknown,
+      "[loopex: the launch-owned process guard stopped before command admission could be " <>
+        "confirmed. Whether a process began is unproven.]", :complete}, 0, :unconfirmed}
+  end
+
+  defp run_owned_process_after_fence(
          job,
          _tool,
          workspace,
@@ -2749,21 +3950,68 @@ defmodule Loopex.Executor.Local do
          owner
        ) do
     environment = child_environment()
+    token = launch_guard_token()
     {launcher, command_arguments} = process_launcher(arguments, environment)
+    {_lease_monitor, lease_pid} = lease
 
     port = open_launcher(launcher, command_arguments, environment, workspace)
 
     os_pid = port |> Port.info(:os_pid) |> elem(1)
+
+    collector =
+      case safe_port_command(port, "#{@guard_init}:#{token}\n") do
+        true ->
+          case await_launch_guard_ready(
+                 port,
+                 new_output_collector(port, os_pid, token, progress, identity),
+                 limits.artifact
+               ) do
+            {:ok, ready} ->
+              ready
+
+            _missing_guard_evidence ->
+              close_waiting_guard(port, token)
+              throw({:loopex_prelaunch_refused, job.job_id, :launch_guard_unavailable})
+          end
+
+        false ->
+          close_waiting_guard(port, token)
+          throw({:loopex_prelaunch_refused, job.job_id, :launch_guard_unavailable})
+      end
+
+    # The first image is a waiting launch guard, not the command. This is the
+    # final effect-authorizing transition: the token/start frame is delivered
+    # only after the Port exists, its group-leader identity is confirmed, and
+    # both authority fences still hold. Refusal closes that exact waiting child
+    # before throwing; no model command has been started and no numeric group
+    # observation is used.
+    remaining = fence_remaining(deadline)
+
+    cause =
+      cond do
+        not Process.alive?(lease_pid) -> :workspace_lease_lost
+        not effect_owner_alive?(owner) -> :effect_owner_lost
+        remaining <= 0 -> :run_deadline_reached
+        true -> nil
+      end
+
+    if cause do
+      close_waiting_guard(port, token)
+      throw({:loopex_prelaunch_refused, job.job_id, cause})
+    else
+      unless safe_port_command(port, "#{@guard_run}:#{token}\n") do
+        close_waiting_guard(port, token)
+        throw({:loopex_prelaunch_refused, job.job_id, :launch_guard_unavailable})
+      end
+    end
 
     notify(
       options,
       {:executor_process_started, job.job_id, job.tool_id, environment_names(environment)}
     )
 
-    register_inflight(job.job_id, os_pid)
+    register_inflight(job.job_id, collector.group)
 
-    collector = new_output_collector(os_pid, progress, identity)
-    {_parent_lease_monitor, lease_pid} = lease
     local_lease = {Process.monitor(lease_pid), lease_pid}
 
     result =
@@ -2791,27 +4039,25 @@ defmodule Loopex.Executor.Local do
         # quiescence and confirmed before `:completed` is reported. A command that
         # backgrounds work and exits has that work terminated, which is the
         # intended reading of owning the group rather than the leader.
-        {:exited, status, output, group, progress_count} ->
-          quiescence = quiesce_group(group, job_episode())
+        {:exited, status, output, progress_count, quiescence, confirmed} ->
           forget_inflight(job.job_id)
 
-          case quiescence do
-            :quiescent ->
-              {bound_process_output(status, output, "", limits.output), progress_count}
+          case {quiescence, confirmed} do
+            {:quiescent, true} ->
+              {bound_process_output(status, output, "", limits.output), progress_count,
+               :confirmed}
 
-            :terminated ->
+            {:terminated, true} ->
               {bound_process_output(status, output, @group_terminated_note, limits.output),
-               progress_count}
+               progress_count, :confirmed}
 
-            :unconfirmed ->
+            _unconfirmed ->
               {unproven(
                  bound_process_output(status, output, @group_unconfirmed_note, limits.output)
-               ), progress_count}
+               ), progress_count, :unconfirmed}
           end
 
-        {:artifact_limit_exceeded, output, group, observed, progress_count} ->
-          confirmed = confirm_group_terminated(group, job_episode())
-
+        {:artifact_limit_exceeded, output, observed, progress_count, confirmed} ->
           {{if(confirmed, do: :failed, else: :outcome_unknown),
             artifact_ceiling_message(
               output,
@@ -2819,22 +4065,21 @@ defmodule Loopex.Executor.Local do
               limits.artifact,
               observed,
               confirmed
-            ), :complete}, progress_count}
+            ), :complete}, progress_count, cleanup_fact(confirmed)}
 
-        {:cancelled, output, group, progress_count} ->
-          confirmed = confirm_group_terminated(group, job_episode())
-
+        {:cancelled, output, progress_count, confirmed} ->
           suffix =
-            "\n[loopex: the deadline passed and the command was terminated." <>
+            "\n[loopex: the run deadline passed and the command was terminated." <>
               if(confirmed,
                 do: " Its process group is confirmed cleaned.]",
                 else: " Cleanup could not be confirmed.]"
               )
 
           {{if(confirmed, do: :cancelled, else: :outcome_unknown),
-            bounded_terminal_output(output, suffix, limits.output)}, progress_count}
+            bounded_terminal_output(output, suffix, limits.output)}, progress_count,
+           cleanup_fact(confirmed)}
 
-        {:external_cancelled, output, _group, progress_count, confirmed} ->
+        {:external_cancelled, output, progress_count, confirmed} ->
           suffix =
             "\n[loopex: cancellation reached the process owner." <>
               if(confirmed,
@@ -2843,19 +4088,20 @@ defmodule Loopex.Executor.Local do
               )
 
           {{if(confirmed, do: :cancelled, else: :outcome_unknown),
-            bounded_terminal_output(output, suffix, limits.output)}, progress_count}
+            bounded_terminal_output(output, suffix, limits.output)}, progress_count,
+           cleanup_fact(confirmed)}
 
-        {:executor_owner_lost, output, _group, progress_count, confirmed} ->
+        {:executor_owner_lost, output, progress_count, confirmed} ->
+          executor_owner_lost_result(output, progress_count, confirmed, limits.output)
+
+        {:guard_lost, status, output, progress_count} ->
           suffix =
-            "\n[loopex: the local executor owner stopped while this command was running." <>
-              if(confirmed,
-                do:
-                  " Its process group was terminated and confirmed cleaned, but no receipt owner remained.]",
-                else: " Cleanup could not be confirmed and the effect remains unproven.]"
-              )
+            "\n[loopex: the launch-owned process guard exited with status #{status} before " <>
+              "it supplied complete command and cleanup evidence. Whether this effect is " <>
+              "complete is unproven.]"
 
           {{:outcome_unknown, bounded_terminal_output(output, suffix, limits.output)},
-           progress_count}
+           progress_count, :unconfirmed}
 
         # Concept: a command whose lease vanished is unproven, not cancelled.
         #
@@ -2869,9 +4115,7 @@ defmodule Loopex.Executor.Local do
         # state, and it is reported whether or not the group was confirmed cleaned
         # -- confirming cleanup proves the command stopped, not that its effect
         # never landed.
-        {:workspace_lease_lost, output, group, progress_count} ->
-          confirmed = confirm_group_terminated(group, job_episode())
-
+        {:workspace_lease_lost, output, progress_count, confirmed} ->
           suffix =
             "\n[loopex: the workspace lease was lost and the command was terminated." <>
               if(confirmed,
@@ -2882,24 +4126,24 @@ defmodule Loopex.Executor.Local do
               " against is unproven.]"
 
           {{:outcome_unknown, bounded_terminal_output(output, suffix, limits.output)},
-           progress_count}
+           progress_count, cleanup_fact(confirmed)}
       end
 
     Process.demonitor(elem(local_lease, 0), [:flush])
-    result
+    finalize_effect_owner_result(result, owner, limits.output)
   end
 
   # Concept: an in-flight job publishes the group it owns, so a cancel can reach
-  # it without calling a server that is busy running it.
+  # it without routing cleanup through the executor's serialized call path.
   #
-  # Technical depth: `execute/5` blocks this executor's GenServer for the whole
-  # job, so a concurrent `cancel/2` cannot be a call. The table is created per
-  # executor process and its identifier is kept in that process's own dictionary
-  # rather than under a registered name, because a named table is VM-global and
-  # two executors in one VM would collide on it — the same reason nothing else in
-  # this project hides per-runtime state in a global name. Reading another
-  # process's dictionary is unusual, and it is used here precisely because it
-  # reads state that process owns without waiting for it to be free.
+  # Technical depth: `execute/5` performs admitted work in its caller while this
+  # executor's GenServer remains available for short authority decisions. The
+  # table is created per executor process and its identifier is kept in that
+  # process's own dictionary rather than under a registered name, because a named
+  # table is VM-global and two executors in one VM would collide on it — the same
+  # reason nothing else in this project hides per-runtime state in a global name.
+  # Reading another process's dictionary is unusual, and it lets `cancel/2` find
+  # the caller-published process group without routing cleanup through the server.
   # Concept: the process whose authority admitted the effect is the one a
   # launch-owned guard watches.
   #
@@ -2909,6 +4153,61 @@ defmodule Loopex.Executor.Local do
   # reservation, ledger, and cancellation entry are what the child is owned
   # through. `self()` is the fallback for the one path that has no reservation.
   defp effect_owner, do: Process.get(:loopex_effect_owner, self())
+
+  defp effect_owner_alive?({_monitor, owner}) when is_pid(owner), do: Process.alive?(owner)
+
+  # Port data, exit, deadlines, cancellation, lease monitors, and owner monitors
+  # are independent signal paths. None of their mailbox positions proves the
+  # exact Local authority still existed when this worker fixed a terminal
+  # result. Every branch above performs its branch-specific group cleanup first;
+  # this one final boundary admits a proved outcome only while that authority is
+  # still live. Results already unproven remain so without changing their more
+  # specific diagnosis.
+  defp finalize_effect_owner_result(
+         {result, progress_count, cleanup_confirmation} = settled,
+         owner,
+         output_limit
+       ) do
+    case result do
+      {outcome, output, _spill} when outcome in [:completed, :failed, :cancelled] ->
+        if effect_owner_alive?(owner),
+          do: settled,
+          else:
+            executor_owner_lost_result(
+              output,
+              progress_count,
+              cleanup_confirmation == :confirmed,
+              output_limit
+            )
+
+      {outcome, output} when outcome in [:completed, :failed, :cancelled] ->
+        if effect_owner_alive?(owner),
+          do: settled,
+          else:
+            executor_owner_lost_result(
+              output,
+              progress_count,
+              cleanup_confirmation == :confirmed,
+              output_limit
+            )
+
+      _already_unproven ->
+        settled
+    end
+  end
+
+  defp executor_owner_lost_result(output, progress_count, confirmed, output_limit) do
+    suffix =
+      "\n[loopex: the local executor owner stopped while this command was running." <>
+        if(confirmed,
+          do:
+            " Its process group was terminated and confirmed cleaned, but no receipt owner remained.]",
+          else: " Cleanup could not be confirmed and the effect remains unproven.]"
+        )
+
+    {{:outcome_unknown, bounded_terminal_output(output, suffix, output_limit)}, progress_count,
+     cleanup_fact(confirmed)}
+  end
 
   defp inflight_table do
     case Process.get(:loopex_inflight_table) do
@@ -2929,8 +4228,23 @@ defmodule Loopex.Executor.Local do
     ArgumentError -> :error
   end
 
+  defp register_starting_process(job_id, worker, grace) do
+    authority = {@process_authority_key, job_id}
+
+    :ets.insert(inflight_table(), [
+      {job_id, {:starting, worker}},
+      {authority, worker, grace}
+    ])
+
+    :ok
+  rescue
+    ArgumentError -> :error
+  end
+
   defp forget_inflight(job_id) do
-    :ets.delete(inflight_table(), job_id)
+    table = inflight_table()
+    :ets.delete(table, job_id)
+    :ets.delete(table, {@process_authority_key, job_id})
     :ok
   rescue
     ArgumentError -> :ok
@@ -2963,29 +4277,6 @@ defmodule Loopex.Executor.Local do
   end
 
   defp unproven({_outcome, kept, spill}), do: {:outcome_unknown, kept, spill}
-
-  # Concept: a job is over when the group it owns is empty, and that is looked
-  # at rather than assumed.
-  #
-  # Technical depth: the common case costs one `ps` and signals nothing, because
-  # a command whose group is already empty needs no termination and must not pay
-  # for one. Where members remain, the existing cleanup-and-confirmation sequence
-  # runs — the same one the deadline branch uses — and its answer decides between
-  # a truthful `:completed` and `:outcome_unknown`.
-  #
-  # The signal is sent only while a member of the captured group is still
-  # present, and the check runs in the instant the launcher's exit is reported,
-  # which is what keeps the negated-group kill aimed at this job's own group
-  # rather than at a group identifier the operating system has since reissued.
-  defp quiesce_group(group, episode) do
-    if confirm_group_terminated(group, episode) do
-      :quiescent
-    else
-      terminate_group(group, episode)
-
-      if confirm_group_terminated(group, episode), do: :terminated, else: :unconfirmed
-    end
-  end
 
   defp exit_note(0), do: ""
 
@@ -3095,6 +4386,82 @@ defmodule Loopex.Executor.Local do
     end
   end
 
+  # Concept: the durable terminal is known to fit before this executor grants
+  # the effect permission that makes a terminal receipt mandatory.
+  #
+  # Technical depth: the Store ceiling applies to the complete deterministic
+  # external-term record, not to `output` alone. Reserve against every valid
+  # outcome/cleanup pairing and, for coding tools, against both no artifact and
+  # the largest compact artifact reference ADR 0015 admits. Every other receipt
+  # member is an encoding-size upper bound for the value this job will retain,
+  # including the admission sample already taken; the effective deadline uses
+  # the job deadline, whose integer encoding is at least as wide as the earlier
+  # terminal deadline, and the progress count that arises while work runs uses
+  # its largest admitted encoding. Because an external-term binary's
+  # header has fixed width here, subtracting the empty output record's size gives
+  # the exact number of output bytes that variant can carry. A fixed shape that
+  # leaves no byte for output is refused before the admission marker and open
+  # authority are written.
+  defp reserve_receipt_output(state, job, tool, arguments, observed_at_ms) do
+    environment = receipt_environment(tool, arguments)
+
+    capacities =
+      for {outcome, cleanup} <- @receipt_terminal_variants,
+          artifacts <- receipt_artifact_variants(state, tool) do
+        state
+        |> receipt(
+          job,
+          tool,
+          outcome,
+          "",
+          environment,
+          artifacts,
+          Map.get(job, :effective_job_deadline),
+          @max_uint64,
+          cleanup
+        )
+        |> Map.put(:observed_at_ms, observed_at_ms)
+        |> :erlang.term_to_binary([:deterministic])
+        |> byte_size()
+        |> then(&(@max_receipt_bytes - &1))
+      end
+
+    case Enum.min(capacities) do
+      limit when limit > 0 -> {:ok, limit}
+      _no_capacity -> refused_before_effect(:receipt_record_shape_too_large)
+    end
+  end
+
+  defp receipt_environment(%{coding: _definition}, arguments),
+    do: coding_tool_environment(arguments)
+
+  defp receipt_environment(_demonstration, _arguments), do: demonstration_environment()
+
+  defp receipt_artifact_variants(%{artifacts: artifacts}, %{coding: _definition})
+       when not is_nil(artifacts),
+       do: [[], [largest_artifact_reference()]]
+
+  defp receipt_artifact_variants(_state, _tool), do: [[]]
+
+  defp largest_artifact_reference do
+    digest = String.duplicate("f", 64)
+
+    %{
+      digest: digest,
+      size: @max_uint64,
+      locator: String.duplicate("l", 1_024),
+      media_type: String.duplicate("m", 255),
+      role: "tool_output",
+      use_canonicalization_version: LoopexProtocol.Canonical.version(),
+      use_digest: digest,
+      use_locator: "use:" <> digest
+    }
+  end
+
+  defp cap_output_limit(limits, receipt_output_limit) do
+    %{limits | output: min(limits.output, receipt_output_limit)}
+  end
+
   # Concept: output beyond a tool's bound is retained, not discarded.
   #
   # Technical depth: a bounded tool returned the kept prefix and dropped the
@@ -3106,7 +4473,9 @@ defmodule Loopex.Executor.Local do
   # A tool whose output fits spills nothing. Where no artifact store is composed,
   # or the store refuses, the tool keeps the marker it had: an operator loses the
   # retrieval, never the result, and the receipt says truthfully that nothing was
-  # retained.
+  # retained. A different rule applies when the store worker cannot be confirmed
+  # stopped: no receipt is written and the durable open entry remains quarantine,
+  # because that worker may still publish after any receipt assembled here.
   defp spill({outcome, output}, state, job, lease, limits),
     do: spill({outcome, output, :complete}, state, job, lease, limits)
 
@@ -3149,9 +4518,9 @@ defmodule Loopex.Executor.Local do
       "tool_call_id" => job.tool_call_id
     }
 
-    {bound, bound_cause} = retention_bound(job)
+    {deadline, bound_cause} = retention_deadline(job)
 
-    case retain_under_lease(state.artifacts, full, metadata, lease, bound) do
+    case retain_under_lease(state.artifacts, full, metadata, lease, deadline) do
       {:ok, reference} ->
         {outcome, bounded_artifact_notice(full, diagnostic, limit, reference), [reference]}
 
@@ -3199,6 +4568,9 @@ defmodule Loopex.Executor.Local do
              " retained, and the retention was abandoned. Whether the effect landed in" <>
              " the workspace this job was authorised against is unproven.]"
          ), []}
+
+      {:unconfirmed, reason} ->
+        {:settlement_unconfirmed, reason}
     end
   end
 
@@ -3227,6 +4599,11 @@ defmodule Loopex.Executor.Local do
   # two, and it is the run's rather than the tool's effective deadline because a
   # tool's declared budget bounds the tool and this is the run retaining what the
   # tool produced.
+  #
+  # The guardian's stop bit is settlement truth, not teardown detail. When it is
+  # false, the host store may still publish after this function returns. Such a
+  # result bypasses receipt construction and leaves the admission's open record
+  # in place, so later work sees quarantine rather than a false terminal.
   # The share is what keeps one shared allowance from starving the phase that
   # writes down what happened. A store that answers more slowly than the whole
   # allowance would otherwise leave nothing for the receipt, and exactly the job
@@ -3238,13 +4615,14 @@ defmodule Loopex.Executor.Local do
 
   # Which of the two bound it is carried out, because the two are different
   # facts and an abandoned retention has to say which one ended it.
-  defp retention_bound(job) do
+  defp retention_deadline(job) do
+    now = cleanup_now_ms()
     run_remaining = max(job.run_deadline - System.system_time(:millisecond), 0)
-    share = div(retention_remaining(), @retention_spill_share)
+    share = div(max(retention_until() - now, 0), @retention_spill_share)
 
     if run_remaining <= share,
-      do: {run_remaining, :run_deadline},
-      else: {share, :retention_allowance}
+      do: {now + run_remaining, :run_deadline},
+      else: {now + share, :retention_allowance}
   end
 
   # Concept: the receipt says the bound its whole settlement received.
@@ -3268,12 +4646,57 @@ defmodule Loopex.Executor.Local do
   # milliseconds left spilled into a store that delayed four seconds and returned
   # after about four seconds, reporting `completed`. Both are alternatives of the
   # one wait now.
-  defp retain_under_lease(store, bytes, metadata, lease, bound) do
-    case bounded_work(fn -> Loopex.ArtifactStore.put(store, bytes, metadata) end, bound, lease) do
-      {:done, result} -> result
-      {:stopped, reason} -> {:error, {:artifact_retention_stopped, reason}}
-      {:abandoned, :workspace_lease_lost, _stopped, _late} -> :workspace_lease_lost
-      {:abandoned, :bound_reached, _stopped, _late} -> :retention_bound_reached
+  defp retain_under_lease(store, bytes, metadata, {_monitor, lease_pid}, deadline) do
+    bounded_guardian_until(
+      fn -> Loopex.ArtifactStore.put(store, bytes, metadata) end,
+      deadline,
+      lease_pid,
+      nil
+    )
+    |> artifact_retention_result()
+  end
+
+  # The operating system normally confirms an untrappable BEAM kill before a
+  # deterministic test can observe the false branch. Keep the decision as one
+  # pure seam so every guardian result, including that safety boundary, can be
+  # mutation-tested without turning scheduler timing into evidence.
+  @doc false
+  @spec artifact_retention_result(
+          {:done, term()}
+          | {:stopped, term()}
+          | {:guardian_stopped, term(), boolean()}
+          | {:abandoned, :workspace_lease_lost | :bound_reached, boolean(), term()}
+        ) ::
+          term()
+          | {:error, term()}
+          | {:unconfirmed, term()}
+          | :workspace_lease_lost
+          | :retention_bound_reached
+  def artifact_retention_result(result) do
+    case result do
+      {:done, result} ->
+        result
+
+      {:stopped, reason} ->
+        {:error, {:artifact_retention_stopped, reason}}
+
+      {:guardian_stopped, reason, true} ->
+        {:error, {:artifact_retention_guardian_stopped, reason}}
+
+      {:guardian_stopped, reason, false} ->
+        {:unconfirmed, {:artifact_retention_guardian_unconfirmed, reason}}
+
+      {:abandoned, :workspace_lease_lost, true, _late} ->
+        :workspace_lease_lost
+
+      {:abandoned, :workspace_lease_lost, false, _late} ->
+        {:unconfirmed, :workspace_lease_lost_with_artifact_retention_worker_unconfirmed}
+
+      {:abandoned, :bound_reached, true, _late} ->
+        :retention_bound_reached
+
+      {:abandoned, :bound_reached, false, _late} ->
+        {:unconfirmed, :artifact_retention_worker_unconfirmed_at_bound}
     end
   end
 
@@ -3294,11 +4717,13 @@ defmodule Loopex.Executor.Local do
   # explicitly after that snapshot so the security claim never rests on the
   # snapshot being complete. The downstream `env -i` boundary constructs the
   # exact PATH-only command environment recorded by the receipt.
-  # Concept: the demonstration tools construct their environment in argv.
+  # Concept: the demonstration tools and coding tools share one owned-process
+  # launcher and construct their environment in argv.
   #
-  # Technical depth: `launcher_arguments/1` passes `-i` and one assignment to
-  # `/usr/bin/env`, so the child's environment is that one name. It is expressed
-  # here in the same shape the coding tools use so one function reports both.
+  # Technical depth: `process_launcher/2` passes `-i` and one assignment to
+  # `/usr/bin/env`, so the child's environment is that one name. Expressing both
+  # tool classes in the same shape also gives both the same captured process-group
+  # cleanup rather than leaving demonstration children behind a released Port.
   defp demonstration_environment do
     [{String.to_charlist(@search_path_name), String.to_charlist(@search_path_value)}]
   end
@@ -3451,19 +4876,20 @@ defmodule Loopex.Executor.Local do
   #
   # `/usr/bin/env` is an absolute path, so it cannot be substituted, and it is
   # the first thing executed. It clears the environment, sets the one `PATH` this
-  # executor chose, and only then resolves the shell or argv command from that
-  # PATH rather than the operator's.
+  # executor chose, and only then starts the fixed internal `/bin/bash`. Raw
+  # commands use `/bin/sh`; argv commands retain the executor's chosen PATH.
   #
-  # Concept: the launcher's own arguments are the whole of the boundary, and no
-  # process inside the tree can look back at them.
+  # Concept: the launcher's arguments contain the fixed guard program and command,
+  # never the unpredictable token that authenticates its private control frames.
   #
-  # Technical depth: every image in this chain replaces the last with `execve`,
-  # so the launcher and the shell are one operating-system process and the
-  # argument vector the first image was handed no longer exists
-  # by the time anything a case can talk to does. The vector is therefore exposed
-  # for direct inspection, for the reason `group_answered_empty?/1` is: the rule
-  # that decides what runs before the environment is cleared must not rest on a
-  # branch nothing can observe. A case places a recorder at the first operand
+  # Technical depth: the Port-owned shell remains alive as the process-group
+  # guard and forks the model command only after receiving a token over stdin.
+  # The command can inspect its parent's command line, so putting that token in
+  # argv would let it forge status or release evidence on the shared Port pipe.
+  # The fixed vector is exposed for direct inspection, for the reason
+  # `process_group_answered_empty?/3` is: the rule that decides what runs before the
+  # environment is cleared must not rest on a branch nothing can observe. A case
+  # places a recorder at the first operand
   # `env` will execute -- the first argument that is neither an option nor a
   # `NAME=VALUE` assignment, which is `env`'s own parsing rule and not a
   # restatement of this vector -- and reads the environment that operand
@@ -3476,12 +4902,220 @@ defmodule Loopex.Executor.Local do
   defp process_launcher(%{argv: [program | rest]}, environment) do
     {"/usr/bin/env",
      env_prefix(environment) ++
-       ["sh", "-c", group_preamble() <> "exec \"$0\" \"$@\"", program] ++ rest}
+       [
+         "/bin/bash",
+         "-c",
+         launch_carrier_script(),
+         "loopex-port-carrier",
+         launch_guard_script(),
+         "loopex-launch-guard",
+         "argv",
+         program
+         | rest
+       ]}
+  end
+
+  defp process_launcher(%{helper: [program | rest]}, environment) do
+    {"/usr/bin/env",
+     env_prefix(environment) ++
+       [
+         "/bin/bash",
+         "-c",
+         launch_carrier_script(),
+         "loopex-port-carrier",
+         launch_guard_script(),
+         "loopex-launch-guard",
+         "helper",
+         program
+         | rest
+       ]}
   end
 
   defp process_launcher(%{command: command}, environment) do
-    {"/usr/bin/env", env_prefix(environment) ++ ["sh", "-c", group_preamble() <> command]}
+    {"/usr/bin/env",
+     env_prefix(environment) ++
+       [
+         "/bin/bash",
+         "-c",
+         launch_carrier_script(),
+         "loopex-port-carrier",
+         launch_guard_script(),
+         "loopex-launch-guard",
+         "command",
+         command
+       ]}
   end
+
+  # Concept: the operating-system cleanup guard outlives an abrupt death of the
+  # BEAM process that opened its Port.
+  #
+  # Technical depth: the VM closes a dead Port owner's direct operating-system
+  # image before that image can act on EOF. A direct guard therefore cannot
+  # clean descendants on Port-owner death. This fixed carrier is the disposable
+  # Port image: it starts the real guard as a second member of the Port-created
+  # command group, waits for it, and never admits the command. If the carrier is
+  # destroyed, the guard retains the control descriptor, observes the BEAM end
+  # closing, and aborts the group it still anchors. During an ordinary group TERM
+  # the carrier stays alive long enough to relay the guard's eventual exit. A
+  # bounded helper instead gets a guard-led group: if that guard disappears, the
+  # carrier reports failure without signalling a now-detached numeric group. In
+  # command mode the carrier still anchors its own group and may safely terminate
+  # that group as its last act after an abnormal guard exit.
+  # Both internal shells use fixed `/bin/bash`, which creates the helper group
+  # without a terminal. Capture control before the asynchronous fork: a shell
+  # may replace that fork's stdin with `/dev/null` before processing `<&0`.
+  # Only the guard retains control input; neither shell retains the extra copy.
+  # Every carrier/guard group signal uses `kill -s SIGNAL -- -PGID`: dash rejects
+  # the shorthand `-SIGNAL --`, and both shells need `--` before a negative PID.
+  # The builtin keeps signal authority in the live shell, without a later helper.
+  # Catch TERM until the asynchronous launch so the guard does not inherit an
+  # ignored signal. After that fork, ignoring TERM changes only this carrier:
+  # its one owned-child wait cannot be interrupted by cooperative group TERM.
+  # Capture the actual wait status directly, without PID probes or retries.
+  defp launch_carrier_script do
+    """
+    guard_script=$1
+    shift
+    guard_name=$1
+    shift
+    carrier_pid=$$
+    mode=$1
+    exec 4<&0
+    trap ':' TERM
+    if [ "$mode" = helper ]; then
+      set -m
+      /bin/bash -c "$guard_script" "$guard_name" "$carrier_pid" "$@" <&4 4<&- &
+      guard_pid=$!
+      set +m
+    else
+      /bin/bash -c "$guard_script" "$guard_name" "$carrier_pid" "$@" <&4 4<&- &
+      guard_pid=$!
+    fi
+    trap '' TERM
+    exec </dev/null 4<&-
+    wait "$guard_pid" 2>/dev/null
+    guard_status=$?
+    if [ "$guard_status" -eq 0 ]; then
+      exit 0
+    fi
+    if [ "$mode" != helper ]; then
+      trap '' TERM
+      kill -s TERM -- -"$carrier_pid" >/dev/null 2>&1
+      kill -s KILL -- -"$carrier_pid" >/dev/null 2>&1
+    fi
+    exit 125
+    """
+  end
+
+  # Concept: the guard stays in the Port-created command group until this runtime
+  # has either proved the group quiescent or delivered the final KILL. A direct
+  # command child or the disposable Port carrier may exit; the numeric group
+  # cannot become detached signal authority while the guard remains a member.
+  #
+  # Technical depth: the carrier supplies its own stable group identity as a
+  # positional argument. A command guard announces that Port-established group;
+  # a helper guard is its own group leader and announces its shell PID. This
+  # avoids a second, unbounded `ps` merely to discover launch identity. The guard
+  # also announces its own member identity before it starts the command, then
+  # runs a status-owning wrapper and that command as children in the same group. The guard itself
+  # reads control for the whole job. EOF can therefore terminate its
+  # still-anchored group even while the command is silent, and TERM/KILL
+  # actuation occurs inside a current member rather than in a later helper aimed
+  # at a sampled number. The wrapper's private status frame reports both its own
+  # process identity and the direct child's wait status. That identity lets the
+  # runtime distinguish a terminal wrapper still flushing the frame from live
+  # command work in the first process-table sample. The guard accepts token-bound
+  # signal and release lines on stdin. The token itself is delivered over that control
+  # channel before the child is created, never through argv or environment that
+  # the child can inspect. FD 3 is copied from the Port's output before the child
+  # is started and closed in the child, keeping protocol writes separate from
+  # ordinary inherited descriptors. The status wrapper catches TERM until the
+  # command forks, then ignores it while waiting. The child inherits the earlier
+  # caught disposition, reset for execution, not its parent's later ignore; it
+  # remains free to use default TERM behavior or install its own handler. The
+  # wrapper captures one actual wait result without a signal-interrupted retry.
+  # The guard
+  # treats an externally delivered TERM as authority loss and aborts the whole
+  # group; only while it sends its own cooperative group TERM does it temporarily
+  # ignore that one signal. KILL is deliberately not trapped: it is the final
+  # group signal and no later signal may use that group number.
+  defp launch_guard_script do
+    """
+    carrier_group=$1
+    shift
+    mode=$1
+    shift
+    group_id=
+    guard_abort() {
+      trap '' TERM
+      [ -n "$group_id" ] && kill -s TERM -- -"$group_id" >/dev/null 2>&1
+      [ -n "$group_id" ] && kill -s KILL -- -"$group_id" >/dev/null 2>&1
+      exit 125
+    }
+    trap 'guard_abort' HUP INT PIPE TERM
+    IFS= read -r init || exit 125
+    case "$init" in
+      '#{@guard_init}:'*) token=${init#'#{@guard_init}:'} ;;
+      *) exit 125 ;;
+    esac
+    [ -n "$token" ] || exit 125
+    exec 3>&2
+    if [ "$mode" = helper ]; then
+      group_id=$$
+    else
+      group_id=$carrier_group
+    fi
+    printf '#{@guard_preamble}:%s:%s:%s\\n' "$token" "$group_id" "$$" >&3
+    IFS= read -r permit || guard_abort
+    case "$permit" in
+      '#{@guard_run}:'"$token") ;;
+      '#{@guard_abort}:'"$token") exit 125 ;;
+      *) guard_abort ;;
+    esac
+    (
+      trap - HUP INT PIPE
+      trap ':' TERM
+      if [ "$mode" = command ]; then
+        command=$1
+        /bin/sh -c "$command" 3>&- </dev/null &
+      else
+        "$@" 3>&- </dev/null &
+      fi
+      command_pid=$!
+      trap '' TERM
+      wait "$command_pid"
+      command_status=$?
+      printf '\\n#{@guard_status}:%s:status:%s\\n' "$token" "$command_status" >&3
+      exit "$command_status"
+    ) &
+    status_pid=$!
+    printf '\\n#{@guard_status}:%s:wrapper:%s\\n' "$token" "$status_pid" >&3
+    while IFS= read -r control; do
+      case "$control" in
+        '#{@guard_signal}:'"$token"':TERM')
+          trap '' TERM
+          kill -s TERM -- -"$group_id" >/dev/null 2>&1
+          trap 'guard_abort' TERM
+          ;;
+        '#{@guard_signal}:'"$token"':KILL')
+          if [ "$mode" = helper ]; then
+            printf '\n#{@guard_signal_ack}:%s:KILL\n' "$token" >&3
+          fi
+          kill -s KILL -- -"$group_id" >/dev/null 2>&1
+          ;;
+        '#{@guard_release}:'"$token")
+          wait "$status_pid"
+          exit 0
+          ;;
+        *) guard_abort ;;
+      esac
+    done
+    guard_abort
+    """
+  end
+
+  defp launch_guard_token,
+    do: Base.url_encode64(:crypto.strong_rand_bytes(18), padding: false)
 
   # Concept: `env -i` builds the environment of the command, which is not the
   # environment of the process that runs `env`.
@@ -3508,20 +5142,14 @@ defmodule Loopex.Executor.Local do
   # option an argument of the command rather than an option of the clearing
   # process, and the spawned image ran and then executed a further image with
   # this operating-system process's whole inherited environment -- the provider
-  # credential in it -- before anything was cleared. `launcher_arguments/1`, the
-  # other spawn site in this module, has always begun with `-i`; this is the same
-  # shape.
+  # credential in it -- before anything was cleared. Every job launcher now takes
+  # this same prefix.
   defp env_prefix(environment) do
     ["-i"] ++
       for {name, value} <- environment,
           value != false,
           do: List.to_string(name) <> "=" <> List.to_string(value)
   end
-
-  # The child announces the group it actually leads before doing anything else,
-  # so termination confirms a group the operating system assigned rather than one
-  # this executor assumed.
-  defp group_preamble, do: "printf 'loopex-pgid:%s\\n' \"$(ps -o pgid= -p $$ | tr -d ' ')\" >&2; "
 
   # Concept: command output is accumulated only up to the artifact ceiling that
   # its resolved definition declared.
@@ -3533,14 +5161,44 @@ defmodule Loopex.Executor.Local do
   # artifact ceiling. Crossing it terminates the owned group immediately. The
   # final flatten therefore has a hard upper bound, while ordinary output beneath
   # the ceiling is still byte-identical for artifact spill.
-  defp new_output_collector(os_pid, progress, identity) do
+  defp new_output_collector(port, os_pid, token, progress, identity) do
     %{
       chunks: [],
       bytes: 0,
-      group: os_pid,
+      group: nil,
       preamble: <<>>,
+      control_buffer: <<>>,
+      command_status: nil,
+      protocol_valid: true,
+      guard: %{
+        port: port,
+        os_pid: os_pid,
+        group: nil,
+        anchor_pid: nil,
+        carrier_in_group: nil,
+        terminal_wrapper_pid: nil,
+        token: token,
+        announced: false,
+        state: :live
+      },
       progress: %{publish: progress, identity: identity, sequence: 0, byte_offset: 0}
     }
+  end
+
+  defp await_launch_guard_ready(port, collector, artifact_limit) do
+    receive do
+      {^port, {:data, chunk}} ->
+        case collect_chunk(collector, chunk, artifact_limit) do
+          {:ok, %{guard: %{announced: true}} = ready} -> {:ok, ready}
+          {:ok, next} -> await_launch_guard_ready(port, next, artifact_limit)
+          {:artifact_limit_exceeded, _next, _observed} -> {:error, :invalid_guard_preamble}
+        end
+
+      {^port, {:exit_status, status}} ->
+        {:error, {:guard_exited_before_ready, status}}
+    after
+      @launch_guard_handshake_ms -> {:error, :guard_ready_timeout}
+    end
   end
 
   defp collect_output(port, deadline, collector, options, job, lease, artifact_limit, owner) do
@@ -3549,10 +5207,19 @@ defmodule Loopex.Executor.Local do
     remaining = fence_remaining(deadline)
 
     if remaining <= 0 do
-      {output, group, progress_count} = collected_output(collector, artifact_limit)
-      terminate_group(group, job_episode())
+      finished =
+        finish_guarded_output(
+          port,
+          collector,
+          job_episode(),
+          artifact_limit,
+          options,
+          job,
+          :terminate
+        )
+
       forget_inflight(job.job_id)
-      {:cancelled, output, group, progress_count}
+      {:cancelled, finished.output, finished.progress_count, finished.confirmed}
     else
       receive do
         {^port, {:data, chunk}} ->
@@ -3562,62 +5229,109 @@ defmodule Loopex.Executor.Local do
             {:ok, next} ->
               register_inflight(job.job_id, next.group)
 
-              collect_output(
-                port,
-                deadline,
-                next,
-                options,
-                job,
-                lease,
-                artifact_limit,
-                owner
-              )
+              if is_integer(next.command_status) and
+                   is_integer(next.guard.terminal_wrapper_pid) do
+                finished =
+                  finish_guarded_output(
+                    port,
+                    next,
+                    job_episode(),
+                    artifact_limit,
+                    options,
+                    job,
+                    :quiesce
+                  )
+
+                forget_inflight(job.job_id)
+
+                {:exited, next.command_status, finished.output, finished.progress_count,
+                 finished.quiescence, finished.confirmed}
+              else
+                collect_output(
+                  port,
+                  deadline,
+                  next,
+                  options,
+                  job,
+                  lease,
+                  artifact_limit,
+                  owner
+                )
+              end
 
             {:artifact_limit_exceeded, next, observed} ->
-              terminate_group(next.group, job_episode())
+              finished =
+                finish_guarded_output(
+                  port,
+                  next,
+                  job_episode(),
+                  artifact_limit,
+                  options,
+                  job,
+                  :terminate,
+                  observed
+                )
+
               forget_inflight(job.job_id)
 
-              {:artifact_limit_exceeded, flatten_chunks(next), next.group, observed,
-               progress_count(next)}
+              {:artifact_limit_exceeded, finished.output, finished.observed,
+               finished.progress_count, finished.confirmed}
           end
 
         {^port, {:exit_status, status}} ->
-          case finish_collector(collector, artifact_limit) do
-            {:ok, finished} ->
-              {:exited, status, flatten_chunks(finished), finished.group,
-               progress_count(finished)}
-
-            {:artifact_limit_exceeded, finished, observed} ->
-              terminate_group(finished.group, job_episode())
-              forget_inflight(job.job_id)
-
-              {:artifact_limit_exceeded, flatten_chunks(finished), finished.group, observed,
-               progress_count(finished)}
-          end
+          {output, _group, progress_count} = collected_output(collector, artifact_limit)
+          forget_inflight(job.job_id)
+          {:guard_lost, status, output, progress_count}
 
         {:DOWN, ^monitor, :process, ^lease_pid, _reason} ->
-          {output, group, progress_count} = collected_output(collector, artifact_limit)
-          terminate_group(group, job_episode())
-          forget_inflight(job.job_id)
-          {:workspace_lease_lost, output, group, progress_count}
+          finished =
+            finish_guarded_output(
+              port,
+              collector,
+              job_episode(),
+              artifact_limit,
+              options,
+              job,
+              :terminate
+            )
 
-        {:loopex_cancel_pending, token, caller, grace, probe} ->
-          {output, group, progress_count} = collected_output(collector, artifact_limit)
-          episode = cancellation_episode(grace, probe)
-          terminate_group(group, episode)
-          confirmed = confirm_group_terminated(group, episode)
+          forget_inflight(job.job_id)
+          {:workspace_lease_lost, finished.output, finished.progress_count, finished.confirmed}
+
+        {:loopex_cancel_pending, token, caller, episode} ->
+          finished =
+            finish_guarded_output(
+              port,
+              collector,
+              episode,
+              artifact_limit,
+              options,
+              job,
+              :terminate
+            )
+
           forget_inflight(job.job_id)
 
-          answer = if confirmed, do: {:ok, :cleaned}, else: {:ok, :unconfirmed}
+          answer = if finished.confirmed, do: {:ok, :cleaned}, else: {:ok, :unconfirmed}
           send(caller, {:loopex_cancel_result, token, answer})
-          {:external_cancelled, output, group, progress_count, confirmed}
+
+          {:external_cancelled, finished.output, finished.progress_count, finished.confirmed}
 
         {:DOWN, ^owner_monitor, :process, ^owner_pid, _reason} ->
-          {output, group, progress_count} = collected_output(collector, artifact_limit)
-          terminate_group(group, job_episode())
-          confirmed = confirm_group_terminated(group, job_episode())
+          finished =
+            finish_guarded_output(
+              port,
+              collector,
+              job_episode(),
+              artifact_limit,
+              options,
+              job,
+              :terminate
+            )
+
           forget_inflight(job.job_id)
-          {:executor_owner_lost, output, group, progress_count, confirmed}
+
+          {:executor_owner_lost, finished.output, finished.progress_count, finished.confirmed}
       after
         min(remaining, 50) ->
           collect_output(
@@ -3644,17 +5358,43 @@ defmodule Loopex.Executor.Local do
         line = binary_part(combined, 0, line_size)
         rest = binary_part(combined, line_size, byte_size(combined) - line_size)
 
-        case Regex.run(~r/^loopex-pgid:(\d+)\n$/, line) do
-          [_all, group] ->
-            collector
-            |> Map.put(:preamble, nil)
-            |> Map.put(:group, String.to_integer(group))
-            |> append_collected(rest, limit)
+        expected =
+          Regex.compile!(
+            "^#{Regex.escape(@guard_preamble)}:#{Regex.escape(collector.guard.token)}:" <>
+              "(\\d+):(\\d+)\\n$"
+          )
+
+        case Regex.run(expected, line) do
+          [_all, group, anchor] ->
+            group = String.to_integer(group)
+            anchor = String.to_integer(anchor)
+
+            carrier_in_group =
+              cond do
+                group == collector.guard.os_pid and anchor != group -> true
+                group == anchor and group != collector.guard.os_pid -> false
+                true -> nil
+              end
+
+            if group > 1 and anchor > 1 and is_boolean(carrier_in_group) do
+              collector
+              |> Map.put(:group, group)
+              |> Map.put(:preamble, nil)
+              |> put_in([:guard, :group], group)
+              |> put_in([:guard, :anchor_pid], anchor)
+              |> put_in([:guard, :carrier_in_group], carrier_in_group)
+              |> put_in([:guard, :announced], true)
+              |> collect_guard_chunk(rest, limit)
+            else
+              collector
+              |> Map.put(:preamble, nil)
+              |> collect_guard_chunk(rest, limit)
+            end
 
           nil ->
             collector
             |> Map.put(:preamble, nil)
-            |> append_collected(combined, limit)
+            |> collect_guard_chunk(combined, limit)
         end
 
       :nomatch when byte_size(combined) <= 64 ->
@@ -3667,7 +5407,136 @@ defmodule Loopex.Executor.Local do
     end
   end
 
-  defp collect_chunk(collector, chunk, limit), do: append_collected(collector, chunk, limit)
+  defp collect_chunk(collector, chunk, limit), do: collect_guard_chunk(collector, chunk, limit)
+
+  # Concept: the launch guard's status is control evidence, never tool output.
+  #
+  # Technical depth: FD 3 and the tool's stdout ultimately share the Port pipe,
+  # so either may be split or coalesced at arbitrary byte boundaries. Keep only
+  # the shortest suffix that could begin the token-bound status marker, emit all
+  # earlier bytes normally, and remove each complete frame. The live guard names
+  # the wrapper it just spawned, while that wrapper later reports the command's
+  # status; requiring both facts avoids assuming either writer wins the race.
+  # This keeps
+  # progress and terminal output byte-identical without assuming one write maps
+  # to one Port message.
+  defp collect_guard_chunk(collector, chunk, limit) do
+    marker = "\n#{@guard_status}:#{collector.guard.token}:"
+    combined = collector.control_buffer <> chunk
+
+    case :binary.match(combined, marker) do
+      {offset, marker_size} ->
+        before = binary_part(combined, 0, offset)
+        after_offset = offset + marker_size
+        rest_size = byte_size(combined) - after_offset
+        after_marker = binary_part(combined, after_offset, rest_size)
+
+        case :binary.match(after_marker, "\n") do
+          {newline, 1} ->
+            frame = binary_part(after_marker, 0, newline)
+            tail_offset = newline + 1
+            tail = binary_part(after_marker, tail_offset, byte_size(after_marker) - tail_offset)
+
+            with {:ok, next} <-
+                   collector
+                   |> Map.put(:control_buffer, <<>>)
+                   |> append_collected(before, limit),
+                 {:ok, framed} <- collect_guard_frame(next, frame) do
+              framed
+              |> collect_guard_chunk(tail, limit)
+            else
+              {:artifact_limit_exceeded, next, observed} ->
+                {:artifact_limit_exceeded, next, observed}
+
+              _invalid_frame ->
+                {:ok, %{collector | control_buffer: <<>>, protocol_valid: false}}
+            end
+
+          :nomatch ->
+            {:ok, %{collector | control_buffer: combined}}
+        end
+
+      :nomatch ->
+        retained = marker_suffix_size(combined, marker)
+        emitted = byte_size(combined) - retained
+        safe = binary_part(combined, 0, emitted)
+        suffix = binary_part(combined, emitted, retained)
+
+        case append_collected(%{collector | control_buffer: <<>>}, safe, limit) do
+          {:ok, next} -> {:ok, %{next | control_buffer: suffix}}
+          overflow -> overflow
+        end
+    end
+  end
+
+  defp collect_guard_frame(%{command_status: nil} = collector, "status:" <> status_bytes) do
+    case Integer.parse(status_bytes) do
+      {status, ""} when status in 0..255 -> {:ok, %{collector | command_status: status}}
+      _invalid_status -> :error
+    end
+  end
+
+  defp collect_guard_frame(
+         %{guard: %{terminal_wrapper_pid: nil}} = collector,
+         "wrapper:" <> wrapper_pid_bytes
+       ) do
+    case Integer.parse(wrapper_pid_bytes) do
+      {wrapper_pid, ""} when wrapper_pid > 1 ->
+        {:ok, put_in(collector, [:guard, :terminal_wrapper_pid], wrapper_pid)}
+
+      _invalid_pid ->
+        :error
+    end
+  end
+
+  defp collect_guard_frame(_collector, _duplicate_or_invalid), do: :error
+
+  # Concept: tests can drive the authenticated frame parser without racing an
+  # operating-system process.
+  #
+  # Technical depth: this is the production parser over raw Port chunks, not a
+  # second model of it. The fixed token is private to this probe. A complete
+  # proof requires exactly one status and one wrapper fact, an empty partial
+  # frame buffer, and no invalid or duplicate frame.
+  @doc false
+  @spec guard_protocol_probe([binary()]) :: :valid | :invalid
+  def guard_protocol_probe(chunks) when is_list(chunks) do
+    collector = new_output_collector(nil, 2, "loopex-protocol-probe", nil, %{})
+
+    parsed =
+      Enum.reduce_while(chunks, collector, fn chunk, current ->
+        case collect_guard_chunk(current, chunk, @helper_control_bytes) do
+          {:ok, next} -> {:cont, next}
+          {:artifact_limit_exceeded, _next, _observed} -> {:halt, :invalid}
+        end
+      end)
+
+    case parsed do
+      %{
+        protocol_valid: true,
+        command_status: status,
+        control_buffer: <<>>,
+        guard: %{terminal_wrapper_pid: wrapper_pid}
+      }
+      when is_integer(status) and is_integer(wrapper_pid) ->
+        :valid
+
+      _incomplete_or_invalid ->
+        :invalid
+    end
+  end
+
+  defp marker_suffix_size(bytes, marker) do
+    maximum = min(byte_size(bytes), max(byte_size(marker) - 1, 0))
+
+    if maximum == 0 do
+      0
+    else
+      Enum.find(maximum..1//-1, 0, fn size ->
+        binary_part(bytes, byte_size(bytes) - size, size) == binary_part(marker, 0, size)
+      end)
+    end
+  end
 
   defp append_collected(collector, <<>>, _limit), do: {:ok, collector}
 
@@ -3693,20 +5562,30 @@ defmodule Loopex.Executor.Local do
       else: {:ok, next}
   end
 
-  defp finish_collector(%{preamble: nil} = collector, _limit), do: {:ok, collector}
+  defp finish_collector(%{preamble: nil} = collector, limit),
+    do: flush_control_buffer(collector, limit)
 
   defp finish_collector(%{preamble: preamble} = collector, limit) do
     collector = Map.put(collector, :preamble, nil)
 
     if private_preamble_prefix?(preamble) do
-      {:ok, collector}
+      flush_control_buffer(collector, limit)
     else
-      append_collected(collector, preamble, limit)
+      case append_collected(collector, preamble, limit) do
+        {:ok, next} -> flush_control_buffer(next, limit)
+        overflow -> overflow
+      end
     end
   end
 
+  defp flush_control_buffer(%{control_buffer: <<>>} = collector, _limit),
+    do: {:ok, collector}
+
+  defp flush_control_buffer(%{control_buffer: buffer} = collector, limit),
+    do: append_collected(%{collector | control_buffer: <<>>}, buffer, limit)
+
   defp private_preamble_prefix?(bytes) do
-    prefix = "loopex-pgid:"
+    prefix = @guard_preamble <> ":"
     String.starts_with?(prefix, bytes) or String.starts_with?(bytes, prefix)
   end
 
@@ -3731,6 +5610,8 @@ defmodule Loopex.Executor.Local do
   # chunk ceiling, and one state owns both sequence and byte offset so the
   # receipt's `progress_count` is the exact number of callbacks invoked.
   defp emit_progress(collector, <<>>), do: collector
+
+  defp emit_progress(%{progress: %{publish: nil}} = collector, _bytes), do: collector
 
   defp emit_progress(%{progress: progress} = collector, bytes) do
     %{collector | progress: emit_progress_bytes(progress, bytes)}
@@ -3763,28 +5644,301 @@ defmodule Loopex.Executor.Local do
 
   defp progress_count(%{progress: %{sequence: sequence}}), do: sequence
 
-  # Concept: end the group, not the leader.
+  # Concept: the Port child is the authority for its process group for the whole
+  # cleanup episode. Its numeric OS pid is used only while that exact Port still
+  # owns it; after release or final KILL no later signal is sent to the number.
   #
-  # Technical depth: a negative pid names the process group. TERM first so a
-  # child can finish a write, then KILL, because a command interrupted mid-write
-  # leaves a half-written file the operator has to notice for themselves.
-  # `--` is the portable end-of-options boundary for that negative operand.
-  # Darwin's `/bin/kill` accepts the operand without it; the `/bin/kill` in the
-  # locked Linux lane instead treats the number as an option and returns success
-  # without signalling the group, which makes every later cleanup confirmation
-  # truthfully fail.
-  defp terminate_group(group, {until, _grace, _probe} = episode)
-       when is_integer(group) and group > 1 do
-    _ = answer_within("/bin/kill", ["-TERM", "--", "-#{group}"], cleanup_remaining(until))
+  # Technical depth: normal completion first proves that only the guard remains.
+  # Cancellation and every fault path ask that live, token-bound guard to send
+  # TERM to its own group, let the rest consume its cooperative share, then ask
+  # it to send at most one final KILL as its last act. No external helper ever
+  # signals a sampled negative PGID. The guard traps TERM but cannot trap KILL. A
+  # read-only `ps` may confirm emptiness after KILL; it never restores signal
+  # authority. The token-bound command-status frame and the Port's own exit
+  # status are independently required before a normally released result is
+  # returned; forced KILL instead proves cleanup by anchored actuation followed
+  # by positive group emptiness.
+  defp finish_guarded_output(
+         port,
+         collector,
+         episode,
+         artifact_limit,
+         options,
+         job,
+         action,
+         observed \\ nil
+       ) do
+    {guard, quiescence, cleanup_proved} =
+      case action do
+        :quiesce ->
+          quiesce_launch_guard(collector.guard, episode, is_integer(collector.command_status))
 
-    unless exited_cooperatively?(group, cooperative_episode(episode)) do
-      _ = answer_within("/bin/kill", ["-KILL", "--", "-#{group}"], cleanup_remaining(until))
-    end
+        :terminate ->
+          terminate_launch_guard(collector.guard, episode, is_integer(collector.command_status))
+      end
 
-    :ok
+    collector = %{collector | guard: guard}
+
+    {collector, guard_exit_proved, observed} =
+      await_launch_guard_exit(port, collector, episode, artifact_limit, options, job, observed)
+
+    collector =
+      case finish_collector(collector, artifact_limit) do
+        {:ok, finished} -> finished
+        {:artifact_limit_exceeded, finished, _overflow} -> finished
+      end
+
+    protocol_proved =
+      collector.protocol_valid and collector.guard.announced and
+        is_integer(collector.guard.terminal_wrapper_pid) and guard_exit_proved
+
+    %{
+      output: flatten_chunks(collector),
+      progress_count: progress_count(collector),
+      observed: observed,
+      quiescence: if(cleanup_proved and protocol_proved, do: quiescence, else: :unconfirmed),
+      confirmed: cleanup_proved and protocol_proved
+    }
   end
 
-  defp terminate_group(_group, _episode), do: :ok
+  defp quiesce_launch_guard(guard, episode, status_known?) do
+    if guard_children_gone?(guard, episode) do
+      {released, release_sent} = release_launch_guard(guard, episode, status_known?)
+
+      if release_sent do
+        {released, :quiescent, true}
+      else
+        {killed, kill_sent} = kill_launch_guard(released, episode)
+        {killed, :terminated, kill_sent and await_released_group_empty(killed, episode)}
+      end
+    else
+      terminate_launch_guard(guard, episode, status_known?)
+    end
+  end
+
+  defp terminate_launch_guard(guard, {_until, _grace, _probe} = episode, status_known?) do
+    term_sent = signal_guard_group(guard, :term)
+
+    if exited_cooperatively?(guard, cooperative_episode(episode)) do
+      {released, release_sent} = release_launch_guard(guard, episode, status_known?)
+
+      if release_sent do
+        {released, :terminated, term_sent or release_sent}
+      else
+        {killed, kill_sent} = kill_launch_guard(released, episode)
+        {killed, :terminated, kill_sent and await_released_group_empty(killed, episode)}
+      end
+    else
+      {killed, kill_sent} = kill_launch_guard(guard, episode)
+      group_empty = await_released_group_empty(killed, episode)
+      {killed, :terminated, kill_sent and group_empty}
+    end
+  end
+
+  # The wrapper and guard are separate writers to the Port. Seeing through `ps`
+  # that the wrapper exited does not prove its status bytes reached this BEAM
+  # process before the guard can exit. Conversely, parsing the frame may precede
+  # the wrapper's own exit. Ordinary release is therefore available only after
+  # the collector parsed the authenticated frame, whose wrapper identity lets
+  # the quiescence proof admit that one terminal member. A cleanup path that has
+  # not seen it uses the live guard's final KILL instead, which preserves cleanup
+  # truth without depending on cross-writer message order.
+  defp release_launch_guard(guard, _episode, status_known?) do
+    # Both callers reach this function only from the positive result of
+    # `guard_children_gone?/2`. The status wrapper has either exited or is the
+    # sole extra member named by its authenticated terminal frame; it can create
+    # no child after that frame, and the guard reaps it before exiting. Nothing
+    # in the guard can therefore create a new child between that proof and this
+    # token-bound release. Re-running the bounded external probe here
+    # made a transient second non-answer turn an already-proved clean group into
+    # a forced KILL and lose the carrier's status.
+    if status_known? and launch_guard_live?(guard) do
+      sent = safe_port_command(guard.port, "#{@guard_release}:#{guard.token}\n")
+      {%{guard | state: if(sent, do: :release_sent, else: :live)}, sent}
+    else
+      {guard, false}
+    end
+  end
+
+  defp kill_launch_guard(guard, {_until, _grace, _probe}) do
+    if launch_guard_live?(guard) do
+      sent = signal_guard_group(guard, :kill)
+      {%{guard | state: if(sent, do: :kill_sent, else: :guard_missing)}, sent}
+    else
+      {%{guard | state: :guard_missing}, false}
+    end
+  end
+
+  defp signal_guard_group(guard, signal) when signal in [:term, :kill] do
+    # The Port object is the authority operation: a token-bound instruction is
+    # delivered to its still-live guard, and that guard signals the group it
+    # currently anchors. The Port-facing carrier leads the ordinary command
+    # group; the bounded-helper guard leads its separate group. Neither topology
+    # leaves a check-then-act interval in which unrelated work can reuse a cached
+    # numeric PGID.
+    if launch_guard_live?(guard) do
+      signal_name = signal |> Atom.to_string() |> String.upcase()
+      safe_port_command(guard.port, "#{@guard_signal}:#{guard.token}:#{signal_name}\n")
+    else
+      false
+    end
+  end
+
+  defp launch_guard_live?(%{state: :live, port: port, os_pid: os_pid}) do
+    Port.info(port, :os_pid) == {:os_pid, os_pid}
+  rescue
+    ArgumentError -> false
+  end
+
+  defp launch_guard_live?(_guard), do: false
+
+  defp guard_children_gone?(guard, {until, _grace, probe}) do
+    if launch_guard_live?(guard) do
+      answer = process_table_within(probe, cleanup_remaining(until))
+
+      guard_answered_alone?(
+        answer,
+        guard.group,
+        guard.anchor_pid,
+        guard.os_pid,
+        guard.carrier_in_group,
+        guard.terminal_wrapper_pid
+      )
+    else
+      false
+    end
+  end
+
+  defp guard_answered_alone?(
+         answer,
+         group,
+         anchor_pid,
+         carrier_pid,
+         carrier_in_group,
+         terminal_wrapper_pid
+       )
+       when is_integer(group) and is_integer(anchor_pid) and is_integer(carrier_pid) and
+              is_boolean(carrier_in_group) do
+    fixed_members =
+      if carrier_in_group,
+        do: [anchor_pid, carrier_pid],
+        else: [anchor_pid]
+
+    case process_group_members(answer, group) do
+      {:ok, members} ->
+        members = Enum.sort(members)
+        fixed_members = Enum.sort(fixed_members)
+
+        members == fixed_members or
+          (is_integer(terminal_wrapper_pid) and terminal_wrapper_pid > 1 and
+             terminal_wrapper_pid not in fixed_members and
+             members == Enum.sort([terminal_wrapper_pid | fixed_members]))
+
+      _other ->
+        false
+    end
+  end
+
+  defp guard_answered_alone?(
+         _answer,
+         _group,
+         _anchor_pid,
+         _carrier_pid,
+         _carrier_in_group,
+         _terminal_wrapper_pid
+       ),
+       do: false
+
+  defp await_released_group_empty(%{group: group}, {until, _grace, probe} = episode) do
+    cond do
+      confirm_released_group_terminated(group, probe, cleanup_remaining(until)) ->
+        true
+
+      cleanup_remaining(until) == 0 ->
+        false
+
+      true ->
+        Process.sleep(min(@cooperative_poll_ms, cleanup_remaining(until)))
+        await_released_group_empty(%{group: group}, episode)
+    end
+  end
+
+  defp confirm_released_group_terminated(group, probe, bound) do
+    probe
+    |> process_table_within(bound)
+    |> process_group_answered_empty?(group)
+  end
+
+  defp await_launch_guard_exit(
+         port,
+         collector,
+         {until, _grace, _probe} = episode,
+         limit,
+         options,
+         job,
+         observed
+       ) do
+    remaining = cleanup_remaining(until)
+
+    receive do
+      {^port, {:data, chunk}} ->
+        notify(options, {:executor_progress, job.job_id, byte_size(chunk)})
+
+        case collect_chunk(collector, chunk, limit) do
+          {:ok, next} ->
+            await_launch_guard_exit(port, next, episode, limit, options, job, observed)
+
+          {:artifact_limit_exceeded, next, next_observed} ->
+            await_launch_guard_exit(
+              port,
+              next,
+              episode,
+              limit,
+              options,
+              job,
+              observed || next_observed
+            )
+        end
+
+      {^port, {:exit_status, status}} ->
+        {collector, launch_guard_exit_proved?(collector, status), observed}
+    after
+      min(remaining, 50) ->
+        if cleanup_remaining(until) == 0 do
+          close_helper(port)
+          {collector, false, observed}
+        else
+          await_launch_guard_exit(port, collector, episode, limit, options, job, observed)
+        end
+    end
+  end
+
+  defp launch_guard_exit_proved?(collector, status) do
+    case collector.guard.state do
+      :release_sent ->
+        is_integer(collector.command_status) and status == 0
+
+      :kill_sent ->
+        status != 0
+
+      _missing_transition ->
+        false
+    end
+  end
+
+  defp safe_port_command(port, bytes) do
+    Port.command(port, bytes) == true
+  rescue
+    ArgumentError -> false
+  catch
+    _kind, _reason -> false
+  end
+
+  defp close_waiting_guard(port, token) do
+    _ = safe_port_command(port, "#{@guard_abort}:#{token}\n")
+    close_helper(port)
+    :ok
+  end
 
   # Concept: the cooperative grace is a wait for the group to go, not a pause of
   # a length nobody declared.
@@ -3803,9 +5957,9 @@ defmodule Loopex.Executor.Local do
     {cleanup_now_ms() + min(share, cleanup_remaining(until)), grace, probe}
   end
 
-  defp exited_cooperatively?(group, {until, _grace, _probe} = episode) do
+  defp exited_cooperatively?(guard, {until, _grace, _probe} = episode) do
     cond do
-      confirm_group_terminated(group, episode) ->
+      guard_children_gone?(guard, episode) ->
         true
 
       cleanup_remaining(until) == 0 ->
@@ -3813,24 +5967,9 @@ defmodule Loopex.Executor.Local do
 
       true ->
         Process.sleep(min(@cooperative_poll_ms, cleanup_remaining(until)))
-        exited_cooperatively?(group, episode)
+        exited_cooperatively?(guard, episode)
     end
   end
-
-  # Concept: cleanup is confirmed by looking, not by assuming the signal worked.
-  #
-  # Technical depth: the confirmation is that no member of the group remains. A
-  # descendant that left the group is outside both the kill and this check, which
-  # is stated rather than papered over: the claim is about the group this
-  # executor owns and no wider.
-  defp confirm_group_terminated(group, {until, _grace, probe})
-       when is_integer(group) and group > 1 do
-    probe
-    |> answer_within(["-o", "pid=", "-g", Integer.to_string(group)], cleanup_remaining(until))
-    |> group_answered_empty?()
-  end
-
-  defp confirm_group_terminated(_group, _episode), do: true
 
   # Concept: a program this executor runs to clean up is still a program that can
   # fail to answer, and a bound that only stops this runtime waiting is not a
@@ -3848,12 +5987,14 @@ defmodule Loopex.Executor.Local do
   # this executor believes its cleanup already ended, and process-group
   # identifiers are reissued.
   #
-  # The program is now this process's own port, so the bound reaches the thing
-  # that has to stop: at expiry the child is signalled by the process identifier
-  # the port reported, and only then is the port closed. Signalling before
-  # closing is deliberate -- the child is still this port's child while the port
-  # is open, so the identifier still names it rather than whatever the operating
-  # system reissues next.
+  # A sampled process identifier is still not authority, even while a Port that
+  # once reported it remains open: the child can exit and the operating system
+  # can reuse the number between the observation and an external signal. Helpers
+  # therefore use the same Port-owned carrier/guard protocol as model commands.
+  # At expiry the runtime sends a private token-bound KILL instruction over that
+  # Port; the live guard performs the signal against its separately anchored
+  # helper group, while the carrier remains available to flush the acknowledgement
+  # and exit status. No later `/bin/kill` process and no cached PID participates.
   #
   # The wait is the declared cleanup grace rather than the run deadline because
   # this is the sequence that runs *after* expiry: bounding it by an instant
@@ -3861,115 +6002,217 @@ defmodule Loopex.Executor.Local do
   # deadline. Every caller now passes what remains of one absolute instant, so
   # the whole sequence shares the budget rather than each program receiving one.
   #
-  # `:no_answer` is not silence. `group_answered_empty?/1` reads an empty answer
-  # as an empty group, which is only sound for an answer that arrived, so a
-  # program that never answered confirms nothing and the effect stays unproven --
-  # the same rule that already refuses a `ps` killed by a signal. A program that
-  # cannot be run at all raises where the port is opened and arrives as the same
-  # non-answer.
+  # `:no_answer` is not silence. `process_group_answered_empty?/2` accepts only a
+  # complete process table from a probe that answered successfully, so a program
+  # that never answered confirms nothing and the effect stays unproven. A program
+  # that cannot be run at all raises where the port is opened and arrives as the
+  # same non-answer.
   #
-  # It is exposed for the reason `group_answered_empty?/1` is: no case can make
-  # the operating system's own `ps` hang, and a case that must prove a timed-out
-  # helper is dead has to be able to time one out.
+  # It is exposed for the reason `process_group_answered_empty?/2` is: no case
+  # can make the operating system's own `ps` hang, and a case that must prove a
+  # timed-out helper is dead has to be able to time one out.
   @doc false
   @spec answer_within(binary(), [binary()], non_neg_integer()) ::
           {binary(), integer()} | :no_answer
-  def answer_within(program, arguments, bound)
-      when is_binary(program) and is_list(arguments) and is_integer(bound) and bound >= 0 do
-    port =
-      Port.open(
-        {:spawn_executable, String.to_charlist(program)},
-        [
-          :binary,
-          :exit_status,
-          :use_stdio,
-          :stderr_to_stdout,
-          :hide,
-          args: Enum.map(arguments, &String.to_charlist/1),
-          env: spawn_environment(demonstration_environment())
-        ]
-      )
+  def answer_within(program, arguments, 0) when is_binary(program) and is_list(arguments),
+    do: :no_answer
 
-    collect_answer(port, helper_os_pid(port), <<>>, System.monotonic_time(:millisecond) + bound)
+  def answer_within(program, arguments, bound)
+      when is_binary(program) and is_list(arguments) and is_integer(bound) and bound > 0 do
+    case guarded_answer_within(program, arguments, bound) do
+      {:answered, output, status, _witness} -> {output, status}
+      :no_answer -> :no_answer
+    end
+  end
+
+  defp process_table_within(program, bound) do
+    guarded_answer_within(program, ["-e", "-o", "pid=", "-o", "pgid="], bound)
+  end
+
+  defp guarded_answer_within(_program, _arguments, 0), do: :no_answer
+
+  defp guarded_answer_within(program, arguments, bound) do
+    stop = System.monotonic_time(:millisecond) + bound
+    environment = demonstration_environment()
+    token = launch_guard_token()
+
+    {launcher, command_arguments} =
+      process_launcher(%{helper: [program | arguments]}, environment)
+
+    port = open_launcher(launcher, command_arguments, environment, File.cwd!())
+    {:os_pid, os_pid} = Port.info(port, :os_pid)
+    collector = new_output_collector(port, os_pid, token, nil, %{})
+    collector_limit = @max_output_bytes + @helper_control_bytes
+
+    try do
+      case start_guarded_helper(port, collector, stop, collector_limit) do
+        {:ok, ready} -> collect_answer(port, ready, stop, collector_limit)
+        {:error, last} -> abandon_helper(port, last)
+      end
+    rescue
+      _error -> abandon_helper(port, collector)
+    catch
+      _kind, _value -> abandon_helper(port, collector)
+    after
+      close_helper(port)
+    end
   rescue
     _error -> :no_answer
   catch
     _kind, _value -> :no_answer
   end
 
-  defp collect_answer(port, os_pid, acc, stop) do
+  defp start_guarded_helper(port, collector, stop, limit) do
+    with true <- safe_port_command(port, "#{@guard_init}:#{collector.guard.token}\n"),
+         {:ok, ready} <- await_helper_guard_ready(port, collector, stop, limit),
+         true <- System.monotonic_time(:millisecond) < stop,
+         true <- safe_port_command(port, "#{@guard_run}:#{collector.guard.token}\n") do
+      {:ok, ready}
+    else
+      {:error, last} -> {:error, last}
+      _not_started -> {:error, collector}
+    end
+  end
+
+  defp await_helper_guard_ready(port, collector, stop, limit) do
     remaining = stop - System.monotonic_time(:millisecond)
 
     if remaining <= 0 do
-      abandon_helper(port, os_pid)
+      {:error, collector}
     else
       receive do
         {^port, {:data, chunk}} ->
-          collect_answer(port, os_pid, acc <> chunk, stop)
+          case collect_chunk(collector, chunk, limit) do
+            {:ok, %{guard: %{announced: true}} = ready} -> {:ok, ready}
+            {:ok, next} -> await_helper_guard_ready(port, next, stop, limit)
+            {:artifact_limit_exceeded, next, _observed} -> {:error, next}
+          end
 
-        {^port, {:exit_status, status}} ->
-          {acc, status}
+        {^port, {:exit_status, _status}} ->
+          {:error, collector}
       after
-        # One allowance, spent in slices, refreshed by nothing -- the rule
-        # `await_bounded_work/6` follows and for the same reason. An admitted
-        # cleanup period spans the whole positive unsigned 64-bit range and this
-        # wait is derived from it, so an unsliced `after` raised `:timeout_value`
-        # and this function reported `:no_answer` for a program that had not been
-        # asked anything yet: every confirmation under a large period failed and
-        # the helper's own child was left running. The instant above is what the
-        # wait ends against; a slice only decides how often it is looked at.
-        min(remaining, @timer_slice_ms) -> collect_answer(port, os_pid, acc, stop)
+        min(remaining, @timer_slice_ms) ->
+          await_helper_guard_ready(port, collector, stop, limit)
       end
     end
   end
 
-  # Concept: the helper is killed, and only then let go of.
+  defp collect_answer(port, collector, stop, limit) do
+    remaining = stop - System.monotonic_time(:millisecond)
+
+    if remaining <= 0 do
+      abandon_helper(port, collector)
+    else
+      receive do
+        {^port, {:data, chunk}} ->
+          case collect_chunk(collector, chunk, limit) do
+            {:ok,
+             %{command_status: status, guard: %{terminal_wrapper_pid: wrapper_pid}} = answered}
+            when is_integer(status) and is_integer(wrapper_pid) ->
+              finish_helper_answer(port, answered, limit)
+
+            {:ok, next} ->
+              collect_answer(port, next, stop, limit)
+
+            {:artifact_limit_exceeded, next, _observed} ->
+              abandon_helper(port, next)
+          end
+
+        {^port, {:exit_status, _status}} ->
+          :no_answer
+      after
+        # One allowance, spent in slices, refreshed by nothing -- the rule
+        # `await_bounded_work/6` follows and for the same reason. An admitted
+        # cleanup period spans the whole positive unsigned 64-bit range and this
+        # wait is derived from it, so an unsliced `after` raises
+        # `:timeout_value`. The instant above is what the wait ends against; a
+        # slice only decides how often it is looked at.
+        min(remaining, @timer_slice_ms) -> collect_answer(port, collector, stop, limit)
+      end
+    end
+  end
+
+  defp finish_helper_answer(port, collector, limit) do
+    case kill_guarded_helper(port, collector, limit) do
+      {:ok, complete, output}
+      when complete.command_status not in [126, 127] and byte_size(output) <= @max_output_bytes ->
+        {:answered, output, complete.command_status, complete.guard.os_pid}
+
+      :error ->
+        :no_answer
+
+      _over_limit ->
+        :no_answer
+    end
+  end
+
+  # Concept: a helper answer is accepted only after the Port-owned guard proves
+  # it processed final cleanup; a timeout remains a non-answer.
   #
-  # Technical depth: closing the port releases this runtime's handle and does not
-  # end the process behind it, which is the whole defect. `kill(2)` on the
-  # reported identifier is what ends it, and it is sent while the port still owns
-  # the child. The confirmation is bounded because a `/bin/kill` that does not
-  # answer is itself a process that has stopped answering, and the caller is
-  # already past a bound; the answer is `:no_answer` either way, because this
-  # runtime cannot prove a kill it did not see reported.
-  defp abandon_helper(port, os_pid) do
-    if is_integer(os_pid), do: signal_helper(os_pid)
-    close_helper(port)
+  # Technical depth: a helper may fork before its direct process answers. The
+  # authenticated status proves that direct answer, not group quiescence, so the
+  # normal path also uses the guard's final KILL. Before making that untrappable
+  # group signal, helper mode writes one token-bound acknowledgement. The returned
+  # answer is admitted only when the status frame, guard identity, exactly one
+  # acknowledgement and Port exit all agree. Merely queueing `Port.command/2`
+  # cannot prove the instruction ran. The timeout path requests the same cleanup
+  # but returns no verdict regardless of whether confirmation arrives.
+  defp abandon_helper(port, collector) do
+    _ = kill_guarded_helper(port, collector, @max_output_bytes)
     :no_answer
   end
 
-  defp signal_helper(os_pid) do
-    port =
-      Port.open(
-        {:spawn_executable, ~c"/bin/kill"},
-        [
-          :binary,
-          :exit_status,
-          :use_stdio,
-          :stderr_to_stdout,
-          :hide,
-          args: [~c"-KILL", String.to_charlist(Integer.to_string(os_pid))],
-          env: spawn_environment(demonstration_environment())
-        ]
-      )
+  defp kill_guarded_helper(port, collector, limit) do
+    {guard, sent} = kill_launch_guard(collector.guard, {0, 0, nil})
+    collector = %{collector | guard: guard}
+    stop = System.monotonic_time(:millisecond) + @helper_signal_ms
 
-    receive do
-      {^port, {:exit_status, _status}} -> :ok
-    after
-      @helper_signal_ms -> :ok
+    case await_helper_guard_exit(port, collector, stop, limit, false) do
+      {finished, true, false} when sent -> finish_guarded_helper(finished, limit)
+      {_finished, _proved, _overflow} -> :error
     end
-
-    close_helper(port)
-  rescue
-    _error -> :ok
-  catch
-    _kind, _value -> :ok
   end
 
-  defp helper_os_pid(port) do
-    case Port.info(port, :os_pid) do
-      {:os_pid, os_pid} -> os_pid
-      _absent -> nil
+  defp finish_guarded_helper(collector, limit) do
+    with {:ok, complete} <- finish_collector(collector, limit),
+         output = flatten_chunks(complete),
+         acknowledgement = helper_kill_ack(complete.guard.token),
+         1 <- occurrences(output, acknowledgement) do
+      {:ok, complete, String.replace(output, acknowledgement, "", global: false)}
+    else
+      _missing_or_duplicate_acknowledgement -> :error
+    end
+  end
+
+  defp helper_kill_ack(token), do: "\n#{@guard_signal_ack}:#{token}:KILL\n"
+
+  defp await_helper_guard_exit(port, collector, stop, limit, overflow) do
+    remaining = stop - System.monotonic_time(:millisecond)
+
+    if remaining <= 0 do
+      close_helper(port)
+      {collector, false, overflow}
+    else
+      receive do
+        {^port, {:data, chunk}} ->
+          case collect_chunk(collector, chunk, limit) do
+            {:ok, next} ->
+              await_helper_guard_exit(port, next, stop, limit, overflow)
+
+            {:artifact_limit_exceeded, next, _observed} ->
+              await_helper_guard_exit(port, next, stop, limit, true)
+          end
+
+        {^port, {:exit_status, status}} ->
+          proved =
+            collector.protocol_valid and collector.guard.announced and
+              launch_guard_exit_proved?(collector, status)
+
+          {collector, proved, overflow}
+      after
+        min(remaining, @timer_slice_ms) ->
+          await_helper_guard_exit(port, collector, stop, limit, overflow)
+      end
     end
   end
 
@@ -3982,42 +6225,80 @@ defmodule Loopex.Executor.Local do
     _kind, _value -> :ok
   end
 
-  # Concept: silence only means "no survivors" when it came from a `ps` that
-  # actually answered.
+  # Concept: a process group is empty only when a complete process table from a
+  # probe that actually answered contains no row with that exact PGID.
   #
-  # Technical depth: the exit status was discarded, so any empty response read as
-  # an empty group. A `ps` killed by a signal reports `{"", 137}` through
-  # `System.cmd/3` -- measured on the supported toolchain -- and that read as a
-  # confirmed-clean group. This is the single piece of evidence standing between
-  # `:completed` and `:outcome_unknown`, and between `cancel/2`'s `:cleaned` and
-  # `:unconfirmed`, so a non-answer must confirm nothing.
-  #
-  # The status cannot simply be required to be zero: measured on the same
-  # toolchain, an empty group is reported as `{"", 1}`, so zero-only would refuse
-  # every honest confirmation this executor makes. `0` and `1` are the two
-  # statuses `ps` uses to answer -- survivors listed, and none matched -- and its
-  # own errors print a diagnostic that `stderr_to_stdout` puts in the same
-  # output, so an error is already non-empty. Anything outside those two statuses
-  # is not an answer.
-  #
-  # A program that never answered within its bound, or could not be run at all,
-  # arrives here as `:no_answer` rather than as an empty answer. It is the same
-  # rule the abnormal status above states, reaching the same place: this decides
-  # between a proved and an unproven effect, so it is one function rather than a
-  # mapping at each call site that a later change can get wrong in only one of
-  # them.
+  # Technical depth: `ps -g` has incompatible dialects: BSD selects a process
+  # group while procps selects a session. Filtering there can therefore return an
+  # empty answer while same-PG descendants remain alive. The probe instead emits
+  # the whole `pid,pgid` table with headers suppressed, and this runtime selects
+  # exact PGID equality. Every row must contain exactly two decimal integers and
+  # the command must exit zero; malformed output, diagnostics, abnormal status
+  # and `:no_answer` all confirm nothing. This is the single fact standing
+  # between `:completed` and `:outcome_unknown`, and between cancellation's
+  # `:cleaned` and `:unconfirmed`.
   #
   # It is exposed rather than private because no test can make the operating
   # system's `ps` die abnormally, and a rule that decides between a proved and an
   # unproven effect should not rest on an unreachable branch.
   @doc false
-  @spec group_answered_empty?({binary(), integer()} | :no_answer) :: boolean()
-  def group_answered_empty?({output, status}) when status in 0..1,
-    do: String.trim(output) == ""
+  @spec process_group_answered_empty?(
+          {:answered, binary(), integer(), non_neg_integer()} | :no_answer,
+          non_neg_integer()
+        ) :: boolean()
+  def process_group_answered_empty?(answer, group) when is_integer(group) and group >= 0 do
+    process_group_members(answer, group) == {:ok, []}
+  end
 
-  def group_answered_empty?({_output, _status}), do: false
+  @doc false
+  @spec process_group_answered_empty?(
+          {binary(), integer()} | :no_answer,
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: boolean()
+  def process_group_answered_empty?({output, status}, group, witness)
+      when is_integer(group) and group >= 0 and is_integer(witness) and witness >= 0 do
+    process_group_answered_empty?({:answered, output, status, witness}, group)
+  end
 
-  def group_answered_empty?(:no_answer), do: false
+  def process_group_answered_empty?(:no_answer, group, witness)
+      when is_integer(group) and group >= 0 and is_integer(witness) and witness >= 0,
+      do: false
+
+  defp process_group_members({:answered, output, 0, witness}, group)
+       when is_binary(output) do
+    with {:ok, rows} <- parse_process_table(output),
+         true <- Enum.member?(rows, {witness, witness}) do
+      {:ok, for({pid, row_group} <- rows, row_group == group, do: pid)}
+    else
+      _invalid_or_unwitnessed -> :error
+    end
+  end
+
+  defp process_group_members(_non_answer, _group), do: :error
+
+  defp parse_process_table(output) do
+    output
+    |> String.split("\n", trim: true)
+    |> Enum.reduce_while({:ok, []}, fn line, {:ok, rows} ->
+      case String.split(line) do
+        [pid_bytes, group_bytes] ->
+          with {pid, ""} <- Integer.parse(pid_bytes),
+               {group, ""} <- Integer.parse(group_bytes) do
+            {:cont, {:ok, [{pid, group} | rows]}}
+          else
+            _invalid_integer -> {:halt, :error}
+          end
+
+        _invalid_row ->
+          {:halt, :error}
+      end
+    end)
+    |> case do
+      {:ok, rows} -> {:ok, Enum.reverse(rows)}
+      :error -> :error
+    end
+  end
 
   defp occurrences(content, needle) when needle != "" do
     content |> String.split(needle) |> length() |> Kernel.-(1)
@@ -4178,7 +6459,7 @@ defmodule Loopex.Executor.Local do
   # silently, and a real provider answered it by writing the same file again,
   # several times, in a live recovery trace. The four operator-facing coding
   # tools already report what they did; this one now does too.
-  defp launcher_arguments(%{path: path, content: content, delay_ms: delay}) do
+  defp demonstration_process_arguments(%{path: path, content: content, delay_ms: delay}) do
     script =
       "if [ \"${#{@credential_name}+x}\" = x ]; then exit 97; fi; " <>
         "delay=$1; target=$2; content=$3; " <>
@@ -4186,83 +6467,21 @@ defmodule Loopex.Executor.Local do
         "umask 077; printf %s \"$content\" > \"$target\"; " <>
         "printf 'wrote the requested content to %s' \"$target\""
 
-    [
-      "-i",
-      @search_path_name <> "=" <> @search_path_value,
-      "/bin/sh",
-      "-c",
-      script,
-      "loopex-controlled-tool",
-      Integer.to_string(div(delay + 999, 1_000)),
-      path,
-      content
-    ]
+    %{
+      argv: [
+        "/bin/sh",
+        "-c",
+        script,
+        "loopex-controlled-tool",
+        Integer.to_string(div(delay + 999, 1_000)),
+        path,
+        content
+      ]
+    }
   end
 
-  # Concept: the demonstration tools are launched by this executor too, so the
-  # run's instant bounds them for the same reason it bounds everything else.
-  #
-  # Technical depth: this wait named the port and the lease and nothing else, so
-  # a `loopex.demo.wait_write` declaring a thirty second delay ran for thirty
-  # seconds under a two hundred millisecond run deadline and reported
-  # `:completed`. It is the same defect the coding tools' filesystem and
-  # retention waits had, in the path M1 left behind, and the same requirement
-  # covers it: no operation the run owns may outlast the run's committed instant.
-  #
-  # The outcome is `:outcome_unknown` rather than a cancellation. This path
-  # captures no process group -- only the coding path's shell announces one -- so
-  # closing the port releases this executor's handle on the child without
-  # proving the child stopped or that its write did not land. A cancellation
-  # would claim the stop; `:outcome_unknown` claims only what was observed, and
-  # is what stops a coordinator blindly retrying an effectful job.
-  defp await_port(port, monitor, lease_pid, output, deadline) do
-    remaining = fence_remaining(deadline)
-
-    if remaining <= 0 do
-      if Port.info(port), do: Port.close(port)
-      {:outcome_unknown, output <> @deadline_released_note}
-    else
-      receive do
-        # Concept: the job was cancelled while its child was running, and what
-        # this path can honestly say is that it let the child go.
-        #
-        # Technical depth: no process group was captured here, so there is
-        # nothing to signal and nothing to confirm quiescent. The Port is closed,
-        # the answer to the cancellation is `unconfirmed`, and the job's own
-        # terminal is `outcome_unknown` -- which is what stops a coordinator
-        # blindly retrying an effect that may have landed.
-        {:loopex_cancel_pending, token, from, _cancel_grace, _cancel_probe} ->
-          if Port.info(port), do: Port.close(port)
-          send(from, {:loopex_cancel_result, token, {:ok, :unconfirmed}})
-          {:outcome_unknown, output <> @cancelled_released_note}
-
-        {^port, {:data, data}} ->
-          combined = output <> data
-
-          if byte_size(combined) <= @max_output_bytes do
-            await_port(port, monitor, lease_pid, combined, deadline)
-          else
-            Port.close(port)
-            {:failed_output_limit, binary_part(combined, 0, @max_output_bytes)}
-          end
-
-        {^port, {:exit_status, 0}} ->
-          {:completed, output}
-
-        {^port, {:exit_status, status}} ->
-          {{:failed, status}, output}
-
-        {:DOWN, ^monitor, :process, ^lease_pid, _reason} ->
-          if Port.info(port), do: Port.close(port)
-          {:cancelled_workspace_lease_lost, output}
-      after
-        # Polled in the same shape and for the same reason `collect_output/7`
-        # polls: the deadline is an instant rather than a message, so it has to
-        # be looked at between waits.
-        min(remaining, 50) -> await_port(port, monitor, lease_pid, output, deadline)
-      end
-    end
-  end
+  defp normalize_tool_result({outcome, output, spill}), do: {outcome, output, spill}
+  defp normalize_tool_result({outcome, output}), do: {outcome, output, :complete}
 
   defp receipt(
          state,
@@ -4273,7 +6492,8 @@ defmodule Loopex.Executor.Local do
          environment,
          artifacts,
          deadline,
-         progress_count
+         progress_count,
+         cleanup_confirmation
        ) do
     %{
       protocol_version: 1,
@@ -4311,7 +6531,7 @@ defmodule Loopex.Executor.Local do
       # would make the durable record name a period the cleanup did not run
       # under whenever a session declared its own.
       cleanup_grace_ms: job.cleanup_grace_ms,
-      cleanup_confirmation: cleanup_confirmation(outcome),
+      cleanup_confirmation: cleanup_confirmation,
       receipt_retention_bound_ms: committed_retention_ms(job),
       process_probe: state.process_probe,
       effective_deadline_ms: deadline,
@@ -4327,20 +6547,16 @@ defmodule Loopex.Executor.Local do
     end
   end
 
-  # Concept: whether this job's captured process group was positively confirmed
-  # gone.
+  # Concept: whether this job's effect owner was positively confirmed gone.
   #
-  # Technical depth: it is derived from the same evidence the outcome is, rather
-  # than guessed beside it. Every path in this executor that cannot confirm the
-  # captured group quiescent, cannot confirm an abandoned worker stopped, or lost
-  # the lease that authorized the effect already reports `:outcome_unknown`;
-  # every other terminal was reached with either nothing to clean up or a
-  # positively confirmed group. That coupling is what makes the two facts
-  # consistent by construction, and it is exactly ADR 0016's relation: an
-  # unconfirmed cleanup is conforming only beside `outcome_unknown`. Escaped
-  # descendants remain outside this claim, as ADR 0012 and ADR 0016 both state.
-  defp cleanup_confirmation(:outcome_unknown), do: :unconfirmed
-  defp cleanup_confirmation(_settled), do: :confirmed
+  # Technical depth: outcome and cleanup are independent facts. Lease loss may
+  # make the effect's disposition unknown even after its process group or bounded
+  # filesystem worker was positively stopped; conversely no proved terminal may
+  # carry an unconfirmed cleanup. Each branch therefore supplies the fact it
+  # actually observed instead of deriving it from the outcome atom. Escaped
+  # descendants remain outside the claim, as ADR 0012 and ADR 0016 both state.
+  defp cleanup_fact(true), do: :confirmed
+  defp cleanup_fact(false), do: :unconfirmed
 
   defp committed_retention_ms(job), do: receipt_reserve_ms(job.cleanup_grace_ms)
 
@@ -4357,10 +6573,14 @@ defmodule Loopex.Executor.Local do
     bytes = :erlang.term_to_binary(receipt, [:deterministic])
 
     result =
-      with :ok <- write_synced_receipt(temporary, bytes),
+      with true <- byte_size(bytes) <= @max_receipt_bytes,
+           :ok <- write_synced_receipt(temporary, bytes),
            :ok <- File.rename(temporary, path),
            :ok <- sync_parent_directory(path) do
         :ok
+      else
+        false -> {:error, :receipt_record_shape_too_large}
+        other -> other
       end
 
     if result != :ok, do: File.rm(temporary)
@@ -4416,29 +6636,67 @@ defmodule Loopex.Executor.Local do
   # its answer before the claim is released, and this is that decision. The caller
   # must already hold the root claim. A receipt whose entry is still on the root
   # belongs to a settlement that has not finished disposing of that entry: those
-  # bytes may still be replaced by the quarantined form, so the answer is
+  # bytes remain provisional until that entry is disposed, so the answer is
   # `effect_settling` -- unresolved, and deliberately never `:absent`, because
   # `:absent` is what ends a recovered run `outcome_unknown` and would admit
   # unrelated effects on a root whose effect never reached a durable terminal. An
   # entry with no receipt is an effect this instance is not settling; whether it
-  # is in flight here is decided by the caller that holds the reservation table.
+  # is in flight here is decided by the caller that holds the operation-owner
+  # table.
   # Only neither present is the one true absence, and only a receipt whose entry
   # is gone is final.
   defp final_receipt(ledger, root, job_id) do
+    case Ledger.open_snapshot(ledger) do
+      {:ok, entries} -> final_receipt_from_snapshot(root, job_id, entries)
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp final_receipt_from_snapshot(root, job_id, entries) do
+    open? = Enum.any?(entries, &(&1["job_id"] == job_id))
+
     case read_receipt(root, job_id) do
       {:ok, receipt} ->
-        if Ledger.open?(ledger, job_id), do: {:error, :effect_settling}, else: {:ok, receipt}
+        if open?, do: {:error, :effect_settling}, else: {:ok, receipt}
 
-      # An entry with no receipt on an instance that does not hold the job is an
-      # effect no live instance is settling: unresolved, which is different from
-      # `effect_in_flight`, the answer this server gives for a job it holds. A
-      # coordinator activating a prepared resume ends the run `outcome_unknown`
-      # on the former and leaves the latter to its executor.
+      # An entry with no receipt that this instance's exact live owner table does
+      # not prove is unresolved. That is different from `effect_in_flight`, the
+      # answer this server gives for a job whose admitted owner it still holds;
+      # it makes no claim about another process or VM. A coordinator activating a
+      # prepared resume ends the run `outcome_unknown` on the former and leaves
+      # the latter to its executor.
       :absent ->
-        if Ledger.open?(ledger, job_id), do: {:error, :effect_unresolved}, else: :absent
+        if open?, do: {:error, :effect_unresolved}, else: :absent
 
       {:error, reason} ->
         {:error, reason}
+    end
+  end
+
+  # Concept: this instance reports a job in flight only while its exact admitted
+  # operation owner remains live.
+  #
+  # Technical depth: the fast owner check avoids a root-claim wait for active
+  # work. An absent check is repeated inside the claim because admission inserts
+  # its owner token while holding that same claim: if admission wins the ordering,
+  # the second check sees `effect_in_flight`; if this lookup wins, its receipt and
+  # open snapshot is fixed before a later permit can begin. A join-only token
+  # satisfies neither check.
+  defp local_receipt_under_claim(_state, "", _wait), do: :absent
+
+  defp local_receipt_under_claim(state, job_id, wait) do
+    if operation_owner?(state, job_id) do
+      {:error, :effect_in_flight}
+    else
+      Ledger.with_claim(
+        state.ledger,
+        fn claimed ->
+          if operation_owner?(state, job_id),
+            do: {:error, :effect_in_flight},
+            else: final_receipt(claimed, state.ledger_root, job_id)
+        end,
+        wait
+      )
     end
   end
 
@@ -4454,29 +6712,279 @@ defmodule Loopex.Executor.Local do
   defp final_receipt_under_claim(_ledger, _root, "", _wait), do: :absent
 
   defp final_receipt_under_claim(ledger, root, job_id, wait) do
-    Ledger.with_claim(ledger, fn -> final_receipt(ledger, root, job_id) end, wait)
+    Ledger.with_claim(ledger, fn claimed -> final_receipt(claimed, root, job_id) end, wait)
   end
 
   defp read_receipt(_root, ""), do: :absent
 
   defp read_receipt(root, job_id) do
-    case File.read(receipt_path(root, job_id)) do
-      {:ok, bytes} -> decode_receipt(bytes, job_id)
-      {:error, :enoent} -> :absent
-      {:error, reason} -> {:error, {:receipt_read_failed, reason}}
+    path = receipt_path(root, job_id)
+
+    with {:ok, identity} <- receipt_file_identity(path),
+         {:ok, file} <- File.open(path, [:read, :binary, :raw]) do
+      read_bounded_receipt(file, path, identity, job_id)
+    else
+      :absent ->
+        :absent
+
+      {:error, reason}
+      when reason in [:receipt_record_too_large, :receipt_record_not_a_regular_file] ->
+        {:error, :invalid_retained_receipt}
+
+      {:error, reason} ->
+        {:error, {:receipt_read_failed, reason}}
     end
   end
 
-  defp decode_receipt(bytes, job_id) do
-    receipt = :erlang.binary_to_term(bytes, [:safe])
+  # Concept: a receipt is a bounded ordinary file on this ledger, never a link,
+  # pipe, device, or name that changed while it was opened.
+  #
+  # Technical depth: opening first followed symlinks and could block the whole VM
+  # on a FIFO while the root-wide claim was held. `lstat` refuses those names
+  # before open; the handle identity and a second pathname observation then
+  # prove that the bytes read are the same regular file that was admitted. The
+  # raw size is bounded before decode, and the read asks the kernel for only one
+  # byte beyond that ceiling so an oversized hostile record is never loaded
+  # whole merely to reject it.
+  defp receipt_file_identity(path) do
+    case File.lstat(path) do
+      {:ok, %File.Stat{type: :regular, size: size} = stat} when size <= @max_receipt_bytes ->
+        {:ok, receipt_identity(stat)}
 
-    if is_map(receipt) and Map.get(receipt, :job_id) == job_id and
-         cleanup_facts_readable?(receipt),
-       do: {:ok, receipt},
-       else: {:error, :invalid_retained_receipt}
+      {:ok, %File.Stat{type: :regular}} ->
+        {:error, :receipt_record_too_large}
+
+      {:ok, _non_regular} ->
+        {:error, :receipt_record_not_a_regular_file}
+
+      {:error, :enoent} ->
+        :absent
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp opened_receipt_identity(file) do
+    case :file.read_file_info(file) do
+      {:ok, record} ->
+        case File.Stat.from_record(record) do
+          %File.Stat{type: :regular, size: size} = stat when size <= @max_receipt_bytes ->
+            {:ok, receipt_identity(stat)}
+
+          %File.Stat{type: :regular} ->
+            {:error, :receipt_record_too_large}
+
+          %File.Stat{} ->
+            {:error, :receipt_record_not_a_regular_file}
+        end
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp receipt_identity(stat), do: {stat.major_device, stat.inode, stat.size}
+
+  defp read_bounded_receipt(file, path, identity, job_id) do
+    result =
+      with {:ok, ^identity} <- opened_receipt_identity(file),
+           {:ok, ^identity} <- receipt_file_identity(path) do
+        IO.binread(file, @max_receipt_bytes + 1)
+      else
+        _changed -> {:error, :receipt_record_replaced}
+      end
+
+    close_result = File.close(file)
+
+    case {result, close_result} do
+      {bytes, :ok} when is_binary(bytes) and byte_size(bytes) <= @max_receipt_bytes ->
+        decode_receipt(bytes, job_id)
+
+      {:eof, :ok} ->
+        {:error, :invalid_retained_receipt}
+
+      {bytes, :ok} when is_binary(bytes) ->
+        {:error, :invalid_retained_receipt}
+
+      {{:error, reason}, _close}
+      when reason in [
+             :receipt_record_too_large,
+             :receipt_record_not_a_regular_file,
+             :receipt_record_replaced
+           ] ->
+        {:error, :invalid_retained_receipt}
+
+      {{:error, reason}, _close} ->
+        {:error, {:receipt_read_failed, reason}}
+
+      {_read, {:error, reason}} ->
+        {:error, {:receipt_read_failed, reason}}
+    end
+  end
+
+  # A canonical receipt is an uncompressed map external term. Refusing the ETF
+  # compression tag before decoding prevents a small file from expanding into a
+  # large term merely to be rejected by the later canonical-byte comparison.
+  defp decode_receipt(bytes, job_id),
+    do: decode_receipt(bytes, job_id, &:erlang.binary_to_term(&1, [:safe]))
+
+  # The injected decoder makes the allocation boundary directly observable to
+  # the locked contract case without changing the production path.
+  @doc false
+  @spec receipt_decode_probe(binary(), binary(), (binary() -> term())) ::
+          {:ok, map()} | {:error, :invalid_retained_receipt}
+  def receipt_decode_probe(bytes, job_id, decoder)
+      when is_binary(bytes) and is_binary(job_id) and is_function(decoder, 1),
+      do: decode_receipt(bytes, job_id, decoder)
+
+  defp decode_receipt(<<131, 80, _compressed::binary>>, _job_id, _decoder),
+    do: {:error, :invalid_retained_receipt}
+
+  defp decode_receipt(bytes, job_id, decoder) when byte_size(bytes) <= @max_receipt_bytes do
+    with receipt <- decoder.(bytes),
+         true <- :erlang.term_to_binary(receipt, [:deterministic]) == bytes,
+         true <- exact_receipt_fields?(receipt),
+         true <- receipt_fields_readable?(receipt, job_id) do
+      {:ok, receipt}
+    else
+      _invalid -> {:error, :invalid_retained_receipt}
+    end
   rescue
     _error -> {:error, :invalid_retained_receipt}
   end
+
+  defp exact_receipt_fields?(receipt) when is_map(receipt) and not is_struct(receipt),
+    do: Enum.sort(Map.keys(receipt)) == Enum.sort(@receipt_fields)
+
+  defp exact_receipt_fields?(_receipt), do: false
+
+  # Concept: retained bytes are terminal authority only when every member is a
+  # value this Local executor could have produced for the named job.
+  #
+  # Technical depth: ADR 0016 makes the retained receipt an exact-key canonical
+  # external-term record. Checking only the job ID and the two cleanup members
+  # admitted rewritten identity, deadline, environment, artifact, and outcome
+  # values as final truth on both lookup and duplicate execution. This predicate
+  # independently closes every constructed member's domain and the relations
+  # among cleanup, retention, admission observation, and the two deadlines.
+  defp receipt_fields_readable?(receipt, job_id) do
+    identifiers = [
+      receipt.job_id,
+      receipt.operation_id,
+      receipt.session_id,
+      receipt.run_id,
+      receipt.turn_id,
+      receipt.tool_call_id,
+      receipt.executor_identity,
+      receipt.tool_id,
+      receipt.tool_version
+    ]
+
+    receipt.protocol_version == 1 and receipt.job_id == job_id and
+      Enum.all?(identifiers, &bounded_receipt_binary?/1) and
+      is_integer(receipt.attempt) and receipt.attempt > 0 and
+      is_integer(receipt.session_epoch_at_dispatch) and receipt.session_epoch_at_dispatch >= 0 and
+      is_integer(receipt.executor_epoch) and receipt.executor_epoch >= 0 and
+      digest_readable?(receipt.canonical_request_digest) and
+      is_integer(receipt.fencing_token) and receipt.fencing_token >= 0 and
+      receipt.outcome in @receipt_outcomes and is_binary(receipt.output) and
+      byte_size(receipt.output) <= @max_output_bytes and
+      is_integer(receipt.progress_count) and receipt.progress_count >= 0 and
+      is_integer(receipt.observed_at_ms) and receipt.observed_at_ms >= 0 and
+      environment_names_readable?(receipt.child_environment_names) and
+      tool_receipt_readable?(receipt) and
+      receipt.provider_credential_present == false and
+      is_integer(receipt.cleanup_grace_ms) and receipt.cleanup_grace_ms in 1..@max_uint64 and
+      cleanup_facts_readable?(receipt) and retention_bound_matches?(receipt) and
+      process_probe_readable?(receipt.process_probe) and deadlines_readable?(receipt) and
+      artifacts_readable?(receipt.artifacts)
+  end
+
+  defp bounded_receipt_binary?(value),
+    do: is_binary(value) and byte_size(value) in 1..@max_job_id_bytes
+
+  defp digest_readable?(digest) when is_binary(digest),
+    do: Regex.match?(@receipt_digest, digest)
+
+  defp digest_readable?(_digest), do: false
+
+  defp environment_names_readable?(names) when is_list(names) do
+    names == Enum.uniq(names) and
+      Enum.all?(names, fn name ->
+        is_binary(name) and byte_size(name) in 1..@max_job_id_bytes and
+          Regex.match?(@receipt_environment_name, name) and name != @credential_name
+      end)
+  end
+
+  defp environment_names_readable?(_names), do: false
+
+  defp tool_receipt_readable?(receipt) do
+    case tool(receipt.tool_id) do
+      {:ok,
+       %{
+         version: version,
+         coding: %{"tool_id" => "loopex.bash", "budgets" => %{"output_bytes" => output}}
+       }} ->
+        receipt.tool_version == version and receipt.child_environment_names == [@search_path_name] and
+          byte_size(receipt.output) <= output
+
+      {:ok, %{version: version, coding: %{"budgets" => %{"output_bytes" => output}}}} ->
+        receipt.tool_version == version and receipt.child_environment_names == [] and
+          receipt.progress_count == 0 and byte_size(receipt.output) <= output
+
+      {:ok, %{version: version}} ->
+        receipt.tool_version == version and receipt.child_environment_names == [@search_path_name] and
+          receipt.progress_count == 0 and receipt.artifacts == [] and
+          byte_size(receipt.output) <= @max_output_bytes
+
+      :error ->
+        false
+    end
+  end
+
+  defp receipt_output_limit(job, receipt) do
+    domain_limit =
+      case resolve_tool(job) do
+        {:ok, %{coding: _definition} = tool} -> effective_output_limits(job, tool).output
+        {:ok, _demonstration_tool} -> receipt_output_limit(receipt)
+        {:error, _reason} -> receipt_output_limit(receipt)
+      end
+
+    safe_receipt = %{receipt | outcome: :outcome_unknown, output: ""}
+    receipt_limit = @max_receipt_bytes - encoded_receipt_size(safe_receipt)
+    max(min(domain_limit, receipt_limit), 0)
+  end
+
+  defp receipt_output_limit(receipt) do
+    case tool(receipt.tool_id) do
+      {:ok, %{coding: %{"budgets" => %{"output_bytes" => output}}}} -> output
+      {:ok, _demonstration_tool} -> @max_output_bytes
+      :error -> @max_output_bytes
+    end
+  end
+
+  defp encoded_receipt_size(receipt),
+    do: receipt |> :erlang.term_to_binary([:deterministic]) |> byte_size()
+
+  defp retention_bound_matches?(receipt),
+    do: receipt.receipt_retention_bound_ms == receipt_reserve_ms(receipt.cleanup_grace_ms)
+
+  defp process_probe_readable?(probe),
+    do:
+      is_binary(probe) and String.starts_with?(probe, "/") and
+        not String.contains?(probe, <<0>>)
+
+  defp deadlines_readable?(receipt) do
+    is_integer(receipt.effective_deadline_ms) and receipt.effective_deadline_ms > 0 and
+      is_integer(receipt.run_deadline_ms) and receipt.run_deadline_ms > 0 and
+      receipt.effective_deadline_ms <= receipt.run_deadline_ms
+  end
+
+  defp artifacts_readable?(artifacts) when is_list(artifacts) and length(artifacts) <= 1,
+    do: Enum.all?(artifacts, &Loopex.ArtifactStore.valid_reference?/1)
+
+  defp artifacts_readable?(_artifacts), do: false
 
   # Concept: a retained receipt whose cleanup facts are missing, unreadable, or
   # contradictory is not a receipt this executor will hand back.

@@ -48,13 +48,27 @@ the terminal, and yesterday's session can be found and continued. Those bytes
 are part of the closed product baseline; the marked status capsule above and
 the canonical plan register carry the milestone state.
 
-Loopex remains source-tree milestone work, not
-an installable package, release, or frozen public API. Start with the
+Loopex remains source-tree milestone work, not an installable package or frozen
+public API. The annotated tag `v0.0.0-m2` identifies the exact integrated M2
+source snapshot only. Start with the
 [coding sessions guide](docs/operator/coding-sessions.md#concept) for the `loopex`
 command, or the [operator runtime guide](docs/operator/runtime.md#concept) for the
 embedded runtime beneath it and run the complete source-tree loop, or use the
 [developer embedding guide](docs/developer/runtime-and-embedding.md#concept) to
 understand the composition and commit ordering.
+
+The integrated post-closure repair line implements the accepted follow-up decisions for a
+private provider process, explicit local recovery handoff, versioned provider
+accounting, and bounded executor receipts. The
+[source qualification](docs/evidence/M2-ff17990-review-followup.md#final-repaired-source-06dadbb)
+and [integration disposition](docs/evidence/M2-recorded-limitations.md#final-repaired-source-integration)
+name the evidence and authority used for integration. Those repairs do not
+publish a package or label a public surface.
+
+The repaired reference local executor requires `/bin/bash` for its internal
+supervision on Darwin and Linux; raw commands still use `/bin/sh`. See the
+[runtime prerequisite](docs/operator/tools-and-policy.md#operator-local-supervision-shell)
+before using the reference stack. Core and custom executors are unaffected.
 
 The [roadmap](docs/roadmap.md#concept) is non-normative capability guidance;
 [CHANGELOG.md](CHANGELOG.md) records what changed.
@@ -195,3 +209,12 @@ Erlang/OTP are both Apache-2.0 — and gives you an explicit patent grant
 alongside explicit "AS IS", no-warranty terms that match the no-promises
 posture above. If you contribute, your contribution is licensed under the
 same terms — that is Apache-2.0 §5, and there is no separate CLA.
+
+The next milestone, `M3` (extensible local foundations), has an Open documentation candidate on
+branch `m3` and is not yet accepted; see that branch's `docs/plans/README.md`.
+
+The [M3 plan](docs/plans/M3.md#concept) proposes compatible skills, durable
+policy interactions and shared local foundations. Its [M4 successor draft](docs/archive/M4.md#concept)
+uses them through a foreground protocol and TypeScript workflow. This planning
+revision changes documents only; executable gate readiness and milestone
+acceptance remain pending.

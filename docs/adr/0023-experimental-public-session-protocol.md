@@ -1,9 +1,9 @@
-# 0019. Experimental public session protocol
+# 0023. Experimental public session protocol
 
 <a id="concept"></a>
 ## Concept
 
-Technical depth: [Protocol mechanics](0019-experimental-public-session-protocol-technical.md#technical-depth).
+Technical depth: [Protocol mechanics](0023-experimental-public-session-protocol-technical.md#technical-depth).
 
 - **Status:** Proposed
 - **Date:** 2026-08-24
@@ -16,10 +16,11 @@ Technical depth: [Protocol mechanics](0019-experimental-public-session-protocol-
 | --- | --- | --- | --- |
 | Acceptance | — | — | — |
 
-<a id="concept-adr-0019-context"></a>
+<a id="concept-adr-0023-context"></a>
 ## Context
 
-M2 makes one foreground process a useful coding harness. Its public Elixir
+M2 makes one foreground process a useful coding harness; M3 adds reusable
+resources, durable interactions and bounded artifact access. Its public Elixir
 facade owns the durable command semantics, but another program has no bounded,
 language-neutral way to initialize the runtime, submit those commands, or
 distinguish durable events from transient progress. Adding JSON around internal
@@ -32,9 +33,9 @@ or asking a transport to own a second loop. The first real transport is stdio;
 sockets, concurrent attachments, controller takeover, and process residency
 remain evidence M4 does not yet have.
 
-Technical depth: [Boundary and ownership problem](0019-experimental-public-session-protocol-technical.md#technical-adr-0019-context).
+Technical depth: [Boundary and ownership problem](0023-experimental-public-session-protocol-technical.md#technical-adr-0023-context).
 
-<a id="concept-adr-0019-decision"></a>
+<a id="concept-adr-0023-decision"></a>
 ## Decision
 
 - **`loopex_protocol` owns one transport-neutral public protocol.** It owns
@@ -74,7 +75,7 @@ Technical depth: [Boundary and ownership problem](0019-experimental-public-sessi
   auto-attachment whose cursor a client cannot observe.
 - **M4 exposes only implemented semantics.** The protocol covers session
   create, list, resume, inspect, snapshot and current cursor; prompt, steer,
-  follow-up, abort, and interaction response; project-resource trust; bounded
+  follow-up, abort, and interaction response; resource catalogs, explicit skill selection and project-resource trust; bounded
   artifact retrieval; durable events; and transient progress. Fork, compaction,
   model switching, extension management, and daemon operations are negotiated
   unavailable rather than invented at the wire.
@@ -95,9 +96,9 @@ Technical depth: [Boundary and ownership problem](0019-experimental-public-sessi
   experimental protocol generation is negotiated separately. The version change
   is not a tag, package, release, publication, or compatibility freeze.
 
-Technical depth: [Exact protocol contract](0019-experimental-public-session-protocol-technical.md#technical-adr-0019-decision).
+Technical depth: [Exact protocol contract](0023-experimental-public-session-protocol-technical.md#technical-adr-0023-decision).
 
-<a id="concept-adr-0019-alternatives"></a>
+<a id="concept-adr-0023-alternatives"></a>
 ## Alternatives
 
 - **Put RPC directly in the coordinator.** Rejected because transport pressure,
@@ -111,7 +112,7 @@ Technical depth: [Exact protocol contract](0019-experimental-public-session-prot
 - **Use transport request IDs as command IDs.** Rejected because reconnect and
   retry would turn connection-local correlation into durable authority.
 
-<a id="concept-adr-0019-consequences"></a>
+<a id="concept-adr-0023-consequences"></a>
 ## Consequences
 
 An external program can drive the same session M2 exposes without linking
@@ -121,19 +122,19 @@ reviewed contract rather than adapter accident. The contract is deliberately
 experimental and exactly negotiated; it does not promise mixed-generation
 compatibility or daemon behavior.
 
-Technical depth: [Evidence and operational consequences](0019-experimental-public-session-protocol-technical.md#technical-adr-0019-consequences).
+Technical depth: [Evidence and operational consequences](0023-experimental-public-session-protocol-technical.md#technical-adr-0023-consequences).
 
-<a id="concept-adr-0019-compatibility"></a>
+<a id="concept-adr-0023-compatibility"></a>
 ## Compatibility, Migration, and Rollback
 
 No released wire surface or installed base exists. A client and server must
 agree on the exact experimental generation and schema digest, so M4 creates no
 reader/writer compatibility range. Before M4 closure, rollback removes the
-app-server and schema bundle and returns callers to M2's embedded and command
+app-server and schema bundle and returns callers to M3's embedded and command
 surfaces. This decision adds no Store schema by itself. A later compatibility
 freeze, package, or public release needs its own explicit authority.
 
-Technical depth: [Rollback mechanics](0019-experimental-public-session-protocol-technical.md#technical-adr-0019-compatibility).
+Technical depth: [Rollback mechanics](0023-experimental-public-session-protocol-technical.md#technical-adr-0023-compatibility).
 
 ## Links
 

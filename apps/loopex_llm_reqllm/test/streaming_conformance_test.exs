@@ -106,7 +106,13 @@ defmodule Loopex.LLM.ReqLLM.StreamingConformanceTest do
     @impl Loopex.Model
     def complete(request, options, progress \\ nil) do
       progress = progress || Model.discard_progress()
-      Adapter.reply_from_stream(stream_response(options), request, identity(), progress)
+
+      Adapter.reply_from_stream(
+        stream_response(options),
+        request,
+        Keyword.get(options, :identity, identity()),
+        progress
+      )
     end
 
     @doc """
@@ -744,6 +750,96 @@ defmodule Loopex.LLM.ReqLLM.StreamingConformanceTest do
     assert reply.provider_response_id == "req_synthetic_conformance"
   end
 
+  test "the provider response identifier follows the account visible request header" do
+    metadata =
+      Shipped.clean_metadata()
+      |> Map.put(:headers, [{"x-request-id", "req_openai_synthetic_conformance"}])
+
+    identity = %{Shipped.identity() | provider: "openai"}
+
+    assert {:ok, reply} =
+             Shipped.complete(
+               request(),
+               [chunks: ["acknowledged"], metadata: metadata, identity: identity],
+               Model.discard_progress()
+             )
+
+    assert reply.provider_response_id == "req_openai_synthetic_conformance"
+  end
+
+  test "the resolved provider selects only its own account identifier header" do
+    metadata =
+      Shipped.clean_metadata()
+      |> Map.put(:headers, [
+        {"request-id", "req_anthropic_account"},
+        {"x-request-id", "req_openai_account"}
+      ])
+
+    for {provider, expected} <- [
+          {"anthropic", "req_anthropic_account"},
+          {"openai", "req_openai_account"},
+          {"unknown-provider", nil}
+        ] do
+      identity = %{Shipped.identity() | provider: provider}
+
+      assert {:ok, reply} =
+               Shipped.complete(
+                 request(),
+                 [chunks: ["acknowledged"], metadata: metadata, identity: identity],
+                 Model.discard_progress()
+               )
+
+      assert reply.provider_response_id == expected
+    end
+  end
+
+  test "provider response identifiers are exact bounded header values and never manufactured" do
+    valid_at_ceiling = String.duplicate("r", 256)
+    decomposed_utf8 = "req_e\u0301"
+    refute decomposed_utf8 == String.normalize(decomposed_utf8, :nfc)
+
+    cases = [
+      {"anthropic", [], nil},
+      {"anthropic", [{"request-id", ""}], nil},
+      {"anthropic", [{"REQUEST-ID", "req_anthropic_mixed_case"}], "req_anthropic_mixed_case"},
+      {"openai", [{"X-Request-ID", "req_openai_mixed_case"}], "req_openai_mixed_case"},
+      {"anthropic", %{"request-id" => "req_anthropic_map"}, "req_anthropic_map"},
+      {"openai", %{"X-Request-ID" => "req_openai_map"}, "req_openai_map"},
+      {"anthropic", %{"request-id" => ["req_anthropic_list_value"]}, "req_anthropic_list_value"},
+      {"openai", [{"x-request-id", ["req_openai_list_value"]}], "req_openai_list_value"},
+      {"anthropic", [{"request-id", " Req_MiXeD_exact_bytes "}], " Req_MiXeD_exact_bytes "},
+      {"anthropic", [{"request-id", decomposed_utf8}], decomposed_utf8},
+      {"anthropic",
+       [
+         {"proxy-request-id", "req_not_an_exact_header"},
+         {"request-id-extra", "req_not_an_exact_header"},
+         {"not-x-request-id", "req_not_an_exact_header"}
+       ], nil},
+      {"openai",
+       [
+         {"not-x-request-id", "req_not_an_exact_header"},
+         {"x-request-id-extra", "req_not_an_exact_header"}
+       ], nil},
+      {"anthropic", [{"request-id", valid_at_ceiling}], valid_at_ceiling},
+      {"anthropic", [{"request-id", valid_at_ceiling <> "x"}], nil},
+      {"anthropic", [{"request-id", <<255>>}], nil}
+    ]
+
+    for {provider, headers, expected} <- cases do
+      metadata = Shipped.clean_metadata() |> Map.put(:headers, headers)
+      identity = %{Shipped.identity() | provider: provider}
+
+      assert {:ok, reply} =
+               Shipped.complete(
+                 request(),
+                 [chunks: ["acknowledged"], metadata: metadata, identity: identity],
+                 Model.discard_progress()
+               )
+
+      assert reply.provider_response_id == expected
+    end
+  end
+
   test "a reply the provider's own builder cannot assemble is an error and never a completion with no tool calls" do
     # A builder failure used to become `nil`, and `nil` became empty text and no
     # tool calls -- the exact reply shape that means "the model asked for nothing
@@ -828,6 +924,10 @@ defmodule Loopex.LLM.ReqLLM.StreamingConformanceTest do
     assert Keyword.fetch!(options, :max_tokens) == 32
     assert Keyword.fetch!(options, :api_key) == "credential"
 
+    # Core owns the only retry authority. A transport-library retry would spend
+    # the same durable attempt more than once without a second Control permit.
+    assert Keyword.fetch!(options, :max_retries) == 0
+
     # An adapter is also an enforcement point. It refuses an already-expired
     # request rather than extending the run by inventing a minimum transport
     # wait after the committed instant.
@@ -843,6 +943,42 @@ defmodule Loopex.LLM.ReqLLM.StreamingConformanceTest do
 
     assert Loopex.LLM.ReqLLM.call_options(expired, "credential", []) ==
              {:error, :deadline_elapsed}
+  end
+
+  test "one durable adapter attempt invokes provider transport at most once" do
+    deadline = System.system_time(:millisecond) + 60_000
+
+    {:ok, request} =
+      Loopex.Model.request(
+        Loopex.LLM.ReqLLM.default_model(),
+        [%{"role" => "user", "content" => "one transport"}],
+        sampling: %{"max_tokens" => 8},
+        deadline: deadline
+      )
+
+    assert {:ok, call_options} =
+             Loopex.LLM.ReqLLM.call_options(request, "credential", [])
+
+    stream_options = ReqLLM.Streaming.FinchClient.stream_options(%{}, call_options)
+    owner = self()
+
+    transport = fn _request, _finch, state, _callback, _options ->
+      send(owner, :provider_transport_invoked)
+      {:error, %Mint.TransportError{reason: :timeout}, state}
+    end
+
+    assert {:error, %Mint.TransportError{reason: :timeout}, :initial} =
+             ReqLLM.Streaming.Retry.stream(
+               Finch.build(:post, "http://provider.invalid", [], ""),
+               ReqLLM.Finch,
+               :initial,
+               fn _event, state -> state end,
+               stream_options,
+               transport
+             )
+
+    assert_receive :provider_transport_invoked
+    refute_receive :provider_transport_invoked, 0
   end
 
   test "the exported reply type names exactly the fields a reply carries" do

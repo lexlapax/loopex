@@ -137,10 +137,8 @@ defmodule Loopex.Executor.LocalAuthorityContractTest do
              ]
              |> Enum.sort()
 
-    assert generation["generation_id"] ==
-             generation["executor_epoch"]
-             |> Integer.to_string(16)
-             |> String.pad_leading(64, "0")
+    assert generation["generation_id"] =~ ~r/\A[0-9a-f]{64}\z/
+    assert Integer.parse(generation["generation_id"], 16) == {generation["executor_epoch"], ""}
 
     assert generation["root_binding"] == expected_root_binding(root)
 
@@ -337,6 +335,7 @@ defmodule Loopex.Executor.LocalAuthorityContractTest do
     cases = [
       {"monotonic", [{wall, 1_000}, {wall - 10_000, 2_000}], :refused},
       {"wall", [{wall, 1_000}, {wall + 2_000, 1_001}], :refused},
+      {"narrow-normal", [{wall, 1_000}, {wall + 90, 1_090}], :completed},
       {"normal", [{wall, 1_000}, {wall + 1, 1_001}], :completed}
     ]
 
@@ -398,6 +397,175 @@ defmodule Loopex.Executor.LocalAuthorityContractTest do
     assert File.read!(Path.join(sliced.workspace, "sliced.txt")) == "ok"
   end
 
+  test "an owned process cannot start after its admitted action deadline expires" do
+    # Concept: admission authorizes one future transition; it does not authorize
+    # a process to start after that transition's immutable deadline has passed.
+    #
+    # Technical depth: the first two paired samples admit the job. The third is
+    # consumed by the launch worker immediately before it sends the token-bound
+    # run permit to an already-open waiting guard and crosses both fences. Opening
+    # the guard is not the effect: it cannot create the command before that
+    # permit. The missing process-start notification is the decisive observation
+    # that no model command was created.
+    fixture = prepared_fixture("process-expired-before-port")
+    wall = System.system_time(:millisecond)
+
+    clock =
+      clock_provider([
+        {wall, 1_000},
+        {wall + 1, 1_001},
+        {wall + 200, 1_200}
+      ])
+
+    {:ok, local} = start_local(fixture, clock_provider: clock)
+    on_exit(fn -> stop(local) end)
+
+    target = Path.join(fixture.workspace, "must-not-start.txt")
+
+    request =
+      job(
+        fixture,
+        "process-expired-before-port",
+        %{"command" => "printf forbidden > #{shell_path(target)}"},
+        wall + 100
+      )
+
+    assert {:ok, receipt} =
+             Local.execute(local, request, grant(request), [notify: self()], nil)
+
+    assert receipt.outcome == :cancelled
+    assert receipt.cleanup_confirmation == :confirmed
+
+    refute_receive {:executor_process_started, "process-expired-before-port", _tool,
+                    _environment},
+                   100
+
+    refute File.exists?(target)
+
+    source = File.read!(Path.expand("../lib/executor.ex", __DIR__))
+
+    [launch_boundary] =
+      Regex.run(
+        ~r/defp run_owned_process_after_fence\((.*?)\n  end\n\n  # Concept: an in-flight/s,
+        source,
+        capture: :all_but_first
+      )
+
+    {ready_offset, _size} =
+      :binary.match(launch_boundary, "await_launch_guard_ready(")
+
+    {fence_offset, _size} =
+      :binary.match(launch_boundary, "remaining = fence_remaining(deadline)")
+
+    {run_offset, _size} =
+      :binary.match(
+        launch_boundary,
+        ~S|safe_port_command(port, "#{@guard_run}:#{token}\n")|
+      )
+
+    {notification_offset, _size} =
+      :binary.match(launch_boundary, "{:executor_process_started,")
+
+    assert ready_offset < fence_offset,
+           "the final fence ran before the waiting guard established its identity"
+
+    assert fence_offset < run_offset,
+           "the final fence moved after the token-bound command-start permit"
+
+    assert run_offset < notification_offset,
+           "the process-start notification moved before the command-start permit"
+
+    assert launch_boundary =~ "not Process.alive?(lease_pid)"
+    assert launch_boundary =~ "not effect_owner_alive?(owner)"
+    assert launch_boundary =~ "remaining <= 0"
+
+    assert launch_boundary =~ "close_waiting_guard(port, token)"
+
+    assert launch_boundary =~
+             ~S|unless safe_port_command(port, "#{@guard_run}:#{token}\n")|,
+           "the command can start without the authenticated run permit"
+  end
+
+  test "an owned process cannot start after its workspace lease dies at the launch boundary" do
+    fixture = prepared_fixture("process-lease-lost-before-port")
+    Process.unlink(fixture.lease)
+    wall = System.system_time(:millisecond)
+
+    clock =
+      clock_provider_with_action(
+        [{wall, 1_000}, {wall + 1, 1_001}, {wall + 2, 1_002}],
+        3,
+        fn -> stop(fixture.lease) end
+      )
+
+    {:ok, local} = start_local(fixture, clock_provider: clock)
+    on_exit(fn -> stop(local) end)
+    target = Path.join(fixture.workspace, "must-not-start-after-lease.txt")
+
+    request =
+      job(
+        fixture,
+        "process-lease-lost-before-port",
+        %{"command" => "printf forbidden > #{shell_path(target)}"},
+        wall + 10_000
+      )
+
+    assert {:ok, receipt} =
+             Local.execute(local, request, grant(request), [notify: self()], nil)
+
+    assert receipt.outcome == :outcome_unknown
+    assert receipt.cleanup_confirmation == :confirmed
+
+    refute_receive {:executor_process_started, "process-lease-lost-before-port", _tool,
+                    _environment},
+                   100
+
+    refute File.exists?(target)
+  end
+
+  test "an owned process cannot start after its Local owner dies at the launch boundary" do
+    fixture = prepared_fixture("process-owner-lost-before-port")
+    wall = System.system_time(:millisecond)
+    {:ok, owner_cell} = Agent.start_link(fn -> nil end)
+    on_exit(fn -> stop(owner_cell) end)
+
+    clock =
+      clock_provider_with_action(
+        [{wall, 1_000}, {wall + 1, 1_001}, {wall + 2, 1_002}],
+        3,
+        fn ->
+          owner = Agent.get(owner_cell, & &1)
+          if is_pid(owner), do: Process.exit(owner, :kill)
+        end
+      )
+
+    {:ok, local} = start_local(fixture, clock_provider: clock)
+    Process.unlink(local)
+    Agent.update(owner_cell, fn _old -> local end)
+    on_exit(fn -> stop(local) end)
+    target = Path.join(fixture.workspace, "must-not-start-after-owner.txt")
+
+    request =
+      job(
+        fixture,
+        "process-owner-lost-before-port",
+        %{"command" => "printf forbidden > #{shell_path(target)}"},
+        wall + 10_000
+      )
+
+    assert {:ok, receipt} =
+             Local.execute(local, request, grant(request), [notify: self()], nil)
+
+    assert receipt.outcome == :outcome_unknown
+    assert receipt.cleanup_confirmation == :confirmed
+
+    refute_receive {:executor_process_started, "process-owner-lost-before-port", _tool,
+                    _environment},
+                   100
+
+    refute File.exists?(target)
+  end
+
   test "a later effect transition reuses the handoff deadline after wall time moves backward" do
     fixture = prepared_fixture("clock-no-refresh")
     wall = System.system_time(:millisecond)
@@ -435,11 +603,11 @@ defmodule Loopex.Executor.LocalAuthorityContractTest do
 
     assert {:ok, %{outcome: outcome, output: output}} = result
 
-    assert outcome in [:outcome_unknown, :failed],
-           "a job stopped at its deadline cannot report a proven outcome"
+    refute outcome == :completed,
+           "a job stopped at its deadline was reported completed: #{inspect(result)}"
 
-    assert output =~ "deadline passed while this tool was running",
-           "the receipt does not name a stop that happened after the tool started"
+    assert output =~ "run deadline passed" and output =~ "terminated",
+           "the receipt does not name the post-start deadline termination: #{output}"
 
     refute File.exists?(Path.join(fixture.workspace, "clock-no-refresh.txt"))
   end
@@ -514,6 +682,356 @@ defmodule Loopex.Executor.LocalAuthorityContractTest do
     end
   end
 
+  test "a retained receipt admits exactly its mandatory keys on lookup and duplicate execution" do
+    fixture = prepared_fixture("receipt-exact-keys")
+    {:ok, local} = start_local(fixture)
+    on_exit(fn -> stop(local) end)
+
+    request =
+      job(fixture, "receipt-exact-keys", %{
+        "path" => "receipt-exact-keys.txt",
+        "content" => "ok"
+      })
+
+    assert {:ok, receipt} = Local.execute(local, request, grant(request), [], nil)
+    assert Local.stats(local).dispatches[request.job_id] == 1
+
+    path = receipt_path!(fixture.ledger, request.job_id)
+    assert {:ok, ^receipt} = Local.receipt(local, request.job_id)
+
+    mutations =
+      [unknown_key: Map.put(receipt, :adapter_private, "not part of the receipt contract")] ++
+        Enum.map(Map.keys(receipt), &{{:missing, &1}, Map.delete(receipt, &1)})
+
+    for {label, malformed} <- mutations do
+      File.write!(path, :erlang.term_to_binary(malformed, [:deterministic]))
+
+      assert Local.receipt(local, request.job_id) == {:error, :invalid_retained_receipt},
+             "#{inspect(label)} was returned by retained lookup"
+
+      assert Local.execute(local, request, grant(request), [], nil) ==
+               {:error, :invalid_retained_receipt},
+             "#{inspect(label)} was returned by duplicate execution"
+    end
+
+    assert Local.stats(local).dispatches[request.job_id] == 1
+  end
+
+  test "a malformed duplicate job is refused before retained replay or admission join" do
+    fixture = prepared_fixture("malformed-duplicate-job")
+    {:ok, local} = start_local(fixture)
+    on_exit(fn -> stop(local) end)
+
+    retained =
+      job(fixture, "malformed-retained-job", %{
+        "path" => "malformed-retained-job.txt",
+        "content" => "ok"
+      })
+
+    assert {:ok, receipt} = Local.execute(local, retained, grant(retained), [], nil)
+    malformed_retained = Map.delete(retained, :operation_id)
+
+    assert Local.execute(local, malformed_retained, grant(retained), [], nil) ==
+             {:error, {:refused_before_effect, :canonical_job_request_mismatch}}
+
+    assert Process.alive?(local)
+    assert {:ok, ^receipt} = Local.receipt(local, retained.job_id)
+    assert Local.stats(local).dispatches[retained.job_id] == 1
+
+    joining =
+      job(fixture, "malformed-joining-job", %{
+        "relative_path" => "malformed-joining-job.txt",
+        "content" => "ok",
+        "delay_ms" => 1_000
+      })
+
+    parent = self()
+    joining_grant = grant(joining)
+
+    owner =
+      Task.async(fn ->
+        Local.execute(local, joining, joining_grant, [notify: parent], nil)
+      end)
+
+    assert_receive {:executor_process_started, "malformed-joining-job", _tool, _environment},
+                   5_000
+
+    malformed_join = Map.put(joining, :attempt, 0)
+
+    assert Local.execute(local, malformed_join, joining_grant, [], nil) ==
+             {:error, {:refused_before_effect, :canonical_job_request_mismatch}}
+
+    assert Process.alive?(local)
+    assert {:ok, joined_receipt} = Task.await(owner, 5_000)
+    assert joined_receipt.outcome == :completed
+    assert Local.stats(local).dispatches[joining.job_id] == 1
+  end
+
+  test "a retained receipt validates every member domain and relation before replay" do
+    fixture = prepared_fixture("receipt-domains")
+    {:ok, local} = start_local(fixture)
+    on_exit(fn -> stop(local) end)
+
+    request =
+      job(fixture, "receipt-domains", %{
+        "path" => "receipt-domains.txt",
+        "content" => "ok"
+      })
+
+    assert {:ok, receipt} = Local.execute(local, request, grant(request), [], nil)
+    path = receipt_path!(fixture.ledger, request.job_id)
+
+    mutations = [
+      protocol_version: Map.put(receipt, :protocol_version, 2),
+      job_id: Map.put(receipt, :job_id, 7),
+      operation_id: Map.put(receipt, :operation_id, ""),
+      attempt: Map.put(receipt, :attempt, 0),
+      session_id: Map.put(receipt, :session_id, ""),
+      run_id: Map.put(receipt, :run_id, ""),
+      turn_id: Map.put(receipt, :turn_id, ""),
+      tool_call_id: Map.put(receipt, :tool_call_id, ""),
+      session_epoch_at_dispatch: Map.put(receipt, :session_epoch_at_dispatch, -1),
+      executor_epoch: Map.put(receipt, :executor_epoch, -1),
+      executor_identity: Map.put(receipt, :executor_identity, ""),
+      canonical_request_digest: Map.put(receipt, :canonical_request_digest, "not-a-digest"),
+      fencing_token: Map.put(receipt, :fencing_token, -1),
+      tool_id: Map.put(receipt, :tool_id, ""),
+      tool_version: Map.put(receipt, :tool_version, ""),
+      unknown_tool_version: Map.put(receipt, :tool_version, "2.0.0"),
+      outcome: Map.put(receipt, :outcome, :invented),
+      unproduced_outcome: Map.put(receipt, :outcome, :denied),
+      output: Map.put(receipt, :output, :not_binary),
+      oversized_output: Map.put(receipt, :output, :binary.copy("x", 1_048_577)),
+      tool_output_ceiling: Map.put(receipt, :output, :binary.copy("x", 4_097)),
+      progress_count: Map.put(receipt, :progress_count, -1),
+      filesystem_progress: Map.put(receipt, :progress_count, 1),
+      observed_at_ms: Map.put(receipt, :observed_at_ms, -1),
+      child_environment_names: Map.put(receipt, :child_environment_names, "PATH"),
+      child_environment_assignment:
+        Map.put(receipt, :child_environment_names, ["PATH=/usr/bin:/bin"]),
+      child_environment_unproduced: Map.put(receipt, :child_environment_names, ["HOME"]),
+      child_environment_credential:
+        Map.put(receipt, :child_environment_names, ["LOOPEX_PROVIDER_API_KEY"]),
+      provider_credential_present: Map.put(receipt, :provider_credential_present, true),
+      cleanup_grace_ms: Map.put(receipt, :cleanup_grace_ms, 0),
+      cleanup_confirmation: Map.put(receipt, :cleanup_confirmation, :maybe),
+      receipt_retention_bound_ms: Map.put(receipt, :receipt_retention_bound_ms, 0),
+      retention_relation: Map.update!(receipt, :receipt_retention_bound_ms, &(&1 + 1)),
+      cleanup_relation:
+        receipt
+        |> Map.put(:outcome, :completed)
+        |> Map.put(:cleanup_confirmation, :unconfirmed),
+      process_probe: Map.put(receipt, :process_probe, "relative/ps"),
+      effective_deadline_ms: Map.put(receipt, :effective_deadline_ms, 0),
+      run_deadline_ms: Map.put(receipt, :run_deadline_ms, 0),
+      deadline_relation: Map.put(receipt, :effective_deadline_ms, receipt.run_deadline_ms + 1),
+      artifacts: Map.put(receipt, :artifacts, %{})
+    ]
+
+    for {label, malformed} <- mutations do
+      File.write!(path, :erlang.term_to_binary(malformed, [:deterministic]))
+
+      assert Local.receipt(local, request.job_id) == {:error, :invalid_retained_receipt},
+             "#{inspect(label)} was returned by retained lookup"
+
+      assert Local.execute(local, request, grant(request), [], nil) ==
+               {:error, :invalid_retained_receipt},
+             "#{inspect(label)} was returned by duplicate execution"
+    end
+
+    assert Local.stats(local).dispatches[request.job_id] == 1
+  end
+
+  test "duplicate execution binds every repeated retained receipt identity to its job" do
+    fixture = prepared_fixture("receipt-job-relations")
+    {:ok, local} = start_local(fixture)
+    on_exit(fn -> stop(local) end)
+
+    request =
+      job(fixture, "receipt-job-relations", %{
+        "path" => "receipt-job-relations.txt",
+        "content" => "ok"
+      })
+
+    assert {:ok, receipt} = Local.execute(local, request, grant(request), [], nil)
+    path = receipt_path!(fixture.ledger, request.job_id)
+
+    mutations = [
+      protocol_version: Map.put(receipt, :protocol_version, receipt.protocol_version + 1),
+      operation_id: Map.put(receipt, :operation_id, receipt.operation_id <> "-other"),
+      attempt: Map.put(receipt, :attempt, receipt.attempt + 1),
+      session_id: Map.put(receipt, :session_id, receipt.session_id <> "-other"),
+      run_id: Map.put(receipt, :run_id, receipt.run_id <> "-other"),
+      turn_id: Map.put(receipt, :turn_id, receipt.turn_id <> "-other"),
+      tool_call_id: Map.put(receipt, :tool_call_id, receipt.tool_call_id <> "-other"),
+      session_epoch_at_dispatch:
+        Map.put(receipt, :session_epoch_at_dispatch, receipt.session_epoch_at_dispatch + 1),
+      executor_epoch: Map.put(receipt, :executor_epoch, receipt.executor_epoch + 1),
+      executor_identity:
+        Map.put(receipt, :executor_identity, receipt.executor_identity <> "-other"),
+      canonical_request_digest:
+        Map.put(receipt, :canonical_request_digest, String.duplicate("0", 64)),
+      fencing_token: Map.put(receipt, :fencing_token, receipt.fencing_token + 1),
+      tool_id: Map.put(receipt, :tool_id, receipt.tool_id <> "-other"),
+      tool_version: Map.put(receipt, :tool_version, receipt.tool_version <> "-other"),
+      cleanup_grace_ms:
+        receipt
+        |> Map.put(:cleanup_grace_ms, receipt.cleanup_grace_ms + 4)
+        |> Map.put(:receipt_retention_bound_ms, receipt.receipt_retention_bound_ms + 1),
+      output_limit: Map.put(receipt, :output, :binary.copy("x", 4_097)),
+      run_deadline_ms: Map.put(receipt, :run_deadline_ms, receipt.run_deadline_ms + 1)
+    ]
+
+    for {label, altered} <- mutations do
+      File.write!(path, :erlang.term_to_binary(altered, [:deterministic]))
+
+      expected =
+        if label == :canonical_request_digest,
+          do: {:error, :job_id_conflict},
+          else: {:error, :invalid_retained_receipt}
+
+      assert Local.execute(local, request, grant(request), [], nil) == expected,
+             "#{inspect(label)} was replayed for a different job identity"
+    end
+
+    File.write!(path, :erlang.term_to_binary(receipt, [:deterministic]))
+
+    smaller =
+      job(
+        fixture,
+        "receipt-smaller-output-limit",
+        %{"path" => "receipt-smaller-output-limit.txt", "content" => "ok"},
+        System.system_time(:millisecond) + 60_000,
+        %{resource_budgets: %{"max_output_bytes" => 512}}
+      )
+
+    assert {:ok, smaller_receipt} = Local.execute(local, smaller, grant(smaller), [], nil)
+    assert byte_size(smaller_receipt.output) <= 512
+    smaller_path = receipt_path!(fixture.ledger, smaller.job_id)
+
+    File.write!(
+      smaller_path,
+      :erlang.term_to_binary(%{smaller_receipt | output: :binary.copy("x", 513)}, [
+        :deterministic
+      ])
+    )
+
+    assert Local.execute(local, smaller, grant(smaller), [], nil) ==
+             {:error, :invalid_retained_receipt}
+
+    assert Local.stats(local).dispatches[request.job_id] == 1
+  end
+
+  test "retained process-tool receipts bind exactly the PATH-only child environment" do
+    cases = [
+      {"bash", %{"command" => "printf ok"}, %{}},
+      {"demo", %{"relative_path" => "demo-environment.txt", "content" => "ok"},
+       %{tool_id: "loopex.demo.write", effect_class: "workspace_write"}}
+    ]
+
+    for {label, arguments, overrides} <- cases do
+      fixture = prepared_fixture("receipt-environment-#{label}")
+      {:ok, local} = start_local(fixture)
+      on_exit(fn -> stop(local) end)
+
+      request =
+        job(
+          fixture,
+          "receipt-environment-#{label}",
+          arguments,
+          System.system_time(:millisecond) + 60_000,
+          overrides
+        )
+
+      assert {:ok, receipt} = Local.execute(local, request, grant(request), [], nil)
+      assert receipt.child_environment_names == ["PATH"]
+      path = receipt_path!(fixture.ledger, request.job_id)
+
+      for names <- [[], ["PATH", "HOME"]] do
+        File.write!(
+          path,
+          :erlang.term_to_binary(%{receipt | child_environment_names: names}, [:deterministic])
+        )
+
+        assert Local.receipt(local, request.job_id) == {:error, :invalid_retained_receipt}
+
+        assert Local.execute(local, request, grant(request), [], nil) ==
+                 {:error, :invalid_retained_receipt}
+      end
+
+      if label == "bash" do
+        bash_output_limit =
+          Loopex.Executor.Local.CodingTools.definitions()
+          |> Enum.find(&(&1["tool_id"] == "loopex.bash"))
+          |> get_in(["budgets", "output_bytes"])
+
+        File.write!(
+          path,
+          :erlang.term_to_binary(
+            %{receipt | output: :binary.copy("x", bash_output_limit + 1)},
+            [:deterministic]
+          )
+        )
+
+        assert Local.receipt(local, request.job_id) == {:error, :invalid_retained_receipt}
+      else
+        File.write!(
+          path,
+          :erlang.term_to_binary(%{receipt | progress_count: 1}, [:deterministic])
+        )
+
+        assert Local.receipt(local, request.job_id) == {:error, :invalid_retained_receipt}
+
+        {:ok, artifact_store} = ArtifactStore.start(:truthful)
+        on_exit(fn -> stop(artifact_store) end)
+
+        assert {:ok, unrelated_reference} =
+                 ArtifactStore.put(artifact_store, "unrelated", %{
+                   media_type: "text/plain",
+                   role: "tool_output",
+                   metadata: %{}
+                 })
+
+        File.write!(
+          path,
+          :erlang.term_to_binary(%{receipt | artifacts: [unrelated_reference]}, [:deterministic])
+        )
+
+        assert Local.receipt(local, request.job_id) == {:error, :invalid_retained_receipt}
+      end
+
+      assert Local.stats(local).dispatches[request.job_id] == 1
+    end
+  end
+
+  test "a retained receipt refuses noncanonical external-term bytes" do
+    fixture = prepared_fixture("receipt-canonical-bytes")
+    {:ok, local} = start_local(fixture)
+    on_exit(fn -> stop(local) end)
+
+    request =
+      job(fixture, "receipt-canonical-bytes", %{
+        "path" => "receipt-canonical-bytes.txt",
+        "content" => "ok"
+      })
+
+    assert {:ok, receipt} = Local.execute(local, request, grant(request), [], nil)
+    path = receipt_path!(fixture.ledger, request.job_id)
+    canonical = :erlang.term_to_binary(receipt, [:deterministic])
+    noncanonical = :erlang.term_to_binary(receipt, [:compressed])
+
+    refute noncanonical == canonical
+
+    File.write!(path, noncanonical)
+
+    assert Local.receipt(local, request.job_id) == {:error, :invalid_retained_receipt}
+
+    assert Local.execute(local, request, grant(request), [], nil) ==
+             {:error, :invalid_retained_receipt}
+
+    assert Local.stats(local).dispatches[request.job_id] == 1
+  end
+
   test "receipt fitting spills complete bytes and fail-closed artifact answers claim no suffix" do
     full = :binary.copy("receipt-fit-line\n", 512)
 
@@ -554,6 +1072,34 @@ defmodule Loopex.Executor.LocalAuthorityContractTest do
           assert [reference] = receipt.artifacts
           assert Loopex.ArtifactStore.valid_reference?(reference)
 
+          path = receipt_path!(fixture.ledger, request.job_id)
+
+          File.write!(
+            path,
+            :erlang.term_to_binary(%{receipt | artifacts: [reference, reference]}, [
+              :deterministic
+            ])
+          )
+
+          assert Local.receipt(local, request.job_id) ==
+                   {:error, :invalid_retained_receipt}
+
+          assert Local.execute(local, request, grant(request), [], nil) ==
+                   {:error, :invalid_retained_receipt}
+
+          File.write!(
+            path,
+            :erlang.term_to_binary(%{receipt | artifacts: [Map.delete(reference, :digest)]}, [
+              :deterministic
+            ])
+          )
+
+          assert Local.receipt(local, request.job_id) ==
+                   {:error, :invalid_retained_receipt}
+
+          assert Local.execute(local, request, grant(request), [], nil) ==
+                   {:error, :invalid_retained_receipt}
+
         unavailable when unavailable in [:refuse, :malformed] ->
           assert receipt.artifacts == []
 
@@ -562,6 +1108,175 @@ defmodule Loopex.Executor.LocalAuthorityContractTest do
                    receipt.output =~ "retention unavailable"
       end
     end
+
+    # A legal complete tool result can itself fill the Store item ceiling. The
+    # executor must lower its inline ceiling before the read begins so the
+    # existing truncation path retains the full bytes and the complete receipt
+    # still fits; rejecting the receipt after the effect would strand open
+    # authority instead.
+    complete_fixture = prepared_fixture("receipt-fit-complete")
+    complete = :binary.copy("c", 65_536)
+    File.write!(Path.join(complete_fixture.workspace, "complete.txt"), complete)
+    {:ok, complete_store} = ArtifactStore.start(:truthful)
+    on_exit(fn -> stop(complete_store) end)
+
+    {:ok, complete_local} =
+      start_local(complete_fixture,
+        artifacts: %{module: ArtifactStore, handle: complete_store}
+      )
+
+    on_exit(fn -> stop(complete_local) end)
+
+    complete_job =
+      job(
+        complete_fixture,
+        "receipt-fit-complete",
+        %{"path" => "complete.txt"},
+        System.system_time(:millisecond) + 60_000,
+        %{
+          tool_id: "loopex.read",
+          effect_class: "read_only",
+          required_capabilities: ["read_only"],
+          resource_budgets: %{"max_output_bytes" => 65_536}
+        }
+      )
+
+    assert {:ok, complete_receipt} =
+             Local.execute(complete_local, complete_job, grant(complete_job), [], nil)
+
+    assert [{^complete, _normalized_use}] = ArtifactStore.retained(complete_store)
+    assert [_reference] = complete_receipt.artifacts
+    assert byte_size(complete_receipt.output) < byte_size(complete)
+    assert byte_size(:erlang.term_to_binary(complete_receipt, [:deterministic])) <= 65_536
+
+    # A fixed receipt shape that cannot fit is refused before the write effect,
+    # not discovered while its mandatory terminal is being retained.
+    preflight_fixture = prepared_fixture("receipt-fit-preflight")
+
+    {:ok, preflight_local} =
+      start_local(preflight_fixture,
+        process_probe: "/" <> :binary.copy("p", 65_536)
+      )
+
+    on_exit(fn -> stop(preflight_local) end)
+
+    preflight_job =
+      job(preflight_fixture, "receipt-fit-preflight", %{
+        "path" => "must-not-exist.txt",
+        "content" => "forbidden"
+      })
+
+    assert Local.execute(preflight_local, preflight_job, grant(preflight_job), [], nil) ==
+             {:error, {:refused_before_effect, :receipt_record_shape_too_large}}
+
+    refute File.exists?(Path.join(preflight_fixture.workspace, "must-not-exist.txt"))
+    assert Map.get(Local.stats(preflight_local).dispatches, preflight_job.job_id, 0) == 0
+
+    # The raw retained envelope is bounded independently of every member's
+    # domain. The output member's own ceiling is larger than the complete
+    # envelope, so this remains valid in every other respect and would replay if
+    # the complete-byte ceiling were omitted.
+    envelope_fixture = prepared_fixture("receipt-envelope")
+    {:ok, envelope_local} = start_local(envelope_fixture)
+    on_exit(fn -> stop(envelope_local) end)
+
+    envelope_job =
+      job(
+        envelope_fixture,
+        "receipt-envelope-job",
+        %{"relative_path" => "receipt-envelope.txt", "content" => "ok"},
+        System.system_time(:millisecond) + 60_000,
+        %{tool_id: "loopex.demo.write", effect_class: "workspace_write"}
+      )
+
+    assert {:ok, envelope_receipt} =
+             Local.execute(envelope_local, envelope_job, grant(envelope_job), [], nil)
+
+    envelope_path = receipt_path!(envelope_fixture.ledger, envelope_job.job_id)
+
+    empty_envelope =
+      envelope_receipt
+      |> Map.put(:output, "")
+      |> :erlang.term_to_binary([:deterministic])
+
+    exact_output = :binary.copy("x", 65_536 - byte_size(empty_envelope))
+
+    exact_bytes =
+      envelope_receipt
+      |> Map.put(:output, exact_output)
+      |> :erlang.term_to_binary([:deterministic])
+
+    assert byte_size(exact_bytes) == 65_536
+    File.write!(envelope_path, exact_bytes)
+    assert {:ok, %{output: ^exact_output}} = Local.receipt(envelope_local, envelope_job.job_id)
+
+    oversized_bytes =
+      envelope_receipt
+      |> Map.put(:output, exact_output <> "x")
+      |> :erlang.term_to_binary([:deterministic])
+
+    assert byte_size(oversized_bytes) == 65_537
+    File.write!(envelope_path, oversized_bytes)
+
+    assert Local.receipt(envelope_local, envelope_job.job_id) ==
+             {:error, :invalid_retained_receipt}
+
+    assert Local.execute(envelope_local, envelope_job, grant(envelope_job), [], nil) ==
+             {:error, :invalid_retained_receipt}
+
+    # A compressed ETF can be tiny while expanding into a large term. The
+    # retained dialect is deterministic and uncompressed, so its tag is refused
+    # before external-term decoding rather than allocating the expanded value.
+    compressed_bytes =
+      envelope_receipt
+      |> Map.put(:output, :binary.copy("x", 1_048_576))
+      |> :erlang.term_to_binary([:compressed])
+
+    assert byte_size(compressed_bytes) < 65_536
+    assert match?(<<131, 80, _::binary>>, compressed_bytes)
+
+    owner = self()
+
+    assert Local.receipt_decode_probe(compressed_bytes, envelope_job.job_id, fn bytes ->
+             send(owner, {:receipt_decoder_called, bytes})
+             :erlang.binary_to_term(bytes, [:safe])
+           end) == {:error, :invalid_retained_receipt}
+
+    refute_receive {:receipt_decoder_called, _bytes}
+
+    assert {:ok, ^envelope_receipt} =
+             Local.receipt_decode_probe(
+               :erlang.term_to_binary(envelope_receipt, [:deterministic]),
+               envelope_job.job_id,
+               fn bytes ->
+                 send(owner, {:receipt_decoder_called, bytes})
+                 :erlang.binary_to_term(bytes, [:safe])
+               end
+             )
+
+    assert_receive {:receipt_decoder_called, _canonical_bytes}
+
+    File.write!(envelope_path, compressed_bytes)
+
+    assert Local.receipt(envelope_local, envelope_job.job_id) ==
+             {:error, :invalid_retained_receipt}
+
+    # A symlink and FIFO are unavailable ledger entries. Neither is opened, so a
+    # FIFO cannot wedge the VM while the root-wide claim is held.
+    canonical_path = envelope_path <> ".canonical"
+    File.write!(canonical_path, :erlang.term_to_binary(envelope_receipt, [:deterministic]))
+    File.rm!(envelope_path)
+    File.ln_s!(canonical_path, envelope_path)
+
+    assert Local.receipt(envelope_local, envelope_job.job_id) ==
+             {:error, :invalid_retained_receipt}
+
+    File.rm!(envelope_path)
+    mkfifo = System.find_executable("mkfifo") || flunk("mkfifo is required by the Local gate")
+    {_output, 0} = System.cmd(mkfifo, [envelope_path])
+
+    assert Local.receipt(envelope_local, envelope_job.job_id) ==
+             {:error, :invalid_retained_receipt}
   end
 
   test "complete root snapshots enforce both entry capacity and the byte ceiling" do
@@ -669,6 +1384,7 @@ defmodule Loopex.Executor.LocalAuthorityContractTest do
         end
       end)
 
+    :erlang.trace(local, true, [:call, {:tracer, parent}])
     :erlang.trace(task.pid, true, [:call, :set_on_spawn, {:tracer, parent}])
     send(task.pid, :begin_admission)
 
@@ -1091,16 +1807,21 @@ defmodule Loopex.Executor.LocalAuthorityContractTest do
     assert {:ok, %{outcome: :completed}} = Task.await(holder, 15_000)
   end
 
-  test "the lease-lost retention path reserves the receipt's own declared retention bound" do
+  test "lease-lost retention carries one shared absolute allowance into its worker" do
     # ADR 0016 gives one formula for `receipt_retention_ms`, and a committed
     # period of three is exactly where a second derivation by integer division
-    # disagreed with it: every receipt declared one millisecond of retention and
-    # the lease-lost path reserved zero for it. Proving the pure function proves
-    # only the pure function, so this observes the budget the running system
-    # actually hands the retention worker.
-    grace = 3
+    # disagrees with it: the canonical result is one millisecond while `div/2`
+    # produces zero. Proving the pure function alone proves nothing about the
+    # running path, so this observes both the allowance production opens and the
+    # exact absolute instant its later lease-lost retention worker receives.
+    # Claim acquisition is an earlier phase of the same episode;
+    # translating the remainder back into a duration would let scheduling delay
+    # refresh it and violate the contract this case protects.
+    assert {:ok, one_millisecond} = Executor.cancellation_bounds(3)
+    assert one_millisecond.receipt_retention_ms == 1
+
+    grace = 4_000
     assert {:ok, bounds} = Executor.cancellation_bounds(grace)
-    assert bounds.receipt_retention_ms == 1
 
     fixture = prepared_fixture("lease-lost-reserve", grace)
     {:ok, local} = start_local(fixture)
@@ -1115,12 +1836,26 @@ defmodule Loopex.Executor.LocalAuthorityContractTest do
 
     # A refutation over an untraced function proves nothing, so the pattern is
     # asserted to have matched exactly the one entry this reads.
-    assert :erlang.trace_pattern({Local, :bounded_work, 3}, true, [:local]) == 1
-    assert :erlang.trace_pattern({Local, :retain_now, 3}, true, [:local]) == 1
+    assert :erlang.trace_pattern({Local, :bound_only_work_until, 2}, true, [:local]) == 1
+    assert :erlang.trace_pattern({Local, :retain_after_lease_loss, 2}, true, [:local]) == 1
+
+    assert :erlang.trace_pattern(
+             {Local, :receipt_reserve_ms, 1},
+             [{:_, [], [{:return_trace}]}],
+             [:local]
+           ) == 1
+
+    assert :erlang.trace_pattern(
+             {Local, :retention_until, 0},
+             [{:_, [], [{:return_trace}]}],
+             [:local]
+           ) == 1
 
     on_exit(fn ->
-      _ = :erlang.trace_pattern({Local, :bounded_work, 3}, false, [:local])
-      _ = :erlang.trace_pattern({Local, :retain_now, 3}, false, [:local])
+      _ = :erlang.trace_pattern({Local, :bound_only_work_until, 2}, false, [:local])
+      _ = :erlang.trace_pattern({Local, :retain_after_lease_loss, 2}, false, [:local])
+      _ = :erlang.trace_pattern({Local, :receipt_reserve_ms, 1}, false, [:local])
+      _ = :erlang.trace_pattern({Local, :retention_until, 0}, false, [:local])
     end)
 
     task =
@@ -1129,7 +1864,12 @@ defmodule Loopex.Executor.LocalAuthorityContractTest do
         # first instruction removes any window between arming the trace and the
         # calls it has to see.
         :erlang.trace(self(), true, [:call, {:tracer, parent}])
-        Local.execute(local, request, grant(request), [notify: parent], nil)
+        result = Local.execute(local, request, grant(request), [notify: parent], nil)
+        send(parent, {:retention_finished, self(), result})
+
+        receive do
+          :trace_collected -> result
+        end
       end)
 
     assert_receive {:executor_process_started, "lease-lost-reserve", _tool, _environment}, 5_000
@@ -1140,18 +1880,40 @@ defmodule Loopex.Executor.LocalAuthorityContractTest do
     # retention this reserve belongs to.
     stop(fixture.lease)
 
-    _ = Task.yield(task, 15_000) || Task.shutdown(task, :brutal_kill)
+    assert_receive {:retention_finished, tracee, result}, 15_000
+    assert tracee == task.pid
+
+    # Task completion and trace messages travel on different signal paths. A
+    # zero-time mailbox drain after observing completion can therefore run before
+    # the trace messages arrive. Keep the tracee alive, request the VM's delivery
+    # barrier, and only then let it exit; every call and return used below is in
+    # this mailbox before `collect_call_trace/0` starts.
+    delivered = :erlang.trace_delivered(tracee)
+    assert_receive {:trace_delivered, ^tracee, ^delivered}, 5_000
+    send(tracee, :trace_collected)
+    assert Task.await(task, 5_000) == result
 
     events = collect_call_trace()
 
-    assert Enum.any?(events, &match?({Local, :retain_now, _arguments}, &1)),
+    assert Enum.any?(
+             events,
+             &match?({:call, Local, :retain_after_lease_loss, _arguments}, &1)
+           ),
            "the lease-lost retention path was never reached, so its reserve was not observed"
 
-    reserve = lease_lost_reserve!(events)
+    assert canonical_retention_bound!(events, grace) == bounds.receipt_retention_ms
 
-    assert reserve == bounds.receipt_retention_ms,
-           "the lease-lost retention reserved #{reserve} ms where every receipt for this " <>
-             "period declares #{bounds.receipt_retention_ms} ms"
+    {shared_deadline, worker_deadline} = lease_lost_deadline!(events)
+
+    assert worker_deadline == shared_deadline,
+           "the lease-lost retention refreshed or translated the shared absolute deadline: " <>
+             "#{worker_deadline} != #{shared_deadline}"
+
+    source = File.read!(Path.expand("../lib/executor.ex", __DIR__))
+
+    assert source =~
+             ~r/defp retention_until do\s+case Process\.get\(:loopex_retention_episode\) do.*?Process\.put\(:loopex_retention_episode, until\).*?until ->\s+until\s+end/s,
+           "retention_until/0 no longer memoizes and reuses the first settlement deadline"
   end
 
   test "a refusal never renames over an admission marker for the same job" do
@@ -1197,26 +1959,64 @@ defmodule Loopex.Executor.LocalAuthorityContractTest do
     assert replaced["reason"]["code"] == "effective_deadline_reached"
   end
 
-  # The trace is ordered per process, and `retain_now/3` calls `bounded_work/3`
-  # directly, so the first bounded reserve after that entry is the one the
-  # lease-lost retention chose.
-  defp lease_lost_reserve!(events) do
+  defp canonical_retention_bound!(events, grace) do
+    assert Enum.any?(events, &match?({:call, Local, :receipt_reserve_ms, [^grace]}, &1)),
+           "the running settlement never derived its allowance from the canonical formula"
+
     events
-    |> Enum.drop_while(&(not match?({Local, :retain_now, _arguments}, &1)))
     |> Enum.find_value(fn
-      {Local, :bounded_work, [_work, reserve, _lease]} -> {:ok, reserve}
+      {:return, Local, :receipt_reserve_ms, 1, reserve} -> {:ok, reserve}
       _other -> nil
     end)
     |> case do
       {:ok, reserve} -> reserve
-      nil -> flunk("the lease-lost retention entered no bounded work")
+      nil -> flunk("the canonical retention formula returned no observed allowance")
+    end
+  end
+
+  # The trace is ordered per process. Inside `retain_after_lease_loss/2`,
+  # production reads the one shared instant and hands those exact bytes to
+  # `bound_only_work_until/2`; no later phase turns its remainder into a fresh
+  # duration.
+  defp lease_lost_deadline!(events) do
+    all_shared_deadlines =
+      for {:return, Local, :retention_until, 0, value} <- events,
+          do: value
+
+    after_retain =
+      Enum.drop_while(
+        events,
+        &(not match?({:call, Local, :retain_after_lease_loss, _arguments}, &1))
+      )
+
+    worker_deadline =
+      Enum.find_value(after_retain, fn
+        {:call, Local, :bound_only_work_until, [_work, value]} -> {:ok, value}
+        _other -> nil
+      end)
+
+    case {all_shared_deadlines, worker_deadline} do
+      {[first, _later | _rest] = deadlines, {:ok, worker_deadline}} ->
+        assert Enum.uniq(deadlines) == [first],
+               "one settlement returned more than one retention deadline: #{inspect(deadlines)}"
+
+        {first, worker_deadline}
+
+      {deadlines, _worker_deadline} when length(deadlines) < 2 ->
+        flunk("the lease-lost settlement did not read its shared deadline in both phases")
+
+      {_shared_deadlines, nil} ->
+        flunk("the lease-lost retention entered no absolute-deadline bounded work")
     end
   end
 
   defp collect_call_trace(acc \\ []) do
     receive do
       {:trace, _pid, :call, {module, function, arguments}} ->
-        collect_call_trace([{module, function, arguments} | acc])
+        collect_call_trace([{:call, module, function, arguments} | acc])
+
+      {:trace, _pid, :return_from, {module, function, arity}, result} ->
+        collect_call_trace([{:return, module, function, arity, result} | acc])
     after
       0 -> Enum.reverse(acc)
     end
@@ -1382,6 +2182,26 @@ defmodule Loopex.Executor.LocalAuthorityContractTest do
         {current, [next | tail]} -> {current, {next, tail}}
         {current, []} -> {current, {current, []}}
       end)
+    end
+  end
+
+  defp clock_provider_with_action([first | rest], action_sample, action)
+       when is_integer(action_sample) and action_sample > 0 and is_function(action, 0) do
+    {:ok, clock} = Agent.start_link(fn -> {1, first, rest} end)
+    on_exit(fn -> stop(clock) end)
+
+    fn ->
+      {sample, act?} =
+        Agent.get_and_update(clock, fn
+          {index, current, [next | tail]} ->
+            {{current, index == action_sample}, {index + 1, next, tail}}
+
+          {index, current, []} ->
+            {{current, index == action_sample}, {index + 1, current, []}}
+        end)
+
+      if act?, do: action.()
+      sample
     end
   end
 

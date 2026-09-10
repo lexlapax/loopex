@@ -600,7 +600,7 @@ for shadowed in $shadow_names; do
   esac
 done
 bypass="(/["'"'"']*|(^|[[:space:]])(command|exec)([[:space:]]+-[^[:space:]]*)*[[:space:]]+["'"'"']?|env([[:space:]]+[^[:space:]]+)*[[:space:]]+["'"'"']?|(^|[[:space:]])([A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*[[:space:]]+)+["'"'"']?)($interpreter_alternation)([^[:alnum:]_/]|$)"
-# The scan covers every tracked file with one exclusion: this runner, which must
+# The interpreter scan covers every tracked file with one exclusion: this runner, which must
 # name the interpreters in order to shadow and report them, and whose drift the
 # bound-artifact digest catches instead. Markdown is NOT excluded. Excluding it
 # by file type was unsafe, because a mode-0644 file is still executable as
@@ -620,12 +620,14 @@ case "$scan_status" in
   *) fail "the bypass scan could not run (git grep exit $scan_status); evidence is unavailable (outcome 8)" ;;
 esac
 
-# Every textual way to mutate the search-path variable is rejected: plain and
-# exported assignment, `unset`, `printf -v`, an array-element write, and a
-# declaration that names it. No repository script has a legitimate reason to
-# touch it, and none does, so the rule needs no judgment about the value --
-# requiring the old value to be carried forward failed both by prepending a real
-# interpreter directory ahead of the stub and by deleting the stub root.
+# The original textual matcher is unchanged. Amendment 6 admits four reviewed
+# child-constructor occurrences only after their parsed definition and immediate
+# use context are checked. No product file is excluded. These children have a
+# different path; this is not a claim that they run under the aggregate's stubs.
+# Every other match remains a refusal, including an extra match in either
+# registered file. The checker and its syntax corpus contain the rule's own
+# examples; only those two bound enforcement files join this runner's exclusion
+# for this scan, never for the interpreter-invocation scan above.
 #
 # THIS IS NOT AIRTIGHT, and the gate says so rather than claiming otherwise.
 # Indirection -- a nameref, `eval`, or a computed variable name -- mutates the
@@ -649,15 +651,35 @@ esac
 # line a binding is the construct, not the punctuation.
 path_mutation='(^|[[:space:]]|;|\(|\{)(export|declare|typeset|local|readonly|unset|read|mapfile|readarray|for|select)([[:space:]]+-[^[:space:]]*)*([[:space:]]+[^[:space:]]+)*[[:space:]]+["'"'"'"]?PATH["'"'"'"]?([^[:alnum:]_]|$)|(^|[[:space:]]|;|\(|\{)["'"'"'"]?PATH["'"'"'"]?([[:space:]]*=|\[)|printf[[:space:]]+([^[:space:]]+[[:space:]]+)*-v[[:space:]]+["'"'"'"]?PATH["'"'"'"]?'
 mutation_status=0
-git grep -nE "$path_mutation" -- $scan_tree >/dev/null 2>&1 || mutation_status=$?
+search_path_matches="$isolated_root/search-path-matches"
+git grep -n -zE "$path_mutation" -- $scan_tree \
+  ':(exclude)scripts/m0-child-env-check.exs' \
+  ':(exclude)apps/loopex/test/m0_child_env_check_test.exs' \
+  >"$search_path_matches" || mutation_status=$?
 case "$mutation_status" in
-  0)
-    git grep -nE "$path_mutation" -- $scan_tree >&2
-    fail "a search-path mutation outside the runner would displace the shadow root (outcome 8)"
-    ;;
-  1) ;;
+  0|1) ;;
   *) fail "the search-path scan could not run (git grep exit $mutation_status); evidence is unavailable (outcome 8)" ;;
 esac
+elixir scripts/m0-child-env-check.exs "$PWD" "$search_path_matches" \
+  || fail "an unregistered or unproved search-path construction survives (outcome 8)"
+
+require_named_test apps/loopex/test/m0_child_env_check_test.exs "the four reviewed occurrences pass through the real Git matcher and checker"
+require_named_test apps/loopex/test/m0_child_env_check_test.exs "every changed constructor is refused in its own boundary"
+require_named_test apps/loopex/test/m0_child_env_check_test.exs "construction use and intervening reassignment are checked independently"
+require_named_test apps/loopex/test/m0_child_env_check_test.exs "a constructor moved to another function or module is refused"
+require_named_test apps/loopex/test/m0_child_env_check_test.exs "duplicate functions and extra occurrences in registered files are refused"
+require_named_test apps/loopex/test/m0_child_env_check_test.exs "an extra binding on an admitted line is not subtracted"
+require_named_test apps/loopex/test/m0_child_env_check_test.exs "the legacy binding forms remain refused outside the registered occurrences"
+require_named_test apps/loopex/test/m0_child_env_check_test.exs "a matching copy at another path is not a registered boundary"
+require_named_test apps/loopex/test/m0_child_env_check_test.exs "malformed and duplicated matcher frames are refused"
+require_named_test apps/loopex/test/m0_child_env_check_test.exs "mismatched line evidence and unavailable source are refused"
+require_named_test apps/loopex/test/m0_child_env_check_test.exs "malformed registered Elixir is unavailable evidence and an empty scan is clean"
+require_named_test apps/loopex/test/m0_child_env_check_test.exs "the standalone CLI refuses unregistered matches and missing input"
+run_selector apps/loopex/test/m0_child_env_check_test.exs 12
+require_named_test apps/loopex_llm_reqllm/test/m0_child_environment_conformance_test.exs "the actual provider worker receives the fixed PATH without the caller sentinel"
+require_named_test apps/loopex_llm_reqllm/test/m0_child_environment_conformance_test.exs "actual fixture Git children are scrubbed and the offline build bypasses parent PATH shims"
+run_selector apps/loopex_llm_reqllm/test/m0_child_environment_conformance_test.exs 2
+
 for residue in \
   scripts/check-status.sh \
   scripts/check-agent-bootstrap.sh \

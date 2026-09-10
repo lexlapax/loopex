@@ -43,7 +43,240 @@ defmodule Loopex.ProviderAttemptExitModel do
   def complete(request, options, _progress) do
     observer = Keyword.fetch!(options, :observer)
     send(observer, {:provider_attempt_exit_model_called, self(), request})
-    exit(:third_party_model_down)
+
+    receive do
+      :provider_attempt_exit_model_never_returns -> :unreachable
+    end
+  end
+end
+
+defmodule Loopex.ProviderAttemptRegisteredLifetimeModel do
+  @moduledoc false
+
+  @behaviour Loopex.Model
+
+  alias Loopex.Runtime.ProviderLifetime
+
+  @impl Loopex.Model
+  def complete(request, options, _progress) do
+    observer = Keyword.fetch!(options, :observer)
+    resource_mode = Keyword.get(options, :resource_mode, :hold)
+    return_result? = Keyword.get(options, :return_result, false)
+    registration_phase = Keyword.get(options, :registration_phase, :immediate)
+    hold_result? = Keyword.get(options, :hold_result, false)
+    callback = self()
+    stop_reference = make_ref()
+
+    resource =
+      spawn(fn ->
+        receive do
+          {:loopex_provider_resource_stop, ^stop_reference, stop, requester, cooperative_deadline,
+           observation_deadline}
+          when is_reference(stop) and is_pid(requester) and
+                 is_integer(cooperative_deadline) and is_integer(observation_deadline) and
+                 cooperative_deadline <= observation_deadline ->
+            send(observer, {:provider_resource_stop_requested, self(), requester, stop})
+
+            case resource_mode do
+              :hold ->
+                receive do
+                  {:release_provider_resource, ^stop} ->
+                    send(requester, {:loopex_provider_resource_stopped, stop, self()})
+                end
+
+              :crash_before_ack ->
+                exit(:provider_resource_cleanup_crashed)
+
+              :normal_before_ack ->
+                :ok
+
+              :ack_then_crash ->
+                send(requester, {:loopex_provider_resource_stopped, stop, self()})
+                send(observer, {:provider_resource_stop_acknowledged, self(), stop})
+
+                receive do
+                  {:release_provider_resource_after_ack, ^stop} ->
+                    exit(:provider_resource_cleanup_crashed)
+                end
+            end
+        end
+      end)
+
+    if registration_phase == :held do
+      send(observer, {:provider_resource_registration_pending, callback, resource, request})
+
+      receive do
+        {:release_provider_resource_registration, ^callback} -> :ok
+      end
+    end
+
+    {:managed, retaining_guard, cleanup_grace_ms} =
+      ProviderLifetime.register(resource, stop_reference)
+
+    true = is_integer(cleanup_grace_ms) and cleanup_grace_ms > 0
+    send(observer, {:provider_resource_registered, callback, resource, request})
+    send(observer, {:provider_resource_retainer, callback, resource, retaining_guard})
+
+    if return_result? do
+      if hold_result? do
+        send(observer, {:provider_result_ready, callback, resource})
+
+        receive do
+          {:release_provider_result, ^callback} -> :ok
+        end
+      end
+
+      {:ok,
+       %{
+         text: "registered resource completed",
+         identity: %{provider: "scripted", model: request.model, endpoint: "in-process"},
+         usage: %{input_tokens: 1, output_tokens: 1},
+         tool_calls: [],
+         delta_count: 0,
+         streamed: false,
+         canonical_request_bytes: request.canonical_request_bytes,
+         staged_request_digest: request.staged_request_digest
+       }}
+    else
+      receive do
+        :provider_attempt_registered_lifetime_model_never_returns -> :unreachable
+      end
+    end
+  end
+end
+
+defmodule Loopex.ProviderAttemptUnlinkingModel do
+  @moduledoc false
+
+  @behaviour Loopex.Model
+
+  @impl Loopex.Model
+  def complete(request, options, _progress) do
+    observer = Keyword.fetch!(options, :observer)
+    mode = Keyword.fetch!(options, :unlink_mode)
+    callback = self()
+
+    guard =
+      case Process.info(callback, :links) do
+        {:links, [guard]} when is_pid(guard) -> guard
+        {:links, links} -> raise "provider callback did not have one guard: #{inspect(links)}"
+      end
+
+    Process.unlink(guard)
+    send(observer, {:provider_attempt_unlinked, mode, callback, guard})
+
+    case mode do
+      :return ->
+        {:ok,
+         %{
+           text: "detached callback completed",
+           identity: %{provider: "scripted", model: request.model, endpoint: "in-process"},
+           usage: %{input_tokens: 1, output_tokens: 1},
+           tool_calls: [],
+           delta_count: 0,
+           streamed: false,
+           canonical_request_bytes: request.canonical_request_bytes,
+           staged_request_digest: request.staged_request_digest
+         }}
+
+      :hold ->
+        receive do
+          :provider_attempt_unlinking_model_never_returns -> :unreachable
+        end
+    end
+  end
+end
+
+defmodule Loopex.ProviderLinkedCredentialFailureModel do
+  @moduledoc false
+
+  @behaviour Loopex.Model
+
+  @credential "provider-credential-shaped-linked-exit-must-stay-private"
+
+  def credential, do: @credential
+
+  @impl Loopex.Model
+  def complete(request, options, _progress) do
+    observer = Keyword.fetch!(options, :observer)
+    callback = self()
+    send(observer, {:provider_linked_credential_model_called, callback, request})
+
+    child =
+      spawn_link(fn ->
+        receive do
+          {:fail_linked_callback, ^callback} ->
+            exit({:provider_credential, @credential})
+        end
+      end)
+
+    send(child, {:fail_linked_callback, callback})
+
+    receive do
+      :provider_linked_credential_model_never_returns -> :unreachable
+    end
+  end
+end
+
+defmodule Loopex.ProviderCredentialFailureModel do
+  @moduledoc false
+
+  @behaviour Loopex.Model
+
+  @credential "provider-credential-shaped-task-failure-must-stay-private"
+
+  def credential, do: @credential
+
+  @impl Loopex.Model
+  def complete(request, options, _progress) do
+    observer = Keyword.fetch!(options, :observer)
+    failure_kind = Keyword.fetch!(options, :failure_kind)
+    send(observer, {:provider_credential_failure_model_called, failure_kind, self(), request})
+
+    case failure_kind do
+      :raise -> raise @credential
+      :throw -> throw({:provider_credential, @credential})
+      :exit -> exit({:provider_credential, @credential})
+    end
+  end
+end
+
+defmodule Loopex.ProviderDeadlineForgeryModel do
+  @moduledoc false
+
+  @behaviour Loopex.Model
+
+  @impl Loopex.Model
+  def complete(request, options, _progress) do
+    observer = Keyword.fetch!(options, :observer)
+    send(observer, {:provider_deadline_forgery_model_called, self(), request})
+
+    {:loopex_provider_deadline_elapsed, request.deadline, request.deadline}
+  end
+end
+
+defmodule Loopex.ProviderBinaryUsageMalformedModel do
+  @moduledoc false
+
+  @behaviour Loopex.Model
+
+  @impl Loopex.Model
+  def complete(request, _options, _progress) do
+    {:ok,
+     %{
+       "text" => "invalid binary-keyed reply",
+       "identity" => %{
+         "provider" => nil,
+         "model" => "scripted:v1",
+         "endpoint" => "in-process"
+       },
+       "usage" => %{"input_tokens" => 1, "output_tokens" => 1},
+       "tool_calls" => [],
+       "delta_count" => 0,
+       "streamed" => false,
+       "canonical_request_bytes" => request.canonical_request_bytes,
+       "staged_request_digest" => request.staged_request_digest
+     }}
   end
 end
 
@@ -101,24 +334,28 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     refute_receive {:holding, _worker}, 0
 
     M1RuntimeTestStore.release(waiter)
-    assert_receive {:holding, worker}, 5_000
+    assert_receive {:holding, callback}, 5_000
 
-    assert_receive {:trace, ^control, :send, permit, ^worker}, 5_000
+    assert_receive {:trace, ^control, :send,
+                    {:loopex_provider_permit, _reference, _binding} = permit, permit_worker},
+                   5_000
+
+    refute callback == permit_worker
     expected_binding = Map.put(attempt_identity(opened), "session_id", session_id)
 
     permit_binding = coherent_attempt_binding!(permit, expected_binding)
     assert permit_binding == expected_binding
 
-    {caller, request} = await_control_request_binding(control, worker, expected_binding)
+    {caller, request} = await_control_request_binding(control, permit_worker, expected_binding)
     assert caller == coordinator_of(fixture.runtime)
     assert coherent_attempt_binding!(request, expected_binding) == expected_binding
 
-    authority = permit_authority!(fixture, session_id, opened, request, worker)
+    authority = permit_authority!(fixture, session_id, opened, request, permit_worker)
 
     assert authority.runtime_id == fixture.runtime_id
     assert authority.session_id == session_id
     assert authority.coordinator == caller
-    assert authority.worker == worker
+    assert authority.worker == permit_worker
     assert authority.owner_epoch > 0
     assert is_binary(authority.owner_incarnation_id)
     assert authority.journal_version > 0
@@ -143,14 +380,14 @@ defmodule Loopex.ProviderAttemptProtocolTest do
 
     duplicate_request =
       request
-      |> replace_exact(worker, fresh_worker)
+      |> replace_exact(permit_worker, fresh_worker)
       |> replace_exact(permit_reference, make_ref())
 
     assert {:error, _spent_attempt} = GenServer.call(control, duplicate_request, 5_000)
     refute_receive {:fresh_permit_received, ^fresh_worker, _message}, 0
-    refute_receive {:trace, ^control, :send, _second_permit, ^worker}, 0
+    refute_receive {:trace, ^control, :send, _second_permit, ^permit_worker}, 0
 
-    send(worker, :release)
+    send(callback, :release)
     assert await_event(attachment, "run.finished")["outcome"] == "completed"
     assert length(AgentLoopTestModel.dispatched(fixture.model)) == 1
     :erlang.trace(control, false, [:all])
@@ -167,21 +404,29 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     # the coordinator's own pid as caller, so ownership, position, worker, and
     # deadline all pass and only the spent-identity check can refuse. The reply
     # is routed to an alias this process owns, so the coordinator never sees a
-    # stray message and the exact refusal reason is asserted by name.
+    # stray message and the exact refusal reason is asserted by name. A traced
+    # positive Store read establishes the observer before the duplicate. After
+    # its exact refusal and a trace-delivery barrier, a second read would be
+    # unnecessary work inside Control's runtime-wide serialization point.
     fixture = start(script: [%{text: "done", calls: [], hold: self()}], progress_to: self())
     {:ok, %{control: control}} = Runtime.children(fixture.runtime)
     :erlang.trace(control, true, [:send, :receive])
 
     {session_id, attachment, {:accepted, "prompt-1"}} = Fixture.run(fixture, "open once")
-    assert_receive {:holding, worker}, 5_000
-    assert_receive {:trace, ^control, :send, permit, ^worker}, 5_000
+    assert_receive {:holding, callback}, 5_000
+
+    assert_receive {:trace, ^control, :send,
+                    {:loopex_provider_permit, _reference, _binding} = permit, permit_worker},
+                   5_000
+
+    refute callback == permit_worker
 
     records = Fixture.records(fixture, session_id)
     [opened] = Enum.filter(records, &(&1.payload[:kind] == "model_attempt_opened_v1"))
     expected_binding = Map.put(attempt_identity(opened.payload), "session_id", session_id)
     assert coherent_attempt_binding!(permit, expected_binding) == expected_binding
 
-    {caller, request} = await_control_request_binding(control, worker, expected_binding)
+    {caller, request} = await_control_request_binding(control, permit_worker, expected_binding)
     assert caller == coordinator_of(fixture.runtime)
 
     [permit_reference] =
@@ -203,17 +448,44 @@ defmodule Loopex.ProviderAttemptProtocolTest do
 
     duplicate_request =
       request
-      |> replace_exact(worker, fresh_worker)
+      |> replace_exact(permit_worker, fresh_worker)
       |> replace_exact(permit_reference, make_ref())
 
+    store = fixture.store
+    :erlang.trace(store, true, [:receive])
     reply_alias = :erlang.alias([:reply])
-    send(control, {:"$gen_call", {caller, [:alias | reply_alias]}, duplicate_request})
 
-    assert_receive {[:alias | ^reply_alias], {:error, :provider_attempt_already_permitted}}, 5_000
-    refute_receive {:fresh_permit_received, ^fresh_worker, _message}, 0
-    refute_receive {:trace, ^control, :send, _second_permit, ^worker}, 0
+    try do
+      assert {:ok, [_record]} =
+               Loopex.M1RuntimeTestStore.load_records(store, session_id, 0, 1)
 
-    send(worker, :release)
+      assert_receive {:trace, ^store, :receive,
+                      {:"$gen_call", _reader, {:load_records, ^session_id, 0, 1}}},
+                     5_000
+
+      baseline_barrier = :erlang.trace_delivered(store)
+      assert_receive {:trace_delivered, ^store, ^baseline_barrier}, 5_000
+
+      send(control, {:"$gen_call", {caller, [:alias | reply_alias]}, duplicate_request})
+
+      assert_receive {[:alias | ^reply_alias], {:error, :provider_attempt_already_permitted}},
+                     5_000
+
+      refusal_barrier = :erlang.trace_delivered(store)
+      assert_receive {:trace_delivered, ^store, ^refusal_barrier}, 5_000
+
+      refute_receive {:trace, ^store, :receive,
+                      {:"$gen_call", _reader, {:load_records, ^session_id, _after, _limit}}},
+                     0
+
+      refute_receive {:fresh_permit_received, ^fresh_worker, _message}, 0
+      refute_receive {:trace, ^control, :send, _second_permit, ^permit_worker}, 0
+    after
+      :erlang.trace(store, false, [:receive])
+      :erlang.unalias(reply_alias)
+    end
+
+    send(callback, :release)
     assert await_event(attachment, "run.finished")["outcome"] == "completed"
     assert length(AgentLoopTestModel.dispatched(fixture.model)) == 1
     :erlang.trace(control, false, [:all])
@@ -237,15 +509,20 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     :erlang.trace(control, true, [:send, :receive])
 
     {session_id, attachment, {:accepted, "prompt-1"}} = Fixture.run(fixture, "open once")
-    assert_receive {:holding, worker}, 5_000
-    assert_receive {:trace, ^control, :send, permit, ^worker}, 5_000
+    assert_receive {:holding, callback}, 5_000
+
+    assert_receive {:trace, ^control, :send,
+                    {:loopex_provider_permit, _reference, _binding} = permit, permit_worker},
+                   5_000
+
+    refute callback == permit_worker
 
     records = Fixture.records(fixture, session_id)
     [opened] = Enum.filter(records, &(&1.payload[:kind] == "model_attempt_opened_v1"))
     expected_binding = Map.put(attempt_identity(opened.payload), "session_id", session_id)
     assert coherent_attempt_binding!(permit, expected_binding) == expected_binding
 
-    {caller, request} = await_control_request_binding(control, worker, expected_binding)
+    {caller, request} = await_control_request_binding(control, permit_worker, expected_binding)
     assert caller == coordinator_of(fixture.runtime)
     assert spent_attempt_bindings(control) == [expected_binding]
 
@@ -279,7 +556,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
 
       tampered_request =
         request
-        |> replace_exact(worker, fresh_worker)
+        |> replace_exact(permit_worker, fresh_worker)
         |> replace_exact(permit_reference, make_ref())
         |> put_elem(1, binding)
 
@@ -291,9 +568,9 @@ defmodule Loopex.ProviderAttemptProtocolTest do
       assert spent_attempt_bindings(control) == [expected_binding]
     end
 
-    refute_receive {:trace, ^control, :send, _second_permit, ^worker}, 0
+    refute_receive {:trace, ^control, :send, _second_permit, ^permit_worker}, 0
 
-    send(worker, :release)
+    send(callback, :release)
     assert await_event(attachment, "run.finished")["outcome"] == "completed"
     assert length(AgentLoopTestModel.dispatched(fixture.model)) == 1
     :erlang.trace(control, false, [:all])
@@ -497,14 +774,14 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     :ok =
       M1RuntimeTestStore.delay_after_record(
         fixture.store,
-        "model_attempt_settled_v1",
+        "model_attempt_settled_v2",
         self()
       )
 
     {session_id, _attachment, {:accepted, "prompt-1"}} =
       Fixture.run(fixture, "settlement page boundary")
 
-    assert_receive {:record_linearized, waiter, _store, "model_attempt_settled_v1", _transition,
+    assert_receive {:record_linearized, waiter, _store, "model_attempt_settled_v2", _transition,
                     {:committed, _tx_id, receipt}},
                    5_000
 
@@ -520,17 +797,9 @@ defmodule Loopex.ProviderAttemptProtocolTest do
 
     event_prefix = events_before_receipt(retained_events, receipt)
 
-    assert {:ok, settlement_only} =
+    assert {:error, :incomplete_model_attempt_settlement_pair} =
              SessionState.recover(session_id, settlement_prefix, event_prefix)
 
-    [pending_terminal] = SessionState.pending_work(settlement_only)
-    assert pending_terminal.stage == "model_attempt_pending_terminal"
-
-    settlement = List.last(settlement_prefix).payload
-    run_id = settlement["run_id"]
-    {_declared, charged} = SessionState.accounting(settlement_only, run_id)
-    assert charged == %{tokens: 0, source: nil}
-    refute Enum.any?(SessionState.elements(settlement_only, run_id), &assistant_element?/1)
     refute Enum.any?(event_prefix, &(public_event_kind(&1) == "run.finished"))
     refute Enum.any?(receive_progress(), &(&1.kind == :model_stream_closed))
 
@@ -552,8 +821,8 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     recovery_pages = receive_record_pages()
     assert Enum.all?(recovery_pages, fn {_after_version, rows} -> length(rows) <= 1 end)
 
-    assert consecutive_page_kinds(recovery_pages, "model_attempt_settled_v1") == [
-             "model_attempt_settled_v1",
+    assert consecutive_page_kinds(recovery_pages, "model_attempt_settled_v2") == [
+             "model_attempt_settled_v2",
              "run_terminal_committed"
            ]
 
@@ -577,8 +846,8 @@ defmodule Loopex.ProviderAttemptProtocolTest do
         source_attempt.binding
       )
 
-    assert_receive {:holding, source_worker}, 5_000
-    assert source_worker == source_attempt.worker
+    assert_receive {:holding, source_callback}, 5_000
+    refute source_callback == source_attempt.worker
 
     target =
       start(script: [%{text: "target", calls: [], hold: self(), hold_timeout_ms: 30_000}])
@@ -587,7 +856,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     target_worker_pid = target_attempt.worker
 
     send(target_worker_pid, source_permit)
-    refute_receive {:holding, ^target_worker_pid}, 50
+    refute_receive {:holding, _target_callback}, 50
     assert AgentLoopTestModel.dispatched(target.model) == []
 
     target_shaped_permit =
@@ -603,7 +872,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
       )
 
     send(target_worker_pid, wrong_permit)
-    refute_receive {:holding, ^target_worker_pid}, 50
+    refute_receive {:holding, _target_callback}, 50
     assert AgentLoopTestModel.dispatched(target.model) == []
 
     suspend_process(target_worker_pid)
@@ -618,15 +887,15 @@ defmodule Loopex.ProviderAttemptProtocolTest do
 
     send(target_worker_pid, target_permit)
     resume_process(target_worker_pid)
-    assert_receive {:holding, target_worker}, 5_000
-    assert target_worker == target_attempt.worker
+    assert_receive {:holding, target_callback}, 5_000
+    refute target_callback == target_attempt.worker
 
-    send(target_worker, :release)
+    send(target_callback, :release)
 
     assert await_event(target_attempt.attachment, "run.finished")["outcome"] == "completed"
     assert length(AgentLoopTestModel.dispatched(target.model)) == 1
 
-    send(source_worker, :release)
+    send(source_callback, :release)
     assert await_event(source_attempt.attachment, "run.finished")["outcome"] == "completed"
     assert length(AgentLoopTestModel.dispatched(source.model)) == 1
   end
@@ -656,7 +925,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
 
     records = Fixture.records(fixture, attempt.session_id)
     opens = records_of_kind(records, "model_attempt_opened_v1")
-    settlements = records_of_kind(records, "model_attempt_settled_v1")
+    settlements = records_of_kind(records, "model_attempt_settled_v2")
 
     assert Enum.map(opens, & &1["attempt"]) == [1, 2]
     assert Enum.map(settlements, & &1["attempt"]) == [1, 2]
@@ -673,18 +942,56 @@ defmodule Loopex.ProviderAttemptProtocolTest do
 
   test "a third-party Model task DOWN after dispatch is ambiguous terminal evidence and never retries" do
     fixture = start(script: [], model_module: Loopex.ProviderAttemptExitModel)
+    attempt = queue_provider_permit_request(fixture, "third-party model task down")
+    worker_monitor = Process.monitor(attempt.worker)
+    resume_process(attempt.control)
 
-    {session_id, attachment, {:accepted, "prompt-1"}} =
-      Fixture.run(fixture, "third-party model task down")
+    assert_receive {:provider_attempt_exit_model_called, callback, _request}, 5_000
+    assert is_pid(callback)
+    guard = provider_guard!(callback)
+    coordinator = attempt.coordinator
+    callback_monitor = Process.monitor(callback)
+    guard_monitor = Process.monitor(guard)
+    assert 1 = :erlang.trace(coordinator, true, [:send])
+    suspend_process(guard)
 
-    assert_receive {:provider_attempt_exit_model_called, worker, _request}, 5_000
-    assert is_pid(worker)
-    assert await_event(attachment, "run.finished")["outcome"] == "failed"
+    try do
+      Process.exit(attempt.worker, :kill)
+      assert_receive {:DOWN, ^worker_monitor, :process, _worker, :killed}, 5_000
+
+      assert_receive {:trace, ^coordinator, :send,
+                      {:loopex_provider_tree_stop, _provider_reference, _stop, ^coordinator,
+                       cleanup}, ^guard},
+                     5_000
+
+      assert map_size(cleanup) == 2
+      assert is_integer(cleanup.cooperative_deadline)
+      assert is_integer(cleanup.observation_deadline)
+      assert cleanup.observation_deadline >= cleanup.cooperative_deadline
+      assert Process.alive?(callback)
+
+      refute Enum.any?(
+               Fixture.events(fixture, attempt.session_id),
+               &(public_event_kind(&1) == "run.finished")
+             ),
+             "the terminal committed before the provider callback tree was reaped"
+
+      resume_process(guard)
+      assert_receive {:DOWN, ^callback_monitor, :process, ^callback, :killed}, 5_000
+      assert_receive {:DOWN, ^guard_monitor, :process, ^guard, :normal}, 5_000
+      refute Process.alive?(callback)
+      assert await_event(attempt.attachment, "run.finished")["outcome"] == "failed"
+    after
+      resume_process(guard)
+
+      if Process.alive?(coordinator), do: :erlang.trace(coordinator, false, [:all])
+    end
+
     refute_receive {:provider_attempt_exit_model_called, _other_worker, _request}, 100
 
-    records = Fixture.records(fixture, session_id)
+    records = Fixture.records(fixture, attempt.session_id)
     assert Enum.map(records_of_kind(records, "model_attempt_opened_v1"), & &1["attempt"]) == [1]
-    [settlement] = records_of_kind(records, "model_attempt_settled_v1")
+    [settlement] = records_of_kind(records, "model_attempt_settled_v2")
     assert settlement["transport"] == "dispatched_or_unknown"
     assert settlement["termination"] == nil
     assert settlement["conversation"] == "none"
@@ -695,6 +1002,675 @@ defmodule Loopex.ProviderAttemptProtocolTest do
              "source" => "estimated",
              "basis" => "remaining_allowance"
            }
+  end
+
+  test "a provider callback result cannot survive that callback exiting abnormally" do
+    fixture = start(script: [], model_module: Loopex.ProviderAttemptExitModel)
+    attempt = queue_provider_permit_request(fixture, "callback dies after answering")
+    resume_process(attempt.control)
+
+    assert_receive {:provider_attempt_exit_model_called, callback, request}, 5_000
+    guard = provider_guard!(callback)
+    reference = provider_reference!(attempt.coordinator, attempt.worker, guard)
+
+    send(
+      guard,
+      {:loopex_provider_callback_result, reference, callback, {:ok, adapter_reply(request, [])}}
+    )
+
+    assert await_current_function(guard, :await_provider_callback_exit, 9)
+    Process.exit(callback, :kill)
+
+    assert await_event(attempt.attachment, "run.finished")["outcome"] == "failed"
+
+    [settlement] =
+      fixture
+      |> Fixture.records(attempt.session_id)
+      |> records_of_kind("model_attempt_settled_v2")
+
+    assert settlement["transport"] == "dispatched_or_unknown"
+
+    assert settlement["result"] == %{
+             "kind" => "error",
+             "category" => "model_call_failed"
+           }
+  end
+
+  test "a provider callback tree cannot settle until its registered resource proves cleanup" do
+    fixture = start(script: [], model_module: Loopex.ProviderAttemptRegisteredLifetimeModel)
+    attempt = queue_provider_permit_request(fixture, "registered provider lifetime")
+    worker_monitor = Process.monitor(attempt.worker)
+    resume_process(attempt.control)
+
+    assert_receive {:provider_resource_registered, callback, resource, _request}, 5_000
+    guard = provider_guard!(callback)
+    guard_monitor = Process.monitor(guard)
+    resource_monitor = Process.monitor(resource)
+
+    Process.exit(attempt.worker, :kill)
+    assert_receive {:DOWN, ^worker_monitor, :process, _worker, :killed}, 5_000
+
+    assert_receive {:provider_resource_stop_requested, ^resource, requester, stop}, 5_000
+    assert requester == guard
+    assert Process.alive?(guard)
+
+    refute Enum.any?(
+             Fixture.events(fixture, attempt.session_id),
+             &(public_event_kind(&1) == "run.finished")
+           ),
+           "the terminal committed before the registered provider resource proved cleanup"
+
+    send(resource, {:release_provider_resource, stop})
+    assert_receive {:DOWN, ^resource_monitor, :process, ^resource, :normal}, 5_000
+    assert_receive {:DOWN, ^guard_monitor, :process, ^guard, :normal}, 5_000
+    assert await_event(attempt.attachment, "run.finished")["outcome"] == "failed"
+  end
+
+  test "provider resource registration names the guard that outlives the callback and requests cleanup" do
+    fixture =
+      start(
+        script: [],
+        model_module: Loopex.ProviderAttemptRegisteredLifetimeModel,
+        model_options: [return_result: true, hold_result: true]
+      )
+
+    {_session_id, attachment, {:accepted, "prompt-1"}} =
+      Fixture.run(fixture, "identify the retaining provider guard")
+
+    assert_receive {:provider_resource_registered, callback, resource, _request}, 5_000
+    assert_receive {:provider_resource_retainer, ^callback, ^resource, retainer}, 5_000
+    assert_receive {:provider_result_ready, ^callback, ^resource}, 5_000
+    callback_monitor = Process.monitor(callback)
+    retainer_monitor = Process.monitor(retainer)
+    resource_monitor = Process.monitor(resource)
+
+    send(callback, {:release_provider_result, callback})
+    assert_receive {:DOWN, ^callback_monitor, :process, ^callback, :normal}, 5_000
+    assert_receive {:provider_resource_stop_requested, ^resource, requester, stop}, 5_000
+
+    # The identity returned at registration must match the independently
+    # observed cleanup sender, not the callback that has already returned.
+    assert retainer == requester
+    refute retainer == callback
+    assert Process.alive?(retainer)
+
+    send(resource, {:release_provider_resource, stop})
+    assert_receive {:DOWN, ^resource_monitor, :process, ^resource, :normal}, 5_000
+    assert_receive {:DOWN, ^retainer_monitor, :process, ^retainer, :normal}, 5_000
+    assert await_event(attachment, "run.finished")["outcome"] == "completed"
+  end
+
+  test "a provider guard crash cannot orphan a resource retained by the permitted worker" do
+    fixture = start(script: [], model_module: Loopex.ProviderAttemptRegisteredLifetimeModel)
+    attempt = queue_provider_permit_request(fixture, "provider guard crash")
+    resume_process(attempt.control)
+
+    assert_receive {:provider_resource_registered, callback, resource, _request}, 5_000
+    guard = provider_guard!(callback)
+    guard_monitor = Process.monitor(guard)
+    resource_monitor = Process.monitor(resource)
+
+    Process.exit(guard, :kill)
+    assert_receive {:DOWN, ^guard_monitor, :process, ^guard, :killed}, 5_000
+
+    assert_receive {:provider_resource_stop_requested, ^resource, requester, stop}, 5_000
+    assert requester == attempt.worker
+    assert Process.alive?(resource)
+
+    refute Enum.any?(
+             Fixture.events(fixture, attempt.session_id),
+             &(public_event_kind(&1) == "run.finished")
+           ),
+           "the terminal committed while the independently retained provider resource lived"
+
+    send(resource, {:release_provider_resource, stop})
+    assert_receive {:DOWN, ^resource_monitor, :process, ^resource, :normal}, 5_000
+    assert await_event(attempt.attachment, "run.finished")["outcome"] == "failed"
+  end
+
+  test "a provider resource crash before cleanup proof fails without wedging the coordinator" do
+    fixture =
+      start(
+        script: [],
+        model_module: Loopex.ProviderAttemptRegisteredLifetimeModel,
+        model_options: [resource_mode: :crash_before_ack, return_result: true]
+      )
+
+    {session_id, attachment, {:accepted, "prompt-1"}} =
+      Fixture.run(fixture, "resource crash before cleanup proof")
+
+    assert_receive {:provider_resource_registered, _callback, resource, _request}, 5_000
+    assert_receive {:provider_resource_stop_requested, ^resource, _requester, _stop}, 5_000
+
+    assert await_event(attachment, "run.finished")["outcome"] == "failed"
+    assert Process.alive?(coordinator_of(fixture.runtime))
+
+    [settlement] =
+      fixture
+      |> Fixture.records(session_id)
+      |> records_of_kind("model_attempt_settled_v2")
+
+    assert settlement["transport"] == "dispatched_or_unknown"
+  end
+
+  test "a provider resource normal exit without acknowledgement is not cleanup proof" do
+    fixture =
+      start(
+        script: [],
+        model_module: Loopex.ProviderAttemptRegisteredLifetimeModel,
+        model_options: [resource_mode: :normal_before_ack, return_result: true]
+      )
+
+    {session_id, attachment, {:accepted, "prompt-1"}} =
+      Fixture.run(fixture, "resource exits normally without cleanup proof")
+
+    assert_receive {:provider_resource_registered, _callback, resource, _request}, 5_000
+    assert_receive {:provider_resource_stop_requested, ^resource, _requester, _stop}, 5_000
+
+    assert await_event(attachment, "run.finished")["outcome"] == "failed"
+    assert Process.alive?(coordinator_of(fixture.runtime))
+
+    [settlement] =
+      fixture
+      |> Fixture.records(session_id)
+      |> records_of_kind("model_attempt_settled_v2")
+
+    assert settlement["transport"] == "dispatched_or_unknown"
+
+    assert settlement["result"] == %{
+             "kind" => "error",
+             "category" => "model_call_failed"
+           }
+  end
+
+  test "a provider resource acknowledgement proves cleanup even if its later exit is abnormal" do
+    fixture =
+      start(
+        script: [],
+        model_module: Loopex.ProviderAttemptRegisteredLifetimeModel,
+        model_options: [resource_mode: :ack_then_crash, return_result: true]
+      )
+
+    {session_id, attachment, {:accepted, "prompt-1"}} =
+      Fixture.run(fixture, "resource acknowledges before abnormal exit")
+
+    assert_receive {:provider_resource_registered, _callback, resource, _request}, 5_000
+    resource_monitor = Process.monitor(resource)
+    assert_receive {:provider_resource_stop_requested, ^resource, _requester, stop}, 5_000
+    assert_receive {:provider_resource_stop_acknowledged, ^resource, ^stop}, 5_000
+
+    refute Enum.any?(
+             Fixture.events(fixture, session_id),
+             &(public_event_kind(&1) == "run.finished")
+           ),
+           "the terminal committed after acknowledgement but before the resource exited"
+
+    send(resource, {:release_provider_resource_after_ack, stop})
+
+    assert_receive {:DOWN, ^resource_monitor, :process, ^resource,
+                    :provider_resource_cleanup_crashed},
+                   5_000
+
+    assert await_event(attachment, "run.finished")["outcome"] == "completed"
+    assert Process.alive?(coordinator_of(fixture.runtime))
+  end
+
+  test "a provider resource that never acknowledges cleanup is force-stopped without wedging the run" do
+    fixture =
+      start(
+        script: [],
+        model_module: Loopex.ProviderAttemptRegisteredLifetimeModel,
+        model_options: [resource_mode: :hold, return_result: true, hold_result: true],
+        cleanup_grace_ms: 25
+      )
+
+    {session_id, attachment, {:accepted, "prompt-1"}} =
+      Fixture.run(fixture, "resource never acknowledges cleanup")
+
+    assert_receive {:provider_resource_registered, callback, resource, _request}, 5_000
+    resource_monitor = Process.monitor(resource)
+    assert_receive {:provider_result_ready, ^callback, ^resource}, 5_000
+
+    :ok =
+      M1RuntimeTestStore.hold_next_record_before_linearization(
+        fixture.store,
+        "run_terminal_committed",
+        self()
+      )
+
+    send(callback, {:release_provider_result, callback})
+    assert_receive {:provider_resource_stop_requested, ^resource, _requester, _stop}, 5_000
+    assert_receive {:DOWN, ^resource_monitor, :process, ^resource, :killed}, 5_000
+
+    assert_receive {:record_held_before_linearization, waiter, _store, "run_terminal_committed",
+                    _transaction},
+                   10_000
+
+    refute Process.alive?(resource),
+           "the unresponsive provider resource survived the terminal proposal"
+
+    M1RuntimeTestStore.release(waiter)
+
+    assert await_event(attachment, "run.finished")["outcome"] == "failed"
+    assert Process.alive?(coordinator_of(fixture.runtime))
+
+    [settlement] =
+      fixture
+      |> Fixture.records(session_id)
+      |> records_of_kind("model_attempt_settled_v2")
+
+    assert settlement["transport"] == "dispatched_or_unknown"
+  end
+
+  test "an abort force stops an unresponsive provider resource and retains bounded failure evidence" do
+    fixture =
+      start(
+        script: [],
+        model_module: Loopex.ProviderAttemptRegisteredLifetimeModel,
+        model_options: [resource_mode: :hold],
+        cleanup_grace_ms: 25
+      )
+
+    {session_id, attachment, {:accepted, "prompt-1"}} =
+      Fixture.run(fixture, "abort unproved provider cleanup")
+
+    assert_receive {:provider_resource_registered, _callback, resource, _request}, 5_000
+    resource_monitor = Process.monitor(resource)
+
+    assert {:accepted, "abort-provider-cleanup"} =
+             Loopex.command(attachment, %{
+               type: :abort,
+               command_id: "abort-provider-cleanup"
+             })
+
+    assert_receive {:provider_resource_stop_requested, ^resource, _requester, _stop}, 5_000
+    assert_receive {:DOWN, ^resource_monitor, :process, ^resource, :killed}, 5_000
+
+    finished = await_event(attachment, "run.finished")
+    assert finished["outcome"] == "cancelled"
+    assert finished["reconciliation_ref"] == nil
+
+    [settlement] =
+      fixture
+      |> Fixture.records(session_id)
+      |> records_of_kind("model_attempt_settled_v2")
+
+    assert settlement["termination"] == "abort"
+    assert settlement["transport"] == "dispatched_or_unknown"
+
+    assert settlement["result"] == %{
+             "kind" => "error",
+             "category" => "model_call_failed"
+           }
+
+    assert Process.alive?(coordinator_of(fixture.runtime))
+  end
+
+  test "a forced provider guard stop reaps every retained or queued provider process before terminal commit" do
+    Enum.each([:retained, :queued], fn phase ->
+      model_options =
+        case phase do
+          :retained -> [resource_mode: :hold]
+          :queued -> [resource_mode: :hold, registration_phase: :held]
+        end
+
+      fixture =
+        start(
+          script: [],
+          model_module: Loopex.ProviderAttemptRegisteredLifetimeModel,
+          model_options: model_options,
+          cleanup_grace_ms: 25
+        )
+
+      {_session_id, attachment, {:accepted, "prompt-1"}} =
+        Fixture.run(fixture, "force a #{phase} provider guard")
+
+      {callback, resource} =
+        case phase do
+          :retained ->
+            assert_receive {:provider_resource_registered, callback, resource, _request}, 5_000
+            {callback, resource}
+
+          :queued ->
+            assert_receive {:provider_resource_registration_pending, callback, resource,
+                            _request},
+                           5_000
+
+            {callback, resource}
+        end
+
+      guard = provider_guard!(callback)
+      suspend_process(guard)
+
+      if phase == :queued do
+        send(callback, {:release_provider_resource_registration, callback})
+
+        assert await_process_message(guard, fn
+                 {:loopex_provider_resource_register, _reference, ^callback, ^resource,
+                  _stop_reference, _registration} ->
+                   true
+
+                 _other ->
+                   false
+               end),
+               "the queued resource registration never reached the suspended guard"
+      end
+
+      :ok =
+        M1RuntimeTestStore.hold_next_record_before_linearization(
+          fixture.store,
+          "run_terminal_committed",
+          self()
+        )
+
+      command_id = "abort-provider-guard-#{phase}"
+
+      assert {:accepted, ^command_id} =
+               Loopex.command(attachment, %{
+                 type: :abort,
+                 command_id: command_id
+               })
+
+      assert_receive {:record_held_before_linearization, waiter, _store, "run_terminal_committed",
+                      transaction},
+                     10_000
+
+      assert Enum.map(transaction.records, &record_kind/1) == [
+               "model_attempt_settled_v2",
+               "run_terminal_committed"
+             ]
+
+      refute Process.alive?(guard), "the #{phase} provider guard survived terminal proposal"
+      refute Process.alive?(callback), "the #{phase} provider callback survived terminal proposal"
+      refute Process.alive?(resource), "the #{phase} provider resource survived terminal proposal"
+
+      M1RuntimeTestStore.release(waiter)
+      assert await_event(attachment, "run.finished")["outcome"] == "cancelled"
+      assert Process.alive?(coordinator_of(fixture.runtime))
+    end)
+  end
+
+  test "an acknowledged provider resource is force stopped before its completed result can commit" do
+    fixture =
+      start(
+        script: [],
+        model_module: Loopex.ProviderAttemptRegisteredLifetimeModel,
+        model_options: [resource_mode: :ack_then_crash, return_result: true, hold_result: true],
+        cleanup_grace_ms: 25
+      )
+
+    {_session_id, attachment, {:accepted, "prompt-1"}} =
+      Fixture.run(fixture, "resource acknowledges but never exits")
+
+    assert_receive {:provider_resource_registered, callback, resource, _request}, 5_000
+    resource_monitor = Process.monitor(resource)
+    assert_receive {:provider_result_ready, ^callback, ^resource}, 5_000
+
+    :ok =
+      M1RuntimeTestStore.hold_next_record_before_linearization(
+        fixture.store,
+        "run_terminal_committed",
+        self()
+      )
+
+    send(callback, {:release_provider_result, callback})
+    assert_receive {:provider_resource_stop_requested, ^resource, _requester, stop}, 5_000
+    assert_receive {:provider_resource_stop_acknowledged, ^resource, ^stop}, 5_000
+
+    assert_receive {:DOWN, ^resource_monitor, :process, ^resource, :killed}, 5_000
+
+    assert_receive {:record_held_before_linearization, waiter, _store, "run_terminal_committed",
+                    _transaction},
+                   10_000
+
+    refute Process.alive?(resource),
+           "the acknowledged provider resource survived the terminal proposal"
+
+    M1RuntimeTestStore.release(waiter)
+    assert await_event(attachment, "run.finished")["outcome"] == "completed"
+    assert Process.alive?(coordinator_of(fixture.runtime))
+  end
+
+  test "a returning third-party Model cannot unlink around provider lifetime cleanup" do
+    fixture =
+      start(
+        script: [],
+        model_module: Loopex.ProviderAttemptUnlinkingModel,
+        model_options: [unlink_mode: :return]
+      )
+
+    {session_id, attachment, {:accepted, "prompt-1"}} =
+      Fixture.run(fixture, "return after unlink")
+
+    assert_receive {:provider_attempt_unlinked, :return, callback, guard}, 5_000
+    await_process_down(callback)
+    await_process_down(guard)
+
+    assert await_event(attachment, "run.finished")["outcome"] == "completed"
+
+    assert length(
+             records_of_kind(Fixture.records(fixture, session_id), "model_attempt_opened_v1")
+           ) == 1
+  end
+
+  test "a blocked third-party Model cannot unlink around provider lifetime cleanup" do
+    fixture =
+      start(
+        script: [],
+        model_module: Loopex.ProviderAttemptUnlinkingModel,
+        model_options: [unlink_mode: :hold]
+      )
+
+    attempt = queue_provider_permit_request(fixture, "hold after unlink")
+    worker_monitor = Process.monitor(attempt.worker)
+    resume_process(attempt.control)
+
+    assert_receive {:provider_attempt_unlinked, :hold, callback, guard}, 5_000
+    Process.exit(attempt.worker, :kill)
+    assert_receive {:DOWN, ^worker_monitor, :process, _worker, :killed}, 5_000
+
+    await_process_down(callback)
+    await_process_down(guard)
+    assert await_event(attempt.attachment, "run.finished")["outcome"] == "failed"
+  end
+
+  test "a crashed provider guard cannot orphan a callback that unlinked from it" do
+    fixture =
+      start(
+        script: [],
+        model_module: Loopex.ProviderAttemptUnlinkingModel,
+        model_options: [unlink_mode: :hold]
+      )
+
+    attempt = queue_provider_permit_request(fixture, "guard crash after callback unlink")
+    resume_process(attempt.control)
+
+    assert_receive {:provider_attempt_unlinked, :hold, callback, guard}, 5_000
+    callback_monitor = Process.monitor(callback)
+    guard_monitor = Process.monitor(guard)
+
+    Process.exit(guard, :kill)
+
+    assert_receive {:DOWN, ^guard_monitor, :process, ^guard, :killed}, 5_000
+    assert_receive {:DOWN, ^callback_monitor, :process, ^callback, :killed}, 5_000
+    assert await_event(attempt.attachment, "run.finished")["outcome"] == "failed"
+    assert Process.alive?(coordinator_of(fixture.runtime))
+  end
+
+  # Concept: a successful provider reply is not evidence that its process tree
+  # has ended; the runtime crosses that boundary only after both callback and
+  # guard are gone.
+  #
+  # Technical depth: the callback's final send and process exit occupy private
+  # BEAM reductions that no public fixture can suspend causally without adding a
+  # product hook. The surrounding behavior cases prove terminal-path cleanup;
+  # this parsed-AST check locks the private handoffs: callback result waits for
+  # callback exit and resource cleanup, while the permitted worker independently
+  # retains that cleanup handle and waits for both guard and resource before it
+  # may return the value.
+  test "a successful provider result crosses each lifetime boundary only after its process exits" do
+    source =
+      File.read!(Path.expand("../lib/loopex/runtime/session_coordinator.ex", __DIR__))
+
+    {:ok, ast} = Code.string_to_quoted(source)
+    await_start = private_function_body!(ast, :await_provider_start, 6)
+    await_guard = private_function_body!(ast, :await_provider_guard, 5)
+    await_callback = private_function_body!(ast, :await_provider_callback, 8)
+    await_callback_exit = private_function_body!(ast, :await_provider_callback_exit, 9)
+    register_resource = private_function_body!(ast, :register_provider_resource, 7)
+    result_after_guard = private_function_body!(ast, :provider_result_after_guard_exit, 5)
+    cleanup_window = private_function_body!(ast, :provider_cleanup_window, 1)
+
+    callback_retained =
+      quote do
+        send(owner, {:loopex_provider_callback_retained, reference, guard, callback})
+      end
+
+    callback_started =
+      quote do
+        send(callback, {:loopex_provider_callback_start, reference, guard})
+      end
+
+    callback_recorded =
+      quote do
+        Process.put({@provider_callback_key, reference}, callback)
+      end
+
+    assert ast_expression_position!(await_start, callback_recorded) <
+             ast_expression_position!(await_start, callback_retained)
+
+    assert ast_expression_position!(await_start, callback_retained) <
+             ast_expression_position!(await_start, callback_started),
+           "third-party provider code can run before the worker retains its callback"
+
+    pending_resource =
+      quote do
+        Process.put(pending_key, %{pid: resource, stop_reference: stop_reference})
+      end
+
+    worker_offer =
+      quote do
+        send(
+          owner,
+          {:loopex_provider_resource_offered, reference, callback, resource, stop_reference,
+           offer}
+        )
+      end
+
+    guard_registration =
+      quote do
+        send(
+          guard,
+          {:loopex_provider_resource_register, reference, callback, resource, stop_reference,
+           registration}
+        )
+      end
+
+    assert ast_expression_position!(register_resource, pending_resource) <
+             ast_expression_position!(register_resource, worker_offer)
+
+    assert ast_expression_position!(register_resource, worker_offer) <
+             ast_expression_position!(register_resource, guard_registration),
+           "the guard can consume a resource registration before an independent owner retains it"
+
+    assert ast_contains_expression?(
+             register_resource,
+             quote do
+               restore_provider_process_value(pending_key, previous)
+             end
+           ),
+           "the callback can retain a stale provider resource handle after registration"
+
+    guard_result = receive_clause_body!(await_guard, :loopex_provider_guard_result)
+
+    assert {:provider_result_after_guard_exit, _metadata,
+            [
+              {:guard, _guard_metadata, nil},
+              {:guard_monitor, _monitor_metadata, nil},
+              {:reference, _reference_metadata, nil},
+              {:result, _result_metadata, nil},
+              {:provider_cleanup_window, _window_metadata,
+               [{:cleanup_grace_ms, _grace_metadata, nil}]}
+            ]} = guard_result,
+           "the supervised worker can wait forever for its provider guard to exit"
+
+    guard_down = receive_clause_body!(await_guard, :DOWN)
+
+    assert ast_contains_expression?(
+             guard_down,
+             quote do
+               stop_provider_callback_handle(retained.callback, cleanup)
+             end
+           ),
+           "guard death can discard the independently retained provider callback"
+
+    assert ast_contains_expression?(
+             guard_down,
+             quote do
+               stop_provider_resource_handle(retained.resource, cleanup)
+             end
+           ),
+           "guard death can discard the independently retained provider resource"
+
+    assert ast_contains_expression?(
+             result_after_guard,
+             quote do
+               await_provider_process_down(guard, guard_monitor, cleanup.cooperative_deadline)
+             end
+           ),
+           "the provider result can cross an unbounded guard-exit wait"
+
+    assert ast_contains_expression?(
+             result_after_guard,
+             quote do
+               force_unproved_provider_guard_stop(guard, guard_monitor, reference, cleanup)
+             end
+           ),
+           "guard-exit timeout can publish the provider result without forced cleanup"
+
+    assert ast_contains_expression?(
+             cleanup_window,
+             quote do
+               Executor.cancellation_bounds(cleanup_grace_ms)
+             end
+           ),
+           "provider cleanup can invent a bound outside the committed cancellation formula"
+
+    assert ast_contains_expression?(
+             cleanup_window,
+             quote do
+               started + cleanup_grace_ms
+             end
+           ),
+           "provider cooperative cleanup does not use the committed grace"
+
+    assert ast_contains_expression?(
+             cleanup_window,
+             quote do
+               started + observation_ms
+             end
+           ),
+           "provider forced-stop observation does not use the derived observation bound"
+
+    callback_result = receive_clause_body!(await_callback, :loopex_provider_callback_result)
+
+    assert {:await_provider_callback_exit, _metadata, arguments} = callback_result
+    assert length(arguments) == 9
+
+    normal_down = receive_clause_body!(await_callback_exit, {:DOWN, :normal})
+
+    assert {:finish_provider_guard, _finish_metadata,
+            [
+              {:owner, _owner_metadata, nil},
+              {:reference, _reference_metadata, nil},
+              {:result, _reply_metadata, nil},
+              {:stop_provider_resource, _stop_metadata,
+               [
+                 {:reference, _cleanup_reference_metadata, nil},
+                 {:cleanup_grace_ms, _cleanup_grace_metadata, nil}
+               ]}
+            ]} = normal_down,
+           "the guard can forward a provider result before its registered resource stops"
   end
 
   test "the authoritative origin closes its model stream before a terminal outcome can publish" do
@@ -825,6 +1801,132 @@ defmodule Loopex.ProviderAttemptProtocolTest do
            }
   end
 
+  # Concept: the deadline instant itself is outside provider authority at the
+  # actual Control send boundary, not merely in the shared Bounds helper.
+  #
+  # Technical depth: the queued dispatch is held while Control's private clock
+  # is scripted to answer one millisecond before the committed deadline at the
+  # early check and exactly the deadline at the final send check. This drives
+  # the real durable-binding read and permit path without racing wall time. A
+  # final comparison changed from `<` to `<=` sends the permit, enters the model,
+  # and fails this case.
+  test "Control refuses a provider permit when its final clock sample equals the committed deadline" do
+    fixture =
+      start(
+        script: [%{text: "must not run", calls: []}],
+        bounds_deadline_ms: 10_000,
+        bounds_token_budget: 17
+      )
+
+    {:ok, %{control: control}} = Runtime.children(fixture.runtime)
+    {:ok, clock} = Agent.start_link(fn -> :not_armed end)
+
+    :sys.replace_state(control, fn state ->
+      Map.put(state, :wall_clock, fn -> next_clock_sample!(clock) end)
+    end)
+
+    attempt = queue_provider_permit_request(fixture, "exact Control deadline")
+    deadline = committed_deadline!(attempt.request_record)
+    Agent.update(clock, fn :not_armed -> [deadline - 1, deadline] end)
+    {:"$gen_call", {_caller, tag}, _request} = attempt.control_message
+
+    # Keep the coordinator from interpreting the deliberately injected clock;
+    # this case owns Control's exact reply and send boundary only.
+    suspend_process(attempt.coordinator)
+
+    try do
+      resume_process(control)
+
+      assert_receive {:trace, ^control, :send, {^tag, {:error, :deadline_elapsed}}, _target},
+                     5_000
+
+      worker = attempt.worker
+
+      refute_receive {:trace, ^control, :send, {:loopex_provider_permit, _reference, _binding},
+                      ^worker},
+                     50
+
+      assert AgentLoopTestModel.dispatched(fixture.model) == []
+      assert Agent.get(clock, & &1) == []
+
+      refute Map.has_key?(
+               control |> :sys.get_state() |> Map.fetch!(:spent_attempts),
+               attempt.binding
+             )
+    after
+      if Process.alive?(control) do
+        :sys.replace_state(control, fn state ->
+          Map.put(state, :wall_clock, fn -> System.system_time(:millisecond) end)
+        end)
+      end
+
+      resume_process(attempt.coordinator)
+    end
+  end
+
+  # Concept: a permit sent inside the run's authority cannot make a provider
+  # call when scheduler delay keeps its worker from handling that permit until
+  # after the committed deadline.
+  #
+  # Technical depth: both Control and the worker are frozen before the queued
+  # permit request is released. Control alone is resumed, and its send trace is
+  # the causal proof that the permit linearized before the deadline while the
+  # worker remained unable to consume it. Only after the clock has crossed the
+  # exact committed instant is the worker resumed. The old worker called the
+  # adapter immediately from that receive clause; a receiver-side deadline
+  # fence instead returns an internal expiry result, which the coordinator
+  # admits as deadline truth but accounts as dispatched-or-unknown because a
+  # permit was already possible. No sleep competes with the send or receive.
+  test "a provider worker delayed past the deadline invokes no adapter and settles the sent permit conservatively" do
+    fixture =
+      start(
+        script: [
+          %{text: "must not run", calls: []},
+          %{text: "must not retry", calls: []}
+        ],
+        bounds_deadline_ms: 3_000,
+        bounds_token_budget: 103
+      )
+
+    attempt = queue_provider_permit_request(fixture, "delay the permitted worker")
+    deadline = committed_deadline!(attempt.request_record)
+
+    suspend_process(attempt.coordinator)
+    suspend_process(attempt.worker)
+
+    assert System.system_time(:millisecond) < deadline,
+           "setup outlasted the committed deadline before Control sent the permit"
+
+    resume_process(attempt.control)
+    _permit = await_control_permit(attempt.control, attempt.worker, attempt.binding)
+
+    wait_past_deadline(deadline)
+    resume_process(attempt.worker)
+    await_process_down(attempt.worker)
+
+    assert AgentLoopTestModel.dispatched(fixture.model) == [],
+           "the delayed worker entered the adapter after its committed deadline"
+
+    resume_process(attempt.coordinator)
+
+    finished = await_event(attempt.attachment, "run.finished")
+    assert finished["outcome"] == "bound_reached"
+    assert finished["bound"] == "deadline"
+
+    records = Fixture.records(fixture, attempt.session_id)
+    assert Enum.map(records_of_kind(records, "model_attempt_opened_v1"), & &1["attempt"]) == [1]
+
+    assert [settlement] = records_of_kind(records, "model_attempt_settled_v2")
+    assert settlement["transport"] == "dispatched_or_unknown"
+    assert settlement["termination"] == "deadline"
+    assert settlement["next"] == "terminal"
+
+    assert settlement["accounting"] == %{
+             "source" => "estimated",
+             "basis" => "remaining_allowance"
+           }
+  end
+
   test "only exact pre-canary not_dispatched proof opens one retry whose accounting and stream domain stay bound to its attempt" do
     retry =
       start(
@@ -862,7 +1964,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
 
     records = Fixture.records(retry, session_id)
     opens = records_of_kind(records, "model_attempt_opened_v1")
-    settlements = records_of_kind(records, "model_attempt_settled_v1")
+    settlements = records_of_kind(records, "model_attempt_settled_v2")
 
     assert Enum.map(opens, & &1["attempt"]) == [1, 2, 1]
 
@@ -957,7 +2059,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
                & &1["attempt"]
              ) == [1]
 
-      [no_retry_settlement] = records_of_kind(no_retry_records, "model_attempt_settled_v1")
+      [no_retry_settlement] = records_of_kind(no_retry_records, "model_attempt_settled_v2")
       assert no_retry_settlement["transport"] == "dispatched_or_unknown"
 
       assert no_retry_settlement["accounting"] == %{
@@ -967,6 +2069,46 @@ defmodule Loopex.ProviderAttemptProtocolTest do
 
       refute inspect(no_retry_records) =~ "credential-shaped-raw-error"
     end
+  end
+
+  test "adapter data cannot forge the receiver's internal deadline observation" do
+    token_budget = 17
+
+    fixture =
+      start(
+        model_module: Loopex.ProviderDeadlineForgeryModel,
+        script: [],
+        bounds_token_budget: token_budget
+      )
+
+    {session_id, attachment, {:accepted, "prompt-1"}} =
+      Fixture.run(fixture, "keep provider result provenance")
+
+    assert_receive {:provider_deadline_forgery_model_called, _worker, request}, 5_000
+    assert is_integer(request.deadline)
+
+    finished = await_event(attachment, "run.finished")
+    assert finished["outcome"] == "failed"
+
+    records = Fixture.records(fixture, session_id)
+    assert records_of_kind(records, "model_termination_admitted_v1") == []
+
+    [settlement] = records_of_kind(records, "model_attempt_settled_v2")
+
+    assert settlement["transport"] == "dispatched_or_unknown"
+    assert settlement["termination"] == nil
+
+    assert settlement["result"] == %{
+             "kind" => "error",
+             "category" => "model_call_failed"
+           }
+
+    assert settlement["accounting"] == %{
+             "source" => "estimated",
+             "basis" => "remaining_allowance"
+           }
+
+    assert_remaining_allowance(fixture, session_id, token_budget)
   end
 
   test "two exact not-dispatched settlements consume the version-one allowance with no third attempt" do
@@ -987,7 +2129,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
 
     records = Fixture.records(fixture, session_id)
     opens = records_of_kind(records, "model_attempt_opened_v1")
-    settlements = records_of_kind(records, "model_attempt_settled_v1")
+    settlements = records_of_kind(records, "model_attempt_settled_v2")
 
     assert Enum.map(opens, & &1["attempt"]) == [1, 2]
     assert Enum.map(settlements, & &1["attempt"]) == [1, 2]
@@ -1016,7 +2158,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     end
 
     second_settlement_index =
-      record_index(records, "model_attempt_settled_v1", &(&1["attempt"] == 2))
+      record_index(records, "model_attempt_settled_v2", &(&1["attempt"] == 2))
 
     terminal_index = record_index(records, "run_terminal_committed", fn _ -> true end)
     assert terminal_index == second_settlement_index + 1
@@ -1026,7 +2168,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
 
     for {label, invalid_records} <- [
           {"attempt-open extra key", add_payload_key(records, "model_attempt_opened_v1")},
-          {"settlement extra key", add_payload_key(records, "model_attempt_settled_v1")}
+          {"settlement extra key", add_payload_key(records, "model_attempt_settled_v2")}
         ] do
       assert {:error, _invalid_exact_schema} =
                SessionState.recover(
@@ -1095,7 +2237,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
 
     records = Fixture.records(fixture, session_id)
     assert records_of_kind(records, "model_termination_admitted_v1") == []
-    assert records_of_kind(records, "model_attempt_settled_v1") == []
+    assert records_of_kind(records, "model_attempt_settled_v2") == []
     assert records_of_kind(records, "run_terminal_committed") == []
   end
 
@@ -1181,7 +2323,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     records = Fixture.records(fixture, session_id)
     assert [opened] = records_of_kind(records, "model_attempt_opened_v1")
     assert opened["attempt"] == 1
-    assert [settlement] = records_of_kind(records, "model_attempt_settled_v1")
+    assert [settlement] = records_of_kind(records, "model_attempt_settled_v2")
 
     assert settlement["transport"] == "not_dispatched"
     assert settlement["accounting"] == %{"source" => "none", "basis" => "not_dispatched"}
@@ -1256,7 +2398,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     records = Fixture.records(fixture, session_id)
     events = Fixture.events(fixture, session_id)
 
-    [settlement] = records_of_kind(records, "model_attempt_settled_v1")
+    [settlement] = records_of_kind(records, "model_attempt_settled_v2")
     assert settlement["termination"] == "abort"
     assert settlement["conversation"] == "evidence_only"
     assert settlement["result"]["kind"] == "reply"
@@ -1311,7 +2453,14 @@ defmodule Loopex.ProviderAttemptProtocolTest do
 
         assert settlement["result"] == %{
                  "kind" => "error",
-                 "category" => "unreadable_model_answer"
+                 "category" => "unreadable_model_answer",
+                 "accounting_evidence" => %{
+                   "kind" => "validated_reply_compaction_v1",
+                   "usage" => reply["usage"],
+                   "dimension" => "record_bytes",
+                   "observed" => target,
+                   "limit" => @record_limit
+                 }
                }
 
         assert settlement["accounting"] == %{
@@ -1345,7 +2494,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
       fixture |> Fixture.records(session_id) |> records_of_kind("model_request_committed")
 
     [settlement] =
-      fixture |> Fixture.records(session_id) |> records_of_kind("model_attempt_settled_v1")
+      fixture |> Fixture.records(session_id) |> records_of_kind("model_attempt_settled_v2")
 
     [dispatched_request] = AgentLoopTestModel.dispatched(fixture.model)
     durable_reply = settlement["result"]["reply"]
@@ -1391,7 +2540,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     assert length(AgentLoopTestModel.dispatched(fixture.model)) == 1
 
     records = Fixture.records(fixture, session_id)
-    [settlement] = records_of_kind(records, "model_attempt_settled_v1")
+    [settlement] = records_of_kind(records, "model_attempt_settled_v2")
 
     assert settlement["result"] == %{
              "kind" => "error",
@@ -1432,6 +2581,133 @@ defmodule Loopex.ProviderAttemptProtocolTest do
       :erlang.term_to_binary([records, durable_store, durable_public], [:deterministic])
 
     assert :binary.match(durable_bytes, secret) == :nomatch
+  end
+
+  test "catchable credential-shaped Model failures enter no diagnostic retained or public plane" do
+    secret = Loopex.ProviderCredentialFailureModel.credential()
+
+    for failure_kind <- [:raise, :throw, :exit] do
+      fixture =
+        start(
+          script: [],
+          model_module: Loopex.ProviderCredentialFailureModel,
+          model_options: [failure_kind: failure_kind],
+          progress_to: self(),
+          diagnostics_to: self(),
+          bounds_token_budget: 113
+        )
+
+      test_process = self()
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          {session_id, attachment, {:accepted, "prompt-1"}} =
+            Fixture.run(fixture, "keep task failure reasons private")
+
+          public_events = await_events_through(attachment, "run.finished")
+          send(test_process, {:provider_failure_result, failure_kind, session_id, public_events})
+
+          # With the catch removed, Task emits the raw credential-shaped reason.
+          # Flush synchronously so its absence is not inferred from a timer.
+          Logger.flush()
+        end)
+
+      assert_receive {:provider_credential_failure_model_called, ^failure_kind, worker, _request},
+                     5_000
+
+      assert is_pid(worker)
+
+      assert_receive {:provider_failure_result, ^failure_kind, session_id, public_events},
+                     5_000
+
+      finished = Enum.find(public_events, &(&1.kind == "run.finished"))
+      assert finished["outcome"] == "failed"
+
+      records = Fixture.records(fixture, session_id)
+      [settlement] = records_of_kind(records, "model_attempt_settled_v2")
+
+      assert settlement["transport"] == "dispatched_or_unknown"
+      assert settlement["next"] == "terminal"
+
+      assert settlement["result"] == %{
+               "kind" => "error",
+               "category" => "model_call_failed"
+             }
+
+      planes = [
+        diagnostic_log: log,
+        durable: records,
+        durable_public: Fixture.events(fixture, session_id),
+        public: public_events,
+        progress: receive_progress(),
+        diagnostic: receive_diagnostics(),
+        terminal: finished
+      ]
+
+      for {plane, value} <- planes do
+        refute printable(value) =~ secret,
+               "credential-shaped task failure entered the #{plane} plane"
+      end
+    end
+  end
+
+  test "a credential-shaped linked Model exit enters no diagnostic retained or public plane" do
+    secret = Loopex.ProviderLinkedCredentialFailureModel.credential()
+
+    fixture =
+      start(
+        script: [],
+        model_module: Loopex.ProviderLinkedCredentialFailureModel,
+        progress_to: self(),
+        diagnostics_to: self(),
+        bounds_token_budget: 113
+      )
+
+    test_process = self()
+
+    log =
+      ExUnit.CaptureLog.capture_log(fn ->
+        {session_id, attachment, {:accepted, "prompt-1"}} =
+          Fixture.run(fixture, "keep linked task failure reasons private")
+
+        public_events = await_events_through(attachment, "run.finished")
+        send(test_process, {:provider_linked_failure_result, session_id, public_events})
+        Logger.flush()
+      end)
+
+    assert_receive {:provider_linked_credential_model_called, worker, _request}, 5_000
+    assert is_pid(worker)
+
+    assert_receive {:provider_linked_failure_result, session_id, public_events}, 5_000
+
+    finished = Enum.find(public_events, &(&1.kind == "run.finished"))
+    assert finished["outcome"] == "failed"
+
+    records = Fixture.records(fixture, session_id)
+    [settlement] = records_of_kind(records, "model_attempt_settled_v2")
+
+    assert settlement["transport"] == "dispatched_or_unknown"
+    assert settlement["next"] == "terminal"
+
+    assert settlement["result"] == %{
+             "kind" => "error",
+             "category" => "model_call_failed"
+           }
+
+    planes = [
+      diagnostic_log: log,
+      durable: records,
+      durable_public: Fixture.events(fixture, session_id),
+      public: public_events,
+      progress: receive_progress(),
+      diagnostic: receive_diagnostics(),
+      terminal: finished
+    ]
+
+    for {plane, value} <- planes do
+      refute printable(value) =~ secret,
+             "credential-shaped linked exit entered the #{plane} plane"
+    end
   end
 
   test "request-open commit-unknown re-presents identical bytes and dispatches only after the retained pair resolves" do
@@ -1498,14 +2774,14 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     :ok =
       M1RuntimeTestStore.delay_after_record(
         fixture.store,
-        "model_attempt_settled_v1",
+        "model_attempt_settled_v2",
         self()
       )
 
     {session_id, attachment, {:accepted, "prompt-1"}} =
       Fixture.run(fixture, "retain retry open")
 
-    assert_receive {:record_linearized, settlement_waiter, _store, "model_attempt_settled_v1",
+    assert_receive {:record_linearized, settlement_waiter, _store, "model_attempt_settled_v2",
                     _transition, {:committed, _settlement_tx_id, _settlement_receipt}},
                    5_000
 
@@ -1582,7 +2858,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     :ok =
       M1RuntimeTestStore.hold_next_record_before_linearization(
         fixture.store,
-        "model_attempt_settled_v1",
+        "model_attempt_settled_v2",
         self()
       )
 
@@ -1590,11 +2866,11 @@ defmodule Loopex.ProviderAttemptProtocolTest do
       Fixture.run(fixture, "retain continue settlement")
 
     assert_receive {:record_held_before_linearization, first_waiter, _store,
-                    "model_attempt_settled_v1", first_transaction},
+                    "model_attempt_settled_v2", first_transaction},
                    5_000
 
     assert [settlement] = first_transaction.records
-    assert record_kind(settlement) == "model_attempt_settled_v1"
+    assert record_kind(settlement) == "model_attempt_settled_v2"
     assert settlement["conversation"] == "canonical"
     assert settlement["next"] == "continue"
 
@@ -1607,7 +2883,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     replay_waiter =
       hold_commit_unknown_replay(
         fixture.store,
-        "model_attempt_settled_v1",
+        "model_attempt_settled_v2",
         first_waiter,
         first_transaction
       )
@@ -1627,7 +2903,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     settlements =
       fixture
       |> Fixture.records(session_id)
-      |> records_of_kind("model_attempt_settled_v1")
+      |> records_of_kind("model_attempt_settled_v2")
 
     assert Enum.count(settlements, &(&1 == settlement)) == 1
   end
@@ -1648,7 +2924,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     :ok =
       M1RuntimeTestStore.hold_next_record_before_linearization(
         fixture.store,
-        "model_attempt_settled_v1",
+        "model_attempt_settled_v2",
         self()
       )
 
@@ -1656,13 +2932,13 @@ defmodule Loopex.ProviderAttemptProtocolTest do
       Fixture.run(fixture, "retain terminal settlement")
 
     assert_receive {:record_held_before_linearization, first_waiter, _store,
-                    "model_attempt_settled_v1", first_transaction},
+                    "model_attempt_settled_v2", first_transaction},
                    5_000
 
     assert [settlement, terminal] = first_transaction.records
 
     assert Enum.map(first_transaction.records, &record_kind/1) == [
-             "model_attempt_settled_v1",
+             "model_attempt_settled_v2",
              "run_terminal_committed"
            ]
 
@@ -1680,7 +2956,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     replay_waiter =
       hold_commit_unknown_replay(
         fixture.store,
-        "model_attempt_settled_v1",
+        "model_attempt_settled_v2",
         first_waiter,
         first_transaction
       )
@@ -1693,7 +2969,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
 
     records = Fixture.records(fixture, session_id)
 
-    assert Enum.count(records_of_kind(records, "model_attempt_settled_v1"), &(&1 == settlement)) ==
+    assert Enum.count(records_of_kind(records, "model_attempt_settled_v2"), &(&1 == settlement)) ==
              1
 
     assert Enum.count(records_of_kind(records, "run_terminal_committed"), &(&1 == terminal)) == 1
@@ -1716,7 +2992,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     :ok =
       M1RuntimeTestStore.hold_next_record_before_linearization(
         exact.store,
-        "model_attempt_settled_v1",
+        "model_attempt_settled_v2",
         self()
       )
 
@@ -1724,11 +3000,11 @@ defmodule Loopex.ProviderAttemptProtocolTest do
       Fixture.run(exact, request_text)
 
     assert_receive {:record_held_before_linearization, exact_waiter, _store,
-                    "model_attempt_settled_v1", exact_transaction},
+                    "model_attempt_settled_v2", exact_transaction},
                    5_000
 
     assert Enum.map(exact_transaction.records, &record_kind/1) == [
-             "model_attempt_settled_v1",
+             "model_attempt_settled_v2",
              "run_terminal_committed"
            ]
 
@@ -1743,7 +3019,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     assert {:error, :no_active_run} = Task.await(result_first_abort, 5_000)
     exact_records = Fixture.records(exact, exact_session)
     [request] = records_of_kind(exact_records, "model_request_committed")
-    [settlement] = records_of_kind(exact_records, "model_attempt_settled_v1")
+    [settlement] = records_of_kind(exact_records, "model_attempt_settled_v2")
 
     assert settlement["accounting"] == %{
              "source" => "reported",
@@ -1779,22 +3055,23 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     [unreadable_settlement] =
       unreadable
       |> Fixture.records(unreadable_session)
-      |> records_of_kind("model_attempt_settled_v1")
+      |> records_of_kind("model_attempt_settled_v2")
 
     assert unreadable_settlement["result"] == %{
              "kind" => "error",
-             "category" => "unreadable_model_answer"
+             "category" => "unreadable_model_answer",
+             "accounting_evidence" => %{"kind" => "none"}
            }
 
     assert unreadable_settlement["accounting"] == %{
-             "source" => "reported",
-             "input_tokens" => 3,
-             "output_tokens" => 2
+             "source" => "estimated",
+             "basis" => "remaining_allowance"
            }
 
     assert unreadable_finished["outcome"] == "failed"
     assert length(AgentLoopTestModel.dispatched(unreadable.model)) == 1
     assert_exact_settlement_schema(unreadable_settlement)
+    assert_remaining_allowance(unreadable, unreadable_session, 100)
 
     malformed =
       start(
@@ -1819,21 +3096,22 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     [malformed_settlement] =
       malformed
       |> Fixture.records(malformed_session)
-      |> records_of_kind("model_attempt_settled_v1")
+      |> records_of_kind("model_attempt_settled_v2")
 
     assert malformed_settlement["result"] == %{
              "kind" => "error",
-             "category" => "unreadable_model_answer"
+             "category" => "unreadable_model_answer",
+             "accounting_evidence" => %{"kind" => "none"}
            }
 
     assert malformed_settlement["accounting"] == %{
-             "source" => "reported",
-             "input_tokens" => 4,
-             "output_tokens" => 3
+             "source" => "estimated",
+             "basis" => "remaining_allowance"
            }
 
     assert length(AgentLoopTestModel.dispatched(malformed.model)) == 1
     assert_exact_settlement_schema(malformed_settlement)
+    assert_remaining_allowance(malformed, malformed_session, 100)
 
     for reply_overrides <- [
           %{unexpected_reply_key: true},
@@ -1878,11 +3156,17 @@ defmodule Loopex.ProviderAttemptProtocolTest do
       [extra_settlement] =
         extra_key
         |> Fixture.records(extra_session)
-        |> records_of_kind("model_attempt_settled_v1")
+        |> records_of_kind("model_attempt_settled_v2")
 
       assert extra_settlement["result"] == %{
                "kind" => "error",
-               "category" => "unreadable_model_answer"
+               "category" => "unreadable_model_answer",
+               "accounting_evidence" => %{"kind" => "none"}
+             }
+
+      assert extra_settlement["accounting"] == %{
+               "source" => "estimated",
+               "basis" => "remaining_allowance"
              }
 
       assert_exact_settlement_schema(extra_settlement)
@@ -1902,7 +3186,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     [ambiguous_settlement] =
       ambiguous
       |> Fixture.records(ambiguous_session)
-      |> records_of_kind("model_attempt_settled_v1")
+      |> records_of_kind("model_attempt_settled_v2")
 
     assert ambiguous_settlement["accounting"] == %{
              "source" => "estimated",
@@ -1918,7 +3202,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     for {raw_usage, category} <- [
           {%{}, "missing"},
           {%{input_tokens: 1}, "partial"},
-          {:malformed_usage, "malformed"},
+          {nil, "malformed"},
           {%{input_tokens: -1, output_tokens: 2}, "malformed"},
           {%{input_tokens: "1", output_tokens: 2}, "malformed"},
           {%{input_tokens: @uint64_max + 1, output_tokens: 0}, "uint64_overflow"}
@@ -1950,7 +3234,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     settlement_transactions =
       traced_transactions(commit_unknown.store)
       |> Enum.filter(fn transaction ->
-        Enum.any?(transaction.records, &(record_kind(&1) == "model_attempt_settled_v1"))
+        Enum.any?(transaction.records, &(record_kind(&1) == "model_attempt_settled_v2"))
       end)
 
     assert [first_presentation, second_presentation | _rest] = settlement_transactions
@@ -1959,12 +3243,265 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     assert length(
              commit_unknown
              |> Fixture.records(unknown_session)
-             |> records_of_kind("model_attempt_settled_v1")
+             |> records_of_kind("model_attempt_settled_v2")
            ) == 1
 
     assert_abort_first_ordering()
     assert_deadline_first_ordering()
     assert_late_error_ordering()
+  end
+
+  test "compacted v2 commit-unknown preserves exact provenance transaction bytes and never runs discarded tools" do
+    call = %{
+      "id" => "compacted-call",
+      "name" => "write",
+      "arguments" => structural_arguments(:depth, 7)
+    }
+
+    fixture =
+      start(
+        script: [
+          %{text: "discarded", calls: [call], usage: %{input_tokens: 37, output_tokens: 11}}
+        ]
+      )
+
+    :ok =
+      M1RuntimeTestStore.hold_next_record_before_linearization(
+        fixture.store,
+        "model_attempt_settled_v2",
+        self()
+      )
+
+    {session_id, attachment, {:accepted, "prompt-1"}} = Fixture.run(fixture, "compact once")
+
+    assert_receive {:record_held_before_linearization, waiter, _store, "model_attempt_settled_v2",
+                    transaction},
+                   5_000
+
+    [settlement, terminal] = transaction.records
+
+    assert settlement["result"]["accounting_evidence"] == %{
+             "kind" => "validated_reply_compaction_v1",
+             "usage" => %{"status" => "reported", "input_tokens" => 37, "output_tokens" => 11},
+             "dimension" => "record_depth",
+             "observed" => 13,
+             "limit" => 12
+           }
+
+    assert settlement["conversation"] == "none"
+    assert settlement["next"] == "terminal"
+    assert terminal["outcome"] == "failed"
+
+    replay_waiter =
+      hold_commit_unknown_replay(fixture.store, "model_attempt_settled_v2", waiter, transaction)
+
+    refute Enum.any?(available_events(attachment), &(&1.kind == "run.finished"))
+    M1RuntimeTestStore.release(replay_waiter)
+    assert await_event(attachment, "run.finished")["outcome"] == "failed"
+    assert Loopex.AgentLoopTestExecutor.jobs(fixture.executor) == []
+    assert length(AgentLoopTestModel.dispatched(fixture.model)) == 1
+
+    assert records_of_kind(Fixture.records(fixture, session_id), "model_attempt_settled_v2") == [
+             settlement
+           ]
+
+    events = Fixture.events(fixture, session_id)
+    refute inspect(events) =~ "accounting_evidence"
+
+    assert {:ok, recovered} =
+             SessionState.recover(session_id, Fixture.records(fixture, session_id), events)
+
+    assert elem(SessionState.accounting(recovered, settlement["run_id"]), 1) == %{
+             tokens: 48,
+             source: :reported
+           }
+  end
+
+  # Concept: usage rejected as part of an unreadable provider reply cannot be
+  # recovered under a different interpretation for durable accounting.
+  #
+  # Technical depth: atom and binary spellings of one usage member collide at
+  # canonical reply admission. Selecting the binary spelling afterwards would
+  # turn the same ambiguous bytes into a reported zero charge even though the
+  # reply was refused. The full runtime path must instead charge the declared
+  # remaining allowance, which is the conservative accounting cell for an
+  # unreadable dispatched answer.
+  test "an unreadable usage key collision consumes the remaining allowance rather than reporting one spelling" do
+    token_budget = 11
+
+    fixture =
+      start(
+        script: [
+          %{
+            text: "ambiguous usage",
+            calls: [],
+            usage: %{
+              "input_tokens" => 0,
+              "output_tokens" => 0,
+              input_tokens: 99_999,
+              output_tokens: 99_999
+            }
+          }
+        ],
+        bounds_token_budget: token_budget
+      )
+
+    {session_id, attachment, {:accepted, "prompt-1"}} =
+      Fixture.run(fixture, "refuse ambiguous usage")
+
+    assert await_event(attachment, "run.finished")["outcome"] == "failed"
+
+    [settlement] =
+      fixture
+      |> Fixture.records(session_id)
+      |> records_of_kind("model_attempt_settled_v2")
+
+    assert settlement["result"] == %{
+             "kind" => "error",
+             "category" => "unreadable_model_answer",
+             "accounting_evidence" => %{"kind" => "none"}
+           }
+
+    assert settlement["accounting"] == %{
+             "source" => "estimated",
+             "basis" => "remaining_allowance"
+           }
+
+    assert_remaining_allowance(fixture, session_id, token_budget)
+  end
+
+  # Concept: a binary-keyed provider reply has the same accounting boundary as
+  # an atom-keyed one: a valid-looking usage pair is not reportable when the
+  # complete reply is malformed.
+  #
+  # Technical depth: the ordinary scripted adapter constructs atom keys, which
+  # left a binary-only salvage mutant invisible to the entire suite. This model
+  # returns the adapter boundary's other admitted spelling and an invalid
+  # provider identity. Store admission succeeds, canonical validation refuses,
+  # and accounting must consume the exact remaining allowance rather than read
+  # the adjacent binary `usage` member independently.
+  test "a malformed binary-keyed reply cannot salvage otherwise valid raw usage" do
+    token_budget = 19
+
+    fixture =
+      start(
+        script: [],
+        model_module: Loopex.ProviderBinaryUsageMalformedModel,
+        bounds_token_budget: token_budget
+      )
+
+    {session_id, attachment, {:accepted, "prompt-1"}} =
+      Fixture.run(fixture, "refuse malformed binary-keyed provider reply")
+
+    assert await_event(attachment, "run.finished")["outcome"] == "failed"
+
+    [settlement] =
+      records_of_kind(Fixture.records(fixture, session_id), "model_attempt_settled_v2")
+
+    assert settlement["result"] == %{
+             "kind" => "error",
+             "category" => "unreadable_model_answer",
+             "accounting_evidence" => %{"kind" => "none"}
+           }
+
+    assert settlement["accounting"] == %{
+             "source" => "estimated",
+             "basis" => "remaining_allowance"
+           }
+
+    assert_remaining_allowance(fixture, session_id, token_budget)
+  end
+
+  # Concept: unreadable callback bytes cannot become an accounting fact merely
+  # because a valid-looking usage pair sits beside them.
+  #
+  # Technical depth: the PID makes Store admission refuse the raw reply before
+  # any member can be projected. Restoring the retired raw-usage salvage would
+  # recover the two-key pair after that refusal and make this case report five
+  # tokens instead of consuming the exact remaining allowance.
+  test "a Store-refused unreadable reply cannot salvage otherwise valid raw usage" do
+    token_budget = 13
+
+    fixture =
+      start(
+        script: [
+          %{
+            text: "unreadable sibling",
+            calls: [],
+            usage: %{input_tokens: 3, output_tokens: 2},
+            reply_overrides: %{adapter_private: self()}
+          }
+        ],
+        bounds_token_budget: token_budget
+      )
+
+    {session_id, attachment, {:accepted, "prompt-1"}} =
+      Fixture.run(fixture, "refuse non-plain provider sibling")
+
+    assert await_event(attachment, "run.finished")["outcome"] == "failed"
+
+    [settlement] =
+      records_of_kind(Fixture.records(fixture, session_id), "model_attempt_settled_v2")
+
+    assert settlement["result"] == %{
+             "kind" => "error",
+             "category" => "unreadable_model_answer",
+             "accounting_evidence" => %{"kind" => "none"}
+           }
+
+    assert settlement["accounting"] == %{
+             "source" => "estimated",
+             "basis" => "remaining_allowance"
+           }
+
+    assert_remaining_allowance(fixture, session_id, token_budget)
+  end
+
+  # Concept: passing the Store's structural admission is necessary but not
+  # sufficient to make reported usage trustworthy.
+  #
+  # Technical depth: every supplied value here is admitted plain data, but the
+  # provider identity violates the canonical reply contract. Usage becomes
+  # reportable only after the complete reply passes that validation; restoring
+  # raw salvage makes this exact case fail by reporting the adjacent pair.
+  test "a semantically malformed reply cannot salvage otherwise valid raw usage" do
+    token_budget = 17
+
+    fixture =
+      start(
+        script: [
+          %{
+            text: "invalid identity",
+            calls: [],
+            usage: %{input_tokens: 4, output_tokens: 3},
+            reply_overrides: %{
+              identity: %{provider: nil, model: "scripted:v1", endpoint: "in-process"}
+            }
+          }
+        ],
+        bounds_token_budget: token_budget
+      )
+
+    {session_id, attachment, {:accepted, "prompt-1"}} =
+      Fixture.run(fixture, "refuse semantically malformed provider reply")
+
+    assert await_event(attachment, "run.finished")["outcome"] == "failed"
+
+    [settlement] =
+      records_of_kind(Fixture.records(fixture, session_id), "model_attempt_settled_v2")
+
+    assert settlement["result"] == %{
+             "kind" => "error",
+             "category" => "unreadable_model_answer",
+             "accounting_evidence" => %{"kind" => "none"}
+           }
+
+    assert settlement["accounting"] == %{
+             "source" => "estimated",
+             "basis" => "remaining_allowance"
+           }
+
+    assert_remaining_allowance(fixture, session_id, token_budget)
   end
 
   test "recovery settles an unresolved open without redispatch and never reuses or closes the dead predecessor stream" do
@@ -2001,7 +3538,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     assert length(AgentLoopTestModel.dispatched(fixture.model)) == 1
 
     records = Fixture.records(fixture, session_id)
-    [settlement] = records_of_kind(records, "model_attempt_settled_v1")
+    [settlement] = records_of_kind(records, "model_attempt_settled_v2")
     assert Enum.map(records_of_kind(records, "model_attempt_opened_v1"), & &1["attempt"]) == [1]
     assert settlement["transport"] == "dispatched_or_unknown"
     assert settlement["termination"] == "owner_loss"
@@ -2029,7 +3566,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
              public_event_kind(event) == "assistant.message_appended"
            end)
 
-    settlement_index = record_index(records, "model_attempt_settled_v1", fn _ -> true end)
+    settlement_index = record_index(records, "model_attempt_settled_v2", fn _ -> true end)
     terminal_index = record_index(records, "run_terminal_committed", fn _ -> true end)
     assert terminal_index == settlement_index + 1
 
@@ -2094,7 +3631,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     assert await_event(attachment, "run.finished")["outcome"] == "completed"
 
     records = Fixture.records(fixture, session_id)
-    [settlement | _later] = records_of_kind(records, "model_attempt_settled_v1")
+    [settlement | _later] = records_of_kind(records, "model_attempt_settled_v2")
     assert %{"kind" => "reply", "reply" => reply} = settlement["result"]
 
     assert reply["text"] == text
@@ -2193,7 +3730,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
              "#{label}: a reply after a possible send was retried"
 
       records = Fixture.records(fixture, session_id)
-      [settlement] = records_of_kind(records, "model_attempt_settled_v1")
+      [settlement] = records_of_kind(records, "model_attempt_settled_v2")
       assert settlement["transport"] == "dispatched_or_unknown"
       assert %{"kind" => "error"} = settlement["result"]
 
@@ -2459,14 +3996,14 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     :ok =
       M1RuntimeTestStore.delay_after_record(
         fixture.store,
-        "model_attempt_settled_v1",
+        "model_attempt_settled_v2",
         self()
       )
 
     {session_id, _attachment, {:accepted, "prompt-1"}} =
       Fixture.run(fixture, "retry across succession")
 
-    assert_receive {:record_linearized, settlement_waiter, _store, "model_attempt_settled_v1",
+    assert_receive {:record_linearized, settlement_waiter, _store, "model_attempt_settled_v2",
                     _transition, {:committed, _tx_id, _receipt}},
                    5_000
 
@@ -2518,7 +4055,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
       provider_calls: length(AgentLoopTestModel.dispatched(fixture.model)),
       finished: finished,
       opens: records_of_kind(records, "model_attempt_opened_v1"),
-      settlements: records_of_kind(records, "model_attempt_settled_v1")
+      settlements: records_of_kind(records, "model_attempt_settled_v2")
     }
   end
 
@@ -2551,43 +4088,71 @@ defmodule Loopex.ProviderAttemptProtocolTest do
         attempt.opened["attempt"]
       )
 
-    case {loss, phase} do
-      {:control_death, :before_send} ->
-        Process.exit(attempt.control, :kill)
+    {provider_callback, held_guard} =
+      case {loss, phase} do
+        {:control_death, :before_send} ->
+          Process.exit(attempt.control, :kill)
+          {nil, nil}
 
-      {:control_death, :after_send} ->
-        resume_process(attempt.control)
+        {:control_death, :after_send} ->
+          resume_process(attempt.control)
 
-        _permit =
-          await_control_permit(attempt.control, attempt.worker, attempt.binding)
+          _permit =
+            await_control_permit(attempt.control, attempt.worker, attempt.binding)
 
-        worker = attempt.worker
-        assert_receive {:holding, ^worker}, 5_000
-        Process.exit(attempt.control, :kill)
+          assert_receive {:holding, callback}, 5_000
+          refute callback == attempt.worker
+          Process.exit(attempt.control, :kill)
+          {callback, nil}
 
-      {:lost_reply, :before_send} ->
-        suspend_process(attempt.coordinator)
-        Process.exit(attempt.worker, :kill)
-        await_process_down(attempt.worker)
-        resume_process(attempt.control)
-        await_control_call_consumed(attempt.control, attempt.control_message)
-        worker = attempt.worker
-        control = attempt.control
-        refute_receive {:trace, ^control, :send, _permit, ^worker}, 50
-        Process.exit(attempt.coordinator, :kill)
+        {:lost_reply, :before_send} ->
+          suspend_process(attempt.coordinator)
+          Process.exit(attempt.worker, :kill)
+          await_process_down(attempt.worker)
+          resume_process(attempt.control)
+          await_control_call_consumed(attempt.control, attempt.control_message)
+          worker = attempt.worker
+          control = attempt.control
+          refute_receive {:trace, ^control, :send, _permit, ^worker}, 50
+          Process.exit(attempt.coordinator, :kill)
+          {nil, nil}
 
-      {:lost_reply, :after_send} ->
-        suspend_process(attempt.coordinator)
-        resume_process(attempt.control)
+        {:lost_reply, :after_send} ->
+          suspend_process(attempt.coordinator)
+          resume_process(attempt.control)
 
-        _permit =
-          await_control_permit(attempt.control, attempt.worker, attempt.binding)
+          _permit =
+            await_control_permit(attempt.control, attempt.worker, attempt.binding)
 
-        worker = attempt.worker
-        assert_receive {:holding, ^worker}, 5_000
-        await_control_call_consumed(attempt.control, attempt.control_message)
-        Process.exit(attempt.coordinator, :kill)
-    end
+          assert_receive {:holding, callback}, 5_000
+          refute callback == attempt.worker
+          guard = provider_guard!(callback)
+
+          assert {:links, guard_links} = Process.info(guard, :links)
+          assert {:links, worker_links} = Process.info(attempt.worker, :links)
+
+          shared_supervisors =
+            guard_links
+            |> MapSet.new()
+            |> MapSet.intersection(MapSet.new(worker_links))
+            |> MapSet.to_list()
+
+          assert [owner_workers] = shared_supervisors
+          assert is_pid(owner_workers)
+
+          owner_worker_children = Task.Supervisor.children(owner_workers)
+
+          assert guard in owner_worker_children,
+                 "the provider guard was linked to, but not supervised by, the owner generation"
+
+          assert attempt.worker in owner_worker_children,
+                 "the permitted worker was not supervised by the same owner generation"
+
+          suspend_process(guard)
+          await_control_call_consumed(attempt.control, attempt.control_message)
+          Process.exit(attempt.coordinator, :kill)
+          {callback, guard}
+      end
 
     await_process_down(attempt.coordinator)
     await_process_down(attempt.worker)
@@ -2596,10 +4161,32 @@ defmodule Loopex.ProviderAttemptProtocolTest do
       _new_control = await_restarted_control(fixture.runtime, attempt.control)
     end
 
-    assert {:ok, attempt.session_id} ==
-             Loopex.resume_session(fixture.runtime, attempt.session_id,
-               command_id: "resume-#{label}"
-             )
+    if is_pid(provider_callback) and is_nil(held_guard),
+      do: await_process_down(provider_callback)
+
+    resume =
+      Task.async(fn ->
+        Loopex.resume_session(fixture.runtime, attempt.session_id, command_id: "resume-#{label}")
+      end)
+
+    if is_pid(held_guard) do
+      assert Task.yield(resume, 100) == nil,
+             "a successor advanced while the prior provider guard was still suspended"
+
+      assert Process.alive?(provider_callback)
+
+      refute Enum.any?(
+               Fixture.events(fixture, attempt.session_id),
+               &(public_event_kind(&1) == "run.finished")
+             ),
+             "owner-loss terminal evidence appeared before the provider tree stopped"
+
+      resume_process(held_guard)
+      await_process_down(provider_callback)
+      await_process_down(held_guard)
+    end
+
+    assert {:ok, attempt.session_id} == Task.await(resume, 5_000)
 
     {:ok, resumed} = Loopex.attach(fixture.runtime, attempt.session_id, after_event_sequence: 0)
     finished = await_event(resumed, "run.finished")
@@ -2609,7 +4196,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
       provider_calls: length(AgentLoopTestModel.dispatched(fixture.model)),
       finished: finished,
       opens: records_of_kind(records, "model_attempt_opened_v1"),
-      settlements: records_of_kind(records, "model_attempt_settled_v1"),
+      settlements: records_of_kind(records, "model_attempt_settled_v2"),
       progress: receive_progress(),
       predecessor_domain: predecessor_domain
     }
@@ -2721,15 +4308,15 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     attempt = queue_provider_permit_request(fixture, "handoff after permit")
     resume_process(attempt.control)
     _permit = await_control_permit(attempt.control, attempt.worker, attempt.binding)
-    worker = attempt.worker
-    assert_receive {:holding, ^worker}, 5_000
+    assert_receive {:holding, callback}, 5_000
+    refute callback == attempt.worker
 
     assert {:ok, attempt.session_id} ==
              Loopex.resume_session(fixture.runtime, attempt.session_id,
                command_id: "resume-after-provider-permit"
              )
 
-    if Process.alive?(worker), do: send(worker, :release)
+    if Process.alive?(callback), do: send(callback, :release)
     await_process_down(attempt.coordinator)
 
     finish_live_handoff(fixture, attempt.session_id)
@@ -2744,7 +4331,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
       provider_calls: length(AgentLoopTestModel.dispatched(fixture.model)),
       finished: finished,
       opens: records_of_kind(records, "model_attempt_opened_v1"),
-      settlements: records_of_kind(records, "model_attempt_settled_v1")
+      settlements: records_of_kind(records, "model_attempt_settled_v2")
     }
   end
 
@@ -2938,14 +4525,14 @@ defmodule Loopex.ProviderAttemptProtocolTest do
 
         resume_process(attempt.control)
         _permit = await_control_permit(attempt.control, attempt.worker, attempt.binding)
-        worker = attempt.worker
 
         # The provider holding is the causal proof that the permit won: a deadline
         # reached before the send makes Control refuse and this message never
         # arrives, which fails here loudly. No wall-clock comparison is made in
         # this process, because one taken after the permit could only fail a
         # correct implementation that had already won.
-        assert_receive {:holding, ^worker}, 5_000
+        assert_receive {:holding, callback}, 5_000
+        refute callback == attempt.worker
 
         wait_past_deadline(deadline)
         resume_process(attempt.coordinator)
@@ -2964,7 +4551,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
       provider_calls: length(AgentLoopTestModel.dispatched(fixture.model)),
       finished: finished,
       opens: records_of_kind(records, "model_attempt_opened_v1"),
-      settlements: records_of_kind(records, "model_attempt_settled_v1")
+      settlements: records_of_kind(records, "model_attempt_settled_v2")
     }
   end
 
@@ -2988,6 +4575,13 @@ defmodule Loopex.ProviderAttemptProtocolTest do
       [] -> flunk("the committed request carries no absolute deadline")
       _many -> flunk("the committed request carries competing absolute deadlines")
     end
+  end
+
+  defp next_clock_sample!(clock) do
+    Agent.get_and_update(clock, fn
+      [sample | rest] -> {sample, rest}
+      other -> raise "Control sampled an unarmed or exhausted test clock: #{inspect(other)}"
+    end)
   end
 
   defp wait_past_deadline(deadline) do
@@ -3052,6 +4646,169 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     else
       :ok
     end
+  end
+
+  defp provider_guard!(callback) when is_pid(callback) do
+    case Process.info(callback, :links) do
+      {:links, [guard]} when is_pid(guard) ->
+        guard
+
+      {:links, links} ->
+        flunk("provider callback has no single lifetime guard: #{inspect(links)}")
+
+      nil ->
+        flunk("provider callback stopped before its lifetime guard was observed")
+    end
+  end
+
+  defp provider_reference!(coordinator, worker, guard) do
+    coordinator
+    |> :sys.get_state()
+    |> Map.fetch!(:in_flight)
+    |> Enum.find_value(fn
+      {_monitor,
+       {:model, _run_id, ^worker,
+        %{guard: ^guard, reference: reference, cleanup_grace_ms: cleanup_grace_ms}}}
+      when is_reference(reference) and is_integer(cleanup_grace_ms) ->
+        reference
+
+      _other ->
+        nil
+    end)
+    |> case do
+      nil -> flunk("the permitted worker retained no matching provider lifetime reference")
+      reference -> reference
+    end
+  end
+
+  defp await_current_function(process, name, arity, attempts \\ 1_000)
+  defp await_current_function(_process, _name, _arity, 0), do: false
+
+  defp await_current_function(process, name, arity, attempts) do
+    case Process.info(process, :current_function) do
+      {:current_function, {Loopex.Runtime.SessionCoordinator, ^name, ^arity}} ->
+        true
+
+      _other ->
+        Process.sleep(5)
+        await_current_function(process, name, arity, attempts - 1)
+    end
+  end
+
+  defp await_process_message(process, predicate, attempts \\ 1_000)
+
+  defp await_process_message(_process, predicate, 0) when is_function(predicate, 1), do: false
+
+  defp await_process_message(process, predicate, attempts) when is_function(predicate, 1) do
+    case Process.info(process, :messages) do
+      {:messages, messages} ->
+        if Enum.any?(messages, predicate) do
+          true
+        else
+          Process.sleep(5)
+          await_process_message(process, predicate, attempts - 1)
+        end
+
+      nil ->
+        false
+    end
+  end
+
+  defp private_function_body!(ast, name, arity) do
+    {_ast, bodies} =
+      Macro.prewalk(ast, [], fn
+        {:defp, _metadata, [{^name, _head_metadata, arguments}, clauses]} = node, bodies
+        when is_list(arguments) and length(arguments) == arity and is_list(clauses) ->
+          {node, [Keyword.fetch!(clauses, :do) | bodies]}
+
+        node, bodies ->
+          {node, bodies}
+      end)
+
+    case bodies do
+      [body] -> body
+      [] -> flunk("private function #{name}/#{arity} was not found")
+      _many -> flunk("private function #{name}/#{arity} was defined more than once")
+    end
+  end
+
+  defp receive_clause_body!(ast, expected) do
+    {_ast, matches} =
+      Macro.prewalk(ast, [], fn
+        {:->, _metadata, [[pattern], body]} = node, matches ->
+          if receive_pattern_matches?(pattern, expected),
+            do: {node, [body | matches]},
+            else: {node, matches}
+
+        node, matches ->
+          {node, matches}
+      end)
+
+    case matches do
+      [body] -> body
+      [] -> flunk("receive clause #{inspect(expected)} was not found")
+      _many -> flunk("receive clause #{inspect(expected)} was not unique")
+    end
+  end
+
+  defp receive_pattern_matches?(pattern, expected) when is_atom(expected),
+    do: ast_contains_atom?(pattern, expected)
+
+  defp receive_pattern_matches?(pattern, {:EXIT, reason}),
+    do: ast_contains_atom?(pattern, :EXIT) and ast_contains_atom?(pattern, reason)
+
+  defp receive_pattern_matches?(pattern, {:DOWN, reason}),
+    do: ast_contains_atom?(pattern, :DOWN) and ast_contains_atom?(pattern, reason)
+
+  defp ast_contains_atom?(ast, expected) do
+    {_ast, found?} =
+      Macro.prewalk(ast, false, fn
+        ^expected = node, _found? -> {node, true}
+        node, found? -> {node, found?}
+      end)
+
+    found?
+  end
+
+  defp ast_contains_expression?(ast, expected) do
+    expected = strip_ast_metadata(expected)
+
+    {_ast, found?} =
+      Macro.prewalk(ast, false, fn node, found? ->
+        {node, found? or strip_ast_metadata(node) == expected}
+      end)
+
+    found?
+  end
+
+  defp ast_expression_position!(ast, expected) do
+    expected = strip_ast_metadata(expected)
+
+    {_ast, {_position, found}} =
+      Macro.prewalk(ast, {0, nil}, fn node, {position, found} ->
+        normalized = strip_ast_metadata(node)
+        next_found = if is_nil(found) and normalized == expected, do: position, else: found
+        {node, {position + 1, next_found}}
+      end)
+
+    case found do
+      nil -> flunk("AST expression was not found: #{Macro.to_string(expected)}")
+      position -> position
+    end
+  end
+
+  defp strip_ast_metadata(ast) do
+    Macro.prewalk(ast, fn
+      {name, metadata, context}
+      when is_atom(name) and is_list(metadata) and (is_atom(context) or is_nil(context)) ->
+        {name, [], nil}
+
+      {form, metadata, arguments} when is_list(metadata) ->
+        {form, [], arguments}
+
+      node ->
+        node
+    end)
   end
 
   defp hold_commit_unknown_replay(store, kind, first_waiter, first_transaction) do
@@ -3159,17 +4916,22 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     {:ok, store} = Store.new(M1RuntimeTestStore, fixture.store)
     model_module = Keyword.fetch!(options, :model_module)
 
+    model_options =
+      [observer: self(), max_tokens: Keyword.get(options, :max_tokens, 256)]
+      |> Keyword.merge(Keyword.get(options, :model_options, []))
+
     {:ok, runtime} =
       Loopex.start_link(
         context_token_budget: 8_192,
         runtime_id: Keyword.fetch!(options, :runtime_id),
         store: store,
+        cleanup_grace_ms: Keyword.get(options, :cleanup_grace_ms),
         progress_to: Keyword.get(options, :progress_to),
         diagnostics_to: Keyword.get(options, :diagnostics_to),
         model: %{
           module: model_module,
           model: "scripted:v1",
-          options: [observer: self(), max_tokens: Keyword.get(options, :max_tokens, 256)]
+          options: model_options
         },
         executor: %{
           module: Loopex.AgentLoopTestExecutor,
@@ -3388,6 +5150,58 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     assert projected["tool_calls"] == [at_key]
   end
 
+  # Concept: usage is provider input just like text, identity, and tool calls;
+  # replacing it with a compact accounting classification does not exempt the
+  # raw keys or values from the Store boundary that protects projection.
+  #
+  # Technical depth: each refused arm is closed in every other callback
+  # dimension. The first crosses only the Store identifier ceiling inside the
+  # usage map, while the second crosses only the Store item-byte ceiling with a
+  # value `normalize_usage/1` would otherwise collapse to `malformed`. The
+  # ordinary arm proves that admitting the complete raw callback still retains
+  # a valid reported pair exactly.
+  test "raw usage keys and values pass Store admission before normalization" do
+    request = %{
+      canonical_request_bytes: "canonical-request-bytes",
+      staged_request_digest: String.duplicate("d", 64)
+    }
+
+    raw = adapter_reply(request, [])
+    overlong_key = String.duplicate("k", @identifier_limit + 1)
+
+    assert ProviderAttempt.canonical_reply(
+             Map.put(raw, "usage", %{overlong_key => 1}),
+             request
+           ) == {:error, :unreadable_model_answer}
+
+    oversized_value = String.duplicate("x", @record_limit)
+
+    for member <- ["input_tokens", "output_tokens"] do
+      oversized_usage =
+        %{"input_tokens" => 3, "output_tokens" => 2}
+        |> Map.put(member, oversized_value)
+
+      assert {:error, {:item_too_large, _observed, @record_limit}} =
+               raw
+               |> Map.put("usage", oversized_usage)
+               |> Map.drop(["canonical_request_bytes"])
+               |> Store.admit_bounded()
+
+      assert ProviderAttempt.canonical_reply(
+               Map.put(raw, "usage", oversized_usage),
+               request
+             ) == {:error, :unreadable_model_answer}
+    end
+
+    assert {:ok, projected} = ProviderAttempt.canonical_reply(raw, request)
+
+    assert projected["usage"] == %{
+             "status" => "reported",
+             "input_tokens" => 3,
+             "output_tokens" => 2
+           }
+  end
+
   # Concept: the ceiling admits the largest answer that fits, and refuses the
   # first one that does not.
   #
@@ -3404,7 +5218,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     }
 
     raw = adapter_reply(request, [])
-    measured = Map.drop(raw, ["usage", "canonical_request_bytes"])
+    measured = Map.drop(raw, ["canonical_request_bytes"])
 
     assert {:ok, base} = Store.admit_bounded(measured)
 
@@ -3420,17 +5234,15 @@ defmodule Loopex.ProviderAttemptProtocolTest do
              {:error, :unreadable_model_answer}
   end
 
-  # Concept: a usage member an adapter actually sent is never read as a member
-  # it never sent.
+  # Concept: a non-plain usage member is an unreadable reply, not a missing
+  # accounting member.
   #
-  # Technical depth: `usage` is deliberately outside the Store admission,
-  # because ADR 0018 combination 1 requires a malformed one to be classified
-  # rather than to refuse an otherwise canonical reply. That exclusion is why
-  # the missing-member marker had to stop being a bare atom: nothing else on
-  # this path would refuse an adapter that literally answers `:absent`. The last
-  # arm pins the exclusion itself, by showing the same atom anywhere the
-  # admission does cover refuses the whole reply.
-  test "an adapter-supplied :absent usage member is malformed, not missing" do
+  # Technical depth: `:absent` remains an internal marker that distinguishes an
+  # omitted member from a supplied term. The Store boundary now sees every raw
+  # usage value before that classification, so an adapter-supplied atom is
+  # refused consistently wherever it appears. An actually omitted member stays
+  # the admitted `partial` accounting cell.
+  test "adapter-supplied non-plain usage and members are unreadable, not malformed or missing" do
     request = %{
       canonical_request_bytes: "canonical-request-bytes",
       staged_request_digest: String.duplicate("d", 64)
@@ -3438,10 +5250,13 @@ defmodule Loopex.ProviderAttemptProtocolTest do
 
     raw = adapter_reply(request, [])
 
+    assert ProviderAttempt.canonical_reply(Map.put(raw, "usage", :malformed_usage), request) ==
+             {:error, :unreadable_model_answer}
+
     sentinel = Map.put(raw, "usage", %{"input_tokens" => :absent, "output_tokens" => 10})
 
-    assert {:ok, supplied} = ProviderAttempt.canonical_reply(sentinel, request)
-    assert supplied["usage"] == %{"status" => "unreported", "category" => "malformed"}
+    assert ProviderAttempt.canonical_reply(sentinel, request) ==
+             {:error, :unreadable_model_answer}
 
     assert Store.admit_bounded(%{"input_tokens" => :absent}) == {:error, :invalid_item}
 
@@ -3608,7 +5423,16 @@ defmodule Loopex.ProviderAttemptProtocolTest do
         )
 
       expected =
-        if MapSet.member?(valid, cell), do: :ok, else: {:error, :invalid_attempt_settlement}
+        cond do
+          not MapSet.member?(valid, cell) ->
+            {:error, :invalid_attempt_settlement}
+
+          result_tag == :unreadable and accounting_tag in [:reported_pair, :reported_other] ->
+            {:error, :ambiguous_legacy_provider_accounting}
+
+          true ->
+            :ok
+        end
 
       assert ProviderAttempt.validate_settled(record) == expected,
              "settlement cell #{inspect(cell)} expected #{inspect(expected)}"
@@ -3793,7 +5617,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     calls = Map.fetch!(reply, "tool_calls")
 
     %{
-      "kind" => "model_attempt_settled_v1",
+      "kind" => "model_attempt_settled_v2",
       "run_id" => "run_" <> String.duplicate("r", 30),
       "turn_id" => "turn_" <> String.duplicate("t", 30),
       "operation_id" => "model-operation_" <> String.duplicate("o", 23),
@@ -3844,7 +5668,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
 
     assert %{payload: settlement} =
              await_record(fixture, session_id, fn record ->
-               record_kind(record.payload) == "model_attempt_settled_v1"
+               record_kind(record.payload) == "model_attempt_settled_v2"
              end)
 
     settlement
@@ -3878,9 +5702,23 @@ defmodule Loopex.ProviderAttemptProtocolTest do
         assert settlement["result"]["kind"] == "reply"
         assert settlement["result"]["reply"]["tool_calls"] == [call]
       else
+        evidence =
+          if kind == :depth do
+            %{
+              "kind" => "validated_reply_compaction_v1",
+              "usage" => candidate["result"]["reply"]["usage"],
+              "dimension" => "record_depth",
+              "observed" => 13,
+              "limit" => 12
+            }
+          else
+            %{"kind" => "none"}
+          end
+
         assert settlement["result"] == %{
                  "kind" => "error",
-                 "category" => "unreadable_model_answer"
+                 "category" => "unreadable_model_answer",
+                 "accounting_evidence" => evidence
                }
       end
     end
@@ -3988,6 +5826,21 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     ])
 
     case settlement["result"] do
+      %{
+        "kind" => "error",
+        "category" => "unreadable_model_answer",
+        "accounting_evidence" => evidence
+      } = result ->
+        assert_exact_keys(result, ["kind", "category", "accounting_evidence"])
+
+        case evidence do
+          %{"kind" => "none"} ->
+            assert_exact_keys(evidence, ["kind"])
+
+          %{"kind" => "validated_reply_compaction_v1"} ->
+            assert_exact_keys(evidence, ["kind", "usage", "dimension", "observed", "limit"])
+        end
+
       %{"kind" => "error"} = result ->
         assert_exact_keys(result, ["kind", "category"])
 
@@ -4057,7 +5910,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
       Enum.map_reduce(records, false, fn record, removed ->
         payload = record.payload
 
-        if not removed and record_kind(payload) == "model_attempt_settled_v1" and
+        if not removed and record_kind(payload) == "model_attempt_settled_v2" and
              payload["run_id"] == first_run_id and payload["attempt"] == 1 do
           {nil, true}
         else
@@ -4111,7 +5964,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
   end
 
   defp retry_at_the_attempt_limit(records) do
-    limit_index = record_index(records, "model_attempt_settled_v1", &(&1["attempt"] == 2))
+    limit_index = record_index(records, "model_attempt_settled_v2", &(&1["attempt"] == 2))
 
     records
     |> Enum.take(limit_index + 1)
@@ -4125,7 +5978,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
       Enum.map_reduce(records, false, fn record, changed? ->
         payload = record.payload
 
-        if not changed? and record_kind(payload) == "model_attempt_settled_v1" and
+        if not changed? and record_kind(payload) == "model_attempt_settled_v2" and
              select.(payload) do
           {%{record | payload: rewrite.(payload)}, true}
         else
@@ -4141,7 +5994,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     Enum.map(records, fn record ->
       payload = record.payload
 
-      if record_kind(payload) in ["model_attempt_opened_v1", "model_attempt_settled_v1"] and
+      if record_kind(payload) in ["model_attempt_opened_v1", "model_attempt_settled_v2"] and
            payload["run_id"] == run_id and Map.has_key?(replacements, payload["attempt"]) do
         %{
           record
@@ -4182,7 +6035,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     settlements =
       fixture
       |> Fixture.records(session_id)
-      |> records_of_kind("model_attempt_settled_v1")
+      |> records_of_kind("model_attempt_settled_v2")
 
     assert [reported, estimated] = settlements
 
@@ -4213,7 +6066,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     assert {:ok, recovered} =
              SessionState.recover(session_id, records, Fixture.events(fixture, session_id))
 
-    [settlement | _rest] = records_of_kind(Enum.reverse(records), "model_attempt_settled_v1")
+    [settlement | _rest] = records_of_kind(Enum.reverse(records), "model_attempt_settled_v2")
     run_id = settlement["run_id"]
     {declared, charged} = SessionState.accounting(recovered, run_id)
 
@@ -4268,13 +6121,13 @@ defmodule Loopex.ProviderAttemptProtocolTest do
 
     records = Fixture.records(fixture, session_id)
     abort_index = record_index(records, "command_admitted", &(&1["command_type"] == "abort"))
-    settlement_index = record_index(records, "model_attempt_settled_v1", fn _ -> true end)
+    settlement_index = record_index(records, "model_attempt_settled_v2", fn _ -> true end)
     terminal_index = record_index(records, "run_terminal_committed", fn _ -> true end)
 
     assert abort_index < settlement_index
     assert terminal_index == settlement_index + 1
 
-    [settlement] = records_of_kind(records, "model_attempt_settled_v1")
+    [settlement] = records_of_kind(records, "model_attempt_settled_v2")
     assert settlement["termination"] == "abort"
     assert settlement["conversation"] == "evidence_only"
     assert settlement["next"] == "terminal"
@@ -4329,13 +6182,13 @@ defmodule Loopex.ProviderAttemptProtocolTest do
 
     records = Fixture.records(fixture, session_id)
     deadline_index = record_index(records, "model_termination_admitted_v1", fn _ -> true end)
-    settlement_index = record_index(records, "model_attempt_settled_v1", fn _ -> true end)
+    settlement_index = record_index(records, "model_attempt_settled_v2", fn _ -> true end)
     terminal_index = record_index(records, "run_terminal_committed", fn _ -> true end)
 
     assert deadline_index < settlement_index
     assert terminal_index == settlement_index + 1
 
-    [settlement] = records_of_kind(records, "model_attempt_settled_v1")
+    [settlement] = records_of_kind(records, "model_attempt_settled_v2")
     assert settlement["termination"] == "deadline"
     assert settlement["conversation"] == "evidence_only"
     assert settlement["next"] == "terminal"
@@ -4402,7 +6255,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     assert await_event(attachment, "run.finished")["outcome"] == "cancelled"
 
     records = Fixture.records(fixture, session_id)
-    [settlement] = records_of_kind(records, "model_attempt_settled_v1")
+    [settlement] = records_of_kind(records, "model_attempt_settled_v2")
     assert settlement["termination"] == "abort"
     assert settlement["conversation"] == "none"
     assert settlement["next"] == "terminal"

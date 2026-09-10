@@ -43,10 +43,9 @@ Technical depth: [M0 candidate proof boundaries](roadmap-technical.md#technical-
 
 Can a developer use a small, durable, truthful coding loop through the
 embedded API and reference client? Three milestones answer it: the foreground
-harness a developer drives from a terminal, a consolidation milestone that pays
-the harness's recorded debt down on the kernel before a second surface is built
-on it, then the headless boundary another program drives with the same
-semantics. It builds on the durable single-machine session and effect truth M1
+harness a developer drives from a terminal, reusable local foundations including
+skills and durable policy interactions, then the headless boundary another
+program drives with the same semantics. It builds on the durable single-machine session and effect truth M1
 delivered. Its surfaces remain experimental throughout, and the projected
 `0.1.0` tag sits at the end of the last of the three rather than the first.
 
@@ -63,33 +62,36 @@ streaming progress, session discovery and resume, a one-page embedded
 composition, and a runnable `loopex` command. It publishes nothing and freezes
 nothing.
 
+M2 has closed this rung. Its integrated post-closure repair line preserves the
+operator capability while tightening receipt bounds and qualification evidence.
+The `v0.0.0-m2` tag identifies that exact repaired source snapshot; it is not a
+package, publication, compatibility label, or public-surface freeze.
+
 Technical depth: [Foreground-harness candidate proof](roadmap-technical.md#technical-roadmap-foreground-harness)
 
 <a id="concept-roadmap-kernel-consolidation"></a>
-##### Kernel consolidation — M3 candidate
+##### Extensible local foundations — M3 candidate
 
-Is the kernel the next surface will be built on actually sound? The foreground
-harness closed with recorded limitations, an approved out-of-plan hotfix set,
-and two independent audits whose regression tests no gate locks. The projected
-shape is those tests locked, the recorded debt implemented rather than carried,
-the closed gates run by something instead of by a person remembering, and the
-runtime floor decided while it is still cheap to decide. It ships no new
-operator or public surface, which is the point: a surface built on unproved
-foundations makes every later defect twice as expensive to find.
+Can an operator acquire and use a compatible skill, answer a durable policy
+question and inspect the result through the same local runtime? M3 joins those
+capabilities to the remaining context, dispatcher and permit-retention repairs.
+It settles shared contracts and runtime-floor prerequisites, protects the
+integrated M2 repairs and proves one complete workflow before adding breadth.
+Resource packs and registered tools provide bounded extensibility; trusted
+VM-global plugin activation remains at its later vision barrier.
 
-Technical depth: [Kernel-consolidation candidate proof](roadmap-technical.md#technical-roadmap-kernel-consolidation)
+Technical depth: [Foundation candidate proof](roadmap-technical.md#technical-roadmap-kernel-consolidation)
 
 <a id="concept-roadmap-session-protocol"></a>
-##### Headless session protocol — M4 candidate
+##### Headless external consumption — M4 candidate
 
-Can a separate program drive the same session semantics over a language-neutral
-boundary? The projected shape is a long-lived stdio JSONL contract with an exact
-versioned schema bundle, golden vectors, capability negotiation, command
-admission separated from asynchronous completion, and sample clients. The vision
-names this transport before the reference daemon, so a daemon inherits a
-boundary already proved against a real loop instead of defining one.
+Can an independent program use those foundations without a second session or
+policy engine? M4 projects the actual M3 facade through strict foreground stdio
+JSONL, with schemas and vectors, then demonstrates a TypeScript client selecting
+a skill, answering an interaction, observing a real tool result, retrieving an
+artifact and recovering after process loss. The daemon remains a later host.
 
-Technical depth: [Session-protocol candidate proof](roadmap-technical.md#technical-roadmap-session-protocol)
+Technical depth: [External-consumer candidate proof](roadmap-technical.md#technical-roadmap-session-protocol)
 
 <a id="concept-roadmap-durable-service"></a>
 #### Durable service — v0.2 candidate

@@ -1,3 +1,5 @@
+Code.require_file("../../../loopex_llm_reqllm/test/support/provider_build_fixture.exs", __DIR__)
+
 defmodule Loopex.ReferenceClientTraceChild do
   alias Loopex.Executor.Local
   alias Loopex.ReferenceClient
@@ -211,7 +213,7 @@ defmodule Loopex.ReferenceClientTraceChild do
   defp model_results(records) do
     Enum.filter(
       records,
-      &(&1.payload.kind == "model_attempt_settled_v1" and
+      &(&1.payload.kind == "model_attempt_settled_v2" and
           &1.payload["conversation"] == "canonical")
     )
   end

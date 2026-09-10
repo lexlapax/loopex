@@ -5,13 +5,14 @@ All notable changes to Loopex are recorded here. The format follows
 semantic versioning under the
 [0.x compatibility policy](docs/vision.md#concept-vision-compatibility). That
 policy labels public surfaces stable, release-candidate, or experimental once
-there are public surfaces to label. Nothing is labelled yet — see
+there are public surfaces to label. No public surface is labelled yet — see
 [compatibility surfaces](docs/developer/compatibility-surfaces.md#concept).
 
-Nothing is released or installable yet. Entries below the first release record
-repository, planning, and milestone implementation work, and carry no
-compatibility meaning: M0's product code is disposable experiment and scaffold,
-and no public surface is labelled.
+No package is released or installable yet. The annotated tag `v0.0.0-m2` is
+defined as the exact integrated M2 source snapshot; it is not a package version,
+public API freeze, or compatibility label. Entries below the first package release record
+repository, planning, and milestone implementation work, and carry no consumer
+compatibility meaning.
 
 Updating this file is part of a milestone closure candidate, not an optional
 courtesy — see [AGENTS.md](AGENTS.md) § Milestones and Gates. Each gate locks
@@ -19,22 +20,48 @@ the exact document set its milestone must update.
 
 ## [Unreleased]
 
-### Planned
+No package or compatibility-labelled surface is pending.
 
-- `M3`, kernel consolidation, is Open: its plan pair and red gate exist and
-  await maintainer acceptance. It adds no operator capability and no public
-  surface. It locks in a gate the seventy-three regression cases the
-  post-closure override sets produced, implements ADR 0017 evaluation step 5,
-  moves the event dispatcher off synchronous Store reads inside its own call
-  handler, bounds spent provider-attempt retention, makes a repository-owned
-  aggregate run every Closed gate with its own invocation structurally
-  verified, repairs the test-honesty weaknesses two independent reviews froze,
-  and raises the bootstrap runtime floor by amendment to ADR 0002.
-- The headless stdio JSONL app-server milestone drafted on this branch is now
-  `M4` rather than `M3`. Its plan pair and gate are retained unopened in
-  the [retained `M4` draft](docs/archive/M4.md), its proposed decisions were renumbered
-  to ADR 0019 and ADR 0020, and the projected `0.1.0` tag moves with it to the
-  end of that milestone.
+Revise the Open [M3 plan](docs/plans/M3.md#concept) around extensible local
+foundations and the [unopened M4 draft](docs/archive/M4.md#concept) around their
+external consumption. Move durable interactions into M3, add compatible skills
+and bounded artifact access, reconcile integrated M2 repairs, and require early
+end-to-end proof and an integrated audit before independent review. Renumber the
+protocol/interaction proposals and add explicit foundation ADR proposals. This
+change updates documentation only; no product or gate implementation is added.
+
+## [v0.0.0-m2] — 2026-09-09
+
+The integrated post-closure repair line implements accepted ADRs 0019–0021.
+Its [exact-source qualification](docs/evidence/M2-ff17990-review-followup.md#final-repaired-source-06dadbb)
+and [integration disposition](docs/evidence/M2-recorded-limitations.md#final-repaired-source-integration)
+name the evidence and authority used for the source snapshot.
+The provider uses a separately built private OS process instead
+of taking over the embedding VM's diagnostics. Interactive recovery presents an
+explicit local participant rather than selecting behavior through process-local
+state. New provider settlements carry version-2 accounting provenance; an old
+reader cannot resume a session containing that version, and ambiguous legacy
+reported accounting is refused rather than rewritten. Operator setup and
+rollback implications are documented in the
+[compatibility inventory](docs/developer/compatibility-surfaces.md#concept).
+This entry does not publish a package or label a public surface.
+
+The reference local executor also gains an explicit `/bin/bash` runtime
+prerequisite for its internal admission and cleanup scripts on Darwin and Linux.
+The maintainer approved this repair after native Linux qualification exposed
+control-input loss and unavailable job control in the prior noninteractive shell.
+Raw model commands remain on `/bin/sh`, argv remains literal, and Core and custom
+executors gain no dependency. The [operator setup](docs/operator/tools-and-policy.md#operator-local-supervision-shell)
+states the requirement; [ADR 0022](docs/adr/0022-local-executor-supervision-shell.md#concept)
+is Accepted at its exact pair. That ADR acceptance governs only this
+supervision-shell choice; the final-source disposition separately governs
+integration and the source-snapshot tag, and neither publishes a package.
+
+The next milestone, `M3` (kernel consolidation), is being opened gate-first on
+branch `m3`, where its plan pair and red gate live until acceptance; the headless
+session-protocol draft is retained there as `M4`. Neither unaccepted plan pair
+nor gate is on `main`, by the contract's rule that an unaccepted Open tree never
+merges.
 
 ### Added
 
@@ -200,6 +227,97 @@ the exact document set its milestone must update.
 
 ### Fixed
 
+- The reference local executor now reserves a bounded receipt before admitting
+  an effect, reads retained receipts through a bounded regular-file path, and
+  keeps every committed receipt within the Store's 65,536-byte private-record
+  ceiling. A full-budget read now reaches the next model request and durable
+  journal as proved content instead of being rejected downstream as an invalid
+  executor receipt.
+- The provider backpressure witness now becomes eligible only after the test's
+  explicit fill release. A transient earlier send could previously publish the
+  write-once blocked marker with a stale send count under whole-suite load,
+  producing a same-source false red even though the bounded writer was sound.
+- M0 gate generation 6 narrows its search-path text allowance to the four exact
+  child-environment constructions used by M2 while retaining the whole-tree
+  interpreter scan and real-boundary absence checks. This restores the inherited
+  M0 gate without weakening its Python and `jq` retirement guarantee.
+- Replacing the command's interrupt handler could either drop a prepared
+  capability presentation or leave an interval with no interrupt coverage. The
+  temporary installer-lifetime guard now monitors the installer before it
+  creates the holder. It creates that holder initially linked and monitored,
+  waits for the holder to acknowledge its guard, and only then unlinks the
+  relationship into its one-way lifetime, so no capability-bearing process
+  exists in the former spawn-before-guard interval. That same guard is then
+  armed against the exact signal manager, and the handler is visible before the
+  capability transfer begins. On this guarded CLI path the coordinator fixes the
+  transfer verdict, the installer forwards it to the exact guard, and the guard
+  acknowledges it before the coordinator records the holder and returns `:ok`.
+  Installer death before holder readiness or before forwarding fails closed;
+  after forwarding, ordered delivery to the guard preserves the handoff even if
+  the public reply is lost.
+  Ordinary `transfer_resume/2` remains an unguarded coordinator transfer whose
+  missing reply does not prove refusal. The successor is installed before retired
+  holders are drained, unfinished drains survive the installer's death in that
+  live successor, concurrent replacements serialize, and replacement is refused
+  atomically once an interrupt has admitted its one abort identity and backstop.
+- Provider authority could expire between Control's permit decision and the
+  worker entering the adapter, while raw usage values bypassed the Store
+  admission applied to the rest of a reply. Control now takes its final deadline
+  sample next to permit send and the worker rechecks the same committed deadline
+  immediately after receiving that exact permit. Equality is expired, a late
+  permit is retained conservatively without retry, and the complete raw reply,
+  including every usage key and value, passes bounded Store admission and full
+  canonical validation before accounting. A Store- or canonical-rejected reply
+  consumes the remaining allowance as estimated accounting, even when an
+  adjacent raw usage member looks valid. Missing or invalid usage in an otherwise
+  canonical reply does the same. Only a fully canonical reply compacted because
+  its complete durable settlement does not fit preserves already validated
+  reported usage. Adapter results retain their worker provenance through
+  admission, so provider data cannot impersonate the runtime's private deadline
+  observation.
+- A local executor reservation was treated too broadly as live-effect evidence,
+  allowing a joiner to erase an owner's standing and allowing a job reserved
+  before a peer died to outrun the unresolved open entry that death left. Queue
+  reservation and effect permission are now separate serialized decisions. The
+  final permit revalidates the exact live holder and the complete shared root
+  again after bounded validation, then publishes admission and the
+  operation-owner token under one claim. An incomplete publication leaves an
+  unresolved open entry that quarantines the root; no token is claimed for a
+  permit that did not complete. A
+  partially completed ledger close restores open authority before releasing the
+  claim or keeps the root quarantined when restoration cannot be proved. Missing
+  and oversized job identities are refused before ledger or reservation work;
+  filesystem work remains bound to the Local authority that admitted it, every
+  potentially proved command result is fenced by that authority after cleanup,
+  and a command worker cannot survive loss of its execute caller before its run
+  signal. The launch owner remains independently responsive while the execute
+  caller delivers progress, so a blocked progress consumer cannot keep a command
+  alive past cancellation. A credential-clean Port carrier opens first and
+  starts an inert waiting guard; the final wall and monotonic deadline fence runs
+  immediately before the token-bound permit that lets the guard start the
+  command. Expiry there closes the waiting guard and produces a confirmed
+  no-effect cancellation without starting model work. Command mode keeps the carrier as
+  the Port group's leader while its token-bound guard signals that group; a
+  sampled numeric process-group identifier never becomes later signal authority.
+  Bounded cleanup probes instead place the guard in a separate guard-led group,
+  letting the carrier survive final KILL and relay protocol evidence. A helper
+  answer is admitted only after the live guard acknowledges the private
+  final-KILL command and the carrier reports the resulting Port exit; timeout
+  requests the same cleanup but remains a non-answer. Neither path starts a later
+  `/bin/kill` aimed at a sampled and potentially reused PID.
+  Process-group confirmation reads a complete `pid,pgid` table and filters PGID
+  itself instead of relying on the incompatible BSD/procps meanings of `ps -g`;
+  the probe's Port carrier must appear as a self-grouped witness before absence
+  can prove quiescence, so an empty answer from a misconfigured probe fails
+  closed.
+  Closing its control channel also ends the anchored group while a command is
+  silent, and private status framing no longer drops an incomplete marker-like
+  suffix from the command's real output.
+- Control's bounded provider-position read could outlive Control itself while
+  blocked in a Store call. A guardian now owns that exact reader and monitors
+  Control; timeout cancellation and Control death kill and await the reader, and
+  a successful value is forwarded only after the reader has exited.
+
 - A completed run could not be resumed or cancelled from a fresh process. The
   store's writer marker survives its holder's death by design, and every later
   `resume` or `cancel` was refused by a marker the previous run left behind. The
@@ -207,21 +325,33 @@ the exact document set its milestone must update.
   (`loopex_store_writer_v2`), and a recovery request is honoured only once the
   operating system says that holder is gone: a live holder is refused whoever
   asks, so a fresh command can no longer evict an embedded runtime that never
-  held the command's placement lock; a marker carrying no identity, including
-  one written by an earlier version, is never recovered automatically. The store
-  also releases the marker on an orderly stop. `resume` installs its interrupt
+  held the command's placement lock. Only the probe's exact "no such process"
+  answer counts as absence; a probe that fails, prints a diagnostic, or does
+  not answer within five seconds, an unreadable marker, and a marker carrying
+  no identity, including one written by an earlier version, are all refused as
+  unverifiable with the path and reason, never recovered automatically, and the
+  placement lock applies the same rule. A store that cannot record its own
+  identity refuses to open rather than leave a marker nothing could recover.
+  The store also releases the marker on an orderly stop. `resume` installs its interrupt
   owner before it spends the activation, so a signal landing in that window
   submits the ordinary abort instead of stopping the process with recovered
   work live.
 - Prepared recovery kept its one-use capability with the process that prepared
   the owner, so the acknowledged holder transfer ADR 0016 requires did not
-  exist and a preparer's death left nothing any process could present. The
-  interrupt handler's own process is now the capability's acknowledged holder
-  from installation: activation and abandonment go through it
-  (`activate_prepared/1`, `abandon_prepared/1`; `abandon_resume/2` is removed),
-  a signal's abort and the command's activation serialize inside one process,
-  and a preparer that dies after the acknowledgement leaves a live holder. The
-  facade gains `transfer_resume/2`, which only the current holder may call.
+  exist and a preparer's death left nothing any process could present. At
+  installation, a temporary guard first binds itself to the installer, creates
+  and handshakes the initially linked holder, and only then makes that holder
+  available to the handler. The handler hands the capability to that holder:
+  activation and abandonment go through it
+  (`activate_prepared/1`, `abandon_prepared/1`; `abandon_resume/2` is kept
+  and delegates to the holder)
+  and wait for the owner without a bound, `install_prepared/3` returns the
+  owner's acknowledgement or refusal, a refused activation is given up through
+  the holder before the command reports, and a preparer that dies after the
+  acknowledgement leaves a live holder. The holder is deliberately not the
+  signal server, so a signal is handled, an abort submitted, and the backstop
+  armed while an activation waits. The facade gains `transfer_resume/2`, which
+  only the current holder may call.
 - The coordinator waited for a cancelled job's own answer inside its own
   message loop, so a status read or a command queued behind that reserve for up
   to the whole derived window. The reserve is now a timer the coordinator
@@ -232,7 +362,13 @@ the exact document set its milestone must update.
   now the same positive unsigned 64-bit range as the cleanup period, refused at
   declaration and at admission before anything durable is written, and an
   over-domain cleanup period is refused at runtime start and at session
-  creation rather than committed into a genesis no owner can recover.
+  creation rather than committed into a genesis no owner can recover. A
+  provider permit re-establishes the committed deadline immediately before it
+  is sent, after the bounded one-second read that rebuilds its binding, so a
+  slow store can cost an attempt but never sends a permit after authority
+  expired. A superseded coordinator closes as abandoned every cleanup whose
+  model worker it terminated and cancels that worker's reserve, so it is reaped
+  instead of leaking; its reserve timers no longer act once it is superseded.
 - Command identifiers were a per-process counter, so a second `loopex` process
   against the same state root replayed the first one's identifiers and was
   refused as a conflict. They are now random.
@@ -248,34 +384,53 @@ the exact document set its milestone must update.
   coordinator asks for the retained receipt, validates it exactly as it
   validates a host's, and settles the run as completed or `outcome_unknown`. An
   executor that cannot say leaves reconciliation host-driven.
-- The local executor decided a cancellation from process-local state, so an
-  instance with no record of a job open on its own root reported it cleaned;
-  absence is now decided from the shared root and answers `unconfirmed`, and so
-  does an identity the root has never admitted. Every cleanup window derives
-  from the period the job committed rather than the executor's start default.
-  The open entry's disposition is now decided under the root claim before the
-  receipt is published, so no reader ever sees a confirmed receipt that later
-  reverses to `outcome_unknown`; a removal that fails or runs past the
-  settlement allowance publishes the quarantined form instead. Open-entry
-  removal shares the settlement allowance with every other retention phase; a
-  root claim the ledger could not release is reported to the caller rather than
-  swallowed; every level of a ledger directory is synced into its own parent;
-  the open record is published before the marker so an interrupted admission
-  fails closed; and every executor wait derived from an admitted period is
-  sliced below the VM's timer ceiling. One residual is stated rather than
-  hidden: a removal that succeeds followed by a receipt that cannot be retained
-  leaves the root without its standing quarantine; the caller receives
-  `{:receipt_not_retained, reason}` and a later reader gets `:absent`.
+- The local executor decided cancellation from a numeric process-group
+  observation and process-local absence. Cancellation now routes to the live
+  launch owner that captured the group and carries the job's committed cleanup
+  period; cached numeric identifiers are never signal authority in another
+  process, and an absent or unavailable owner answers `unconfirmed`. Every
+  cleanup window therefore derives from the cancelled job's committed period
+  rather than the executor's start default, even while the root claim is held.
+  A receipt is final only once its open entry is gone, and every reader honours
+  that: the settlement takes one root claim, retains the receipt, removes the
+  entry, and where removal fails preserves the receipt's proved operation and
+  cleanup facts while the retained or restored open entry keeps them
+  provisional. A receipt or open-entry worker that cannot be confirmed stopped
+  retains the root claim rather than releasing permission around a late writer;
+  an artifact worker with the same uncertainty produces no receipt and leaves
+  the durable open entry as quarantine. Readers see a receipt whose entry still
+  stands as `effect_settling`,
+  an entry with no receipt as `effect_unresolved` unless this executor holds the
+  job, and `effect_in_flight` only for a job it holds. The retention episode
+  opens immediately after the effect result and before normalization, optional
+  spill, or receipt preparation; claim acquisition, retention, recovery, and
+  open-entry removal then spend that one absolute settlement deadline, rechecked
+  immediately before a newly acquired claim enters its protected body, so
+  contention never refreshes it. A reentrant progress callback may run another
+  Local job without erasing the outer job's admission, cleanup, retention, lease,
+  owner, probe, or in-flight context. A root claim the ledger could not release
+  is reported to the caller, including after a body that raised, rather than
+  swallowed; ordinary guard release now requires the status wrapper's
+  authenticated frame to have been observed, while a cleanup path that has not
+  seen it uses final KILL instead of relying on cross-writer arrival order; every
+  level of a ledger directory is synced into its own parent;
+  the open record is published
+  before the marker so an interrupted admission fails closed; and every executor
+  wait derived from an admitted period is sliced below the VM's timer ceiling.
+  A truly absent cancellation target answers `unconfirmed`, as ADR 0016 says.
 - Mint 1.9.3 carried two published HTTP/1 advisories (an unbounded status-line
   and chunk-extension buffer, and a quadratic chunk-size parser) reachable
   through the shipped provider chain; it is raised to 1.10.0.
 - A completed create replayed into a restarted runtime started a new owner
   generation; a replay now answers from the durable result and starts nothing.
   Store items are measured without encoding them first, so an oversized binary
-  is refused without an allocated copy. Adapter replies are admitted against
-  plain-data, depth, member, and byte ceilings before any projection, so a reply
-  with a million tool calls, a thousand calls each carrying a megabyte, or a
-  ten-thousand-level nesting is refused as unreadable in bounded time. The
+  is refused without an allocated copy. Adapter replies are admitted by the
+  Store's own item admission (`Store.admit_bounded/1`: form, depth, member
+  count, key length, and exact external size) before any projection, so a reply
+  with a million tool calls, a thousand calls each carrying a megabyte, a
+  ten-thousand-level nesting, or legal containers whose framing alone exceeds
+  the ceiling is refused as unreadable in bounded time; a usage member an
+  adapter fills with an atom is classified as unreadable rather than absent. The
   one-use provider permit is authorized only where the binding equals the one
   rebuilt from the committed attempt-open row at that journal position, so a
   fabricated first binding is refused rather than recorded. Settlement validation
@@ -318,7 +473,8 @@ the exact document set its milestone must update.
   exhausted the retry allowance and stopped the run's owner — roughly one run in
   twelve, while runs in isolation were clean. The transport now receives the
   remaining time on the committed deadline, so there is one bound and it is the
-  one the run declared. It became visible only because an interrupted stream is
+  one the run declared, apart from Control's one-second bound on the read that
+  rebuilds a permit's binding, which refuses the attempt rather than the run. It became visible only because an interrupted stream is
   now an error rather than the partial text already emitted; the same timeout
   previously produced a truncated answer indistinguishable from a short one.
 - The core-only lane measured the ambient VM, which made outcomes 7 and 9 appear
@@ -655,8 +811,16 @@ the exact document set its milestone must update.
 
 - A provider library that crashed inside the streaming call left its error
   uncaught, and the argument list of the frame it crashed on carried the
-  credential, so the VM's own crash report could print it. Every raise, throw,
-  and exit under that call is now caught and reported as the same bounded
+  credential, so the VM's own crash report could print it. The coordinator now
+  starts a dormant lifetime guard under the owner generation's private
+  supervisor before asking Control to authorize the call. Only the exact
+  permitted worker can ask that guard to start a linked callback;
+  catchable raises, throws, and exits are normalized inside the callback, while
+  the guard traps an asynchronous linked exit before it can become the supervised
+  worker's raw reason. The guard cannot finish before its callback, and every
+  terminal path stops and awaits it, and abrupt owner loss cannot release the
+  generation barrier before the guard and callback end, so provider work cannot
+  detach from the attempt. All those failures report the same bounded
   classification the ordinary failure branches produce. An interrupted stream is
   likewise an error for all three endings rather than only for a raise, so a
   progress function or a lazy stream that threw or exited no longer escapes the
@@ -782,6 +946,11 @@ the exact document set its milestone must update.
 
 ### Changed
 
+- The reference `loopex.read` and `loopex.bash` inline output ceilings are
+  16,384 bytes rather than 65,536 bytes. The smaller limit leaves deterministic
+  room for receipt identity and accounting fields inside the Store record;
+  larger output is truncated or retained as an artifact according to the
+  configured artifact store.
 - The Store answers one refusal taxonomy for every path that admits an item.
   Building a transaction, preflighting a record through
   `Loopex.Store.normalize_and_measure_item/2`, and validating a transaction all
@@ -824,10 +993,16 @@ the exact document set its milestone must update.
   is a start option, `process_probe`, defaulting to `/bin/ps` and recorded on
   every receipt. An image that ships `ps` elsewhere previously had every command
   reported `outcome_unknown` with nothing to say which program was missing.
+  The configured program must implement the full `ps -e -o pid= -o pgid=`
+  dialect; its zero-status table must include the probe's own Port carrier as a
+  PID-equals-PGID witness or it confirms nothing.
 - Cancelling a job through the shipped local executor now spends the period its
-  host configured. `cancel/2` runs in its caller so it is not queued behind the
-  job it is ending, and it read the period from a process dictionary the caller
-  does not have, so it spent the compiled-in default instead.
+  host configured. `cancel/2` remains reachable from its caller, but routes the
+  request to the live launch owner carrying the captured process group and the
+  job's committed period; it no longer reads a missing caller-side process
+  dictionary or substitutes the compiled-in default. Progress delivery runs in
+  the execute caller, leaving that owner responsive to cancellation and Local
+  authority loss even when a progress consumer blocks.
 - The cleanup period is a declared session configuration value with a default,
   as ADR 0009 requires. `Loopex.start_link(cleanup_grace_ms: …)` declares it,
   `loopex run --cleanup-grace-ms …` is the operator's way to name it, and

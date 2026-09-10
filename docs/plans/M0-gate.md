@@ -6,6 +6,15 @@ milestone. Plan progress and evidence links change without touching these bytes.
 
 Concept plan: `docs/plans/M0.md`. Technical depth: `docs/plans/M0-technical.md`.
 
+<a id="amendment-transaction-v1"></a>
+<a id="amendment-transaction-v2"></a>
+
+Amendments 1–5 are retained pre-v1 history. M0 is Closed; Amendment 6 proposes
+an additive gate generation under `amendment-transaction-v2`. Its acceptance
+belongs in M0's Gate Generations table, not in the immutable Acceptance or
+Closure rows. The v1 marker records the contract's marker requirement for an
+amended gate; it does not reopen M0 or replace v2 for this transaction.
+
 Every command form below was executed against a disposable umbrella scaffold
 before this gate was proposed. That check exists because a previous version of
 this gate locked repository-root test paths, which an umbrella root never runs:
@@ -32,7 +41,10 @@ against the file it names at every validation.
 
 | SHA-256 | Path |
 | --- | --- |
-| `77a0042d65b2fde0e8bea9d61ecf17cbb71545773b390ec58b7d2521f1761f58` | `scripts/check-m0-gate.sh` |
+| `959b450daeb310d502ed0ccf77c71efd345d7e70d6bca318ae6977543ff2b349` | `scripts/check-m0-gate.sh` |
+| `60e371867bb4e142850fca4f3642025b41d7a804ba010d00c67c0f298d5f1f43` | `scripts/m0-child-env-check.exs` |
+| `cfad881eda27049b61b0e058817143d9dcd98b6c5fc5c42f486c124a2594ef92` | `apps/loopex/test/m0_child_env_check_test.exs` |
+| `b4d2de9ee3faad7e7f8a945161b12e528bdfb1420f1b43ec61e9a2061871204e` | `apps/loopex_llm_reqllm/test/m0_child_environment_conformance_test.exs` |
 | `fad47299b27a767785d2a6a776155038054f5457ee3ce0195a37ae667f7a9999` | `.tool-versions` |
 | `ef67304cbf2e3be1f424eb6bad463a12a61538aaeee953f4bf8f16574759be9a` | `scripts/fixtures/hook-cases/guard-bash.stdin` |
 | `94538072921e9a56fb62f402766979ee7872df952228bd5ca8baaccaffe8729e` | `scripts/fixtures/hook-cases/guard-filesystem.stdin` |
@@ -71,6 +83,8 @@ that accepted it.
 | 9 | `mix test apps/loopex/test/vm_code_spike_test.exs` | Outcome 6: isolated VM load and rollback |
 | 10 | `mix test apps/loopex_llm_reqllm/test/provider_test.exs --only real_provider` | Outcome 7: real model call from the adapter application |
 | 11 | `mix loopex.self_hosting` | Outcome 8: absence, inventory, hook behavior, measurement |
+| 11a | `elixir scripts/m0-child-env-check.exs <checkout> <git-match-file>` and `mix test apps/loopex/test/m0_child_env_check_test.exs` | Outcome 8: only four registered child-environment occurrences may be subtracted from the unchanged search-path matcher; every other match is refused |
+| 11b | `mix test apps/loopex_llm_reqllm/test/m0_child_environment_conformance_test.exs` | Outcome 8: real worker and offline-build boundaries preserve the caller environment and use the reviewed child search paths; positive-controlled Git child observations |
 | 13 | `mix test` | The full suite. The credential is absent from the whole run, so no test anywhere can reach a provider |
 
 Selectors are application-relative because an umbrella root runs no tests of its
@@ -110,6 +124,8 @@ or renamed. It does not prove the test asserts anything, and review owns that.
 | `apps/loopex/test/vm_code_spike_test.exs` | 1 | `a trusted generation loads and rolls back in an isolated VM` |
 | `apps/loopex/test/history_anchoring_test.exs` | 3 | `a mutated then restored artifact is rejected`; `a merge parent carrying a mutated artifact is rejected`; `an artifact missing from history is rejected` |
 | `apps/loopex_llm_reqllm/test/provider_test.exs --only real_provider` | 1 | — |
+| `apps/loopex/test/m0_child_env_check_test.exs` | 12 | `the four reviewed occurrences pass through the real Git matcher and checker`; `every changed constructor is refused in its own boundary`; `construction use and intervening reassignment are checked independently`; `a constructor moved to another function or module is refused`; `duplicate functions and extra occurrences in registered files are refused`; `an extra binding on an admitted line is not subtracted`; `the legacy binding forms remain refused outside the registered occurrences`; `a matching copy at another path is not a registered boundary`; `malformed and duplicated matcher frames are refused`; `mismatched line evidence and unavailable source are refused`; `malformed registered Elixir is unavailable evidence and an empty scan is clean`; `the standalone CLI refuses unregistered matches and missing input` |
+| `apps/loopex_llm_reqllm/test/m0_child_environment_conformance_test.exs` | 2 | `the actual provider worker receives the fixed PATH without the caller sentinel`; `actual fixture Git children are scrubbed and the offline build bypasses parent PATH shims` |
 
 Minimums and names may be raised or extended by stricter append-only coverage
 with independent gate review. They may never be lowered while `M0` is open.
@@ -300,9 +316,12 @@ scans for invocations that shadowing cannot intercept. Dropping directories from
 The scan covers the **whole tracked tree**, not a list of top-level directories.
 An allowlist is defeated by a directory nobody thought to add: an absolute
 invocation in a new `tools/helper.sh` called by the aggregate would evade both
-the stub and a `scripts`-only scan. Exactly one exclusion applies: the runner
-itself, which must name the interpreters in order to shadow and report them, and
-whose drift the bound-artifact digest catches instead.
+the stub and a `scripts`-only scan. Exactly one exclusion applies to the
+interpreter-invocation scan: the runner itself, which must name the interpreters
+in order to shadow and report them, and whose drift the bound-artifact digest
+catches instead. The separate search-path scan's two enforcement-file exclusions
+and four occurrence-specific allowances are stated below; neither changes the
+interpreter-invocation scan's coverage.
 
 Markdown is **not** excluded. Excluding prose by file type was unsafe: a
 mode-0644 file is still executable as an argument to a shell or by being
@@ -344,14 +363,18 @@ Command 11 covers four separable things and fails on any of the first three:
 
    Mutating the search-path variable defeats the stubs as completely as naming an
    absolute path, and the mutation need not sit on the line that calls the
-   interpreter. Every **textual** mutation outside the runner is therefore
-   rejected: plain and exported assignment, a quoted assignment handed to `env`,
+   interpreter. Apart from the four child-construction occurrences and two bound
+   enforcement files specified by [Amendment 6](#amendment-6), every **matched
+   textual** mutation outside the runner is rejected: plain and exported
+   assignment, a quoted assignment handed to `env`,
    `unset`, `printf -v`, an array-element write, and a declaration naming the
    variable. Requiring the value to carry the old one forward was a heuristic and
    failed in both directions -- prepending a real interpreter directory ahead of
    the stub root preserves the variable and defeats the stub, and a substring
    removal deletes the stub root while still naming it -- so the rule makes no
-   judgment about the value.
+   judgment about an unregistered value. Amendment 6 distinguishes four
+   constructed child environments from changes to the aggregate's own search
+   path. It does not claim those children retain the interpreter-shadow root.
 
    **This is not airtight, and no claim is made that it is.** Indirection --- a
    nameref, `eval`, or a computed variable name --- mutates the same variable
@@ -686,3 +709,126 @@ described as total. A textual scan of shell cannot be proved exhaustive, and the
 gate says so where the residual is stated — indirection through a nameref, `eval`,
 or a computed name leaves no token to match, and no containment available in the
 development baseline closes it.
+
+<a id="amendment-6"></a>
+## Amendment 6 — distinguish child environments from the bootstrap search path
+
+**Acceptance: OUTSTANDING.** Proposed as additive generation 6 of this Closed
+gate. The maintainer authorized preparing this proposal; that instruction is not
+acceptance. M0's Acceptance and Closure rows, envelopes, outcomes and lifecycle
+remain unchanged. Acceptance of this generation requires independent exact-SHA
+review followed by an explicit disposition and the immediate one-parent rebind
+child prescribed by `amendment-transaction-v2`.
+
+### Reason and exact reduction
+
+At product source `274afa171a118faebdf98575ac74094cea811617`, the literal M0
+runner refused four direct search-path constructions. The failure and its log
+digest are retained in
+[the source-qualification record](../evidence/M2-ff17990-review-followup.md).
+The blanket rule conflated a child environment with mutation of the bootstrap
+caller's own search path. These four constructions deliberately remove ambient
+environment state. This amendment allows those occurrences, not their files,
+and does not change their production implementation.
+
+| Registered file | Definition | Inspected construction/use boundary |
+| --- | --- | --- |
+| `apps/loopex_llm_reqllm/lib/loopex/llm/req_llm/provider_launcher.ex` | `vector/5` | Complete returned executable/argument expression constructing the downstream carrier shell environment |
+| `apps/loopex_llm_reqllm/lib/loopex/llm/req_llm/provider_launcher.ex` | `guard_program/0` | One complete literal worker-launch command inside the unique literal shell program, including empty-environment invocation, fixed search path and private descriptor closure |
+| `apps/loopex_llm_reqllm/test/support/provider_build_fixture.exs` | `build!/1` | Adjacent environment construction and actual offline-build command consuming it |
+| `apps/loopex_llm_reqllm/test/support/provider_build_fixture.exs` | `clean_source!/0` | Complete function body constructing one environment consumed by both Git commands |
+
+The downstream carrier construction is not the first process image's load-time
+environment. The launcher separately supplies removals when opening the Port;
+this amendment neither changes that mechanism nor claims the returned argument
+vector proves it.
+
+### Enforcement and its limits
+
+The original whole-tree search-path expression is unchanged. Git emits path,
+line and source text with NUL framing; the standalone Elixir checker parses the
+two registered source files without evaluating them. It derives definition and
+occurrence positions, checks the construction/use context above, and subtracts
+only those exact records. Extra matches, including one elsewhere in the same
+registered file, are refused. For registered files referenced by matcher records,
+missing or duplicated definitions, changed construction/use context and
+unavailable source are refusals. Malformed framing is also refused. An empty
+scan succeeds without opening these files; it claims no matching construction,
+not that a registered source file exists or compiles. Unrelated source lines
+are not frozen by whole-module hashes.
+
+The new checker and its syntax corpus contain the rule's own literal examples.
+They join the runner's exclusions for the search-path scan only; their exact
+bytes are bound below. No product file is excluded. The interpreter-invocation
+scan still covers both new files and all other tracked files except its original
+runner exclusion. No old selector, minimum, fixture, toolchain pair, hook check,
+retirement inventory, provider lane or shadowed-bootstrap invocation changes.
+Two additional corpus selectors lock the narrowed boundary.
+
+This is structural drift protection, not general Elixir dataflow or shell
+semantic analysis. A matching literal is not proof of every possible way its
+program could use that text. Existing indirection and semantic-review limits in
+Self-Hosting and What the Runner Is For remain. In particular these children
+intentionally do not inherit the interpreter-shadow root; no claim is made that
+arbitrary child programs cannot invoke a retired interpreter. That distinction
+does not remove the real shadowed-bootstrap proof or the whole-tree interpreter
+scan. A future edit to a registered construction/use boundary must be reviewed
+through its applicable gate-generation transaction, not added to an ungoverned
+file allowlist.
+
+### Additional evidence
+
+The twelve-case checker corpus drives the actual Git matcher and standalone
+checker, including per-boundary changes, extra occurrences, invalid evidence,
+and subprocess use. Its source literals are inert test data. The two real
+conformance cases observe a launched worker and an actual offline companion
+build, retain the caller's controlled search path and synthetic sentinel, and
+require owned-worker cleanup. Transparent Git and build observers first prove
+they detect an unsanitized child. The four actual fixture Git children then
+report the fixed child path and absent sentinel, and the build does not invoke
+the caller-only Erlang shim.
+
+Git executable resolution occurs in the caller before its child environment is
+applied; those observations prove the child's environment, not selection of a
+particular Git binary. The worker case observes the actual final worker, not
+every intermediate image. Existing first-image tests remain required where
+their own gates select them. Neither these conformance cases nor the synthetic
+sentinel replaces any required real-provider evidence.
+
+A pre-proposal clause-derived hunt found a missing CLI assertion: returning
+success after diagnosing an unregistered match survived the original twelve
+checker cases. A direct real-Git probe reproduced the wrong exit status; no
+whole-suite-survivor claim was made. The CLI case now requires refusal by exit
+status as well as text. Repeating that same mutation fails exactly that case
+(eleven of twelve pass), while the repaired corpus passes all twelve. Separate
+removals of duplicate-record and build-context protection, and a benign change
+to the actual worker's fixed search path, were also rejected by their corpora.
+This bounded hunt is evidence of those checks, not exhaustive mutation coverage
+or a replacement for independent acceptance review.
+
+### Transaction and re-verification
+
+The generation's amended and additional bound artifacts are:
+
+| SHA-256 | Path |
+| --- | --- |
+| `959b450daeb310d502ed0ccf77c71efd345d7e70d6bca318ae6977543ff2b349` | `scripts/check-m0-gate.sh` |
+| `60e371867bb4e142850fca4f3642025b41d7a804ba010d00c67c0f298d5f1f43` | `scripts/m0-child-env-check.exs` |
+| `cfad881eda27049b61b0e058817143d9dcd98b6c5fc5c42f486c124a2594ef92` | `apps/loopex/test/m0_child_env_check_test.exs` |
+| `b4d2de9ee3faad7e7f8a945161b12e528bdfb1420f1b43ec61e9a2061871204e` | `apps/loopex_llm_reqllm/test/m0_child_environment_conformance_test.exs` |
+
+Proposal A atomically carries this gate, the amended runner, three newly bound
+enforcement/corpus files and the pending generation-6 row in M0's plan. That row
+names this gate's digest but no candidate, authority or disposition. It follows
+the five historical amendments without rewriting their text. Binding validation
+at A must refuse the pending generation; binding-independent checks and these
+additional selectors must still be proved directly. A result at a simulated
+rebind is diagnostic, not authority or evidence that A was green.
+
+Only explicit acceptance authorizes R. Its only changes complete generation 6
+with exact A and a new amendment-specific disposition in an existing durable
+document. R must re-prove binding validation, bootstrap and inherited required
+gates, with serial checks from clean checkouts. This proposal does not waive
+the failed M0 run, close or reopen a milestone, accept a product ADR, or authorize
+integration, release or substitution of provider evidence. Later source
+qualification must name the source where it actually runs.

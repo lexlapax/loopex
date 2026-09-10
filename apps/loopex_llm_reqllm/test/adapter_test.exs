@@ -1,3 +1,5 @@
+Code.require_file("support/provider_isolation_fixture.exs", __DIR__)
+
 defmodule Loopex.LLM.ReqLLM.AdapterTest do
   @moduledoc """
   ## Concept
@@ -18,6 +20,12 @@ defmodule Loopex.LLM.ReqLLM.AdapterTest do
   use ExUnit.Case, async: false
 
   alias Loopex.LLM.ReqLLM, as: Adapter
+  alias Loopex.LLM.ReqLLM.ProviderIsolationFixture, as: Fixture
+
+  setup do
+    {:ok, _} = Application.ensure_all_started(:req_llm)
+    :ok
+  end
 
   test "the pinned reference model resolves to a non-secret identity" do
     assert {:ok, identity} = Adapter.identity(Adapter.default_model())
@@ -48,26 +56,45 @@ defmodule Loopex.LLM.ReqLLM.AdapterTest do
     # false` keeps the mutation off concurrent tests.
     previous = System.get_env(variable)
     System.delete_env(variable)
+    fixture = Fixture.new()
 
     try do
-      assert Adapter.complete(Adapter.default_model(), "unreachable") ==
+      assert Fixture.complete(fixture) ==
                {:error, {:not_dispatched, "model_call_failed"}}
+
+      assert Fixture.canaries(fixture) == 0
+      assert Fixture.count(fixture) == 0
+      Fixture.assert_gone(fixture)
     after
       if previous, do: System.put_env(variable, previous)
     end
   end
 
-  test "the adapter reads exactly one environment variable" do
+  test "the adapter reads exactly one credential environment variable" do
     # Concept: other provider keys present on the host are not this lane's to
     # spend. Drift protection against a fallback read being added later; it
     # proves what the adapter reads, not what ReqLLM would read on its own.
-    source = File.read!(Path.join(__DIR__, "../lib/loopex/llm/req_llm.ex"))
+    # ADR 0019 moves the sole credential read into the raw sender. The worker
+    # reads only its non-secret crash policy, and the launcher enumerates names
+    # solely to clear the first image's environment; neither is a key fallback.
+    for path <- Path.wildcard(Path.join(__DIR__, "../lib/**/*.ex")) do
+      source = File.read!(path)
 
-    reads =
-      ~r/System\.get_env\(([^)]*)\)/
-      |> Regex.scan(source)
-      |> Enum.map(fn [_match, argument] -> String.trim(argument) end)
+      reads =
+        ~r/System\.get_env\(([^)]*)\)/
+        |> Regex.scan(source)
+        |> Enum.map(fn [_match, argument] -> String.trim(argument) end)
 
-    assert reads == ["@credential_variable"]
+      expected =
+        case Path.basename(path) do
+          "provider_bridge.ex" -> ["\"LOOPEX_PROVIDER_API_KEY\""]
+          "provider_worker.ex" -> ["\"ERL_CRASH_DUMP\"", "\"ERL_CRASH_DUMP_SECONDS\""]
+          "provider_launcher.ex" -> [""]
+          _ -> []
+        end
+
+      assert reads == expected
+      refute source =~ ~r/System\.fetch_env!?\(/
+    end
   end
 end

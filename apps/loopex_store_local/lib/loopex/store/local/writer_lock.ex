@@ -44,10 +44,14 @@ defmodule Loopex.Store.Local.WriterLock do
       identity matches, so the marker was written inside this VM and the
       recorded BEAM process can be asked directly — a dead one is gone, a live
       one is the writer;
-    * anything else leaves the marker in place and the opener is refused with
-      `{:store_writer_active, path}`: another live operating-system process, a
-      probe that cannot answer, or a marker carrying no identity to check, such
-      as a `loopex_store_writer_v1` one.
+    * another live operating-system process leaves the marker in place and the
+      opener is refused with `{:store_writer_active, path}`;
+    * a marker the store cannot verify — a probe that cannot answer, printed a
+      diagnostic, or did not answer within the bound, unreadable bytes, or a
+      record carrying no identity to check, such as a `loopex_store_writer_v1`
+      one — leaves the marker in place and refuses the recovery request with
+      `{:store_writer_unverifiable, path, reason}`, which names a decision only
+      a person can make.
 
   Establishing the writer's own liveness, rather than the asking caller's
   authority, is what closes the case no runtime-root lock can. An embedded

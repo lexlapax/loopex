@@ -1,14 +1,14 @@
-# 0020. Durable interaction lifecycle and host-policy authority
+# 0024. Durable interaction lifecycle and host-policy authority
 
 <a id="concept"></a>
 ## Concept
 
-Technical depth: [Interaction mechanics](0020-durable-interaction-lifecycle-and-host-policy-authority-technical.md#technical-depth).
+Technical depth: [Interaction mechanics](0024-durable-interaction-lifecycle-and-host-policy-authority-technical.md#technical-depth).
 
 - **Status:** Proposed
 - **Date:** 2026-08-24
 - **Decision owner:** Maintainer
-- **Prerequisite for:** `M4` acceptance
+- **Prerequisite for:** `M3` acceptance
 
 ## Governance Record
 
@@ -16,7 +16,7 @@ Technical depth: [Interaction mechanics](0020-durable-interaction-lifecycle-and-
 | --- | --- | --- | --- |
 | Acceptance | — | — | — |
 
-<a id="concept-adr-0020-context"></a>
+<a id="concept-adr-0024-context"></a>
 ## Context
 
 ADR 0009 already declares `allow`, `deny`, and `defer` on the host-policy
@@ -27,23 +27,23 @@ a task is running. Adding a prompt at the wire alone would be unsafe: a
 transport reply could be mistaken for authority, disappear on process loss, or
 race an abort or deadline without a durable winner.
 
-M4 needs a session-owned interaction that survives the app-server process and
+M3 needs a session-owned interaction that survives its host process and
 returns an operator answer to host policy. The answer is evidence for a new
 policy decision; it is never a grant.
 
-Technical depth: [Missing durable decision point](0020-durable-interaction-lifecycle-and-host-policy-authority-technical.md#technical-adr-0020-context).
+Technical depth: [Missing durable decision point](0024-durable-interaction-lifecycle-and-host-policy-authority-technical.md#technical-adr-0024-context).
 
-<a id="concept-adr-0020-decision"></a>
+<a id="concept-adr-0024-decision"></a>
 ## Decision
 
 - A policy `defer` commits one pending interaction before
   `interaction.requested` publishes. The owning tool decision and run suspend,
   and no executor intent or process starts.
-- M4 activates ADR 0009's existing callback branch; it does not widen the
+- M3 activates ADR 0009's existing callback branch; it does not widen the
   callback return. The locked M2 one-shot `Loopex.Policy.decide/2` projection
   continues to turn `defer` into `interaction_unsupported`. A separately named
   interaction-aware evaluator admits a validated `defer` only for the
-  session-owned M4 lifecycle and re-enters the same host callback with one
+  session-owned M3 lifecycle and re-enters the same host callback with one
   bounded `interaction_response` field after an answer commits.
 - The coordinator creates a durable opaque `interaction_id` distinct from every
   request, command, session, run, turn, tool-call, operation, and attempt
@@ -70,6 +70,9 @@ Technical depth: [Missing durable decision point](0020-durable-interaction-lifec
 - Another `defer` resolves the current interaction and creates a fresh
   interaction ID. At most one interaction is pending for the serial tool
   decision, and the run's absolute deadline remains the outer bound.
+- Creation and expiry instants are chosen once before their transaction and
+  retained through uncertain commit resolution. Graceful cancellation stays
+  cancelled; abrupt-loss recovery resumes only retained pending/answered state.
 - Response, expiry, abort, deadline, and policy resolution races are decided by
   journal order. Expiry resolves the policy decision as denial and mints no
   grant; it does not add a new run-terminal outcome. Abort and deadline retain
@@ -84,9 +87,9 @@ Technical depth: [Missing durable decision point](0020-durable-interaction-lifec
   protocol method, session parameter, model value, project resource, answer, or
   other client content selects a policy implementation or changes its profile.
 
-Technical depth: [Exact state and race contract](0020-durable-interaction-lifecycle-and-host-policy-authority-technical.md#technical-adr-0020-decision).
+Technical depth: [Exact state and race contract](0024-durable-interaction-lifecycle-and-host-policy-authority-technical.md#technical-adr-0024-decision).
 
-<a id="concept-adr-0020-alternatives"></a>
+<a id="concept-adr-0024-alternatives"></a>
 ## Alternatives
 
 - **Treat the answer as a grant.** Rejected because content and interaction do
@@ -96,10 +99,10 @@ Technical depth: [Exact state and race contract](0020-durable-interaction-lifecy
 - **Map expiry to a new run-terminal outcome.** Rejected because the existing
   denial and deadline algebra already state what happened without widening the
   founding terminal set.
-- **Generalize M4 into a workflow/question engine.** Rejected because the only
+- **Generalize M3 into a workflow/question engine.** Rejected because the only
   proven producer is policy `defer`.
 
-<a id="concept-adr-0020-consequences"></a>
+<a id="concept-adr-0024-consequences"></a>
 ## Consequences
 
 An operator can answer a policy question after an app-server restart without
@@ -108,22 +111,22 @@ state and recovery path, and policy gains a second evaluation carrying bounded
 answer evidence. Runs may stay suspended until answer, expiry, abort, or
 deadline resolves the question.
 
-Technical depth: [Evidence consequences](0020-durable-interaction-lifecycle-and-host-policy-authority-technical.md#technical-adr-0020-consequences).
+Technical depth: [Evidence consequences](0024-durable-interaction-lifecycle-and-host-policy-authority-technical.md#technical-adr-0024-consequences).
 
-<a id="concept-adr-0020-compatibility"></a>
+<a id="concept-adr-0024-compatibility"></a>
 ## Compatibility, Migration, and Rollback
 
 The interaction records add private session format. There is no installed base:
 M2 evidence roots need not be migrated, and an M2 binary is not promised to open
-an M4 root containing interactions. Before closure, rollback removes interaction
+an M3 root containing interactions. Before closure, rollback removes interaction
 admission, policy re-evaluation, and their records together. A later persisted-
 data promise requires an explicit migration decision.
 
-Technical depth: [Format and rollback](0020-durable-interaction-lifecycle-and-host-policy-authority-technical.md#technical-adr-0020-compatibility).
+Technical depth: [Format and rollback](0024-durable-interaction-lifecycle-and-host-policy-authority-technical.md#technical-adr-0024-compatibility).
 
 ## Links
 
 - [ADR 0009](0009-tool-executor-and-grant-contracts.md#concept)
 - [ADR 0010](0010-provider-continuation-and-context-staging.md#concept)
 - [ADR 0011](0011-session-input-algebra-and-streaming.md#concept)
-- [M4 Concept plan](../archive/M4.md#concept)
+- [M3 Concept plan](../plans/M3.md#concept)

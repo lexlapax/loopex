@@ -60,8 +60,16 @@ pairing, link, review, code-documentation, and enforcement contracts.
 | 0016 — configured cancellation observation | [Decision](adr/0016-configured-cancellation-observation.md#concept) | [Technical depth](adr/0016-configured-cancellation-observation-technical.md#technical-depth) |
 | 0017 — durable context and record admission budgets | [Decision](adr/0017-durable-context-admission-budget.md#concept) | [Technical depth](adr/0017-durable-context-admission-budget-technical.md#technical-depth) |
 | 0018 — provider attempt authority and recovery | [Decision](adr/0018-provider-attempt-authority-and-recovery.md#concept) | [Technical depth](adr/0018-provider-attempt-authority-and-recovery-technical.md#technical-depth) |
-| 0019 — experimental public session protocol | [Decision](adr/0019-experimental-public-session-protocol.md#concept) | [Technical depth](adr/0019-experimental-public-session-protocol-technical.md#technical-depth) |
-| 0020 — durable interaction lifecycle and host-policy authority | [Decision](adr/0020-durable-interaction-lifecycle-and-host-policy-authority.md#concept) | [Technical depth](adr/0020-durable-interaction-lifecycle-and-host-policy-authority-technical.md#technical-depth) |
+| 0019 — host-owned provider protection | [Decision](adr/0019-host-owned-provider-protection.md#concept) | [Technical depth](adr/0019-host-owned-provider-protection-technical.md#technical-depth) |
+| 0020 — explicit prepared handoff | [Decision](adr/0020-explicit-prepared-handoff.md#concept) | [Technical depth](adr/0020-explicit-prepared-handoff-technical.md#technical-depth) |
+| 0021 — compacted provider-accounting provenance | [Decision](adr/0021-compacted-provider-accounting-provenance.md#concept) | [Technical depth](adr/0021-compacted-provider-accounting-provenance-technical.md#technical-depth) |
+| 0022 — local executor supervision shell | [Decision](adr/0022-local-executor-supervision-shell.md#concept) | [Technical depth](adr/0022-local-executor-supervision-shell-technical.md#technical-depth) |
+| 0023 — experimental public session protocol | [Decision](adr/0023-experimental-public-session-protocol.md#concept) | [Technical depth](adr/0023-experimental-public-session-protocol-technical.md#technical-depth) |
+| 0024 — durable interaction lifecycle and host-policy authority | [Decision](adr/0024-durable-interaction-lifecycle-and-host-policy-authority.md#concept) | [Technical depth](adr/0024-durable-interaction-lifecycle-and-host-policy-authority-technical.md#technical-depth) |
+| 0025 — resource packs and skill admission | [Decision](adr/0025-resource-packs-and-skill-admission.md#concept) | [Technical depth](adr/0025-resource-packs-and-skill-admission-technical.md#technical-depth) |
+| 0026 — development floor refresh | [Decision](adr/0026-development-floor-refresh.md#concept) | [Technical depth](adr/0026-development-floor-refresh-technical.md#technical-depth) |
+| 0027 — provider permit retirement | [Decision](adr/0027-provider-permit-retirement.md#concept) | [Technical depth](adr/0027-provider-permit-retirement-technical.md#technical-depth) |
+| 0028 — bounded artifact retrieval | [Decision](adr/0028-bounded-artifact-retrieval.md#concept) | [Technical depth](adr/0028-bounded-artifact-retrieval-technical.md#technical-depth) |
 
 An ADR pair is one decision. Its status and governance record live in the
 Concept file and bind both files when accepted.
@@ -71,6 +79,9 @@ check rejects an unindexed pair, a missing companion, or a local Markdown link
 whose path or explicit fragment does not resolve.
 
 ## Planning and Development
+
+- [M3 foundations](plans/M3.md#concept) and [technical plan](plans/M3-technical.md#technical-depth) — compatible skills, durable interactions and shared local contracts; Open, with executable readiness still required.
+- [M4 external consumer draft](archive/M4.md#concept) and [technical plan](archive/M4-technical.md#technical-depth) — unopened protocol and TypeScript workflow over M3.
 
 - [Development contract](../AGENTS.md) — canonical tool-neutral authority,
   autonomy, documentation, milestone, and enforcement rules.

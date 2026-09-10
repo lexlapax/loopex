@@ -69,7 +69,11 @@ reason it matters.
 permissions. That is the honest statement of its reach: **it is not a sandbox.**
 Loopex does not isolate a tool child from your machine in this milestone, and the
 protection that exists is the host policy you name plus the workspace-root
-containment above.
+containment above. The same user can also inspect or signal Loopex's local helper
+processes. If a command deliberately disables its launch guard, Loopex refuses to
+claim cleanup, reports the effect unproven, and keeps the ledger root quarantined;
+this milestone does not claim that an unsandboxed same-user command can always be
+reaped synchronously after sabotaging the cleanup mechanism itself.
 
 Every process the executor starts explicitly removes the provider credential.
 The model-supplied command then crosses `/usr/bin/env -i` and receives only a
@@ -80,6 +84,24 @@ environment rather than atomically replacing it, so M2 does not claim that an
 arbitrary name introduced concurrently elsewhere in the same VM cannot reach
 that first image; the provider credential is removed explicitly after the
 snapshot and does not depend on that broader claim.
+
+<a id="operator-local-supervision-shell"></a>
+### Local Supervision Prerequisite
+
+The reference local executor requires executable `/bin/bash` for its internal
+carrier and cleanup guard on Darwin and Linux. Those scripts control admission,
+process groups, and cleanup; they do not change the interpreter requested by a
+tool. A raw `command` still runs on `/bin/sh`, and an `argv` vector still runs
+without shell interpretation. Core and third-party executors are unaffected.
+
+Provide `/bin/bash` before using the reference stack. The executor does not
+silently select another shell when it is absent; a failed launch is not proof
+that an effect completed or cleanup succeeded. The
+[approved implementation choice](../developer/agent-context-map.md#disposition-local-executor-bash-2026-09-07)
+and [Accepted ADR 0022](../adr/0022-local-executor-supervision-shell.md#concept)
+record this new prerequisite and its qualification requirements.
+
+### Run and Cleanup Bounds
 
 Every run declares a deadline duration when its prompt is admitted or its queued
 follow-up is promoted. The absolute deadline begins when that run's first model
@@ -124,6 +146,17 @@ authority and operating-system child that used it; if that cannot be proved,
 reboot the host, then use the prior source with a fresh empty root. Stopping only
 the application is not sufficient. The exact limitation and disposition are
 retained in [M2's evidence record](../evidence/M2-recorded-limitations.md#local-authority-trusted-root).
+
+Generation records use the lowercase hexadecimal identity required by
+[ADR 0016](../adr/0016-configured-cancellation-observation-technical.md#technical-depth).
+Earlier development code could write uppercase letters instead. The repaired
+reader refuses those nonconforming records and leaves the root intact; it does
+not normalize, migrate or rewrite them. A digits-only identity already satisfies
+the encoding rule, and spelling does not establish a root's age or provenance.
+If a root is refused, preserve it and follow the positive-termination and
+fresh-root procedure above. Merely selecting another directory does not end old
+effect authority. This correction grants no permission to delete a root or
+reboot a host.
 
 The quarantine that root can carry is decided when a job is reserved, not once
 when an executor starts, because the root is shared. An open entry stranded by
@@ -276,10 +309,17 @@ Developer companion:
 
 | Tool | Wall time | Output bytes | Artifact bytes |
 | --- | --- | --- | --- |
-| `loopex.read` | 30,000 ms | 65,536 | 8,388,608 |
+| `loopex.read` | 30,000 ms | 16,384 | 8,388,608 |
 | `loopex.write` | 30,000 ms | 4,096 | 8,388,608 |
 | `loopex.edit` | 30,000 ms | 4,096 | 8,388,608 |
-| `loopex.bash` | 120,000 ms | 65,536 | 8,388,608 |
+| `loopex.bash` | 120,000 ms | 16,384 | 8,388,608 |
+
+The read and shell ceilings leave room for both the durable receipt and the next
+staged context inside the Store's 65,536-byte record ceiling. Local reserves
+capacity for the receipt before starting an effect and measures the complete
+receipt before retaining it; unusually large valid identity fields can reduce
+the inline prefix further, with truncation or artifact retention reported in the
+result.
 
 All four carry version `1.0.0`. The `loopex.` prefix is a reserved namespace: the
 runtime admits a tool with that prefix only through its own `:tools` start
@@ -361,17 +401,29 @@ credential, including the launcher and the executor's own process-management
 helpers. A model-supplied command is then launched through `/usr/bin/env -i`
 with `PATH` as its only variable. The receipt records that constructed downstream
 environment and whether the provider credential was present, so the command-side
-claim is journalled rather than asserted. A provider error is bounded and has the
-credential's bytes substituted out before any caller, report, or terminal can
-see it.
+claim is journalled rather than asserted. A provider failure exposes only its
+dispatch classification and the fixed `model_call_failed` literal, not a provider
+reason containing material that the parent must try to scrub.
 
-A crash inside the provider library is covered by that too. The call the adapter
-makes carries the credential in its arguments, so an error left uncaught there
-could reach the emulator's own crash report with those arguments printed beside
-it. Every raise, throw, and exit under that call is caught and reported as the
-same bounded classification an ordinary provider failure produces, and an
-interrupted stream is an error carrying a bounded, credential-substituted reason
-for all three endings rather than only for a raise.
+The reference adapter runs provider code in one companion BEAM per invocation,
+with crash output, standard output, and standard error suppressed before provider
+startup. Protected entry also suppresses that child's Logger and direct IO. It
+does not install a filter or change a group leader in the embedding VM. The
+credential enters through a private channel only after the worker's protected
+entry and build identity are checked; it is absent from launch arguments and the
+initial process environment. Channel values are bounded plain data, and an
+interrupted stream is a failure rather than a successful partial answer.
+
+The host must supply the trusted interpreter path, companion path, worker digest,
+and manifest digest explicitly. Direct unmanaged calls also supply a cleanup
+period; managed calls use the period retained by Core. Missing configuration
+refuses before dispatch instead of discovering a binary in the workspace or
+falling back to in-process provider execution. The guardian observes the committed
+deadline independently of a blocked provider or socket writer and owns the
+companion's process group until cleanup is proved. A returned reply or closed
+socket alone is not cleanup proof. See
+[ADR 0019](../adr/0019-host-owned-provider-protection.md#concept) for the accepted
+host and private-channel boundaries.
 
 ## Related
 

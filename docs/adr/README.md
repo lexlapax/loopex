@@ -27,9 +27,17 @@ a decision adds a new record rather than rewriting the old one.
 | 0015 | Artifact object and use identity | Accepted | [Decision](0015-artifact-object-and-use-identity.md#concept) | [Technical depth](0015-artifact-object-and-use-identity-technical.md#technical-depth) |
 | 0016 | Configured cancellation observation | Accepted | [Decision](0016-configured-cancellation-observation.md#concept) | [Technical depth](0016-configured-cancellation-observation-technical.md#technical-depth) |
 | 0017 | Durable context and record admission budgets | Accepted | [Decision](0017-durable-context-admission-budget.md#concept) | [Technical depth](0017-durable-context-admission-budget-technical.md#technical-depth) |
-| 0018 | Provider attempt authority and recovery | Accepted | [Decision](0018-provider-attempt-authority-and-recovery.md#concept) | [Technical depth](0018-provider-attempt-authority-and-recovery-technical.md#technical-depth) |
-| 0019 | Experimental public session protocol | Proposed | [Decision](0019-experimental-public-session-protocol.md#concept) | [Technical depth](0019-experimental-public-session-protocol-technical.md#technical-depth) |
-| 0020 | Durable interaction lifecycle and host-policy authority | Proposed | [Decision](0020-durable-interaction-lifecycle-and-host-policy-authority.md#concept) | [Technical depth](0020-durable-interaction-lifecycle-and-host-policy-authority-technical.md#technical-depth) |
+| 0018 | Provider attempt authority and recovery | Accepted (partially superseded by 0021) | [Decision](0018-provider-attempt-authority-and-recovery.md#concept) | [Technical depth](0018-provider-attempt-authority-and-recovery-technical.md#technical-depth) |
+| 0019 | Host-owned provider protection | Accepted | [Decision](0019-host-owned-provider-protection.md#concept) | [Technical depth](0019-host-owned-provider-protection-technical.md#technical-depth) |
+| 0020 | Explicit prepared handoff | Accepted | [Decision](0020-explicit-prepared-handoff.md#concept) | [Technical depth](0020-explicit-prepared-handoff-technical.md#technical-depth) |
+| 0021 | Compacted provider-accounting provenance | Accepted | [Decision](0021-compacted-provider-accounting-provenance.md#concept) | [Technical depth](0021-compacted-provider-accounting-provenance-technical.md#technical-depth) |
+| 0022 | Local executor supervision shell | Accepted | [Decision](0022-local-executor-supervision-shell.md#concept) | [Technical depth](0022-local-executor-supervision-shell-technical.md#technical-depth) |
+| 0023 | Experimental public session protocol | Proposed | [Decision](0023-experimental-public-session-protocol.md#concept) | [Technical depth](0023-experimental-public-session-protocol-technical.md#technical-depth) |
+| 0024 | Durable interaction lifecycle and host-policy authority | Proposed | [Decision](0024-durable-interaction-lifecycle-and-host-policy-authority.md#concept) | [Technical depth](0024-durable-interaction-lifecycle-and-host-policy-authority-technical.md#technical-depth) |
+| 0025 | Resource packs and skill admission | Proposed | [Decision](0025-resource-packs-and-skill-admission.md#concept) | [Technical depth](0025-resource-packs-and-skill-admission-technical.md#technical-depth) |
+| 0026 | Development floor refresh | Proposed | [Decision](0026-development-floor-refresh.md#concept) | [Technical depth](0026-development-floor-refresh-technical.md#technical-depth) |
+| 0027 | Provider permit retirement | Proposed | [Decision](0027-provider-permit-retirement.md#concept) | [Technical depth](0027-provider-permit-retirement-technical.md#technical-depth) |
+| 0028 | Bounded artifact retrieval | Proposed | [Decision](0028-bounded-artifact-retrieval.md#concept) | [Technical depth](0028-bounded-artifact-retrieval-technical.md#technical-depth) |
 
 0001 and 0002 were the prerequisites that unblocked the first milestone
 candidate; the [plans register](../plans/README.md) records current status.
@@ -84,14 +92,26 @@ attempt and owner-loss retry clauses it names in ADR 0010, ADR 0011, and ADR
 acceptance does not itself amend the M2 plan pair or gate, authorize dependent
 implementation, close M2, or authorize integration or release.
 
-0019 and 0020 are proposed for the headless application protocol milestone,
-whose retained draft is the [`M4` plan](../archive/M4.md). 0019 decides the experimental
-public session protocol and its first stdio mapping; 0020 decides durable
-interaction and policy resumption without turning an answer into a grant.
-Neither is a prerequisite for `M3`, and neither is accepted. The JSON codec
-decision drafted beside them was withdrawn: the runtime floor `M3` raises puts
-Elixir's standard-library `JSON` module inside the toolchain, so no external
-codec dependency is proposed.
+0019, 0020, and 0021 are accepted post-closure repair decisions, not retroactive
+M2 prerequisites. 0019 selects a host-owned, one-invocation provider process and private companion
+build so the adapter no longer changes parent VM diagnostic machinery. Its
+explicit worker configuration and new credential-size ceiling are accepted
+compatibility changes; implementation and conformance evidence remain separate.
+0020 makes the local prepared-handoff participant explicit and replaces unused
+handler replacement with atomic duplicate refusal. 0021 defines versioned
+compact accounting evidence while preserving ADR 0018's reported-usage rule and
+explicitly refusing ambiguous legacy records. None changes M2's Closed state,
+locked gate, or integration authority. The
+[repair follow-up](../evidence/M2-ff17990-review-followup.md#provider-protection-choice)
+records implementation progress and outstanding evidence. ADR 0021 supersedes
+only ADR 0018's settlement version, compact representation/validation, and
+legacy-compatibility clauses, preserving its reported-usage accounting policy.
+
+0022 records the maintainer-approved fixed Bash prerequisite for the reference
+local executor's internal supervision, preserving raw command semantics and
+the current cleanup topology. Its exact-pair acceptance is recorded separately
+from the earlier implementation instruction. It is not
+a retroactive M2 prerequisite and changes no Closed plan or locked gate.
 
 0004 and 0005 are both parked. They designed correction paths for a defect
 found in an accepted plan, then the defect that prompted them turned out to be
@@ -124,3 +144,11 @@ valid designs, never an activity log.
 - [Vision](../vision.md#concept) — the founding authority these decisions refine.
 - [Developer documentation](../developer/README.md) — method and routing.
 - [Plans](../plans/README.md) — milestone register and lifecycle.
+
+0024–0028 are the proposed M3 foundation prerequisites. They settle durable
+interactions, resource-pack admission, floor ordering, safe permit retirement
+and bounded artifact retrieval before implementation. 0023 is the subsequent
+M4 protocol prerequisite. Their proposed status supplies no acceptance and
+changes no accepted ADR or Closed gate record. The protocol and interaction
+proposals were renumbered from the old draft's 0019/0020 because those numbers
+are now accepted M2 decisions.

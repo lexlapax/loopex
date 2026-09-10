@@ -224,12 +224,12 @@ defmodule Loopex.Executor do
   `{:error, reason}` says the executor could not answer, and a job the executor
   still holds in flight answers `{:error, :effect_in_flight}` rather than
   `:absent`, because absence there would read live work as lost. An executor
-  whose durable authority shows an admitted effect that no live instance is
-  settling answers `{:error, :effect_unresolved}`, and one whose receipt is
-  retained but whose open entry still stands answers `{:error, :effect_settling}`;
-  the coordinator ends a recovered run `outcome_unknown` on either, since the
-  process that could have finished them is gone by the time a prepared resume is
-  activated. The session
+  whose durable authority shows an admitted job this instance does not hold,
+  with an open entry and no final receipt, answers
+  `{:error, :effect_unresolved}`. One whose receipt is retained but whose open
+  entry still stands answers `{:error, :effect_settling}`; the coordinator ends
+  a recovered run `outcome_unknown` on either, because neither is a final fact
+  from which it may resume or re-dispatch. The session
   coordinator asks this once, at the activation of a prepared resume whose
   pending work is a dispatched effect, and validates the answer exactly as it
   validates a receipt a host presents through `Loopex.reconcile/2`; an executor
@@ -618,7 +618,8 @@ defmodule Loopex.Executor do
          :ok <- validate_job_fields(fields),
          {:ok, bytes} <- canonical_bytes(fields),
          true <- Map.get(job, :canonical_request_bytes) == bytes,
-         true <- Map.get(job, :canonical_request_digest) == digest(bytes) do
+         true <- Map.get(job, :canonical_request_digest) == digest(bytes),
+         true <- valid_effective_job_deadline?(job, fields) do
       :ok
     else
       _other -> {:error, :canonical_job_request_mismatch}
@@ -829,6 +830,29 @@ defmodule Loopex.Executor do
       _no_declared_ceiling ->
         deadline
     end
+  end
+
+  # Concept: the dispatch-local deadline is outside the canonical digest, but it
+  # is still a required bounded job fact rather than caller-controlled slack.
+  #
+  # Technical depth: the dispatch instant is intentionally not serialized, so a
+  # later executor cannot reproduce the exact instant. It can and must refuse
+  # every reproducibly impossible value: the value is a positive wall instant,
+  # never past the run deadline, and equals that deadline when no positive
+  # dispatch-local wall ceiling exists. The exact budget-derived instant cannot
+  # be reconstructed later because its dispatch instant is deliberately absent
+  # from the canonical request.
+  defp valid_effective_job_deadline?(job, %{run_deadline: run_deadline, resource_budgets: budgets}) do
+    deadline = Map.get(job, :effective_job_deadline)
+
+    is_integer(deadline) and deadline > 0 and
+      case budgets do
+        %{"max_wall_time_ms" => budget} when is_integer(budget) and budget > 0 ->
+          deadline <= run_deadline
+
+        _no_declared_ceiling ->
+          deadline == run_deadline
+      end
   end
 
   defp digest(bytes), do: :crypto.hash(:sha256, bytes) |> Base.encode16(case: :lower)

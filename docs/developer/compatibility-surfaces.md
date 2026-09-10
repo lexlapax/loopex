@@ -5,10 +5,11 @@
 
 Every surface M2 touches is unstable. None is labelled, frozen, versioned for
 consumers, or given a compatibility promise, and none is owed a deprecation
-window or a migration note. `VERSION` is `0.0.0`, nothing is tagged, and nothing
-is published, so the vision's package surface — released names, their contents,
-and the constraints they declare — stays inert because it has never been
-created.
+window or a migration note. `VERSION` remains `0.0.0`; `v0.0.0-m2` identifies
+the exact integrated M2 source snapshot and labels no consumer surface.
+Nothing is packaged or published, so the vision's package
+surface — released names, their contents, and the constraints they declare —
+stays inert because it has never been created.
 
 That is a deliberate position, not an omission. The
 [compatibility contract](../vision.md#concept-vision-compatibility) freezes a
@@ -73,7 +74,7 @@ so nothing has welded two surfaces together by shipping them in one artifact.
 `next_event/1`, `snapshot/1`, `attachment_status/1`, `progress/2`,
 `diagnostic/2`, `session_status/2`, `reconciliation_query/1`, `reconcile/2`,
 `prepare_resume_session/3`, `prepare_resume_known_session/4`,
-`activate_resume/1`, `abandon_resume/1`, `transfer_resume/2`, `state_root/0`,
+`activate_resume/1`, `abandon_resume/1`, `transfer_resume/2`, `transfer_resume/3`, `state_root/0`,
 `runtime_placement_id/1`, `track_session/3`, `list_sessions/1`, and `version/0`.
 Prepared resume entries return an opaque one-use activation capability; neither
 preparation nor handler installation schedules recovered work. `activate_resume/1`
@@ -90,6 +91,52 @@ start options are part of this surface, including
 `:context_token_budget`. Direct Runtime callers choose that context value;
 Runtime supplies no default.
 
+[ADR 0020](../adr/0020-explicit-prepared-handoff.md#concept) adds the explicit
+three-argument prepared handoff: it names a local receiving holder and its
+local lifetime participant. Ordinary `transfer_resume/2` keeps its PID domain
+and no longer reads a CLI-written process-dictionary selector. The new entry
+distinguishes a definitive refusal from loss after a possible handoff. The CLI
+refuses duplicate handler installation atomically instead of replacing/draining
+the incumbent. Missing decision replies do not authorize retries, abandonment,
+or activation; read-only holder observations remain bounded. These are
+unreleased source/behavior changes, not new portable or durable data.
+
+**Reference provider launch.**
+[ADR 0019](../adr/0019-host-owned-provider-protection.md#concept) requires one
+private companion process per invocation and explicit adapter options:
+`worker_path`, `interpreter_path`, `worker_sha256`, and
+`build_manifest_sha256`. Unmanaged calls additionally supply the validated
+`cleanup_grace_ms`; managed calls use Core's retained value. Missing, malformed,
+or mismatched configuration refuses before credential delivery, with no
+shared-VM fallback or runtime code discovery. The bare-model `complete/2` helper
+now refuses; direct callers use `complete_prompt/3` with explicit configuration.
+The Model callback remains `complete/3`.
+
+`Loopex.LLM.ReqLLM.call_options/3` also remains an exported, unstable helper.
+It takes an explicit credential and returns provider options containing that
+credential; calling it is not protected credential admission. Normal provider
+execution calls it inside the isolated companion after private delivery, not
+in the host callback. A direct caller owns the returned secret-bearing value
+and must not log or retain it in public or durable data.
+
+The sole credential source remains `LOOPEX_PROVIDER_API_KEY`, with a new
+65,536-byte maximum; empty and oversized credentials refuse. Starting or stopping
+the adapter installs no parent Logger filter or credential registry and changes
+no parent group leader. Provider-side raw diagnostics are unavailable rather
+than forwarded for secret-dependent scrubbing. Companion startup consumes the
+existing deadline. Rollback must contain live children and change bridge,
+companion, and launch configuration together; it does not restore unsafe shared
+diagnostics or retry an uncertain invocation. The companion is private
+source-build output, not a separately published package.
+
+The generic Model reply accepts an optional nonempty UTF-8
+`provider_response_id` of at most 256 bytes and retains its bytes unchanged.
+It does not normalize whitespace or Unicode. The historical M2 attestation
+dialect `req_` plus 16–64 ASCII identifier characters is a narrower evidence
+format for those provider records, not the generic Model callback's domain.
+An account-verification record must still satisfy its own declared format;
+generic reply admission alone does not prove account visibility.
+
 **Ports.** Core declares exactly five behaviours: `Loopex.Store`,
 `Loopex.Model`, `Loopex.Executor`, `Loopex.Policy`, and
 `Loopex.ArtifactStore`. M1 declared the first three; M2 adds the last two, and
@@ -105,16 +152,38 @@ it does not restore conformance to an implementation that omits the callback.
 The port also declares an optional `retained_receipt/2`, which reads the terminal receipt
 an executor retained for one job: `{:ok, receipt}`, `:absent`, or
 `{:error, term()}`, with `{:error, :effect_in_flight}` reserved for a job the
-executor still holds. The session coordinator consults it once when a prepared
-resume is activated over a dispatched effect; `Loopex.Executor.retained_receipt/3` bounds
+executor still holds; the shipped local executor also answers
+`{:error, :effect_unresolved}` for an admitted job this Local does not hold,
+with an open entry and no final receipt, and `{:error, :effect_settling}` for a
+receipt whose open entry still stands. A receipt is final only once its entry is
+gone. The session
+coordinator consults it once when a prepared resume is activated over a
+dispatched effect, ending the run `outcome_unknown` on absence, an unresolved
+entry, or a settling one; `Loopex.Executor.retained_receipt/3` bounds
 the call and reports an absent callback, a raise, a malformed answer, or the
 bound elapsing as distinct errors that leave reconciliation host-driven. Omitting
 it is conformant. An implementation of any port is written against bytes that
 may change in the next milestone.
 
+The shipped local executor now requires executable `/bin/bash` for its internal
+carrier and cleanup guard on Darwin and Linux. This is a new concrete-adapter
+runtime prerequisite, not a Core or custom-executor dependency. Raw commands
+still use `/bin/sh`; argv vectors remain literal. There is no interpreter
+selection option or silent fallback. No callback, journal record, or configuration
+schema changes with this prerequisite. The
+[current implementation disposition](agent-context-map.md#disposition-local-executor-bash-2026-09-07)
+authorizes the change; [ADR 0022](../adr/0022-local-executor-supervision-shell.md#concept)
+is Accepted through its [exact-pair disposition](agent-context-map.md#disposition-adr-0022-acceptance-2026-09-08).
+A host that previously supplied only a
+POSIX shell must provide `/bin/bash` or select a different executor before using
+this repaired reference stack.
+
 The shipped local executor's `process_probe` start option is edge configuration,
-defaults to `/bin/ps`, and is recorded on receipts that use it. The cleanup
-period is different: the session commits it, every job and terminal carries it,
+defaults to `/bin/ps`, and is recorded on receipts that use it. The probe contract
+is the `-e -o pid= -o pgid=` table dialect with the probe's Port carrier as the
+PID-equals-PGID witness row; empty, malformed, or nonzero answers fail closed.
+The cleanup period is
+different: the session commits it, every job and terminal carries it,
 and `Loopex.Executor.cancellation_bounds/1` derives each production observation
 window from it. `Loopex.Executor.cancel/4` applies that configured observation
 around required callback `cancel/2`; retained `cancel/3` is a defensive legacy
@@ -123,6 +192,86 @@ entry and production coordination never selects it. Local's
 committed value before effect authority exists. These additions are source and
 behaviour changes to direct integrations even though every surface remains
 unreleased.
+
+The local adapter's queue reservation is deliberately not evidence that an
+effect is live. A second serialized permit decision revalidates the exact live
+holder, the complete shared-root reconciliation result, the job, grant, lease,
+and deadline, then repeats the complete root snapshot after any bounded
+validation wait. A successful newly admitted permit publishes the marker and
+open entry, installs the exact operation-owner token under the same root claim,
+and counts as a dispatch. Publication can stop after the open entry but before
+the marker; that incomplete state installs no owner token and deliberately
+quarantines the root. Another reservation for that job is only a joiner. If
+closing an entry changes only part of the ledger, the adapter restores the open
+authority before releasing the root claim or retains the claim and quarantines
+the root when restoration cannot be proved. These are current semantics of the
+unstable trusted-local adapter, not new callbacks in the executor port.
+
+Local's generation writer and reader enforce ADR 0016's exact lowercase
+64-hex encoding of its positive 256-bit epoch. Earlier development code's
+uppercase rendering was nonconforming; a generation ID containing uppercase
+letters now makes its record unavailable rather than silently rewritten or
+accepted through a legacy decoder. Digits-only encodings already conform. The
+generation digest continues to bind the original stored record, and no encoding
+establishes provenance.
+This restores the existing unreleased contract: M2 promises no installed-store
+compatibility and forbids ledger downgrades or rewrites. Preserve refused roots;
+the [operator recovery procedure](../operator/tools-and-policy.md#operator-tools-reach)
+still requires positive cessation of every old effect authority, or the
+prescribed host reboot, before using a fresh root. No new migration, callback,
+persistent record version or public compatibility guarantee is introduced.
+
+The concrete Local start options also include `clock_provider` (a zero-argument
+function returning paired wall and monotonic millisecond instants) and
+`open_authority_close` (a two-argument function replacing `Ledger.close_open/2`).
+The latter receives the prepared ledger and job ID and must answer `:ok` or
+`{:error, reason}`; an invalid answer, failed call, or unfinished bounded removal
+does not prove authority was removed. These are trusted executable host
+configuration, not portable job fields or model-supplied tools.
+
+The private reservation/permit exchange copies Local placement values to the
+trusted executing process. That native map includes the public ETS table ID,
+artifact-store handle and removal callback; it is executable authority within
+the same VM, not a sandbox or a serializable capability. A reservation alone
+does not authorize an effect. Its holder must obtain the separately fenced
+permit. The holder liveness observation and a subsequent death are not one
+atomic operation: no reservation becomes a permit after the relevant loss is
+observed, not a promise that a later death is impossible.
+
+Reserve and permit callers wait for that serialized decision or server exit;
+they do not impose separate 10/15-second observation ceilings that can expire
+while admission continues. This does not widen the job's effect deadline or
+convert missing replies into authority. A stalled host filesystem can still
+prevent the server answering; this wait is not a promise of bounded host-disk
+latency.
+
+Additional concrete error families include
+`{:ledger_unavailable, :operation_owner_unavailable}`, `:effect_settling`,
+`{:receipt_not_retained, reason}`, `{:receipt_read_failed, reason}`,
+`{:refusal_not_retained, reason}`, and nested settlement/removal or
+`root_claim_retained` details. These remain unstable terms. Only the explicit
+`{:refused_before_effect, reason}` wrapper proves pre-effect refusal; neither
+an unfamiliar error atom nor loss of a reply proves that nothing ran.
+
+Local also exports hidden test-support entries: `stats/1`, `tool/1`,
+`bounded_work/3,4`, `bounded_read_probe/2`, `await_owned_process_start/4`,
+`artifact_retention_result/1`, `launcher_probe_port/1,3`, `launcher_vector/1`,
+`answer_within/3`, `guard_protocol_probe/1`, `receipt_decode_probe/3`, and
+`process_group_answered_empty?/2,3`. `@doc false` hides
+generated documentation, not callability. These are unstable concrete test
+support, not additions to `Loopex.Executor` conformance or supported embedder
+extension points.
+
+The adapter refuses a missing, empty, or larger-than-8,192-byte `job_id` before
+it enters the shared ledger or creates a reservation. That is a constraint of
+this concrete unstable adapter rather than a new field or callback in the
+executor protocol. Its filesystem effects also remain bound to the exact Local
+instance that admitted them. A command worker is not released to run after its
+execute caller or launch guard has disappeared, and a potentially proved command
+result is re-fenced by the Local owner after cleanup before it can be reported.
+An artifact-retention worker that cannot be confirmed stopped produces no
+receipt and leaves the job's durable open entry in place, so uncertainty in a
+host-supplied store cannot be converted into permission for a later effect.
 
 **Artifact object and use identity.** The adapter callbacks are `put/3`,
 `fetch/2`, `stat/2`, and `describe/2`. Core owns the caller-facing
@@ -192,14 +341,46 @@ measurements do not otherwise know is measured by encoding it, so an unbounded
 integer no longer measures as nothing. Both are behaviour changes for an adapter
 that compiles unchanged, and the shipped adapter already emitted complete deltas.
 
-A reply's usage map is also closed to `input_tokens` and `output_tokens`. An
+A reply's usage map is also closed to `input_tokens` and `output_tokens`, and
+the complete raw usage subtree must satisfy the Store's bounded plain-data
+admission before either key or value is normalized. An
 adapter that reports a third key — a cache count, a reasoning count, a provider's
 own total — now settles the attempt as `unreadable_model_answer` instead of
 having the extra number silently dropped, because a usage record Core cannot
 account for in full is one it must not charge from. Omitting either key stays
-legal and normalizes as unreported; a present but unreadable value is classified
-rather than refused. Widening that key set is the change a later milestone makes
-deliberately, and it is why the closure exists rather than a lenient filter.
+legal and normalizes as unreported. A present, Store-admitted plain-data value
+of the wrong numeric shape is classified rather than refused; a non-plain raw
+term fails the reply's Store admission before projection. Widening that key set
+is the change a later milestone makes deliberately, and it is why the closure
+exists rather than a lenient filter.
+
+An unreadable sibling or any other canonical mismatch invalidates the usage
+projection as well: accounting charges the committed remaining allowance as
+estimated even when the rejected raw reply contains a plausible pair. Reported
+usage survives only when the entire canonical reply validates and the later
+complete-settlement size preflight alone requires a compact unreadable result.
+
+[ADR 0021](../adr/0021-compacted-provider-accounting-provenance.md#concept)
+versions that distinction. New writers retain `model_attempt_settled_v2`;
+unreadable results carry either no validated accounting evidence or the exact
+normalized usage and Store byte/depth overage observed for the full settlement.
+Reported accounting must equal that retained usage in both members. This is a
+private journal change, not a new public reply or terminal field.
+
+The reader accepts an unambiguous version-1 prefix, followed by version 2, and
+refuses a version-1 settlement after that cutover. A legacy unreadable result
+with reported accounting now refuses as
+`ambiguous_legacy_provider_accounting`: it is neither rewritten nor silently
+charged as estimated. A version-2 settlement can close an existing version-1
+attempt without another provider call. Unknown versions refuse.
+
+Rollback therefore requires stopping owners and preserving a complete backup.
+An older binary cannot resume a history containing version 2; there is no
+in-place migration or hot-upgrade promise. Ownership acquisition may still
+write fenced administration before replay refuses, so this is not a promise of
+zero writes. Readiness and recovered semantic work require successful replay
+through the committed head. The exact old-binary execution proof remains a
+release-review evidence obligation, not something a schema comparison proves.
 
 **Store port.** An append failure gains one pair of reasons and one changed
 consequence. The local Store holds the log *file* rather than its path: it
@@ -236,7 +417,8 @@ nothing it can act on.
 `owner_advanced`, `prompt_admitted_v2`, the other input-command admissions and
 `command_admission_refused_v1`, `model_request_committed`,
 `model_attempt_opened_v1`, `model_termination_admitted_v1`,
-`model_attempt_settled_v1`, `context_admission_refused_v1`,
+`model_attempt_settled_v2` (and readable legacy `model_attempt_settled_v1`),
+`context_admission_refused_v1`,
 `deadline_staging_failed_v1`, `effect_intent_committed`,
 `executor_receipt_committed`, `tool_result_committed`,
 `outcome_unknown_committed`, and `run_terminal_committed`. The model-attempt
@@ -299,6 +481,8 @@ option. It passes `:project_manifest` and `:project_decision` through to the
 runtime, and hands `:cleanup_grace_ms` to the session and the executor together
 so a run's ending cannot report a period its cleanup did not run under.
 `:process_probe` reaches the executor alone, which is where that option belongs.
+`:provider_launch` carries the host's explicit companion configuration opaquely
+to the reference model adapter; no default worker is discovered.
 It names four concrete implementations, so an embedder that
 depends on it transitively acquires the reference adapters and their external
 dependency whether or not every one is used. An embedder who wants a different
@@ -319,13 +503,41 @@ remaining word as data, which is what makes an artifact locator beginning with
 value to 8,192; prepared `resume` and `cancel` recover an active run's committed
 value on omission and refuse an explicit conflict before activation or abort.
 The command's cross-application interrupt entries are `install/1`,
-`install/2`, `install_prepared(attachment, cleanup_ms, activation)`,
-`activate_prepared(activation)`, and `abandon_prepared(activation)`. Prepared
-installation binds the handler to the attachment and the exact one-use
-capability and makes the handler's own process that capability's acknowledged
-holder; activation and abandonment are both answered by that process, and
-abandonment schedules no recovered work. `abandon_resume(attachment, activation)`
-was removed with that change.
+`install/2`, `install_prepared(attachment, cleanup_ms, activation)`, which
+returns `:ok`, a definitive `{:error, reason}`, or `{:unresolved, reason}`,
+`activate_prepared(activation)`,
+and `abandon_prepared(activation)`. Prepared installation binds the handler to
+the attachment and the exact one-use capability and makes a holder process the
+handler owns that capability's acknowledged holder. Before creating it, a
+temporary lifetime guard monitors the installer; it creates the holder linked
+and monitored, waits for the holder's acknowledgement, then unlinks the pair
+into a one-way lifetime. That same guard is armed against the exact signal
+manager, and the handler is visible before public transfer begins. On this
+explicit `transfer_resume/3` path the coordinator fixes the verdict, the installer forwards it to
+the guard, and the guard acknowledges it before the coordinator records the
+holder and returns `:ok`.
+Installer death before holder readiness or before forwarding fails closed; after
+forwarding, ordered delivery makes the handoff independent of the installer even
+if its public reply is lost. Ordinary `transfer_resume/2` has no guard and a
+missing reply does not prove whether its coordinator transfer happened.
+Activation and abandonment
+are presented from that holder and wait for the owner's exact answer. A lost
+holder or coordinator after a possible presentation is unresolved, not proof
+that the decision failed; read-only holder lookup independently reports
+unavailable on observation expiry. Installation errors may originate in
+configuration, the signal manager, or the owner, and are not all owner refusals.
+Abandonment schedules no recovered work. Under
+[ADR 0020](../adr/0020-explicit-prepared-handoff.md#concept), installation
+atomically claims one handler identity on the exact signal manager. A duplicate
+returns `interrupt_already_installed` and preserves the incumbent attachment,
+holder, abort identity and backstop. There is no dynamic replacement or
+predecessor drain. Orderly removal releases its own holder asynchronously;
+manager and coordinator loss independently end dependent holders, without
+undoing work already activated. Unresolved installation keeps recovery fenced
+and lifetime cleanup active; the command neither activates nor retries it
+speculatively. `abandon_resume(attachment,
+activation)`, the entry ADR 0016 names, is kept and presents the capability
+from the same holder.
 An unrecognised flag is refused rather than
 ignored, which means adding a flag is observable and removing one is breaking.
 `loopex artifact` reads objects through the `Loopex.ArtifactStore` port, so the

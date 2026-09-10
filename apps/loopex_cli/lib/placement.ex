@@ -516,7 +516,32 @@ defmodule LoopexCli.Placement do
 
   @doc false
   @spec process_incarnation(binary(), Path.t()) :: {:ok, binary()} | {:error, term()}
+  @probe_bound_ms 5_000
+
   def process_incarnation(pid, probe \\ "/bin/ps") when is_binary(pid) and is_binary(probe) do
+    parent = self()
+    reference = make_ref()
+    {asker, monitor} = spawn_monitor(fn -> send(parent, {reference, ask(pid, probe)}) end)
+
+    # Technical depth: bounded for the reason the writer lock's probe is -- a
+    # helper that hangs must not hang the command's placement acquisition, and
+    # its silence is never read as absence.
+    receive do
+      {^reference, answer} ->
+        Process.demonitor(monitor, [:flush])
+        answer
+
+      {:DOWN, ^monitor, :process, ^asker, reason} ->
+        {:error, {:process_probe_failed, reason}}
+    after
+      @probe_bound_ms ->
+        Process.demonitor(monitor, [:flush])
+        Process.exit(asker, :kill)
+        {:error, :process_probe_timeout}
+    end
+  end
+
+  defp ask(pid, probe) do
     try do
       case System.cmd(probe, ["-o", "lstart=", "-p", pid],
              stderr_to_stdout: true,
