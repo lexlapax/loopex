@@ -63,11 +63,10 @@ streaming progress, session discovery and resume, a one-page embedded
 composition, and a runnable `loopex` command. It publishes nothing and freezes
 nothing.
 
-M2 has closed this rung. Its post-closure repair line preserves the operator
-capability while tightening receipt bounds and qualification evidence. The
-maintainer has authorized `v0.0.0-m2` after final evidence and integration as a
-tag for that exact repaired source snapshot; it is not a package, publication,
-compatibility label, or public-surface freeze.
+M2 has closed this rung. Its integrated post-closure repair line preserves the
+operator capability while tightening receipt bounds and qualification evidence.
+The `v0.0.0-m2` tag identifies that exact repaired source snapshot; it is not a
+package, publication, compatibility label, or public-surface freeze.
 
 Technical depth: [Foreground-harness candidate proof](roadmap-technical.md#technical-roadmap-foreground-harness)
 

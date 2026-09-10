@@ -20,10 +20,14 @@ the exact document set its milestone must update.
 
 ## [Unreleased]
 
-Post-closure repair work on `codex/m2-release-repair` implements accepted ADRs
-0019–0021. Integration requires its exact-source qualification and independent
-review disposition to be named in the
-[repair record](docs/evidence/M2-ff17990-review-followup.md#completion-order).
+No package or compatibility-labelled surface is pending.
+
+## [v0.0.0-m2] — 2026-09-09
+
+The integrated post-closure repair line implements accepted ADRs 0019–0021.
+Its [exact-source qualification](docs/evidence/M2-ff17990-review-followup.md#final-repaired-source-06dadbb)
+and [integration disposition](docs/evidence/M2-recorded-limitations.md#final-repaired-source-integration)
+name the evidence and authority used for the source snapshot.
 The provider uses a separately built private OS process instead
 of taking over the embedding VM's diagnostics. Interactive recovery presents an
 explicit local participant rather than selecting behavior through process-local
@@ -42,13 +46,14 @@ Raw model commands remain on `/bin/sh`, argv remains literal, and Core and custo
 executors gain no dependency. The [operator setup](docs/operator/tools-and-policy.md#operator-local-supervision-shell)
 states the requirement; [ADR 0022](docs/adr/0022-local-executor-supervision-shell.md#concept)
 is Accepted at its exact pair. That ADR acceptance governs only this
-supervision-shell choice; integration and the source-snapshot tag require their
-own final-source disposition, and neither publishes a package.
+supervision-shell choice; the final-source disposition separately governs
+integration and the source-snapshot tag, and neither publishes a package.
 
 The next milestone, `M3` (kernel consolidation), is being opened gate-first on
 branch `m3`, where its plan pair and red gate live until acceptance; the headless
-session-protocol draft is retained there as `M4`. Nothing about either is on
-`main` yet, by the contract's rule that an unaccepted Open tree never merges.
+session-protocol draft is retained there as `M4`. Neither unaccepted plan pair
+nor gate is on `main`, by the contract's rule that an unaccepted Open tree never
+merges.
 
 ### Added
 
