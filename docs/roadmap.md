@@ -62,6 +62,13 @@ streaming progress, session discovery and resume, a one-page embedded
 composition, and a runnable `loopex` command. It publishes nothing and freezes
 nothing.
 
+Closed M2 answers this question for the integrated source tree. Its
+post-closure repair line preserves that operator capability while tightening
+receipt bounds and qualification evidence. The authorized `v0.0.0-m2` tag is
+reserved for the exact integrated repaired source snapshot; it is not a package,
+publication, compatibility label, or public-surface freeze. The next projected
+product boundary remains M3's independently driven session protocol.
+
 Technical depth: [Foreground-harness candidate proof](roadmap-technical.md#technical-roadmap-foreground-harness)
 
 <a id="concept-roadmap-session-protocol"></a>
