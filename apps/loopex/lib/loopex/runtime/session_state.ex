@@ -43,7 +43,15 @@ defmodule Loopex.Runtime.SessionState do
                           provider_revision record_byte_cost selector_identity
                           selector_revision token_estimator totals transformer_identity
                           transformer_revision
-                        ))
+  ))
+  @resource_context_receipt_keys Enum.sort(["resource_packs" | @context_receipt_keys])
+  @resource_pack_header_keys Enum.sort(~w(version manifest_digest selection_digest status blocks))
+  @resource_pack_row_keys Enum.sort(~w(pack file status))
+  @resource_pack_header_bytes 8_192
+  @resource_pack_max_rows 37
+  @resource_catalog_index 64
+  @resource_catalog_bytes 16_384
+  @resource_text_bytes 65_536
   @uint64_max 18_446_744_073_709_551_615
   @descriptor_canonicalization_version "loopex.canonical.v1"
   @descriptor_digest_domain "loopex.context.descriptors.v1"
@@ -687,6 +695,30 @@ defmodule Loopex.Runtime.SessionState do
   end
 
   @doc false
+  @spec preflight_model_request(t(), binary(), Loopex.Model.request(), keyword()) ::
+          {:ok, map()}
+          | {:refused, map()}
+          | {:refused_not_required_only, map()}
+          | {:error, term()}
+  def preflight_model_request(state, run_id, request, options \\ [])
+
+  def preflight_model_request(%__MODULE__{} = state, run_id, request, options)
+      when is_binary(run_id) and is_map(request) and is_list(options) do
+    work = Map.get(state.pending_work, run_id, %{turn_number: 1})
+    turn_number = next_turn_number(work)
+    record = model_request_record(state, run_id, request, options, turn_number)
+
+    case admit_context_candidate(record) do
+      {:ok, fixed} -> {:ok, fixed}
+      {:refused, refusal} -> context_refusal_result(record, refusal, work, turn_number)
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  def preflight_model_request(_state, _run_id, _request, _options),
+    do: {:error, :invalid_model_request}
+
+  @doc false
   @spec propose_model_request(t(), binary(), Loopex.Model.request(), keyword()) ::
           {:ok, proposal()}
           | {:refused, map()}
@@ -694,23 +726,9 @@ defmodule Loopex.Runtime.SessionState do
           | {:error, term()}
   def propose_model_request(%__MODULE__{} = state, run_id, request, options \\ [])
       when is_binary(run_id) and is_map(request) and is_list(options) do
-    applied_steer = Keyword.get(options, :applied_steer)
-    context_receipt = Keyword.get(options, :context_receipt)
-
     work = Map.get(state.pending_work, run_id, %{turn_number: 1})
     turn_number = next_turn_number(work)
     turn_id = stable_id("turn", run_id, turn_number)
-
-    record = %{
-      "run_id" => run_id,
-      "turn_id" => turn_id,
-      "operation_id" => model_operation_id(run_id, turn_number),
-      "staged_request_digest" => request.staged_request_digest,
-      "request" => encode_plain(request),
-      "applied_steer" => applied_steer,
-      "context_receipt" => context_receipt,
-      kind: "model_request_committed"
-    }
 
     # Concept: a request that cannot be staged is refused here, before any
     # provider sees it, and one that can is committed with the attempt that may
@@ -725,7 +743,7 @@ defmodule Loopex.Runtime.SessionState do
     # separately would leave a window in which the bytes exist and the authority
     # does not, and a crash inside it would hand a successor a staged request
     # whose attempt nobody opened.
-    with {:ok, fixed} <- admit_context_candidate(record),
+    with {:ok, fixed} <- preflight_model_request(state, run_id, request, options),
          {:ok, opened} <-
            ProviderAttempt.opened_record(%{
              run_id: run_id,
@@ -741,11 +759,32 @@ defmodule Loopex.Runtime.SessionState do
       )
     else
       {:refused, refusal} ->
-        context_refusal_result(record, refusal, work, turn_number)
+        {:refused, refusal}
+
+      {:refused_not_required_only, refusal} ->
+        {:refused_not_required_only, refusal}
 
       {:error, reason} ->
         {:error, reason}
     end
+  end
+
+  defp model_request_record(state, run_id, request, options, turn_number) do
+    kind =
+      if is_nil(Map.get(state.run_resources, run_id)),
+        do: "model_request_committed",
+        else: "model_request_committed_resources_v1"
+
+    %{
+      "run_id" => run_id,
+      "turn_id" => stable_id("turn", run_id, turn_number),
+      "operation_id" => model_operation_id(run_id, turn_number),
+      "staged_request_digest" => request.staged_request_digest,
+      "request" => encode_plain(request),
+      "applied_steer" => Keyword.get(options, :applied_steer),
+      "context_receipt" => Keyword.get(options, :context_receipt),
+      kind: kind
+    }
   end
 
   defp admit_context_candidate(%{"context_receipt" => receipt} = record) when is_map(receipt) do
@@ -1776,6 +1815,7 @@ defmodule Loopex.Runtime.SessionState do
               "context_admission_refused_v1",
               "deadline_staging_failed_v1",
               "model_request_committed",
+              "model_request_committed_resources_v1",
               "model_attempt_opened_v1",
               "model_attempt_settled_v1",
               "model_attempt_settled_v2",
@@ -2162,7 +2202,8 @@ defmodule Loopex.Runtime.SessionState do
            kind: "model_request_committed"
          } = record
        ) do
-    with {:ok, request} <- decode_request(request),
+    with true <- is_nil(Map.get(state.run_resources, run_id)),
+         {:ok, request} <- decode_request(request),
          %{stage: stage} = work when stage in ["model_pending", "turn_settled"] <-
            Map.get(state.pending_work, run_id),
          :ok <- Loopex.Model.validate_request(request),
@@ -2171,6 +2212,49 @@ defmodule Loopex.Runtime.SessionState do
          true <- operation_id == model_operation_id(run_id, turn_number),
          true <- staged_request_digest == request.staged_request_digest,
          :ok <- validate_context_receipt(state, record, request, run_id, applied_steer) do
+      next_work =
+        work
+        |> Map.drop([:request, :model_attempt, :model_termination, :settlement, :next_attempt])
+        |> Map.merge(%{
+          stage: "model_request_pending_attempt_open",
+          pending_calls: [],
+          staged: %{
+            turn_id: turn_id,
+            turn_number: turn_number,
+            request: request,
+            applied_steer: applied_steer
+          }
+        })
+
+      {:ok, put_pending(state, run_id, next_work), []}
+    else
+      _other -> {:error, :invalid_model_request_transition}
+    end
+  end
+
+  defp apply_internal_record(
+         state,
+         %{
+           "run_id" => run_id,
+           "turn_id" => turn_id,
+           "operation_id" => operation_id,
+           "staged_request_digest" => staged_request_digest,
+           "request" => request,
+           "applied_steer" => applied_steer,
+           kind: "model_request_committed_resources_v1"
+         } = record
+       ) do
+    with true <- not is_nil(Map.get(state.run_resources, run_id)),
+         true <- map_size(record) == 8,
+         {:ok, request} <- decode_request(request),
+         %{stage: stage} = work when stage in ["model_pending", "turn_settled"] <-
+           Map.get(state.pending_work, run_id),
+         :ok <- Loopex.Model.validate_request(request),
+         turn_number = next_turn_number(work),
+         true <- turn_id == stable_id("turn", run_id, turn_number),
+         true <- operation_id == model_operation_id(run_id, turn_number),
+         true <- staged_request_digest == request.staged_request_digest,
+         :ok <- validate_resource_context_receipt(state, record, request, run_id, applied_steer) do
       next_work =
         work
         |> Map.drop([:request, :model_attempt, :model_termination, :settlement, :next_attempt])
@@ -4291,6 +4375,281 @@ defmodule Loopex.Runtime.SessionState do
     end
   end
 
+  # Concept: revision-three receipts bind the immutable resource selection and
+  # only the resource bytes actually retained in the staged request.
+  #
+  # Technical depth: replay derives every resource descriptor from the frozen
+  # run selection, closed row identities, and exact UTF-8 request messages. It
+  # never consults a manifest, retained pack, filesystem, or network source.
+  defp validate_resource_context_receipt(state, record, request, run_id, applied_steer) do
+    receipt = Map.get(record, "context_receipt")
+    resources = Map.get(state.run_resources, run_id)
+
+    with :ok <- validate_resource_receipt_shell(receipt),
+         {:ok, resource_sources} <-
+           validate_resource_pack_header(
+             receipt["resource_packs"],
+             resources,
+             request,
+             state,
+             run_id,
+             applied_steer,
+             length(expected_project_sources(receipt["project_resource"]))
+           ),
+         {:ok, sources} <-
+           expected_resource_context_sources(
+             state,
+             receipt,
+             run_id,
+             applied_steer,
+             resource_sources
+           ),
+         {:ok, expected} <- expected_context_blocks(request, sources),
+         true <- receipt["blocks"] == expected,
+         :ok <- validate_resource_receipt_totals(receipt, expected) do
+      :ok
+    else
+      {:error, reason} -> {:error, reason}
+      _mismatch -> {:error, :invalid_context_receipt}
+    end
+  end
+
+  defp validate_resource_receipt_shell(receipt) when is_map(receipt) do
+    with true <- Enum.sort(Map.keys(receipt)) == @resource_context_receipt_keys,
+         true <- receipt["provider_identity"] == "loopex.context.reference",
+         true <- receipt["provider_revision"] == 3,
+         true <- receipt["transformer_identity"] == nil,
+         true <- receipt["transformer_revision"] == nil,
+         true <- receipt["selector_identity"] == nil,
+         true <- receipt["selector_revision"] == nil,
+         true <- receipt["token_estimator"] == Bounds.estimator(),
+         true <-
+           receipt["descriptor_canonicalization_version"] ==
+             @descriptor_canonicalization_version,
+         true <- receipt["context_record_byte_ceiling"] == Store.max_item_bytes(),
+         true <- positive_uint64?(receipt["context_token_budget"]),
+         :ok <- validate_project_receipt(receipt["project_resource"]) do
+      :ok
+    else
+      {:error, reason} -> {:error, reason}
+      _invalid -> {:error, :invalid_context_receipt}
+    end
+  end
+
+  defp validate_resource_receipt_shell(_receipt), do: {:error, :invalid_context_receipt}
+
+  defp validate_resource_pack_header(
+         header,
+         resources,
+         request,
+         state,
+         run_id,
+         applied_steer,
+         project_count
+       )
+       when is_map(header) and is_map(resources) do
+    with true <- Enum.sort(Map.keys(header)) == @resource_pack_header_keys,
+         true <- header["version"] == 1,
+         true <- resource_digest?(header["manifest_digest"]),
+         true <- header["manifest_digest"] == resources["manifest_digest"],
+         true <- header["selection_digest"] == resource_selection_digest(resources),
+         {:ok, rows} <- bounded_resource_rows(header["blocks"], @resource_pack_max_rows, []),
+         {:ok, bytes} <- Store.admit_bounded(header),
+         true <- bytes <= @resource_pack_header_bytes,
+         {:ok, staged_rows} <-
+           validate_resource_header_disposition(header["status"], rows, resources),
+         {:ok, messages} <-
+           resource_messages(
+             request,
+             state,
+             run_id,
+             applied_steer,
+             project_count,
+             length(staged_rows)
+           ),
+         true <- length(messages) == length(staged_rows),
+         {:ok, sources} <- resource_sources(staged_rows, messages, resources, []) do
+      {:ok, sources}
+    else
+      _invalid -> {:error, :invalid_context_receipt}
+    end
+  end
+
+  defp validate_resource_pack_header(
+         _header,
+         _resources,
+         _request,
+         _state,
+         _run_id,
+         _steer,
+         _project_count
+       ),
+       do: {:error, :invalid_context_receipt}
+
+  defp bounded_resource_rows([], _remaining, reversed), do: {:ok, Enum.reverse(reversed)}
+
+  defp bounded_resource_rows([row | rows], remaining, reversed) when remaining > 0,
+    do: bounded_resource_rows(rows, remaining - 1, [row | reversed])
+
+  defp bounded_resource_rows(_rows, _remaining, _reversed),
+    do: {:error, :invalid_context_receipt}
+
+  defp validate_resource_header_disposition(status, rows, resources) do
+    decision = resources["decision"]
+
+    cond do
+      is_nil(decision) and status == "no_decision" and rows == [] ->
+        {:ok, []}
+
+      is_map(decision) and decision["revocation_state"] == "revoked" and status == "revoked" and
+          rows == [] ->
+        {:ok, []}
+
+      is_map(decision) and decision["revocation_state"] == "active" and
+        status in ["binding_changed", "retained_content_missing", "metadata_budget"] and
+          rows == [] ->
+        {:ok, []}
+
+      is_map(decision) and decision["revocation_state"] == "active" and status == "evaluated" ->
+        validate_evaluated_resource_rows(rows, expected_resource_identities(resources), [])
+
+      true ->
+        {:error, :invalid_context_receipt}
+    end
+  end
+
+  defp expected_resource_identities(resources) do
+    catalog = [
+      %{"pack" => @resource_catalog_index, "file" => @resource_catalog_index, digest: :catalog}
+    ]
+
+    instructions =
+      Enum.map(resources["selections"], fn selection ->
+        %{
+          "pack" => selection["pack_index"],
+          "file" => selection["instruction_file_index"],
+          digest: selection["instruction_digest"]
+        }
+      end)
+
+    supporting =
+      Enum.flat_map(resources["selections"], fn selection ->
+        Enum.map(selection["supporting_files"], fn file ->
+          %{
+            "pack" => selection["pack_index"],
+            "file" => file["file_index"],
+            digest: file["digest"]
+          }
+        end)
+      end)
+
+    catalog ++ instructions ++ supporting
+  end
+
+  defp validate_evaluated_resource_rows([], [], staged), do: {:ok, Enum.reverse(staged)}
+
+  defp validate_evaluated_resource_rows([row | rows], [identity | identities], staged)
+       when is_map(row) do
+    status = row["status"]
+
+    with true <- Enum.sort(Map.keys(row)) == @resource_pack_row_keys,
+         true <- row["pack"] == identity["pack"] and row["file"] == identity["file"],
+         true <- valid_closed_resource_status?(identity, status) do
+      staged = if status == "staged", do: [{identity, row} | staged], else: staged
+      validate_evaluated_resource_rows(rows, identities, staged)
+    else
+      _invalid -> {:error, :invalid_context_receipt}
+    end
+  end
+
+  defp validate_evaluated_resource_rows(_rows, _identities, _staged),
+    do: {:error, :invalid_context_receipt}
+
+  defp valid_closed_resource_status?(%{"pack" => 64, "file" => 64}, status),
+    do:
+      status in [
+        "staged",
+        "catalog_byte_limit",
+        "context_tokens",
+        "context_record_depth",
+        "context_record_cardinality",
+        "context_record_bytes"
+      ]
+
+  defp valid_closed_resource_status?(_identity, status),
+    do:
+      status in [
+        "staged",
+        "resource_byte_limit",
+        "unsupported_text",
+        "context_tokens",
+        "context_record_depth",
+        "context_record_cardinality",
+        "context_record_bytes"
+      ]
+
+  defp resource_messages(request, state, run_id, applied_steer, project_count, staged_count)
+       when is_integer(project_count) and project_count >= 0 and is_integer(staged_count) and
+              staged_count >= 0 do
+    session_count = length(Conversation.session_entries(Map.get(state.conversation, run_id, [])))
+    steer_count = if applied_steer, do: 1, else: 0
+
+    if length(request.messages) == 1 + project_count + staged_count + session_count + steer_count do
+      {:ok, request.messages |> Enum.drop(1 + project_count) |> Enum.take(staged_count)}
+    else
+      {:error, :invalid_context_receipt}
+    end
+  end
+
+  defp resource_messages(
+         _request,
+         _state,
+         _run_id,
+         _applied_steer,
+         _project_count,
+         _staged_count
+       ),
+       do: {:error, :invalid_context_receipt}
+
+  defp resource_sources([], [], _resources, reversed), do: {:ok, Enum.reverse(reversed)}
+
+  defp resource_sources([{identity, _row} | rows], [message | messages], resources, reversed)
+       when is_map(message) do
+    content = Map.get(message, "content")
+    digest = if is_binary(content), do: Canonical.digest_bytes(content), else: nil
+    expected_digest = identity[:digest]
+    catalog? = expected_digest == :catalog
+
+    with true <- map_size(message) == 2,
+         true <- message["role"] == "user",
+         true <- is_binary(content) and String.valid?(content),
+         true <-
+           byte_size(content) <=
+             if(catalog?, do: @resource_catalog_bytes, else: @resource_text_bytes),
+         true <- catalog? or digest == expected_digest do
+      file_digest = if catalog?, do: digest, else: expected_digest
+
+      source =
+        context_source(
+          %{
+            "kind" => "resource_pack",
+            "manifest_digest" => resources["manifest_digest"],
+            "pack" => identity["pack"],
+            "file" => identity["file"],
+            "file_digest" => file_digest
+          },
+          "resource_pack"
+        )
+
+      resource_sources(rows, messages, resources, [source | reversed])
+    else
+      _invalid -> {:error, :invalid_context_receipt}
+    end
+  end
+
+  defp resource_sources(_rows, _messages, _resources, _reversed),
+    do: {:error, :invalid_context_receipt}
+
   defp validate_receipt_shell(receipt) when is_map(receipt) do
     with true <- Enum.sort(Map.keys(receipt)) == @context_receipt_keys,
          true <- Map.get(receipt, "provider_identity") == "loopex.context.reference",
@@ -4405,6 +4764,49 @@ defmodule Loopex.Runtime.SessionState do
        end) ++ steer}
   end
 
+  defp expected_resource_context_sources(
+         state,
+         receipt,
+         run_id,
+         applied_steer,
+         resource_sources
+       ) do
+    elements = Map.get(state.conversation, run_id, [])
+
+    steer =
+      case applied_steer && Map.get(state.steer, run_id) do
+        %{command_id: ^applied_steer} ->
+          [
+            context_source(
+              %{
+                "kind" => "session_steer",
+                "run_id" => run_id,
+                "command_id" => applied_steer
+              },
+              "session"
+            )
+          ]
+
+        value when is_nil(value) ->
+          []
+
+        _mismatch ->
+          :invalid
+      end
+
+    if steer == :invalid do
+      {:error, :invalid_context_receipt}
+    else
+      {:ok,
+       [context_source(%{"kind" => "system", "identity" => "loopex.system.v1"}, "system")] ++
+         expected_project_sources(receipt["project_resource"]) ++
+         resource_sources ++
+         Enum.map(Conversation.session_entries(elements), fn {reference, _message} ->
+           context_source(reference, "session")
+         end) ++ steer}
+    end
+  end
+
   defp expected_project_sources(%{
          "disposition" => "staged",
          "detail" => %{
@@ -4435,6 +4837,7 @@ defmodule Loopex.Runtime.SessionState do
         "system" -> "host_owned_trusted_brain_content"
         "session" -> "session_owned_durable_truth"
         "project_resource" -> "untrusted_behavior_shaping_data"
+        "resource_pack" -> "untrusted_behavior_shaping_data"
       end
 
     %{
@@ -4447,6 +4850,28 @@ defmodule Loopex.Runtime.SessionState do
   defp expected_context_totals(blocks) do
     by_provenance =
       Map.new(~w(system session project_resource), fn provenance ->
+        {provenance,
+         sum_context_costs(Enum.filter(blocks, &(&1["provenance_class"] == provenance)))}
+      end)
+
+    Map.put(sum_context_costs(blocks), "by_provenance", by_provenance)
+  end
+
+  defp validate_resource_receipt_totals(receipt, blocks) do
+    totals = expected_resource_context_totals(blocks)
+
+    if receipt["totals"] == totals and
+         receipt["provider_estimated_tokens"] == totals["token_cost"] and
+         receipt["ordered_descriptor_digest"] == ordered_descriptor_digest(blocks) do
+      :ok
+    else
+      {:error, :invalid_context_receipt}
+    end
+  end
+
+  defp expected_resource_context_totals(blocks) do
+    by_provenance =
+      Map.new(~w(system session project_resource resource_pack), fn provenance ->
         {provenance,
          sum_context_costs(Enum.filter(blocks, &(&1["provenance_class"] == provenance)))}
       end)
