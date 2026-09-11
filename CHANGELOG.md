@@ -34,6 +34,12 @@ preserves exact staged bytes without refetch or ambiguous redispatch. Genuine
 integrated M2 histories remain readable; M2 readers refuse new resource records
 before effects, including a session containing only a refused resource command.
 
+Add `LoopexComposition.with_runtime/2` for operations that need a temporary stack
+with confirmed cleanup. CLI recovery prepares without activating work, reads the
+admitted manifest digest, closes the temporary stack and opens the final runtime
+with that exact retained snapshot and unchanged trusted launch configuration.
+Missing snapshots withhold skill content while ordinary recovery continues.
+
 Repair required-first context admission and move dispatcher reads off the
 acknowledgement path, with bounded retained readers, cancellation and late-result
 fences. Fix stale executor test-root reuse through atomic fresh-directory

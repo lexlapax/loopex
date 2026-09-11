@@ -68,7 +68,10 @@ publish a package or label a public surface.
 The M3 implementation adds pinned Git skill installation, project-only discovery,
 explicit manifest admission, and operator-selected instructions and supporting
 files in model context. Skills use the existing tool, policy and artifact paths;
-downloaded scripts and metadata grant no permissions. See
+downloaded scripts and metadata grant no permissions. Fresh-process CLI recovery
+uses the exact retained skill snapshot with its configured provider and executor.
+Core repairs keep required context ahead of optional content, let acknowledgements
+continue while Store reads wait, and retire settled provider permits safely. See
 [project skills](docs/operator/coding-sessions.md#operator-sessions-skills) for
 the commands and [embedding resources](docs/developer/runtime-and-embedding.md#technical-embedding-resources)
 for the host API. This work remains on the M3 implementation branch pending its

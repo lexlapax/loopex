@@ -261,8 +261,11 @@ context or Store budgets.
 
 Resource commands use `resource_command_v1`; admitted sessions stage through
 `model_request_committed_resources_v1`. The durable reducer reconstructs exact
-staged request bytes without any resource snapshot. The configured-host
-fresh-process recovery workflow remains an M3 implementation obligation.
+staged request bytes without any resource snapshot. For fresh-process CLI
+recovery, a temporary composition prepares the session without activating work,
+reads its admitted manifest digest and abandons the preparation. After confirmed
+cleanup, the CLI loads that exact retained snapshot and starts the final
+composition with the same trusted provider and executor configuration.
 A future unstaged request
 needs the matching retained snapshot or withholds resource content. It never
 refetches or uses an edited workspace as the prior admission. See
@@ -377,9 +380,10 @@ or undoes an admitted activation or abort.
 
 ### Reference Composition
 
-`LoopexComposition` assembles the reference local stack in one module under a
-hard ceiling of one hundred eighty effective lines, counting neither blank lines nor
-comments. `start/1` starts the applications an `escript` does not start for it,
+`LoopexComposition` wires the reference local stack in one module under a
+hard ceiling of one hundred eighty effective lines, counting neither blank lines
+nor comments. A private `RuntimeOwner` supplies the shared startup and cleanup
+lifecycle. `start/1` starts the applications an `escript` does not start for it,
 opens the durable store and the artifact store under the caller's resolved state
 root, opens a workspace lease and the local executor, and returns a runtime
 already composed with the four bootstrap coding tools:
@@ -411,6 +415,26 @@ start so the session, executor, and command observe one committed value.
 
 `:state_root` and `:workspace` are resolved by the caller, never discovered
 here, and no value is read from application environment.
+
+Use `with_runtime/2` when the reference stack is needed for one operation:
+
+```elixir
+LoopexComposition.with_runtime(runtime_options, fn runtime ->
+  Loopex.create_session(runtime, %{"workspace" => "example"}, command_id: "create-1")
+end)
+```
+
+It returns the callback result after `Loopex.stop/1` succeeds and the directly
+owned executor, workspace lease and Store report orderly shutdown. A normally
+returning callback receives `{:error, {:composition_cleanup_unconfirmed,
+details}}` if cleanup required force or could not be confirmed. Unexpected
+runtime death returns `composition_runtime_stopped`; owner failure returns
+`composition_owner_failed`. Exceptions, throws and exits from the callback are
+re-raised after cleanup. Caller loss also starts cleanup. `start/1` retains its
+independent-owner lifecycle. If shutdown remains unconfirmed after the error is
+returned, the private owner retains and monitors those process identities until
+they stop.
+
 `LoopexComposition.artifacts/1` returns the artifact-store handle on its own,
 because an artifact outlives the run that produced it and an operator
 retrieving one later needs no runtime.

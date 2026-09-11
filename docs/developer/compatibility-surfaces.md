@@ -66,7 +66,7 @@ belongs to under
 | Durable record shapes | committed record kinds, replayed by `Loopex.Runtime.SessionState` | 1, private journal and store schema | Unstable, changed in M2 and M3 |
 | Public event shapes | `Loopex.attach/3`, `Loopex.next_event/1` | 2, public protocol | Unstable |
 | Tool definition contract | `LoopexProtocol.ToolDefinition`, `LoopexProtocol.Canonical` | 2 and 3 | Unstable, new in M2 |
-| Reference composition | `LoopexComposition.start/1` and `artifacts/1` | 5, embedded Elixir API | Unstable, new in M2 |
+| Reference composition | `LoopexComposition.start/1`, `with_runtime/2` and `artifacts/1` | 5, embedded Elixir API | Unstable; `with_runtime/2` added in M3 |
 | Operator command | the `loopex` escript and its subcommands and flags | not yet a listed surface | Unstable, new in M2 |
 
 Surface 4, the extension manifest and lifecycle API, does not exist yet. Surface

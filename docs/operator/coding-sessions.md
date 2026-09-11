@@ -442,12 +442,17 @@ to at most 256 MiB; past that it accepts no further append and does not reopen,
 so a long-lived state root is one to retire rather than to prune by hand.
 
 Resource retention is separate from installation. A successfully discovered
-manifest is retained before a resource-enabled runtime starts. A recovering
-runtime can use only the snapshot supplied at launch whose digest matches the
-session's durable admitted manifest digest; current workspace discovery cannot
-replace it. If that exact snapshot is unavailable, unstaged skill content stays
-withheld. Requests whose complete model-visible bytes were already staged remain
-recoverable from session history.
+manifest is retained before a resource-enabled runtime starts. On `resume` or
+offline `cancel`, the CLI first opens the session with recovered work paused,
+reads its saved skill identity and closes that temporary stack. It then loads
+the exact retained snapshot and opens the final runtime with the same configured
+provider and executor. If temporary cleanup cannot be confirmed, recovery stops
+before opening the final runtime.
+
+Current workspace discovery cannot replace the admitted snapshot. If the exact
+snapshot is unavailable or invalid, the CLI reports that skill content is
+withheld and continues ordinary recovery. Requests whose complete model-visible
+bytes were already staged remain recoverable from session history.
 
 There is no automatic collection for retained resource snapshots. Keep the
 state root with the session data when making or restoring a backup, and do not

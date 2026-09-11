@@ -91,12 +91,12 @@ flowchart TB
     EXEC -. implements .-> PORTS
 ```
 
-The approved M3 implementation contract adds `LoopexComposition.with_runtime/2`
+M3 adds `LoopexComposition.with_runtime/2`
 for an embedding host that needs a temporary reference stack for one operation.
-It must return success only after orderly shutdown of every process the stack
-owns. Forced or unconfirmed cleanup must be an error, and an operation that
-raises must propagate after cleanup. The existing `start/1` behavior must remain.
-Prepared CLI recovery will use this helper to inspect the saved session before
+It returns the operation's result after confirmed shutdown of the runtime and
+its directly owned processes. Forced or unconfirmed cleanup returns an error;
+an operation that raises propagates after cleanup. The existing `start/1`
+behavior remains. Prepared CLI recovery uses this helper to inspect the saved session before
 opening the final runtime with its
 exact retained resource snapshot and trusted launch configuration.
 
