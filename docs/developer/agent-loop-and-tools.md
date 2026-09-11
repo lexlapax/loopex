@@ -43,6 +43,14 @@ see the [operator setup boundary](../operator/tools-and-policy.md#operator-local
 None of these surfaces is frozen or labelled:
 [Compatibility surfaces](compatibility-surfaces.md#concept).
 
+M3 lets an operator add trusted project skills to that input. Installation,
+admission and selection are separate steps. The run sees a bounded catalog and
+only the selected instructions and supporting files; those bytes change no tool
+definition, policy result or grant. Required context is checked before optional
+content is read.
+
+Technical depth: [Progressive skill context](#technical-loop-skills).
+
 Operator workflow: [Coding sessions](../operator/coding-sessions.md#concept).
 Tool reach and policy selection:
 [Tools and policy](../operator/tools-and-policy.md#concept).
@@ -64,6 +72,8 @@ Tool reach and policy selection:
 | `Loopex.Policy` | the host authority port and its fail-closed resolution |
 | `Loopex.ArtifactStore` | the spill port, its reference shape, and the truncation notice |
 | `Loopex.ProjectResource` | manifest verification, the trust binding, and the staged or declined receipt |
+| `Loopex.ResourcePack`, `Loopex.Runtime.ResourceSnapshot` | bounded skill identities and one immutable runtime-owned snapshot |
+| `Loopex.Runtime.ResourceContext` | catalog rendering and ordered instruction/supporting blocks from that snapshot |
 | `Loopex.Runtime.SessionCoordinator` | the serial owner: the only process that commits, dispatches, and stamps a stream domain |
 | `Loopex.Executor.Local.CodingTools` | the four shipped definitions and workspace-root resolution |
 | `Loopex.Store.Local.Artifacts` | the local content-addressed artifact objects |
@@ -792,7 +802,7 @@ operator was charged for is attributable by origin and not only in aggregate.
 
 ### Project Resources
 
-Discovery is shallow and content-independent: the reference stage names exactly
+The root project-resource class is shallow and content-independent: it names exactly
 one resource, `AGENTS.md` at the root of the canonical workspace. There is no
 recursion, globbing, home-directory resource, or configured path list, and an
 import or link inside an admitted resource is inert text.
@@ -835,6 +845,49 @@ goes on to do the coding task, because refusing to start would make an absent
 decision look like a broken installation. An admitted block is typed input
 structure inside `<project_resource label="...">` delimiters and changes no tool
 set, policy decision, bound, or grant.
+
+<a id="technical-loop-skills"></a>
+### Progressive Skill Context
+
+Concept: [Agent loop and tools](#concept).
+
+Skills are a second fixed resource class under
+[ADR 0025](../adr/0025-resource-packs-and-skill-admission.md#concept). The root
+`AGENTS.md` class keeps its existing receipt and discovery rules. A host imports
+or discovers a pack; core receives an immutable manifest and never opens a path
+or follows a reference in skill text. Unsupported executable metadata and
+downloaded scripts acquire no authority from installation or admission.
+
+For each request the coordinator first measures required-only context through
+the Store's exact normalizer. Resource-enabled requests also reserve the longest
+empty resource-status header before reading optional contents. This is fixed
+format overhead, independent of any skill body, so a fallback receipt still fits
+when the required request is near the Store ceiling. There is no persisted
+padding or additional durable field.
+
+Only after that preflight does the coordinator evaluate the root project block,
+then a catalog, then all selected instruction files in selection order, then each
+selected supporting file in its requested order. The catalog is at most 16 KiB,
+an instruction at most 64 KiB, and a supporting block at most 16 KiB. Each block
+is admitted whole against the complete request and receipt. A token- or byte-heavy
+block can be withheld while a later smaller block fits. Depth and per-container
+cardinality still pass the same Store checks; the maximal fixed resource format
+does not approach those structural ceilings.
+
+The resource header has at most 37 rows and 8 KiB metadata. Its identities and
+selection digest bind the frozen run selection; source descriptors bind each
+actual staged body. The new model-request record uses receipt revision 3 and
+adds the `resource_pack` totals bucket; existing M2 receipt validation is unchanged.
+If the metadata cannot fit, resources are withheld before
+content resolution. If any retained body is missing or inconsistent, the entire
+resource class is withheld, including earlier provisional blocks. Root project
+context and ordinary coding can continue.
+
+Only the final admitted request and its attempt-open record commit. Replay
+reconstructs the expected source identities from the retained decisions,
+selection and actual message bytes, checks complete ordered rows and budgets,
+and recomputes digests and receipt totals. It neither reads today's snapshot nor
+treats retained staged bytes as permission to redispatch an ambiguous attempt.
 
 ### Commit Ordering for One Turn
 

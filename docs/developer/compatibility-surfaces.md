@@ -3,7 +3,7 @@
 <a id="concept"></a>
 ## Concept
 
-Every surface M2 touches is unstable. None is labelled, frozen, versioned for
+Every surface M2 and M3 touch is unstable. None is labelled, frozen, versioned for
 consumers, or given a compatibility promise, and none is owed a deprecation
 window or a migration note. `VERSION` remains `0.0.0`; `v0.0.0-m2` identifies
 the exact integrated M2 source snapshot and labels no consumer surface.
@@ -34,7 +34,11 @@ Internal process topology, process messages, supervision structure, and private
 structs are not a public surface at all, at any point, and are not listed below.
 
 The scoped statement of this position for the milestone is
-[M2's compatibility section](../plans/M2-technical.md#technical-plan-compatibility).
+[M3's compatibility section](../plans/M3-technical.md#technical-plan-compatibility).
+M3 preserves genuine M2 histories, including settlement-v2. Once a session
+contains a resource command, an M2 binary cannot open it. Even a refused resource
+command creates this boundary. Rollback uses the old binary with a complete
+old-format state-root backup; removing skill files does not downgrade history.
 Operator-facing consequences:
 [Coding sessions](../operator/coding-sessions.md#concept) and
 [Tools and policy](../operator/tools-and-policy.md#concept).
@@ -42,7 +46,7 @@ Operator-facing consequences:
 <a id="technical-depth"></a>
 ## Technical depth
 
-### The Surfaces M2 Touches
+### The Surfaces M2 and M3 Touch
 
 Each row names what an embedder or operator can reach, and the vision surface it
 belongs to under
@@ -56,7 +60,7 @@ belongs to under
 | Executor port | `Loopex.Executor` behaviour, job, grant, receipt, `cancel/2`, optional `retained_receipt/2` | 3, executor protocol | Unstable |
 | Policy port | `Loopex.Policy` behaviour, request, context, refusal categories | 2, public protocol semantics | Unstable |
 | Artifact-store port | `Loopex.ArtifactStore` object/use behaviour and eight-member `artifact_reference` | 6, artifact formats | Unstable |
-| Durable record shapes | committed record kinds, replayed by `Loopex.Runtime.SessionState` | 1, private journal and store schema | Unstable, and changed in M2 |
+| Durable record shapes | committed record kinds, replayed by `Loopex.Runtime.SessionState` | 1, private journal and store schema | Unstable, changed in M2 and M3 |
 | Public event shapes | `Loopex.attach/3`, `Loopex.next_event/1` | 2, public protocol | Unstable |
 | Tool definition contract | `LoopexProtocol.ToolDefinition`, `LoopexProtocol.Canonical` | 2 and 3 | Unstable, new in M2 |
 | Reference composition | `LoopexComposition.start/1` and `artifacts/1` | 5, embedded Elixir API | Unstable, new in M2 |
@@ -76,6 +80,12 @@ so nothing has welded two surfaces together by shipping them in one artifact.
 `prepare_resume_session/3`, `prepare_resume_known_session/4`,
 `activate_resume/1`, `abandon_resume/1`, `transfer_resume/2`, `transfer_resume/3`, `state_root/0`,
 `runtime_placement_id/1`, `track_session/3`, `list_sessions/1`, and `version/0`.
+M3 adds `resource_catalog/2` and `read_resource/3`, the `resource_manifest:`
+launch option, and settled-state `:admit_resources` / `:activate_skill` commands.
+These experimental resource operations use the existing facade and Store;
+they create no new behaviour or wire protocol. Resource admission never changes
+the tool registry, policy or grant contract.
+
 Prepared resume entries return an opaque one-use activation capability; neither
 preparation nor handler installation schedules recovered work. `activate_resume/1`
 and `abandon_resume/1` wait for the coordinator's answer rather than expiring on
@@ -413,7 +423,16 @@ not. The list-level `:invalid_records` and `:invalid_events` remain for an
 ordinary malformed member, because which member was malformed tells a caller
 nothing it can act on.
 
-**Durable records.** M2's session schema includes `session_genesis_v2`,
+**Durable records.** M3 adds `resource_command_v1` and
+`model_request_committed_resources_v1` without rewriting M2 records. The first
+retains admission/selection outcomes, including stateful refusal; the second
+carries a resource-aware receipt and exact model input. The receipt variant is
+part of that new record kind, not a new public event. Sessions without resource
+admission keep the existing model-request kind. Removing content or revoking
+admission does not remove these retained format markers. M2 readers refuse a
+session containing them at load, before model or executor work.
+
+M2's session schema includes `session_genesis_v2`,
 `owner_advanced`, `prompt_admitted_v2`, the other input-command admissions and
 `command_admission_refused_v1`, `model_request_committed`,
 `model_attempt_opened_v1`, `model_termination_admitted_v1`,

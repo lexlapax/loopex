@@ -77,6 +77,20 @@ superseded coordinator is never restarted in place. Startup reads transaction
 status and the non-authorizing ownership head, then commits one fresh
 compare-and-set `advance_owner` succession before admission opens.
 
+The runtime supervisor also owns the unnamed protected ETS table for an optional
+resource snapshot. It creates that table once from validated launch input and
+keeps the content out of child options and per-session state. Decisions and
+selections are session truth; the snapshot is runtime-local material used only
+when its identity matches that truth.
+
+Dispatcher Store scans and queue fills run in linked workers. One attachment
+retains at most one read worker and caller; concurrent readers wait in their own
+processes through a private Runtime protocol. Acknowledgement and unrelated
+attachments stay available while a read is held. Adoption checks the captured
+attachment and publication bound; a tightened bound forces a new read. Caller
+loss, call-budget expiry, replacement and invalidation cancel the exact worker.
+No pending-read reply introduces a public busy status or treats waiting as empty.
+
 ### The Invariants
 
 | Invariant | Enforced by |
@@ -476,6 +490,18 @@ exemption: the model suite carries a non-streaming member as a first-class case.
 ## The Policy, Grant, and Lease Path
 
 Concept: [Brains, hands, and what the host keeps](architecture.md#concept-arch-brains-hands).
+
+`LoopexComposition.ResourcePacks` owns the fixed project directory walk, Git
+jobs, atomic publication and retained manifest/provenance files. It submits Git
+commands through the existing local executor after explicit acquisition
+authorization. The core resource path imports no filesystem or network adapter.
+`Loopex.ResourcePack` validates bounded plain identities;
+`Loopex.Runtime.ResourceSnapshot` holds verified content;
+`Loopex.Runtime.ResourceContext` constructs ordered optional blocks. The serial
+coordinator retains resource decisions and model requests through the existing
+Store transaction path. None of those operations registers a tool or supplies
+a policy allow. The accepted contract is
+[ADR 0025](../adr/0025-resource-packs-and-skill-admission.md#concept).
 
 Resolution happens once per tool call, from the model-visible name through the
 run's committed name-to-generation mapping, before argument validation and before
