@@ -1012,6 +1012,9 @@ defmodule LoopexCli.FoundationWorkflowTest do
         :binary,
         :exit_status,
         :stderr_to_stdout,
+        # The escript does not inherit Elixir launcher options such as +fnu.
+        # Give this byte-preserving child its own UTF-8 locale under inherited gates.
+        env: [{~c"LANG", ~c"C.UTF-8"}, {~c"LC_ALL", ~c"C.UTF-8"}],
         args: arguments
       ])
 
