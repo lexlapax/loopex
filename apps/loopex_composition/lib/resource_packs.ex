@@ -127,13 +127,13 @@ defmodule LoopexComposition.ResourcePacks do
     caller_monitor = Process.monitor(caller)
 
     result =
-      with {:ok, staging_root} <- create_staging_root(config.workspace) do
+      with {:ok, staging_root} <- create_staging_root(config.workspace_root) do
         try do
           with {:ok, context} <- open_import_executor(config) do
             coordinate_import_worker(caller, caller_monitor, tag, context, config, staging_root)
           end
         after
-          File.rm_rf(staging_root)
+          File.rm_rf(staging_root.path)
         end
       end
 
@@ -363,36 +363,79 @@ defmodule LoopexComposition.ResourcePacks do
     end
   end
 
-  defp discover_packs(workspace, state_root) do
-    root = Path.join([workspace, ".agents", "skills"])
+  defp discover_packs(workspace_root, state_root) do
+    with {:ok, %{path: _path} = agents} <- existing_child_directory(workspace_root, ".agents"),
+         {:ok, %{path: _path} = skills} <- existing_child_directory(agents, "skills") do
+      discover_pack_directories(skills, state_root)
+    else
+      {:ok, nil} -> {:ok, []}
+      {:error, {_reason, _detail}} = refusal -> refusal
+    end
+  end
 
-    case File.ls(root) do
+  defp discover_pack_directories(root, state_root) do
+    with :ok <- verify_directory(root) do
+      discover_pack_directory_entries(root, state_root)
+    end
+  end
+
+  defp discover_pack_directory_entries(root, state_root) do
+    case File.ls(root.path) do
       {:ok, names} ->
-        names
-        |> Enum.sort()
-        |> Enum.reduce_while({:ok, []}, fn name, {:ok, packs} ->
-          path = Path.join(root, name)
+        with :ok <- verify_directory(root) do
+          names
+          |> Enum.sort()
+          |> Enum.reduce_while({:ok, []}, fn name, {:ok, packs} ->
+            case discovered_pack_directory(root, name) do
+              :ignored ->
+                {:cont, {:ok, packs}}
 
-          case File.lstat(path) do
-            {:ok, %File.Stat{type: :directory}} ->
-              case read_pack(path, name, local_identity(name)) do
-                {:ok, pack} -> {:cont, {:ok, packs ++ [reattach_provenance(pack, state_root)]}}
-                {:error, _reason} = refusal -> {:halt, refusal}
-              end
+              {:ok, nil} ->
+                {:halt, error(:discovery_failed, "pack directory changed during discovery")}
 
-            {:ok, _other} ->
-              {:cont, {:ok, packs}}
+              {:ok, pack_root} ->
+                case read_pack(pack_root, name, local_identity(name)) do
+                  {:ok, pack} ->
+                    {:cont, {:ok, packs ++ [reattach_provenance(pack, state_root)]}}
 
-            {:error, reason} ->
-              {:halt, error(:discovery_failed, inspect(reason))}
-          end
-        end)
+                  {:error, _reason} = refusal ->
+                    {:halt, refusal}
+                end
+
+              {:error, _reason} = refusal ->
+                {:halt, refusal}
+            end
+          end)
+        end
 
       {:error, :enoent} ->
         {:ok, []}
 
       {:error, reason} ->
         error(:discovery_failed, inspect(reason))
+    end
+  end
+
+  defp discovered_pack_directory(root, name) do
+    with :ok <- verify_directory(root) do
+      path = Path.join(root.path, name)
+
+      case File.lstat(path) do
+        {:ok, %File.Stat{type: :regular}} ->
+          with :ok <- verify_directory(root), do: :ignored
+
+        {:ok, %File.Stat{type: :directory}} ->
+          fixed_directory(path, root)
+
+        {:ok, %File.Stat{type: type}} ->
+          error(:unsupported_file, "#{name} is #{type}")
+
+        {:error, :enoent} ->
+          {:ok, nil}
+
+        {:error, reason} ->
+          error(:discovery_failed, inspect(reason))
+      end
     end
   end
 
@@ -410,8 +453,8 @@ defmodule LoopexComposition.ResourcePacks do
              "manual_only" => metadata["disable-model-invocation"] == true,
              "files" => files
            }),
-         {:ok, _digest} <- core_pack_digest(pack) do
-      {:ok, pack}
+         {:ok, normalized} <- normalize_pack(pack) do
+      {:ok, normalized}
     else
       false -> error(:skill_manifest_missing, "SKILL.md is required")
       {:error, {_reason, _detail}} = refusal -> refusal
@@ -426,17 +469,25 @@ defmodule LoopexComposition.ResourcePacks do
     do: error(:pack_byte_limit, "a pack may contain at most #{@max_pack_bytes} bytes")
 
   defp regular_files(root, path, files, count, bytes) do
-    with {:ok, entries} <- File.ls(path) do
+    with :ok <- verify_directory(path),
+         {:ok, entries} <- File.ls(path.path),
+         :ok <- verify_directory(path) do
       entries
       |> Enum.sort()
       |> Enum.reduce_while({:ok, files, count, bytes}, fn entry, {:ok, acc, n, total} ->
-        full = Path.join(path, entry)
+        full = Path.join(path.path, entry)
 
         case File.lstat(full) do
           {:ok, %File.Stat{type: :directory}} ->
-            case regular_files(root, full, acc, n, total) do
-              {:ok, nested, nested_count, nested_bytes} ->
-                {:cont, {:ok, nested, nested_count, nested_bytes}}
+            case fixed_directory(full, root) do
+              {:ok, nested_root} ->
+                case regular_files(root, nested_root, acc, n, total) do
+                  {:ok, nested, nested_count, nested_bytes} ->
+                    {:cont, {:ok, nested, nested_count, nested_bytes}}
+
+                  {:error, _reason} = refusal ->
+                    {:halt, refusal}
+                end
 
               {:error, _reason} = refusal ->
                 {:halt, refusal}
@@ -454,11 +505,11 @@ defmodule LoopexComposition.ResourcePacks do
                 {:halt, error(:pack_byte_limit, "pack is too large")}
 
               true ->
-                {:cont, {:ok, acc ++ [Path.relative_to(full, root)], next_count, next_bytes}}
+                {:cont, {:ok, acc ++ [Path.relative_to(full, root.path)], next_count, next_bytes}}
             end
 
           {:ok, %File.Stat{type: type}} ->
-            {:halt, error(:unsupported_file, "#{Path.relative_to(full, root)} is #{type}")}
+            {:halt, error(:unsupported_file, "#{Path.relative_to(full, root.path)} is #{type}")}
 
           {:error, reason} ->
             {:halt, error(:discovery_failed, inspect(reason))}
@@ -469,6 +520,7 @@ defmodule LoopexComposition.ResourcePacks do
         refusal -> refusal
       end
     else
+      {:error, {_reason, _detail}} = refusal -> refusal
       {:error, reason} -> error(:discovery_failed, inspect(reason))
     end
   end
@@ -482,9 +534,7 @@ defmodule LoopexComposition.ResourcePacks do
 
   defp read_files(root, paths) do
     Enum.reduce_while(paths, {:ok, []}, fn label, {:ok, files} ->
-      path = Path.join(root, label)
-
-      case File.read(path) do
+      case read_contained_file(root, label) do
         {:ok, content} ->
           file = %{
             "label" => label,
@@ -496,8 +546,8 @@ defmodule LoopexComposition.ResourcePacks do
 
           {:cont, {:ok, files ++ [file]}}
 
-        {:error, reason} ->
-          {:halt, error(:discovery_failed, inspect(reason))}
+        {:error, {_reason, _detail}} = refusal ->
+          {:halt, refusal}
       end
     end)
   end
@@ -508,9 +558,13 @@ defmodule LoopexComposition.ResourcePacks do
   # The supported YAML subset is deliberately small. It accepts plain/quoted
   # strings, true/false, block strings, and one string-valued metadata map.
   defp parse_skill(content) when is_binary(content) and byte_size(content) <= @max_text_bytes do
-    case String.split(content, "\n") do
-      ["---" | lines] -> parse_frontmatter(lines, %{}, nil)
-      _other -> error(:invalid_frontmatter, "SKILL.md must start with bounded frontmatter")
+    if String.valid?(content) do
+      case String.split(content, "\n") do
+        ["---" | lines] -> parse_frontmatter(lines, %{}, nil)
+        _other -> error(:invalid_frontmatter, "SKILL.md must start with bounded frontmatter")
+      end
+    else
+      error(:invalid_frontmatter, "SKILL.md frontmatter must be UTF-8")
     end
   end
 
@@ -547,8 +601,8 @@ defmodule LoopexComposition.ResourcePacks do
       String.trim(line) == "" ->
         parse_frontmatter(rest, metadata, {:metadata, values})
 
-      String.starts_with?(line, "  ") ->
-        with {:ok, key, value} <- parse_pair(String.trim_leading(line)),
+      String.starts_with?(line, "  ") and not String.starts_with?(line, "   ") ->
+        with {:ok, key, value} <- parse_pair(binary_part(line, 2, byte_size(line) - 2)),
              false <- Map.has_key?(values, key) do
           parse_frontmatter(rest, metadata, {:metadata, Map.put(values, key, value)})
         else
@@ -562,7 +616,8 @@ defmodule LoopexComposition.ResourcePacks do
   end
 
   defp parse_frontmatter([line | rest], metadata, nil) do
-    with {:ok, key, value} <- parse_pair(line),
+    with false <- starts_with_space?(line),
+         {:ok, key, value} <- parse_pair(line),
          true <- key in @frontmatter_keys,
          false <- Map.has_key?(metadata, key) do
       case {key, value} do
@@ -576,34 +631,55 @@ defmodule LoopexComposition.ResourcePacks do
           parse_frontmatter(rest, Map.put(metadata, key, value), nil)
       end
     else
-      false -> error(:unsupported_frontmatter, "unsupported or duplicate frontmatter field")
-      {:error, {_reason, _detail}} = refusal -> refusal
+      value when value in [true, false] ->
+        error(:unsupported_frontmatter, "unsupported or duplicate frontmatter field")
+
+      {:error, {_reason, _detail}} = refusal ->
+        refusal
     end
   end
 
   defp parse_pair(line) do
     case String.split(line, ":", parts: 2) do
-      [key, value] when key != "" -> {:ok, String.trim(key), scalar(String.trim(value))}
-      _other -> error(:invalid_frontmatter, "frontmatter entries must be key-value pairs")
+      [key, value] when key != "" ->
+        normalized_key = String.trim(key)
+
+        with true <- normalized_key != "" and supported_plain_scalar?(normalized_key),
+             {:ok, scalar} <- scalar(String.trim(value)) do
+          {:ok, normalized_key, scalar}
+        else
+          false -> unsupported_scalar()
+          {:error, {_reason, _detail}} = refusal -> refusal
+        end
+
+      _other ->
+        error(:invalid_frontmatter, "frontmatter entries must be key-value pairs")
     end
   end
 
-  defp scalar("true"), do: true
-  defp scalar("false"), do: false
+  defp scalar("true"), do: {:ok, true}
+  defp scalar("false"), do: {:ok, false}
 
   defp scalar(<<quote, rest::binary>>) when quote in [?\", ?'] do
-    if String.ends_with?(rest, <<quote>>),
-      do: binary_part(rest, 0, byte_size(rest) - 1),
-      else: rest
+    if byte_size(rest) > 0 and String.ends_with?(rest, <<quote>>) do
+      value = binary_part(rest, 0, byte_size(rest) - 1)
+      if supported_string?(value), do: {:ok, value}, else: unsupported_scalar()
+    else
+      unsupported_scalar()
+    end
   end
 
-  defp scalar(value), do: value
+  defp scalar(value) do
+    if supported_plain_scalar?(value), do: {:ok, value}, else: unsupported_scalar()
+  end
 
   defp validate_metadata(%{"name" => name, "description" => description} = metadata)
        when is_binary(name) and is_binary(description) do
     with :ok <- validate_skill_name(name),
          true <- byte_size(description) in 1..1_024,
-         true <- String.valid?(description),
+         true <- supported_string?(description),
+         true <- valid_optional_frontmatter_string?(Map.get(metadata, "license")),
+         true <- valid_optional_frontmatter_string?(Map.get(metadata, "compatibility")),
          true <- valid_metadata_map?(Map.get(metadata, "metadata", %{})),
          true <- Map.get(metadata, "disable-model-invocation", false) in [true, false] do
       {:ok, metadata}
@@ -622,9 +698,32 @@ defmodule LoopexComposition.ResourcePacks do
   defp valid_metadata_map?(map) when is_map(map),
     do:
       map_size(map) <= 64 and
-        Enum.all?(map, fn {key, value} -> is_binary(key) and is_binary(value) end)
+        Enum.all?(map, fn {key, value} ->
+          is_binary(key) and supported_plain_scalar?(key) and is_binary(value) and
+            supported_string?(value)
+        end)
 
   defp valid_metadata_map?(_map), do: false
+
+  defp valid_optional_frontmatter_string?(nil), do: true
+  defp valid_optional_frontmatter_string?(value), do: supported_string?(value)
+
+  defp supported_plain_scalar?(value) do
+    supported_string?(value) and
+      not String.starts_with?(value, ["*", "&", "!", "{", "[", "- "])
+  end
+
+  defp supported_string?(value) when is_binary(value) do
+    String.valid?(value) and not String.contains?(value, ["${", "$(", "{{", "<%"])
+  end
+
+  defp supported_string?(_value), do: false
+
+  defp unsupported_scalar,
+    do: error(:unsupported_frontmatter, "frontmatter scalar is outside the supported subset")
+
+  defp starts_with_space?(<<character, _rest::binary>>), do: character in [?\s, ?\t]
+  defp starts_with_space?(""), do: false
 
   defp validate_skill_name(name) when is_binary(name) do
     if String.length(name) in 1..64 and Regex.match?(@skill_name, name),
@@ -661,7 +760,8 @@ defmodule LoopexComposition.ResourcePacks do
          {:ok, root} <- canonical_workspace(workspace) do
       {:ok,
        %{
-         workspace: root,
+         workspace: root.path,
+         workspace_root: root,
          workspace_ref: workspace_ref,
          state_root: state_root,
          source: source,
@@ -782,7 +882,8 @@ defmodule LoopexComposition.ResourcePacks do
   defp safe_relative_path(path) when is_binary(path) do
     components = Path.split(path)
 
-    if path != "" and Path.type(path) == :relative and components != [] and
+    if byte_size(path) in 1..@max_text_bytes and String.valid?(path) and
+         Path.type(path) == :relative and components != [] and
          Enum.all?(components, &(&1 not in [".", ".."])) and not String.contains?(path, <<0>>),
        do: {:ok, Path.join(components)},
        else: error(:invalid_source_path, "selected path must be a contained relative directory")
@@ -791,11 +892,220 @@ defmodule LoopexComposition.ResourcePacks do
   defp safe_relative_path(_path), do: error(:invalid_source_path, "selected path is required")
 
   defp canonical_workspace(workspace) do
-    root = Path.expand(workspace)
-
-    case File.mkdir_p(root) do
-      :ok -> {:ok, root}
+    with {:ok, resolved} <- resolve_path(Path.expand(workspace)),
+         :ok <- ensure_absolute_directory(resolved),
+         {:ok, root} <- fixed_directory(resolved, nil) do
+      {:ok, root}
+    else
+      {:error, {_reason, _detail}} = refusal -> refusal
       {:error, reason} -> error(:workspace_unavailable, inspect(reason))
+    end
+  end
+
+  defp resolve_path(path), do: resolve_components(Path.split(Path.expand(path)), "/", 0)
+
+  defp resolve_components([], resolved, _hops), do: {:ok, resolved}
+
+  defp resolve_components(_remaining, _resolved, hops) when hops > 40,
+    do: error(:workspace_unavailable, "symlink resolution limit exceeded")
+
+  defp resolve_components(["/" | rest], resolved, hops),
+    do: resolve_components(rest, resolved, hops)
+
+  defp resolve_components(["." | rest], resolved, hops),
+    do: resolve_components(rest, resolved, hops)
+
+  defp resolve_components([".." | rest], resolved, hops),
+    do: resolve_components(rest, Path.dirname(resolved), hops)
+
+  defp resolve_components([component | rest], resolved, hops) do
+    candidate = Path.join(resolved, component)
+
+    case File.read_link(candidate) do
+      {:ok, target} ->
+        next = if Path.type(target) == :absolute, do: target, else: Path.join(resolved, target)
+        resolve_components(Path.split(next) ++ rest, "/", hops + 1)
+
+      {:error, _not_link} ->
+        resolve_components(rest, candidate, hops)
+    end
+  end
+
+  defp ensure_absolute_directory(path) do
+    path
+    |> Path.split()
+    |> Enum.reject(&(&1 == "/"))
+    |> Enum.reduce_while({:ok, "/"}, fn component, {:ok, parent} ->
+      child = Path.join(parent, component)
+
+      case File.lstat(child) do
+        {:ok, %File.Stat{type: :directory}} ->
+          {:cont, {:ok, child}}
+
+        {:ok, %File.Stat{}} ->
+          {:halt, error(:workspace_unavailable, "workspace is not a directory")}
+
+        {:error, :enoent} ->
+          create_directory_component(child)
+
+        {:error, reason} ->
+          {:halt, error(:workspace_unavailable, inspect(reason))}
+      end
+    end)
+    |> case do
+      {:ok, _path} -> :ok
+      refusal -> refusal
+    end
+  end
+
+  defp create_directory_component(path) do
+    case File.mkdir(path) do
+      :ok ->
+        {:cont, {:ok, path}}
+
+      {:error, :eexist} ->
+        case File.lstat(path) do
+          {:ok, %File.Stat{type: :directory}} -> {:cont, {:ok, path}}
+          _other -> {:halt, error(:workspace_unavailable, "workspace is not a directory")}
+        end
+
+      {:error, reason} ->
+        {:halt, error(:workspace_unavailable, inspect(reason))}
+    end
+  end
+
+  defp existing_child_directory(nil, _component), do: {:ok, nil}
+
+  defp existing_child_directory(parent, component) do
+    with :ok <- verify_directory(parent) do
+      path = Path.join(parent.path, component)
+
+      case File.lstat(path) do
+        {:ok, %File.Stat{type: :directory}} -> fixed_directory(path, parent)
+        {:ok, %File.Stat{type: type}} -> error(:unsupported_file, "#{component} is #{type}")
+        {:error, :enoent} -> {:ok, nil}
+        {:error, reason} -> error(:discovery_failed, inspect(reason))
+      end
+    end
+  end
+
+  defp ensure_child_directory(parent, component, reason) do
+    with :ok <- verify_directory(parent) do
+      path = Path.join(parent.path, component)
+
+      case File.mkdir(path) do
+        :ok ->
+          fixed_directory(path, parent)
+
+        {:error, :eexist} ->
+          case File.lstat(path) do
+            {:ok, %File.Stat{type: :directory}} -> fixed_directory(path, parent)
+            {:ok, %File.Stat{type: type}} -> error(:unsupported_file, "#{component} is #{type}")
+            {:error, file_reason} -> error(reason, inspect(file_reason))
+          end
+
+        {:error, file_reason} ->
+          error(reason, inspect(file_reason))
+      end
+    end
+  end
+
+  defp fixed_directory(path, containment_root) do
+    with :ok <- verify_optional_directory(containment_root),
+         {:ok, ^path} <- resolve_path(path),
+         true <- is_nil(containment_root) or contained?(path, containment_root.path),
+         {:ok, %File.Stat{type: :directory} = stat} <- File.lstat(path),
+         identity = directory_identity(stat),
+         {:ok, ^path} <- resolve_path(path),
+         {:ok, %File.Stat{type: :directory} = current} <- File.lstat(path),
+         ^identity <- directory_identity(current) do
+      {:ok, %{path: path, identity: identity}}
+    else
+      false -> error(:unsupported_file, "directory escapes its fixed root")
+      {:ok, _other} -> error(:unsupported_file, "directory path resolves through a link")
+      {:error, {_reason, _detail}} = refusal -> refusal
+      {:error, reason} -> error(:discovery_failed, inspect(reason))
+      _changed -> error(:unsupported_file, "directory identity changed during validation")
+    end
+  end
+
+  defp fixed_descendant_directory(root, relative_path) do
+    relative_path
+    |> Path.split()
+    |> Enum.reduce_while({:ok, root}, fn component, {:ok, parent} ->
+      case existing_child_directory(parent, component) do
+        {:ok, nil} -> {:halt, error(:unsupported_file, "selected directory is missing")}
+        {:ok, child} -> {:cont, {:ok, child}}
+        {:error, _reason} = refusal -> {:halt, refusal}
+      end
+    end)
+  end
+
+  defp verify_optional_directory(nil), do: :ok
+  defp verify_optional_directory(directory), do: verify_directory(directory)
+
+  defp verify_directory(%{path: path, identity: identity}) do
+    with {:ok, ^path} <- resolve_path(path),
+         {:ok, %File.Stat{type: :directory} = stat} <- File.lstat(path),
+         ^identity <- directory_identity(stat) do
+      :ok
+    else
+      _changed -> error(:unsupported_file, "directory identity changed during validation")
+    end
+  end
+
+  defp directory_identity(stat), do: {stat.major_device, stat.inode}
+
+  defp contained?(path, "/"), do: String.starts_with?(path, "/")
+  defp contained?(path, root), do: path == root or String.starts_with?(path, root <> "/")
+
+  defp read_contained_file(root, label) do
+    path = Path.join(root.path, label)
+
+    with :ok <- verify_directory(root),
+         {:ok, %File.Stat{type: :regular} = expected} <- File.lstat(path),
+         expected_identity = directory_identity(expected),
+         {:ok, device} <- File.open(path, [:read, :binary, :raw]) do
+      try do
+        with {:ok, opened_record} <- :file.read_file_info(device),
+             %File.Stat{type: :regular} = opened <- File.Stat.from_record(opened_record),
+             ^expected_identity <- directory_identity(opened),
+             :ok <- verify_directory(root),
+             {:ok, ^path} <- resolve_path(path),
+             {:ok, %File.Stat{type: :regular} = current} <- File.lstat(path),
+             ^expected_identity <- directory_identity(current),
+             {:ok, content} <- read_bounded(device, @max_pack_bytes + 1),
+             true <- byte_size(content) <= @max_pack_bytes do
+          {:ok, content}
+        else
+          false -> error(:pack_byte_limit, "pack file is too large")
+          _changed -> error(:unsupported_file, "file identity changed during validation")
+        end
+      after
+        File.close(device)
+      end
+    else
+      {:error, {_reason, _detail}} = refusal -> refusal
+      {:ok, %File.Stat{type: type}} -> error(:unsupported_file, "#{label} is #{type}")
+      {:error, reason} -> error(:discovery_failed, inspect(reason))
+    end
+  end
+
+  defp read_bounded(device, remaining, chunks \\ [])
+
+  defp read_bounded(_device, 0, chunks),
+    do: {:ok, chunks |> Enum.reverse() |> IO.iodata_to_binary()}
+
+  defp read_bounded(device, remaining, chunks) do
+    case :file.read(device, remaining) do
+      {:ok, bytes} when byte_size(bytes) > 0 ->
+        read_bounded(device, remaining - byte_size(bytes), [bytes | chunks])
+
+      :eof ->
+        {:ok, chunks |> Enum.reverse() |> IO.iodata_to_binary()}
+
+      {:error, reason} ->
+        error(:discovery_failed, inspect(reason))
     end
   end
 
@@ -852,10 +1162,11 @@ defmodule LoopexComposition.ResourcePacks do
   end
 
   defp import_with_executor(context, config, staging_root) do
-    repo = Path.join(staging_root, "repo")
-    export = Path.join(staging_root, "export")
+    repo = Path.join(staging_root.path, "repo")
+    export = Path.join(staging_root.path, "export")
 
     with :ok <- File.mkdir(export),
+         {:ok, export_root} <- fixed_directory(export, staging_root),
          {:ok, context, _clone} <-
            git_job(context, config, "clone", [
              "clone",
@@ -883,6 +1194,12 @@ defmodule LoopexComposition.ResourcePacks do
            ]),
          tree = first_line(tree_output),
          true <- matching_git_ids?(config.rev, tree),
+         {:ok, context, tree_type} <-
+           git_job(context, config, "tree-type", ["-C", repo, "cat-file", "-t", tree]),
+         true <- first_line(tree_type) == "tree",
+         {:ok, context, tree_files_output} <-
+           git_job(context, config, "tree-files", ["-C", repo, "ls-tree", "-r", "-z", tree]),
+         {:ok, tree_files} <- git_tree_files(tree_files_output),
          {:ok, _context, _checkout} <-
            git_job(context, config, "checkout", [
              "-C",
@@ -895,7 +1212,8 @@ defmodule LoopexComposition.ResourcePacks do
              config.path
            ]),
          selected = Path.join(export, config.path),
-         {:ok, metadata_name} <- frontmatter_name(selected),
+         {:ok, selected_root} <- fixed_descendant_directory(export_root, config.path),
+         {:ok, metadata_name} <- frontmatter_name(selected_root),
          true <- metadata_name == Path.basename(selected),
          identity = %{
            "source_id" => "git:" <> Canonical.digest_bytes(config.origin),
@@ -903,8 +1221,9 @@ defmodule LoopexComposition.ResourcePacks do
            "commit" => config.rev,
            "tree_digest" => tree
          },
-         {:ok, pack} <- read_pack(selected, metadata_name, identity) do
-      {:ok, pack, selected}
+         {:ok, pack} <- read_pack(selected_root, metadata_name, identity),
+         true <- Enum.map(pack["files"], & &1["label"]) == tree_files do
+      {:ok, pack, selected_root}
     else
       false ->
         error(
@@ -926,7 +1245,7 @@ defmodule LoopexComposition.ResourcePacks do
          :ok <- retain_provenance([pack], config.state_root),
          :ok <- caller_available(caller, caller_monitor),
          :ok <- before_deadline(config.deadline),
-         :ok <- publish_pack(selected, config.workspace, pack["name"]) do
+         :ok <- publish_pack(selected, config.workspace_root, pack["name"]) do
       {:ok, pack}
     end
   end
@@ -1023,26 +1342,69 @@ defmodule LoopexComposition.ResourcePacks do
 
   defp first_line(output), do: output |> String.split("\n", parts: 2) |> hd() |> String.trim()
 
+  defp git_tree_files(output) when is_binary(output) do
+    output
+    |> String.split(<<0>>, trim: true)
+    |> Enum.reduce_while({:ok, [], MapSet.new()}, fn entry, {:ok, paths, normalized_paths} ->
+      case String.split(entry, "\t", parts: 2) do
+        [header, path] ->
+          with [mode, "blob", object] <- String.split(header),
+               true <- mode in ["100644", "100755"],
+               true <- Regex.match?(@git_oid, object),
+               true <- String.valid?(path),
+               {:ok, ^path} <- safe_relative_path(path),
+               normalized_path = path |> String.normalize(:nfc) |> String.downcase(),
+               false <- MapSet.member?(normalized_paths, normalized_path) do
+            {:cont, {:ok, [path | paths], MapSet.put(normalized_paths, normalized_path)}}
+          else
+            _unsupported ->
+              {:halt,
+               error(:unsupported_file, "selected Git tree is outside the supported subset")}
+          end
+
+        _malformed ->
+          {:halt, error(:git_identity_mismatch, "selected Git tree listing is malformed")}
+      end
+    end)
+    |> case do
+      {:ok, paths, _normalized_paths} when length(paths) <= @max_files ->
+        {:ok, Enum.sort(paths)}
+
+      {:ok, _paths, _normalized_paths} ->
+        error(:pack_file_limit, "too many files")
+
+      refusal ->
+        refusal
+    end
+  end
+
   defp matching_git_ids?(commit, tree),
     do: Regex.match?(@git_oid, tree) and byte_size(commit) == byte_size(tree)
 
   defp frontmatter_name(selected) do
-    with {:ok, content} <- read_file(Path.join(selected, "SKILL.md"), :skill_manifest_missing),
+    with {:ok, content} <- read_contained_file(selected, "SKILL.md"),
          {:ok, %{"name" => name}} <- parse_skill(content) do
       {:ok, name}
     end
   end
 
-  defp publish_pack(selected, workspace, name) do
-    destination_root = Path.join([workspace, ".agents", "skills"])
-    destination = Path.join(destination_root, name)
-
-    with :ok <- File.mkdir_p(destination_root),
+  defp publish_pack(selected, workspace_root, name) do
+    with {:ok, agents} <- ensure_child_directory(workspace_root, ".agents", :installation_failed),
+         {:ok, destination_root} <-
+           ensure_child_directory(agents, "skills", :installation_failed),
+         :ok <- verify_directory(workspace_root),
+         :ok <- verify_directory(destination_root),
+         :ok <- verify_directory(selected),
+         destination = Path.join(destination_root.path, name),
          false <- File.exists?(destination),
-         :ok <- File.rename(selected, destination) do
+         :ok <- File.rename(selected.path, destination),
+         {:ok, published} <- fixed_directory(destination, destination_root),
+         true <- published.identity == selected.identity do
       :ok
     else
       true -> error(:pack_already_installed, "#{name} is already installed")
+      false -> error(:installation_failed, "published pack identity changed")
+      {:error, {_reason, _detail}} = refusal -> refusal
       {:error, reason} -> error(:installation_failed, inspect(reason))
     end
   end
@@ -1070,9 +1432,12 @@ defmodule LoopexComposition.ResourcePacks do
 
     with {:ok, bytes} <- File.read(path),
          {:ok, record} <- decode_term(bytes),
-         {:ok, _digest} <- core_pack_digest(record),
-         true <- provenance_matches?(record, pack) do
-      Map.merge(pack, Map.take(record, ["source_id", "origin", "commit", "tree_digest"]))
+         {:ok, normalized_record} <- normalize_pack(record),
+         true <- provenance_matches?(normalized_record, pack) do
+      Map.merge(
+        pack,
+        Map.take(normalized_record, ["source_id", "origin", "commit", "tree_digest"])
+      )
     else
       _other -> pack
     end
@@ -1087,12 +1452,18 @@ defmodule LoopexComposition.ResourcePacks do
   end
 
   defp provenance_file_identity(files) when is_list(files),
-    do: Enum.map(files, &Map.take(&1, ["label", "digest"]))
+    do:
+      files
+      |> Enum.map(&Map.take(&1, ["label", "digest"]))
+      |> Enum.sort_by(& &1["label"])
 
   defp provenance_file_identity(_files), do: :invalid
 
   defp content_identity(pack) do
-    value = Enum.map(pack["files"], &[&1["label"], &1["digest"]])
+    value =
+      pack["files"]
+      |> Enum.map(&[&1["label"], &1["digest"]])
+      |> Enum.sort_by(&hd/1)
 
     Canonical.digest(%{
       "encoding" => Canonical.version(),
@@ -1122,13 +1493,11 @@ defmodule LoopexComposition.ResourcePacks do
     end
   end
 
-  defp create_staging_root(workspace) do
-    parent = Path.join(workspace, ".agents")
-
-    with :ok <- File.mkdir_p(parent) do
-      create_exclusive_directory(parent, 8)
-    else
-      {:error, reason} -> error(:installation_failed, inspect(reason))
+  defp create_staging_root(workspace_root) do
+    with {:ok, parent} <- ensure_child_directory(workspace_root, ".agents", :installation_failed),
+         {:ok, path} <- create_exclusive_directory(parent.path, 8),
+         {:ok, staging_root} <- fixed_directory(path, parent) do
+      {:ok, staging_root}
     end
   end
 
@@ -1242,10 +1611,16 @@ defmodule LoopexComposition.ResourcePacks do
     end
   end
 
-  defp core_pack_digest(pack) do
-    case Loopex.ResourcePack.pack_digest(pack) do
-      {:ok, digest} -> {:ok, digest}
-      digest when is_binary(digest) -> {:ok, digest}
+  defp normalize_pack(pack) do
+    manifest = %{
+      "version" => @version,
+      "workspace_ref" => "resource-pack-validation",
+      "revision" => nil,
+      "packs" => [pack]
+    }
+
+    case Loopex.ResourcePack.digest(manifest) do
+      {:ok, _digest, %{"packs" => [normalized]}} -> {:ok, normalized}
       {:error, reason, detail} -> error(reason, detail)
       other -> error(:invalid_pack, inspect(other))
     end
