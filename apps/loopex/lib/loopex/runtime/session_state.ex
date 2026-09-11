@@ -4163,13 +4163,13 @@ defmodule Loopex.Runtime.SessionState do
     end
   end
 
-  defp apply_resource_disposition(state, _command, %{
+  defp apply_resource_disposition(state, command, %{
          "disposition" => disposition,
          "resolved" => nil
        }) do
     reason = Enum.find(@resource_refusals, &(Atom.to_string(&1) == disposition))
 
-    if not is_nil(reason) and reason == :run_active == not is_nil(state.active_run_id) do
+    if not is_nil(reason) and valid_resource_refusal?(state, command, reason) do
       {:ok, state.resources, {:error, reason}}
     else
       :error
@@ -4177,6 +4177,80 @@ defmodule Loopex.Runtime.SessionState do
   end
 
   defp apply_resource_disposition(_state, _command, _record), do: :error
+
+  # Concept: a retained refusal remains an exact outcome of its command rather
+  # than an interchangeable member of the resource error vocabulary.
+  # Technical depth: replay validates every fact available in durable state but
+  # preserves snapshot-dependent outcomes without consulting current content.
+  defp valid_resource_refusal?(%{active_run_id: run_id}, _command, :run_active),
+    do: not is_nil(run_id)
+
+  defp valid_resource_refusal?(%{active_run_id: run_id}, _command, _reason)
+       when not is_nil(run_id),
+       do: false
+
+  defp valid_resource_refusal?(
+         %{resources: resources},
+         %{"type" => "admit_resources", "decision" => decision} = command,
+         reason
+       ) do
+    cond do
+      is_map(decision) and decision["revocation_state"] == "active" ->
+        reason in [:resource_manifest_missing, :resource_binding_changed]
+
+      is_nil(resources) ->
+        reason == :resource_not_admitted
+
+      not disabled_resource_binding?(resources, command, decision) ->
+        reason == :resource_binding_changed
+
+      true ->
+        false
+    end
+  end
+
+  defp valid_resource_refusal?(%{resources: nil}, %{"type" => "activate_skill"}, reason),
+    do: reason == :resource_not_admitted
+
+  defp valid_resource_refusal?(
+         %{resources: resources},
+         %{"type" => "activate_skill", "manifest_digest" => manifest_digest} = command,
+         reason
+       ) do
+    cond do
+      manifest_digest != resources["manifest_digest"] ->
+        reason == :resource_binding_changed
+
+      is_nil(resources["decision"]) or resources["decision"]["revocation_state"] == "revoked" ->
+        reason == :resource_not_admitted
+
+      true ->
+        active_resource_refusal?(resources, command, reason)
+    end
+  end
+
+  defp valid_resource_refusal?(_state, _command, _reason), do: false
+
+  defp disabled_resource_binding?(resources, command, nil),
+    do: resources["manifest_digest"] == command["manifest_digest"]
+
+  defp disabled_resource_binding?(resources, command, decision) do
+    resources["manifest_digest"] == command["manifest_digest"] and
+      decision["manifest_digest"] == resources["manifest_digest"] and
+      decision["workspace_ref"] == resources["workspace_ref"]
+  end
+
+  defp active_resource_refusal?(_resources, _command, reason)
+       when reason in [:resource_manifest_missing, :resource_binding_changed, :resource_not_found],
+       do: true
+
+  defp active_resource_refusal?(resources, _command, :resource_selection_limit),
+    do: length(resources["selections"]) == 4
+
+  defp active_resource_refusal?(_resources, command, :resource_support_not_found),
+    do: command["supporting_labels"] != []
+
+  defp active_resource_refusal?(_resources, _command, _reason), do: false
 
   defp apply_resource_acceptance(previous, %{"type" => "admit_resources"} = command, resolved) do
     decision = command["decision"]
