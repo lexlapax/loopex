@@ -1997,3 +1997,38 @@ not waive either lane or authorize M3 closure, integration to main or release.
 
 This standalone disposition receives independent exact-SHA read-only review
 before the replacement evidence allocation is relied on.
+
+<a id="disposition-m3-implementation-completion-2026-09-11"></a>
+### M3 implementation completion decisions, 2026-09-11
+
+The maintainer received three separate recommendations:
+
+> May I repair the published `m3` history, then push the completed fixes? Some development commits accidentally changed a protected M2 test file, so the history checker rejects the branch even though the file is now restored. The reviewed repair preserves the accepted milestones and final product files, but changes affected development commit IDs. A complete backup exists; `main` and `m4` stay unchanged. The replacement is `7995965da0de9a51ace807da4183498142c42cd9`, guarded against replacing anything newer than the last pushed `07018b93e2084bf3e4d278e677f0984bcda5fb48`.
+
+> May I implement the accepted ADR 0027 memory fix in `Control`? The runtime currently keeps used provider-permission entries after requests finish, allowing that memory to grow. The fix removes an entry only after its completion is safely recorded, while preserving ownership checks, rejection of reused or stale permissions, and retry/accounting rules. Automatic approval review requires your explicit authorization for this exact change.
+
+> May I add `LoopexComposition.with_runtime/2`, a shared helper that starts a temporary runtime, runs an operation, and shuts down all its processes? Recovery needs this temporary runtime to inspect a saved session before opening it with the correct configuration. The helper would report success only after orderly shutdown, and report an error if cleanup is forced or cannot be confirmed. This adds a public API while preserving existing `start/1` behavior, so the repository contract requires your architectural approval.
+
+The maintainer answered **"Approve all recommendations"**, then
+**"Approved all recommendations.  Go"**. These instructions approve the three
+named changes. They grant no milestone closure, product merge to `main`, release,
+gate weakening, or change to an accepted ADR decision.
+
+The reviewed history replacement was pushed with an exact lease against
+`07018b93e2084bf3e4d278e677f0984bcda5fb48`; the completed acquisition and
+compatibility repairs then advanced `m3` normally to
+`720d1d76a28140e69e8acbae30c7b7df36a360a4`. Accepted milestone and ADR candidates,
+their bindings and their original evidence remain unchanged and reachable.
+The original published lineage is retained in a verified complete Git bundle.
+This repairs the unaccepted implementation lineage and creates no history-check
+exception. All later pushes use ordinary fast-forwards.
+
+Control retirement implements accepted ADR 0027 and retains its required
+durable-settlement, current-owner and current-attempt proof. The composition
+helper is an experimental host API for temporary use of the existing reference
+stack. It introduces no durable field, new port, dependency, or alternative
+session recovery path. Exceptions propagate after cleanup; forced or unconfirmed
+cleanup cannot be reported as success. Its ownership and compatibility contract
+is recorded in the [architecture pair](architecture.md#concept-arch-applications).
+Focused tests must prove orderly and failed cleanup, configuration preservation
+and the exact retained skill snapshot before final M0–M3 qualification.

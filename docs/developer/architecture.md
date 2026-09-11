@@ -93,6 +93,16 @@ flowchart TB
 
 Technical depth: [Exact inventory and the checks that hold it](architecture-technical.md#technical-arch-applications).
 
+The maintainer-approved `LoopexComposition.with_runtime/2` gives an embedding
+host a temporary reference stack for one operation. It returns success only
+after orderly shutdown of every process the stack owns. Forced or unconfirmed
+cleanup is an error, and an operation that raises is propagated after cleanup.
+The existing `start/1` API keeps its behavior. Prepared CLI recovery uses this
+helper to inspect the saved session before opening the final runtime with its
+exact retained resource snapshot and trusted launch configuration.
+
+Technical depth: [Temporary stack ownership](architecture-technical.md#technical-arch-applications).
+
 The direction is not a convention a reviewer remembers. `mix loopex.deps_budget`
 reads the umbrella's actual project inventory and refuses an application whose
 role, identity, or declared dependencies fall outside the planned set, and
