@@ -3,7 +3,7 @@
 
 Technical depth: [Resource packs and skill admission mechanics](0025-resource-packs-and-skill-admission-technical.md#technical-depth).
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-09-09
 - **Decision owner:** Maintainer
 - **Prerequisite for:** M3 acceptance
@@ -89,4 +89,4 @@ Technical depth: [Compatibility mechanics](0025-resource-packs-and-skill-admissi
 
 | Decision | Authority | Authority evidence | Bound bytes |
 | --- | --- | --- | --- |
-| Acceptance | — | — | — |
+| Acceptance | Maintainer | [disposition](../developer/agent-context-map.md#disposition-m3-prerequisite-adrs-2026-09-10) | candidate `1a16033c2418bc72916a1ff86821f8420f6adbf7`; concept `sha256:1ef539109e13b663cdb819b9278b23b70a4cfd889b4a62b26776b612735b83a0`; technical `sha256:d61a1c5bf10f9dba4fd9b6c7bada5fdf5711bfa42e80e39b2c4de5df042fd068` |

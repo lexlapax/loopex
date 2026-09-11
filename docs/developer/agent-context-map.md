@@ -1842,3 +1842,34 @@ independent delta review. The administrative transitions record their exact
 candidates and digests separately. This standalone commit adds only this
 disposition; it does not itself change lifecycle status, authorize a merge to
 main, close M3, or grant release or publication authority.
+
+<a id="disposition-m3-prerequisite-adrs-2026-09-10"></a>
+### ADR 0025 and ADR 0027 acceptance — 2026-09-10
+
+The maintainer's explicit "Confirm" to the
+[conditional acceptance packet](#override-disposition-m3-review-ordering-2026-09-10)
+accepts [ADR 0025](../adr/0025-resource-packs-and-skill-admission.md#concept) and
+[ADR 0027](../adr/0027-provider-permit-retirement.md#concept) as the Proposed
+pairs at `1a16033c2418bc72916a1ff86821f8420f6adbf7`. The standalone ordering
+disposition received an independent exact-SHA APPROVE before that candidate's
+two-sentence provenance correction was committed. The candidate's independent
+delta review found no issues; its sole condition, a passing status check at
+that exact source, was met before this administrative transition.
+
+Acceptance binds the complete Proposed files:
+
+| Decision | Concept | Technical depth |
+| --- | --- | --- |
+| ADR 0025 | `sha256:1ef539109e13b663cdb819b9278b23b70a4cfd889b4a62b26776b612735b83a0` | `sha256:d61a1c5bf10f9dba4fd9b6c7bada5fdf5711bfa42e80e39b2c4de5df042fd068` |
+| ADR 0027 | `sha256:ae631119f412726baadbc8bda4e91030147a7853a10b0e52be7e7baba183766b` | `sha256:080c74758d2d264f139dc3dfd0b725c1c62d07e7bed5e190208bd888fa51a479` |
+
+The acceptance aggregate is **waived**, not passed. The cancelled M2 diagnostic
+is not PASS. The reported executor flake remains assigned to M3 outcome 5 for
+investigation and repair before closure, exactly as dispositioned in the packet;
+the prior failed suite and diagnostic reruns keep their original meanings.
+
+Within each ADR pair this transition changes only its status and Acceptance
+row. It also adds this disposition and updates the ADR index and the plans
+register's derived prerequisite status. M3 remains Open until its own reviewed
+acceptance transition. The ADR decision bytes, Technical companions, plan and
+gate remain unchanged, and this record grants no main merge, closure or release.

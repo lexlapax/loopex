@@ -19,24 +19,24 @@ a decision adds a new record rather than rewriting the old one.
 | 0007 | Local executor grant, job, and receipt | Accepted | [Decision](0007-local-executor-grant-job-receipt.md#concept) | [Technical depth](0007-local-executor-grant-job-receipt-technical.md#technical-depth) |
 | 0008 | Owner succession recovery and runtime placement | Accepted | [Decision](0008-owner-succession-recovery-and-runtime-placement.md#concept) | [Technical depth](0008-owner-succession-recovery-and-runtime-placement-technical.md#technical-depth) |
 | 0009 | Tool, executor, and grant contracts | Accepted (partially superseded by 0012, 0015, and 0016) | [Decision](0009-tool-executor-and-grant-contracts.md#concept) | [Technical depth](0009-tool-executor-and-grant-contracts-technical.md#technical-depth) |
-| 0010 | Provider continuation and exact context staging | Accepted (partially superseded by 0013, 0017, and 0018) | [Decision](0010-provider-continuation-and-context-staging.md#concept) | [Technical depth](0010-provider-continuation-and-context-staging-technical.md#technical-depth) |
+| 0010 | Provider continuation and exact context staging | Accepted (partially superseded by 0013, 0017, 0018, and 0025) | [Decision](0010-provider-continuation-and-context-staging.md#concept) | [Technical depth](0010-provider-continuation-and-context-staging-technical.md#technical-depth) |
 | 0011 | Session input algebra and streaming progress | Accepted (partially superseded by 0012, 0013, 0014, 0016, 0017, and 0018) | [Decision](0011-session-input-algebra-and-streaming.md#concept) | [Technical depth](0011-session-input-algebra-and-streaming-technical.md#technical-depth) |
 | 0012 | Executor cancellation capability | Accepted (partially superseded by 0016) | [Decision](0012-executor-cancellation-capability.md#concept) | [Technical depth](0012-executor-cancellation-capability-technical.md#technical-depth) |
 | 0013 | Run-deadline commitment at first request staging | Accepted (partially superseded by 0017) | [Decision](0013-run-deadline-commitment-at-first-request-staging.md#concept) | [Technical depth](0013-run-deadline-commitment-at-first-request-staging-technical.md#technical-depth) |
 | 0014 | Stream closure at owner loss | Accepted (partially superseded by 0018) | [Decision](0014-stream-closure-at-owner-loss.md#concept) | [Technical depth](0014-stream-closure-at-owner-loss-technical.md#technical-depth) |
 | 0015 | Artifact object and use identity | Accepted | [Decision](0015-artifact-object-and-use-identity.md#concept) | [Technical depth](0015-artifact-object-and-use-identity-technical.md#technical-depth) |
 | 0016 | Configured cancellation observation | Accepted | [Decision](0016-configured-cancellation-observation.md#concept) | [Technical depth](0016-configured-cancellation-observation-technical.md#technical-depth) |
-| 0017 | Durable context and record admission budgets | Accepted | [Decision](0017-durable-context-admission-budget.md#concept) | [Technical depth](0017-durable-context-admission-budget-technical.md#technical-depth) |
-| 0018 | Provider attempt authority and recovery | Accepted (partially superseded by 0021) | [Decision](0018-provider-attempt-authority-and-recovery.md#concept) | [Technical depth](0018-provider-attempt-authority-and-recovery-technical.md#technical-depth) |
+| 0017 | Durable context and record admission budgets | Accepted (partially superseded by 0025) | [Decision](0017-durable-context-admission-budget.md#concept) | [Technical depth](0017-durable-context-admission-budget-technical.md#technical-depth) |
+| 0018 | Provider attempt authority and recovery | Accepted (partially superseded by 0021 and 0027) | [Decision](0018-provider-attempt-authority-and-recovery.md#concept) | [Technical depth](0018-provider-attempt-authority-and-recovery-technical.md#technical-depth) |
 | 0019 | Host-owned provider protection | Accepted | [Decision](0019-host-owned-provider-protection.md#concept) | [Technical depth](0019-host-owned-provider-protection-technical.md#technical-depth) |
 | 0020 | Explicit prepared handoff | Accepted | [Decision](0020-explicit-prepared-handoff.md#concept) | [Technical depth](0020-explicit-prepared-handoff-technical.md#technical-depth) |
 | 0021 | Compacted provider-accounting provenance | Accepted | [Decision](0021-compacted-provider-accounting-provenance.md#concept) | [Technical depth](0021-compacted-provider-accounting-provenance-technical.md#technical-depth) |
 | 0022 | Local executor supervision shell | Accepted | [Decision](0022-local-executor-supervision-shell.md#concept) | [Technical depth](0022-local-executor-supervision-shell-technical.md#technical-depth) |
 | 0023 | Experimental public session protocol | Proposed | [Decision](0023-experimental-public-session-protocol.md#concept) | [Technical depth](0023-experimental-public-session-protocol-technical.md#technical-depth) |
 | 0024 | Durable interaction lifecycle and host-policy authority | Proposed | [Decision](0024-durable-interaction-lifecycle-and-host-policy-authority.md#concept) | [Technical depth](0024-durable-interaction-lifecycle-and-host-policy-authority-technical.md#technical-depth) |
-| 0025 | Resource packs and skill admission | Proposed | [Decision](0025-resource-packs-and-skill-admission.md#concept) | [Technical depth](0025-resource-packs-and-skill-admission-technical.md#technical-depth) |
+| 0025 | Resource packs and skill admission | Accepted | [Decision](0025-resource-packs-and-skill-admission.md#concept) | [Technical depth](0025-resource-packs-and-skill-admission-technical.md#technical-depth) |
 | 0026 | Development floor refresh | Proposed | [Decision](0026-development-floor-refresh.md#concept) | [Technical depth](0026-development-floor-refresh-technical.md#technical-depth) |
-| 0027 | Provider permit retirement | Proposed | [Decision](0027-provider-permit-retirement.md#concept) | [Technical depth](0027-provider-permit-retirement-technical.md#technical-depth) |
+| 0027 | Provider permit retirement | Accepted | [Decision](0027-provider-permit-retirement.md#concept) | [Technical depth](0027-provider-permit-retirement-technical.md#technical-depth) |
 | 0028 | Bounded artifact retrieval | Proposed | [Decision](0028-bounded-artifact-retrieval.md#concept) | [Technical depth](0028-bounded-artifact-retrieval-technical.md#technical-depth) |
 
 0001 and 0002 were the prerequisites that unblocked the first milestone
@@ -145,7 +145,7 @@ valid designs, never an activity log.
 - [Developer documentation](../developer/README.md) — method and routing.
 - [Plans](../plans/README.md) — milestone register and lifecycle.
 
-0025 and 0027 are the two proposed M3 prerequisites: project-skill admission and
+0025 and 0027 are the two accepted M3 prerequisites: project-skill admission and
 safe permit retirement. M4 owns 0023/0024/0026/0028: protocol, durable interactions,
 floor refresh and bounded artifact retrieval. The floor transaction inventory
 must include every holder on integrated M3, rather than assume three. Proposed

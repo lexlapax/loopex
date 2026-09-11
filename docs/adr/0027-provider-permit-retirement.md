@@ -3,7 +3,7 @@
 
 Technical depth: [Provider permit retirement mechanics](0027-provider-permit-retirement-technical.md#technical-depth).
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-09-09
 - **Decision owner:** Maintainer
 - **Supersedes:** 0018
@@ -45,4 +45,4 @@ Technical depth: [Compatibility mechanics](0027-provider-permit-retirement-techn
 
 | Decision | Authority | Authority evidence | Bound bytes |
 | --- | --- | --- | --- |
-| Acceptance | — | — | — |
+| Acceptance | Maintainer | [disposition](../developer/agent-context-map.md#disposition-m3-prerequisite-adrs-2026-09-10) | candidate `1a16033c2418bc72916a1ff86821f8420f6adbf7`; concept `sha256:ae631119f412726baadbc8bda4e91030147a7853a10b0e52be7e7baba183766b`; technical `sha256:080c74758d2d264f139dc3dfd0b725c1c62d07e7bed5e190208bd888fa51a479` |

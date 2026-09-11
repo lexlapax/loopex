@@ -22,10 +22,10 @@ integrated product baseline.
 | --- | --- |
 | Integrated phase | Closed milestone product baseline |
 | Last closed product checkpoint | `M2` — 2026-09-03 |
-| Blockers | [ADR 0025](../adr/0025-resource-packs-and-skill-admission.md#concept) and [ADR 0027](../adr/0027-provider-permit-retirement.md#concept) must be accepted before the `M3` plan pair and gate can be accepted |
+| Blockers | `M3` is open and not accepted; the recorded acceptance authority must accept both normative envelopes and the gate |
 | Authorized work | Explicitly authorized planning, ADR, bootstrap, and review work only; no product implementation |
-| Next maintainer decision | Disposition ADR 0025 and ADR 0027 |
-| Next transition | After the prerequisites are accepted, accept or reject the `M3` plan pair and gate |
+| Next maintainer decision | Accept or reject the `M3` plan pair and gate |
+| Next transition | Record the acceptance governance row and move `M3` to Accepted |
 | Validation | `bash scripts/check-bootstrap.sh` |
 <!-- loopex:current-status:end -->
 
