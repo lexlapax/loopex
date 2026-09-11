@@ -758,11 +758,23 @@ defmodule LoopexCli.FoundationWorkflowTest do
   end
 
   defp replace_workspace_resources(workflow) do
-    instruction = "M3_CHANGED_WORKSPACE_INSTRUCTION: must never be rediscovered.\n"
+    instruction =
+      "---\nname: review\ndescription: A valid replacement after admission.\n---\n" <>
+        "M3_CHANGED_WORKSPACE_INSTRUCTION: must never be rediscovered.\n"
+
     support = "M3_CHANGED_WORKSPACE_SUPPORT: must never be rediscovered.\n"
     skill = Path.join([workflow.workspace, ".agents", "skills", "review"])
     File.write!(Path.join(skill, "SKILL.md"), instruction)
     File.write!(Path.join([skill, "references", "checklist.md"]), support)
+
+    assert {:ok, replacement} =
+             LoopexComposition.ResourcePacks.discover(workflow.workspace,
+               workspace_ref: workflow.manifest["workspace_ref"],
+               state_root: workflow.state_root
+             )
+
+    assert {:ok, replacement_digest, _normalized} = ResourcePack.digest(replacement)
+    refute replacement_digest == workflow.digest
     %{instruction: instruction, support: support}
   end
 
