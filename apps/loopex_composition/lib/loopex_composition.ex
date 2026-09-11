@@ -39,7 +39,7 @@ defmodule LoopexComposition do
 
   # Concept: what the host decides stays the host's to supply; an option the
   # host did not supply is absent rather than a default this module invented.
-  @host_supplied ~w(project_manifest project_decision progress_to diagnostics_to cleanup_grace_ms)a
+  @host_supplied ~w(project_manifest project_decision resource_manifest progress_to diagnostics_to cleanup_grace_ms)a
   @edge :"$loopex_composition_edge_observer"
   @effect :"$loopex_composition_effect_observer"
   @owned :"$loopex_composition_owned"
@@ -91,6 +91,7 @@ defmodule LoopexComposition do
     with {:ok, policy} <- policy(Keyword.get(options, :policy)),
          {:ok, [root, workspace, id]} <- required(options, @required_options),
          :ok <- boolean(options, :recover_stale_writer),
+         :ok <- LoopexComposition.ResourcePacks.validate_launch_option(options),
          do: {:ok, {options, root, workspace, id, policy}}
   end
 
@@ -163,6 +164,7 @@ defmodule LoopexComposition do
   defp compose({options, root, workspace, runtime_id, policy}) do
     with :ok <- start_applications(),
          :ok <- File.mkdir_p(root),
+         {:ok, options} <- LoopexComposition.ResourcePacks.retain_launch_option(options, root),
          {:ok, adapter} <- start_edge(Store.Local, store_options(root, options)),
          {:ok, store} <- Store.new(Store.Local, adapter),
          {:ok, executor} <- open_executor(root, workspace, options) do
