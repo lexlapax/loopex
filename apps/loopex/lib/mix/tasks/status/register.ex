@@ -818,8 +818,9 @@ defmodule Loopex.Checks.Register do
     )
     |> Map.put(
       "Next transition",
-      "Turn the locked `#{delivery_name}` gate green and close it; then refresh and " <>
-        "independently review `#{lookahead_name}` on that closed base"
+      "Turn the locked `#{delivery_name}` gate green, move `#{delivery_name}` to In " <>
+        "progress and then In review with cleared independent review, and close it; " <>
+        "then refresh and independently review `#{lookahead_name}` on that closed base"
     )
   end
 

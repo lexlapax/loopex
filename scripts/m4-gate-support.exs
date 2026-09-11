@@ -25,6 +25,7 @@ defmodule Loopex.M4Gate.Support do
   defp outcome("apps/loopex/test/interaction_lifecycle_test.exs"), do: [3]
   defp outcome("apps/loopex_store_local/test/artifact_transfer_test.exs"), do: [4]
   defp outcome("apps/loopex_protocol/test/public_schema_conformance_test.exs"), do: [6]
+  defp outcome("apps/loopex/test/m4_gate_support_test.exs"), do: [6]
   # Concept: shared contract, store and server paths select every outcome that
   # can observe them; only leaf test files select one outcome.
   defp outcome("apps/loopex/lib/loopex/runtime/interaction" <> _), do: [2, 3, 5]
@@ -204,23 +205,37 @@ defmodule Loopex.M4Gate.Support do
     {"source", ~r/\A[0-9a-f]{40}\z/},
     {"gate", ~r/\Asha256:[0-9a-f]{64}\z/},
     {"version", ~r/\A\d+\.\d+\.\d+\z/},
+    {"role", ~r/\Afull\z/},
     {"seed", ~r/\A3107\z/},
     {"outcome_ids", ~r/\A1,2,3,4,5,6\z/},
+    {"selectors", ~r/\A[1-9]\d*\z/},
+    {"elapsed_seconds", ~r/\A\d+\z/},
     {"elixir", ~r/\A\d+\.\d+\.\d+(-[0-9A-Za-z.]+)?\z/},
-    {"otp", ~r/\A\d+\z/},
+    {"otp", ~r/\A\d+(\.\d+)+\z/},
     {"erts", ~r/\A\d+(\.\d+)+\z/},
     {"platform", ~r/\A[A-Za-z0-9_.-]+\z/},
     {"node", ~r/\A\d+\.\d+\.\d+\z/},
     {"python", ~r/\A\d+\.\d+\.\d+\z/},
+    {"clients", ~r/\Asha256:[0-9a-f]{64}\z/},
     {"schema", ~r/\Asha256:[0-9a-f]{64}\z/},
-    {"selectors", ~r/\A[1-9]\d*\z/},
     {"inherited", ~r/\Atrue\z/},
     {"real_workflow", ~r/\Atrue\z/},
     {"result", ~r/\APASS\z/}
   ]
 
+  # Concept: evidence names the exact runtime, not its major release.
+  # Technical depth: `otp_release` is the major number only; the installed
+  # release's `OTP_VERSION` file carries the exact version the pins name.
+  def exact_otp_version do
+    [:code.root_dir(), "releases", :erlang.system_info(:otp_release), "OTP_VERSION"]
+    |> Path.join()
+    |> File.read!()
+    |> String.trim()
+  end
+
   def verify_final_report(line) do
-    ["LOOPEX_M4_GATE_REPORT" | fields] = String.split(String.trim_trailing(line, "\n"), " ")
+    [prefix | fields] = String.split(String.trim_trailing(line, "\n"), " ")
+    ensure(prefix == "LOOPEX_M4_GATE_REPORT", "final report prefix is not the M4 gate report")
     pairs = Enum.map(fields, &String.split(&1, "=", parts: 2))
     ensure(Enum.all?(pairs, &(length(&1) == 2)), "malformed final report field")
 
@@ -262,7 +277,7 @@ defmodule Loopex.M4Gate.Support do
         {sha, digest} = Shared.source_identity(root, String.to_existing_atom(mode))
 
         IO.puts(
-          "LOOPEX_M4_SOURCE sha=#{sha} working_digest=sha256:#{digest} seed=3107 elixir=#{System.version()} otp=#{:erlang.system_info(:otp_release)} erts=#{:erlang.system_info(:version)} platform=#{:erlang.system_info(:system_architecture)}"
+          "LOOPEX_M4_SOURCE sha=#{sha} working_digest=sha256:#{digest} seed=3107 elixir=#{System.version()} otp=#{exact_otp_version()} erts=#{:erlang.system_info(:version)} platform=#{:erlang.system_info(:system_architecture)}"
         )
 
       ["selectors", root, ids] ->

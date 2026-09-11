@@ -62,8 +62,10 @@
             "a chunk is returned only after the complete immutable object verifies once per transfer and object and chunk digests stay distinct",
             "an unsupported ArtifactStore reports unsupported rather than falling back to a whole object fetch",
             "wrong session use object and use swaps and corruption outside the requested window refuse at open before any bytes",
+            "a same inode same size rewrite of the original after open never reaches a chunk and every chunk matches the reported object digest",
             "concurrent transfer and connection work exhaustion refuse and close cancellation loss and expiry release every descriptor",
-            "chunk byte and deadline budgets bound allocation and a transfer reads at most one verification plus one emit"
+            "unlinked owner private snapshots leave no bytes in the scratch root across repeated abrupt kill and restart",
+            "open deadline chunk byte and read deadline budgets bound allocation and a transfer reads at most one verification plus one emit"
           ]
         },
         %{
@@ -97,6 +99,13 @@
           names: [
             "Elixir Python and TypeScript clients execute the same positive and negative vectors without the server codec",
             "exact source schema client versions and toolchain platform identities are recorded with every result"
+          ]
+        },
+        %{
+          path: "apps/loopex/test/m4_gate_support_test.exs",
+          names: [
+            "authoritative reports reject missing duplicate reordered wrong kind and stale version fields",
+            "the final report grammar rejects missing duplicated reordered and malformed fields"
           ]
         }
       ]

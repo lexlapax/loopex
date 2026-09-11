@@ -37,7 +37,7 @@ M4 accepts four decisions before dependent work:
 | [**ADR 0023**](../adr/0023-experimental-public-session-protocol.md#concept) | Maintainer, before M4 acceptance; must carry the connection state table below | Transport-neutral experimental protocol, exact initialization, identity ownership and fail-closed boundary |
 | [**ADR 0024**](../adr/0024-durable-interaction-lifecycle-and-host-policy-authority.md#concept) | Maintainer, before M4 acceptance; must fix the exact maximum of successive answer → defer rounds per tool decision | Durable policy `defer`/answer lifecycle owned by the session with host-policy authority preserved |
 | [**ADR 0026**](../adr/0026-development-floor-refresh.md#concept) | Maintainer, before M4 acceptance; holder transactions below settle after M3 closes | Explicit floor/current validation pairs replacing the derived pin rule |
-| [**ADR 0028**](../adr/0028-bounded-artifact-retrieval.md#concept) | Maintainer, before M4 acceptance; must settle the transfer design below | Bounded artifact retrieval through the facade and ArtifactStore with distinct object/range digests |
+| [**ADR 0028**](../adr/0028-bounded-artifact-retrieval.md#concept) | Maintainer, before M4 acceptance; carries the transfer design below | Bounded artifact transfer through the facade and ArtifactStore with distinct object/chunk digests |
 
 **Artifact transfer design (decided).** The earlier draft admitted
 1–16,384-byte ranges while the local store admits 64 MiB objects and verified
@@ -46,11 +46,12 @@ verified it 4,096 times. On 2026-09-10, during the M4 planning task, the
 maintainer chose one authorized, verified transfer that verifies once and emits
 bounded chunks from an owned, cancellable reader, over independent range reads
 that would have reduced the feature to bounded excerpts. ADR 0028 now proposes
-that design. Both envelopes bind exact values at acceptance for: chunk bytes,
-per-read deadline, open-transfer lifetime, concurrent transfers per connection
-and per runtime, connection work budget, and read amplification (at most one
-complete verification plus one sequential emit per authorized transfer).
-Missing values block acceptance.
+that design. Both envelopes bind exact values at acceptance for: the opening
+verification's deadline and work budget, chunk bytes, per-read deadline,
+open-transfer lifetime, concurrent transfers per connection and per runtime,
+connection work budget, and read amplification (at most one complete
+verification plus one sequential emit per authorized transfer). Missing values
+block acceptance.
 
 **Connection state table (required content of ADR 0023).**
 
@@ -82,30 +83,28 @@ and current 1.20.3/OTP 29.0.5, with real matrix evidence), the ninth
 application, the dependency-rule change and source VERSION 0.1.0 each change
 bytes that Closed gates bind. The default sequence is exact:
 
-| Step | Transaction |
-| --- | --- |
-| 1 | Close and integrate M3 on its existing floor |
-| 2 | Derive the exact M0–M3 holder inventory on that integrated closure |
-| 3 | Settle every Closed holder through the v2 gate-generation route, unless a separately recorded and reviewed maintainer override names the exact replacement |
-| 4 | Refresh M4 on that base and re-prove every inherited gate green plus this gate's own red |
-| 5 | Accept M4 |
-| 6 | Add the ninth application during implementation; apply 0.1.0 at the closure rejoin under its holders' transactions |
+| Phase | When | Transactions |
+| --- | --- | --- |
+| A. Successor enabling | After M3 closes and integrates, before M4 acceptance | Derive the exact M0–M3 holder inventory on the integrated closure; settle the floor refresh with every `.tool-versions` holder; refresh M4 on that base and re-prove every inherited gate green plus this gate's own red; then accept |
+| B. Implementation | After acceptance, on branch `m4`, before the first rejoin that runs the full lanes | Land the M1 dependency-oracle transaction (nine applications, client → contract edge, negative tests) as its own v2 `A`/`R`; then add the ninth application as ordinary product work |
+| C. Closure rejoin | At the closure candidate | Apply the separately approved version transition to 0.1.0 and settle every version holder below through its own v2 `A`/`R` in register order; M4 rebinds its own table last |
 
 Because M4 cannot be accepted before M3 closes, every holder is Closed when
-its transaction runs; no v1 route applies. Two kinds of change are kept apart:
-successor-enabling changes to bound development-time bytes, which settle
-before M4 acceptance, and M4 product bytes, which land during implementation
-and at the closure rejoin. The ledger at the planning base is:
+its transaction runs; no v1 route applies. Phase A settles before acceptance;
+phases B and C do not, and nothing in them is a precondition of acceptance.
+ADR 0026 governs only the floor and is satisfied by phase A. The ledger at the
+planning base is:
 
-| Artifact | Holders | Restriction today | Planned change | When | Route and checks |
+| Artifact | Holders | Restriction today | Planned change | Phase | Route and checks |
 | --- | --- | --- | --- | --- | --- |
-| `.tool-versions` | M0, M1, M2, M3 | Floor 1.17.0/OTP 26.0, current 1.20.3/OTP 29.0.5 | Floor 1.18.5/OTP 27.3.4 | Before acceptance, after M3 closes | One v2 proposal `A` and rebind `R` per holder in register order, or a recorded override naming all four; matrix evidence on both pairs; each holder's gate green at its `R`; bootstrap |
-| `apps/loopex/lib/mix/tasks/loopex.deps_budget.ex` | M1 | Eight-application inventory; a client may depend only on core and a composition | Nine-application inventory and a permitted client → contract production edge | Before acceptance | M1 v2 `A`/`R` together with the test below; M1 gate green at `R` |
-| `apps/loopex/test/deps_budget_test.exs` | M1 | Locks the current rule set | Negative tests for the new edge and inventory | Same M1 transaction | Same `A`/`R`; not a separate transaction |
-| `scripts/m1-exunit-runner.exs`, `apps/loopex/test/m1_exunit_runner_test.exs` | M1, M2, M3, M4 | Authoritative report channel | None planned; any version-aware field change touches every holder | Only if changed | v2 for M1–M3 in register order, M4's own table while Open |
-| `scripts/m3-gate-support.exs`, `scripts/check-closed-gates.sh` | M3, M4 | M3's combined real-path verifier fixes `@0.0.0` | None; M4's verifier reads `VERSION`; an M3 rerun after 0.1.0 needs M3's own v2 | Only if changed | M3 v2, then M4 rebinds |
-| `apps/loopex_app_server` | None | Absent | Ninth application | Implementation, after the M1 rule change | Ordinary M4 product work on branch `m4` |
-| `VERSION`, application versions | Gates whose evidence names the version | 0.0.0 | 0.1.0 | Closure rejoin | Separately approved version transition; evidence names the exact version |
+| `.tool-versions` | M0, M1, M2, M3 | Floor 1.17.0/OTP 26.0, current 1.20.3/OTP 29.0.5 | Floor 1.18.5/OTP 27.3.4 | A | One v2 `A`/`R` per holder in register order, or a recorded override naming all four; matrix evidence on both pairs; each holder's gate green at its `R`; bootstrap |
+| `apps/loopex/lib/mix/tasks/loopex.deps_budget.ex`, `apps/loopex/test/deps_budget_test.exs` | M1 | Eight-application inventory; a client may depend only on core and a composition | Nine-application inventory, permitted client → contract production edge, negative tests | B | One M1 v2 `A`/`R` covering both files; M1 gate green at `R` |
+| `apps/loopex_app_server` | None | Absent | Ninth application | B | Ordinary M4 product work after the M1 transaction |
+| `VERSION`, application versions | Every holder below | 0.0.0 | 0.1.0 | C | Separately approved version transition; evidence names the exact version |
+| `scripts/m1-exunit-runner.exs`, `apps/loopex/test/m1_exunit_runner_test.exs` | M1, M2, M3, M4 | The selector runner refuses a real report whose build identities are not `@0.0.0` | Version-aware build identities; required, because M4's real lane runs through this runner | C | v2 for M1, M2 and M3 in register order; M4 rebinds |
+| `scripts/m1-evidence-verifier.exs` | M1 | Fixes `@0.0.0` build identities | Version-aware | C | M1 v2 |
+| `scripts/check-m2-gate.sh` | M2 | Requires the version train to report exactly `0.0.0` and `@0.0.0` build identities | Version-aware | C | M2 v2; otherwise the Closed M2 gate is red after the transition |
+| `scripts/m3-gate-support.exs`, `scripts/check-closed-gates.sh` | M3, M4 | M3's combined real-path verifier fixes `@0.0.0` | Version-aware; M4's own verifier already reads `VERSION` | C | M3 v2; M4 rebinds |
 
 M2 deliberately binds neither dependency file, so it is not a holder there.
 The planned `loopex_app_server` depends directly on `loopex_protocol`; the
@@ -121,13 +120,15 @@ acceptance, an accepted ADR decision, or a released public contract. The
 operative disposition is recorded and independently reviewed in its own commit;
 each holder then lands its replacement row in its own status-checked,
 exact-SHA-reviewed commit before the next proceeds. No override ignores a stale
-hash or rewrites a prior Acceptance/Closure row. All replacement bindings settle
-before M4 acceptance; publication and compatibility freezes still require
-separate authority. No floor change is made by this opening.
+hash or rewrites a prior Acceptance/Closure row. Phase A bindings settle before
+M4 acceptance; phase B and C bindings settle before the rejoin or closure
+candidate that depends on them, and closure cannot be recorded while any is
+stale. Publication and compatibility freezes still require separate authority.
+No floor change is made by this opening.
 
 M3 owns resource admission, inherited-gate enforcement and the three repairs.
-M4 adds core defer/answer and ArtifactStore ranges before the app-server maps
-them. An inherited defect is reproduced at the exact base and repaired at its
+M4 adds core defer/answer and ArtifactStore transfers before the app-server
+maps them. An inherited defect is reproduced at the exact base and repaired at its
 owner; a wire workaround cannot conceal it.
 
 <a id="technical-plan-ownership"></a>

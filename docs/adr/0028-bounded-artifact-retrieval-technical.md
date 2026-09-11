@@ -43,9 +43,16 @@ whole-object accumulator while copying the verified bytes into a transfer-owned
 snapshot file under the store's task-owned scratch root; chunks are emitted
 only from that snapshot, so a mutation of the original object after
 verification, including a same-inode, same-size rewrite, cannot reach a chunk
-whose digest the open response did not cover. The snapshot is deleted at
-close, cancellation, connection loss and lifetime expiry, and disk use per
-transfer is bounded by the object ceiling. Missing or corrupt object,
+whose digest the open response did not cover. The snapshot is owner-private
+and held only by its descriptor: it is created under the store's task-owned
+scratch root with owner-only permissions and unlinked immediately after it is
+opened, so the operating system reclaims it when the descriptor closes or the
+process dies, and no path to it exists that a later process or another user
+could read or replace. Close, cancellation, connection loss and lifetime expiry
+close the descriptor. On startup the store scavenges its own scratch root,
+deleting only regular files it owns and never following links, as the bounded
+defense for a platform or failure that left an unlinked-before-open file
+behind. Disk use per transfer is bounded by the object ceiling. Missing or corrupt object,
 mismatched use, unsupported capability, invalid window, unknown or expired
 transfer, exhausted open deadline or work budget, and exhausted transfer or
 connection budgets have distinct bounded refusals. Every open transfer owns one
@@ -62,7 +69,8 @@ same-inode, same-size rewrite of the original after open, whose chunks must
 still match the reported object digest; an open that exceeds its deadline or
 work budget; concurrent transfers up to and beyond the budget; mutation of
 window bounds; close, cancellation, connection loss, lifetime expiry, and
-descriptor and snapshot release. Measure retained and peak memory against
+descriptor and snapshot release, including repeated abrupt kill and restart
+leaving no snapshot bytes in the scratch root. Measure retained and peak memory against
 objects well above the chunk ceiling, and measure bytes read per transfer: at
 most one complete verification plus one sequential emit. Genuine old-format artifacts are positive controls. A
 full-object read followed by binary slicing fails the memory obligation even

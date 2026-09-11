@@ -40,10 +40,10 @@ loading it all in memory. Each transfer costs one complete sequential
 verification plus one sequential emit of the requested window; saving an N-byte
 object reads at most 2N bytes. Caching and Merkle formats remain outside scope.
 Resource packs do not enter the tool-output artifact namespace. Before M4
-acceptance, pair the transfer/frame contract with explicit chunk-byte,
-per-read deadline, open-transfer lifetime, concurrent-transfer and
-connection-work budgets. Missing budget decisions block acceptance; they are
-not an unlimited-I/O grant.
+acceptance, pair the transfer/frame contract with explicit budgets for the
+opening verification (its deadline and work), chunk bytes, per-read deadline,
+open-transfer lifetime, concurrent transfers and connection work. Missing
+budget decisions block acceptance; they are not an unlimited-I/O grant.
 
 Keep existing put/fetch callbacks and object/use formats. Add one optional
 bounded transfer capability to ArtifactStore and an experimental facade

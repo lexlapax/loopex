@@ -199,9 +199,6 @@ require_client_pins() {
   [ "$observed_node" = "v$pinned_node" ] || die "Node version differs from the pin: $observed_node"
   [ "$observed_python" = "$pinned_python" ] || die "Python version differs from the pin: $observed_python"
 }
-case ",$selected_ids," in
-  *,5,*|*,6,*) require_client_pins ;;
-esac
 
 support prepare-build "$task_root" "$operator_mix_home" "${LOOPEX_HOME:-$operator_home/.loopex}" "${LOOPEX_WORKSPACE:-$root}" || exit $?
 if ! env LANG=C.UTF-8 LC_ALL=C.UTF-8 elixir -r apps/loopex/lib/mix/tasks/loopex.deps_budget.ex \
@@ -245,6 +242,10 @@ run_selector() {
   [ "${#argv[@]}" -ge 10 ] || die 'selector argument construction incomplete'
   nonce=$(env LANG=C.UTF-8 LC_ALL=C.UTF-8 elixir -e 'IO.write(Base.encode16(:crypto.strong_rand_bytes(16), case: :lower))' </dev/null) || die 'cannot allocate selector nonce'
   printf 'M4 selector: %s kind=%s\n' "$selector" "$kind"
+  # Client-backed selectors run only under the pinned interpreters.
+  case "$selector" in
+    */external_workflow_test.exs|*/external_workflow_real_test.exs|*/public_schema_conformance_test.exs) require_client_pins ;;
+  esac
   if [ "$kind" = real ]; then
     [ -n "$m4_provider_key" ] || die 'full gate requires provider input for the real workflow'
     builtin printf 'LOOPEX_M1_SELECTOR_V1\0%s\0%s\0' "$nonce" "$m4_provider_key" |
@@ -317,7 +318,8 @@ schema_path=apps/loopex_protocol/priv/schema/loopex-experimental-1.json
 [ -r "$schema_path" ] || die "canonical schema bytes are absent: $schema_path"
 schema_digest=$(shasum -a 256 "$schema_path" | cut -d' ' -f1) || die 'cannot hash the canonical schema'
 selector_count=$(grep -c . "$task_root/selector-ledger") || die 'selector ledger is empty'
-report=$(printf 'LOOPEX_M4_GATE_REPORT source=%s gate=sha256:%s version=%s seed=3107 outcome_ids=1,2,3,4,5,6 %snode=%s python=%s schema=sha256:%s selectors=%s inherited=true real_workflow=true result=PASS' \
-  "$(git rev-parse HEAD)" "$(shasum -a 256 docs/plans/M4-gate.md | cut -d' ' -f1)" "$source_version" "$toolchain" "$pinned_node" "$pinned_python" "$schema_digest" "$selector_count")
+clients_digest=$(shasum -a 256 "$client_pins" | cut -d' ' -f1) || die 'cannot hash the client toolchain pins'
+report=$(printf 'LOOPEX_M4_GATE_REPORT source=%s gate=sha256:%s version=%s role=full seed=3107 outcome_ids=1,2,3,4,5,6 selectors=%s elapsed_seconds=%s %snode=%s python=%s clients=sha256:%s schema=sha256:%s inherited=true real_workflow=true result=PASS' \
+  "$(git rev-parse HEAD)" "$(shasum -a 256 docs/plans/M4-gate.md | cut -d' ' -f1)" "$source_version" "$selector_count" "$SECONDS" "$toolchain" "$pinned_node" "$pinned_python" "$clients_digest" "$schema_digest")
 support evidence "$report" </dev/null || exit $?
 printf '%s\n' "$report"

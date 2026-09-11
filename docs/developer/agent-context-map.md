@@ -57,7 +57,7 @@ separate decision duty when a founding boundary or invariant would change.
 
 ## Test Quick Reference
 
-The umbrella exists. Product tests run with `mix test` from the repository root, and the repository's own checks are Mix tasks: `mix loopex.deps_budget`, `loopex.core_only`, `loopex.matrix`, `loopex.format_scope`, `loopex.version_train`, `loopex.docs_check`, `loopex.hook_registration`, and `loopex.self_hosting`. `bash scripts/check-bootstrap.sh` runs the aggregate, and `bash scripts/check-m0-gate.sh`, `/bin/bash -p scripts/check-m1-gate.sh`, and `bash scripts/check-m2-gate.sh` run the Closed gates. `bash scripts/check-m3-gate.sh` runs the Open `M3` gate, which must be red for its own declared missing behavior while every Closed gate stays green.
+The umbrella exists. Product tests run with `mix test` from the repository root, and the repository's own checks are Mix tasks: `mix loopex.deps_budget`, `loopex.core_only`, `loopex.matrix`, `loopex.format_scope`, `loopex.version_train`, `loopex.docs_check`, `loopex.hook_registration`, and `loopex.self_hosting`. `bash scripts/check-bootstrap.sh` runs the aggregate, and `bash scripts/check-m0-gate.sh`, `/bin/bash -p scripts/check-m1-gate.sh`, and `bash scripts/check-m2-gate.sh` run the Closed gates. `bash scripts/check-m3-gate.sh` runs the Accepted `M3` gate and `bash scripts/check-m4-gate.sh` runs the Open `M4` lookahead gate; each must be red for its own declared missing behavior while every Closed gate stays green.
 
 Product tests run against a temporary `LOOPEX_HOME`; the
 affected conformance suites (`conformance/`) run for any adapter or behaviour

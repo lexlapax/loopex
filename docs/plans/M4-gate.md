@@ -140,12 +140,12 @@ binding.
 
 | SHA-256 | Path |
 | --- | --- |
-| `b5d3e263b5b66a2ef29f87548676cb0636787f92ab83a04660970f651e689346` | `scripts/check-m4-gate.sh` |
+| `027b30ebceb1e1a869603cf33a44972da55752267956e9b3629c21f57beca9f6` | `scripts/check-m4-gate.sh` |
 | `a559bd9f44f1f46f65aaff0bdcfcac2e5124301bc367c58c85966fd6409ba68f` | `scripts/m4-opening-probe.exs` |
-| `0c49e933b9de7785c745656f1711818993604da326d214669671d1da4e5374c5` | `scripts/m4-gate-support.exs` |
+| `cb1960d4dd5dd7c686401d98930ad0f07448f3efea85a057e23ce3ad0307d813` | `scripts/m4-gate-support.exs` |
 | `65d0de9dcd1218af542f00e32c2177d2612a2f1232f22db37b9942200c84cf66` | `scripts/m3-gate-support.exs` |
 | `c4d485ca3229441c678abe1e8733f90216e89e0dfb9e81786f58f525619aec29` | `scripts/check-closed-gates.sh` |
-| `9121c61de6d8e6674b7551b9ea282307e5a8d5551b8ece29ced33234b752d228` | `scripts/m4-outcomes.exs` |
+| `83c5b6573c66e3c2eb9e252e6835e7899bc0cd5b7c1bd8a0f416e8db05a2fdca` | `scripts/m4-outcomes.exs` |
 | `cc290e60d9f9588c75f1259b25976a58d1c30713e570cd5a88c70cdf3c2159a0` | `scripts/m1-exunit-runner.exs` |
 | `0a8406ca080c70624e776b01e37c7ded210b54659064cf63723a847a54debe2d` | `apps/loopex/test/m1_exunit_runner_test.exs` |
 | `fad47299b27a767785d2a6a776155038054f5457ee3ce0195a37ae667f7a9999` | `.tool-versions` |
@@ -201,21 +201,28 @@ the gate rejects that invocation ledger.
 | Real workflow | Separately selected attended real-provider task through the shipped server and TypeScript consumer |
 | Retained evidence | One final report line in the exact grammar below, validated by the bound support script before it is printed; the real selector's authoritative report binds provider/model/endpoint and version-aware adapter/executor build identities; save that output without relabelling its source |
 
-The pinned Node and Python interpreters are verified before any selector for
-outcome 5 or 6 runs, in checkpoint and full modes alike, and again before the
-real lane; absence or mismatch is UNAVAILABLE, never RED.
+The pinned Node and Python interpreters are verified immediately before each
+client-backed selector (the external workflow, its real-provider file and the
+schema conformance file) in checkpoint and full modes alike; absence or
+mismatch is UNAVAILABLE, never RED.
 
 The retained final report has exactly this grammar, one line, fields in this
 order, each present once:
 
 ```text
-LOOPEX_M4_GATE_REPORT source=<40 hex> gate=sha256:<64 hex> version=<major.minor.patch> seed=3107 outcome_ids=1,2,3,4,5,6 elixir=<version> otp=<release> erts=<version> platform=<system architecture> node=<pinned> python=<pinned> schema=sha256:<64 hex> selectors=<count> inherited=true real_workflow=true result=PASS
+LOOPEX_M4_GATE_REPORT source=<40 hex> gate=sha256:<64 hex> version=<major.minor.patch> role=full seed=3107 outcome_ids=1,2,3,4,5,6 selectors=<count> elapsed_seconds=<n> elixir=<exact> otp=<exact, e.g. 29.0.5> erts=<exact> platform=<system architecture> node=<pinned> python=<pinned> clients=sha256:<64 hex> schema=sha256:<64 hex> inherited=true real_workflow=true result=PASS
 ```
 
-`schema` is the digest of `apps/loopex_protocol/priv/schema/loopex-experimental-1.json`,
-the canonical schema bytes the protocol application ships; `selectors` is the
-number of authoritative selector reports the ledger accounted for. The support
-script refuses a line with a missing, duplicated, reordered or malformed field.
+`role` names the command role that produced the line (only the full role
+reports); `selectors` is the number of authoritative selector reports the
+ledger accounted for; `elapsed_seconds` is the whole run's wall time;
+`clients` is the digest of the bound client toolchain pins; `schema` is the
+digest of `apps/loopex_protocol/priv/schema/loopex-experimental-1.json`, the
+canonical schema bytes the protocol application ships, which also carry every
+negotiated limit. The support script refuses a line with a missing, duplicated,
+reordered or malformed field, and the bound
+`apps/loopex/test/m4_gate_support_test.exs` witnesses retain that refusal for
+both report kinds and the final grammar.
 
 Real-provider tests live in the dedicated
 `apps/loopex_app_server/test/external_workflow_real_test.exs`. Full mode accepts
@@ -237,9 +244,9 @@ are pinned before acceptance, not by this opening.
 | 1 | `apps/loopex_app_server/test/initialization_test.exs` | Exact generation/schema/limit negotiation before mutation; mutation-before-init and duplicate-init refusal without durable work; stdout purity and real process boundary |
 | 2 | `apps/loopex_app_server/test/session_mapping_test.exs` | Same corpus facade/wire; independent request and command identity with replay idempotency; admission vs completion; snapshot/live ordering |
 | 3 | `apps/loopex/test/interaction_lifecycle_test.exs`, `apps/loopex_app_server/test/foundation_mapping_test.exs` | Durable request/answer/policy/intent cuts, fixed timestamps through uncertain commits, expiry/abort/restart races, the exact successive-round bound, old-reader refusal; exact resources, missing/stale trust, manual-only selection, answer admission separate from re-evaluation and grant/intent, immutable launch inputs unreplaceable from the wire |
-| 4 | `apps/loopex_store_local/test/artifact_transfer_test.exs`, `apps/loopex_app_server/test/delivery_bounds_test.exs` | Complete verification at open with one verification per transfer, distinct object/chunk digests, unsupported-store refusal, wrong-session use, object/use swap, corruption outside the requested window, concurrent-transfer and connection-work exhaustion, lifetime expiry, cancellation and descriptor release, chunk/deadline budgets; malformed UTF-8, duplicate keys, nesting, fragmented/multiple/oversized frames, blocked reader, detach cursor, late progress and actual cleanup |
+| 4 | `apps/loopex_store_local/test/artifact_transfer_test.exs`, `apps/loopex_app_server/test/delivery_bounds_test.exs` | Complete verification at open with one verification per transfer, distinct object/chunk digests, unsupported-store refusal, wrong-session use, object/use swap, corruption outside the requested window, post-open same-size rewrite never reaching a chunk, concurrent-transfer and connection-work exhaustion, lifetime expiry, cancellation, descriptor and snapshot release across repeated kill/restart, open-deadline/chunk/read-deadline budgets; malformed UTF-8, duplicate keys, nesting, fragmented/multiple/oversized frames, blocked reader, detach cursor, late progress and actual cleanup |
 | 5 | `apps/loopex_app_server/test/external_workflow_test.exs` | TypeScript skill → interaction answer → policy re-evaluation → committed grant/intent → actual tool → artifact → abrupt restart from operator input with no embedded identities; clean stdin EOF performs orderly shutdown with no cancellation; abrupt death records nothing; a pending interaction survives both; `session.abort` is the only cancellation and an aborted interaction never reappears |
-| 6 | `apps/loopex_protocol/test/public_schema_conformance_test.exs` | Independently executed Elixir, Python and TypeScript clients over canonical positive/negative vectors under the pinned interpreters; exact version and platform identities |
+| 6 | `apps/loopex_protocol/test/public_schema_conformance_test.exs`, `apps/loopex/test/m4_gate_support_test.exs` | Independently executed Elixir, Python and TypeScript clients over canonical positive/negative vectors under the pinned interpreters; exact version and platform identities; retained refusal of missing, duplicated, reordered, wrong-kind, stale-version and malformed evidence fields |
 
 Each required clause maps to a named decisive witness in `scripts/m4-outcomes.exs`.
 Related clauses may share one named case only when it contains distinct observed

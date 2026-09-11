@@ -2757,8 +2757,9 @@ defmodule Loopex.StatusCheckTest do
                "None until `current` is ready for independent review; `next` cannot be " <>
                  "accepted before `current` closes",
              "Next transition" =>
-               "Turn the locked `current` gate green and close it; then refresh and " <>
-                 "independently review `next` on that closed base"
+               "Turn the locked `current` gate green, move `current` to In progress and " <>
+                 "then In review with cleared independent review, and close it; then " <>
+                 "refresh and independently review `next` on that closed base"
            }
   end
 

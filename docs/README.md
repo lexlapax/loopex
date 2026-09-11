@@ -81,7 +81,7 @@ whose path or explicit fragment does not resolve.
 ## Planning and Development
 
 - [M3 foundations](plans/M3.md#concept) and [technical plan](plans/M3-technical.md#technical-depth) — project skills and core repairs; Accepted, implementation on its milestone branch.
-- [M4 headless external consumption](plans/M4.md#concept) and [technical plan](plans/M4-technical.md#technical-depth) — durable interactions, artifact ranges, floor refresh and protocol/TypeScript workflow over M3; Open planning lookahead with a red gate.
+- [M4 headless external consumption](plans/M4.md#concept) and [technical plan](plans/M4-technical.md#technical-depth) — durable interactions, artifact transfers, floor refresh and protocol/TypeScript workflow over M3; Open planning lookahead with a red gate.
 
 - [Development contract](../AGENTS.md) — canonical tool-neutral authority,
   autonomy, documentation, milestone, and enforcement rules.
