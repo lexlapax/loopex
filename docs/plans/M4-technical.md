@@ -17,12 +17,17 @@ M4 is Open as the one permitted planning lookahead after M3's accepted
 governance checkpoint integrated to `main`. Its planning base is
 `4bba8b74f5e260dc2a364fcbd3554c7badd1a09c`, retained as an ancestor without
 rebasing or squashing bound history. The M0–M2 Closed aggregate was proved
-green once at the opening candidate; under the reviewed
+green once at the opening candidate. Under the reviewed
 [planning-revision aggregate override](../developer/agent-context-map.md#override-disposition-m4-planning-aggregate-2026-09-11)
-later planning-only revisions of this lineage rely on that result and are not
-rerun, while any revision touching product, portable-enforcement or bound
-Closed-gate bytes, the refresh onto M3's closure, acceptance, rejoins, rebinds
-and closure candidates keep the ordinary aggregate obligation. While Open it records M3 as `Accepted` and
+and its reviewed
+[widened scope](../developer/agent-context-map.md#override-disposition-m4-planning-aggregate-scope-2026-09-11),
+every later revision of this Open lineage relies on that result: plan and gate
+documents, manifests, runner and support work, prerequisite ADR proposals,
+documentation, and repository-status enforcement with its tests, provided the
+revision adds no milestone product implementation and bootstrap passes at the
+revision. Product changes, changes to a Closed gate's bound bytes, the refresh
+onto M3's closure, acceptance, rejoins, rebind children and closure candidates
+keep the ordinary aggregate obligation. While Open it records M3 as `Accepted` and
 holds no implementation authority. M4 cannot be accepted or implemented until
 M3 is Closed and integrated: absorb that exact closed product base, re-prove
 every inherited gate green and this milestone's own distinct red, complete its
@@ -83,28 +88,29 @@ and current 1.20.3/OTP 29.0.5, with real matrix evidence), the ninth
 application, the dependency-rule change and source VERSION 0.1.0 each change
 bytes that Closed gates bind. The default sequence is exact:
 
-| Phase | When | Transactions |
+| Phase | When | Transactions and routes |
 | --- | --- | --- |
-| A. Successor enabling | After M3 closes and integrates, before M4 acceptance | Derive the exact M0–M3 holder inventory on the integrated closure; settle the floor refresh with every `.tool-versions` holder; refresh M4 on that base and re-prove every inherited gate green plus this gate's own red; then accept |
-| B. Implementation | After acceptance, on branch `m4`, before the first rejoin that runs the full lanes | Land the M1 dependency-oracle transaction (nine applications, client → contract edge, negative tests) as its own v2 `A`/`R`; then add the ninth application as ordinary product work |
-| C. Closure rejoin | At the closure candidate | Apply the separately approved version transition to 0.1.0 and settle every version holder below through its own v2 `A`/`R` in register order; M4 rebinds its own table last |
+| A. Successor enabling | After M3 closes and integrates, before M4 acceptance | Derive the exact M0–M3 holder inventory on the integrated closure; settle the floor refresh with every `.tool-versions` holder: Closed M0–M3 each through v2 `A`/`R` in register order, and Open M4 by refreshing its own table directly; refresh M4 on that base and re-prove every inherited gate green plus this gate's own red; then accept |
+| B. Implementation | After acceptance, on branch `m4`, before the first rejoin that runs the full lanes | One Closed-M1 v2 proposal `A` that atomically carries M1's next gate generation, both dependency-oracle artifacts with the nine-application inventory, the client → contract edge and negative tests, and the minimal M4-authorized `loopex_app_server` application that makes the new inventory true, following the M1 Amendment 7 pattern; exact-SHA review and explicit acceptance of `A`; immediate governance-only `R`; then ordinary implementation continues |
+| C. Closure rejoin | At the closure candidate | Apply the separately approved version transition to 0.1.0 and settle every version holder below: Closed M1, M2 and M3 through v2 `A`/`R` in register order, then Accepted M4 through its own v1 amendment proposal and rebind, last |
 
-Because M4 cannot be accepted before M3 closes, every holder is Closed when
-its transaction runs; no v1 route applies. Phase A settles before acceptance;
-phases B and C do not, and nothing in them is a precondition of acceptance.
-ADR 0026 governs only the floor and is satisfied by phase A. The ledger at the
-planning base is:
+Phase A settles before acceptance; phases B and C do not, and nothing in them
+is a precondition of acceptance. The dependency-oracle change and the ninth
+application cannot be separated: the checker's complete-inventory predicate
+would become false with a nine-application inventory and no ninth application
+and would route the provider edge through an incompatible legacy rule, so both
+land in one reviewed proposal. ADR 0026 governs only the floor and is
+satisfied by phase A. The ledger at the planning base is:
 
 | Artifact | Holders | Restriction today | Planned change | Phase | Route and checks |
 | --- | --- | --- | --- | --- | --- |
-| `.tool-versions` | M0, M1, M2, M3 | Floor 1.17.0/OTP 26.0, current 1.20.3/OTP 29.0.5 | Floor 1.18.5/OTP 27.3.4 | A | One v2 `A`/`R` per holder in register order, or a recorded override naming all four; matrix evidence on both pairs; each holder's gate green at its `R`; bootstrap |
-| `apps/loopex/lib/mix/tasks/loopex.deps_budget.ex`, `apps/loopex/test/deps_budget_test.exs` | M1 | Eight-application inventory; a client may depend only on core and a composition | Nine-application inventory, permitted client → contract production edge, negative tests | B | One M1 v2 `A`/`R` covering both files; M1 gate green at `R` |
-| `apps/loopex_app_server` | None | Absent | Ninth application | B | Ordinary M4 product work after the M1 transaction |
+| `.tool-versions` | M0, M1, M2, M3, M4 | Floor 1.17.0/OTP 26.0, current 1.20.3/OTP 29.0.5 | Floor 1.18.5/OTP 27.3.4 | A | v2 `A`/`R` for Closed M0–M3 in register order, or a recorded override naming all of them; Open M4 refreshes its own table; matrix evidence on both pairs; each holder's gate green at its `R`; bootstrap |
+| `apps/loopex/lib/mix/tasks/loopex.deps_budget.ex`, `apps/loopex/test/deps_budget_test.exs`, `apps/loopex_app_server` | M1 (the application is unbound M4 product) | Eight-application inventory; a client may depend only on core and a composition; the application is absent | Nine-application inventory, permitted client → contract production edge, negative tests, and the minimal ninth application in the same proposal | B | One M1 v2 `A` carrying all three plus M1's generation row; review and accept `A`; governance-only `R`; M1 gate green at `R` |
 | `VERSION`, application versions | Every holder below | 0.0.0 | 0.1.0 | C | Separately approved version transition; evidence names the exact version |
-| `scripts/m1-exunit-runner.exs`, `apps/loopex/test/m1_exunit_runner_test.exs` | M1, M2, M3, M4 | The selector runner refuses a real report whose build identities are not `@0.0.0` | Version-aware build identities; required, because M4's real lane runs through this runner | C | v2 for M1, M2 and M3 in register order; M4 rebinds |
+| `scripts/m1-exunit-runner.exs`, `apps/loopex/test/m1_exunit_runner_test.exs` | M1, M2, M3, M4 | The selector runner refuses a real report whose build identities are not `@0.0.0` | Version-aware build identities; required, because M4's real lane runs through this runner | C | v2 for M1, M2 and M3 in register order; Accepted M4 last through v1 |
 | `scripts/m1-evidence-verifier.exs` | M1 | Fixes `@0.0.0` build identities | Version-aware | C | M1 v2 |
 | `scripts/check-m2-gate.sh` | M2 | Requires the version train to report exactly `0.0.0` and `@0.0.0` build identities | Version-aware | C | M2 v2; otherwise the Closed M2 gate is red after the transition |
-| `scripts/m3-gate-support.exs`, `scripts/check-closed-gates.sh` | M3, M4 | M3's combined real-path verifier fixes `@0.0.0` | Version-aware; M4's own verifier already reads `VERSION` | C | M3 v2; M4 rebinds |
+| `scripts/m3-gate-support.exs`, `scripts/check-closed-gates.sh` | M3, M4 | M3's combined real-path verifier fixes `@0.0.0` | Version-aware; M4's own verifier already reads `VERSION` | C | M3 v2; Accepted M4 last through v1 |
 
 M2 deliberately binds neither dependency file, so it is not a holder there.
 The planned `loopex_app_server` depends directly on `loopex_protocol`; the
@@ -145,7 +151,7 @@ Concept: [Scope](M4.md#concept-plan-scope).
 | TypeScript consumer | User workflow and local output presentation | Normative session, trust or policy semantics |
 
 The ordered rejoin is prerequisite transactions/contracts → core interaction
-and artifact-range witnesses → thin server/client workflow → remaining
+and artifact-transfer witnesses → thin server/client workflow → remaining
 method/delivery coverage → integrated audit → independent review. Protocol and
 consumer work may develop together against fixed vectors; the integrator owns
 one candidate and the real-process rejoin. Prove resource selection, defer,
@@ -190,16 +196,19 @@ Concept: [Outcomes](M4.md#concept-plan-outcomes).
 The opening runner binds one real behavioral red for outcome 3: through a
 real local session and Store, a host-policy `defer` is denied as
 `interaction_unsupported` instead of committing a pending interaction. It proves
-that one missing core behavior; it proves no protocol, range, client or
+that one missing core behavior; it proves no protocol, transfer, client or
 workflow behavior. Its green requires the exact pending record for the probe's
 tool call, an explicit pending interaction in the facade status and no terminal,
 intent or executor invocation; a run that merely fails to settle is a witness
 error, never green. The superseded raw-process scaffold retained at
 `ba51d1898bcca109a5ed32a8cc3ba831323113a1` is historical design input.
-Reconstruct and reconcile the raw-process probe, vectors and the integrated
-client fixture against settled contracts before acceptance. An echo server
-cannot pass because admissions, event order, exact interaction/tool identity,
-real artifact bytes and fresh settled snapshots are required. Parsing
+Before acceptance, bind the real opening red, the exact selectors and witness
+names, the canonical schema and vector bytes, the client interpreter pins, the
+exact limits and fail-closed routing. After acceptance, implement the server,
+the raw-process probe, the language clients and the consumer workflow; every
+lane must pass before closure. An echo server cannot pass because admissions,
+event order, exact interaction/tool identity, real artifact bytes and fresh
+settled snapshots are required. Parsing
 fixture-shaped output is not full JSON conformance.
 
 Every protected selector uses the existing authoritative standalone ExUnit
@@ -288,6 +297,6 @@ justify growth. No new role or external production dependency, transport registr
 abstraction, daemon supervisor, duplicate resource resolver or second interaction
 reducer. The app-server has no direct Store/model/executor dependency or private
 coordinator shortcut. Artifact object/use identity and launch configuration
-reuse existing owners. Implement new interaction/range behavior once in core/ports,
+reuse existing owners. Implement new interaction/transfer behavior once in core/ports,
 then prove all consumer mappings against it. Raw line count is a review signal; behavior and measured limits govern.
 <!-- loopex:plan-technical-envelope:end -->

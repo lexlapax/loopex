@@ -10,9 +10,14 @@ witness must pass before closure. The
 [technical plan](M4-technical.md#technical-depth) owns the contracts and evidence.
 The reviewed
 [planning-revision aggregate override](../developer/agent-context-map.md#override-disposition-m4-planning-aggregate-2026-09-11)
-lets planning-only revisions of this Open lineage rely on the M0–M2 aggregate
-proved at the opening candidate; it waives nothing at acceptance, rejoin, rebind
-or closure.
+and its reviewed
+[widened scope](../developer/agent-context-map.md#override-disposition-m4-planning-aggregate-scope-2026-09-11)
+let every revision of this Open lineage (plan and gate documents, manifests,
+runner and support work, ADR proposals, documentation, and repository-status
+enforcement with its tests, with no product bytes and bootstrap green) rely on
+the M0–M2 aggregate proved at the opening candidate; they waive nothing for
+product changes, Closed-bound bytes, the refresh, acceptance, rejoin, rebind or
+closure.
 
 The complete command to bind at acceptance is:
 
@@ -65,40 +70,47 @@ dependency is UNAVAILABLE, never a full-gate PASS.
 
 ## Readiness Work Before Acceptance
 
+Before acceptance:
+
 1. Settle ADRs 0023/0024/0026/0028 and their complete core/port contracts, then
    reconcile DTO/schema/vector bytes with the actual M3 resource facade. ADR 0028
    carries the decided one-verification-per-transfer design and must bind every
    limit the technical plan names; ADR 0023 must carry the connection state
-   table; ADR 0024 must fix the successive-round bound. Before acceptance construct executable
-   interaction/range witnesses and prove their declared reds on the unchanged
-   base. After acceptance, require local core/port greens before wire
-   implementation/rejoin. Advertise only implemented semantic capabilities;
-   unknown input rules and every limit are exact.
-2. Rebuild the independent raw-process probe to the full foundation
-   workflow: initialize, create, attach, select an admitted skill, submit prompt,
-   observe durable admission, answer the exact interaction, observe policy-
-   authorized tool receipt, verify actual artifact bytes and a settled snapshot.
-3. Add the TypeScript workflow and independent Elixir/Python conformance clients.
-   Lock their execution versions in `scripts/fixtures/m4/client-toolchain.txt`
-   and their positive/negative vectors before acceptance, and bind both. The
-   runner verifies the pinned executables before any client lane; absence or
-   mismatch is UNAVAILABLE, never PASS or an ordinary RED.
-4. Complete all runner lanes before implementation: isolated compile and probe,
-   inherited gates, authoritative protected selectors, whole suite, independent
-   clients, attended real-provider workflow and retained-evidence validation.
-   Use the existing standalone result channel. Do not build a second
-   result/evidence framework.
-5. Settle all floor/inventory/version holder transactions or an explicitly
-   approved development-time procedural replacement, including M3, before M4
+   table; ADR 0024 must fix the successive-round bound. Advertise only
+   implemented semantic capabilities; unknown input rules and every limit are
+   exact.
+2. Keep the real opening red on the unchanged base and bind the exact
+   selectors and witness names, the canonical schema and vector bytes, the
+   client interpreter pins in `scripts/fixtures/m4/client-toolchain.txt`, the
+   exact limits and the fail-closed routing. The runner verifies the pinned
+   executables before any client-backed selector; absence or mismatch is
+   UNAVAILABLE, never PASS or an ordinary RED. Use the existing standalone
+   result channel; do not build a second result/evidence framework.
+3. Settle the phase A floor holder transactions, including M3, or an
+   explicitly approved development-time procedural replacement, before M4
    binds replacement bytes. Name every holder and complete its own replacement
    commit, status check and exact-SHA review in sequence.
-6. After M3 closes and integrates, absorb that exact base, re-prove every
+4. After M3 closes and integrates, absorb that exact base, re-prove every
    inherited gate green and this gate's own distinct red, and present the
    refreshed candidate for fresh exact-SHA review and explicit acceptance.
 
-Neither document presence nor acceptance state can satisfy the opening. The
-opening probe is proof of one missing core behavior, not of skills,
-interactions, the TypeScript workflow or artifact integrity.
+After acceptance, during implementation:
+
+5. Build the independent raw-process probe to the full foundation workflow:
+   initialize, create, attach, select an admitted skill, submit prompt, observe
+   durable admission, answer the exact interaction, observe policy re-evaluation
+   and the committed grant/intent, observe the tool receipt, verify actual
+   artifact bytes and a settled snapshot. Require local core/port greens before
+   the wire implementation rejoins.
+6. Implement the server, the TypeScript consumer workflow and the independent
+   Elixir/Python conformance clients against the bound vectors and pins.
+
+Before closure, every lane must pass: isolated compile and probe, inherited
+gates, authoritative protected selectors, whole suite, independent clients,
+attended real-provider workflow and retained-evidence validation. Neither
+document presence nor acceptance state can satisfy the opening. The opening
+probe is proof of one missing core behavior, not of skills, interactions, the
+TypeScript workflow or artifact integrity.
 
 ## Required Raw-Process Conjunction
 
@@ -145,7 +157,7 @@ binding.
 | `cb1960d4dd5dd7c686401d98930ad0f07448f3efea85a057e23ce3ad0307d813` | `scripts/m4-gate-support.exs` |
 | `65d0de9dcd1218af542f00e32c2177d2612a2f1232f22db37b9942200c84cf66` | `scripts/m3-gate-support.exs` |
 | `c4d485ca3229441c678abe1e8733f90216e89e0dfb9e81786f58f525619aec29` | `scripts/check-closed-gates.sh` |
-| `83c5b6573c66e3c2eb9e252e6835e7899bc0cd5b7c1bd8a0f416e8db05a2fdca` | `scripts/m4-outcomes.exs` |
+| `8ee9dc7756c960838583473a4e8d936cdf25abded22aefa6e4e316b0255b8b55` | `scripts/m4-outcomes.exs` |
 | `cc290e60d9f9588c75f1259b25976a58d1c30713e570cd5a88c70cdf3c2159a0` | `scripts/m1-exunit-runner.exs` |
 | `0a8406ca080c70624e776b01e37c7ded210b54659064cf63723a847a54debe2d` | `apps/loopex/test/m1_exunit_runner_test.exs` |
 | `fad47299b27a767785d2a6a776155038054f5457ee3ce0195a37ae667f7a9999` | `.tool-versions` |
@@ -173,11 +185,14 @@ unavailable. Before either a checkpoint-success line or full-gate continuation,
 an exact ordered selector ledger must account for every manifest-derived lane.
 
 The inherited lane is register-derived through `scripts/check-closed-gates.sh
---before M4`. While M3 is not Closed that lane reports UNAVAILABLE; the lookahead
-posture is proved instead by running the Closed aggregate and the M3 opening
-probe separately, so neither red masks the other. Run the inherited aggregate
-at the acceptance base, every parallel-workstream rejoin, every rebind child,
-closure candidate and whenever changed bytes invalidate its later evidence.
+--before M4`. While M3 is not Closed that lane reports UNAVAILABLE. The
+lookahead posture was proved once at the opening candidate by running the
+Closed aggregate and the M3 opening probe separately, so neither red masks the
+other; under the widened override above, later Open-lineage revisions rely on
+that result and rerun only status, formatting, bootstrap, inspection and the
+two opening probes. Run the inherited aggregate at the refreshed acceptance
+base, every parallel-workstream rejoin, every rebind child, closure candidate
+and whenever product or Closed-bound bytes invalidate its later evidence.
 Unknown acceptance impact fails closed to the full gate. Protected-selector
 execution never invokes the aggregate itself.
 
@@ -241,10 +256,10 @@ are pinned before acceptance, not by this opening.
 
 | Outcome | Protected selector family | Required clauses |
 | --- | --- | --- |
-| 1 | `apps/loopex_app_server/test/initialization_test.exs` | Exact generation/schema/limit negotiation before mutation; mutation-before-init and duplicate-init refusal without durable work; stdout purity and real process boundary |
-| 2 | `apps/loopex_app_server/test/session_mapping_test.exs` | Same corpus facade/wire; independent request and command identity with replay idempotency; admission vs completion; snapshot/live ordering |
-| 3 | `apps/loopex/test/interaction_lifecycle_test.exs`, `apps/loopex_app_server/test/foundation_mapping_test.exs` | Durable request/answer/policy/intent cuts, fixed timestamps through uncertain commits, expiry/abort/restart races, the exact successive-round bound, old-reader refusal; exact resources, missing/stale trust, manual-only selection, answer admission separate from re-evaluation and grant/intent, immutable launch inputs unreplaceable from the wire |
-| 4 | `apps/loopex_store_local/test/artifact_transfer_test.exs`, `apps/loopex_app_server/test/delivery_bounds_test.exs` | Complete verification at open with one verification per transfer, distinct object/chunk digests, unsupported-store refusal, wrong-session use, object/use swap, corruption outside the requested window, post-open same-size rewrite never reaching a chunk, concurrent-transfer and connection-work exhaustion, lifetime expiry, cancellation, descriptor and snapshot release across repeated kill/restart, open-deadline/chunk/read-deadline budgets; malformed UTF-8, duplicate keys, nesting, fragmented/multiple/oversized frames, blocked reader, detach cursor, late progress and actual cleanup |
+| 1 | `apps/loopex_app_server/test/initialization_test.exs` | Exact generation/schema/limit negotiation before mutation; mutation-before-init and duplicate-init refusal without durable work; stdout purity and real process boundary; strict UTF-8/LF framing and the exact method inventory with unknown mutating methods refused before admission and unknown queries answered with a bounded error; every ADR 0023 connection-state row from before initialize through restart |
+| 2 | `apps/loopex_app_server/test/session_mapping_test.exs` | Same corpus facade/wire; independent request and command identity with replay idempotency; admission vs completion; snapshot/live ordering; second-attach refusal or explicit replacement at the last emitted cursor; in-flight request-ID reuse refused and post-completion reuse ordinary; pre-admission pressure refusing before any durable write and post-admission pressure dropping progress first then detaching at the last emitted cursor; snapshot, event, progress and diagnostic record families kept separate with a fresh settled attachment as the final authority |
+| 3 | `apps/loopex/test/interaction_lifecycle_test.exs`, `apps/loopex_app_server/test/foundation_mapping_test.exs` | Durable request/answer/policy/intent cuts journaled before publication and before any intent, fixed timestamps through uncertain commits, expiry/abort/restart races, the exact successive-round bound, old-reader refusal; answered-but-unresolved recovery without speculation, acknowledgement or dispatch; identical replay returns the historical admission while changed content, wrong-target, resolved, expired or absent interactions refuse with stable reasons; invalid answers, malformed policy output and failed or timed-out re-evaluation dispatch nothing and resolve as denial; policy-request, interaction-request and answer digests with their preimages preserved through commit_unknown and restart under the same policy identity and revision; exact resources, missing/stale trust, manual-only selection, answer admission separate from re-evaluation and grant/intent, immutable launch inputs unreplaceable from the wire |
+| 4 | `apps/loopex_store_local/test/artifact_transfer_test.exs`, `apps/loopex_app_server/test/delivery_bounds_test.exs` | The attachment-owned open/read/close API refusing another attachment, session or runtime and disclosing no path; complete verification at open with one verification per transfer, distinct object/chunk digests, unsupported-store refusal; whole, first, last, empty and overrun windows and every distinct refusal reason; wrong-session use, object/use swap, corruption outside the requested window, post-open same-size rewrite never reaching a chunk; open deadline or work-budget exhaustion refusing before any snapshot bytes; per-connection and per-runtime transfer limits refusing independently; connection-work exhaustion, lifetime expiry, cancellation, descriptor and snapshot release across repeated kill/restart, streaming memory bounded well above the chunk ceiling and startup scavenging touching only owned regular files; genuine old-format artifacts readable and capability removal restoring the prior API; chunk/read-deadline budgets; at the wire, a transfer reference from another connection refused and connection loss closing every transfer it opened; malformed UTF-8, duplicate keys, nesting, fragmented/multiple/oversized frames, blocked reader, detach cursor, late progress and actual cleanup |
 | 5 | `apps/loopex_app_server/test/external_workflow_test.exs` | TypeScript skill → interaction answer → policy re-evaluation → committed grant/intent → actual tool → artifact → abrupt restart from operator input with no embedded identities; clean stdin EOF performs orderly shutdown with no cancellation; abrupt death records nothing; a pending interaction survives both; `session.abort` is the only cancellation and an aborted interaction never reappears |
 | 6 | `apps/loopex_protocol/test/public_schema_conformance_test.exs`, `apps/loopex/test/m4_gate_support_test.exs` | Independently executed Elixir, Python and TypeScript clients over canonical positive/negative vectors under the pinned interpreters; exact version and platform identities; retained refusal of missing, duplicated, reordered, wrong-kind, stale-version and malformed evidence fields |
 

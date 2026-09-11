@@ -215,6 +215,6 @@ branch `m3`; see the [canonical plan register](docs/plans/README.md).
 
 The accepted [M3 plan](docs/plans/M3.md#concept) covers project skills and the remaining
 core repairs. Its Open [M4 successor](docs/plans/M4.md#concept) adds durable
-interactions, bounded artifact ranges and a foreground protocol/TypeScript
+interactions, bounded artifact transfers and a foreground protocol/TypeScript
 consumer. The M3 opening runner now proves an actual required-only admission
 ordering defect. Implementation must now turn that declared opening red green.
