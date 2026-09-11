@@ -2032,3 +2032,53 @@ cleanup cannot be reported as success. Its ownership and compatibility contract
 is recorded in the [architecture pair](architecture.md#concept-arch-applications).
 Focused tests must prove orderly and failed cleanup, configuration preservation
 and the exact retained skill snapshot before final M0–M3 qualification.
+
+
+<a id="override-disposition-m3-commit-titles-2026-09-11"></a>
+### M3 published commit-title exception, 2026-09-11
+
+The maintainer received this recommendation in the two-blocker approval dialog:
+
+> Commit titles: eight already-pushed commits have titles that are too long or use the wrong format, so bootstrap stops. Approve an exception for only those eight commits? This preserves published history, keeps all product tests and future commit checks intact, and authorizes recording, reviewing, implementing, testing, and pushing the exception to m3.
+
+The recommended choice was **"Approve the eight-title exception (Recommended)"**.
+The maintainer answered **"Approve both recommendations."** This disposition
+records the commit-title recommendation only; the other recommendation grants
+fixture-specific attended-test permission and changes no repository rule.
+
+Under [the explicit maintainer override](../../AGENTS.md#maintainer-override),
+this replaces only the continuing title-format and 72-character-limit
+requirements in `scripts/check-commit-messages.sh` for these eight immutable
+commits in the M3 implementation lineage:
+
+| Commit | Existing title |
+| --- | --- |
+| `3eaeaafb0cb1af6135dccb64d63354944cb1b301` | test(M3): use causal acquisition readiness and finalize implementation record |
+| `2dc0ad4ede416da068004b14333b26441a973f2f` | fix(skills): validate contained trees and bounded pack content before publication |
+| `2f2dce216cdb63c7387073d8834e756c759ba5c6` | feat(composition): bracket configured skill recovery with confirmed cleanup |
+| `262ad1a04274a0b52e19484e76c621842f158676` | Merge branch 'm3' into codex/m3-cli |
+| `9f742e52d32115c8dedd5c2df47d549a60e86777` | Merge branch 'm3' into codex/m3-cli |
+| `3c8dcc1bc4951d35f6cdee4e695e9682e8bc53db` | M3 CLI: verify retained Git skill commands |
+| `cdc086900515e1bd4d890bb7c62ab3de846ef6fa` | M3 CLI: admit selected skills before runs |
+| `461d44dc004740110231a459c8359efe407d09e6` | M3 CLI: add skill command and launch wiring |
+
+Each exception must be matched by its complete SHA and reported as waived.
+Preserve the fixed baseline, complete-history requirement, commit enumeration
+and stream accounting, prospective title controls, and unconditional commit-body
+attribution and scan-error checks. Every other commit remains subject to the
+complete policy. No history rewrite is authorized or needed. Every accepted
+candidate, bound artifact, disposition, and historical evidence identity remains
+unchanged. No M0–M3 gate binds this checker's bytes, so this change needs no
+replacement gate binding.
+
+Before changing the checker, independently review this standalone disposition
+commit at its exact SHA. Then prove that the original check refuses only these
+eight titles, the replacement reports all eight exceptions, a ninth malformed
+title still fails, and attribution/error scanning remains effective. Run the
+complete bootstrap check and the final M0–M3 qualification on the resulting
+candidate. Commit and push the approved work to `m3` using ordinary fast-forwards.
+
+This grants no exception to a product test or other check, no additional title
+exception, and no ADR change, milestone closure, product integration to `main`,
+tag, or release. The red commit-title evidence retained for
+`f82fb25270ebcdecb23730d57187e9d3ac28b7ca` remains true for that revision.
