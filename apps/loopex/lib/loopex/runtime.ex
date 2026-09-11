@@ -236,7 +236,7 @@ defmodule Loopex.Runtime do
            Attachment.routing(attachment) do
       dispatcher_call(
         runtime,
-        {:next_event, runtime.token, session_id, attachment_id, incarnation_id},
+        {:next_event, runtime.token, session_id, attachment_id, incarnation_id, make_ref()},
         :infinity
       )
     end
@@ -251,7 +251,7 @@ defmodule Loopex.Runtime do
            Attachment.routing(attachment) do
       dispatcher_call(
         runtime,
-        {:attachment_status, runtime.token, session_id, attachment_id, incarnation_id}
+        {:attachment_status, runtime.token, session_id, attachment_id, incarnation_id, make_ref()}
       )
     end
   end
@@ -385,11 +385,54 @@ defmodule Loopex.Runtime do
 
   defp dispatcher_call(%__MODULE__{supervisor: supervisor}, message, timeout \\ 5_000) do
     with {:ok, %{dispatcher: dispatcher}} <- RuntimeSupervisor.children(supervisor) do
-      safe_call(dispatcher, message, timeout)
+      deadline = if timeout == :infinity, do: :infinity, else: monotonic_now() + timeout
+      dispatcher_request(dispatcher, message, deadline)
     else
       _other -> {:error, :runtime_unavailable}
     end
   end
+
+  # Concept: concurrent readers wait without accumulating in the dispatcher.
+  # Technical depth: this private response never crosses the facade. The read
+  # worker exits after adoption or cancellation; a caller then revalidates its
+  # attachment and uses the remaining original call budget. Public event order,
+  # empty/refusal meanings and status deadlines remain unchanged.
+  defp dispatcher_request(dispatcher, message, deadline) do
+    case safe_call(dispatcher, message, remaining_call_time(deadline)) do
+      {:wait_for_attachment_read, worker} when is_pid(worker) ->
+        monitor = Process.monitor(worker)
+
+        receive do
+          {:DOWN, ^monitor, :process, ^worker, _reason} ->
+            dispatcher_request(dispatcher, message, deadline)
+        after
+          remaining_call_time(deadline) ->
+            Process.demonitor(monitor, [:flush])
+            cancel_dispatcher_read(dispatcher, message)
+            {:error, :runtime_unavailable}
+        end
+
+      {:error, :runtime_unavailable} = error ->
+        cancel_dispatcher_read(dispatcher, message)
+        error
+
+      reply ->
+        reply
+    end
+  end
+
+  defp cancel_dispatcher_read(
+         dispatcher,
+         {operation, _token, _session, id, _incarnation, call_id}
+       )
+       when operation in [:next_event, :attachment_status],
+       do: GenServer.cast(dispatcher, {:cancel_attachment_read, id, call_id})
+
+  defp cancel_dispatcher_read(_dispatcher, _message), do: :ok
+
+  defp remaining_call_time(:infinity), do: :infinity
+  defp remaining_call_time(deadline), do: max(deadline - monotonic_now(), 0)
+  defp monotonic_now, do: System.monotonic_time(:millisecond)
 
   defp safe_call(server, message, timeout) do
     try do

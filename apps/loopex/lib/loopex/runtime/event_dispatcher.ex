@@ -150,6 +150,8 @@ defmodule Loopex.Runtime.EventDispatcher do
        diagnostics_to: Keyword.fetch!(options, :diagnostics_to),
        attachments: %{},
        pending_scans: %{},
+       pending_reads: %{},
+       read_monitors: %{},
        acknowledged: %{},
        counter: 0
      }}
@@ -197,91 +199,30 @@ defmodule Loopex.Runtime.EventDispatcher do
   end
 
   def handle_call(
-        {:next_event, token, session_id, attachment_id, incarnation_id},
-        _from,
+        {operation, token, session_id, attachment_id, incarnation_id, call_id},
+        from,
         state
-      ) do
+      )
+      when operation in [:next_event, :attachment_status] do
     case fetch_attachment(state, token, session_id, attachment_id, incarnation_id) do
-      {:ok, %{status: :active} = attachment} ->
-        case :queue.out(attachment.queue) do
-          {{:value, event}, queue} ->
-            consumed = %{
-              attachment
-              | queue: queue,
-                queue_depth: attachment.queue_depth - 1,
-                cursor: event.event_sequence
+      {:ok, attachment} ->
+        case Map.fetch(state.pending_reads, attachment_id) do
+          {:ok, pending} ->
+            {:reply, {:wait_for_attachment_read, pending.worker}, state}
+
+          :error ->
+            call = %{
+              operation: operation,
+              from: from,
+              monitor: Process.monitor(elem(from, 0)),
+              id: call_id
             }
 
-            next = put_attachment(state, consumed)
-            {:reply, {:ok, event}, next}
-
-          {:empty, _queue} ->
-            pumped = pump(state, attachment)
-
-            case :queue.out(pumped.queue) do
-              {{:value, event}, queue} ->
-                consumed = %{
-                  pumped
-                  | queue: queue,
-                    queue_depth: pumped.queue_depth - 1,
-                    cursor: event.event_sequence
-                }
-
-                next = put_attachment(state, consumed)
-                {:reply, {:ok, event}, next}
-
-              {:empty, _queue} when pumped.status == :active ->
-                {:reply, {:error, :empty}, put_attachment(state, pumped)}
-
-              {:empty, _queue} ->
-                {:reply, {:disconnected, pumped.cursor}, put_attachment(state, pumped)}
-            end
+            {:noreply, start_read(state, attachment, call)}
         end
-
-      {:ok, attachment} ->
-        {:reply, {:disconnected, attachment.cursor}, state}
 
       {:error, reason} ->
         {:reply, {:error, reason}, state}
-    end
-  end
-
-  def handle_call(
-        {:attachment_status, token, session_id, attachment_id, incarnation_id},
-        _from,
-        state
-      ) do
-    reply =
-      case fetch_attachment(state, token, session_id, attachment_id, incarnation_id) do
-        {:ok, %{status: :active} = attachment} ->
-          pumped = pump(state, attachment)
-
-          {:ok,
-           %{
-             status: pumped.status,
-             cursor: pumped.cursor,
-             queue_depth: pumped.queue_depth,
-             max_queue_depth: pumped.max_queue_depth,
-             capacity: pumped.capacity
-           }, pumped}
-
-        {:ok, attachment} ->
-          {:ok,
-           %{
-             status: attachment.status,
-             cursor: attachment.cursor,
-             queue_depth: attachment.queue_depth,
-             max_queue_depth: attachment.max_queue_depth,
-             capacity: attachment.capacity
-           }, attachment}
-
-        {:error, reason} ->
-          {:error, reason}
-      end
-
-    case reply do
-      {:ok, status, attachment} -> {:reply, {:ok, status}, put_attachment(state, attachment)}
-      {:error, reason} -> {:reply, {:error, reason}, state}
     end
   end
 
@@ -321,6 +262,18 @@ defmodule Loopex.Runtime.EventDispatcher do
   end
 
   @impl GenServer
+  def handle_cast({:cancel_attachment_read, attachment_id, call_id}, state) do
+    case Map.fetch(state.pending_reads, attachment_id) do
+      {:ok, %{current: %{id: ^call_id}} = pending} ->
+        Process.exit(pending.worker, :kill)
+        reply_read(pending.current, {:error, :runtime_unavailable})
+        {:noreply, remove_read(state, attachment_id, pending)}
+
+      _other ->
+        {:noreply, state}
+    end
+  end
+
   def handle_cast({:release_fence, session_id}, state),
     do: {:noreply, %{state | acknowledged: Map.delete(state.acknowledged, session_id)}}
 
@@ -346,7 +299,8 @@ defmodule Loopex.Runtime.EventDispatcher do
       GenServer.reply(pending.from, {:error, :attachment_superseded})
     end)
 
-    {:noreply, %{state | attachments: retained, pending_scans: pending_scans}}
+    next = cancel_session_reads(state, session_id)
+    {:noreply, %{next | attachments: retained, pending_scans: pending_scans}}
   end
 
   @impl GenServer
@@ -361,8 +315,20 @@ defmodule Loopex.Runtime.EventDispatcher do
         {reply, next} =
           install_attachment(%{state | pending_scans: pending_scans}, pending, result)
 
-        GenServer.reply(pending.from, reply)
-        {:noreply, next}
+        case reply do
+          {:ok, %{id: id} = installed} ->
+            call = %{
+              operation: {:attach, installed},
+              from: pending.from,
+              monitor: Process.monitor(elem(pending.from, 0))
+            }
+
+            {:noreply, start_read(next, Map.fetch!(next.attachments, id), call)}
+
+          error ->
+            GenServer.reply(pending.from, error)
+            {:noreply, next}
+        end
     end
   end
 
@@ -371,7 +337,7 @@ defmodule Loopex.Runtime.EventDispatcher do
            pending.caller_monitor == monitor
          end) do
       nil ->
-        {:noreply, state}
+        {:noreply, cancel_read_caller(state, monitor)}
 
       {scan_id, pending} ->
         Process.exit(pending.worker, :kill)
@@ -382,12 +348,31 @@ defmodule Loopex.Runtime.EventDispatcher do
   def handle_info({:EXIT, worker, _reason}, state) do
     case Enum.find(state.pending_scans, fn {_scan_id, pending} -> pending.worker == worker end) do
       nil ->
-        {:noreply, state}
+        case Enum.find(state.pending_reads, fn {_id, pending} ->
+               pending.worker == worker
+             end) do
+          nil ->
+            {:noreply, state}
+
+          {id, pending} ->
+            failed = disconnect(pending.attachment, :store_unavailable)
+            {:noreply, finish_read(state, id, pending, failed)}
+        end
 
       {scan_id, pending} ->
         Process.demonitor(pending.caller_monitor, [:flush])
         GenServer.reply(pending.from, {:error, :store_unavailable})
         {:noreply, %{state | pending_scans: Map.delete(state.pending_scans, scan_id)}}
+    end
+  end
+
+  def handle_info({:attachment_read_finished, id, read_id, attachment}, state) do
+    case Map.fetch(state.pending_reads, id) do
+      {:ok, %{read_id: ^read_id} = pending} ->
+        {:noreply, finish_read(state, id, pending, attachment)}
+
+      _other ->
+        {:noreply, state}
     end
   end
 
@@ -398,6 +383,155 @@ defmodule Loopex.Runtime.EventDispatcher do
     |> Map.put(:message, :redacted_event_dispatcher_message)
     |> Map.put(:reason, :redacted_event_dispatcher_reason)
     |> Map.put(:log, [])
+  end
+
+  # Concept: one slow attachment cannot hold the runtime's acknowledgement path.
+  #
+  # Technical depth: each attachment has at most one linked Store worker and
+  # one retained caller. Concurrent callers wait in their own processes on that
+  # worker, then retry through Runtime's private call protocol. The worker exits
+  # only after its result is adopted or cancelled, so waiting carries no public
+  # busy/empty result and no unbounded queue in the dispatcher. Only this process
+  # adopts results against the captured incarnation and cursor.
+  defp start_read(state, attachment, call) do
+    if attachment.status == :active and publishable_limit(state, attachment) > 0 and
+         (call.operation != :next_event or attachment.queue_depth == 0) do
+      parent = self()
+      read_id = make_ref()
+
+      read_state = %{
+        store: state.store,
+        acknowledged: Map.take(state.acknowledged, [attachment.session_id])
+      }
+
+      worker =
+        spawn_link(fn ->
+          parent_monitor = Process.monitor(parent)
+          result = pump(read_state, attachment)
+          send(parent, {:attachment_read_finished, attachment.id, read_id, result})
+
+          receive do
+            {:read_adopted, ^read_id} -> Process.demonitor(parent_monitor, [:flush])
+            {:DOWN, ^parent_monitor, :process, ^parent, _reason} -> :ok
+          end
+        end)
+
+      pending = %{
+        session_id: attachment.session_id,
+        attachment: attachment,
+        current: call,
+        worker: worker,
+        read_id: read_id,
+        bound: scan_bound(state, attachment.session_id)
+      }
+
+      %{
+        state
+        | pending_reads: Map.put(state.pending_reads, attachment.id, pending),
+          read_monitors: Map.put(state.read_monitors, call.monitor, attachment.id)
+      }
+    else
+      {reply, next_attachment} = read_reply(call.operation, attachment)
+      reply_read(call, reply)
+      put_attachment(state, next_attachment)
+    end
+  end
+
+  defp finish_read(state, id, pending, result) do
+    case Map.fetch(state.attachments, id) do
+      {:ok, current} when current == pending.attachment ->
+        if current_read_fence?(state, pending) do
+          answer_read(state, id, pending, result)
+        else
+          # A newly installed owner may have lowered an absent publication
+          # fence. Re-read from the unchanged cursor under its current bound.
+          start_read(remove_read(state, id, pending), current, pending.current)
+        end
+
+      _stale ->
+        reply_read(pending.current, {:error, :stale_attachment})
+        remove_read(state, id, pending)
+    end
+  end
+
+  defp current_read_fence?(state, pending) do
+    case {pending.bound, scan_bound(state, pending.session_id)} do
+      {_prior, :unbounded} -> true
+      {:unbounded, _current} -> false
+      {prior, current} -> current >= prior
+    end
+  end
+
+  defp answer_read(state, id, pending, attachment) do
+    {reply, next_attachment} = read_reply(pending.current.operation, attachment)
+    reply_read(pending.current, reply)
+    remove_read(put_attachment(state, next_attachment), id, pending)
+  end
+
+  defp read_reply(:attachment_status, attachment) do
+    status = Map.take(attachment, [:status, :cursor, :queue_depth, :max_queue_depth, :capacity])
+    {{:ok, status}, attachment}
+  end
+
+  defp read_reply({:attach, installed}, attachment), do: {{:ok, installed}, attachment}
+
+  defp read_reply(:next_event, %{status: :active} = attachment) do
+    case :queue.out(attachment.queue) do
+      {{:value, event}, queue} ->
+        consumed = %{
+          attachment
+          | queue: queue,
+            queue_depth: attachment.queue_depth - 1,
+            cursor: event.event_sequence
+        }
+
+        {{:ok, event}, consumed}
+
+      {:empty, _queue} ->
+        {{:error, :empty}, attachment}
+    end
+  end
+
+  defp read_reply(:next_event, attachment),
+    do: {{:disconnected, attachment.cursor}, attachment}
+
+  defp reply_read(call, reply) do
+    Process.demonitor(call.monitor, [:flush])
+    GenServer.reply(call.from, reply)
+  end
+
+  defp remove_read(state, id, pending) do
+    send(pending.worker, {:read_adopted, pending.read_id})
+
+    %{
+      state
+      | pending_reads: Map.delete(state.pending_reads, id),
+        read_monitors: Map.delete(state.read_monitors, pending.current.monitor)
+    }
+  end
+
+  defp cancel_session_reads(state, session_id) do
+    Enum.reduce(state.pending_reads, state, fn {id, pending}, current ->
+      if pending.session_id == session_id do
+        Process.exit(pending.worker, :kill)
+        reply_read(pending.current, {:error, :stale_attachment})
+        remove_read(current, id, pending)
+      else
+        current
+      end
+    end)
+  end
+
+  defp cancel_read_caller(state, monitor) do
+    case Map.fetch(state.read_monitors, monitor) do
+      {:ok, id} ->
+        pending = Map.fetch!(state.pending_reads, id)
+        Process.exit(pending.worker, :kill)
+        remove_read(state, id, pending)
+
+      :error ->
+        state
+    end
   end
 
   # Concept: read no further than the position this runtime has acknowledged.
@@ -479,15 +613,13 @@ defmodule Loopex.Runtime.EventDispatcher do
         metadata: transient_metadata(pending.options)
       }
 
-      attachment = pump(state, attachment)
-
       retained =
         state.attachments
         |> Enum.reject(fn {_id, existing} -> existing.session_id == pending.session_id end)
         |> Map.new()
 
       next = %{
-        state
+        cancel_session_reads(state, pending.session_id)
         | counter: counter,
           attachments: Map.put(retained, attachment_id, attachment)
       }
