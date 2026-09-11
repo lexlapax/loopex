@@ -22,13 +22,31 @@ the exact document set its milestone must update.
 
 No package or compatibility-labelled surface is pending.
 
-Narrow the Open [M3 plan](docs/plans/M3.md#concept) to project skills, three core
-repairs and reliable verification. Move durable interactions, artifact ranges
-and the floor refresh to the [unopened M4 draft](docs/archive/M4.md#concept).
-Require Git-only acquisition, operator-only pre-run selection, hostile-pack
-authority invariance, early integrated proof and self-audit. Specify focused
-checkpoints and stable clause witnesses while preserving full inherited checks
-at contract moments. Align proposed ADRs and roadmap/index documentation.
+Implement project skills under the Accepted [M3 plan](docs/plans/M3.md#concept).
+Add pinned Git import, contained project discovery, retained provenance and
+immutable runtime snapshots. Keep installation separate from explicit session
+admission and pre-run instruction/supporting-file selection. Stage optional
+blocks progressively after required context passes; downloaded scripts and
+metadata remain inert and grant no tool authority.
+
+Retain versioned resource commands and resource-aware model receipts. Replay
+preserves exact staged bytes without refetch or ambiguous redispatch. Genuine
+integrated M2 histories remain readable; M2 readers refuse new resource records
+before effects, including a session containing only a refused resource command.
+
+Repair required-first context admission and move dispatcher reads off the
+acknowledgement path, with bounded retained readers, cancellation and late-result
+fences. Fix stale executor test-root reuse through atomic fresh-directory
+reservation. Add deterministic embedding/source-built CLI workflow, resource
+boundary and old-reader compatibility witnesses. Remaining M3 implementation
+and final qualification are recorded in its plan progress; this entry claims no
+closure or full-gate result.
+
+Keep durable interactions, artifact ranges and the floor refresh in the
+[M4 draft](docs/archive/M4.md#concept). The reviewed M3 cadence override uses
+focused checks during implementation and the complete M0–M3 gates at the final
+candidate. The workflow evidence allocation retains separate deterministic and
+attended production-provider proof obligations.
 
 Replace the obsolete M3 gate probe with real local Store/session observations
 of required-only admission ordering and explicit inspection/checkpoint modes.
@@ -41,7 +59,7 @@ Record the maintainer-approved successor exception to M2's CLI inventory:
 preserve the five existing commands and permit `skill`, with negative checks
 for missing legacy commands and unapproved additions. Make scoped maintainer
 overrides an explicit governance route, preserving historical evidence and
-digest enforcement. No M3 product feature is implemented by these changes.
+digest enforcement. Historical plan, gate and authority records remain unchanged.
 
 ## [v0.0.0-m2] — 2026-09-09
 

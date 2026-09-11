@@ -39,11 +39,11 @@ separate decision duty when a founding boundary or invariant would change.
 | Agent loop, queues, tool ordering | [Loop semantics](../vision.md#concept-vision-loop-semantics) | [Loop mechanics](../vision-technical.md#technical-vision-loop-semantics) | One run per session, input classes, ordering, and split payloads. |
 | Public protocol, events, attachments | [Public protocol](../vision.md#concept-vision-public-protocol) | [Protocol mechanics](../vision-technical.md#technical-vision-public-protocol) | Stream planes, envelopes, attach behavior, and authority boundaries; the headless protocol proposal is [ADR 0023](../adr/0023-experimental-public-session-protocol.md#concept); [ADR 0024](../adr/0024-durable-interaction-lifecycle-and-host-policy-authority.md#concept) places durable interactions in M4 core before wire mapping. Both remain Proposed; the external consumer remains the unopened [`M4` plan](../archive/M4.md). |
 | Journal, stores, branches, compaction, artifacts | [Sessions and storage](../vision.md#concept-vision-sessions-storage) | [Storage mechanics](../vision-technical.md#technical-vision-sessions-storage) | Recovery surfaces, private adapters, store decision, protection. |
-| Model boundary and continuation | [Model boundary](../vision.md#concept-vision-model-boundary) | [Model mechanics](../vision-technical.md#technical-vision-model-boundary) | Canonical types, `Loopex.LLM`, reference adapter and native sidecar. For M3 provider-attempt retention work, load the Proposed [ADR 0027 decision](../adr/0027-provider-permit-retirement.md#concept) and [retirement mechanics](../adr/0027-provider-permit-retirement-technical.md#technical-adr-0027-decision); they remain review material until accepted. |
+| Model boundary and continuation | [Model boundary](../vision.md#concept-vision-model-boundary) | [Model mechanics](../vision-technical.md#technical-vision-model-boundary) | Canonical types, `Loopex.LLM`, reference adapter and native sidecar. Accepted [ADR 0027](../adr/0027-provider-permit-retirement.md#concept) and its [retirement mechanics](../adr/0027-provider-permit-retirement-technical.md#technical-adr-0027-decision) govern the remaining M3 provider-attempt retention work. |
 | Context pipeline | [Model boundary](../vision.md#concept-vision-model-boundary) | [Context-pipeline mechanics](../vision-technical.md#technical-vision-model-boundary) | The sole seam for memory, retrieval, prompts, provenance, and receipts. |
 | Tools and coding surface | [Tools](../vision.md#concept-vision-tools) | [Tool mechanics](../vision-technical.md#technical-vision-tools) | Seven-tool surface, budget, and non-authority of metadata. |
 | Executors, brain/hand, distribution | [Executor protocol](../vision.md#concept-vision-executor-protocol) | [Executor mechanics](../vision-technical.md#technical-vision-executor-protocol) | Job/receipt protocol, trust classes, trusted gateways. |
-| Trust, resources, sensitive data | [Sensitive data](../vision.md#concept-vision-sensitive-data) | [Trust mechanics](../vision-technical.md#technical-vision-sensitive-data) | Resource admission, tenancy, credentials, and redaction. |
+| Trust, resources, sensitive data | [Sensitive data](../vision.md#concept-vision-sensitive-data) | [Trust mechanics](../vision-technical.md#technical-vision-sensitive-data) | Resource admission, tenancy, credentials and redaction. Project skills implement Accepted [ADR 0025](../adr/0025-resource-packs-and-skill-admission.md#concept); use [snapshot/command guidance](runtime-and-embedding.md#technical-embedding-resources) and [staging/replay guidance](agent-loop-and-tools.md#technical-loop-skills). |
 | Extensions, generations, generated code | [Extensions](../vision.md#concept-vision-extensions) | [Extension mechanics](../vision-technical.md#technical-vision-extensions) | Package classes, quiescent activation, A→B→A rollback, promotion. |
 | Embedded API, transports, clients, ACP | [API and transports](../vision.md#concept-vision-api-transports) | [Transport mechanics](../vision-technical.md#technical-vision-api-transports) | One semantic contract, JSONL RPC first, reference surfaces. |
 | Hosts and wrappers | [Hosts](../vision.md#concept-vision-hosts) | [Host mechanics](../vision-technical.md#technical-vision-hosts) | Expected consumers, secured sample host, independent implementation. |
@@ -57,7 +57,15 @@ separate decision duty when a founding boundary or invariant would change.
 
 ## Test Quick Reference
 
-The umbrella exists. Product tests run with `mix test` from the repository root, and the repository's own checks are Mix tasks: `mix loopex.deps_budget`, `loopex.core_only`, `loopex.matrix`, `loopex.format_scope`, `loopex.version_train`, `loopex.docs_check`, `loopex.hook_registration`, and `loopex.self_hosting`. `bash scripts/check-bootstrap.sh` runs the aggregate, and `bash scripts/check-m0-gate.sh`, `/bin/bash -p scripts/check-m1-gate.sh`, and `bash scripts/check-m2-gate.sh` run the Closed gates. `bash scripts/check-m3-gate.sh` runs the Open `M3` gate, which must be red for its own declared missing behavior while every Closed gate stays green.
+Product tests run with `mix test` from the repository root. Repository checks
+are Mix tasks: `mix loopex.deps_budget`, `loopex.core_only`, `loopex.matrix`,
+`loopex.format_scope`, `loopex.version_train`, `loopex.docs_check`,
+`loopex.hook_registration`, and `loopex.self_hosting`.
+`bash scripts/check-bootstrap.sh` runs the bootstrap aggregate.
+`bash scripts/check-m3-gate.sh` owns the complete M3 gate and its M0–M2
+predecessor aggregate. Inspection and focused checkpoints make narrower claims;
+the accepted opening red can become green during implementation without proving
+the rest of M3 complete.
 
 Product tests run against a temporary `LOOPEX_HOME`; the
 affected conformance suites (`conformance/`) run for any adapter or behaviour
@@ -65,21 +73,23 @@ change; property tests own reducer/replay claims; fault injection owns
 durable-transition claims. Real-provider runs are a tagged, explicitly invoked
 lane — never part of the default suite.
 
-Use focused checks during implementation and the full inherited set at the
-acceptance base, each parallel-workstream rejoin, each required rebind, closure
-candidates, scheduled cadence and evidence-invalidating changes named in
-[AGENTS.md](../../AGENTS.md#milestones-and-gates) and the active plan. Under the
+Use focused checks during M3 implementation under the reviewed
+[end-only full-gate cadence](#override-disposition-m3-implementation-gate-cadence-2026-09-10).
+Complete M0–M3 evidence is required at the final candidate. Other milestones
+follow [AGENTS.md](../../AGENTS.md#milestones-and-gates) and their accepted plan.
+Under the
 [reviewed M3 preparation-rule ratification](#override-disposition-m3-incremental-witness-ratification-2026-09-10),
 acceptance binds clauses, witness identities, runnable commands and a real
 opening red; future test bodies grow with implementation. The closure command
 must reject missing witnesses and unavailable evidence. Focused results never
 substitute for required acceptance-base or closure evidence.
 
-For the still-Open M3 lineage only, the independently reviewed
+For M3's recorded plan acceptance only, the independently reviewed
 [acceptance aggregate override](#override-disposition-m3-acceptance-aggregate-2026-09-10)
 replaces the new acceptance-base M0–M2 aggregate with the exact-candidate
 validation listed in that disposition. It does not change later aggregate
-obligations or the generic rule for another milestone.
+obligations or the generic rule for another milestone. The later implementation
+cadence disposition above names the separate replacement timing.
 
 An inherited test inventory may be changed under a recorded, explicitly scoped
 maintainer override. Follow [the canonical override rule](../../AGENTS.md#maintainer-override),

@@ -65,6 +65,15 @@ and [integration disposition](docs/evidence/M2-recorded-limitations.md#final-rep
 name the evidence and authority used for integration. Those repairs do not
 publish a package or label a public surface.
 
+The M3 implementation adds pinned Git skill installation, project-only discovery,
+explicit manifest admission, and operator-selected instructions and supporting
+files in model context. Skills use the existing tool, policy and artifact paths;
+downloaded scripts and metadata grant no permissions. See
+[project skills](docs/operator/coding-sessions.md#operator-sessions-skills) for
+the commands and [embedding resources](docs/developer/runtime-and-embedding.md#technical-embedding-resources)
+for the host API. This work remains on the M3 implementation branch pending its
+remaining outcomes, final gates and independent closure review.
+
 The repaired reference local executor requires `/bin/bash` for its internal
 supervision on Darwin and Linux; raw commands still use `/bin/sh`. See the
 [runtime prerequisite](docs/operator/tools-and-policy.md#operator-local-supervision-shell)

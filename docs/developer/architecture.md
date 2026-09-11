@@ -295,6 +295,13 @@ same semantic contract through the public facade, and none of them owns a loop, 
 cursor, or durable session truth. If a surface disappeared, everything it does
 would still be reachable.
 
+Project skills use that same division. The host discovers or imports bounded
+resource packs and retains their provenance. Core holds an immutable snapshot,
+records the operator's admission and selection, and stages the selected bytes.
+The fixed resource class adds no application, behaviour, tool or plugin loader.
+Downloaded metadata and scripts remain data; ordinary host policy and executor
+grants still decide whether a requested effect runs.
+
 Technical depth: [The policy, grant, and lease path](architecture-technical.md#technical-arch-brains-hands).
 
 ## Where to Read Next

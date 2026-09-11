@@ -33,6 +33,14 @@ until a second real composition exists to give evidence for one.
 Nothing in this milestone is frozen or labelled:
 [Compatibility surfaces](compatibility-surfaces.md#concept).
 
+M3 adds project skills through the same runtime. A host supplies one immutable
+resource snapshot, explicitly admits its exact identity, and selects instructions
+and supporting files before a run. The snapshot belongs to one workspace and one
+runtime; sessions retain decisions and selections rather than copying the whole
+pack set. A skill changes model input and never grants a tool permission.
+
+Technical depth: [Resource snapshot and commands](#technical-embedding-resources).
+
 Operator workflow and failure handling: [Runtime operations](../operator/runtime.md#concept).
 Running a coding session: [Coding sessions](../operator/coding-sessions.md#concept).
 
@@ -214,6 +222,53 @@ outlive its exact authority.
 All durable and public boundary data is bounded plain data. Provider structs,
 PIDs, functions, arbitrary terms, credentials, and implementation types remain
 inside their owning edge or transient runtime process.
+
+<a id="technical-embedding-resources"></a>
+### Resource Snapshot and Commands
+
+Concept: [Runtime and embedding](#concept).
+
+The reference host's `LoopexComposition.ResourcePacks` owns discovery, pinned Git
+acquisition, containment and retained provenance. `discover/2` walks only
+`.agents/skills/<name>/SKILL.md` and bounded files inside each pack. `add/3`
+requires an exact commit, selected directory and explicit acquisition authority;
+installation does not admit content to a session. `retain/2` and `load/2` keep
+the exact snapshot under its manifest digest in the state root.
+
+Pass the verified manifest as `resource_manifest:` to the composition or core
+runtime. Core validates it once and stores one copy in a protected unnamed ETS
+table owned by the runtime supervisor. Child options keep the table reference,
+not the manifest contents. The host may still retain its input copy; it owns that
+additional residency. One snapshot binds one workspace for that runtime's
+lifetime. A session for another workspace withholds this resource class instead
+of borrowing another session's admission.
+
+The host uses `Loopex.command/2` with `:admit_resources` and then
+`:activate_skill` while the session is settled. Admission binds the manifest
+digest and full decision; selection binds that digest, `source_id`, `name`,
+`pack_digest` and ordered `supporting_labels`. A run freezes the resulting
+selection. Repeated command IDs replay the retained outcome; stateful refusals
+are retained too. A fresh admission clears earlier selections. There is no
+model-callable selection or arbitrary-path resource query.
+
+`Loopex.resource_catalog/2` returns catalog entries only for matching active
+admission. `Loopex.read_resource/3` takes the exact manifest digest, source, name
+and manifested label. Both are facade queries and grant no effect authority.
+The complete manifest has at most 64 packs, 64 files per pack and 1 MiB content per pack,
+64 MiB content overall and 8 MiB metadata. Selection is bounded to four skills
+and eight supporting files each. These ceilings do not raise the existing
+context or Store budgets.
+
+Resource commands use `resource_command_v1`; admitted sessions stage through
+`model_request_committed_resources_v1`. The durable reducer reconstructs exact
+staged request bytes without any resource snapshot. The configured-host
+fresh-process recovery workflow remains an M3 implementation obligation.
+A future unstaged request
+needs the matching retained snapshot or withholds resource content. It never
+refetches or uses an edited workspace as the prior admission. See
+[ADR 0025](../adr/0025-resource-packs-and-skill-admission.md#concept) for the
+accepted format and [compatibility](compatibility-surfaces.md#concept) for the
+old-reader refusal and rollback boundary.
 
 ### Embedded API
 
