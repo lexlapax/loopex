@@ -194,6 +194,125 @@ defmodule LoopexComposition.ResourceLaunchTest do
     end
   end
 
+  test "with_runtime retains an unconfirmed owned identity until it stops" do
+    {state_root, workspace} = roots()
+    test = self()
+    edge_observer = :"$loopex_composition_edge_observer"
+    effect_observer = :"$loopex_composition_effect_observer"
+
+    Process.put(edge_observer, fn module, function, arguments ->
+      result = apply(module, function, arguments)
+      send(test, {:unconfirmed_owner, self()})
+      result
+    end)
+
+    Process.put(effect_observer, fn
+      Process, :exit, [pid, reason] when reason in [:shutdown, :kill] ->
+        case Process.get(:loopex_unconfirmed_identity) do
+          nil ->
+            Process.put(:loopex_unconfirmed_identity, pid)
+            send(test, {:unconfirmed_identity, pid})
+            :ok
+
+          ^pid ->
+            :ok
+
+          _other ->
+            Process.exit(pid, reason)
+        end
+
+      module, function, arguments ->
+        apply(module, function, arguments)
+    end)
+
+    try do
+      assert {:error, {:composition_cleanup_unconfirmed, failures}} =
+               LoopexComposition.with_runtime(
+                 [
+                   runtime_id: "unconfirmed-cleanup-runtime",
+                   state_root: state_root,
+                   workspace: workspace,
+                   policy: Embedder
+                 ],
+                 fn _runtime -> :returned end
+               )
+
+      assert [{_module, :stop_unconfirmed, :ok, :ok}] = failures
+      assert_receive {:unconfirmed_identity, held}
+      assert_receive {:unconfirmed_owner, owner}
+      assert Process.alive?(held)
+      assert Process.alive?(owner)
+      assert {:monitors, monitors} = Process.info(owner, :monitors)
+      assert {:process, held} in monitors
+      refute File.exists?(Path.join(state_root, "store.log.writer"))
+
+      held_down = Process.monitor(held)
+      owner_down = Process.monitor(owner)
+      Process.exit(held, :kill)
+      assert_receive {:DOWN, ^held_down, :process, ^held, :killed}, 1_000
+      assert_receive {:DOWN, ^owner_down, :process, ^owner, :normal}, 1_000
+    after
+      Process.delete(edge_observer)
+      Process.delete(effect_observer)
+    end
+  end
+
+  test "with_runtime cleans every owned process when its callback caller dies" do
+    {state_root, workspace} = roots()
+    test = self()
+    marker = make_ref()
+    observer = :"$loopex_composition_edge_observer"
+
+    {caller, caller_down} =
+      spawn_monitor(fn ->
+        Process.put(observer, fn module, function, arguments ->
+          result = apply(module, function, arguments)
+          send(test, {marker, self(), module, result})
+          result
+        end)
+
+        LoopexComposition.with_runtime(
+          [
+            runtime_id: "lost-caller-runtime",
+            state_root: state_root,
+            workspace: workspace,
+            policy: Embedder
+          ],
+          fn _runtime ->
+            send(test, {:callback_held, self()})
+            receive do: (:finish -> :unexpected)
+          end
+        )
+      end)
+
+    acquired =
+      for _index <- 1..4 do
+        assert_receive {^marker, owner, module, {:ok, owned}}, 1_000
+        {owner, module, owned}
+      end
+
+    assert_receive {:callback_held, ^caller}, 1_000
+    [{owner, _module, _owned} | _rest] = acquired
+    owner_down = Process.monitor(owner)
+
+    owned_processes =
+      Enum.map(acquired, fn
+        {_owner, Loopex, runtime} -> runtime.supervisor
+        {_owner, _module, pid} -> pid
+      end)
+
+    owned_monitors = Enum.map(owned_processes, &{&1, Process.monitor(&1)})
+    Process.exit(caller, :kill)
+    assert_receive {:DOWN, ^caller_down, :process, ^caller, :killed}, 1_000
+
+    Enum.each(owned_monitors, fn {pid, monitor} ->
+      assert_receive {:DOWN, ^monitor, :process, ^pid, _reason}, 2_000
+    end)
+
+    assert_receive {:DOWN, ^owner_down, :process, ^owner, :normal}, 1_000
+    refute File.exists?(Path.join(state_root, "store.log.writer"))
+  end
+
   test "with_runtime reraises callback exceptions after cleanup" do
     {state_root, workspace} = roots()
 

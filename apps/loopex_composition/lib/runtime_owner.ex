@@ -16,6 +16,10 @@ defmodule LoopexComposition.RuntimeOwner do
         Process.demonitor(monitor, [:flush])
         result
 
+      {^tag, result, pending?} ->
+        settle_owner_monitor(owner, monitor, pending?)
+        result
+
       {:DOWN, ^monitor, :process, ^owner, reason} ->
         {:error, {:composition_owner_failed, reason}}
     end
@@ -35,11 +39,15 @@ defmodule LoopexComposition.RuntimeOwner do
     case guarded_compose(configuration, compose) do
       {:ok, _runtime} = started ->
         send(caller, {tag, started})
-        receive do: ({:EXIT, _pid, _reason} -> cleanup(seams))
+
+        receive do
+          {:EXIT, _pid, _reason} -> cleanup_and_retain(seams)
+        end
 
       {:error, _reason} = refusal ->
-        _ = cleanup(seams)
-        send(caller, {tag, refusal})
+        {_result, pending} = cleanup(seams)
+        send(caller, {tag, refusal, pending != []})
+        await_pending(pending)
     end
   end
 
@@ -55,8 +63,8 @@ defmodule LoopexComposition.RuntimeOwner do
       {^tag, {:ok, runtime}} ->
         {:ok, %{owner: owner, monitor: monitor, token: token, runtime: runtime, tag: tag}}
 
-      {^tag, {:error, _reason} = refusal} ->
-        await_owner(owner, monitor)
+      {^tag, {:error, _reason} = refusal, pending?} ->
+        settle_owner_monitor(owner, monitor, pending?)
         refusal
 
       {:DOWN, ^monitor, :process, ^owner, reason} ->
@@ -74,8 +82,9 @@ defmodule LoopexComposition.RuntimeOwner do
         await_stop(caller, caller_monitor, tag, token, runtime, seams)
 
       {:error, _reason} = refusal ->
-        _ = cleanup(seams)
-        send(caller, {tag, refusal})
+        {_result, pending} = cleanup(seams)
+        send(caller, {tag, refusal, pending != []})
+        await_pending(pending)
     end
   end
 
@@ -84,15 +93,17 @@ defmodule LoopexComposition.RuntimeOwner do
 
     receive do
       {^token, :stop, ^caller} ->
-        result = cleanup(seams)
-        send(caller, {tag, :stopped, result})
+        {result, pending} = cleanup(seams)
+        send(caller, {tag, :stopped, result, pending != []})
+        await_pending(pending)
 
       {:DOWN, ^caller_monitor, :process, ^caller, _reason} ->
-        _ = cleanup(seams)
+        cleanup_and_retain(seams)
 
       {:EXIT, ^runtime_supervisor, reason} ->
-        result = cleanup(seams)
-        send(caller, {tag, :runtime_stopped, reason, result})
+        {result, pending} = cleanup(seams)
+        send(caller, {tag, :runtime_stopped, reason, result, pending != []})
+        await_pending(pending)
     end
   end
 
@@ -119,16 +130,16 @@ defmodule LoopexComposition.RuntimeOwner do
     send(handle.owner, {handle.token, :stop, self()})
 
     receive do
-      {tag, :stopped, :ok} when tag == handle.tag ->
+      {tag, :stopped, :ok, false} when tag == handle.tag ->
         await_owner(handle.owner, handle.monitor)
         :ok
 
-      {tag, :stopped, {:error, details}} when tag == handle.tag ->
-        await_owner(handle.owner, handle.monitor)
+      {tag, :stopped, {:error, details}, pending?} when tag == handle.tag ->
+        settle_owner_monitor(handle.owner, handle.monitor, pending?)
         {:error, {:composition_cleanup_unconfirmed, details}}
 
-      {tag, :runtime_stopped, reason, cleanup} when tag == handle.tag ->
-        await_owner(handle.owner, handle.monitor)
+      {tag, :runtime_stopped, reason, cleanup, pending?} when tag == handle.tag ->
+        settle_owner_monitor(handle.owner, handle.monitor, pending?)
         {:error, {:composition_runtime_stopped, reason, cleanup}}
 
       {:DOWN, monitor, :process, owner, reason}
@@ -157,22 +168,50 @@ defmodule LoopexComposition.RuntimeOwner do
   defp cleanup(seams) do
     seams.owned_key
     |> Process.get([])
-    |> Enum.reduce([], fn owned, failures ->
+    |> Enum.reduce({[], []}, fn owned, {failures, pending} ->
       case stop_owned(owned, seams.effect) do
-        :ok -> failures
-        {:error, detail} -> [detail | failures]
+        :ok -> {failures, pending}
+        {:error, detail} -> {[detail | failures], pending}
+        {:pending, detail, identity} -> {[detail | failures], [identity | pending]}
       end
     end)
-    |> case do
-      [] -> :ok
-      failures -> {:error, Enum.reverse(failures)}
+    |> then(fn {failures, pending} ->
+      result = if failures == [], do: :ok, else: {:error, Enum.reverse(failures)}
+      {result, Enum.reverse(pending)}
+    end)
+  end
+
+  defp cleanup_and_retain(seams) do
+    {_result, pending} = cleanup(seams)
+    await_pending(pending)
+  end
+
+  defp await_pending([]), do: :ok
+
+  defp await_pending(pending) do
+    receive do
+      {:DOWN, monitor, :process, pid, _reason} ->
+        identity = {pid, monitor}
+
+        if identity in pending,
+          do: await_pending(List.delete(pending, identity)),
+          else: await_pending(pending)
     end
   end
 
   defp stop_owned({Loopex, runtime}, effect) do
     case guarded_effect(effect, Loopex, :stop, [runtime]) do
-      :ok -> :ok
-      other -> {:error, {:runtime_stop_unconfirmed, other}}
+      :ok ->
+        :ok
+
+      other ->
+        if Process.alive?(runtime.supervisor) do
+          monitor = Process.monitor(runtime.supervisor)
+
+          {:pending, {:runtime_stop_unconfirmed, other}, {runtime.supervisor, monitor}}
+        else
+          {:error, {:runtime_stop_unconfirmed, other}}
+        end
     end
   end
 
@@ -203,8 +242,7 @@ defmodule LoopexComposition.RuntimeOwner do
         {:error, {module, :forced_stop, shutdown, forced, reason}}
     after
       @shutdown_wait_ms ->
-        Process.demonitor(monitor, [:flush])
-        {:error, {module, :stop_unconfirmed, shutdown, forced}}
+        {:pending, {module, :stop_unconfirmed, shutdown, forced}, {pid, monitor}}
     end
   end
 
@@ -223,4 +261,9 @@ defmodule LoopexComposition.RuntimeOwner do
       {:DOWN, ^monitor, :process, ^owner, _reason} -> :ok
     end
   end
+
+  defp settle_owner_monitor(_owner, monitor, true),
+    do: Process.demonitor(monitor, [:flush])
+
+  defp settle_owner_monitor(owner, monitor, false), do: await_owner(owner, monitor)
 end
