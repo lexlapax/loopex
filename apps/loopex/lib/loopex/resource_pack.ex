@@ -25,9 +25,8 @@ defmodule Loopex.ResourcePack do
   @max_files 64
   @max_pack_bytes 1024 * 1024
   @max_manifest_bytes 64 * 1024 * 1024
-  @max_instruction_bytes 64 * 1024
+  @max_text_resource_bytes 64 * 1024
   @max_metadata_bytes 8 * 1024 * 1024
-  @max_catalog_bytes 16 * 1024
   @max_text_bytes 1_024
   @unsafe_label_codepoints ~r/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u
 
@@ -272,7 +271,7 @@ defmodule Loopex.ResourcePack do
          true <- outer["size"] == byte_size(outer["content"]),
          true <- valid_digest?(outer["digest"]),
          true <- outer["contained"] == true,
-         :ok <- admit_instruction_size(outer["label"], outer["size"]) do
+         :ok <- admit_file_size(outer["label"], outer["content"], outer["size"]) do
       {:ok,
        %{
          "label" => outer["label"],
@@ -415,11 +414,20 @@ defmodule Loopex.ResourcePack do
       else: rejected("instruction_missing")
   end
 
-  defp admit_instruction_size("SKILL.md", observed)
-       when observed > @max_instruction_bytes,
-       do: over_limit("instruction_bytes", observed, @max_instruction_bytes)
+  defp admit_file_size(_label, _content, observed) when observed > @max_pack_bytes,
+    do: over_limit("pack_bytes", observed, @max_pack_bytes)
 
-  defp admit_instruction_size(_label, _observed), do: :ok
+  defp admit_file_size("SKILL.md", _content, observed)
+       when observed > @max_text_resource_bytes,
+       do: over_limit("instruction_bytes", observed, @max_text_resource_bytes)
+
+  defp admit_file_size(_label, content, observed) when observed > @max_text_resource_bytes do
+    if String.valid?(content),
+      do: over_limit("text_resource_bytes", observed, @max_text_resource_bytes),
+      else: :ok
+  end
+
+  defp admit_file_size(_label, _content, _observed), do: :ok
 
   defp admit_total(observed, limit, dimension) when observed > limit,
     do: over_limit(dimension, observed, limit)
@@ -459,14 +467,7 @@ defmodule Loopex.ResourcePack do
             {:declined, :revoked, receipt(manifest_digest, "revoked")}
 
           true ->
-            entries = catalog_entries(normalized["packs"])
-
-            if byte_size(Canonical.encode(entries)) <= @max_catalog_bytes do
-              {:staged, entries, receipt(manifest_digest, "active")}
-            else
-              {:declined, :resource_catalog_limit,
-               receipt(manifest_digest, "resource_catalog_limit")}
-            end
+            {:staged, catalog_entries(normalized["packs"]), receipt(manifest_digest, "active")}
         end
     end
   end
