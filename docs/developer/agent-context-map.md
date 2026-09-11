@@ -1956,3 +1956,34 @@ This standalone disposition must receive independent exact-SHA read-only
 review before implementation relies on its replacement schedule. Historical
 acceptance evidence and the acceptance-only aggregate waiver keep their
 original scope and meaning.
+
+<a id="override-disposition-m3-workflow-evidence-2026-09-10"></a>
+### M3 workflow evidence allocation — 2026-09-10
+
+The maintainer was asked:
+
+> Approve separating the workflow evidence this way: deterministic tests prove the complete CLI/embedding workflow with the existing isolated test provider, and the required real-provider test proves the exact source-built CLI plus production companion end to end? The packaged companion has no local test-endpoint option. This preserves both proofs without adding a production transport API solely for testing, but changes where the plan’s evidence is collected.
+
+The maintainer answered: **"Approve the evidence split"**.
+
+Under [the explicit maintainer override](../../AGENTS.md#maintainer-override),
+this replaces only the continuing requirement that the deterministic outcome-3
+selector alone prove the complete workflow through the exact production
+companion. The affected sources are the accepted M3 Technical envelope's first
+workflow and evidence mapping and the M3 gate's outcome-3 obligation. The
+deterministic selector proves the complete admitted skill, actual authorized
+tool, and full-object artifact workflow through embedding and the source-built
+CLI with the existing isolated test provider. It identifies that test provider
+as such. The attended real-provider selector separately proves the complete
+workflow through the exact source-built CLI and production companion pair.
+
+Both proofs remain required for closure. Preserve every protected selector
+identity, actual tool/artifact operation, trusted launch and recovery check,
+production package identity check, and the separate public Git import. A test
+provider result is never reported as a production companion or real-provider
+result. No new production transport option, dependency, public API, gate command,
+bound artifact, accepted ADR or historical evidence changes. This approval does
+not waive either lane or authorize M3 closure, integration to main or release.
+
+This standalone disposition receives independent exact-SHA read-only review
+before the replacement evidence allocation is relied on.
