@@ -5287,6 +5287,100 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     assert {"entered", 200} = Local.answer_within("/bin/sh", ["-c", command], 5_000)
   end
 
+  test "a stalled first quiescence probe leaves budget for a real successor probe and confirmed cleanup" do
+    # Concept: one failed observation must leave time to prove cleanup through a
+    # later real process table. This demonstrates budget starvation, not the
+    # cause of the previously observed fast-command failure.
+    # Technical depth: both fixtures fail their first observation. One exits
+    # immediately; the other waits behind an unreleased file until the executor
+    # cleans it up. Every later invocation execs the real /bin/ps with its
+    # original arguments, so no table, group identity or acknowledgement is faked.
+    for mode <- [:immediate, :stalled] do
+      root = workspace()
+      first = Path.join(root, "first-probe")
+      ready = Path.join(root, "first-probe-ready")
+      first_group_path = Path.join(root, "first-probe-group")
+      release = Path.join(root, "release-first-probe")
+      released = Path.join(root, "first-probe-released")
+      successor = Path.join(root, "successor-probe-ran")
+      probe = Path.join(root, "process-probe")
+
+      first_answer =
+        case mode do
+          :immediate ->
+            "exit 1"
+
+          :stalled ->
+            "while [ ! -f #{shell_path(release)} ]; do /bin/sleep 0.01; done\n" <>
+              "printf released > #{shell_path(released)}\nexit 1"
+        end
+
+      File.write!(probe, """
+      #!/bin/sh
+      if /bin/mkdir #{shell_path(first)} 2>/dev/null; then
+        /bin/ps -o pgid= -p "$$" > #{shell_path(first_group_path)}
+        printf ready > #{shell_path(ready)}
+        #{first_answer}
+      fi
+      printf invoked > #{shell_path(successor)}
+      exec /bin/ps "$@"
+      """)
+
+      File.chmod!(probe, 0o700)
+      {executor, lease_id} = executor_with_options(root, process_probe: probe)
+
+      running =
+        Task.async(fn ->
+          run(root, "loopex.bash", %{"argv" => ["/usr/bin/true"]}, %{
+            executor: executor,
+            lease_id: lease_id
+          })
+        end)
+
+      # Release a still-waiting fixture before stopping its owner and before the
+      # root-removal callbacks. Teardown never signals a sampled OS identity.
+      on_exit(fn ->
+        release_held_group(release, first_group_path)
+        stop_test_process(running.pid)
+      end)
+
+      assert {:ok, :ready} =
+               await_path(
+                 fn -> if File.exists?(ready), do: {:ok, :ready}, else: :error end,
+                 5_000
+               )
+
+      assert {:ok, first_group} = await_positive_integer_file(first_group_path, 5_000)
+      assert {:ok, receipt} = Task.await(running, 10_000)
+      assert receipt.cleanup_grace_ms == 5_000
+
+      first_group_empty =
+        await_path(
+          fn -> if process_group_empty?(first_group), do: {:ok, :empty}, else: :error end,
+          5_000
+        ) == {:ok, :empty}
+
+      facts = %{
+        mode: mode,
+        outcome: receipt.outcome,
+        cleanup_confirmation: receipt.cleanup_confirmation,
+        successor_probe_ran: File.exists?(successor),
+        first_probe_released: File.exists?(released),
+        first_probe_group_empty: first_group_empty
+      }
+
+      assert facts == %{
+               mode: mode,
+               outcome: :completed,
+               cleanup_confirmation: :confirmed,
+               successor_probe_ran: true,
+               first_probe_released: false,
+               first_probe_group_empty: true
+             },
+             "cleanup evidence: #{inspect(Map.put(facts, :output, receipt.output))}"
+    end
+  end
+
   test "the launch guard preserves fast command status and remains the only group signal authority" do
     root = workspace()
     {executor, lease_id} = executor_for(root)
@@ -5467,7 +5561,7 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
            "a pre-permit refusal signals a sampled process identifier"
 
     assert source =~
-             ~r/defp quiesce_launch_guard.*?if guard_children_gone\?\(guard, episode\) do.*?release_launch_guard\(guard, episode, status_known\?\)/s,
+             ~r/defp quiesce_launch_guard.*?if guard_children_gone\?\(guard, cooperative_episode\(episode\)\) do.*?release_launch_guard\(guard, episode, status_known\?\)/s,
            "the normal path can release the guard without first proving group quiescence"
 
     assert source =~

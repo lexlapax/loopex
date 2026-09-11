@@ -5702,7 +5702,10 @@ defmodule Loopex.Executor.Local do
   end
 
   defp quiesce_launch_guard(guard, episode, status_known?) do
-    if guard_children_gone?(guard, episode) do
+    # Concept: a stalled first observation leaves time to recover cleanup proof.
+    # Technical depth: its cooperative share reserves the rest of the original
+    # deadline for termination and another positive observation.
+    if guard_children_gone?(guard, cooperative_episode(episode)) do
       {released, release_sent} = release_launch_guard(guard, episode, status_known?)
 
       if release_sent do
