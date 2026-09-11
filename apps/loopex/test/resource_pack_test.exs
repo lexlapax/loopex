@@ -168,6 +168,30 @@ defmodule Loopex.ResourcePackTest do
     refute inspect(result) =~ hostile
   end
 
+  test "supporting text is limited to 64 KiB while a binary asset may use the pack budget" do
+    oversized_text = String.duplicate("t", 65_537)
+
+    assert {:error, :over_limit,
+            %{
+              "dimension" => "text_resource_bytes",
+              "observed" => 65_537,
+              "limit" => 65_536
+            }} =
+             ResourcePack.digest(
+               manifest([pack("alpha", [file("SKILL.md"), file("guide.txt", oversized_text)])])
+             )
+
+    binary_asset = :binary.copy(<<255>>, 65_537)
+
+    assert {:ok, _digest, normalized} =
+             ResourcePack.digest(
+               manifest([pack("alpha", [file("SKILL.md"), file("asset.bin", binary_asset)])])
+             )
+
+    assert get_in(normalized, ["packs", Access.at(0), "files", Access.at(1), "content"]) ==
+             binary_asset
+  end
+
   test "decisions have an exact bounded non-expiring active or revoked shape" do
     {:ok, manifest_digest, normalized} =
       ResourcePack.digest(manifest([pack("alpha", [file("SKILL.md")])]))
@@ -233,6 +257,23 @@ defmodule Loopex.ResourcePackTest do
     assert {:declined, :binding_changed, bounded} = ResourcePack.catalog(given, stale)
     assert bounded["reason"] == "decision_binding_mismatch"
     refute Map.has_key?(bounded, "decision")
+  end
+
+  test "pure catalog metadata is not refused at the model-visible block limit" do
+    packs =
+      for index <- 1..64 do
+        pack("skill-#{index}", [file("SKILL.md")])
+        |> Map.put(:description, String.duplicate("d", 300))
+      end
+
+    given = manifest(packs)
+    {:ok, manifest_digest, _normalized} = ResourcePack.digest(given)
+
+    assert {:staged, entries, %{"decision_disposition" => "active"}} =
+             ResourcePack.catalog(given, decision(manifest_digest))
+
+    assert length(entries) == 64
+    assert byte_size(Canonical.encode(entries)) > 16 * 1_024
   end
 
   defp manifest(packs) do
