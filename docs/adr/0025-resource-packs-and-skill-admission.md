@@ -52,8 +52,10 @@ Supersede ADR 0017's zero-or-one optional-block shape proof and receipt
 dispositions with versioned multi-block admission for this new class. Preserve their
 required context, whole-block withholding, trust and exact staging guarantees.
 Version new receipts and staging records; do not reinterpret historical bytes.
-Resource bundles use host-owned content-addressed retention, not ADR 0015's
-closed tool_output use schema. Context already staged for a request is durable
+Resource provenance bundles use host-owned retention keyed by sorted pairs of
+file label and file digest, excluding remote-identity metadata and the enclosing
+manifest, separately from ADR 0015's closed tool_output use schema.
+Context already staged for a request is durable
 session data, independent of later bundle installation or removal.
 
 Technical depth: [Contract and evidence](0025-resource-packs-and-skill-admission-technical.md#technical-adr-0025-decision).

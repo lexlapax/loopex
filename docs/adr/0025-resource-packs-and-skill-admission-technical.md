@@ -220,9 +220,11 @@ refuse with a clear unsupported-source diagnostic.
 Stage under a task-owned sibling directory, verify every identity and bound,
 then atomically publish the complete project pack. Retain admitted pack bytes
 under host-owned content identity separately from discovery and tool artifacts.
-The retained bundle stores normalized `source_id`, sanitized `origin`,
-`commit`, `tree_digest` and every file digest beside the bytes under the
-manifest digest. On rediscovery or restart, the host may reattach verified remote
+The retained provenance bundle is keyed by the canonically sorted pairs of
+file label and file digest, excluding `source_id`, `origin`, `commit`,
+`tree_digest` and the enclosing manifest, and stores normalized `source_id`,
+sanitized `origin`, `commit`, `tree_digest` and every file digest beside the
+bytes. On rediscovery or restart, the host may reattach verified remote
 provenance only when that retained identity and freshly verified current pack
 bytes agree; otherwise the pack is local/unverified and cannot claim remote
 `commit` or `tree_digest`. Retention configuration is not a configured
