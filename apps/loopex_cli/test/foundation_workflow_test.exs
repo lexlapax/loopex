@@ -155,10 +155,7 @@ defmodule LoopexCli.FoundationWorkflowTest do
   end
 
   test "new readers preserve genuine M2 history and old readers refuse new records before effects" do
-    unique = "#{System.pid()}-#{System.unique_integer([:positive])}"
-    root = Path.join(System.tmp_dir!(), "loopex-m3-compatibility-#{unique}")
-    File.mkdir_p!(root)
-    on_exit(fn -> File.rm_rf(root) end)
+    root = owned_root("compatibility")
 
     old = build_m2_reader(root)
     written = Path.join(root, "m2-written")
@@ -301,7 +298,7 @@ defmodule LoopexCli.FoundationWorkflowTest do
     )
   end
 
-  defp command!(executable, arguments, directory, environment \\ []) do
+  defp command!(executable, arguments, directory, environment) do
     {output, status} =
       System.cmd(executable, arguments,
         cd: directory,
@@ -421,9 +418,25 @@ defmodule LoopexCli.FoundationWorkflowTest do
     {normalized, digest, decision}
   end
 
+  defp owned_root(label) do
+    nonce = Base.encode16(:crypto.strong_rand_bytes(12), case: :lower)
+    root = Path.join(System.tmp_dir!(), "loopex-m3-#{label}-#{nonce}")
+
+    case File.mkdir(root) do
+      :ok ->
+        on_exit(fn -> File.rm_rf(root) end)
+        root
+
+      {:error, :eexist} ->
+        owned_root(label)
+
+      {:error, reason} ->
+        flunk("cannot allocate workflow root: #{inspect(reason)}")
+    end
+  end
+
   defp workflow_fixture(label, credential) do
-    unique = "#{System.pid()}-#{System.unique_integer([:positive])}"
-    root = Path.join(System.tmp_dir!(), "loopex-m3-foundation-#{label}-#{unique}")
+    root = owned_root("foundation-#{label}")
     workspace = Path.join(root, "workspace")
     state_root = Path.join(root, "state")
     skill = Path.join([workspace, ".agents", "skills", "review"])
@@ -440,8 +453,6 @@ defmodule LoopexCli.FoundationWorkflowTest do
     full = String.duplicate("artifact-byte-sequence\n", CodingTools.limits().read_bytes)
     File.write!(Path.join(workspace, "large.txt"), full)
     File.mkdir_p!(state_root)
-    on_exit(fn -> File.rm_rf(root) end)
-
     {:ok, workspace_ref} = LoopexCli.ProjectResources.workspace_reference(workspace)
 
     {:ok, manifest} =
