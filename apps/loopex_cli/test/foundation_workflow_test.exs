@@ -3,6 +3,35 @@ Code.require_file(
   __DIR__
 )
 
+defmodule LoopexCli.FoundationNoEffectModel do
+  @moduledoc false
+  @behaviour Loopex.Model
+
+  @impl Loopex.Model
+  def complete(_request, options, _progress) do
+    Agent.update(
+      Keyword.fetch!(options, :counter),
+      &Map.update!(&1, :model, fn count -> count + 1 end)
+    )
+
+    {:error, :unexpected_model_dispatch}
+  end
+end
+
+defmodule LoopexCli.FoundationNoEffectExecutor do
+  @moduledoc false
+  @behaviour Loopex.Executor
+
+  @impl Loopex.Executor
+  def execute(counter, _job, _grant, _lease, _progress) do
+    Agent.update(counter, &Map.update!(&1, :executor, fn count -> count + 1 end))
+    {:error, :unexpected_executor_dispatch}
+  end
+
+  @impl Loopex.Executor
+  def cancel(_counter, _job_id), do: {:ok, :cleaned}
+end
+
 defmodule LoopexCli.FoundationWorkflowTest do
   use ExUnit.Case, async: false
 
@@ -10,6 +39,7 @@ defmodule LoopexCli.FoundationWorkflowTest do
   alias Loopex.LLM.ReqLLM
   alias Loopex.LLM.ReqLLM.ProviderIsolationFixture, as: ProviderFixture
   alias Loopex.ResourcePack
+  alias Loopex.Store
   alias LoopexCli.Policy.AllowAll
 
   setup do
@@ -122,6 +152,273 @@ defmodule LoopexCli.FoundationWorkflowTest do
                ["artifact", cli_locator, "--state-root", cli.state_root],
                nil
              )
+  end
+
+  test "new readers preserve genuine M2 history and old readers refuse new records before effects" do
+    unique = "#{System.pid()}-#{System.unique_integer([:positive])}"
+    root = Path.join(System.tmp_dir!(), "loopex-m3-compatibility-#{unique}")
+    File.mkdir_p!(root)
+    on_exit(fn -> File.rm_rf(root) end)
+
+    old = build_m2_reader(root)
+    written = Path.join(root, "m2-written")
+    File.mkdir_p!(written)
+
+    assert run_compatibility_probe(old.paths, old.probe, "write-v2", written, root) =~
+             "writer=model_attempt_settled_v2 ready=true model_calls=1"
+
+    old_control = Path.join(root, "m2-old-reader-control")
+    new_control = Path.join(root, "m2-new-reader-control")
+    File.cp_r!(written, old_control)
+    File.cp_r!(written, new_control)
+
+    old_journal = File.read!(Path.join(old_control, "store.log"))
+    old_ready = run_compatibility_probe(old.paths, old.probe, "read-v1", old_control, root)
+    assert old_ready =~ "reader=ready model_calls=0 semantic_records=0 public_events=0"
+    assert old_ready =~ "session_state_beam=#{Path.join(old.build, "lib/loopex/ebin")}/"
+    assert File.read!(Path.join(old_control, "before-reader.log")) == old_journal
+    assert File.read!(Path.join(old_control, "store.log")) |> String.starts_with?(old_journal)
+
+    current_paths = current_reader_paths()
+    current_journal = File.read!(Path.join(new_control, "store.log"))
+
+    current_ready =
+      run_compatibility_probe(current_paths, old.probe, "read-v1", new_control, root)
+
+    assert current_ready =~ "reader=ready model_calls=0 semantic_records=0 public_events=0"
+    assert current_ready =~ "session_state_beam=#{Enum.at(current_paths, 1)}/"
+    assert File.read!(Path.join(new_control, "before-reader.log")) == current_journal
+    assert File.read!(Path.join(new_control, "store.log")) |> String.starts_with?(current_journal)
+
+    resource_root = Path.join(root, "m3-resource-root")
+    write_resource_history(resource_root)
+    resource_journal = File.read!(Path.join(resource_root, "store.log"))
+
+    refused =
+      run_compatibility_probe(old.paths, old.probe, "read-v2-refused", resource_root, root)
+
+    assert refused =~ "reader=refused model_calls=0 semantic_records=0 public_events=0"
+    assert refused =~ "session_state_beam=#{Path.join(old.build, "lib/loopex/ebin")}/"
+    assert File.read!(Path.join(resource_root, "before-reader.log")) == resource_journal
+
+    assert File.read!(Path.join(resource_root, "store.log"))
+           |> String.starts_with?(resource_journal)
+  end
+
+  defp build_m2_reader(root) do
+    source = Path.join(root, "m2-source")
+    build = Path.join(root, "m2-build")
+    repository = Path.expand("../../..", __DIR__)
+    closure = "b637873ddc39542ec27add71015b46a4f7c7f80e"
+
+    git_environment = [
+      {"HOME", root},
+      {"GIT_CONFIG_GLOBAL", "/dev/null"},
+      {"GIT_CONFIG_NOSYSTEM", "1"}
+    ]
+
+    command!(
+      "git",
+      ["clone", "--shared", "--no-checkout", repository, source],
+      root,
+      git_environment
+    )
+
+    command!("git", ["checkout", "--detach", closure], source, git_environment)
+    assert String.trim(command!("git", ["rev-parse", "HEAD"], source, git_environment)) == closure
+
+    assert command!(
+             "git",
+             ["status", "--porcelain=v1", "--untracked-files=all"],
+             source,
+             git_environment
+           ) == ""
+
+    environment = isolated_mix_environment(root, build)
+
+    for application <- ["loopex_protocol", "loopex", "loopex_store_local"] do
+      command!(
+        System.find_executable("mix") || flunk("Mix executable unavailable"),
+        ["compile", "--no-deps-check", "--warnings-as-errors"],
+        Path.join([source, "apps", application]),
+        environment
+      )
+    end
+
+    paths =
+      for application <- ["loopex_protocol", "loopex", "loopex_store_local"] do
+        Path.join([build, "lib", application, "ebin"])
+      end
+
+    assert Enum.all?(paths, &File.dir?/1)
+
+    %{
+      build: build,
+      paths: paths,
+      probe: Path.join([source, "scripts", "provider-accounting-rollback.exs"])
+    }
+  end
+
+  defp isolated_mix_environment(root, build) do
+    [
+      {"HOME", root},
+      {"TMPDIR", root},
+      {"MIX_ENV", "test"},
+      {"MIX_BUILD_PATH", build},
+      {"MIX_HOME", Path.join(root, "mix-home")},
+      {"HEX_HOME", Path.join(root, "hex-home")},
+      # Every compiler owns a unique task-root build, so no cross-process lock
+      # protects shared bytes and Mix's TCP fallback is deliberately unnecessary.
+      {"MIX_OS_CONCURRENCY_LOCK", "0"},
+      {"LOOPEX_HOME", root},
+      {"LOOPEX_PROVIDER_API_KEY", nil},
+      {"ANTHROPIC_API_KEY", nil},
+      {"OPENAI_API_KEY", nil},
+      {"ERL_CRASH_DUMP", "/dev/null"},
+      {"ERL_CRASH_DUMP_SECONDS", "0"}
+    ]
+  end
+
+  defp current_reader_paths do
+    build = Mix.Project.build_path()
+
+    for application <- ["loopex_protocol", "loopex", "loopex_store_local"] do
+      path = Path.join([build, "lib", application, "ebin"])
+      assert File.dir?(path)
+      path
+    end
+  end
+
+  defp run_compatibility_probe(paths, probe, mode, root, environment_root) do
+    elixir = System.find_executable("elixir") || flunk("Elixir executable unavailable")
+    path_arguments = Enum.flat_map(paths, &["-pa", &1])
+
+    command!(
+      elixir,
+      path_arguments ++ [probe, mode, root],
+      environment_root,
+      isolated_mix_environment(environment_root, Path.join(environment_root, "unused-build"))
+    )
+  end
+
+  defp command!(executable, arguments, directory, environment \\ []) do
+    {output, status} =
+      System.cmd(executable, arguments,
+        cd: directory,
+        env: environment,
+        stderr_to_stdout: true
+      )
+
+    assert status == 0,
+           "command failed (#{Path.basename(executable)} #{Enum.join(arguments, " ")}):\n#{output}"
+
+    output
+  end
+
+  defp write_resource_history(root) do
+    File.mkdir_p!(root)
+    File.write!(Path.join(root, "probe-owned"), "LOOPEX_ACCOUNTING_ROLLBACK_PROBE_V1\n")
+    {:ok, store_pid} = Store.Local.start_link(path: Path.join(root, "store.log"))
+    {:ok, store} = Store.new(Store.Local, store_pid)
+    {:ok, counter} = Agent.start_link(fn -> %{model: 0, executor: 0} end)
+    {manifest, digest, decision} = compatibility_manifest()
+
+    {:ok, runtime} =
+      Loopex.start_link(
+        runtime_id: "m3-resource-rollback-probe",
+        store: store,
+        context_token_budget: 8_192,
+        cleanup_grace_ms: 250,
+        model: %{
+          module: LoopexCli.FoundationNoEffectModel,
+          model: "scripted:no-effects",
+          options: [counter: counter, max_tokens: 256]
+        },
+        executor: %{
+          module: LoopexCli.FoundationNoEffectExecutor,
+          reference: counter,
+          identity: "resource-rollback-no-effects",
+          epoch: 1,
+          fencing_token: 1,
+          workspace_ref: "m3-resource-workspace",
+          workspace_lease: "m3-resource-workspace"
+        },
+        policy: AllowAll,
+        tools: [],
+        active_tools: [],
+        bounds: %{max_turns: 2, token_budget: 10_000, deadline_ms: 30_000},
+        resource_manifest: manifest
+      )
+
+    try do
+      {:ok, session_id} =
+        Loopex.create_session(runtime, %{"purpose" => "resource rollback refusal"},
+          command_id: "create"
+        )
+
+      {:ok, attachment} = Loopex.attach(runtime, session_id, after_event_sequence: 0)
+
+      assert {:accepted, "admit"} =
+               Loopex.command(attachment, %{
+                 type: :admit_resources,
+                 command_id: "admit",
+                 manifest_digest: digest,
+                 decision: decision
+               })
+
+      assert {:ok, records} = Store.load_records(store, session_id, 0, 128)
+      assert Enum.any?(records, &(&1.payload.kind == "resource_command_v1"))
+      assert Agent.get(counter, & &1) == %{model: 0, executor: 0}
+      File.write!(Path.join(root, "session-id"), session_id <> "\n")
+    after
+      :ok = Loopex.stop(runtime)
+      :ok = GenServer.stop(store_pid, :normal, 5_000)
+      :ok = Agent.stop(counter)
+    end
+  end
+
+  defp compatibility_manifest do
+    content = "Compatibility skill instructions."
+
+    manifest = %{
+      version: "loopex.resource_pack/1",
+      workspace_ref: "m3-resource-workspace",
+      revision: nil,
+      packs: [
+        %{
+          source_id: "project",
+          origin: nil,
+          commit: nil,
+          tree_digest: nil,
+          name: "compatibility",
+          description: "Compatibility boundary",
+          manual_only: true,
+          files: [
+            %{
+              label: "SKILL.md",
+              content: content,
+              size: byte_size(content),
+              digest: LoopexProtocol.Canonical.digest_bytes(content),
+              contained: true
+            }
+          ]
+        }
+      ]
+    }
+
+    {:ok, digest, normalized} = ResourcePack.digest(manifest)
+
+    decision = %{
+      manifest_digest: digest,
+      workspace_ref: "m3-resource-workspace",
+      trust_scope: "project_skills",
+      decision_source: "host_supplied",
+      issued_at: "2026-09-10T00:00:00Z",
+      expires_at: nil,
+      revocation_state: "active"
+    }
+
+    {normalized, digest, decision}
   end
 
   defp workflow_fixture(label, credential) do
