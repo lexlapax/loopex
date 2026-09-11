@@ -173,17 +173,26 @@ defmodule LoopexComposition.ResourcePacks do
          current_job
        ) do
     receive do
-      {^tag, :job_started, job_id} ->
-        await_import_worker(
-          caller,
-          caller_monitor,
-          tag,
-          context,
-          config,
-          worker,
-          worker_monitor,
-          job_id
-        )
+      {^tag, :job_ready, ^worker, job_id} ->
+        with :ok <- caller_available(caller, caller_monitor),
+             :ok <- before_deadline(config.deadline) do
+          send(worker, {tag, :job_adopted, job_id})
+
+          await_import_worker(
+            caller,
+            caller_monitor,
+            tag,
+            context,
+            config,
+            worker,
+            worker_monitor,
+            job_id
+          )
+        else
+          refusal ->
+            cancel_import_worker(context, worker, worker_monitor, current_job, config.deadline)
+            refusal
+        end
 
       {^tag, {:ok, pack, selected}} ->
         await_worker_down(worker, worker_monitor)
@@ -693,26 +702,82 @@ defmodule LoopexComposition.ResourcePacks do
 
   defp explicit_git(_path), do: error(:git_unavailable, "git executable is required")
 
+  # Concept: the host and core agree on which source identities are safe to retain.
+  # Technical depth: match ResourcePack's SSH/scp username grammar before any job
+  # exists. Bounds and trim checks precede URI parsing so disguised credentials
+  # cannot be interpreted as a local path.
   defp sanitized_origin(source) do
-    uri = URI.parse(source)
-
     cond do
       byte_size(source) not in 1..1_024 ->
         error(:unsupported_source, "source is outside the supported bound")
 
-      String.contains?(source, <<0>>) ->
-        error(:unsupported_source, "source contains a null byte")
+      not valid_source_text?(source) ->
+        error(:unsupported_source, "source text is malformed")
 
-      uri.userinfo || uri.query || uri.fragment ->
+      source != String.trim(source) ->
+        error(:unsupported_source, "source may not contain surrounding whitespace")
+
+      String.starts_with?(source, "-") ->
+        error(:unsupported_source, "source may not use Git option syntax")
+
+      String.contains?(source, ["?", "#"]) ->
         error(:unsupported_source, "source may not contain credentials, query, or fragment")
 
-      uri.scheme in [nil, "file", "http", "https", "ssh", "git"] ->
-        {:ok, source}
-
       true ->
-        error(:unsupported_source, "source scheme is unsupported")
+        parse_origin(source)
     end
   end
+
+  defp parse_origin(source) do
+    case URI.new(source) do
+      {:ok, %URI{scheme: "ssh", host: host, userinfo: username}} ->
+        if valid_source_host?(host) and valid_optional_source_username?(username),
+          do: {:ok, source},
+          else: error(:unsupported_source, "source credentials or host are unsupported")
+
+      {:ok, %URI{scheme: scheme, userinfo: nil}}
+      when scheme in ["file", "http", "https", "git"] ->
+        {:ok, source}
+
+      {:ok, %URI{scheme: nil, userinfo: nil}} ->
+        if String.contains?(source, "@"),
+          do: error(:unsupported_source, "source credentials are unsupported"),
+          else: {:ok, source}
+
+      {:error, ":"} ->
+        if valid_scp_origin?(source),
+          do: {:ok, source},
+          else: error(:unsupported_source, "source syntax is unsupported")
+
+      _credential_or_malformed ->
+        error(:unsupported_source, "source syntax or credentials are unsupported")
+    end
+  end
+
+  defp valid_source_text?(source),
+    do: String.valid?(source) and not Regex.match?(~r/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u, source)
+
+  defp valid_source_host?(host) when is_binary(host),
+    do: byte_size(host) in 1..1_024 and valid_source_text?(host)
+
+  defp valid_source_host?(_host), do: false
+
+  defp valid_optional_source_username?(nil), do: true
+  defp valid_optional_source_username?(username), do: valid_source_username?(username)
+
+  defp valid_scp_origin?(origin) do
+    case Regex.run(~r/\A([^@]+)@([^:\/\s]+):(.+)\z/u, origin) do
+      [^origin, username, _host, _path] -> valid_source_username?(username)
+      _not_scp -> false
+    end
+  end
+
+  defp valid_source_username?(username) when is_binary(username),
+    do:
+      byte_size(username) in 1..1_024 and
+        String.match?(username, ~r/\A[A-Za-z0-9._~-]+\z/)
+
+  defp valid_source_username?(_username), do: false
 
   defp safe_relative_path(path) when is_binary(path) do
     components = Path.split(path)
@@ -922,7 +987,7 @@ defmodule LoopexComposition.ResourcePacks do
            Executor.issue_grant(config.authorization, job, deadline, %{
              "purpose" => "resource_pack_import"
            }),
-         :ok <- notify_import_started(config, job_id),
+         :ok <- adopt_import_job(config, job_id),
          {:ok, receipt} <- Local.execute(context.executor, job, grant),
          :completed <- receipt.outcome do
       {:ok, %{context | sequence: sequence}, receipt.output}
@@ -933,9 +998,27 @@ defmodule LoopexComposition.ResourcePacks do
     end
   end
 
-  defp notify_import_started(%{import_observer: {observer, tag}}, job_id) do
-    send(observer, {tag, :job_started, job_id})
-    :ok
+  # Concept: an executor job cannot begin before its cancellation owner knows it.
+  # Technical depth: the worker waits for adoption before Local.execute/3. The
+  # coordinator records the exact job identity before it can observe caller loss;
+  # a caller already lost or expired never receives this acknowledgement.
+  defp adopt_import_job(%{import_observer: {observer, tag}, deadline: deadline}, job_id) do
+    monitor = Process.monitor(observer)
+    send(observer, {tag, :job_ready, self(), job_id})
+
+    try do
+      receive do
+        {^tag, :job_adopted, ^job_id} ->
+          :ok
+
+        {:DOWN, ^monitor, :process, ^observer, _reason} ->
+          error(:executor_failed, "import coordinator stopped before job adoption")
+      after
+        remaining_ms(deadline) -> error(:git_failed, "resource import deadline reached")
+      end
+    after
+      Process.demonitor(monitor, [:flush])
+    end
   end
 
   defp first_line(output), do: output |> String.split("\n", parts: 2) |> hd() |> String.trim()

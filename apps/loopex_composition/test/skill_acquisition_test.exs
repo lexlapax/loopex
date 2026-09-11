@@ -227,9 +227,13 @@ defmodule LoopexComposition.SkillAcquisitionTest do
       "http://operator:#{secret}@example.invalid/repository",
       "https://operator:#{secret}@example.invalid/repository",
       "ssh://operator:#{secret}@example.invalid/repository",
+      " ssh://operator:#{secret}@example.invalid/repository",
+      "\thttps://operator:#{secret}@example.invalid/repository",
+      "ssh://operator%3A#{secret}@example.invalid/repository",
       "git://example.invalid/repository?token=#{secret}",
       "file:///tmp/repository##{secret}",
-      "repository?token=#{secret}"
+      "repository?token=#{secret}",
+      "-upload-pack=#{secret}"
     ]
 
     Enum.each(sources, fn source ->
@@ -240,7 +244,7 @@ defmodule LoopexComposition.SkillAcquisitionTest do
                  rev: String.duplicate("a", 40),
                  path: "skill",
                  git_executable: System.find_executable("git"),
-                 executor_authorization: {:host_policy, :allow}
+                 executor_authorization: {:host_policy, :deny}
                )
 
       refute detail =~ secret
@@ -249,6 +253,22 @@ defmodule LoopexComposition.SkillAcquisitionTest do
 
     assert retained_executor_receipts(state_root) == []
     assert staging_paths(workspace) == []
+
+    for source <- [
+          "ssh://git@example.invalid/repository",
+          "ssh://example.invalid/repository",
+          "git@example.invalid:repository"
+        ] do
+      assert {:error, {:executor_authorization_required, _detail}} =
+               ResourcePacks.add(workspace, source,
+                 workspace_ref: "workspace:test",
+                 state_root: state_root,
+                 rev: String.duplicate("a", 40),
+                 path: "skill",
+                 git_executable: System.find_executable("git"),
+                 executor_authorization: {:host_policy, :deny}
+               )
+    end
   end
 
   test "one retained executor generation accepts repeated distinct imports" do
@@ -413,6 +433,93 @@ defmodule LoopexComposition.SkillAcquisitionTest do
 
     assert File.regular?(Path.join(cancel_state, "resource-packs/receipts/generation"))
     assert Path.wildcard(Path.join(cancel_state, "resource-packs/receipts/open/*")) == []
+
+    assert_cancellation_before_next_job(root, workspace, source, commit, installed)
+  end
+
+  defp assert_cancellation_before_next_job(root, workspace, source, commit, installed) do
+    started = Path.join(root, "adoption-started")
+    release = Path.join(root, "adoption-release")
+    next_job = Path.join(root, "adoption-next-job")
+    state_root = Path.join(root, "adoption-state")
+    git = Path.join(root, "git-adoption")
+    real_git = System.find_executable("git") || flunk("git is required")
+
+    File.write!(git, """
+    #!/bin/sh
+    for argument in "$@"; do
+      if [ "$argument" = clone ]; then
+        "#{real_git}" "$@" || exit "$?"
+        printf started >"#{started}"
+        while [ ! -f "#{release}" ]; do /bin/sleep 0.01; done
+        exit 0
+      fi
+    done
+    printf started >"#{next_job}"
+    exec "#{real_git}" "$@"
+    """)
+
+    File.chmod!(git, 0o700)
+
+    task =
+      Task.async(fn ->
+        ResourcePacks.add(workspace, source,
+          workspace_ref: "workspace:test",
+          state_root: state_root,
+          rev: commit,
+          path: "safe",
+          git_executable: git,
+          executor_authorization: {:host_policy, :allow},
+          deadline_ms: 10_000
+        )
+      end)
+
+    await_file!(started)
+    coordinator = import_coordinator!(task.pid)
+    monitor = Process.monitor(coordinator)
+    true = :erlang.suspend_process(coordinator)
+
+    try do
+      File.write!(release, "continue")
+      await_adoption_wait!(coordinator)
+      refute File.exists?(next_job)
+    after
+      Task.shutdown(task, :brutal_kill)
+      true = :erlang.resume_process(coordinator)
+    end
+
+    assert_receive {:DOWN, ^monitor, :process, ^coordinator, :normal}, 10_000
+    refute File.exists?(next_job)
+    assert File.read!(installed) =~ "Keep me."
+    assert staging_paths(workspace) == []
+    assert length(retained_executor_receipts(state_root)) == 1
+    assert Path.wildcard(Path.join(state_root, "resource-packs/provenance/*.etf")) == []
+  end
+
+  defp await_adoption_wait!(coordinator, remaining \\ 200)
+  defp await_adoption_wait!(_coordinator, 0), do: flunk("Git worker did not await job adoption")
+
+  defp await_adoption_wait!(coordinator, remaining) do
+    {:messages, messages} = Process.info(coordinator, :messages)
+
+    waiting? =
+      Enum.any?(messages, fn
+        {_tag, :job_ready, worker, job_id} when is_pid(worker) and is_binary(job_id) ->
+          String.starts_with?(job_id, "resource-import-commit-") and
+            Process.info(worker, :current_function) ==
+              {:current_function, {ResourcePacks, :adopt_import_job, 2}} and
+            Process.info(worker, :status) == {:status, :waiting}
+
+        _other ->
+          false
+      end)
+
+    if waiting? do
+      :ok
+    else
+      Process.sleep(10)
+      await_adoption_wait!(coordinator, remaining - 1)
+    end
   end
 
   defp tmp_dir!(label) do
@@ -476,11 +583,16 @@ defmodule LoopexComposition.SkillAcquisitionTest do
   defp await_file!(_path, 0), do: flunk("delayed Git did not start")
 
   defp await_file!(path, remaining) do
-    if File.exists?(path) do
-      File.read!(path)
-    else
-      Process.sleep(10)
-      await_file!(path, remaining - 1)
+    case File.read(path) do
+      {:ok, content} when byte_size(content) > 0 ->
+        content
+
+      {:error, reason} when reason != :enoent ->
+        flunk("could not read Git start marker: #{inspect(reason)}")
+
+      _not_yet_published ->
+        Process.sleep(10)
+        await_file!(path, remaining - 1)
     end
   end
 
