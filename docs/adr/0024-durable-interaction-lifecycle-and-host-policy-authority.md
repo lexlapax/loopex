@@ -130,4 +130,4 @@ Technical depth: [Format and rollback](0024-durable-interaction-lifecycle-and-ho
 - [ADR 0009](0009-tool-executor-and-grant-contracts.md#concept)
 - [ADR 0010](0010-provider-continuation-and-context-staging.md#concept)
 - [ADR 0011](0011-session-input-algebra-and-streaming.md#concept)
-- [M4 Concept plan](../archive/M4.md#concept)
+- [M4 Concept plan](../plans/M4.md#concept)

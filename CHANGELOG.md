@@ -22,9 +22,15 @@ the exact document set its milestone must update.
 
 No package or compatibility-labelled surface is pending.
 
+Open the [M4 plan](docs/plans/M4.md#concept) as the one permitted planning
+lookahead on the integrated M3 acceptance checkpoint: move the draft triple
+into `docs/plans/`, bind a runner whose opening probe observes a policy
+`defer` denied as `interaction_unsupported`, and register `M4` as Open. No
+plan, ADR or product behavior is accepted by the opening.
+
 Narrow the Open [M3 plan](docs/plans/M3.md#concept) to project skills, three core
 repairs and reliable verification. Move durable interactions, artifact ranges
-and the floor refresh to the [unopened M4 draft](docs/archive/M4.md#concept).
+and the floor refresh to the [M4 plan](docs/plans/M4.md#concept).
 Require Git-only acquisition, operator-only pre-run selection, hostile-pack
 authority invariance, early integrated proof and self-audit. Specify focused
 checkpoints and stable clause witnesses while preserving full inherited checks

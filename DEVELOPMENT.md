@@ -111,13 +111,14 @@ the toolchain lets you build and test today: `mix test` from the repository root
 `bash scripts/check-bootstrap.sh` for the aggregate,
 `bash scripts/check-m0-gate.sh` for the closed M0 gate,
 `/bin/bash -p scripts/check-m1-gate.sh` for the closed M1 gate,
-`bash scripts/check-m2-gate.sh` for the closed M2 gate, and
-`bash scripts/check-m3-gate.sh` for the Open M3 scaffold. `--inspect` checks its
-artifact identities; `--preflight` and `--checkpoint` run the isolated real-session
-admission-ordering probe, currently RED for a missing repair. Checkpoint is not
-full-gate evidence. Complete integrated skills/witness/full lanes while M3 is
-Open before acceptance. The unopened M4 runner is unavailable; its superseded
-scaffolding is retained in Git at `ba51d1898bcca109a5ed32a8cc3ba831323113a1`. The
+`bash scripts/check-m2-gate.sh` for the closed M2 gate,
+`bash scripts/check-m3-gate.sh` for the accepted M3 gate, and
+`bash scripts/check-m4-gate.sh` for the Open M4 lookahead scaffold. For both,
+`--inspect` checks artifact identities; `--preflight` and `--checkpoint` run the
+isolated real-session opening probe, currently RED for a missing repair (M3:
+required-only admission ordering; M4: durable policy interactions). Checkpoint
+is not full-gate evidence. The M4 full lane stays unavailable until M3 is Closed
+and integrated, because its inherited aggregate is register-derived. The
 privileged-Bash flag is part of the command: the runner refuses an ordinary Bash
 because inherited functions and `BASH_ENV` would otherwise precede its
 environment boundary.

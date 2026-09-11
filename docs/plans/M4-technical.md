@@ -13,38 +13,50 @@ Concept: [Scope](M4.md#concept-plan-scope).
 
 Concept: [non-goals](M4.md#concept-plan-non-goals).
 
-M4 is unopened. While M3 is Open there is no second planning lookahead. After
-M3's accepted governance checkpoint is integrated, the one-successor lookahead
-rule may be used exactly as AGENTS.md defines. M4 cannot be accepted or
-implemented until M3 is Closed and integrated. Move this triple into docs/plans
-only when opening it, absorb the exact permitted base without discarding bound
-history, complete its executable contract/vector tests and obtain fresh review.
-At final acceptance all inherited gates are green and the M4 boundary remains
+M4 is Open as the one permitted planning lookahead after M3's accepted
+governance checkpoint integrated to `main`. Its planning base is
+`4bba8b74f5e260dc2a364fcbd3554c7badd1a09c`, retained as an ancestor without
+rebasing or squashing bound history. While Open it records M3 as `Accepted` and
+holds no implementation authority. M4 cannot be accepted or implemented until
+M3 is Closed and integrated: absorb that exact closed product base, re-prove
+every inherited gate green and this milestone's own distinct red, complete its
+executable contract/vector tests and obtain fresh exact-SHA review. At final
+acceptance all inherited gates are green and the M4 boundary remains
 truthfully red for missing external behavior.
 
-M4 accepts ADR 0023 (protocol), ADR 0024 (durable interactions), ADR 0026
-(development floor) and ADR 0028 (bounded artifact retrieval) before dependent
-work. ADRs 0025/0027 and M3's working resource/launch/repair interfaces are
-inherited. Reconcile the schema with those interfaces and the new core contracts;
-no TODO member or unproved method earns an advertised capability.
+M4 accepts four decisions before dependent work:
+
+| Decision | Owner and acceptance point | Effect |
+| --- | --- | --- |
+| [**ADR 0023**](../adr/0023-experimental-public-session-protocol.md#concept) | Maintainer, before M4 acceptance | Transport-neutral experimental protocol, exact initialization, identity ownership and fail-closed boundary |
+| [**ADR 0024**](../adr/0024-durable-interaction-lifecycle-and-host-policy-authority.md#concept) | Maintainer, before M4 acceptance | Durable policy `defer`/answer lifecycle owned by the session with host-policy authority preserved |
+| [**ADR 0026**](../adr/0026-development-floor-refresh.md#concept) | Maintainer, before M4 acceptance | Explicit floor/current validation pairs replacing the derived pin rule |
+| [**ADR 0028**](../adr/0028-bounded-artifact-retrieval.md#concept) | Maintainer, before M4 acceptance | Bounded range retrieval through the facade and ArtifactStore with distinct object/range digests |
+
+The accepted M3 decisions on resource packs and permit retirement and M3's
+working resource/launch/repair interfaces are inherited. Reconcile the schema
+with those interfaces and the new core contracts; no TODO member or unproved
+method earns an advertised capability.
 
 The first prerequisite workstream settles the floor before M4 binds its own
-future edits: proposed Elixir 1.18.5/OTP 27.3.4 and current 1.20.3/29.0.5, with
-real matrix evidence. Inventory every Closed holder of changed artifacts on the
-exact integrated M3 base. M0/M1/M2 are known floor holders; include M3 if its gate
-binds the pins or affected machinery. Use each holder's v2 proposal/rebind by
-default. An expressly scoped maintainer override may replace only the development-
-time holder transaction or procedure; it cannot replace ADR 0026 acceptance, an
-accepted ADR decision, or a released public contract. One explicit instruction
-may name a coherent set of holders, replacement bindings and validation without
-repeatedly asking for the same decision, but the operative disposition is first
-recorded and independently reviewed in its own commit. Each affected holder then
-lands its replacement row in that holder's own commit, names the override and
-holder, passes status validation, and receives exact-SHA read-only review before
-the next holder proceeds. No override ignores a stale hash or rewrites a prior
+future edits: proposed Elixir 1.18.5/OTP 27.3.4 and current 1.20.3/OTP 29.0.5,
+with real matrix evidence. At the planning base the Closed M0, M1 and M2 gates
+and the accepted M3 gate all bind `.tool-versions`, so all four are holders;
+inventory every holder again on the exact integrated M3 closure. Use each
+holder's default transaction: the v2 gate-generation route for a Closed holder
+and the v1 proposal/rebind route while M3 is Accepted. An expressly scoped
+maintainer override may replace only the development-time holder transaction or
+procedure; it cannot replace ADR 0026 acceptance, an accepted ADR decision, or a
+released public contract. One explicit instruction may name a coherent set of
+holders, replacement bindings and validation without repeatedly asking for the
+same decision, but the operative disposition is first recorded and independently
+reviewed in its own commit. Each affected holder then lands its replacement row
+in that holder's own commit, names the override and holder, passes status
+validation, and receives exact-SHA read-only review before the next holder
+proceeds. No override ignores a stale hash or rewrites a prior
 Acceptance/Closure row. Without such approval, retain the default transaction and
 its required evidence. Moving this cost from M3 does not remove it, and no floor
-change is made by this archived draft.
+change is made by this opening.
 
 The ninth app, dependency inventory and source VERSION 0.1.0 also require their
 actual holders' transactions or the explicitly approved development-time override
@@ -115,22 +127,30 @@ Concept: [Outcomes](M4.md#concept-plan-outcomes).
 | 5 | TypeScript drives skill/interaction/tool/artifact with real Store and executor; real-provider task separately attended; abrupt kill and fresh-process resume; graceful EOF case remains distinct |
 | 6 | Elixir, Python and TypeScript clients execute the same positive/negative vectors without importing the server codec; exact source/schema/client versions and toolchain/platform identities |
 
-The superseded raw-process scaffold is retained in Git history at
-`ba51d1898bcca109a5ed32a8cc3ba831323113a1`; it is removed from live scripts.
-Reconstruct and reconcile vectors and the integrated client fixture only when
-M4 opens. Complete and lock the revised executable proof before acceptance. An echo server cannot pass because admissions, event order, exact
-interaction/tool identity, real artifact bytes and fresh settled snapshots are
-required. Parsing fixture-shaped output is not full JSON conformance.
+The opening runner binds one real behavioral red for outcome 3: through a
+real local session and Store, a host-policy `defer` is denied as
+`interaction_unsupported` instead of committing a pending interaction. It proves
+that one missing core behavior; it proves no protocol, range, client or
+workflow behavior. The superseded raw-process scaffold retained at
+`ba51d1898bcca109a5ed32a8cc3ba831323113a1` is historical design input.
+Reconstruct and reconcile the raw-process probe, vectors and the integrated
+client fixture against settled contracts before acceptance. An echo server
+cannot pass because admissions, event order, exact interaction/tool identity,
+real artifact bytes and fresh settled snapshots are required. Parsing
+fixture-shaped output is not full JSON conformance.
 
 Every protected selector uses the existing authoritative standalone ExUnit
 channel. Preserve the inherited repair manifest rather than re-listing old case
-counts in this draft. The complete gate runs inherited predecessors, protected
-selectors, whole suite, language clients and retained-evidence validation. Use M3
-checkpoint/full modes and one decisive named witness per clause; ordinary
-negatives stay in the required suite without freezing their inventories. Real
-provider cases live in separate files. No current M4 opening proof is claimed.
+counts in this plan. The complete gate runs inherited predecessors, protected
+selectors, whole suite, language clients and retained-evidence validation. Use
+M3-style checkpoint/full modes and one decisive named witness per clause;
+ordinary negatives stay in the required suite without freezing their
+inventories. Real provider cases live in separate files. Under the same
+preparation rule M3 recorded, future test bodies are written with
+implementation; a missing witness is never a pass, and every named witness
+must pass before closure.
 
-Apply the M3 [integrated audit](../plans/M3-technical.md#technical-plan-evidence)
+Apply the M3 [integrated audit](M3-technical.md#technical-plan-evidence)
 to direct facade, CLI, wire, recovery child and actual built server/companion.
 Test every transaction/lifetime cut and each decoder-side negative at the
 receiver, not just the encoder. Run actual Darwin floor/current and Linux

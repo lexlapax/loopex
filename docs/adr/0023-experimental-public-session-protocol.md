@@ -144,4 +144,4 @@ Technical depth: [Rollback mechanics](0023-experimental-public-session-protocol-
 - [Vision serial barriers](../vision-technical.md#technical-vision-serial-barriers)
 - [ADR 0011](0011-session-input-algebra-and-streaming.md#concept)
 - [ADR 0008](0008-owner-succession-recovery-and-runtime-placement.md#concept)
-- [M4 Concept plan](../archive/M4.md#concept)
+- [M4 Concept plan](../plans/M4.md#concept)

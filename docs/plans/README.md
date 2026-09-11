@@ -16,16 +16,16 @@ integrated product baseline.
 <!-- loopex:current-status:start -->
 ## Current Status
 
-**Revision status:** Closed milestone product baseline; active milestone `M3` is accepted; no next candidate is recorded.
+**Revision status:** Closed milestone product baseline; active milestone `M3` is accepted; next candidate `M4` is open.
 
 | Field | Value |
 | --- | --- |
 | Integrated phase | Closed milestone product baseline |
 | Last closed product checkpoint | `M2` — 2026-09-03 |
-| Blockers | None; `M3` is accepted and implementation may proceed |
-| Authorized work | Implementation inside the accepted `M3` envelopes and its locked gate on the designated milestone branch; no milestone product bytes integrate before closure |
-| Next maintainer decision | None until `M3` is ready for independent review |
-| Next transition | Turn the locked gate green, then move `M3` to In progress and In review |
+| Blockers | None for `M3` delivery; `M4` acceptance, integration, and product implementation wait until `M3` closes and the Open candidate is refreshed and independently reviewed on that closed base; `M4` additionally waits on ADR 0023, ADR 0024, ADR 0026, and ADR 0028 |
+| Authorized work | Implementation inside the accepted `M3` envelopes and locked gate on its designated milestone branch; planning, gate construction, and review for Open `M4`; no milestone product bytes integrate before closure and no `M4` product implementation |
+| Next maintainer decision | None until `M3` is ready for independent review; `M4` cannot be accepted before `M3` closes; `M4` also waits on [ADR 0023](../adr/0023-experimental-public-session-protocol.md#concept), [ADR 0024](../adr/0024-durable-interaction-lifecycle-and-host-policy-authority.md#concept), [ADR 0026](../adr/0026-development-floor-refresh.md#concept), and [ADR 0028](../adr/0028-bounded-artifact-retrieval.md#concept), which are not accepted |
+| Next transition | Turn the locked `M3` gate green and close it; then refresh and independently review `M4` on that closed base |
 | Validation | `bash scripts/check-bootstrap.sh` |
 <!-- loopex:current-status:end -->
 
@@ -132,6 +132,7 @@ representable.
 | `M1` | Closed | [concept](M1.md) | [technical depth](M1-technical.md) | [gate](M1-gate.md) |
 | `M2` | Closed | [concept](M2.md) | [technical depth](M2-technical.md) | [gate](M2-gate.md) |
 | `M3` | Accepted | [concept](M3.md) | [technical depth](M3-technical.md) | [gate](M3-gate.md) |
+| `M4` | Open | [concept](M4.md) | [technical depth](M4-technical.md) | [gate](M4-gate.md) |
 <!-- loopex:milestone-register:end -->
 
 When a plan exists, the Concept, Technical depth, and Gate columns link their
