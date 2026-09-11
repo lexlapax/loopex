@@ -5295,7 +5295,9 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     # sample taken after its authenticated frame arrives. Exercise that narrow
     # ordering repeatedly through one real executor: the wrapper is terminal
     # protocol evidence, never unfinished model work.
-    for _iteration <- 1..12 do
+    for iteration <- 1..12 do
+      started_at = System.monotonic_time(:millisecond)
+
       assert {:ok, succeeded} =
                run(
                  root,
@@ -5304,7 +5306,12 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
                  %{executor: executor, lease_id: lease_id}
                )
 
-      assert succeeded.outcome == :completed
+      elapsed_ms = System.monotonic_time(:millisecond) - started_at
+      observed = Map.take(succeeded, [:outcome, :cleanup_confirmation, :output])
+
+      assert succeeded.outcome == :completed,
+             "fast command iteration=#{iteration} elapsed_ms=#{elapsed_ms} result=#{inspect(observed, limit: :infinity)}"
+
       assert succeeded.cleanup_confirmation == :confirmed
     end
 
