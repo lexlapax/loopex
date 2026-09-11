@@ -57,13 +57,13 @@
       id: 4,
       selectors: [
         %{
-          path: "apps/loopex_store_local/test/artifact_range_test.exs",
+          path: "apps/loopex_store_local/test/artifact_transfer_test.exs",
           names: [
-            "a chunk is returned only after the complete immutable object verifies once per transfer and object and range digests stay distinct",
+            "a chunk is returned only after the complete immutable object verifies once per transfer and object and chunk digests stay distinct",
             "an unsupported ArtifactStore reports unsupported rather than falling back to a whole object fetch",
-            "wrong session use object and use swaps and corruption outside the returned range refuse before any bytes",
-            "concurrent reader and connection work exhaustion refuse and cancellation releases every descriptor",
-            "per read byte and deadline budgets bound allocation and measured read amplification"
+            "wrong session use object and use swaps and corruption outside the requested window refuse at open before any bytes",
+            "concurrent transfer and connection work exhaustion refuse and close cancellation loss and expiry release every descriptor",
+            "chunk byte and deadline budgets bound allocation and a transfer reads at most one verification plus one emit"
           ]
         },
         %{

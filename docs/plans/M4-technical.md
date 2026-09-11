@@ -33,22 +33,18 @@ M4 accepts four decisions before dependent work:
 | [**ADR 0026**](../adr/0026-development-floor-refresh.md#concept) | Maintainer, before M4 acceptance; holder transactions below settle after M3 closes | Explicit floor/current validation pairs replacing the derived pin rule |
 | [**ADR 0028**](../adr/0028-bounded-artifact-retrieval.md#concept) | Maintainer, before M4 acceptance; must settle the transfer design below | Bounded artifact retrieval through the facade and ArtifactStore with distinct object/range digests |
 
-**Artifact transfer design (unresolved, blocks ADR 0028 acceptance).** The
-Proposed ADR admits 1–16,384-byte ranges while the local store admits 64 MiB
-objects and verifies the complete object on every range. Saving a maximal
-object through independent ranges would verify it 4,096 times. Two designs
-satisfy the Concept constraint of one verification per transfer:
-
-| Choice | Consequence |
-| --- | --- |
-| One authorized, verified transfer that scans once and emits bounded chunks (recommended) | Preserves the complete-artifact promise; adds an owned, cancellable reader lifecycle with descriptor release and per-connection reader limits |
-| Independent `fetch_range` calls as drafted | Smaller; M4 must then cap total reconstruction and describe the feature as bounded excerpts, not artifact saving |
-
-Whichever the maintainer records in ADR 0028, both envelopes bind exact values
-at acceptance for: chunk or range bytes, per-read deadline, concurrent readers
-per connection and per runtime, connection work budget, and read amplification
-(complete verifications per authorized transfer, at most one under the
-recommended design). Missing values block acceptance.
+**Artifact transfer design (decided).** The earlier draft admitted
+1–16,384-byte ranges while the local store admits 64 MiB objects and verified
+the complete object on every range, so saving a maximal object would have
+verified it 4,096 times. On 2026-09-10, during the M4 planning task, the
+maintainer chose one authorized, verified transfer that verifies once and emits
+bounded chunks from an owned, cancellable reader, over independent range reads
+that would have reduced the feature to bounded excerpts. ADR 0028 now proposes
+that design. Both envelopes bind exact values at acceptance for: chunk bytes,
+per-read deadline, open-transfer lifetime, concurrent transfers per connection
+and per runtime, connection work budget, and read amplification (at most one
+complete verification plus one sequential emit per authorized transfer).
+Missing values block acceptance.
 
 **Connection state table (required content of ADR 0023).**
 
@@ -131,7 +127,7 @@ Concept: [Scope](M4.md#concept-plan-scope).
 | Component | Owns | Cannot own |
 | --- | --- | --- |
 | `loopex_protocol` | Bounded DTOs, validators, schemas, vectors and capability identity | JSON implementation, runtime or authority |
-| `loopex` | Inherited resource facade plus new M4 interaction lifecycle, range query and artifact-use authorization | Framing or connection policy |
+| `loopex` | Inherited resource facade plus new M4 interaction lifecycle, artifact transfer queries and artifact-use authorization | Framing or connection policy |
 | `loopex_app_server` | Foreground lifetime, UTF-8 JSONL framing, request correlation, bounded writer and facade mapping | Store/coordinator calls, a second loop, resource parsing, policy selection |
 | `loopex_composition` | Trusted startup wiring, provider companion, explicit prepared handoff and project resource configuration | Wire-supplied implementation selection |
 | TypeScript consumer | User workflow and local output presentation | Normative session, trust or policy semantics |
@@ -146,7 +142,7 @@ building further UI or generalized transports.
 
 Use the existing command identity for `admit_resources`, `activate_skill` and
 `respond_interaction`; request IDs never enter journals or asynchronous facts.
-M3 resource queries and M4's ADR 0028 facade range query supply the results. Client trust
+M3 resource queries and M4's ADR 0028 facade transfer queries supply the results. Client trust
 answers are evidence presented to host policy, not a way to name arbitrary
 filesystem roots or import a URL. Acquisition remains an explicit host workflow.
 
@@ -174,7 +170,7 @@ Concept: [Outcomes](M4.md#concept-plan-outcomes).
 | 1 | Independent raw-byte client launches actual server process, exact init/schema/limits vector, refusal before init, no durable work on malformed startup |
 | 2 | Identical command corpus through facade/wire; independent variation of request and command identity; snapshot-before-live; committed admission before correlated delivery; command replay after disconnect |
 | 3 | Durable interaction request/answer/policy/intent cuts, fixed timestamps through commit_unknown, expiry/abort/restart races, the exact successive-round bound and policy identity; catalog and selected content identity preserved; stale/missing trust withholds content; manual-only restriction; interaction answer admission separately observed from policy re-evaluation, grant/intent commit and tool receipt; every immutable launch input proved unreplaceable from the wire |
-| 4 | ADR 0028 complete verification and bounded allocation proved at ArtifactStore and facade with object and range digests distinguished; wrong-session use, object/use swap and corruption outside the returned range refused; concurrent-reader and connection-work exhaustion, cancellation and descriptor release; oversized/fragmented/multiple frames; malformed UTF-8/duplicate keys/depth; slow reader; bounded queue; late progress; stdout contamination; actual process-tree cleanup |
+| 4 | ADR 0028 one verification per transfer and bounded allocation proved at ArtifactStore and facade with object and chunk digests distinguished; wrong-session use, object/use swap and corruption outside the requested window refused at open; concurrent-transfer and connection-work exhaustion, lifetime expiry, cancellation and descriptor release; oversized/fragmented/multiple frames; malformed UTF-8/duplicate keys/depth; slow reader; bounded queue; late progress; stdout contamination; actual process-tree cleanup |
 | 5 | TypeScript drives skill, interaction answer, policy re-evaluation, committed grant/intent, tool and artifact with real Store and executor from operator input, embedding no identities; real-provider task separately attended; abrupt kill and fresh-process resume; stdin EOF performs orderly shutdown with no cancellation and a still-pending interaction; `session.abort` is the separate deliberate-cancellation case |
 | 6 | Elixir, Python and TypeScript clients execute the same positive/negative vectors without importing the server codec; pinned interpreter versions verified before the lane, absence or mismatch reported as unavailable evidence; exact source/schema/client versions and toolchain/platform identities recorded in the retained report |
 
@@ -233,7 +229,7 @@ Prove new readers on genuine M3 histories, interaction recovery on M4 records
 and old readers refusing unknown interaction records before effects. Retain an
 old-format positive control and old root/binary pair; removing the server does
 not make an interaction-bearing root readable by M3. Resource behavior and
-existing artifact formats remain unchanged. Range capability removal restores
+existing artifact formats remain unchanged. Transfer capability removal restores
 the previous full-object API without rewriting artifacts. Restore floor/version/
 inventory protections through governed transactions. No in-place downgrade,
 installed-data migration or service installation claim.
@@ -273,8 +269,9 @@ package or service install follows from closure alone.
 
 Concept: [Scope](M4.md#concept-plan-scope).
 
-One application, the core policy-interaction slice, optional ArtifactStore range
-capability, one stdio mapping and bounded schemas/client fixtures justify growth. No new role or external production dependency, transport registry, socket
+One application, the core policy-interaction slice, the optional ArtifactStore
+transfer capability, one stdio mapping and bounded schemas/client fixtures
+justify growth. No new role or external production dependency, transport registry, socket
 abstraction, daemon supervisor, duplicate resource resolver or second interaction
 reducer. The app-server has no direct Store/model/executor dependency or private
 coordinator shortcut. Artifact object/use identity and launch configuration

@@ -23,7 +23,7 @@ defmodule Loopex.M4Gate.Support do
   defp outcome("apps/loopex_app_server/test/external_workflow_test.exs"), do: [5]
   defp outcome("apps/loopex_app_server/test/external_workflow_real_test.exs"), do: [5]
   defp outcome("apps/loopex/test/interaction_lifecycle_test.exs"), do: [3]
-  defp outcome("apps/loopex_store_local/test/artifact_range_test.exs"), do: [4]
+  defp outcome("apps/loopex_store_local/test/artifact_transfer_test.exs"), do: [4]
   defp outcome("apps/loopex_protocol/test/public_schema_conformance_test.exs"), do: [6]
   # Concept: shared contract, store and server paths select every outcome that
   # can observe them; only leaf test files select one outcome.

@@ -12,35 +12,45 @@ Technical depth: [Bounded artifact retrieval mechanics](0028-bounded-artifact-re
 <a id="concept-adr-0028-decision"></a>
 ### Context and Decision
 
-M4's range-read promise requires a shared bounded implementation. Existing
-ArtifactStore.fetch retrieves and validates an entire object; a small output
-chunk alone does not bound memory or prove the requested object is intact.
+M4's promise to save or inspect a large artifact from outside the runtime
+requires a shared bounded implementation. Existing ArtifactStore.fetch
+retrieves and validates an entire object; a small output chunk alone does not
+bound memory or prove the requested object is intact, and verifying the whole
+object again for every chunk makes saving a large object impractically slow.
 
-Add bounded range retrieval through the public facade and ArtifactStore boundary while
-preserving ADR 0015's distinct object and use identities and closed tool_output
-provenance. Narrowly extend ADR 0015’s ArtifactStore callback inventory with an optional
-range capability; the session journal Store is unchanged. Validate the authorized use and stream-verify the complete immutable
-object before returning a requested range. Report full-object and returned-range
-digests separately. Do not label a range hash as proof of the complete object.
+Add one bounded, verified artifact transfer through the public facade and
+ArtifactStore boundary while preserving ADR 0015's distinct object and use
+identities and closed tool_output provenance. Narrowly extend ADR 0015's
+ArtifactStore callback inventory with an optional transfer capability; the
+session journal Store is unchanged. A transfer validates the authorized use,
+stream-verifies the complete immutable object exactly once, then emits bounded
+chunks sequentially from an owned, cancellable reader until the requested
+window ends or the transfer is closed. Report the full-object digest and each
+chunk's digest separately. Do not label a chunk hash as proof of the complete
+object. The maintainer chose this one-verification-per-transfer design over
+independent range reads on 2026-09-10 during the M4 planning task.
 
 Technical depth: [Contract and evidence](0028-bounded-artifact-retrieval-technical.md#technical-adr-0028-decision).
 
 <a id="concept-adr-0028-consequences"></a>
 ### Consequences, Compatibility and Rollback
 
-Terminal, embedded and M4 consumers retrieve large tool output without loading
-it all in memory. Full-object verification costs a sequential read per request
-in this first implementation; caching and Merkle formats remain outside scope.
+Terminal, embedded and M4 consumers save or inspect large tool output without
+loading it all in memory. Each transfer costs one complete sequential
+verification plus one sequential emit of the requested window; saving an N-byte
+object reads at most 2N bytes. Caching and Merkle formats remain outside scope.
 Resource packs do not enter the tool-output artifact namespace. Before M4
-acceptance, pair the range/frame contract with explicit per-read byte/deadline,
-concurrent-reader and connection-work budgets and measured read amplification.
-Missing budget decisions block acceptance; they are not an unlimited-I/O grant.
+acceptance, pair the transfer/frame contract with explicit chunk-byte,
+per-read deadline, open-transfer lifetime, concurrent-transfer and
+connection-work budgets. Missing budget decisions block acceptance; they are
+not an unlimited-I/O grant.
 
-Keep existing put/fetch callbacks and object/use formats. Add one optional bounded
-fetch_range ArtifactStore callback and an experimental facade query. A custom ArtifactStore that does
-not implement the capability returns unsupported; it does not fall back to an
-unbounded fetch. Old artifacts remain readable and no format migration is
-introduced. Removal restores the prior API without rewriting data.
+Keep existing put/fetch callbacks and object/use formats. Add one optional
+bounded transfer capability to ArtifactStore and an experimental facade
+open/read/close query family. A custom ArtifactStore that does not implement
+the capability returns unsupported; it does not fall back to an unbounded
+fetch. Old artifacts remain readable and no format migration is introduced.
+Removal restores the prior API without rewriting data.
 
 Technical depth: [Compatibility mechanics](0028-bounded-artifact-retrieval-technical.md#technical-adr-0028-compatibility).
 

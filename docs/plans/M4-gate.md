@@ -62,9 +62,9 @@ dependency is UNAVAILABLE, never a full-gate PASS.
 
 1. Settle ADRs 0023/0024/0026/0028 and their complete core/port contracts, then
    reconcile DTO/schema/vector bytes with the actual M3 resource facade. ADR 0028
-   must record the artifact transfer design and every limit the technical plan
-   names; ADR 0023 must carry the connection state table; ADR 0024 must fix the
-   successive-round bound. Before acceptance construct executable
+   carries the decided one-verification-per-transfer design and must bind every
+   limit the technical plan names; ADR 0023 must carry the connection state
+   table; ADR 0024 must fix the successive-round bound. Before acceptance construct executable
    interaction/range witnesses and prove their declared reds on the unchanged
    base. After acceptance, require local core/port greens before wire
    implementation/rejoin. Advertise only implemented semantic capabilities;
@@ -106,7 +106,8 @@ A separate program, without loading the product codec, observes:
 - unchanged M3 catalog/selection identity and actual staged skill-use evidence;
 - pending interaction, committed response, host-policy resolution and completed
   tool receipt for the exact tool call;
-- bounded artifact reconstruction with distinct full-object and range hashes;
+- bounded artifact transfer with distinct full-object and chunk hashes and one
+  verification per transfer;
 - gap-free committed events, truthful progress fallback, run.finished and
   session.settled, and a fresh authoritative settled attachment;
 - protocol records only on stdout and bounded diagnostics on stderr.
@@ -134,10 +135,10 @@ binding.
 | --- | --- |
 | `927db7431a66f6c3963e552ee95beb459f5a735d9fd0782bb793affaad3f4617` | `scripts/check-m4-gate.sh` |
 | `952e2549fed1cb96de70db016b1fb1bd8da3c191b3a41db6ac7a7baf37047f4d` | `scripts/m4-opening-probe.exs` |
-| `60cf412d06b9ec0d07d7b671aa444a7fbfc178ea42d94a3073685022861f1bfd` | `scripts/m4-gate-support.exs` |
+| `357a0d1aa982d1fa0fa8d2163507de4602822c562e7465d4b436a94bcb5a98c9` | `scripts/m4-gate-support.exs` |
 | `65d0de9dcd1218af542f00e32c2177d2612a2f1232f22db37b9942200c84cf66` | `scripts/m3-gate-support.exs` |
 | `c4d485ca3229441c678abe1e8733f90216e89e0dfb9e81786f58f525619aec29` | `scripts/check-closed-gates.sh` |
-| `a9f76fd9c07fd5a696d28f28296c380eb2b43aa7c013060a8a3a4e7c7682236d` | `scripts/m4-outcomes.exs` |
+| `9121c61de6d8e6674b7551b9ea282307e5a8d5551b8ece29ced33234b752d228` | `scripts/m4-outcomes.exs` |
 | `cc290e60d9f9588c75f1259b25976a58d1c30713e570cd5a88c70cdf3c2159a0` | `scripts/m1-exunit-runner.exs` |
 | `0a8406ca080c70624e776b01e37c7ded210b54659064cf63723a847a54debe2d` | `apps/loopex/test/m1_exunit_runner_test.exs` |
 | `fad47299b27a767785d2a6a776155038054f5457ee3ce0195a37ae667f7a9999` | `.tool-versions` |
@@ -213,7 +214,7 @@ are pinned before acceptance, not by this opening.
 | 1 | `apps/loopex_app_server/test/initialization_test.exs` | Exact generation/schema/limit negotiation before mutation; mutation-before-init and duplicate-init refusal without durable work; stdout purity and real process boundary |
 | 2 | `apps/loopex_app_server/test/session_mapping_test.exs` | Same corpus facade/wire; independent request and command identity with replay idempotency; admission vs completion; snapshot/live ordering |
 | 3 | `apps/loopex/test/interaction_lifecycle_test.exs`, `apps/loopex_app_server/test/foundation_mapping_test.exs` | Durable request/answer/policy/intent cuts, fixed timestamps through uncertain commits, expiry/abort/restart races, the exact successive-round bound, old-reader refusal; exact resources, missing/stale trust, manual-only selection, answer admission separate from re-evaluation and grant/intent, immutable launch inputs unreplaceable from the wire |
-| 4 | `apps/loopex_store_local/test/artifact_range_test.exs`, `apps/loopex_app_server/test/delivery_bounds_test.exs` | Complete verification before any chunk with one verification per transfer, distinct object/range digests, unsupported-store refusal, wrong-session use, object/use swap, corruption outside the returned range, concurrent-reader and connection-work exhaustion, cancellation and descriptor release, byte/deadline budgets; malformed UTF-8, duplicate keys, nesting, fragmented/multiple/oversized frames, blocked reader, detach cursor, late progress and actual cleanup |
+| 4 | `apps/loopex_store_local/test/artifact_transfer_test.exs`, `apps/loopex_app_server/test/delivery_bounds_test.exs` | Complete verification at open with one verification per transfer, distinct object/chunk digests, unsupported-store refusal, wrong-session use, object/use swap, corruption outside the requested window, concurrent-transfer and connection-work exhaustion, lifetime expiry, cancellation and descriptor release, chunk/deadline budgets; malformed UTF-8, duplicate keys, nesting, fragmented/multiple/oversized frames, blocked reader, detach cursor, late progress and actual cleanup |
 | 5 | `apps/loopex_app_server/test/external_workflow_test.exs` | TypeScript skill → interaction answer → policy re-evaluation → committed grant/intent → actual tool → artifact → abrupt restart from operator input with no embedded identities; stdin EOF performs orderly shutdown with no cancellation and a still-pending interaction; `session.abort` is the separate deliberate case |
 | 6 | `apps/loopex_protocol/test/public_schema_conformance_test.exs` | Independently executed Elixir, Python and TypeScript clients over canonical positive/negative vectors under the pinned interpreters; exact version and platform identities |
 
