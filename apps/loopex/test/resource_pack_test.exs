@@ -124,6 +124,7 @@ defmodule Loopex.ResourcePackTest do
       [
         %{origin: "https://user:secret@example.invalid/repo", commit: sha1, tree_digest: sha1},
         %{origin: "https://example.invalid/repo?token=secret", commit: sha1, tree_digest: sha1},
+        %{origin: "https://example.invalid/repo#directory", commit: sha1, tree_digest: sha1},
         %{origin: "https://example.invalid/repo", commit: String.upcase(sha1), tree_digest: sha1},
         %{origin: "https://example.invalid/repo", commit: sha1, tree_digest: sha256},
         %{origin: nil, commit: sha1, tree_digest: sha1}
@@ -135,6 +136,36 @@ defmodule Loopex.ResourcePackTest do
                  ResourcePack.digest(manifest([remote]))
       end
     )
+  end
+
+  test "origin sanitation rejects disguised credentials and permits username-only SSH" do
+    sha1 = String.duplicate("a", 40)
+
+    Enum.each(
+      [
+        "ssh://git@example.invalid/org/repo.git",
+        "git@example.invalid:org/repo.git"
+      ],
+      fn origin ->
+        remote =
+          pack("remote", [file("SKILL.md")])
+          |> Map.merge(%{origin: origin, commit: sha1, tree_digest: sha1})
+
+        assert {:ok, _digest, normalized} = ResourcePack.digest(manifest([remote]))
+        assert get_in(normalized, ["packs", Access.at(0), "origin"]) == origin
+      end
+    )
+
+    disguised =
+      pack("remote", [file("SKILL.md")])
+      |> Map.merge(%{
+        origin: " https://user:secret@example.invalid/repo.git",
+        commit: sha1,
+        tree_digest: sha1
+      })
+
+    assert {:error, :manifest_rejected, %{"reason" => "invalid_pack"}} =
+             ResourcePack.digest(manifest([disguised]))
   end
 
   test "list shells text bodies metadata and counts are bounded before canonical work" do
