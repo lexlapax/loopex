@@ -619,8 +619,8 @@ defmodule LoopexCli do
   defp resume({flags, words}, options) do
     with {:ok, session_id} <- positional(words, "session identifier"),
          {:ok, policy} <- policy(Map.get(flags, "policy")),
-         {:ok, runtime} <- start_runtime(flags, policy, options),
-         {:ok, root} <- state_root(flags) do
+         {:ok, root} <- state_root(flags),
+         {:ok, runtime} <- recovery_runtime(root, session_id, flags, policy, options) do
       recover(:resume, root, runtime, session_id, flags)
     end
   end
@@ -869,7 +869,7 @@ defmodule LoopexCli do
     with {:ok, policy} <- reconciling_policy(flags),
          {:ok, root} <- state_root(flags),
          :none <- Placement.live_owner(root),
-         {:ok, runtime} <- start_runtime(flags, policy, options) do
+         {:ok, runtime} <- recovery_runtime(root, session_id, flags, policy, options) do
       recover(:cancel, root, runtime, session_id, flags)
     else
       {:ok, owner} ->
@@ -888,6 +888,76 @@ defmodule LoopexCli do
       # rather than inspected into the terminal.
       {:error, reason} ->
         {:error, stated(reason, session_id)}
+    end
+  end
+
+  defp recovery_runtime(root, session_id, flags, policy, options) do
+    with {:ok, inspection_options} <-
+           runtime_options(flags, policy, options, nil),
+         {:ok, digest} <-
+           runtime_bracket(options).(inspection_options, fn runtime ->
+             inspect_recovery_manifest(root, session_id, runtime)
+           end),
+         {:ok, manifest} <- load_recovery_manifest(root, digest, options) do
+      final_options = resource_manifest_option(inspection_options, manifest)
+      start_configured_runtime(final_options, options)
+    end
+  end
+
+  defp resource_manifest_option(options, nil), do: Keyword.delete(options, :resource_manifest)
+
+  defp resource_manifest_option(options, manifest),
+    do: Keyword.put(options, :resource_manifest, manifest)
+
+  defp inspect_recovery_manifest(root, session_id, runtime) do
+    prepared =
+      facade(Loopex, :prepare_resume_known_session, [root, runtime, session_id, unique_id()])
+
+    case prepared do
+      {:ok, {:prepared, activation}} ->
+        catalog = facade(Loopex, :resource_catalog, [runtime, session_id])
+        abandoned = give_up(activation)
+
+        with {:ok, resource_catalog} <- catalog,
+             :ok <- abandoned,
+             do: admitted_manifest_digest(resource_catalog)
+
+      {:ok, {:replayed, _resumed}} ->
+        with {:ok, catalog} <- facade(Loopex, :resource_catalog, [runtime, session_id]),
+             do: admitted_manifest_digest(catalog)
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp admitted_manifest_digest(catalog),
+    do: {:ok, catalog["admitted_manifest_digest"] || catalog[:admitted_manifest_digest]}
+
+  defp load_recovery_manifest(_root, nil, _options), do: {:ok, nil}
+
+  defp load_recovery_manifest(root, digest, options) do
+    case resource_packs(options, :load, [root, digest]) do
+      {:ok, manifest} ->
+        {:ok, manifest}
+
+      {:error, {_reason, _detail}} ->
+        IO.puts(
+          :stderr,
+          "loopex: the admitted skill snapshot is unavailable; recovery continues with skill content withheld"
+        )
+
+        {:ok, nil}
+    end
+  end
+
+  defp runtime_bracket(options) do
+    case Keyword.fetch(options, :runtime_bracket) do
+      {:ok, bracket} ->
+        bracket
+
+      :error ->
+        &LoopexComposition.with_runtime/2
     end
   end
 
@@ -1237,9 +1307,14 @@ defmodule LoopexCli do
          do: {:ok, {runtime, resource_manifest}}
   end
 
-  defp start_runtime(flags, policy, options), do: start_runtime(flags, policy, options, nil)
-
   defp start_runtime(flags, policy, options, resource_manifest) do
+    with {:ok, composition_options} <-
+           runtime_options(flags, policy, options, resource_manifest) do
+      start_configured_runtime(composition_options, options)
+    end
+  end
+
+  defp runtime_options(flags, policy, _options, resource_manifest) do
     with {:ok, workspace} <- workspace(flags),
          {:ok, root} <- state_root(flags),
          {:ok, cleanup} <- cleanup_grace(flags),
@@ -1259,8 +1334,6 @@ defmodule LoopexCli do
       decision = ProjectResources.decide(discovered, workspace)
       manifest = ProjectResources.runtime_manifest(discovered)
 
-      runtime_starter = Keyword.get(options, :runtime_starter, &LoopexComposition.start/1)
-
       # Concept: yesterday's session can be resumed today, and the file the
       # previous run left behind is not what decides that.
       #
@@ -1279,21 +1352,26 @@ defmodule LoopexCli do
       resource_options =
         if is_nil(resource_manifest), do: [], else: [resource_manifest: resource_manifest]
 
-      runtime_starter.(
-        [
-          runtime_id: placement,
-          state_root: root,
-          workspace: workspace,
-          policy: policy,
-          project_manifest: manifest,
-          project_decision: decision,
-          progress_to: self(),
-          provider_launch: LoopexCli.ProviderLaunch.options(),
-          recover_stale_writer: true
-        ] ++ resource_options ++ cleanup ++ context
-      )
-      |> started()
+      {:ok,
+       [
+         runtime_id: placement,
+         state_root: root,
+         workspace: workspace,
+         policy: policy,
+         project_manifest: manifest,
+         project_decision: decision,
+         progress_to: self(),
+         provider_launch: LoopexCli.ProviderLaunch.options(),
+         recover_stale_writer: true
+       ] ++ resource_options ++ cleanup ++ context}
     end
+  end
+
+  defp start_configured_runtime(composition_options, options) do
+    options
+    |> Keyword.get(:runtime_starter, &LoopexComposition.start/1)
+    |> then(& &1.(composition_options))
+    |> started()
   end
 
   @store_writer_refusal "another process is already writing this state root's store; " <>

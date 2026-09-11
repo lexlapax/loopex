@@ -154,6 +154,47 @@ defmodule LoopexCli.FoundationWorkflowTest do
              )
   end
 
+  # Concept: a fresh CLI process recovers the exact skill content admitted by
+  # the prior process while preserving its configured provider launch.
+  #
+  # Technical depth: one source-built CLI completes the real skill/tool/artifact
+  # workflow and exits. A second operating-system process uses the production
+  # preparation bracket, loads the exact admitted snapshot, and replays the
+  # durable result. No third provider request means inspection stayed paused.
+  test "trusted launch and fresh process recovery preserve resource and provider configuration" do
+    workflow = configured_recovery_workflow("recovery")
+    {session_id, first_output} = complete_cli_workflow(workflow)
+    {recovery_output, 0} = resume_cli_workflow(workflow, session_id)
+
+    assert first_output =~ "artifact retained"
+    assert recovery_output =~ "artifact retained"
+    assert [{first, true}, {second, true}] = ProviderFixture.events(workflow.provider)
+    assert workflow.instruction in Enum.map(first["messages"], & &1["content"])
+    assert workflow.support in Enum.map(first["messages"], & &1["content"])
+    assert Jason.encode!(second) =~ "output truncated"
+  end
+
+  test "fresh recovery withholds resources when the admitted snapshot is missing" do
+    workflow = configured_recovery_workflow("missing-recovery")
+    {session_id, first_output} = complete_cli_workflow(workflow)
+
+    retained =
+      Path.join([
+        workflow.state_root,
+        "resource-packs",
+        "manifests",
+        workflow.digest <> ".etf"
+      ])
+
+    File.rm!(retained)
+    {recovery_output, 0} = resume_cli_workflow(workflow, session_id)
+
+    assert first_output =~ "artifact retained"
+    assert recovery_output =~ "admitted skill snapshot is unavailable"
+    assert recovery_output =~ "artifact retained"
+    assert length(ProviderFixture.events(workflow.provider)) == 2
+  end
+
   test "new readers preserve genuine M2 history and old readers refuse new records before effects" do
     root = owned_root("compatibility")
 
@@ -592,6 +633,64 @@ defmodule LoopexCli.FoundationWorkflowTest do
       instruction: instruction,
       support: support
     }
+  end
+
+  defp configured_recovery_workflow(label) do
+    credential = "m3-foundation-#{label}"
+    variable = ReqLLM.credential_variable()
+    previous = System.get_env(variable)
+    System.put_env(variable, credential)
+
+    on_exit(fn ->
+      if previous,
+        do: System.put_env(variable, previous),
+        else: System.delete_env(variable)
+    end)
+
+    workflow = workflow_fixture(label, credential)
+    Map.put(workflow, :cli_binary, build_isolated_provider_cli(workflow))
+  end
+
+  defp complete_cli_workflow(workflow) do
+    {output, 0} =
+      run_cli_process(
+        workflow.cli_binary,
+        [
+          "run",
+          "--policy",
+          "allow-all",
+          "--skill",
+          "review",
+          "--skill-resource",
+          "review:references/checklist.md",
+          "--state-root",
+          workflow.state_root,
+          "--workspace",
+          workflow.workspace,
+          "Use the review skill and inspect large.txt."
+        ],
+        nil
+      )
+
+    assert {:ok, [%{session_id: session_id}]} = Loopex.list_sessions(workflow.state_root)
+    {session_id, output}
+  end
+
+  defp resume_cli_workflow(workflow, session_id) do
+    run_cli_process(
+      workflow.cli_binary,
+      [
+        "resume",
+        session_id,
+        "--policy",
+        "allow-all",
+        "--state-root",
+        workflow.state_root,
+        "--workspace",
+        workflow.workspace
+      ],
+      nil
+    )
   end
 
   defp run_embedded(runtime, workflow) do

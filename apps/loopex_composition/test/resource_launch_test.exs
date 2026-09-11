@@ -108,4 +108,118 @@ defmodule LoopexComposition.ResourceLaunchTest do
       Process.delete(effect_observer)
     end
   end
+
+  test "with_runtime returns only after every owned process stops orderly" do
+    {state_root, workspace} = roots()
+    test = self()
+    marker = make_ref()
+    observer = :"$loopex_composition_edge_observer"
+
+    Process.put(observer, fn module, function, arguments ->
+      result = apply(module, function, arguments)
+      send(test, {marker, module, result})
+      result
+    end)
+
+    try do
+      assert :callback_result =
+               LoopexComposition.with_runtime(
+                 [
+                   runtime_id: "bracketed-runtime",
+                   state_root: state_root,
+                   workspace: workspace,
+                   policy: Embedder
+                 ],
+                 fn runtime ->
+                   assert Loopex.Runtime.alive?(runtime)
+                   :callback_result
+                 end
+               )
+
+      acquired =
+        for _index <- 1..4 do
+          assert_receive {^marker, module, {:ok, owned}}
+          {module, owned}
+        end
+
+      for {module, owned} <- acquired, module != Loopex do
+        refute Process.alive?(owned)
+      end
+
+      refute File.exists?(Path.join(state_root, "store.log.writer"))
+    after
+      Process.delete(observer)
+    end
+  end
+
+  test "with_runtime reports forced cleanup after stopping every owned process" do
+    {state_root, workspace} = roots()
+    observer = :"$loopex_composition_effect_observer"
+
+    Process.put(observer, fn
+      Process, :exit, [pid, :shutdown] ->
+        case Process.get(:loopex_force_one_cleanup) do
+          nil ->
+            Process.put(:loopex_force_one_cleanup, true)
+            :ok
+
+          true ->
+            apply(Process, :exit, [pid, :shutdown])
+        end
+
+      module, function, arguments ->
+        apply(module, function, arguments)
+    end)
+
+    try do
+      assert {:error, {:composition_cleanup_unconfirmed, failures}} =
+               LoopexComposition.with_runtime(
+                 [
+                   runtime_id: "forced-cleanup-runtime",
+                   state_root: state_root,
+                   workspace: workspace,
+                   policy: Embedder
+                 ],
+                 fn runtime ->
+                   assert Loopex.Runtime.alive?(runtime)
+                   :callback_result
+                 end
+               )
+
+      assert length(failures) == 1
+      assert Enum.all?(failures, &match?({_module, :forced_stop, _, _, :killed}, &1))
+      refute File.exists?(Path.join(state_root, "store.log.writer"))
+    after
+      Process.delete(observer)
+    end
+  end
+
+  test "with_runtime reraises callback exceptions after cleanup" do
+    {state_root, workspace} = roots()
+
+    assert_raise RuntimeError, "callback failed", fn ->
+      LoopexComposition.with_runtime(
+        [
+          runtime_id: "exception-runtime",
+          state_root: state_root,
+          workspace: workspace,
+          policy: Embedder
+        ],
+        fn _runtime -> raise "callback failed" end
+      )
+    end
+
+    refute File.exists?(Path.join(state_root, "store.log.writer"))
+
+    assert :reopened =
+             LoopexComposition.with_runtime(
+               [
+                 runtime_id: "exception-runtime-reopened",
+                 state_root: state_root,
+                 workspace: workspace,
+                 policy: Embedder
+               ],
+               fn _runtime -> :reopened end
+             )
+  end
 end
