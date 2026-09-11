@@ -1916,3 +1916,43 @@ disposition, the register and derived lifecycle prose; it changes no normative
 envelope, gate, ADR decision or product byte. Its own independent exact-diff
 review remains required before integration. M3 is not Closed, M4 remains an
 unopened draft, and no main merge, release, tag or publication is authorized.
+
+<a id="override-disposition-m3-implementation-gate-cadence-2026-09-10"></a>
+### M3 implementation gate cadence — 2026-09-10
+
+The maintainer's current implementation instruction is:
+
+> finish m3 implementation. do unit tests until complete. do overall m0, m1, m2 and m3 gate check after you think m3 is complete (only at the end because they take time to run). ask me questions to clarify or make architectural changes.
+
+The explicit clarification asked:
+
+> Do you explicitly approve replacing M3’s full-gate checks at implementation start and intermediate workstream rejoins with focused tests, while requiring the complete M0–M3 gates at the final candidate? This changes timing only; all required tests and pass criteria remain.
+
+The maintainer answered: **"Approve end-only full gates"**.
+
+Under [the explicit maintainer override](../../AGENTS.md#maintainer-override),
+this instruction replaces the continuing full-gate timing requirements for
+ordinary M3 implementation in AGENTS.md, the accepted M3 Technical envelope's
+"Cheap checkpoints and full contract evidence" section and the M3 gate's
+"Runner Modes and Evidence Cost" section. Focused unit, conformance, integration
+and repair tests run during implementation. Full M0, M1, M2 and M3 gates run
+after the implementer judges all M3 outcomes complete, rather than at the
+implementation start, intermediate checkpoints or parallel-workstream rejoins.
+The full M3 command already owns the M0–M2 predecessor aggregate; its retained
+per-gate results may satisfy that final set without duplicate invocations.
+
+This approval changes timing only. It changes no bound artifact, protected
+witness, gate command, outcome, acceptance or closure record, ADR decision,
+required real path or pass criterion. Intermediate focused evidence is not
+full-gate evidence. An observed inherited regression still requires repair,
+and the assigned executor flake still requires stable evidence before closure.
+If final checks find a defect, repair it and rerun affected final evidence at the
+resulting candidate; never carry a PASS across invalidating changes. Any needed
+architectural or binding change must be raised separately under its existing
+decision procedure. This disposition grants no M3 closure, product merge or
+release and changes no M4 obligation.
+
+This standalone disposition must receive independent exact-SHA read-only
+review before implementation relies on its replacement schedule. Historical
+acceptance evidence and the acceptance-only aggregate waiver keep their
+original scope and meaning.
