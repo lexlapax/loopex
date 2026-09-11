@@ -2082,3 +2082,53 @@ This grants no exception to a product test or other check, no additional title
 exception, and no ADR change, milestone closure, product integration to `main`,
 tag, or release. The red commit-title evidence retained for
 `f82fb25270ebcdecb23730d57187e9d3ac28b7ca` remains true for that revision.
+
+<a id="override-disposition-m3-acquisition-deadline-witness-2026-09-11"></a>
+### M3 acquisition deadline witness timing, 2026-09-11
+
+The maintainer received the reviewed test-only repair proposal:
+
+> Approve this test-only repair? The current test gives Git only 0.75 seconds to start. The proposed repair uses a 10-second import deadline and a 25-second outer watchdog, requires proof that Git actually started, then verifies that the deadline stopped it and left no published files or running process. Production limits stay unchanged; this adds about nine seconds to this test.
+
+The proposed patch has SHA-256
+`1dc8f2062ee6b94e9806b2d0e5f8363a1373a9561c2abf0a89461b35387e02eb`.
+After the pending choice was restated as the test-only 10-second deadline and
+25-second watchdog, the maintainer answered **"authorize test-only 10 second"**.
+
+Under [the explicit maintainer override](../../AGENTS.md#maintainer-override),
+this replaces only the existing 750-millisecond deadline allowance and its
+delayed-wrapper witness in
+`apps/loopex_composition/test/skill_acquisition_test.exs`, within the protected
+case `import uses the authorized executor with closed configuration and bounded cancellation`.
+It is the explicit exception to AGENTS.md's prohibition on increasing test
+timeouts for this repair. The replacement uses a 10,000-millisecond import
+deadline and a 25,000-millisecond outer watchdog, allowing the import period,
+the existing cleanup period and the existing owner-stop bounds.
+
+The witness must observe a positive process-group identity and a live Git
+wrapper before awaiting expiry. The wrapper remains held throughout the test;
+neither the successful path nor failure teardown releases it. A successful
+witness requires the exact coordinator deadline refusal, or a matching retained
+executor receipt with the reported outcome and executor-owned deadline
+diagnostic. Elapsed time alone and a generic error are insufficient. Preserve
+proof of an empty process group, no escaped execution, no published pack, no
+provenance record and no staging residue. Failure teardown cannot supply the
+successful-path proof. Retain bounded result and receipt summaries when the
+deadline evidence is absent or inconsistent.
+
+This is a test-only change. Production deadlines, cleanup bounds, APIs, accepted
+ADR decisions, gate commands, protected case identity and every other witness
+remain unchanged. The test file is not a digest-bound artifact of M0–M3; no gate
+binding changes. The original missing-readiness failure at
+`2df5eda7ba7c5e62adc9408b19e52737aa2c0ac7` remains failed evidence. Its original
+cause was not established; the diagnostic pass does not erase it or waive the
+replacement witness's required proof.
+
+This standalone commit adds only this disposition. An independent reviewer
+must examine its exact SHA before the test patch is applied or executed. Then
+run the complete acquisition test file on the current and accepted-floor macOS
+toolchains and on Linux serenity. Retain source, command, seed, result and log
+identity, and diagnose any failure before another run. The complete final M0–M3
+gates remain required on the resulting candidate under the existing approved
+cadence. Commit and push completed work to `m3`; this approval grants no M3
+closure, product integration to `main`, release or waiver of another finding.
