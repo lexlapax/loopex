@@ -3,7 +3,10 @@
 <a id="concept"></a>
 ## Concept
 
-A coding session is only useful if it can act. M2 gives a session four tools —
+Technical depth: [Budgets, policy, grants, and credential boundaries](#technical-depth).
+
+A coding session is only useful if it can act. The source checkout gives a
+session four tools —
 `read`, `write`, `edit`, and `bash` — that act on a real workspace on your
 machine, and it puts a host policy in front of every one of them.
 
@@ -299,6 +302,27 @@ is the one thing that never enters that record: it stays a reference, never
 reaches a journal, a fixture, a progress item, a diagnostic, or a tool child's
 environment.
 
+<a id="operator-tools-skill-authority"></a>
+## Skill Content Does Not Grant Authority
+
+A project skill may contain instructions, supporting files, scripts, and
+supported metadata. Loopex treats them as inert content. Unsupported execution
+or permission fields refuse installation rather than grant authority.
+Installing or selecting a skill does not register a tool, choose a policy,
+approve a tool call, widen a workspace lease, or mint a grant.
+
+Downloaded scripts do not run during installation or selection. If admitted
+instructions later cause the model to request a script through `bash`, that
+request crosses the same registered-tool, host-policy, grant, workspace, and
+executor checks as any other shell request. A field such as `allowed-tools`, a
+hook declaration, or a vendor-specific extension cannot bypass those checks.
+
+Git installation has its own narrow operator decision. `loopex skill add`
+shows the exact source, commit, and selected directory before fetching and
+requires an affirmative terminal answer. That answer permits only the bounded
+acquisition jobs. It neither admits the resulting skill to a session nor
+changes the `--policy` chosen for a coding run.
+
 <a id="technical-depth"></a>
 ## Technical depth
 
@@ -424,6 +448,22 @@ companion's process group until cleanup is proved. A returned reply or closed
 socket alone is not cleanup proof. See
 [ADR 0019](../adr/0019-host-owned-provider-protection.md#concept) for the accepted
 host and private-channel boundaries.
+
+### Skill Acquisition and Tool Authority
+
+The command acquires a pinned Git import only after explicit operator
+authorization. Clone, commit verification, tree resolution, and checkout are
+ordinary command jobs in the existing local executor. They use a closed Git
+environment: no credential prompt, ambient user or system configuration,
+submodule recursion, hooks, or content filters. The acquisition is
+bounded to 30 seconds per job and publishes the selected skill only after every
+file and identity check succeeds.
+
+This acquisition authorization is scoped to those jobs. The retained pack
+carries no executable authority. Resource admission changes model-visible data;
+tool execution still requires a registered tool generation, a host-policy
+allow decision, a matching workspace lease, and a grant that the executor
+validates against the complete job.
 
 ## Related
 
