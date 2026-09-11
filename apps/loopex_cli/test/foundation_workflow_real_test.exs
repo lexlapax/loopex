@@ -24,7 +24,7 @@ defmodule LoopexCli.FoundationWorkflowRealTest do
   @tag :real_provider
   @tag timeout: 600_000
   test "public pinned Git import and a real provider complete the admitted skill tool and artifact workflow" do
-    require_attended_terminal!()
+    terminal = require_attended_terminal!()
     root = owned_root()
     on_exit(fn -> File.rm_rf!(root) end)
     state_root = Path.join(root, "state")
@@ -40,6 +40,7 @@ defmodule LoopexCli.FoundationWorkflowRealTest do
 
     import_output =
       attended_cli(
+        terminal,
         cli,
         [
           "skill",
@@ -89,6 +90,7 @@ defmodule LoopexCli.FoundationWorkflowRealTest do
 
     run_output =
       attended_cli(
+        terminal,
         cli,
         [
           "run",
@@ -200,6 +202,24 @@ defmodule LoopexCli.FoundationWorkflowRealTest do
             "run the full gate from a terminal (#{inspect(reason)})"
         )
     end
+
+    # Concept: the spawned CLI reads the same operator terminal as this test.
+    # Technical depth: System.cmd children cannot open the parent's /dev/tty;
+    # resolve that parent's device once and pass its strict name as shell data.
+    {output, status} =
+      System.cmd("/bin/ps", ["-p", System.pid(), "-o", "tty="],
+        env: provider_environment(:without_provider),
+        stderr_to_stdout: true
+      )
+
+    name = String.trim(output)
+
+    unless status == 0 and byte_size(name) <= 32 and
+             Regex.match?(~r/\A(?:ttys[0-9]+|pts\/[0-9]+|tty[0-9]+)\z/, name) do
+      flunk("M3 real workflow could not resolve a supported parent terminal device")
+    end
+
+    "/dev/" <> name
   end
 
   defp architecture_fixture do
@@ -288,12 +308,13 @@ defmodule LoopexCli.FoundationWorkflowRealTest do
     ]
   end
 
-  defp attended_cli(cli, arguments, notice, credential_scope) do
-    shell = "printf '%s\\n' \"$1\" >/dev/tty || exit 2; shift; exec \"$@\" </dev/tty"
+  defp attended_cli(terminal, cli, arguments, notice, credential_scope) do
+    shell =
+      ~S(task_operator_tty=$1; shift; printf '%s\n' "$1" >"$task_operator_tty" || exit 2; shift; exec "$@" <"$task_operator_tty")
 
     command!(
       "/bin/sh",
-      ["-c", shell, "loopex-attended", notice, cli | arguments],
+      ["-c", shell, "loopex-attended", terminal, notice, cli | arguments],
       Path.dirname(cli),
       provider_environment(credential_scope)
     )
