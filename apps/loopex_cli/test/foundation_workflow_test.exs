@@ -358,10 +358,8 @@ defmodule LoopexCli.FoundationWorkflowTest do
   end
 
   defp current_reader_paths do
-    build = Mix.Project.build_path()
-
-    for application <- ["loopex_protocol", "loopex", "loopex_store_local"] do
-      path = Path.join([build, "lib", application, "ebin"])
+    for application <- [:loopex_protocol, :loopex, :loopex_store_local] do
+      path = Application.app_dir(application, "ebin")
       assert File.dir?(path)
       path
     end
@@ -863,6 +861,27 @@ defmodule LoopexCli.FoundationWorkflowTest do
   end
 
   defp build_isolated_provider_cli(workflow) do
+    # Concept: the source-built workflow also runs as a standalone gate selector.
+    # Technical depth: only its build helper needs Mix project state. Establish
+    # that state explicitly and keep using the application bytes loaded by the
+    # selector, instead of depending on mix test's ambient project stack.
+    {:ok, _} = Application.ensure_all_started(:mix)
+
+    build = fn ->
+      assert Path.expand(Mix.Project.compile_path()) ==
+               Path.expand(Application.app_dir(:loopex_cli, "ebin"))
+
+      build_cli_in_project(workflow)
+    end
+
+    if Mix.Project.get() == LoopexCli.MixProject do
+      build.()
+    else
+      Mix.Project.in_project(:loopex_cli, Path.expand("..", __DIR__), fn _project -> build.() end)
+    end
+  end
+
+  defp build_cli_in_project(workflow) do
     launch_path = Path.join(workflow.root, "isolated-test-provider.launch")
 
     launch =
