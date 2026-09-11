@@ -289,15 +289,39 @@ publication and compatibility acceptance retain their distinct authorities.
 
 | Category | Required closure disposition |
 | --- | --- |
-| Operator-facing documentation | `docs/operator/app-server.md`, `docs/operator/coding-sessions.md`, `docs/operator/tools-and-policy.md`, `docs/operator/how-a-run-works.md`, `docs/operator/how-a-run-works-technical.md` |
+| Operator-facing documentation | `docs/operator/app-server.md`, `docs/operator/runtime.md`, `docs/operator/coding-sessions.md`, `docs/operator/tools-and-policy.md`, `docs/operator/how-a-run-works.md`, `docs/operator/how-a-run-works-technical.md` |
 | Operator README | `docs/operator/README.md` |
-| Developer-facing documentation | `docs/developer/app-server-protocol.md`, `docs/developer/app-server-protocol-technical.md`, `docs/developer/runtime-and-embedding.md`, `docs/developer/agent-loop-and-tools.md`, `docs/developer/compatibility-surfaces.md`, `docs/developer/agent-context-map.md` |
+| Developer-facing documentation | `docs/developer/app-server-protocol.md`, `docs/developer/app-server-protocol-technical.md`, `docs/developer/architecture.md`, `docs/developer/architecture-technical.md`, `docs/developer/runtime-and-embedding.md`, `docs/developer/agent-loop-and-tools.md`, `docs/developer/compatibility-surfaces.md`, `docs/developer/agent-context-map.md` |
 | Developer README | `docs/developer/README.md` |
 | Documentation README | `docs/README.md` |
 | Root README | `README.md` |
 | Changelog | `CHANGELOG.md` |
 
+Each row is complete only when the documents state what M4 actually changed
+for its reader, in the charter's Concept-then-Technical-depth form where the
+document is a pair:
+
+- **Operator-facing.** How to launch the app server and the TypeScript
+  consumer from a source build; what the operator sees at initialize, attach,
+  prompt, pending interaction, answer, tool receipt, artifact transfer and
+  settlement; the exact meaning of clean EOF, abrupt death and `session.abort`;
+  answering an interaction after a restart; the artifact transfer limits and
+  what "one verification per transfer" costs; the refreshed floor pair, the
+  client interpreter pins and the 0.1.0 source version; and what remains
+  experimental or unavailable (no daemon, sockets, takeover or publication).
+- **Developer-facing.** The protocol pair as the normative wire reference
+  (methods, records, identities, limits, schema and vector identities); the
+  ninth application, the changed client-role dependency rule and the
+  dependency direction; the core interaction lifecycle and the ArtifactStore
+  transfer capability as embedding contracts; the experimental labels and
+  exact-generation rule in the compatibility surfaces; and the context map's
+  routing for M4's ADRs, documents and gate.
+- **Repository-wide.** `docs/README.md`, `README.md` and `CHANGELOG.md`
+  describe the ninth application, the new operator and developer documents,
+  the version transition and its non-release meaning, and the M4 outcome
+  evidence, without claiming any package, tag or publication.
+
 The status check limits the developer-facing row to `docs/developer/` paths, so
 `DEVELOPMENT.md` is named here instead: it is updated at closure for the ninth
-application, the client toolchain pins and the M4 runner commands, and its
-drift blocks closure exactly like a row above.
+application, the refreshed floor pair, the client toolchain pins and the M4
+runner commands, and its drift blocks closure exactly like a row above.
