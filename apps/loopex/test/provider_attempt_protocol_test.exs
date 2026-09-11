@@ -34,6 +34,65 @@ defmodule Loopex.ProviderAttemptPageOneStore do
     do: Store.load_events(store, session_id, after_sequence, limit)
 end
 
+defmodule Loopex.ProviderAttemptRetirementReadStore do
+  @moduledoc false
+
+  @behaviour Loopex.Store
+
+  alias Loopex.Store
+
+  @impl Store
+  def transact({store, _mode, _observer}, transaction), do: Store.transact(store, transaction)
+
+  @impl Store
+  def transaction_status({store, _mode, _observer}, session_id, domain, tx_id),
+    do: Store.transaction_status(store, session_id, domain, tx_id)
+
+  @impl Store
+  def runtime_command({store, _mode, _observer}, command),
+    do: Store.runtime_command(store, command)
+
+  @impl Store
+  def ownership_head({store, _mode, _observer}, session_id, domain),
+    do: Store.ownership_head(store, session_id, domain)
+
+  @impl Store
+  def load_records({_store, :blocked, observer}, session_id, after_version, limit) do
+    send(observer, {:retirement_read_blocked, self(), session_id, after_version, limit})
+
+    receive do
+      :retirement_read_must_not_be_released -> :unreachable
+    end
+  end
+
+  def load_records({store, :malformed, observer}, session_id, after_version, limit) do
+    result = Store.load_records(store, session_id, after_version, limit)
+    send(observer, {:retirement_read_returned_malformed, session_id})
+
+    case result do
+      {:ok, records} ->
+        {:ok,
+         Enum.map(records, fn record ->
+           if record_kind(record.payload) == "model_attempt_settled_v2" do
+             %{record | payload: Map.delete(record.payload, "attempt")}
+           else
+             record
+           end
+         end)}
+
+      other ->
+        other
+    end
+  end
+
+  @impl Store
+  def load_events({store, _mode, _observer}, session_id, after_sequence, limit),
+    do: Store.load_events(store, session_id, after_sequence, limit)
+
+  defp record_kind(record) when is_map(record),
+    do: Map.get(record, :kind) || Map.get(record, "kind")
+end
+
 defmodule Loopex.ProviderAttemptExitModel do
   @moduledoc false
 
@@ -289,6 +348,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
   alias Loopex.AgentLoopTestModel
   alias Loopex.M1RuntimeTestStore
   alias Loopex.ProviderAttemptPageOneStore
+  alias Loopex.ProviderAttemptRetirementReadStore
   alias Loopex.Runtime
   alias Loopex.Runtime.ProviderAttempt
   alias Loopex.Runtime.SessionState
@@ -586,8 +646,8 @@ defmodule Loopex.ProviderAttemptProtocolTest do
   # coordinator, live worker, unexpired deadline and the session's genuine
   # current journal version -- but an invented run, turn, operation, attempt and
   # digest -- was replied `{:ok, :dispatched}` and handed the permit, with no
-  # `model_attempt_opened_v1` row registering any of it. ADR 0018 requires that
-  # "every identity equals its registered state" before the spend, and the
+  # `model_attempt_opened_v1` row registering any of it. ADR 0027 retains the
+  # requirement that "every identity equals its registered state" before the spend, and the
   # registered state is the committed attempt-open row at that position, so both
   # arms below probe positions where no such row stands: a session that has
   # never staged a model operation, and a settled session whose current row is
@@ -608,18 +668,17 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     {session_id, attachment, {:accepted, "prompt-1"}} = Fixture.run(fixture, "settle one run")
     assert await_event(attachment, "run.finished")["outcome"] == "completed"
 
-    [genuine] =
-      fixture
-      |> Fixture.records(session_id)
-      |> records_of_kind("model_attempt_opened_v1")
-      |> Enum.map(&Map.put(attempt_identity(&1), "session_id", session_id))
+    assert [_genuine] =
+             fixture
+             |> Fixture.records(session_id)
+             |> records_of_kind("model_attempt_opened_v1")
 
-    assert spent_attempt_bindings(control) == [genuine]
+    assert spent_attempt_bindings(control) == []
 
     assert refuse_fabricated_permit(fixture, control, session_id) ==
              {:error, :invalid_provider_attempt_binding}
 
-    assert spent_attempt_bindings(control) == [genuine]
+    assert spent_attempt_bindings(control) == []
     assert length(AgentLoopTestModel.dispatched(fixture.model)) == 1
   end
 
@@ -2241,36 +2300,105 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     assert records_of_kind(records, "run_terminal_committed") == []
   end
 
-  # Concept: how long Control remembers that an attempt identity was spent.
+  # Concept: settled historical attempts do not make Control memory grow with a
+  # session's lifetime, while unresolved work remains fenced by its exact spend.
   #
-  # Technical depth: ADR 0018 requires the spend to outlive the coordinator and
-  # the worker for the complete ownership generation -- "replacing the
-  # coordinator or worker does not clear it" -- because a successor that could
-  # re-spend an identity could make a second provider call on an attempt that
-  # may already have been billed. So a succession is exactly the moment the map
-  # must not be pruned, and this states that. What it may not do is outlive the
-  # session's ownership itself, which is why the entry is dropped on the one
-  # line that removes the session from Control. The retained key is the exact
-  # attempt binding, which is also the value the refusal is compared against.
-  test "a spent attempt identity is the exact attempt binding and outlives the owner that spent it" do
-    fixture = start(script: [%{text: "one attempt", calls: []}])
+  # Technical depth: the Store commits a terminal settlement beside the run
+  # terminal. ADR 0027 permits Control to retire that exact binding only after
+  # both rows close the authorization domain. The durable current-position check
+  # remains the refusal authority; absence from the spent map grants nothing.
+  test "retired permit retention is bounded by active sessions and unresolved work" do
+    attempts = 24
+    fixture = start(script: List.duplicate(%{text: "settled attempt", calls: []}, attempts))
 
-    {session_id, attachment, {:accepted, "prompt-1"}} = Fixture.run(fixture, "spend one identity")
+    {session_id, attachment, {:accepted, "prompt-1"}} = Fixture.run(fixture, "retire one")
     assert await_event(attachment, "run.finished")["outcome"] == "completed"
 
     {:ok, %{control: control}} = Runtime.children(fixture.runtime)
 
-    [opened] =
-      fixture |> Fixture.records(session_id) |> records_of_kind("model_attempt_opened_v1")
+    for attempt <- 2..attempts do
+      command_id = "retirement-sequence-#{attempt}"
 
-    binding = Map.put(attempt_identity(opened), "session_id", session_id)
+      assert {:accepted, ^command_id} =
+               Loopex.command(attachment, %{
+                 type: :prompt,
+                 command_id: command_id,
+                 content: "retire #{attempt}"
+               })
 
-    assert spent_attempt_bindings(control) == [binding]
+      assert await_event(attachment, "run.finished")["outcome"] == "completed"
+      assert spent_attempt_bindings(control) == []
+    end
 
-    assert {:ok, ^session_id} =
-             Loopex.resume_session(fixture.runtime, session_id, command_id: "resume-once")
+    assert length(
+             fixture
+             |> Fixture.records(session_id)
+             |> records_of_kind("model_attempt_opened_v1")
+           ) == attempts
 
-    assert spent_attempt_bindings(control) == [binding]
+    assert length(
+             fixture
+             |> Fixture.records(session_id)
+             |> records_of_kind("model_attempt_settled_v2")
+           ) == attempts
+
+    assert spent_attempt_bindings(control) == []
+
+    for mode <- [:malformed, :blocked] do
+      assert_retirement_read_failure_retains(mode)
+    end
+
+    assert_terminal_without_settlement_retains()
+  end
+
+  # Concept: a retired identity remains refused by durable authorization after
+  # the local spent evidence has been pruned.
+  #
+  # Technical depth: this preserves ADR 0018's delayed-identity refusal while
+  # applying ADR 0027's shorter retention lifetime. The replay is a captured
+  # production request with only its dead worker/reference replaced. Its open
+  # position is no longer current, so the request is refused before the empty
+  # spent set both before and after Control restart and owner succession.
+  test "retired identities remain refused across delayed registration restart and ownership succession" do
+    fixture = start(script: [%{text: "one attempt", calls: []}])
+    attempt = queue_provider_permit_request(fixture, "retire and replay")
+
+    resume_process(attempt.control)
+    _permit = await_control_permit(attempt.control, attempt.worker, attempt.binding)
+    assert await_event(attempt.attachment, "run.finished")["outcome"] == "completed"
+    assert spent_attempt_bindings(attempt.control) == []
+    predecessor = control_entry(attempt.control, attempt.session_id)
+
+    assert replay_retired_request(attempt.control, attempt.control_request, %{
+             coordinator: attempt.coordinator,
+             owner: predecessor.owner,
+             old_coordinator: attempt.coordinator,
+             old_owner: predecessor.owner,
+             old_worker: attempt.worker,
+             old_reference: attempt.permit_reference
+           }) == {:error, :stale_attempt_open_position}
+
+    Process.exit(attempt.control, :kill)
+    restarted = await_restarted_control(fixture.runtime, attempt.control)
+
+    assert {:ok, attempt.session_id} ==
+             Loopex.resume_session(fixture.runtime, attempt.session_id,
+               command_id: "resume-retired-identity"
+             )
+
+    successor = control_entry(restarted, attempt.session_id)
+
+    assert replay_retired_request(restarted, attempt.control_request, %{
+             coordinator: successor.coordinator,
+             owner: successor.owner,
+             old_coordinator: attempt.coordinator,
+             old_owner: predecessor.owner,
+             old_worker: attempt.worker,
+             old_reference: attempt.permit_reference
+           }) == {:error, :stale_attempt_open_position}
+
+    assert spent_attempt_bindings(restarted) == []
+    assert length(AgentLoopTestModel.dispatched(fixture.model)) == 1
   end
 
   # Concept: an abort that lands after the attempt opened and before anything
@@ -3797,6 +3925,138 @@ defmodule Loopex.ProviderAttemptProtocolTest do
       worker: worker,
       permit_reference: permit_reference
     }
+  end
+
+  defp assert_retirement_read_failure_retains(mode) do
+    fixture =
+      start(
+        script: [
+          %{text: "retain on #{mode}", calls: [], hold: self(), hold_timeout_ms: 30_000}
+        ]
+      )
+
+    attempt = queue_provider_permit_request(fixture, "retirement read #{mode}")
+    resume_process(attempt.control)
+    _permit = await_control_permit(attempt.control, attempt.worker, attempt.binding)
+    assert_receive {:holding, callback}, 5_000
+    assert spent_attempt_bindings(attempt.control) == [attempt.binding]
+
+    {:ok, backing_store} = Store.new(M1RuntimeTestStore, fixture.store)
+
+    {:ok, faulting_store} =
+      Store.new(ProviderAttemptRetirementReadStore, {backing_store, mode, self()})
+
+    :sys.replace_state(attempt.control, &Map.put(&1, :store, faulting_store))
+    send(callback, :release)
+
+    expected =
+      case mode do
+        :malformed -> {:retirement_read_returned_malformed, attempt.session_id}
+        :blocked -> {:retirement_read_blocked, :_, attempt.session_id, :_, :_}
+      end
+
+    case expected do
+      {:retirement_read_returned_malformed, session_id} ->
+        assert_receive {:retirement_read_returned_malformed, ^session_id}, 5_000
+
+      {:retirement_read_blocked, :_, session_id, :_, :_} ->
+        assert_receive {:retirement_read_blocked, reader, ^session_id, _after_version, _limit},
+                       5_000
+
+        monitor = Process.monitor(reader)
+        assert_receive {:DOWN, ^monitor, :process, ^reader, _reason}, 5_000
+    end
+
+    assert await_event(attempt.attachment, "run.finished")["outcome"] == "completed"
+    assert spent_attempt_bindings(attempt.control) == [attempt.binding]
+  end
+
+  defp assert_terminal_without_settlement_retains do
+    fixture = start(script: [%{text: "terminal only receipt", calls: []}])
+
+    :ok =
+      M1RuntimeTestStore.delay_after_record(
+        fixture.store,
+        "run_terminal_committed",
+        self()
+      )
+
+    {session_id, attachment, {:accepted, "prompt-1"}} =
+      Fixture.run(fixture, "terminal does not retire")
+
+    assert_receive {:record_linearized, waiter, _store, "run_terminal_committed", _transition,
+                    {:committed, _tx_id, receipt}},
+                   5_000
+
+    {:ok, %{control: control}} = Runtime.children(fixture.runtime)
+
+    [opened] =
+      fixture |> Fixture.records(session_id) |> records_of_kind("model_attempt_opened_v1")
+
+    binding = Map.put(attempt_identity(opened), "session_id", session_id)
+
+    M1RuntimeTestStore.release(waiter)
+    assert await_event(attachment, "run.finished")["outcome"] == "completed"
+
+    entry = control_entry(control, session_id)
+
+    :sys.replace_state(control, fn state ->
+      %{state | spent_attempts: Map.put(state.spent_attempts, binding, {self(), make_ref()})}
+    end)
+
+    terminal_version = receipt.journal_versions.last
+
+    # The Store row and its position come from the completed real transaction.
+    # Narrowing the acknowledged range to that exact terminal row exercises the
+    # valid receipt shape of a terminal-only commit without inventing a durable
+    # record or weakening Store validation.
+    terminal_only_receipt = put_in(receipt, [:journal_versions, :first], terminal_version)
+
+    positions = %{
+      journal_version: terminal_version,
+      event_sequence: receipt.event_sequences.last
+    }
+
+    assert :ok ==
+             Loopex.Runtime.Control.post_commit(
+               control,
+               session_id,
+               entry.owner,
+               positions,
+               terminal_only_receipt
+             )
+
+    assert spent_attempt_bindings(control) == [binding]
+  end
+
+  defp replay_retired_request(control, request, replacements) do
+    observer = self()
+
+    worker =
+      spawn(fn ->
+        receive do
+          message -> send(observer, {:retired_permit_received, self(), message})
+        after
+          5_000 -> :ok
+        end
+      end)
+
+    replay =
+      request
+      |> replace_exact(replacements.old_coordinator, replacements.coordinator)
+      |> replace_exact(replacements.old_owner, replacements.owner)
+      |> replace_exact(replacements.old_worker, worker)
+      |> replace_exact(replacements.old_reference, make_ref())
+
+    reply_alias = :erlang.alias([:reply])
+    send(control, {:"$gen_call", {replacements.coordinator, [:alias | reply_alias]}, replay})
+    assert_receive {[:alias | ^reply_alias], reply}, 5_000
+    refute_receive {:retired_permit_received, ^worker, _message}, 0
+    reply
+  end
+
+  defp control_entry(control, session_id) do
+    control |> :sys.get_state() |> Map.fetch!(:sessions) |> Map.fetch!(session_id)
   end
 
   defp advance_to_queued_provider_request(
