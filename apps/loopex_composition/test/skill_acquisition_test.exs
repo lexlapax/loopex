@@ -133,7 +133,7 @@ defmodule LoopexComposition.SkillAcquisitionTest do
     refute File.exists?(marker)
 
     receipts = retained_executor_receipts(state_root)
-    assert length(receipts) == 4
+    assert length(receipts) == 6
     assert Enum.all?(receipts, &(&1.tool_id == "loopex.bash"))
     assert Enum.all?(receipts, &(&1.outcome == :completed))
     assert Enum.all?(receipts, &(&1.child_environment_names == ["PATH"]))
@@ -215,6 +215,57 @@ defmodule LoopexComposition.SkillAcquisitionTest do
 
     assert Path.wildcard(Path.join(root, "deadline-state/resource-packs/provenance/*.etf")) ==
              []
+
+    write!(Path.join(source, "not-a-tree"), "ordinary blob\n")
+    blob_commit = commit!(source)
+
+    assert {:error, {:git_identity_mismatch, _detail}} =
+             ResourcePacks.add(Path.join(root, "blob-workspace"), source,
+               workspace_ref: "workspace:blob",
+               state_root: Path.join(root, "blob-state"),
+               rev: blob_commit,
+               path: "not-a-tree",
+               git_executable: git,
+               executor_authorization: {:host_policy, :allow}
+             )
+
+    refute File.exists?(Path.join([root, "blob-workspace", ".agents", "skills", "not-a-tree"]))
+
+    write!(Path.join(source, "too-large/SKILL.md"), skill("too-large"))
+    write!(Path.join(source, "too-large/reference.txt"), :binary.copy("x", 65_537))
+    oversized_commit = commit!(source)
+    oversized_workspace = Path.join(root, "oversized-import-workspace")
+    oversized_state = Path.join(root, "oversized-import-state")
+
+    assert {:error, {:over_limit, _detail}} =
+             ResourcePacks.add(oversized_workspace, source,
+               workspace_ref: "workspace:oversized",
+               state_root: oversized_state,
+               rev: oversized_commit,
+               path: "too-large",
+               git_executable: git,
+               executor_authorization: {:host_policy, :allow}
+             )
+
+    refute File.exists?(Path.join([oversized_workspace, ".agents", "skills", "too-large"]))
+
+    assert Path.wildcard(Path.join(oversized_state, "resource-packs/provenance/*.etf")) == []
+
+    collision_source = Path.join(root, "collision-source")
+    collision_commit = commit_case_collision!(collision_source, root)
+    collision_workspace = Path.join(root, "collision-import-workspace")
+
+    assert {:error, {:unsupported_file, _detail}} =
+             ResourcePacks.add(collision_workspace, collision_source,
+               workspace_ref: "workspace:collision",
+               state_root: Path.join(root, "collision-import-state"),
+               rev: collision_commit,
+               path: "collision",
+               git_executable: git,
+               executor_authorization: {:host_policy, :allow}
+             )
+
+    refute File.exists?(Path.join([collision_workspace, ".agents", "skills", "collision"]))
   end
 
   test "credential-bearing source forms refuse before Git or retention" do
@@ -294,9 +345,9 @@ defmodule LoopexComposition.SkillAcquisitionTest do
     end)
 
     receipts = retained_executor_receipts(state_root)
-    assert length(receipts) == 8
+    assert length(receipts) == 12
     assert receipts |> Enum.map(& &1.executor_identity) |> Enum.uniq() |> length() == 1
-    assert receipts |> Enum.map(& &1.job_id) |> Enum.uniq() |> length() == 8
+    assert receipts |> Enum.map(& &1.job_id) |> Enum.uniq() |> length() == 12
     assert retention_temporaries(state_root) == []
   end
 
@@ -313,6 +364,97 @@ defmodule LoopexComposition.SkillAcquisitionTest do
              ResourcePacks.discover(workspace, workspace_ref: "workspace:test")
 
     assert is_binary(detail) and byte_size(detail) <= 1_024
+
+    for linked_component <- [".agents", ".agents/skills"] do
+      linked_workspace = Path.join(root, "linked-" <> String.replace(linked_component, "/", "-"))
+
+      linked_target =
+        Path.join(root, "linked-target-" <> String.replace(linked_component, "/", "-"))
+
+      write!(Path.join([linked_target, "unsafe", "SKILL.md"]), skill("unsafe"))
+
+      link = Path.join(linked_workspace, linked_component)
+      File.mkdir_p!(Path.dirname(link))
+      File.ln_s!(linked_target, link)
+
+      assert {:error, {:unsupported_file, _detail}} =
+               ResourcePacks.discover(linked_workspace, workspace_ref: "workspace:test")
+    end
+
+    malformed_frontmatter = [
+      "name: malformed\nname: malformed",
+      "name: malformed\ndescription: |\n  first\ndescription: second",
+      "name: malformed\ndescription: valid\nmetadata:\n  owner: first\n  owner: second",
+      "name: malformed\ndescription: *description",
+      "name: malformed\ndescription: &description anchored",
+      "name: malformed\ndescription: !text tagged",
+      "name: malformed\ndescription: ${RUN_ME}",
+      "name: malformed\ndescription: $(run-me)",
+      "name: malformed\ndescription: {nested: object}",
+      "name: malformed\ndescription: valid\nmetadata:\n    nested: object",
+      "name: malformed\ndescription: valid\nlicense: true",
+      "name: malformed\ndescription: valid\ncompatibility:\n  nested: object"
+    ]
+
+    Enum.with_index(malformed_frontmatter, fn frontmatter, index ->
+      malformed_workspace = Path.join(root, "malformed-#{index}")
+
+      write!(
+        Path.join([malformed_workspace, ".agents", "skills", "malformed", "SKILL.md"]),
+        "---\n#{frontmatter}\n---\nBody\n"
+      )
+
+      assert {:error, {reason, detail}} =
+               ResourcePacks.discover(malformed_workspace, workspace_ref: "workspace:test")
+
+      assert reason in [:invalid_frontmatter, :unsupported_frontmatter]
+      assert is_binary(detail) and byte_size(detail) <= 1_024
+    end)
+
+    text_workspace = Path.join(root, "text-workspace")
+    text_skill = Path.join([text_workspace, ".agents", "skills", "large-text"])
+    write!(Path.join(text_skill, "SKILL.md"), skill("large-text"))
+    write!(Path.join(text_skill, "reference.txt"), :binary.copy("x", 65_537))
+
+    assert {:error, {:over_limit, _detail}} =
+             ResourcePacks.discover(text_workspace, workspace_ref: "workspace:test")
+
+    supported_workspace = Path.join(root, "supported-workspace")
+
+    write!(
+      Path.join([supported_workspace, ".agents", "skills", "supported", "SKILL.md"]),
+      """
+      ---
+      name: supported
+      description: |
+        Supported literal description.
+      license: 'MIT'
+      compatibility: >
+        OTP 28
+        Elixir 1.20
+      metadata:
+        owner: project
+      disable-model-invocation: true
+      ---
+      Body.
+      """
+    )
+
+    assert {:ok, %{"packs" => [supported]}} =
+             ResourcePacks.discover(supported_workspace, workspace_ref: "workspace:test")
+
+    assert supported["description"] == "Supported literal description."
+    assert supported["manual_only"]
+
+    invalid_utf8_workspace = Path.join(root, "invalid-utf8-workspace")
+
+    write!(
+      Path.join([invalid_utf8_workspace, ".agents", "skills", "invalid-utf8", "SKILL.md"]),
+      "---\nname: invalid-utf8\ndescription: " <> <<255>> <> "\n---\nBody\n"
+    )
+
+    assert {:error, {:invalid_frontmatter, _detail}} =
+             ResourcePacks.discover(invalid_utf8_workspace, workspace_ref: "workspace:test")
 
     limited_workspace = Path.join(root, "limited-workspace")
     limited_skill = Path.join([limited_workspace, ".agents", "skills", "limited"])
@@ -376,6 +518,24 @@ defmodule LoopexComposition.SkillAcquisitionTest do
     ])
 
     commit = git!(source, ["rev-parse", "HEAD"])
+
+    linked_workspace = Path.join(root, "linked-publish-workspace")
+    linked_target = Path.join(root, "linked-publish-target")
+    File.mkdir_p!(linked_workspace)
+    File.mkdir_p!(linked_target)
+    File.ln_s!(linked_target, Path.join(linked_workspace, ".agents"))
+
+    assert {:error, {:unsupported_file, _detail}} =
+             ResourcePacks.add(linked_workspace, source,
+               workspace_ref: "workspace:linked",
+               state_root: Path.join(root, "linked-state"),
+               rev: commit,
+               path: "safe",
+               git_executable: System.find_executable("git"),
+               executor_authorization: {:host_policy, :allow}
+             )
+
+    refute File.exists?(Path.join([linked_target, "skills", "safe"]))
 
     assert {:error, {:pack_already_installed, _detail}} =
              ResourcePacks.add(workspace, source,
@@ -559,6 +719,45 @@ defmodule LoopexComposition.SkillAcquisitionTest do
       "--quiet",
       "-m",
       "fixture"
+    ])
+
+    git!(source, ["rev-parse", "HEAD"])
+  end
+
+  defp commit_case_collision!(source, root) do
+    write!(Path.join(source, "collision/SKILL.md"), skill("collision"))
+    first = Path.join(root, "collision-first")
+    second = Path.join(root, "collision-second")
+    write!(first, "first\n")
+    write!(second, "second\n")
+    git!(source, ["init", "--quiet"])
+    git!(source, ["add", "collision/SKILL.md"])
+    first_object = git!(source, ["hash-object", "-w", first])
+    second_object = git!(source, ["hash-object", "-w", second])
+
+    git!(source, [
+      "update-index",
+      "--add",
+      "--cacheinfo",
+      "100644,#{first_object},collision/A.txt"
+    ])
+
+    git!(source, [
+      "update-index",
+      "--add",
+      "--cacheinfo",
+      "100644,#{second_object},collision/a.txt"
+    ])
+
+    git!(source, [
+      "-c",
+      "user.name=Loopex Test",
+      "-c",
+      "user.email=test@loopex.invalid",
+      "commit",
+      "--quiet",
+      "-m",
+      "case collision fixture"
     ])
 
     git!(source, ["rev-parse", "HEAD"])
