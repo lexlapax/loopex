@@ -195,28 +195,134 @@ defmodule LoopexComposition.SkillAcquisitionTest do
     deadline_started = Path.join(root, "deadline-started")
     deadline_escaped = Path.join(root, "deadline-escaped")
 
-    deadline_git =
-      delaying_git!(root, git, "deadline", deadline_started, deadline_escaped, 2)
+    {deadline_git, _deadline_release} =
+      holding_git!(root, git, "deadline", deadline_started, deadline_escaped)
 
-    assert {:error, {_reason, _detail}} =
-             ResourcePacks.add(deadline_workspace, source,
-               workspace_ref: "workspace:deadline",
-               state_root: Path.join(root, "deadline-state"),
-               rev: commit,
-               path: "imported",
-               git_executable: deadline_git,
-               executor_authorization: {:host_policy, :allow},
-               deadline_ms: 750
-             )
+    deadline_clock = System.monotonic_time(:millisecond)
 
-    deadline_group = deadline_started |> await_file!() |> String.trim() |> String.to_integer()
-    assert process_group_empty?(deadline_group)
-    refute File.exists?(deadline_escaped)
-    refute File.exists?(Path.join([deadline_workspace, ".agents", "skills", "imported"]))
-    assert staging_paths(deadline_workspace) == []
+    deadline_task =
+      Task.async(fn ->
+        ResourcePacks.add(deadline_workspace, source,
+          workspace_ref: "workspace:deadline",
+          state_root: Path.join(root, "deadline-state"),
+          rev: commit,
+          path: "imported",
+          git_executable: deadline_git,
+          executor_authorization: {:host_policy, :allow},
+          deadline_ms: 10_000
+        )
+      end)
 
-    assert Path.wildcard(Path.join(root, "deadline-state/resource-packs/provenance/*.etf")) ==
-             []
+    try do
+      deadline_group =
+        deadline_started
+        |> await_task_file!(deadline_task)
+        |> String.trim()
+        |> String.to_integer()
+
+      assert deadline_group > 1
+      coordinator = import_coordinator!(deadline_task.pid)
+      coordinator_monitor = Process.monitor(coordinator)
+
+      try do
+        refute process_group_empty?(deadline_group)
+
+        # The held wrapper is never released. Either deadline owner may report first.
+        # The watchdog allows 10s import, 5s cleanup and two existing 5s owner stops.
+        result = Task.await(deadline_task, 25_000)
+        elapsed = System.monotonic_time(:millisecond) - deadline_clock
+
+        deadline_receipts =
+          root
+          |> Path.join("deadline-state")
+          |> retained_executor_receipts()
+          |> Enum.filter(fn receipt ->
+            is_binary(receipt.job_id) and
+              String.starts_with?(receipt.job_id, "resource-import-clone-")
+          end)
+
+        deadline_evidence =
+          case result do
+            {:error, {:git_failed, "resource import deadline reached"}} ->
+              :coordinator_deadline
+
+            {:error, {:executor_failed, detail}}
+            when detail in [":cancelled", ":outcome_unknown"] ->
+              outcome = if detail == ":cancelled", do: :cancelled, else: :outcome_unknown
+
+              matched =
+                Enum.any?(deadline_receipts, fn receipt ->
+                  receipt.outcome == outcome and is_binary(receipt.output) and
+                    String.contains?(receipt.output, "deadline passed")
+                end)
+
+              if matched, do: :executor_deadline, else: :missing_executor_deadline_receipt
+
+            _ ->
+              :unexpected_result_shape
+          end
+
+        receipt_summary =
+          deadline_receipts
+          |> Enum.take(4)
+          |> Enum.map(fn receipt ->
+            receipt
+            |> Map.take([
+              :outcome,
+              :run_deadline_ms,
+              :effective_deadline_ms,
+              :cleanup_confirmation
+            ])
+            |> Map.put(
+              :deadline_diagnostic,
+              is_binary(receipt.output) and String.contains?(receipt.output, "deadline passed")
+            )
+          end)
+
+        diagnostic =
+          "deadline evidence=#{deadline_evidence}; elapsed_ms=#{elapsed}; " <>
+            "result=#{inspect(result, limit: 8, printable_limit: 256)}; " <>
+            "receipts=#{inspect(receipt_summary, limit: 64, printable_limit: 256)}"
+
+        assert elapsed >= 10_000, diagnostic
+        assert deadline_evidence in [:coordinator_deadline, :executor_deadline], diagnostic
+
+        assert process_group_empty?(deadline_group)
+        refute File.exists?(deadline_escaped)
+        refute File.exists?(Path.join([deadline_workspace, ".agents", "skills", "imported"]))
+        assert staging_paths(deadline_workspace) == []
+
+        assert Path.wildcard(Path.join(root, "deadline-state/resource-packs/provenance/*.etf")) ==
+                 []
+      catch
+        kind, reason ->
+          stack = __STACKTRACE__
+          Task.shutdown(deadline_task, :brutal_kill)
+
+          cleaned =
+            receive do
+              {:DOWN, ^coordinator_monitor, :process, ^coordinator, _} ->
+                process_group_empty?(deadline_group)
+            after
+              10_000 -> false
+            end
+
+          # Failure cleanup cannot supply the successful-path deadline proof.
+          try do
+            IO.puts(:stderr, "deadline failure teardown observed_group_empty=#{cleaned}")
+          catch
+            _, _ -> :ok
+          end
+
+          :erlang.raise(kind, reason, stack)
+      after
+        Process.demonitor(coordinator_monitor, [:flush])
+      end
+    after
+      # Before readiness, only the exact caller is owned. Its coordinator observes
+      # caller loss; never release the held script or signal a sampled OS group.
+      if Process.alive?(deadline_task.pid), do: Task.shutdown(deadline_task, :brutal_kill)
+    end
 
     write!(Path.join(source, "not-a-tree"), "ordinary blob\n")
     blob_commit = commit!(source)
@@ -765,21 +871,6 @@ defmodule LoopexComposition.SkillAcquisitionTest do
     git!(source, ["rev-parse", "HEAD"])
   end
 
-  defp delaying_git!(root, real_git, label, started, escaped, seconds) do
-    path = Path.join(root, "git-#{label}")
-
-    File.write!(path, """
-    #!/bin/sh
-    /bin/ps -o pgid= -p "$$" >#{started}
-    /bin/sleep #{seconds}
-    printf escaped >#{escaped}
-    exec #{real_git} "$@"
-    """)
-
-    File.chmod!(path, 0o700)
-    path
-  end
-
   defp holding_git!(root, real_git, label, started, escaped) do
     path = Path.join(root, "git-#{label}")
     release = Path.join(root, "git-#{label}-release")
@@ -812,23 +903,6 @@ defmodule LoopexComposition.SkillAcquisitionTest do
           nil -> await_task_file!(path, task)
           result -> flunk("import ended before Git signalled readiness: #{inspect(result)}")
         end
-    end
-  end
-
-  defp await_file!(path, remaining \\ 200)
-  defp await_file!(_path, 0), do: flunk("delayed Git did not start")
-
-  defp await_file!(path, remaining) do
-    case File.read(path) do
-      {:ok, content} when byte_size(content) > 0 ->
-        content
-
-      {:error, reason} when reason != :enoent ->
-        flunk("could not read Git start marker: #{inspect(reason)}")
-
-      _not_yet_published ->
-        Process.sleep(10)
-        await_file!(path, remaining - 1)
     end
   end
 
