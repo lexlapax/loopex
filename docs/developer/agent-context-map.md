@@ -1985,3 +1985,24 @@ for `8fc7f5c` was stopped without a result and is recorded as waived, not
 unavailable. This commit adds only this disposition; an independent exact-SHA
 read must approve its changed path and authority scope before the M4 plan
 cites it.
+
+<a id="disposition-m4-planning-packet-approval-2026-09-11"></a>
+### M4 planning packet approval — 2026-09-11
+
+The maintainer's actual instruction was: “ok i approve m4. we'll leave it open
+until m3 is done.” It was given after the independent completeness reviewer
+reported the frozen ledger resolved at
+`1b181f916b99556165395da0499d4dbb02a55542` on branch `m4`.
+
+This approves the Open M4 planning packet at that exact revision as complete
+for its lookahead purpose: the plan pair, gate, runner, support scripts,
+outcome manifest, opening probe, prerequisite ADR proposals 0023, 0024, 0026
+and 0028 as revised, and the documentation obligations. M4 stays `Open`. This
+is not acceptance: no Acceptance row is recorded, no envelope or gate digest
+is bound, no ADR is accepted, and no implementation, integration, release,
+tag or publication is authorized. Acceptance still requires M3 to be Closed
+and integrated, the refresh of M4 onto that exact base, every inherited gate
+green with M4's own distinct red, a fresh exact-SHA review, and the
+maintainer's explicit acceptance disposition recorded in its own transition.
+Until then, planning edits to M4 remain ordinary Open-lineage work under the
+recorded aggregate overrides.
