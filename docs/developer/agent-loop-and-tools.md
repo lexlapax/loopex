@@ -276,9 +276,15 @@ worker compares the same committed deadline immediately after receiving the
 permit and before entering the adapter. The send remains the
 provider-dispatch linearization point: a permit that arrives late is retained as
 possibly dispatched and is never retried, even though the receiver makes no
-provider call. The spent attempt identity survives
-owner and worker replacement, so no timeout, lost reply, dead worker, or
-successor can mint a second call for it.
+provider call. An unresolved spent identity survives owner and worker
+replacement. Control retires it after its matching committed settlement closes
+the attempt, with a consecutive matching terminal row when required. Current
+ownership, journal position and exact attempt-open binding remain mandatory even
+after the spent entry is gone, so a timeout, lost reply, dead worker or successor
+cannot mint another call for it. Missing settlement evidence retains the spend;
+a run terminal alone leaves it retained until session release. This is the
+in-memory change accepted in
+[ADR 0027](../adr/0027-provider-permit-retirement.md#concept).
 
 The Store read that rebuilds the committed binding is owned by a guardian that
 monitors Runtime Control. A timeout or Control death kills and awaits the exact

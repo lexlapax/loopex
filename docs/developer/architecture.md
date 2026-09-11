@@ -278,6 +278,14 @@ closed that way at once, since a superseded owner commits nothing, while an
 executor cleanup keeps its worker alive until it answers, so a superseded owner
 lives exactly as long as that effectful work does.
 
+Control retains spent provider identities while their settlement is unresolved.
+After the matching durable settlement closes the attempt, it removes the spent
+entry. Current ownership and the exact current attempt still govern every permit,
+so removing an old entry cannot authorize another provider call. A terminal
+settlement requires its matching consecutive terminal record. An attempt with
+only a run terminal remains retained until the session is released, as required by
+[ADR 0027](../adr/0027-provider-permit-retirement.md#concept).
+
 Technical depth: [Succession, the post-commit fence, and the invariants](architecture-technical.md#technical-arch-session-owner).
 
 <a id="concept-arch-brains-hands"></a>

@@ -37,7 +37,9 @@ before effects, including a session containing only a refused resource command.
 Repair required-first context admission and move dispatcher reads off the
 acknowledgement path, with bounded retained readers, cancellation and late-result
 fences. Fix stale executor test-root reuse through atomic fresh-directory
-reservation. Add deterministic embedding/source-built CLI workflow, resource
+reservation. Retire spent provider permits after matching durable settlement,
+including bounded short-page reads and matching terminal-pair validation, while
+preserving delayed-identity refusal and retry/accounting rules. Add deterministic embedding/source-built CLI workflow, resource
 boundary and old-reader compatibility witnesses. Remaining M3 implementation
 and final qualification are recorded in its plan progress; this entry claims no
 closure or full-gate result.

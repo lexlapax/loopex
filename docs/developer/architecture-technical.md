@@ -180,9 +180,17 @@ exact reader, while a successful result reaches Control only after the reader is
 down. A slow store therefore costs one attempt without holding or outliving
 Control. The binding is
 `session_id`, `run_id`, `turn_id`, `operation_id`, `attempt`, and
-`staged_request_digest`. Spent identities are dropped only when control stops
-holding the session at all; dropping them at succession would hand a successor a
-second call on an attempt that may already have been billed. Fixed by
+`staged_request_digest`. Under
+[ADR 0027](../adr/0027-provider-permit-retirement.md#concept), Control retires a
+spent identity only after its matching validated settlement closes the durable
+authorization domain. A terminal settlement also requires the adjacent matching
+terminal record. The acknowledged receipt range is read through bounded pages
+under one existing one-second deadline; a short conforming page is continued,
+and missing, malformed or unavailable evidence preserves the spend. A run
+terminal without a matching settlement does not retire it before session release.
+Current-owner, current-version and exact attempt-open checks still refuse an old
+identity after pruning or restart. Retirement changes no retry or accounting
+rule inherited from
 [ADR 0018](../adr/0018-provider-attempt-authority-and-recovery.md#concept).
 
 **The effect identity set.** `Loopex.Effect` is pure and process-free. A request

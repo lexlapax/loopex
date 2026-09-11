@@ -39,6 +39,9 @@ M3 preserves genuine M2 histories, including settlement-v2. Once a session
 contains a resource command, an M2 binary cannot open it. Even a refused resource
 command creates this boundary. Rollback uses the old binary with a complete
 old-format state-root backup; removing skill files does not downgrade history.
+Provider-permit retirement changes only Control's in-memory retention. It adds
+no record or retry permission; rollback to longer retention requires no journal
+migration for this repair.
 Operator-facing consequences:
 [Coding sessions](../operator/coding-sessions.md#concept) and
 [Tools and policy](../operator/tools-and-policy.md#concept).
