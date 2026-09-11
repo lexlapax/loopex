@@ -297,6 +297,12 @@ publication and compatibility acceptance retain their distinct authorities.
 | Root README | `README.md` |
 | Changelog | `CHANGELOG.md` |
 
+This set is inclusive of the M3 gate's complete documentation set: every
+document M3 must update at its closure appears above, because M4 builds on
+those same operator and developer surfaces and its closure re-describes them
+for the app server, interactions and transfers. A document added to M3's set
+by an accepted amendment is added here too.
+
 Each row is complete only when the documents state what M4 actually changed
 for its reader, in the charter's Concept-then-Technical-depth form where the
 document is a pair:
