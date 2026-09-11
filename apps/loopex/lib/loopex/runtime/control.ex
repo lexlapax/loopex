@@ -38,12 +38,26 @@ defmodule Loopex.Runtime.Control do
 
   @max_identifier_bytes 256
 
-  # Technical depth: this is Control's private responsiveness bound for the one
-  # single-row page that rebuilds a provider attempt binding. It is deliberately
-  # independent of the run deadline: expiry proves only that the Store did not
-  # answer inside Control's local allowance, so it refuses without manufacturing
-  # a dispatch verdict.
+  # Technical depth: this is Control's private responsiveness bound for the
+  # Store evidence that rebuilds a provider binding or closes one receipt range.
+  # It is deliberately independent of the run deadline: expiry proves only that
+  # the Store did not answer inside Control's local allowance, so it refuses
+  # without manufacturing a dispatch verdict.
   @position_read_timeout_ms 1_000
+
+  @run_terminal_keys [
+    "accounting_source",
+    "bound",
+    "cleanup_grace_ms",
+    "command_id",
+    "declared_limit",
+    "observed",
+    "outcome",
+    "reason",
+    "reconciliation_ref",
+    "run_id",
+    :kind
+  ]
 
   @doc """
   ## Concept
@@ -211,14 +225,13 @@ defmodule Loopex.Runtime.Control do
        lane: OwnerLane.new(Keyword.fetch!(options, :store)),
        sessions: %{},
        monitor_to_session: %{},
-       # Concept: the full attempt identities this runtime has already
-       # authorized, and the one worker and reference each was bound to.
+       # Concept: the unresolved attempt identities this runtime has authorized,
+       # and the one worker and reference each was bound to.
        #
-       # Technical depth: ADR 0018 requires the spend to outlive the coordinator
-       # and the worker for the complete ownership generation, so it is held
-       # here rather than in either. A later request for the same
-       # `{session, run, turn, operation, attempt}` is refused even when it
-       # supplies a fresh PID and a fresh reference.
+       # Technical depth: ADR 0027 retains a spend across coordinator and worker
+       # replacement until a matching committed settlement closes its durable
+       # authorization domain. A missing entry never grants a permit: the current
+       # owner, journal position and exact attempt-open row remain mandatory.
        spent_attempts: %{},
        generation_counter: 0
      }}
@@ -412,7 +425,11 @@ defmodule Loopex.Runtime.Control do
               event_sequence: positions.event_sequence
           }
 
-          next = %{state | sessions: Map.put(state.sessions, session_id, next_entry)}
+          next =
+            state
+            |> Map.put(:sessions, Map.put(state.sessions, session_id, next_entry))
+            |> retire_settled_attempts(session_id, next_entry, receipt)
+
           EventDispatcher.acknowledge(state.root, session_id, positions.event_sequence)
           {:reply, :ok, next}
         else
@@ -607,23 +624,158 @@ defmodule Loopex.Runtime.Control do
     end
   end
 
-  # Concept: an attempt identity is remembered for exactly as long as the
-  # ownership generation that spent it.
+  # Concept: releasing a session clears any unresolved attempt identities that
+  # could not be retired from committed settlement evidence.
   #
-  # Technical depth: ADR 0018 scopes the retention to "the complete ownership
-  # generation", and the same paragraph says replacing the coordinator or the
-  # worker does not clear it -- a successor must still be refused the identity
-  # its predecessor spent. So the only moment a session's identities may be
-  # dropped is the one where this Control stops holding the session at all, and
-  # that is the same line that removes its entry. Dropping them at succession
-  # would hand the successor a second call on an attempt that may already have
-  # been billed; never dropping them makes a runtime that resumes many sessions
-  # accumulate one entry per attempt of every session it has finished with.
+  # Technical depth: ADR 0027 retires proven settled identities earlier, but a
+  # missing, unreadable or malformed settlement retains the spend across owner
+  # succession. The residual entries leave memory only when Control releases the
+  # session itself, preserving the existing owner-epoch fence.
   defp forget_spent_attempts(spent, session_id) do
     spent
     |> Enum.reject(fn {binding, _bound} -> Map.get(binding, "session_id") == session_id end)
     |> Map.new()
   end
+
+  # Concept: a settled provider attempt stops consuming runtime memory only once
+  # durable truth proves both its settlement and the authorization domain after it.
+  #
+  # Technical depth: the acknowledged Store receipt fixes one bounded committed
+  # range and `next_entry` fixes its authoritative last version. Every candidate
+  # settlement is validated with ProviderAttempt before it can match a spent key.
+  # The final row either registers one exact current attempt-open binding or no
+  # binding; a matching settlement never retires that current identity. Any
+  # missing, delayed, malformed or oversized read preserves the complete map.
+  defp retire_settled_attempts(%{spent_attempts: spent} = state, _session_id, _entry, _receipt)
+       when map_size(spent) == 0,
+       do: state
+
+  defp retire_settled_attempts(state, session_id, entry, receipt) do
+    with {:ok, records} <- committed_receipt_records(state.store, session_id, entry, receipt),
+         {:ok, current} <- current_provider_binding(session_id, List.last(records)),
+         {:ok, settled} <- settled_spent_bindings(records, session_id, state.spent_attempts) do
+      retired = if is_nil(current), do: settled, else: List.delete(settled, current)
+      %{state | spent_attempts: Map.drop(state.spent_attempts, retired)}
+    else
+      _unproved -> state
+    end
+  end
+
+  defp committed_receipt_records(store, session_id, %{journal_version: current}, %{
+         journal_versions: %{first: first, last: current}
+       })
+       when is_integer(first) and first > 0 and first <= current do
+    count = current - first + 1
+
+    if count <= Store.max_item_cardinality() do
+      case bounded_receipt_records_read(store, session_id, first - 1, count) do
+        {:ok, records} ->
+          if Enum.map(records, & &1.journal_version) == Enum.to_list(first..current),
+            do: {:ok, records},
+            else: {:error, :incomplete_settlement_range}
+
+        _unavailable ->
+          {:error, :settlement_range_unavailable}
+      end
+    else
+      {:error, :settlement_range_too_large}
+    end
+  end
+
+  defp committed_receipt_records(_store, _session_id, _entry, _receipt),
+    do: {:error, :invalid_settlement_range}
+
+  defp current_provider_binding(session_id, %{payload: payload}) do
+    if record_kind(payload) == ProviderAttempt.opened_kind(),
+      do: ProviderAttempt.binding_from_opened(session_id, payload),
+      else: {:ok, nil}
+  end
+
+  defp current_provider_binding(_session_id, _record),
+    do: {:error, :invalid_current_provider_record}
+
+  defp settled_spent_bindings(records, session_id, spent)
+       when is_list(records) and is_map(spent) do
+    records
+    |> Enum.with_index()
+    |> Enum.reduce_while({:ok, []}, fn
+      {%{payload: payload}, index}, {:ok, retired} ->
+        if record_kind(payload) == ProviderAttempt.settled_kind() do
+          with :ok <- ProviderAttempt.validate_settled(payload),
+               :ok <- settlement_domain_closed(payload, Enum.at(records, index + 1)) do
+            matching =
+              spent
+              |> Map.keys()
+              |> Enum.filter(&settlement_matches_binding?(&1, session_id, payload))
+
+            {:cont, {:ok, matching ++ retired}}
+          else
+            {:error, _reason} -> {:halt, {:error, :invalid_attempt_settlement}}
+          end
+        else
+          {:cont, {:ok, retired}}
+        end
+
+      _invalid_record, _acc ->
+        {:halt, {:error, :invalid_settlement_records}}
+    end)
+  end
+
+  defp settled_spent_bindings(_records, _session_id, _spent),
+    do: {:error, :invalid_settlement_records}
+
+  defp settlement_domain_closed(%{"next" => "terminal"} = settlement, %{
+         payload: terminal
+       }) do
+    with true <- MapSet.new(Map.keys(terminal)) == MapSet.new(@run_terminal_keys),
+         "run_terminal_committed" <- record_kind(terminal),
+         true <- terminal["run_id"] == settlement["run_id"],
+         true <- terminal["outcome"] == settlement_terminal_outcome(settlement),
+         true <- valid_terminal_bound?(terminal, settlement["termination"]),
+         true <- is_integer(terminal["cleanup_grace_ms"]) and terminal["cleanup_grace_ms"] > 0,
+         true <- is_nil(terminal["command_id"]) or is_binary(terminal["command_id"]),
+         true <-
+           is_nil(terminal["reconciliation_ref"]) or is_binary(terminal["reconciliation_ref"]),
+         true <- is_nil(terminal["reason"]) or is_binary(terminal["reason"]) do
+      :ok
+    else
+      _invalid -> {:error, :invalid_attempt_terminal}
+    end
+  end
+
+  defp settlement_domain_closed(%{"next" => "terminal"}, _next),
+    do: {:error, :missing_attempt_terminal}
+
+  defp settlement_domain_closed(_settlement, _next), do: :ok
+
+  defp settlement_terminal_outcome(%{"termination" => "abort"}), do: "cancelled"
+  defp settlement_terminal_outcome(%{"termination" => "deadline"}), do: "bound_reached"
+  defp settlement_terminal_outcome(%{"result" => %{"kind" => "reply"}}), do: "completed"
+  defp settlement_terminal_outcome(_settlement), do: "failed"
+
+  defp valid_terminal_bound?(terminal, "deadline") do
+    terminal["bound"] == "deadline" and is_integer(terminal["observed"]) and
+      terminal["observed"] >= 0 and terminal["declared_limit"] == terminal["observed"] and
+      is_nil(terminal["accounting_source"])
+  end
+
+  defp valid_terminal_bound?(terminal, _termination) do
+    terminal["bound"] == false and terminal["observed"] == false and
+      terminal["declared_limit"] == false and is_nil(terminal["accounting_source"])
+  end
+
+  defp settlement_matches_binding?(binding, session_id, settlement) do
+    ProviderAttempt.validate_binding(binding) == :ok and binding["session_id"] == session_id and
+      Enum.all?(binding, fn
+        {"session_id", ^session_id} -> true
+        {key, value} -> settlement[key] == value
+      end)
+  end
+
+  defp record_kind(record) when is_map(record),
+    do: Map.get(record, :kind, Map.get(record, "kind"))
+
+  defp record_kind(_record), do: nil
 
   @impl GenServer
   def handle_info({:DOWN, reference, :process, pid, _reason}, state) do
@@ -1315,14 +1467,52 @@ defmodule Loopex.Runtime.Control do
   # adapter that raises or exits is contained the same way instead of taking the
   # whole runtime's Control down with it.
   defp bounded_position_read(store, session_id, version) do
+    bounded_records_read(store, session_id, version - 1, 1)
+  end
+
+  defp bounded_records_read(store, session_id, after_position, limit) do
+    bounded_store_read(fn -> Store.load_records(store, session_id, after_position, limit) end)
+  end
+
+  defp bounded_receipt_records_read(store, session_id, after_position, limit) do
+    # A Store page may be shorter than the caller's limit. Keep the complete
+    # finite receipt scan under one guardian and therefore one existing deadline.
+    bounded_store_read(fn ->
+      collect_receipt_records(store, session_id, after_position, limit, [])
+    end)
+  end
+
+  defp collect_receipt_records(_store, _session_id, _after_position, 0, records),
+    do: {:ok, Enum.reverse(records)}
+
+  defp collect_receipt_records(store, session_id, after_position, remaining, records) do
+    case Store.load_records(store, session_id, after_position, remaining) do
+      {:ok, []} ->
+        {:error, :incomplete_settlement_range}
+
+      {:ok, page} ->
+        last = List.last(page).journal_version
+
+        collect_receipt_records(
+          store,
+          session_id,
+          last,
+          remaining - length(page),
+          Enum.reverse(page, records)
+        )
+
+      other ->
+        other
+    end
+  end
+
+  defp bounded_store_read(read) when is_function(read, 0) do
     control = self()
     tag = make_ref()
 
     {guardian, monitor} =
       spawn_monitor(fn ->
-        guard_position_read(control, tag, fn ->
-          Store.load_records(store, session_id, version - 1, 1)
-        end)
+        guard_position_read(control, tag, read)
       end)
 
     receive do
