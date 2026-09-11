@@ -1786,3 +1786,59 @@ product implementation, approve integration, closure, release, tag or
 publication, or report an unrun check as PASS. This commit adds only this
 disposition; an independent exact-SHA read must approve its changed path and
 authority scope before dependent M3 acceptance-plan edits land.
+
+<a id="override-disposition-m3-review-ordering-2026-09-10"></a>
+### M3 review ordering and acceptance exceptions — 2026-09-10
+
+The maintainer was asked to confirm this bundled approval: "accept the one-time
+ordering exception, assign the executor flake to M3 outcome 5 for repair before
+closure, and authorize ADR 0025/0027 and M3 acceptance after a clean delta
+review." The maintainer answered: "Confirm". This records that explicit
+instruction, including its review condition, rather than inferring acceptance
+from the reviewer's recommendation.
+
+The ordering exception applies only to the still-Open M3 lineage reviewed at
+`ec5c302928ab300128d7abe5fcc4a1b29c56fba9` and these three standalone override
+commits:
+
+- `3310c8dd80d4774da23f004a7a275f327a2e0afb`: CLI extension ratification;
+- `5dbef63a7cd798f8bb5cb0b88d7c5f2bc1104bb9`: incremental witness ratification;
+- `82fad5d6b7948161a2014bb29cad39f444d62e93`: acceptance aggregate override.
+
+Their independent exact-SHA read happened after dependent planning commits,
+contrary to the before-dependent-work requirement in
+[AGENTS.md](../../AGENTS.md#maintainer-override) and those dispositions.
+The maintainer accepts that historical ordering for this M3 plan-acceptance
+lineage. The late review is not backdated, the earlier records remain unchanged,
+and the rule still applies to future work. This new disposition must receive an
+independent exact-SHA read before the next dependent commit and before the
+acceptance transitions. It changes no bound artifact or accepted ADR decision.
+
+The same approval dispositions the inherited executor flake reported at
+`ec5c302928ab300128d7abe5fcc4a1b29c56fba9` for plan acceptance only:
+`apps/loopex_executor_local/test/coding_tools_test.exs`, case
+`edit applies an exact match change and names what differed on a mismatch`,
+returned `{:error, {:reconciliation_required, 1}}` instead of the expected failed
+outcome at seed `3107`. The review's whole-suite result remains 1,095 passed and
+one failed; three subsequent file reruns, each 72 passed, are diagnostic evidence
+of a flake and do not replace that failed result. The executor bytes were
+unchanged by this planning candidate. M3 outcome 5 owns investigation and repair,
+with stable evidence required before closure; acceptance does not mark the case
+fixed or permit filtering, retries-as-PASS or weakening its guarantee.
+
+The M0–M2 acceptance aggregate remains explicitly **waived**, under the
+[existing acceptance-only override](#override-disposition-m3-acceptance-aggregate-2026-09-10).
+The review's single M2 gate diagnostic was cancelled and supplies no PASS.
+Its retained mitigations are the identical 47 CLI case names and green bootstrap
+at the reviewed SHA. The floor-pair compile, governance and CLI files, and
+behavioral opening red are evidence from that review, not newly run evidence
+at this disposition. For the bounded follow-up, the reviewer requires only the
+exact delta, bound-artifact inspection and status; the full lane set is not
+repeated for these documentation changes.
+
+Conditional acceptance covers only the reviewed M3 plan/gate and ADRs 0025 and
+0027, after the two-sentence ADR 0025 provenance-key correction and a clean
+independent delta review. The administrative transitions record their exact
+candidates and digests separately. This standalone commit adds only this
+disposition; it does not itself change lifecycle status, authorize a merge to
+main, close M3, or grant release or publication authority.
