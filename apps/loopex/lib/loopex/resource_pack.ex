@@ -359,9 +359,45 @@ defmodule Loopex.ResourcePack do
   defp valid_origin_and_git?(_pack), do: false
 
   defp valid_origin?(origin) do
-    valid_label?(origin) and not String.contains?(origin, ["?", "#"]) and
-      not Regex.match?(~r|^[a-z][a-z0-9+.-]*://[^/]*@|i, origin)
+    valid_label?(origin) and origin == String.trim(origin) and valid_origin_uri?(origin)
   end
+
+  defp valid_origin_uri?(origin) do
+    case URI.new(origin) do
+      {:ok, %URI{query: nil, fragment: nil, scheme: "ssh", host: host, userinfo: userinfo}} ->
+        valid_label?(host) and valid_optional_username?(userinfo)
+
+      {:ok, %URI{query: nil, fragment: nil, scheme: scheme, userinfo: nil}}
+      when is_binary(scheme) ->
+        true
+
+      {:ok, %URI{query: nil, fragment: nil, scheme: nil, userinfo: nil}} ->
+        not String.contains?(origin, "@")
+
+      {:error, ":"} ->
+        valid_scp_origin?(origin)
+
+      _credential_query_fragment_or_malformed ->
+        false
+    end
+  end
+
+  defp valid_optional_username?(nil), do: true
+  defp valid_optional_username?(username), do: valid_source_username?(username)
+
+  defp valid_scp_origin?(origin) do
+    case Regex.run(~r/\A([^@]+)@([^:\/\s]+):(.+)\z/u, origin) do
+      [^origin, username, _host, _path] -> valid_source_username?(username)
+      _not_scp -> false
+    end
+  end
+
+  defp valid_source_username?(username) when is_binary(username),
+    do:
+      byte_size(username) in 1..@max_text_bytes and
+        String.match?(username, ~r/\A[A-Za-z0-9._~-]+\z/)
+
+  defp valid_source_username?(_username), do: false
 
   defp valid_git_id?(value) when is_binary(value) and byte_size(value) in [40, 64],
     do: String.match?(value, ~r/\A[0-9a-f]+\z/)
@@ -401,6 +437,11 @@ defmodule Loopex.ResourcePack do
       |> Enum.all?(&(&1 not in ["", ".", ".."]))
   end
 
+  # Concept: one published pack has one portable label for each file.
+  #
+  # Technical depth: NFC plus case folding deliberately refuses case-distinct
+  # aliases before publication. That is the supported cross-platform install
+  # subset, not a claim that a case-sensitive POSIX filesystem equates them.
   defp normalized_path(label), do: label |> String.normalize(:nfc) |> String.downcase()
 
   defp valid_issued_at?(value) do
