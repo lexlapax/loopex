@@ -379,6 +379,7 @@ defmodule LoopexCliTest do
     assert output =~ "https://example.test/skills.git"
     assert output =~ commit
     assert output =~ tree
+    assert output =~ Loopex.ResourcePack.pack_digest(hd(manifest["packs"]))
     assert output =~ "SKILL.md  18 bytes  #{digest}"
   end
 
@@ -420,6 +421,150 @@ defmodule LoopexCliTest do
     assert Keyword.fetch!(launch_options, :resource_manifest) == manifest
     assert Keyword.fetch!(launch_options, :project_manifest) == nil
     assert Keyword.has_key?(launch_options, :provider_launch)
+  end
+
+  test "fresh run admits an explicit host decision and activates selected resources before the prompt" do
+    {state_root, workspace} = roots()
+    {:ok, workspace_ref} = LoopexCli.ProjectResources.workspace_reference(workspace)
+    instruction = "---\nname: review\ndescription: Review one change\n---\nUse the checklist.\n"
+    checklist = "Check the result.\n"
+
+    pack = %{
+      "source_id" => "example.test/skills",
+      "origin" => "https://example.test/skills.git",
+      "commit" => String.duplicate("a", 40),
+      "tree_digest" => String.duplicate("b", 40),
+      "name" => "review",
+      "description" => "Review one change",
+      "manual_only" => true,
+      "files" => [
+        %{
+          "label" => "SKILL.md",
+          "size" => byte_size(instruction),
+          "digest" => LoopexProtocol.Canonical.digest_bytes(instruction),
+          "content" => instruction,
+          "contained" => true
+        },
+        %{
+          "label" => "references/checklist.md",
+          "size" => byte_size(checklist),
+          "digest" => LoopexProtocol.Canonical.digest_bytes(checklist),
+          "content" => checklist,
+          "contained" => true
+        }
+      ]
+    }
+
+    manifest = %{
+      "version" => "loopex.resource_pack/1",
+      "workspace_ref" => workspace_ref,
+      "revision" => nil,
+      "packs" => [pack]
+    }
+
+    {:ok, manifest_digest, _normalized} = Loopex.ResourcePack.digest(manifest)
+    pack_digest = Loopex.ResourcePack.pack_digest(pack)
+
+    decision = %{
+      "manifest_digest" => manifest_digest,
+      "workspace_ref" => workspace_ref,
+      "trust_scope" => "project_skills",
+      "decision_source" => "host_supplied",
+      "issued_at" => "2026-09-10T20:00:00Z",
+      "expires_at" => nil,
+      "revocation_state" => "active"
+    }
+
+    parent = self()
+
+    Process.put(:"$loopex_cli_facade_observer", fn
+      Loopex, :runtime_placement_id, [_root] ->
+        {:ok, "runtime-skills"}
+
+      Loopex, :create_session, [:runtime, %{"surface" => "cli"}, [_command_id]] ->
+        {:ok, "session-skills"}
+
+      Loopex, :attach, [:runtime, "session-skills", [after_event_sequence: 0]] ->
+        {:ok, :attachment}
+
+      Loopex, :command, [:attachment, %{type: :admit_resources} = command] ->
+        send(parent, {:admit_resources, command})
+        {:accepted, command.command_id}
+
+      Loopex, :resource_catalog, [:runtime, "session-skills"] ->
+        {:ok,
+         %{
+           "configured_manifest_digest" => manifest_digest,
+           "admitted_manifest_digest" => manifest_digest,
+           "decision_disposition" => "active",
+           "entries" => [
+             %{
+               "pack_index" => 0,
+               "source_id" => "example.test/skills",
+               "name" => "review",
+               "description" => "Review one change",
+               "pack_digest" => pack_digest,
+               "manual_only" => true
+             }
+           ]
+         }}
+
+      Loopex, :command, [:attachment, %{type: :activate_skill} = command] ->
+        send(parent, {:activate_skill, command})
+        {:accepted, command.command_id}
+
+      Loopex, :session_status, [:runtime, "session-skills"] ->
+        {:ok, %{cleanup_grace_ms: 1_000}}
+
+      Loopex, :command, [:attachment, %{type: :prompt}] ->
+        {:error, :prompt_probe_complete}
+
+      module, function, arguments ->
+        apply(module, function, arguments)
+    end)
+
+    try do
+      assert {:error, message} =
+               LoopexCli.dispatch(
+                 [
+                   "run",
+                   "--policy",
+                   "allow-all",
+                   "--skill",
+                   "example.test/skills:review",
+                   "--skill-resource",
+                   "example.test/skills:review:references/checklist.md",
+                   "--state-root",
+                   state_root,
+                   "--workspace",
+                   workspace,
+                   "review this"
+                 ],
+                 resource_packs: %{
+                   discover: fn _workspace, _options -> {:ok, manifest} end
+                 },
+                 resource_decision: decision,
+                 runtime_starter: fn options ->
+                   assert Keyword.fetch!(options, :resource_manifest) == manifest
+                   {:ok, :runtime}
+                 end
+               )
+
+      assert message =~ "prompt_probe_complete"
+    after
+      Process.delete(:"$loopex_cli_facade_observer")
+    end
+
+    assert_receive {:admit_resources, admit}
+    assert admit.manifest_digest == manifest_digest
+    assert admit.decision == decision
+
+    assert_receive {:activate_skill, activate}
+    assert activate.manifest_digest == manifest_digest
+    assert activate.source_id == "example.test/skills"
+    assert activate.name == "review"
+    assert activate.pack_digest == pack_digest
+    assert activate.supporting_labels == ["references/checklist.md"]
   end
 
   # Concept: watch both planes at once, in the order they actually arrive.

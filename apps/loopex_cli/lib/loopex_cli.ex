@@ -255,10 +255,19 @@ defmodule LoopexCli do
          :ok <- one_input(flags),
          {:ok, policy} <- policy(Map.get(flags, "policy")),
          {:ok, prompt} <- prompt_of(words),
-         {:ok, runtime} <- start_runtime(flags, policy, options),
+         {:ok, {runtime, resource_manifest}} <- start_fresh_runtime(flags, policy, options),
          {:ok, session_id} <- create(runtime),
          {:ok, attachment} <-
            facade(Loopex, :attach, [runtime, session_id, [after_event_sequence: 0]]),
+         :ok <-
+           configure_resources(
+             runtime,
+             session_id,
+             attachment,
+             resource_manifest,
+             flags,
+             options
+           ),
          {:ok, status} <- facade(Loopex, :session_status, [runtime, session_id]) do
       # Technical depth: the backstop is sized from the cleanup period this
       # session committed, exactly as `resume` sizes its own, because a fixed
@@ -288,6 +297,185 @@ defmodule LoopexCli do
         {:error, reason} ->
           {:error, "the prompt was refused: #{inspect(reason)}"}
       end
+    end
+  end
+
+  defp configure_resources(_runtime, _session_id, _attachment, nil, flags, _options) do
+    if skill_selections?(flags),
+      do: {:error, "no compatible project skills were found in this workspace"},
+      else: :ok
+  end
+
+  defp configure_resources(runtime, session_id, attachment, manifest, flags, options) do
+    with {:ok, manifest_digest, normalized_manifest} <- Loopex.ResourcePack.digest(manifest),
+         {:ok, decision} <- resource_decision(normalized_manifest, manifest_digest, options),
+         :ok <-
+           submit_resource_command(attachment, %{
+             type: :admit_resources,
+             command_id: unique_id(),
+             manifest_digest: manifest_digest,
+             decision: decision
+           }),
+         :ok <- activate_selected_skills(runtime, session_id, attachment, manifest_digest, flags) do
+      :ok
+    else
+      {:error, reason, detail} ->
+        {:error, "the skill manifest was refused: #{reason} (#{inspect(detail)})"}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp resource_decision(manifest, manifest_digest, options) do
+    case Keyword.fetch(options, :resource_decision) do
+      {:ok, decision} ->
+        case Loopex.ResourcePack.normalize_decision(decision) do
+          {:ok, normalized} -> {:ok, normalized}
+          {:error, :invalid_decision} -> {:error, "the supplied skill trust decision is invalid"}
+        end
+
+      :error ->
+        interactive_resource_decision(manifest, manifest_digest, options)
+    end
+  end
+
+  defp interactive_resource_decision(manifest, manifest_digest, options) do
+    sources =
+      manifest["packs"]
+      |> Enum.map(&"#{&1["source_id"]}:#{&1["name"]}")
+      |> Enum.join(", ")
+
+    IO.puts(:stderr, "loopex: project skills #{sources}")
+    IO.puts(:stderr, "loopex: complete manifest digest #{manifest_digest}")
+
+    operator_present =
+      Keyword.get_lazy(options, :operator_present, &ProjectResources.operator_present?/0)
+
+    if operator_present do
+      IO.write(:stderr, "loopex: trust this exact skill manifest for the next run? [y/N] ")
+
+      answer = IO.gets("")
+
+      if is_binary(answer) and String.downcase(String.trim(answer)) in ["y", "yes"] do
+        {:ok,
+         %{
+           "manifest_digest" => manifest_digest,
+           "workspace_ref" => manifest["workspace_ref"],
+           "trust_scope" => "project_skills",
+           "decision_source" => "interactive_operator",
+           "issued_at" =>
+             DateTime.utc_now() |> DateTime.truncate(:second) |> DateTime.to_iso8601(),
+           "expires_at" => nil,
+           "revocation_state" => "active"
+         }}
+      else
+        {:ok, nil}
+      end
+    else
+      IO.puts(:stderr, "loopex: no skill trust decision was supplied; skill content is withheld")
+      {:ok, nil}
+    end
+  end
+
+  defp submit_resource_command(attachment, command) do
+    case facade(Loopex, :command, [attachment, command]) do
+      {:accepted, _command_id} -> :ok
+      {:error, reason} -> {:error, "the skill command was refused: #{inspect(reason)}"}
+    end
+  end
+
+  defp activate_selected_skills(runtime, session_id, attachment, manifest_digest, flags) do
+    if skill_selections?(flags) do
+      with {:ok, catalog} <- facade(Loopex, :resource_catalog, [runtime, session_id]),
+           {:ok, selections} <- resolve_skill_selections(catalog["entries"], flags) do
+        Enum.reduce_while(selections, :ok, fn {entry, labels}, :ok ->
+          command = %{
+            type: :activate_skill,
+            command_id: unique_id(),
+            manifest_digest: manifest_digest,
+            source_id: entry["source_id"],
+            name: entry["name"],
+            pack_digest: entry["pack_digest"],
+            supporting_labels: labels
+          }
+
+          case submit_resource_command(attachment, command) do
+            :ok -> {:cont, :ok}
+            {:error, _message} = error -> {:halt, error}
+          end
+        end)
+      end
+    else
+      :ok
+    end
+  end
+
+  defp skill_selections?(flags),
+    do: Map.has_key?(flags, "skill") or Map.has_key?(flags, "skill-resource")
+
+  defp resolve_skill_selections(entries, flags) when is_list(entries) do
+    with {:ok, resources} <- supporting_resources(Map.get(flags, "skill-resource", [])),
+         {:ok, selections} <-
+           select_catalog_entries(entries, Map.get(flags, "skill", []), resources),
+         :ok <- reject_unselected_resources(resources, Map.get(flags, "skill", [])) do
+      {:ok, selections}
+    end
+  end
+
+  defp resolve_skill_selections(_entries, _flags),
+    do: {:error, "the runtime returned an invalid skill catalog"}
+
+  defp select_catalog_entries(entries, identifiers, resources) do
+    Enum.reduce_while(identifiers, {:ok, []}, fn identifier, {:ok, selected} ->
+      case find_catalog_entry(entries, identifier) do
+        {:ok, entry} ->
+          labels = Map.get(resources, identifier, [])
+          {:cont, {:ok, selected ++ [{entry, labels}]}}
+
+        {:error, _message} = error ->
+          {:halt, error}
+      end
+    end)
+  end
+
+  defp supporting_resources(values) do
+    Enum.reduce_while(values, {:ok, %{}}, fn value, {:ok, resources} ->
+      case String.split(value, ":") do
+        [_one_part] ->
+          {:halt, {:error, "--skill-resource must name <skill>:<label>"}}
+
+        parts ->
+          {label, skill_parts} = List.pop_at(parts, -1)
+          skill = Enum.join(skill_parts, ":")
+
+          if skill == "" or label == "" do
+            {:halt, {:error, "--skill-resource must name <skill>:<label>"}}
+          else
+            {:cont, {:ok, Map.update(resources, skill, [label], &(&1 ++ [label]))}}
+          end
+      end
+    end)
+  end
+
+  defp reject_unselected_resources(resources, selected) do
+    case Map.keys(resources) -- selected do
+      [] -> :ok
+      [skill | _rest] -> {:error, "--skill-resource names unselected skill #{skill}"}
+    end
+  end
+
+  defp find_catalog_entry(entries, identifier) do
+    matches =
+      Enum.filter(entries, fn entry ->
+        entry["name"] == identifier or
+          "#{entry["source_id"]}:#{entry["name"]}" == identifier
+      end)
+
+    case matches do
+      [entry] -> {:ok, entry}
+      [] -> {:error, "no admitted skill is named #{identifier}"}
+      _many -> {:error, "skill name #{identifier} is ambiguous; use its source-qualified name"}
     end
   end
 
@@ -746,7 +934,8 @@ defmodule LoopexCli do
   end
 
   defp skill({flags, ["add", source]}, options) do
-    with {:ok, workspace} <- workspace(flags),
+    with :ok <- only_flags(flags, ~w(state-root workspace rev path), "skill add"),
+         {:ok, workspace} <- workspace(flags),
          {:ok, root} <- state_root(flags),
          {:ok, workspace_ref} <- ProjectResources.workspace_reference(workspace),
          {:ok, revision} <- git_revision(Map.get(flags, "rev")),
@@ -771,7 +960,7 @@ defmodule LoopexCli do
       :ok
     else
       {:error, {reason, detail}} ->
-        {:error, "the skill could not be installed: #{reason} (#{detail})"}
+        {:error, "the skill could not be installed: #{reason} (#{inspect(detail)})"}
 
       {:error, reason} ->
         {:error, reason}
@@ -782,7 +971,8 @@ defmodule LoopexCli do
     do: {:error, "loopex skill add takes exactly one Git source"}
 
   defp skill({flags, ["list"]}, options) do
-    with {:ok, manifest} <- discover_skill_manifest(flags, options) do
+    with :ok <- only_flags(flags, ~w(state-root workspace), "skill list"),
+         {:ok, manifest} <- discover_skill_manifest(flags, options) do
       case manifest["packs"] do
         [] ->
           IO.puts("no skills")
@@ -800,13 +990,15 @@ defmodule LoopexCli do
   end
 
   defp skill({flags, ["show", qualified_name]}, options) do
-    with {:ok, manifest} <- discover_skill_manifest(flags, options),
+    with :ok <- only_flags(flags, ~w(state-root workspace), "skill show"),
+         {:ok, manifest} <- discover_skill_manifest(flags, options),
          {:ok, pack} <- find_skill(manifest["packs"], qualified_name) do
       IO.puts("#{pack["source_id"]}:#{pack["name"]}")
       IO.puts(pack["description"])
       IO.puts("origin #{pack["origin"] || "local workspace"}")
       IO.puts("commit #{pack["commit"] || "local"}")
       IO.puts("tree #{pack["tree_digest"] || "local"}")
+      IO.puts("pack digest #{Loopex.ResourcePack.pack_digest(pack)}")
       IO.puts(if(pack["manual_only"], do: "manual only", else: "model invocation compatible"))
 
       Enum.each(pack["files"], fn file ->
@@ -832,6 +1024,13 @@ defmodule LoopexCli do
     case Map.get(flags, name) do
       value when is_binary(value) and byte_size(value) > 0 -> {:ok, value}
       _missing -> {:error, "--#{name} is required"}
+    end
+  end
+
+  defp only_flags(flags, allowed, command) do
+    case Map.keys(flags) -- allowed do
+      [] -> :ok
+      [flag | _rest] -> {:error, "--#{flag} is not valid for loopex #{command}"}
     end
   end
 
@@ -897,7 +1096,7 @@ defmodule LoopexCli do
           {:ok, manifest}
 
         {:error, {reason, detail}} ->
-          {:error, "skills could not be inspected: #{reason} (#{detail})"}
+          {:error, "skills could not be inspected: #{reason} (#{inspect(detail)})"}
       end
     end
   end
@@ -1013,12 +1212,21 @@ defmodule LoopexCli do
     end
   end
 
-  defp start_runtime(flags, policy, options) do
+  defp start_fresh_runtime(flags, policy, options) do
+    with {:ok, workspace} <- workspace(flags),
+         {:ok, root} <- state_root(flags),
+         {:ok, resource_manifest} <- discover_skill_manifest(workspace, root, options),
+         {:ok, runtime} <- start_runtime(flags, policy, options, resource_manifest),
+         do: {:ok, {runtime, resource_manifest}}
+  end
+
+  defp start_runtime(flags, policy, options), do: start_runtime(flags, policy, options, nil)
+
+  defp start_runtime(flags, policy, options, resource_manifest) do
     with {:ok, workspace} <- workspace(flags),
          {:ok, root} <- state_root(flags),
          {:ok, cleanup} <- cleanup_grace(flags),
          {:ok, context} <- context_token_budget(flags),
-         {:ok, resource_manifest} <- discover_skill_manifest(workspace, root, options),
          :ok <- own_placement(root) do
       {:ok, placement} = facade(Loopex, :runtime_placement_id, [root])
 
