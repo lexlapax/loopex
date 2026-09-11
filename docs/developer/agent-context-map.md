@@ -1916,3 +1916,35 @@ disposition, the register and derived lifecycle prose; it changes no normative
 envelope, gate, ADR decision or product byte. Its own independent exact-diff
 review remains required before integration. M3 is not Closed, M4 remains an
 unopened draft, and no main merge, release, tag or publication is authorized.
+
+<a id="override-disposition-m4-planning-aggregate-2026-09-11"></a>
+### M4 planning-revision aggregate override — 2026-09-11
+
+The maintainer's actual instruction was: “no need to run m0 to m2 gates again
+during plan creation. override.” It was given while M4 was being revised on
+branch `m4` after a preliminary review, with the M0–M2 Closed aggregate already
+GREEN at the M4 opening candidate `4b13fd92904603dfe8476c50b98350bd70c5d7a8`
+on the integrated M3 acceptance base
+`4bba8b74f5e260dc2a364fcbd3554c7badd1a09c`.
+
+For the Open M4 planning lineage only, this replaces the procedure that would
+rerun the M0–M2 Closed aggregate for every later planning-only revision of the
+M4 plan pair, gate, runner, support scripts, manifest, prerequisite ADR
+proposals and documentation. The lineage may rely on the aggregate result
+recorded at `4b13fd9` while every later M4 planning revision changes no
+milestone product bytes; each such revision still runs status, formatting,
+bootstrap, runner inspection, the M4 opening probe and, separately, the M3
+opening probe, and receives exact-SHA review. A revision that changes product,
+portable-enforcement or bound Closed-gate bytes, the refresh of M4 onto the
+integrated M3 closure, M4 acceptance, any rejoin, rebind child or closure
+candidate remain under the ordinary inherited-aggregate obligations unless
+separately overridden. Any inherited regression actually observed still
+blocks.
+
+This override changes one development-time evidence procedure. It changes no
+released public surface or accepted ADR decision, does not weaken an M4 outcome
+or witness, and does not accept M4 or ADRs 0023, 0024, 0026 or 0028, authorize
+product implementation, approve integration, closure, release, tag or
+publication, or report an unrun check as PASS. This commit adds only this
+disposition; an independent exact-SHA read must approve its changed path and
+authority scope before the M4 plan cites it.
