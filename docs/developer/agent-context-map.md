@@ -2023,11 +2023,11 @@ The original published lineage is retained in a verified complete Git bundle.
 This repairs the unaccepted implementation lineage and creates no history-check
 exception. All later pushes use ordinary fast-forwards.
 
-Control retirement implements accepted ADR 0027 and retains its required
+Control retirement must implement accepted ADR 0027 and retain its required
 durable-settlement, current-owner and current-attempt proof. The composition
-helper is an experimental host API for temporary use of the existing reference
-stack. It introduces no durable field, new port, dependency, or alternative
-session recovery path. Exceptions propagate after cleanup; forced or unconfirmed
+helper is approved as an experimental host API for temporary use of the existing
+reference stack. It must introduce no durable field, new port, dependency, or
+alternative session recovery path. Exceptions must propagate after cleanup; forced or unconfirmed
 cleanup cannot be reported as success. Its ownership and compatibility contract
 is recorded in the [architecture pair](architecture.md#concept-arch-applications).
 Focused tests must prove orderly and failed cleanup, configuration preservation

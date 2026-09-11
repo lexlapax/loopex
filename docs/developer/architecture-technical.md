@@ -14,9 +14,9 @@ adapter joins a port, and the repository commands that hold the shape.
 
 Concept: [The eight applications and one direction](architecture.md#concept-arch-applications).
 
-`LoopexComposition.with_runtime/2` brackets a caller operation with startup and
+The approved M3 helper `LoopexComposition.with_runtime/2` must bracket a caller operation with startup and
 confirmed cleanup of the reference runtime, Store, workspace lease and executor.
-Its private owner retains those process identities until shutdown is observed.
+Its private owner must retain those process identities until shutdown is observed.
 A forced stop or missing confirmation produces a cleanup error rather than a
 successful operation result; exceptions are re-raised after cleanup. This
 experimental host addition preserves `start/1`, adds no durable record and
@@ -24,10 +24,10 @@ changes no core port. Returning to the prior host binary needs no data migration
 for this helper. The maintainer's exact approval is in the
 [implementation disposition](agent-context-map.md#disposition-m3-implementation-completion-2026-09-11).
 
-For prepared CLI recovery, the temporary runtime has no resource snapshot. The
-host prepares without activating recovered work, obtains the session's admitted
-manifest digest, abandons the preparation capability and completes cleanup. Only
-then does it load the snapshot at that exact retained digest and prepare the
+For prepared CLI recovery, the temporary runtime must have no resource snapshot.
+The host must prepare without activating recovered work, obtain the session's
+admitted manifest digest, abandon the preparation capability and complete cleanup.
+Only then may it load the snapshot at that exact retained digest and prepare the
 final runtime with the trusted provider and executor configuration. A missing or
 invalid retained snapshot withholds the resource class while ordinary recovery
 continues. Current workspace bytes never substitute for the admitted snapshot.
