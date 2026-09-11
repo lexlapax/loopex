@@ -30,7 +30,8 @@ defmodule Loopex.M4Gate.Support do
   defp outcome("apps/loopex/lib/loopex/runtime/interaction" <> _), do: [2, 3, 5]
   defp outcome("apps/loopex/lib/loopex/policy.ex"), do: [3, 5]
   defp outcome("apps/loopex/lib/loopex/artifact_store.ex"), do: [4, 5]
-  defp outcome("apps/loopex_store_local/lib/" <> _), do: [4, 5]
+  defp outcome("apps/loopex_store_local/lib/loopex/store/local/artifacts.ex"), do: [4, 5]
+  defp outcome("apps/loopex_store_local/lib/" <> _), do: @all
   defp outcome("apps/loopex_protocol/" <> _), do: @all
   defp outcome("apps/loopex_app_server/lib/" <> _), do: @all
   defp outcome("clients/" <> _), do: [5, 6]
@@ -136,38 +137,55 @@ defmodule Loopex.M4Gate.Support do
     ] ++ Enum.map(selector.names, &("passed=" <> &1))
   end
 
-  # Concept: the real-path report must name the build identities of the source
-  # under test, whatever version that source declares.
-  # Technical depth: the M3-bound verifier fixes `@0.0.0`; M4 reads the source
-  # tree's `VERSION` so a truthful 0.1.0 closure passes and a mismatch fails.
+  # Concept: one authoritative report per selector, parsed and judged once
+  # against the complete M4 schema for its kind.
+  # Technical depth: the M3-bound verifier fixes `@0.0.0` build identities and
+  # rejects real-path fields on a non-real schema, so M4 owns the whole check:
+  # exact key set for the kind, no duplicates, nonce/selector/seed identity,
+  # minimum executed count, digest form, and build identities that name the
+  # source tree's `VERSION` so a truthful 0.1.0 closure passes and a stale or
+  # foreign version fails.
+  @base_fields ~w(nonce selector seed executed digest)
+  @real_fields ~w(provider model endpoint adapter_build executor_build executor_identity tool_identity recorded)
+
   def verify_report(root, log, nonce, path, minimum, real?) do
-    Shared.verify_report(log, nonce, path, minimum, false)
-    if real?, do: verify_real_identities(root, log)
+    reports =
+      String.split(log, "\n") |> Enum.filter(&String.starts_with?(&1, "LOOPEX_EXUNIT_REPORT "))
+
+    ensure(length(reports) == 1, "selector did not emit one authoritative report")
+    [report] = reports
+    fields = String.split(report, " ") |> tl() |> Enum.map(&String.split(&1, "=", parts: 2))
+    ensure(Enum.all?(fields, &(length(&1) == 2)), "malformed authoritative report")
+    map = Map.new(fields, fn [key, value] -> {key, value} end)
+    expected = @base_fields ++ if(real?, do: @real_fields, else: [])
+
+    ensure(
+      map_size(map) == length(fields) and Enum.sort(Map.keys(map)) == Enum.sort(expected),
+      "duplicate, missing or unexpected authoritative report fields"
+    )
+
+    ensure(
+      map["nonce"] == nonce and map["selector"] == path and map["seed"] == "3107",
+      "authoritative report identity mismatch"
+    )
+
+    ensure(
+      Regex.match?(~r/\A\d+\z/, map["executed"]) and String.to_integer(map["executed"]) >= minimum and
+        Regex.match?(~r/\Asha256:[0-9a-f]{64}\z/, map["digest"]),
+      "authoritative count or digest missing"
+    )
+
+    if real?, do: verify_real_identities(root, map)
     :ok
   end
 
-  defp verify_real_identities(root, log) do
+  defp verify_real_identities(root, map) do
     version = File.read!(Path.join(root, "VERSION")) |> String.trim()
     ensure(Regex.match?(~r/\A\d+\.\d+\.\d+\z/, version), "source VERSION is malformed")
 
-    [report] =
-      String.split(log, "\n") |> Enum.filter(&String.starts_with?(&1, "LOOPEX_EXUNIT_REPORT "))
-
-    map =
-      report
-      |> String.split(" ")
-      |> tl()
-      |> Map.new(fn field ->
-        [key, value] = String.split(field, "=", parts: 2)
-        {key, value}
-      end)
-
-    fields =
-      ~w(provider model endpoint adapter_build executor_build executor_identity tool_identity recorded)
-
     ensure(
       Enum.all?(
-        fields,
+        @real_fields,
         &(is_binary(map[&1]) and map[&1] != "" and
             String.downcase(map[&1]) not in ~w(tbd todo pending unknown -) and
             Enum.all?(:binary.bin_to_list(map[&1]), fn byte -> byte in 0x21..0x7E end))
@@ -176,6 +194,46 @@ defmodule Loopex.M4Gate.Support do
         match?({:ok, _, 0}, DateTime.from_iso8601(map["recorded"])),
       "combined real-path report incomplete or names another source version"
     )
+  end
+
+  # Concept: the retained final report has one exact grammar.
+  # Technical depth: fields are validated by name, order, count and form before
+  # the runner prints the line, so a missing or duplicated identity cannot be
+  # retained as evidence.
+  @report_grammar [
+    {"source", ~r/\A[0-9a-f]{40}\z/},
+    {"gate", ~r/\Asha256:[0-9a-f]{64}\z/},
+    {"version", ~r/\A\d+\.\d+\.\d+\z/},
+    {"seed", ~r/\A3107\z/},
+    {"outcome_ids", ~r/\A1,2,3,4,5,6\z/},
+    {"elixir", ~r/\A\d+\.\d+\.\d+(-[0-9A-Za-z.]+)?\z/},
+    {"otp", ~r/\A\d+\z/},
+    {"erts", ~r/\A\d+(\.\d+)+\z/},
+    {"platform", ~r/\A[A-Za-z0-9_.-]+\z/},
+    {"node", ~r/\A\d+\.\d+\.\d+\z/},
+    {"python", ~r/\A\d+\.\d+\.\d+\z/},
+    {"schema", ~r/\Asha256:[0-9a-f]{64}\z/},
+    {"selectors", ~r/\A[1-9]\d*\z/},
+    {"inherited", ~r/\Atrue\z/},
+    {"real_workflow", ~r/\Atrue\z/},
+    {"result", ~r/\APASS\z/}
+  ]
+
+  def verify_final_report(line) do
+    ["LOOPEX_M4_GATE_REPORT" | fields] = String.split(String.trim_trailing(line, "\n"), " ")
+    pairs = Enum.map(fields, &String.split(&1, "=", parts: 2))
+    ensure(Enum.all?(pairs, &(length(&1) == 2)), "malformed final report field")
+
+    ensure(
+      Enum.map(pairs, &hd/1) == Enum.map(@report_grammar, &elem(&1, 0)),
+      "final report fields are missing, duplicated or reordered"
+    )
+
+    for {[key, value], {key, pattern}} <- Enum.zip(pairs, @report_grammar) do
+      ensure(Regex.match?(pattern, value), "final report field is malformed: #{key}")
+    end
+
+    :ok
   end
 
   defp ensure(true, _), do: :ok
@@ -228,6 +286,9 @@ defmodule Loopex.M4Gate.Support do
 
       ["build", build] ->
         IO.puts("LOOPEX_M4_BUILD digest=sha256:#{Shared.build_digest(build)}")
+
+      ["evidence", line] ->
+        verify_final_report(line)
 
       ["selector-account", expected_path, observed_path] ->
         expected = File.read!(expected_path) |> String.split("\n", trim: true)

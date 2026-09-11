@@ -17,41 +17,54 @@ ADR 0015's callback inventory, leaving its object/use schema and existing
 callbacks intact. Legacy ArtifactStore adapters remain conformant and return
 unsupported through the facade when the capability is absent.
 
-The facade exposes the same triple: `Loopex.open_artifact_transfer(runtime,
-session_id, request)` receives exactly the opaque artifact use reference, a
-non-negative start offset and an optional window length; `Loopex.read_artifact_chunk(runtime,
-transfer_ref, length)` returns the next sequential chunk; `Loopex.close_artifact_transfer(runtime,
-transfer_ref)` releases it. Resolve authorization and ADR 0015 use identity for
-that session before opening an object. Opening verifies total size and the full
-SHA-256 of the immutable object in one sequential pass before any chunk exists;
-the open response carries the existing object and use references, total_size,
-the window bounds, object_digest and an opaque transfer reference bound to the
-session and the opening connection. Each chunk carries offset, bytes and
-chunk_digest; length is bounded by the accepted chunk ceiling and a chunk never
-crosses the window. A window starting at total_size yields an empty transfer;
-one starting beyond it refuses. No path or private tool provenance escapes
-through this query family.
+The facade exposes the same triple, owned by the existing attachment
+capability: `Loopex.open_artifact_transfer(attachment, request)` receives
+exactly the opaque artifact use reference, a non-negative start offset and an
+optional window length; `Loopex.read_artifact_chunk(attachment, transfer_ref,
+length)` returns the next sequential chunk; `Loopex.close_artifact_transfer(attachment,
+transfer_ref)` releases it. The transfer reference is bound to the session and
+the opening attachment; another attachment, session or runtime refuses it, and
+detaching releases every transfer the attachment opened. The app-server maps
+one connection to one attachment, so no separate connection table is needed.
+Resolve authorization and ADR 0015 use identity for that session before
+opening an object. Opening verifies total size and the full SHA-256 of the
+immutable object in one sequential pass before any chunk exists; that pass is
+bounded by the accepted per-open deadline and work budget and refuses when
+either is exhausted. The open response carries the existing object and use
+references, total_size, the window bounds, object_digest and the transfer
+reference. Each chunk carries offset, bytes and chunk_digest; length is bounded
+by the accepted chunk ceiling and a chunk never crosses the window. A window
+starting at total_size yields an empty transfer; one starting beyond it
+refuses. No path or private tool provenance escapes through this query family.
 
 The ArtifactStore implementation opens the immutable object once per transfer,
-validates the use binding, verifies with a 64 KiB buffer and no whole-object
-accumulator, then emits chunks from the same descriptor while rejecting link
-replacement and changed file identity or size around every read. Missing or
-corrupt object, mismatched use, unsupported capability, invalid window,
-unknown or expired transfer, and exhausted transfer or connection budgets have
-distinct bounded refusals. Every open transfer owns one descriptor; close,
-cancellation, connection loss and lifetime expiry release it. The existing
-artifact boundary owns disk reads; core never opens paths.
+validates the use binding, and verifies with a 64 KiB buffer and no
+whole-object accumulator while copying the verified bytes into a transfer-owned
+snapshot file under the store's task-owned scratch root; chunks are emitted
+only from that snapshot, so a mutation of the original object after
+verification, including a same-inode, same-size rewrite, cannot reach a chunk
+whose digest the open response did not cover. The snapshot is deleted at
+close, cancellation, connection loss and lifetime expiry, and disk use per
+transfer is bounded by the object ceiling. Missing or corrupt object,
+mismatched use, unsupported capability, invalid window, unknown or expired
+transfer, exhausted open deadline or work budget, and exhausted transfer or
+connection budgets have distinct bounded refusals. Every open transfer owns one
+descriptor and one snapshot; close, cancellation, connection loss and lifetime
+expiry release both. The existing artifact boundary owns disk reads; core
+never opens paths.
 
 ### Evidence and alternatives
 
 Test whole-object, first, last, empty and overrun windows; misuse across
-sessions and connections; object-use swaps; corruption inside and outside the
-requested window, which must refuse at open before any bytes; concurrent
-transfers up to and beyond the budget; mutation of window bounds; close,
-cancellation, connection loss, lifetime expiry and descriptor release. Measure
-retained and peak memory against objects well above the chunk ceiling, and
-measure bytes read per transfer: at most one complete verification plus one
-sequential emit. Genuine old-format artifacts are positive controls. A
+sessions, attachments and connections; object-use swaps; corruption inside and
+outside the requested window, which must refuse at open before any bytes; a
+same-inode, same-size rewrite of the original after open, whose chunks must
+still match the reported object digest; an open that exceeds its deadline or
+work budget; concurrent transfers up to and beyond the budget; mutation of
+window bounds; close, cancellation, connection loss, lifetime expiry, and
+descriptor and snapshot release. Measure retained and peak memory against
+objects well above the chunk ceiling, and measure bytes read per transfer: at
+most one complete verification plus one sequential emit. Genuine old-format artifacts are positive controls. A
 full-object read followed by binary slicing fails the memory obligation even
 when the response bytes are correct.
 

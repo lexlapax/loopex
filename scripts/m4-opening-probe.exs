@@ -163,7 +163,7 @@ defmodule Loopex.M4Opening do
         )
 
       is_nil(defer.terminal) and not defer.settled ->
-        throw({:witness_error, "defer_unsettled_without_explicit_pending_interaction"})
+        throw({:witness_error, "defer_unsettled_without_exact_pending_interaction"})
 
       true ->
         throw({:witness_error, "defer_neither_denied_nor_durably_pending"})
@@ -171,21 +171,29 @@ defmodule Loopex.M4Opening do
   end
 
   # Concept: green means an exact suspended state, not the absence of settlement.
-  # Technical depth: the facade status must name exactly one pending interaction
-  # for the probe's tool call and the journal must hold its pending record with
-  # the same interaction identity; a deadlocked or merely slow run has neither.
+  # Technical depth: the run is still active and unsettled after exactly one
+  # model turn, the facade status names exactly one pending interaction bound to
+  # that run and the probe's tool call, and the journal holds exactly one
+  # `interaction_requested_v1` record with the same run, turn, tool-call and
+  # interaction identities in pending status. A deadlocked or merely slow run,
+  # a second model turn, or a record under another kind is not green.
   defp durably_pending?(observation) do
-    case observation.status do
-      {:ok, %{pending_interactions: [%{interaction_id: id, tool_call_id: "m4-probe-call"}]}}
-      when is_binary(id) and id != "" ->
-        Enum.any?(observation.interaction_records, fn record ->
-          record["interaction_id"] == id and record["tool_call_id"] == "m4-probe-call" and
-            record["status"] == "pending" and
-            String.starts_with?(to_string(record[:kind]), "interaction_requested")
-        end)
-
-      _other ->
-        false
+    with false <- observation.settled,
+         1 <- observation.model_calls,
+         {:ok, %{active_run_id: run_id, pending_interactions: [pending]}} <- observation.status,
+         %{interaction_id: id, run_id: ^run_id, turn_id: turn_id, tool_call_id: "m4-probe-call"}
+         when is_binary(id) and id != "" and is_binary(run_id) and is_binary(turn_id) <-
+           pending,
+         [record] <-
+           Enum.filter(
+             observation.interaction_records,
+             &(&1[:kind] == "interaction_requested_v1")
+           ) do
+      record["interaction_id"] == id and record["run_id"] == run_id and
+        record["turn_id"] == turn_id and record["tool_call_id"] == "m4-probe-call" and
+        record["status"] == "pending"
+    else
+      _other -> false
     end
   end
 

@@ -21,7 +21,7 @@ Technical depth: [Protocol mechanics](0023-experimental-public-session-protocol-
 
 M2 makes one foreground process a useful coding harness; M3 adds reusable
 project skills and core repairs. M4 first adds durable interactions and bounded
-artifact ranges at the shared core/port boundaries. The public Elixir
+artifact transfers at the shared core/port boundaries. The public Elixir
 facade owns the durable command semantics, but another program has no bounded,
 language-neutral way to initialize the runtime, submit those commands, or
 distinguish durable events from transient progress. Adding JSON around internal

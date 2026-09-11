@@ -16,7 +16,13 @@ Concept: [non-goals](M4.md#concept-plan-non-goals).
 M4 is Open as the one permitted planning lookahead after M3's accepted
 governance checkpoint integrated to `main`. Its planning base is
 `4bba8b74f5e260dc2a364fcbd3554c7badd1a09c`, retained as an ancestor without
-rebasing or squashing bound history. While Open it records M3 as `Accepted` and
+rebasing or squashing bound history. The M0–M2 Closed aggregate was proved
+green once at the opening candidate; under the reviewed
+[planning-revision aggregate override](../developer/agent-context-map.md#override-disposition-m4-planning-aggregate-2026-09-11)
+later planning-only revisions of this lineage rely on that result and are not
+rerun, while any revision touching product, portable-enforcement or bound
+Closed-gate bytes, the refresh onto M3's closure, acceptance, rejoins, rebinds
+and closure candidates keep the ordinary aggregate obligation. While Open it records M3 as `Accepted` and
 holds no implementation authority. M4 cannot be accepted or implemented until
 M3 is Closed and integrated: absorb that exact closed product base, re-prove
 every inherited gate green and this milestone's own distinct red, complete its
@@ -56,8 +62,9 @@ Missing values block acceptance.
 | Request identity | `request_id` is unique among in-flight requests on the connection; reuse while in flight refuses; reuse after completion is ordinary correlation |
 | Pre-admission pressure | Refuse the mutation before any durable write |
 | Post-admission pressure | Drop or coalesce progress first; if durable output still cannot drain, detach at the last completely emitted cursor and say so |
-| Raw stdin EOF or process death | Connection or host loss: inherited orderly foreground shutdown, no new dispatch, no cancellation record, no interaction state change |
-| Deliberate cancellation | Only the durable `session.abort` command |
+| Clean stdin EOF | Connection closed by the host: inherited orderly foreground shutdown, no new dispatch, open transfers closed, no cancellation record, no interaction state change |
+| Abrupt process death | Host loss: nothing is recorded by the dying process; the journal alone states what settled and the inherited recovery contract resolves unresolved outcomes |
+| Deliberate cancellation | Only the durable `session.abort` command; never inferred from EOF or death |
 | Restart | A fresh process attaches with snapshot and cursor first; pending interactions remain pending; cancelled, expired or denied ones never reappear |
 
 **Immutable launch inputs.** State root, workspace identity, resource snapshot,
@@ -85,18 +92,22 @@ bytes that Closed gates bind. The default sequence is exact:
 | 6 | Add the ninth application during implementation; apply 0.1.0 at the closure rejoin under its holders' transactions |
 
 Because M4 cannot be accepted before M3 closes, every holder is Closed when
-its transaction runs; no v1 route applies. At the planning base the inventory
-is:
+its transaction runs; no v1 route applies. Two kinds of change are kept apart:
+successor-enabling changes to bound development-time bytes, which settle
+before M4 acceptance, and M4 product bytes, which land during implementation
+and at the closure rejoin. The ledger at the planning base is:
 
-| Changed artifact | Planned change | Holders at the planning base |
-| --- | --- | --- |
-| `.tool-versions` | Floor pair refresh | M0, M1, M2, M3 |
-| `apps/loopex/lib/mix/tasks/loopex.deps_budget.ex` | Nine-application inventory; permit a client's production dependency on the contract application with negative tests; version literals | M1, M2 |
-| `scripts/m1-exunit-runner.exs`, `apps/loopex/test/m1_exunit_runner_test.exs` | Any report-channel change needed for version-aware evidence | M1, M2, M3, M4 |
-| `scripts/m3-gate-support.exs` | Its combined real-path verifier requires `@0.0.0` build identities; M4's own verifier reads `VERSION`, and M3's binding is untouched unless M3 reruns after 0.1.0 | M3, M4 |
-| `scripts/check-closed-gates.sh` | None planned; listed because M4 binds it | M3, M4 |
-| `VERSION` and application versions | 0.1.0 at closure rejoin | Every gate whose evidence names the version |
+| Artifact | Holders | Restriction today | Planned change | When | Route and checks |
+| --- | --- | --- | --- | --- | --- |
+| `.tool-versions` | M0, M1, M2, M3 | Floor 1.17.0/OTP 26.0, current 1.20.3/OTP 29.0.5 | Floor 1.18.5/OTP 27.3.4 | Before acceptance, after M3 closes | One v2 proposal `A` and rebind `R` per holder in register order, or a recorded override naming all four; matrix evidence on both pairs; each holder's gate green at its `R`; bootstrap |
+| `apps/loopex/lib/mix/tasks/loopex.deps_budget.ex` | M1 | Eight-application inventory; a client may depend only on core and a composition | Nine-application inventory and a permitted client → contract production edge | Before acceptance | M1 v2 `A`/`R` together with the test below; M1 gate green at `R` |
+| `apps/loopex/test/deps_budget_test.exs` | M1 | Locks the current rule set | Negative tests for the new edge and inventory | Same M1 transaction | Same `A`/`R`; not a separate transaction |
+| `scripts/m1-exunit-runner.exs`, `apps/loopex/test/m1_exunit_runner_test.exs` | M1, M2, M3, M4 | Authoritative report channel | None planned; any version-aware field change touches every holder | Only if changed | v2 for M1–M3 in register order, M4's own table while Open |
+| `scripts/m3-gate-support.exs`, `scripts/check-closed-gates.sh` | M3, M4 | M3's combined real-path verifier fixes `@0.0.0` | None; M4's verifier reads `VERSION`; an M3 rerun after 0.1.0 needs M3's own v2 | Only if changed | M3 v2, then M4 rebinds |
+| `apps/loopex_app_server` | None | Absent | Ninth application | Implementation, after the M1 rule change | Ordinary M4 product work on branch `m4` |
+| `VERSION`, application versions | Gates whose evidence names the version | 0.0.0 | 0.1.0 | Closure rejoin | Separately approved version transition; evidence names the exact version |
 
+M2 deliberately binds neither dependency file, so it is not a holder there.
 The planned `loopex_app_server` depends directly on `loopex_protocol`; the
 current client-role rule rejects every internal edge other than core and a
 composition. Permit client → contract production dependencies deliberately and
@@ -155,9 +166,10 @@ lost duplicate-key evidence. Stdlib JSON at the accepted floor is the codec;
 no external dependency is added to the app-server.
 
 A foreground app-server loss invokes the inherited host shutdown/recovery
-contract. Explicit graceful EOF can cancel its owned run; abrupt loss leaves
-only what the journal proves. Neither attachment nor transport reconnection
-recreates an expired, denied or cancelled interaction. The same cancellation,
+contract. Clean EOF shuts down in order without cancelling; abrupt loss leaves
+only what the journal proves; only `session.abort` cancels. Neither attachment
+nor transport reconnection recreates an expired, denied or cancelled
+interaction. The same cancellation,
 provider-protection and executor process-tree guarantees as the CLI must hold.
 
 <a id="technical-plan-evidence"></a>

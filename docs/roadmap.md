@@ -44,7 +44,7 @@ Technical depth: [M0 candidate proof boundaries](roadmap-technical.md#technical-
 Can a developer use a small, durable, truthful coding loop through the
 embedded API and reference client? Three milestones answer it: the foreground
 harness a developer drives from a terminal, reusable local foundations including
-project skills and core repairs, then durable interactions, artifact ranges
+project skills and core repairs, then durable interactions, artifact transfers
 and the headless boundary another
 program drives with the same semantics. It builds on the durable single-machine session and effect truth M1
 delivered. Its surfaces remain experimental throughout, and the projected

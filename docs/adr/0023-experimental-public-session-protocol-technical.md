@@ -67,14 +67,22 @@ The generation contains methods for `session.create`, `session.list`,
 `session.steer`, `session.follow_up`, `session.abort`,
 `session.respond_interaction`, `project_resources.inspect`,
 `project_resources.decide`, `resources.catalog`, `resources.read`,
-`session.admit_resources`, `session.activate_skill`, and `artifact.read`.
+`session.admit_resources`, `session.activate_skill`, `artifact.open_transfer`,
+`artifact.read_chunk`, and `artifact.close_transfer`.
 The project_resources pair preserves the existing root AGENTS.md trust class;
 resources.catalog/read map M3's resource_catalog/read_resource facade queries,
 and the two session methods map M3's exact admission/selection commands. No
 wire method fetches arbitrary URLs or selects a host resource root.
-Artifact reads map M4's ADR 0028 read_artifact query: opaque use reference plus bounded
-offset/length, separate full-object and returned-range digests, total size,
-returned range and bytes in a declared transfer encoding. They expose no path.
+The three artifact methods map M4's ADR 0028 transfer lifecycle one to one:
+open names an opaque use reference, a start offset and an optional window
+length and returns the object and use references, total size, window bounds,
+the full-object digest and an opaque transfer reference that the server binds
+to the opening connection's attachment; read_chunk returns the next sequential
+chunk with its offset, bytes in a declared transfer encoding and chunk digest;
+close releases the transfer. A transfer reference from another connection or
+attachment refuses. Connection loss closes every transfer the connection
+opened. The methods expose no path, and no chunk digest is presented as proof
+of the complete object.
 
 `session.create` admits the durable creation command and returns the new session
 identity; it does not attach. `session.attach` is connection-local and returns
@@ -102,14 +110,27 @@ be retained, the connection detaches at the last reported cursor or a new
 admission is refused before mutation. It never blocks a coordinator callback on
 the client's read rate.
 
-### Process loss and resume
+### Connection states, process loss and resume
 
-EOF closes the foreground host and grants nothing. Owned session shutdown,
-effect cleanup, and unresolved outcome follow M2's public facade. A later
-process uses the durable state root and ADR 0008 resume command identity to
-acquire ownership. M4 promises neither live attachment replay across process
-loss nor controller takeover; the new attachment starts again from a current
-snapshot and cursor.
+| Situation | Required behavior |
+| --- | --- |
+| Before `initialize` | Every other frame refuses; nothing durable is created |
+| Repeated `initialize` or no common generation | Refuse; the connection stays uninitialized; each generation binds exactly one schema digest |
+| Attachment | At most one active attachment per foreground process; a second `session.attach` refuses with a stable reason unless it names explicit replacement, which detaches the first at its last completely emitted cursor |
+| Request identity | `request_id` is unique among in-flight requests on the connection; reuse while in flight refuses; reuse after completion is ordinary correlation |
+| Pre-admission pressure | Refuse the mutation before any durable write |
+| Post-admission pressure | Drop or coalesce progress first; if durable output still cannot drain, detach at the last completely emitted cursor and say so |
+| Clean stdin EOF | Connection closed by the host: inherited orderly foreground shutdown, no new dispatch, open transfers closed, no cancellation record, no interaction state change |
+| Abrupt process death | Host loss: nothing is recorded by the dying process; the journal alone states what settled, and the inherited recovery contract resolves unresolved outcomes |
+| Deliberate cancellation | Only the durable `session.abort` command cancels; it is never inferred from EOF or death |
+| Restart | A fresh process attaches with snapshot and cursor first; pending interactions remain pending; cancelled, expired or denied ones never reappear |
+
+Neither EOF nor process death grants anything or cancels anything. Owned
+session shutdown, effect cleanup, and unresolved outcome follow M2's public
+facade. A later process uses the durable state root and ADR 0008 resume command
+identity to acquire ownership. M4 promises neither live attachment replay
+across process loss nor controller takeover; the new attachment starts again
+from a current snapshot and cursor.
 
 <a id="technical-adr-0023-consequences"></a>
 ## Evidence and Operational Consequences

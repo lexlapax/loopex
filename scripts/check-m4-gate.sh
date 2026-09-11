@@ -181,6 +181,28 @@ if [ "$role" = checkpoint ] && [ -z "$selected_ids" ]; then
   exit "$opening_result"
 fi
 
+# Concept: client lanes run only under the pinned interpreters the gate binds.
+# Technical depth: outcomes 5 and 6 execute external clients, so their pins are
+# verified before any selector for them runs; an absent or different interpreter
+# is unavailable evidence, never a product red. The pin file names exact
+# `node=` and `python=` versions.
+client_pins=scripts/fixtures/m4/client-toolchain.txt
+pinned_node=""
+pinned_python=""
+require_client_pins() {
+  [ -r "$client_pins" ] || die "client toolchain pins are absent: $client_pins"
+  pinned_node=$(awk -F= '$1 == "node" { print $2 }' "$client_pins")
+  pinned_python=$(awk -F= '$1 == "python" { print $2 }' "$client_pins")
+  [ -n "$pinned_node" ] && [ -n "$pinned_python" ] || die 'client toolchain pins are incomplete'
+  observed_node=$(node --version 2>/dev/null </dev/null) || die 'pinned Node interpreter is unavailable'
+  observed_python=$(python3 --version 2>/dev/null </dev/null | cut -d' ' -f2) || die 'pinned Python interpreter is unavailable'
+  [ "$observed_node" = "v$pinned_node" ] || die "Node version differs from the pin: $observed_node"
+  [ "$observed_python" = "$pinned_python" ] || die "Python version differs from the pin: $observed_python"
+}
+case ",$selected_ids," in
+  *,5,*|*,6,*) require_client_pins ;;
+esac
+
 support prepare-build "$task_root" "$operator_mix_home" "${LOOPEX_HOME:-$operator_home/.loopex}" "${LOOPEX_WORKSPACE:-$root}" || exit $?
 if ! env LANG=C.UTF-8 LC_ALL=C.UTF-8 elixir -r apps/loopex/lib/mix/tasks/loopex.deps_budget.ex \
   -e 'Loopex.Checks.DepsBudget.main(System.argv())' -- \
@@ -277,18 +299,7 @@ cat "$task_root/inherited.log"
 lane_finished inherited "$task_inherited_started" "$result"
 [ "$result" = 0 ] || exit "$result"
 [ "$(tail -n 1 "$task_root/inherited.log")" = 'LOOPEX_CLOSED_GATES_REPORT caller=M4 complete=true' ] || die 'inherited gate invocation report missing'
-# Concept: client lanes run only under the pinned interpreters the gate binds.
-# Technical depth: an absent or different interpreter is unavailable evidence,
-# never a product red; the pin file names exact `node=` and `python=` versions.
-client_pins=scripts/fixtures/m4/client-toolchain.txt
-[ -r "$client_pins" ] || die "client toolchain pins are absent: $client_pins"
-pinned_node=$(awk -F= '$1 == "node" { print $2 }' "$client_pins")
-pinned_python=$(awk -F= '$1 == "python" { print $2 }' "$client_pins")
-[ -n "$pinned_node" ] && [ -n "$pinned_python" ] || die 'client toolchain pins are incomplete'
-observed_node=$(node --version 2>/dev/null </dev/null) || die 'pinned Node interpreter is unavailable'
-observed_python=$(python3 --version 2>/dev/null </dev/null | cut -d' ' -f2) || die 'pinned Python interpreter is unavailable'
-[ "$observed_node" = "v$pinned_node" ] || die "Node version differs from the pin: $observed_node"
-[ "$observed_python" = "$pinned_python" ] || die "Python version differs from the pin: $observed_python"
+require_client_pins
 real_selector=$(support real "$root") || exit $?
 printf '%s\n' "$real_selector" >> "$task_root/selectors"
 run_selector "$real_selector" real
@@ -297,8 +308,16 @@ final_identity=$(support identity "$root" committed) || exit $?
 [ "$full_identity" = "$final_identity" ] || die 'source identity changed during the full gate'
 [ "$build_identity" = "$(support build "$task_root/build/test")" ] || die 'selector build identity changed during the full gate'
 printf '%s\n' "$final_identity"
+# Concept: the retained report is validated against its grammar before it is
+# printed, so a missing identity can never be retained as evidence.
 source_version=$(tr -d '[:space:]' < VERSION) || die 'source VERSION is unreadable'
 toolchain=$(printf '%s\n' "$final_identity" | awk '{ for (i = 1; i <= NF; i++) if ($i ~ /^(elixir|otp|erts|platform)=/) printf "%s ", $i }')
 [ -n "$toolchain" ] || die 'toolchain identity is missing from the source identity line'
-printf 'LOOPEX_M4_GATE_REPORT source=%s gate=sha256:%s version=%s seed=3107 outcome_ids=1,2,3,4,5,6 %snode=%s python=%s inherited=true real_workflow=true result=PASS\n' \
-  "$(git rev-parse HEAD)" "$(shasum -a 256 docs/plans/M4-gate.md | cut -d' ' -f1)" "$source_version" "$toolchain" "$pinned_node" "$pinned_python"
+schema_path=apps/loopex_protocol/priv/schema/loopex-experimental-1.json
+[ -r "$schema_path" ] || die "canonical schema bytes are absent: $schema_path"
+schema_digest=$(shasum -a 256 "$schema_path" | cut -d' ' -f1) || die 'cannot hash the canonical schema'
+selector_count=$(grep -c . "$task_root/selector-ledger") || die 'selector ledger is empty'
+report=$(printf 'LOOPEX_M4_GATE_REPORT source=%s gate=sha256:%s version=%s seed=3107 outcome_ids=1,2,3,4,5,6 %snode=%s python=%s schema=sha256:%s selectors=%s inherited=true real_workflow=true result=PASS' \
+  "$(git rev-parse HEAD)" "$(shasum -a 256 docs/plans/M4-gate.md | cut -d' ' -f1)" "$source_version" "$toolchain" "$pinned_node" "$pinned_python" "$schema_digest" "$selector_count")
+support evidence "$report" </dev/null || exit $?
+printf '%s\n' "$report"

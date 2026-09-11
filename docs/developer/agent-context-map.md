@@ -75,7 +75,7 @@ opening red; future test bodies grow with implementation. The closure command
 must reject missing witnesses and unavailable evidence. Focused results never
 substitute for required acceptance-base or closure evidence.
 
-For the still-Open M3 lineage only, the independently reviewed
+For the M3 planning lineage before its acceptance only, the independently reviewed
 [acceptance aggregate override](#override-disposition-m3-acceptance-aggregate-2026-09-10)
 replaces the new acceptance-base M0–M2 aggregate with the exact-candidate
 validation listed in that disposition. It does not change later aggregate
