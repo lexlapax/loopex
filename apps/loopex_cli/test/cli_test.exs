@@ -172,6 +172,256 @@ defmodule LoopexCliTest do
 
   defp call(id \\ "c1"), do: %{id: id, name: "write", arguments: %{"path" => "notes.txt"}}
 
+  test "run accepts repeatable explicit skill and supporting resource selections" do
+    assert {:error, message} =
+             LoopexCli.dispatch([
+               "run",
+               "--skill",
+               "source-a:format",
+               "--skill",
+               "source-b:test",
+               "--skill-resource",
+               "source-a:format:references/checks.md",
+               "--skill-resource",
+               "source-a:format:templates/review.md",
+               "do the thing"
+             ])
+
+    assert message == "--policy is required; there is no default host authority"
+  end
+
+  test "skill add sends one explicitly authorized pinned Git import to the host" do
+    {state_root, workspace} = roots()
+    revision = String.duplicate("a", 40)
+    parent = self()
+
+    resource_packs = %{
+      add: fn actual_workspace, source, options ->
+        send(parent, {:skill_add, actual_workspace, source, options})
+
+        {:ok,
+         %{
+           "source_id" => "github.com/example/skills",
+           "name" => "format"
+         }}
+      end
+    }
+
+    output =
+      capture_io("y\n", fn ->
+        assert :ok =
+                 LoopexCli.dispatch(
+                   [
+                     "skill",
+                     "add",
+                     "https://github.com/example/skills.git",
+                     "--rev",
+                     revision,
+                     "--path",
+                     "skills/format",
+                     "--state-root",
+                     state_root,
+                     "--workspace",
+                     workspace
+                   ],
+                   resource_packs: resource_packs,
+                   executor_authorization: {:host_policy, :allow}
+                 )
+      end)
+
+    assert_receive {:skill_add, ^workspace, "https://github.com/example/skills.git", options}
+    assert Keyword.fetch!(options, :state_root) == state_root
+    assert Keyword.fetch!(options, :rev) == revision
+    assert Keyword.fetch!(options, :path) == "skills/format"
+    assert Keyword.fetch!(options, :executor_authorization) == {:host_policy, :allow}
+    assert is_binary(Keyword.fetch!(options, :git_executable))
+    assert String.starts_with?(Keyword.fetch!(options, :workspace_ref), "workspace:")
+    assert output =~ "github.com/example/skills:format"
+  end
+
+  test "skill add asks before fetching and installation grants no run trust" do
+    {state_root, workspace} = roots()
+    revision = String.duplicate("c", 40)
+    parent = self()
+
+    resource_packs = %{
+      add: fn _workspace, _source, options ->
+        send(parent, {:authorized_import, Keyword.fetch!(options, :executor_authorization)})
+        {:ok, %{"source_id" => "example.test/skills", "name" => "review"}}
+      end
+    }
+
+    _stdout =
+      capture_io("yes\n", fn ->
+        stderr =
+          capture_io(:stderr, fn ->
+            send(
+              parent,
+              {:skill_add_result,
+               LoopexCli.dispatch(
+                 [
+                   "skill",
+                   "add",
+                   "https://example.test/skills.git",
+                   "--rev",
+                   revision,
+                   "--path",
+                   "review",
+                   "--state-root",
+                   state_root,
+                   "--workspace",
+                   workspace
+                 ],
+                 resource_packs: resource_packs,
+                 operator_present: true
+               )}
+            )
+          end)
+
+        send(parent, {:skill_add_stderr, stderr})
+      end)
+
+    assert_receive {:authorized_import, {:host_policy, :allow}}
+    assert_receive {:skill_add_result, :ok}
+    assert_receive {:skill_add_stderr, stderr}
+    assert stderr =~ "fetch exact Git commit #{revision}"
+    assert stderr =~ "installation does not trust this skill for a run"
+  end
+
+  test "skill list inspects the host manifest without starting a runtime" do
+    {state_root, workspace} = roots()
+    parent = self()
+
+    manifest = %{
+      "packs" => [
+        %{
+          "source_id" => "example.test/skills",
+          "name" => "review",
+          "description" => "Review one change",
+          "manual_only" => true,
+          "files" => []
+        }
+      ]
+    }
+
+    resource_packs = %{
+      discover: fn actual_workspace, options ->
+        send(parent, {:skill_discover, actual_workspace, options})
+        {:ok, manifest}
+      end
+    }
+
+    output =
+      capture_io(fn ->
+        assert :ok =
+                 LoopexCli.dispatch(
+                   [
+                     "skill",
+                     "list",
+                     "--state-root",
+                     state_root,
+                     "--workspace",
+                     workspace
+                   ],
+                   resource_packs: resource_packs
+                 )
+      end)
+
+    assert_receive {:skill_discover, ^workspace, options}
+    assert Keyword.fetch!(options, :state_root) == state_root
+    assert String.starts_with?(Keyword.fetch!(options, :workspace_ref), "workspace:")
+    assert output =~ "example.test/skills:review"
+    assert output =~ "Review one change"
+    assert output =~ "manual only"
+  end
+
+  test "skill show prints the retained source and complete file identity" do
+    {state_root, workspace} = roots()
+    commit = String.duplicate("d", 40)
+    tree = String.duplicate("e", 40)
+    digest = String.duplicate("f", 64)
+
+    manifest = %{
+      "packs" => [
+        %{
+          "source_id" => "example.test/skills",
+          "origin" => "https://example.test/skills.git",
+          "commit" => commit,
+          "tree_digest" => tree,
+          "name" => "review",
+          "description" => "Review one change",
+          "manual_only" => true,
+          "files" => [
+            %{"label" => "SKILL.md", "size" => 18, "digest" => digest, "contained" => true}
+          ]
+        }
+      ]
+    }
+
+    output =
+      capture_io(fn ->
+        assert :ok =
+                 LoopexCli.dispatch(
+                   [
+                     "skill",
+                     "show",
+                     "example.test/skills:review",
+                     "--state-root",
+                     state_root,
+                     "--workspace",
+                     workspace
+                   ],
+                   resource_packs: %{discover: fn _workspace, _options -> {:ok, manifest} end}
+                 )
+      end)
+
+    assert output =~ "example.test/skills:review"
+    assert output =~ "https://example.test/skills.git"
+    assert output =~ commit
+    assert output =~ tree
+    assert output =~ "SKILL.md  18 bytes  #{digest}"
+  end
+
+  test "fresh run passes the discovered immutable skill manifest to the shipped composition" do
+    {state_root, workspace} = roots()
+    parent = self()
+    manifest = %{"version" => "loopex.resource_pack/1", "packs" => []}
+
+    assert {:error, "captured skill launch"} =
+             LoopexCli.dispatch(
+               [
+                 "run",
+                 "--policy",
+                 "allow-all",
+                 "--skill",
+                 "source:review",
+                 "--state-root",
+                 state_root,
+                 "--workspace",
+                 workspace,
+                 "review this"
+               ],
+               resource_packs: %{
+                 discover: fn actual_workspace, options ->
+                   send(parent, {:fresh_skill_discovery, actual_workspace, options})
+                   {:ok, manifest}
+                 end
+               },
+               runtime_starter: fn options ->
+                 send(parent, {:fresh_skill_launch, options})
+                 {:error, "captured skill launch"}
+               end
+             )
+
+    assert_receive {:fresh_skill_discovery, ^workspace, discovery_options}
+    assert Keyword.fetch!(discovery_options, :state_root) == state_root
+
+    assert_receive {:fresh_skill_launch, launch_options}
+    assert Keyword.fetch!(launch_options, :resource_manifest) == manifest
+    assert Keyword.fetch!(launch_options, :project_manifest) == nil
+    assert Keyword.has_key?(launch_options, :provider_launch)
+  end
+
   # Concept: watch both planes at once, in the order they actually arrive.
   #
   # Technical depth: a case about a transient item reaching the terminal before a

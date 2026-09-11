@@ -235,6 +235,14 @@ defmodule LoopexCli.ProjectResources do
   def resolve_path(path), do: real_path(path)
 
   @doc false
+  @spec workspace_reference(Path.t()) :: {:ok, binary()} | {:error, term()}
+  def workspace_reference(workspace) do
+    with {:ok, root} <- real_path(workspace),
+         {:ok, identity} <- directory_identity(root),
+         do: {:ok, workspace_reference(root, identity)}
+  end
+
+  @doc false
   @spec directory_identity(Path.t()) :: {:ok, {integer(), integer()}} | {:error, term()}
   def directory_identity(path) do
     case File.stat(path) do

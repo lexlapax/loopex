@@ -78,21 +78,27 @@ defmodule LoopexCli do
   def dispatch(["resume" | rest], options), do: admitted("resume", rest, &resume(&1, options))
   def dispatch(["cancel" | rest], options), do: admitted("cancel", rest, &cancel(&1, options))
   def dispatch(["artifact" | rest], _options), do: admitted("artifact", rest, &artifact/1)
+  def dispatch(["skill" | rest], options), do: admitted("skill", rest, &skill(&1, options))
 
   def dispatch([], _options),
-    do: {:error, "choose one command: run, sessions, resume, cancel, or artifact\n\n" <> usage()}
+    do:
+      {:error,
+       "choose one command: run, sessions, resume, cancel, artifact, or skill\n\n" <> usage()}
 
   def dispatch([unknown | _rest], _options),
     do: {:error, "unknown command #{unknown}\n\n" <> usage()}
 
   @command_flags %{
     "run" =>
-      ~w(policy state-root workspace steer follow-up cleanup-grace-ms context-token-budget),
+      ~w(policy state-root workspace steer follow-up cleanup-grace-ms context-token-budget skill skill-resource),
     "sessions" => ~w(state-root),
     "resume" => ~w(policy state-root workspace cleanup-grace-ms context-token-budget),
     "cancel" => ~w(policy state-root workspace cleanup-grace-ms context-token-budget),
-    "artifact" => ~w(state-root)
+    "artifact" => ~w(state-root),
+    "skill" => ~w(state-root workspace rev path)
   }
+
+  @repeatable_flags ~w(skill skill-resource)
 
   # Concept: input naming nothing this command offers is refused, whichever
   # subcommand it was typed after.
@@ -130,13 +136,13 @@ defmodule LoopexCli do
       [key, value] ->
         with :ok <- admit_flag(name, allowed, flags, key),
              :ok <- require_flag_value(key, value) do
-          parse_command(name, allowed, rest, Map.put(flags, key, value), words)
+          parse_command(name, allowed, rest, put_flag(flags, key, value), words)
         end
 
       [key] ->
         with :ok <- admit_flag(name, allowed, flags, key),
              {:ok, value, tail} <- take_flag_value(key, rest) do
-          parse_command(name, allowed, tail, Map.put(flags, key, value), words)
+          parse_command(name, allowed, tail, put_flag(flags, key, value), words)
         end
     end
   end
@@ -146,11 +152,21 @@ defmodule LoopexCli do
 
   defp admit_flag(name, allowed, flags, key) do
     cond do
-      key not in allowed -> {:error, "--#{key} is not valid for loopex #{name}"}
-      Map.has_key?(flags, key) -> {:error, "--#{key} was supplied more than once"}
-      true -> :ok
+      key not in allowed ->
+        {:error, "--#{key} is not valid for loopex #{name}"}
+
+      Map.has_key?(flags, key) and key not in @repeatable_flags ->
+        {:error, "--#{key} was supplied more than once"}
+
+      true ->
+        :ok
     end
   end
+
+  defp put_flag(flags, key, value) when key in @repeatable_flags,
+    do: Map.update(flags, key, [value], &(&1 ++ [value]))
+
+  defp put_flag(flags, key, value), do: Map.put(flags, key, value)
 
   defp require_flag_value(key, ""), do: {:error, "--#{key} requires a value"}
   defp require_flag_value(_key, _value), do: :ok
@@ -729,6 +745,172 @@ defmodule LoopexCli do
     end
   end
 
+  defp skill({flags, ["add", source]}, options) do
+    with {:ok, workspace} <- workspace(flags),
+         {:ok, root} <- state_root(flags),
+         {:ok, workspace_ref} <- ProjectResources.workspace_reference(workspace),
+         {:ok, revision} <- git_revision(Map.get(flags, "rev")),
+         {:ok, path} <- required_flag(flags, "path"),
+         {:ok, executable} <- git_executable(),
+         {:ok, authorization} <- import_authorization(source, revision, path, options),
+         {:ok, pack} <-
+           resource_packs(options, :add, [
+             workspace,
+             source,
+             [
+               workspace_ref: workspace_ref,
+               state_root: root,
+               rev: revision,
+               path: path,
+               git_executable: executable,
+               executor_authorization: authorization
+             ]
+           ]) do
+      IO.puts("installed #{pack["source_id"]}:#{pack["name"]}")
+      IO.puts(:stderr, "loopex: installation does not trust this skill for a run")
+      :ok
+    else
+      {:error, {reason, detail}} ->
+        {:error, "the skill could not be installed: #{reason} (#{detail})"}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp skill({_flags, ["add" | _words]}, _options),
+    do: {:error, "loopex skill add takes exactly one Git source"}
+
+  defp skill({flags, ["list"]}, options) do
+    with {:ok, manifest} <- discover_skill_manifest(flags, options) do
+      case manifest["packs"] do
+        [] ->
+          IO.puts("no skills")
+
+        packs ->
+          Enum.each(packs, fn pack ->
+            manual = if pack["manual_only"], do: " (manual only)", else: ""
+
+            IO.puts("#{pack["source_id"]}:#{pack["name"]}#{manual}  #{pack["description"]}")
+          end)
+      end
+
+      :ok
+    end
+  end
+
+  defp skill({flags, ["show", qualified_name]}, options) do
+    with {:ok, manifest} <- discover_skill_manifest(flags, options),
+         {:ok, pack} <- find_skill(manifest["packs"], qualified_name) do
+      IO.puts("#{pack["source_id"]}:#{pack["name"]}")
+      IO.puts(pack["description"])
+      IO.puts("origin #{pack["origin"] || "local workspace"}")
+      IO.puts("commit #{pack["commit"] || "local"}")
+      IO.puts("tree #{pack["tree_digest"] || "local"}")
+      IO.puts(if(pack["manual_only"], do: "manual only", else: "model invocation compatible"))
+
+      Enum.each(pack["files"], fn file ->
+        IO.puts("#{file["label"]}  #{file["size"]} bytes  #{file["digest"]}")
+      end)
+
+      :ok
+    end
+  end
+
+  defp skill({_flags, words}, _options),
+    do: {:error, "choose one skill command: add, list, or show; got #{Enum.join(words, " ")}"}
+
+  defp git_revision(value) when is_binary(value) and byte_size(value) in [40, 64] do
+    if String.match?(value, ~r/\A[0-9a-f]+\z/),
+      do: {:ok, value},
+      else: {:error, "--rev must be a full lowercase Git object ID"}
+  end
+
+  defp git_revision(_value), do: {:error, "--rev must be a full lowercase Git object ID"}
+
+  defp required_flag(flags, name) do
+    case Map.get(flags, name) do
+      value when is_binary(value) and byte_size(value) > 0 -> {:ok, value}
+      _missing -> {:error, "--#{name} is required"}
+    end
+  end
+
+  defp git_executable do
+    case System.find_executable("git") do
+      executable when is_binary(executable) -> {:ok, executable}
+      nil -> {:error, "Git is required to install a skill"}
+    end
+  end
+
+  defp import_authorization(source, revision, path, options) do
+    case Keyword.get(options, :executor_authorization) do
+      {:host_policy, :allow} = authorization ->
+        {:ok, authorization}
+
+      _absent ->
+        operator_present =
+          Keyword.get_lazy(options, :operator_present, &ProjectResources.operator_present?/0)
+
+        if operator_present do
+          IO.write(
+            :stderr,
+            "loopex: fetch exact Git commit #{revision} from #{source}, path #{path}? [y/N] "
+          )
+
+          case IO.gets("") do
+            answer when is_binary(answer) ->
+              if String.downcase(String.trim(answer)) in ["y", "yes"],
+                do: {:ok, {:host_policy, :allow}},
+                else: {:error, "the skill import was not authorized"}
+
+            _eof ->
+              {:error, "the skill import was not authorized"}
+          end
+        else
+          {:error, "installing a skill requires explicit operator authorization"}
+        end
+    end
+  end
+
+  defp resource_packs(options, function, arguments) do
+    case Keyword.get(options, :resource_packs, LoopexComposition.ResourcePacks) do
+      functions when is_map(functions) -> functions |> Map.fetch!(function) |> apply(arguments)
+      module when is_atom(module) -> apply(module, function, arguments)
+    end
+  end
+
+  defp discover_skill_manifest(flags, options) do
+    with {:ok, workspace} <- workspace(flags),
+         {:ok, root} <- state_root(flags),
+         do: discover_skill_manifest(workspace, root, options)
+  end
+
+  defp discover_skill_manifest(workspace, root, options) do
+    with {:ok, workspace_ref} <- ProjectResources.workspace_reference(workspace),
+         result <-
+           resource_packs(options, :discover, [
+             workspace,
+             [workspace_ref: workspace_ref, state_root: root]
+           ]) do
+      case result do
+        {:ok, manifest} ->
+          {:ok, manifest}
+
+        {:error, {reason, detail}} ->
+          {:error, "skills could not be inspected: #{reason} (#{detail})"}
+      end
+    end
+  end
+
+  defp find_skill(packs, qualified_name) do
+    case Enum.find(packs, fn pack ->
+           "#{pack["source_id"]}:#{pack["name"]}" == qualified_name
+         end) do
+      nil -> {:error, "no installed skill is named #{qualified_name}"}
+      pack -> {:ok, pack}
+    end
+  end
+
   # Concept: retrieval goes through the port, so a host that composed a different
   # artifact store is followed rather than bypassed.
   #
@@ -836,6 +1018,7 @@ defmodule LoopexCli do
          {:ok, root} <- state_root(flags),
          {:ok, cleanup} <- cleanup_grace(flags),
          {:ok, context} <- context_token_budget(flags),
+         {:ok, resource_manifest} <- discover_skill_manifest(workspace, root, options),
          :ok <- own_placement(root) do
       {:ok, placement} = facade(Loopex, :runtime_placement_id, [root])
 
@@ -876,6 +1059,7 @@ defmodule LoopexCli do
           policy: policy,
           project_manifest: manifest,
           project_decision: decision,
+          resource_manifest: resource_manifest,
           progress_to: self(),
           provider_launch: LoopexCli.ProviderLaunch.options(),
           recover_stale_writer: true
@@ -1090,6 +1274,9 @@ defmodule LoopexCli do
       loopex resume <session> --policy allow-all
       loopex cancel <session> [--policy <name>]
       loopex artifact <reference>
+      loopex skill add <git-source> --rev <commit> --path <directory>
+      loopex skill list
+      loopex skill show <source-qualified-name>
 
     --policy is required for anything that runs tools. There is no default.
 
