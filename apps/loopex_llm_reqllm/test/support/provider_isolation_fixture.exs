@@ -135,14 +135,11 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
     {:ok, {_address, port}} = :inet.sockname(listener)
     expected = Keyword.get(options, :credential, System.get_env(Adapter.credential_variable()))
 
-    response_body =
-      if mode == :backpressure,
-        do: {root, Keyword.get(options, :stream_prelude), Keyword.fetch!(options, :stream_parts)},
-        else: Keyword.get(options, :response_body)
+    responses = response_plan!(mode, root, options)
 
     acceptor =
       spawn_link(fn ->
-        accept_loop(listener, events, transport_events, mode, expected, response_body)
+        accept_loop(listener, events, transport_events, mode, expected, responses)
       end)
 
     if mode == :closed_port, do: :gen_tcp.close(listener)
@@ -202,6 +199,26 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
 
   def complete(fixture, request \\ request(), progress \\ Model.discard_progress()),
     do: Adapter.complete(request, fixture.options, progress)
+
+  defp response_plan!(:backpressure, root, options) do
+    {:repeat,
+     {root, Keyword.get(options, :stream_prelude), Keyword.fetch!(options, :stream_parts)}}
+  end
+
+  defp response_plan!(_mode, _root, options) do
+    case Keyword.fetch(options, :response_bodies) do
+      {:ok, bodies} when is_list(bodies) and bodies != [] ->
+        if Enum.all?(bodies, &is_binary/1),
+          do: {:sequence, bodies},
+          else: raise(ArgumentError, "response_bodies must contain only binaries")
+
+      {:ok, _invalid} ->
+        raise ArgumentError, "response_bodies must be a non-empty list"
+
+      :error ->
+        {:repeat, Keyword.get(options, :response_body)}
+    end
+  end
 
   def managed(
         fixture,
@@ -970,27 +987,39 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
     end
   end
 
-  defp accept_loop(listener, events, transport_events, mode, expected, response_body) do
+  defp accept_loop(listener, events, transport_events, mode, expected, responses) do
     case :gen_tcp.accept(listener) do
       {:ok, socket} ->
         Agent.update(transport_events, &[:connected | &1])
+        {response_body, remaining_responses} = next_response(responses)
 
         handler =
           spawn_link(fn ->
             receive do
               {:socket, ^socket} ->
-                serve(socket, events, transport_events, mode, expected, response_body)
+                case response_body do
+                  :sequence_exhausted ->
+                    respond(socket, "500 Internal Server Error", "application/json", "{}")
+                    :gen_tcp.close(socket)
+
+                  body ->
+                    serve(socket, events, transport_events, mode, expected, body)
+                end
             end
           end)
 
         :ok = :gen_tcp.controlling_process(socket, handler)
         send(handler, {:socket, socket})
-        accept_loop(listener, events, transport_events, mode, expected, response_body)
+        accept_loop(listener, events, transport_events, mode, expected, remaining_responses)
 
       {:error, :closed} ->
         :ok
     end
   end
+
+  defp next_response({:repeat, response_body} = responses), do: {response_body, responses}
+  defp next_response({:sequence, [response_body | rest]}), do: {response_body, {:sequence, rest}}
+  defp next_response({:sequence, []} = responses), do: {:sequence_exhausted, responses}
 
   defp serve(socket, events, transport_events, mode, expected, response_body) do
     with {:ok, headers, body} <- read_request(socket, "") do
