@@ -36,6 +36,7 @@ defmodule LoopexComposition do
   alias Loopex.Executor.Local.{CodingTools, WorkspaceLease}
   alias Loopex.Store.Local.Artifacts
   alias LoopexProtocol.Canonical
+  alias LoopexComposition.RuntimeOwner
 
   # Concept: what the host decides stays the host's to supply; an option the
   # host did not supply is absent rather than a default this module invented.
@@ -64,10 +65,35 @@ defmodule LoopexComposition do
   """
   @spec start(keyword()) :: {:ok, Loopex.Runtime.t()} | {:error, term()}
   def start(options) when is_list(options) do
-    with {:ok, configuration} <- validate(options), do: start_owner(configuration)
+    with {:ok, configuration} <- validate(options),
+         do: RuntimeOwner.start(configuration, &compose/1, owner_seams())
   end
 
   def start(_options), do: {:error, :invalid_composition_options}
+
+  @doc """
+  ## Concept
+
+  Runs one callback with a temporary reference runtime and returns only after
+  every process owned by that composition has stopped orderly.
+
+  ## Technical depth
+
+  The callback result is returned unchanged after confirmed cleanup. Exceptions,
+  throws, and exits are reraised with their original stack after cleanup. A
+  forced or unconfirmed stop returns `{:error, {:composition_cleanup_unconfirmed,
+  details}}` for a normally returning callback. `start/1` retains its existing
+  independent-owner lifecycle.
+  """
+  @spec with_runtime(keyword(), (Loopex.Runtime.t() -> result)) ::
+          result | {:error, term()}
+        when result: term()
+  def with_runtime(options, function) when is_list(options) and is_function(function, 1) do
+    with {:ok, configuration} <- validate(options),
+         do: RuntimeOwner.with_runtime(configuration, function, &compose/1, owner_seams())
+  end
+
+  def with_runtime(_options, _function), do: {:error, :invalid_composition_options}
 
   @doc """
   ## Concept
@@ -118,48 +144,14 @@ defmodule LoopexComposition do
     end)
   end
 
-  # Concept: one private owner acquires every process, so a later failure, a
-  # runtime stop, or abnormal runtime death releases all of them. The caller's
-  # observer seams travel with it so tests observe effects without global state.
-  defp start_owner(configuration) do
-    {caller, tag} = {self(), make_ref()}
-    seams = {Process.get(@edge, &apply/3), Process.get(@effect, &apply/3)}
-    {owner, monitor} = spawn_monitor(fn -> own(caller, tag, configuration, seams) end)
-
-    receive do
-      {^tag, result} ->
-        Process.demonitor(monitor, [:flush])
-        result
-
-      {:DOWN, ^monitor, :process, ^owner, reason} ->
-        {:error, {:composition_owner_failed, reason}}
-    end
-  end
-
-  defp own(caller, tag, configuration, {edge, effect}) do
-    Process.flag(:trap_exit, true)
-
-    Enum.each([{@edge, edge}, {@effect, effect}, {@owned, []}], fn {k, v} -> Process.put(k, v) end)
-
-    result =
-      try do
-        compose(configuration)
-      rescue
-        exception -> {:error, {:composition_start_raised, exception}}
-      catch
-        kind, reason -> {:error, {:composition_start_caught, kind, reason}}
-      end
-
-    case result do
-      {:ok, _runtime} ->
-        send(caller, {tag, result})
-        receive do: ({:EXIT, _pid, _reason} -> cleanup())
-
-      {:error, _reason} ->
-        cleanup()
-        send(caller, {tag, result})
-    end
-  end
+  defp owner_seams,
+    do: %{
+      edge: Process.get(@edge, &apply/3),
+      effect: Process.get(@effect, &apply/3),
+      edge_key: @edge,
+      effect_key: @effect,
+      owned_key: @owned
+    }
 
   defp compose({options, root, workspace, runtime_id, policy}) do
     with :ok <- start_applications(),
@@ -247,24 +239,6 @@ defmodule LoopexComposition do
     with {:ok, resource} = result <- Process.get(@edge, &apply/3).(module, :start_link, [options]) do
       Process.put(@owned, [{module, resource} | Process.get(@owned)])
       result
-    end
-  end
-
-  defp cleanup, do: Enum.each(Process.get(@owned, []), &stop_owned/1)
-  defp stop_owned({Loopex, runtime}), do: effect(Loopex, :stop, [runtime])
-
-  defp stop_owned({_module, pid}) do
-    if Process.alive?(pid) do
-      monitor = Process.monitor(pid)
-      effect(Process, :exit, [pid, :shutdown])
-
-      receive do
-        {:DOWN, ^monitor, :process, ^pid, _reason} -> :ok
-      after
-        1_000 ->
-          effect(Process, :exit, [pid, :kill])
-          receive do: ({:DOWN, ^monitor, :process, ^pid, _reason} -> :ok)
-      end
     end
   end
 end

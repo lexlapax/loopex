@@ -1350,12 +1350,21 @@ defmodule LoopexCliTest do
                      "--workspace",
                      workspace
                    ],
+                   runtime_bracket: fn options, inspect ->
+                     assert Keyword.fetch!(options, :runtime_id) == placement
+                     refute Keyword.has_key?(options, :resource_manifest)
+                     result = inspect.(fixture.runtime)
+                     send(self(), {:resume_inspection_cleaned, result})
+                     result
+                   end,
                    runtime_starter: fn options ->
                      assert Keyword.fetch!(options, :runtime_id) == placement
                      {:ok, fixture.runtime}
                    end
                  )
       end)
+
+    assert_received {:resume_inspection_cleaned, {:ok, _digest}}
 
     assert output =~ "resume this session"
     assert output =~ "done"
@@ -1513,7 +1522,7 @@ defmodule LoopexCliTest do
   # Ends the composition the way halting an emulator does, and answers with the
   # marker bytes the dead process left behind for its successor to recover.
   defp end_the_process(marker) do
-    assert_receive {:composed_store, store_pid}, 5_000
+    store_pid = next_live_composed_store()
     down = Process.monitor(store_pid)
     Process.exit(store_pid, :kill)
     assert_receive {:DOWN, ^down, :process, ^store_pid, :killed}, 5_000
@@ -1527,6 +1536,14 @@ defmodule LoopexCliTest do
     # than silently replacing the previous terminal's handler.
     restore_signal_handlers()
     File.read!(marker)
+  end
+
+  # Prepared recovery opens and closes one inspection Store before the final
+  # runtime. The observer reports both real boundaries; only the live final
+  # Store models the command process that is about to halt.
+  defp next_live_composed_store do
+    assert_receive {:composed_store, store_pid}, 5_000
+    if Process.alive?(store_pid), do: store_pid, else: next_live_composed_store()
   end
 
   test "an interrupt signal delivered to a running loopex process cancels the task through the public facade" do
@@ -2012,6 +2029,14 @@ defmodule LoopexCliTest do
                "--workspace",
                workspace
              ],
+             runtime_bracket: fn options, inspect ->
+               assert Keyword.fetch!(options, :runtime_id) == placement
+               assert Keyword.fetch!(options, :policy) == LoopexCli.Policy.RefuseAll
+               refute Keyword.has_key?(options, :resource_manifest)
+               result = inspect.(fixture.runtime)
+               send(self(), {:cancel_inspection_cleaned, result})
+               result
+             end,
              runtime_starter: fn options ->
                assert Keyword.fetch!(options, :runtime_id) == placement
                assert Keyword.fetch!(options, :policy) == LoopexCli.Policy.RefuseAll
@@ -2022,6 +2047,7 @@ defmodule LoopexCliTest do
       end)
 
     assert_received {:cancelled, :ok}
+    assert_received {:cancel_inspection_cleaned, {:ok, _digest}}
     assert output =~ "loopex: cancelled"
     refute output =~ "outcome is unknown"
     refute output =~ "--policy is required"
