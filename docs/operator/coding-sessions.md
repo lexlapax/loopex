@@ -493,6 +493,9 @@ required, and the name must match the skill directory. The supported optional
 fields are `license`, `compatibility`, `metadata`, and
 `disable-model-invocation`. Unknown or duplicate fields refuse the pack. This
 parser does not turn metadata, scripts, or hook-shaped content into behavior.
+Ordinary files beside the skill directories, such as a catalog `README.md`, are
+ignored. Resource directory links, unsupported file types and invalid packs are
+refused before installation or admission.
 
 ### Streaming, and What an Absent Stream Means
 

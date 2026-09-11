@@ -555,14 +555,13 @@ defmodule LoopexComposition.SkillAcquisitionTest do
     cancel_started = Path.join(root, "cancel-started")
     cancel_escaped = Path.join(root, "cancel-escaped")
 
-    cancel_git =
-      delaying_git!(
+    {cancel_git, cancel_release} =
+      holding_git!(
         root,
         System.find_executable("git"),
         "cancel",
         cancel_started,
-        cancel_escaped,
-        5
+        cancel_escaped
       )
 
     cancel_state = Path.join(root, "cancel-state")
@@ -580,7 +579,7 @@ defmodule LoopexComposition.SkillAcquisitionTest do
         )
       end)
 
-    group = cancel_started |> await_file!() |> String.trim() |> String.to_integer()
+    group = cancel_started |> await_task_file!(task) |> String.trim() |> String.to_integer()
     refute process_group_empty?(group)
     coordinator = import_coordinator!(task.pid)
     coordinator_monitor = Process.monitor(coordinator)
@@ -588,6 +587,7 @@ defmodule LoopexComposition.SkillAcquisitionTest do
     assert_receive {:DOWN, ^coordinator_monitor, :process, ^coordinator, :normal}, 10_000
 
     assert process_group_empty?(group)
+    File.write!(cancel_release, "release")
     refute File.exists?(cancel_escaped)
     assert File.read!(installed) =~ "Keep me."
     assert staging_paths(workspace) == []
@@ -636,7 +636,7 @@ defmodule LoopexComposition.SkillAcquisitionTest do
         )
       end)
 
-    await_file!(started)
+    await_task_file!(started, task)
     coordinator = import_coordinator!(task.pid)
     monitor = Process.monitor(coordinator)
     true = :erlang.suspend_process(coordinator)
@@ -778,6 +778,41 @@ defmodule LoopexComposition.SkillAcquisitionTest do
 
     File.chmod!(path, 0o700)
     path
+  end
+
+  defp holding_git!(root, real_git, label, started, escaped) do
+    path = Path.join(root, "git-#{label}")
+    release = Path.join(root, "git-#{label}-release")
+
+    File.write!(path, """
+    #!/bin/sh
+    /bin/ps -o pgid= -p "$$" >#{started}
+    while [ ! -f "#{release}" ]; do /bin/sleep 0.01; done
+    printf escaped >#{escaped}
+    exec #{real_git} "$@"
+    """)
+
+    File.chmod!(path, 0o700)
+    {path, release}
+  end
+
+  # Concept: cancellation starts after observed Git readiness.
+  # Technical depth: the import's existing deadline bounds this wait. A completed
+  # import without its start marker fails with the actual result.
+  defp await_task_file!(path, task) do
+    case File.read(path) do
+      {:ok, content} when byte_size(content) > 0 ->
+        content
+
+      {:error, reason} when reason != :enoent ->
+        flunk("could not read Git start marker: #{inspect(reason)}")
+
+      _not_yet_published ->
+        case Task.yield(task, 10) do
+          nil -> await_task_file!(path, task)
+          result -> flunk("import ended before Git signalled readiness: #{inspect(result)}")
+        end
+    end
   end
 
   defp await_file!(path, remaining \\ 200)

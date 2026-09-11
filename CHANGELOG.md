@@ -29,6 +29,13 @@ admission and pre-run instruction/supporting-file selection. Stage optional
 blocks progressively after required context passes; downloaded scripts and
 metadata remain inert and grant no tool authority.
 
+Validate canonical resource roots and opened file identities across discovery,
+staging and publication. Check the selected Git object's type and complete file
+inventory before extraction, refuse normalized label collisions, and validate
+the complete pack before installation. Unsupported or duplicate frontmatter
+returns a bounded refusal. Ordinary files beside skill directories remain
+outside discovery.
+
 Retain versioned resource commands and resource-aware model receipts. Replay
 preserves exact staged bytes without refetch or ambiguous redispatch. Genuine
 integrated M2 histories remain readable; M2 readers refuse new resource records
@@ -46,8 +53,8 @@ fences. Fix stale executor test-root reuse through atomic fresh-directory
 reservation. Retire spent provider permits after matching durable settlement,
 including bounded short-page reads and matching terminal-pair validation, while
 preserving delayed-identity refusal and retry/accounting rules. Add deterministic embedding/source-built CLI workflow, resource
-boundary and old-reader compatibility witnesses. Remaining M3 implementation
-and final qualification are recorded in its plan progress; this entry claims no
+boundary and old-reader compatibility witnesses. M3's remaining final
+qualification is recorded in its plan progress; this entry claims no
 closure or full-gate result.
 
 Keep durable interactions, artifact ranges and the floor refresh in the
