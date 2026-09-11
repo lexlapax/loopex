@@ -2412,6 +2412,130 @@ defmodule Loopex.ContextAdmissionTest do
             }} = ProjectResource.resolve(valid, huge_decision)
   end
 
+  test "required only preflight refuses before any optional inclusive measurement" do
+    control = observe_required_first(100)
+    assert control.finished["outcome"] == "completed"
+    assert control.calls == 1
+    assert control.trace.required_measurements > 0
+    assert control.trace.optional_measurements > 0
+    assert control.trace.optional_admissions > 0
+    assert control.trace.project_resolutions > 0
+
+    overflow = observe_required_first(32_000)
+    assert overflow.finished["outcome"] == "failed"
+    assert overflow.calls == 0
+    assert overflow.trace.required_measurements > 0
+    assert overflow.trace.optional_measurements == 0
+    assert overflow.trace.optional_admissions == 0
+    assert overflow.trace.project_resolutions == 0
+    assert overflow.refusal["dimension"] == "context_record_bytes"
+    assert overflow.refusal["project_disposition"] == "not_evaluated_required_failure"
+    assert overflow.refusal["observed"] == overflow.refusal["record_byte_cost"]
+  end
+
+  defp observe_required_first(bytes) do
+    manifest = %{
+      workspace: project_workspace(),
+      entries: [project_entry("Optional project body")]
+    }
+
+    {:ok, digest, _entries} = ProjectResource.digest(manifest)
+
+    fixture =
+      start_fixture(
+        context_token_budget: @uint64_max,
+        script: [%{text: "done"}],
+        project_manifest: manifest,
+        project_decision: project_decision(digest)
+      )
+
+    {session_id, attachment} = create_attached_session(fixture)
+    coordinator = coordinator_of(fixture.runtime)
+
+    boundaries = [
+      {Store, :normalize_and_measure_item, 2},
+      {ContextAdmission, :preflight_required_candidate, 2},
+      {ProjectResource, :resolve, 2}
+    ]
+
+    for boundary <- boundaries, do: :erlang.trace_pattern(boundary, true, [:local])
+    1 = :erlang.trace(coordinator, true, [:call, {:tracer, self()}])
+
+    finished =
+      try do
+        assert {:accepted, "required-first"} =
+                 Loopex.command(
+                   attachment,
+                   %{
+                     type: :prompt,
+                     command_id: "required-first",
+                     content: String.duplicate("x", bytes)
+                   }
+                 )
+
+        await_event(attachment, "run.finished")
+      after
+        :erlang.trace(coordinator, false, [:call])
+        for boundary <- boundaries, do: :erlang.trace_pattern(boundary, false, [:local])
+      end
+
+    barrier = :erlang.trace_delivered(coordinator)
+    assert_receive {:trace_delivered, ^coordinator, ^barrier}, 2_000
+
+    counts =
+      collect_context_measurements(coordinator, %{
+        required_measurements: 0,
+        optional_measurements: 0,
+        optional_admissions: 0,
+        project_resolutions: 0
+      })
+
+    refusal = Enum.find(records(fixture, session_id), &kind?(&1, "context_admission_refused_v1"))
+
+    %{
+      finished: finished,
+      calls: length(Loopex.ContextAdmissionTestModel.requests(fixture.model)),
+      trace: counts,
+      refusal: refusal && refusal.payload
+    }
+  end
+
+  defp collect_context_measurements(coordinator, counts) do
+    receive do
+      {:trace, ^coordinator, :call,
+       {Store, :normalize_and_measure_item,
+        [:record, %{"context_receipt" => %{"blocks" => _}} = candidate]}} ->
+        key =
+          if optional_candidate?(candidate),
+            do: :optional_measurements,
+            else: :required_measurements
+
+        collect_context_measurements(coordinator, Map.update!(counts, key, &(&1 + 1)))
+
+      {:trace, ^coordinator, :call,
+       {ContextAdmission, :preflight_required_candidate, [candidate, _]}} ->
+        counts =
+          if optional_candidate?(candidate),
+            do: Map.update!(counts, :optional_admissions, &(&1 + 1)),
+            else: counts
+
+        collect_context_measurements(coordinator, counts)
+
+      {:trace, ^coordinator, :call, {ProjectResource, :resolve, _args}} ->
+        collect_context_measurements(
+          coordinator,
+          Map.update!(counts, :project_resolutions, &(&1 + 1))
+        )
+    after
+      0 -> counts
+    end
+  end
+
+  defp optional_candidate?(%{"context_receipt" => %{"blocks" => blocks}}),
+    do: Enum.any?(blocks, &(&1["provenance_class"] in ["project_resource", "resource_pack"]))
+
+  defp optional_candidate?(_candidate), do: false
+
   defp start_fixture(options) do
     script = Keyword.fetch!(options, :script)
     context_token_budget = Keyword.fetch!(options, :context_token_budget)
