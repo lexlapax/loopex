@@ -994,7 +994,9 @@ defmodule LoopexCli do
           Enum.each(packs, fn pack ->
             manual = if pack["manual_only"], do: " (manual only)", else: ""
 
-            IO.puts("#{pack["source_id"]}:#{pack["name"]}#{manual}  #{pack["description"]}")
+            IO.puts(
+              "#{pack["source_id"]}:#{pack["name"]}#{manual}  #{terminal_message(pack["description"])}"
+            )
           end)
       end
 
@@ -1007,7 +1009,7 @@ defmodule LoopexCli do
          {:ok, manifest} <- discover_skill_manifest(flags, options),
          {:ok, pack} <- find_skill(manifest["packs"], qualified_name) do
       IO.puts("#{pack["source_id"]}:#{pack["name"]}")
-      IO.puts(pack["description"])
+      IO.puts(terminal_message(pack["description"]))
       IO.puts("origin #{pack["origin"] || "local workspace"}")
       IO.puts("commit #{pack["commit"] || "local"}")
       IO.puts("tree #{pack["tree_digest"] || "local"}")

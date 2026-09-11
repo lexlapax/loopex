@@ -335,6 +335,41 @@ defmodule LoopexCliTest do
     assert output =~ "manual only"
   end
 
+  test "skill list and show escape untrusted description controls before terminal output" do
+    {state_root, workspace} = roots()
+    unsafe = "review\e]52;c;terminal-injection\a"
+
+    pack = %{
+      "source_id" => "example.test/skills",
+      "origin" => "https://example.test/skills.git",
+      "commit" => String.duplicate("d", 40),
+      "tree_digest" => String.duplicate("e", 40),
+      "name" => "review",
+      "description" => unsafe,
+      "manual_only" => true,
+      "files" => []
+    }
+
+    options = [
+      resource_packs: %{discover: fn _workspace, _options -> {:ok, %{"packs" => [pack]}} end}
+    ]
+
+    for command <- [["skill", "list"], ["skill", "show", "example.test/skills:review"]] do
+      output =
+        capture_io(fn ->
+          assert :ok =
+                   LoopexCli.dispatch(
+                     command ++ ["--state-root", state_root, "--workspace", workspace],
+                     options
+                   )
+        end)
+
+      refute output =~ "\e]52;c;terminal-injection\a"
+      assert output =~ "terminal-injection"
+      assert output =~ "\\e"
+    end
+  end
+
   test "skill show prints the retained source and complete file identity" do
     {state_root, workspace} = roots()
     commit = String.duplicate("d", 40)
