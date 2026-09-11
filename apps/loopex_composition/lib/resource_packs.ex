@@ -109,18 +109,7 @@ defmodule LoopexComposition.ResourcePacks do
 
     {owner, monitor} =
       spawn_monitor(fn ->
-        Process.flag(:trap_exit, true)
-
-        result =
-          with {:ok, context} <- open_import_executor(config) do
-            try do
-              import_with_executor(context, config)
-            after
-              close_import_executor(context)
-            end
-          end
-
-        send(caller, {tag, result})
+        coordinate_import(caller, tag, config)
       end)
 
     receive do
@@ -133,6 +122,137 @@ defmodule LoopexComposition.ResourcePacks do
     end
   end
 
+  defp coordinate_import(caller, tag, config) do
+    Process.flag(:trap_exit, true)
+    caller_monitor = Process.monitor(caller)
+
+    result =
+      with {:ok, staging_root} <- create_staging_root(config.workspace) do
+        try do
+          with {:ok, context} <- open_import_executor(config) do
+            coordinate_import_worker(caller, caller_monitor, tag, context, config, staging_root)
+          end
+        after
+          File.rm_rf(staging_root)
+        end
+      end
+
+    if result != :caller_down do
+      Process.demonitor(caller_monitor, [:flush])
+      send(caller, {tag, result})
+    end
+  end
+
+  defp coordinate_import_worker(caller, caller_monitor, tag, context, config, staging_root) do
+    coordinator = self()
+
+    {worker, worker_monitor} =
+      spawn_monitor(fn ->
+        worker_config = Map.put(config, :import_observer, {coordinator, tag})
+        send(coordinator, {tag, import_with_executor(context, worker_config, staging_root)})
+      end)
+
+    await_import_worker(caller, caller_monitor, tag, context, config, worker, worker_monitor, nil)
+  end
+
+  # Concept: caller death or the acquisition deadline wins once its observation
+  # reaches this coordinator. A validated staged tree is still provisional.
+  #
+  # Technical depth: only this coordinator retains provenance and publishes the
+  # directory. It first observes worker termination and closes the executor, then
+  # checks the caller monitor and deadline before retention and again before the
+  # atomic rename. That last check is the cancellation-versus-publication tie.
+  defp await_import_worker(
+         caller,
+         caller_monitor,
+         tag,
+         context,
+         config,
+         worker,
+         worker_monitor,
+         current_job
+       ) do
+    receive do
+      {^tag, :job_started, job_id} ->
+        await_import_worker(
+          caller,
+          caller_monitor,
+          tag,
+          context,
+          config,
+          worker,
+          worker_monitor,
+          job_id
+        )
+
+      {^tag, {:ok, pack, selected}} ->
+        await_worker_down(worker, worker_monitor)
+        close_import_executor(context)
+
+        receive do
+          {:DOWN, ^caller_monitor, :process, ^caller, _reason} -> :caller_down
+        after
+          0 -> finalize_import(pack, selected, config, caller, caller_monitor)
+        end
+
+      {^tag, result} ->
+        await_worker_down(worker, worker_monitor)
+        close_import_executor(context)
+        result
+
+      {:DOWN, ^caller_monitor, :process, ^caller, _reason} ->
+        cancel_import_worker(context, worker, worker_monitor, current_job, config.deadline)
+        :caller_down
+
+      {:DOWN, ^worker_monitor, :process, ^worker, reason} ->
+        close_import_executor(context)
+        error(:executor_failed, inspect(reason))
+    after
+      remaining_ms(config.deadline) ->
+        cancel_import_worker(context, worker, worker_monitor, current_job, config.deadline)
+        error(:git_failed, "resource import deadline reached")
+    end
+  end
+
+  defp cancel_import_worker(context, worker, worker_monitor, current_job, deadline) do
+    cancellation =
+      if is_binary(current_job),
+        do: Local.cancel(context.executor, current_job),
+        else: {:ok, :unconfirmed}
+
+    case cancellation do
+      {:ok, :cleaned} ->
+        case await_worker_down(worker, worker_monitor, deadline) do
+          :ok ->
+            :ok
+
+          :timeout ->
+            Process.exit(worker, :kill)
+            await_worker_down(worker, worker_monitor)
+        end
+
+      _unconfirmed ->
+        Process.exit(worker, :kill)
+        await_worker_down(worker, worker_monitor)
+    end
+
+    close_import_executor(context)
+  end
+
+  defp await_worker_down(worker, monitor) do
+    receive do
+      {:DOWN, ^monitor, :process, ^worker, _reason} -> :ok
+    end
+  end
+
+  defp await_worker_down(worker, monitor, deadline) do
+    receive do
+      {:DOWN, ^monitor, :process, ^worker, _reason} -> :ok
+    after
+      remaining_ms(deadline) -> :timeout
+    end
+  end
+
   @doc """
   ## Concept
 
@@ -140,7 +260,7 @@ defmodule LoopexComposition.ResourcePacks do
 
   ## Technical depth
 
-  Publication uses a sibling temporary file, sync, and rename. Existing content
+  Publication uses a sibling exclusive temporary file, sync, and atomic link. Existing content
   must decode to the same canonical manifest. Each imported pack also retains a
   provenance record keyed only by its sorted file label and digest pairs.
   """
@@ -527,6 +647,7 @@ defmodule LoopexComposition.ResourcePacks do
          {:ok, git} <- explicit_git(Keyword.get(options, :git_executable)),
          {:ok, origin} <- sanitized_origin(source),
          {:ok, deadline_ms} <- deadline(Keyword.get(options, :deadline_ms, @max_deadline_ms)),
+         deadline = System.system_time(:millisecond) + deadline_ms,
          :ok <- authorization(Keyword.get(options, :executor_authorization)),
          {:ok, root} <- canonical_workspace(workspace) do
       {:ok,
@@ -539,7 +660,7 @@ defmodule LoopexComposition.ResourcePacks do
          rev: rev,
          path: selected_path,
          git: git,
-         deadline_ms: deadline_ms,
+         deadline: deadline,
          authorization: {:host_policy, :allow}
        }}
     else
@@ -582,7 +703,7 @@ defmodule LoopexComposition.ResourcePacks do
       String.contains?(source, <<0>>) ->
         error(:unsupported_source, "source contains a null byte")
 
-      uri.scheme in ["http", "https"] and (uri.userinfo || uri.query || uri.fragment) ->
+      uri.userinfo || uri.query || uri.fragment ->
         error(:unsupported_source, "source may not contain credentials, query, or fragment")
 
       uri.scheme in [nil, "file", "http", "https", "ssh", "git"] ->
@@ -614,10 +735,9 @@ defmodule LoopexComposition.ResourcePacks do
   end
 
   defp open_import_executor(config) do
-    suffix = Integer.to_string(System.unique_integer([:positive]))
-    lease_id = "resource-import-" <> suffix
-    identity = "resource-import-executor-" <> suffix
     ledger = Path.join([config.state_root, "resource-packs", "receipts"])
+    lease_id = "resource-import-" <> nonce()
+    identity = "resource-import-executor:" <> Canonical.digest_bytes(Path.expand(ledger))
 
     with :ok <- ensure_applications(),
          :ok <- File.mkdir_p(ledger),
@@ -666,93 +786,107 @@ defmodule LoopexComposition.ResourcePacks do
     :exit, _reason -> :ok
   end
 
-  defp import_with_executor(context, config) do
-    staging_root =
-      Path.join([
-        config.workspace,
-        ".agents",
-        ".loopex-import-#{System.unique_integer([:positive])}"
-      ])
-
+  defp import_with_executor(context, config, staging_root) do
     repo = Path.join(staging_root, "repo")
     export = Path.join(staging_root, "export")
 
-    try do
-      with :ok <- File.mkdir_p(export),
-           {:ok, context, _clone} <-
-             git_job(context, config, "clone", [
-               "clone",
-               "--quiet",
-               "--no-checkout",
-               "--no-local",
-               config.source,
-               repo
-             ]),
-           {:ok, context, commit} <-
-             git_job(context, config, "commit", [
-               "-C",
-               repo,
-               "rev-parse",
-               "--verify",
-               config.rev <> "^{commit}"
-             ]),
-           true <- first_line(commit) == config.rev,
-           {:ok, context, tree_output} <-
-             git_job(context, config, "tree", [
-               "-C",
-               repo,
-               "rev-parse",
-               config.rev <> ":" <> config.path
-             ]),
-           tree = first_line(tree_output),
-           true <- matching_git_ids?(config.rev, tree),
-           {:ok, _context, _checkout} <-
-             git_job(context, config, "checkout", [
-               "-C",
-               repo,
-               "--work-tree=" <> export,
-               "checkout",
-               "--quiet",
-               config.rev,
-               "--",
-               config.path
-             ]),
-           selected = Path.join(export, config.path),
-           {:ok, metadata_name} <- frontmatter_name(selected),
-           true <- metadata_name == Path.basename(selected),
-           identity = %{
-             "source_id" => "git:" <> Canonical.digest_bytes(config.origin),
-             "origin" => config.origin,
-             "commit" => config.rev,
-             "tree_digest" => tree
-           },
-           {:ok, pack} <- read_pack(selected, metadata_name, identity),
-           :ok <- retain_provenance([pack], config.state_root),
-           :ok <- publish_pack(selected, config.workspace, metadata_name) do
-        {:ok, pack}
-      else
-        false ->
-          error(
-            :git_identity_mismatch,
-            "Git identity or selected skill directory did not match"
-          )
+    with :ok <- File.mkdir(export),
+         {:ok, context, _clone} <-
+           git_job(context, config, "clone", [
+             "clone",
+             "--quiet",
+             "--no-checkout",
+             "--no-local",
+             config.source,
+             repo
+           ]),
+         {:ok, context, commit} <-
+           git_job(context, config, "commit", [
+             "-C",
+             repo,
+             "rev-parse",
+             "--verify",
+             config.rev <> "^{commit}"
+           ]),
+         true <- first_line(commit) == config.rev,
+         {:ok, context, tree_output} <-
+           git_job(context, config, "tree", [
+             "-C",
+             repo,
+             "rev-parse",
+             config.rev <> ":" <> config.path
+           ]),
+         tree = first_line(tree_output),
+         true <- matching_git_ids?(config.rev, tree),
+         {:ok, _context, _checkout} <-
+           git_job(context, config, "checkout", [
+             "-C",
+             repo,
+             "--work-tree=" <> export,
+             "checkout",
+             "--quiet",
+             config.rev,
+             "--",
+             config.path
+           ]),
+         selected = Path.join(export, config.path),
+         {:ok, metadata_name} <- frontmatter_name(selected),
+         true <- metadata_name == Path.basename(selected),
+         identity = %{
+           "source_id" => "git:" <> Canonical.digest_bytes(config.origin),
+           "origin" => config.origin,
+           "commit" => config.rev,
+           "tree_digest" => tree
+         },
+         {:ok, pack} <- read_pack(selected, metadata_name, identity) do
+      {:ok, pack, selected}
+    else
+      false ->
+        error(
+          :git_identity_mismatch,
+          "Git identity or selected skill directory did not match"
+        )
 
-        {:error, {_reason, _detail}} = refusal ->
-          refusal
+      {:error, {_reason, _detail}} = refusal ->
+        refusal
 
-        {:error, reason} ->
-          error(:installation_failed, inspect(reason))
-      end
-    after
-      File.rm_rf(staging_root)
+      {:error, reason} ->
+        error(:installation_failed, inspect(reason))
     end
   end
 
+  defp finalize_import(pack, selected, config, caller, caller_monitor) do
+    with :ok <- caller_available(caller, caller_monitor),
+         :ok <- before_deadline(config.deadline),
+         :ok <- retain_provenance([pack], config.state_root),
+         :ok <- caller_available(caller, caller_monitor),
+         :ok <- before_deadline(config.deadline),
+         :ok <- publish_pack(selected, config.workspace, pack["name"]) do
+      {:ok, pack}
+    end
+  end
+
+  defp caller_available(caller, caller_monitor) do
+    receive do
+      {:DOWN, ^caller_monitor, :process, ^caller, _reason} -> :caller_down
+    after
+      0 -> if Process.alive?(caller), do: :ok, else: :caller_down
+    end
+  end
+
+  defp before_deadline(deadline) do
+    if System.system_time(:millisecond) < deadline,
+      do: :ok,
+      else: error(:git_failed, "resource import deadline reached")
+  end
+
+  defp remaining_ms(deadline), do: max(deadline - System.system_time(:millisecond), 0)
+
   defp git_job(context, config, label, args) do
     sequence = context.sequence + 1
-    now = System.system_time(:millisecond)
-    deadline = now + config.deadline_ms
-    job_id = "resource-import-#{label}-#{System.unique_integer([:positive])}"
+    deadline = config.deadline
+    remaining_ms = max(deadline - System.system_time(:millisecond), 1)
+    job_id = "resource-import-#{label}-#{nonce()}"
     argv = ["/usr/bin/env" | @git_environment ++ [config.git] ++ @git_config ++ args]
 
     fields = %{
@@ -775,7 +909,7 @@ defmodule LoopexComposition.ResourcePacks do
       workspace_ref: config.workspace_ref,
       workspace_lease: context.lease_id,
       run_deadline: deadline,
-      resource_budgets: %{"max_wall_time_ms" => config.deadline_ms, "max_output_bytes" => 65_536},
+      resource_budgets: %{"max_wall_time_ms" => remaining_ms, "max_output_bytes" => 65_536},
       idempotency_class: "never_blind_retry",
       fencing_token: 1,
       artifact_policy: %{"retain" => false},
@@ -788,6 +922,7 @@ defmodule LoopexComposition.ResourcePacks do
            Executor.issue_grant(config.authorization, job, deadline, %{
              "purpose" => "resource_pack_import"
            }),
+         :ok <- notify_import_started(config, job_id),
          {:ok, receipt} <- Local.execute(context.executor, job, grant),
          :completed <- receipt.outcome do
       {:ok, %{context | sequence: sequence}, receipt.output}
@@ -796,6 +931,11 @@ defmodule LoopexComposition.ResourcePacks do
       {:error, reason} -> error(:executor_failed, inspect(reason))
       other -> error(:executor_failed, inspect(other))
     end
+  end
+
+  defp notify_import_started(%{import_observer: {observer, tag}}, job_id) do
+    send(observer, {tag, :job_started, job_id})
+    :ok
   end
 
   defp first_line(output), do: output |> String.split("\n", parts: 2) |> hd() |> String.trim()
@@ -880,21 +1020,88 @@ defmodule LoopexComposition.ResourcePacks do
 
   defp atomic_term(path, value) do
     bytes = :erlang.term_to_binary(value, [:deterministic])
-    temp = path <> ".tmp-#{System.unique_integer([:positive])}"
+    directory = Path.dirname(path)
 
-    try do
-      with :ok <- File.mkdir_p(Path.dirname(path)),
-           :ok <- File.write(temp, bytes, [:binary, :sync]),
-           :ok <- publish_term(temp, path, bytes) do
-        :ok
-      else
-        {:error, {_reason, _detail}} = refusal -> refusal
-        {:error, reason} -> error(:retention_failed, inspect(reason))
+    with :ok <- File.mkdir_p(directory),
+         {:ok, temp} <- write_exclusive_temp(path, bytes) do
+      try do
+        case publish_term(temp, path, bytes) do
+          :ok -> :ok
+          {:error, {_reason, _detail}} = refusal -> refusal
+          {:error, reason} -> error(:retention_failed, inspect(reason))
+        end
+      after
+        File.rm(temp)
       end
-    after
-      File.rm(temp)
+    else
+      {:error, {_reason, _detail}} = refusal -> refusal
+      {:error, reason} -> error(:retention_failed, inspect(reason))
     end
   end
+
+  defp create_staging_root(workspace) do
+    parent = Path.join(workspace, ".agents")
+
+    with :ok <- File.mkdir_p(parent) do
+      create_exclusive_directory(parent, 8)
+    else
+      {:error, reason} -> error(:installation_failed, inspect(reason))
+    end
+  end
+
+  defp create_exclusive_directory(_parent, 0),
+    do: error(:installation_failed, "could not allocate an exclusive staging directory")
+
+  defp create_exclusive_directory(parent, attempts) do
+    path = Path.join(parent, ".loopex-import-" <> nonce())
+
+    case File.mkdir(path) do
+      :ok -> {:ok, path}
+      {:error, :eexist} -> create_exclusive_directory(parent, attempts - 1)
+      {:error, reason} -> error(:installation_failed, inspect(reason))
+    end
+  end
+
+  defp write_exclusive_temp(path, bytes, attempts \\ 8)
+
+  defp write_exclusive_temp(_path, _bytes, 0),
+    do: error(:retention_failed, "could not allocate an exclusive retention temporary")
+
+  defp write_exclusive_temp(path, bytes, attempts) do
+    temp = path <> ".tmp-" <> nonce()
+
+    case :file.open(String.to_charlist(temp), [:raw, :write, :binary, :exclusive]) do
+      {:ok, device} ->
+        write_result =
+          with :ok <- :file.write(device, bytes),
+               :ok <- :file.sync(device) do
+            :ok
+          end
+
+        close_result = :file.close(device)
+
+        case {write_result, close_result} do
+          {:ok, :ok} ->
+            {:ok, temp}
+
+          {{:error, reason}, _close_result} ->
+            File.rm(temp)
+            error(:retention_failed, inspect(reason))
+
+          {:ok, {:error, reason}} ->
+            File.rm(temp)
+            error(:retention_failed, inspect(reason))
+        end
+
+      {:error, :eexist} ->
+        write_exclusive_temp(path, bytes, attempts - 1)
+
+      {:error, reason} ->
+        error(:retention_failed, inspect(reason))
+    end
+  end
+
+  defp nonce, do: Base.url_encode64(:crypto.strong_rand_bytes(18), padding: false)
 
   defp publish_term(temp, path, bytes) do
     case File.ln(temp, path) do
