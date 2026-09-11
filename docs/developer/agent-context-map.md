@@ -1948,3 +1948,40 @@ product implementation, approve integration, closure, release, tag or
 publication, or report an unrun check as PASS. This commit adds only this
 disposition; an independent exact-SHA read must approve its changed path and
 authority scope before the M4 plan cites it.
+
+<a id="override-disposition-m4-planning-aggregate-scope-2026-09-11"></a>
+### M4 planning-revision aggregate override scope — 2026-09-11
+
+The maintainer's actual instruction was: “I dont agree on you needing to run
+m0- m2 again for plan changes for m4”. It was given after the M4 planning
+revision `8fc7f5c65ba6ec3d62c69f3e9d841785bf58b59f` changed the derived
+status-capsule wording in `apps/loopex/lib/mix/tasks/status/register.ex` and
+its test, and the earlier
+[planning-revision aggregate override](#override-disposition-m4-planning-aggregate-2026-09-11)
+had been transcribed narrowly enough to exclude that change.
+
+This widens that override's scope and changes nothing else. For the Open M4
+planning lineage while M3 remains Accepted, the M0–M2 Closed aggregate proved
+GREEN at the opening candidate `4b13fd92904603dfe8476c50b98350bd70c5d7a8` is
+not rerun for any later M4 planning revision, including a revision that
+changes repository status enforcement, its tests, plan documents, gate
+documents, runner or support scripts, manifests, prerequisite ADR proposals or
+documentation, provided the revision adds no milestone product implementation
+and every changed enforcement check passes bootstrap at the revision. Each such
+revision still runs status, formatting, bootstrap, runner inspection, the M4
+opening probe and, separately, the M3 opening probe, and receives exact-SHA
+review. The refresh of M4 onto the integrated M3 closure, M4 acceptance, any
+rejoin, rebind child or closure candidate, and any change to a Closed gate's
+bound bytes remain under the ordinary inherited-aggregate obligations unless
+separately overridden. Any inherited regression actually observed still
+blocks.
+
+This override changes one development-time evidence procedure. It changes no
+released public surface or accepted ADR decision, does not weaken an M4
+outcome or witness, and does not accept M4 or ADRs 0023, 0024, 0026 or 0028,
+authorize product implementation, approve integration, closure, release, tag
+or publication, or report an unrun check as PASS. The aggregate rerun started
+for `8fc7f5c` was stopped without a result and is recorded as waived, not
+unavailable. This commit adds only this disposition; an independent exact-SHA
+read must approve its changed path and authority scope before the M4 plan
+cites it.
