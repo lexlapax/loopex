@@ -86,6 +86,24 @@ valid_title() {
   esac
 }
 
+# The eight immutable titles listed here have a scoped maintainer exception.
+# Only title grammar and length are excepted. Every commit body is still scanned.
+# Authority: docs/developer/agent-context-map.md
+#   #override-disposition-m3-commit-titles-2026-09-11
+has_title_exception() {
+  case "$1" in
+    3eaeaafb0cb1af6135dccb64d63354944cb1b301|\
+    2dc0ad4ede416da068004b14333b26441a973f2f|\
+    2f2dce216cdb63c7387073d8834e756c759ba5c6|\
+    262ad1a04274a0b52e19484e76c621842f158676|\
+    9f742e52d32115c8dedd5c2df47d549a60e86777|\
+    3c8dcc1bc4951d35f6cdee4e695e9682e8bc53db|\
+    cdc086900515e1bd4d890bb7c62ab3de846ef6fa|\
+    461d44dc004740110231a459c8359efe407d09e6) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 # Prospective controls keep flexible operator slugs aligned with the documented
 # path grammar instead of testing only names already present in history.
 for title in \
@@ -176,15 +194,19 @@ while IFS= read -r -d '' record; do
   title="${rest%%$'\x1f'*}"
   body="${rest#*$'\x1f'}"
 
-  if ! valid_title "$title"; then
-    echo "$sha: title must be 'area(marker): summary' with marker planning, seed, or a milestone" >&2
-    echo "  got: $title" >&2
-    status=1
-  fi
+  if has_title_exception "$sha"; then
+    echo "$sha: title grammar/length waived by recorded M3 maintainer disposition" >&2
+  else
+    if ! valid_title "$title"; then
+      echo "$sha: title must be 'area(marker): summary' with marker planning, seed, or a milestone" >&2
+      echo "  got: $title" >&2
+      status=1
+    fi
 
-  if [ "${#title}" -gt 72 ]; then
-    echo "$sha: title is ${#title} characters; keep it at 72 or fewer" >&2
-    status=1
+    if [ "${#title}" -gt 72 ]; then
+      echo "$sha: title is ${#title} characters; keep it at 72 or fewer" >&2
+      status=1
+    fi
   fi
 
   if scan_attribution "$body"; then
