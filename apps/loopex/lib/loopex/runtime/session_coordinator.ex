@@ -180,6 +180,14 @@ defmodule Loopex.Runtime.SessionCoordinator do
   end
 
   @doc false
+  def resource_catalog(coordinator, owner),
+    do: safe_call(coordinator, {:resource_catalog, owner}, @session_status_timeout_ms)
+
+  @doc false
+  def read_resource(coordinator, owner, request),
+    do: safe_call(coordinator, {:read_resource, owner, request}, @session_status_timeout_ms)
+
+  @doc false
   @spec reconciliation_fields() :: [atom()]
   def reconciliation_fields, do: @reconciliation_fields
 
@@ -280,6 +288,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
        policy: Keyword.get(options, :policy),
        project_manifest: Keyword.get(options, :project_manifest),
        project_decision: Keyword.get(options, :project_decision),
+       resource_snapshot: Keyword.get(options, :resource_snapshot),
        sampling: Keyword.get(options, :sampling),
        grant_decision: Keyword.fetch!(options, :grant_decision),
        fault_to: Keyword.fetch!(options, :fault_to),
@@ -410,6 +419,24 @@ defmodule Loopex.Runtime.SessionCoordinator do
     else
       {:reply, {:error, :session_unavailable}, state}
     end
+  end
+
+  def handle_call({:resource_catalog, supplied_owner}, _from, state) do
+    reply =
+      if ready_current?(state, supplied_owner),
+        do: inspect_resource_catalog(state),
+        else: {:error, :session_unavailable}
+
+    {:reply, reply, state}
+  end
+
+  def handle_call({:read_resource, supplied_owner, request}, _from, state) do
+    reply =
+      if ready_current?(state, supplied_owner),
+        do: inspect_resource(state, request),
+        else: {:error, :session_unavailable}
+
+    {:reply, reply, state}
   end
 
   def handle_call({:activate_resume, supplied_owner, capability}, {caller, _tag}, state) do
@@ -1436,6 +1463,61 @@ defmodule Loopex.Runtime.SessionCoordinator do
   end
 
   defp commit_command(state, command) do
+    if resource_command?(command) do
+      commit_resource_command(state, command)
+    else
+      commit_loop_command(state, command)
+    end
+  end
+
+  defp resource_command?(command) do
+    Enum.any?([:type, "type"], fn key ->
+      Map.get(command, key) in [
+        :admit_resources,
+        "admit_resources",
+        :activate_skill,
+        "activate_skill"
+      ]
+    end)
+  end
+
+  defp commit_resource_command(state, command) do
+    case SessionState.prepare_resource_command(state.durable, command) do
+      {:new, normalized} ->
+        resolution =
+          if is_nil(state.durable.active_run_id) do
+            Loopex.Runtime.ResourceSnapshot.resolve(
+              state.resource_snapshot,
+              state.durable.resources,
+              normalized
+            )
+          else
+            {:refused, :run_active}
+          end
+
+        proposal = SessionState.propose_resource_command(state.durable, normalized, resolution)
+        commit_command_proposal(state, proposal)
+
+      {:replayed, reply} ->
+        {:reply, reply, state}
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
+  end
+
+  defp inspect_resource_catalog(state),
+    do: Loopex.Runtime.ResourceSnapshot.view(state.resource_snapshot, state.durable.resources)
+
+  defp inspect_resource(state, request),
+    do:
+      Loopex.Runtime.ResourceSnapshot.read(
+        state.resource_snapshot,
+        state.durable.resources,
+        request
+      )
+
+  defp commit_loop_command(state, command) do
     {state, resolved} = resolve_command(state, command)
 
     with {:ok, _declared} <- declared_bounds(resolved) do
@@ -1458,7 +1540,11 @@ defmodule Loopex.Runtime.SessionCoordinator do
     do: Bounds.declare(Map.take(resolved, [:max_turns, :token_budget, :deadline_ms]))
 
   defp propose_command(state, command, resolved) do
-    case SessionState.propose(state.durable, command, resolved) do
+    commit_command_proposal(state, SessionState.propose(state.durable, command, resolved))
+  end
+
+  defp commit_command_proposal(state, result) do
+    case result do
       {:replayed, reply} ->
         {:reply, reply, state}
 

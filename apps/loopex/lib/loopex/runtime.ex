@@ -69,6 +69,7 @@ defmodule Loopex.Runtime do
           | {:policy, module() | nil}
           | {:project_manifest, map() | nil}
           | {:project_decision, map() | nil}
+          | {:resource_manifest, map() | nil}
           | {:sampling, map()}
           | {:grant_decision, term()}
           | {:fault_to, pid() | nil}
@@ -291,6 +292,28 @@ defmodule Loopex.Runtime do
   def session_status(_runtime, _session_id), do: {:error, :runtime_reference_required}
 
   @doc false
+  @spec resource_catalog(t(), binary()) :: {:ok, map()} | {:error, term()}
+  def resource_catalog(%__MODULE__{} = runtime, session_id) do
+    with {:ok, coordinator, owner} <-
+           control_call(runtime, {:session_status, runtime.token, session_id}) do
+      SessionCoordinator.resource_catalog(coordinator, owner)
+    end
+  end
+
+  def resource_catalog(_runtime, _session_id), do: {:error, :runtime_reference_required}
+
+  @doc false
+  @spec read_resource(t(), binary(), map()) :: {:ok, map()} | {:error, term()}
+  def read_resource(%__MODULE__{} = runtime, session_id, request) do
+    with {:ok, coordinator, owner} <-
+           control_call(runtime, {:session_status, runtime.token, session_id}) do
+      SessionCoordinator.read_resource(coordinator, owner, request)
+    end
+  end
+
+  def read_resource(_runtime, _session_id, _request), do: {:error, :runtime_reference_required}
+
+  @doc false
   @spec reconciliation_query(Attachment.t()) :: {:ok, map()} | {:error, term()}
   def reconciliation_query(%Attachment{} = attachment) do
     with {:ok, runtime, session_id, attachment_id, incarnation_id} <-
@@ -426,6 +449,7 @@ defmodule Loopex.Runtime do
              policy: nil,
              project_manifest: nil,
              project_decision: nil,
+             resource_manifest: nil,
              grant_decision: nil,
              fault_to: nil,
              cleanup_grace_ms: nil,
@@ -447,6 +471,7 @@ defmodule Loopex.Runtime do
          {:ok, policy} <-
            validate_policy(validated[:policy], validated[:tools], validated[:tool]),
          {:ok, sampling} <- validate_sampling(validated[:sampling]),
+         {:ok, resource_manifest} <- validate_resource_manifest(validated[:resource_manifest]),
          {:ok, grant_decision} <- validate_grant_decision(validated[:grant_decision]),
          {:ok, fault_to} <- validate_sink(validated[:fault_to]),
          {:ok, cleanup_grace_ms} <- validate_cleanup_grace(validated[:cleanup_grace_ms]),
@@ -475,6 +500,7 @@ defmodule Loopex.Runtime do
          policy: policy,
          project_manifest: validated[:project_manifest],
          project_decision: validated[:project_decision],
+         resource_manifest: resource_manifest,
          grant_decision: grant_decision,
          fault_to: fault_to,
          cleanup_grace_ms: cleanup_grace_ms,
@@ -502,6 +528,15 @@ defmodule Loopex.Runtime do
 
       _other ->
         {:error, :invalid_identifier}
+    end
+  end
+
+  defp validate_resource_manifest(nil), do: {:ok, nil}
+
+  defp validate_resource_manifest(manifest) do
+    case Loopex.ResourcePack.digest(manifest) do
+      {:ok, digest, normalized} -> {:ok, {digest, normalized}}
+      {:error, _reason, _detail} -> {:error, :invalid_resource_manifest}
     end
   end
 
