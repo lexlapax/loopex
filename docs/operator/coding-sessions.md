@@ -3,7 +3,10 @@
 <a id="concept"></a>
 ## Concept
 
-M2 gives an operator a command. You stand in a Git repository, describe a change
+Technical depth: [Commands, retained state, streaming, and recovery](#technical-depth).
+
+The source checkout gives an operator a command. You stand in a Git repository,
+describe a change
 in ordinary words, and watch a session read files, edit them, and run commands
 until the work is done. The answer arrives as it is produced. Tomorrow,
 `loopex sessions` finds the session again and `loopex resume` continues it.
@@ -14,8 +17,7 @@ durable session truth, no cursor truth, no store access, and no authority
 decision. If the command disappeared, everything it does would still be
 reachable.
 
-This is a working milestone surface. It is not packaged or installed, and the
-`v0.0.0-m2` source-only milestone tag carries no compatibility promise. An
+This is a working source-tree surface. It is not packaged or installed. An
 M1-era session data root is **not** readable by M2: the durable record shape
 changed, and M2 will not open one. Start a new state root rather than pointing
 M2 at an M1 directory.
@@ -290,6 +292,64 @@ An admitted block changes no tool set, no policy decision, no bound, and no
 grant. It is provenance-typed, budgeted, receipt-journalled data, never a grant
 of authority.
 
+<a id="operator-sessions-skills"></a>
+## Install, Inspect, and Select Project Skills
+
+Loopex discovers skills only under `.agents/skills/<name>/` in the selected
+workspace. Each skill needs a `SKILL.md`; supporting files may sit below that
+same skill directory. Home-directory skills, configured search paths, registry
+search, and content-directed discovery are outside this surface.
+
+You can also install one directory from a Git repository at an exact commit:
+
+```text
+loopex skill add /path/to/skills-repository \
+  --rev 0123456789abcdef0123456789abcdef01234567 \
+  --path review
+loopex skill list
+loopex skill show git:<source-id>:review
+```
+
+`--rev` must be the complete lowercase Git object ID, 40 or 64 hexadecimal
+characters. `--path` names one contained directory at that commit. The command
+shows the source, commit, and path and asks before fetching. A non-interactive
+invocation cannot supply that confirmation and refuses the installation.
+
+Installation and admission answer different questions. Installation verifies
+the selected Git content and publishes it into the project's fixed skills
+directory so you can inspect it. It does not trust the skill for a run. On a
+later `run`, Loopex displays the project skill identities and complete manifest
+digest, then asks whether to trust that exact manifest for the next run.
+Changing any skill byte changes that identity.
+
+If you requested `--skill` or `--skill-resource` and then decline trust, the
+selection has no admitted catalog entry to resolve and the command refuses
+before submitting the prompt. Omit those flags when you want the run to proceed
+without skill content.
+
+Select instructions explicitly with `--skill`. Select a manifested supporting
+file only for a selected skill with `--skill-resource`:
+
+```text
+loopex run --policy shell-allowlist \
+  --skill review \
+  --skill-resource review:references/checklist.md \
+  "review the parser change"
+```
+
+Both flags may be repeated. If the same unqualified name exists under more than
+one source, use the source-qualified name printed by `loopex skill list`. The
+list and show commands label a skill `manual only` when its metadata disables
+model invocation. Such a skill remains inspectable and available for explicit
+operator selection; the label prevents it from being presented as compatible
+with model-initiated use.
+
+Files in a skill are data. Installation runs no downloaded script, hook, tool,
+or vendor extension. Selecting a skill places only its admitted instruction and
+explicitly requested text resources into the bounded model context. Any later
+command still has to cross the ordinary registered-tool, host-policy, grant,
+workspace, and executor checks.
+
 <a id="technical-depth"></a>
 ## Technical depth
 
@@ -300,7 +360,8 @@ Developer companion:
 
 ```text
 loopex run --policy <name> [--state-root DIR] [--workspace DIR]
-           [--cleanup-grace-ms MS] [--context-token-budget TOKENS] "<prompt>"
+           [--cleanup-grace-ms MS] [--context-token-budget TOKENS]
+           [--skill NAME]... [--skill-resource NAME:LABEL]... "<prompt>"
 loopex run --policy <name> --steer "<text>" "<prompt>"
 loopex run --policy <name> --follow-up "<text>" "<prompt>"
 loopex sessions [--state-root DIR]
@@ -309,6 +370,10 @@ loopex resume <session> --policy <name> [--state-root DIR] [--workspace DIR]
 loopex cancel <session> [--policy <name>] [--state-root DIR] [--workspace DIR]
               [--cleanup-grace-ms MS] [--context-token-budget TOKENS]
 loopex artifact <reference> [--state-root DIR]
+loopex skill add <git-source> --rev <full-object-id> --path <directory>
+                 [--state-root DIR] [--workspace DIR]
+loopex skill list [--state-root DIR] [--workspace DIR]
+loopex skill show <source-qualified-name> [--state-root DIR] [--workspace DIR]
 ```
 
 Each subcommand names its own flags, and a flag is refused by name wherever the
@@ -317,19 +382,22 @@ rather than quietly ignored:
 
 | Subcommand | Flags |
 | --- | --- |
-| `run` | `--policy`, `--state-root`, `--workspace`, `--steer`, `--follow-up`, `--cleanup-grace-ms`, `--context-token-budget` |
+| `run` | `--policy`, `--state-root`, `--workspace`, `--steer`, `--follow-up`, `--cleanup-grace-ms`, `--context-token-budget`, repeatable `--skill`, repeatable `--skill-resource` |
 | `sessions` | `--state-root` |
 | `resume` | `--policy`, `--state-root`, `--workspace`, `--cleanup-grace-ms`, `--context-token-budget` |
 | `cancel` | `--policy`, `--state-root`, `--workspace`, `--cleanup-grace-ms`, `--context-token-budget` |
 | `artifact` | `--state-root` |
+| `skill add` | `--state-root`, `--workspace`, `--rev`, `--path` |
+| `skill list`, `skill show` | `--state-root`, `--workspace` |
 
-Naming the same flag twice is refused, and both numeric options are refused
-before a runtime starts unless they are positive whole numbers within the
-unsigned 64-bit domain. The parser accepts `--flag value`, `--flag=value`, and
-bare positional words, and uses the standard library only: a dependency here
-would land in an operator's install for the sake of flag parsing. A bare `--`
-ends option parsing and keeps every remaining word as data, which is how an
-artifact locator that begins with `--` is retrievable at all.
+Naming the same non-repeatable flag twice is refused. `--skill` and
+`--skill-resource` are repeatable. Both numeric options are refused before a
+runtime starts unless they are positive whole numbers within the unsigned
+64-bit domain. The parser accepts `--flag value`, `--flag=value`, and bare
+positional words, and uses the standard library only: a dependency here would
+land in an operator's install for the sake of flag parsing. A bare `--` ends
+option parsing and keeps every remaining word as data, which is how an artifact
+locator that begins with `--` is retrievable at all.
 
 Exit status is `0` for success and `1` for a refusal or failure, with the reason
 on standard error prefixed `loopex:`. An unrecognised subcommand, or no arguments
@@ -346,6 +414,9 @@ command can tell a run from a mistyped one.
 | `sessions/` | The session directory `loopex sessions` reads |
 | `placement.lock` | The owning process identifier, for single-owner exclusion |
 | `runtime_id` | The durable runtime placement identity sessions are recorded under |
+| `resource-packs/manifests/` | Complete verified resource manifests, named by manifest digest |
+| `resource-packs/provenance/` | Exact retained Git provenance for matching pack bytes |
+| `resource-packs/receipts/` | Executor receipts for Git acquisition jobs |
 
 The state root resolves from `LOOPEX_HOME` and never from Elixir application
 environment, so the directory an operator's shell names is the directory used.
@@ -369,6 +440,54 @@ applies to copies: a partial copy, a restored snapshot, or an edited log is a
 history Loopex cannot prove, and it refuses rather than pretends. One log grows
 to at most 256 MiB; past that it accepts no further append and does not reopen,
 so a long-lived state root is one to retire rather than to prune by hand.
+
+Resource retention is separate from installation. A successfully discovered
+manifest is retained before a resource-enabled runtime starts. A recovering
+runtime can use only the snapshot supplied at launch whose digest matches the
+session's durable admitted manifest digest; current workspace discovery cannot
+replace it. If that exact snapshot is unavailable, unstaged skill content stays
+withheld. Requests whose complete model-visible bytes were already staged remain
+recoverable from session history.
+
+There is no automatic collection for retained resource snapshots. Keep the
+state root with the session data when making or restoring a backup, and do not
+prune `resource-packs/` for sessions you may need to recover. `skill add` also
+never overwrites an existing skill directory: an interrupted import removes
+only its own staging directory and leaves a prior installation unchanged.
+
+Retained provenance is intentionally single-valued for one content identity.
+When the same file labels and digests already carry different origin, commit, or
+tree metadata, Loopex refuses the new claim and preserves the first retained
+bundle. Operators who need the same labels and digests to retain two different
+remote origins must use separate state roots; this format does not merge
+provenance claims within one state root.
+
+The supported resource bounds are:
+
+| Bound | Ceiling |
+| --- | --- |
+| Packs in one manifest | 64 |
+| Files in one pack | 64 |
+| Retained content in one pack | 1 MiB |
+| Complete manifest content | 64 MiB |
+| Manifest metadata without content | 8 MiB |
+| `SKILL.md` or another UTF-8 text resource | 64 KiB |
+| Model-visible catalog | 16 KiB |
+| Active skills in one run | 4 |
+| Supporting files selected per skill | 8 |
+| Supporting files selected per run | 32 |
+| One requested supporting resource | 16 KiB, whole file or refusal |
+
+These resource limits do not raise the existing request token budget or Store
+record ceiling. When a catalog or selected file cannot fit its own ceiling or
+the complete request budget, the whole optional block is withheld or the
+selection is refused; Loopex does not truncate it.
+
+`SKILL.md` starts with bounded YAML frontmatter. `name` and `description` are
+required, and the name must match the skill directory. The supported optional
+fields are `license`, `compatibility`, `metadata`, and
+`disable-model-invocation`. Unknown or duplicate fields refuse the pack. This
+parser does not turn metadata, scripts, or hook-shaped content into behavior.
 
 ### Streaming, and What an Absent Stream Means
 

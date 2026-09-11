@@ -50,8 +50,11 @@ turn's reply settles. Nothing on this table is published from a mutation reply.
 
 | Step | Committed first | Then published |
 | --- | --- | --- |
+| Skill manifest retained | Complete verified snapshot under its manifest digest, before resource admission | nothing; installation and retention do not grant session trust |
+| Resources admitted or declined | `resource_command_v1` with the exact manifest and decision binding | no new public event; the matching active catalog is available through the facade query |
+| Skill selected | `resource_command_v1` with source, name, pack digest, and ordered supporting labels; the selection is frozen for the next run | no new public event |
 | Prompt admitted | `prompt_admitted_v2` — command digest, run id, content, the run's bounds and context ceiling | `user.message_appended`, echoed as `> ...` |
-| Request staged | `model_request_committed` (canonical request bytes and their digest, applied steer, context receipt) **and** `model_attempt_opened_v1`, one transaction | `run.started`, on the first turn only |
+| Request staged | `model_request_committed` (canonical request bytes and their digest, applied steer, context receipt), `model_request_committed_resources_v1` when resources are admitted, **and** `model_attempt_opened_v1`, one transaction | `run.started`, on the first turn only |
 | Model called | nothing | streamed text, transient |
 | Reply settled | `model_attempt_settled_v2` | `assistant.message_appended` |
 | Tool authorized | `effect_intent_committed` — the whole executor job **and** the host grant | `tool.started` |
@@ -103,6 +106,9 @@ application environment.
 | `sessions/<session id>` | the runtime | The entries `loopex sessions` lists |
 | `runtime_id` | the runtime | The durable placement identity sessions are recorded under |
 | `placement.lock` | the `loopex` command | The owning process, for single-owner exclusion |
+| `resource-packs/manifests/` | the composition host | Complete verified skill snapshots named by manifest digest |
+| `resource-packs/provenance/` | the composition host | Exact source, commit, and tree provenance for imported pack bytes |
+| `resource-packs/receipts/` | the local executor | Receipts for the bounded Git acquisition jobs |
 
 Sizes and their refusals: one journal frame is at most 4 MiB and one log at most
 256 MiB, past which the log accepts no further append; one artifact is at most
@@ -281,6 +287,23 @@ can no longer satisfy an expected value that happens to be absent itself.
 Where no provable receipt exists, the answer is `outcome_unknown`. That commits,
 and it is terminal for the run. The effect is never redispatched merely because
 its result is missing.
+
+Resource recovery uses the same identity rule. A session with a successful
+resource admission names its durable manifest digest. A recovering runtime can
+read or stage resource content only from a matching snapshot supplied at
+launch; rediscovering today's workspace cannot stand in for yesterday's
+admitted bytes. If the retained snapshot is missing or invalid, new resource
+reads remain withheld while ordinary session and tool recovery continues. A
+request whose complete resource blocks were already committed remains
+recoverable from the journal without reopening the pack.
+
+Resource-bearing histories are a forward format boundary. This reader replays
+histories from before resources unchanged. An older binary refuses a history
+containing `resource_command_v1` or
+`model_request_committed_resources_v1` before dispatch. Rollback therefore
+requires stopped owners plus the matching old binary and a complete old-format
+state-root backup. Removing installed skills or running an older binary does
+not convert a resource-bearing root, and no in-place downgrade is provided.
 
 `loopex cancel` applies only where no live process holds the placement lock, and
 is refused against a live owner rather than racing it. A lock this version cannot
