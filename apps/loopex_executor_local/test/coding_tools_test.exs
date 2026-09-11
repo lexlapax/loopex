@@ -1,3 +1,5 @@
+Code.require_file("support/cleanup_trace.exs", __DIR__)
+
 defmodule Loopex.Executor.Local.CodingToolsTest.RecordingStore do
   @moduledoc false
 
@@ -231,6 +233,7 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
   alias Loopex.ArtifactStore
   alias Loopex.Executor.Local
   alias Loopex.Executor.Local.CodingTools
+  alias Loopex.Executor.Local.CodingToolsTest.CleanupTrace
   alias Loopex.Executor.Local.Ledger
   alias Loopex.Executor.Local.WorkspaceLease
 
@@ -5295,119 +5298,144 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     # immediately; the other waits behind an unreleased file until the executor
     # cleans it up. Every later invocation execs the real /bin/ps with its
     # original arguments, so no table, group identity or acknowledgement is faked.
-    for mode <- [:immediate, :stalled] do
-      root = workspace()
-      first = Path.join(root, "first-probe")
-      ready = Path.join(root, "first-probe-ready")
-      first_group_path = Path.join(root, "first-probe-group")
-      release = Path.join(root, "release-first-probe")
-      released = Path.join(root, "first-probe-released")
-      successor = Path.join(root, "successor-probe-ran")
-      probe = Path.join(root, "process-probe")
+    CleanupTrace.observe(
+      [1, 2],
+      fn trace ->
+        for mode <- [:immediate, :stalled] do
+          :ok = CleanupTrace.mark(trace, if(mode == :immediate, do: 1, else: 2))
+          root = workspace()
+          first = Path.join(root, "first-probe")
+          ready = Path.join(root, "first-probe-ready")
+          first_group_path = Path.join(root, "first-probe-group")
+          release = Path.join(root, "release-first-probe")
+          released = Path.join(root, "first-probe-released")
+          successor = Path.join(root, "successor-probe-ran")
+          probe = Path.join(root, "process-probe")
 
-      first_answer =
-        case mode do
-          :immediate ->
-            "exit 1"
+          first_answer =
+            case mode do
+              :immediate ->
+                "exit 1"
 
-          :stalled ->
-            "while [ ! -f #{shell_path(release)} ]; do /bin/sleep 0.01; done\n" <>
-              "printf released > #{shell_path(released)}\nexit 1"
+              :stalled ->
+                "while [ ! -f #{shell_path(release)} ]; do /bin/sleep 0.01; done\n" <>
+                  "printf released > #{shell_path(released)}\nexit 1"
+            end
+
+          File.write!(probe, """
+          #!/bin/sh
+          if /bin/mkdir #{shell_path(first)} 2>/dev/null; then
+            /bin/ps -o pgid= -p "$$" > #{shell_path(first_group_path)}
+            printf ready > #{shell_path(ready)}
+            #{first_answer}
+          fi
+          printf invoked > #{shell_path(successor)}
+          exec /bin/ps "$@"
+          """)
+
+          File.chmod!(probe, 0o700)
+          {executor, lease_id} = executor_with_options(root, process_probe: probe)
+
+          running =
+            Task.async(fn ->
+              run(root, "loopex.bash", %{"argv" => ["/usr/bin/true"]}, %{
+                executor: executor,
+                lease_id: lease_id
+              })
+            end)
+
+          # Release a still-waiting fixture before stopping its owner and before the
+          # root-removal callbacks. Teardown never signals a sampled OS identity.
+          on_exit(fn ->
+            release_held_group(release, first_group_path)
+            stop_test_process(running.pid)
+          end)
+
+          assert {:ok, :ready} =
+                   await_path(
+                     fn -> if File.exists?(ready), do: {:ok, :ready}, else: :error end,
+                     5_000
+                   )
+
+          assert {:ok, first_group} = await_positive_integer_file(first_group_path, 5_000)
+          assert {:ok, receipt} = Task.await(running, 10_000)
+          assert receipt.cleanup_grace_ms == 5_000
+
+          first_group_empty =
+            await_path(
+              fn -> if process_group_empty?(first_group), do: {:ok, :empty}, else: :error end,
+              5_000
+            ) == {:ok, :empty}
+
+          facts = %{
+            mode: mode,
+            outcome: receipt.outcome,
+            cleanup_confirmation: receipt.cleanup_confirmation,
+            successor_probe_ran: File.exists?(successor),
+            first_probe_released: File.exists?(released),
+            first_probe_group_empty: first_group_empty
+          }
+
+          assert facts == %{
+                   mode: mode,
+                   outcome: :completed,
+                   cleanup_confirmation: :confirmed,
+                   successor_probe_ran: true,
+                   first_probe_released: false,
+                   first_probe_group_empty: true
+                 },
+                 "cleanup evidence: #{inspect(Map.put(facts, :output, receipt.output))}"
         end
+      end,
+      fn report ->
+        stalled = Enum.filter(report.events, &(&1.iteration == 2))
 
-      File.write!(probe, """
-      #!/bin/sh
-      if /bin/mkdir #{shell_path(first)} 2>/dev/null; then
-        /bin/ps -o pgid= -p "$$" > #{shell_path(first_group_path)}
-        printf ready > #{shell_path(ready)}
-        #{first_answer}
-      fi
-      printf invoked > #{shell_path(successor)}
-      exec /bin/ps "$@"
-      """)
+        assert Enum.any?(stalled, fn event ->
+                 event.function == :process_table_within and event.phase == :return and
+                   event.result == :no_answer
+               end)
 
-      File.chmod!(probe, 0o700)
-      {executor, lease_id} = executor_with_options(root, process_probe: probe)
-
-      running =
-        Task.async(fn ->
-          run(root, "loopex.bash", %{"argv" => ["/usr/bin/true"]}, %{
-            executor: executor,
-            lease_id: lease_id
-          })
-        end)
-
-      # Release a still-waiting fixture before stopping its owner and before the
-      # root-removal callbacks. Teardown never signals a sampled OS identity.
-      on_exit(fn ->
-        release_held_group(release, first_group_path)
-        stop_test_process(running.pid)
-      end)
-
-      assert {:ok, :ready} =
-               await_path(
-                 fn -> if File.exists?(ready), do: {:ok, :ready}, else: :error end,
-                 5_000
-               )
-
-      assert {:ok, first_group} = await_positive_integer_file(first_group_path, 5_000)
-      assert {:ok, receipt} = Task.await(running, 10_000)
-      assert receipt.cleanup_grace_ms == 5_000
-
-      first_group_empty =
-        await_path(
-          fn -> if process_group_empty?(first_group), do: {:ok, :empty}, else: :error end,
-          5_000
-        ) == {:ok, :empty}
-
-      facts = %{
-        mode: mode,
-        outcome: receipt.outcome,
-        cleanup_confirmation: receipt.cleanup_confirmation,
-        successor_probe_ran: File.exists?(successor),
-        first_probe_released: File.exists?(released),
-        first_probe_group_empty: first_group_empty
-      }
-
-      assert facts == %{
-               mode: mode,
-               outcome: :completed,
-               cleanup_confirmation: :confirmed,
-               successor_probe_ran: true,
-               first_probe_released: false,
-               first_probe_group_empty: true
-             },
-             "cleanup evidence: #{inspect(Map.put(facts, :output, receipt.output))}"
-    end
+        assert Enum.any?(stalled, fn event ->
+                 event.function == :process_table_within and event.phase == :return and
+                   event.result == :answered and event.valid_shape and event.helper_witness
+               end)
+      end
+    )
   end
 
   test "the launch guard preserves fast command status and remains the only group signal authority" do
-    root = workspace()
-    {executor, lease_id} = executor_for(root)
+    {root, executor, lease_id} =
+      CleanupTrace.observe(Enum.to_list(1..12), fn trace ->
+        root = workspace()
+        {executor, lease_id} = executor_for(root)
 
-    # A fast status wrapper may still be present in the first process-table
-    # sample taken after its authenticated frame arrives. Exercise that narrow
-    # ordering repeatedly through one real executor: the wrapper is terminal
-    # protocol evidence, never unfinished model work.
-    for iteration <- 1..12 do
-      started_at = System.monotonic_time(:millisecond)
+        # A fast status wrapper may still be present in the first process-table
+        # sample taken after its authenticated frame arrives. Exercise that narrow
+        # ordering repeatedly through one real executor: the wrapper is terminal
+        # protocol evidence, never unfinished model work.
+        for iteration <- 1..12 do
+          :ok = CleanupTrace.mark(trace, iteration)
+          started_at = System.monotonic_time(:millisecond)
 
-      assert {:ok, succeeded} =
-               run(
-                 root,
-                 "loopex.bash",
-                 %{"argv" => ["/usr/bin/true"]},
-                 %{executor: executor, lease_id: lease_id}
-               )
+          assert {:ok, succeeded} =
+                   run(
+                     root,
+                     "loopex.bash",
+                     %{"argv" => ["/usr/bin/true"]},
+                     %{executor: executor, lease_id: lease_id}
+                   )
 
-      elapsed_ms = System.monotonic_time(:millisecond) - started_at
-      observed = Map.take(succeeded, [:outcome, :cleanup_confirmation, :output])
+          elapsed_ms = System.monotonic_time(:millisecond) - started_at
+          observed = Map.take(succeeded, [:outcome, :cleanup_confirmation, :output])
 
-      assert succeeded.outcome == :completed,
-             "fast command iteration=#{iteration} elapsed_ms=#{elapsed_ms} result=#{inspect(observed, limit: :infinity)}"
+          assert succeeded.outcome == :completed,
+                 "fast command iteration=#{iteration} elapsed_ms=#{elapsed_ms} result=#{inspect(observed, limit: :infinity)}"
 
-      assert succeeded.cleanup_confirmation == :confirmed
-    end
+          assert succeeded.cleanup_confirmation == :confirmed
+        end
+
+        {root, executor, lease_id}
+      end)
 
     assert {:ok, failed} =
              run(
