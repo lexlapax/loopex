@@ -23,6 +23,7 @@ defmodule Loopex.Runtime.Supervisor do
 
   alias Loopex.Runtime.Control
   alias Loopex.Runtime.EventDispatcher
+  alias Loopex.Runtime.ResourceSnapshot
   alias Loopex.ToolRegistry
 
   @registry_id Loopex.ToolRegistry
@@ -48,6 +49,15 @@ defmodule Loopex.Runtime.Supervisor do
   @impl Supervisor
   def init(options) do
     root = self()
+
+    # Concept: child restarts keep the same resource snapshot without retaining
+    # a complete manifest in every child specification or session process.
+    # Technical depth: the root owns the immutable table for its own lifetime;
+    # validated launch bytes leave the retained options before children start.
+    snapshot = ResourceSnapshot.new(Keyword.get(options, :resource_manifest))
+
+    options =
+      options |> Keyword.delete(:resource_manifest) |> Keyword.put(:resource_snapshot, snapshot)
 
     children = [
       %{
