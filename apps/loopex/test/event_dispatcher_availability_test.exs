@@ -137,6 +137,41 @@ defmodule Loopex.EventDispatcherAvailabilityTest do
 
       assert :sys.get_state(fixture.dispatcher).pending_reads == %{}
     end
+
+    # Concept: losing an attach caller stops its reader before it gets a handle.
+    # Technical depth: hold both the initial scan and the later queue prefetch,
+    # then observe the exact worker's death before starting a replacement attach.
+    for entry <- [:attach_scan, :attach_prefetch] do
+      fixture = fixture()
+      {session_id, attachment} = session(fixture, "lost-attach-caller")
+      prompt(attachment, "prompt")
+      {caller, waiter} = held_read(fixture, session_id, attachment, entry)
+      state = :sys.get_state(fixture.dispatcher)
+
+      pending =
+        case entry do
+          :attach_scan -> state.pending_scans
+          :attach_prefetch -> state.pending_reads
+        end
+        |> Map.values()
+
+      assert [%{worker: worker}] = pending
+      assert Process.alive?(worker)
+      monitor = Process.monitor(worker)
+      Task.shutdown(caller, :brutal_kill)
+      assert_receive {:DOWN, ^monitor, :process, ^worker, :killed}, 2_000
+
+      state = :sys.get_state(fixture.dispatcher)
+      assert state.pending_scans == %{}
+      assert state.pending_reads == %{}
+      assert state.read_monitors == %{}
+      TestStore.release(waiter)
+
+      assert {:ok, replacement} =
+               Loopex.attach(fixture.runtime, session_id, after_event_sequence: 0)
+
+      assert drain(replacement) == events(fixture, session_id)
+    end
   end
 
   test "read callers serialize per attachment and caller loss releases their worker" do
