@@ -189,8 +189,11 @@ defmodule LoopexCli.FoundationWorkflowTest do
 
     for variant <- [:accepted_command, :refused_command, :resource_request] do
       resource_root = Path.join(root, "m3-resource-#{variant}")
-      write_resource_history(resource_root, variant)
+      history = write_resource_history(resource_root, variant)
       resource_journal = File.read!(Path.join(resource_root, "store.log"))
+
+      if variant == :resource_request,
+        do: assert_old_reader_reaches_resource_request(old.paths, history, resource_root, root)
 
       refused =
         run_compatibility_probe(old.paths, old.probe, "read-v2-refused", resource_root, root)
@@ -298,6 +301,54 @@ defmodule LoopexCli.FoundationWorkflowTest do
       environment_root,
       isolated_mix_environment(environment_root, Path.join(environment_root, "unused-build"))
     )
+  end
+
+  # Concept: the complete resource history proves rollback refusal, while this
+  # isolated record-format vector proves which later record the M2 reducer rejects.
+  #
+  # Technical depth: a genuine resource request necessarily follows an admitted
+  # resource command, which an M2 reducer rejects first. Keep the exact captured
+  # request payload and owner stamps, change only its journal position so it is
+  # the next row after the genuine genesis/owner prefix, and prove that prefix
+  # succeeds immediately before the added kind returns invalid private history.
+  defp assert_old_reader_reaches_resource_request(paths, history, root, environment_root) do
+    prefix = Enum.take(history.records, 2)
+
+    captured =
+      Enum.find(history.records, &(&1.payload.kind == "model_request_committed_resources_v1"))
+
+    candidate = %{captured | journal_version: List.last(prefix).journal_version + 1}
+    assert candidate.payload === captured.payload
+    assert Map.drop(candidate, [:journal_version]) === Map.drop(captured, [:journal_version])
+
+    vector = Path.join(root, "resource-request-record-format.term")
+
+    File.write!(vector, :erlang.term_to_binary({history.session_id, prefix, candidate}), [
+      :exclusive
+    ])
+
+    probe = """
+    [vector] = System.argv()
+    {session_id, prefix, candidate} = vector |> File.read!() |> :erlang.binary_to_term([:safe])
+    {:ok, _state} = Loopex.Runtime.SessionState.recover(session_id, prefix, [])
+    {:error, :invalid_private_history} =
+      Loopex.Runtime.SessionState.recover(session_id, prefix ++ [candidate], [])
+    IO.puts("reader=refused_at_kind kind=\#{candidate.payload.kind} prefix=ready")
+    """
+
+    elixir = System.find_executable("elixir") || flunk("Elixir executable unavailable")
+    path_arguments = Enum.flat_map(paths, &["-pa", &1])
+
+    output =
+      command!(
+        elixir,
+        path_arguments ++ ["-e", probe, "--", vector],
+        environment_root,
+        isolated_mix_environment(environment_root, Path.join(environment_root, "unused-build"))
+      )
+
+    assert output =~
+             "reader=refused_at_kind kind=model_request_committed_resources_v1 prefix=ready"
   end
 
   defp command!(executable, arguments, directory, environment) do
@@ -412,6 +463,7 @@ defmodule LoopexCli.FoundationWorkflowTest do
           assert(Enum.any?(records, &(&1.payload.kind == "model_request_committed_resources_v1")))
 
       File.write!(Path.join(root, "session-id"), session_id <> "\n")
+      %{session_id: session_id, records: records}
     after
       :ok = Loopex.stop(runtime)
       :ok = GenServer.stop(store_pid, :normal, 5_000)
