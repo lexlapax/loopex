@@ -187,19 +187,21 @@ defmodule LoopexCli.FoundationWorkflowTest do
     assert File.read!(Path.join(new_control, "before-reader.log")) == current_journal
     assert File.read!(Path.join(new_control, "store.log")) |> String.starts_with?(current_journal)
 
-    resource_root = Path.join(root, "m3-resource-root")
-    write_resource_history(resource_root)
-    resource_journal = File.read!(Path.join(resource_root, "store.log"))
+    for variant <- [:accepted_command, :refused_command, :resource_request] do
+      resource_root = Path.join(root, "m3-resource-#{variant}")
+      write_resource_history(resource_root, variant)
+      resource_journal = File.read!(Path.join(resource_root, "store.log"))
 
-    refused =
-      run_compatibility_probe(old.paths, old.probe, "read-v2-refused", resource_root, root)
+      refused =
+        run_compatibility_probe(old.paths, old.probe, "read-v2-refused", resource_root, root)
 
-    assert refused =~ "reader=refused model_calls=0 semantic_records=0 public_events=0"
-    assert refused =~ "session_state_beam=#{Path.join(old.build, "lib/loopex/ebin")}/"
-    assert File.read!(Path.join(resource_root, "before-reader.log")) == resource_journal
+      assert refused =~ "reader=refused model_calls=0 semantic_records=0 public_events=0"
+      assert refused =~ "session_state_beam=#{Path.join(old.build, "lib/loopex/ebin")}/"
+      assert File.read!(Path.join(resource_root, "before-reader.log")) == resource_journal
 
-    assert File.read!(Path.join(resource_root, "store.log"))
-           |> String.starts_with?(resource_journal)
+      assert File.read!(Path.join(resource_root, "store.log"))
+             |> String.starts_with?(resource_journal)
+    end
   end
 
   defp build_m2_reader(root) do
@@ -312,7 +314,7 @@ defmodule LoopexCli.FoundationWorkflowTest do
     output
   end
 
-  defp write_resource_history(root) do
+  defp write_resource_history(root, variant) do
     File.mkdir_p!(root)
     File.write!(Path.join(root, "probe-owned"), "LOOPEX_ACCOUNTING_ROLLBACK_PROBE_V1\n")
     {:ok, store_pid} = Store.Local.start_link(path: Path.join(root, "store.log"))
@@ -355,17 +357,60 @@ defmodule LoopexCli.FoundationWorkflowTest do
 
       {:ok, attachment} = Loopex.attach(runtime, session_id, after_event_sequence: 0)
 
-      assert {:accepted, "admit"} =
-               Loopex.command(attachment, %{
-                 type: :admit_resources,
-                 command_id: "admit",
-                 manifest_digest: digest,
-                 decision: decision
-               })
+      admit = %{
+        type: :admit_resources,
+        command_id: "admit",
+        manifest_digest: digest,
+        decision: decision
+      }
+
+      activate = %{
+        type: :activate_skill,
+        command_id: "activate",
+        manifest_digest: digest,
+        source_id: "project",
+        name: "compatibility",
+        pack_digest: ResourcePack.pack_digest(hd(manifest["packs"])),
+        supporting_labels: []
+      }
+
+      {expected_disposition, expected_model_calls} =
+        case variant do
+          :accepted_command ->
+            assert {:accepted, "admit"} = Loopex.command(attachment, admit)
+            {"accepted", 0}
+
+          :refused_command ->
+            assert {:error, :resource_not_admitted} = Loopex.command(attachment, activate)
+            {"resource_not_admitted", 0}
+
+          :resource_request ->
+            assert {:accepted, "admit"} = Loopex.command(attachment, admit)
+
+            assert {:accepted, "prompt"} =
+                     Loopex.command(attachment, %{
+                       type: :prompt,
+                       command_id: "prompt",
+                       content: "Exercise the resource-bearing request format."
+                     })
+
+            assert %{"outcome" => "failed"} = await_finished(attachment)
+            {"accepted", 1}
+        end
 
       assert {:ok, records} = Store.load_records(store, session_id, 0, 128)
-      assert Enum.any?(records, &(&1.payload.kind == "resource_command_v1"))
-      assert Agent.get(counter, & &1) == %{model: 0, executor: 0}
+
+      resource_records = Enum.filter(records, &(&1.payload.kind == "resource_command_v1"))
+
+      assert [%{"disposition" => ^expected_disposition}] =
+               Enum.map(resource_records, & &1.payload)
+
+      assert Agent.get(counter, & &1) == %{model: expected_model_calls, executor: 0}
+
+      if variant == :resource_request,
+        do:
+          assert(Enum.any?(records, &(&1.payload.kind == "model_request_committed_resources_v1")))
+
       File.write!(Path.join(root, "session-id"), session_id <> "\n")
     after
       :ok = Loopex.stop(runtime)
