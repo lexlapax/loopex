@@ -242,10 +242,25 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
   # removed on exit, matching the inherited executor case in this application.
   # Nothing here reads or writes the operator's own workspace.
   defp temporary_root(prefix) do
-    Path.join([
-      System.tmp_dir!(),
-      "loopex-#{prefix}-#{System.unique_integer([:positive])}"
-    ])
+    nonce = Base.encode16(:crypto.strong_rand_bytes(12), case: :lower)
+
+    root =
+      Path.join([
+        System.tmp_dir!(),
+        "loopex-#{prefix}-#{System.unique_integer([:positive])}-#{nonce}"
+      ])
+
+    case File.mkdir(root) do
+      :ok ->
+        on_exit(fn -> File.rm_rf(root) end)
+        root
+
+      {:error, :eexist} ->
+        temporary_root(prefix)
+
+      {:error, reason} ->
+        raise File.Error, reason: reason, action: "make test directory", path: root
+    end
   end
 
   defp workspace do
@@ -598,6 +613,80 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
       execute_options,
       progress
     )
+  end
+
+  test "temporary roots cannot reuse a ledger carrying foreign open authority" do
+    root = workspace()
+
+    legacy_ledger =
+      Path.join(
+        System.tmp_dir!(),
+        "loopex-ledger-#{System.system_time(:nanosecond)}#{System.unique_integer([:positive])}"
+      )
+
+    on_exit(fn -> File.rm_rf(legacy_ledger) end)
+
+    assert {:ok, prepared} = Ledger.prepare(legacy_ledger, "executor-local", 5_000)
+
+    foreign = %{
+      job_id: "foreign-open-authority",
+      canonical_request_digest: String.duplicate("a", 64),
+      operation_id: "foreign-operation",
+      attempt: 1,
+      cleanup_grace_ms: 5_000,
+      origin_executor_epoch: 3
+    }
+
+    assert :ok =
+             Ledger.with_claim(prepared, fn claimed ->
+               Ledger.admit(
+                 claimed,
+                 Ledger.marker(foreign),
+                 Ledger.open_entry(foreign, "executor-local")
+               )
+             end)
+
+    lease_id = "lease-#{System.unique_integer([:positive])}"
+    {:ok, lease} = WorkspaceLease.start_link(id: lease_id, path: root, fencing_token: @fence)
+
+    {:ok, executor} =
+      Local.start_link(
+        identity: "executor-local",
+        epoch: 3,
+        fencing_token: @fence,
+        workspace_leases: %{lease_id => lease},
+        ledger_root: legacy_ledger
+      )
+
+    on_exit(fn ->
+      stop_test_process(executor)
+      stop_test_process(lease)
+    end)
+
+    assert {:error, {:reconciliation_required, 1}} =
+             run(
+               root,
+               "loopex.edit",
+               %{
+                 "path" => "missing.txt",
+                 "old" => "before",
+                 "new" => "after"
+               },
+               %{
+                 executor: executor,
+                 lease_id: lease_id
+               }
+             )
+
+    allocated = temporary_root("ledger")
+
+    assert File.dir?(allocated),
+           "the test allocator returned an unchecked basename that a later VM can reuse"
+
+    assert {:ok, fresh} = Ledger.prepare(allocated, "executor-local", 5_000)
+
+    assert {:ok, []} =
+             Ledger.with_claim(fresh, fn claimed -> Ledger.open_snapshot(claimed) end)
   end
 
   # Concept: a case about the cleanup budget needs an executor composed with the
