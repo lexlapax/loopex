@@ -386,7 +386,10 @@ defmodule LoopexComposition.ResourcePacks do
           names
           |> Enum.sort()
           |> Enum.reduce_while({:ok, []}, fn name, {:ok, packs} ->
-            case existing_child_directory(root, name) do
+            case discovered_pack_directory(root, name) do
+              :ignored ->
+                {:cont, {:ok, packs}}
+
               {:ok, nil} ->
                 {:halt, error(:discovery_failed, "pack directory changed during discovery")}
 
@@ -410,6 +413,29 @@ defmodule LoopexComposition.ResourcePacks do
 
       {:error, reason} ->
         error(:discovery_failed, inspect(reason))
+    end
+  end
+
+  defp discovered_pack_directory(root, name) do
+    with :ok <- verify_directory(root) do
+      path = Path.join(root.path, name)
+
+      case File.lstat(path) do
+        {:ok, %File.Stat{type: :regular}} ->
+          with :ok <- verify_directory(root), do: :ignored
+
+        {:ok, %File.Stat{type: :directory}} ->
+          fixed_directory(path, root)
+
+        {:ok, %File.Stat{type: type}} ->
+          error(:unsupported_file, "#{name} is #{type}")
+
+        {:error, :enoent} ->
+          {:ok, nil}
+
+        {:error, reason} ->
+          error(:discovery_failed, inspect(reason))
+      end
     end
   end
 

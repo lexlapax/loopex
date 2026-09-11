@@ -21,6 +21,8 @@ defmodule LoopexComposition.SkillAcquisitionTest do
     """)
 
     write!(Path.join(skill, "references/checklist.md"), "Check the actual diff.\n")
+    write!(Path.join(Path.dirname(skill), "README.md"), "Project skill catalog notes.\n")
+    write!(Path.join(Path.dirname(skill), ".DS_Store"), <<0, 1, 2, 3>>)
 
     assert {:ok, manifest} =
              ResourcePacks.discover(workspace,
