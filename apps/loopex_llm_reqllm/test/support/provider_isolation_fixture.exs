@@ -641,6 +641,15 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
       end
 
       defp backpressure_observer(root, socket, owner, writer, slots, kind, calls) do
+        if File.exists?(Path.join(root, "drain-control")) do
+          if File.exists?(Path.join(root, "drain-control-drained")) and
+               not File.exists?(Path.join(root, "drain-control-carried")) do
+            publish(root, "drain-control-carried", %{actual_send_calls: calls})
+          end
+          if calls == 3 and not File.exists?(Path.join(root, "drain-control-third")) do
+            publish(root, "drain-control-third", %{actual_send_calls: calls})
+          end
+        end
         receive do
           {:trace, ^writer, :call,
             {Loopex.LLM.ReqLLM.ProviderCodec, :send, [^socket, next_kind, _payload]}} ->
@@ -648,7 +657,13 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
           {:DOWN, _, :process, ^writer, _} -> :ok
         after
           10 ->
-            try do
+            if calls == 1 and File.exists?(Path.join(root, "drain-control")) and
+                 not File.exists?(Path.join(root, "drain-control-ready")) do
+              publish(root, "drain-control-ready", %{actual_send_calls: calls})
+              await_drain_control(root, writer, socket)
+            end
+            # Carry the barrier's consumed trace count into the next turn.
+            {kind, calls} = try do
               {:ok, [send_pend: pending]} = :inet.getstat(socket, [:send_pend])
               info = Process.info(writer, [:current_stacktrace, :messages])
               in_send = Enum.any?(info[:current_stacktrace], fn
@@ -669,6 +684,10 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
                   do: synchronize_backpressure_trace(writer, socket, kind, calls),
                   else: {kind, calls}
 
+              if File.exists?(Path.join(root, "drain-control-ready")) and
+                   not File.exists?(Path.join(root, "drain-control-drained")) do
+                publish(root, "drain-control-drained", %{actual_send_calls: calls})
+              end
               publish(root, "backpressure-observation", %{
                 pending_bytes: pending, writer_in_send: in_send,
                 actual_send_calls: calls, kind: if(kind, do: Atom.to_string(kind), else: nil),
@@ -721,13 +740,38 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
                   _ -> :ok
                 end
               end
+              {kind, calls}
             catch
               _, _ ->
                 if Process.alive?(writer) and not File.exists?(Path.join(root, "backpressure-error")) do
                   publish(root, "backpressure-error", %{observation_failed: true})
                 end
+                {kind, calls}
             end
             backpressure_observer(root, socket, owner, writer, slots, kind, calls)
+        end
+      end
+
+      # Concept: the dedicated regression controls only this observer, while
+      # the production child writer and HTTP stream perform every send.
+      # Technical depth: leave the genuine call trace queued for the barrier
+      # drain; publish counts/flags only, and stop if the writer dies.
+      defp await_drain_control(root, writer, socket) do
+        {:messages, messages} = Process.info(self(), :messages)
+        queued = Enum.any?(messages, fn
+          {:trace, ^writer, :call,
+           {Loopex.LLM.ReqLLM.ProviderCodec, :send, [^socket, :delta, _]}} -> true
+          _ -> false
+        end)
+        if queued and not File.exists?(Path.join(root, "drain-control-queued")) do
+          publish(root, "drain-control-queued", %{actual_writer_trace_queued: true})
+        end
+        if not File.exists?(Path.join(root, "release-drain-control")) do
+          receive do
+            {:DOWN, _monitor, :process, ^writer, _reason} -> exit(:normal)
+          after
+            10 -> await_drain_control(root, writer, socket)
+          end
         end
       end
 
