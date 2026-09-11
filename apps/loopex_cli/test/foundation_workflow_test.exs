@@ -6,8 +6,6 @@ Code.require_file(
 defmodule LoopexCli.FoundationWorkflowTest do
   use ExUnit.Case, async: false
 
-  import ExUnit.CaptureIO
-
   alias Loopex.Executor.Local.CodingTools
   alias Loopex.LLM.ReqLLM
   alias Loopex.LLM.ReqLLM.ProviderIsolationFixture, as: ProviderFixture
@@ -55,6 +53,8 @@ defmodule LoopexCli.FoundationWorkflowTest do
   #
   # Technical depth: the reviewed M3 workflow-evidence disposition preserves
   # both obligations while keeping credentials out of this deterministic lane.
+  # This lane's test main supplies a host_supplied decision through dispatch/2;
+  # only the attended selector binds exact production LoopexCli.main/1 and companion bytes.
   test "embedding and the source built CLI complete the same skill tool and full artifact workflow" do
     credential = "m3-foundation-workflow"
     variable = ReqLLM.credential_variable()
@@ -81,61 +81,47 @@ defmodule LoopexCli.FoundationWorkflowTest do
 
     on_exit(fn -> stop_runtime(embedded_runtime) end)
     run_embedded(embedded_runtime, embedded)
-    assert_workflow(embedded, :embedded)
+    embedded_locator = assert_provider_workflow(embedded)
+    {:ok, embedded_artifacts} = LoopexComposition.artifacts(embedded.state_root)
+
+    assert {:ok, embedded_bytes} =
+             Loopex.ArtifactStore.retrieve(embedded_artifacts, embedded_locator)
+
+    assert embedded_bytes == embedded.full
 
     cli = workflow_fixture("cli", credential)
-    parent = self()
+    cli_binary = build_isolated_provider_cli(cli)
 
-    starter = fn options ->
-      result =
-        options
-        |> Keyword.replace!(:provider_launch, cli.provider.options)
-        |> LoopexComposition.start()
+    {cli_output, 0} =
+      run_cli_process(
+        cli_binary,
+        [
+          "run",
+          "--policy",
+          "allow-all",
+          "--skill",
+          "review",
+          "--skill-resource",
+          "review:references/checklist.md",
+          "--state-root",
+          cli.state_root,
+          "--workspace",
+          cli.workspace,
+          "Use the review skill and inspect large.txt."
+        ],
+        nil
+      )
 
-      case result do
-        {:ok, runtime} -> send(parent, {:cli_runtime, runtime})
-        _error -> :ok
-      end
+    assert cli_output =~ "artifact retained"
+    assert cli_output =~ "loopex.read: completed"
+    cli_locator = assert_provider_workflow(cli)
 
-      result
-    end
-
-    stderr =
-      capture_io(:stderr, fn ->
-        send(
-          parent,
-          {:cli_result,
-           capture_io(fn ->
-             assert :ok =
-                      LoopexCli.dispatch(
-                        [
-                          "run",
-                          "--policy",
-                          "allow-all",
-                          "--skill",
-                          "review",
-                          "--skill-resource",
-                          "review:references/checklist.md",
-                          "--state-root",
-                          cli.state_root,
-                          "--workspace",
-                          cli.workspace,
-                          "Use the review skill and inspect large.txt."
-                        ],
-                        runtime_starter: starter,
-                        resource_decision: cli.decision,
-                        operator_present: false
-                      )
-           end)}
-        )
-      end)
-
-    assert_receive {:cli_result, answer}
-    assert_receive {:cli_runtime, cli_runtime}
-    on_exit(fn -> stop_runtime(cli_runtime) end)
-    assert answer =~ "artifact retained"
-    assert stderr =~ "loopex.read: completed"
-    assert_workflow(cli, :cli)
+    assert {cli.full, 0} ==
+             run_cli_process(
+               cli_binary,
+               ["artifact", cli_locator, "--state-root", cli.state_root],
+               nil
+             )
   end
 
   defp workflow_fixture(label, credential) do
@@ -189,6 +175,7 @@ defmodule LoopexCli.FoundationWorkflowTest do
       )
 
     %{
+      root: root,
       state_root: state_root,
       workspace: workspace,
       manifest: normalized,
@@ -248,7 +235,7 @@ defmodule LoopexCli.FoundationWorkflowTest do
     end
   end
 
-  defp assert_workflow(workflow, entry) do
+  defp assert_provider_workflow(workflow) do
     assert [{first, true}, {second, true}] = ProviderFixture.events(workflow.provider)
     second_bytes = Jason.encode!(second)
     staged = Enum.map(first["messages"], & &1["content"])
@@ -257,19 +244,154 @@ defmodule LoopexCli.FoundationWorkflowTest do
     assert second_bytes =~ "output truncated"
 
     assert [_, locator] = Regex.run(~r/output truncated[^\]]* ([0-9a-f]{64})\]/, second_bytes)
+    locator
+  end
 
-    retrieved =
-      capture_io(fn ->
-        assert :ok =
-                 LoopexCli.dispatch([
-                   "artifact",
-                   locator,
-                   "--state-root",
-                   workflow.state_root
-                 ])
+  defp build_isolated_provider_cli(workflow) do
+    launch_path = Path.join(workflow.root, "isolated-test-provider.launch")
+
+    launch =
+      Keyword.take(workflow.provider.options, [
+        :worker_path,
+        :interpreter_path,
+        :worker_sha256,
+        :build_manifest_sha256
+      ])
+
+    File.write!(launch_path, :io_lib.format(~c"~tp.~n", [launch]))
+
+    executable = Path.join(workflow.root, "loopex")
+    build_output = Path.expand(Mix.Project.config()[:escript][:path] || "loopex")
+    previous_output = File.read(build_output)
+    previous_mode = file_mode(build_output)
+
+    try do
+      with_resource_decision_main(workflow.decision, fn main_module ->
+        with_provider_launch(launch_path, fn ->
+          original_escript = Mix.Project.config()[:escript]
+
+          Mix.ProjectStack.merge_config(
+            escript: Keyword.put(original_escript, :main_module, main_module)
+          )
+
+          try do
+            Mix.Tasks.Escript.Build.run(["--no-compile", "--no-deps-check"])
+            File.cp!(build_output, executable)
+            File.chmod!(executable, file_mode(build_output))
+          after
+            Mix.ProjectStack.merge_config(escript: original_escript)
+          end
+        end)
       end)
+    after
+      restore_build_output(build_output, previous_output, previous_mode)
+    end
 
-    assert retrieved == workflow.full, "#{entry} did not retrieve the complete retained artifact"
+    assert File.exists?(executable)
+    executable
+  end
+
+  defp file_mode(path) do
+    case File.stat(path) do
+      {:ok, stat} -> stat.mode
+      {:error, :enoent} -> nil
+    end
+  end
+
+  defp restore_build_output(path, {:ok, bytes}, mode) do
+    File.write!(path, bytes)
+    File.chmod!(path, mode)
+  end
+
+  defp restore_build_output(path, {:error, :enoent}, nil), do: File.rm(path)
+
+  defp with_resource_decision_main(decision, build) do
+    module = LoopexCli.IsolatedProviderMain
+
+    beam_path =
+      Path.join(Mix.Project.compile_path(), "Elixir.LoopexCli.IsolatedProviderMain.beam")
+
+    previous_beam = File.read(beam_path)
+    previous_mode = file_mode(beam_path)
+
+    quoted =
+      quote do
+        defmodule unquote(module) do
+          def main(arguments) do
+            result =
+              LoopexCli.dispatch(arguments,
+                resource_decision: unquote(Macro.escape(decision)),
+                operator_present: false
+              )
+
+            LoopexCli.release_placement()
+
+            case result do
+              :ok -> System.halt(0)
+              {:error, message} -> IO.puts(:stderr, "loopex: #{message}") && System.halt(1)
+            end
+          end
+        end
+      end
+
+    try do
+      [{^module, beam}] = Code.compile_quoted(quoted)
+      File.write!(beam_path, beam)
+      build.(module)
+    after
+      restore_build_output(beam_path, previous_beam, previous_mode)
+      :code.purge(module)
+      :code.delete(module)
+    end
+  end
+
+  defp with_provider_launch(launch_path, build) do
+    module = LoopexCli.ProviderLaunch
+    {^module, original, original_path} = :code.get_object_code(module)
+    beam_path = List.to_string(original_path)
+    previous_environment = System.get_env("LOOPEX_BUILD_PROVIDER_CONFIG")
+    previous_compiler = Code.compiler_options(ignore_module_conflict: true)
+    System.put_env("LOOPEX_BUILD_PROVIDER_CONFIG", launch_path)
+
+    try do
+      [{^module, configured}] =
+        Code.compile_file(Path.expand("../lib/provider_launch.ex", __DIR__))
+
+      File.write!(beam_path, configured)
+      build.()
+    after
+      File.write!(beam_path, original)
+      Code.compiler_options(previous_compiler)
+
+      if previous_environment,
+        do: System.put_env("LOOPEX_BUILD_PROVIDER_CONFIG", previous_environment),
+        else: System.delete_env("LOOPEX_BUILD_PROVIDER_CONFIG")
+
+      :code.purge(module)
+      {:module, ^module} = :code.load_binary(module, original_path, original)
+    end
+  end
+
+  defp run_cli_process(executable, arguments, input) do
+    port =
+      Port.open({:spawn_executable, executable}, [
+        :binary,
+        :exit_status,
+        :stderr_to_stdout,
+        args: arguments
+      ])
+
+    if is_binary(input), do: Port.command(port, input)
+    collect_port(port, "")
+  end
+
+  defp collect_port(port, output) do
+    receive do
+      {^port, {:data, bytes}} -> collect_port(port, output <> bytes)
+      {^port, {:exit_status, status}} -> {output, status}
+    after
+      60_000 -> flunk("the source-built CLI did not exit")
+    end
   end
 
   defp stop_runtime(runtime) do
