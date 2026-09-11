@@ -157,13 +157,35 @@ defmodule Loopex.M4Opening do
 
         System.halt(1)
 
-      is_nil(defer.terminal) and defer.interaction_records != [] and not defer.settled ->
+      is_nil(defer.terminal) and durably_pending?(defer) ->
         IO.puts(
           "M4 opening GREEN: policy defer commits a pending interaction and suspends the run"
         )
 
+      is_nil(defer.terminal) and not defer.settled ->
+        throw({:witness_error, "defer_unsettled_without_explicit_pending_interaction"})
+
       true ->
         throw({:witness_error, "defer_neither_denied_nor_durably_pending"})
+    end
+  end
+
+  # Concept: green means an exact suspended state, not the absence of settlement.
+  # Technical depth: the facade status must name exactly one pending interaction
+  # for the probe's tool call and the journal must hold its pending record with
+  # the same interaction identity; a deadlocked or merely slow run has neither.
+  defp durably_pending?(observation) do
+    case observation.status do
+      {:ok, %{pending_interactions: [%{interaction_id: id, tool_call_id: "m4-probe-call"}]}}
+      when is_binary(id) and id != "" ->
+        Enum.any?(observation.interaction_records, fn record ->
+          record["interaction_id"] == id and record["tool_call_id"] == "m4-probe-call" and
+            record["status"] == "pending" and
+            String.starts_with?(to_string(record[:kind]), "interaction_requested")
+        end)
+
+      _other ->
+        false
     end
   end
 
@@ -238,7 +260,11 @@ defmodule Loopex.M4Opening do
         terminal: terminal && terminal.payload,
         receipt: receipt && receipt.payload,
         intent: "effect_intent_committed" in kinds,
-        interaction_records: Enum.filter(kinds, &String.contains?(&1, "interaction")),
+        interaction_records:
+          records
+          |> Enum.map(& &1.payload)
+          |> Enum.filter(&String.contains?(to_string(&1[:kind]), "interaction")),
+        status: Loopex.session_status(runtime, session),
         settled: settled,
         model_calls: drain(:model_called, 0),
         executor_calls: drain_executor([])

@@ -46,6 +46,11 @@ This is a credential-free behavioral red for outcome 3. It reads the retained
 journal through the real Store, observes settlement through the public facade
 and counts executor invocations; it does not depend on acceptance state,
 exported function names, source text, case counts or an invented record member.
+Its green is exact: the facade status must report the run suspended on one
+pending interaction, the journal must hold the pending-interaction record
+naming that interaction and the probe's tool call, and no terminal, effect
+intent or executor invocation may exist. A run that fails to settle without
+that explicit pending state is a WITNESS ERROR, so a deadlock cannot pass.
 Compile/tool failure is UNAVAILABLE (exit 2); a failed positive control is a
 named WITNESS ERROR (exit 2); the observed defect is RED (exit 1). Inspection can
 pass without a behavior claim. Full mode continues into its closure lanes only
@@ -56,18 +61,23 @@ dependency is UNAVAILABLE, never a full-gate PASS.
 ## Readiness Work Before Acceptance
 
 1. Settle ADRs 0023/0024/0026/0028 and their complete core/port contracts, then
-   reconcile DTO/schema/vector bytes with the actual M3 resource facade. Before
-   acceptance construct executable interaction/range witnesses and prove their
-   declared reds on the unchanged base. After acceptance, require local core/port
-   greens before wire implementation/rejoin. Advertise only implemented
-   semantic capabilities; unknown input rules and every limit are exact.
+   reconcile DTO/schema/vector bytes with the actual M3 resource facade. ADR 0028
+   must record the artifact transfer design and every limit the technical plan
+   names; ADR 0023 must carry the connection state table; ADR 0024 must fix the
+   successive-round bound. Before acceptance construct executable
+   interaction/range witnesses and prove their declared reds on the unchanged
+   base. After acceptance, require local core/port greens before wire
+   implementation/rejoin. Advertise only implemented semantic capabilities;
+   unknown input rules and every limit are exact.
 2. Rebuild the independent raw-process probe to the full foundation
    workflow: initialize, create, attach, select an admitted skill, submit prompt,
    observe durable admission, answer the exact interaction, observe policy-
    authorized tool receipt, verify actual artifact bytes and a settled snapshot.
 3. Add the TypeScript workflow and independent Elixir/Python conformance clients.
-   Lock their execution versions and positive/negative vectors before acceptance.
-   A missing interpreter is unavailable evidence, not PASS.
+   Lock their execution versions in `scripts/fixtures/m4/client-toolchain.txt`
+   and their positive/negative vectors before acceptance, and bind both. The
+   runner verifies the pinned executables before any client lane; absence or
+   mismatch is UNAVAILABLE, never PASS or an ordinary RED.
 4. Complete all runner lanes before implementation: isolated compile and probe,
    inherited gates, authoritative protected selectors, whole suite, independent
    clients, attended real-provider workflow and retained-evidence validation.
@@ -122,12 +132,12 @@ binding.
 
 | SHA-256 | Path |
 | --- | --- |
-| `30c7b39fcc837849302c240d029aab7c7983737af3711bd4d007549631cc107e` | `scripts/check-m4-gate.sh` |
-| `775b7a9ae9b6e77621712ad6bb79aed731beee5c9f7fd19ee0ae6f1c6151b9cb` | `scripts/m4-opening-probe.exs` |
-| `a34423e38152ba23e2ec7c637262641a65b87b187c523b387103ff04b2e70a85` | `scripts/m4-gate-support.exs` |
+| `927db7431a66f6c3963e552ee95beb459f5a735d9fd0782bb793affaad3f4617` | `scripts/check-m4-gate.sh` |
+| `952e2549fed1cb96de70db016b1fb1bd8da3c191b3a41db6ac7a7baf37047f4d` | `scripts/m4-opening-probe.exs` |
+| `60cf412d06b9ec0d07d7b671aa444a7fbfc178ea42d94a3073685022861f1bfd` | `scripts/m4-gate-support.exs` |
 | `65d0de9dcd1218af542f00e32c2177d2612a2f1232f22db37b9942200c84cf66` | `scripts/m3-gate-support.exs` |
 | `c4d485ca3229441c678abe1e8733f90216e89e0dfb9e81786f58f525619aec29` | `scripts/check-closed-gates.sh` |
-| `f2e0915aa01db5bdc12c8d8f1c3b4aca177d3a5a52d44e5e5c88a4b57bc7ed0c` | `scripts/m4-outcomes.exs` |
+| `a9f76fd9c07fd5a696d28f28296c380eb2b43aa7c013060a8a3a4e7c7682236d` | `scripts/m4-outcomes.exs` |
 | `cc290e60d9f9588c75f1259b25976a58d1c30713e570cd5a88c70cdf3c2159a0` | `scripts/m1-exunit-runner.exs` |
 | `0a8406ca080c70624e776b01e37c7ded210b54659064cf63723a847a54debe2d` | `apps/loopex/test/m1_exunit_runner_test.exs` |
 | `fad47299b27a767785d2a6a776155038054f5457ee3ce0195a37ae667f7a9999` | `.tool-versions` |
@@ -180,8 +190,8 @@ the gate rejects that invocation ledger.
 | Inherited | Bootstrap and all required Closed commands, including Closed M3, with credential lanes and truthful propagation |
 | Protected outcomes | Standalone authoritative ExUnit result channel, seed 3107, exact required witness identities and runnable states |
 | Whole suite | Complete deterministic suite, format, warning-free compile, documentation and dependency checks |
-| Real workflow | Separately selected attended real-provider task through the shipped server and TypeScript consumer |
-| Retained evidence | Execution output binds source/gate/commands/seed, toolchains/platforms and non-secret build/artifact identities; save that output without relabelling its source |
+| Real workflow | Separately selected attended real-provider task through the shipped server and TypeScript consumer, after the pinned interpreters verify |
+| Retained evidence | The final report binds source SHA, gate digest, seed, outcome IDs, Elixir/OTP/ERTS, platform, source VERSION and the pinned client toolchain; the real selector's authoritative report binds provider/model/endpoint and version-aware adapter/executor build identities; save that output without relabelling its source |
 
 Real-provider tests live in the dedicated
 `apps/loopex_app_server/test/external_workflow_real_test.exs`. Full mode accepts
@@ -202,10 +212,10 @@ are pinned before acceptance, not by this opening.
 | --- | --- | --- |
 | 1 | `apps/loopex_app_server/test/initialization_test.exs` | Exact generation/schema/limit negotiation before mutation; mutation-before-init and duplicate-init refusal without durable work; stdout purity and real process boundary |
 | 2 | `apps/loopex_app_server/test/session_mapping_test.exs` | Same corpus facade/wire; independent request and command identity with replay idempotency; admission vs completion; snapshot/live ordering |
-| 3 | `apps/loopex/test/interaction_lifecycle_test.exs`, `apps/loopex_app_server/test/foundation_mapping_test.exs` | Durable request/answer/policy/intent cuts, fixed timestamps through uncertain commits, expiry/abort/restart races, old-reader refusal; exact resources, missing/stale trust, manual-only selection, interaction/policy separation, wire cannot select roots/modules/profiles or grant |
-| 4 | `apps/loopex_store_local/test/artifact_range_test.exs`, `apps/loopex_app_server/test/delivery_bounds_test.exs` | Full-object verification before a range, distinct object/range digests, unsupported-store refusal, byte/deadline budgets; malformed UTF-8, duplicate keys, nesting, fragmented/multiple/oversized frames, blocked reader, detach cursor, late progress and actual cleanup |
-| 5 | `apps/loopex_app_server/test/external_workflow_test.exs` | TypeScript skill → approval → actual tool → artifact → abrupt restart, plus separate graceful EOF behavior |
-| 6 | `apps/loopex_protocol/test/public_schema_conformance_test.exs` | Independently executed Elixir, Python and TypeScript clients over canonical positive/negative vectors; exact version and platform identities |
+| 3 | `apps/loopex/test/interaction_lifecycle_test.exs`, `apps/loopex_app_server/test/foundation_mapping_test.exs` | Durable request/answer/policy/intent cuts, fixed timestamps through uncertain commits, expiry/abort/restart races, the exact successive-round bound, old-reader refusal; exact resources, missing/stale trust, manual-only selection, answer admission separate from re-evaluation and grant/intent, immutable launch inputs unreplaceable from the wire |
+| 4 | `apps/loopex_store_local/test/artifact_range_test.exs`, `apps/loopex_app_server/test/delivery_bounds_test.exs` | Complete verification before any chunk with one verification per transfer, distinct object/range digests, unsupported-store refusal, wrong-session use, object/use swap, corruption outside the returned range, concurrent-reader and connection-work exhaustion, cancellation and descriptor release, byte/deadline budgets; malformed UTF-8, duplicate keys, nesting, fragmented/multiple/oversized frames, blocked reader, detach cursor, late progress and actual cleanup |
+| 5 | `apps/loopex_app_server/test/external_workflow_test.exs` | TypeScript skill → interaction answer → policy re-evaluation → committed grant/intent → actual tool → artifact → abrupt restart from operator input with no embedded identities; stdin EOF performs orderly shutdown with no cancellation and a still-pending interaction; `session.abort` is the separate deliberate case |
+| 6 | `apps/loopex_protocol/test/public_schema_conformance_test.exs` | Independently executed Elixir, Python and TypeScript clients over canonical positive/negative vectors under the pinned interpreters; exact version and platform identities |
 
 Each required clause maps to a named decisive witness in `scripts/m4-outcomes.exs`.
 Related clauses may share one named case only when it contains distinct observed
@@ -248,10 +258,14 @@ publication and compatibility acceptance retain their distinct authorities.
 
 | Category | Required closure disposition |
 | --- | --- |
-| Operator-facing documentation | `docs/operator/app-server.md`, `docs/operator/coding-sessions.md`, `docs/operator/tools-and-policy.md` |
+| Operator-facing documentation | `docs/operator/app-server.md`, `docs/operator/coding-sessions.md`, `docs/operator/tools-and-policy.md`, `docs/operator/how-a-run-works.md`, `docs/operator/how-a-run-works-technical.md` |
 | Operator README | `docs/operator/README.md` |
-| Developer-facing documentation | `docs/developer/app-server-protocol.md`, `docs/developer/app-server-protocol-technical.md`, `docs/developer/runtime-and-embedding.md`, `docs/developer/compatibility-surfaces.md` |
+| Developer-facing documentation | `docs/developer/app-server-protocol.md`, `docs/developer/app-server-protocol-technical.md`, `docs/developer/runtime-and-embedding.md`, `docs/developer/agent-loop-and-tools.md`, `docs/developer/compatibility-surfaces.md`, `docs/developer/agent-context-map.md` |
 | Developer README | `docs/developer/README.md` |
 | Documentation README | `docs/README.md` |
 | Root README | `README.md` |
 | Changelog | `CHANGELOG.md` |
+
+`DEVELOPMENT.md` is also updated at closure for the ninth application, the
+client toolchain pins and the M4 runner commands; it is setup guidance outside
+the seven categories, and its drift blocks closure like any other row.

@@ -38,6 +38,7 @@
             "policy defer commits one pending interaction before publication and suspends the run without executor intent",
             "a committed answer re-enters host policy and only an allow result mints a grant before dispatch",
             "expiry abort deadline and restart races resolve by journal order and recovery resumes only retained pending state",
+            "successive answer and defer rounds stop at the exact bound with a stable refusal",
             "old readers refuse interaction records before effects beside an old format positive control"
           ]
         },
@@ -45,8 +46,9 @@
           path: "apps/loopex_app_server/test/foundation_mapping_test.exs",
           names: [
             "wire clients select only admitted catalog resources and cannot name roots modules profiles or grants",
+            "no request parameter model output resource or answer replaces an immutable launch input",
             "missing or stale trust withholds staged content while ordinary coding continues",
-            "interaction answer admission is observed separately from policy authorization and tool receipt"
+            "interaction answer admission is observed separately from policy re-evaluation grant intent and tool receipt"
           ]
         }
       ]
@@ -57,8 +59,10 @@
         %{
           path: "apps/loopex_store_local/test/artifact_range_test.exs",
           names: [
-            "a range is returned only after the complete immutable object verifies and object and range digests stay distinct",
+            "a chunk is returned only after the complete immutable object verifies once per transfer and object and range digests stay distinct",
             "an unsupported ArtifactStore reports unsupported rather than falling back to a whole object fetch",
+            "wrong session use object and use swaps and corruption outside the returned range refuse before any bytes",
+            "concurrent reader and connection work exhaustion refuse and cancellation releases every descriptor",
             "per read byte and deadline budgets bound allocation and measured read amplification"
           ]
         },
@@ -78,8 +82,9 @@
         %{
           path: "apps/loopex_app_server/test/external_workflow_test.exs",
           names: [
-            "the TypeScript consumer completes skill approval tool artifact and abrupt restart against the shipped server",
-            "graceful EOF cancels the owned run and a cancelled interaction is never pending after restart"
+            "the TypeScript consumer completes skill answer reevaluation grant tool artifact and abrupt restart from operator input against the shipped server",
+            "stdin EOF performs orderly shutdown without cancellation and the pending interaction survives restart",
+            "session abort is the only deliberate cancellation and an aborted interaction is never pending after restart"
           ]
         }
       ]
@@ -100,7 +105,7 @@
   real: %{
     path: "apps/loopex_app_server/test/external_workflow_real_test.exs",
     names: [
-      "an attended real provider task completes the TypeScript skill approval tool artifact and restart workflow"
+      "an attended real provider task completes the TypeScript skill answer reevaluation grant tool artifact and restart workflow"
     ]
   }
 }

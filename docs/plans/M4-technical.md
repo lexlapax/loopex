@@ -28,44 +28,95 @@ M4 accepts four decisions before dependent work:
 
 | Decision | Owner and acceptance point | Effect |
 | --- | --- | --- |
-| [**ADR 0023**](../adr/0023-experimental-public-session-protocol.md#concept) | Maintainer, before M4 acceptance | Transport-neutral experimental protocol, exact initialization, identity ownership and fail-closed boundary |
-| [**ADR 0024**](../adr/0024-durable-interaction-lifecycle-and-host-policy-authority.md#concept) | Maintainer, before M4 acceptance | Durable policy `defer`/answer lifecycle owned by the session with host-policy authority preserved |
-| [**ADR 0026**](../adr/0026-development-floor-refresh.md#concept) | Maintainer, before M4 acceptance | Explicit floor/current validation pairs replacing the derived pin rule |
-| [**ADR 0028**](../adr/0028-bounded-artifact-retrieval.md#concept) | Maintainer, before M4 acceptance | Bounded range retrieval through the facade and ArtifactStore with distinct object/range digests |
+| [**ADR 0023**](../adr/0023-experimental-public-session-protocol.md#concept) | Maintainer, before M4 acceptance; must carry the connection state table below | Transport-neutral experimental protocol, exact initialization, identity ownership and fail-closed boundary |
+| [**ADR 0024**](../adr/0024-durable-interaction-lifecycle-and-host-policy-authority.md#concept) | Maintainer, before M4 acceptance; must fix the exact maximum of successive answer → defer rounds per tool decision | Durable policy `defer`/answer lifecycle owned by the session with host-policy authority preserved |
+| [**ADR 0026**](../adr/0026-development-floor-refresh.md#concept) | Maintainer, before M4 acceptance; holder transactions below settle after M3 closes | Explicit floor/current validation pairs replacing the derived pin rule |
+| [**ADR 0028**](../adr/0028-bounded-artifact-retrieval.md#concept) | Maintainer, before M4 acceptance; must settle the transfer design below | Bounded artifact retrieval through the facade and ArtifactStore with distinct object/range digests |
+
+**Artifact transfer design (unresolved, blocks ADR 0028 acceptance).** The
+Proposed ADR admits 1–16,384-byte ranges while the local store admits 64 MiB
+objects and verifies the complete object on every range. Saving a maximal
+object through independent ranges would verify it 4,096 times. Two designs
+satisfy the Concept constraint of one verification per transfer:
+
+| Choice | Consequence |
+| --- | --- |
+| One authorized, verified transfer that scans once and emits bounded chunks (recommended) | Preserves the complete-artifact promise; adds an owned, cancellable reader lifecycle with descriptor release and per-connection reader limits |
+| Independent `fetch_range` calls as drafted | Smaller; M4 must then cap total reconstruction and describe the feature as bounded excerpts, not artifact saving |
+
+Whichever the maintainer records in ADR 0028, both envelopes bind exact values
+at acceptance for: chunk or range bytes, per-read deadline, concurrent readers
+per connection and per runtime, connection work budget, and read amplification
+(complete verifications per authorized transfer, at most one under the
+recommended design). Missing values block acceptance.
+
+**Connection state table (required content of ADR 0023).**
+
+| Situation | Required behavior |
+| --- | --- |
+| Before `initialize` | Every other frame refuses; nothing durable is created |
+| Repeated `initialize` or no common generation | Refuse; the connection stays uninitialized; each generation binds exactly one schema digest |
+| Attachment | At most one active attachment per foreground process; a second `session.attach` refuses with a stable reason unless it names explicit replacement, which detaches the first at its last completely emitted cursor |
+| Request identity | `request_id` is unique among in-flight requests on the connection; reuse while in flight refuses; reuse after completion is ordinary correlation |
+| Pre-admission pressure | Refuse the mutation before any durable write |
+| Post-admission pressure | Drop or coalesce progress first; if durable output still cannot drain, detach at the last completely emitted cursor and say so |
+| Raw stdin EOF or process death | Connection or host loss: inherited orderly foreground shutdown, no new dispatch, no cancellation record, no interaction state change |
+| Deliberate cancellation | Only the durable `session.abort` command |
+| Restart | A fresh process attaches with snapshot and cursor first; pending interactions remain pending; cancelled, expired or denied ones never reappear |
+
+**Immutable launch inputs.** State root, workspace identity, resource snapshot,
+policy module plus identity and revision, provider, executor and ArtifactStore
+are fixed at launch. A decisive witness proves that no request, parameter,
+model output, project resource or answer replaces any of them.
 
 The accepted M3 decisions on resource packs and permit retirement and M3's
 working resource/launch/repair interfaces are inherited. Reconcile the schema
 with those interfaces and the new core contracts; no TODO member or unproved
 method earns an advertised capability.
 
-The first prerequisite workstream settles the floor before M4 binds its own
-future edits: proposed Elixir 1.18.5/OTP 27.3.4 and current 1.20.3/OTP 29.0.5,
-with real matrix evidence. At the planning base the Closed M0, M1 and M2 gates
-and the accepted M3 gate all bind `.tool-versions`, so all four are holders;
-inventory every holder again on the exact integrated M3 closure. Use each
-holder's default transaction: the v2 gate-generation route for a Closed holder
-and the v1 proposal/rebind route while M3 is Accepted. An expressly scoped
-maintainer override may replace only the development-time holder transaction or
-procedure; it cannot replace ADR 0026 acceptance, an accepted ADR decision, or a
-released public contract. One explicit instruction may name a coherent set of
-holders, replacement bindings and validation without repeatedly asking for the
-same decision, but the operative disposition is first recorded and independently
-reviewed in its own commit. Each affected holder then lands its replacement row
-in that holder's own commit, names the override and holder, passes status
-validation, and receives exact-SHA read-only review before the next holder
-proceeds. No override ignores a stale hash or rewrites a prior
-Acceptance/Closure row. Without such approval, retain the default transaction and
-its required evidence. Moving this cost from M3 does not remove it, and no floor
-change is made by this opening.
+**Holder transactions.** The floor refresh (proposed Elixir 1.18.5/OTP 27.3.4
+and current 1.20.3/OTP 29.0.5, with real matrix evidence), the ninth
+application, the dependency-rule change and source VERSION 0.1.0 each change
+bytes that Closed gates bind. The default sequence is exact:
 
-The ninth app, dependency inventory and source VERSION 0.1.0 also require their
-actual holders' transactions or the explicitly approved development-time override
-route above. Where the same holder binds several planned changes, review the
-complete coherent proposal together rather than lock known future edits and
-repeat the transaction. Do not combine unrelated decisions, combine different
-holders' replacement commits, or skip any holder. All replacement bindings settle
+| Step | Transaction |
+| --- | --- |
+| 1 | Close and integrate M3 on its existing floor |
+| 2 | Derive the exact M0–M3 holder inventory on that integrated closure |
+| 3 | Settle every Closed holder through the v2 gate-generation route, unless a separately recorded and reviewed maintainer override names the exact replacement |
+| 4 | Refresh M4 on that base and re-prove every inherited gate green plus this gate's own red |
+| 5 | Accept M4 |
+| 6 | Add the ninth application during implementation; apply 0.1.0 at the closure rejoin under its holders' transactions |
+
+Because M4 cannot be accepted before M3 closes, every holder is Closed when
+its transaction runs; no v1 route applies. At the planning base the inventory
+is:
+
+| Changed artifact | Planned change | Holders at the planning base |
+| --- | --- | --- |
+| `.tool-versions` | Floor pair refresh | M0, M1, M2, M3 |
+| `apps/loopex/lib/mix/tasks/loopex.deps_budget.ex` | Nine-application inventory; permit a client's production dependency on the contract application with negative tests; version literals | M1, M2 |
+| `scripts/m1-exunit-runner.exs`, `apps/loopex/test/m1_exunit_runner_test.exs` | Any report-channel change needed for version-aware evidence | M1, M2, M3, M4 |
+| `scripts/m3-gate-support.exs` | Its combined real-path verifier requires `@0.0.0` build identities; M4's own verifier reads `VERSION`, and M3's binding is untouched unless M3 reruns after 0.1.0 | M3, M4 |
+| `scripts/check-closed-gates.sh` | None planned; listed because M4 binds it | M3, M4 |
+| `VERSION` and application versions | 0.1.0 at closure rejoin | Every gate whose evidence names the version |
+
+The planned `loopex_app_server` depends directly on `loopex_protocol`; the
+current client-role rule rejects every internal edge other than core and a
+composition. Permit client → contract production dependencies deliberately and
+add negative tests, rather than reach the protocol through a transitive
+dependency. Where the same holder binds several planned changes, review the
+complete coherent proposal together rather than repeat the transaction. Do not
+combine unrelated decisions, combine different holders' replacement commits, or
+skip any holder. An expressly scoped maintainer override may replace only the
+development-time holder transaction or procedure; it cannot replace ADR 0026
+acceptance, an accepted ADR decision, or a released public contract. The
+operative disposition is recorded and independently reviewed in its own commit;
+each holder then lands its replacement row in its own status-checked,
+exact-SHA-reviewed commit before the next proceeds. No override ignores a stale
+hash or rewrites a prior Acceptance/Closure row. All replacement bindings settle
 before M4 acceptance; publication and compatibility freezes still require
-separate authority.
+separate authority. No floor change is made by this opening.
 
 M3 owns resource admission, inherited-gate enforcement and the three repairs.
 M4 adds core defer/answer and ArtifactStore ranges before the app-server maps
@@ -122,16 +173,19 @@ Concept: [Outcomes](M4.md#concept-plan-outcomes).
 | --- | --- |
 | 1 | Independent raw-byte client launches actual server process, exact init/schema/limits vector, refusal before init, no durable work on malformed startup |
 | 2 | Identical command corpus through facade/wire; independent variation of request and command identity; snapshot-before-live; committed admission before correlated delivery; command replay after disconnect |
-| 3 | Durable interaction request/answer/policy/intent cuts, fixed timestamps through commit_unknown, expiry/abort/restart races and policy identity; catalog and selected content identity preserved; stale/missing trust withholds content; manual-only restriction; interaction answer admission separately observed from policy authorization and tool receipt; wire-selected policy/module/root refused |
-| 4 | ADR 0028 full-object verification and range allocation proved at ArtifactStore and facade, object and range digests distinguished; oversized/fragmented/multiple frames; malformed UTF-8/duplicate keys/depth; slow reader; bounded queue; late progress; stdout contamination; actual process-tree cleanup |
-| 5 | TypeScript drives skill/interaction/tool/artifact with real Store and executor; real-provider task separately attended; abrupt kill and fresh-process resume; graceful EOF case remains distinct |
-| 6 | Elixir, Python and TypeScript clients execute the same positive/negative vectors without importing the server codec; exact source/schema/client versions and toolchain/platform identities |
+| 3 | Durable interaction request/answer/policy/intent cuts, fixed timestamps through commit_unknown, expiry/abort/restart races, the exact successive-round bound and policy identity; catalog and selected content identity preserved; stale/missing trust withholds content; manual-only restriction; interaction answer admission separately observed from policy re-evaluation, grant/intent commit and tool receipt; every immutable launch input proved unreplaceable from the wire |
+| 4 | ADR 0028 complete verification and bounded allocation proved at ArtifactStore and facade with object and range digests distinguished; wrong-session use, object/use swap and corruption outside the returned range refused; concurrent-reader and connection-work exhaustion, cancellation and descriptor release; oversized/fragmented/multiple frames; malformed UTF-8/duplicate keys/depth; slow reader; bounded queue; late progress; stdout contamination; actual process-tree cleanup |
+| 5 | TypeScript drives skill, interaction answer, policy re-evaluation, committed grant/intent, tool and artifact with real Store and executor from operator input, embedding no identities; real-provider task separately attended; abrupt kill and fresh-process resume; stdin EOF performs orderly shutdown with no cancellation and a still-pending interaction; `session.abort` is the separate deliberate-cancellation case |
+| 6 | Elixir, Python and TypeScript clients execute the same positive/negative vectors without importing the server codec; pinned interpreter versions verified before the lane, absence or mismatch reported as unavailable evidence; exact source/schema/client versions and toolchain/platform identities recorded in the retained report |
 
 The opening runner binds one real behavioral red for outcome 3: through a
 real local session and Store, a host-policy `defer` is denied as
 `interaction_unsupported` instead of committing a pending interaction. It proves
 that one missing core behavior; it proves no protocol, range, client or
-workflow behavior. The superseded raw-process scaffold retained at
+workflow behavior. Its green requires the exact pending record for the probe's
+tool call, an explicit pending interaction in the facade status and no terminal,
+intent or executor invocation; a run that merely fails to settle is a witness
+error, never green. The superseded raw-process scaffold retained at
 `ba51d1898bcca109a5ed32a8cc3ba831323113a1` is historical design input.
 Reconstruct and reconcile the raw-process probe, vectors and the integrated
 client fixture against settled contracts before acceptance. An echo server
@@ -190,16 +244,21 @@ installed-data migration or service installation claim.
 Concept: [Scope](M4.md#concept-plan-scope).
 
 Add exactly `loopex_app_server`, the ninth application with role `:client`,
-depending inward on core, protocol and composition. It adds zero external
-production dependencies; existing ReqLLM edge dependencies remain permitted.
+depending inward on core, protocol and composition. The client-role rule and
+application inventory in `loopex.deps_budget.ex` change under their holders'
+transactions to permit the direct contract dependency; it is not hidden behind a
+transitive edge. It adds zero external production dependencies; existing ReqLLM
+edge dependencies remain permitted.
 Core and protocol remain stdlib-only. The floor decision makes the stdlib JSON
 codec available; duplicate-key and all other strictness requirements remain
 independent tests.
 
 Supply a source-built foreground entrypoint and one TypeScript example, plus
 small Elixir/Python conformance clients. Pin Node/TypeScript execution and Python
-versions in the M4 gate before acceptance; these are isolated client-validation
-prerequisites, not a new bootstrap or production dependency. Prefer Node's
+versions in `scripts/fixtures/m4/client-toolchain.txt` and bind it in the M4
+gate before acceptance; the runner verifies the pinned executables before any
+client lane and reports absence or mismatch as UNAVAILABLE. These are isolated
+client-validation prerequisites, not a new bootstrap or production dependency. Prefer Node's
 supported native type stripping and dependency-free TypeScript; if the accepted
 runtime cannot execute it, settle the validation-toolchain decision before
 acceptance rather than download a compiler during a gate.

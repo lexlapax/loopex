@@ -25,14 +25,16 @@ defmodule Loopex.M4Gate.Support do
   defp outcome("apps/loopex/test/interaction_lifecycle_test.exs"), do: [3]
   defp outcome("apps/loopex_store_local/test/artifact_range_test.exs"), do: [4]
   defp outcome("apps/loopex_protocol/test/public_schema_conformance_test.exs"), do: [6]
-  defp outcome("apps/loopex/lib/loopex/runtime/interaction" <> _), do: [3]
-  defp outcome("apps/loopex/lib/loopex/policy.ex"), do: [3]
-  defp outcome("apps/loopex/lib/loopex/artifact_store.ex"), do: [4]
-  defp outcome("apps/loopex_store_local/lib/" <> _), do: [4]
-  defp outcome("apps/loopex_protocol/lib/" <> _), do: [1, 2, 6]
-  defp outcome("apps/loopex_protocol/priv/" <> _), do: [1, 6]
-  defp outcome("apps/loopex_app_server/lib/" <> _), do: [1, 2, 3, 4, 5]
+  # Concept: shared contract, store and server paths select every outcome that
+  # can observe them; only leaf test files select one outcome.
+  defp outcome("apps/loopex/lib/loopex/runtime/interaction" <> _), do: [2, 3, 5]
+  defp outcome("apps/loopex/lib/loopex/policy.ex"), do: [3, 5]
+  defp outcome("apps/loopex/lib/loopex/artifact_store.ex"), do: [4, 5]
+  defp outcome("apps/loopex_store_local/lib/" <> _), do: [4, 5]
+  defp outcome("apps/loopex_protocol/" <> _), do: @all
+  defp outcome("apps/loopex_app_server/lib/" <> _), do: @all
   defp outcome("clients/" <> _), do: [5, 6]
+  defp outcome("scripts/fixtures/m4/" <> _), do: @all
   defp outcome(_), do: @all
 
   def manifest(root) do
@@ -134,6 +136,48 @@ defmodule Loopex.M4Gate.Support do
     ] ++ Enum.map(selector.names, &("passed=" <> &1))
   end
 
+  # Concept: the real-path report must name the build identities of the source
+  # under test, whatever version that source declares.
+  # Technical depth: the M3-bound verifier fixes `@0.0.0`; M4 reads the source
+  # tree's `VERSION` so a truthful 0.1.0 closure passes and a mismatch fails.
+  def verify_report(root, log, nonce, path, minimum, real?) do
+    Shared.verify_report(log, nonce, path, minimum, false)
+    if real?, do: verify_real_identities(root, log)
+    :ok
+  end
+
+  defp verify_real_identities(root, log) do
+    version = File.read!(Path.join(root, "VERSION")) |> String.trim()
+    ensure(Regex.match?(~r/\A\d+\.\d+\.\d+\z/, version), "source VERSION is malformed")
+
+    [report] =
+      String.split(log, "\n") |> Enum.filter(&String.starts_with?(&1, "LOOPEX_EXUNIT_REPORT "))
+
+    map =
+      report
+      |> String.split(" ")
+      |> tl()
+      |> Map.new(fn field ->
+        [key, value] = String.split(field, "=", parts: 2)
+        {key, value}
+      end)
+
+    fields =
+      ~w(provider model endpoint adapter_build executor_build executor_identity tool_identity recorded)
+
+    ensure(
+      Enum.all?(
+        fields,
+        &(is_binary(map[&1]) and map[&1] != "" and
+            String.downcase(map[&1]) not in ~w(tbd todo pending unknown -) and
+            Enum.all?(:binary.bin_to_list(map[&1]), fn byte -> byte in 0x21..0x7E end))
+      ) and map["adapter_build"] == "loopex_llm_reqllm@#{version}" and
+        map["executor_build"] == "loopex_executor_local@#{version}" and
+        match?({:ok, _, 0}, DateTime.from_iso8601(map["recorded"])),
+      "combined real-path report incomplete or names another source version"
+    )
+  end
+
   defp ensure(true, _), do: :ok
   defp ensure(false, reason), do: raise(ArgumentError, reason)
 
@@ -172,8 +216,9 @@ defmodule Loopex.M4Gate.Support do
       ["args", root, build, path] ->
         selector_arguments(root, build, path) |> Enum.each(&IO.binwrite([&1, <<0>>]))
 
-      ["report", log, nonce, path, minimum, real] ->
-        Shared.verify_report(
+      ["report", root, log, nonce, path, minimum, real] ->
+        verify_report(
+          root,
           File.read!(log),
           nonce,
           path,

@@ -234,7 +234,7 @@ run_selector() {
   cat "$task_root/selector.log"
   lane_finished "$selector" "$task_selector_started" "$result"
   [ "$result" = 0 ] || { printf 'M4 gate RED: selector failed: %s\n' "$selector" >&2; exit "$result"; }
-  support report "$task_root/selector.log" "$nonce" "$selector" "${argv[7]}" "$kind" </dev/null || exit $?
+  support report "$root" "$task_root/selector.log" "$nonce" "$selector" "${argv[7]}" "$kind" </dev/null || exit $?
   printf '%s\n' "$selector" >> "$task_root/selector-ledger"
 }
 support selectors "$root" "$selected_ids" > "$task_root/selectors" || exit $?
@@ -277,6 +277,18 @@ cat "$task_root/inherited.log"
 lane_finished inherited "$task_inherited_started" "$result"
 [ "$result" = 0 ] || exit "$result"
 [ "$(tail -n 1 "$task_root/inherited.log")" = 'LOOPEX_CLOSED_GATES_REPORT caller=M4 complete=true' ] || die 'inherited gate invocation report missing'
+# Concept: client lanes run only under the pinned interpreters the gate binds.
+# Technical depth: an absent or different interpreter is unavailable evidence,
+# never a product red; the pin file names exact `node=` and `python=` versions.
+client_pins=scripts/fixtures/m4/client-toolchain.txt
+[ -r "$client_pins" ] || die "client toolchain pins are absent: $client_pins"
+pinned_node=$(awk -F= '$1 == "node" { print $2 }' "$client_pins")
+pinned_python=$(awk -F= '$1 == "python" { print $2 }' "$client_pins")
+[ -n "$pinned_node" ] && [ -n "$pinned_python" ] || die 'client toolchain pins are incomplete'
+observed_node=$(node --version 2>/dev/null </dev/null) || die 'pinned Node interpreter is unavailable'
+observed_python=$(python3 --version 2>/dev/null </dev/null | cut -d' ' -f2) || die 'pinned Python interpreter is unavailable'
+[ "$observed_node" = "v$pinned_node" ] || die "Node version differs from the pin: $observed_node"
+[ "$observed_python" = "$pinned_python" ] || die "Python version differs from the pin: $observed_python"
 real_selector=$(support real "$root") || exit $?
 printf '%s\n' "$real_selector" >> "$task_root/selectors"
 run_selector "$real_selector" real
@@ -285,5 +297,8 @@ final_identity=$(support identity "$root" committed) || exit $?
 [ "$full_identity" = "$final_identity" ] || die 'source identity changed during the full gate'
 [ "$build_identity" = "$(support build "$task_root/build/test")" ] || die 'selector build identity changed during the full gate'
 printf '%s\n' "$final_identity"
-printf 'LOOPEX_M4_GATE_REPORT source=%s gate=sha256:%s seed=3107 outcome_ids=1,2,3,4,5,6 inherited=true real_workflow=true result=PASS\n' \
-  "$(git rev-parse HEAD)" "$(shasum -a 256 docs/plans/M4-gate.md | cut -d' ' -f1)"
+source_version=$(tr -d '[:space:]' < VERSION) || die 'source VERSION is unreadable'
+toolchain=$(printf '%s\n' "$final_identity" | awk '{ for (i = 1; i <= NF; i++) if ($i ~ /^(elixir|otp|erts|platform)=/) printf "%s ", $i }')
+[ -n "$toolchain" ] || die 'toolchain identity is missing from the source identity line'
+printf 'LOOPEX_M4_GATE_REPORT source=%s gate=sha256:%s version=%s seed=3107 outcome_ids=1,2,3,4,5,6 %snode=%s python=%s inherited=true real_workflow=true result=PASS\n' \
+  "$(git rev-parse HEAD)" "$(shasum -a 256 docs/plans/M4-gate.md | cut -d' ' -f1)" "$source_version" "$toolchain" "$pinned_node" "$pinned_python"
