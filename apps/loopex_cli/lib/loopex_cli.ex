@@ -306,6 +306,19 @@ defmodule LoopexCli do
       else: :ok
   end
 
+  defp configure_resources(
+         _runtime,
+         _session_id,
+         _attachment,
+         %{"packs" => []},
+         flags,
+         _options
+       ) do
+    if skill_selections?(flags),
+      do: {:error, "no compatible project skills were found in this workspace"},
+      else: :ok
+  end
+
   defp configure_resources(runtime, session_id, attachment, manifest, flags, options) do
     with {:ok, manifest_digest, normalized_manifest} <- Loopex.ResourcePack.digest(manifest),
          {:ok, decision} <- resource_decision(normalized_manifest, manifest_digest, options),
@@ -1216,7 +1229,9 @@ defmodule LoopexCli do
     with {:ok, workspace} <- workspace(flags),
          {:ok, root} <- state_root(flags),
          {:ok, resource_manifest} <- discover_skill_manifest(workspace, root, options),
-         {:ok, runtime} <- start_runtime(flags, policy, options, resource_manifest),
+         launch_manifest =
+           if(resource_manifest["packs"] == [], do: nil, else: resource_manifest),
+         {:ok, runtime} <- start_runtime(flags, policy, options, launch_manifest),
          do: {:ok, {runtime, resource_manifest}}
   end
 
@@ -1259,6 +1274,9 @@ defmodule LoopexCli do
       # lock is this command's own and an embedded runtime writing the same
       # store never takes one -- so holding it says nothing at all about who is
       # writing that store.
+      resource_options =
+        if is_nil(resource_manifest), do: [], else: [resource_manifest: resource_manifest]
+
       runtime_starter.(
         [
           runtime_id: placement,
@@ -1267,11 +1285,10 @@ defmodule LoopexCli do
           policy: policy,
           project_manifest: manifest,
           project_decision: decision,
-          resource_manifest: resource_manifest,
           progress_to: self(),
           provider_launch: LoopexCli.ProviderLaunch.options(),
           recover_stale_writer: true
-        ] ++ cleanup ++ context
+        ] ++ resource_options ++ cleanup ++ context
       )
       |> started()
     end

@@ -386,7 +386,7 @@ defmodule LoopexCliTest do
   test "fresh run passes the discovered immutable skill manifest to the shipped composition" do
     {state_root, workspace} = roots()
     parent = self()
-    manifest = %{"version" => "loopex.resource_pack/1", "packs" => []}
+    manifest = %{"version" => "loopex.resource_pack/1", "packs" => [%{"name" => "review"}]}
 
     assert {:error, "captured skill launch"} =
              LoopexCli.dispatch(
@@ -565,6 +565,109 @@ defmodule LoopexCliTest do
     assert activate.name == "review"
     assert activate.pack_digest == pack_digest
     assert activate.supporting_labels == ["references/checklist.md"]
+  end
+
+  test "skill add list and show use the real retained Git pack" do
+    {state_root, workspace} = roots()
+    source = state_root <> "-git-source"
+    skill_file = Path.join([source, "review", "SKILL.md"])
+    File.mkdir_p!(Path.dirname(skill_file))
+
+    File.write!(
+      skill_file,
+      "---\nname: review\ndescription: Review through the CLI.\n---\nRead the actual diff.\n"
+    )
+
+    File.mkdir_p!(Path.join([source, "review", "references"]))
+    File.write!(Path.join([source, "review", "references", "checklist.md"]), "Check it.\n")
+    on_exit(fn -> File.rm_rf(source) end)
+
+    git_cli!(source, ["init", "--quiet"])
+    git_cli!(source, ["add", "."])
+
+    git_cli!(source, [
+      "-c",
+      "user.name=Loopex Test",
+      "-c",
+      "user.email=test@loopex.invalid",
+      "commit",
+      "--quiet",
+      "-m",
+      "fixture"
+    ])
+
+    revision = git_cli!(source, ["rev-parse", "HEAD"])
+
+    added =
+      capture_io(fn ->
+        capture_io(:stderr, fn ->
+          assert :ok =
+                   LoopexCli.dispatch(
+                     [
+                       "skill",
+                       "add",
+                       source,
+                       "--rev",
+                       revision,
+                       "--path",
+                       "review",
+                       "--state-root",
+                       state_root,
+                       "--workspace",
+                       workspace
+                     ],
+                     executor_authorization: {:host_policy, :allow}
+                   )
+        end)
+      end)
+
+    assert added =~ "installed git:"
+    assert added =~ ":review"
+
+    listed =
+      capture_io(fn ->
+        assert :ok =
+                 LoopexCli.dispatch([
+                   "skill",
+                   "list",
+                   "--state-root",
+                   state_root,
+                   "--workspace",
+                   workspace
+                 ])
+      end)
+
+    assert listed =~ "review"
+    assert listed =~ "Review through the CLI."
+
+    {:ok, workspace_ref} = LoopexCli.ProjectResources.workspace_reference(workspace)
+
+    {:ok, %{"packs" => [pack]}} =
+      LoopexComposition.ResourcePacks.discover(workspace,
+        workspace_ref: workspace_ref,
+        state_root: state_root
+      )
+
+    qualified = "#{pack["source_id"]}:#{pack["name"]}"
+
+    shown =
+      capture_io(fn ->
+        assert :ok =
+                 LoopexCli.dispatch([
+                   "skill",
+                   "show",
+                   qualified,
+                   "--state-root",
+                   state_root,
+                   "--workspace",
+                   workspace
+                 ])
+      end)
+
+    assert shown =~ qualified
+    assert shown =~ revision
+    assert shown =~ "references/checklist.md"
+    assert shown =~ Loopex.ResourcePack.pack_digest(pack)
   end
 
   # Concept: watch both planes at once, in the order they actually arrive.
@@ -3605,6 +3708,12 @@ defmodule LoopexCliTest do
   # shell child that has exited before its parent returns provides.
   defp dead_os_pid do
     {output, 0} = System.cmd("/bin/sh", ["-c", "sleep 0 & echo $!; wait"])
+    String.trim(output)
+  end
+
+  defp git_cli!(root, arguments) do
+    {output, status} = System.cmd("git", arguments, cd: root, stderr_to_stdout: true)
+    assert status == 0, output
     String.trim(output)
   end
 
