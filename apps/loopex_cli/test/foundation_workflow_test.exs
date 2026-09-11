@@ -40,6 +40,7 @@ defmodule LoopexCli.FoundationWorkflowTest do
   alias Loopex.LLM.ReqLLM.ProviderIsolationFixture, as: ProviderFixture
   alias Loopex.ResourcePack
   alias Loopex.Store
+  alias Loopex.Store.Local.Log
   alias LoopexCli.Policy.AllowAll
 
   setup do
@@ -158,25 +159,46 @@ defmodule LoopexCli.FoundationWorkflowTest do
   # the prior process while preserving its configured provider launch.
   #
   # Technical depth: one source-built CLI completes the real skill/tool/artifact
-  # workflow and exits. A second operating-system process uses the production
-  # preparation bracket, loads the exact admitted snapshot, and replays the
-  # durable result. No third provider request means inspection stayed paused.
+  # workflow. Its genuine journal is retained at the settled tool-result frame,
+  # before the next provider request. A second operating-system process uses the
+  # production preparation bracket, loads the admitted snapshot, and stages the
+  # pending turn with the prior provider and executor history.
   test "trusted launch and fresh process recovery preserve resource and provider configuration" do
     workflow = configured_recovery_workflow("recovery")
     {session_id, first_output} = complete_cli_workflow(workflow)
+    locator = completed_artifact_locator(workflow)
+    rewind_after_tool_result(workflow, session_id)
+    changed = replace_workspace_resources(workflow)
     {recovery_output, 0} = resume_cli_workflow(workflow, session_id)
 
     assert first_output =~ "artifact retained"
-    assert recovery_output =~ "artifact retained"
-    assert [{first, true}, {second, true}] = ProviderFixture.events(workflow.provider)
+    assert recovery_output =~ "artifact retained after recovery"
+
+    assert [{first, true}, {second, true}, {recovered, true}] =
+             ProviderFixture.events(workflow.provider)
+
     assert workflow.instruction in Enum.map(first["messages"], & &1["content"])
     assert workflow.support in Enum.map(first["messages"], & &1["content"])
     assert Jason.encode!(second) =~ "output truncated"
+    assert workflow.instruction in Enum.map(recovered["messages"], & &1["content"])
+    assert workflow.support in Enum.map(recovered["messages"], & &1["content"])
+    refute changed.instruction in Enum.map(recovered["messages"], & &1["content"])
+    refute changed.support in Enum.map(recovered["messages"], & &1["content"])
+    assert Jason.encode!(recovered) =~ "output truncated"
+
+    assert {workflow.full, 0} ==
+             run_cli_process(
+               workflow.cli_binary,
+               ["artifact", locator, "--state-root", workflow.state_root],
+               nil
+             )
   end
 
   test "fresh recovery withholds resources when the admitted snapshot is missing" do
     workflow = configured_recovery_workflow("missing-recovery")
     {session_id, first_output} = complete_cli_workflow(workflow)
+    rewind_after_tool_result(workflow, session_id)
+    changed = replace_workspace_resources(workflow)
 
     retained =
       Path.join([
@@ -192,7 +214,20 @@ defmodule LoopexCli.FoundationWorkflowTest do
     assert first_output =~ "artifact retained"
     assert recovery_output =~ "admitted skill snapshot is unavailable"
     assert recovery_output =~ "artifact retained"
-    assert length(ProviderFixture.events(workflow.provider)) == 2
+
+    assert [{first, true}, {_second, true}, {recovered, true}] =
+             ProviderFixture.events(workflow.provider)
+
+    recovered_contents = Enum.map(recovered["messages"], & &1["content"])
+
+    first
+    |> Map.fetch!("messages")
+    |> Enum.take(3)
+    |> Enum.each(fn message -> refute message["content"] in recovered_contents end)
+
+    refute changed.instruction in Enum.map(recovered["messages"], & &1["content"])
+    refute changed.support in Enum.map(recovered["messages"], & &1["content"])
+    assert Jason.encode!(recovered) =~ "output truncated"
   end
 
   test "new readers preserve genuine M2 history and old readers refuse new records before effects" do
@@ -616,7 +651,8 @@ defmodule LoopexCli.FoundationWorkflowTest do
         credential: credential,
         response_bodies: [
           tool_response("large.txt", "msg_#{label}_tool"),
-          text_response("artifact retained", "msg_#{label}_done")
+          text_response("artifact retained", "msg_#{label}_done"),
+          text_response("artifact retained after recovery", "msg_#{label}_recovered")
         ]
       )
 
@@ -674,6 +710,69 @@ defmodule LoopexCli.FoundationWorkflowTest do
 
     assert {:ok, [%{session_id: session_id}]} = Loopex.list_sessions(workflow.state_root)
     {session_id, output}
+  end
+
+  # Concept: recovery starts from a real durable continuation point after the
+  # tool result, so it must stage new provider input rather than replay a
+  # completed session.
+  #
+  # Technical depth: the source-built CLI first writes the complete genuine
+  # history. This keeps its exact Store bytes only through the existing frame
+  # whose session transaction committed the tool result. The next request and
+  # terminal are complete later frames, so removing that suffix is equivalent
+  # to the previous process stopping at this already-linearized boundary; no
+  # resource receipt or runtime record is synthesized.
+  defp rewind_after_tool_result(workflow, session_id) do
+    path = Path.join(workflow.state_root, "store.log")
+    original = File.read!(path)
+    assert {:ok, frames, :complete} = Log.read(path)
+
+    tool_frame =
+      Enum.find_index(frames, fn frame ->
+        Enum.any?(frame.records, &(&1.payload.kind == "executor_receipt_committed"))
+      end)
+
+    assert is_integer(tool_frame), "the completed workflow did not retain its tool result"
+    {kept, removed} = Enum.split(frames, tool_frame + 1)
+    assert get_in(List.last(kept), [:transaction, :session_id]) == session_id
+
+    assert Enum.any?(removed, fn frame ->
+             Enum.any?(frame.records, fn record ->
+               record.payload.kind in [
+                 "model_request_committed",
+                 "model_request_committed_resources_v1"
+               ]
+             end)
+           end),
+           "the fixture had no later provider request to remove"
+
+    prefix =
+      Enum.map_join(kept, fn frame ->
+        assert {:ok, encoded} = Log.encode(frame)
+        encoded
+      end)
+
+    assert String.starts_with?(original, prefix)
+    File.write!(path, binary_part(original, 0, byte_size(prefix)), [:binary])
+    assert {:ok, ^kept, :complete} = Log.read(path)
+  end
+
+  defp replace_workspace_resources(workflow) do
+    instruction = "M3_CHANGED_WORKSPACE_INSTRUCTION: must never be rediscovered.\n"
+    support = "M3_CHANGED_WORKSPACE_SUPPORT: must never be rediscovered.\n"
+    skill = Path.join([workflow.workspace, ".agents", "skills", "review"])
+    File.write!(Path.join(skill, "SKILL.md"), instruction)
+    File.write!(Path.join([skill, "references", "checklist.md"]), support)
+    %{instruction: instruction, support: support}
+  end
+
+  defp completed_artifact_locator(workflow) do
+    assert [{_first, true}, {second, true}] = ProviderFixture.events(workflow.provider)
+
+    assert [_, locator] =
+             Regex.run(~r/output truncated[^\]]* ([0-9a-f]{64})\]/, Jason.encode!(second))
+
+    locator
   end
 
   defp resume_cli_workflow(workflow, session_id) do
