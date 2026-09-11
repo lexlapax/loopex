@@ -256,12 +256,20 @@ defmodule LoopexComposition.SkillAcquisitionTest do
   end
 
   defp tmp_dir!(label) do
-    path =
-      Path.join(System.tmp_dir!(), "loopex-m3-#{label}-#{System.unique_integer([:positive])}")
+    nonce = Base.encode16(:crypto.strong_rand_bytes(12), case: :lower)
+    path = Path.join(System.tmp_dir!(), "loopex-m3-#{label}-#{nonce}")
 
-    File.mkdir_p!(path)
-    on_exit(fn -> File.rm_rf!(path) end)
-    path
+    case File.mkdir(path) do
+      :ok ->
+        on_exit(fn -> File.rm_rf!(path) end)
+        path
+
+      {:error, :eexist} ->
+        tmp_dir!(label)
+
+      {:error, reason} ->
+        raise File.Error, reason: reason, action: "make test directory", path: path
+    end
   end
 
   defp write!(path, contents) do
