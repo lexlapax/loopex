@@ -85,12 +85,39 @@ defmodule Loopex.ProviderAttemptRetirementReadStore do
     end
   end
 
+  def load_records({store, mode, observer}, session_id, after_version, limit)
+      when mode in [:missing_terminal, :invalid_terminal, :mismatched_terminal] do
+    result = Store.load_records(store, session_id, after_version, limit)
+    send(observer, {:retirement_terminal_read, mode, session_id})
+
+    case result do
+      {:ok, records} -> {:ok, Enum.flat_map(records, &terminal_record(mode, &1))}
+      other -> other
+    end
+  end
+
   @impl Store
   def load_events({store, _mode, _observer}, session_id, after_sequence, limit),
     do: Store.load_events(store, session_id, after_sequence, limit)
 
   defp record_kind(record) when is_map(record),
     do: Map.get(record, :kind) || Map.get(record, "kind")
+
+  defp terminal_record(:missing_terminal, %{payload: payload} = record) do
+    if record_kind(payload) == "run_terminal_committed", do: [], else: [record]
+  end
+
+  defp terminal_record(:invalid_terminal, %{payload: payload} = record) do
+    if record_kind(payload) == "run_terminal_committed",
+      do: [%{record | payload: Map.delete(payload, "outcome")}],
+      else: [record]
+  end
+
+  defp terminal_record(:mismatched_terminal, %{payload: payload} = record) do
+    if record_kind(payload) == "run_terminal_committed",
+      do: [%{record | payload: Map.put(payload, "run_id", "mismatched-run")}],
+      else: [record]
+  end
 end
 
 defmodule Loopex.ProviderAttemptExitModel do
@@ -2309,7 +2336,12 @@ defmodule Loopex.ProviderAttemptProtocolTest do
   # remains the refusal authority; absence from the spent map grants nothing.
   test "retired permit retention is bounded by active sessions and unresolved work" do
     attempts = 24
-    fixture = start(script: List.duplicate(%{text: "settled attempt", calls: []}, attempts))
+
+    fixture =
+      start(
+        script: List.duplicate(%{text: "settled attempt", calls: []}, attempts),
+        record_page_size_one: true
+      )
 
     {session_id, attachment, {:accepted, "prompt-1"}} = Fixture.run(fixture, "retire one")
     assert await_event(attachment, "run.finished")["outcome"] == "completed"
@@ -2345,6 +2377,10 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     assert spent_attempt_bindings(control) == []
 
     for mode <- [:malformed, :blocked] do
+      assert_retirement_read_failure_retains(mode)
+    end
+
+    for mode <- [:missing_terminal, :invalid_terminal, :mismatched_terminal] do
       assert_retirement_read_failure_retains(mode)
     end
 
@@ -3953,6 +3989,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
       case mode do
         :malformed -> {:retirement_read_returned_malformed, attempt.session_id}
         :blocked -> {:retirement_read_blocked, :_, attempt.session_id, :_, :_}
+        terminal -> {:retirement_terminal_read, terminal, attempt.session_id}
       end
 
     case expected do
@@ -3965,6 +4002,9 @@ defmodule Loopex.ProviderAttemptProtocolTest do
 
         monitor = Process.monitor(reader)
         assert_receive {:DOWN, ^monitor, :process, ^reader, _reason}, 5_000
+
+      {:retirement_terminal_read, mode, session_id} ->
+        assert_receive {:retirement_terminal_read, ^mode, ^session_id}, 5_000
     end
 
     assert await_event(attempt.attachment, "run.finished")["outcome"] == "completed"

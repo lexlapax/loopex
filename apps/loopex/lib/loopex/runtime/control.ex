@@ -38,12 +38,26 @@ defmodule Loopex.Runtime.Control do
 
   @max_identifier_bytes 256
 
-  # Technical depth: this is Control's private responsiveness bound for the one
-  # single-row page that rebuilds a provider attempt binding. It is deliberately
-  # independent of the run deadline: expiry proves only that the Store did not
-  # answer inside Control's local allowance, so it refuses without manufacturing
-  # a dispatch verdict.
+  # Technical depth: this is Control's private responsiveness bound for the
+  # Store evidence that rebuilds a provider binding or closes one receipt range.
+  # It is deliberately independent of the run deadline: expiry proves only that
+  # the Store did not answer inside Control's local allowance, so it refuses
+  # without manufacturing a dispatch verdict.
   @position_read_timeout_ms 1_000
+
+  @run_terminal_keys [
+    "accounting_source",
+    "bound",
+    "cleanup_grace_ms",
+    "command_id",
+    "declared_limit",
+    "observed",
+    "outcome",
+    "reason",
+    "reconciliation_ref",
+    "run_id",
+    :kind
+  ]
 
   @doc """
   ## Concept
@@ -654,7 +668,7 @@ defmodule Loopex.Runtime.Control do
     count = current - first + 1
 
     if count <= Store.max_item_cardinality() do
-      case bounded_records_read(store, session_id, first - 1, count) do
+      case bounded_receipt_records_read(store, session_id, first - 1, count) do
         {:ok, records} ->
           if Enum.map(records, & &1.journal_version) == Enum.to_list(first..current),
             do: {:ok, records},
@@ -682,20 +696,21 @@ defmodule Loopex.Runtime.Control do
 
   defp settled_spent_bindings(records, session_id, spent)
        when is_list(records) and is_map(spent) do
-    Enum.reduce_while(records, {:ok, []}, fn
-      %{payload: payload}, {:ok, retired} ->
+    records
+    |> Enum.with_index()
+    |> Enum.reduce_while({:ok, []}, fn
+      {%{payload: payload}, index}, {:ok, retired} ->
         if record_kind(payload) == ProviderAttempt.settled_kind() do
-          case ProviderAttempt.validate_settled(payload) do
-            :ok ->
-              matching =
-                spent
-                |> Map.keys()
-                |> Enum.filter(&settlement_matches_binding?(&1, session_id, payload))
+          with :ok <- ProviderAttempt.validate_settled(payload),
+               :ok <- settlement_domain_closed(payload, Enum.at(records, index + 1)) do
+            matching =
+              spent
+              |> Map.keys()
+              |> Enum.filter(&settlement_matches_binding?(&1, session_id, payload))
 
-              {:cont, {:ok, matching ++ retired}}
-
-            {:error, _reason} ->
-              {:halt, {:error, :invalid_attempt_settlement}}
+            {:cont, {:ok, matching ++ retired}}
+          else
+            {:error, _reason} -> {:halt, {:error, :invalid_attempt_settlement}}
           end
         else
           {:cont, {:ok, retired}}
@@ -708,6 +723,46 @@ defmodule Loopex.Runtime.Control do
 
   defp settled_spent_bindings(_records, _session_id, _spent),
     do: {:error, :invalid_settlement_records}
+
+  defp settlement_domain_closed(%{"next" => "terminal"} = settlement, %{
+         payload: terminal
+       }) do
+    with true <- MapSet.new(Map.keys(terminal)) == MapSet.new(@run_terminal_keys),
+         "run_terminal_committed" <- record_kind(terminal),
+         true <- terminal["run_id"] == settlement["run_id"],
+         true <- terminal["outcome"] == settlement_terminal_outcome(settlement),
+         true <- valid_terminal_bound?(terminal, settlement["termination"]),
+         true <- is_integer(terminal["cleanup_grace_ms"]) and terminal["cleanup_grace_ms"] > 0,
+         true <- is_nil(terminal["command_id"]) or is_binary(terminal["command_id"]),
+         true <-
+           is_nil(terminal["reconciliation_ref"]) or is_binary(terminal["reconciliation_ref"]),
+         true <- is_nil(terminal["reason"]) or is_binary(terminal["reason"]) do
+      :ok
+    else
+      _invalid -> {:error, :invalid_attempt_terminal}
+    end
+  end
+
+  defp settlement_domain_closed(%{"next" => "terminal"}, _next),
+    do: {:error, :missing_attempt_terminal}
+
+  defp settlement_domain_closed(_settlement, _next), do: :ok
+
+  defp settlement_terminal_outcome(%{"termination" => "abort"}), do: "cancelled"
+  defp settlement_terminal_outcome(%{"termination" => "deadline"}), do: "bound_reached"
+  defp settlement_terminal_outcome(%{"result" => %{"kind" => "reply"}}), do: "completed"
+  defp settlement_terminal_outcome(_settlement), do: "failed"
+
+  defp valid_terminal_bound?(terminal, "deadline") do
+    terminal["bound"] == "deadline" and is_integer(terminal["observed"]) and
+      terminal["observed"] >= 0 and terminal["declared_limit"] == terminal["observed"] and
+      is_nil(terminal["accounting_source"])
+  end
+
+  defp valid_terminal_bound?(terminal, _termination) do
+    terminal["bound"] == false and terminal["observed"] == false and
+      terminal["declared_limit"] == false and is_nil(terminal["accounting_source"])
+  end
 
   defp settlement_matches_binding?(binding, session_id, settlement) do
     ProviderAttempt.validate_binding(binding) == :ok and binding["session_id"] == session_id and
@@ -1416,14 +1471,48 @@ defmodule Loopex.Runtime.Control do
   end
 
   defp bounded_records_read(store, session_id, after_position, limit) do
+    bounded_store_read(fn -> Store.load_records(store, session_id, after_position, limit) end)
+  end
+
+  defp bounded_receipt_records_read(store, session_id, after_position, limit) do
+    # A Store page may be shorter than the caller's limit. Keep the complete
+    # finite receipt scan under one guardian and therefore one existing deadline.
+    bounded_store_read(fn ->
+      collect_receipt_records(store, session_id, after_position, limit, [])
+    end)
+  end
+
+  defp collect_receipt_records(_store, _session_id, _after_position, 0, records),
+    do: {:ok, Enum.reverse(records)}
+
+  defp collect_receipt_records(store, session_id, after_position, remaining, records) do
+    case Store.load_records(store, session_id, after_position, remaining) do
+      {:ok, []} ->
+        {:error, :incomplete_settlement_range}
+
+      {:ok, page} ->
+        last = List.last(page).journal_version
+
+        collect_receipt_records(
+          store,
+          session_id,
+          last,
+          remaining - length(page),
+          Enum.reverse(page, records)
+        )
+
+      other ->
+        other
+    end
+  end
+
+  defp bounded_store_read(read) when is_function(read, 0) do
     control = self()
     tag = make_ref()
 
     {guardian, monitor} =
       spawn_monitor(fn ->
-        guard_position_read(control, tag, fn ->
-          Store.load_records(store, session_id, after_position, limit)
-        end)
+        guard_position_read(control, tag, read)
       end)
 
     receive do
