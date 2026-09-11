@@ -126,7 +126,74 @@ defmodule Loopex.ResourceReceiptReplayTest do
     end)
   end
 
-  defp resource_history do
+  test "replay enforces the supporting size and 16 KiB class without narrowing instructions" do
+    oversized_support = resource_history(support: String.duplicate("s", 16_385))
+    oversized_receipt = resource_receipt(oversized_support)
+
+    assert {:ok, fixed} =
+             SessionState.preflight_model_request(
+               oversized_support.state,
+               oversized_support.run_id,
+               oversized_support.request,
+               context_receipt: oversized_receipt
+             )
+
+    assert {:error, :invalid_model_request_transition} =
+             SessionState.propose_model_request(
+               oversized_support.state,
+               oversized_support.run_id,
+               oversized_support.request,
+               context_receipt: oversized_receipt
+             )
+
+    baseline = resource_history()
+    baseline_receipt = resource_receipt(baseline)
+
+    {:ok, baseline_proposal} =
+      SessionState.propose_model_request(baseline.state, baseline.run_id, baseline.request,
+        context_receipt: baseline_receipt
+      )
+
+    [_request, opened] = baseline_proposal.records
+
+    opened =
+      Map.put(opened, "staged_request_digest", oversized_support.request.staged_request_digest)
+
+    {forged_records, forged_events} =
+      stamp_records(oversized_support, [fixed, opened], baseline_proposal.events)
+
+    assert {:error, _reason} =
+             SessionState.recover(
+               oversized_support.session_id,
+               forged_records,
+               forged_events
+             )
+
+    wrong_size = resource_history(support_size: 1)
+
+    assert {:error, :invalid_model_request_transition} =
+             SessionState.propose_model_request(
+               wrong_size.state,
+               wrong_size.run_id,
+               wrong_size.request,
+               context_receipt: resource_receipt(wrong_size)
+             )
+
+    long_instruction = resource_history(instruction: String.duplicate("i", 16_385))
+
+    assert {:ok, proposal} =
+             SessionState.propose_model_request(
+               long_instruction.state,
+               long_instruction.run_id,
+               long_instruction.request,
+               context_receipt: resource_receipt(long_instruction)
+             )
+
+    {_state, records, events} = append_proposal(long_instruction, proposal)
+    assert {:ok, _recovered} = SessionState.recover(long_instruction.session_id, records, events)
+  end
+
+  defp resource_history(options \\ []) do
     session_id = "resource-replay"
     incarnation = "owner-one"
 
@@ -184,8 +251,9 @@ defmodule Loopex.ResourceReceiptReplayTest do
     {state, records, events} =
       append_proposal(%{state: state, records: records, events: []}, proposal)
 
-    instruction = "Use the exact retained instruction."
-    support = "Supporting context."
+    instruction = Keyword.get(options, :instruction, "Use the exact retained instruction.")
+    support = Keyword.get(options, :support, "Supporting context.")
+    support_size = Keyword.get(options, :support_size, byte_size(support))
 
     activate = %{
       type: :activate_skill,
@@ -205,7 +273,7 @@ defmodule Loopex.ResourceReceiptReplayTest do
         %{
           "file_index" => 1,
           "digest" => Canonical.digest_bytes(support),
-          "size" => byte_size(support)
+          "size" => support_size
         }
       ]
     }
@@ -417,6 +485,31 @@ defmodule Loopex.ResourceReceiptReplayTest do
 
     {:ok, state} = SessionState.commit_proposal(proposal, receipt)
     {state, fixture.records ++ records, fixture.events ++ events}
+  end
+
+  defp stamp_records(fixture, payloads, proposed_events) do
+    first_version = fixture.state.journal_version + 1
+
+    records =
+      payloads
+      |> Enum.with_index(first_version)
+      |> Enum.map(fn {payload, version} ->
+        %{
+          journal_version: version,
+          owner_epoch: fixture.state.owner_epoch,
+          owner_incarnation_id: fixture.state.owner_incarnation_id,
+          payload: payload
+        }
+      end)
+
+    first_event = fixture.state.event_sequence + 1
+
+    events =
+      proposed_events
+      |> Enum.with_index(first_event)
+      |> Enum.map(fn {event, sequence} -> Map.put(event, :event_sequence, sequence) end)
+
+    {fixture.records ++ records, fixture.events ++ events}
   end
 
   defp mutate_resource_record(records, mutate) do

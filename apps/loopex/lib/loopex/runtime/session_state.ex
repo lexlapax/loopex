@@ -51,7 +51,8 @@ defmodule Loopex.Runtime.SessionState do
   @resource_pack_max_rows 37
   @resource_catalog_index 64
   @resource_catalog_bytes 16_384
-  @resource_text_bytes 65_536
+  @resource_instruction_bytes 65_536
+  @resource_support_bytes 16_384
   @uint64_max 18_446_744_073_709_551_615
   @descriptor_canonicalization_version "loopex.canonical.v1"
   @descriptor_digest_domain "loopex.context.descriptors.v1"
@@ -170,6 +171,8 @@ defmodule Loopex.Runtime.SessionState do
           deadlines: map(),
           steer: map(),
           follow_up: map() | nil,
+          resources: map() | nil,
+          run_resources: map(),
           charged: map(),
           provider_settlement_version: 1 | 2,
           expected_events: [map()]
@@ -4520,7 +4523,13 @@ defmodule Loopex.Runtime.SessionState do
 
   defp expected_resource_identities(resources) do
     catalog = [
-      %{"pack" => @resource_catalog_index, "file" => @resource_catalog_index, digest: :catalog}
+      %{
+        "pack" => @resource_catalog_index,
+        "file" => @resource_catalog_index,
+        digest: :catalog,
+        limit: @resource_catalog_bytes,
+        size: nil
+      }
     ]
 
     instructions =
@@ -4528,7 +4537,9 @@ defmodule Loopex.Runtime.SessionState do
         %{
           "pack" => selection["pack_index"],
           "file" => selection["instruction_file_index"],
-          digest: selection["instruction_digest"]
+          digest: selection["instruction_digest"],
+          limit: @resource_instruction_bytes,
+          size: nil
         }
       end)
 
@@ -4538,7 +4549,9 @@ defmodule Loopex.Runtime.SessionState do
           %{
             "pack" => selection["pack_index"],
             "file" => file["file_index"],
-            digest: file["digest"]
+            digest: file["digest"],
+            limit: @resource_support_bytes,
+            size: file["size"]
           }
         end)
       end)
@@ -4619,13 +4632,13 @@ defmodule Loopex.Runtime.SessionState do
     digest = if is_binary(content), do: Canonical.digest_bytes(content), else: nil
     expected_digest = identity[:digest]
     catalog? = expected_digest == :catalog
+    expected_size = identity[:size]
 
     with true <- map_size(message) == 2,
          true <- message["role"] == "user",
          true <- is_binary(content) and String.valid?(content),
-         true <-
-           byte_size(content) <=
-             if(catalog?, do: @resource_catalog_bytes, else: @resource_text_bytes),
+         true <- byte_size(content) <= identity[:limit],
+         true <- is_nil(expected_size) or byte_size(content) == expected_size,
          true <- catalog? or digest == expected_digest do
       file_digest = if catalog?, do: digest, else: expected_digest
 
