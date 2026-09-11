@@ -1873,3 +1873,46 @@ row. It also adds this disposition and updates the ADR index and the plans
 register's derived prerequisite status. M3 remains Open until its own reviewed
 acceptance transition. The ADR decision bytes, Technical companions, plan and
 gate remain unchanged, and this record grants no main merge, closure or release.
+
+<a id="disposition-m3-plan-acceptance-2026-09-10"></a>
+### M3 plan pair and gate acceptance — 2026-09-10
+
+Under the maintainer's explicit "Confirm" to the
+[conditional acceptance packet](#override-disposition-m3-review-ordering-2026-09-10),
+M3's [Concept plan](../plans/M3.md#concept),
+[Technical depth companion](../plans/M3-technical.md#technical-depth) and
+[gate](../plans/M3-gate.md) are accepted at candidate
+`d6b4870da4e2306923234482f84a388aff7cb0a6`. That candidate contains the accepted
+ADR 0025 and ADR 0027 records. Its independent exact-SHA review approved the ADR
+transition and the Open M3 candidate; the sole condition, passing status at that
+source, was met before this transition. The earlier ordering disposition was
+reviewed before the provenance correction and all subsequent dependent commits.
+
+Acceptance binds:
+
+- Concept envelope: `sha256:9d6abe3889bc2531259b076c5233cbd8c5d7afb4df4f0435cef7c842c5d7fa7b`;
+- Technical depth envelope: `sha256:82471073b4fbfb9798c3f002ebbde2453c8f8aabb72d53ad69dc65f799178a55`;
+- Gate: `sha256:dd2ded0b82e303e134d9d56c7cd5a9111206eb167a95aa612fb79c5bcc310880`.
+
+The M0–M2 acceptance aggregate is **waived**, not passed, under the approved
+acceptance-only exception. The cancelled single M2 diagnostic supplies no PASS.
+The retained mitigation is the review's identical 47 CLI case names and green
+bootstrap at `ec5c302928ab300128d7abe5fcc4a1b29c56fba9`. The original behavioral
+opening red and floor-pair results remain evidence at that reviewed source;
+the bounded documentation follow-up adds exact-delta review, status and
+bound-artifact inspection, without claiming another full lane run.
+
+The inherited executor flake in `coding_tools_test.exs`, case
+`edit applies an exact match change and names what differed on a mismatch`, is
+assigned to M3 outcome 5 for investigation and repair before closure. The
+reviewed whole-suite failure and three diagnostic file reruns retain their
+original results; acceptance neither marks the flake fixed nor permits a
+weaker witness. The five outcome rows remain Open and the declared opening red
+remains implementation work. All unaffected evidence duties remain required.
+
+This acceptance authorizes implementation within the accepted M3 envelopes on
+`m3`. This administrative transition changes the Acceptance row, this single
+disposition, the register and derived lifecycle prose; it changes no normative
+envelope, gate, ADR decision or product byte. Its own independent exact-diff
+review remains required before integration. M3 is not Closed, M4 remains an
+unopened draft, and no main merge, release, tag or publication is authorized.

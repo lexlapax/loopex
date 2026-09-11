@@ -16,16 +16,16 @@ integrated product baseline.
 <!-- loopex:current-status:start -->
 ## Current Status
 
-**Revision status:** Closed milestone product baseline; active milestone `M3` is open; no next candidate is recorded.
+**Revision status:** Closed milestone product baseline; active milestone `M3` is accepted; no next candidate is recorded.
 
 | Field | Value |
 | --- | --- |
 | Integrated phase | Closed milestone product baseline |
 | Last closed product checkpoint | `M2` — 2026-09-03 |
-| Blockers | `M3` is open and not accepted; the recorded acceptance authority must accept both normative envelopes and the gate |
-| Authorized work | Explicitly authorized planning, ADR, bootstrap, and review work only; no product implementation |
-| Next maintainer decision | Accept or reject the `M3` plan pair and gate |
-| Next transition | Record the acceptance governance row and move `M3` to Accepted |
+| Blockers | None; `M3` is accepted and implementation may proceed |
+| Authorized work | Implementation inside the accepted `M3` envelopes and its locked gate on the designated milestone branch; no milestone product bytes integrate before closure |
+| Next maintainer decision | None until `M3` is ready for independent review |
+| Next transition | Turn the locked gate green, then move `M3` to In progress and In review |
 | Validation | `bash scripts/check-bootstrap.sh` |
 <!-- loopex:current-status:end -->
 
@@ -131,7 +131,7 @@ representable.
 | `M0` | Closed | [concept](M0.md) | [technical depth](M0-technical.md) | [gate](M0-gate.md) |
 | `M1` | Closed | [concept](M1.md) | [technical depth](M1-technical.md) | [gate](M1-gate.md) |
 | `M2` | Closed | [concept](M2.md) | [technical depth](M2-technical.md) | [gate](M2-gate.md) |
-| `M3` | Open | [concept](M3.md) | [technical depth](M3-technical.md) | [gate](M3-gate.md) |
+| `M3` | Accepted | [concept](M3.md) | [technical depth](M3-technical.md) | [gate](M3-gate.md) |
 <!-- loopex:milestone-register:end -->
 
 When a plan exists, the Concept, Technical depth, and Gate columns link their
