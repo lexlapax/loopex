@@ -143,6 +143,141 @@ defmodule Loopex.ResourceCommandTest do
              Loopex.command(context.attachment, %{context.activate | command_id: "new-select"})
   end
 
+  test "replay rejects refusal reasons that the admitted command type cannot produce", context do
+    other_digest = String.duplicate("b", 64)
+
+    mismatched_admission = %{
+      context.admit
+      | command_id: "mismatched-admission",
+        manifest_digest: other_digest,
+        decision: %{
+          context.admit.decision
+          | manifest_digest: other_digest
+        }
+    }
+
+    assert {:error, :resource_binding_changed} =
+             Loopex.command(context.attachment, mismatched_admission)
+
+    rows = Fixture.records(context.fixture, context.session)
+
+    malformed =
+      Enum.map(rows, fn
+        %{
+          payload:
+            %{"command" => %{"command_id" => "mismatched-admission"}, kind: "resource_command_v1"} =
+                payload
+        } = row ->
+          %{row | payload: %{payload | "disposition" => "resource_selection_limit"}}
+
+        row ->
+          row
+      end)
+
+    assert {:error, :invalid_resource_command_record} =
+             SessionState.recover(
+               context.session,
+               malformed,
+               Fixture.events(context.fixture, context.session)
+             )
+  end
+
+  test "refusal validation preserves every outcome reachable from retained state", context do
+    base = recover(context)
+    assert {:accepted, "admit"} = Loopex.command(context.attachment, context.admit)
+    admitted = recover(context)
+
+    revoke = %{
+      context.admit
+      | command_id: "revoke-for-validation",
+        decision: %{context.admit.decision | revocation_state: "revoked"}
+    }
+
+    assert {:accepted, "revoke-for-validation"} = Loopex.command(context.attachment, revoke)
+    revoked = recover(context)
+
+    disabled = %{context.admit | command_id: "disabled", decision: nil}
+    assert {:accepted, "disabled"} = Loopex.command(context.attachment, disabled)
+    disabled_state = recover(context)
+    active_run = %{base | active_run_id: "active-run"}
+    wrong_digest = %{context.activate | manifest_digest: String.duplicate("b", 64)}
+    disabled_wrong_digest = %{disabled | manifest_digest: String.duplicate("b", 64)}
+    empty_support = %{context.activate | supporting_labels: []}
+
+    full_selection =
+      put_in(
+        admitted.resources["selections"],
+        for index <- 0..3 do
+          %{
+            "pack_index" => index,
+            "instruction_file_index" => 0,
+            "instruction_digest" => String.duplicate(Integer.to_string(index), 64),
+            "supporting_files" => []
+          }
+        end
+      )
+
+    allowed = [
+      {base, context.admit, :resource_manifest_missing},
+      {base, context.admit, :resource_binding_changed},
+      {base, disabled, :resource_not_admitted},
+      {base, context.activate, :resource_not_admitted},
+      {admitted, disabled_wrong_digest, :resource_binding_changed},
+      {admitted, context.activate, :resource_manifest_missing},
+      {admitted, context.activate, :resource_binding_changed},
+      {admitted, context.activate, :resource_not_found},
+      {full_selection, context.activate, :resource_selection_limit},
+      {admitted, context.activate, :resource_support_not_found},
+      {admitted, wrong_digest, :resource_binding_changed},
+      {revoked, context.activate, :resource_not_admitted},
+      {revoked, wrong_digest, :resource_binding_changed},
+      {disabled_state, context.activate, :resource_not_admitted},
+      {disabled_state, wrong_digest, :resource_binding_changed},
+      {active_run, context.admit, :run_active},
+      {active_run, context.activate, :run_active}
+    ]
+
+    Enum.each(allowed, fn {state, command, reason} ->
+      command = Map.put(command, :command_id, "allowed-#{command.type}-#{reason}")
+      assert {:ok, %{reply: {:error, ^reason}}} = refused_proposal(state, command, reason)
+    end)
+
+    rejected = [
+      {base, context.admit, :resource_not_admitted},
+      {base, context.admit, :resource_not_found},
+      {base, context.admit, :resource_selection_limit},
+      {base, context.admit, :resource_support_not_found},
+      {base, disabled, :resource_binding_changed},
+      {admitted, disabled, :resource_binding_changed},
+      {admitted, disabled, :resource_not_admitted},
+      {admitted, revoke, :resource_binding_changed},
+      {admitted, revoke, :resource_not_admitted},
+      {base, context.activate, :resource_manifest_missing},
+      {base, context.activate, :resource_binding_changed},
+      {base, context.activate, :resource_not_found},
+      {base, context.activate, :resource_selection_limit},
+      {base, context.activate, :resource_support_not_found},
+      {admitted, context.activate, :resource_not_admitted},
+      {admitted, context.activate, :resource_selection_limit},
+      {admitted, empty_support, :resource_support_not_found},
+      {admitted, wrong_digest, :resource_manifest_missing},
+      {admitted, wrong_digest, :resource_not_found},
+      {revoked, context.activate, :resource_manifest_missing},
+      {revoked, context.activate, :resource_binding_changed},
+      {disabled_state, context.activate, :resource_manifest_missing},
+      {disabled_state, context.activate, :resource_binding_changed},
+      {active_run, context.admit, :resource_binding_changed},
+      {active_run, context.activate, :resource_not_admitted}
+    ]
+
+    Enum.each(rejected, fn {state, command, reason} ->
+      command = Map.put(command, :command_id, "rejected-#{command.type}-#{reason}")
+
+      assert {:error, :invalid_resource_command_record} =
+               refused_proposal(state, command, reason)
+    end)
+  end
+
   test "revocation retains identity and refuses inspection while command replay stays exact",
        context do
     assert {:accepted, "admit"} = Loopex.command(context.attachment, context.admit)
@@ -236,4 +371,18 @@ defmodule Loopex.ResourceCommandTest do
     do: value |> Tuple.to_list() |> Enum.any?(&has_key_deep?(&1, key))
 
   defp has_key_deep?(_value, _key), do: false
+
+  defp refused_proposal(state, command, reason),
+    do: SessionState.propose_resource_command(state, command, {:refused, reason})
+
+  defp recover(context) do
+    {:ok, state} =
+      SessionState.recover(
+        context.session,
+        Fixture.records(context.fixture, context.session),
+        Fixture.events(context.fixture, context.session)
+      )
+
+    state
+  end
 end
