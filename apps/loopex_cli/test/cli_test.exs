@@ -1762,6 +1762,7 @@ defmodule LoopexCliTest do
       "--workspace",
       workspace
     ],
+    runtime_bracket: fn _options, inspect -> inspect.(:probe_runtime) end,
     runtime_starter: fn _options -> {:ok, :probe_runtime} end
   )
   """
@@ -1949,6 +1950,9 @@ defmodule LoopexCliTest do
     assert {:error, message} =
              LoopexCli.dispatch(
                ["cancel", "s_known_1", "--state-root", state_root],
+               runtime_bracket: fn _options, _inspect ->
+                 flunk("a live placement owner must refuse before inspection starts")
+               end,
                runtime_starter: fn _options ->
                  flunk("a live placement owner must refuse before composition starts")
                end

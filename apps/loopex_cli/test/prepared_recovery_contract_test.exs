@@ -2448,6 +2448,13 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
              :resume_activation_fenced
   end
 
+  # Concept: these resource-free cases own the prepared handoff and configuration
+  # behavior after resource inspection.
+  # Technical depth: their histories live in M1RuntimeTestStore. Supply the absent
+  # resource result without invoking unrelated inspection or abandonment faults;
+  # foundation_workflow_test.exs proves actual M3 resource inspection and recovery.
+  defp resource_free_inspection(_options, _callback), do: {:ok, nil}
+
   # Concept: nothing `loopex resume` restarts is ever running while no handler
   # owns stopping it.
   #
@@ -2516,6 +2523,7 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
                  "--workspace",
                  fixture.workspace
                ],
+               runtime_bracket: &resource_free_inspection/2,
                runtime_starter: starter
              )}
           )
@@ -2591,6 +2599,7 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
                  "--workspace",
                  fixture.workspace
                ],
+               runtime_bracket: &resource_free_inspection/2,
                runtime_starter: starter
              )}
           )
@@ -2663,6 +2672,7 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
               "--workspace",
               fixture.workspace
             ],
+            runtime_bracket: &resource_free_inspection/2,
             runtime_starter: fn _options -> {:ok, fixture.runtime} end
           )
 
@@ -2744,6 +2754,7 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
                      "--workspace",
                      fixture.workspace
                    ],
+                   runtime_bracket: &resource_free_inspection/2,
                    runtime_starter: starter
                  )
       end)
@@ -2779,7 +2790,11 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
             Integer.to_string(@grace + 1)
           ]
 
-      assert {:error, conflict} = LoopexCli.dispatch(arguments, runtime_starter: starter)
+      assert {:error, conflict} =
+               LoopexCli.dispatch(arguments,
+                 runtime_bracket: &resource_free_inspection/2,
+                 runtime_starter: starter
+               )
 
       assert inspect(conflict) =~ "cleanup"
       assert_receive {:runtime_start_options, ^command, conflict_options}, 5_000
@@ -2832,7 +2847,14 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
       # build the runtime, so the refusal arrives before any recovery begins.
       # This locks that ordering: move either parse out of `start_runtime/3` and
       # the swallow behind it becomes reachable.
-      assert {:error, refusal} = LoopexCli.dispatch(arguments, runtime_starter: starter)
+      assert {:error, refusal} =
+               LoopexCli.dispatch(arguments,
+                 runtime_bracket: fn _options, _callback ->
+                   flunk("unreadable configuration reached resource inspection")
+                 end,
+                 runtime_starter: starter
+               )
+
       assert refusal =~ sentence
 
       # It costs nothing: no runtime is started, no owner is prepared, and no
@@ -2864,6 +2886,7 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
                "--workspace",
                fixture.workspace
              ],
+             runtime_bracket: &resource_free_inspection/2,
              runtime_starter: starter
            )}
         )

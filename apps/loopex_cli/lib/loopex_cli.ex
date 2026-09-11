@@ -897,7 +897,8 @@ defmodule LoopexCli do
          {:ok, digest} <-
            runtime_bracket(options).(inspection_options, fn runtime ->
              inspect_recovery_manifest(root, session_id, runtime)
-           end),
+           end)
+           |> started(),
          {:ok, manifest} <- load_recovery_manifest(root, digest, options) do
       final_options = resource_manifest_option(inspection_options, manifest)
       start_configured_runtime(final_options, options)

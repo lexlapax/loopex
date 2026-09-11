@@ -24,12 +24,14 @@ defmodule LoopexCli.LiveStoreHolderTest do
     marker = Path.join(root, "store.log.writer")
     bytes = File.read!(marker)
 
-    assert {:error, message} = resume(root, workspace)
-    assert :ok = LoopexCli.release_placement()
+    for command <- ["resume", "cancel"] do
+      assert {:error, message} = recover(command, root, workspace)
+      assert :ok = LoopexCli.release_placement()
 
-    assert message =~ "another process is already writing this state root's store"
-    assert message =~ "--state-root"
-    assert File.read!(marker) == bytes, "the command evicted a live embedder's writer marker"
+      assert message =~ "another process is already writing this state root's store"
+      assert message =~ "--state-root"
+      assert File.read!(marker) == bytes, "the command evicted a live embedder's writer marker"
+    end
 
     # The refusal is not a refusal of the root: once that holder is gone the
     # same command gets past the marker it left and reaches the truthful
@@ -37,14 +39,18 @@ defmodule LoopexCli.LiveStoreHolderTest do
     # embedder was still running.
     kill(port, os_pid)
 
-    assert {:error, :session_unknown} = resume(root, workspace)
+    assert {:error, :session_unknown} = recover("resume", root, workspace)
     assert :ok = LoopexCli.release_placement()
-    refute File.read!(marker) == bytes, "the command reused the dead holder's marker"
+
+    # Concept: failed inspection leaves no writer behind.
+    # Technical depth: the bracket closes its temporary Store and removes its
+    # marker; neither the dead holder's marker nor a replacement may remain.
+    assert {:error, :enoent} = File.read(marker)
   end
 
-  defp resume(root, workspace) do
+  defp recover(command, root, workspace) do
     LoopexCli.dispatch([
-      "resume",
+      command,
       "s_missing",
       "--policy",
       "allow-all",

@@ -440,6 +440,15 @@ defmodule LoopexCli.ContextBudgetCommandsTest do
         "--workspace",
         fixture.workspace
       ] ++ context ++ cleanup,
+      # Concept: this resource-free fixture owns context comparison and its
+      # abandonment result after resource inspection has completed.
+      # Technical depth: inspection uses its explicit seam so the observer's
+      # injected abandonment failure reaches the context-conflict branch.
+      runtime_bracket: fn options, _inspect ->
+        assert Keyword.fetch!(options, :runtime_id) == fixture.placement
+        refute Keyword.has_key?(options, :resource_manifest)
+        {:ok, nil}
+      end,
       runtime_starter: fn options ->
         assert Keyword.fetch!(options, :runtime_id) == fixture.placement
 
