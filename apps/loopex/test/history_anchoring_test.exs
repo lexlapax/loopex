@@ -131,6 +131,511 @@ defmodule Loopex.HistoryAnchoringTest do
     end
   end
 
+  test "sequential shared bindings settle each holder without erasing intermediate history" do
+    snapshots = shared_binding_history()
+    assert :ok == History.artifact_history({elem(List.last(snapshots), 0), snapshots})
+    assert :ok == generation_history(snapshots)
+    # Artifact history previously admitted a fully matching atomic update;
+    # governance independently decides whether that document transition is legal.
+    base = hd(snapshots)
+    last = List.last(snapshots)
+
+    assert :ok ==
+             History.artifact_history(
+               {"atomic", [base, {"atomic", [elem(base, 0)], elem(last, 2)}]}
+             )
+
+    partial = Enum.take(snapshots, 3)
+
+    assert_raise Invalid, ~r/unfinished shared binding/, fn ->
+      History.artifact_history({elem(List.last(partial), 0), partial})
+    end
+
+    assert %{binding_scope: "M1", pending_holders: ["M2", "M3"]} =
+             History.artifact_history({elem(List.last(partial), 0), partial}, holder: "M1")
+
+    assert_raise Invalid, ~r/holder scope/, fn ->
+      History.artifact_history({elem(List.last(partial), 0), partial}, holder: "M2")
+    end
+  end
+
+  test "shared binding scope rejects changed bytes dropped holders overlap and unrelated progress" do
+    history = shared_binding_history()
+    [base, a1, r1, a2, r2, a3, r3] = history
+    change = fn {sha, parents, files}, fun -> {sha, parents, fun.(files)} end
+
+    invalid = [
+      # An earlier mismatch cannot be laundered by a later legitimate sequence.
+      [
+        base,
+        {"early", [elem(base, 0)], Map.put(elem(base, 2), @runner, @bad)},
+        {elem(a1, 0), ["early"], elem(a1, 2)}
+      ] ++ Enum.drop(history, 2),
+      [base, change.(a1, &Map.delete(&1, "docs/plans/M2-gate.md"))] ++ Enum.drop(history, 2),
+      [
+        base,
+        change.(a1, &Map.put(&1, "docs/plans/M2-gate.md", elem(a2, 2)["docs/plans/M2-gate.md"]))
+      ] ++ Enum.drop(history, 2),
+      [base, a1, {elem(a2, 0), [elem(a1, 0)], elem(a2, 2)}, r2, a3, r3],
+      [base, a1, r1, {"ordinary", [elem(r1, 0)], elem(r1, 2)}],
+      [base, a1, r1, change.(a2, &Map.put(&1, @runner, @good)), r2, a3, r3],
+      [
+        base,
+        a1,
+        r1,
+        change.(a2, fn files ->
+          Map.update!(
+            files,
+            "docs/plans/M2-gate.md",
+            &String.replace(&1, Markdown.digest(@bad), Markdown.digest("different"))
+          )
+        end),
+        r2,
+        a3,
+        r3
+      ],
+      [
+        base,
+        change.(a1, fn files ->
+          Map.update!(
+            files,
+            "docs/plans/M1-gate.md",
+            &String.replace(
+              &1,
+              "| `#{Markdown.digest(@bad)}` | `#{@runner}` |",
+              "| `#{Markdown.digest(@bad)}` | `#{@runner}` |\n| `#{Markdown.digest(@good)}` | `#{@runner}` |"
+            )
+          )
+        end)
+      ] ++ Enum.drop(history, 2),
+      [base, a1, change.(r1, &Map.put(&1, @runner, @good))],
+      [base, a1, {"wrong-parent", [elem(base, 0)], elem(r1, 2)}],
+      Enum.take(history, 3) ++
+        [{"working tree", [elem(r1, 0)], Map.put(elem(r1, 2), @runner, @bad <> "x")}]
+    ]
+
+    for snapshots <- invalid do
+      head = elem(List.last(snapshots), 0)
+      assert_raise Invalid, fn -> History.artifact_history({head, snapshots}, holder: "M1") end
+    end
+
+    assert_raise Invalid, ~r/holder scope/, fn ->
+      History.artifact_history({elem(r3, 0), history}, holder: "unknown")
+    end
+
+    assert_raise Invalid, ~r/holder scope/, fn ->
+      History.artifact_history({elem(a1, 0), [base, a1]}, holder: "M1")
+    end
+  end
+
+  test "shared binding completion permits covered prefixes but refuses divergent pending merges" do
+    history = shared_binding_history()
+    [base, a1, r1 | _] = history
+    last = List.last(history)
+    covered = history ++ [{"merge", [elem(last, 0), elem(r1, 0)], elem(last, 2)}]
+    assert :ok == History.artifact_history({"merge", covered})
+
+    diverged = [
+      base,
+      a1,
+      r1,
+      {"other", [elem(base, 0)], elem(base, 2)},
+      {"merge", [elem(r1, 0), "other"], elem(r1, 2)}
+    ]
+
+    assert_raise Invalid, ~r/divergent lineage/, fn ->
+      History.artifact_history({"merge", diverged}, holder: "M1")
+    end
+  end
+
+  test "a pending holder may change its local artifact only in its own proposal" do
+    history = shared_binding_history()
+    local = "scripts/local-second.exs"
+
+    with_local = fn change_index, shared? ->
+      Enum.with_index(history)
+      |> Enum.map(fn {{revision, parents, files}, index} ->
+        bytes = if index >= change_index, do: "new local", else: "old local"
+
+        files =
+          Enum.reduce(if(shared?, do: ["M2", "M3"], else: ["M2"]), files, fn holder, files ->
+            expected =
+              if holder == "M2" and index >= change_index, do: "new local", else: "old local"
+
+            gate = "docs/plans/#{holder}-gate.md"
+            text = Map.fetch!(files, gate)
+
+            text =
+              String.replace(
+                text,
+                "| --- | --- |",
+                "| --- | --- |\n| `#{Markdown.digest(expected)}` | `#{local}` |"
+              )
+
+            Map.put(files, gate, text)
+          end)
+          |> Map.put(local, bytes)
+
+        {revision, parents, files}
+      end)
+    end
+
+    valid = with_local.(3, false)
+    assert :ok == History.artifact_history({elem(List.last(valid), 0), valid})
+
+    for bad <- [with_local.(4, false), with_local.(3, true)] do
+      assert_raise Invalid, fn -> History.artifact_history({elem(List.last(bad), 0), bad}) end
+    end
+  end
+
+  test "scoped status requires both current bytes and full history" do
+    documents = Fixture.documents()
+    assert [message] = Status.validate(documents, artifact_holder: "M1")
+    assert message =~ "requires current artifact bytes and complete history"
+
+    assert [message] =
+             Status.validate(documents, artifact_holder: "M1", read_artifact: fn _ -> @good end)
+
+    assert message =~ "requires current artifact bytes and complete history"
+  end
+
+  test "scoped status validates complete governance and current bytes before its explicit pending result" do
+    history = shared_status_history()
+    # Plan's existing ancestry check uses Git; give synthetic contents real,
+    # linearly related node identities without changing that ancestry proof.
+    root = Path.expand("../../..", __DIR__)
+
+    {revisions, 0} =
+      Loopex.Checks.Git.run(root, ["rev-list", "--first-parent", "--max-count=10", "HEAD"])
+
+    replacements =
+      Enum.zip(Enum.map(history, &elem(&1, 0)), revisions |> String.split() |> Enum.reverse())
+
+    history =
+      Enum.map(history, fn {revision, parents, files} ->
+        replace = fn text ->
+          Enum.reduce(replacements, text, fn {old, new}, text ->
+            String.replace(text, old, new)
+          end)
+        end
+
+        {replace.(revision), Enum.map(parents, replace),
+         Map.new(files, fn {path, text} -> {path, replace.(text)} end)}
+      end)
+
+    partial = Enum.take(history, 6)
+
+    check = fn snapshots, options ->
+      {head, _, files} = List.last(snapshots)
+
+      Status.validate(
+        Map.delete(files, @runner),
+        [
+          plan_history: fn -> {head, snapshots} end,
+          resolve_file: generation_resolver(snapshots),
+          read_artifact:
+            Keyword.get(options, :read_artifact, fn target -> Map.get(files, target) end)
+        ] ++ Keyword.delete(options, :read_artifact)
+      )
+    end
+
+    assert %{binding_scope: "first", pending_holders: ["second", "third"]} =
+             check.(partial, artifact_holder: "first")
+
+    assert [global_error] = check.(partial, [])
+    assert global_error =~ "unfinished shared binding"
+    assert [] == check.(history, [])
+    # Every holder's A/R is locally well formed, but their overlap is not a
+    # sequential shared-byte update even though no stale row ever appears.
+    {a, [parent], first_proposal} = Enum.at(history, 4)
+    {r, _, _} = Enum.at(history, 5)
+    {_, _, final_files} = List.last(history)
+
+    proposals =
+      Enum.reduce([{"first", 4}, {"second", 6}, {"third", 8}], final_files, fn {name, index},
+                                                                               files ->
+        Map.put(
+          files,
+          "docs/plans/#{name}.md",
+          elem(Enum.at(history, index), 2)["docs/plans/#{name}.md"]
+        )
+      end)
+      |> Map.put(
+        "docs/developer/agent-context-map.md",
+        first_proposal["docs/developer/agent-context-map.md"]
+      )
+
+    simultaneous_rebind =
+      Map.new(final_files, fn {path, text} ->
+        {path,
+         Enum.reduce([6, 8], text, fn index, text ->
+           String.replace(text, elem(Enum.at(history, index), 0), a)
+         end)}
+      end)
+
+    overlapping =
+      Enum.take(history, 4) ++ [{a, [parent], proposals}, {r, [a], simultaneous_rebind}]
+
+    assert :ok == generation_history(overlapping)
+    assert [overlap_error] = check.(overlapping, [])
+    assert overlap_error =~ "simultaneous shared binding proposals"
+
+    assert [dirty_error] =
+             check.(partial,
+               artifact_holder: "first",
+               read_artifact: fn _ -> @bad <> "dirty" end
+             )
+
+    assert dirty_error =~ "locked digest"
+    assert [_] = check.(partial, artifact_holder: "second")
+    assert [_] = check.(partial, artifact_holder: "unknown")
+    assert [_] = check.(Enum.take(history, 5), artifact_holder: "first")
+    {_, _, rebound_files} = List.last(partial)
+
+    malformed =
+      List.update_at(partial, 4, fn {r, parents, files} ->
+        {r, parents,
+         Map.put(
+           files,
+           "docs/developer/agent-context-map.md",
+           rebound_files["docs/developer/agent-context-map.md"]
+         )}
+      end)
+
+    assert [authority_error] = check.(malformed, artifact_holder: "first")
+    assert authority_error =~ "disposition"
+  end
+
+  defp shared_status_history do
+    [base | tail] = shared_binding_history()
+    base_files = elem(base, 2)
+    old_gate = one_artifact_gate()
+
+    stages =
+      for {id, governed, progress} <- [
+            {"a", false, "Open"},
+            {"b", true, "Open"},
+            {"c", true, "Proved"}
+          ] do
+        files =
+          Enum.reduce(["M1", "M2", "M3"], base_files, fn name, files ->
+            Map.put(
+              files,
+              "docs/plans/#{name}.md",
+              Fixture.plan(governed: governed, progress: progress, gate: old_gate)
+            )
+          end)
+
+        parent =
+          case id do
+            "a" -> []
+            "b" -> [sha("a")]
+            "c" -> [sha("b")]
+          end
+
+        {sha(id), parent, files}
+      end
+
+    [{a1, _, files} | rest] = tail
+    raw = stages ++ [{sha("d"), [sha("c")], base_files}, {a1, [sha("d")], files} | rest]
+    names = [{"M1", "first"}, {"M2", "second"}, {"M3", "third"}]
+
+    Enum.map(raw, fn {revision, parents, source} ->
+      documents =
+        Enum.reduce(names, Fixture.documents(), fn {old, name}, docs ->
+          path = "docs/plans/#{old}.md"
+          concept = source[path] |> String.replace("M0", name)
+          technical = Fixture.technical_plan() |> String.replace("M0", name)
+          gate = source["docs/plans/#{old}-gate.md"] |> String.replace("M0", name)
+
+          concept_hash =
+            concept |> Plan.concept_envelope(path) |> elem(0) |> Plan.envelope_digest()
+
+          technical_hash = technical |> Plan.technical_envelope(path) |> Plan.envelope_digest()
+
+          concept =
+            concept
+            |> String.replace(
+              ~r/concept `sha256:[0-9a-f]{64}`/,
+              "concept `sha256:#{concept_hash}`"
+            )
+            |> String.replace(
+              ~r/technical `sha256:[0-9a-f]{64}`/,
+              "technical `sha256:#{technical_hash}`"
+            )
+
+          concept =
+            Enum.reduce(raw, concept, fn {_, _, historical}, text ->
+              old_gate = historical["docs/plans/#{old}-gate.md"]
+
+              String.replace(
+                text,
+                Markdown.digest(old_gate),
+                Markdown.digest(String.replace(old_gate, "M0", name))
+              )
+            end)
+
+          docs
+          |> Map.put("docs/plans/#{name}.md", concept)
+          |> Map.put("docs/plans/#{name}-technical.md", technical)
+          |> Map.put("docs/plans/#{name}-gate.md", gate)
+        end)
+
+      rows = [{"first", "Closed"}, {"second", "Closed"}, {"third", "Accepted"}]
+
+      rows =
+        if revision in [sha("a"), sha("b"), sha("c")],
+          do:
+            Enum.map(rows, fn {name, _} ->
+              {name, if(revision == sha("a"), do: "Open", else: "Accepted")}
+            end),
+          else: rows
+
+      index =
+        documents["docs/plans/README.md"]
+        |> String.replace(
+          Fixture.blocked_row(),
+          Enum.map_join(rows, "\n", fn {name, state} ->
+            "| `#{name}` | #{state} | [concept](#{name}.md) | [technical depth](#{name}-technical.md) | [gate](#{name}-gate.md) |"
+          end)
+        )
+
+      summary =
+        Loopex.Checks.Register.summary("Closed milestone product baseline", [
+          {"first", "Closed"},
+          {"second", "Closed"},
+          {"third", "Accepted"}
+        ])
+
+      {capsule, old_summary} = Loopex.Checks.Register.current_status(index)
+
+      expected =
+        Loopex.Checks.Register.expected_capsule("Accepted", "third", %{})
+        |> Map.put("Last closed product checkpoint", "`second` — 2026-09-12")
+        |> Map.put("Integrated phase", Loopex.Checks.Register.integrated_phase(rows))
+
+      index =
+        Enum.reduce(expected, String.replace(index, old_summary, summary), fn {key, value},
+                                                                              text ->
+          if Map.has_key?(capsule, key),
+            do: String.replace(text, "| #{key} | #{capsule[key]} |", "| #{key} | #{value} |"),
+            else: text
+        end)
+
+      documents =
+        documents
+        |> Map.put("docs/plans/README.md", index)
+        |> Map.update!("README.md", &String.replace(&1, old_summary, summary))
+        |> Map.put(
+          "docs/developer/agent-context-map.md",
+          source["docs/developer/agent-context-map.md"]
+        )
+        |> Map.put(@runner, source[@runner])
+
+      {revision, parents, documents}
+    end)
+  end
+
+  defp shared_binding_history do
+    old_gate = one_artifact_gate()
+    new_gate = Fixture.amended_gate(1, mutated_artifact_gate())
+    old_plan = Fixture.plan(governed: true, closed: true, gate: old_gate)
+
+    files =
+      Map.new(["M1", "M2", "M3"], fn name ->
+        {"docs/plans/#{name}-gate.md", old_gate}
+      end)
+
+    files =
+      Enum.reduce(["M1", "M2", "M3"], files, fn name, acc ->
+        plan = if name == "M3", do: Fixture.plan(governed: true, gate: old_gate), else: old_plan
+
+        acc
+        |> Map.put("docs/plans/#{name}.md", plan)
+        |> Map.put("docs/plans/#{name}-technical.md", Fixture.technical_plan())
+      end)
+      |> Map.put(@runner, @good)
+
+    index =
+      Fixture.documents()
+      |> Map.fetch!("docs/plans/README.md")
+      |> String.replace(
+        Fixture.blocked_row(),
+        Enum.map_join(["M1", "M2", "M3"], "\n", fn name ->
+          state = if name == "M3", do: "Accepted", else: "Closed"
+
+          "| `#{name}` | #{state} | [concept](#{name}.md) | [technical depth](#{name}-technical.md) | [gate](#{name}-gate.md) |"
+        end)
+      )
+
+    files =
+      files
+      |> Map.put("docs/plans/README.md", index)
+      |> Map.put("docs/developer/agent-context-map.md", "# Context\n")
+
+    {_files, history} =
+      Enum.reduce(
+        Enum.with_index(["M1", "M2", "M3"], 1),
+        {files, [{sha("a"), [], files}]},
+        fn {name, index}, {prior, history} ->
+          a = String.duplicate(Integer.to_string(index * 2), 40)
+          r = String.duplicate(Integer.to_string(index * 2 + 1), 40)
+          disposition = "../developer/agent-context-map.md#shared-binding-#{index}"
+
+          gate =
+            if name == "M3",
+              do:
+                String.replace(new_gate, "amendment-transaction-v2", "amendment-transaction-v1"),
+              else: new_gate
+
+          proposal =
+            if name == "M3" do
+              Fixture.plan(governed: true, gate: old_gate)
+            else
+              Fixture.plan(
+                governed: true,
+                closed: true,
+                gate: old_gate,
+                generations: [Fixture.proposed_generation(1, gate)]
+              )
+            end
+
+          accepted =
+            if name == "M3" do
+              Fixture.plan(governed: true, gate: gate)
+              |> String.replace("candidate `#{sha("a")}`", "candidate `#{a}`")
+              |> String.replace("../vision.md#concept", disposition)
+            else
+              Fixture.plan(
+                governed: true,
+                closed: true,
+                gate: old_gate,
+                generations: [Fixture.accepted_generation(1, a, gate, disposition)]
+              )
+            end
+
+          proposed =
+            prior
+            |> Map.put("docs/plans/#{name}-gate.md", gate)
+            |> Map.put("docs/plans/#{name}.md", proposal)
+            |> Map.put(@runner, @bad)
+
+          rebound =
+            proposed
+            |> Map.put("docs/plans/#{name}.md", accepted)
+            |> Map.update!(
+              "docs/developer/agent-context-map.md",
+              &(&1 <> "\n<a id=\"shared-binding-#{index}\"></a>\nAccepted.\n")
+            )
+
+          parent = elem(List.last(history), 0)
+          {rebound, history ++ [{a, [parent], proposed}, {r, [a], rebound}]}
+        end
+      )
+
+    history
+  end
+
   test "artifact binding persists along every parent" do
     two = two_artifact_gate()
     one = config_only_gate()

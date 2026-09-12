@@ -1574,8 +1574,9 @@ defmodule Loopex.Checks.History do
   @doc """
   ## Concept
 
-  Every artifact a gate binds matches its locked digest at every revision where
-  that gate declares it, and no descendant may stop declaring it.
+  Every artifact a gate binds remains declared and matches its governing bytes.
+  A sequential shared-artifact transaction preserves each waiting holder's old
+  row only until that holder completes its own proposal and immediate rebind.
 
   ## Technical depth
 
@@ -1588,46 +1589,383 @@ defmodule Loopex.Checks.History do
   A malformed declaration is a failure rather than a gate that predates the
   convention: reading a broken table as "nothing bound here" would make the
   malformed state the cheapest way to unbind an artifact.
+
+  The default refuses unfinished sequences. Internal `:holder` inspection reports
+  a rebound holder and the remaining holders instead of global success. It checks
+  artifact transitions; Status also requires the independent governance-history
+  walk, current bytes and each plan's governance before exposing that result.
   """
   @spec artifact_history({String.t(), [{String.t(), [String.t()], map()}]} | nil) :: :ok
-  def artifact_history(nil) do
+  def artifact_history(history, options \\ [])
+
+  def artifact_history(nil, _options) do
     raise Invalid, "governed documents: complete reachable artifact history is unavailable"
   end
 
-  def artifact_history({_head, snapshots}) do
-    Enum.reduce(snapshots, %{}, fn {revision, parents, files}, state ->
-      inherited =
-        Enum.reduce(parents, %{}, fn parent, acc ->
-          state
-          |> Map.get(parent, %{})
-          |> Enum.reduce(acc, fn {gate_path, targets}, inner ->
-            Map.update(inner, gate_path, targets, &MapSet.union(&1, targets))
+  def artifact_history({head, snapshots}, options) do
+    states =
+      Enum.reduce(snapshots, %{}, fn {revision, parents, files}, states ->
+        unless not Map.has_key?(states, revision) and
+                 Enum.all?(parents, &Map.has_key?(states, &1)) do
+          raise Invalid, "artifact history is duplicated or not parent-first"
+        end
+
+        prior = Enum.map(parents, &Map.fetch!(states, &1))
+
+        inherited =
+          Enum.reduce(prior, %{}, fn state, acc ->
+            Enum.reduce(state.declared, acc, fn {gate, bindings}, merged ->
+              Map.update(
+                merged,
+                gate,
+                MapSet.new(Map.keys(bindings)),
+                &MapSet.union(&1, MapSet.new(Map.keys(bindings)))
+              )
+            end)
           end)
-        end)
 
-      declared = declared_artifacts!(files, revision)
-      require_binding_persists!(inherited, declared, files, revision)
+        declared = artifact_declarations!(files, revision)
 
-      merged =
-        Enum.reduce(declared, inherited, fn {gate_path, targets}, acc ->
-          Map.update(acc, gate_path, targets, &MapSet.union(&1, targets))
-        end)
+        sets =
+          Map.new(declared, fn {gate, bindings} -> {gate, MapSet.new(Map.keys(bindings))} end)
 
-      Map.put(state, revision, merged)
-    end)
+        require_binding_persists!(inherited, sets, files, revision)
+        sequence = binding_sequence(prior, declared, files, revision, parents, states)
+        verify_artifact_bytes!(declared, files, revision, sequence)
 
-    :ok
+        Map.put(states, revision, %{
+          declared: declared,
+          files: files,
+          sequence: sequence,
+          revision: revision,
+          parents: parents
+        })
+      end)
+
+    final = Map.fetch!(states, head)
+
+    case {Keyword.get(options, :holder), final.sequence} do
+      {nil, %{pending: [_ | _]}} ->
+        raise Invalid, "unfinished shared binding sequence"
+
+      {nil, _} ->
+        :ok
+
+      {holder, %{settled: settled, pending: pending, active: nil}} ->
+        gate = "docs/plans/#{holder}-gate.md"
+        unless gate in settled, do: raise(Invalid, "holder scope must name a rebound holder")
+
+        %{
+          binding_scope: holder,
+          pending_holders: Enum.map(pending, &binding_holder/1),
+          pending_bindings: pending_bindings(final.sequence)
+        }
+
+      {_holder, _} ->
+        raise Invalid, "holder scope is unavailable before a valid rebind"
+    end
   end
 
-  defp declared_artifacts!(files, revision) do
+  # Concept: only one shared-byte proposal can be in flight. Its complete holder
+  # set and old/new bytes come from the actual parent, never a caller allowlist.
+  # Technical depth: ordinary artifact strictness remains outside those exact
+  # pending pairs. A holder's local bound files may change at its own atomic A.
+  defp binding_sequence(prior, declared, files, revision, parents, states) do
+    active = Enum.filter(prior, &match?(%{pending: [_ | _]}, &1.sequence))
+
+    if length(prior) > 1 do
+      Enum.each(active, fn pending ->
+        covered =
+          Enum.any?(prior, fn other ->
+            not match?(%{pending: [_ | _]}, other.sequence) and
+              binding_ancestor?(pending.revision, other.revision, states)
+          end)
+
+        unless covered,
+          do: raise(Invalid, "shared binding sequence cannot cross divergent lineage")
+      end)
+    end
+
+    case prior do
+      [previous] ->
+        sequence = previous.sequence
+
+        cond do
+          revision == "working tree" and declared == previous.declared and
+              binding_sources_equal?(declared, files, previous.files) ->
+            sequence
+
+          match?(%{pending: [_ | _]}, sequence) ->
+            advance_binding_sequence(sequence, previous, declared, files, revision, hd(parents))
+
+          true ->
+            start_binding_sequence(previous, declared, files, revision)
+        end
+
+      _ ->
+        nil
+    end
+  end
+
+  defp binding_ancestor?(ancestor, descendant, states) do
+    ancestor == descendant or
+      Enum.any?(
+        Map.fetch!(states, descendant).parents,
+        &binding_ancestor?(ancestor, &1, states)
+      )
+  end
+
+  defp start_binding_sequence(previous, declared, files, revision) do
+    pairs =
+      Enum.reduce(previous.declared, %{}, fn {_gate, bindings}, acc ->
+        Enum.reduce(bindings, acc, fn {target, old}, acc ->
+          bytes = Map.get(files, target)
+
+          if is_binary(bytes) and Markdown.digest(bytes) != old do
+            holders =
+              previous.declared
+              |> Enum.filter(fn {_g, b} -> Map.get(b, target) == old end)
+              |> Enum.map(&elem(&1, 0))
+              |> Enum.sort()
+
+            if length(holders) > 1 do
+              Map.put(acc, target, %{old: old, new: Markdown.digest(bytes), holders: holders})
+            else
+              acc
+            end
+          else
+            acc
+          end
+        end)
+      end)
+
+    stale? =
+      Enum.any?(declared, fn {_gate, bindings} ->
+        Enum.any?(bindings, fn {target, digest} ->
+          bytes = Map.get(files, target)
+          is_binary(bytes) and Markdown.digest(bytes) != digest
+        end)
+      end)
+
+    if map_size(pairs) > 0 and not stale? do
+      simultaneous =
+        pairs
+        |> Map.values()
+        |> Enum.flat_map(& &1.holders)
+        |> Enum.uniq()
+        |> Enum.count(fn holder ->
+          if Map.get(previous.declared, holder) != Map.get(declared, holder) do
+            try do
+              require_binding_proposal!(holder, previous.files, files, revision)
+              true
+            rescue
+              _error in Invalid -> false
+            end
+          else
+            false
+          end
+        end)
+
+      if simultaneous > 1,
+        do: raise(Invalid, "simultaneous shared binding proposals are not sequential")
+    end
+
+    if map_size(pairs) == 0 or not stale? do
+      nil
+    else
+      holders = pairs |> Map.values() |> Enum.flat_map(& &1.holders) |> Enum.uniq() |> Enum.sort()
+      changed = Enum.filter(holders, &(Map.get(previous.declared, &1) != Map.get(declared, &1)))
+
+      case changed do
+        [holder] ->
+          Enum.each(previous.declared, fn {gate, bindings} ->
+            if gate != holder and Map.get(declared, gate) != bindings,
+              do: raise(Invalid, "shared binding proposal changes another holder")
+          end)
+
+          require_binding_proposal!(holder, previous.files, files, revision)
+          sequence = %{pairs: pairs, pending: holders, settled: [], active: {holder, revision}}
+          require_sequence_rows!(sequence, declared)
+          sequence
+
+        _ ->
+          raise Invalid, "shared binding proposal must advance exactly one holder"
+      end
+    end
+  end
+
+  defp advance_binding_sequence(sequence, previous, declared, files, revision, parent) do
+    case sequence.active do
+      {holder, proposal} ->
+        unless parent == proposal and declared == previous.declared,
+          do:
+            raise(Invalid, "shared binding rebind must immediately follow its unchanged proposal")
+
+        require_binding_rebind!(holder, previous.files, files, proposal)
+
+        %{
+          sequence
+          | active: nil,
+            pending: List.delete(sequence.pending, holder),
+            settled: sequence.settled ++ [holder]
+        }
+
+      nil ->
+        changed =
+          Enum.filter(
+            sequence.pending,
+            &(Map.get(previous.declared, &1) != Map.get(declared, &1))
+          )
+
+        case changed do
+          [holder] ->
+            require_binding_proposal!(holder, previous.files, files, revision)
+            # No other holder may move, including holders outside the frozen set.
+            Enum.each(previous.declared, fn {gate, bindings} ->
+              if gate != holder and Map.get(declared, gate) != bindings,
+                do: raise(Invalid, "shared binding proposal changes another holder")
+            end)
+
+            next = %{sequence | active: {holder, revision}}
+            require_sequence_rows!(next, declared)
+            next
+
+          _ ->
+            raise Invalid, "shared binding sequence requires the next pending holder proposal"
+        end
+    end
+  end
+
+  defp require_binding_proposal!(gate, prior, files, revision) do
+    path = String.replace_suffix(gate, "-gate.md", ".md")
+    old = Map.fetch!(prior, gate)
+    new = Map.fetch!(files, gate)
+
+    unless Plan.gate_generation(new, gate) == Plan.gate_generation(old, gate) + 1,
+      do:
+        raise(
+          Invalid,
+          "#{gate}: shared binding change requires the next amendment at #{revision}"
+        )
+
+    if Plan.amendment_transaction_v2?(new, gate) do
+      before = recorded_generations(Map.fetch!(prior, path), path, revision)
+      after_rows = recorded_generations(Map.fetch!(files, path), path, revision)
+
+      unless Plan.generation_proposal_appended?(before, after_rows),
+        do:
+          raise(Invalid, "#{gate}: shared binding change requires an atomic generation proposal")
+    else
+      unless Plan.amendment_transaction_v1?(new, gate),
+        do: raise(Invalid, "#{gate}: shared binding change requires a transaction marker")
+
+      {before, _, _} = Records.governance_records(Map.fetch!(prior, path), path)
+      {after_rows, _, _} = Records.governance_records(Map.fetch!(files, path), path)
+
+      unless hd(before) == hd(after_rows),
+        do: raise(Invalid, "#{gate}: shared binding proposal must retain Acceptance")
+    end
+  end
+
+  defp require_binding_rebind!(gate, prior, files, proposal) do
+    path = String.replace_suffix(gate, "-gate.md", ".md")
+
+    if Plan.amendment_transaction_v2?(Map.fetch!(files, gate), gate) do
+      before = recorded_generations(Map.fetch!(prior, path), path, proposal)
+      after_rows = recorded_generations(Map.fetch!(files, path), path, proposal)
+
+      unless Plan.generation_proposal_completed?(before, after_rows) and
+               Enum.at(List.last(after_rows), 3) == proposal,
+             do: raise(Invalid, "#{gate}: shared binding rebind must accept its exact proposal")
+    else
+      {rows, _, _} = Records.governance_records(Map.fetch!(files, path), path)
+
+      unless bound_candidate_revision(hd(rows)) == proposal,
+        do: raise(Invalid, "#{gate}: shared binding rebind must accept its exact proposal")
+    end
+  end
+
+  defp require_sequence_rows!(sequence, declared) do
+    Enum.each(sequence.pairs, fn {target, pair} ->
+      actual_holders =
+        declared
+        |> Enum.filter(fn {_gate, b} -> Map.has_key?(b, target) end)
+        |> Enum.map(&elem(&1, 0))
+        |> Enum.sort()
+
+      unless actual_holders == pair.holders,
+        do: raise(Invalid, "shared binding holder set changed")
+
+      Enum.each(pair.holders, fn gate ->
+        new? = gate in sequence.settled or match?({^gate, _}, sequence.active)
+        expected = if new?, do: pair.new, else: pair.old
+
+        unless get_in(declared, [gate, target]) == expected,
+          do: raise(Invalid, "shared binding rows changed outside their holder transaction")
+      end)
+    end)
+  end
+
+  defp pending_bindings(nil), do: %{}
+
+  defp pending_bindings(sequence) do
+    Enum.reduce(sequence.pairs, %{}, fn {target, pair}, acc ->
+      Enum.reduce(pair.holders, acc, fn gate, acc ->
+        if gate in sequence.pending and not match?({^gate, _}, sequence.active),
+          do: Map.put(acc, {gate, target}, {pair.old, pair.new}),
+          else: acc
+      end)
+    end)
+  end
+
+  defp verify_artifact_bytes!(declared, files, revision, sequence) do
+    allowed = pending_bindings(sequence)
+
+    Enum.each(declared, fn {gate, bindings} ->
+      Enum.each(bindings, fn {target, digest} ->
+        case Map.get(files, target) do
+          nil ->
+            raise Invalid, "#{gate} at #{revision}: bound artifact #{target} is missing"
+
+          bytes ->
+            actual = Markdown.digest(bytes)
+
+            unless actual == digest or Map.get(allowed, {gate, target}) == {digest, actual},
+              do:
+                raise(
+                  Invalid,
+                  "#{gate} at #{revision}: bound artifact #{target} does not match its locked digest"
+                )
+        end
+      end)
+    end)
+
+    if sequence do
+      Enum.each(sequence.pairs, fn {target, pair} ->
+        unless Markdown.digest(Map.fetch!(files, target)) == pair.new,
+          do: raise(Invalid, "shared binding proposed bytes changed")
+      end)
+    end
+  end
+
+  defp binding_sources_equal?(declared, files, prior) do
+    Enum.all?(declared, fn {_gate, bindings} ->
+      Enum.all?(bindings, fn {target, _digest} ->
+        Map.get(files, target) == Map.get(prior, target)
+      end)
+    end)
+  end
+
+  defp binding_holder(gate), do: gate |> Path.basename("-gate.md")
+
+  defp artifact_declarations!(files, revision) do
     files
-    |> Enum.sort()
     |> Enum.filter(fn {path, text} ->
       String.starts_with?(path, "docs/plans/") and String.ends_with?(path, "-gate.md") and
         text |> String.split("\n") |> Enum.any?(&(String.trim(&1) == "## Bound Artifacts"))
     end)
     |> Map.new(fn {path, text} ->
-      artifacts =
+      bindings =
         try do
           Plan.bound_artifacts(text, path)
         rescue
@@ -1636,20 +1974,12 @@ defmodule Loopex.Checks.History do
                   "#{path} at #{revision}: bound-artifact declaration is malformed (#{Exception.message(error)})"
         end
 
-      Enum.each(artifacts, fn {digest, target} ->
-        case Map.get(files, target) do
-          nil ->
-            raise Invalid, "#{path} at #{revision}: bound artifact #{target} is missing"
+      mapped = Map.new(bindings, fn {digest, target} -> {target, digest} end)
 
-          content ->
-            if Markdown.digest(content) != digest do
-              raise Invalid,
-                    "#{path} at #{revision}: bound artifact #{target} does not match its locked digest"
-            end
-        end
-      end)
+      if map_size(mapped) != length(bindings),
+        do: raise(Invalid, "#{path} at #{revision}: duplicate bound-artifact target")
 
-      {path, MapSet.new(artifacts, fn {_digest, target} -> target end)}
+      {path, mapped}
     end)
   end
 
