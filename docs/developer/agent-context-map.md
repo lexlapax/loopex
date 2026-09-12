@@ -2473,3 +2473,66 @@ or product contract, and grants no additional supplemental provider call,
 M3 closure, product integration to `main`, tag or release. The lost details of
 the Linux M1 failure at `5c74164deb610016854a2a77ce79d650d269c669` remain
 unavailable; later diagnostic evidence cannot assign its cause retroactively.
+
+<a id="override-disposition-m3-sequential-binding-checker-2026-09-12"></a>
+### M3 sequential binding checker correction — 2026-09-12
+
+Before the first shared-byte proposal, inspection and four synthetic controls
+of the actual artifact-history validator proved a conflict with the existing
+sequential-holder rule. An M1 update leaves M2/M3 temporarily bound to old
+bytes; the checker rejects that historical revision even after their later
+updates. No bound artifact was changed while identifying this defect.
+
+The maintainer was asked:
+
+> May I fix the checker so M1, M2 and M3 can be updated one at a time as you approved, and extend the independent reviewer’s limited authority to approve that correction after testing and exact-commit review? Today the checker permanently rejects the temporary old bindings for milestones waiting their turn. The correction will still reject altered bytes, invalid update order, and any unfinished sequence at final validation. The diagnostics patch stays unchanged, and all final macOS/Linux gates remain required. Your previous approval was limited to that exact patch, so this additional checker change needs approval.
+
+The maintainer answered **"Approve checker correction (Recommended)"**.
+
+This extends the [shared-selector diagnostics approval](#override-disposition-m3-selector-diagnostics-2026-09-12)
+only to correcting the status checker and its governance tests so they enforce
+the already-required per-holder sequence. The diagnostic patch remains exactly
+`d2bfe33c46ff83c97fb80ff4406c78c37e1d878739854af03f26cc65a8e7c1c8`.
+The scope includes the current artifact/history validation path and an explicit
+internal holder scope for intermediate checks. It creates no new product API,
+command-line surface, ADR, transaction marker or gate criterion.
+
+Derive the old/new digest pairs for the shared artifacts changed by the first
+proposal, and their complete holder set, from that proposal and its real
+parent. Keep those shared identities fixed. Only holders still awaiting their
+own update may retain their old rows while actual source bytes must match the
+proposed new digests. Already-rebound holders remain strict. Holder-local
+bound files may change atomically at their owning holder's valid proposal
+within the previously approved inventory; these changes cannot introduce
+another shared-byte change or enlarge the pending holder set.
+
+Reuse the existing v1/v2 proposal and immediate one-parent rebind checks.
+Intermediate holder-scoped validation must identify the holder checked and
+the outstanding holders; it cannot claim global PASS. Normal global status
+must reject an unfinished sequence. A completed, validated sequence admits
+only its own temporary old rows, preserving rejection of missing or dropped
+bindings, unrelated mismatches, changed proposed bytes, invalid ordering,
+overlap and divergent lineage. No implementer-supplied mismatch allowlist
+substitutes for those checks.
+
+This permission lands in its own standalone commit and receives independent
+exact-SHA review before correction code is edited. Focused tests must prove
+the complete valid sequence and the refusal cases above against the actual
+validator, including truthful intermediate scope and final global validation.
+Retain commands, source attribution and results. The original four-control
+reproducer result has SHA-256
+`af33e5e106a6963612dd90e2623693abd38e49bf45b123376437103f6d8ea2ff`;
+it demonstrates the defect, not the correction.
+
+The independently recorded delegate remains **`/root/m3_independent_review`**.
+Its scope now also includes approval of the actual checker correction commit
+after focused testing and exact-commit review against these constraints.
+That review must complete before the first shared-byte proposal. Its later
+M1/M2/M3 acceptance scope and all separate sequential update/review obligations
+remain as recorded in the original approval. No unseen commit is accepted.
+
+Full M0–M3 gates remain required on the final candidate on macOS and Linux
+serenity. This correction changes no pass criterion, waives no failure and
+grants no additional supplemental provider calls, ADR changes, M3 closure,
+product integration to `main`, tag or release. Further deviations require the
+maintainer's decision.
