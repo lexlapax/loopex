@@ -628,11 +628,17 @@ defmodule Loopex.LLM.ReqLLM.ProviderAttemptAdapterContractTest do
   test "private worker attributes returned incomplete completion and HTTP stream failures" do
     for {mode, stage, class} <- [
           {:incomplete_stream, "completion", "stream_incomplete"},
-          {:http_error, "stream", "stream_http_server"}
+          {:http_error, "stream", "stream_http_server"},
+          {:reply, "handoff", "returned_error"}
         ] do
       fixture = Fixture.new(mode)
       run_category_probe(fixture, %{"stage" => stage, "class" => class})
     end
+  end
+
+  @tag :failure_categories
+  test "public stream results retain their tags while private stage labels stay finite" do
+    run_category_probe(Fixture.new(:reply), :stream_controls)
   end
 
   defp run_category_probe(fixture, expected) do
@@ -643,7 +649,8 @@ defmodule Loopex.LLM.ReqLLM.ProviderAttemptAdapterContractTest do
     output = if expected, do: "STAGE_OK\n", else: "CONTROL_OK\nFINITE_CATEGORIES_OK\n"
 
     assert_receive {^reference, :started, _pid}, 5_000
-    assert_receive {^reference, :result, {^output, 0}, :clean}, 30_000
+    assert_receive {^reference, :result, result, cleanup}, 30_000
+    assert {result, cleanup} == {{output, 0}, :clean}
     assert_receive {:DOWN, ^monitor, :process, ^owner, :normal}, 5_000
   end
 
@@ -823,13 +830,16 @@ defmodule Loopex.LLM.ReqLLM.ProviderAttemptAdapterContractTest do
                "FINITE_CATEGORIES_FAILED\n",
                "CONTROL_PREFLIGHT_REFUSED\n",
                "CONTROL_UNKNOWN\n",
-               "CONTROL_OTHER\n"
-             ], do: output, else: :invalid_output
+               "CONTROL_OTHER\n",
+               "STAGE_NOT_DISPATCHED\n",
+               "STAGE_UNEXPECTED_SUCCESS\n",
+               "STAGE_INVALID_RESULT\n"
+             ] or finite_stage_output?(output), do: output, else: :invalid_output
 
         {:exited, safe, status}
 
-      {^port, {:data, _}} ->
-        {:invalid_output, 1}
+      {^port, {:data, data}} ->
+        {:invalid_output, probe_output_class(output <> data)}
 
       {:DOWN, ^caller_monitor, :process, _, _} ->
         {:caller_down, 1}
@@ -841,19 +851,137 @@ defmodule Loopex.LLM.ReqLLM.ProviderAttemptAdapterContractTest do
     end
   end
 
+  defp category_classes do
+    ~w(stream_http_auth stream_http_rate_limit stream_http_server stream_http_status
+      stream_transport_timeout stream_transport_tls stream_transport_error
+      stream_http_protocol_error stream_finch_error stream_http_task_failed
+      stream_wait_timeout stream_task_call_timeout stream_decode_error stream_other_error
+      genserver_timeout raised exited thrown caught provider_status stream_failed
+      stream_incomplete assembly_failed returned_error unclassified)
+  end
+
+  defp finite_stage_output?(output) do
+    case String.split(output, ":") do
+      ["STAGE_RESULT", stage, class] ->
+        stage in ~w(handoff stream metadata completion assembly calls unavailable) and
+          String.ends_with?(class, "\n") and
+          String.trim_trailing(class, "\n") in category_classes()
+
+      _ ->
+        false
+    end
+  end
+
+  defp probe_output_class(output) do
+    cond do
+      String.contains?(output, "warning:") -> :compiler_warning
+      String.contains?(output, "SyntaxError") -> :syntax_error
+      String.contains?(output, "CompileError") -> :compile_error
+      String.contains?(output, "escript:") -> :escript_error
+      String.contains?(output, "[error]") -> :dependency_error_log
+      String.contains?(output, "error:") -> :compiler_error
+      String.contains?(output, "Error") -> :exception_text
+      String.contains?(output, "[warning]") -> :dependency_warning_log
+      String.contains?(output, "FINITE_CATEGORIES_FAILED") -> :probe_failed
+      true -> :unrecognized_output
+    end
+  end
+
+  defp stream_category_controls do
+    ~S"""
+    {:ok, model} = ReqLLM.model(request.model)
+    {:ok, identity} = Loopex.LLM.ReqLLM.identity(request.model)
+    clean = %{finish_reason: :stop, status: 200, headers: []}
+    text = [ReqLLM.StreamChunk.text("control")]
+    broken_calls = [
+      ReqLLM.StreamChunk.tool_call("write", %{}, %{id: "toolu_1", index: 1, start: true}),
+      ReqLLM.StreamChunk.meta(%{tool_call_args: %{index: 1, fragment: "{\"path\":\"a"}})
+    ]
+    dead = spawn(fn -> :ok end)
+    dead_monitor = Process.monitor(dead)
+    receive do {:DOWN, ^dead_monitor, :process, ^dead, _} -> :ok end
+    cases = [
+      {clean, text, "none", "none", :ok},
+      {:dead, text, "metadata", "exited", :stream_interrupted},
+      {%{clean | status: 429}, text, "completion", "provider_status", :stream_failed},
+      {Map.put(clean, :error, "unused-secret-never-retained"), text, "completion", "stream_failed", :stream_failed},
+      {%{clean | finish_reason: :incomplete}, text, "completion", "stream_incomplete", :stream_incomplete},
+      {Map.put(clean, :usage, :not_a_usage_map), text, "assembly", "assembly_failed", :reply_not_assembled},
+      {%{clean | finish_reason: :length}, broken_calls, "calls", "returned_error", :tool_call_not_reconstructible}
+    ]
+    for {metadata, chunks, stage, class, tag} <- cases do
+      handle = if metadata == :dead do
+        dead
+      else
+        {:ok, handle} = ReqLLM.StreamResponse.MetadataHandle.start_link(fn -> metadata end)
+        handle
+      end
+      response = %ReqLLM.StreamResponse{stream: chunks, metadata_handle: handle,
+        cancel: fn -> :ok end, model: model,
+        context: ReqLLM.Context.new([ReqLLM.Context.user("hello")])}
+      caller = self()
+      collector = spawn_link(fn ->
+        loop = fn recur, {count, unexpected} ->
+          receive do
+            {:trace, ^caller, :call, {Loopex.LLM.ReqLLM, :failure_pair, 2}, :normalization_match} ->
+              recur.(recur, {min(count + 1, 2), unexpected})
+            {:trace, ^caller, :call, {Loopex.LLM.ReqLLM, :failure_pair, 2}, :unexpected_normalization} ->
+              recur.(recur, {count, min(unexpected + 1, 2)})
+            {:collect, reference} -> send(caller, {reference, {count, unexpected}})
+          end
+        end
+        loop.(loop, {0, 0})
+      end)
+      target = {Loopex.LLM.ReqLLM, :failure_pair, 2}
+      true = :erlang.trace_pattern(target, [{[stage, class], [], [{:message, :normalization_match}]},
+        {[:_, :_], [], [{:message, :unexpected_normalization}]}], [:local]) > 0
+      1 = :erlang.trace(self(), true, [:call, :arity, {:tracer, collector}])
+      try do
+        result = Loopex.LLM.ReqLLM.reply_from_stream(response, request, identity, fn _ -> :ok end)
+        if tag == :ok do
+          {:ok, %{text: "control"}} = result
+        else
+          {:error, {^tag, "model_call_failed"}} = result
+        end
+        barrier = :erlang.trace_delivered(self())
+        receive do {:trace_delivered, _, ^barrier} -> :ok after 1_000 -> raise "trace barrier unavailable" end
+        reference = make_ref()
+        send(collector, {:collect, reference})
+        expected_count = {if(tag == :ok, do: 0, else: 1), 0}
+        receive do {^reference, ^expected_count} -> :ok after 1_000 -> raise "trace control failed" end
+      after
+        :erlang.trace(self(), false, [:call])
+        :erlang.trace_pattern(target, false, [:local])
+        if Process.alive?(collector), do: Process.exit(collector, :normal)
+        if metadata != :dead and Process.alive?(handle), do: GenServer.stop(handle)
+      end
+    end
+    """
+  end
+
   defp category_probe_source(request, http_port, expected) do
     encoded = request |> :erlang.term_to_binary() |> Base.encode64()
 
     """
     defmodule CategoryProbeTransport do
-      def call(request), do: %{request | scheme: :http, host: "127.0.0.1", port: #{http_port}, path: "/", query: nil}
+      def call(request) do
+        if Application.get_env(:req_llm, :category_probe_handoff) do
+          raise "synthetic handoff failure"
+        else
+          %{request | scheme: :http, host: "127.0.0.1", port: #{http_port}, path: "/", query: nil}
+        end
+      end
     end
     try do
       :logger.set_primary_config(:level, :emergency)
+      expected_configuration = :erlang.binary_to_term(Base.decode64!("#{Base.encode64(:erlang.term_to_binary(expected))}"))
+      Application.put_env(:req_llm, :category_probe_handoff,
+        match?(%{"stage" => "handoff"}, expected_configuration), persistent: true)
       Application.put_env(:req_llm, :load_dotenv, false, persistent: true)
       Application.put_env(:llm_db, :load_dotenv, false, persistent: true)
       Application.put_env(:req_llm, :finch_request_adapter, CategoryProbeTransport)
       {:ok, _} = Application.ensure_all_started(:req_llm)
+      :ok = :logger.set_primary_config(:level, :none)
       request = :erlang.binary_to_term(Base.decode64!("#{encoded}"))
       credential = "credential-shaped-canary-secret"
       invoke = fn progress ->
@@ -861,10 +989,25 @@ defmodule Loopex.LLM.ReqLLM.ProviderAttemptAdapterContractTest do
           sampling: request.sampling, deadline: System.system_time(:millisecond) + 10_000)
         Loopex.LLM.ReqLLM.worker_invoke(current, credential, progress, fn -> :ok end)
       end
-      if #{inspect(expected)} != nil do
-        expected = {:error, {:dispatched_or_unknown, "model_call_failed"}, #{inspect(expected)}}
-        ^expected = invoke.(fn _ -> :ok end)
+      if expected_configuration == :stream_controls do
+        #{stream_category_controls()}
         IO.puts("STAGE_OK")
+        System.halt(0)
+      end
+      if expected_configuration != nil do
+        expected = {:error, {:dispatched_or_unknown, "model_call_failed"}, expected_configuration}
+        case invoke.(fn _ -> :ok end) do
+          ^expected -> IO.puts("STAGE_OK")
+          {:error, {:dispatched_or_unknown, "model_call_failed"}, %{"stage" => stage, "class" => class}}
+            when stage in #{inspect(~w(handoff stream metadata completion assembly calls unavailable))}
+              and class in #{inspect(category_classes())} ->
+            IO.puts("STAGE_RESULT:" <> stage <> ":" <> class)
+            System.halt(1)
+          {:error, {:not_dispatched, "model_call_failed"}} ->
+            IO.puts("STAGE_NOT_DISPATCHED"); System.halt(1)
+          {:ok, _} -> IO.puts("STAGE_UNEXPECTED_SUCCESS"); System.halt(1)
+          _ -> IO.puts("STAGE_INVALID_RESULT"); System.halt(1)
+        end
         System.halt(0)
       end
       case invoke.(fn _ -> :ok end) do
@@ -874,6 +1017,12 @@ defmodule Loopex.LLM.ReqLLM.ProviderAttemptAdapterContractTest do
         _ -> IO.puts("CONTROL_OTHER"); System.halt(1)
       end
       IO.puts("CONTROL_OK")
+      {:ok, fallback_request} = Loopex.Model.request(request.model, request.messages,
+        sampling: request.sampling, deadline: System.system_time(:millisecond) + 10_000)
+      {:error, {:dispatched_or_unknown, "model_call_failed"},
+       %{"stage" => "unavailable", "class" => "unclassified"}} =
+        Loopex.LLM.ReqLLM.worker_invoke(fallback_request, credential, fn _ -> :ok end,
+          fn -> raise "synthetic start failure" end)
       secret = "unused-secret-never-retained"
       causes = [
         {%ReqLLM.Error.API.Request{status: 401, reason: secret}, "stream_http_auth"},
