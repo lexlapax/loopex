@@ -2536,3 +2536,40 @@ serenity. This correction changes no pass criterion, waives no failure and
 grants no additional supplemental provider calls, ADR changes, M3 closure,
 product integration to `main`, tag or release. Further deviations require the
 maintainer's decision.
+
+<a id="disposition-m1-gate-generation-9-2026-09-12"></a>
+### M1 gate generation 9 acceptance — 2026-09-12
+
+Under the maintainer's [diagnostics delegation](#override-disposition-m3-selector-diagnostics-2026-09-12)
+and [checker correction approval](#override-disposition-m3-sequential-binding-checker-2026-09-12),
+delegate **`/root/m3_independent_review`** independently reviewed exact proposal
+`08268e11317d0a57a95e374e7bf1f98c9aabd3ad` and explicitly stated:
+
+> I explicitly ACCEPT M1 gate generation 9 proposal A 08268e11317d0a57a95e374e7bf1f98c9aabd3ad, with gate SHA-256 57076985b3aab41d72f26c399d0177e115198f147f9c1c8168fc65df5fd2c066.
+
+The proposal changes exactly the five reviewed M1 paths and retains historical
+Acceptance, Closure and earlier generation rows. Its immediate one-parent rebind
+completes only generation 9 and adds this fresh disposition. The independently
+approved checker corrections `ad5e530952d3b08ee1a8a14773789e727012f90d`
+and `8abfee872c4dc2fb0e2d76680e8c4b2fb96afbeb` preceded this proposal.
+
+At the accepted proposal, focused checks verified nine bound artifacts, document
+links and pairing, unchanged historical governance records, and the exact
+pending-generation-9 refusal. The command exited 1 in 9.91 seconds and explicitly
+reported `global_pass=false`; its log SHA-256 is
+`9db3a52d6d90bc9a0ea1ebb137dc1173eafb1e52e92212ab40fb752944456bfa`.
+The seven-case diagnostics corpus remains attributed to retained, unaccepted
+`2368c9daab6a709226bd0a0ecf8616b83b1aa582`, whose shared runner and corpus
+bytes are identical. That earlier proposal's unexpected Closed-citation guard
+refusal remains recorded; it was preserved outside the integration lineage and
+was never accepted. The current and floor checker tests passed all 84 cases;
+the current run used the exact correction bytes before commit, and the floor
+run used exact `8abfee872c4dc2fb0e2d76680e8c4b2fb96afbeb`.
+
+Before M2 proceeds, this rebind requires complete real-history M1-scoped status
+validation identifying M2 and M3 as pending, plus independent exact-transition
+review. Those results belong to the rebind, not to its proposal. Full gates at
+these intermediate revisions are unrun under the recorded timing approval.
+Complete M0–M3 gates remain required at the final candidate on macOS and Linux
+serenity. No historical failure, later proposal, closure or release is accepted
+by this disposition.
