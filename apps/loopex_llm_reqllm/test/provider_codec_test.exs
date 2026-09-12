@@ -7,6 +7,23 @@ defmodule Loopex.LLM.ReqLLM.ProviderCodecTest do
   @nonce String.duplicate("a", 64)
   @digest String.duplicate("b", 64)
 
+  test "an ambiguous terminal carries its bounded failure category" do
+    control = Map.put(identity_fields(), "status", "not_dispatched")
+    assert {:ok, control_frame} = ProviderCodec.encode(:terminal, control)
+    assert {:ok, :terminal, ^control} = ProviderCodec.decode(control_frame)
+
+    failure = %{"stage" => "stream", "class" => "stream_transport_timeout"}
+
+    payload =
+      Map.merge(identity_fields(), %{
+        "status" => "dispatched_or_unknown",
+        "failure" => failure
+      })
+
+    assert {:ok, frame} = ProviderCodec.encode(:terminal, payload)
+    assert {:ok, :terminal, ^payload} = ProviderCodec.decode(frame)
+  end
+
   test "every closed kind round-trips its exact envelope" do
     handshake = %{"nonce" => @nonce, "version" => 1, "build_manifest_sha256" => @digest}
 
