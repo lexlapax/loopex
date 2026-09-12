@@ -355,8 +355,11 @@ whether the credential was present, so the claim is journalled rather than
 asserted.
 
 Provider failures are bounded before they can carry it anywhere. The companion
-suppresses its raw diagnostics before ReqLLM starts, and the parent receives only
-the classified literal `model_call_failed`, never provider diagnostic text.
+suppresses its raw diagnostics before ReqLLM starts. The host's private guardian
+can also receive a validated finite failure stage/class pair, observable only
+after a valid terminal frame and timely clean end-of-stream. Core and public
+callers retain the classified `model_call_failed` error; provider diagnostic text
+is never forwarded.
 Before Control is asked to authorize the attempt, the coordinator starts a
 dormant lifetime guard under the owner generation's private supervisor.
 The exact permitted worker asks that guard to create a linked callback. Catchable

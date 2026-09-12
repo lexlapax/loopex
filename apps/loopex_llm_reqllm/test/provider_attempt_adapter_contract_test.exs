@@ -1029,6 +1029,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderAttemptAdapterContractTest do
         {%ReqLLM.Error.API.Request{status: 403, headers: secret}, "stream_http_auth"},
         {%ReqLLM.Error.API.Request{status: 429, response_body: secret}, "stream_http_rate_limit"},
         {%ReqLLM.Error.API.Request{status: 503, request_body: secret}, "stream_http_server"},
+        {%ReqLLM.Error.API.Request{status: 599, request_body: secret}, "stream_http_server"},
         {%ReqLLM.Error.API.Request{status: 418, reason: secret}, "stream_http_status"},
         {%Finch.TransportError{reason: :timeout, source: secret}, "stream_transport_timeout"},
         {%Finch.TransportError{reason: {:tls_alert, secret}}, "stream_transport_tls"},
