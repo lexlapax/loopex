@@ -441,15 +441,47 @@ defmodule LoopexComposition.SkillAcquisitionTest do
       write!(Path.join(source, "#{name}/SKILL.md"), skill(name))
       commit = commit!(source)
 
-      assert {:ok, %{"name" => ^name}} =
-               ResourcePacks.add(workspace, source,
-                 workspace_ref: "workspace:test",
-                 state_root: state_root,
-                 rev: commit,
-                 path: name,
-                 git_executable: git,
-                 executor_authorization: {:host_policy, :allow}
-               )
+      result =
+        ResourcePacks.add(workspace, source,
+          workspace_ref: "workspace:test",
+          state_root: state_root,
+          rev: commit,
+          path: name,
+          git_executable: git,
+          executor_authorization: {:host_policy, :allow}
+        )
+
+      diagnostic =
+        if match?({:ok, %{"name" => ^name}}, result) do
+          ""
+        else
+          receipts =
+            state_root
+            |> retained_executor_receipts()
+            |> Enum.filter(fn receipt ->
+              is_binary(receipt.job_id) and
+                String.starts_with?(receipt.job_id, "resource-import-tree-files-")
+            end)
+            |> Enum.take(2)
+            |> Enum.map(fn receipt ->
+              output = receipt.output
+
+              %{
+                job_id: receipt.job_id,
+                outcome: receipt.outcome,
+                bytes: byte_size(output),
+                sha256: Base.encode16(:crypto.hash(:sha256, output), case: :lower),
+                prefix_base64:
+                  Base.encode64(binary_part(output, 0, min(byte_size(output), 4_096)))
+              }
+            end)
+
+          "import=#{name}; selected tree-files receipts=" <>
+            inspect(receipts, limit: 32, printable_limit: 16_384)
+        end
+
+      if diagnostic != "", do: IO.puts(diagnostic)
+      assert {:ok, %{"name" => ^name}} = result
     end)
 
     receipts = retained_executor_receipts(state_root)

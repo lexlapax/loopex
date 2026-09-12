@@ -827,6 +827,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderAttemptAdapterContractTest do
                "STAGE_OK\n",
                "CONTROL_OK\nFINITE_CATEGORIES_OK\n",
                "CONTROL_OK\nFINITE_CATEGORIES_FAILED\n",
+               "CONTROL_OK\nSENSITIVE_CONTENT_RETAINED\n",
                "FINITE_CATEGORIES_FAILED\n",
                "CONTROL_PREFLIGHT_REFUSED\n",
                "CONTROL_UNKNOWN\n",
@@ -1050,6 +1051,17 @@ defmodule Loopex.LLM.ReqLLM.ProviderAttemptAdapterContractTest do
         exception = %ReqLLM.Error.API.Stream{cause: cause, reason: secret}
         expected = {:error, {:dispatched_or_unknown, "model_call_failed"}, %{"stage" => "stream", "class" => class}}
         ^expected = invoke.(fn _ -> raise exception end)
+        response = %{stream: Stream.map([1], fn _ -> raise exception end)}
+        {:error, {:stream_interrupted, "model_call_failed"}} =
+          Loopex.LLM.ReqLLM.reply_from_stream(response, %{}, %{}, fn _ -> :ok end)
+        # Inspect every dictionary key/value through an uncompressed term encoding.
+        # Only the boolean match verdict can leave this owned synthetic child.
+        retained_sensitive_content =
+          :binary.match(:erlang.term_to_binary(Process.get()), secret) != :nomatch
+        if retained_sensitive_content do
+          IO.puts("SENSITIVE_CONTENT_RETAINED")
+          System.halt(1)
+        end
       end
       for {action, class} <- [
         {fn -> raise secret end, "raised"},

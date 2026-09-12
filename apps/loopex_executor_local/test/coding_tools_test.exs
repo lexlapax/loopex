@@ -5521,7 +5521,7 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     assert script =~ "while IFS= read -r control"
 
     assert script =~
-             ~r/command_pid=\$!\n\s+trap '' TERM\n\s+wait "\$command_pid"\n\s+command_status=\$\?/
+             ~r/command_pid=\$!\n\s+trap '' TERM\n\s+wait "\$command_pid" 2>\/dev\/null\n\s+command_status=\$\?/
 
     assert script =~
              ~S|"$token" "$command_status"|,
@@ -5619,6 +5619,172 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     assert source =~
              ~r/defp launch_guard_exit_proved\?.*?:release_sent ->\s+is_integer\(collector\.command_status\) and status == 0.*?:kill_sent ->\s+status != 0.*?_missing_transition ->\s+false/s,
            "normal release is not status-bound, or an unowned guard exit is treated as proof"
+  end
+
+  test "release wait diagnostics never become completed command output" do
+    # Concept: internal reaping diagnostics are not command stdout or stderr.
+    # Technical depth: use the emitted production program, pausing its wrapper
+    # after status publication so owned wrapper death before release is certain.
+    # This proves the guard stream boundary, not the historical import failure.
+    root = workspace()
+    fifo = Path.join(root, "wrapper-pause")
+    assert {"", 0} = System.cmd("/usr/bin/mkfifo", [fifo])
+    expected = "fixture-row\tSKILL.md" <> <<0>> <> "command-stderr\n"
+    command = "printf 'fixture-row\\tSKILL.md\\0'; printf 'command-stderr\\n' >&2"
+    {launcher, vector} = Local.launcher_vector(%{command: command})
+    script_index = Enum.find_index(vector, &(&1 == "loopex-port-carrier")) + 1
+    script = Enum.at(vector, script_index)
+    assert length(String.split(script, ~S|exit "$command_status"|)) == 2
+
+    paused =
+      String.replace(
+        script,
+        ~S|exit "$command_status"|,
+        "IFS= read -r diagnostic_pause < #{shell_path(fifo)}\n" <> ~S|exit "$command_status"|,
+        global: false
+      )
+
+    vector = List.replace_at(vector, script_index, paused)
+
+    port =
+      Port.open(
+        {:spawn_executable, String.to_charlist(launcher)},
+        [
+          :binary,
+          :exit_status,
+          :use_stdio,
+          :stderr_to_stdout,
+          :hide,
+          args: Enum.map(vector, &String.to_charlist/1),
+          cd: String.to_charlist(root)
+        ]
+      )
+
+    on_exit(fn -> close_test_port(port) end)
+    {:os_pid, carrier} = Port.info(port, :os_pid)
+    token = "release-wait-case"
+    assert Port.command(port, "loopex-init:#{token}\nloopex-run:#{token}\n")
+    stop = System.monotonic_time(:millisecond) + 5_000
+
+    {:ready, bytes} =
+      guard_wait_bytes(port, <<>>, stop, fn bytes ->
+        String.contains?(bytes, ":status:0\n") and
+          Regex.match?(~r/:wrapper:\d+\n/, bytes)
+      end)
+
+    [_, group_text, guard_text] =
+      Regex.run(~r/\Aloopex-guard:release-wait-case:(\d+):(\d+)\n/, bytes)
+
+    assert String.to_integer(group_text) == carrier
+    [_, wrapper_text] = Regex.run(~r/:wrapper:(\d+)\n/, bytes)
+    # Opening the FIFO writer synchronizes with the wrapper's blocked reader.
+    {:ok, hold} = File.open(fifo, [:write])
+
+    try do
+      {table, 0} = System.cmd("/bin/ps", ["-p", wrapper_text, "-o", "ppid=,pgid="])
+      assert String.split(table) == [guard_text, group_text]
+      assert {"", 0} = System.cmd("/bin/kill", ["-KILL", wrapper_text])
+      assert Port.command(port, "loopex-release:#{token}\n")
+
+      assert {:exit, 0, complete} =
+               guard_wait_bytes(port, bytes, System.monotonic_time(:millisecond) + 5_000, fn _ ->
+                 false
+               end)
+
+      assert {:ok, ^carrier} =
+               await_path(
+                 fn -> if process_group_empty?(carrier), do: {:ok, carrier}, else: :error end,
+                 5_000
+               )
+
+      output =
+        complete
+        |> String.replace(~r/\Aloopex-guard:release-wait-case:\d+:\d+\n/, "", global: false)
+        |> String.replace(
+          ~r/\nloopex-command-status:release-wait-case:(?:wrapper:\d+|status:0)\n/,
+          ""
+        )
+
+      assert output == expected
+    after
+      File.close(hold)
+      close_test_port(port)
+    end
+  end
+
+  test "command wait diagnostics preserve signalled status without polluting tool output" do
+    root = workspace()
+    expected = "signalled-row\tSKILL.md" <> <<0>> <> "command-stderr\n"
+
+    command =
+      "printf 'signalled-row\\tSKILL.md\\0'; printf 'command-stderr\\n' >&2; kill -KILL $$"
+
+    {launcher, vector} = Local.launcher_vector(%{command: command})
+
+    port =
+      Port.open(
+        {:spawn_executable, String.to_charlist(launcher)},
+        [
+          :binary,
+          :exit_status,
+          :use_stdio,
+          :stderr_to_stdout,
+          :hide,
+          args: Enum.map(vector, &String.to_charlist/1),
+          cd: String.to_charlist(root)
+        ]
+      )
+
+    on_exit(fn -> close_test_port(port) end)
+    {:os_pid, carrier} = Port.info(port, :os_pid)
+    token = "command-wait-case"
+    assert Port.command(port, "loopex-init:#{token}\nloopex-run:#{token}\n")
+
+    {:ready, bytes} =
+      guard_wait_bytes(port, <<>>, System.monotonic_time(:millisecond) + 5_000, fn bytes ->
+        String.contains?(bytes, ":status:137\n") and Regex.match?(~r/:wrapper:\d+\n/, bytes)
+      end)
+
+    [_, group_text] = Regex.run(~r/\Aloopex-guard:command-wait-case:(\d+):\d+\n/, bytes)
+    assert String.to_integer(group_text) == carrier
+    assert Port.command(port, "loopex-release:#{token}\n")
+
+    assert {:exit, 0, complete} =
+             guard_wait_bytes(port, bytes, System.monotonic_time(:millisecond) + 5_000, fn _ ->
+               false
+             end)
+
+    assert {:ok, ^carrier} =
+             await_path(
+               fn -> if process_group_empty?(carrier), do: {:ok, carrier}, else: :error end,
+               5_000
+             )
+
+    output =
+      complete
+      |> String.replace(~r/\Aloopex-guard:command-wait-case:\d+:\d+\n/, "", global: false)
+      |> String.replace(
+        ~r/\nloopex-command-status:command-wait-case:(?:wrapper:\d+|status:137)\n/,
+        ""
+      )
+
+    assert output == expected
+  end
+
+  defp guard_wait_bytes(port, bytes, stop, ready?) do
+    assert byte_size(bytes) <= 8_192, "guard boundary output exceeded its fixture bound"
+
+    if ready?.(bytes) do
+      {:ready, bytes}
+    else
+      receive do
+        {^port, {:data, chunk}} -> guard_wait_bytes(port, bytes <> chunk, stop, ready?)
+        {^port, {:exit_status, status}} -> {:exit, status, bytes}
+      after
+        max(stop - System.monotonic_time(:millisecond), 0) ->
+          flunk("guard boundary did not reach its synchronized terminal state")
+      end
+    end
   end
 
   test "a malformed control message makes the live guard reap its admitted group" do
