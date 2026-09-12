@@ -2254,3 +2254,53 @@ implementation still requires acceptance of the exact M3 Amendment 1 proposal
 and its direct rebind. This accepts no unseen amendment, waives no failure,
 authorizes no additional supplemental provider call and grants no M3 closure,
 product integration to `main`, tag or release.
+
+<a id="override-disposition-m3-unaccepted-amendment-replacement-2026-09-11"></a>
+### M3 unaccepted amendment replacement — 2026-09-11
+
+The implementer identified an enforcement defect in the published, unaccepted
+M3 Amendment 1 proposal at
+`78610277fd102e549ed9a71e73d3ed2967fc2075`: the status checker required a prior
+plan citation as well as the independently reviewed standalone approval record.
+The contract requires the record to predate dependent work; the record already
+exists at `397031d10353a4b3aef177943b2e4c45aef0fb0a`.
+
+The implementer explained:
+
+> Because the faulty proposal is already pushed, replacing it will need your approval after the repair is concrete and reviewed.
+
+The maintainer answered **"I approve replacement"**. Under
+[the explicit maintainer override](../../AGENTS.md#maintainer-override), this is
+one exception to the ordinary-fast-forward requirement retained in the
+[M3 implementation completion disposition](#disposition-m3-implementation-completion-2026-09-11).
+It authorizes replacing that unaccepted proposal on `m3` and `origin/m3` with
+the reviewed checker correction, this standalone disposition and a recreated
+documentation-only Amendment 1 proposal above unchanged accepted ADR transition
+`b5f9a4bf46f8e8a65b5fffd87f72327954742f4e`. All previously accepted candidates
+and their evidence remain unchanged and reachable. `main` and `m4` are untouched.
+
+The correction admits a first citation only on an already-Accepted single-parent
+lineage with an unchanged Acceptance record and a unique override anchor in
+that same parent. Existing missing/duplicate-anchor, same-commit authority,
+initial-acceptance and split-parent laundering refusals remain required.
+Focused tests must reproduce the false refusal, prove this valid case and retain
+the existing negative guarantees. Independently review the exact correction
+and this disposition before replacement. The recreated proposal must pass its
+focused checks apart from the expected stale M3 binding; full gates retain the
+approved end-only cadence and are not reported as passed here.
+
+The original proposal and complete ancestors are retained in a verified Git
+bundle, SHA-256
+`eb0a3848e7c83b3cd778e593250451fb9c1f0f4dbd25eb740efe09f9450c002f`,
+with the failed bootstrap and passing component evidence in the maintainer's
+review archive. The original bootstrap log SHA-256 is
+`c804bdf4989961ac132b1148a0153ea040dcd047a7533eaceb5fe7614acc89ee`.
+Those results keep their original source attribution and are not waived.
+
+Use an exact remote lease against
+`78610277fd102e549ed9a71e73d3ed2967fc2075`; refuse the replacement if the remote
+has advanced. Verify a clean local `m3` at that same original tip before moving
+it. This authorizes this replacement only; later pushes use ordinary
+fast-forwards. It does not accept the recreated amendment, relax the direct
+proposal/rebind sequence, authorize diagnostic implementation before that
+acceptance, or grant M3 closure, product integration to `main`, tag or release.
