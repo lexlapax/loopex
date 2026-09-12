@@ -2217,3 +2217,40 @@ amendment acceptance, M3 closure, product integration to `main`, tag or release.
 
 This commit adds only this disposition. An independent read-only reviewer must
 examine its exact SHA before dependent work relies on the timing exception.
+
+<a id="disposition-adr-0029-acceptance-2026-09-11"></a>
+### ADR 0029 acceptance — 2026-09-11
+
+The maintainer was asked:
+
+> Do you accept ADR 0029—the bounded provider failure diagnostics proposal—at reviewed and pushed m3 SHA 25fcb94de0d980c3724377670b25cbd14fe638ec? Your design choice is already recorded; this accepts the exact document pair.
+
+The offered choices were **"Accept ADR 0029 (Recommended)"** and
+**"Keep ADR 0029 Proposed"**. A second question concerned the amendment's
+full-gate timing. After requesting and receiving the essence of the ADR, the
+maintainer answered **"Accept both"**. The second decision is retained in the
+separately committed
+[timing disposition](#override-disposition-m3-amendment1-gate-cadence-2026-09-11).
+
+This accepts the exact Proposed
+[ADR 0029 Concept](../adr/0029-bounded-provider-failure-diagnostics.md#concept)
+and [Technical depth](../adr/0029-bounded-provider-failure-diagnostics-technical.md#technical-depth)
+pair at `25fcb94de0d980c3724377670b25cbd14fe638ec`, with Concept SHA-256
+`12a1138603733aa7e71770b00460339569f149fc4332defc3cd60e3712d5a7d1`
+and Technical SHA-256
+`4cb088578dce875fe2c577282242b61bb98c6f8f9b384f1ad4be09bbb101f1e4`.
+Independent exact-SHA review cleared that candidate, and its canonical status
+check passed with unchanged clean source. The reviewed timing-only disposition
+is its own intervening commit; it is not the ADR's bound candidate.
+
+This administrative transition changes only the Concept status and Acceptance
+row, this new disposition and derived ADR index statuses. It preserves both
+decision texts and all ADR 0019 accepted bytes. The historical Proposed pair's
+acceptance-pending explanation describes its preparation state; this record
+and its completed Acceptance row supply the subsequent authority.
+
+The decision permits the bounded private category contract it specifies;
+implementation still requires acceptance of the exact M3 Amendment 1 proposal
+and its direct rebind. This accepts no unseen amendment, waives no failure,
+authorizes no additional supplemental provider call and grants no M3 closure,
+product integration to `main`, tag or release.

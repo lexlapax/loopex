@@ -3,7 +3,7 @@
 
 Technical depth: [Bounded provider failure diagnostics](0029-bounded-provider-failure-diagnostics-technical.md#technical-depth).
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-09-11
 - **Decision owner:** Maintainer
 - **Supersedes:** 0019, only its closed ambiguous-terminal fields and restriction on host observation of child diagnostics, as specified below
@@ -112,4 +112,4 @@ Technical depth: [Authority and scope](0029-bounded-provider-failure-diagnostics
 
 | Decision | Authority | Authority evidence | Bound bytes |
 | --- | --- | --- | --- |
-| Acceptance | — | — | — |
+| Acceptance | Maintainer | [disposition](../developer/agent-context-map.md#disposition-adr-0029-acceptance-2026-09-11) | candidate `25fcb94de0d980c3724377670b25cbd14fe638ec`; concept `sha256:12a1138603733aa7e71770b00460339569f149fc4332defc3cd60e3712d5a7d1`; technical `sha256:4cb088578dce875fe2c577282242b61bb98c6f8f9b384f1ad4be09bbb101f1e4` |
