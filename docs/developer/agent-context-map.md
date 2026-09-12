@@ -2393,3 +2393,83 @@ Later pushes use ordinary fast-forwards. Fresh final macOS and Linux gates
 must name the resulting candidate and retain the approved end-only cadence.
 This approval grants no historical-failure disposition, M3 closure, product
 integration to `main`, tag or release. `main` and `m4` remain unchanged.
+
+<a id="override-disposition-m3-selector-diagnostics-2026-09-12"></a>
+### M3 shared-selector diagnostics repair — 2026-09-12
+
+The maintainer was asked:
+
+> Approve the reviewed diagnostics patch d2bfe33c46ff83c97fb80ff4406c78c37e1d878739854af03f26cc65a8e7c1c8, its M1/M2/M3 binding updates, and the named exception to M2’s requirement to keep the old M1 runner bytes? I recommend using focused checks during these three updates and reserving the complete M0–M3 gates for the final candidate on macOS and Linux. Authorize the independent reviewer (/root/m3_independent_review) to accept only exact commits matching this patch and the listed binding changes, with your permission recorded and independently reviewed before editing. Each milestone keeps its separate sequential update and exact-commit review; deviations stop for your decision. This does not waive any failure or authorize ADR changes, closure, merge to main, or release.
+
+The maintainer answered **"Approve repair, final-only gates, and limited delegation (Recommended)"**.
+
+Under [the explicit maintainer override](../../AGENTS.md#maintainer-override),
+this approves the exact external patch with SHA-256
+`d2bfe33c46ff83c97fb80ff4406c78c37e1d878739854af03f26cc65a8e7c1c8`
+against `5c74164deb610016854a2a77ce79d650d269c669`. The reviewed decision packet
+has SHA-256 `22abae8ddbbf8910e7e00c7eb559fb69cc00f809a684451808ac529b796b0ac3`.
+The immutable proposal and focused evidence are retained in the maintainer's
+`loopex-reviews/m3-selector-diagnostics-proposal-5c74164-ps9qhhkh` archive,
+whose manifest SHA-256 is
+`f1f79d054c384ea07a22818aad826ef07725ce5b4ab3ffb5af2d567abcf96e1a`.
+That archive predates this approval and correctly remains labelled a proposal.
+
+The repair changes only failure diagnostics in `scripts/m1-exunit-runner.exs`
+and adds two synthetic tests in its existing
+`apps/loopex/test/m1_exunit_runner_test.exs` corpus. Failure output retains the
+invocation mode and seed, bounded failed-case identifiers and source locations,
+and closed error categories and operand types. It retains at most eight event
+records, two failure summaries per record and 4,096 bytes per detail line, with
+explicit omitted counts. It excludes arbitrary messages, assertion values or
+expressions, provider bodies, captured logs and stack arguments. Ambiguous
+external source paths remain unavailable. The existing five corpus cases,
+authoritative success output and digest inputs, required counts and exclusions,
+real-provider paths and exit predicates remain unchanged.
+
+The named holders and binding work are:
+
+| Holder | Approved replacement bindings |
+| --- | --- |
+| Closed `M1` | Shared runner and corpus, their embedded digests in `scripts/check-m1-gate.sh`, and that script's own Bound Artifacts row; one additive gate generation in `M1.md` and the next amendment in `M1-gate.md`. |
+| Closed `M2` | Shared runner and corpus, their embedded digests in `scripts/check-m2-gate.sh`, and that script's own Bound Artifacts row; one additive gate generation in `M2.md` and the next amendment in `M2-gate.md`. |
+| Accepted `M3` | The two shared rows in `M3-gate.md`, the next amendment and its acceptance rebind in `M3.md`; only conforming explanation in the plan pair where needed to describe these diagnostics. |
+
+The continuing requirement in [M2's gate](../plans/M2-gate.md) to retain the
+exact shared runner and corpus bytes that M1 closed with is replaced, for this
+M3 repair only, by the exact reviewed diagnostic bytes and these per-holder
+bindings. Historical Acceptance and Closure records remain unchanged and true
+for their revisions. M0 has no direct binding to either changed shared file.
+
+This record lands alone and receives an independent exact-SHA review before
+any dependent edit. Then complete M1, M2 and M3 in that order. M1 and M2 each
+use their own Closed-gate generation proposal and immediate one-parent rebind;
+M3 uses its own Accepted-plan amendment proposal and immediate one-parent
+rebind. Every proposal and rebind retains its independent exact-SHA review
+and each holder's status validation before the next holder proceeds. Binding
+checks at a proposal must identify the expected pending or stale binding;
+unsettled other holders are not reported as passing. Every holder must be
+settled before final qualification.
+
+For these three transactions only, focused checks replace full-gate runs at
+proposal and rebind checkpoints. Validate exact patch identity, the owning
+diagnostic corpus, unchanged success-report semantics, script syntax and
+digests, and the applicable status and binding rules. The copied seven-case
+corpus already passed at seed 3107 on Elixir 1.20.3 / OTP 29 and Elixir 1.17.0 /
+OTP 26; retain its exact commands and artifact hashes with the proposal.
+These focused results do not count as final-source qualification. Run the
+complete M0–M3 gates once the final candidate is complete, on macOS and Linux
+serenity. Required pass criteria and the obligation to resolve failures remain.
+
+The independently recorded delegate is **`/root/m3_independent_review`**.
+Its acceptance scope is only actual, exact proposal commits matching the
+approved patch, the binding inventory above and this validation timing. It
+must review each existing proposal SHA and explicitly accept that SHA before
+its rebind; this is no advance acceptance. Each rebind records that acceptance
+in one fresh disposition. The implementer may not supply the delegate's
+decision. Deviations stop for the maintainer's decision.
+
+This approval waives no historical or future failure, changes no ADR decision
+or product contract, and grants no additional supplemental provider call,
+M3 closure, product integration to `main`, tag or release. The lost details of
+the Linux M1 failure at `5c74164deb610016854a2a77ce79d650d269c669` remain
+unavailable; later diagnostic evidence cannot assign its cause retroactively.
