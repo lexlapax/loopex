@@ -2573,3 +2573,37 @@ these intermediate revisions are unrun under the recorded timing approval.
 Complete M0–M3 gates remain required at the final candidate on macOS and Linux
 serenity. No historical failure, later proposal, closure or release is accepted
 by this disposition.
+
+<a id="disposition-m2-gate-generation-10-2026-09-12"></a>
+### M2 gate generation 10 acceptance — 2026-09-12
+
+Under the [recorded maintainer delegation](#override-disposition-m3-selector-diagnostics-2026-09-12),
+delegate **`/root/m3_independent_review`**, named `m3_independent_review` in the
+generation table, independently reviewed exact proposal `1897d402a906212cc7c4118218352e4df9624591`
+and explicitly stated:
+
+> I explicitly ACCEPT M2 gate generation 10 proposal A 1897d402a906212cc7c4118218352e4df9624591, gate SHA-256 4c0ee04ab5d7838b6a38adeac81689749d9ba530cd6499c2ec3d4866f2bae864.
+
+The proposal changes exactly the three reviewed M2 paths. The shared runner and
+corpus retain the bytes settled by [M1 generation 9](#disposition-m1-gate-generation-9-2026-09-12).
+Only the approved diagnostics exception replaces M2's continuing old-M1-byte
+restriction. Historical Acceptance, Closure and Amendments 1–9 are preserved.
+The immediate one-parent rebind completes only generation 10 and adds this fresh
+disposition; it changes no gate or bound artifact.
+
+M1's reviewed rebind `7aebf6a3ecc8237e42aa7088a04480a6751542b3` completed
+its real-history status check before this proposal, with M2 and M3 explicitly
+pending. Its exit was 0 in 793.108 seconds, with log SHA-256
+`016762860ec9b141faea29ce89a7a08860ce2689d455ab762973352e763e704f`.
+At this M2 proposal, focused checks verified six bound artifacts, links, pairing,
+unchanged historical records, and the exact pending-generation-10 refusal.
+They exited 1 in 9.838 seconds with `global_pass=false`; the log SHA-256 is
+`047eb13baf11de2c4d2bf9566898726da83bcd2e4f1a4a18ccc54033af15edae`.
+Unchanged corpus evidence retains its original source attribution.
+
+Before M3 proceeds, this rebind requires complete real-history M2-scoped status
+validation identifying M3 as pending, plus independent exact-transition review.
+Full gates at these intermediate revisions are unrun under the recorded timing
+approval. Complete M0–M3 gates remain required at the final candidate on macOS
+and Linux serenity. This disposition waives no historical failure and accepts
+no later proposal, closure or release.
