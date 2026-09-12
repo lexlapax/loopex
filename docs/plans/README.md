@@ -22,9 +22,9 @@ integrated product baseline.
 | --- | --- |
 | Integrated phase | Closed milestone product baseline |
 | Last closed product checkpoint | `M2` — 2026-09-03 |
-| Blockers | None for `M3` delivery; `M4` acceptance, integration, and product implementation wait until `M3` closes and the Open candidate is refreshed and independently reviewed on that closed base; `M4` additionally waits on ADR 0023, ADR 0024, ADR 0026, and ADR 0028 |
+| Blockers | None for `M3` delivery; `M4` acceptance, integration, and product implementation wait until `M3` closes and the Open candidate is refreshed and independently reviewed on that closed base; `M4` additionally waits on ADR 0023, ADR 0024, ADR 0026, ADR 0028, and ADR 0029 |
 | Authorized work | Implementation inside the accepted `M3` envelopes and locked gate on its designated milestone branch; planning, gate construction, and review for Open `M4`; no milestone product bytes integrate before closure and no `M4` product implementation |
-| Next maintainer decision | None until `M3` is ready for independent review; `M4` cannot be accepted before `M3` closes; `M4` also waits on [ADR 0023](../adr/0023-experimental-public-session-protocol.md#concept), [ADR 0024](../adr/0024-durable-interaction-lifecycle-and-host-policy-authority.md#concept), [ADR 0026](../adr/0026-development-floor-refresh.md#concept), and [ADR 0028](../adr/0028-bounded-artifact-retrieval.md#concept), which are not accepted |
+| Next maintainer decision | None until `M3` is ready for independent review; `M4` cannot be accepted before `M3` closes; `M4` also waits on [ADR 0023](../adr/0023-experimental-public-session-protocol.md#concept), [ADR 0024](../adr/0024-durable-interaction-lifecycle-and-host-policy-authority.md#concept), [ADR 0026](../adr/0026-development-floor-refresh.md#concept), [ADR 0028](../adr/0028-bounded-artifact-retrieval.md#concept), and [ADR 0029](../adr/0029-observability-tracing-and-telemetry.md#concept), which are not accepted |
 | Next transition | Turn the locked `M3` gate green, move `M3` to In progress and then In review with cleared independent review, and close it; then refresh and independently review `M4` on that closed base |
 | Validation | `bash scripts/check-bootstrap.sh` |
 <!-- loopex:current-status:end -->

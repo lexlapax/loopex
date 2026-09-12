@@ -119,7 +119,8 @@ defmodule Loopex.Checks.Register do
       {"docs/adr/0023-experimental-public-session-protocol.md", "ADR 0023"},
       {"docs/adr/0024-durable-interaction-lifecycle-and-host-policy-authority.md", "ADR 0024"},
       {"docs/adr/0026-development-floor-refresh.md", "ADR 0026"},
-      {"docs/adr/0028-bounded-artifact-retrieval.md", "ADR 0028"}
+      {"docs/adr/0028-bounded-artifact-retrieval.md", "ADR 0028"},
+      {"docs/adr/0029-observability-tracing-and-telemetry.md", "ADR 0029"}
     ]
   }
 

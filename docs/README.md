@@ -70,6 +70,7 @@ pairing, link, review, code-documentation, and enforcement contracts.
 | 0026 — development floor refresh | [Decision](adr/0026-development-floor-refresh.md#concept) | [Technical depth](adr/0026-development-floor-refresh-technical.md#technical-depth) |
 | 0027 — provider permit retirement | [Decision](adr/0027-provider-permit-retirement.md#concept) | [Technical depth](adr/0027-provider-permit-retirement-technical.md#technical-depth) |
 | 0028 — bounded artifact retrieval | [Decision](adr/0028-bounded-artifact-retrieval.md#concept) | [Technical depth](adr/0028-bounded-artifact-retrieval-technical.md#technical-depth) |
+| 0029 — observability: tracing and telemetry | [Decision](adr/0029-observability-tracing-and-telemetry.md#concept) | [Technical depth](adr/0029-observability-tracing-and-telemetry-technical.md#technical-depth) |
 
 An ADR pair is one decision. Its status and governance record live in the
 Concept file and bind both files when accepted.

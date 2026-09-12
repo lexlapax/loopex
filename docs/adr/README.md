@@ -38,6 +38,7 @@ a decision adds a new record rather than rewriting the old one.
 | 0026 | Development floor refresh | Proposed | [Decision](0026-development-floor-refresh.md#concept) | [Technical depth](0026-development-floor-refresh-technical.md#technical-depth) |
 | 0027 | Provider permit retirement | Accepted | [Decision](0027-provider-permit-retirement.md#concept) | [Technical depth](0027-provider-permit-retirement-technical.md#technical-depth) |
 | 0028 | Bounded artifact retrieval | Proposed | [Decision](0028-bounded-artifact-retrieval.md#concept) | [Technical depth](0028-bounded-artifact-retrieval-technical.md#technical-depth) |
+| 0029 | Observability: tracing and telemetry | Proposed | [Decision](0029-observability-tracing-and-telemetry.md#concept) | [Technical depth](0029-observability-tracing-and-telemetry-technical.md#technical-depth) |
 
 0001 and 0002 were the prerequisites that unblocked the first milestone
 candidate; the [plans register](../plans/README.md) records current status.

@@ -92,7 +92,7 @@ defmodule Loopex.M4GateSupportTest do
   test "the final report grammar rejects missing duplicated reordered and malformed fields" do
     line =
       "LOOPEX_M4_GATE_REPORT source=#{String.duplicate("a", 40)} gate=sha256:#{String.duplicate("b", 64)} " <>
-        "version=0.1.0 role=full seed=3107 outcome_ids=1,2,3,4,5,6 selectors=10 elapsed_seconds=4200 " <>
+        "version=0.1.0 role=full seed=3107 outcome_ids=1,2,3,4,5,6,7 selectors=10 elapsed_seconds=4200 " <>
         "elixir=1.20.3 otp=29.0.5 erts=17.0.5 platform=aarch64-apple-darwin25.6.0 node=22.12.0 " <>
         "python=3.12.4 clients=sha256:#{String.duplicate("c", 64)} schema=sha256:#{String.duplicate("e", 64)} " <>
         "inherited=true real_workflow=true result=PASS"

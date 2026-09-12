@@ -127,6 +127,28 @@
           ]
         }
       ]
+    },
+    %{
+      id: 7,
+      selectors: [
+        %{
+          path: "apps/loopex/test/trace_session_test.exs",
+          names: [
+            "a runtime owned session traces only allowed modules and owned processes and leaves a second VM tracer unaffected",
+            "each trace level reports its documented fields and the arguments level redacts credential references model content tool arguments and artifact bytes",
+            "trace limits drop with a counted entry and never block a coordinator",
+            "no session command client content model output project resource or wire request starts changes or stops a session and stop releases every flag",
+            "a release without trace sessions reports unavailability and never falls back to global tracing"
+          ]
+        },
+        %{
+          path: "apps/loopex/test/telemetry_boundary_test.exs",
+          names: [
+            "every port and transaction boundary emits start stop or exception spans with durations and only documented metadata",
+            "a crashing telemetry handler is isolated and emission with no handler stays within the measured overhead"
+          ]
+        }
+      ]
     }
   ],
   real: %{

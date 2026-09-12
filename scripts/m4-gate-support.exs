@@ -8,7 +8,7 @@ Code.require_file("m3-gate-support.exs", __DIR__)
 defmodule Loopex.M4Gate.Support do
   alias Loopex.M3Gate.Support, as: Shared
 
-  @all [1, 2, 3, 4, 5, 6]
+  @all [1, 2, 3, 4, 5, 6, 7]
   @selector ~r/\Aapps\/[a-z][a-z0-9_]*\/test\/[A-Za-z0-9_.\/-]+_test\.exs\z/
   @real_path "apps/loopex_app_server/test/external_workflow_real_test.exs"
 
@@ -26,6 +26,10 @@ defmodule Loopex.M4Gate.Support do
   defp outcome("apps/loopex_store_local/test/artifact_transfer_test.exs"), do: [4]
   defp outcome("apps/loopex_protocol/test/public_schema_conformance_test.exs"), do: [6]
   defp outcome("apps/loopex/test/m4_gate_support_test.exs"), do: [6]
+  defp outcome("apps/loopex/test/trace_session_test.exs"), do: [7]
+  defp outcome("apps/loopex/test/telemetry_boundary_test.exs"), do: [7]
+  defp outcome("apps/loopex/lib/loopex/trace" <> _), do: [7]
+  defp outcome("apps/loopex/lib/loopex/telemetry" <> _), do: @all
   # Concept: shared contract, store and server paths select every outcome that
   # can observe them; only leaf test files select one outcome.
   defp outcome("apps/loopex/lib/loopex/runtime/interaction" <> _), do: [2, 3, 5]
@@ -49,7 +53,7 @@ defmodule Loopex.M4Gate.Support do
 
     ensure(
       is_list(data.outcomes) and Enum.map(data.outcomes, & &1.id) == @all,
-      "outcome manifest must cover 1 through 6 once in order"
+      "outcome manifest must cover 1 through 7 once in order"
     )
 
     for row <- data.outcomes do
@@ -207,7 +211,7 @@ defmodule Loopex.M4Gate.Support do
     {"version", ~r/\A\d+\.\d+\.\d+\z/},
     {"role", ~r/\Afull\z/},
     {"seed", ~r/\A3107\z/},
-    {"outcome_ids", ~r/\A1,2,3,4,5,6\z/},
+    {"outcome_ids", ~r/\A1,2,3,4,5,6,7\z/},
     {"selectors", ~r/\A[1-9]\d*\z/},
     {"elapsed_seconds", ~r/\A\d+\z/},
     {"elixir", ~r/\A\d+\.\d+\.\d+(-[0-9A-Za-z.]+)?\z/},
