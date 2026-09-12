@@ -215,7 +215,9 @@ defmodule Loopex.Checks.History do
   # prefix invoke this rule. Every such local target must contain the visible
   # anchor exactly once at the accepted revision and in every direct parent that
   # already cites that same override. At least one parent must carry both the
-  # citation and anchor. That admits an ordinary integration merge whose unrelated
+  # citation and anchor, except a first citation in a single-parent Accepted
+  # lineage with unchanged completed Acceptance and the anchor already present
+  # in that same parent. That admits an ordinary integration merge whose unrelated
   # main parent predates the milestone, while preventing an unrelated parent from
   # laundering a citation whose own lineage lacks the standalone record. The
   # committed walk resolves targets from Git; the synthetic working-tree child
@@ -237,14 +239,22 @@ defmodule Loopex.Checks.History do
             |> Enum.member?({target, fragment})
           end)
 
-        if citing_parents == [] do
+        record_parents =
+          if citing_parents == [] and
+               unchanged_accepted_parent?(name, state, revision, parents, governed, resolve_file) do
+            parents
+          else
+            citing_parents
+          end
+
+        if record_parents == [] do
           raise Invalid,
                 "#{@index} at #{revision}: `#{name}` cites override disposition " <>
                   "#{target}##{fragment}, but no parent carries both the prior citation " <>
                   "and standalone record"
         end
 
-        Enum.each(citing_parents, fn parent ->
+        Enum.each(record_parents, fn parent ->
           require_override_anchor!(target, fragment, parent, name, governed, resolve_file,
             transition: revision
           )
@@ -254,6 +264,27 @@ defmodule Loopex.Checks.History do
 
     :ok
   end
+
+  defp unchanged_accepted_parent?(name, "Accepted", revision, [parent], governed, resolve_file)
+       when is_function(resolve_file, 2) do
+    path = "docs/plans/#{name}.md"
+    current = Map.get(governed, path)
+    prior = resolve_file.(parent, path)
+    parent_documents = override_parent_documents(parent, name, resolve_file)
+    parent_rows = register_rows(resolve_file.(parent, @index), parent, false, parent_documents)
+
+    if parent_rows != nil and {name, "Accepted"} in parent_rows and
+         plan_accepted?(current, path, revision) and plan_accepted?(prior, path, parent) do
+      {current_rows, _, _} = Records.governance_records(current, "#{path} at #{revision}")
+      {prior_rows, _, _} = Records.governance_records(prior, "#{path} at #{parent}")
+      hd(current_rows) == hd(prior_rows)
+    else
+      false
+    end
+  end
+
+  defp unchanged_accepted_parent?(_name, _state, _revision, _parents, _governed, _resolve_file),
+    do: false
 
   defp override_parent_documents(parent, name, resolve_file) do
     Map.new(

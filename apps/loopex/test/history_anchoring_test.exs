@@ -1483,6 +1483,95 @@ defmodule Loopex.HistoryAnchoringTest do
     |> Map.put(@context_path, context)
   end
 
+  defp first_override_citation_files do
+    plan = Fixture.plan(governed: true) |> String.replace("M0", "M3")
+    before = "# Context map\n"
+    recorded = before <> "\n<a id=\"#{@override_anchor}\"></a>\nReviewed override.\n"
+
+    original =
+      m3_prerequisite_files("Accepted", nil, :link)
+      |> Map.put("docs/plans/M3.md", plan)
+      |> Map.put(@context_path, before)
+
+    standalone = Map.put(original, @context_path, recorded)
+
+    cited =
+      Map.update!(standalone, "docs/plans/M3.md", fn text ->
+        String.replace(
+          text,
+          "One direct workstream.",
+          "One direct workstream. [Override](../developer/agent-context-map.md##{@override_anchor})."
+        )
+      end)
+
+    {original, standalone, cited}
+  end
+
+  test "an already Accepted milestone may first cite a prior standalone override" do
+    {original, standalone, cited} = first_override_citation_files()
+
+    assert :ok ==
+             prerequisite_history([
+               {sha("a"), [], original},
+               {sha("b"), [sha("a")], standalone},
+               {sha("c"), [sha("b")], cited}
+             ])
+  end
+
+  test "a first Accepted override citation cannot borrow or create its approval record" do
+    {original, standalone, cited} = first_override_citation_files()
+
+    assert_raise Invalid, ~r/first added by that transition/, fn ->
+      prerequisite_history([{sha("a"), [], original}, {sha("c"), [sha("a")], cited}])
+    end
+
+    duplicate = Map.update!(standalone, @context_path, &(&1 <> &1))
+
+    assert_raise Invalid, ~r/parent .* carries 2 anchors; one reviewed standalone record/, fn ->
+      prerequisite_history([{sha("a"), [], duplicate}, {sha("c"), [sha("a")], cited}])
+    end
+
+    initial = Map.put(standalone, @index_path, prerequisite_index([{"M3", "Open"}]))
+
+    assert_raise Invalid, ~r/no parent carries both the prior citation/, fn ->
+      prerequisite_history([{sha("a"), [], initial}, {sha("c"), [sha("a")], cited}])
+    end
+
+    assert_raise Invalid, ~r/no parent carries both the prior citation/, fn ->
+      prerequisite_history([
+        {sha("a"), [], original},
+        {sha("b"), [sha("a")], standalone},
+        {sha("c"), [sha("a"), sha("b")], cited}
+      ])
+    end
+
+    changed_acceptance =
+      Map.update!(cited, "docs/plans/M3.md", fn text ->
+        String.replace(text, "| Acceptance | Maintainer |", "| Acceptance | Delegate: Reviewer |")
+      end)
+
+    assert_raise Invalid, ~r/completed Acceptance/, fn ->
+      prerequisite_history([
+        {sha("a"), [], original},
+        {sha("b"), [sha("a")], standalone},
+        {sha("c"), [sha("b")], changed_acceptance}
+      ])
+    end
+
+    assert_raise Invalid, ~r/no parent carries both the prior citation/, fn ->
+      prerequisite_history([
+        {sha("a"), [], Map.delete(standalone, "docs/plans/M3.md")},
+        {sha("c"), [sha("a")],
+         Map.delete(cited, "docs/plans/M3.md")
+         |> Map.update!(
+           "docs/plans/M3-technical.md",
+           &(&1 <>
+               "\n[Override](../developer/agent-context-map.md##{@override_anchor}).\n")
+         )}
+      ])
+    end
+  end
+
   test "an M3 override disposition anchor predates acceptance" do
     before = "# Context map\n"
 
