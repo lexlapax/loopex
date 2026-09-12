@@ -2174,3 +2174,46 @@ approved final-gate cadence remains in force, including Linux serenity and
 required actual provider paths. This choice waives no failed test or finding,
 authorizes no additional supplemental provider calls, and grants no M3 closure,
 product integration to `main`, tag or release.
+
+<a id="override-disposition-m3-amendment1-gate-cadence-2026-09-11"></a>
+### M3 Amendment 1 gate cadence — 2026-09-11
+
+The maintainer received two questions: acceptance of the exact ADR 0029 pair at
+`25fcb94de0d980c3724377670b25cbd14fe638ec`, and this timing question:
+
+> May the upcoming documentation-only M3 amendment commits also use your “full gates only at the end” schedule? I recommend retaining focused status, binding, documentation and bootstrap checks, plus independent review, and deferring full M0–M3 runs until implementation is complete. All final tests and pass criteria stay unchanged; deferred checks are recorded as unrun. The existing exception covers ordinary implementation, while AGENTS.md separately requires full checks for formal amendments.
+
+The offered choices were **"Extend end-only schedule (Recommended)"** and
+**"Run full gates for amendment"**. After requesting and receiving the essence
+of the proposed ADR, the maintainer answered **"Accept both"**. This standalone
+record transcribes the timing decision; the ADR acceptance is recorded in its
+own administrative transition.
+
+Under [the explicit maintainer override](../../AGENTS.md#maintainer-override),
+this replaces only the full-gate execution timing at the documentation-only
+M3 Amendment 1 proposal `A` and its immediate rebind child `R` for ADR 0029.
+It covers the direct gate run at `A` and inherited/full gate runs at `R` required
+by AGENTS.md's v1 amendment procedure, the plans index's amendment mechanics,
+the accepted M3 Technical envelope and the M3 gate's evidence-cost section.
+Full M0, M1, M2 and M3 execution is deferred to the completed implementation
+candidate under the existing final qualification schedule, including Linux
+serenity. Deferred checks are **unrun**, never PASS; retained earlier results
+remain evidence for their original source revisions.
+
+Keep focused status, artifact and envelope binding, documentation and bootstrap
+checks appropriate to each revision, plus independent exact-SHA review. At `A`,
+binding-dependent checks must refuse only for the deliberately stale M3 binding;
+verify binding-independent checks directly. At `R`, status, binding validation
+and bootstrap must pass. The new diagnostic behavior remains explicitly unproved
+until the first implementation checkpoint establishes the behavioral red and
+the implementation supplies its required conformance evidence.
+
+The one-parent direct `A` to `R` transaction and exact-candidate acceptance
+remain required. No bound artifact, gate command, protected witness, required
+real path, deadline, count, outcome, final pass criterion or accepted ADR decision
+changes through this timing record. An observed failure still requires repair
+or explicit disposition; no historical failure is waived. This grants no
+amendment acceptance, M3 closure, product integration to `main`, tag or release.
+
+This commit adds only this disposition. An independent read-only reviewer must
+examine its exact SHA before dependent work relies on the timing exception.
