@@ -196,7 +196,10 @@ defmodule Loopex.M1Gate.ExUnitFormatter do
       selector_mismatches: 0,
       duplicate_tests: 0,
       unknown_events: 0,
-      tests: %{}
+      tests: %{},
+      failures: [],
+      failure_count: 0,
+      diagnostic_root: config.root
     }
   end
 
@@ -204,12 +207,21 @@ defmodule Loopex.M1Gate.ExUnitFormatter do
   defp collect(state, {:suite_finished, _}), do: Map.update!(state, :suite_finished, &(&1 + 1))
   defp collect(state, :max_failures_reached), do: %{state | max_failures: true}
 
-  defp collect(state, {:test_finished, %ExUnit.Test{} = test}),
-    do: put_test(state, test, state_name(test.state))
+  defp collect(state, {:test_finished, %ExUnit.Test{} = test}) do
+    state
+    |> retain_failure(test)
+    |> put_test(test, state_name(test.state))
+  end
 
   defp collect(state, {:module_finished, %ExUnit.TestModule{state: {:failed, _}} = module}) do
     Enum.reduce(module.tests, state, fn test, acc ->
-      if is_nil(test.state), do: put_test(acc, test, "failed", replace: true), else: acc
+      if is_nil(test.state) do
+        acc
+        |> retain_failure(%{test | state: module.state})
+        |> put_test(test, "failed", replace: true)
+      else
+        acc
+      end
     end)
   end
 
@@ -253,6 +265,158 @@ defmodule Loopex.M1Gate.ExUnitFormatter do
       true ->
         Map.update!(state, :tests, &Map.put(&1, id, entry))
     end
+  end
+
+  # Retain shapes and source identifiers only; never exception text, arguments,
+  # assertion values, provider bodies, captured logs or stack-frame arguments.
+  def failure_summary({:failed, failures}) when is_list(failures) do
+    failures
+    |> Enum.take(2)
+    |> Enum.map(fn
+      {kind, %ExUnit.AssertionError{} = error, _stack} ->
+        %{
+          kind: safe_kind(kind),
+          category: :assertion,
+          left: shape(error.left),
+          right: shape(error.right)
+        }
+
+      {kind, %{__struct__: module}, _stack} ->
+        category =
+          if module in [
+               MatchError,
+               CaseClauseError,
+               FunctionClauseError,
+               RuntimeError,
+               ArgumentError
+             ], do: module, else: :other_exception
+
+        %{kind: safe_kind(kind), category: category}
+
+      {kind, _reason, _stack} ->
+        %{kind: safe_kind(kind), category: :reason_withheld}
+
+      _ ->
+        %{kind: :unknown, category: :details_unavailable}
+    end)
+  end
+
+  def failure_summary({:invalid, %{state: nested}}), do: failure_summary(nested)
+  def failure_summary(_), do: [%{kind: :unknown, category: :details_unavailable}]
+
+  defp safe_kind(kind) when kind in [:error, :exit, :throw], do: kind
+  defp safe_kind(_), do: :unknown
+  defp shape(value) when is_binary(value), do: :binary
+  defp shape(value) when is_list(value), do: :list
+  defp shape(value) when is_map(value), do: :map
+  defp shape(value) when is_tuple(value), do: :tuple
+  defp shape(value) when is_number(value), do: :number
+  defp shape(value) when is_atom(value), do: :atom
+  defp shape(_), do: :other
+
+  defp retain_failure(state, %ExUnit.Test{state: {status, _}} = test)
+       when status in [:failed, :invalid] do
+    state = %{state | failure_count: state.failure_count + 1}
+
+    if length(state.failures) < 8 do
+      row = %{
+        name: test.name |> Atom.to_string() |> String.replace_prefix("test ", ""),
+        line: if(is_integer(test.tags[:line]), do: test.tags[:line], else: nil),
+        location: failure_location(test.state, state),
+        details: failure_summary(test.state)
+      }
+
+      %{state | failures: state.failures ++ [row]}
+    else
+      state
+    end
+  end
+
+  defp retain_failure(state, _test), do: state
+
+  defp failure_location({:invalid, %{state: nested}}, state), do: failure_location(nested, state)
+
+  defp failure_location({:failed, failures}, state) when is_list(failures) do
+    failures
+    |> Enum.take(2)
+    |> Enum.find_value(fn
+      {_kind, _reason, stack} when is_list(stack) ->
+        stack
+        |> Enum.take(16)
+        |> Enum.find_value(fn
+          {_module, _function, _arity_or_args, meta} when is_list(meta) ->
+            file = Keyword.get(meta, :file)
+            line = Keyword.get(meta, :line)
+
+            if (is_binary(file) or is_list(file)) and is_integer(line) and line > 0 and
+                 line <= 1_000_000 do
+              file = to_string(file)
+
+              attributable? =
+                Path.type(file) == :absolute or String.starts_with?(file, "apps/")
+
+              relative =
+                file
+                |> Path.expand(state.diagnostic_root)
+                |> Path.relative_to(state.diagnostic_root)
+
+              if attributable? and byte_size(relative) <= 384 and Path.type(relative) != :absolute and
+                   not String.starts_with?(relative, "..") and
+                   Path.extname(relative) in [".ex", ".exs"],
+                 do: %{file: relative, line: line},
+                 else: nil
+            end
+
+          _ ->
+            nil
+        end)
+
+      _ ->
+        nil
+    end)
+  end
+
+  defp failure_location(_, _), do: nil
+
+  def failure_lines(events, invocation, provider_key) do
+    role =
+      if invocation.real_path in ["model", "combined"],
+        do: invocation.real_path,
+        else: "deterministic"
+
+    rows = Map.get(events, :failures, [])
+    omitted = max(Map.get(events, :failure_count, length(rows)) - length(rows), 0)
+
+    header =
+      "LOOPEX_SELECTOR_FAILURE_SUMMARY role=#{role} seed=#{invocation.seed} " <>
+        "retained=#{length(rows)} omitted=#{omitted}"
+
+    [
+      header
+      | Enum.map(rows, fn row ->
+          # Names and selector are source identifiers. Known credential bytes are
+          # additionally removed before escaping/capping them; runtime details above
+          # are a closed vocabulary and cannot contain a provider payload.
+          clean = fn text ->
+            text =
+              if is_binary(provider_key) and provider_key != "",
+                do: String.replace(text, provider_key, "[REDACTED]"),
+                else: text
+
+            inspect(binary_part(text, 0, min(byte_size(text), 384)), binaries: :as_strings)
+          end
+
+          line =
+            "LOOPEX_SELECTOR_FAILURE role=#{role} seed=#{invocation.seed} " <>
+              "selector=#{clean.(invocation.selector)} test=#{clean.(row.name)} " <>
+              "line=#{row.line} failing_location=#{case Map.get(row, :location) do
+                %{file: file, line: line} -> clean.(file) <> ":" <> Integer.to_string(line)
+                _ -> "unavailable"
+              end} details=#{inspect(row.details)}"
+
+          binary_part(line, 0, min(byte_size(line), 4_096))
+        end)
+    ]
   end
 
   defp state_name(nil), do: "passed"
@@ -786,6 +950,11 @@ defmodule Loopex.M1Gate.SelectorRunner do
       System.halt(0)
     else
       {:error, reason} ->
+        Enum.each(
+          Loopex.M1Gate.ExUnitFormatter.failure_lines(events, invocation, provider_key),
+          &IO.puts(:stderr, &1)
+        )
+
         IO.puts(:stderr, "M1 selector runner refused: #{reason}")
         System.halt(1)
     end

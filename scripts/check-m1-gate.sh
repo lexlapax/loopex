@@ -1320,7 +1320,7 @@ require_bound_artifact "$gate_launcher_source" \
   4bba03d218eee656991444a3c22c8753bfef1ab86f688036a4440048752f48bd \
   "bound sealed gate launcher"
 require_bound_artifact "$selector_runner_source" \
-  cc290e60d9f9588c75f1259b25976a58d1c30713e570cd5a88c70cdf3c2159a0 \
+  53d8219bdee584a3849a85a1102e405520d5dd0dfbe21d259434bc9edfc5fcc0 \
   "bound standalone selector runner"
 require_bound_artifact "$evidence_verifier_source" \
   3e742f052f72aaea952cb8173692a3fd10f998a79c1dc35e1072d9e46657786c \
@@ -1332,7 +1332,7 @@ require_bound_artifact apps/loopex/test/m1_gate_evidence_test.exs \
   f97927194c5ab97d0ae20fc9a6586a53b838cea6998307e3c88d96fe8ec9773c \
   "bound M1 mechanics corpus"
 require_bound_artifact apps/loopex/test/m1_exunit_runner_test.exs \
-  0a8406ca080c70624e776b01e37c7ded210b54659064cf63723a847a54debe2d \
+  c36253cff3d74ddff1b330695edbc4bde0a4565c1412c67c1293b2fb7ca6129b \
   "bound selector-runner corpus"
 require_bound_artifact apps/loopex/test/deps_budget_test.exs \
   9705bcd08f7d0b4b4e2d36c745f4fbf732d751a48fdc369aacb6ca99e8f598ac \
