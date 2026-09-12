@@ -2607,3 +2607,41 @@ Full gates at these intermediate revisions are unrun under the recorded timing
 approval. Complete M0–M3 gates remain required at the final candidate on macOS
 and Linux serenity. This disposition waives no historical failure and accepts
 no later proposal, closure or release.
+
+<a id="disposition-m3-amendment-2-acceptance-2026-09-12"></a>
+### M3 Amendment 2 acceptance — 2026-09-12
+
+Under the [recorded diagnostics delegation](#override-disposition-m3-selector-diagnostics-2026-09-12)
+and [checker correction approval](#override-disposition-m3-sequential-binding-checker-2026-09-12),
+delegate **`/root/m3_independent_review`**, named `m3_independent_review` in the
+Acceptance table, independently reviewed exact proposal
+`89a848b6685fd2d6e7d4dfd4768b4d083dc9db36` and explicitly stated:
+
+> I explicitly ACCEPT M3 Amendment 2 proposal A 89a848b6685fd2d6e7d4dfd4768b4d083dc9db36: Concept envelope SHA-256 9c004acd94844a9f1369ac84e6b735076c537cc5caabf4ad0e825854334352e5; Technical envelope SHA-256 433947d010b8999966a9becb9b260647f2764fa0bbc8ef4448f6b395f0b0d227; gate SHA-256 c129c26a9a7a10edc57f4dbc22e624c70001ee7a780bfef643fc826fdde5ab1f.
+
+The proposal changes exactly the three reviewed M3 plan/gate documents. It
+matches the prepared patch with SHA-256
+`17c87646796a292e50c8fc6c6d330021f93f97404873ad6c17a4ca1779b8e66a`.
+The shared runner and corpus remain the exact bytes settled by M1 generation 9
+and M2 generation 10. Five outcomes, ADRs, product contracts, required witnesses
+and final pass criteria retain their meaning. This immediate one-parent rebind
+changes only the Acceptance row and adds this fresh disposition; the Accepted
+lifecycle, gate, normative envelopes and product bytes remain unchanged.
+
+M2's reviewed rebind `7320ee2093d181402e6512dc3166c719ecc4a767` completed
+its real-history status check before this proposal, with only M3 pending. It
+exited 0 in 735.46 seconds, with log SHA-256
+`dc396ee2866becb4405069fd2de4a08616d2dcc3573a5ae3357c36b1ca343cee`.
+At the M3 proposal, focused checks verified eight bound artifacts, links,
+pairing, unchanged prior governance records, and the exact expected stale
+Concept-digest refusal. They exited 1 in 9.45 seconds with `global_pass=false`;
+the log SHA-256 is
+`3f7500700adab1c2e5fb61d70d1fd1841ed6652cebb59c18a98e4bc696825b87`.
+Unchanged corpus evidence retains its original source attribution.
+
+Before final qualification, this rebind requires independent exact-transition
+review, complete default global status validation with no pending holder, and
+M3 gate inspection. Full gates at the intermediate revisions are unrun under
+the recorded timing approval. Complete M0–M3 gates remain required at the final
+candidate on macOS and Linux serenity. This disposition waives no historical
+failure and grants no M3 closure, product integration to `main`, tag or release.
