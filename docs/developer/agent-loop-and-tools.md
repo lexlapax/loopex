@@ -764,22 +764,25 @@ context overflow commits `context_admission_refused_v1` and the run's `failed`
 terminal in one transaction, opens no model attempt, and publishes exactly five
 members: `category`, `retryable: false`, `dimension`, `observed`, and `limit`.
 
-Every retained refusal is decided on and built from a required-only candidate.
-The compact record's four counts — system, session, steer, tool — have no member
-for an optional project descriptor, so a dimension no withholding can cure (the
-strict system-class ceiling, record depth, record cardinality) is re-decided over
-the required-only set before anything is retained. That is what makes the counts
-partition the exact descriptor sequence behind `ordered_descriptor_digest` and
-makes `not_evaluated_required_failure` the truth about a project whose budget
-contribution was never reached. A required-only candidate admitted at that point
-is discarded rather than staged, because its receipt still claims the project
-resolution that produced the optional block it no longer contains. Optional
-content cannot be the sole cause of a structural refusal in M2, so reaching that
-state means the invariant is broken and the session is unavailable rather than
-an operator verdict being invented; a required-only candidate whose own counts
-and sequence disagree is the same kind of broken invariant. The staged source
-list names the blocks the request actually carries rather than the ones its
-receipt's resolution would imply. The residual gap here is recorded at
+M3's [required-only preflight](#technical-loop-skills) measures required context
+before optional content is read. M2 originally resolved optional content before
+the required-only fallback described below; its retained receipts remain valid.
+
+In that M2 fallback, every retained refusal was decided on and built from a
+required-only candidate. The compact record's four counts — system, session,
+steer, tool — had no member for an optional project descriptor, so a dimension no
+withholding could cure (the strict system-class ceiling, record depth, record
+cardinality) was re-decided over the required-only set before anything was
+retained. Those counts partitioned the exact descriptor sequence behind
+`ordered_descriptor_digest`; `not_evaluated_required_failure` described a project
+whose budget contribution was never reached. A required-only candidate admitted
+at that point was discarded rather than staged, because its receipt still
+claimed the project resolution that produced the removed optional block.
+Optional content could not be the sole cause of a structural refusal in M2, so
+that state indicated a broken invariant and made the session unavailable. A
+required-only candidate whose counts and sequence disagreed was likewise an
+invariant failure. The staged source list named the blocks the request actually
+carried. The earlier ordering gap is retained in
 [M2 recorded limitations](../evidence/M2-recorded-limitations.md#adr-0017-step-five).
 
 The candidate record's own byte cost is a fixed point, and one that does not

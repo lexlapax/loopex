@@ -228,5 +228,5 @@ branch `m3`; see the [canonical plan register](docs/plans/README.md).
 The accepted [M3 plan](docs/plans/M3.md#concept) covers project skills and the remaining
 core repairs. Its [M4 successor draft](docs/archive/M4.md#concept) adds durable
 interactions, bounded artifact ranges and a foreground protocol/TypeScript
-consumer. The M3 opening runner now proves an actual required-only admission
-ordering defect. Implementation must now turn that declared opening red green.
+consumer. The M3 opening probe verifies required-only context admission before
+optional content is evaluated.
