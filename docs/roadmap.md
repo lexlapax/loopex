@@ -88,8 +88,12 @@ Technical depth: [Foundation candidate proof](roadmap-technical.md#technical-roa
 ##### Headless external consumption — M4 candidate
 
 Can an independent program use those foundations without a second session or
-policy engine? M4 first adds core durable interactions and bounded ArtifactStore
-retrieval, and settles the floor refresh with its complete holder inventory.
+policy engine? M4 first makes the runtime observable: a host can trace every
+call in Loopex modules through a runtime-owned session without changing any
+source, and consume telemetry at every port and transaction boundary, with
+identities only and no authority. It then adds core durable interactions and
+bounded ArtifactStore transfers, and settles the floor refresh with its
+complete holder inventory.
 It maps the shared facade through strict foreground stdio JSONL and demonstrates
 a TypeScript client selecting
 a skill, answering an interaction, observing a real tool result, retrieving an

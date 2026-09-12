@@ -348,6 +348,12 @@ document is a pair:
   evidence, without claiming any package, tag or publication.
 
 The status check limits the developer-facing row to `docs/developer/` paths, so
-`DEVELOPMENT.md` is named here instead: it is updated at closure for the ninth
-application, the refreshed floor pair, the client toolchain pins and the M4
-runner commands, and its drift blocks closure exactly like a row above.
+two root documents are named here instead, and their drift blocks closure
+exactly like a row above. `DEVELOPMENT.md` is updated for the ninth
+application, the refreshed floor pair, the client toolchain pins, the M4
+runner commands, and how to enable a trace session and read telemetry while
+developing. `AGENTS.md` is updated once outcome 7 is green, in the same
+milestone, so its debugging guidance directs agents to use runtime trace
+sessions and telemetry events for diagnosing Loopex rather than ad hoc
+printing; that edit changes development guidance only and names no authority
+change.
