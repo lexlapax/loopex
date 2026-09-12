@@ -2304,3 +2304,38 @@ it. This authorizes this replacement only; later pushes use ordinary
 fast-forwards. It does not accept the recreated amendment, relax the direct
 proposal/rebind sequence, authorize diagnostic implementation before that
 acceptance, or grant M3 closure, product integration to `main`, tag or release.
+
+<a id="disposition-m3-amendment-1-acceptance-2026-09-11"></a>
+### M3 Amendment 1 acceptance — 2026-09-11
+
+The maintainer was asked:
+
+> Do you accept M3 Amendment 1 at `0c796c215e1405a6dfd9330e4ff6876fdb6e09dd` so I can record acceptance and implement the already-approved provider diagnostics? The replacement is pushed and reviewed. AGENTS.md requires acceptance of this exact plan update before implementation continues.
+
+After requesting an English explanation, the maintainer was told that this
+updates M3's formal scope for the already-approved diagnostic design, permits
+implementation and testing, and retains final macOS/Linux gates and separate
+closure approval. The maintainer replied **"I accept"**.
+
+This accepts the exact [M3 Concept plan](../plans/M3.md#concept),
+[Technical depth plan](../plans/M3-technical.md#technical-depth) and
+[Amendment 1 gate](../plans/M3-gate.md#amendment-1) at
+`0c796c215e1405a6dfd9330e4ff6876fdb6e09dd`. The Acceptance row records the
+candidate's Concept, Technical depth and gate digests. Independent exact-SHA
+review cleared the candidate. Its canonical bootstrap ended only at the
+expected stale Concept binding; 75 governance tests passed at seed 728659,
+and inspection, documentation, formatting and whitespace checks passed.
+This was proposal evidence, not status/bootstrap or full-gate PASS.
+
+This immediate administrative child changes only the Acceptance row and this
+fresh disposition. Both normative envelopes, the gate, product bytes, the
+Accepted lifecycle and derived status records remain unchanged. The
+[approved amendment cadence](#override-disposition-m3-amendment1-gate-cadence-2026-09-11)
+retains focused binding/status/bootstrap checks and independent exact-SHA
+review at this child before dependent implementation; full M0–M3 gates remain
+deferred to the completed candidate, including Linux serenity.
+
+The accepted scope is the bounded private diagnostics of accepted ADR 0029.
+Historical failures and earlier evidence retain their original attribution;
+this acceptance waives no failure and grants no additional supplemental
+provider call, M3 closure, product integration to main, tag or release.
