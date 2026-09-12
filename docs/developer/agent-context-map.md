@@ -2339,3 +2339,57 @@ The accepted scope is the bounded private diagnostics of accepted ADR 0029.
 Historical failures and earlier evidence retain their original attribution;
 this acceptance waives no failure and grants no additional supplemental
 provider call, M3 closure, product integration to main, tag or release.
+
+<a id="override-disposition-m3-commit-title-replacement-2026-09-12"></a>
+### M3 commit-title replacement — 2026-09-12
+
+Three unaccepted implementation commits above
+`3e8ae23d74048f23faaef109c7b1eb3a7185d739` omitted the required milestone
+marker from their titles. Both final gates at
+`0a1b57f1ee7b89d24080a7a48e2de48d4692d2ff` stopped at the bootstrap
+commit-message check after 1,196 deterministic tests passed on each platform.
+
+The maintainer was asked:
+
+> May I replace the last three published m3 commits with the reviewed versions that add `(M3)` to their titles? All file contents stay identical, and the original history is backed up. The replacement is e17fb2e217eedb94040277dbda5f7b02c9195ce3, followed by a separate reviewed record of this permission. The push will refuse to proceed if origin/m3 has advanced beyond 0a1b57f1ee7b89d24080a7a48e2de48d4692d2ff. This corrects my commit-message error without weakening the checker; later pushes remain ordinary fast-forwards.
+
+The maintainer answered **"Approved"**. Under
+[the explicit maintainer override](../../AGENTS.md#maintainer-override), this
+authorizes one exception to the ordinary-fast-forward requirement in the
+[M3 implementation completion disposition](#disposition-m3-implementation-completion-2026-09-11).
+It replaces only these three published commit IDs, followed by this standalone
+approval record:
+
+| Original commit | Reviewed replacement |
+| --- | --- |
+| `19db12c40eca2a62ed87fb25608d065db9cbf500` | `69f06dd2cb7ae6b2019cd7be2ae2b79ef78f6dea` |
+| `3625b6d3058bbe27e484534d9c08cfa5e1e2375c` | `9068461998a084bf82f811551bf33eadfa50a3a3` |
+| `0a1b57f1ee7b89d24080a7a48e2de48d4692d2ff` | `e17fb2e217eedb94040277dbda5f7b02c9195ce3` |
+
+Independent review verified that each corresponding tree is identical. Only
+the three titles and their rewritten parent IDs differ; author and committer
+identities, timestamps and message bodies are preserved. Every ancestor of the
+unchanged base remains reachable, including all accepted and bound candidates.
+The canonical commit-message check passed at the reviewed replacement. The
+checker, accepted plan and ADR decisions, gate criteria and bound artifacts
+remain unchanged. This exception applies only to publication of this corrected
+implementation lineage; it does not add a commit-title waiver.
+
+The original complete history is retained in a verified Git bundle, SHA-256
+`01bc59f1f3bd6efa2dec239088af0edf62476fda6dd246b34a6f770db4c28c27`.
+The original macOS and Linux gate results remain failures at their original
+SHA. Their passing component results are retained with those runs; neither
+tree equivalence nor this permission turns them into full-gate PASS or evidence
+executed at a replacement SHA. The joint evidence manifest SHA-256 is
+`6d7880e673df2868785b44d930d59fd08161020db593fe43955bbdfa06b7b294`.
+
+This disposition lands alone in the immediate child of the reviewed
+replacement. Independently review that exact child and its changed path before
+publication. Verify clean local `m3` and the remote tip at
+`0a1b57f1ee7b89d24080a7a48e2de48d4692d2ff`; use that exact remote lease and
+refuse replacement if either has advanced. Run the canonical commit-message
+check on the resulting candidate before publication and final qualification.
+Later pushes use ordinary fast-forwards. Fresh final macOS and Linux gates
+must name the resulting candidate and retain the approved end-only cadence.
+This approval grants no historical-failure disposition, M3 closure, product
+integration to `main`, tag or release. `main` and `m4` remain unchanged.
