@@ -12,6 +12,119 @@ defmodule Loopex.LLM.ReqLLM.ProviderPhaseDiagnosticTest do
     def fail(_state), do: :ok
     def port_lost(_state), do: :ok
     def deliver(_state, _result), do: :ok
+    def observe_failure(_stage, _class), do: :ok
+  end
+
+  @failure_stages ~w(handoff stream metadata completion assembly calls)
+  @failure_classes ~w(stream_http_auth stream_http_rate_limit stream_http_server stream_http_status stream_transport_timeout stream_transport_tls stream_transport_error stream_http_protocol_error stream_finch_error stream_http_task_failed stream_wait_timeout stream_task_call_timeout stream_decode_error stream_other_error genserver_timeout raised exited thrown caught provider_status stream_failed stream_incomplete assembly_failed returned_error unclassified)
+
+  defp failure_report(calls) do
+    capture_io(fn ->
+      assert catch_throw(
+               Diagnostic.capture(
+                 fn ->
+                   Control.loop(%{phase: :running})
+
+                   Enum.each(calls, fn {stage, class} -> Control.observe_failure(stage, class) end)
+
+                   Control.cleanup_proved(%{})
+                   throw(:original_failure)
+                 end,
+                 Control
+               )
+             ) == :original_failure
+    end)
+    |> String.trim()
+    |> String.replace_prefix("provider phase diagnostic ", "")
+    |> Jason.decode!()
+  end
+
+  test "finite failure pairs are static evidence separate from the thirteen phase labels" do
+    pairs = for stage <- @failure_stages, class <- @failure_classes, do: {stage, class}
+
+    for {stage, class} <- pairs ++ [{"unavailable", "unclassified"}] do
+      report = failure_report([{stage, class}])
+      assert report["failure"] == %{"stage" => stage, "class" => class}
+      assert report["healthy"] and report["cleanup_confirmed"]
+      refute report["incomplete"]
+      assert map_size(report["phases"]) == 2
+      assert report["counts"] == %{"dispatch_started" => 1, "cleanup_proved" => 1}
+    end
+
+    assert {:flags, []} = :erlang.trace_info(self(), :flags)
+    assert {:traced, false} = :erlang.trace_info({Control, :observe_failure, 2}, :traced)
+  end
+
+  test "missing duplicate and unknown failure evidence never yields a guessed pair" do
+    absent = failure_report([])
+    assert absent["failure"] == nil
+    refute absent["incomplete"]
+
+    canary = "private-secret-provider-body"
+
+    for calls <- [
+          [{"stream", "stream_transport_timeout"}, {"stream", "stream_transport_timeout"}],
+          [{"stream", "stream_transport_timeout"}, {"calls", "raised"}],
+          [{"unavailable", "raised"}],
+          [{canary, "raised"}],
+          [{"stream", %{secret: canary}}],
+          [{canary, canary}, {"calls", "raised"}],
+          [{"calls", "raised"}, {canary, canary}]
+        ] do
+      report = failure_report(calls)
+      assert report["failure"] == nil
+      assert report["incomplete"]
+      assert report["cleanup_confirmed"]
+      refute Jason.encode!(report) =~ canary
+    end
+  end
+
+  test "accepted failure evidence is silent on success and cannot survive into another capture" do
+    assert capture_io(fn ->
+             assert Diagnostic.capture(
+                      fn ->
+                        Control.loop(%{phase: :running})
+                        Control.observe_failure("stream", "returned_error")
+                        :original_result
+                      end,
+                      Control
+                    ) == :original_result
+           end) == ""
+
+    assert failure_report([])["failure"] == nil
+  end
+
+  test "a descendant's finite failure is delivered before the collector barrier" do
+    output =
+      capture_io(fn ->
+        assert catch_throw(
+                 Diagnostic.capture(
+                   fn ->
+                     {child, reference} =
+                       spawn_monitor(fn ->
+                         Control.loop(%{phase: :running})
+                         Control.observe_failure("metadata", "returned_error")
+                         Control.cleanup_proved(%{})
+                       end)
+
+                     assert_receive {:DOWN, ^reference, :process, ^child, :normal}
+                     throw(:original_failure)
+                   end,
+                   Control
+                 )
+               ) == :original_failure
+      end)
+
+    report =
+      output
+      |> String.trim()
+      |> String.replace_prefix("provider phase diagnostic ", "")
+      |> Jason.decode!()
+
+    assert report["failure"] == %{"stage" => "metadata", "class" => "returned_error"}
+    assert report["healthy"] and report["cleanup_confirmed"]
+    refute report["incomplete"]
+    assert {:traced, false} = :erlang.trace_info({Control, :observe_failure, 2}, :traced)
   end
 
   test "actual match specifications preserve late phases and never disclose arguments" do
@@ -174,6 +287,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderPhaseDiagnosticTest do
         Diagnostic.capture(
           fn ->
             {:tracer, tracer} = :erlang.trace_info(self(), :tracer)
+            Control.observe_failure("stream", "raised")
             send(parent, {:ready_to_kill, self(), tracer})
 
             receive do
@@ -204,6 +318,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderPhaseDiagnosticTest do
         Diagnostic.capture(
           fn ->
             {:tracer, tracer} = :erlang.trace_info(self(), :tracer)
+            Control.observe_failure("stream", "raised")
             send(parent, {:snapshot_owner, self(), tracer})
 
             receive do

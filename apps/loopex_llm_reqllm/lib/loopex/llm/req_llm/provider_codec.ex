@@ -8,7 +8,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderCodec do
 
   ## Technical depth
 
-  An eight-byte header contains `LP`, version 1, a closed kind byte, and an
+  An eight-byte header contains `LP`, version 2, a closed kind byte, and an
   unsigned big-endian payload length. The payload uses only explicit scalar,
   list, map, and map-key tags; it is never an external Erlang term. Binaries
   retain arbitrary bytes, integers retain sign and magnitude, and floats retain
@@ -41,7 +41,15 @@ defmodule Loopex.LLM.ReqLLM.ProviderCodec do
   recoverable second invocation.
   """
 
-  @version 1
+  @version 2
+  @failure_stages ~w(handoff stream metadata completion assembly calls)
+  @failure_classes ~w(stream_http_auth stream_http_rate_limit stream_http_server
+    stream_http_status stream_transport_timeout stream_transport_tls stream_transport_error
+    stream_http_protocol_error stream_finch_error stream_http_task_failed stream_wait_timeout
+    stream_task_call_timeout stream_decode_error stream_other_error genserver_timeout
+    raised exited thrown caught provider_status stream_failed stream_incomplete
+    assembly_failed returned_error unclassified)
+  @failure_bytes 256
   @semantic_bytes 65_536
   @envelope_bytes 4_096
   @fragment_bytes 4_096
@@ -252,7 +260,11 @@ defmodule Loopex.LLM.ReqLLM.ProviderCodec do
             is_map(payload["reply"]) and not is_struct(payload["reply"]) and
             bounded_echoes?(payload["reply"])
 
-        status when status in ["not_dispatched", "dispatched_or_unknown", "unreadable"] ->
+        "dispatched_or_unknown" ->
+          exact_keys?(payload, ~w(nonce staged_request_digest status failure)) and
+            valid_failure?(payload["failure"])
+
+        status when status in ["not_dispatched", "unreadable"] ->
           exact_keys?(payload, ~w(nonce staged_request_digest status))
 
         _other ->
@@ -261,6 +273,15 @@ defmodule Loopex.LLM.ReqLLM.ProviderCodec do
   end
 
   defp valid_fields?(_kind, _payload), do: false
+
+  defp valid_failure?(%{"stage" => stage, "class" => class} = failure)
+       when map_size(failure) == 2 do
+    ((stage in @failure_stages and class in @failure_classes) or
+       (stage == "unavailable" and class == "unclassified")) and
+      match?({:ok, _, _}, encode_value(failure, 0, @failure_bytes, :terminal))
+  end
+
+  defp valid_failure?(_failure), do: false
 
   defp exact_keys?(payload, expected) do
     map_size(payload) == length(expected) and Enum.all?(expected, &Map.has_key?(payload, &1))

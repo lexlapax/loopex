@@ -3,7 +3,22 @@ defmodule Loopex.LLM.ReqLLM.ProviderPhaseDiagnostic do
   alias Loopex.LLM.ReqLLM.ProviderBridge
 
   @labels ~w(dispatch_started terminal_ok terminal_unknown terminal_not_dispatched cleanup_ok cleanup_unknown cleanup_other cleanup_proved fail port_lost deliver_ok deliver_unknown deliver_not_dispatched)a
-  @functions [loop: 1, begin_cleanup: 2, cleanup_proved: 1, fail: 1, port_lost: 1, deliver: 2]
+  @functions [
+    loop: 1,
+    begin_cleanup: 2,
+    cleanup_proved: 1,
+    fail: 1,
+    port_lost: 1,
+    deliver: 2,
+    observe_failure: 2
+  ]
+  # Only literal finite messages cross the trace boundary. Repeated or unknown
+  # evidence discards the pair; it cannot overwrite an earlier classification.
+  @failure_stages ~w(handoff stream metadata completion assembly calls)
+  @failure_classes ~w(stream_http_auth stream_http_rate_limit stream_http_server stream_http_status stream_transport_timeout stream_transport_tls stream_transport_error stream_http_protocol_error stream_finch_error stream_http_task_failed stream_wait_timeout stream_task_call_timeout stream_decode_error stream_other_error genserver_timeout raised exited thrown caught provider_status stream_failed stream_incomplete assembly_failed returned_error unclassified)
+  @failure_pairs for(stage <- @failure_stages, class <- @failure_classes, do: {stage, class}) ++
+                   [{"unavailable", "unclassified"}]
+
   @flags [:call, :arity, :monotonic_timestamp, :set_on_spawn]
 
   # Concept: diagnostics retain the original caller and preserve its failure.
@@ -41,7 +56,13 @@ defmodule Loopex.LLM.ReqLLM.ProviderPhaseDiagnostic do
   def specifications do
     message = fn pattern, label -> {pattern, [], [{:message, label}]} end
 
+    failure_specs =
+      Enum.map(@failure_pairs, fn {stage, class} ->
+        {[stage, class], [], [{:message, {:const, {:failure, stage, class}}}]}
+      end)
+
     [
+      {:observe_failure, 2, failure_specs ++ [message.([:_, :_], :failure_invalid)]},
       {:loop, 1,
        [
          message.([%{phase: :running}], :dispatch_started),
@@ -109,8 +130,39 @@ defmodule Loopex.LLM.ReqLLM.ProviderPhaseDiagnostic do
     _ -> :unavailable
   end
 
-  defp collect(owner, monitor, module, start, first, counts, incomplete, pending \\ nil) do
+  defp collect(
+         owner,
+         monitor,
+         module,
+         start,
+         first,
+         counts,
+         incomplete,
+         failure \\ nil,
+         pending \\ nil
+       ) do
     receive do
+      {:trace_ts, _pid, :call, {^module, :observe_failure, 2}, {:failure, stage, class},
+       timestamp}
+      when {stage, class} in @failure_pairs and is_integer(timestamp) ->
+        next_failure = if failure == nil, do: {stage, class}, else: :invalid
+
+        collect(
+          owner,
+          monitor,
+          module,
+          start,
+          first,
+          counts,
+          incomplete or next_failure == :invalid,
+          next_failure,
+          pending
+        )
+
+      {:trace_ts, _pid, :call, {^module, :observe_failure, 2}, :failure_invalid, timestamp}
+      when is_integer(timestamp) ->
+        collect(owner, monitor, module, start, first, counts, true, :invalid, pending)
+
       {:trace_ts, _pid, :call, {^module, function, arity}, label, timestamp}
       when {function, arity} in @functions and label in @labels and is_integer(timestamp) ->
         n = Map.get(counts, label, 0) + 1
@@ -130,12 +182,24 @@ defmodule Loopex.LLM.ReqLLM.ProviderPhaseDiagnostic do
           first,
           Map.put(counts, label, min(n, 10_000)),
           incomplete or n >= 10_000,
+          failure,
           pending
         )
 
       {:snapshot, ^owner, reference} ->
         barrier = :erlang.trace_delivered(:all)
-        collect(owner, monitor, module, start, first, counts, incomplete, {reference, barrier})
+
+        collect(
+          owner,
+          monitor,
+          module,
+          start,
+          first,
+          counts,
+          incomplete,
+          failure,
+          {reference, barrier}
+        )
 
       {:trace_delivered, :all, barrier} when is_tuple(pending) ->
         {reference, ^barrier} = pending
@@ -155,12 +219,25 @@ defmodule Loopex.LLM.ReqLLM.ProviderPhaseDiagnostic do
               :erlang.trace_info({module, f, a}, :traced) == {:traced, :local}
             end)
 
+        accepted_failure =
+          case failure do
+            {stage, class} -> %{stage: stage, class: class}
+            _ -> nil
+          end
+
         send(
           owner,
-          {reference, %{phases: first, counts: counts, incomplete: incomplete, healthy: healthy}}
+          {reference,
+           %{
+             phases: first,
+             counts: counts,
+             incomplete: incomplete,
+             healthy: healthy,
+             failure: accepted_failure
+           }}
         )
 
-        collect(owner, monitor, module, start, first, counts, incomplete)
+        collect(owner, monitor, module, start, first, counts, incomplete, failure)
 
       {:stop, ^owner, reference} ->
         send(owner, {:stopped, reference})

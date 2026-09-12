@@ -24,8 +24,136 @@ defmodule Loopex.LLM.ReqLLM.ProviderCodecTest do
     assert {:ok, :terminal, ^payload} = ProviderCodec.decode(frame)
   end
 
+  @failure_stages ~w(handoff stream metadata completion assembly calls)
+  @failure_classes ~w(stream_http_auth stream_http_rate_limit stream_http_server stream_http_status stream_transport_timeout stream_transport_tls stream_transport_error stream_http_protocol_error stream_finch_error stream_http_task_failed stream_wait_timeout stream_task_call_timeout stream_decode_error stream_other_error genserver_timeout raised exited thrown caught provider_status stream_failed stream_incomplete assembly_failed returned_error unclassified)
+
+  test "all finite failure pairs fit the unchanged terminal cap and bounded encoded map" do
+    pairs = for stage <- @failure_stages, class <- @failure_classes, do: {stage, class}
+    assert length(pairs) + 1 == 151
+    assert ProviderCodec.version() == 2
+    assert ProviderCodec.cap(:terminal) == 8 * 65_536 + 2 * (65_536 + 5) + 4_096
+
+    sizes =
+      for {stage, class} <- pairs ++ [{"unavailable", "unclassified"}] do
+        failure = %{"stage" => stage, "class" => class}
+        payload = failed_terminal(failure)
+        assert {:ok, frame} = ProviderCodec.encode(:terminal, payload)
+        assert {:ok, :terminal, ^payload} = ProviderCodec.decode(frame)
+        <<"LP", 2, 7, size::32, body::binary>> = frame
+        assert size == byte_size(body)
+        encoded = failure_map_bytes(stage, class)
+        assert length(:binary.matches(body, encoded)) == 1
+        assert byte_size(encoded) <= 256
+        assert byte_size(frame) <= ProviderCodec.cap(:terminal) + 8
+        {byte_size(encoded), byte_size(frame)}
+      end
+
+    assert Enum.max_by(sizes, &elem(&1, 0)) |> elem(0) <= 256
+  end
+
+  test "failure fields are exactly two binary keys with finite binary values" do
+    valid = %{"stage" => "stream", "class" => "raised"}
+
+    for invalid <- [
+          nil,
+          [],
+          "stream",
+          %{},
+          Map.delete(valid, "stage"),
+          Map.delete(valid, "class"),
+          Map.put(valid, "extra", "secret"),
+          %{stage: "stream", class: "raised"},
+          Map.put(valid, :stage, "stream"),
+          Map.put(valid, "stage", :stream),
+          Map.put(valid, "class", :raised),
+          Map.put(valid, "stage", 1),
+          Map.put(valid, "class", false),
+          Map.put(valid, "class", %{"body" => "secret"}),
+          Map.put(valid, "stage", "unknown"),
+          Map.put(valid, "class", "unknown"),
+          %{"stage" => "unavailable", "class" => "raised"},
+          Map.put(valid, "class", String.duplicate("x", 257))
+        ] do
+      assert {:error, :invalid_frame} = ProviderCodec.encode(:terminal, failed_terminal(invalid))
+    end
+
+    assert {:error, :invalid_frame} =
+             ProviderCodec.encode(
+               :terminal,
+               Map.delete(failed_terminal(valid), "failure")
+             )
+
+    for status <- ["reply", "not_dispatched", "unreadable"] do
+      assert {:error, :invalid_frame} =
+               ProviderCodec.encode(
+                 :terminal,
+                 Map.put(failed_terminal(valid), "status", status)
+               )
+    end
+  end
+
+  test "decoder independently refuses mutated failure maps and both incompatible versions" do
+    payload = failed_terminal(%{"stage" => "stream", "class" => "raised"})
+    assert {:ok, frame} = ProviderCodec.encode(:terminal, payload)
+    assert {:ok, :terminal, ^payload} = ProviderCodec.decode(frame)
+    original = failure_map_bytes("stream", "raised")
+    stage = <<0, 5::16, "stage", 3, 6::32, "stream">>
+    class = <<0, 5::16, "class", 3, 6::32, "raised">>
+
+    for replacement <- [
+          <<0>>,
+          <<3, 6::32, "stream">>,
+          <<7, 0::16>>,
+          <<7, 1::16, stage::binary>>,
+          <<7, 1::16, class::binary>>,
+          <<7, 3::16, stage::binary, class::binary, 0, 5::16, "extra", 0>>,
+          <<7, 2::16, stage::binary, stage::binary>>,
+          <<7, 2::16, 1, 5::16, "stage", 3, 6::32, "stream", class::binary>>,
+          <<7, 2::16, 0, 5::16, "stage", 0, class::binary>>,
+          failure_map_bytes("unknown", "raised"),
+          failure_map_bytes("stream", "unknown"),
+          failure_map_bytes("unavailable", "raised"),
+          failure_map_bytes("stream", String.duplicate("x", 257))
+        ] do
+      <<prefix::binary-size(4), _size::32, body::binary>> = frame
+      assert length(:binary.matches(body, original)) == 1
+      changed = :binary.replace(body, original, replacement)
+
+      assert {:error, :invalid_frame} =
+               ProviderCodec.decode(<<prefix::binary, byte_size(changed)::32, changed::binary>>)
+    end
+
+    <<"LP", 2, rest::binary>> = frame
+
+    for version <- [1, 3] do
+      assert {:error, :invalid_frame} = ProviderCodec.decode(<<"LP", version, rest::binary>>)
+
+      for kind <- [:bootstrap, :ready] do
+        assert {:error, :invalid_frame} =
+                 ProviderCodec.encode(
+                   kind,
+                   %{"nonce" => @nonce, "version" => version, "build_manifest_sha256" => @digest}
+                 )
+      end
+    end
+  end
+
+  defp failed_terminal(failure),
+    do:
+      Map.merge(
+        identity_fields(),
+        %{"status" => "dispatched_or_unknown", "failure" => failure}
+      )
+
+  # Closed binary map encoding is explicit here so decoder negatives never rely
+  # on the production encoder accepting their malformed failure payload.
+  defp failure_map_bytes(stage, class) do
+    <<7, 2::16, 0, 5::16, "stage", 3, byte_size(stage)::32, stage::binary, 0, 5::16, "class", 3,
+      byte_size(class)::32, class::binary>>
+  end
+
   test "every closed kind round-trips its exact envelope" do
-    handshake = %{"nonce" => @nonce, "version" => 1, "build_manifest_sha256" => @digest}
+    handshake = %{"nonce" => @nonce, "version" => 2, "build_manifest_sha256" => @digest}
 
     frames = [
       {:bootstrap, handshake},
@@ -44,7 +172,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderCodecTest do
       assert byte_size(frame) <= ProviderCodec.cap(kind) + 8
     end
 
-    for status <- ["not_dispatched", "dispatched_or_unknown", "unreadable"] do
+    for status <- ["not_dispatched", "unreadable"] do
       payload = Map.put(identity_fields(), "status", status)
       assert {:ok, frame} = ProviderCodec.encode(:terminal, payload)
       assert {:ok, :terminal, ^payload} = ProviderCodec.decode(frame)
@@ -215,13 +343,13 @@ defmodule Loopex.LLM.ReqLLM.ProviderCodecTest do
     assert {:error, :invalid_frame} = ProviderCodec.decode(duplicate)
 
     for malformed <- [
-          <<"LP", 2, 7, 1::32, 0>>,
-          <<"LP", 1, 255, 1::32, 0>>,
-          <<"LP", 1, 7, 1::32, 255>>,
-          <<"LP", 1, 7, 0::32>>,
-          <<"LP", 1, 7, 4_294_967_295::32>>,
-          <<"LP", 1, 7, 5::32, 3, 65_537::32>>,
-          <<"LP", 1, 7, 3::32, 6, 1_025::16>>,
+          <<"LP", 3, 7, 1::32, 0>>,
+          <<"LP", 2, 255, 1::32, 0>>,
+          <<"LP", 2, 7, 1::32, 255>>,
+          <<"LP", 2, 7, 0::32>>,
+          <<"LP", 2, 7, 4_294_967_295::32>>,
+          <<"LP", 2, 7, 5::32, 3, 65_537::32>>,
+          <<"LP", 2, 7, 3::32, 6, 1_025::16>>,
           :erlang.term_to_binary(terminal(%{})),
           binary_part(frame, 0, byte_size(frame) - 1),
           frame <> <<0>>
@@ -251,7 +379,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderCodecTest do
 
   test "oversized declarations refuse before payload and partial EOF never becomes a result" do
     {sender, receiver} = socket_pair()
-    :ok = :gen_tcp.send(sender, <<"LP", 1, 7, ProviderCodec.cap(:terminal) + 1::32>>)
+    :ok = :gen_tcp.send(sender, <<"LP", 2, 7, ProviderCodec.cap(:terminal) + 1::32>>)
     assert {:error, :invalid_frame} = ProviderCodec.recv(receiver, 1_000)
 
     {sender, receiver} = socket_pair()

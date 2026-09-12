@@ -1,4 +1,5 @@
 Code.require_file("support/provider_isolation_fixture.exs", __DIR__)
+Code.require_file("support/provider_phase_diagnostic.exs", __DIR__)
 
 defmodule Loopex.LLM.ReqLLM.CredentialPlaneTest do
   @moduledoc """
@@ -27,6 +28,7 @@ defmodule Loopex.LLM.ReqLLM.CredentialPlaneTest do
 
   alias Loopex.LLM.ReqLLM, as: Adapter
   alias Loopex.LLM.ReqLLM.ProviderIsolationFixture, as: Fixture
+  alias Loopex.LLM.ReqLLM.{ProviderCodec, ProviderPhaseDiagnostic}
   alias Loopex.Model
 
   @sentinel "sk-loopex-credential-plane-sentinel-2f9c41"
@@ -44,6 +46,92 @@ defmodule Loopex.LLM.ReqLLM.CredentialPlaneTest do
     end)
 
     %{variable: variable}
+  end
+
+  test "actual companion seals a finite local failure without changing the public result" do
+    fixture = Fixture.new(:credential_raise)
+
+    output =
+      capture_io(fn ->
+        assert catch_throw(
+                 ProviderPhaseDiagnostic.capture(fn ->
+                   assert Fixture.complete(fixture) == @failed
+                   throw(:retain_failure_diagnostic)
+                 end)
+               ) == :retain_failure_diagnostic
+      end)
+
+    report =
+      output
+      |> String.trim()
+      |> String.replace_prefix("provider phase diagnostic ", "")
+      |> Jason.decode!()
+
+    # The request adapter raises while stream_text is opening the stream; its
+    # unsuccessful return is observed at handoff, before a stream is available.
+    assert report["failure"] == %{"stage" => "handoff", "class" => "returned_error"}
+    assert report["healthy"] and report["cleanup_confirmed"]
+    refute report["incomplete"]
+    assert report["counts"]["terminal_unknown"] >= 1
+    assert report["counts"]["cleanup_proved"] == 1
+    refute output =~ @sentinel
+    refute output =~ "req_llm_transport_raised_after_handoff"
+    assert probe(fixture, "credential-probe")["key_present"]
+    assert Fixture.methods(fixture) == ["POST"]
+    assert Fixture.count(fixture) == 0
+    Fixture.assert_gone(fixture)
+    assert_fixture_files_private(fixture, [@sentinel])
+  end
+
+  test "actual version two companion refuses version one bootstrap before readiness or credential" do
+    fixture = Fixture.new()
+    path = Path.join(System.tmp_dir!(), "v1-#{System.unique_integer([:positive])}.sock")
+
+    {:ok, listener} =
+      :gen_tcp.listen(0, [:binary, active: false, packet: :raw, ifaddr: {:local, path}])
+
+    File.chmod!(path, 0o600)
+    nonce = String.duplicate("a", 64)
+    digest = fixture.options[:build_manifest_sha256]
+    deadline = System.system_time(:millisecond) + 5_000
+
+    port =
+      Port.open(
+        {:spawn_executable, String.to_charlist(fixture.options[:interpreter_path])},
+        [
+          :binary,
+          :exit_status,
+          :use_stdio,
+          :stderr_to_stdout,
+          args:
+            Enum.map(
+              [fixture.options[:worker_path], path, nonce, digest, Integer.to_string(deadline)],
+              &String.to_charlist/1
+            ),
+          env: [{String.to_charlist(Adapter.credential_variable()), false}]
+        ]
+      )
+
+    on_exit(fn ->
+      :gen_tcp.close(listener)
+      if Port.info(port), do: Port.close(port)
+      File.rm(path)
+    end)
+
+    {:ok, socket} = :gen_tcp.accept(listener, 5_000)
+    on_exit(fn -> :gen_tcp.close(socket) end)
+    payload = %{"nonce" => nonce, "version" => 2, "build_manifest_sha256" => digest}
+    assert {:ok, frame} = ProviderCodec.encode(:bootstrap, payload)
+    assert {:ok, :bootstrap, ^payload} = ProviderCodec.decode(frame)
+    <<"LP", 2, rest::binary>> = frame
+    :ok = :gen_tcp.send(socket, <<"LP", 1, rest::binary>>)
+    assert {:error, :closed} = :gen_tcp.recv(socket, 0, 5_000)
+    assert_receive {^port, {:exit_status, 70}}, 5_000
+    refute_receive {^port, {:data, _}}, 0
+    assert Fixture.methods(fixture) == []
+    assert Fixture.count(fixture) == 0
+    refute File.read!(Fixture.marker(fixture, "entry-env")) =~ Adapter.credential_variable()
+    assert Fixture.eventually(fn -> not Fixture.alive?(Fixture.pid(fixture)) end, 2_500)
   end
 
   describe "a stream that ends by throwing or exiting" do

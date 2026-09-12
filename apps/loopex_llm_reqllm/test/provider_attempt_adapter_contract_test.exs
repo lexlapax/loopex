@@ -618,6 +618,307 @@ defmodule Loopex.LLM.ReqLLM.ProviderAttemptAdapterContractTest do
       :erlang.raise(kind, reason, stack)
   end
 
+  @tag :failure_categories
+  test "private worker preserves finite secret-free stream causes before outer fallback" do
+    fixture = Fixture.new(:reply)
+    run_category_probe(fixture, nil)
+  end
+
+  @tag :failure_categories
+  test "private worker attributes returned incomplete completion and HTTP stream failures" do
+    for {mode, stage, class} <- [
+          {:incomplete_stream, "completion", "stream_incomplete"},
+          {:http_error, "stream", "stream_http_server"}
+        ] do
+      fixture = Fixture.new(mode)
+      run_category_probe(fixture, %{"stage" => stage, "class" => class})
+    end
+  end
+
+  defp run_category_probe(fixture, expected) do
+    {:ok, {_, http_port}} = :inet.sockname(fixture.listener)
+    script = Path.join(fixture.root, "failure-category-probe.exs")
+    File.write!(script, category_probe_source(Fixture.request(), http_port, expected))
+    {owner, reference, monitor} = start_category_probe(script, fixture.root, self())
+    output = if expected, do: "STAGE_OK\n", else: "CONTROL_OK\nFINITE_CATEGORIES_OK\n"
+
+    assert_receive {^reference, :started, _pid}, 5_000
+    assert_receive {^reference, :result, {^output, 0}, :clean}, 30_000
+    assert_receive {:DOWN, ^monitor, :process, ^owner, :normal}, 5_000
+  end
+
+  @tag :failure_categories
+  test "synthetic probe owner survives caller death and proves child cessation" do
+    fixture = Fixture.new(:reply)
+    script = Path.join(fixture.root, "blocked-category-probe.exs")
+    File.write!(script, "Process.sleep(:infinity)")
+
+    caller =
+      spawn(fn ->
+        receive do
+          :stop -> :ok
+        end
+      end)
+
+    on_exit(fn -> if Process.alive?(caller), do: Process.exit(caller, :kill) end)
+    {owner, reference, monitor} = start_category_probe(script, fixture.root, caller)
+    assert_receive {^reference, :started, pid}, 5_000
+    Process.exit(caller, :kill)
+    assert_receive {^reference, :result, {:caller_down, 1}, :clean}, 5_000
+    assert_receive {:DOWN, ^monitor, :process, ^owner, :normal}, 5_000
+
+    {_output, status} =
+      System.cmd("/bin/kill", ["-0", Integer.to_string(pid)], stderr_to_stdout: true)
+
+    assert status != 0
+  end
+
+  @tag :failure_categories
+  test "synthetic probe stop retains port ownership until child exit" do
+    fixture = Fixture.new(:reply)
+    script = Path.join(fixture.root, "blocked-category-probe.exs")
+    File.write!(script, "Process.sleep(:infinity)")
+    {owner, reference, monitor} = start_category_probe(script, fixture.root, self())
+    assert_receive {^reference, :started, _pid}, 5_000
+    send(owner, {reference, :stop})
+    assert_receive {^reference, :result, {:stopped, 1}, :clean}, 5_000
+    assert_receive {:DOWN, ^monitor, :process, ^owner, :normal}, 5_000
+  end
+
+  # Concept: the independent owner keeps its port through test-process death.
+  # Technical depth: it watches the caller before launch, clears ambient env,
+  # and kills only the child still attached to its port. Exit status, rather
+  # than a lost port or a saved PID, proves cleanup. No raw output is returned.
+  defp start_category_probe(script, root, caller) do
+    controller = self()
+    reference = make_ref()
+
+    owner =
+      spawn(fn ->
+        Process.flag(:trap_exit, true)
+        caller_monitor = Process.monitor(caller)
+
+        receive do
+          {^reference, :start} ->
+            category_probe_owner(script, root, caller_monitor, controller, reference)
+
+          {:DOWN, ^caller_monitor, :process, ^caller, _} ->
+            :ok
+        end
+      end)
+
+    monitor = Process.monitor(owner)
+
+    on_exit(fn ->
+      cleanup_monitor = Process.monitor(owner)
+      send(owner, {reference, :stop})
+      assert_receive {:DOWN, ^cleanup_monitor, :process, ^owner, _}, 5_000
+    end)
+
+    send(owner, {reference, :start})
+    {owner, reference, monitor}
+  end
+
+  defp category_probe_owner(script, root, caller_monitor, controller, reference) do
+    runner = Path.join(root, "category-probe.escript")
+    paths = :io_lib.format(~c"~tp", [:code.get_path()]) |> IO.iodata_to_binary()
+    source = "Code.eval_file(" <> inspect(script) <> ")"
+
+    File.write!(runner, """
+    #!/usr/bin/env escript
+    %%! +S 2:2 +SDcpu 1 +SDio 1 +A 2
+    main([]) ->
+      ok = code:add_paths(#{paths}),
+      {ok, _} = application:ensure_all_started(elixir),
+      'Elixir.Code':eval_string(base64:decode("#{Base.encode64(source)}")),
+      ok.
+    """)
+
+    environment =
+      Loopex.LLM.ReqLLM.ProviderLauncher.spawn_environment()
+      |> Map.new()
+      |> Map.merge(
+        Map.new(
+          %{
+            "HOME" => root,
+            "TMPDIR" => root,
+            "LANG" => "C.UTF-8",
+            "LC_ALL" => "C.UTF-8",
+            "ERL_CRASH_DUMP" => "/dev/null",
+            "ERL_CRASH_DUMP_SECONDS" => "0"
+          },
+          fn {key, value} -> {String.to_charlist(key), String.to_charlist(value)} end
+        )
+      )
+      |> Map.to_list()
+
+    executable = Path.join(List.to_string(:code.root_dir()), "bin/escript")
+
+    port =
+      Port.open({:spawn_executable, "/bin/sh"}, [
+        :binary,
+        :exit_status,
+        :stderr_to_stdout,
+        cd: root,
+        env: environment,
+        args: ["-c", "exec \"$1\" \"$2\" </dev/null", "category-probe", executable, runner]
+      ])
+
+    {:os_pid, pid} = Port.info(port, :os_pid)
+    send(controller, {reference, :started, pid})
+
+    result =
+      category_probe_result(
+        port,
+        "",
+        System.monotonic_time(:millisecond) + 30_000,
+        caller_monitor,
+        reference
+      )
+
+    cleanup = stop_category_probe(port, result)
+
+    outcome =
+      case result do
+        {:exited, output, status} -> {output, status}
+        other -> other
+      end
+
+    send(controller, {reference, :result, outcome, cleanup})
+  end
+
+  defp stop_category_probe(_port, {:exited, _, _}), do: :clean
+
+  defp stop_category_probe(port, _result) do
+    case Port.info(port, :os_pid) do
+      {:os_pid, pid} ->
+        System.cmd("/bin/kill", ["-KILL", Integer.to_string(pid)], stderr_to_stdout: true)
+
+        receive do
+          {^port, {:exit_status, _}} -> :clean
+        after
+          2_000 -> :cleanup_unavailable
+        end
+
+      nil ->
+        receive do
+          {^port, {:exit_status, _}} -> :clean
+        after
+          0 -> :cleanup_unavailable
+        end
+    end
+  end
+
+  defp category_probe_result(port, output, deadline, caller_monitor, reference) do
+    receive do
+      {^port, {:data, data}} when byte_size(output) + byte_size(data) <= 128 ->
+        category_probe_result(port, output <> data, deadline, caller_monitor, reference)
+
+      {^port, {:exit_status, status}} ->
+        safe =
+          if output in [
+               "STAGE_OK\n",
+               "CONTROL_OK\nFINITE_CATEGORIES_OK\n",
+               "CONTROL_OK\nFINITE_CATEGORIES_FAILED\n",
+               "FINITE_CATEGORIES_FAILED\n",
+               "CONTROL_PREFLIGHT_REFUSED\n",
+               "CONTROL_UNKNOWN\n",
+               "CONTROL_OTHER\n"
+             ], do: output, else: :invalid_output
+
+        {:exited, safe, status}
+
+      {^port, {:data, _}} ->
+        {:invalid_output, 1}
+
+      {:DOWN, ^caller_monitor, :process, _, _} ->
+        {:caller_down, 1}
+
+      {^reference, :stop} ->
+        {:stopped, 1}
+    after
+      max(deadline - System.monotonic_time(:millisecond), 0) -> {:probe_timeout, 1}
+    end
+  end
+
+  defp category_probe_source(request, http_port, expected) do
+    encoded = request |> :erlang.term_to_binary() |> Base.encode64()
+
+    """
+    defmodule CategoryProbeTransport do
+      def call(request), do: %{request | scheme: :http, host: "127.0.0.1", port: #{http_port}, path: "/", query: nil}
+    end
+    try do
+      :logger.set_primary_config(:level, :emergency)
+      Application.put_env(:req_llm, :load_dotenv, false, persistent: true)
+      Application.put_env(:llm_db, :load_dotenv, false, persistent: true)
+      Application.put_env(:req_llm, :finch_request_adapter, CategoryProbeTransport)
+      {:ok, _} = Application.ensure_all_started(:req_llm)
+      request = :erlang.binary_to_term(Base.decode64!("#{encoded}"))
+      credential = "credential-shaped-canary-secret"
+      invoke = fn progress ->
+        {:ok, current} = Loopex.Model.request(request.model, request.messages,
+          sampling: request.sampling, deadline: System.system_time(:millisecond) + 10_000)
+        Loopex.LLM.ReqLLM.worker_invoke(current, credential, progress, fn -> :ok end)
+      end
+      if #{inspect(expected)} != nil do
+        expected = {:error, {:dispatched_or_unknown, "model_call_failed"}, #{inspect(expected)}}
+        ^expected = invoke.(fn _ -> :ok end)
+        IO.puts("STAGE_OK")
+        System.halt(0)
+      end
+      case invoke.(fn _ -> :ok end) do
+        {:ok, %{text: "loopex", delta_count: count}} when count > 0 -> :ok
+        {:error, {:not_dispatched, _}} -> IO.puts("CONTROL_PREFLIGHT_REFUSED"); System.halt(1)
+        {:error, {:dispatched_or_unknown, _}} -> IO.puts("CONTROL_UNKNOWN"); System.halt(1)
+        _ -> IO.puts("CONTROL_OTHER"); System.halt(1)
+      end
+      IO.puts("CONTROL_OK")
+      secret = "unused-secret-never-retained"
+      causes = [
+        {%ReqLLM.Error.API.Request{status: 401, reason: secret}, "stream_http_auth"},
+        {%ReqLLM.Error.API.Request{status: 403, headers: secret}, "stream_http_auth"},
+        {%ReqLLM.Error.API.Request{status: 429, response_body: secret}, "stream_http_rate_limit"},
+        {%ReqLLM.Error.API.Request{status: 503, request_body: secret}, "stream_http_server"},
+        {%ReqLLM.Error.API.Request{status: 418, reason: secret}, "stream_http_status"},
+        {%Finch.TransportError{reason: :timeout, source: secret}, "stream_transport_timeout"},
+        {%Finch.TransportError{reason: {:tls_alert, secret}}, "stream_transport_tls"},
+        {%Finch.TransportError{reason: secret}, "stream_transport_error"},
+        {%Mint.TransportError{reason: :timeout}, "stream_transport_timeout"},
+        {%Mint.TransportError{reason: {:tls_alert, secret}}, "stream_transport_tls"},
+        {%Mint.TransportError{reason: secret}, "stream_transport_error"},
+        {%Finch.HTTPError{reason: secret}, "stream_http_protocol_error"},
+        {%Finch.Error{reason: secret}, "stream_finch_error"},
+        {{:http_task_failed, secret}, "stream_http_task_failed"},
+        {:timeout, "stream_wait_timeout"},
+        {{:exit, {:timeout, {GenServer, :call, secret}}}, "stream_task_call_timeout"},
+        {%Jason.DecodeError{data: secret}, "stream_decode_error"},
+        {{:error, %Jason.DecodeError{data: secret}}, "stream_decode_error"},
+        {secret, "stream_other_error"}
+      ]
+      for {cause, class} <- causes do
+        exception = %ReqLLM.Error.API.Stream{cause: cause, reason: secret}
+        expected = {:error, {:dispatched_or_unknown, "model_call_failed"}, %{"stage" => "stream", "class" => class}}
+        ^expected = invoke.(fn _ -> raise exception end)
+      end
+      for {action, class} <- [
+        {fn -> raise secret end, "raised"},
+        {fn -> exit({:timeout, {GenServer, :call, secret}}) end, "genserver_timeout"},
+        {fn -> exit(secret) end, "exited"},
+        {fn -> throw(secret) end, "thrown"}
+      ] do
+        expected = {:error, {:dispatched_or_unknown, "model_call_failed"}, %{"stage" => "stream", "class" => class}}
+        ^expected = invoke.(fn _ -> action.() end)
+      end
+      IO.puts("FINITE_CATEGORIES_OK")
+    rescue
+      _ -> IO.puts("FINITE_CATEGORIES_FAILED"); System.halt(1)
+    catch
+      _, _ -> IO.puts("FINITE_CATEGORIES_FAILED"); System.halt(1)
+    end
+    """
+  end
+
   defp queued_message(guardian, predicate) do
     assert Fixture.eventually(fn ->
              case Process.info(guardian, :messages) do

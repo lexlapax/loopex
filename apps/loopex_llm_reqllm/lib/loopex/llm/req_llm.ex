@@ -296,13 +296,19 @@ defmodule Loopex.LLM.ReqLLM do
           started.()
 
           case handoff(request, context, identity, options, credential, progress) do
-            {:ok, reply} -> {:ok, reply}
-            _failed -> {:error, {:dispatched_or_unknown, @call_failed}}
+            {:ok, reply} ->
+              {:ok, reply}
+
+            {:error, _sanitized, failure} ->
+              {:error, {:dispatched_or_unknown, @call_failed}, failure}
+
+            _failed ->
+              worker_unknown()
           end
         rescue
-          _error -> {:error, {:dispatched_or_unknown, @call_failed}}
+          _error -> worker_unknown()
         catch
-          _class, _reason -> {:error, {:dispatched_or_unknown, @call_failed}}
+          _class, _reason -> worker_unknown()
         end
 
       _refused ->
@@ -411,10 +417,9 @@ defmodule Loopex.LLM.ReqLLM do
   # handoff that already happened -- reading it would let the library overrule
   # the one fact this adapter actually knows.
   #
-  # The reason is dropped rather than scrubbed. `drain/5` still bounds and
-  # redacts what it builds, because the streaming suite reads those reasons
-  # through `reply_from_stream/4`, but nothing built below this line reaches a
-  # caller of `complete/3`.
+  # Each private boundary normalizes its reason into a fixed error and finite
+  # pair before returning. `reply_from_stream/4` preserves its historical error
+  # tag while dropping the pair; `complete/3` still exposes only generic failure.
   #
   # Technical depth: nothing raised, thrown, or exited under this call may leave
   # the worker uncaught. `call_options` carries the credential and is the
@@ -428,15 +433,12 @@ defmodule Loopex.LLM.ReqLLM do
   # The companion's OS lifetime owns linked dependency deaths; the host bridge
   # classifies loss of that child as uncertainty without receiving a crash term.
   defp handoff(request, context, identity, call_options, credential, progress) do
-    case ReqLLM.stream_text(request.model, context, call_options) do
-      {:ok, response} -> drain(response, request, identity, progress, credential)
-      _failed -> :provider_call_failed
-    end
-  rescue
-    _raised -> :provider_call_failed
-  catch
-    _thrown -> :provider_call_failed
-    :exit, _reason -> :provider_call_failed
+    failure_stage("handoff", fn ->
+      case ReqLLM.stream_text(request.model, context, call_options) do
+        {:ok, response} -> drain(response, request, identity, progress, credential)
+        _failed -> {:error, {:provider_call_failed, @call_failed}}
+      end
+    end)
   end
 
   @doc """
@@ -470,7 +472,7 @@ defmodule Loopex.LLM.ReqLLM do
       when is_map(request) and is_map(identity) and is_function(progress, 1) do
     case drain(response, request, identity, progress, nil) do
       {:ok, reply} -> {:ok, reply}
-      {:error, {category, _raw_reason}} -> {:error, {category, @call_failed}}
+      {:error, {category, _discarded}, _failure} -> {:error, {category, @call_failed}}
     end
   end
 
@@ -486,56 +488,159 @@ defmodule Loopex.LLM.ReqLLM do
   # dangerous shape -- text already streamed, `{:ok, reply}` one line away -- and
   # is why the metadata is judged before a reply is built at all.
   defp drain(response, request, identity, progress, credential) do
-    emitted =
-      Enum.reduce_while(response.stream, {:ok, {[], [], 0}}, fn
-        chunk, {:ok, {chunks, text, deltas}} ->
-          case emit(chunk, progress) do
-            {:text, fragment, count} ->
-              {:cont, {:ok, {[chunk | chunks], [fragment | text], deltas + count}}}
+    failure_stage("stream", fn ->
+      emitted =
+        Enum.reduce_while(response.stream, {:ok, {[], [], 0}}, fn
+          chunk, {:ok, {chunks, text, deltas}} ->
+            case emit(chunk, progress) do
+              {:text, fragment, count} ->
+                {:cont, {:ok, {[chunk | chunks], [fragment | text], deltas + count}}}
 
-            {:counted, count} ->
-              {:cont, {:ok, {[chunk | chunks], text, deltas + count}}}
+              {:counted, count} ->
+                {:cont, {:ok, {[chunk | chunks], text, deltas + count}}}
 
-            :ignored ->
-              {:cont, {:ok, {[chunk | chunks], text, deltas}}}
+              :ignored ->
+                {:cont, {:ok, {[chunk | chunks], text, deltas}}}
 
-            {:error, reason} ->
-              {:halt, {:error, reason}}
-          end
-      end)
+              {:error, _reason} ->
+                {:halt, {:error, {:invalid_progress_delta, @call_failed}}}
+            end
+        end)
 
-    case emitted do
-      {:ok, {chunks, text, deltas}} ->
-        finish_drain(response, request, identity, chunks, text, deltas, credential)
+      case emitted do
+        {:ok, {chunks, text, deltas}} ->
+          finish_drain(response, request, identity, chunks, text, deltas, credential)
 
-      {:error, reason} ->
-        {:error, {:invalid_progress_delta, scrub_error(reason, credential)}}
-    end
-  rescue
-    interrupted -> {:error, {:stream_interrupted, scrub_error(interrupted, credential)}}
-  catch
-    # Technical depth: a `rescue` alone admits only raised exceptions, so a
-    # progress function or a lazy stream that threw or exited left this frame
-    # uncaught -- past the bound, past the substitution, and out of the declared
-    # `{:ok, reply} | {:error, term()}` this function documents. Both endings are
-    # the same fact as a raise: the stream did not produce a reply.
-    thrown -> {:error, {:stream_interrupted, scrub_error({:throw, thrown}, credential)}}
-    :exit, reason -> {:error, {:stream_interrupted, scrub_error({:exit, reason}, credential)}}
+        failure ->
+          failure
+      end
+    end)
   end
 
-  defp finish_drain(response, request, identity, chunks, text, deltas, credential) do
+  defp finish_drain(response, request, identity, chunks, text, deltas, _credential) do
     chunks = Enum.reverse(chunks)
-    metadata = ReqLLM.StreamResponse.MetadataHandle.await(response.metadata_handle)
 
-    with :ok <- completed(metadata),
-         {:ok, assembled} <- assemble(response, chunks, metadata),
-         {:ok, calls} <- bounded_calls(assembled) do
+    with {:ok, metadata} <-
+           failure_stage("metadata", fn ->
+             {:ok, ReqLLM.StreamResponse.MetadataHandle.await(response.metadata_handle)}
+           end),
+         :ok <- failure_stage("completion", fn -> completed(metadata) end),
+         {:ok, assembled} <-
+           failure_stage("assembly", fn -> assemble(response, chunks, metadata) end),
+         {:ok, calls} <- failure_stage("calls", fn -> bounded_calls(assembled) end) do
       streamed = text |> Enum.reverse() |> IO.iodata_to_binary()
       {:ok, reply(request, identity, metadata, streamed, calls, deltas)}
-    else
-      {:error, {tag, reason}} -> {:error, {tag, scrub_error(reason, credential)}}
     end
   end
+
+  # Concept: one unsuccessful boundary supplies the invocation's finite diagnosis.
+  # Technical depth: normalize before discarding raw reasons, and propagate an
+  # inner annotated failure unchanged. No process dictionary or event history is
+  # needed; the caller receives only the original fixed error and one pair.
+  defp failure_stage(stage, operation) do
+    case operation.() do
+      {:error, _sanitized, %{"stage" => _, "class" => _}} = failure ->
+        failure
+
+      {:error, {tag, _reason}} = error ->
+        {:error, {tag, @call_failed}, failure_pair(stage, returned_class(error))}
+
+      {:error, _reason} ->
+        {:error, {:provider_call_failed, @call_failed}, failure_pair(stage, "returned_error")}
+
+      success ->
+        success
+    end
+  rescue
+    exception ->
+      {:error, {:stream_interrupted, @call_failed}, failure_pair(stage, raised_class(exception))}
+  catch
+    kind, reason ->
+      class =
+        case {kind, reason} do
+          {:exit, {:timeout, {GenServer, :call, _}}} -> "genserver_timeout"
+          {:exit, _} -> "exited"
+          {:throw, _} -> "thrown"
+          _ -> "caught"
+        end
+
+      {:error, {:stream_interrupted, @call_failed}, failure_pair(stage, class)}
+  end
+
+  defp failure_pair(stage, class), do: %{"stage" => stage, "class" => class}
+
+  defp worker_unknown,
+    do:
+      {:error, {:dispatched_or_unknown, @call_failed},
+       failure_pair("unavailable", "unclassified")}
+
+  defp returned_class({:error, {:stream_failed, {:provider_status, status}}})
+       when is_integer(status) and status >= 400, do: "provider_status"
+
+  defp returned_class({:error, {:stream_failed, _}}), do: "stream_failed"
+  defp returned_class({:error, {:stream_incomplete, _}}), do: "stream_incomplete"
+  defp returned_class({:error, {:reply_not_assembled, _}}), do: "assembly_failed"
+  defp returned_class(_), do: "returned_error"
+
+  defp raised_class(%ReqLLM.Error.API.Stream{cause: cause}) do
+    case cause do
+      %ReqLLM.Error.API.Request{status: status} when status in [401, 403] ->
+        "stream_http_auth"
+
+      %ReqLLM.Error.API.Request{status: 429} ->
+        "stream_http_rate_limit"
+
+      %ReqLLM.Error.API.Request{status: status} when is_integer(status) and status in 500..599 ->
+        "stream_http_server"
+
+      %ReqLLM.Error.API.Request{status: status} when is_integer(status) and status >= 400 ->
+        "stream_http_status"
+
+      %Finch.TransportError{reason: :timeout} ->
+        "stream_transport_timeout"
+
+      %Finch.TransportError{reason: {:tls_alert, _}} ->
+        "stream_transport_tls"
+
+      %Finch.TransportError{} ->
+        "stream_transport_error"
+
+      %Mint.TransportError{reason: :timeout} ->
+        "stream_transport_timeout"
+
+      %Mint.TransportError{reason: {:tls_alert, _}} ->
+        "stream_transport_tls"
+
+      %Mint.TransportError{} ->
+        "stream_transport_error"
+
+      %Finch.HTTPError{} ->
+        "stream_http_protocol_error"
+
+      %Finch.Error{} ->
+        "stream_finch_error"
+
+      {:http_task_failed, _} ->
+        "stream_http_task_failed"
+
+      :timeout ->
+        "stream_wait_timeout"
+
+      {:exit, {:timeout, {GenServer, :call, _}}} ->
+        "stream_task_call_timeout"
+
+      %Jason.DecodeError{} ->
+        "stream_decode_error"
+
+      {:error, %Jason.DecodeError{}} ->
+        "stream_decode_error"
+
+      _ ->
+        "stream_other_error"
+    end
+  end
+
+  defp raised_class(_), do: "raised"
 
   defp reply(request, identity, metadata, text, calls, deltas) do
     reported = Map.get(metadata, :usage) || %{}

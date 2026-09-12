@@ -1,9 +1,13 @@
+Code.require_file("support/provider_phase_diagnostic.exs", __DIR__)
+
 defmodule Loopex.LLM.ReqLLM.ProviderBridgeTest do
   use ExUnit.Case, async: false
 
+  import ExUnit.CaptureIO
+
   alias Loopex.Model
   alias Loopex.Runtime.ProviderLifetime
-  alias Loopex.LLM.ReqLLM.{ProviderBridge, ProviderConfiguration}
+  alias Loopex.LLM.ReqLLM.{ProviderBridge, ProviderConfiguration, ProviderPhaseDiagnostic}
 
   setup_all do
     {:ok, _apps} = Application.ensure_all_started(:crypto)
@@ -252,6 +256,196 @@ defmodule Loopex.LLM.ReqLLM.ProviderBridgeTest do
              ProviderBridge.complete(request, configuration, Model.discard_progress())
 
     refute process_alive?(child_pid(root))
+  end
+
+  test "a finite failure is exposed only after its single terminal and clean EOF", %{root: root} do
+    for ending <- [:clean, :duplicate, :extra_frame, :partial_frame, :malformed] do
+      case_root = Path.join(root, Atom.to_string(ending))
+      File.mkdir!(case_root)
+      configuration = worker(case_root, {:failure, ending})
+
+      report =
+        failure_diagnostic(fn ->
+          assert {:error, {:dispatched_or_unknown, "model_call_failed"}} =
+                   ProviderBridge.complete(
+                     fresh_request(),
+                     configuration,
+                     Model.discard_progress()
+                   )
+
+          assert File.read!(Path.join(case_root, "credential-size")) == "29"
+          refute process_alive?(child_pid(case_root))
+          refute File.exists?(File.read!(Path.join(case_root, "namespace")))
+        end)
+
+      assert report["counts"]["terminal_unknown"] >= 1
+      assert report["cleanup_confirmed"] and report["healthy"]
+      refute report["incomplete"]
+
+      if ending == :clean do
+        assert report["failure"] == %{"stage" => "stream", "class" => "stream_transport_timeout"}
+      else
+        assert report["failure"] == nil
+        assert report["counts"]["fail"] >= 1
+      end
+    end
+  end
+
+  test "the original deadline discards a terminal whose channel remains open", %{root: root} do
+    configuration = worker(root, {:failure, :withheld_eof})
+
+    report =
+      failure_diagnostic(fn ->
+        assert {:error, {:dispatched_or_unknown, "model_call_failed"}} =
+                 ProviderBridge.complete(fresh_request(), configuration, Model.discard_progress())
+
+        refute process_alive?(child_pid(root))
+        refute File.exists?(File.read!(Path.join(root, "namespace")))
+      end)
+
+    assert report["counts"]["terminal_unknown"] >= 1
+    assert report["counts"]["fail"] >= 1
+    assert report["failure"] == nil
+    assert report["cleanup_confirmed"] and report["healthy"]
+    refute report["incomplete"]
+  end
+
+  test "caller loss stops the EOF receiver and discards its provisional failure", %{root: root} do
+    configuration = worker(root, {:failure, :withheld_eof})
+
+    report =
+      failure_diagnostic(fn ->
+        {caller, guardian, stop_reference} = registered_call(fresh_request(), configuration)
+        send(caller, :continue)
+        assert eventually(fn -> is_pid(eof_receiver(guardian)) end, 5_000)
+        receiver = eof_receiver(guardian)
+        receiver_monitor = Process.monitor(receiver)
+        Process.exit(caller, :kill)
+        assert_receive {:DOWN, ^receiver_monitor, :process, ^receiver, :killed}, 2_500
+        assert eventually(fn -> not process_alive?(child_pid(root)) end, 2_500)
+        refute File.exists?(File.read!(Path.join(root, "namespace")))
+        # Cleanup ends the child; the managed retainer still owns the guardian.
+        assert Process.alive?(guardian)
+        stop_registered(guardian, stop_reference)
+      end)
+
+    assert report["counts"]["terminal_unknown"] >= 1
+    assert report["failure"] == nil
+    assert report["cleanup_confirmed"] and report["healthy"]
+    refute report["incomplete"]
+  end
+
+  test "version-one readiness is refused before the credential is sent", %{root: root} do
+    assert {:error, {:not_dispatched, "model_call_failed"}} =
+             ProviderBridge.complete(
+               fresh_request(),
+               worker(root, :old_ready),
+               Model.discard_progress()
+             )
+
+    assert File.regular?(Path.join(root, "ready"))
+    refute File.exists?(Path.join(root, "credential-size"))
+    refute process_alive?(child_pid(root))
+    refute File.exists?(File.read!(Path.join(root, "namespace")))
+  end
+
+  test "queued EOF after the original deadline cannot publish a failure category", %{root: root} do
+    configuration = worker(root, {:failure, :release_eof})
+    request = fresh_request()
+
+    report =
+      failure_diagnostic(fn ->
+        {caller, guardian, stop_reference} = registered_call(request, configuration)
+        send(caller, :continue)
+        assert eventually(fn -> is_pid(eof_receiver(guardian)) end, 5_000)
+        receiver = eof_receiver(guardian)
+        assert :erlang.suspend_process(guardian)
+
+        try do
+          File.write!(Path.join(root, "release-eof"), "release")
+
+          assert eventually(
+                   fn ->
+                     {:messages, messages} = Process.info(guardian, :messages)
+
+                     Enum.any?(
+                       messages,
+                       &match?({:provider_frame, ^receiver, {:error, :closed}}, &1)
+                     )
+                   end,
+                   5_000
+                 )
+
+          assert eventually(
+                   fn -> System.system_time(:millisecond) >= request.deadline end,
+                   10_000
+                 )
+        after
+          if Process.alive?(guardian), do: :erlang.resume_process(guardian)
+        end
+
+        assert_receive {:completed, {:error, {:dispatched_or_unknown, "model_call_failed"}}},
+                       1_000
+
+        stop_registered(guardian, stop_reference)
+        refute process_alive?(child_pid(root))
+        refute File.exists?(File.read!(Path.join(root, "namespace")))
+      end)
+
+    assert report["counts"]["terminal_unknown"] >= 1
+    assert report["counts"]["fail"] >= 1
+    assert report["failure"] == nil
+    assert report["cleanup_confirmed"] and report["healthy"]
+    refute report["incomplete"]
+  end
+
+  defp failure_diagnostic(fun) do
+    output =
+      capture_io(fn ->
+        assert catch_throw(
+                 ProviderPhaseDiagnostic.capture(fn ->
+                   fun.()
+                   throw(:bounded_failure_test_complete)
+                 end)
+               ) == :bounded_failure_test_complete
+      end)
+
+    output
+    |> String.trim()
+    |> String.replace_prefix("provider phase diagnostic ", "")
+    |> Jason.decode!()
+  end
+
+  defp fresh_request do
+    {:ok, request} =
+      Model.request("fixture:model", [%{"role" => "user", "content" => "hello"}],
+        sampling: %{"max_tokens" => 4},
+        deadline: System.system_time(:millisecond) + 10_000
+      )
+
+    request
+  end
+
+  defp eof_receiver(guardian) do
+    case Process.info(guardian, :links) do
+      {:links, links} ->
+        Enum.find(links, fn pid ->
+          is_pid(pid) and
+            case Process.info(pid, :current_stacktrace) do
+              {:current_stacktrace, frames} ->
+                Enum.any?(frames, fn
+                  {ProviderBridge, :receive_eof, 2, _location} -> true
+                  _frame -> false
+                end)
+
+              nil ->
+                false
+            end
+        end)
+
+      nil ->
+        nil
+    end
   end
 
   test "a blocked progress consumer cannot queue data or delay cleanup", %{
@@ -530,7 +724,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderBridgeTest do
     File.write!(Path.join(root, "namespace"), Path.dirname(path))
     {:ok, socket} = :gen_tcp.connect({:local, path}, 0, [:binary, active: false, packet: :raw], 5_000)
     {:ok, :bootstrap, bootstrap} = ProviderCodec.recv(socket, 5_000)
-    true = bootstrap == %{"nonce" => nonce, "version" => 1, "build_manifest_sha256" => manifest}
+    true = bootstrap == %{"nonce" => nonce, "version" => 2, "build_manifest_sha256" => manifest}
     File.write!(Path.join(root, "booted"), "ready")
     if mode == :stall_ready, do: Process.sleep(:infinity)
     if mode == :stall_writes do
@@ -544,7 +738,12 @@ defmodule Loopex.LLM.ReqLLM.ProviderBridgeTest do
       {:wrong_ready, field} -> Map.put(bootstrap, field, String.duplicate("0", 64))
       _ -> bootstrap
     end
-    :ok = ProviderCodec.send(socket, :ready, ready)
+    if mode == :old_ready do
+      {:ok, <<"LP", 2, rest::binary>>} = ProviderCodec.encode(:ready, ready)
+      :ok = :gen_tcp.send(socket, <<"LP", 1, rest::binary>>)
+    else
+      :ok = ProviderCodec.send(socket, :ready, ready)
+    end
     File.write!(Path.join(root, "ready"), "ready")
     if mode == :stall_writes, do: Process.sleep(:infinity)
     case ProviderCodec.recv(socket, 5_000) do
@@ -580,10 +779,27 @@ defmodule Loopex.LLM.ReqLLM.ProviderBridgeTest do
           else: Map.merge(binding, %{"status" => "reply", "reply" => reply})
         terminal = case mode do
           {:wrong_binding, :terminal, field} -> Map.put(terminal, field, String.duplicate("0", 64))
+          {:failure, _ending} -> Map.merge(binding, %{
+            "status" => "dispatched_or_unknown",
+            "failure" => %{"stage" => "stream", "class" => "stream_transport_timeout"}
+          })
           _ -> terminal
         end
         :ok = ProviderCodec.send(socket, :terminal, terminal)
         if mode == :duplicate, do: ProviderCodec.send(socket, :terminal, terminal)
+        case mode do
+          {:failure, :duplicate} -> ProviderCodec.send(socket, :terminal, terminal)
+          {:failure, :extra_frame} -> ProviderCodec.send(socket, :dispatch_started, binding)
+          {:failure, :partial_frame} -> :gen_tcp.send(socket, "L")
+          {:failure, :malformed} -> :gen_tcp.send(socket, <<0, 255, 42>>)
+          {:failure, :withheld_eof} -> Process.sleep(:infinity)
+          {:failure, :release_eof} ->
+            Stream.repeatedly(fn -> File.exists?(Path.join(root, "release-eof")) end)
+            |> Enum.reduce_while(:waiting, fn ready, _ ->
+              if ready, do: {:halt, :ready}, else: (Process.sleep(10); {:cont, :waiting})
+            end)
+          _ -> :ok
+        end
         :gen_tcp.close(socket)
         File.write!(Path.join(root, "terminal"), "closed")
         Process.sleep(:infinity)
