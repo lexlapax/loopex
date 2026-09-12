@@ -2132,3 +2132,45 @@ identity, and diagnose any failure before another run. The complete final M0–M
 gates remain required on the resulting candidate under the existing approved
 cadence. Commit and push completed work to `m3`; this approval grants no M3
 closure, product integration to `main`, release or waiver of another finding.
+
+<a id="disposition-m3-provider-diagnostics-design-2026-09-11"></a>
+### M3 bounded provider failure diagnostics design, 2026-09-11
+
+The maintainer requested the diagnostic choice in plain English. The presented
+recommendation was:
+
+> **Add limited error reporting — recommended.** Make it report categories such as connection failure, provider rejection, or response-processing error, without exposing keys or response contents. This requires a small code change, architecture approval and fresh tests.
+
+The alternative preserved the companion and observed only its network
+connections. The recommendation explicitly stated that the missing information
+would be repaired first and the underlying failure would still need to be
+identified and resolved. The maintainer answered **"1"**.
+
+This selects the bounded design described by proposed
+[ADR 0029](../adr/0029-bounded-provider-failure-diagnostics.md#concept) and its
+[technical companion](../adr/0029-bounded-provider-failure-diagnostics-technical.md#technical-depth).
+The external design packet had received independent read-only clearance at
+SHA-256 `d48818d1dbdb19fe2aac8cbe24929761036be998001ff71e1eb6a2df24f00880`.
+Its scope is one finite failed-stage/category pair in the companion's existing
+private channel, available to bounded test-owned observation only after a
+validated terminal and clean EOF. Every intervening protocol failure discards
+the provisional pair. An outer fallback cannot replace the first classified
+failure. No raw exception, provider message, credential, new public API,
+durable record, production observer, larger frame limit or dependency is added.
+
+Preserve the generic Model error, dispatch and retry authority, settlement,
+accounting, permit retirement, same-source build checks and cleanup proof.
+The named closed-schema fixtures may be proposed for the version-2 contract;
+their historical identities and unaffected guarantees remain required. This
+record does not itself replace a protected test restriction or accept an ADR
+or M3 amendment candidate. Complete the applicable reviewed acceptance records
+before dependent implementation.
+
+The original Linux failure at source
+`8e9a6c3432fd35784b52a435d12e922b5f33098d` remains unresolved. Supplemental
+instrumented successes and the completed macOS gate do not assign its cause.
+Retain original failures and subsequent results separately. The existing
+approved final-gate cadence remains in force, including Linux serenity and
+required actual provider paths. This choice waives no failed test or finding,
+authorizes no additional supplemental provider calls, and grants no M3 closure,
+product integration to `main`, tag or release.
