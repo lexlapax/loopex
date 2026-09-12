@@ -1225,10 +1225,10 @@ require_bound_artifact() {
 # by mix loopex.status. A runner cannot honestly verify its own bytes before it
 # executes them, and this one does not pretend to.
 require_bound_artifact \
-  cc290e60d9f9588c75f1259b25976a58d1c30713e570cd5a88c70cdf3c2159a0 \
+  53d8219bdee584a3849a85a1102e405520d5dd0dfbe21d259434bc9edfc5fcc0 \
   scripts/m1-exunit-runner.exs
 require_bound_artifact \
-  0a8406ca080c70624e776b01e37c7ded210b54659064cf63723a847a54debe2d \
+  c36253cff3d74ddff1b330695edbc4bde0a4565c1412c67c1293b2fb7ca6129b \
   apps/loopex/test/m1_exunit_runner_test.exs
 require_bound_artifact \
   fad47299b27a767785d2a6a776155038054f5457ee3ce0195a37ae667f7a9999 \
