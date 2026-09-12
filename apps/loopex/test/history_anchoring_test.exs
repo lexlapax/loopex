@@ -2077,6 +2077,118 @@ defmodule Loopex.HistoryAnchoringTest do
     end
   end
 
+  defp closed_first_override_files(name) do
+    {original, standalone, _cited} = first_override_citation_files()
+    plan = Fixture.plan(governed: true, closed: true) |> String.replace("M0", name)
+
+    convert = fn files ->
+      Map.new(files, fn {path, text} ->
+        {String.replace(path, "M3", name), String.replace(text, "M3", name)}
+      end)
+      |> Map.put(@index_path, prerequisite_index([{name, "Closed"}]))
+      |> Map.put("docs/plans/#{name}.md", plan)
+    end
+
+    original = convert.(original)
+    standalone = convert.(standalone)
+
+    cited =
+      Map.update!(standalone, "docs/plans/#{name}.md", fn text ->
+        String.replace(
+          text,
+          "One direct workstream.",
+          "One direct workstream. [Override](../developer/agent-context-map.md##{@override_anchor})."
+        )
+      end)
+
+    {original, standalone, cited}
+  end
+
+  for name <- ["M1", "M2"] do
+    test "Closed #{name} may first cite a prior standalone override without changing either record" do
+      {original, standalone, cited} = closed_first_override_files(unquote(name))
+
+      assert :ok ==
+               prerequisite_history([
+                 {sha("a"), [], original},
+                 {sha("b"), [sha("a")], standalone},
+                 {sha("c"), [sha("b")], cited}
+               ])
+    end
+  end
+
+  test "Closed first override citation cannot replace records borrow authority or change parent state" do
+    for name <- ["M1", "M2"] do
+      {original, standalone, cited} = closed_first_override_files(name)
+      path = "docs/plans/#{name}.md"
+
+      for decision <- ["Acceptance", "Closure"] do
+        changed =
+          Map.update!(
+            cited,
+            path,
+            &String.replace(
+              &1,
+              "| #{decision} | Maintainer |",
+              "| #{decision} | Delegate: Reviewer |"
+            )
+          )
+
+        assert_raise Invalid, ~r/completed (Acceptance|Closure)/, fn ->
+          prerequisite_history([
+            {sha("a"), [], original},
+            {sha("b"), [sha("a")], standalone},
+            {sha("c"), [sha("b")], changed}
+          ])
+        end
+      end
+
+      for state <- ["Open", "Accepted"] do
+        parent = Map.put(standalone, @index_path, prerequisite_index([{name, state}]))
+
+        assert_raise Invalid, ~r/no parent carries both the prior citation/, fn ->
+          prerequisite_history([{sha("a"), [], parent}, {sha("c"), [sha("a")], cited}])
+        end
+      end
+
+      assert_raise Invalid, ~r/first added by that transition/, fn ->
+        prerequisite_history([{sha("a"), [], original}, {sha("c"), [sha("a")], cited}])
+      end
+
+      duplicate = Map.update!(standalone, @context_path, &(&1 <> &1))
+
+      assert_raise Invalid, ~r/parent .* carries 2 anchors/, fn ->
+        prerequisite_history([{sha("a"), [], duplicate}, {sha("c"), [sha("a")], cited}])
+      end
+
+      assert_raise Invalid, ~r/no parent carries both the prior citation/, fn ->
+        prerequisite_history([
+          {sha("a"), [], original},
+          {sha("b"), [sha("a")], standalone},
+          {sha("c"), [sha("a"), sha("b")], cited}
+        ])
+      end
+
+      missing =
+        Map.update!(
+          cited,
+          path,
+          &Regex.replace(~r/\| Closure \|[^\n]+/, &1, "| Closure | — | — | — |")
+        )
+
+      parent =
+        Map.update!(
+          standalone,
+          path,
+          &Regex.replace(~r/\| Closure \|[^\n]+/, &1, "| Closure | — | — | — |")
+        )
+
+      assert_raise Invalid, ~r/no parent carries both the prior citation/, fn ->
+        prerequisite_history([{sha("a"), [], parent}, {sha("c"), [sha("a")], missing}])
+      end
+    end
+  end
+
   test "an M3 override disposition anchor predates acceptance" do
     before = "# Context map\n"
 

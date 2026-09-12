@@ -216,8 +216,9 @@ defmodule Loopex.Checks.History do
   # anchor exactly once at the accepted revision and in every direct parent that
   # already cites that same override. At least one parent must carry both the
   # citation and anchor, except a first citation in a single-parent Accepted
-  # lineage with unchanged completed Acceptance and the anchor already present
-  # in that same parent. That admits an ordinary integration merge whose unrelated
+  # lineage with unchanged completed Acceptance, or a single-parent Closed
+  # lineage with unchanged completed Acceptance and Closure. Both require the
+  # anchor already present exactly once in that same parent. That admits an ordinary integration merge whose unrelated
   # main parent predates the milestone, while preventing an unrelated parent from
   # laundering a citation whose own lineage lacks the standalone record. The
   # committed walk resolves targets from Git; the synthetic working-tree child
@@ -241,7 +242,8 @@ defmodule Loopex.Checks.History do
 
         record_parents =
           if citing_parents == [] and
-               unchanged_accepted_parent?(name, state, revision, parents, governed, resolve_file) do
+               (unchanged_accepted_parent?(name, state, revision, parents, governed, resolve_file) or
+                  unchanged_closed_parent?(name, state, revision, parents, governed, resolve_file)) do
             parents
           else
             citing_parents
@@ -284,6 +286,31 @@ defmodule Loopex.Checks.History do
   end
 
   defp unchanged_accepted_parent?(_name, _state, _revision, _parents, _governed, _resolve_file),
+    do: false
+
+  defp unchanged_closed_parent?(name, "Closed", revision, [parent], governed, resolve_file)
+       when is_function(resolve_file, 2) do
+    path = "docs/plans/#{name}.md"
+    current = Map.get(governed, path)
+    prior = resolve_file.(parent, path)
+    parent_documents = override_parent_documents(parent, name, resolve_file)
+    parent_rows = register_rows(resolve_file.(parent, @index), parent, false, parent_documents)
+
+    if parent_rows != nil and {name, "Closed"} in parent_rows and
+         is_binary(current) and is_binary(prior) do
+      {current_rows, _, current_complete} =
+        Records.governance_records(current, "#{path} at #{revision}")
+
+      {prior_rows, _, prior_complete} = Records.governance_records(prior, "#{path} at #{parent}")
+
+      current_complete == [true, true] and prior_complete == [true, true] and
+        current_rows == prior_rows
+    else
+      false
+    end
+  end
+
+  defp unchanged_closed_parent?(_name, _state, _revision, _parents, _governed, _resolve_file),
     do: false
 
   defp override_parent_documents(parent, name, resolve_file) do
