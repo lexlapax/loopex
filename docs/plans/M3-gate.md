@@ -221,3 +221,55 @@ failure is a blocking flake. No fixed review-round or runtime promise is made.
 | Documentation README | `docs/README.md` |
 | Root README | `README.md` |
 | Changelog | `CHANGELOG.md` |
+
+<a id="amendment-1"></a>
+## Amendment 1 — Bounded Private Provider Failure Diagnostics
+
+**Acceptance: OUTSTANDING.** This proposal retains the prior Acceptance row and
+`Accepted` lifecycle state. After exact-SHA review and explicit acceptance, its
+immediate one-parent child records a fresh amendment-specific disposition and
+rebinds Acceptance to this exact proposal under amendment-transaction-v1.
+No dependent implementation is authorized by the unaccepted proposal.
+
+The amended plan pair permits the finite private diagnostic contract of
+[**ADR 0029**](../adr/0029-bounded-provider-failure-diagnostics.md#concept),
+which must already be accepted before proposal A is committed. The ordinary
+sequence is ADR proposal/acceptance P/T, then M3 proposal/rebind A/R. Its schema, ownership,
+compatibility and evidence are described in the
+[evidence obligations](M3-technical.md#technical-plan-evidence).
+All five outcomes, existing commands, protected selector identities, Bound
+Artifacts rows and existing pass/failure rules remain unchanged. No guarantee
+is deferred, weakened or replaced by a supplemental diagnostic run.
+
+Conformance additions run in the existing required deterministic suite through
+existing provider test/support files; no invented selector or locked test name
+is added. Codec version fixtures are ordinary tests rather than locked version-1
+claims; only the approved schema/version expectations change. Preserve the
+actual M2 pre-transport refusal and generic-ambiguity witness and all unaffected
+protected assertions. Existing required real-provider,
+same-source build and attended workflow paths retain their original requests,
+deadlines, cleanup, execution counts and assertions and must pass on the amended
+candidate. An unavailable diagnostic never supplies cleanup or gate evidence.
+
+This amendment changes no digest-bound product, runner, harness or configuration
+artifact. The gate document and both normative envelopes change and require the
+M3 proposal/rebind transaction; historical Acceptance is not rewritten here.
+
+The diagnostic implementation and its evidence are unavailable at A and R even
+if the unchanged runner passes. Earlier S evidence proves no new diagnostic
+behavior. The first implementation checkpoint after R must first demonstrate
+a positive-control-backed behavioral failure against retained baseline
+production at the existing codec boundary, then add real-companion conformance
+cases through the existing required suite. Missing APIs/tests or setup failures
+are not that red; no new locked witness name is introduced by this amendment.
+
+For these documentation-only A/R revisions, the approved
+[Amendment 1 gate-cadence override](../developer/agent-context-map.md#override-disposition-m3-amendment1-gate-cadence-2026-09-11)
+defers full M0–M3 execution to the completed implementation candidate, including
+Linux serenity. Those A/R commands are **unrun**, never PASS. Keep focused
+status, artifact/envelope binding, documentation and bootstrap checks, plus
+independent exact-SHA review: A refuses only for its deliberately stale M3
+binding in binding-dependent checks, with binding-independent checks verified
+directly; R must be green on those focused checks. Final commands, required
+tests and pass/failure criteria are unchanged. Earlier evidence continues to
+name only its original source revision.

@@ -24,12 +24,21 @@ waives only the new M0–M2 aggregate at this plan-acceptance transition. Record
 that evidence as waived, not green or unavailable.
 M3 stays Open until explicit acceptance of the reviewed plan pair and gate.
 
-Only two new ADRs are M3 prerequisites:
+The original M3 acceptance had two new ADR prerequisites; Amendment 1 adds
+ADR 0029 as an explicit prerequisite before its proposal revision A:
 
 | Decision | Owner and acceptance point | Effect |
 | --- | --- | --- |
 | [**ADR 0025**](../adr/0025-resource-packs-and-skill-admission.md#concept) | Maintainer, before M3 acceptance | Fixed project-skill class, Git import, trust, pre-run selection, retention and optional-block admission |
 | [**ADR 0027**](../adr/0027-provider-permit-retirement.md#concept) | Maintainer, before M3 acceptance | Safe retirement of whole-generation in-memory spent references under unchanged fencing and accounting |
+| [**ADR 0029**](../adr/0029-bounded-provider-failure-diagnostics.md#concept) | Maintainer, accepted before Amendment 1 proposal A is committed | Finite invocation-local companion failure categories through the existing private codec/channel, with unchanged public outcomes and cleanup |
+
+ADR 0029 follows the ordinary proposal/acceptance pair P/T before the M3
+amendment proposal/rebind pair A/R. This draft is A after T: the historical
+prerequisite guard checks every revision retaining the Accepted lifecycle,
+so ADR 0029 acceptance cannot be postponed until implementation. A retains the
+old Acceptance row; R alone rebinds to the reviewed, explicitly accepted A.
+Neither A nor R contains or proves the diagnostic implementation.
 
 Accepted M2 ADRs remain inherited constraints. ADRs 0023, 0024, 0026 and 0028
 belong to M4: protocol, durable interactions, floor and artifact ranges. No floor
@@ -155,6 +164,50 @@ snapshot or freeze every test added since a moving historical revision.
    cross-VM scratch allocation; and mutations of repaired-path clauses and
    sibling transitions.
 
+**Amendment 1: bounded private provider diagnostics**
+
+ADR 0029 owns the exact finite schema, classifier precedence and lifetime.
+Advance the existing private codec/handshake to version 2; only the ambiguous
+failure terminal adds the required stage/class map. Its encoded map is capped
+at 256 bytes within the unchanged terminal/frame caps. The worker normalizes
+one first unsuccessful stage and drops raw reasons. The bridge discards its
+provisional pair on every protocol failure and exposes it only after the
+single terminal is sealed by terminal_end and clean EOF. The existing test
+observer may retain one validated pair using static labels; cleanup proof is
+independent. No automatic production observer or raw-argument trace is added.
+
+Use the existing codec, bridge, adapter-contract, credential-plane and phase-
+diagnostic tests and support fixtures. Their ordinary required deterministic
+suite proves finite types/enums/keys/caps, first-failure precedence, secret
+exclusion, unavailable-on-invalid-protocol behavior, owner/collector lifetime,
+and unchanged public errors/retry classification. Prove positive single-
+terminal-plus-EOF observation and rejection after duplicate/additional/malformed
+or partial final frames. Preserve historical protected case identities and all
+unaffected assertions. Codec version fixtures are ordinary tests, not locked
+version-1 guarantees; update only their approved schema/version expectations.
+In particular, preserve the actual M2 pre-transport refusal and generic-
+ambiguity witness and its public Model/retry assertions. No new locked selector
+or test name is introduced here.
+
+Mixed host/worker versions and build-manifest mismatches must refuse before
+credential delivery, without dual decoding or downgrade. Existing real-
+companion deterministic fixtures prove failure categories; unchanged required
+real-provider and attended source-built CLI paths prove deployment fidelity.
+Keep their model, prompt, deadlines, cleanup grace, invocation counts and
+assertions unchanged. No live-provider failure need be forced. Renew affected
+same-source build, startup/deadline/retainer/backpressure/launcher and full
+candidate evidence under the existing approved cadence. Supplemental diagnostic
+clones and earlier-source passes do not replace required candidate evidence.
+
+The new diagnostic implementation and evidence are unavailable at A and R,
+regardless of the unchanged runner's result. No earlier S PASS establishes the
+addition. The first implementation checkpoint after R must establish a
+positive-control-backed behavioral failure against retained baseline production
+at the existing codec boundary, before adding the implementation. Missing APIs,
+undefined tests and environment failures do not constitute that red. Then add
+real-companion conformance cases to the existing required suite and prove the
+accepted diagnostic contract without inventing new locked witness names.
+
 **Cheap checkpoints and full contract evidence**
 
 The locked default command is the complete closure gate. `--checkpoint` is
@@ -174,6 +227,19 @@ evidence unavailable. A later-discovered inherited red left unobserved between
 those moments is an evidence-schedule defect, not conforming behavior. Focused
 results do not replace required full evidence or excuse an observed inherited
 failure.
+
+For the documentation-only Amendment 1 proposal A and immediate rebind child R,
+the approved [Amendment 1 gate-cadence override](../developer/agent-context-map.md#override-disposition-m3-amendment1-gate-cadence-2026-09-11)
+replaces the full-gate timing requirement above. Full M0–M3 commands at A/R are
+**unrun and deferred** to the completed implementation candidate, including
+Linux serenity. Retain focused status, artifact/envelope binding, documentation
+and bootstrap checks appropriate to each revision, plus independent exact-SHA
+review. At A, binding-dependent checks must refuse only for the deliberately
+stale M3 binding; verify binding-independent checks directly. At R, focused
+status, bindings, documentation and bootstrap must be green. Deferred commands
+are never reported PASS, and earlier results retain their original source
+identities. All final commands, tests and pass/failure criteria remain unchanged.
+
 Do not put the aggregate inside protected-selector execution or bootstrap.
 Record per-lane duration so cost is observable; no promised minute count.
 
@@ -215,6 +281,12 @@ historical refusals. ADR 0025 explicitly narrows its supersession of 0010/0017.
 ADR 0027 changes in-memory retention, not attempt/accounting algebra. Existing
 allow/deny policy and full-object ArtifactStore contracts remain unchanged.
 
+Amendment 1 changes only the matched host/companion private codec pair under
+ADR 0029. It changes no session format or durable data and adds no migration.
+Rollback restores a matching prior pair with diagnostics absent; it never
+authorizes retry of an uncertain invocation. The public Model error remains
+`{:error, {:dispatched_or_unknown, "model_call_failed"}}`.
+
 <a id="technical-plan-migration"></a>
 ### Migration and Rollback
 
@@ -253,4 +325,12 @@ and selection path serve both hosts. No new app/dependency/job kind, second
 policy evaluator, interaction family, range port, default tool, plugin loader,
 generic pipeline, worker pool or second reducer. Review growth against actual
 boundary reuse; arbitrary line ceilings do not replace complete evidence.
+
+Amendment 1 additionally permits finite normalization inside the existing
+adapter, one codec terminal member, provisional guardian state and one private
+side-effect-free observation call after sealing. Keep the existing launcher,
+build task/configuration and BuildFixture unchanged. No generic diagnostic
+framework, event history, extra transport or new retained resource is justified.
+If a bound artifact, cap increase or broader boundary change becomes necessary,
+stop for a new decision rather than extend this allowance.
 <!-- loopex:plan-technical-envelope:end -->
