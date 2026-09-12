@@ -85,9 +85,13 @@ is the only inherited witness-meaning change in this checkpoint.
 Acceptance binds these runner, manifest, configuration and authoritative-channel
 bytes. Product test bodies may grow during implementation; their protected
 identities and required state are fixed in `scripts/m3-outcomes.exs`. Existing
-Closed gate and bound-artifact bytes remain unchanged.
+Closed gate and bound-artifact bytes remain unchanged except for the exact
+shared selector diagnostic repair and named M1/M2/M3 replacement bindings in
+[Amendment 2](#amendment-2), under the
+[approved successor exception](../developer/agent-context-map.md#override-disposition-m3-selector-diagnostics-2026-09-12).
 The M3 gate-support tests follow the same witness rule; their whole-file bytes
-are not frozen. The inherited M1 harness corpus retains its existing binding.
+are not frozen. The inherited M1 harness corpus remains digest-bound, including
+its Amendment 2 replacement below.
 
 | SHA-256 | Path |
 | --- | --- |
@@ -96,8 +100,8 @@ are not frozen. The inherited M1 harness corpus retains its existing binding.
 | `65d0de9dcd1218af542f00e32c2177d2612a2f1232f22db37b9942200c84cf66` | `scripts/m3-gate-support.exs` |
 | `c4d485ca3229441c678abe1e8733f90216e89e0dfb9e81786f58f525619aec29` | `scripts/check-closed-gates.sh` |
 | `bae4d114023091f9162fc0981c28e75db031ba3216adf1b1255d888f2dd3b5e8` | `scripts/m3-outcomes.exs` |
-| `cc290e60d9f9588c75f1259b25976a58d1c30713e570cd5a88c70cdf3c2159a0` | `scripts/m1-exunit-runner.exs` |
-| `0a8406ca080c70624e776b01e37c7ded210b54659064cf63723a847a54debe2d` | `apps/loopex/test/m1_exunit_runner_test.exs` |
+| `53d8219bdee584a3849a85a1102e405520d5dd0dfbe21d259434bc9edfc5fcc0` | `scripts/m1-exunit-runner.exs` |
+| `c36253cff3d74ddff1b330695edbc4bde0a4565c1412c67c1293b2fb7ca6129b` | `apps/loopex/test/m1_exunit_runner_test.exs` |
 | `fad47299b27a767785d2a6a776155038054f5457ee3ce0195a37ae667f7a9999` | `.tool-versions` |
 
 ## Runner Modes and Evidence Cost
@@ -273,3 +277,48 @@ binding in binding-dependent checks, with binding-independent checks verified
 directly; R must be green on those focused checks. Final commands, required
 tests and pass/failure criteria are unchanged. Earlier evidence continues to
 name only its original source revision.
+
+<a id="amendment-2"></a>
+## Amendment 2 — Bind bounded shared selector diagnostics
+
+**Acceptance: OUTSTANDING.** This v1 proposal retains the current Acceptance
+row and Accepted lifecycle. M1 generation 9 and M2 generation 10 must already
+be settled through their separate immediate rebinds. After independent review
+and explicit acceptance of this actual A SHA by the recorded delegate, its
+immediate one-parent child R records one fresh disposition and rebinds Acceptance
+to A's Concept envelope, Technical envelope and gate digests.
+
+The [approved repair](../developer/agent-context-map.md#override-disposition-m3-selector-diagnostics-2026-09-12) binds the exact shared runner/corpus patch
+`sha256:d2bfe33c46ff83c97fb80ff4406c78c37e1d878739854af03f26cc65a8e7c1c8`. This proposal changes only their two M3 Bound Artifacts
+rows, this amendment and the plan pair's explanation of approved diagnostic and
+validation scope. M1 and M2 already own their script digest replacements; M3's
+gate script reads this table and needs no byte change. The plan also records
+the separately approved [sequential binding checker correction](../developer/agent-context-map.md#override-disposition-m3-sequential-binding-checker-2026-09-12).
+
+Failure-only records retain mode/seed, bounded case identifiers and attributable
+source locations, and closed failure categories and operand types. Limits remain
+eight retained event records, two summaries per record and 4,096 bytes per detail
+line, with omitted counts. Arbitrary messages, values, provider bodies, captured
+logs and stack arguments remain excluded. The two added synthetic cases leave
+the existing five corpus cases and authoritative success/report digest behavior
+unchanged. All five M3 outcomes, required selectors, counts/exclusions, provider
+paths, commands and final pass/failure criteria retain their meaning. No ADR or
+product contract changes.
+
+For these M1/M2/M3 proposal and rebind checkpoints, the approved final-only
+cadence uses focused exact-patch/corpus, success-report, script/digest and
+applicable status/binding checks with independent exact-SHA review. A retains
+the expected stale M3 binding; R must settle it and leave no outstanding holder.
+Intermediate scoped validation identifies pending holders and never claims
+global PASS. Complete M0–M3 gates remain required on the final candidate on
+macOS and Linux serenity. Deferred full commands are unrun at A/R, not passing
+evidence. Earlier focused results and gate failures retain their original source.
+
+This is test and repository-check infrastructure supporting the existing
+evidence obligations. It supplies no new product outcome, identifies no lost
+historical cause and grants no failure waiver, closure or release.
+
+| Generation | Artifact | Rebound SHA-256 |
+| --- | --- | --- |
+| 2 | `scripts/m1-exunit-runner.exs` | `53d8219bdee584a3849a85a1102e405520d5dd0dfbe21d259434bc9edfc5fcc0` |
+| 2 | `apps/loopex/test/m1_exunit_runner_test.exs` | `c36253cff3d74ddff1b330695edbc4bde0a4565c1412c67c1293b2fb7ca6129b` |
