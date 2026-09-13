@@ -352,12 +352,33 @@ defmodule Loopex.LLM.ReqLLM.ProviderBridgeTest do
   test "queued EOF after the original deadline cannot publish a failure category", %{root: root} do
     configuration = worker(root, {:failure, :release_eof})
     request = fresh_request()
+    observation = make_ref()
+    deadline_function = {ProviderBridge, :invocation_deadline, 2}
+    assert {:module, ProviderBridge} = Code.ensure_loaded(ProviderBridge)
+    assert :erlang.trace_info(deadline_function, :traced) == {:traced, false}
+    on_exit(fn -> :erlang.trace_pattern(deadline_function, false, [:local]) end)
+    assert :erlang.trace_pattern(deadline_function, [{:_, [], [{:return_trace}]}], [:local]) == 1
 
     report =
       failure_diagnostic(fn ->
         {caller, guardian, stop_reference} = registered_call(request, configuration)
+        # The phase collector remains the guardian's tracer. Its selective
+        # receive retains this extra arity-only call's scalar return untouched.
+        {:tracer, tracer} = :erlang.trace_info(guardian, :tracer)
+        assert is_pid(tracer)
         send(caller, :continue)
         assert eventually(fn -> is_pid(eof_receiver(guardian)) end, 5_000)
+        trace_fence(guardian)
+        {:messages, trace_messages} = Process.info(tracer, :messages)
+
+        deadlines =
+          for {:trace_ts, ^guardian, :return_from, {ProviderBridge, :invocation_deadline, 2},
+               deadline, _timestamp} <- trace_messages,
+              is_integer(deadline),
+              do: deadline
+
+        assert [deadline] = deadlines
+        assert :erlang.trace_pattern(deadline_function, false, [:local]) == 1
         receiver = eof_receiver(guardian)
         assert :erlang.suspend_process(guardian)
 
@@ -376,10 +397,19 @@ defmodule Loopex.LLM.ReqLLM.ProviderBridgeTest do
                    5_000
                  )
 
-          assert eventually(
-                   fn -> System.system_time(:millisecond) >= request.deadline end,
-                   10_000
-                 )
+          assert eventually(fn -> System.monotonic_time() >= deadline end, 10_000),
+                 "committed native deadline=#{deadline} observed=#{System.monotonic_time()}"
+
+          pre_resume = System.monotonic_time()
+          {:messages, pending} = Process.info(guardian, :messages)
+
+          queued_eof =
+            Enum.any?(pending, &match?({:provider_frame, ^receiver, {:error, :closed}}, &1))
+
+          assert pre_resume >= deadline and queued_eof,
+                 "committed native deadline=#{deadline} pre_resume=#{pre_resume} queued_eof=#{queued_eof}"
+
+          send(self(), {observation, deadline, pre_resume, queued_eof})
         after
           if Process.alive?(guardian), do: :erlang.resume_process(guardian)
         end
@@ -394,7 +424,11 @@ defmodule Loopex.LLM.ReqLLM.ProviderBridgeTest do
 
     assert report["counts"]["terminal_unknown"] >= 1
     assert report["counts"]["fail"] >= 1
-    assert report["failure"] == nil
+    assert_receive {^observation, deadline, pre_resume, true}, 0
+
+    assert report["failure"] == nil,
+           "committed native deadline=#{deadline} pre_resume=#{pre_resume}"
+
     assert report["cleanup_confirmed"] and report["healthy"]
     refute report["incomplete"]
   end
