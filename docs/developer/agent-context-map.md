@@ -2705,3 +2705,45 @@ The donor remained unchanged, and only the disposable fixture's runner and
 synthetic self-binding row changed. That evidence predates approval and is
 proposal evidence, not an accepted binding or full-gate result. No historical
 failure is waived by this instruction.
+
+<a id="disposition-m3-amendment-3-acceptance-2026-09-12"></a>
+### M3 Amendment 3 acceptance — 2026-09-12
+
+Under the [recorded checksum delegation](#override-disposition-m3-checksum-portability-2026-09-12),
+independent delegate **`/root/m3_independent_review`**, named
+`m3_independent_review` in the Acceptance table, reviewed exact proposal
+`887ff3733bde8f1560b23c85a4a23988072d5715` and explicitly stated:
+
+> I accept **M3 Amendment 3 proposal `887ff3733bde8f1560b23c85a4a23988072d5715`** under the recorded limited delegation.
+
+The delegate verified and accepted these exact bindings:
+
+- Concept envelope: `sha256:9c004acd94844a9f1369ac84e6b735076c537cc5caabf4ad0e825854334352e5`.
+- Technical envelope: `sha256:433947d010b8999966a9becb9b260647f2764fa0bbc8ef4448f6b395f0b0d227`.
+- Gate: `sha256:7a0140357954e5b465e3e6f41f79893e0f1c820bf0f221c95dc9794a47b1cbcc`.
+
+The proposal changes only the exact approved runner patch and its M3 gate
+binding plus Amendment 3. Both normative envelopes, prior amendment text,
+M1/M2 bindings, product bytes and the Accepted lifecycle are unchanged. This
+immediate one-parent administrative rebind changes only the Acceptance row and
+adds this fresh disposition. It accepts no further repair or amendment.
+
+At exact proposal A, the gate-support file passed all 12 cases with seed 3107,
+zero failures, skipped or excluded cases, in 7.585 seconds. Its log SHA-256 is
+`a66d540aa49b470aa05d0381273693f1713bf579745765de4e44376c014b40ad`.
+Artifact inspection exited 0 in 0.77 seconds with its unchanged inspection-only
+output; log SHA-256
+`ac766105a0ab0b8576719f9255b3a2c7be3cbebc528af9bf445dfc8332d88eb4`.
+Focused proposal validation exited 1 in 10.115 seconds only for the expected
+stale M3 gate binding. It verified all eight artifact hashes, links, pairing
+and unchanged prior governance records, with `global_pass=false`; log SHA-256
+`729af2ea6cdcbec98706191ab6e6f44af7d9e6e15456207bf3804874d7e5f666`.
+The reviewer read those exact results and logs before acceptance. Earlier
+checksum controls retain their original proposal-fixture attribution.
+
+Before final qualification, this rebind requires independent exact-transition
+review, complete default global status validation with no pending holder, and
+M3 artifact inspection. Intermediate full gates remain unrun under the approved
+timing exception. Complete M0–M3 gates remain required at the final candidate
+on macOS and Linux serenity. This acceptance waives no historical failure and
+grants no M3 closure, product integration to `main`, tag or release.
