@@ -2747,3 +2747,65 @@ M3 artifact inspection. Intermediate full gates remain unrun under the approved
 timing exception. Complete M0–M3 gates remain required at the final candidate
 on macOS and Linux serenity. This acceptance waives no historical failure and
 grants no M3 closure, product integration to `main`, tag or release.
+
+<a id="override-disposition-m3-signal-delivery-witness-2026-09-13"></a>
+### M3 prepared signal-delivery witness correction — 2026-09-13
+
+The maintainer answered **"Approved"** to this outstanding request:
+
+> Do you approve the targeted correction: let this single test wait for confirmed delivery within the CLI’s existing **23.8-second limit**, preserving its assertions and failing promptly on refusal or process loss?
+
+The linked decision draft, SHA-256
+`ae7f97838ad2cff87b0c2fdca416ebaaf2e97e3733ddda7b3f471475055911e8`,
+named only `duplicate refusal preserves signal delivery while the incumbent
+presents` in `apps/loopex_cli/test/prepared_recovery_contract_test.exs`, declared
+at line 2242 of source `b839284c2a5770464496dbc3f98b26587d97d024`. The approval
+replaces that case's approximately three-second fixed-attempt mailbox wait
+under the [explicit maintainer override](../../AGENTS.md#maintainer-override).
+It permits no change to the shared `queued_abort?/1-2` helper or its other
+callers.
+
+The replacement observes actual abort enqueue at the still-suspended
+coordinator, using one monotonic cutoff established immediately before the
+signal. Its allowance is derived from the existing
+`Loopex.Executor.cancellation_bounds(@grace).cli_backstop_ms`: with this
+fixture's `@grace = 7_311`, the exact allowance is 23,828 milliseconds. It
+never restarts that cutoff. It requires an initially idle incumbent, the same
+handler identity and live relevant participants; observed refusal, handler
+replacement, participant loss and cutoff expiry are distinct failures. It
+retains the existing holder, attachment and live-backstop assertions,
+coordinator release, presentation result, session identity, durable interrupt
+admission and cleanup in their existing order. Diagnostic assertion output
+does not expose raw private terms.
+
+The reviewed controlled counterexample made the unchanged mailbox assertion
+fail after 3,305 milliseconds while the exact signal worker's routing call
+remained pending. Releasing Control let the same worker deliver the abort
+within the unchanged 5,000-millisecond routing bound, and all remaining
+original assertions passed. The evidence and its independent review are
+retained in the maintainer's
+`loopex-reviews/m3-control-counterexample-b839-xdrvevg1` archive, manifest
+SHA-256 `1205cb5d986881366ed03c0712bbd9f26a396e048d9d6e9c7b427f08d3012244`.
+This proves a possible false-failure schedule in the test; the original Linux
+failure's cause remains unknown. The later passive Linux diagnostic's 56
+passing cases at seed 243366 are diagnostic evidence only. The original
+Linux full-gate failure remains failed, and the macOS full-gate pass remains
+attributed to exact source `b839284c2a5770464496dbc3f98b26587d97d024`.
+
+This disposition lands alone and receives independent exact-SHA review before
+the dependent test edit. The approved validation covers normal delivery, the
+reviewed delayed-Control schedule, refusal or participant loss, and a cutoff
+that does not reset, followed by the owning selector's complete focused run.
+The correction is independently reviewed, committed and pushed to `m3` before
+final qualification. No additional broad mutation hunt is required by this
+instruction.
+
+The test file is not a digest-bound artifact of M2 or M3, so this correction
+requires no binding-generation transaction. Protected case names, selectors,
+exclusions and gate bindings retain their meaning. This changes only the
+named test's waiting allowance; product deadlines, runtime behavior, provider
+paths, ADR decisions, milestone scope and final pass criteria are unchanged.
+Complete M0–M3 gates remain required at the resulting final candidate on
+macOS and Linux serenity under the existing final-only cadence. The approval
+waives no historical or future failure and grants no failure disposition,
+M3 closure, integration to `main`, tag or release.
