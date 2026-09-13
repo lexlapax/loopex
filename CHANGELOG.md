@@ -58,10 +58,33 @@ qualification is recorded in its plan progress; this entry claims no
 closure or full-gate result.
 
 Keep durable interactions, artifact ranges and the floor refresh in the
-[M4 draft](docs/archive/M4.md#concept). The reviewed M3 cadence override uses
-focused checks during implementation and the complete M0–M3 gates at the final
-candidate. The workflow evidence allocation retains separate deterministic and
-attended production-provider proof obligations.
+[M4 draft](docs/archive/M4.md#concept). The reviewed M3 cadence uses focused
+implementation checks. The later [final validation override](docs/developer/agent-context-map.md#override-disposition-m3-final-inherited-gates-waiver-2026-09-13)
+requires M3-only qualification on macOS and Linux; M0–M2 gate reruns are waived,
+not passed. Deterministic and attended production-provider workflow proofs
+remain separate requirements. The floor-toolchain M3 run remains required.
+
+Accept [ADR 0029](docs/adr/0029-bounded-provider-failure-diagnostics.md#concept)
+and implement bounded provider-neutral failure diagnostics without retaining
+provider bodies or credentials. M3 Amendments 1–3 record that diagnostic scope,
+shared selector diagnostics and portable SHA-256 inspection. M1 generation 9
+and M2 generation 10 retain the corresponding reviewed shared-runner bindings.
+The prior generations and their evidence remain historical.
+
+Repair declined, EOF and headless CLI skill trust so ordinary coding continues
+with skills withheld. Preserve the exact declined project-trust disposition on
+required-only context refusal, under the approved witness correction; eligible
+projects still report that optional content was not evaluated. Export pinned
+Git blobs without checkout transformations and verify each native Git object
+identity before publication. Compare resource and executor workspace identities
+before startup, using the same physical-root identity in CLI and composition
+while preserving retained job identities during recovery. Scope permit
+retirement reads to the committing session. Clean up owned runtime components
+when a linked component dies or stop returns an error. Preserve typed provider
+handoff errors returned by the transport. Strengthen real coordinator selection
+refusals, policy allow/deny invariance, launch-identity refusal and all three
+old-reader resource-record variants; temporary CLI proof artifacts no longer
+rewrite shared build beams.
 
 Replace the obsolete M3 gate probe with real local Store/session observations
 of required-only admission ordering and explicit inspection/checkpoint modes.
