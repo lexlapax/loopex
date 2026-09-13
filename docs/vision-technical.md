@@ -497,8 +497,13 @@ at adapter edges.
 
 ### 7.2 Core dependency budget
 
-The initial `loopex` OTP application depends only on the Elixir/Erlang runtime.
-The core has no compile-time dependency on:
+The `loopex` OTP application depends on the Elixir/Erlang runtime and on
+exactly one external library: `:telemetry`, the pure-Erlang, dependency-free
+event dispatcher, admitted on 2026-09-13 under ADR 0030 so that core boundary
+events reach metrics and tracing edges without a Loopex-owned event system.
+That library dispatches events; it attaches no handler in core, adds no
+transport, and carries no runtime behavior of its own. The core has no
+compile-time dependency on:
 
 - ReqLLM or another provider library;
 - Jido Agent, Action, Signal, or another agent-loop package;
@@ -509,10 +514,12 @@ The core has no compile-time dependency on:
 - Docker, Kubernetes, FLAME, or a cloud SDK;
 - OpenTelemetry or an external pub/sub system.
 
-Those dependencies belong in adapters or reference applications. Repository
+Those dependencies belong in adapters or reference applications, and so do
+telemetry reporters, exporters and OpenTelemetry mappings. Repository
 checks, mirrored by CI, enforce namespace and dependency direction with
 `mix xref`, compile-time checks, and tests that build the core against only fake
-edge implementations.
+edge implementations; they name `:telemetry` as the sole admitted core
+dependency and refuse any other.
 
 Use one repository and one release version through 0.x. Physical application
 or Hex-package splits require demonstrated compile, runtime, ownership,

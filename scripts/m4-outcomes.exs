@@ -144,8 +144,9 @@
         %{
           path: "apps/loopex/test/telemetry_boundary_test.exs",
           names: [
-            "every port and transaction boundary emits start stop or exception spans with durations and only documented metadata",
-            "a crashing telemetry handler is isolated and emission with no handler stays within the measured overhead"
+            "every callback and transaction cut in the emission inventory emits start stop or exception spans with durations and only documented metadata",
+            "a crashing telemetry handler is isolated and emission with no handler stays within the measured overhead",
+            "a slow or blocked forwarding sink never delays a coordinator and drops with a counted entry"
           ]
         }
       ]

@@ -2006,3 +2006,44 @@ green with M4's own distinct red, a fresh exact-SHA review, and the
 maintainer's explicit acceptance disposition recorded in its own transition.
 Until then, planning edits to M4 remain ordinary Open-lineage work under the
 recorded aggregate overrides.
+
+<a id="disposition-m4-vision-core-telemetry-2026-09-13"></a>
+### Vision change: telemetry admitted as core's one external dependency — 2026-09-13
+
+The independent M4 review at `fa897361598467ffc53d3042a6ae7212acd2e3dc`
+found that outcome 7 required `:telemetry` in core against the vision's
+no-external-core-dependency rule and `AGENTS.md`, and offered two resolutions:
+keep core stdlib-only and translate diagnostics to telemetry at an edge, or
+an explicit maintainer vision change. Asked to choose, the maintainer selected
+**"Explicit vision change to admit :telemetry in core"**, with the telemetry
+adapter living in a new edge application `loopex_telemetry` and the proposed
+trace limits bound.
+
+This disposition records that vision change under the rule that reversing a
+vision boundary names the principle, the evidence, the compatibility impact
+and the migration path:
+
+- **Principle changed.** Concept §7 (stack and dependency doctrine) and
+  Technical §7.2 (core dependency budget) said the core depends only on Elixir
+  and Erlang. They now admit exactly one external library, `:telemetry`, by
+  name; every other exclusion in §7.2 stands, and reporters, exporters and
+  OpenTelemetry remain edges. `AGENTS.md`'s product non-negotiable is updated
+  to the same wording.
+- **Evidence.** `:telemetry` is pure Erlang with no dependencies of its own; it
+  dispatches events and attaches nothing in core; a Loopex-owned dispatch
+  registry would re-implement it and every consumer would need a bespoke
+  adapter; OTP `:logger` reports are non-standard for metrics consumers. The
+  alternative edge translation was judged by the maintainer to cost more than
+  the boundary it preserved.
+- **Compatibility impact.** No released public surface, journal, event or
+  protocol record changes. The core dependency budget check and application
+  inventory change under the M1 dependency-oracle transaction the M4 plan
+  names; embedding hosts gain one transitive dependency.
+- **Migration and rollback.** Removing the dependency and the emission points
+  restores the previous behavior without data migration; the vision sentences
+  revert with it. The M4 plan carries the rollback obligation.
+
+This is a maintainer decision on a founding boundary, transcribed here and in
+the vision pair together. It accepts no ADR, plan or milestone, authorizes no
+product implementation, and changes nothing about M3. ADR 0030 carries the
+mechanics and remains Proposed until its own acceptance.

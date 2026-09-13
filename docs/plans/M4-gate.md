@@ -72,13 +72,14 @@ dependency is UNAVAILABLE, never a full-gate PASS.
 
 Before acceptance:
 
-1. Settle ADRs 0023/0024/0026/0028 and their complete core/port contracts, then
-   reconcile DTO/schema/vector bytes with the actual M3 resource facade. ADR 0028
-   carries the decided one-verification-per-transfer design and must bind every
-   limit the technical plan names; ADR 0023 must carry the connection state
-   table; ADR 0024 must fix the successive-round bound. Advertise only
-   implemented semantic capabilities; unknown input rules and every limit are
-   exact.
+1. Settle ADRs 0023/0024/0026/0028/0030 and their complete core/port contracts,
+   then reconcile DTO/schema/vector bytes with the actual M3 resource facade.
+   ADR 0028 carries the decided one-verification-per-transfer design and must
+   bind every limit the technical plan names; ADR 0023 must carry the connection
+   state table; ADR 0024 must fix the successive-round bound; ADR 0030 carries
+   the emission inventory, the exact trace limits and the edge-owned handler
+   rule. Advertise only implemented semantic capabilities; unknown input rules
+   and every limit are exact.
 2. Keep the real opening red on the unchanged base and bind the exact
    selectors and witness names, the canonical schema and vector bytes, the
    client interpreter pins in `scripts/fixtures/m4/client-toolchain.txt`, the
@@ -154,10 +155,10 @@ binding.
 | --- | --- |
 | `696b6a8c34cd3f92a7fe7e3473ec3e25e77384a48241c94aa777323fb085a502` | `scripts/check-m4-gate.sh` |
 | `a559bd9f44f1f46f65aaff0bdcfcac2e5124301bc367c58c85966fd6409ba68f` | `scripts/m4-opening-probe.exs` |
-| `8941f7f0e84b68feabac8e4f6e5706a0aabba6049dca6be8b5745e81f8fcc57e` | `scripts/m4-gate-support.exs` |
+| `261ab4ad7627ff8d7091e9b5d6ee2894c069866da870db2800025a99e348aeb9` | `scripts/m4-gate-support.exs` |
 | `65d0de9dcd1218af542f00e32c2177d2612a2f1232f22db37b9942200c84cf66` | `scripts/m3-gate-support.exs` |
 | `c4d485ca3229441c678abe1e8733f90216e89e0dfb9e81786f58f525619aec29` | `scripts/check-closed-gates.sh` |
-| `5470c64bdecb58f64ac3b4e53bf6dc9e1a2a056b4d5947e1c934047c7e19fbc9` | `scripts/m4-outcomes.exs` |
+| `48d556dbbd39b80fab4669fdc41c1e90aaf80a7d4a8aab7dd900feeae483cf4c` | `scripts/m4-outcomes.exs` |
 | `cc290e60d9f9588c75f1259b25976a58d1c30713e570cd5a88c70cdf3c2159a0` | `scripts/m1-exunit-runner.exs` |
 | `0a8406ca080c70624e776b01e37c7ded210b54659064cf63723a847a54debe2d` | `apps/loopex/test/m1_exunit_runner_test.exs` |
 | `fad47299b27a767785d2a6a776155038054f5457ee3ce0195a37ae667f7a9999` | `.tool-versions` |
@@ -262,7 +263,7 @@ are pinned before acceptance, not by this opening.
 | 4 | `apps/loopex_store_local/test/artifact_transfer_test.exs`, `apps/loopex_app_server/test/delivery_bounds_test.exs` | The attachment-owned open/read/close API refusing another attachment, session or runtime and disclosing no path; complete verification at open with one verification per transfer, distinct object/chunk digests, unsupported-store refusal; whole, first, last, empty and overrun windows and every distinct refusal reason; wrong-session use, object/use swap, corruption outside the requested window, post-open same-size rewrite never reaching a chunk; open deadline or work-budget exhaustion refusing before any snapshot bytes; per-connection and per-runtime transfer limits refusing independently; connection-work exhaustion, lifetime expiry, cancellation, descriptor and snapshot release across repeated kill/restart, streaming memory bounded well above the chunk ceiling and startup scavenging touching only owned regular files; genuine old-format artifacts readable and capability removal restoring the prior API; chunk/read-deadline budgets; at the wire, a transfer reference from another connection refused and connection loss closing every transfer it opened; malformed UTF-8, duplicate keys, nesting, fragmented/multiple/oversized frames, blocked reader, detach cursor, late progress and actual cleanup |
 | 5 | `apps/loopex_app_server/test/external_workflow_test.exs` | TypeScript skill → interaction answer → policy re-evaluation → committed grant/intent → actual tool → artifact → abrupt restart from operator input with no embedded identities; clean stdin EOF performs orderly shutdown with no cancellation; abrupt death records nothing; a pending interaction survives both; `session.abort` is the only cancellation and an aborted interaction never reappears |
 | 6 | `apps/loopex_protocol/test/public_schema_conformance_test.exs`, `apps/loopex/test/m4_gate_support_test.exs` | Independently executed Elixir, Python and TypeScript clients over canonical positive/negative vectors under the pinned interpreters; exact version and platform identities; retained refusal of missing, duplicated, reordered, wrong-kind, stale-version and malformed evidence fields |
-| 7 | `apps/loopex/test/trace_session_test.exs`, `apps/loopex/test/telemetry_boundary_test.exs` | Session scoped to owned processes and allowed modules with a second VM tracer unaffected; documented fields per level; redaction of credential references, model content, tool arguments and artifact bytes at the `arguments` level; limits drop with a counted entry without blocking; no session command, client content, model output, project resource or wire request starts, changes or stops a session; stop releases every flag; unavailability on a release without trace sessions; every boundary emits start/stop or exception with duration and documented metadata only; crashing handler isolated; overheads measured |
+| 7 | `apps/loopex/test/trace_session_test.exs`, `apps/loopex/test/telemetry_boundary_test.exs` | Session scoped to owned processes and allowed modules with a second VM tracer unaffected; documented fields per level; redaction of credential references, model content, tool arguments and artifact bytes at the `arguments` level; the exact 4,096-byte, 2,000-per-second and 8,192-entry limits drop with a counted entry without blocking; no session command, client content, model output, project resource or wire request starts, changes or stops a session; stop releases every flag; unavailability on a release without trace sessions; every callback and transaction cut in the ADR 0030 inventory emits start/stop or exception with duration and documented metadata only; crashing handler isolated; a slow or blocked `loopex_telemetry` forwarding sink never delays a coordinator and drops with a counted entry; overheads measured |
 
 Each required clause maps to a named decisive witness in `scripts/m4-outcomes.exs`.
 Related clauses may share one named case only when it contains distinct observed
@@ -273,7 +274,7 @@ witness identity and required state. No protected witness may be removed,
 renamed, skipped or excluded without an accepted amendment or an explicitly
 approved scoped override. The app-server adds zero external production
 dependencies; the existing ReqLLM edge dependency closure remains allowed.
-Exactly nine application identities and the existing role set are checked after
+Exactly ten application identities and the existing role set are checked after
 their prerequisite transactions settle.
 
 ## Isolation, Evidence and Review
@@ -337,20 +338,20 @@ document is a pair:
   trace-session contract, the telemetry event catalog and the redaction and
   limit rules; the protocol pair as the normative wire reference
   (methods, records, identities, limits, schema and vector identities); the
-  ninth application, the changed client-role dependency rule and the
+  ninth and tenth applications, the changed dependency rules and the
   dependency direction; the core interaction lifecycle and the ArtifactStore
   transfer capability as embedding contracts; the experimental labels and
   exact-generation rule in the compatibility surfaces; and the context map's
   routing for M4's ADRs, documents and gate.
 - **Repository-wide.** `docs/README.md`, `README.md` and `CHANGELOG.md`
-  describe the ninth application, the new operator and developer documents,
+  describe the ninth and tenth applications, the new operator and developer documents,
   the version transition and its non-release meaning, and the M4 outcome
   evidence, without claiming any package, tag or publication.
 
 The status check limits the developer-facing row to `docs/developer/` paths, so
 two root documents are named here instead, and their drift blocks closure
-exactly like a row above. `DEVELOPMENT.md` is updated for the ninth
-application, the refreshed floor pair, the client toolchain pins, the M4
+exactly like a row above. `DEVELOPMENT.md` is updated for the ninth and tenth
+applications, the refreshed floor pair, the client toolchain pins, the M4
 runner commands, and how to enable a trace session and read telemetry while
 developing. `AGENTS.md` is updated once outcome 7 is green, in the same
 milestone, so its debugging guidance directs agents to use runtime trace

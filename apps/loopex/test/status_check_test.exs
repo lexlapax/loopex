@@ -1206,7 +1206,7 @@ defmodule Loopex.StatusCheckTest do
       {"docs/adr/0024-durable-interaction-lifecycle-and-host-policy-authority.md", "ADR 0024"},
       {"docs/adr/0026-development-floor-refresh.md", "ADR 0026"},
       {"docs/adr/0028-bounded-artifact-retrieval.md", "ADR 0028"},
-      {"docs/adr/0029-observability-tracing-and-telemetry.md", "ADR 0029"}
+      {"docs/adr/0030-observability-tracing-and-telemetry.md", "ADR 0030"}
     ]
 
     accepted = Map.new(adrs, fn {path, _name} -> {path, "Accepted"} end)
@@ -1214,14 +1214,14 @@ defmodule Loopex.StatusCheckTest do
     open = Register.expected_capsule("Open", "M4", proposed)
 
     assert open["Next maintainer decision"] ==
-             "Disposition ADR 0023, ADR 0024, ADR 0026, ADR 0028, and ADR 0029"
+             "Disposition ADR 0023, ADR 0024, ADR 0026, ADR 0028, and ADR 0030"
 
     assert open["Next transition"] =~ "After the prerequisites are accepted"
 
     lookahead = Register.expected_capsule({"M3", "Accepted"}, {"M4", "Open"}, m3_and_m4(proposed))
 
     assert lookahead["Blockers"] =~
-             "`M4` additionally waits on ADR 0023, ADR 0024, ADR 0026, ADR 0028, and ADR 0029"
+             "`M4` additionally waits on ADR 0023, ADR 0024, ADR 0026, ADR 0028, and ADR 0030"
 
     assert lookahead["Next maintainer decision"] =~
              "cannot be accepted before `M3` closes; `M4` also waits on"

@@ -28,9 +28,11 @@ into `docs/plans/`, bind a runner whose opening probe observes a policy
 `defer` denied as `interaction_unsupported`, and register `M4` as Open. No
 plan, ADR or product behavior is accepted by the opening.
 
-Add M4 outcome 7 and Proposed [ADR 0029](docs/adr/0029-observability-tracing-and-telemetry.md#concept):
+Add M4 outcome 7 and Proposed [ADR 0030](docs/adr/0030-observability-tracing-and-telemetry.md#concept):
 runtime-owned OTP trace sessions with identity-only capture by default and
-`:telemetry` boundary events as core's one observability dependency.
+`:telemetry` boundary events, with `:telemetry` admitted as core's sole
+external dependency by an explicit maintainer vision change and a new
+`loopex_telemetry` edge application owning the only Loopex-attached handler.
 
 Narrow the Open [M3 plan](docs/plans/M3.md#concept) to project skills, three core
 repairs and reliable verification. Move durable interactions, artifact ranges

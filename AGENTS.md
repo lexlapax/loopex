@@ -579,8 +579,9 @@ depends on no host-specific service, workflow feature, or repository setting.
 Releases may use a hosted provider only where retained release evidence
 requires it, and those workflows stay thin wrappers over repository commands.
 
-- Core uses stdlib and OTP only; repository checks, mirrored by CI, enforce the
-  dependency budget and direction.
+- Core uses stdlib and OTP, plus the single telemetry event dispatcher the
+  vision's dependency doctrine admits by name; repository checks, mirrored by
+  CI, enforce the dependency budget and direction.
 - Checkpoints are warning-free under formatting, compilation, static analysis,
   and relevant documentation/protocol checks.
 - Tests use temporary `LOOPEX_HOME` and workspaces; helpers fail before touching

@@ -43,7 +43,7 @@ M4 accepts five decisions before dependent work:
 | [**ADR 0024**](../adr/0024-durable-interaction-lifecycle-and-host-policy-authority.md#concept) | Maintainer, before M4 acceptance; must fix the exact maximum of successive answer → defer rounds per tool decision | Durable policy `defer`/answer lifecycle owned by the session with host-policy authority preserved |
 | [**ADR 0026**](../adr/0026-development-floor-refresh.md#concept) | Maintainer, before M4 acceptance; holder transactions below settle after M3 closes | Explicit floor/current validation pairs replacing the derived pin rule |
 | [**ADR 0028**](../adr/0028-bounded-artifact-retrieval.md#concept) | Maintainer, before M4 acceptance; carries the transfer design below | Bounded artifact transfer through the facade and ArtifactStore with distinct object/chunk digests |
-| [**ADR 0029**](../adr/0029-observability-tracing-and-telemetry.md#concept) | Maintainer, before M4 acceptance; its core dependency lands through the M1 dependency-oracle transaction in phase B | Runtime-owned isolated OTP trace sessions with identity-only default capture, and `:telemetry` spans at every port and transaction boundary as core's one observability dependency |
+| [**ADR 0030**](../adr/0030-observability-tracing-and-telemetry.md#concept) | Maintainer, before M4 acceptance; the core dependency is admitted by the recorded [vision change](../developer/agent-context-map.md#disposition-m4-vision-core-telemetry-2026-09-13) and lands through the M1 dependency-oracle transaction in phase B | Runtime-owned isolated OTP trace sessions with identity-only default capture and exact limits; `:telemetry` spans at every port callback and transaction cut in a bound inventory; the `loopex_telemetry` edge owning the only Loopex-attached handler |
 
 **Artifact transfer design (decided).** The earlier draft admitted
 1–16,384-byte ranges while the local store admits 64 MiB objects and verified
@@ -85,28 +85,29 @@ with those interfaces and the new core contracts; no TODO member or unproved
 method earns an advertised capability.
 
 **Holder transactions.** The floor refresh (proposed Elixir 1.18.5/OTP 27.3.4
-and current 1.20.3/OTP 29.0.5, with real matrix evidence), the ninth
-application, the dependency-rule change and source VERSION 0.1.0 each change
-bytes that Closed gates bind. The default sequence is exact:
+and current 1.20.3/OTP 29.0.5, with real matrix evidence), the ninth and
+tenth applications, the dependency-rule changes (client → contract edge and
+`:telemetry` in core) and source VERSION 0.1.0 each change bytes that Closed
+gates bind. The default sequence is exact:
 
 | Phase | When | Transactions and routes |
 | --- | --- | --- |
 | A. Successor enabling | After M3 closes and integrates, before M4 acceptance | Derive the exact M0–M3 holder inventory on the integrated closure; settle the floor refresh with every `.tool-versions` holder: Closed M0–M3 each through v2 `A`/`R` in register order, and Open M4 by refreshing its own table directly; refresh M4 on that base and re-prove every inherited gate green plus this gate's own red; then accept |
-| B. Implementation | After acceptance, on branch `m4`, before the first rejoin that runs the full lanes | One Closed-M1 v2 proposal `A` that atomically carries M1's next gate generation, both dependency-oracle artifacts with the nine-application inventory, the client → contract edge and negative tests, and the minimal M4-authorized `loopex_app_server` application that makes the new inventory true, following the M1 Amendment 7 pattern; exact-SHA review and explicit acceptance of `A`; immediate governance-only `R`; then ordinary implementation continues |
+| B. Implementation | After acceptance, on branch `m4`, before the first rejoin that runs the full lanes | One Closed-M1 v2 proposal `A` that atomically carries M1's next gate generation, both dependency-oracle artifacts with the ten-application inventory, the client → contract edge, `:telemetry` admitted as core's sole external dependency, negative tests, and the minimal M4-authorized `loopex_app_server` and `loopex_telemetry` applications that make the new inventory true, following the M1 Amendment 7 pattern; exact-SHA review and explicit acceptance of `A`; immediate governance-only `R`; then ordinary implementation continues |
 | C. Closure rejoin | At the closure candidate | Apply the separately approved version transition to 0.1.0 and settle every version holder below: Closed M1, M2 and M3 through v2 `A`/`R` in register order, then Accepted M4 through its own v1 amendment proposal and rebind, last |
 
 Phase A settles before acceptance; phases B and C do not, and nothing in them
-is a precondition of acceptance. The dependency-oracle change and the ninth
-application cannot be separated: the checker's complete-inventory predicate
-would become false with a nine-application inventory and no ninth application
-and would route the provider edge through an incompatible legacy rule, so both
+is a precondition of acceptance. The dependency-oracle change and the new
+applications cannot be separated: the checker's complete-inventory predicate
+would become false with a ten-application inventory and missing applications
+and would route the provider edge through an incompatible legacy rule, so all
 land in one reviewed proposal. ADR 0026 governs only the floor and is
 satisfied by phase A. The ledger at the planning base is:
 
 | Artifact | Holders | Restriction today | Planned change | Phase | Route and checks |
 | --- | --- | --- | --- | --- | --- |
 | `.tool-versions` | M0, M1, M2, M3, M4 | Floor 1.17.0/OTP 26.0, current 1.20.3/OTP 29.0.5 | Floor 1.18.5/OTP 27.3.4 | A | v2 `A`/`R` for Closed M0–M3 in register order, or a recorded override naming all of them; Open M4 refreshes its own table; matrix evidence on both pairs; each holder's gate green at its `R`; bootstrap |
-| `apps/loopex/lib/mix/tasks/loopex.deps_budget.ex`, `apps/loopex/test/deps_budget_test.exs`, `apps/loopex_app_server` | M1 (the application is unbound M4 product) | Eight-application inventory; a client may depend only on core and a composition; core admits no external dependency; the application is absent | Nine-application inventory, permitted client → contract production edge, `:telemetry` admitted as core's one observability dependency, negative tests, and the minimal ninth application in the same proposal | B | One M1 v2 `A` carrying all of these plus M1's generation row; review and accept `A`; governance-only `R`; M1 gate green at `R` |
+| `apps/loopex/lib/mix/tasks/loopex.deps_budget.ex`, `apps/loopex/test/deps_budget_test.exs`, `apps/loopex_app_server`, `apps/loopex_telemetry` | M1 (the applications are unbound M4 product) | Eight-application inventory; a client may depend only on core and a composition; core admits no external dependency; both applications are absent | Ten-application inventory, permitted client → contract production edge, `:telemetry` admitted as core's sole external dependency, negative tests, and the minimal ninth and tenth applications in the same proposal | B | One M1 v2 `A` carrying all of these plus M1's generation row; review and accept `A`; governance-only `R`; M1 gate green at `R` |
 | `VERSION`, application versions | Every holder below | 0.0.0 | 0.1.0 | C | Separately approved version transition; evidence names the exact version |
 | `scripts/m1-exunit-runner.exs`, `apps/loopex/test/m1_exunit_runner_test.exs` | M1, M2, M3, M4 | The selector runner refuses a real report whose build identities are not `@0.0.0` | Version-aware build identities; required, because M4's real lane runs through this runner | C | v2 for M1, M2 and M3 in register order; Accepted M4 last through v1 |
 | `scripts/m1-evidence-verifier.exs` | M1 | Fixes `@0.0.0` build identities | Version-aware | C | M1 v2 |
@@ -146,7 +147,8 @@ Concept: [Scope](M4.md#concept-plan-scope).
 | Component | Owns | Cannot own |
 | --- | --- | --- |
 | `loopex_protocol` | Bounded DTOs, validators, schemas, vectors and capability identity | JSON implementation, runtime or authority |
-| `loopex` | Inherited resource facade plus new M4 interaction lifecycle, artifact transfer queries, artifact-use authorization, the trace-session owner and every telemetry emission point | Framing or connection policy; any reporter, exporter or trace sink beyond the diagnostics plane and Logger |
+| `loopex` | Inherited resource facade plus new M4 interaction lifecycle, artifact transfer queries, artifact-use authorization, the trace-session owner and every telemetry emission point | Framing or connection policy; any attached telemetry handler, reporter, exporter or trace sink beyond the diagnostics plane and Logger |
+| `loopex_telemetry` | Edge: the single bounded forwarding handler from telemetry events to the diagnostics plane, and reference reporter wiring | Emission points, session semantics, any handler that blocks an emitting process |
 | `loopex_app_server` | Foreground lifetime, UTF-8 JSONL framing, request correlation, bounded writer and facade mapping | Store/coordinator calls, a second loop, resource parsing, policy selection |
 | `loopex_composition` | Trusted startup wiring, provider companion, explicit prepared handoff and project resource configuration | Wire-supplied implementation selection |
 | TypeScript consumer | User workflow and local output presentation | Normative session, trust or policy semantics |
@@ -194,7 +196,7 @@ Concept: [Outcomes](M4.md#concept-plan-outcomes).
 | 4 | ADR 0028 one verification per transfer and bounded allocation proved at ArtifactStore and facade with object and chunk digests distinguished; wrong-session use, object/use swap and corruption outside the requested window refused at open; concurrent-transfer and connection-work exhaustion, lifetime expiry, cancellation and descriptor release; oversized/fragmented/multiple frames; malformed UTF-8/duplicate keys/depth; slow reader; bounded queue; late progress; stdout contamination; actual process-tree cleanup |
 | 5 | TypeScript drives skill, interaction answer, policy re-evaluation, committed grant/intent, tool and artifact with real Store and executor from operator input, embedding no identities; real-provider task separately attended; abrupt kill and fresh-process resume; stdin EOF performs orderly shutdown with no cancellation and a still-pending interaction; `session.abort` is the separate deliberate-cancellation case |
 | 6 | Elixir, Python and TypeScript clients execute the same positive/negative vectors without importing the server codec; pinned interpreter versions verified before the lane, absence or mismatch reported as unavailable evidence; exact source/schema/client versions and toolchain/platform identities recorded in the retained report |
-| 7 | With a real runtime and Store: a session traces only allowed modules and owned processes and leaves a second VM tracer unaffected; each level reports its documented fields; the `arguments` level redacts credential references, model content, tool arguments and artifact bytes to typed placeholders; limits drop with a counted entry and never block a coordinator; no session command, client content, model output, project resource or app-server request can start, change or stop a session; stopping releases every trace flag; an OTP release without trace sessions reports unavailability; every telemetry boundary emits start/stop or exception with duration and only documented metadata; a crashing handler is isolated; enabled-trace and no-handler overheads are measured and retained |
+| 7 | With a real runtime and Store: a session traces only allowed modules and owned processes and leaves a second VM tracer unaffected; each level reports its documented fields; the `arguments` level redacts credential references, model content, tool arguments and artifact bytes to typed placeholders; the exact entry, rate and queue limits drop with a counted entry and never block a coordinator; no session command, client content, model output, project resource or app-server request can start, change or stop a session; stopping releases every trace flag; an OTP release without trace sessions reports unavailability; every callback and transaction cut in ADR 0030's emission inventory emits start/stop or exception with duration and only documented metadata; a crashing handler is isolated; a slow or blocked forwarding sink in `loopex_telemetry` never delays a coordinator and drops with a counted entry; enabled-trace and no-handler overheads are measured and retained |
 
 The opening runner binds one real behavioral red for outcome 3: through a
 real local session and Store, a host-policy `defer` is denied as
@@ -264,16 +266,18 @@ installed-data migration or service installation claim.
 
 Concept: [Scope](M4.md#concept-plan-scope).
 
-Add exactly `loopex_app_server`, the ninth application with role `:client`,
-depending inward on core, protocol and composition. The client-role rule and
-application inventory in `loopex.deps_budget.ex` change under their holders'
-transactions to permit the direct contract dependency; it is not hidden behind a
-transitive edge. The app-server adds zero external production dependencies;
-existing ReqLLM edge dependencies remain permitted. Core adds exactly
-`:telemetry`, a pure-Erlang library with no dependencies of its own, under
-ADR 0029 and the same M1 transaction; protocol remains stdlib-only. No
+Add exactly two applications: `loopex_app_server`, the ninth, with role
+`:client`, depending inward on core, protocol and composition; and
+`loopex_telemetry`, the tenth, with role `:edge`, depending inward on core and
+outward on `:telemetry` only. The client-role rule and application inventory
+in `loopex.deps_budget.ex` change under their holders' transactions to permit
+the direct contract dependency; it is not hidden behind a transitive edge. The
+app-server adds zero external production dependencies; existing ReqLLM edge
+dependencies remain permitted. Core adds exactly `:telemetry`, a pure-Erlang
+library with no dependencies of its own, under the recorded vision change and
+ADR 0030 through the same M1 transaction; protocol remains stdlib-only. No
 reporter, exporter or OpenTelemetry package enters core, protocol or the
-app-server. The floor decision makes the stdlib JSON
+app-server; `loopex_telemetry` owns the only Loopex-attached handler. The floor decision makes the stdlib JSON
 codec available; duplicate-key and all other strictness requirements remain
 independent tests.
 
@@ -297,11 +301,11 @@ package or service install follows from closure alone.
 
 Concept: [Scope](M4.md#concept-plan-scope).
 
-One application, the core policy-interaction slice, the optional ArtifactStore
+Two applications, the core policy-interaction slice, the optional ArtifactStore
 transfer capability, one stdio mapping, bounded schemas/client fixtures, one
-trace-session owner and a fixed set of telemetry emission points justify
-growth. No per-function logging, no second event dispatcher, no reporter in
-core. No new role or external production dependency, transport registry, socket
+trace-session owner, a bound inventory of telemetry emission points and one
+edge forwarding handler justify growth. No per-function logging, no second
+event dispatcher, no handler or reporter in core. No new role or external production dependency, transport registry, socket
 abstraction, daemon supervisor, duplicate resource resolver or second interaction
 reducer. The app-server has no direct Store/model/executor dependency or private
 coordinator shortcut. Artifact object/use identity and launch configuration

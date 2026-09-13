@@ -32,10 +32,11 @@ defmodule Loopex.M4Gate.Support do
   defp outcome("apps/loopex/lib/loopex/telemetry" <> _), do: @all
   # Concept: shared contract, store and server paths select every outcome that
   # can observe them; only leaf test files select one outcome.
-  defp outcome("apps/loopex/lib/loopex/runtime/interaction" <> _), do: [2, 3, 5]
-  defp outcome("apps/loopex/lib/loopex/policy.ex"), do: [3, 5]
-  defp outcome("apps/loopex/lib/loopex/artifact_store.ex"), do: [4, 5]
-  defp outcome("apps/loopex_store_local/lib/loopex/store/local/artifacts.ex"), do: [4, 5]
+  defp outcome("apps/loopex/lib/loopex/runtime/interaction" <> _), do: [2, 3, 5, 7]
+  defp outcome("apps/loopex/lib/loopex/policy.ex"), do: [3, 5, 7]
+  defp outcome("apps/loopex/lib/loopex/artifact_store.ex"), do: [4, 5, 7]
+  defp outcome("apps/loopex_store_local/lib/loopex/store/local/artifacts.ex"), do: [4, 5, 7]
+  defp outcome("apps/loopex_telemetry/" <> _), do: [7]
   defp outcome("apps/loopex_store_local/lib/" <> _), do: @all
   defp outcome("apps/loopex_protocol/" <> _), do: @all
   defp outcome("apps/loopex_app_server/lib/" <> _), do: @all
