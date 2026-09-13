@@ -97,11 +97,17 @@ outcome 7 implementation work in core, bound at acceptance:
 | Rule | Contract |
 | --- | --- |
 | Paths | The existing synchronous `Loopex.diagnostic/2` call remains for hosts; the dispatcher gains an asynchronous admission message that the trace tracer and the `loopex_telemetry` handler use, and that never replies to the sender |
-| Ceiling | At most 4,096 diagnostic items queued per runtime, measured as the sink process's message queue length at admission plus the dispatcher's own pending diagnostic items; a host may lower this ceiling, never raise it |
-| Drop | An item admitted above the ceiling is dropped and counted per runtime, never queued; the emitting process is never blocked or slowed by more than the send |
-| Summary | When the queue falls below half the ceiling, the dispatcher publishes one `diagnostics_dropped` item carrying the count and the drop window before any further item; the counter resets |
+| Ingress reservation | The runtime owns one `:counters` pair per runtime, created at start and handed to the tracer and the handler as a plain reference: a reservation counter and a drop counter. Before sending, a sender atomically increments the reservation counter; if the new value exceeds the ceiling it atomically decrements it, increments the drop counter and sends nothing. Only a sender holding a reservation may send. The check and the send are lock-free and never wait on the dispatcher, so the dispatcher's mailbox can hold at most ceiling reserved items regardless of how many senders race |
+| Ceiling | 4,096 reserved items per runtime; a host may lower this ceiling, never raise it |
+| Release | The dispatcher decrements the reservation counter once per admitted item, after it has either forwarded the item to the sink or discarded it; a reservation is therefore released exactly once, and a crashed sender that reserved but never sent is reconciled by the dispatcher's periodic audit, which resets the counter to its actual mailbox count |
+| Egress check | Before forwarding, the dispatcher reads the sink process's message queue length; if it is at or above the ceiling the item is discarded and the drop counter incremented, so the sink's mailbox is bounded as well. A dead sink discards every item |
+| Summary | When the reservation counter falls below half the ceiling and the drop counter is nonzero, the dispatcher publishes one `diagnostics_dropped` item carrying the count read-and-reset atomically and the drop window, before any further item |
 | Bounds per item | The existing transient item and byte limits apply unchanged to every admitted item |
 | Loss semantics | Dropped diagnostics are lost, never durable; nothing in the session journal, public events or progress depends on their delivery |
+
+The claimed bound is therefore exact at both stages: ingress cannot exceed
+the ceiling because capacity is reserved before the send, and egress cannot
+exceed it because the sink's queue is checked before each forward.
 
 ### Evidence
 

@@ -146,8 +146,9 @@ and OpenTelemetry remain edges.
 
 Technical depth: [Layers, dependency budget, and direct-OTP rules](vision-technical.md#technical-vision-dependency-doctrine)
 
-The initial core depends only on Elixir and Erlang. Repository or package
-splits require demonstrated pressure and a decision. Processes, supervision,
+The core depends only on Elixir, Erlang and the single telemetry event
+dispatcher admitted above. Repository or package splits require demonstrated
+pressure and a decision. Processes, supervision,
 messages, and behaviours remain visible rather than being hidden behind a
 private agent DSL.
 
