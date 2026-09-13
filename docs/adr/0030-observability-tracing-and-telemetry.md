@@ -54,9 +54,11 @@ Two mechanisms, chosen by the maintainer on 2026-09-12:
   Loopex controls: a sender reserves capacity with one hardware atomic before
   it sends, so the admission backlog can never exceed 4,096 items per runtime
   however many senders race; above that, items are dropped and counted
-  without a send; crash reconciliation never erases a live reservation; the
-  drop count is taken by one atomic exchange; and one summary item is
-  published when the backlog drains. The host sink's own mailbox is the
+  without a send; a reservation leaked by a sender that died before sending is
+  released exactly when that sender's monitor reports it dead, so no live
+  reservation is ever touched; the drop count is taken by one atomic
+  exchange; and one summary item carrying the exact count is published when
+  the backlog drains. The host sink's own mailbox is the
   host's and is only backpressured, never bounded, by Loopex. Reporters, exporters and
   OpenTelemetry remain edge adapters. A handler a host attaches itself runs in
   the emitting process and is the host's responsibility.
