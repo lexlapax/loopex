@@ -834,7 +834,11 @@ defmodule Loopex.LLM.ReqLLM.ProviderAttemptAdapterContractTest do
                "STAGE_NOT_DISPATCHED\n",
                "STAGE_UNEXPECTED_SUCCESS\n",
                "STAGE_INVALID_RESULT\n"
-             ] or finite_stage_output?(output), do: output, else: :invalid_output
+             ] or finite_stage_output?(output) do
+            output
+          else
+            :invalid_output
+          end
 
         {:exited, safe, status}
 

@@ -593,7 +593,9 @@ defmodule Loopex.LLM.ReqLLM do
        do: raised_class(exception)
 
   defp returned_class({:error, {:stream_failed, {:provider_status, status}}})
-       when is_integer(status) and status >= 400, do: "provider_status"
+       when is_integer(status) and status >= 400 do
+    "provider_status"
+  end
 
   defp returned_class({:error, {:stream_failed, _}}), do: "stream_failed"
   defp returned_class({:error, {:stream_incomplete, _}}), do: "stream_incomplete"
