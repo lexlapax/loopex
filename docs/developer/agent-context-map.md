@@ -3105,3 +3105,41 @@ required on both platforms, and a repeated process-probe error or any other
 required failure blocks closure. M0–M2 final gate reruns remain **WAIVED**, not
 passed, under the separate validation-scope override. This disposition grants
 no M3 closure, integration to `main`, tag, or release.
+
+<a id="disposition-m3-closure-2026-09-13"></a>
+### M3 closure — 2026-09-13
+
+After the independent product review at source
+`f45354572840636b473ad7e40e42355fdff4fc17` found no blocking product
+defect and identified the remaining governance sequence, the maintainer directed:
+
+> Ok. Finish and let's close
+
+This closes M3 at the evidence-only candidate
+`159e7ea96826125e55b6c3dd1ce751dc1445c3f4`, the direct child of that
+product source. The child marks all five outcomes Proved and identifies the
+retained M3-only qualification at the product source: macOS Elixir 1.17.0 /
+OTP 26.0 and Linux Elixir 1.20.3 / OTP 29.0.5 each passed 17 lanes, all nine
+selector reports, the deterministic suite with zero failures, bootstrap, and
+the attended Anthropic workflow. Archive paths and SHA-256 digests are in the
+[source-bound evidence record](../plans/M3.md#concept-m3-final-qualification-f453545).
+The M0–M2 final gate reruns remain **WAIVED**, never described as passed, under
+the [recorded maintainer override](#override-disposition-m3-final-inherited-gates-waiver-2026-09-13).
+
+Closure binds the accepted envelopes and gate:
+
+| Artifact | Digest |
+| --- | --- |
+| Concept envelope | `sha256:9c004acd94844a9f1369ac84e6b735076c537cc5caabf4ad0e825854334352e5` |
+| Technical depth envelope | `sha256:433947d010b8999966a9becb9b260647f2764fa0bbc8ef4448f6b395f0b0d227` |
+| Gate | `sha256:7a0140357954e5b465e3e6f41f79893e0f1c820bf0f221c95dc9794a47b1cbcc` |
+
+The [Git transfer-byte-cap limitation](#override-disposition-m3-repair-completion-packet-2026-09-13)
+stands exactly as accepted: the 30-second deadline, pack caps, cancellation,
+and cleanup still apply. The eleven named historical findings and the
+formatting-only evidence carry-forward retain their own dispositions and
+source attribution; neither becomes a new pass at closure. The maintainer's
+`e17fb2e` task-checklist addition to `AGENTS.md` was their direct instruction
+on this milestone branch. The In progress and In review transitions and this
+closure transition receive separate exact-commit reviews. This record grants
+no tag, release, or publication.
