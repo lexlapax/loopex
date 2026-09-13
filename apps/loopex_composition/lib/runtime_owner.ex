@@ -79,7 +79,7 @@ defmodule LoopexComposition.RuntimeOwner do
     case guarded_compose(configuration, compose) do
       {:ok, runtime} ->
         send(caller, {tag, {:ok, runtime}})
-        await_stop(caller, caller_monitor, tag, token, runtime, seams)
+        await_stop(caller, caller_monitor, tag, token, seams)
 
       {:error, _reason} = refusal ->
         {_result, pending} = cleanup(seams)
@@ -88,9 +88,7 @@ defmodule LoopexComposition.RuntimeOwner do
     end
   end
 
-  defp await_stop(caller, caller_monitor, tag, token, runtime, seams) do
-    runtime_supervisor = runtime.supervisor
-
+  defp await_stop(caller, caller_monitor, tag, token, seams) do
     receive do
       {^token, :stop, ^caller} ->
         {result, pending} = cleanup(seams)
@@ -100,7 +98,7 @@ defmodule LoopexComposition.RuntimeOwner do
       {:DOWN, ^caller_monitor, :process, ^caller, _reason} ->
         cleanup_and_retain(seams)
 
-      {:EXIT, ^runtime_supervisor, reason} ->
+      {:EXIT, _owned_pid, reason} ->
         {result, pending} = cleanup(seams)
         send(caller, {tag, :runtime_stopped, reason, result, pending != []})
         await_pending(pending)
@@ -199,18 +197,25 @@ defmodule LoopexComposition.RuntimeOwner do
     end
   end
 
-  defp stop_owned({Loopex, runtime}, effect) do
+  defp stop_owned({Loopex, %{supervisor: supervisor} = runtime}, effect) do
     case guarded_effect(effect, Loopex, :stop, [runtime]) do
       :ok ->
         :ok
 
       other ->
-        if Process.alive?(runtime.supervisor) do
-          monitor = Process.monitor(runtime.supervisor)
+        detail = {:runtime_stop_unconfirmed, other}
 
-          {:pending, {:runtime_stop_unconfirmed, other}, {runtime.supervisor, monitor}}
+        if Process.alive?(supervisor) do
+          # Concept: a refused stop cannot leave an owned runtime running.
+          # Technical depth: reuse the existing shutdown/kill confirmation path;
+          # retain the exact monitored identity if cessation remains unconfirmed.
+          case stop_owned({Loopex, supervisor}, effect) do
+            :ok -> {:error, detail}
+            {:error, failure} -> {:error, {detail, failure}}
+            {:pending, failure, identity} -> {:pending, {detail, failure}, identity}
+          end
         else
-          {:error, {:runtime_stop_unconfirmed, other}}
+          {:error, detail}
         end
     end
   end
