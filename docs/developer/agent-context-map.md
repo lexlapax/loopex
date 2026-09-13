@@ -2906,3 +2906,38 @@ attribution; this documentation-only recording commit makes no new test claim.
 The record lands alone, is committed and pushed to `m3`, and is passed with
 the retained evidence to an independent reviewer at its exact SHA. It grants
 no M3 closure, product integration to `main`, tag or release.
+
+<a id="override-disposition-m3-required-trust-witness-2026-09-13"></a>
+### M3 required-only trust witness correction — 2026-09-13
+
+For new finding H3 in the post-implementation review of
+`f92f19ee31e7ea62cb5614a487dfb22527c13c66`, the maintainer received this proposal:
+
+> For H3, may I keep ADR 0017’s existing promise and correct the protected test under a narrow override? Required-only failures would retain the exact reason project trust was declined. The test may observe a trust lookup, but must still prove zero optional-content reads, zero optional-inclusive measurements and zero model calls. The test name and gate bindings stay unchanged. I’ll record the approval separately before this fix.
+
+The recommended option was “Approve the narrow witness correction”. The
+maintainer answered:
+
+> Approved recommendations
+
+Under the [explicit maintainer override](../../AGENTS.md#maintainer-override),
+this replaces only the zero-project-resolution assertion in
+`apps/loopex/test/context_admission_test.exs`, in the protected witness
+“required only preflight refuses before any optional inclusive measurement”.
+The successor scope is the current M3 repair. A project trust lookup may occur
+before required-only refusal, so an already declined project retains the exact
+non-budget disposition required by ADR 0017. An eligible optional project
+still records `not_evaluated_required_failure` when the required request fails.
+
+The corrected witness must retain its name, required failure and positive
+controls, and prove zero optional-content reads, zero optional-inclusive
+measurements and admissions, and zero model calls on required-only failure.
+Focused evidence must cover eligible and declined project decisions. No
+bound-artifact bytes, gate digest, normative envelope or accepted ADR decision
+change. All unaffected protected assertions remain required.
+
+This disposition lands alone and receives independent exact-SHA review before
+the dependent source or witness correction. The approval waives no failure,
+changes no validation cadence, and grants no closure, main integration or
+release. Final M0–M2 reruns remain governed by the existing
+[separate waiver](#override-disposition-m3-final-inherited-gates-waiver-2026-09-13).
