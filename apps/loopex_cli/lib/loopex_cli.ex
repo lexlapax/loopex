@@ -333,11 +333,14 @@ defmodule LoopexCli do
          :ok <- activate_selected_skills(runtime, session_id, attachment, manifest_digest, flags) do
       :ok
     else
-      # Concept: declining trust withholds skills while ordinary coding continues.
+      # Concept: declining trust withholds skills; an explicit selection cannot
+      # be satisfied without an admitted catalog and refuses before the prompt.
       # Technical depth: nil revokes an existing admission in Core; this fresh
       # session has none, so neither admission nor selection should be submitted.
       {:ok, nil} ->
-        :ok
+        if skill_selections?(flags),
+          do: {:error, "the selected skill requires trust in this exact manifest"},
+          else: :ok
 
       {:error, reason, detail} ->
         {:error, "the skill manifest was refused: #{reason} (#{inspect(detail)})"}

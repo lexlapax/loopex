@@ -538,6 +538,85 @@ defmodule LoopexCliTest do
         end
       end
     end
+
+    for {selection, selection_flags} <- [
+          {"skill", ["--skill", "review"]},
+          {"supporting resource", ["--skill-resource", "review:SKILL.md"]}
+        ] do
+      test "#{label} trust refuses an explicit #{selection} before admission or prompt" do
+        {state_root, workspace} = roots()
+        skill = Path.join([workspace, ".agents", "skills", "review", "SKILL.md"])
+        File.mkdir_p!(Path.dirname(skill))
+
+        File.write!(
+          skill,
+          "---\nname: review\ndescription: Review one change\n---\nUse the checklist.\n"
+        )
+
+        model = Loopex.AgentLoopTestModel.start([%{text: "should not run"}])
+        parent = self()
+
+        Process.put(:"$loopex_composition_edge_observer", fn
+          Loopex, :start_link, [options] ->
+            configured =
+              Keyword.put(options, :model, %{
+                module: Loopex.AgentLoopTestModel,
+                model: "scripted:v1",
+                options: [script: model, max_tokens: 256]
+              })
+
+            result = Loopex.start_link(configured)
+            send(parent, {:declined_skill_runtime, result})
+            result
+
+          module, function, arguments ->
+            apply(module, function, arguments)
+        end)
+
+        Process.put(:"$loopex_cli_facade_observer", fn
+          Loopex, function, arguments when function in [:command, :resource_catalog] ->
+            send(parent, {:declined_skill_facade, function})
+            apply(Loopex, function, arguments)
+
+          module, function, arguments ->
+            apply(module, function, arguments)
+        end)
+
+        try do
+          capture_io(unquote(input), fn ->
+            capture_io(:stderr, fn ->
+              assert {:error, message} =
+                       LoopexCli.dispatch(
+                         [
+                           "run",
+                           "--policy",
+                           "allow-all",
+                           "--state-root",
+                           state_root,
+                           "--workspace",
+                           workspace
+                         ] ++ unquote(selection_flags) ++ ["Review this change."],
+                         operator_present: unquote(operator_present)
+                       )
+
+              assert message =~ "the selected skill requires trust"
+            end)
+          end)
+
+          refute_received {:declined_skill_facade, _function}
+          assert [] == Loopex.AgentLoopTestModel.dispatched(model)
+        after
+          Process.delete(:"$loopex_cli_facade_observer")
+          Process.delete(:"$loopex_composition_edge_observer")
+
+          receive do
+            {:declined_skill_runtime, {:ok, runtime}} -> :ok = Loopex.stop(runtime)
+          after
+            0 -> :ok
+          end
+        end
+      end
+    end
   end
 
   test "fresh run admits an explicit host decision and activates selected resources before the prompt" do
