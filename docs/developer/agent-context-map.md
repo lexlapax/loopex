@@ -3074,3 +3074,34 @@ closure, integration to `main`, tag or release. The disposition lands in its
 own commit, receives an independent exact-SHA read before the external
 remaining-lanes executor runs, and is pushed to `origin/m3` with the subsequent
 evidence handoff.
+
+<a id="disposition-m3-unlogged-process-probe-2026-09-13"></a>
+### M3 unlogged process-probe occurrence — 2026-09-13
+
+The `4282d9b3ee7718fd120a7bcbf9d1d78a2aaea818` hand-off packet mentioned
+one `{:process_incarnation_unavailable, :process_absent}` stop in a broad CLI
+test. It retained no failing command, raw log, selector, source-bound test
+report, or execution-environment record for that attempt. The original cause
+cannot be established and the attempt is **not a pass**. A separate diagnostic
+at that clean source, retained at
+`~/loopex-reviews/m3-closure-process-probe-4282d9b/README.md`, shows the
+floor-toolchain BEAM's `/bin/ps` command returning exit 1 with empty output
+under restricted execution and returning its process start time under
+permitted host execution. The source maps the first result to the reported
+error. This proves an environmental mechanism that can produce the signature,
+not what happened in the unlogged attempt.
+
+The maintainer was offered two choices: accept this one unlogged occurrence as
+unresolved historical uncertainty, conditional on final M3-only runs passing
+on macOS and Linux with any recurrence blocking closure; or keep it blocking
+and investigate the unrecorded attempt further. The maintainer answered:
+
+> i accept the recommended disposition. move on.
+
+This accepts only the first choice for this single historical occurrence.
+It does not label the old attempt a flake, product regression, environmental
+failure, or pass. Final M3-only qualification at the frozen candidate remains
+required on both platforms, and a repeated process-probe error or any other
+required failure blocks closure. M0–M2 final gate reruns remain **WAIVED**, not
+passed, under the separate validation-scope override. This disposition grants
+no M3 closure, integration to `main`, tag, or release.
