@@ -2245,7 +2245,7 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
 
     try do
       assert_refused_duplicate(fixture, activation)
-      :gen_event.sync_notify(:erl_signal_server, :sigterm)
+      assert_incumbent_signal_delivery(fixture, coordinator, presentation, incumbent)
       assert queued_abort?(coordinator)
       [stopping] = interrupt_handler_states()
       assert stopping.holder == incumbent.holder
@@ -3982,6 +3982,195 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
     if Process.alive?(handoff.holder), do: Process.exit(handoff.holder, :kill)
     _ = invoke(Loopex, :abandon_resume, [handoff.activation])
     :ok
+  end
+
+  # Concept: this presentation stays blocked until its incumbent's abort is
+  # actually queued; notification alone only proves that the handler ran.
+  # Technical depth: the one cutoff starts before the signal and uses the
+  # existing CLI stop bound. Short observation slices never renew that cutoff.
+  defp assert_incumbent_signal_delivery(fixture, coordinator, presentation, incumbent) do
+    {:ok, %{cli_backstop_ms: stop_ms}} = Loopex.Executor.cancellation_bounds(@grace)
+    manager = Process.whereis(:erl_signal_server)
+
+    {control, guard, states} =
+      try do
+        {:ok, %{control: control}} =
+          Loopex.Runtime.Supervisor.children(fixture.runtime.supervisor)
+
+        {control, prepared_guard(coordinator, incumbent.holder), interrupt_handler_states()}
+      rescue
+        _error -> flunk("signal delivery: initial_participant_unavailable")
+      catch
+        :exit, _reason -> flunk("signal delivery: initial_participant_unavailable")
+      end
+
+    unless states == [incumbent] and match?(%{abort: nil, backstop: nil}, incumbent) do
+      flunk("signal delivery: incumbent_not_idle")
+    end
+
+    observation = %{
+      manager: manager,
+      coordinator: coordinator,
+      incumbent: Map.drop(incumbent, [:abort, :backstop]),
+      command_id: nil,
+      participants: [
+        manager_lost: manager,
+        control_lost: control,
+        holder_lost: incumbent.holder,
+        guard_lost: guard,
+        coordinator_lost: coordinator,
+        presenter_lost: presentation.pid
+      ]
+    }
+
+    unless Enum.all?(observation.participants, fn {_category, pid} ->
+             is_pid(pid) and Process.alive?(pid)
+           end) do
+      flunk("signal delivery: initial_participant_unavailable")
+    end
+
+    cutoff = System.monotonic_time(:millisecond) + stop_ms
+
+    result =
+      with :ok <- assert_incumbent_signal_delivery(manager, cutoff, :notify) do
+        assert_incumbent_signal_delivery(observation, cutoff)
+      end
+
+    case result do
+      :ok -> :ok
+      {:error, category} -> flunk("signal delivery: #{category}")
+    end
+  end
+
+  defp assert_incumbent_signal_delivery(manager, cutoff, :notify) do
+    remaining = cutoff - System.monotonic_time(:millisecond)
+
+    if remaining <= 0 do
+      {:error, :cutoff_expired}
+    else
+      # Technical depth: this is sync_notify's same RPC on both locked OTP
+      # versions. Its finite call owns timeout/late-reply cleanup and uses our
+      # original cutoff.
+      try do
+        case :gen.call(manager, self(), {:sync_notify, :sigterm}, remaining) do
+          {:ok, :ok} ->
+            if System.monotonic_time(:millisecond) < cutoff,
+              do: :ok,
+              else: {:error, :cutoff_expired}
+
+          _other ->
+            {:error, :notification_unavailable}
+        end
+      catch
+        :exit, :timeout -> {:error, :cutoff_expired}
+        :exit, _reason -> {:error, :notification_unavailable}
+      end
+    end
+  end
+
+  defp assert_incumbent_signal_delivery(observation, cutoff) do
+    remaining = cutoff - System.monotonic_time(:millisecond)
+
+    state =
+      if remaining > 0 do
+        try do
+          observation.manager
+          |> :sys.get_state(min(10, remaining))
+          |> Enum.flat_map(fn
+            {Interrupt, _id, state} -> [state]
+            _other -> []
+          end)
+        catch
+          :exit, {:timeout, _call} -> :pending
+          :exit, _reason -> :unavailable
+        end
+      end
+
+    lost =
+      Enum.find_value(observation.participants, fn {category, pid} ->
+        if not is_pid(pid) or not Process.alive?(pid), do: category
+      end)
+
+    result =
+      cond do
+        System.monotonic_time(:millisecond) >= cutoff ->
+          {:error, :cutoff_expired}
+
+        lost ->
+          {:error, lost}
+
+        Process.whereis(:erl_signal_server) != observation.manager ->
+          {:error, :handler_replaced}
+
+        Process.info(observation.coordinator, :status) != {:status, :suspended} ->
+          {:error, :presentation_not_blocked}
+
+        state == :pending ->
+          {:pending, observation}
+
+        not match?([%{}], state) ->
+          {:error, :handler_unavailable}
+
+        true ->
+          [handler] = state
+
+          cond do
+            Map.drop(handler, [:abort, :backstop]) != observation.incumbent ->
+              {:error, :handler_replaced}
+
+            not match?(%{abort: _, backstop: _}, handler) ->
+              {:error, :unexpected_handler_state}
+
+            handler.abort == nil or match?(%{accepted: false}, handler.abort) ->
+              {:error, :abort_refused}
+
+            not match?(%{accepted: nil, monitor: _, command_id: _}, handler.abort) ->
+              {:error, :unexpected_abort_state}
+
+            observation.command_id not in [nil, handler.abort.command_id] ->
+              {:error, :abort_replaced}
+
+            not is_pid(handler.backstop) or not Process.alive?(handler.backstop) ->
+              {:error, :backstop_lost}
+
+            not is_reference(handler.abort.monitor) ->
+              {:error, :worker_lost}
+
+            true ->
+              command_id = handler.abort.command_id
+
+              case Process.info(observation.coordinator, :messages) do
+                {:messages, messages} ->
+                  if Enum.any?(messages, fn
+                       {:"$gen_call", _from,
+                        {:command, _owner, %{type: :abort, command_id: ^command_id}}} ->
+                         true
+
+                       _other ->
+                         false
+                     end),
+                     do: :ok,
+                     else: {:pending, %{observation | command_id: command_id}}
+
+                nil ->
+                  {:error, :coordinator_lost}
+              end
+          end
+      end
+
+    case result do
+      {:pending, observation} ->
+        Process.sleep(min(10, max(0, cutoff - System.monotonic_time(:millisecond))))
+        assert_incumbent_signal_delivery(observation, cutoff)
+
+      :ok ->
+        if System.monotonic_time(:millisecond) < cutoff,
+          do: :ok,
+          else: {:error, :cutoff_expired}
+
+      verdict ->
+        verdict
+    end
   end
 
   defp queued_abort?(coordinator, attempts \\ 300)
