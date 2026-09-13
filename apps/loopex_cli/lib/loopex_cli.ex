@@ -321,7 +321,8 @@ defmodule LoopexCli do
 
   defp configure_resources(runtime, session_id, attachment, manifest, flags, options) do
     with {:ok, manifest_digest, normalized_manifest} <- Loopex.ResourcePack.digest(manifest),
-         {:ok, decision} <- resource_decision(normalized_manifest, manifest_digest, options),
+         {:ok, decision} when not is_nil(decision) <-
+           resource_decision(normalized_manifest, manifest_digest, options),
          :ok <-
            submit_resource_command(attachment, %{
              type: :admit_resources,
@@ -332,6 +333,12 @@ defmodule LoopexCli do
          :ok <- activate_selected_skills(runtime, session_id, attachment, manifest_digest, flags) do
       :ok
     else
+      # Concept: declining trust withholds skills while ordinary coding continues.
+      # Technical depth: nil revokes an existing admission in Core; this fresh
+      # session has none, so neither admission nor selection should be submitted.
+      {:ok, nil} ->
+        :ok
+
       {:error, reason, detail} ->
         {:error, "the skill manifest was refused: #{reason} (#{inspect(detail)})"}
 

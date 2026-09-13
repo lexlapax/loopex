@@ -458,6 +458,88 @@ defmodule LoopexCliTest do
     assert Keyword.has_key?(launch_options, :provider_launch)
   end
 
+  for {label, operator_present, input} <- [
+        {"declined", true, "n\n"},
+        {"end of input", true, ""},
+        {"headless", false, ""}
+      ] do
+    test "#{label} skill trust withholds content while the CLI completes ordinary coding" do
+      {state_root, workspace} = roots()
+      skill = Path.join([workspace, ".agents", "skills", "review", "SKILL.md"])
+      instruction = "WITHHELD_SKILL_INSTRUCTIONS"
+      description = "WITHHELD_SKILL_CATALOG"
+      File.mkdir_p!(Path.dirname(skill))
+      File.write!(skill, "---\nname: review\ndescription: #{description}\n---\n#{instruction}\n")
+      model = Loopex.AgentLoopTestModel.start([%{text: "ordinary coding completed"}])
+      parent = self()
+
+      Process.put(:"$loopex_composition_edge_observer", fn
+        Loopex, :start_link, [options] ->
+          assert %{"packs" => [_pack]} = Keyword.fetch!(options, :resource_manifest)
+
+          configured =
+            Keyword.put(options, :model, %{
+              module: Loopex.AgentLoopTestModel,
+              model: "scripted:v1",
+              options: [script: model, max_tokens: 256]
+            })
+
+          result = Loopex.start_link(configured)
+          send(parent, {:skill_trust_runtime, result})
+          result
+
+        module, function, arguments ->
+          apply(module, function, arguments)
+      end)
+
+      try do
+        output =
+          capture_io(unquote(input), fn ->
+            stderr =
+              capture_io(:stderr, fn ->
+                assert :ok =
+                         LoopexCli.dispatch(
+                           [
+                             "run",
+                             "--policy",
+                             "allow-all",
+                             "--state-root",
+                             state_root,
+                             "--workspace",
+                             workspace,
+                             "Complete the ordinary coding task."
+                           ],
+                           operator_present: unquote(operator_present)
+                         )
+              end)
+
+            send(parent, {:skill_trust_stderr, stderr})
+          end)
+
+        assert output =~ "ordinary coding completed"
+        assert_receive {:skill_trust_stderr, stderr}
+        assert stderr =~ "complete manifest digest"
+
+        if unquote(operator_present),
+          do: assert(stderr =~ "trust this exact skill manifest"),
+          else: assert(stderr =~ "skill content is withheld")
+
+        assert [request] = Loopex.AgentLoopTestModel.dispatched(model)
+        assert request.canonical_request_bytes =~ "Complete the ordinary coding task."
+        refute request.canonical_request_bytes =~ instruction
+        refute request.canonical_request_bytes =~ description
+      after
+        Process.delete(:"$loopex_composition_edge_observer")
+
+        receive do
+          {:skill_trust_runtime, {:ok, runtime}} -> :ok = Loopex.stop(runtime)
+        after
+          0 -> :ok
+        end
+      end
+    end
+  end
+
   test "fresh run admits an explicit host decision and activates selected resources before the prompt" do
     {state_root, workspace} = roots()
     {:ok, workspace_ref} = LoopexCli.ProjectResources.workspace_reference(workspace)

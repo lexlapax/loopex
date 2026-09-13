@@ -194,6 +194,46 @@ defmodule LoopexCli.FoundationWorkflowTest do
              )
   end
 
+  test "the source built CLI refuses a changed worker identity before provider dispatch" do
+    workflow = configured_recovery_workflow("launch-mismatch")
+    {_session_id, positive_output} = complete_cli_workflow(workflow)
+    assert positive_output =~ "artifact retained"
+    positive_events = ProviderFixture.events(workflow.provider)
+    assert length(positive_events) == 2
+
+    {:ok, configuration} =
+      Loopex.LLM.ReqLLM.ProviderConfiguration.validate(workflow.provider.options)
+
+    assert :ok = Loopex.LLM.ReqLLM.ProviderConfiguration.verify_artifact(configuration)
+
+    File.write!(configuration.worker_path, "\n% Changed after the CLI bound its identity.\n", [
+      :append
+    ])
+
+    assert {:error, :provider_artifact_unavailable} =
+             Loopex.LLM.ReqLLM.ProviderConfiguration.verify_artifact(configuration)
+
+    {refused, 0} =
+      run_cli_process(
+        workflow.cli_binary,
+        [
+          "run",
+          "--policy",
+          "allow-all",
+          "--state-root",
+          Path.join(workflow.root, "mismatched-launch-state"),
+          "--workspace",
+          workflow.workspace,
+          "Complete another ordinary task."
+        ],
+        nil
+      )
+
+    assert refused =~ "loopex: failed"
+    refute refused =~ "loopex: done"
+    assert ProviderFixture.events(workflow.provider) == positive_events
+  end
+
   test "fresh recovery withholds resources when the admitted snapshot is missing" do
     workflow = configured_recovery_workflow("missing-recovery")
     {session_id, first_output} = complete_cli_workflow(workflow)
@@ -268,8 +308,7 @@ defmodule LoopexCli.FoundationWorkflowTest do
       history = write_resource_history(resource_root, variant)
       resource_journal = File.read!(Path.join(resource_root, "store.log"))
 
-      if variant == :resource_request,
-        do: assert_old_reader_reaches_resource_request(old.paths, history, resource_root, root)
+      assert_old_reader_reaches_resource_record(old.paths, history, variant, resource_root, root)
 
       refused =
         run_compatibility_probe(old.paths, old.probe, "read-v2-refused", resource_root, root)
@@ -377,25 +416,30 @@ defmodule LoopexCli.FoundationWorkflowTest do
     )
   end
 
-  # Concept: the complete resource history proves rollback refusal, while this
-  # isolated record-format vector proves which later record the M2 reducer rejects.
+  # Concept: each resource record variant fails at its own format boundary in
+  # the genuine M2 reducer, after a readable old-format prefix.
   #
   # Technical depth: a genuine resource request necessarily follows an admitted
   # resource command, which an M2 reducer rejects first. Keep the exact captured
   # request payload and owner stamps, change only its journal position so it is
   # the next row after the genuine genesis/owner prefix, and prove that prefix
   # succeeds immediately before the added kind returns invalid private history.
-  defp assert_old_reader_reaches_resource_request(paths, history, root, environment_root) do
+  defp assert_old_reader_reaches_resource_record(paths, history, variant, root, environment_root) do
     prefix = Enum.take(history.records, 2)
 
-    captured =
-      Enum.find(history.records, &(&1.payload.kind == "model_request_committed_resources_v1"))
+    kind =
+      if variant == :resource_request,
+        do: "model_request_committed_resources_v1",
+        else: "resource_command_v1"
+
+    captured = Enum.find(history.records, &(&1.payload.kind == kind))
+    assert captured != nil
 
     candidate = %{captured | journal_version: List.last(prefix).journal_version + 1}
     assert candidate.payload === captured.payload
     assert Map.drop(candidate, [:journal_version]) === Map.drop(captured, [:journal_version])
 
-    vector = Path.join(root, "resource-request-record-format.term")
+    vector = Path.join(root, "#{variant}-record-format.term")
 
     File.write!(vector, :erlang.term_to_binary({history.session_id, prefix, candidate}), [
       :exclusive
@@ -422,7 +466,7 @@ defmodule LoopexCli.FoundationWorkflowTest do
       )
 
     assert output =~
-             "reader=refused_at_kind kind=model_request_committed_resources_v1 prefix=ready"
+             "reader=refused_at_kind kind=#{kind} prefix=ready"
   end
 
   defp command!(executable, arguments, directory, environment) do
@@ -871,7 +915,16 @@ defmodule LoopexCli.FoundationWorkflowTest do
       assert Path.expand(Mix.Project.compile_path()) ==
                Path.expand(Application.app_dir(:loopex_cli, "ebin"))
 
-      build_cli_in_project(workflow)
+      input_paths = [
+        List.to_string(:code.which(LoopexCli.ProviderLaunch)),
+        Path.join(Mix.Project.compile_path(), "Elixir.LoopexCli.IsolatedProviderMain.beam"),
+        Path.expand(Mix.Project.config()[:escript][:path] || "loopex")
+      ]
+
+      original_inputs = Map.new(input_paths, &{&1, File.read(&1)})
+      executable = build_cli_in_project(workflow)
+      assert Map.new(input_paths, &{&1, File.read(&1)}) == original_inputs
+      executable
     end
 
     if Mix.Project.get() == LoopexCli.MixProject do
@@ -895,58 +948,66 @@ defmodule LoopexCli.FoundationWorkflowTest do
     File.write!(launch_path, :io_lib.format(~c"~tp.~n", [launch]))
 
     executable = Path.join(workflow.root, "loopex")
-    build_output = Path.expand(Mix.Project.config()[:escript][:path] || "loopex")
-    previous_output = File.read(build_output)
-    previous_mode = file_mode(build_output)
+    original_escript = Mix.Project.config()[:escript]
 
-    try do
-      with_resource_decision_main(workflow.decision, fn main_module ->
-        with_provider_launch(launch_path, fn ->
-          original_escript = Mix.Project.config()[:escript]
+    with_resource_decision_main(workflow.decision, fn main_module, main_beam ->
+      with_provider_launch(launch_path, fn launch_beam ->
+        Mix.ProjectStack.merge_config(
+          escript:
+            original_escript
+            |> Keyword.put(:main_module, main_module)
+            |> Keyword.put(:path, executable)
+        )
 
-          Mix.ProjectStack.merge_config(
-            escript: Keyword.put(original_escript, :main_module, main_module)
-          )
+        try do
+          Mix.Tasks.Escript.Build.run(["--no-compile", "--no-deps-check"])
 
-          try do
-            Mix.Tasks.Escript.Build.run(["--no-compile", "--no-deps-check"])
-            File.cp!(build_output, executable)
-            File.chmod!(executable, file_mode(build_output))
-          after
-            Mix.ProjectStack.merge_config(escript: original_escript)
-          end
-        end)
+          # Concept: a killed workflow build cannot poison the production beams.
+          # Technical depth: test overrides exist only in this owned archive;
+          # the build directory and any ordinary CLI artifact are read-only inputs.
+          replace_archive_beams(executable, [
+            {main_module, main_beam},
+            {LoopexCli.ProviderLaunch, launch_beam}
+          ])
+        after
+          Mix.ProjectStack.merge_config(escript: original_escript)
+        end
       end)
-    after
-      restore_build_output(build_output, previous_output, previous_mode)
-    end
+    end)
 
     assert File.exists?(executable)
     executable
   end
 
-  defp file_mode(path) do
-    case File.stat(path) do
-      {:ok, stat} -> stat.mode
-      {:error, :enoent} -> nil
-    end
-  end
+  defp replace_archive_beams(executable, overrides) do
+    {:ok, sections} = :escript.extract(String.to_charlist(executable), [])
+    {:ok, entries} = :zip.extract(Keyword.fetch!(sections, :archive), [:memory])
 
-  defp restore_build_output(path, {:ok, bytes}, mode) do
-    File.write!(path, bytes)
-    File.chmod!(path, mode)
-  end
+    cli_directory =
+      entries
+      |> Enum.find(fn {path, _bytes} ->
+        Path.basename(List.to_string(path)) == "Elixir.LoopexCli.beam"
+      end)
+      |> elem(0)
+      |> List.to_string()
+      |> Path.dirname()
 
-  defp restore_build_output(path, {:error, :enoent}, nil), do: File.rm(path)
+    replacements =
+      Map.new(overrides, fn {module, bytes} ->
+        {String.to_charlist(Path.join(cli_directory, Atom.to_string(module) <> ".beam")), bytes}
+      end)
+
+    entries = Enum.reject(entries, fn {path, _bytes} -> Map.has_key?(replacements, path) end)
+
+    {:ok, {_name, archive}} =
+      :zip.create(~c"loopex.zip", entries ++ Map.to_list(replacements), [:memory])
+
+    :ok =
+      :escript.create(String.to_charlist(executable), Keyword.put(sections, :archive, archive))
+  end
 
   defp with_resource_decision_main(decision, build) do
     module = LoopexCli.IsolatedProviderMain
-
-    beam_path =
-      Path.join(Mix.Project.compile_path(), "Elixir.LoopexCli.IsolatedProviderMain.beam")
-
-    previous_beam = File.read(beam_path)
-    previous_mode = file_mode(beam_path)
 
     quoted =
       quote do
@@ -970,10 +1031,8 @@ defmodule LoopexCli.FoundationWorkflowTest do
 
     try do
       [{^module, beam}] = Code.compile_quoted(quoted)
-      File.write!(beam_path, beam)
-      build.(module)
+      build.(module, beam)
     after
-      restore_build_output(beam_path, previous_beam, previous_mode)
       :code.purge(module)
       :code.delete(module)
     end
@@ -982,7 +1041,6 @@ defmodule LoopexCli.FoundationWorkflowTest do
   defp with_provider_launch(launch_path, build) do
     module = LoopexCli.ProviderLaunch
     {^module, original, original_path} = :code.get_object_code(module)
-    beam_path = List.to_string(original_path)
     previous_environment = System.get_env("LOOPEX_BUILD_PROVIDER_CONFIG")
     previous_compiler = Code.compiler_options(ignore_module_conflict: true)
     System.put_env("LOOPEX_BUILD_PROVIDER_CONFIG", launch_path)
@@ -991,10 +1049,8 @@ defmodule LoopexCli.FoundationWorkflowTest do
       [{^module, configured}] =
         Code.compile_file(Path.expand("../lib/provider_launch.ex", __DIR__))
 
-      File.write!(beam_path, configured)
-      build.()
+      build.(configured)
     after
-      File.write!(beam_path, original)
       Code.compiler_options(previous_compiler)
 
       if previous_environment,
