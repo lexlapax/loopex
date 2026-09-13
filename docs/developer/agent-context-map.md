@@ -2645,3 +2645,63 @@ M3 gate inspection. Full gates at the intermediate revisions are unrun under
 the recorded timing approval. Complete M0–M3 gates remain required at the final
 candidate on macOS and Linux serenity. This disposition waives no historical
 failure and grants no M3 closure, product integration to `main`, tag or release.
+
+<a id="override-disposition-m3-checksum-portability-2026-09-12"></a>
+### M3 checksum portability repair — 2026-09-12
+
+The maintainer was asked:
+
+> Approve the reviewed M3 checksum fix and its M3 binding update? Linux’s isolated tests lack `shasum`; the fix also accepts `sha256sum` with the same digest checks. I recommend letting the independent reviewer accept only this exact patch and matching M3 update, after your permission is recorded and reviewed. Use focused checks during the update, then complete M0–M3 gates on macOS and Linux at the final candidate. Patch: 0468bc9e55adca559d37351257076c1dbd7cbb5f491b36cf66464193e1dd5b57. This grants no failure waiver, ADR change, closure, merge to main, or release.
+
+After the completed Linux control and the outstanding approval were reported,
+the maintainer answered **"Approved"**. This records approval of that exact
+packet, including its limited reviewer delegation and validation timing.
+
+Under [the explicit maintainer override](../../AGENTS.md#maintainer-override),
+this authorizes only patch SHA-256
+`0468bc9e55adca559d37351257076c1dbd7cbb5f491b36cf66464193e1dd5b57`
+to `scripts/check-m3-gate.sh`. At source
+`6d745eda73d8aaa6e88f3627fdefd71bdac43236`, the runner digest is
+`49cf9b8f7fc95846d105e045d86f73110f5de2fde80b9b6214ed30c565b87302`;
+the approved replacement digest is
+`d54c66098d971a9bdc0b26addb95d415db02c44e4b82ba55e325b5863cf4629b`.
+The sole holder is Accepted `M3`. Its Amendment 3 proposal changes the runner,
+that runner's Bound Artifacts row in `M3-gate.md`, and the appended amendment.
+The immediate one-parent rebind changes only M3's Acceptance row and adds its
+fresh acceptance disposition here. M1 and M2 bindings remain unchanged.
+
+The replacement accepts a validated `shasum` or `sha256sum`, checks the known
+empty-input SHA-256 digest and every returned lowercase 64-hex digest, and
+refuses unavailable, malformed or failed hashing. Artifact comparisons and the
+final gate digest retain their meaning. It changes no PATH isolation, role,
+command, witness, count, exclusion, timeout, provider path or final report field.
+A final hash failure must refuse before the authoritative PASS report.
+
+This disposition lands alone and receives independent exact-SHA review before
+dependent edits. Delegate **`/root/m3_independent_review`**, named
+`m3_independent_review` in the Acceptance table, may then accept only the actual
+Amendment 3 proposal SHA matching this patch and these M3 binding changes, after
+focused validation and exact-commit review. Deviations require the maintainer's
+decision. The delegate cannot approve another repair, failure waiver, ADR,
+closure, merge to `main`, tag or release.
+
+For this M3 proposal and rebind only, focused checksum controls, script and
+artifact inspection, applicable binding/status checks and independent exact-SHA
+review replace the full gates otherwise required at those intermediate
+checkpoints. The proposal retains its expected stale M3 binding. Its immediate
+rebind must settle that binding and pass complete default status validation
+with no pending holder. The complete M0–M3 gates remain required at the final
+candidate on macOS and Linux serenity. Intermediate full gates are unrun, never
+reported as passing, and prior failures retain their original status.
+
+The reviewed proposal evidence is retained in the maintainer's
+`loopex-reviews/m3-checksum-proposal-6d745ed-p5e86sdi` archive with manifest
+SHA-256 `8f752d5fcad0a8403098e05ab4e7766005f55545f884062ea3e05f878e0d6f14`.
+It contains nine local copied-runner inspection controls, three synthetic
+final-report controls and the actual Linux restricted-PATH control. On Linux,
+the original runner reproduced the exact missing-`shasum` refusal with exit 2;
+the proposed runner returned the unchanged inspection-only output with exit 0.
+The donor remained unchanged, and only the disposable fixture's runner and
+synthetic self-binding row changed. That evidence predates approval and is
+proposal evidence, not an accepted binding or full-gate result. No historical
+failure is waived by this instruction.
