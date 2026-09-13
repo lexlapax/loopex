@@ -1845,27 +1845,29 @@ defmodule Loopex.Runtime.SessionCoordinator do
     end
   end
 
-  # Concept: required context is proved writable before optional resources are
-  # resolved. Every optional block then either fits whole or records why it did
-  # not fit, while later blocks still get their own admission decision.
+  # Concept: required refusal preserves project trust's exact disposition.
+  # Required context is proved writable before optional resource content is read;
+  # each eligible optional block then fits whole or records why it did not fit.
   #
   # Technical depth: the initial resource header has no selection-dependent
   # rows. The maintainer approved reserving the longest closed empty header as
   # the fixed resource-format cost on 2026-09-10: otherwise the shorter initial
   # status could fit while the required withheld-status receipt could not.
-  # Both required-only measurements precede project resolution and file reads.
+  # Resolve project trust once and reuse its result. Both required-only
+  # measurements precede optional-inclusive admission and resource content reads.
   defp stage_candidate(state, staging) do
     initial = ResourceContext.initial_header(staging.resources)
+    {blocks, receipt} = project_blocks(state)
 
     project =
-      if is_nil(state.project_manifest),
-        do: ProjectResource.receipt(:no_manifest, %{}),
-        else: ProjectResource.receipt(:not_evaluated_required_failure, %{})
+      if receipt["disposition"] == "staged",
+        do: ProjectResource.receipt(:not_evaluated_required_failure, %{}),
+        else: receipt
 
     with {:ok, _required} <- measure_candidate(state, staging, [], project, initial),
          :ok <- reserve_empty_resource_header(state, staging, project, initial),
          {:ok, selected, project} <-
-           admit_project_block(state, staging, reserved_resource_header(initial)),
+           admit_project_block(state, staging, reserved_resource_header(initial), blocks, receipt),
          {:ok, selected, resource_header} <-
            admit_resource_blocks(state, staging, selected, project),
          {:ok, candidate} <- model_candidate(state, staging, selected, project, resource_header) do
@@ -1894,8 +1896,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
   defp reserved_resource_header(header),
     do: Map.put(header, "status", "retained_content_missing")
 
-  defp admit_project_block(state, staging, resource_header) do
-    {blocks, receipt} = project_blocks(state)
+  defp admit_project_block(state, staging, resource_header, blocks, receipt) do
     selected = Enum.zip(blocks, project_sources(receipt))
 
     case measure_candidate(state, staging, selected, receipt, resource_header) do
