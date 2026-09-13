@@ -1872,9 +1872,18 @@ defmodule LoopexCliTest do
 
     File.write!(stand_in, """
     #!/bin/sh
-    trap 'echo "stand-in: interrupted" >&2' TERM
-    i=0
-    while [ $i -lt 6 ]; do sleep 1; i=$((i+1)); done
+    count=0
+    interrupted=0
+    trap 'interrupted=1; count=$((count + 1)); printf "ack:%s\\n" "$count"' TERM
+    printf 'ready\\n'
+    while :; do
+      interrupted=0
+      if IFS= read -r control; then
+        if [ "$control" = release ]; then break; fi
+      elif [ "$interrupted" -eq 0 ]; then
+        break
+      fi
+    done
     exit 130
     """)
 
@@ -1888,24 +1897,51 @@ defmodule LoopexCliTest do
         env: [{~c"LOOPEX_ESCRIPT", String.to_charlist(stand_in)}]
       ])
 
-    assert {:os_pid, launcher} = Port.info(port, :os_pid)
+    # One shared bound replaces guessed delays; the stand-in waits for release
+    # and also leaves on stdin EOF if the test process dies and closes its port.
+    deadline = System.monotonic_time(:millisecond) + 20_000
 
-    Process.sleep(1_000)
-    {_output, 0} = System.cmd("/bin/kill", ["-TERM", Integer.to_string(launcher)])
-    Process.sleep(2_000)
-    {_output, 0} = System.cmd("/bin/kill", ["-TERM", Integer.to_string(launcher)])
+    await_marker = fn await_marker, expected, received ->
+      if received == expected do
+        :ok
+      else
+        remaining = max(deadline - System.monotonic_time(:millisecond), 0)
 
-    # Asked of the operating system rather than of the port: the stand-in inherits
-    # the port's output, so the emulator reports the launcher's exit only once
-    # that descendant has gone too, and a launcher that left early looks the same
-    # from here as one that waited.
-    Process.sleep(500)
+        receive do
+          {^port, {:data, bytes}} ->
+            joined = received <> bytes
+            assert byte_size(joined) <= byte_size(expected)
+            await_marker.(await_marker, expected, joined)
 
-    assert {_output, 0} = System.cmd("/bin/kill", ["-0", Integer.to_string(launcher)]),
-           "the launcher left while its child was still running"
+          {^port, {:exit_status, status}} ->
+            flunk("launcher exited before marker with status #{status}")
+        after
+          remaining -> flunk("launcher stand-in did not acknowledge the expected phase")
+        end
+      end
+    end
 
-    assert_receive {^port, {:exit_status, status}}, 20_000
-    assert status == 130, "the launcher reported its own interrupted wait, not the child"
+    try do
+      assert {:os_pid, launcher} = Port.info(port, :os_pid)
+      :ok = await_marker.(await_marker, "ready\n", "")
+      {_output, 0} = System.cmd("/bin/kill", ["-TERM", Integer.to_string(launcher)])
+      :ok = await_marker.(await_marker, "ack:1\n", "")
+      {_output, 0} = System.cmd("/bin/kill", ["-TERM", Integer.to_string(launcher)])
+      :ok = await_marker.(await_marker, "ack:2\n", "")
+
+      # Query the OS while the stand-in remains held, before allowing it to exit.
+      assert {_output, 0} = System.cmd("/bin/kill", ["-0", Integer.to_string(launcher)]),
+             "the launcher left while its child was still running"
+
+      assert Port.command(port, "release\n")
+      remaining = max(deadline - System.monotonic_time(:millisecond), 0)
+      assert_receive {^port, {:exit_status, status}}, remaining
+      assert status == 130, "the launcher reported its own interrupted wait, not the child"
+    after
+      # Closing stdin lets the held stand-in leave on every assertion failure;
+      # the launcher retains its ordinary responsibility to reap that child.
+      if Port.info(port), do: Port.close(port)
+    end
   end
 
   test "an interrupt whose cleanup cannot be confirmed reports outcome unknown with its reconciliation reference" do
