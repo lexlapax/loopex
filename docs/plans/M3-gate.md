@@ -95,7 +95,7 @@ its Amendment 2 replacement below.
 
 | SHA-256 | Path |
 | --- | --- |
-| `49cf9b8f7fc95846d105e045d86f73110f5de2fde80b9b6214ed30c565b87302` | `scripts/check-m3-gate.sh` |
+| `d54c66098d971a9bdc0b26addb95d415db02c44e4b82ba55e325b5863cf4629b` | `scripts/check-m3-gate.sh` |
 | `9bf18c61bdcd9292c1ad382ef373fe11acb4764b5535de744f75342c9f85a84a` | `scripts/m3-opening-probe.exs` |
 | `65d0de9dcd1218af542f00e32c2177d2612a2f1232f22db37b9942200c84cf66` | `scripts/m3-gate-support.exs` |
 | `c4d485ca3229441c678abe1e8733f90216e89e0dfb9e81786f58f525619aec29` | `scripts/check-closed-gates.sh` |
@@ -322,3 +322,43 @@ historical cause and grants no failure waiver, closure or release.
 | --- | --- | --- |
 | 2 | `scripts/m1-exunit-runner.exs` | `53d8219bdee584a3849a85a1102e405520d5dd0dfbe21d259434bc9edfc5fcc0` |
 | 2 | `apps/loopex/test/m1_exunit_runner_test.exs` | `c36253cff3d74ddff1b330695edbc4bde0a4565c1412c67c1293b2fb7ca6129b` |
+
+<a id="amendment-3"></a>
+## Amendment 3 — Portable SHA-256 inspection
+
+**Acceptance: OUTSTANDING.** This v1 proposal retains the current Acceptance
+row, both normative envelopes and the Accepted lifecycle. After independent
+review and explicit acceptance of this actual proposal SHA by the recorded
+delegate, its immediate one-parent child records a fresh acceptance disposition
+and rebinds Acceptance to the proposal's unchanged envelope digests and new gate
+digest.
+
+The [approved checksum repair](../developer/agent-context-map.md#override-disposition-m3-checksum-portability-2026-09-12)
+authorizes exact patch
+`sha256:0468bc9e55adca559d37351257076c1dbd7cbb5f491b36cf66464193e1dd5b57`.
+This proposal changes only `scripts/check-m3-gate.sh`, that runner's Bound
+Artifacts row, and this amendment. M3 is its sole holder; M1 and M2 need no
+binding transaction. Prior amendment text and historical evidence remain true
+for the revisions they name.
+
+The runner accepts either `shasum` or `sha256sum`. It checks the chosen utility
+against the known empty-input SHA-256 digest and requires each returned digest
+to be lowercase 64-hex. Missing, malformed or failed hashing refuses. Every
+artifact comparison and the final gate digest use that validated utility; a
+failed final digest refuses before the authoritative PASS line. PATH isolation,
+roles, commands, outcome and selector sets, witness identities, counts,
+exclusions, timeouts, provider paths and final report fields remain unchanged.
+
+The recorded timing approval permits focused checksum controls, script and
+artifact inspection, applicable binding/status checks and independent exact-SHA
+review at this proposal and its immediate rebind. The proposal must retain the
+expected stale M3 gate binding, with binding-independent checks proved directly.
+The rebind must pass complete default status validation with no pending holder.
+The complete M0–M3 gates remain required at the final candidate on macOS and
+Linux serenity. Full gates at these intermediate revisions are unrun, not
+passing evidence. This changes no product outcome or ADR and grants no failure
+waiver, closure, merge to `main` or release.
+
+| Generation | Artifact | Rebound SHA-256 |
+| --- | --- | --- |
+| 3 | `scripts/check-m3-gate.sh` | `d54c66098d971a9bdc0b26addb95d415db02c44e4b82ba55e325b5863cf4629b` |
