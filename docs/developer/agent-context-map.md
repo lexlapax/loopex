@@ -3024,3 +3024,53 @@ serenity on the current toolchain, with exact source and retained evidence.
 Final M0–M2 reruns remain waived, not passed, under the
 [existing validation-scope disposition](#override-disposition-m3-final-inherited-gates-waiver-2026-09-13).
 These decisions grant no M3 closure, integration to `main`, tag or release.
+
+<a id="override-disposition-m3-formatting-evidence-carry-forward-2026-09-13"></a>
+### M3 formatting evidence carry-forward — 2026-09-13
+
+The maintainer received this exact question after the macOS floor run at
+`96a138a6298fcbc0d3a7b10f191578229bbd71e5` passed eight deterministic
+selectors and the 1,228-test suite, then failed `mix format --check-formatted`:
+
+> Approve reusing the passed deterministic tests from `96a138a` across the formatting-only fix, while I run fresh build, repository and real-provider checks on both macOS and Linux?
+
+The maintainer answered:
+
+> Appved
+
+This is approval to carry only those already passed deterministic results across
+the formatting-only source change in
+`8eafa984eda57229ba7df9d5f9cbb040aa9880c4`. The two changed files have
+equal parsed Elixir syntax trees at the prior and repaired sources on Elixir
+1.17.0 / OTP 26.0 and Elixir 1.20.3 / OTP 29.0.5 after removing only line and
+column metadata. Both toolchains pass the formatter on the repaired source.
+The earlier macOS run's overall result remains a formatting failure; its
+passed tests remain attributed to `96a138a` and are not relabelled as executed
+at the later source. The Linux M3-only pass at `96a138a` also keeps its own
+source attribution. The original macOS test log, formatting failure and syntax
+comparison are retained in the maintainer's
+`loopex-reviews/m3-formatting-compatibility-8eafa98-_dfshvvy` archive.
+
+The replacement validation at the standalone approval revision runs the M3
+opening core and local Store build, opening probe, isolated test build,
+formatting, documentation, dependency budget, bootstrap and attended real
+provider workflow afresh on macOS floor and Linux current. It retains the
+source/build identity and real-selector report checks, a real-only selector
+ledger of 1/1, and the existing M0–M2 inherited-gate waiver. The external
+executor emits only a `LOOPEX_M3_REMAINING_LANES_REPORT` with the exact fresh
+source and `deterministic=CARRIED_NOT_RERUN`; it cannot claim a complete new
+M3-only gate PASS. The original passing deterministic evidence and the fresh
+remaining-lanes evidence must both be presented to the reviewer with their
+separate source identities.
+
+Approved remaining-lanes executor: sha256:fe553d8f087160b868c2a59a1955ce884b9eb431f319007fe12f9463d2d92c28
+Carried deterministic evidence source: 96a138a6298fcbc0d3a7b10f191578229bbd71e5
+Formatting repair source: 8eafa984eda57229ba7df9d5f9cbb040aa9880c4
+Execution scope: fresh M3 opening/test builds, opening probe, format, docs, dependencies, bootstrap and attended real workflow; deterministic selectors and whole suite carried, not rerun.
+
+This disposition changes no product bytes, accepted ADR decision, M3 gate,
+protected assertion, provider requirement or deadline. It grants no M3
+closure, integration to `main`, tag or release. The disposition lands in its
+own commit, receives an independent exact-SHA read before the external
+remaining-lanes executor runs, and is pushed to `origin/m3` with the subsequent
+evidence handoff.
