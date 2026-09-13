@@ -322,10 +322,11 @@ later `run`, Loopex displays the project skill identities and complete manifest
 digest, then asks whether to trust that exact manifest for the next run.
 Changing any skill byte changes that identity.
 
-If you requested `--skill` or `--skill-resource` and then decline trust, the
-selection has no admitted catalog entry to resolve and the command refuses
-before submitting the prompt. Omit those flags when you want the run to proceed
-without skill content.
+If you requested `--skill` or `--skill-resource`, the command refuses before
+submitting the prompt when you decline trust, reach end of input without a
+decision, or run headless without one. In each case, the selection has no
+admitted catalog entry to resolve. Omit those flags when you want the run to
+proceed without skill content.
 
 Select instructions explicitly with `--skill`. Select a manifested supporting
 file only for a selected skill with `--skill-resource`:

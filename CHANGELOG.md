@@ -53,16 +53,17 @@ fences. Fix stale executor test-root reuse through atomic fresh-directory
 reservation. Retire spent provider permits after matching durable settlement,
 including bounded short-page reads and matching terminal-pair validation, while
 preserving delayed-identity refusal and retry/accounting rules. Add deterministic embedding/source-built CLI workflow, resource
-boundary and old-reader compatibility witnesses. M3's remaining final
+boundary and old-reader compatibility witnesses. M3's final M3-only
 qualification is recorded in its plan progress; this entry claims no
-closure or full-gate result.
+closure or full inherited-gate result.
 
 Keep durable interactions, artifact ranges and the floor refresh in the
 [M4 draft](docs/archive/M4.md#concept). The reviewed M3 cadence uses focused
 implementation checks. The later [final validation override](docs/developer/agent-context-map.md#override-disposition-m3-final-inherited-gates-waiver-2026-09-13)
-requires M3-only qualification on macOS and Linux; M0–M2 gate reruns are waived,
+required M3-only qualification on macOS and Linux, which passed at exact source
+`f45354572840636b473ad7e40e42355fdff4fc17`; M0–M2 gate reruns are waived,
 not passed. Deterministic and attended production-provider workflow proofs
-remain separate requirements. The floor-toolchain M3 run remains required.
+remain separately recorded in the M3 plan. The floor-toolchain M3 run passed.
 
 Accept [ADR 0029](docs/adr/0029-bounded-provider-failure-diagnostics.md#concept)
 and implement bounded provider-neutral failure diagnostics without retaining

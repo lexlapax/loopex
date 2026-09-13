@@ -74,8 +74,10 @@ Core repairs keep required context ahead of optional content, let acknowledgemen
 continue while Store reads wait, and retire settled provider permits safely. See
 [project skills](docs/operator/coding-sessions.md#operator-sessions-skills) for
 the commands and [embedding resources](docs/developer/runtime-and-embedding.md#technical-embedding-resources)
-for the host API. This work remains on the M3 implementation branch pending
-final gates and independent closure review.
+for the host API. The exact M3 product source
+`f45354572840636b473ad7e40e42355fdff4fc17` passed M3-only qualification
+on the macOS floor pair and Linux; the [M3 plan](docs/plans/M3.md#concept-m3-final-qualification-f453545)
+records that evidence and the separate lifecycle decision.
 
 The repaired reference local executor requires `/bin/bash` for its internal
 supervision on Darwin and Linux; raw commands still use `/bin/sh`. See the
