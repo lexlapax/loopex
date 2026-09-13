@@ -646,12 +646,18 @@ defmodule Loopex.Runtime.Control do
   # The final row either registers one exact current attempt-open binding or no
   # binding; a matching settlement never retires that current identity. Any
   # missing, delayed, malformed or oversized read preserves the complete map.
+  # Sessions without their own spent attempt need no retirement read; another
+  # session's live work must not make their acknowledgements wait on the Store.
   defp retire_settled_attempts(%{spent_attempts: spent} = state, _session_id, _entry, _receipt)
        when map_size(spent) == 0,
        do: state
 
   defp retire_settled_attempts(state, session_id, entry, receipt) do
-    with {:ok, records} <- committed_receipt_records(state.store, session_id, entry, receipt),
+    with true <-
+           Enum.any?(state.spent_attempts, fn {binding, _bound} ->
+             Map.get(binding, "session_id") == session_id
+           end),
+         {:ok, records} <- committed_receipt_records(state.store, session_id, entry, receipt),
          {:ok, current} <- current_provider_binding(session_id, List.last(records)),
          {:ok, settled} <- settled_spent_bindings(records, session_id, state.spent_attempts) do
       retired = if is_nil(current), do: settled, else: List.delete(settled, current)

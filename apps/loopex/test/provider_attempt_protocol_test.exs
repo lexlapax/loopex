@@ -57,6 +57,11 @@ defmodule Loopex.ProviderAttemptRetirementReadStore do
     do: Store.ownership_head(store, session_id, domain)
 
   @impl Store
+  def load_records({store, {:blocked, reads}, observer}, session_id, after_version, limit) do
+    Agent.update(reads, &[session_id | &1])
+    load_records({store, :blocked, observer}, session_id, after_version, limit)
+  end
+
   def load_records({_store, :blocked, observer}, session_id, after_version, limit) do
     send(observer, {:retirement_read_blocked, self(), session_id, after_version, limit})
 
@@ -2385,6 +2390,64 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     end
 
     assert_terminal_without_settlement_retains()
+  end
+
+  test "an unrelated session acknowledges commits without reading another session's spent permits" do
+    fixture =
+      start(
+        script: [%{text: "settle after the other session", hold: self(), hold_timeout_ms: 30_000}]
+      )
+
+    attempt = queue_provider_permit_request(fixture, "keep one session's permit spent")
+    resume_process(attempt.control)
+    _permit = await_control_permit(attempt.control, attempt.worker, attempt.binding)
+    assert_receive {:holding, callback}, 5_000
+    assert spent_attempt_bindings(attempt.control) == [attempt.binding]
+
+    {:ok, unrelated_session} =
+      Loopex.create_session(fixture.runtime, %{}, command_id: "unrelated-retirement-session")
+
+    {:ok, attachment} = Loopex.attach(fixture.runtime, unrelated_session)
+    {:ok, %{dispatcher: dispatcher}} = Runtime.children(fixture.runtime)
+    :erlang.trace(dispatcher, true, [:receive])
+    {:ok, reads} = Agent.start_link(fn -> [] end)
+    {:ok, backing_store} = Store.new(M1RuntimeTestStore, fixture.store)
+
+    {:ok, faulting_store} =
+      Store.new(ProviderAttemptRetirementReadStore, {backing_store, {:blocked, reads}, self()})
+
+    :sys.replace_state(attempt.control, &Map.put(&1, :store, faulting_store))
+
+    try do
+      # The refused command still commits a real record and acknowledgement,
+      # but creates no provider attempt in this session.
+      assert {:error, :resource_not_admitted} =
+               Loopex.command(attachment, %{
+                 type: :activate_skill,
+                 command_id: "unrelated-retirement-commit",
+                 manifest_digest: String.duplicate("a", 64),
+                 source_id: "project",
+                 name: "unadmitted",
+                 pack_digest: String.duplicate("b", 64),
+                 supporting_labels: []
+               })
+
+      assert_receive {:trace, ^dispatcher, :receive,
+                      {:"$gen_call", _from, {:acknowledge, ^unrelated_session, _position}}},
+                     5_000
+
+      # The synchronous ledger is updated before a faulting read blocks. Read
+      # absence is checked after the completed acknowledgement, not after a sleep.
+      assert Agent.get(reads, & &1) == []
+      assert spent_attempt_bindings(attempt.control) == [attempt.binding]
+    after
+      :sys.replace_state(attempt.control, &Map.put(&1, :store, backing_store))
+      :erlang.trace(dispatcher, false, [:receive])
+      send(callback, :release)
+    end
+
+    assert await_event(attempt.attachment, "run.finished")["outcome"] == "completed"
+    assert spent_attempt_bindings(attempt.control) == []
   end
 
   # Concept: a retired identity remains refused by durable authorization after
