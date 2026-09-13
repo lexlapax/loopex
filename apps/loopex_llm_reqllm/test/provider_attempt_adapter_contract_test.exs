@@ -618,13 +618,11 @@ defmodule Loopex.LLM.ReqLLM.ProviderAttemptAdapterContractTest do
       :erlang.raise(kind, reason, stack)
   end
 
-  @tag :failure_categories
   test "private worker preserves finite secret-free stream causes before outer fallback" do
     fixture = Fixture.new(:reply)
     run_category_probe(fixture, nil)
   end
 
-  @tag :failure_categories
   test "private worker attributes returned incomplete completion and HTTP stream failures" do
     for {mode, stage, class} <- [
           {:incomplete_stream, "completion", "stream_incomplete"},
@@ -636,7 +634,10 @@ defmodule Loopex.LLM.ReqLLM.ProviderAttemptAdapterContractTest do
     end
   end
 
-  @tag :failure_categories
+  test "private worker preserves typed returned handoff failures" do
+    run_category_probe(Fixture.new(:reply), :handoff_controls)
+  end
+
   test "public stream results retain their tags while private stage labels stay finite" do
     run_category_probe(Fixture.new(:reply), :stream_controls)
   end
@@ -654,7 +655,6 @@ defmodule Loopex.LLM.ReqLLM.ProviderAttemptAdapterContractTest do
     assert_receive {:DOWN, ^monitor, :process, ^owner, :normal}, 5_000
   end
 
-  @tag :failure_categories
   test "synthetic probe owner survives caller death and proves child cessation" do
     fixture = Fixture.new(:reply)
     script = Path.join(fixture.root, "blocked-category-probe.exs")
@@ -680,7 +680,6 @@ defmodule Loopex.LLM.ReqLLM.ProviderAttemptAdapterContractTest do
     assert status != 0
   end
 
-  @tag :failure_categories
   test "synthetic probe stop retains port ownership until child exit" do
     fixture = Fixture.new(:reply)
     script = Path.join(fixture.root, "blocked-category-probe.exs")
@@ -966,10 +965,15 @@ defmodule Loopex.LLM.ReqLLM.ProviderAttemptAdapterContractTest do
     """
     defmodule CategoryProbeTransport do
       def call(request) do
-        if Application.get_env(:req_llm, :category_probe_handoff) do
-          raise "synthetic handoff failure"
-        else
-          %{request | scheme: :http, host: "127.0.0.1", port: #{http_port}, path: "/", query: nil}
+        case Application.get_env(:req_llm, :category_probe_handoff) do
+          {:typed, cause} ->
+            raise %ReqLLM.Error.API.Stream{cause: cause, reason: "unused-secret-never-retained"}
+
+          true ->
+            raise "synthetic handoff failure"
+
+          _ ->
+            %{request | scheme: :http, host: "127.0.0.1", port: #{http_port}, path: "/", query: nil}
         end
       end
     end
@@ -992,6 +996,36 @@ defmodule Loopex.LLM.ReqLLM.ProviderAttemptAdapterContractTest do
       end
       if expected_configuration == :stream_controls do
         #{stream_category_controls()}
+        IO.puts("STAGE_OK")
+        System.halt(0)
+      end
+      if expected_configuration == :handoff_controls do
+        secret = "unused-secret-never-retained"
+        for {cause, class} <- [
+          {%ReqLLM.Error.API.Request{status: 401, reason: secret}, "stream_http_auth"},
+          {%ReqLLM.Error.API.Request{status: 429, response_body: secret}, "stream_http_rate_limit"},
+          {%ReqLLM.Error.API.Request{status: 503, request_body: secret}, "stream_http_server"},
+          {%ReqLLM.Error.API.Request{status: 418, reason: secret}, "stream_http_status"},
+          {%Finch.TransportError{reason: :timeout, source: secret}, "stream_transport_timeout"},
+          {%Mint.TransportError{reason: {:tls_alert, secret}}, "stream_transport_tls"},
+          {%Finch.TransportError{reason: secret}, "stream_transport_error"},
+          {%Jason.DecodeError{data: secret}, "stream_decode_error"},
+          {secret, "stream_other_error"}
+        ] do
+          Application.put_env(:req_llm, :category_probe_handoff, {:typed, cause})
+          expected = {:error, {:dispatched_or_unknown, "model_call_failed"},
+            %{"stage" => "handoff", "class" => class}}
+          case invoke.(fn _ -> :ok end) do
+            ^expected -> :ok
+            {:error, {:dispatched_or_unknown, "model_call_failed"},
+              %{"stage" => stage, "class" => actual}}
+              when stage in #{inspect(~w(handoff stream metadata completion assembly calls unavailable))}
+                and actual in #{inspect(category_classes())} ->
+              IO.puts("STAGE_RESULT:" <> stage <> ":" <> actual)
+              System.halt(1)
+            _ -> IO.puts("FINITE_CATEGORIES_FAILED"); System.halt(1)
+          end
+        end
         IO.puts("STAGE_OK")
         System.halt(0)
       end

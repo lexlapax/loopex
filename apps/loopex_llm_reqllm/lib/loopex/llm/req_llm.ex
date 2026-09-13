@@ -436,6 +436,7 @@ defmodule Loopex.LLM.ReqLLM do
     failure_stage("handoff", fn ->
       case ReqLLM.stream_text(request.model, context, call_options) do
         {:ok, response} -> drain(response, request, identity, progress, credential)
+        {:error, _reason} = failed -> failed
         _failed -> {:error, {:provider_call_failed, @call_failed}}
       end
     end)
@@ -545,8 +546,9 @@ defmodule Loopex.LLM.ReqLLM do
       {:error, {tag, _reason}} = error ->
         {:error, {tag, @call_failed}, failure_pair(stage, returned_class(error))}
 
-      {:error, _reason} ->
-        {:error, {:provider_call_failed, @call_failed}, failure_pair(stage, "returned_error")}
+      {:error, _reason} = error ->
+        {:error, {:provider_call_failed, @call_failed},
+         failure_pair(stage, returned_class(error))}
 
       success ->
         success
@@ -573,6 +575,22 @@ defmodule Loopex.LLM.ReqLLM do
     do:
       {:error, {:dispatched_or_unknown, @call_failed},
        failure_pair("unavailable", "unclassified")}
+
+  defp returned_class({:error, %ReqLLM.Error.API.Stream{} = exception}),
+    do: raised_class(exception)
+
+  # Concept: library return wrappers do not erase an observed typed cause.
+  # Technical depth: ReqLLM's request-build boundary returns these fixed wrappers;
+  # unwrap only their API.Stream value and keep all raw fields inside the worker.
+  defp returned_class({:error, {tag, %ReqLLM.Error.API.Stream{} = exception}})
+       when tag in [:build_request_failed, :provider_build_failed],
+       do: raised_class(exception)
+
+  defp returned_class(
+         {:error, {:http_streaming_failed, {tag, %ReqLLM.Error.API.Stream{} = exception}}}
+       )
+       when tag in [:build_request_failed, :provider_build_failed],
+       do: raised_class(exception)
 
   defp returned_class({:error, {:stream_failed, {:provider_status, status}}})
        when is_integer(status) and status >= 400, do: "provider_status"
