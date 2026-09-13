@@ -22,7 +22,7 @@ the exact document set its milestone must update.
 
 No package or compatibility-labelled surface is pending.
 
-Implement project skills under the Accepted [M3 plan](docs/plans/M3.md#concept).
+M3 closed with project skills under the accepted [M3 plan](docs/plans/M3.md#concept).
 Add pinned Git import, contained project discovery, retained provenance and
 immutable runtime snapshots. Keep installation separate from explicit session
 admission and pre-run instruction/supporting-file selection. Stage optional
@@ -54,8 +54,9 @@ reservation. Retire spent provider permits after matching durable settlement,
 including bounded short-page reads and matching terminal-pair validation, while
 preserving delayed-identity refusal and retry/accounting rules. Add deterministic embedding/source-built CLI workflow, resource
 boundary and old-reader compatibility witnesses. M3's final M3-only
-qualification is recorded in its plan progress; this entry claims no
-closure or full inherited-gate result.
+qualification is recorded in its plan progress; closure is recorded at
+`d73a1030405ba5f55c5c7653c0a019f8b5c8bed7`. This entry claims no
+release or full inherited-gate result.
 
 Keep durable interactions, artifact ranges and the floor refresh in the
 [M4 draft](docs/archive/M4.md#concept). The reviewed M3 cadence uses focused

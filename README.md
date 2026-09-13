@@ -224,8 +224,8 @@ alongside explicit "AS IS", no-warranty terms that match the no-promises
 posture above. If you contribute, your contribution is licensed under the
 same terms — that is Apache-2.0 §5, and there is no separate CLA.
 
-The active milestone, `M3` (extensible local foundations), is accepted on
-branch `m3`; see the [canonical plan register](docs/plans/README.md).
+Milestone `M3` (extensible local foundations) is closed; see the
+[canonical plan register](docs/plans/README.md).
 
 The accepted [M3 plan](docs/plans/M3.md#concept) covers project skills and the remaining
 core repairs. Its [M4 successor draft](docs/archive/M4.md#concept) adds durable
