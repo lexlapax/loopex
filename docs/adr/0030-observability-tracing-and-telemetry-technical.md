@@ -97,17 +97,20 @@ outcome 7 implementation work in core, bound at acceptance:
 | Rule | Contract |
 | --- | --- |
 | Paths | The existing synchronous `Loopex.diagnostic/2` call remains for hosts; the dispatcher gains an asynchronous admission message that the trace tracer and the `loopex_telemetry` handler use, and that never replies to the sender |
-| Ingress reservation | The runtime owns one `:counters` pair per runtime, created at start and handed to the tracer and the handler as a plain reference: a reservation counter and a drop counter. Before sending, a sender atomically increments the reservation counter; if the new value exceeds the ceiling it atomically decrements it, increments the drop counter and sends nothing. Only a sender holding a reservation may send. The check and the send are lock-free and never wait on the dispatcher, so the dispatcher's mailbox can hold at most ceiling reserved items regardless of how many senders race |
+| Ingress reservation | The runtime owns one `:atomics` array of two signed 64-bit cells per runtime, created at start and handed to the tracer and the handler as a plain reference: cell 1 holds reservations, cell 2 holds drops. Before sending, a sender calls `:atomics.add_get(ref, 1, 1)`; if the returned value exceeds the ceiling it calls `:atomics.sub(ref, 1, 1)` and `:atomics.add(ref, 2, 1)` and sends nothing. Only a sender holding a reservation may send, and it sends immediately after reserving. Every operation is a single hardware atomic; nothing waits on the dispatcher, so the dispatcher's mailbox holds at most ceiling reserved items however many senders race |
 | Ceiling | 4,096 reserved items per runtime; a host may lower this ceiling, never raise it |
-| Release | The dispatcher decrements the reservation counter once per admitted item, after it has either forwarded the item to the sink or discarded it; a reservation is therefore released exactly once, and a crashed sender that reserved but never sent is reconciled by the dispatcher's periodic audit, which resets the counter to its actual mailbox count |
-| Egress check | Before forwarding, the dispatcher reads the sink process's message queue length; if it is at or above the ceiling the item is discarded and the drop counter incremented, so the sink's mailbox is bounded as well. A dead sink discards every item |
-| Summary | When the reservation counter falls below half the ceiling and the drop counter is nonzero, the dispatcher publishes one `diagnostics_dropped` item carrying the count read-and-reset atomically and the drop window, before any further item |
+| Release | The dispatcher calls `:atomics.sub(ref, 1, 1)` exactly once per admitted item, after it has either forwarded the item or discarded it |
+| Crash reconciliation | A sender killed between reserve and send leaks one reservation. The dispatcher's periodic audit (every 5 seconds) samples the reservation cell and its own mailbox count of admission messages in that order; a surplus that persists across two consecutive samples is a leak, because a live reservation is held for microseconds and cannot span an interval. The audit repairs only the smaller of the two observed surpluses, using `:atomics.compare_exchange(ref, 1, observed, observed - surplus)`; a failed exchange means a concurrent reservation moved the cell, and the audit simply retries at its next interval. A live sender's reservation is therefore never erased |
+| Egress | The dispatcher forwards each admitted item to the sink with one send and never buffers more than the reserved backlog, so the only queues Loopex bounds are its own: the admission backlog and its forwarding. The host sink's mailbox belongs to the host and cannot be bounded by Loopex when other senders can race on it; before each forward the dispatcher reads the sink's queue length and, when it is at or above the ceiling, discards the item and counts a drop as best-effort backpressure, never as a bound. A dead sink discards every item |
+| Summary | When the reservation cell falls below half the ceiling and the drop cell is nonzero, the dispatcher takes the count with `:atomics.exchange(ref, 2, 0)`, one atomic read-and-reset, and publishes one `diagnostics_dropped` item carrying that count and the drop window before any further item |
 | Bounds per item | The existing transient item and byte limits apply unchanged to every admitted item |
 | Loss semantics | Dropped diagnostics are lost, never durable; nothing in the session journal, public events or progress depends on their delivery |
 
-The claimed bound is therefore exact at both stages: ingress cannot exceed
-the ceiling because capacity is reserved before the send, and egress cannot
-exceed it because the sink's queue is checked before each forward.
+The claimed bound is therefore exact for the queues Loopex owns: the
+admission backlog cannot exceed the ceiling because capacity is reserved by a
+hardware atomic before the send, reconciliation never touches a live
+reservation, and the drop count is taken by an atomic exchange. The host
+sink's own mailbox is outside that claim and is only backpressured.
 
 ### Evidence
 
@@ -121,8 +124,12 @@ project resource or app-server request; stopping releases every trace flag.
 Prove every callback and cut in the emission inventory emits start/stop or
 exception with a duration and only the documented metadata, that a crashing
 handler is isolated, that a slow or blocked `loopex_telemetry` forwarding sink
-never delays a coordinator and drops with a counted entry, and that an OTP
-release without trace sessions reports unavailability. Measure the overhead of
+never delays a coordinator and drops with a counted entry, that racing senders
+never push the admission backlog above the ceiling, that an audit interleaved
+between a sender's reserve and its send never erases that reservation, that
+a leaked reservation is repaired within two audit intervals, that the drop
+summary count equals the exact number of drops, and that an OTP release
+without trace sessions reports unavailability. Measure the overhead of
 enabled tracing and of telemetry emission with no handler attached and record
 both with the gate evidence.
 

@@ -147,7 +147,8 @@
             "every callback and transaction cut in the emission inventory emits start stop or exception spans with durations and only documented metadata",
             "a crashing telemetry handler is isolated and emission with no handler stays within the measured overhead",
             "a slow or blocked forwarding sink never delays a coordinator and drops with a counted entry",
-            "racing senders reserve capacity before sending so the backlog never exceeds the ceiling drops are counted without a send and one summary is published on drain"
+            "racing senders reserve capacity before sending so the backlog never exceeds the ceiling drops are counted without a send and one summary is published on drain",
+            "an audit interleaved between reserve and send never erases a live reservation and a leaked reservation is repaired within two intervals"
           ]
         }
       ]

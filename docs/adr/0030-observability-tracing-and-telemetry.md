@@ -50,11 +50,14 @@ Two mechanisms, chosen by the maintainer on 2026-09-12:
   at all; a new edge application, `loopex_telemetry`, owns the only
   Loopex-attached handler, which hands each event to the runtime's diagnostics
   dispatcher through its asynchronous admission path and never blocks the
-  emitting process. The dispatcher owns bounded admission: a sender reserves
-  capacity atomically before it sends, so the backlog can never exceed 4,096
-  items per runtime however many senders race; above that, items are dropped
-  and counted without a send, the sink's own queue is checked before each
-  forward, and one summary item is published when the backlog drains. Reporters, exporters and
+  emitting process. The dispatcher owns bounded admission for the queues
+  Loopex controls: a sender reserves capacity with one hardware atomic before
+  it sends, so the admission backlog can never exceed 4,096 items per runtime
+  however many senders race; above that, items are dropped and counted
+  without a send; crash reconciliation never erases a live reservation; the
+  drop count is taken by one atomic exchange; and one summary item is
+  published when the backlog drains. The host sink's own mailbox is the
+  host's and is only backpressured, never bounded, by Loopex. Reporters, exporters and
   OpenTelemetry remain edge adapters. A handler a host attaches itself runs in
   the emitting process and is the host's responsibility.
 
