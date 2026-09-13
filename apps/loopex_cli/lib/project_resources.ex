@@ -305,17 +305,24 @@ defmodule LoopexCli.ProjectResources do
 
   ## Technical depth
 
-  `:stdin` is the runtime's own view of the input device: `true` only for a
-  terminal, `false` for a pipe or a redirect, and an error term for a
-  descriptor it cannot interrogate. Only the first is an operator. Everything
-  else, the unclassifiable included, is absence -- a prompt nobody can answer
-  either hangs the run or is answered by whatever happened to be on standard
-  input, and content admitted from the second is content no operator consented
-  to.
+  An explicit `:stdin` option takes precedence. OTP 26 can omit that option
+  while output is captured even when input is a terminal. In that case only a
+  physical terminal on standard input, used by the runtime's own console group
+  leader, counts as an operator. A pipe, redirect, or custom IO device never
+  gains trust from the `:terminal` output option.
   """
   @spec operator_present?() :: boolean()
   def operator_present? do
-    Keyword.get(:io.getopts(:standard_io), :stdin) == true
+    case Keyword.fetch(:io.getopts(:standard_io), :stdin) do
+      {:ok, true} ->
+        true
+
+      {:ok, _other} ->
+        false
+
+      :error ->
+        Process.group_leader() == Process.whereis(:user) and :prim_tty.isatty(:stdin) == true
+    end
   rescue
     _error -> false
   end

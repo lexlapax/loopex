@@ -2748,6 +2748,21 @@ defmodule LoopexCliTest do
     assert silent =~ "no project resources found"
   end
 
+  test "a custom IO device without a stdin option cannot claim an operator" do
+    with_terminal_input(
+      "y\n",
+      fn ->
+        options = :io.getopts(:standard_io)
+        assert Keyword.get(options, :terminal) == true
+        refute Keyword.has_key?(options, :stdin)
+        refute LoopexCli.ProjectResources.operator_present?()
+      end,
+      binary: true,
+      encoding: :unicode,
+      terminal: true
+    )
+  end
+
   test "a project resource that resolves outside the workspace is excluded and reported rather than admitted as contained" do
     # Concept: containment is a fact about where the bytes actually are, and the
     # side holding the path is the only side that can establish it.
@@ -3124,13 +3139,17 @@ defmodule LoopexCliTest do
   #
   # Technical depth: `ProjectResources.operator_present?/0` asks the current
   # group leader through the ordinary Erlang IO protocol. This proxy delegates
-  # every request to `StringIO` except `:getopts`, where it truthfully describes
-  # the test device as an input terminal. No project-decision seam is injected:
+  # every request to `StringIO` except `:getopts`, where it describes the test
+  # device using the supplied options. No project-decision seam is injected:
   # the command still calls `decide/2`, asks through `IO.gets/1`, and consumes
   # the typed answer through `:standard_io`.
-  defp with_terminal_input(typed, work) do
+  defp with_terminal_input(
+         typed,
+         work,
+         options \\ [binary: true, encoding: :unicode, terminal: true, stdin: true]
+       ) do
     {:ok, input} = StringIO.open(typed)
-    terminal = spawn(fn -> terminal_io(input) end)
+    terminal = spawn(fn -> terminal_io(input, options) end)
     prior = Process.group_leader()
     true = Process.group_leader(self(), terminal)
 
@@ -3143,15 +3162,12 @@ defmodule LoopexCliTest do
     end
   end
 
-  defp terminal_io(input) do
+  defp terminal_io(input, options) do
     receive do
       {:io_request, from, reply_as, :getopts} ->
-        send(
-          from,
-          {:io_reply, reply_as, [binary: true, encoding: :unicode, terminal: true, stdin: true]}
-        )
+        send(from, {:io_reply, reply_as, options})
 
-        terminal_io(input)
+        terminal_io(input, options)
 
       {:io_request, from, reply_as, request} ->
         reference = make_ref()
@@ -3162,7 +3178,7 @@ defmodule LoopexCliTest do
             send(from, {:io_reply, reply_as, reply})
         end
 
-        terminal_io(input)
+        terminal_io(input, options)
 
       :stop ->
         :ok

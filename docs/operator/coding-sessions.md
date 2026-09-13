@@ -274,8 +274,8 @@ Only `y` or `yes` admits. Anything else withholds, and so does end of input — 
 question nobody answered is not consent.
 
 Where there is nobody to ask, the command does not ask. It reads that from the
-input device rather than assuming it, and fails closed: a pipe, a redirect, and
-any descriptor it cannot classify are all treated as absence, because a prompt
+input device rather than assuming it, and fails closed: a pipe, a file redirect,
+and any descriptor it cannot classify are all treated as absence, because a prompt
 nobody can answer would otherwise be answered by whatever happened to be on
 standard input. Such a run prints
 

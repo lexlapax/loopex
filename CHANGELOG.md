@@ -86,6 +86,10 @@ refusals, policy allow/deny invariance, launch-identity refusal and all three
 old-reader resource-record variants; temporary CLI proof artifacts no longer
 rewrite shared build beams.
 
+Keep attended CLI trust available on OTP 26 when output is captured but input
+remains a real terminal. The input-device check still refuses pipes and custom
+I/O devices that cannot prove operator presence.
+
 Replace the obsolete M3 gate probe with real local Store/session observations
 of required-only admission ordering and explicit inspection/checkpoint modes.
 Remove unopened M4 executable scaffolding from live scripts; its old bytes are
