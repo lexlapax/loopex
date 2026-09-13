@@ -1,6 +1,25 @@
 Code.require_file("support/m1_runtime_helper.exs", __DIR__)
 Code.require_file("support/agent_loop_helper.exs", __DIR__)
 
+defmodule Loopex.SkillContextSelectivePolicy do
+  @moduledoc false
+  @behaviour Loopex.Policy
+
+  def observe(pid), do: :persistent_term.put(__MODULE__, pid)
+  def clear, do: :persistent_term.erase(__MODULE__)
+
+  @impl Loopex.Policy
+  def decide(request) do
+    decision =
+      if request.arguments == %{"path" => "x"} and request.effect_class == "workspace_write",
+        do: {:allow, nil},
+        else: {:deny, :policy_denied}
+
+    send(:persistent_term.get(__MODULE__), {:skill_policy, request, decision})
+    decision
+  end
+end
+
 defmodule Loopex.SkillContextTest do
   use ExUnit.Case, async: false
 
@@ -17,6 +36,9 @@ defmodule Loopex.SkillContextTest do
   test "catalog selected instructions and manifested supporting blocks stage in durable order" do
     context = start_context()
     admit(context)
+    missing = selection(context, "beta", ["not-in-manifest.txt"], "missing-support")
+    assert {:error, :resource_support_not_found} = Loopex.command(context.attachment, missing)
+    assert_resource_refusal(context, "missing-support", "resource_support_not_found", [])
     select(context, "beta", ["second.txt", "first.txt"])
     select(context, "alpha", ["first.txt"])
     prompt(context, "run-one")
@@ -108,6 +130,30 @@ defmodule Loopex.SkillContextTest do
     assert Enum.any?(second.messages, &(&1["content"] == "beta first support"))
   end
 
+  test "coordinator refuses a fifth skill and retains the four settled selections" do
+    packs =
+      for name <- ~w(alpha beta delta epsilon gamma) do
+        %{hd(fallthrough_packs("#{name} instructions")) | name: name}
+      end
+
+    context = start_context(packs: packs)
+    admit(context)
+
+    for name <- ~w(alpha beta delta epsilon), do: select(context, name, [])
+    fifth = selection(context, "gamma", [], "fifth-skill")
+    assert {:error, :resource_selection_limit} = Loopex.command(context.attachment, fifth)
+    assert_resource_refusal(context, "fifth-skill", "resource_selection_limit", [0, 1, 2, 3])
+    prompt(context, "four-skills")
+    settle(context)
+    [request] = AgentLoopTestModel.dispatched(context.fixture.model)
+
+    for name <- ~w(alpha beta delta epsilon) do
+      assert Enum.any?(request.messages, &(&1["content"] == "#{name} instructions"))
+    end
+
+    refute Enum.any?(request.messages, &(&1["content"] == "gamma instructions"))
+  end
+
   test "an oversized whole support block is withheld while a later selected block still fits" do
     context = start_context(large_support: true)
     admit(context)
@@ -191,15 +237,59 @@ defmodule Loopex.SkillContextTest do
       %{text: "done"}
     ]
 
-    baseline = start_context(script: script)
-    hostile = start_context(script: script, hostile_metadata: true)
+    Loopex.SkillContextSelectivePolicy.observe(self())
+    on_exit(fn -> Loopex.SkillContextSelectivePolicy.clear() end)
+
+    deny_script = [
+      %{calls: [%{id: "call-denied", name: "write", arguments: %{"path" => "forbidden"}}]},
+      %{text: "denied honestly"}
+    ]
+
+    script = script ++ deny_script
+    baseline = start_context(script: script, policy: Loopex.SkillContextSelectivePolicy)
+
+    hostile =
+      start_context(
+        script: script,
+        hostile_metadata: true,
+        policy: Loopex.SkillContextSelectivePolicy
+      )
 
     for context <- [baseline, hostile] do
       admit(context)
       select(context, "alpha", ["first.txt"])
       prompt(context, "policy")
       settle(context)
+      prompt(context, "policy-denied")
+      settle(context)
+
+      assert Enum.count(
+               Fixture.records(context.fixture, context.session),
+               &(&1.payload.kind == "effect_intent_committed")
+             ) == 1
+
+      assert Enum.any?(
+               Fixture.events(context.fixture, context.session),
+               &(&1.kind == "tool.finished" and &1["outcome"] == "denied")
+             )
     end
+
+    [baseline_policy, hostile_policy] =
+      for _context <- [baseline, hostile] do
+        assert_receive {:skill_policy, %{arguments: %{"path" => "x"}} = allowed, {:allow, nil}},
+                       1_000
+
+        assert_receive {:skill_policy, %{arguments: %{"path" => "forbidden"}} = denied,
+                        {:deny, :policy_denied}},
+                       1_000
+
+        assert Enum.sort(Map.keys(allowed)) == Enum.sort(Map.keys(denied))
+        refute Map.has_key?(allowed, :context)
+        refute Map.has_key?(denied, :context)
+        Enum.map([allowed, denied], &Map.drop(&1, [:session_id, :run_id]))
+      end
+
+    assert baseline_policy == hostile_policy
 
     [baseline_request | _] = AgentLoopTestModel.dispatched(baseline.fixture.model)
     [hostile_request | _] = AgentLoopTestModel.dispatched(hostile.fixture.model)
@@ -525,7 +615,8 @@ defmodule Loopex.SkillContextTest do
         resource_manifest: manifest,
         project_manifest: project,
         project_decision: project_decision,
-        tools: Keyword.get(options, :tools, [Fixture.tool_definition()])
+        tools: Keyword.get(options, :tools, [Fixture.tool_definition()]),
+        policy: Keyword.get(options, :policy, Loopex.AgentLoopTestPolicy)
       )
 
     on_exit(fn -> Fixture.stop(fixture) end)
@@ -630,7 +721,7 @@ defmodule Loopex.SkillContextTest do
         resource_manifest: Keyword.fetch!(options, :resource_manifest),
         tools: definitions,
         active_tools: Enum.map(definitions, &Map.fetch!(&1, "tool_id")),
-        policy: Loopex.AgentLoopTestPolicy,
+        policy: Keyword.fetch!(options, :policy),
         grant_decision: {:host_policy, :allow}
       )
 
@@ -727,6 +818,32 @@ defmodule Loopex.SkillContextTest do
         Process.sleep(5)
         await_event(attachment, kind, remaining - 1)
     end
+  end
+
+  defp assert_resource_refusal(context, command_id, disposition, selected_indexes) do
+    rows = Fixture.records(context.fixture, context.session)
+
+    record =
+      Enum.find(rows, fn row ->
+        row.payload.kind == "resource_command_v1" and
+          row.payload["command"]["command_id"] == command_id
+      end)
+
+    assert record.payload["disposition"] == disposition
+    assert record.payload["resolved"] == nil
+
+    assert {:ok, recovered} =
+             Task.async(fn ->
+               SessionState.recover(
+                 context.session,
+                 rows,
+                 Fixture.events(context.fixture, context.session)
+               )
+             end)
+             |> Task.await()
+
+    assert Enum.map(recovered.resources["selections"], & &1["pack_index"]) == selected_indexes
+    assert AgentLoopTestModel.dispatched(context.fixture.model) == []
   end
 
   defp resource_record(context) do
