@@ -2941,3 +2941,30 @@ the dependent source or witness correction. The approval waives no failure,
 changes no validation cadence, and grants no closure, main integration or
 release. Final M0–M2 reruns remain governed by the existing
 [separate waiver](#override-disposition-m3-final-inherited-gates-waiver-2026-09-13).
+
+<a id="disposition-m3-checker-ordering-exception-2026-09-13"></a>
+### M3 checker ordering occurrence accepted — 2026-09-13
+
+For new finding M1 in the post-implementation review of
+`f92f19ee31e7ea62cb5614a487dfb22527c13c66`, the maintainer received this proposal:
+
+> May I record a one-time acceptance of the new historical ordering exception: checker change 571c30f landed before its authorizing record e9722e9? The prior exception covered different commits, so it does not cover this occurrence. Acceptance preserves the actual history and all future approval-order requirements; it changes no product or test requirement.
+
+The recommended option was “Accept this named ordering exception”. The
+maintainer answered:
+
+> Approved recommendations
+
+This accepts only the ordering breach between checker/test commit
+`571c30ff9e7fa8e27da71911a21504d9dbc5de7c` and later disposition commit
+`e9722e98705bc8b3f2510e2630957983a6fa027b` in the M3 implementation lineage.
+The earlier planning-lineage exception did not cover this occurrence. The
+actual commit order remains a historical process defect; this record does not
+claim that authorization or an independent read preceded the checker change.
+
+This finding no longer blocks the current M3 repair candidate. The approval
+creates no exception for a recurrence, waives no product failure or required
+test, changes no accepted ADR or gate binding, and grants no closure, main
+integration or release. Future override records and exact-SHA reads must still
+precede dependent work. This acceptance is recorded in its own commit and is
+subject to an independent exact-SHA read.
