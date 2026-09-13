@@ -2809,3 +2809,38 @@ Complete M0–M3 gates remain required at the resulting final candidate on
 macOS and Linux serenity under the existing final-only cadence. The approval
 waives no historical or future failure and grants no failure disposition,
 M3 closure, integration to `main`, tag or release.
+
+<a id="override-disposition-m3-final-inherited-gates-waiver-2026-09-13"></a>
+### M3 final validation scope — 2026-09-13
+
+The maintainer explicitly directed:
+
+> i don't need you to run m0-m2 gates. just run m3 gates. that's. my decision. you've been waffling, we need to move on.
+
+Under the [explicit maintainer override](../../AGENTS.md#maintainer-override),
+this replaces the requirement to rerun M0, M1 and M2 gates for M3's final
+qualification on macOS and Linux serenity. It takes precedence over the final
+inherited-gate requirements in the earlier M3 cadence, diagnostics, checker,
+checksum and signal-delivery dispositions. Those historical records remain
+unchanged. Final M0–M2 evidence is **waived, not passed**.
+
+Run all remaining M3 gate checks on both platforms at the same committed and
+pushed candidate: bound-artifact and source/build identity checks, the opening
+witness, all deterministic outcome selectors, the full deterministic suite,
+formatting, documentation, dependency and bootstrap checks, and the attended
+real-provider workflow with complete selector accounting. The full suite may
+exercise inherited tests; do not invoke the M0, M1 or M2 gate runners or their
+aggregate. Preserve all remaining assertions, credentials handling and failure
+criteria.
+
+Use an external, reviewable derivative of the bound M3 runner that removes
+only its inherited-gate invocation/report requirement and labels its terminal
+report as M3-only with inherited evidence waived. Retain the exact derivative,
+its diff and digest with each run's evidence. The tracked runner, gate document
+and bindings remain unchanged. A scoped pass must never be reported as the
+unchanged full-gate PASS or as fresh M0–M2 qualification.
+
+This standalone disposition receives independent exact-SHA review before the
+dependent execution change. The instruction adds no product or ADR change,
+does not convert any historical failure into a pass, and grants no M3 closure,
+integration to `main`, tag or release.
