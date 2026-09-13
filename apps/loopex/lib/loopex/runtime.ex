@@ -514,7 +514,8 @@ defmodule Loopex.Runtime do
          {:ok, policy} <-
            validate_policy(validated[:policy], validated[:tools], validated[:tool]),
          {:ok, sampling} <- validate_sampling(validated[:sampling]),
-         {:ok, resource_manifest} <- validate_resource_manifest(validated[:resource_manifest]),
+         {:ok, resource_manifest} <-
+           validate_resource_manifest(validated[:resource_manifest], executor),
          {:ok, grant_decision} <- validate_grant_decision(validated[:grant_decision]),
          {:ok, fault_to} <- validate_sink(validated[:fault_to]),
          {:ok, cleanup_grace_ms} <- validate_cleanup_grace(validated[:cleanup_grace_ms]),
@@ -574,12 +575,17 @@ defmodule Loopex.Runtime do
     end
   end
 
-  defp validate_resource_manifest(nil), do: {:ok, nil}
+  defp validate_resource_manifest(nil, _executor), do: {:ok, nil}
 
-  defp validate_resource_manifest(manifest) do
-    case Loopex.ResourcePack.digest(manifest) do
-      {:ok, digest, normalized} -> {:ok, {digest, normalized}}
-      {:error, _reason, _detail} -> {:error, :invalid_resource_manifest}
+  # Concept: a resource snapshot belongs to the workspace served by this runtime.
+  # Technical depth: core compares host-supplied opaque identities before children
+  # start. An executor-free runtime has no second workspace to reconcile.
+  defp validate_resource_manifest(manifest, executor) do
+    with {:ok, digest, normalized} <- Loopex.ResourcePack.digest(manifest),
+         true <- is_nil(executor) or normalized["workspace_ref"] == executor.workspace_ref do
+      {:ok, {digest, normalized}}
+    else
+      _ -> {:error, :invalid_resource_manifest}
     end
   end
 

@@ -46,9 +46,11 @@ defmodule LoopexComposition.ResourceLaunchTest do
       "---\nname: review\ndescription: Review this change.\n---\nRead the diff.\n"
     )
 
+    {:ok, workspace_ref} = LoopexComposition.WorkspaceIdentity.reference(workspace)
+
     assert {:ok, manifest} =
              LoopexComposition.ResourcePacks.discover(workspace,
-               workspace_ref: "workspace:test"
+               workspace_ref: workspace_ref
              )
 
     {:ok, digest, normalized} = Loopex.ResourcePack.digest(manifest)
@@ -77,6 +79,7 @@ defmodule LoopexComposition.ResourceLaunchTest do
 
       assert_receive {^marker, runtime_options}
       assert Keyword.fetch!(runtime_options, :resource_manifest) == normalized
+      assert Keyword.fetch!(runtime_options, :executor).workspace_ref == workspace_ref
       assert {:ok, ^normalized} = LoopexComposition.ResourcePacks.load(state_root, digest)
     after
       Process.delete(observer)
@@ -106,6 +109,48 @@ defmodule LoopexComposition.ResourceLaunchTest do
     after
       Process.delete(edge_observer)
       Process.delete(effect_observer)
+    end
+  end
+
+  test "a snapshot from a different workspace refuses before retention or startup" do
+    {state_root, workspace} = roots()
+    other = Path.join(state_root, "other-workspace")
+    File.mkdir!(other)
+    stat = File.stat!(other)
+
+    ref =
+      "workspace:" <>
+        LoopexProtocol.Canonical.digest(%{
+          "canonical_root" => other,
+          "major_device" => stat.major_device,
+          "inode" => stat.inode
+        })
+
+    {:ok, manifest} = LoopexComposition.ResourcePacks.discover(other, workspace_ref: ref)
+    observer = :"$loopex_composition_edge_observer"
+    owner = self()
+
+    Process.put(observer, fn module, _, _ ->
+      send(owner, {:unexpected_workspace_start, module})
+      {:error, :unexpected_workspace_start}
+    end)
+
+    try do
+      result =
+        LoopexComposition.start(
+          runtime_id: "wrong-workspace",
+          state_root: state_root,
+          workspace: workspace,
+          policy: Embedder,
+          resource_manifest: manifest
+        )
+
+      assert result == {:error, {:invalid_composition_option, :resource_manifest}}
+      refute_received {:unexpected_workspace_start, _}
+      refute File.exists?(Path.join(state_root, "resource-packs"))
+      refute File.exists?(Path.join(state_root, "store.log"))
+    after
+      Process.delete(observer)
     end
   end
 

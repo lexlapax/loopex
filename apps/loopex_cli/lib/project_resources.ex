@@ -37,13 +37,6 @@ defmodule LoopexCli.ProjectResources do
   alias LoopexProtocol.Canonical
   alias __MODULE__.ResourceReader
 
-  # Concept: a symlink chain has to end somewhere, and a cycle is a filesystem an
-  # operator can create by accident.
-  #
-  # Technical depth: the walk replaces one component per hop, so the bound is on
-  # links followed rather than on path length.
-  @symlink_hops 32
-
   @doc """
   ## Concept
 
@@ -221,13 +214,7 @@ defmodule LoopexCli.ProjectResources do
   # therefore invalidates the decision, while the value crossing into core
   # reveals no joinable or openable path.
   defp workspace_reference(root, {major_device, inode}) do
-    identity = %{
-      "canonical_root" => root,
-      "major_device" => major_device,
-      "inode" => inode
-    }
-
-    "workspace:" <> Canonical.digest(identity)
+    LoopexComposition.WorkspaceIdentity.from_verified_root(root, {major_device, inode})
   end
 
   @doc false
@@ -237,63 +224,14 @@ defmodule LoopexCli.ProjectResources do
   @doc false
   @spec workspace_reference(Path.t()) :: {:ok, binary()} | {:error, term()}
   def workspace_reference(workspace) do
-    with {:ok, root} <- real_path(workspace),
-         {:ok, identity} <- directory_identity(root),
-         do: {:ok, workspace_reference(root, identity)}
+    LoopexComposition.WorkspaceIdentity.reference(workspace)
   end
 
   @doc false
   @spec directory_identity(Path.t()) :: {:ok, {integer(), integer()}} | {:error, term()}
-  def directory_identity(path) do
-    case File.stat(path) do
-      {:ok, %File.Stat{type: :directory} = stat} ->
-        {:ok, {stat.major_device, stat.inode}}
+  def directory_identity(path), do: LoopexComposition.WorkspaceIdentity.directory_identity(path)
 
-      {:ok, %File.Stat{}} ->
-        {:error, :workspace_root_not_directory}
-
-      {:error, reason} ->
-        {:error, reason}
-    end
-  end
-
-  # Concept: the path the kernel would open, without moving the emulator.
-  #
-  # Technical depth: `Path.expand/1` is textual and would normalise away a `..`
-  # that a symlink makes mean something else, so each component is resolved
-  # against the filesystem before the next is considered. Nothing here changes
-  # the working directory, which is global to the emulator rather than local to
-  # this process, so two commands resolving at once do not read each other's
-  # answer. A component that does not exist resolves to itself, which is what
-  # lets a workspace with no `AGENTS.md` be reported absent rather than refused.
-  defp real_path(path), do: walk(Path.split(Path.expand(path)), "/", 0)
-
-  defp walk([], resolved, _hops), do: {:ok, resolved}
-
-  defp walk(_remaining, _resolved, hops) when hops > @symlink_hops,
-    do: {:error, :symlink_hops_exhausted}
-
-  defp walk(["/" | rest], resolved, hops), do: walk(rest, resolved, hops)
-  defp walk(["." | rest], resolved, hops), do: walk(rest, resolved, hops)
-  defp walk([".." | rest], resolved, hops), do: walk(rest, Path.dirname(resolved), hops)
-
-  defp walk([segment | rest], resolved, hops) do
-    candidate = Path.join(resolved, segment)
-
-    case File.read_link(candidate) do
-      {:ok, target} ->
-        absolute =
-          case Path.type(target) do
-            :absolute -> target
-            _relative -> Path.join(resolved, target)
-          end
-
-        walk(Path.split(absolute) ++ rest, "/", hops + 1)
-
-      {:error, _not_a_link} ->
-        walk(rest, candidate, hops)
-    end
-  end
+  defp real_path(path), do: LoopexComposition.WorkspaceIdentity.resolve_path(path)
 
   @doc """
   ## Concept

@@ -35,8 +35,7 @@ defmodule LoopexComposition do
   alias Loopex.{Executor.Local, LLM.ReqLLM, Store}
   alias Loopex.Executor.Local.{CodingTools, WorkspaceLease}
   alias Loopex.Store.Local.Artifacts
-  alias LoopexProtocol.Canonical
-  alias LoopexComposition.RuntimeOwner
+  alias LoopexComposition.{RuntimeOwner, WorkspaceIdentity}
 
   # Concept: what the host decides stays the host's to supply; an option the
   # host did not supply is absent rather than a default this module invented.
@@ -118,6 +117,7 @@ defmodule LoopexComposition do
          {:ok, [root, workspace, id]} <- required(options, @required_options),
          :ok <- boolean(options, :recover_stale_writer),
          :ok <- LoopexComposition.ResourcePacks.validate_launch_option(options),
+         :ok <- WorkspaceIdentity.validate_manifest(options, workspace),
          do: {:ok, {options, root, workspace, id, policy}}
   end
 
@@ -154,7 +154,8 @@ defmodule LoopexComposition do
     }
 
   defp compose({options, root, workspace, runtime_id, policy}) do
-    with :ok <- start_applications(),
+    with :ok <- WorkspaceIdentity.validate_manifest(options, workspace),
+         :ok <- start_applications(),
          :ok <- File.mkdir_p(root),
          {:ok, options} <- LoopexComposition.ResourcePacks.retain_launch_option(options, root),
          {:ok, adapter} <- start_edge(Store.Local, store_options(root, options)),
@@ -213,7 +214,8 @@ defmodule LoopexComposition do
     placement = [identity: "executor-local", epoch: 1, fencing_token: 1]
     forwarded = Keyword.take(options, [:cleanup_grace_ms, :process_probe])
 
-    with {:ok, lease} <-
+    with {:ok, workspace_ref} <- WorkspaceIdentity.reference(workspace),
+         {:ok, lease} <-
            start_edge(WorkspaceLease, id: "workspace", path: workspace, fencing_token: 1),
          {:ok, spill} <- artifacts(root),
          owned = [
@@ -223,7 +225,6 @@ defmodule LoopexComposition do
          {:ok, executor} <-
            start_edge(Local, placement ++ owned ++ [artifacts: spill] ++ forwarded) do
       identity = %{module: Local, reference: executor, workspace_lease: "workspace"}
-      workspace_ref = "workspace:" <> Canonical.digest_bytes(workspace)
 
       {:ok,
        placement |> Map.new() |> Map.merge(identity) |> Map.put(:workspace_ref, workspace_ref)}
