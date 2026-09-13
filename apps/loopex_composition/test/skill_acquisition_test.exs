@@ -66,6 +66,84 @@ defmodule LoopexComposition.SkillAcquisitionTest do
     assert second_retain == {:ok, digest}
     assert {:ok, ^manifest} = ResourcePacks.load(state_root, digest)
     assert retention_temporaries(state_root) == []
+
+    # Concept: the protected witness also imports an actual pinned Git tree.
+    # Technical depth: checkout transforms are a positive control for the byte
+    # fidelity regression; retained and installed bytes must equal raw blobs.
+    source = Path.join(root, "attribute-source")
+    write!(Path.join(source, "attributes/SKILL.md"), skill("attributes"))
+
+    write!(Path.join(source, "attributes/.gitattributes"), """
+    crlf.txt text eol=crlf
+    ident.txt ident
+    encoded.txt text working-tree-encoding=UTF-16LE
+    binary.dat -text
+    """)
+
+    write!(Path.join(source, "attributes/crlf.txt"), "line one\nline two\n")
+    write!(Path.join(source, "attributes/ident.txt"), "$Id$\n")
+
+    write!(
+      Path.join(source, "attributes/encoded.txt"),
+      :unicode.characters_to_binary("encoded text\n", :utf8, {:utf16, :little})
+    )
+
+    binary = :binary.copy(<<0, 255, 128, 13, 10>>, 14_000)
+    write!(Path.join(source, "attributes/binary.dat"), binary)
+    commit = commit!(source)
+    tree = git!(source, ["rev-parse", "#{commit}:attributes"])
+    labels = ~w(.gitattributes SKILL.md binary.dat crlf.txt encoded.txt ident.txt)
+
+    expected =
+      Map.new(labels, fn label ->
+        {bytes, 0} = System.cmd("git", ["cat-file", "blob", "#{tree}:#{label}"], cd: source)
+        {label, bytes}
+      end)
+
+    checkout = Path.join(root, "attribute-checkout")
+    File.mkdir!(checkout)
+    git!(source, ["checkout-index", "--all", "--prefix=#{checkout}/"])
+
+    for label <- ~w(crlf.txt ident.txt encoded.txt) do
+      refute File.read!(Path.join([checkout, "attributes", label])) == expected[label]
+    end
+
+    imported_workspace = Path.join(root, "attribute-workspace")
+
+    assert {:ok, imported} =
+             ResourcePacks.add(imported_workspace, source,
+               workspace_ref: "workspace:attributes",
+               state_root: state_root,
+               rev: commit,
+               path: "attributes",
+               git_executable: System.find_executable("git"),
+               executor_authorization: {:host_policy, :allow}
+             )
+
+    assert imported["commit"] == commit
+    assert imported["tree_digest"] == tree
+    assert Enum.map(imported["files"], & &1["label"]) == labels
+
+    for file <- imported["files"] do
+      bytes = Map.fetch!(expected, file["label"])
+      assert file["content"] == bytes
+      assert file["size"] == byte_size(bytes)
+      assert file["digest"] == LoopexProtocol.Canonical.digest_bytes(bytes)
+
+      assert File.read!(
+               Path.join([imported_workspace, ".agents", "skills", "attributes", file["label"]])
+             ) == bytes
+    end
+
+    assert {:ok, rediscovered} =
+             ResourcePacks.discover(imported_workspace,
+               workspace_ref: "workspace:attributes",
+               state_root: state_root
+             )
+
+    assert rediscovered["packs"] == [imported]
+    assert {:ok, imported_digest} = ResourcePacks.retain(rediscovered, state_root)
+    assert {:ok, ^rediscovered} = ResourcePacks.load(state_root, imported_digest)
   end
 
   test "import uses the authorized executor with closed configuration and bounded cancellation" do
@@ -135,7 +213,7 @@ defmodule LoopexComposition.SkillAcquisitionTest do
     refute File.exists?(marker)
 
     receipts = retained_executor_receipts(state_root)
-    assert length(receipts) == 6
+    assert length(receipts) == 5 + length(pack["files"])
     assert Enum.all?(receipts, &(&1.tool_id == "loopex.bash"))
     assert Enum.all?(receipts, &(&1.outcome == :completed))
     assert Enum.all?(receipts, &(&1.child_environment_names == ["PATH"]))
@@ -198,7 +276,7 @@ defmodule LoopexComposition.SkillAcquisitionTest do
     {deadline_git, _deadline_release} =
       holding_git!(root, git, "deadline", deadline_started, deadline_escaped)
 
-    deadline_clock = System.monotonic_time(:millisecond)
+    deadline_clock = System.system_time(:millisecond)
 
     deadline_task =
       Task.async(fn ->
@@ -230,7 +308,8 @@ defmodule LoopexComposition.SkillAcquisitionTest do
         # The held wrapper is never released. Either deadline owner may report first.
         # The watchdog allows 10s import, 5s cleanup and two existing 5s owner stops.
         result = Task.await(deadline_task, 25_000)
-        elapsed = System.monotonic_time(:millisecond) - deadline_clock
+        deadline_observed_at = System.system_time(:millisecond)
+        elapsed = deadline_observed_at - deadline_clock
 
         deadline_receipts =
           root
@@ -283,6 +362,16 @@ defmodule LoopexComposition.SkillAcquisitionTest do
           "deadline evidence=#{deadline_evidence}; elapsed_ms=#{elapsed}; " <>
             "result=#{inspect(result, limit: 8, printable_limit: 256)}; " <>
             "receipts=#{inspect(receipt_summary, limit: 64, printable_limit: 256)}"
+
+        # Concept: the real job must reach its configured absolute deadline.
+        # Technical depth: compare start, return, and any retained deadline in
+        # the executor's system-time domain. The coordinator can win cancellation
+        # before a terminal receipt is retained; its exact deadline refusal above
+        # still supplies the boundary observation.
+        for receipt <- deadline_receipts do
+          assert receipt.run_deadline_ms >= deadline_clock + 10_000, diagnostic
+          assert deadline_observed_at >= receipt.run_deadline_ms, diagnostic
+        end
 
         assert elapsed >= 10_000, diagnostic
         assert deadline_evidence in [:coordinator_deadline, :executor_deadline], diagnostic
@@ -374,6 +463,165 @@ defmodule LoopexComposition.SkillAcquisitionTest do
              )
 
     refute File.exists?(Path.join([collision_workspace, ".agents", "skills", "collision"]))
+  end
+
+  test "raw Git export verifies native blob identity and refuses altered bytes or unsafe filenames" do
+    root = tmp_dir!("blob-identity")
+    git = System.find_executable("git") || flunk("git is required for this test")
+
+    for format <- ["sha1", "sha256"] do
+      source = Path.join(root, format)
+      bytes = skill(format)
+      write!(Path.join(source, "#{format}/SKILL.md"), bytes)
+      git!(source, ["init", "--quiet", "--object-format=#{format}"])
+      commit = commit!(source)
+
+      assert {:ok, pack} =
+               ResourcePacks.add(Path.join(root, "workspace-#{format}"), source,
+                 workspace_ref: "workspace:#{format}",
+                 state_root: Path.join(root, "state-#{format}"),
+                 rev: commit,
+                 path: format,
+                 git_executable: git,
+                 executor_authorization: {:host_policy, :allow}
+               )
+
+      assert pack["commit"] == commit
+      assert byte_size(commit) == if(format == "sha1", do: 40, else: 64)
+      assert [%{"content" => ^bytes}] = pack["files"]
+    end
+
+    source = Path.join(root, "sha1")
+    commit = git!(source, ["rev-parse", "HEAD"])
+
+    for {label, rewrite} <- [
+          {"altered",
+           ~S(sed 's/Body/FAKE/' "$repo/$temporary" > "$repo/altered"; mv "$repo/altered" "$repo/$temporary"; printf '%s\n' "$temporary")},
+          {"escape", ~S(printf '%s\n' '../outside')}
+        ] do
+      wrapper = Path.join(root, "git-#{label}")
+      marker = Path.join(root, "reached-#{label}")
+
+      write!(wrapper, """
+      #!/bin/sh
+      case " $* " in
+        *" unpack-file "*)
+          previous=
+          repo=
+          for argument do
+            if [ "$previous" = '-C' ]; then repo=$argument; fi
+            previous=$argument
+          done
+          temporary=$(#{git} "$@") || exit
+          printf reached > '#{marker}'
+          #{rewrite}
+          ;;
+        *) exec #{git} "$@" ;;
+      esac
+      """)
+
+      File.chmod!(wrapper, 0o700)
+      workspace = Path.join(root, "workspace-#{label}")
+      state = Path.join(root, "state-#{label}")
+
+      assert {:error, {:git_identity_mismatch, _detail}} =
+               ResourcePacks.add(workspace, source,
+                 workspace_ref: "workspace:#{label}",
+                 state_root: state,
+                 rev: commit,
+                 path: "sha1",
+                 git_executable: wrapper,
+                 executor_authorization: {:host_policy, :allow}
+               )
+
+      assert File.read!(marker) == "reached"
+      refute File.exists?(Path.join([workspace, ".agents", "skills", "sha1"]))
+      assert staging_paths(workspace) == []
+      assert Path.wildcard(Path.join(state, "resource-packs/provenance/*.etf")) == []
+    end
+  end
+
+  test "an incomplete Git tree listing refuses before blob export" do
+    root = tmp_dir!("truncated-inventory")
+    source = Path.join(root, "source")
+    write!(Path.join(source, "truncated/SKILL.md"), skill("truncated"))
+    commit = commit!(source)
+    git = System.find_executable("git")
+    wrapper = Path.join(root, "git-truncated")
+    marker = Path.join(root, "listing-reached")
+
+    write!(wrapper, """
+    #!/bin/sh
+    case " $* " in
+      *" ls-tree "*)
+        printf reached > '#{marker}'
+        #{git} "$@" | tr -d '\\000'
+        ;;
+      *) exec #{git} "$@" ;;
+    esac
+    """)
+
+    File.chmod!(wrapper, 0o700)
+    workspace = Path.join(root, "workspace")
+    state = Path.join(root, "state")
+
+    assert {:error, {:git_identity_mismatch, _detail}} =
+             ResourcePacks.add(workspace, source,
+               workspace_ref: "workspace:truncated",
+               state_root: state,
+               rev: commit,
+               path: "truncated",
+               git_executable: wrapper,
+               executor_authorization: {:host_policy, :allow}
+             )
+
+    assert File.read!(marker) == "reached"
+
+    refute Enum.any?(
+             retained_executor_receipts(state),
+             &String.starts_with?(&1.job_id, "resource-import-blob-")
+           )
+
+    refute File.exists?(Path.join([workspace, ".agents", "skills", "truncated"]))
+    assert staging_paths(workspace) == []
+  end
+
+  test "Git tree byte and file caps refuse before unpacking any blob" do
+    root = tmp_dir!("inventory-caps")
+
+    for {name, expected_refusal} <- [{"bytes", :pack_byte_limit}, {"files", :pack_file_limit}] do
+      source = Path.join(root, "source-#{name}")
+      write!(Path.join(source, "#{name}/SKILL.md"), skill(name))
+
+      if name == "bytes" do
+        write!(Path.join(source, "#{name}/large.bin"), :binary.copy(<<255>>, 1_048_576))
+      else
+        for index <- 1..64 do
+          write!(Path.join(source, "#{name}/reference-#{index}"), "small")
+        end
+      end
+
+      commit = commit!(source)
+      state = Path.join(root, "state-#{name}")
+      workspace = Path.join(root, "workspace-#{name}")
+
+      assert {:error, {^expected_refusal, _detail}} =
+               ResourcePacks.add(workspace, source,
+                 workspace_ref: "workspace:#{name}",
+                 state_root: state,
+                 rev: commit,
+                 path: name,
+                 git_executable: System.find_executable("git"),
+                 executor_authorization: {:host_policy, :allow}
+               )
+
+      receipts = retained_executor_receipts(state)
+      assert Enum.any?(receipts, &String.starts_with?(&1.job_id, "resource-import-tree-files-"))
+      refute Enum.any?(receipts, &String.starts_with?(&1.job_id, "resource-import-blob-"))
+      refute File.exists?(Path.join([workspace, ".agents", "skills", name]))
+      assert staging_paths(workspace) == []
+      assert Path.wildcard(Path.join(state, "resource-packs/provenance/*.etf")) == []
+    end
   end
 
   test "credential-bearing source forms refuse before Git or retention" do

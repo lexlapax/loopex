@@ -1029,18 +1029,6 @@ defmodule LoopexComposition.ResourcePacks do
     end
   end
 
-  defp fixed_descendant_directory(root, relative_path) do
-    relative_path
-    |> Path.split()
-    |> Enum.reduce_while({:ok, root}, fn component, {:ok, parent} ->
-      case existing_child_directory(parent, component) do
-        {:ok, nil} -> {:halt, error(:unsupported_file, "selected directory is missing")}
-        {:ok, child} -> {:cont, {:ok, child}}
-        {:error, _reason} = refusal -> {:halt, refusal}
-      end
-    end)
-  end
-
   defp verify_optional_directory(nil), do: :ok
   defp verify_optional_directory(directory), do: verify_directory(directory)
 
@@ -1198,21 +1186,13 @@ defmodule LoopexComposition.ResourcePacks do
            git_job(context, config, "tree-type", ["-C", repo, "cat-file", "-t", tree]),
          true <- first_line(tree_type) == "tree",
          {:ok, context, tree_files_output} <-
-           git_job(context, config, "tree-files", ["-C", repo, "ls-tree", "-r", "-z", tree]),
+           git_job(context, config, "tree-files", ["-C", repo, "ls-tree", "-r", "-l", "-z", tree]),
+         true <- tree_files_output == "" or String.ends_with?(tree_files_output, <<0>>),
          {:ok, tree_files} <- git_tree_files(tree_files_output),
-         {:ok, _context, _checkout} <-
-           git_job(context, config, "checkout", [
-             "-C",
-             repo,
-             "--work-tree=" <> export,
-             "checkout",
-             "--quiet",
-             config.rev,
-             "--",
-             config.path
-           ]),
-         selected = Path.join(export, config.path),
-         {:ok, selected_root} <- fixed_descendant_directory(export_root, config.path),
+         {:ok, repo_root} <- fixed_directory(repo, staging_root),
+         {:ok, selected_root} <- create_export_directory(export_root, config.path),
+         :ok <- export_git_blobs(context, config, repo_root, selected_root, tree_files),
+         selected = selected_root.path,
          {:ok, metadata_name} <- frontmatter_name(selected_root),
          true <- metadata_name == Path.basename(selected),
          identity = %{
@@ -1222,7 +1202,7 @@ defmodule LoopexComposition.ResourcePacks do
            "tree_digest" => tree
          },
          {:ok, pack} <- read_pack(selected_root, metadata_name, identity),
-         true <- Enum.map(pack["files"], & &1["label"]) == tree_files do
+         true <- matching_git_files?(pack["files"], tree_files) do
       {:ok, pack, selected_root}
     else
       false ->
@@ -1348,14 +1328,16 @@ defmodule LoopexComposition.ResourcePacks do
     |> Enum.reduce_while({:ok, [], MapSet.new()}, fn entry, {:ok, paths, normalized_paths} ->
       case String.split(entry, "\t", parts: 2) do
         [header, path] ->
-          with [mode, "blob", object] <- String.split(header),
+          with [mode, "blob", object, size_text] <- String.split(header),
+               {size, ""} when size >= 0 <- Integer.parse(size_text),
                true <- mode in ["100644", "100755"],
                true <- Regex.match?(@git_oid, object),
                true <- String.valid?(path),
                {:ok, ^path} <- safe_relative_path(path),
                normalized_path = path |> String.normalize(:nfc) |> String.downcase(),
                false <- MapSet.member?(normalized_paths, normalized_path) do
-            {:cont, {:ok, [path | paths], MapSet.put(normalized_paths, normalized_path)}}
+            file = %{label: path, oid: object, size: size, mode: mode}
+            {:cont, {:ok, [file | paths], MapSet.put(normalized_paths, normalized_path)}}
           else
             _unsupported ->
               {:halt,
@@ -1367,8 +1349,10 @@ defmodule LoopexComposition.ResourcePacks do
       end
     end)
     |> case do
-      {:ok, paths, _normalized_paths} when length(paths) <= @max_files ->
-        {:ok, Enum.sort(paths)}
+      {:ok, files, _normalized_paths} when length(files) <= @max_files ->
+        if Enum.sum(Enum.map(files, & &1.size)) <= @max_pack_bytes,
+          do: {:ok, Enum.sort_by(files, & &1.label)},
+          else: error(:pack_byte_limit, "pack is too large")
 
       {:ok, _paths, _normalized_paths} ->
         error(:pack_file_limit, "too many files")
@@ -1376,6 +1360,67 @@ defmodule LoopexComposition.ResourcePacks do
       refusal ->
         refusal
     end
+  end
+
+  # Concept: installed content is the selected tree's raw blobs.
+  # Technical depth: unpack-file bypasses every checkout attribute and emits only
+  # a temporary filename through the bounded executor output. The inventory caps
+  # precede export; both temporary and retained bytes must match the native Git
+  # object hash. Git's returned filename is validated within the owned repository.
+  defp export_git_blobs(context, config, repo_root, selected_root, files) do
+    Enum.reduce_while(files, {:ok, context}, fn file, {:ok, context} ->
+      with {:ok, context, output} <-
+             git_job(context, config, "blob", ["-C", repo_root.path, "unpack-file", file.oid]),
+           temporary = String.trim_trailing(output, "\n"),
+           true <- Regex.match?(~r/\A\.merge_file_[a-zA-Z0-9]+\z/, temporary),
+           {:ok, content} <- read_contained_file(repo_root, temporary),
+           true <- matching_git_blob?(content, file),
+           {:ok, parent} <- create_export_directory(selected_root, Path.dirname(file.label)),
+           :ok <- verify_directory(repo_root),
+           :ok <- verify_directory(parent),
+           destination = Path.join(parent.path, Path.basename(file.label)),
+           :ok <- File.write(destination, content, [:binary, :exclusive]),
+           :ok <- File.chmod(destination, if(file.mode == "100755", do: 0o755, else: 0o644)),
+           :ok <- File.rm(Path.join(repo_root.path, temporary)) do
+        {:cont, {:ok, context}}
+      else
+        false -> {:halt, error(:git_identity_mismatch, "exported Git blob did not match")}
+        {:error, {_reason, _detail}} = refusal -> {:halt, refusal}
+        {:error, reason} -> {:halt, error(:installation_failed, inspect(reason))}
+      end
+    end)
+    |> case do
+      {:ok, _context} -> :ok
+      refusal -> refusal
+    end
+  end
+
+  defp create_export_directory(root, "."), do: {:ok, root}
+
+  defp create_export_directory(root, path) do
+    path
+    |> Path.split()
+    |> Enum.reduce_while({:ok, root}, fn component, {:ok, parent} ->
+      case ensure_child_directory(parent, component, :installation_failed) do
+        {:ok, child} -> {:cont, {:ok, child}}
+        refusal -> {:halt, refusal}
+      end
+    end)
+  end
+
+  defp matching_git_files?(files, inventory) do
+    Enum.map(files, & &1["label"]) == Enum.map(inventory, & &1.label) and
+      Enum.zip(files, inventory)
+      |> Enum.all?(fn {file, entry} -> matching_git_blob?(file["content"], entry) end)
+  end
+
+  defp matching_git_blob?(content, %{size: size, oid: oid}) do
+    algorithm = if byte_size(oid) == 40, do: :sha, else: :sha256
+
+    hash =
+      :crypto.hash(algorithm, ["blob ", Integer.to_string(byte_size(content)), <<0>>, content])
+
+    byte_size(content) == size and Base.encode16(hash, case: :lower) == oid
   end
 
   defp matching_git_ids?(commit, tree),
