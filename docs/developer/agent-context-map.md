@@ -2844,3 +2844,65 @@ This standalone disposition receives independent exact-SHA review before the
 dependent execution change. The instruction adds no product or ADR change,
 does not convert any historical failure into a pass, and grants no M3 closure,
 integration to `main`, tag or release.
+
+<a id="disposition-m3-historical-findings-acceptance-2026-09-13"></a>
+### M3 historical findings accepted for the reviewed candidate — 2026-09-13
+
+After receiving the completed eleven-finding decision packet and its clear
+independent evidence review, the maintainer explicitly directed:
+
+> pass the eleven hittorical decision as accepted for now and pass it to reviewer.
+
+This accepts the residual uncertainty of records 1–11 for qualified M3
+candidate `7d73707dca4953f91b3244ad43e09c1545f8f123` under the explicit
+finding-disposition rule in [AGENTS.md](../../AGENTS.md). The findings no longer
+block review of that candidate. "For now" limits this acceptance to these named
+historical occurrences and this candidate; it supplies no standing exception
+for a recurrence or a future milestone. Their original causes remain unknown
+where the packet says so. Failed results remain failed, and unavailable
+evidence remains unavailable.
+
+The accepted record identities are those in the retained packet:
+
+| Record | Historical occurrence | Historical source | Seed |
+| --- | --- | --- | --- |
+| 1 | macOS M0 fast-command executor result | `994184d` | 906860 |
+| 2 | Linux M0 provider failure after dispatch | `232df7a` | 817697 |
+| 3 | Linux M0 unknown provider result | `8e9a6c3` | 906644 |
+| 4 | macOS M0 repeated skill-import Git listing | `3e8ae23` | 928736 |
+| 5 | macOS floor materializer setup refusal | `0a1b57f` | No test seed |
+| 6 | Linux M1 recovery selector failure | `5c74164` | Unavailable |
+| 7 | macOS M1 launcher second interrupt | `44533d7` | 1734 |
+| 8 | macOS M3 queued-EOF deadline witness | `4372a57` | 3107 |
+| 9 | Linux M1 real-model request-count assertion | `7d2b6d1` | 10195 |
+| 10 | macOS M2 CLI queued-follow-up snapshot | `610671e` | 993077 |
+| 11 | Linux M2 prepared-recovery signal-delivery witness | `b839284` | 243366 |
+
+The decision packet is retained in the maintainer's
+`loopex-reviews/m3-final-review-packet-7d73707-4x2lkbb8` archive. Its manifest
+SHA-256 is
+`b97c7d9402ecf60c3bf8d1e490081e8d1fffaae9266cb48d6d5791ef9ca6b27a`;
+`packet/decision-packet.md` has SHA-256
+`76ec7848a95c23ae7f3270b2c2116c3d85a6dc184133730628ae1c51fefcb4a1`.
+The packet's original pending-decision state remains historical; this new
+disposition records the subsequent acceptance. The retained failures, repair
+reviews, causal limits and evidence map are unchanged.
+
+Both M3-only qualifications passed at exact candidate
+`7d73707dca4953f91b3244ad43e09c1545f8f123`: macOS and Linux serenity each
+completed 17 checks, nine selectors, 1,207 deterministic tests with zero
+failures at seed 3107, and one attended real-provider workflow. Their combined
+archive is `loopex-reviews/m3-only-final-evidence-7d73707-y8c1arat`, manifest
+SHA-256 `57da9db3c0cf1660abb9a0a06b089a8bc52f5fb149177d3f45648b1e8b8e96d6`.
+The final independent archive review is clear, with report SHA-256
+`4240044f92efe3b040207729d4850f21eb77304846e9d1ac966f252dbb316492`,
+retained as `archive-review/review.md` in the decision-packet archive.
+
+Final M0–M2 reruns remain waived under the
+[separate validation-scope disposition](#override-disposition-m3-final-inherited-gates-waiver-2026-09-13).
+This acceptance changes no required assertion, count, deadline, real path or
+future failure criterion. Qualification results keep their exact source
+attribution; this documentation-only recording commit makes no new test claim.
+The record lands alone, is committed and pushed to `m3`, and is passed with
+the retained evidence to an independent reviewer at its exact SHA. It grants
+no M3 closure, product integration to `main`, tag or release.
