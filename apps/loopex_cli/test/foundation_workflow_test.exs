@@ -992,6 +992,10 @@ defmodule LoopexCli.FoundationWorkflowTest do
       |> List.to_string()
       |> Path.dirname()
 
+    # Mix 1.17 stores beams at the archive root; a ./ prefix names a different
+    # ZIP entry and prevents OTP 26 from loading the injected module.
+    cli_directory = if cli_directory == ".", do: "", else: cli_directory
+
     replacements =
       Map.new(overrides, fn {module, bytes} ->
         {String.to_charlist(Path.join(cli_directory, Atom.to_string(module) <> ".beam")), bytes}
