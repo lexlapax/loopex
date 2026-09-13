@@ -478,7 +478,8 @@ decision gates.
 
 The project is an independent greenfield implementation of a multi-instance,
 host-neutral OTP coding-session and effects runtime. It uses direct OTP, small
-edge behaviours, a standard-runtime-only core, a provider-neutral model port,
+edge behaviours, a core whose only external dependency is the standard
+telemetry event dispatcher, a provider-neutral model port,
 seven reference tool implementations, serial tool execution by default, and
 separate durable truth planes.
 

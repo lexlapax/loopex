@@ -6,6 +6,7 @@ Technical depth: [Observability mechanics](0030-observability-tracing-and-teleme
 - **Status:** Proposed
 - **Date:** 2026-09-12
 - **Decision owner:** Maintainer
+- **Supersedes:** 0001, only the two clauses that require an empty `apps/loopex` dependency list
 - **Prerequisite for:** M4 acceptance
 
 <a id="concept-adr-0030-decision"></a>
@@ -31,21 +32,29 @@ Two mechanisms, chosen by the maintainer on 2026-09-12:
   host administrative act at launch or through the facade; no session command,
   client content, model output, project resource or wire request can do it.
 - **Telemetry boundary events.** Core emits `:telemetry` span events (start,
-  stop, exception, with durations and counts) at every port callback and every
-  coordinator transaction cut named in the technical companion's emission
-  inventory: admission, commit, model attempt, policy decision, effect intent
-  and dispatch, receipt, publication, interaction and artifact transfer.
-  Metadata carries identities, kinds and outcome categories, never content,
-  credentials or arguments. `:telemetry` becomes core's sole external
+  stop, exception, with durations and counts) at exactly the emission
+  inventory the technical companion binds: every callback of the model, store,
+  artifact-store, executor and policy ports, and six coordinator cuts (command
+  admission; durable commit and `commit_unknown` resolution; effect intent;
+  receipt and publication; interaction transitions; artifact transfer
+  lifecycle). Metadata carries identities, kinds and outcome categories, never
+  content, credentials or arguments. `:telemetry` becomes core's sole external
   dependency under the maintainer's recorded
   [vision change](../developer/agent-context-map.md#disposition-m4-vision-core-telemetry-2026-09-13)
-  of 2026-09-13. Telemetry dispatch is synchronous by the library's design, so
-  core attaches no handler at all; a new edge application, `loopex_telemetry`,
-  owns the only Loopex-attached handler, which forwards events to the
-  runtime's asynchronous diagnostics plane without blocking and drops with a
-  count when its sink is full. Reporters, exporters and OpenTelemetry remain
-  edge adapters. A handler a host attaches itself runs in the emitting process
-  and is the host's responsibility.
+  of 2026-09-13; this decision supersedes only the two ADR 0001 clauses that
+  require an empty `apps/loopex` dependency list (its Decision bullet for
+  `apps/loopex` and implementation constraint 1 as it applies to
+  `apps/loopex`), and every other ADR 0001 clause, including the empty
+  protocol dependency list and the one-way contract edge, stands. Telemetry
+  dispatch is synchronous by the library's design, so core attaches no handler
+  at all; a new edge application, `loopex_telemetry`, owns the only
+  Loopex-attached handler, which hands each event to the runtime's diagnostics
+  dispatcher through its asynchronous admission path and never blocks the
+  emitting process. The dispatcher owns bounded admission: it admits at most
+  4,096 queued diagnostic items per runtime and, above that, drops and counts,
+  publishing one summary item when the queue drains. Reporters, exporters and
+  OpenTelemetry remain edge adapters. A handler a host attaches itself runs in
+  the emitting process and is the host's responsibility.
 
 Both feed the diagnostics plane. Trace output is bounded to at most 4,096
 bytes per entry after redaction, 2,000 entries per second per session and

@@ -11,8 +11,10 @@ Concept: [Context and decision](0028-bounded-artifact-retrieval.md#concept-adr-0
 ### Boundary and result
 
 Extend the exact callback set of `Loopex.ArtifactStore` with the optional
-transfer triple `open_transfer`, `read_transfer` and `close_transfer`; do not
-change `Loopex.Store` or ADR 0006 journal transactions. This narrowly extends
+transfer triple `open_transfer/4` (handle, artifact object, normalized use,
+window), `read_transfer/3` (handle, transfer, length) and `close_transfer/2`
+(handle, transfer); do not change `Loopex.Store` or ADR 0006 journal
+transactions. This narrowly extends
 ADR 0015's callback inventory, leaving its object/use schema and existing
 callbacks intact. Legacy ArtifactStore adapters remain conformant and return
 unsupported through the facade when the capability is absent.

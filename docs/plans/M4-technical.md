@@ -43,7 +43,7 @@ M4 accepts five decisions before dependent work:
 | [**ADR 0024**](../adr/0024-durable-interaction-lifecycle-and-host-policy-authority.md#concept) | Maintainer, before M4 acceptance; must fix the exact maximum of successive answer → defer rounds per tool decision | Durable policy `defer`/answer lifecycle owned by the session with host-policy authority preserved |
 | [**ADR 0026**](../adr/0026-development-floor-refresh.md#concept) | Maintainer, before M4 acceptance; holder transactions below settle after M3 closes | Explicit floor/current validation pairs replacing the derived pin rule |
 | [**ADR 0028**](../adr/0028-bounded-artifact-retrieval.md#concept) | Maintainer, before M4 acceptance; carries the transfer design below | Bounded artifact transfer through the facade and ArtifactStore with distinct object/chunk digests |
-| [**ADR 0030**](../adr/0030-observability-tracing-and-telemetry.md#concept) | Maintainer, before M4 acceptance; the core dependency is admitted by the recorded [vision change](../developer/agent-context-map.md#disposition-m4-vision-core-telemetry-2026-09-13) and lands through the M1 dependency-oracle transaction in phase B | Runtime-owned isolated OTP trace sessions with identity-only default capture and exact limits; `:telemetry` spans at every port callback and transaction cut in a bound inventory; the `loopex_telemetry` edge owning the only Loopex-attached handler |
+| [**ADR 0030**](../adr/0030-observability-tracing-and-telemetry.md#concept) | Maintainer, before M4 acceptance; the core dependency is admitted by the recorded [vision change](../developer/agent-context-map.md#disposition-m4-vision-core-telemetry-2026-09-13), supersedes only the two ADR 0001 empty-dependency clauses for `apps/loopex`, and lands through the M1 dependency-oracle transaction in phase B | Runtime-owned isolated OTP trace sessions with identity-only default capture and exact limits; `:telemetry` spans at every port callback and transaction cut in a bound arity-exact inventory; the `loopex_telemetry` edge owning the only Loopex-attached handler; dispatcher-owned bounded diagnostics admission with counted drops |
 
 **Artifact transfer design (decided).** The earlier draft admitted
 1–16,384-byte ranges while the local store admits 64 MiB objects and verified
@@ -305,9 +305,10 @@ Two applications, the core policy-interaction slice, the optional ArtifactStore
 transfer capability, one stdio mapping, bounded schemas/client fixtures, one
 trace-session owner, a bound inventory of telemetry emission points and one
 edge forwarding handler justify growth. No per-function logging, no second
-event dispatcher, no handler or reporter in core. No new role or external production dependency, transport registry, socket
-abstraction, daemon supervisor, duplicate resource resolver or second interaction
-reducer. The app-server has no direct Store/model/executor dependency or private
+event dispatcher, no handler or reporter in core. No new role, and no external
+production dependency beyond `:telemetry` in core and in `loopex_telemetry`;
+no transport registry, socket abstraction, daemon supervisor, duplicate
+resource resolver or second interaction reducer. The app-server has no direct Store/model/executor dependency or private
 coordinator shortcut. Artifact object/use identity and launch configuration
 reuse existing owners. Implement new interaction/transfer behavior once in core/ports,
 then prove all consumer mappings against it. Raw line count is a review signal; behavior and measured limits govern.
