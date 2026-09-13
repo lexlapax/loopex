@@ -2968,3 +2968,59 @@ test, changes no accepted ADR or gate binding, and grants no closure, main
 integration or release. Future override records and exact-SHA reads must still
 precede dependent work. This acceptance is recorded in its own commit and is
 subject to an independent exact-SHA read.
+
+<a id="override-disposition-m3-repair-completion-packet-2026-09-13"></a>
+### M3 repair completion decisions — 2026-09-13
+
+After the approval dialogs did not appear, the maintainer received the three
+proposals again in plain text: retain the existing Git import limits, accept
+four named commit-title exceptions, and replace only the malformed final
+documentation commit with its reviewed correction and this approval record.
+The maintainer answered:
+
+> approve all three
+
+The approved scopes and replacement requirements are:
+
+1. **Git download limit.** For finding L1 in the post-implementation review of
+   `f92f19ee31e7ea62cb5614a487dfb22527c13c66`, retain the existing maximum
+   30-second acquisition deadline and existing pack admission limits. M3 does
+   not add a separate download-byte cap. The initial Git transfer can therefore
+   consume bytes beyond the admitted pack size before the existing deadline or
+   subsequent size validation refuses it. This is an accepted limitation for
+   this M3 repair, not evidence of a transfer-size bound or permission to relax
+   the deadline, admission checks, cancellation or cleanup guarantees.
+2. **Historical commit titles.** Accept only the milestone-marker naming
+   exceptions in `d158989f8b3f4e423bf00bdd0f940162433d46c1`,
+   `dafc42b8ded769dfe7aa6fd17875ad46ed5df32f`,
+   `d11af17050aa1fe96cc67171eb41fd25e76a66c9` and
+   `5e9db2edf711991b73899a78e82280d10fb39f2b`. Their titles used subsystem
+   markers instead of `M3`; their history remains unchanged. Future repair
+   commits use the `M3` marker. This disposition changes no checker, product
+   requirement or test result and creates no naming exception for later work.
+3. **Documentation-tip replacement.** Replace only
+   `92fcb6184ae286b8493f0cbf71e51bc1cf58c384` with the reviewed correction
+   `fde3eadc4fe90a78e8b9c0378f947a35689919c3`, followed by this standalone
+   approval-record commit. Both documentation candidates have sole parent
+   `873a1d759b367757aa21336babc6f4f4ff260695`. The correction places the same
+   explanatory text in the existing Workstreams section, preserves table-only
+   Progress and Governance sections, and wraps CHANGELOG lines. Full repository
+   status must pass before publication. The push must use an exact remote lease
+   expecting `92fcb6184ae286b8493f0cbf71e51bc1cf58c384`; any advancement of
+   local or remote `m3`, or another checkout using local `m3`, stops replacement
+   for reconciliation. The original tip is retained in the verified
+   `original-documentation-tip.bundle` in the maintainer's
+   `loopex-reviews/m3-review-repair-focused-92fcb61-0lob23r0` evidence archive.
+
+The third decision is the explicit destructive-history permission for this one
+unaccepted documentation tip. It does not rewrite earlier history, accepted
+candidates, product, tests, gates, ADRs or either normative plan envelope. The
+first two decisions accept their named limitations only; they do not relabel
+failed or unrun checks as passing. This record changes only this document and
+receives independent exact-SHA review before the dependent publication.
+
+Fresh qualification remains M3-only: macOS on Elixir 1.17.0 / OTP 26.0 and Linux
+serenity on the current toolchain, with exact source and retained evidence.
+Final M0–M2 reruns remain waived, not passed, under the
+[existing validation-scope disposition](#override-disposition-m3-final-inherited-gates-waiver-2026-09-13).
+These decisions grant no M3 closure, integration to `main`, tag or release.
