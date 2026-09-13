@@ -97,21 +97,28 @@ outcome 7 implementation work in core, bound at acceptance:
 | Rule | Contract |
 | --- | --- |
 | Paths | The existing synchronous `Loopex.diagnostic/2` call remains for hosts; the dispatcher gains an asynchronous admission message that the trace tracer and the `loopex_telemetry` handler use, and that never replies to the sender |
-| Ingress reservation | The runtime owns one `:atomics` array of two signed 64-bit cells per runtime, created at start and handed to the tracer and the handler as a plain reference: cell 1 holds reservations, cell 2 holds drops. It also owns one public ETS table of per-sender counts keyed by pid. Before sending, a sender calls `:atomics.add_get(ref, 1, 1)`; if the returned value exceeds the ceiling it calls `:atomics.sub(ref, 1, 1)` and `:atomics.add(ref, 2, 1)` and sends nothing. Otherwise it increments its own row with `:ets.update_counter/4` (inserting the row at zero on first use, when it also sends the dispatcher one `monitor_me` message) and sends the admission message carrying its pid. Only a sender holding a reservation may send, and it sends immediately after reserving. Every step is a single atomic operation; nothing waits on the dispatcher, so the dispatcher's mailbox holds at most ceiling reserved items however many senders race |
-| Ceiling | 4,096 reserved items per runtime; a host may lower this ceiling, never raise it |
-| Release | Once per admitted item, after forwarding or discarding it, the dispatcher decrements the sender's ETS row and calls `:atomics.sub(ref, 1, 1)`; every release is attributed to the pid the message carries |
-| Crash reconciliation | The dispatcher monitors each sending process once, on its `monitor_me`. Erlang delivers every message a process sent to the dispatcher before that process's `DOWN` signal, so when `DOWN` arrives every admission the dead sender actually sent has already been released. The dead sender's remaining ETS count is therefore exactly its reservations taken but never sent; the dispatcher subtracts that count from cell 1 with `:atomics.sub`, deletes the row and demonitors. No count, timer or sample is ever attributed to a live process, so a live sender's reservation is never touched, and a leak is repaired at the moment the dead sender's `DOWN` is processed |
-| Egress | The dispatcher forwards each admitted item to the sink with one send and never buffers more than the reserved backlog, so the only queues Loopex bounds are its own: the admission backlog and its forwarding. The host sink's mailbox belongs to the host and cannot be bounded by Loopex when other senders can race on it; before each forward the dispatcher reads the sink's queue length and, when it is at or above the ceiling, discards the item and counts a drop as best-effort backpressure, never as a bound. A dead sink discards every item |
-| Summary | When the reservation cell falls below half the ceiling and the drop cell is nonzero, the dispatcher takes the count with `:atomics.exchange(ref, 2, 0)`, one atomic read-and-reset, and publishes one `diagnostics_dropped` item carrying that count and the drop window before any further item |
+| Ingress claim | The runtime owns, per runtime and created at start, one `:atomics` array of two signed 64-bit cells (cell 1 a monotonic ticket counter, cell 2 the drop count) and one public ETS `set` table of slot rows keyed by slot index, of which at most ceiling can exist; both are handed to the tracer and the handler as plain references. Before sending, a sender takes a ticket `t = :atomics.add_get(ref, 1, 1)`, derives its slot `rem(t, ceiling)`, and claims that slot with one `:ets.insert_new(slots, {slot, self(), t})`. That single atomic insert is the whole reservation: it either records the sender as the slot's owner or fails because the slot is still held. On failure the sender calls `:atomics.add(ref, 2, 1)` and sends nothing. On success it sends the admission message carrying its pid, slot and ticket. Only a sender holding a slot may send, and it sends immediately after claiming. Each step is one atomic operation, no step is ever rolled back, and nothing waits on the dispatcher. Because only ceiling slot keys exist, at most ceiling items are claimed at any instant, so the dispatcher's mailbox holds at most ceiling admitted items however many senders race |
+| Ceiling | 4,096 slots per runtime, fixed when the runtime starts; a host may lower this ceiling, never raise it |
+| Drop semantics | A slot is still held when the item claimed ceiling tickets earlier has not yet been released; with a full backlog that is every slot, so a sender drops exactly when the backlog is at the ceiling. A slot may also still be held by a sender that took its ticket earlier but has not yet sent, or by a dead sender whose `DOWN` the dispatcher has not yet processed; such a collision drops one item while the backlog is below the ceiling and never weakens the bound. The sender counts every drop before it continues; a sender killed between its failed claim and that count loses one count, the item is lost as any dropped item is, and the bound is unaffected |
+| Monitoring | Before its first claim against a given dispatcher, a sender sends that dispatcher one `monitor_me` message and records in its own process dictionary, keyed by the dispatcher's pid, that it has done so; that record dies with the process, so a reused pid registers again. The dispatcher monitors the pid on `monitor_me`, keeps exactly one monitor per live sender, ignores a duplicate, and relies on the VM delivering `DOWN` at once for a process that has already exited. It retains nothing else per sender: its only per-sender state is that monitor, and the `DOWN` releases it |
+| Release | Once per admitted item, after forwarding or discarding it, the dispatcher frees the slot with `:ets.delete_object(slots, {slot, pid, ticket})`, the exact triple the message carries, so a release can never free a slot that a later claim now holds |
+| Crash reconciliation | Erlang delivers every message a process sent to the dispatcher before that process's `DOWN` signal, so when `DOWN` arrives every slot the dead sender actually sent for has already been released. The slots still owned by the dead pid are therefore exactly its claims never sent; the dispatcher removes them with `:ets.match_delete(slots, {:_, pid, :_})` and drops the monitor. Every crash cut is covered: killed before `monitor_me` or after taking a ticket but before claiming, the sender holds nothing; killed after a failed claim, it holds nothing; killed after a successful claim and before the send, it holds exactly the slots its `DOWN` releases; killed after the send, its message is released before its `DOWN`. No count, timer or sample is ever attributed to a live process, so a live sender's slot is never touched, and no slot stays held until restart |
+| Egress | The dispatcher forwards each admitted item to the sink with one send and never buffers more than the claimed backlog, so the only queues Loopex bounds are its own: the admission backlog and its forwarding. The host sink's mailbox belongs to the host and cannot be bounded by Loopex when other senders can race on it; before each forward the dispatcher reads the sink's queue length and, when it is at or above the ceiling, discards the item and counts a drop as best-effort backpressure, never as a bound. A dead sink discards every item |
+| Summary | After any release, when fewer than half the slots are held (`:ets.info(slots, :size)`) and the drop cell is nonzero, the dispatcher takes the count with `:atomics.exchange(ref, 2, 0)`, one atomic read-and-reset, and publishes one `diagnostics_dropped` item carrying that count and the drop window before any further item |
 | Bounds per item | The existing transient item and byte limits apply unchanged to every admitted item |
 | Loss semantics | Dropped diagnostics are lost, never durable; nothing in the session journal, public events or progress depends on their delivery |
 
 The claimed bound is therefore exact for the queues Loopex owns: the
-admission backlog cannot exceed the ceiling because capacity is reserved by a
-hardware atomic before the send, reconciliation releases only reservations
-proven to belong to a dead sender by its `DOWN` and the signal ordering that
-precedes it, and the drop count is taken by an atomic exchange. The host
-sink's own mailbox is outside that claim and is only backpressured.
+admission backlog cannot exceed the ceiling because a claim is one atomic
+slot insert that records its owner, only ceiling slots exist, no step is ever
+rolled back, reconciliation releases only slots proven to belong to a dead
+sender by its `DOWN` and the signal ordering that precedes it, and the drop
+count is taken by an atomic exchange. A process killed between any two steps
+leaves nothing its `DOWN` cannot account for. That is why the claim is a
+per-slot owner record rather than a global count beside a per-sender count:
+two counters cannot be updated together atomically, and a kill between them
+leaves a reservation no monitor can attribute. The host sink's own mailbox is
+outside that claim and is only backpressured.
 
 ### Evidence
 
@@ -126,12 +133,15 @@ Prove every callback and cut in the emission inventory emits start/stop or
 exception with a duration and only the documented metadata, that a crashing
 handler is isolated, that a slow or blocked `loopex_telemetry` forwarding sink
 never delays a coordinator and drops with a counted entry, that racing senders
-never push the admission backlog above the ceiling, that a sender killed
-between reserve and send has exactly its unsent reservations released when
-its `DOWN` is processed while another sender's reservation taken in the same
-window is untouched and still admits, that the drop summary count equals the
-exact number of dropped items, and that an OTP release without trace sessions
-reports unavailability. Measure the overhead of
+never push the admission backlog above the ceiling, that a sender killed at
+each crash cut (before its first `monitor_me`, after taking a ticket, after a
+failed claim, after a successful claim before the send, and after the send)
+holds afterwards exactly the slots it claimed and never sent for, released
+when its `DOWN` is processed, while another sender's slot claimed in the same
+window is untouched and still admits, that a release frees only the exact
+claim it names, that the drop summary count equals the exact number of
+counted drops, and that an OTP release without trace sessions reports
+unavailability. Measure the overhead of
 enabled tracing and of telemetry emission with no handler attached and record
 both with the gate evidence.
 

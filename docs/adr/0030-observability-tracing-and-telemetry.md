@@ -51,14 +51,16 @@ Two mechanisms, chosen by the maintainer on 2026-09-12:
   Loopex-attached handler, which hands each event to the runtime's diagnostics
   dispatcher through its asynchronous admission path and never blocks the
   emitting process. The dispatcher owns bounded admission for the queues
-  Loopex controls: a sender reserves capacity with one hardware atomic before
-  it sends, so the admission backlog can never exceed 4,096 items per runtime
-  however many senders race; above that, items are dropped and counted
-  without a send; a reservation leaked by a sender that died before sending is
-  released exactly when that sender's monitor reports it dead, so no live
-  reservation is ever touched; the drop count is taken by one atomic
-  exchange; and one summary item carrying the exact count is published when
-  the backlog drains. The host sink's own mailbox is the
+  Loopex controls: a sender claims one of 4,096 slots with a single atomic
+  insert that records it as the slot's owner before it sends, so the
+  admission backlog can never exceed 4,096 items per runtime however many
+  senders race; an item whose slot is still held is dropped and counted
+  without a send; because the claim and its owner are one record, the slots a
+  sender claimed and never sent for are released exactly when that sender's
+  monitor reports it dead, whichever step it died at, so no live claim is ever
+  touched and no slot stays held until restart; the drop count is taken by
+  one atomic exchange; and one summary item carrying the exact count is
+  published when the backlog drains. The host sink's own mailbox is the
   host's and is only backpressured, never bounded, by Loopex. Reporters, exporters and
   OpenTelemetry remain edge adapters. A handler a host attaches itself runs in
   the emitting process and is the host's responsibility.
