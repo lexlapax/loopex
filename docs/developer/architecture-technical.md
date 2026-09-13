@@ -14,6 +14,28 @@ adapter joins a port, and the repository commands that hold the shape.
 
 Concept: [The eight applications and one direction](architecture.md#concept-arch-applications).
 
+`LoopexComposition.with_runtime/2` brackets a caller operation with startup and
+confirmed cleanup of the reference runtime, Store, workspace lease and executor.
+Its private owner retains those process identities until shutdown is observed.
+Confirmation requires `Loopex.stop/1` to succeed and the directly owned executor,
+lease and Store to report orderly shutdown.
+A forced stop or missing confirmation produces a cleanup error rather than a
+successful operation result. After returning an unconfirmed-cleanup error, the
+private owner retains and monitors the remaining identities until shutdown is
+observed. Exceptions are re-raised after cleanup. This
+experimental host addition preserves `start/1`, adds no durable record and
+changes no core port. Returning to the prior host binary needs no data migration
+for this helper. The maintainer's exact approval is in the
+[implementation disposition](agent-context-map.md#disposition-m3-implementation-completion-2026-09-11).
+
+For prepared CLI recovery, the temporary runtime has no resource snapshot.
+The host prepares without activating recovered work, obtains the session's
+admitted manifest digest, abandons the preparation capability and completes cleanup.
+Only then does it load the snapshot at that exact retained digest and prepare the
+final runtime with the trusted provider and executor configuration. A missing or
+invalid retained snapshot withholds the resource class while ordinary recovery
+continues. Current workspace bytes never substitute for the admitted snapshot.
+
 The umbrella's declared dependencies are the whole of the direction claim:
 
 | Application | Role | Declared dependencies |
@@ -76,6 +98,20 @@ A coordinator is an unnamed temporary `DynamicSupervisor` child: a crashed or
 superseded coordinator is never restarted in place. Startup reads transaction
 status and the non-authorizing ownership head, then commits one fresh
 compare-and-set `advance_owner` succession before admission opens.
+
+The runtime supervisor also owns the unnamed protected ETS table for an optional
+resource snapshot. It creates that table once from validated launch input and
+keeps the content out of child options and per-session state. Decisions and
+selections are session truth; the snapshot is runtime-local material used only
+when its identity matches that truth.
+
+Dispatcher Store scans and queue fills run in linked workers. One attachment
+retains at most one read worker and caller; concurrent readers wait in their own
+processes through a private Runtime protocol. Acknowledgement and unrelated
+attachments stay available while a read is held. Adoption checks the captured
+attachment and publication bound; a tightened bound forces a new read. Caller
+loss, call-budget expiry, replacement and invalidation cancel the exact worker.
+No pending-read reply introduces a public busy status or treats waiting as empty.
 
 ### The Invariants
 
@@ -148,9 +184,17 @@ exact reader, while a successful result reaches Control only after the reader is
 down. A slow store therefore costs one attempt without holding or outliving
 Control. The binding is
 `session_id`, `run_id`, `turn_id`, `operation_id`, `attempt`, and
-`staged_request_digest`. Spent identities are dropped only when control stops
-holding the session at all; dropping them at succession would hand a successor a
-second call on an attempt that may already have been billed. Fixed by
+`staged_request_digest`. Under
+[ADR 0027](../adr/0027-provider-permit-retirement.md#concept), Control retires a
+spent identity only after its matching validated settlement closes the durable
+authorization domain. A terminal settlement also requires the adjacent matching
+terminal record. The acknowledged receipt range is read through bounded pages
+under one existing one-second deadline; a short conforming page is continued,
+and missing, malformed or unavailable evidence preserves the spend. A run
+terminal without a matching settlement does not retire it before session release.
+Current-owner, current-version and exact attempt-open checks still refuse an old
+identity after pruning or restart. Retirement changes no retry or accounting
+rule inherited from
 [ADR 0018](../adr/0018-provider-attempt-authority-and-recovery.md#concept).
 
 **The effect identity set.** `Loopex.Effect` is pure and process-free. A request
@@ -476,6 +520,18 @@ exemption: the model suite carries a non-streaming member as a first-class case.
 ## The Policy, Grant, and Lease Path
 
 Concept: [Brains, hands, and what the host keeps](architecture.md#concept-arch-brains-hands).
+
+`LoopexComposition.ResourcePacks` owns the fixed project directory walk, Git
+jobs, atomic publication and retained manifest/provenance files. It submits Git
+commands through the existing local executor after explicit acquisition
+authorization. The core resource path imports no filesystem or network adapter.
+`Loopex.ResourcePack` validates bounded plain identities;
+`Loopex.Runtime.ResourceSnapshot` holds verified content;
+`Loopex.Runtime.ResourceContext` constructs ordered optional blocks. The serial
+coordinator retains resource decisions and model requests through the existing
+Store transaction path. None of those operations registers a tool or supplies
+a policy allow. The accepted contract is
+[ADR 0025](../adr/0025-resource-packs-and-skill-admission.md#concept).
 
 Resolution happens once per tool call, from the model-visible name through the
 run's committed name-to-generation mapping, before argument validation and before

@@ -57,7 +57,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderRetainerBoundariesTest do
       assert Fixture.eventually(fn -> queued_ready(guardian) != nil end, remaining(request))
       {receiver, binding} = queued_ready(guardian)
       assert Enum.sort(Map.keys(binding)) == ["build_manifest_sha256", "nonce", "version"]
-      assert binding["version"] == 1
+      assert binding["version"] == 2
       assert binding["build_manifest_sha256"] == fixture.options[:build_manifest_sha256]
       assert binding["nonce"] =~ ~r/\A[0-9a-f]{64}\z/
       File.write!(Fixture.marker(fixture, "hold-credential-reader"), "release")

@@ -33,17 +33,17 @@ separate decision duty when a founding boundary or invariant would change.
 | Doctrine, product definition, principles | [Product definition](../vision.md#concept-vision-product-definition) and [principles](../vision.md#concept-vision-product-principles) | [Product boundaries](../vision-technical.md#technical-vision-product-definition) and [principle mechanics](../vision-technical.md#technical-vision-product-principles) | “Runtime is the framework”; what Loopex is and is not. |
 | Domain language | [Domain language](../vision.md#concept-vision-domain-language) | [Exact terms](../vision-technical.md#technical-vision-domain-language) | Session/run/turn, operation/attempt/epoch/fence, journal/public event, brain/hand. |
 | Ownership and trust boundaries | [Ownership](../vision.md#concept-vision-ownership-trust) | [Ownership mechanics](../vision-technical.md#technical-vision-ownership-trust) | Loopex/host/executor ownership, policy decisions, and grants. |
-| Stack, dependency budget, runtime floor | [Dependency doctrine](../vision.md#concept-vision-dependency-doctrine) and [ADR 0002 decision](../adr/0002-bootstrap-runtime-floor.md#concept-adr-0002-decision) | [Exact dependency constraints](../vision-technical.md#technical-vision-dependency-doctrine) and [ADR 0002 mechanics](../adr/0002-bootstrap-runtime-floor-technical.md#technical-adr-0002-decision) | Protocol/Core/Runtime, stdlib+OTP-only core, bootstrap floor. |
+| Stack, dependency budget, runtime floor | [Dependency doctrine](../vision.md#concept-vision-dependency-doctrine) and [ADR 0002 decision](../adr/0002-bootstrap-runtime-floor.md#concept-adr-0002-decision) | [Exact dependency constraints](../vision-technical.md#technical-vision-dependency-doctrine) and [ADR 0002 mechanics](../adr/0002-bootstrap-runtime-floor-technical.md#technical-adr-0002-decision) | Protocol/Core/Runtime, one admitted `:telemetry` dependency in core, bootstrap floor. |
 | Runtime instances, supervision, reducer | [Runtime ownership](../vision.md#concept-vision-runtime-supervision) | [Supervision and reducer mechanics](../vision-technical.md#technical-vision-runtime-supervision) | Multi-instance supervision, pure reducer, bounded journal transaction; use the [M1 runtime and embedding guide](runtime-and-embedding.md#concept) for the implemented single-machine surface. |
 | Transactions, operations, recovery, cancellation | [Recovery truth](../vision.md#concept-vision-recovery-truth) | [Transaction and recovery mechanics](../vision-technical.md#technical-vision-recovery-truth) | `commit_unknown`, operation lifecycle, reconciliation, outcome algebra. |
 | Agent loop, queues, tool ordering | [Loop semantics](../vision.md#concept-vision-loop-semantics) | [Loop mechanics](../vision-technical.md#technical-vision-loop-semantics) | One run per session, input classes, ordering, and split payloads. |
-| Public protocol, events, attachments | [Public protocol](../vision.md#concept-vision-public-protocol) | [Protocol mechanics](../vision-technical.md#technical-vision-public-protocol) | Stream planes, envelopes, attach behavior, and authority boundaries; the headless protocol proposal is [ADR 0023](../adr/0023-experimental-public-session-protocol.md#concept); [ADR 0024](../adr/0024-durable-interaction-lifecycle-and-host-policy-authority.md#concept) places durable interactions in M4 core before wire mapping. Both remain Proposed prerequisites of the Open [`M4` plan](../plans/M4.md#concept), the planning lookahead behind Accepted M3. |
+| Public protocol, events, attachments | [Public protocol](../vision.md#concept-vision-public-protocol) | [Protocol mechanics](../vision-technical.md#technical-vision-public-protocol) | Stream planes, envelopes, attach behavior, and authority boundaries; the headless protocol proposal is [ADR 0023](../adr/0023-experimental-public-session-protocol.md#concept); [ADR 0024](../adr/0024-durable-interaction-lifecycle-and-host-policy-authority.md#concept) places durable interactions in M4 core before wire mapping. Both remain Proposed prerequisites of the Open [`M4` plan](../plans/M4.md#concept) after M3 closure. |
 | Journal, stores, branches, compaction, artifacts | [Sessions and storage](../vision.md#concept-vision-sessions-storage) | [Storage mechanics](../vision-technical.md#technical-vision-sessions-storage) | Recovery surfaces, private adapters, store decision, protection. |
-| Model boundary and continuation | [Model boundary](../vision.md#concept-vision-model-boundary) | [Model mechanics](../vision-technical.md#technical-vision-model-boundary) | Canonical types, `Loopex.LLM`, reference adapter and native sidecar. For M3 provider-attempt retention work, load the Proposed [ADR 0027 decision](../adr/0027-provider-permit-retirement.md#concept) and [retirement mechanics](../adr/0027-provider-permit-retirement-technical.md#technical-adr-0027-decision); they remain review material until accepted. |
+| Model boundary and continuation | [Model boundary](../vision.md#concept-vision-model-boundary) | [Model mechanics](../vision-technical.md#technical-vision-model-boundary) | Canonical types, `Loopex.LLM`, reference adapter and native sidecar. Accepted [ADR 0027](../adr/0027-provider-permit-retirement.md#concept) and its [retirement mechanics](../adr/0027-provider-permit-retirement-technical.md#technical-adr-0027-decision) govern M3 provider-attempt retention. |
 | Context pipeline | [Model boundary](../vision.md#concept-vision-model-boundary) | [Context-pipeline mechanics](../vision-technical.md#technical-vision-model-boundary) | The sole seam for memory, retrieval, prompts, provenance, and receipts. |
 | Tools and coding surface | [Tools](../vision.md#concept-vision-tools) | [Tool mechanics](../vision-technical.md#technical-vision-tools) | Seven-tool surface, budget, and non-authority of metadata. |
 | Executors, brain/hand, distribution | [Executor protocol](../vision.md#concept-vision-executor-protocol) | [Executor mechanics](../vision-technical.md#technical-vision-executor-protocol) | Job/receipt protocol, trust classes, trusted gateways. |
-| Trust, resources, sensitive data | [Sensitive data](../vision.md#concept-vision-sensitive-data) | [Trust mechanics](../vision-technical.md#technical-vision-sensitive-data) | Resource admission, tenancy, credentials, and redaction. |
+| Trust, resources, sensitive data | [Sensitive data](../vision.md#concept-vision-sensitive-data) | [Trust mechanics](../vision-technical.md#technical-vision-sensitive-data) | Resource admission, tenancy, credentials and redaction. Project skills implement Accepted [ADR 0025](../adr/0025-resource-packs-and-skill-admission.md#concept); use [snapshot/command guidance](runtime-and-embedding.md#technical-embedding-resources) and [staging/replay guidance](agent-loop-and-tools.md#technical-loop-skills). |
 | Extensions, generations, generated code | [Extensions](../vision.md#concept-vision-extensions) | [Extension mechanics](../vision-technical.md#technical-vision-extensions) | Package classes, quiescent activation, A→B→A rollback, promotion. |
 | Embedded API, transports, clients, ACP | [API and transports](../vision.md#concept-vision-api-transports) | [Transport mechanics](../vision-technical.md#technical-vision-api-transports) | One semantic contract, JSONL RPC first, reference surfaces. |
 | Hosts and wrappers | [Hosts](../vision.md#concept-vision-hosts) | [Host mechanics](../vision-technical.md#technical-vision-hosts) | Expected consumers, secured sample host, independent implementation. |
@@ -57,7 +57,16 @@ separate decision duty when a founding boundary or invariant would change.
 
 ## Test Quick Reference
 
-The umbrella exists. Product tests run with `mix test` from the repository root, and the repository's own checks are Mix tasks: `mix loopex.deps_budget`, `loopex.core_only`, `loopex.matrix`, `loopex.format_scope`, `loopex.version_train`, `loopex.docs_check`, `loopex.hook_registration`, and `loopex.self_hosting`. `bash scripts/check-bootstrap.sh` runs the aggregate, and `bash scripts/check-m0-gate.sh`, `/bin/bash -p scripts/check-m1-gate.sh`, and `bash scripts/check-m2-gate.sh` run the Closed gates. `bash scripts/check-m3-gate.sh` runs the Accepted `M3` gate and `bash scripts/check-m4-gate.sh` runs the Open `M4` lookahead gate; each must be red for its own declared missing behavior while every Closed gate stays green.
+Product tests run with `mix test` from the repository root. Repository checks
+are Mix tasks: `mix loopex.deps_budget`, `loopex.core_only`, `loopex.matrix`,
+`loopex.format_scope`, `loopex.version_train`, `loopex.docs_check`,
+`loopex.hook_registration`, and `loopex.self_hosting`.
+`bash scripts/check-bootstrap.sh` runs the bootstrap aggregate.
+`bash scripts/check-m0-gate.sh`, `/bin/bash -p scripts/check-m1-gate.sh`,
+`bash scripts/check-m2-gate.sh`, and `bash scripts/check-m3-gate.sh` run the
+Closed gates. The M3 gate includes its M0–M2 predecessor aggregate.
+`bash scripts/check-m4-gate.sh` runs the Open M4 gate, which must be red for
+its declared missing behavior while every Closed gate stays green.
 
 Product tests run against a temporary `LOOPEX_HOME`; the
 affected conformance suites (`conformance/`) run for any adapter or behaviour
@@ -65,21 +74,23 @@ change; property tests own reducer/replay claims; fault injection owns
 durable-transition claims. Real-provider runs are a tagged, explicitly invoked
 lane — never part of the default suite.
 
-Use focused checks during implementation and the full inherited set at the
-acceptance base, each parallel-workstream rejoin, each required rebind, closure
-candidates, scheduled cadence and evidence-invalidating changes named in
-[AGENTS.md](../../AGENTS.md#milestones-and-gates) and the active plan. Under the
+Use focused checks during M3 implementation under the reviewed
+[end-only full-gate cadence](#override-disposition-m3-implementation-gate-cadence-2026-09-10).
+Complete M0–M3 evidence is required at the final candidate. Other milestones
+follow [AGENTS.md](../../AGENTS.md#milestones-and-gates) and their accepted plan.
+Under the
 [reviewed M3 preparation-rule ratification](#override-disposition-m3-incremental-witness-ratification-2026-09-10),
 acceptance binds clauses, witness identities, runnable commands and a real
 opening red; future test bodies grow with implementation. The closure command
 must reject missing witnesses and unavailable evidence. Focused results never
 substitute for required acceptance-base or closure evidence.
 
-For the M3 planning lineage before its acceptance only, the independently reviewed
+For M3's recorded plan acceptance only, the independently reviewed
 [acceptance aggregate override](#override-disposition-m3-acceptance-aggregate-2026-09-10)
 replaces the new acceptance-base M0–M2 aggregate with the exact-candidate
 validation listed in that disposition. It does not change later aggregate
-obligations or the generic rule for another milestone.
+obligations or the generic rule for another milestone. The later implementation
+cadence disposition above names the separate replacement timing.
 
 An inherited test inventory may be changed under a recorded, explicitly scoped
 maintainer override. Follow [the canonical override rule](../../AGENTS.md#maintainer-override),
@@ -2047,3 +2058,1220 @@ This is a maintainer decision on a founding boundary, transcribed here and in
 the vision pair together. It accepts no ADR, plan or milestone, authorizes no
 product implementation, and changes nothing about M3. ADR 0030 carries the
 mechanics and remains Proposed until its own acceptance.
+
+<a id="override-disposition-m3-implementation-gate-cadence-2026-09-10"></a>
+### M3 implementation gate cadence — 2026-09-10
+
+The maintainer's current implementation instruction is:
+
+> finish m3 implementation. do unit tests until complete. do overall m0, m1, m2 and m3 gate check after you think m3 is complete (only at the end because they take time to run). ask me questions to clarify or make architectural changes.
+
+The explicit clarification asked:
+
+> Do you explicitly approve replacing M3’s full-gate checks at implementation start and intermediate workstream rejoins with focused tests, while requiring the complete M0–M3 gates at the final candidate? This changes timing only; all required tests and pass criteria remain.
+
+The maintainer answered: **"Approve end-only full gates"**.
+
+Under [the explicit maintainer override](../../AGENTS.md#maintainer-override),
+this instruction replaces the continuing full-gate timing requirements for
+ordinary M3 implementation in AGENTS.md, the accepted M3 Technical envelope's
+"Cheap checkpoints and full contract evidence" section and the M3 gate's
+"Runner Modes and Evidence Cost" section. Focused unit, conformance, integration
+and repair tests run during implementation. Full M0, M1, M2 and M3 gates run
+after the implementer judges all M3 outcomes complete, rather than at the
+implementation start, intermediate checkpoints or parallel-workstream rejoins.
+The full M3 command already owns the M0–M2 predecessor aggregate; its retained
+per-gate results may satisfy that final set without duplicate invocations.
+
+This approval changes timing only. It changes no bound artifact, protected
+witness, gate command, outcome, acceptance or closure record, ADR decision,
+required real path or pass criterion. Intermediate focused evidence is not
+full-gate evidence. An observed inherited regression still requires repair,
+and the assigned executor flake still requires stable evidence before closure.
+If final checks find a defect, repair it and rerun affected final evidence at the
+resulting candidate; never carry a PASS across invalidating changes. Any needed
+architectural or binding change must be raised separately under its existing
+decision procedure. This disposition grants no M3 closure, product merge or
+release and changes no M4 obligation.
+
+This standalone disposition must receive independent exact-SHA read-only
+review before implementation relies on its replacement schedule. Historical
+acceptance evidence and the acceptance-only aggregate waiver keep their
+original scope and meaning.
+
+<a id="override-disposition-m3-workflow-evidence-2026-09-10"></a>
+### M3 workflow evidence allocation — 2026-09-10
+
+The maintainer was asked:
+
+> Approve separating the workflow evidence this way: deterministic tests prove the complete CLI/embedding workflow with the existing isolated test provider, and the required real-provider test proves the exact source-built CLI plus production companion end to end? The packaged companion has no local test-endpoint option. This preserves both proofs without adding a production transport API solely for testing, but changes where the plan’s evidence is collected.
+
+The maintainer answered: **"Approve the evidence split"**.
+
+Under [the explicit maintainer override](../../AGENTS.md#maintainer-override),
+this replaces only the continuing requirement that the deterministic outcome-3
+selector alone prove the complete workflow through the exact production
+companion. The affected sources are the accepted M3 Technical envelope's first
+workflow and evidence mapping and the M3 gate's outcome-3 obligation. The
+deterministic selector proves the complete admitted skill, actual authorized
+tool, and full-object artifact workflow through embedding and the source-built
+CLI with the existing isolated test provider. It identifies that test provider
+as such. The attended real-provider selector separately proves the complete
+workflow through the exact source-built CLI and production companion pair.
+
+Both proofs remain required for closure. Preserve every protected selector
+identity, actual tool/artifact operation, trusted launch and recovery check,
+production package identity check, and the separate public Git import. A test
+provider result is never reported as a production companion or real-provider
+result. No new production transport option, dependency, public API, gate command,
+bound artifact, accepted ADR or historical evidence changes. This approval does
+not waive either lane or authorize M3 closure, integration to main or release.
+
+This standalone disposition receives independent exact-SHA read-only review
+before the replacement evidence allocation is relied on.
+
+<a id="disposition-m3-implementation-completion-2026-09-11"></a>
+### M3 implementation completion decisions, 2026-09-11
+
+The maintainer received three separate recommendations:
+
+> May I repair the published `m3` history, then push the completed fixes? Some development commits accidentally changed a protected M2 test file, so the history checker rejects the branch even though the file is now restored. The reviewed repair preserves the accepted milestones and final product files, but changes affected development commit IDs. A complete backup exists; `main` and `m4` stay unchanged. The replacement is `7995965da0de9a51ace807da4183498142c42cd9`, guarded against replacing anything newer than the last pushed `07018b93e2084bf3e4d278e677f0984bcda5fb48`.
+
+> May I implement the accepted ADR 0027 memory fix in `Control`? The runtime currently keeps used provider-permission entries after requests finish, allowing that memory to grow. The fix removes an entry only after its completion is safely recorded, while preserving ownership checks, rejection of reused or stale permissions, and retry/accounting rules. Automatic approval review requires your explicit authorization for this exact change.
+
+> May I add `LoopexComposition.with_runtime/2`, a shared helper that starts a temporary runtime, runs an operation, and shuts down all its processes? Recovery needs this temporary runtime to inspect a saved session before opening it with the correct configuration. The helper would report success only after orderly shutdown, and report an error if cleanup is forced or cannot be confirmed. This adds a public API while preserving existing `start/1` behavior, so the repository contract requires your architectural approval.
+
+The maintainer answered **"Approve all recommendations"**, then
+**"Approved all recommendations.  Go"**. These instructions approve the three
+named changes. They grant no milestone closure, product merge to `main`, release,
+gate weakening, or change to an accepted ADR decision.
+
+The reviewed history replacement was pushed with an exact lease against
+`07018b93e2084bf3e4d278e677f0984bcda5fb48`; the completed acquisition and
+compatibility repairs then advanced `m3` normally to
+`720d1d76a28140e69e8acbae30c7b7df36a360a4`. Accepted milestone and ADR candidates,
+their bindings and their original evidence remain unchanged and reachable.
+The original published lineage is retained in a verified complete Git bundle.
+This repairs the unaccepted implementation lineage and creates no history-check
+exception. All later pushes use ordinary fast-forwards.
+
+Control retirement must implement accepted ADR 0027 and retain its required
+durable-settlement, current-owner and current-attempt proof. The composition
+helper is approved as an experimental host API for temporary use of the existing
+reference stack. It must introduce no durable field, new port, dependency, or
+alternative session recovery path. Exceptions must propagate after cleanup; forced or unconfirmed
+cleanup cannot be reported as success. Its ownership and compatibility contract
+is recorded in the [architecture pair](architecture.md#concept-arch-applications).
+Focused tests must prove orderly and failed cleanup, configuration preservation
+and the exact retained skill snapshot before final M0–M3 qualification.
+
+
+<a id="override-disposition-m3-commit-titles-2026-09-11"></a>
+### M3 published commit-title exception, 2026-09-11
+
+The maintainer received this recommendation in the two-blocker approval dialog:
+
+> Commit titles: eight already-pushed commits have titles that are too long or use the wrong format, so bootstrap stops. Approve an exception for only those eight commits? This preserves published history, keeps all product tests and future commit checks intact, and authorizes recording, reviewing, implementing, testing, and pushing the exception to m3.
+
+The recommended choice was **"Approve the eight-title exception (Recommended)"**.
+The maintainer answered **"Approve both recommendations."** This disposition
+records the commit-title recommendation only; the other recommendation grants
+fixture-specific attended-test permission and changes no repository rule.
+
+Under [the explicit maintainer override](../../AGENTS.md#maintainer-override),
+this replaces only the continuing title-format and 72-character-limit
+requirements in `scripts/check-commit-messages.sh` for these eight immutable
+commits in the M3 implementation lineage:
+
+| Commit | Existing title |
+| --- | --- |
+| `3eaeaafb0cb1af6135dccb64d63354944cb1b301` | test(M3): use causal acquisition readiness and finalize implementation record |
+| `2dc0ad4ede416da068004b14333b26441a973f2f` | fix(skills): validate contained trees and bounded pack content before publication |
+| `2f2dce216cdb63c7387073d8834e756c759ba5c6` | feat(composition): bracket configured skill recovery with confirmed cleanup |
+| `262ad1a04274a0b52e19484e76c621842f158676` | Merge branch 'm3' into codex/m3-cli |
+| `9f742e52d32115c8dedd5c2df47d549a60e86777` | Merge branch 'm3' into codex/m3-cli |
+| `3c8dcc1bc4951d35f6cdee4e695e9682e8bc53db` | M3 CLI: verify retained Git skill commands |
+| `cdc086900515e1bd4d890bb7c62ab3de846ef6fa` | M3 CLI: admit selected skills before runs |
+| `461d44dc004740110231a459c8359efe407d09e6` | M3 CLI: add skill command and launch wiring |
+
+Each exception must be matched by its complete SHA and reported as waived.
+Preserve the fixed baseline, complete-history requirement, commit enumeration
+and stream accounting, prospective title controls, and unconditional commit-body
+attribution and scan-error checks. Every other commit remains subject to the
+complete policy. No history rewrite is authorized or needed. Every accepted
+candidate, bound artifact, disposition, and historical evidence identity remains
+unchanged. No M0–M3 gate binds this checker's bytes, so this change needs no
+replacement gate binding.
+
+Before changing the checker, independently review this standalone disposition
+commit at its exact SHA. Then prove that the original check refuses only these
+eight titles, the replacement reports all eight exceptions, a ninth malformed
+title still fails, and attribution/error scanning remains effective. Run the
+complete bootstrap check and the final M0–M3 qualification on the resulting
+candidate. Commit and push the approved work to `m3` using ordinary fast-forwards.
+
+This grants no exception to a product test or other check, no additional title
+exception, and no ADR change, milestone closure, product integration to `main`,
+tag, or release. The red commit-title evidence retained for
+`f82fb25270ebcdecb23730d57187e9d3ac28b7ca` remains true for that revision.
+
+<a id="override-disposition-m3-acquisition-deadline-witness-2026-09-11"></a>
+### M3 acquisition deadline witness timing, 2026-09-11
+
+The maintainer received the reviewed test-only repair proposal:
+
+> Approve this test-only repair? The current test gives Git only 0.75 seconds to start. The proposed repair uses a 10-second import deadline and a 25-second outer watchdog, requires proof that Git actually started, then verifies that the deadline stopped it and left no published files or running process. Production limits stay unchanged; this adds about nine seconds to this test.
+
+The proposed patch has SHA-256
+`1dc8f2062ee6b94e9806b2d0e5f8363a1373a9561c2abf0a89461b35387e02eb`.
+After the pending choice was restated as the test-only 10-second deadline and
+25-second watchdog, the maintainer answered **"authorize test-only 10 second"**.
+
+Under [the explicit maintainer override](../../AGENTS.md#maintainer-override),
+this replaces only the existing 750-millisecond deadline allowance and its
+delayed-wrapper witness in
+`apps/loopex_composition/test/skill_acquisition_test.exs`, within the protected
+case `import uses the authorized executor with closed configuration and bounded cancellation`.
+It is the explicit exception to AGENTS.md's prohibition on increasing test
+timeouts for this repair. The replacement uses a 10,000-millisecond import
+deadline and a 25,000-millisecond outer watchdog, allowing the import period,
+the existing cleanup period and the existing owner-stop bounds.
+
+The witness must observe a positive process-group identity and a live Git
+wrapper before awaiting expiry. The wrapper remains held throughout the test;
+neither the successful path nor failure teardown releases it. A successful
+witness requires the exact coordinator deadline refusal, or a matching retained
+executor receipt with the reported outcome and executor-owned deadline
+diagnostic. Elapsed time alone and a generic error are insufficient. Preserve
+proof of an empty process group, no escaped execution, no published pack, no
+provenance record and no staging residue. Failure teardown cannot supply the
+successful-path proof. Retain bounded result and receipt summaries when the
+deadline evidence is absent or inconsistent.
+
+This is a test-only change. Production deadlines, cleanup bounds, APIs, accepted
+ADR decisions, gate commands, protected case identity and every other witness
+remain unchanged. The test file is not a digest-bound artifact of M0–M3; no gate
+binding changes. The original missing-readiness failure at
+`2df5eda7ba7c5e62adc9408b19e52737aa2c0ac7` remains failed evidence. Its original
+cause was not established; the diagnostic pass does not erase it or waive the
+replacement witness's required proof.
+
+This standalone commit adds only this disposition. An independent reviewer
+must examine its exact SHA before the test patch is applied or executed. Then
+run the complete acquisition test file on the current and accepted-floor macOS
+toolchains and on Linux serenity. Retain source, command, seed, result and log
+identity, and diagnose any failure before another run. The complete final M0–M3
+gates remain required on the resulting candidate under the existing approved
+cadence. Commit and push completed work to `m3`; this approval grants no M3
+closure, product integration to `main`, release or waiver of another finding.
+
+<a id="disposition-m3-provider-diagnostics-design-2026-09-11"></a>
+### M3 bounded provider failure diagnostics design, 2026-09-11
+
+The maintainer requested the diagnostic choice in plain English. The presented
+recommendation was:
+
+> **Add limited error reporting — recommended.** Make it report categories such as connection failure, provider rejection, or response-processing error, without exposing keys or response contents. This requires a small code change, architecture approval and fresh tests.
+
+The alternative preserved the companion and observed only its network
+connections. The recommendation explicitly stated that the missing information
+would be repaired first and the underlying failure would still need to be
+identified and resolved. The maintainer answered **"1"**.
+
+This selects the bounded design described by proposed
+[ADR 0029](../adr/0029-bounded-provider-failure-diagnostics.md#concept) and its
+[technical companion](../adr/0029-bounded-provider-failure-diagnostics-technical.md#technical-depth).
+The external design packet had received independent read-only clearance at
+SHA-256 `d48818d1dbdb19fe2aac8cbe24929761036be998001ff71e1eb6a2df24f00880`.
+Its scope is one finite failed-stage/category pair in the companion's existing
+private channel, available to bounded test-owned observation only after a
+validated terminal and clean EOF. Every intervening protocol failure discards
+the provisional pair. An outer fallback cannot replace the first classified
+failure. No raw exception, provider message, credential, new public API,
+durable record, production observer, larger frame limit or dependency is added.
+
+Preserve the generic Model error, dispatch and retry authority, settlement,
+accounting, permit retirement, same-source build checks and cleanup proof.
+The named closed-schema fixtures may be proposed for the version-2 contract;
+their historical identities and unaffected guarantees remain required. This
+record does not itself replace a protected test restriction or accept an ADR
+or M3 amendment candidate. Complete the applicable reviewed acceptance records
+before dependent implementation.
+
+The original Linux failure at source
+`8e9a6c3432fd35784b52a435d12e922b5f33098d` remains unresolved. Supplemental
+instrumented successes and the completed macOS gate do not assign its cause.
+Retain original failures and subsequent results separately. The existing
+approved final-gate cadence remains in force, including Linux serenity and
+required actual provider paths. This choice waives no failed test or finding,
+authorizes no additional supplemental provider calls, and grants no M3 closure,
+product integration to `main`, tag or release.
+
+<a id="override-disposition-m3-amendment1-gate-cadence-2026-09-11"></a>
+### M3 Amendment 1 gate cadence — 2026-09-11
+
+The maintainer received two questions: acceptance of the exact ADR 0029 pair at
+`25fcb94de0d980c3724377670b25cbd14fe638ec`, and this timing question:
+
+> May the upcoming documentation-only M3 amendment commits also use your “full gates only at the end” schedule? I recommend retaining focused status, binding, documentation and bootstrap checks, plus independent review, and deferring full M0–M3 runs until implementation is complete. All final tests and pass criteria stay unchanged; deferred checks are recorded as unrun. The existing exception covers ordinary implementation, while AGENTS.md separately requires full checks for formal amendments.
+
+The offered choices were **"Extend end-only schedule (Recommended)"** and
+**"Run full gates for amendment"**. After requesting and receiving the essence
+of the proposed ADR, the maintainer answered **"Accept both"**. This standalone
+record transcribes the timing decision; the ADR acceptance is recorded in its
+own administrative transition.
+
+Under [the explicit maintainer override](../../AGENTS.md#maintainer-override),
+this replaces only the full-gate execution timing at the documentation-only
+M3 Amendment 1 proposal `A` and its immediate rebind child `R` for ADR 0029.
+It covers the direct gate run at `A` and inherited/full gate runs at `R` required
+by AGENTS.md's v1 amendment procedure, the plans index's amendment mechanics,
+the accepted M3 Technical envelope and the M3 gate's evidence-cost section.
+Full M0, M1, M2 and M3 execution is deferred to the completed implementation
+candidate under the existing final qualification schedule, including Linux
+serenity. Deferred checks are **unrun**, never PASS; retained earlier results
+remain evidence for their original source revisions.
+
+Keep focused status, artifact and envelope binding, documentation and bootstrap
+checks appropriate to each revision, plus independent exact-SHA review. At `A`,
+binding-dependent checks must refuse only for the deliberately stale M3 binding;
+verify binding-independent checks directly. At `R`, status, binding validation
+and bootstrap must pass. The new diagnostic behavior remains explicitly unproved
+until the first implementation checkpoint establishes the behavioral red and
+the implementation supplies its required conformance evidence.
+
+The one-parent direct `A` to `R` transaction and exact-candidate acceptance
+remain required. No bound artifact, gate command, protected witness, required
+real path, deadline, count, outcome, final pass criterion or accepted ADR decision
+changes through this timing record. An observed failure still requires repair
+or explicit disposition; no historical failure is waived. This grants no
+amendment acceptance, M3 closure, product integration to `main`, tag or release.
+
+This commit adds only this disposition. An independent read-only reviewer must
+examine its exact SHA before dependent work relies on the timing exception.
+
+<a id="disposition-adr-0029-acceptance-2026-09-11"></a>
+### ADR 0029 acceptance — 2026-09-11
+
+The maintainer was asked:
+
+> Do you accept ADR 0029—the bounded provider failure diagnostics proposal—at reviewed and pushed m3 SHA 25fcb94de0d980c3724377670b25cbd14fe638ec? Your design choice is already recorded; this accepts the exact document pair.
+
+The offered choices were **"Accept ADR 0029 (Recommended)"** and
+**"Keep ADR 0029 Proposed"**. A second question concerned the amendment's
+full-gate timing. After requesting and receiving the essence of the ADR, the
+maintainer answered **"Accept both"**. The second decision is retained in the
+separately committed
+[timing disposition](#override-disposition-m3-amendment1-gate-cadence-2026-09-11).
+
+This accepts the exact Proposed
+[ADR 0029 Concept](../adr/0029-bounded-provider-failure-diagnostics.md#concept)
+and [Technical depth](../adr/0029-bounded-provider-failure-diagnostics-technical.md#technical-depth)
+pair at `25fcb94de0d980c3724377670b25cbd14fe638ec`, with Concept SHA-256
+`12a1138603733aa7e71770b00460339569f149fc4332defc3cd60e3712d5a7d1`
+and Technical SHA-256
+`4cb088578dce875fe2c577282242b61bb98c6f8f9b384f1ad4be09bbb101f1e4`.
+Independent exact-SHA review cleared that candidate, and its canonical status
+check passed with unchanged clean source. The reviewed timing-only disposition
+is its own intervening commit; it is not the ADR's bound candidate.
+
+This administrative transition changes only the Concept status and Acceptance
+row, this new disposition and derived ADR index statuses. It preserves both
+decision texts and all ADR 0019 accepted bytes. The historical Proposed pair's
+acceptance-pending explanation describes its preparation state; this record
+and its completed Acceptance row supply the subsequent authority.
+
+The decision permits the bounded private category contract it specifies;
+implementation still requires acceptance of the exact M3 Amendment 1 proposal
+and its direct rebind. This accepts no unseen amendment, waives no failure,
+authorizes no additional supplemental provider call and grants no M3 closure,
+product integration to `main`, tag or release.
+
+<a id="override-disposition-m3-unaccepted-amendment-replacement-2026-09-11"></a>
+### M3 unaccepted amendment replacement — 2026-09-11
+
+The implementer identified an enforcement defect in the published, unaccepted
+M3 Amendment 1 proposal at
+`78610277fd102e549ed9a71e73d3ed2967fc2075`: the status checker required a prior
+plan citation as well as the independently reviewed standalone approval record.
+The contract requires the record to predate dependent work; the record already
+exists at `397031d10353a4b3aef177943b2e4c45aef0fb0a`.
+
+The implementer explained:
+
+> Because the faulty proposal is already pushed, replacing it will need your approval after the repair is concrete and reviewed.
+
+The maintainer answered **"I approve replacement"**. Under
+[the explicit maintainer override](../../AGENTS.md#maintainer-override), this is
+one exception to the ordinary-fast-forward requirement retained in the
+[M3 implementation completion disposition](#disposition-m3-implementation-completion-2026-09-11).
+It authorizes replacing that unaccepted proposal on `m3` and `origin/m3` with
+the reviewed checker correction, this standalone disposition and a recreated
+documentation-only Amendment 1 proposal above unchanged accepted ADR transition
+`b5f9a4bf46f8e8a65b5fffd87f72327954742f4e`. All previously accepted candidates
+and their evidence remain unchanged and reachable. `main` and `m4` are untouched.
+
+The correction admits a first citation only on an already-Accepted single-parent
+lineage with an unchanged Acceptance record and a unique override anchor in
+that same parent. Existing missing/duplicate-anchor, same-commit authority,
+initial-acceptance and split-parent laundering refusals remain required.
+Focused tests must reproduce the false refusal, prove this valid case and retain
+the existing negative guarantees. Independently review the exact correction
+and this disposition before replacement. The recreated proposal must pass its
+focused checks apart from the expected stale M3 binding; full gates retain the
+approved end-only cadence and are not reported as passed here.
+
+The original proposal and complete ancestors are retained in a verified Git
+bundle, SHA-256
+`eb0a3848e7c83b3cd778e593250451fb9c1f0f4dbd25eb740efe09f9450c002f`,
+with the failed bootstrap and passing component evidence in the maintainer's
+review archive. The original bootstrap log SHA-256 is
+`c804bdf4989961ac132b1148a0153ea040dcd047a7533eaceb5fe7614acc89ee`.
+Those results keep their original source attribution and are not waived.
+
+Use an exact remote lease against
+`78610277fd102e549ed9a71e73d3ed2967fc2075`; refuse the replacement if the remote
+has advanced. Verify a clean local `m3` at that same original tip before moving
+it. This authorizes this replacement only; later pushes use ordinary
+fast-forwards. It does not accept the recreated amendment, relax the direct
+proposal/rebind sequence, authorize diagnostic implementation before that
+acceptance, or grant M3 closure, product integration to `main`, tag or release.
+
+<a id="disposition-m3-amendment-1-acceptance-2026-09-11"></a>
+### M3 Amendment 1 acceptance — 2026-09-11
+
+The maintainer was asked:
+
+> Do you accept M3 Amendment 1 at `0c796c215e1405a6dfd9330e4ff6876fdb6e09dd` so I can record acceptance and implement the already-approved provider diagnostics? The replacement is pushed and reviewed. AGENTS.md requires acceptance of this exact plan update before implementation continues.
+
+After requesting an English explanation, the maintainer was told that this
+updates M3's formal scope for the already-approved diagnostic design, permits
+implementation and testing, and retains final macOS/Linux gates and separate
+closure approval. The maintainer replied **"I accept"**.
+
+This accepts the exact [M3 Concept plan](../plans/M3.md#concept),
+[Technical depth plan](../plans/M3-technical.md#technical-depth) and
+[Amendment 1 gate](../plans/M3-gate.md#amendment-1) at
+`0c796c215e1405a6dfd9330e4ff6876fdb6e09dd`. The Acceptance row records the
+candidate's Concept, Technical depth and gate digests. Independent exact-SHA
+review cleared the candidate. Its canonical bootstrap ended only at the
+expected stale Concept binding; 75 governance tests passed at seed 728659,
+and inspection, documentation, formatting and whitespace checks passed.
+This was proposal evidence, not status/bootstrap or full-gate PASS.
+
+This immediate administrative child changes only the Acceptance row and this
+fresh disposition. Both normative envelopes, the gate, product bytes, the
+Accepted lifecycle and derived status records remain unchanged. The
+[approved amendment cadence](#override-disposition-m3-amendment1-gate-cadence-2026-09-11)
+retains focused binding/status/bootstrap checks and independent exact-SHA
+review at this child before dependent implementation; full M0–M3 gates remain
+deferred to the completed candidate, including Linux serenity.
+
+The accepted scope is the bounded private diagnostics of accepted ADR 0029.
+Historical failures and earlier evidence retain their original attribution;
+this acceptance waives no failure and grants no additional supplemental
+provider call, M3 closure, product integration to main, tag or release.
+
+<a id="override-disposition-m3-commit-title-replacement-2026-09-12"></a>
+### M3 commit-title replacement — 2026-09-12
+
+Three unaccepted implementation commits above
+`3e8ae23d74048f23faaef109c7b1eb3a7185d739` omitted the required milestone
+marker from their titles. Both final gates at
+`0a1b57f1ee7b89d24080a7a48e2de48d4692d2ff` stopped at the bootstrap
+commit-message check after 1,196 deterministic tests passed on each platform.
+
+The maintainer was asked:
+
+> May I replace the last three published m3 commits with the reviewed versions that add `(M3)` to their titles? All file contents stay identical, and the original history is backed up. The replacement is e17fb2e217eedb94040277dbda5f7b02c9195ce3, followed by a separate reviewed record of this permission. The push will refuse to proceed if origin/m3 has advanced beyond 0a1b57f1ee7b89d24080a7a48e2de48d4692d2ff. This corrects my commit-message error without weakening the checker; later pushes remain ordinary fast-forwards.
+
+The maintainer answered **"Approved"**. Under
+[the explicit maintainer override](../../AGENTS.md#maintainer-override), this
+authorizes one exception to the ordinary-fast-forward requirement in the
+[M3 implementation completion disposition](#disposition-m3-implementation-completion-2026-09-11).
+It replaces only these three published commit IDs, followed by this standalone
+approval record:
+
+| Original commit | Reviewed replacement |
+| --- | --- |
+| `19db12c40eca2a62ed87fb25608d065db9cbf500` | `69f06dd2cb7ae6b2019cd7be2ae2b79ef78f6dea` |
+| `3625b6d3058bbe27e484534d9c08cfa5e1e2375c` | `9068461998a084bf82f811551bf33eadfa50a3a3` |
+| `0a1b57f1ee7b89d24080a7a48e2de48d4692d2ff` | `e17fb2e217eedb94040277dbda5f7b02c9195ce3` |
+
+Independent review verified that each corresponding tree is identical. Only
+the three titles and their rewritten parent IDs differ; author and committer
+identities, timestamps and message bodies are preserved. Every ancestor of the
+unchanged base remains reachable, including all accepted and bound candidates.
+The canonical commit-message check passed at the reviewed replacement. The
+checker, accepted plan and ADR decisions, gate criteria and bound artifacts
+remain unchanged. This exception applies only to publication of this corrected
+implementation lineage; it does not add a commit-title waiver.
+
+The original complete history is retained in a verified Git bundle, SHA-256
+`01bc59f1f3bd6efa2dec239088af0edf62476fda6dd246b34a6f770db4c28c27`.
+The original macOS and Linux gate results remain failures at their original
+SHA. Their passing component results are retained with those runs; neither
+tree equivalence nor this permission turns them into full-gate PASS or evidence
+executed at a replacement SHA. The joint evidence manifest SHA-256 is
+`6d7880e673df2868785b44d930d59fd08161020db593fe43955bbdfa06b7b294`.
+
+This disposition lands alone in the immediate child of the reviewed
+replacement. Independently review that exact child and its changed path before
+publication. Verify clean local `m3` and the remote tip at
+`0a1b57f1ee7b89d24080a7a48e2de48d4692d2ff`; use that exact remote lease and
+refuse replacement if either has advanced. Run the canonical commit-message
+check on the resulting candidate before publication and final qualification.
+Later pushes use ordinary fast-forwards. Fresh final macOS and Linux gates
+must name the resulting candidate and retain the approved end-only cadence.
+This approval grants no historical-failure disposition, M3 closure, product
+integration to `main`, tag or release. `main` and `m4` remain unchanged.
+
+<a id="override-disposition-m3-selector-diagnostics-2026-09-12"></a>
+### M3 shared-selector diagnostics repair — 2026-09-12
+
+The maintainer was asked:
+
+> Approve the reviewed diagnostics patch d2bfe33c46ff83c97fb80ff4406c78c37e1d878739854af03f26cc65a8e7c1c8, its M1/M2/M3 binding updates, and the named exception to M2’s requirement to keep the old M1 runner bytes? I recommend using focused checks during these three updates and reserving the complete M0–M3 gates for the final candidate on macOS and Linux. Authorize the independent reviewer (/root/m3_independent_review) to accept only exact commits matching this patch and the listed binding changes, with your permission recorded and independently reviewed before editing. Each milestone keeps its separate sequential update and exact-commit review; deviations stop for your decision. This does not waive any failure or authorize ADR changes, closure, merge to main, or release.
+
+The maintainer answered **"Approve repair, final-only gates, and limited delegation (Recommended)"**.
+
+Under [the explicit maintainer override](../../AGENTS.md#maintainer-override),
+this approves the exact external patch with SHA-256
+`d2bfe33c46ff83c97fb80ff4406c78c37e1d878739854af03f26cc65a8e7c1c8`
+against `5c74164deb610016854a2a77ce79d650d269c669`. The reviewed decision packet
+has SHA-256 `22abae8ddbbf8910e7e00c7eb559fb69cc00f809a684451808ac529b796b0ac3`.
+The immutable proposal and focused evidence are retained in the maintainer's
+`loopex-reviews/m3-selector-diagnostics-proposal-5c74164-ps9qhhkh` archive,
+whose manifest SHA-256 is
+`f1f79d054c384ea07a22818aad826ef07725ce5b4ab3ffb5af2d567abcf96e1a`.
+That archive predates this approval and correctly remains labelled a proposal.
+
+The repair changes only failure diagnostics in `scripts/m1-exunit-runner.exs`
+and adds two synthetic tests in its existing
+`apps/loopex/test/m1_exunit_runner_test.exs` corpus. Failure output retains the
+invocation mode and seed, bounded failed-case identifiers and source locations,
+and closed error categories and operand types. It retains at most eight event
+records, two failure summaries per record and 4,096 bytes per detail line, with
+explicit omitted counts. It excludes arbitrary messages, assertion values or
+expressions, provider bodies, captured logs and stack arguments. Ambiguous
+external source paths remain unavailable. The existing five corpus cases,
+authoritative success output and digest inputs, required counts and exclusions,
+real-provider paths and exit predicates remain unchanged.
+
+The named holders and binding work are:
+
+| Holder | Approved replacement bindings |
+| --- | --- |
+| Closed `M1` | Shared runner and corpus, their embedded digests in `scripts/check-m1-gate.sh`, and that script's own Bound Artifacts row; one additive gate generation in `M1.md` and the next amendment in `M1-gate.md`. |
+| Closed `M2` | Shared runner and corpus, their embedded digests in `scripts/check-m2-gate.sh`, and that script's own Bound Artifacts row; one additive gate generation in `M2.md` and the next amendment in `M2-gate.md`. |
+| Accepted `M3` | The two shared rows in `M3-gate.md`, the next amendment and its acceptance rebind in `M3.md`; only conforming explanation in the plan pair where needed to describe these diagnostics. |
+
+The continuing requirement in [M2's gate](../plans/M2-gate.md) to retain the
+exact shared runner and corpus bytes that M1 closed with is replaced, for this
+M3 repair only, by the exact reviewed diagnostic bytes and these per-holder
+bindings. Historical Acceptance and Closure records remain unchanged and true
+for their revisions. M0 has no direct binding to either changed shared file.
+
+This record lands alone and receives an independent exact-SHA review before
+any dependent edit. Then complete M1, M2 and M3 in that order. M1 and M2 each
+use their own Closed-gate generation proposal and immediate one-parent rebind;
+M3 uses its own Accepted-plan amendment proposal and immediate one-parent
+rebind. Every proposal and rebind retains its independent exact-SHA review
+and each holder's status validation before the next holder proceeds. Binding
+checks at a proposal must identify the expected pending or stale binding;
+unsettled other holders are not reported as passing. Every holder must be
+settled before final qualification.
+
+For these three transactions only, focused checks replace full-gate runs at
+proposal and rebind checkpoints. Validate exact patch identity, the owning
+diagnostic corpus, unchanged success-report semantics, script syntax and
+digests, and the applicable status and binding rules. The copied seven-case
+corpus already passed at seed 3107 on Elixir 1.20.3 / OTP 29 and Elixir 1.17.0 /
+OTP 26; retain its exact commands and artifact hashes with the proposal.
+These focused results do not count as final-source qualification. Run the
+complete M0–M3 gates once the final candidate is complete, on macOS and Linux
+serenity. Required pass criteria and the obligation to resolve failures remain.
+
+The independently recorded delegate is **`/root/m3_independent_review`**.
+Its acceptance scope is only actual, exact proposal commits matching the
+approved patch, the binding inventory above and this validation timing. It
+must review each existing proposal SHA and explicitly accept that SHA before
+its rebind; this is no advance acceptance. Each rebind records that acceptance
+in one fresh disposition. The implementer may not supply the delegate's
+decision. Deviations stop for the maintainer's decision.
+
+This approval waives no historical or future failure, changes no ADR decision
+or product contract, and grants no additional supplemental provider call,
+M3 closure, product integration to `main`, tag or release. The lost details of
+the Linux M1 failure at `5c74164deb610016854a2a77ce79d650d269c669` remain
+unavailable; later diagnostic evidence cannot assign its cause retroactively.
+
+<a id="override-disposition-m3-sequential-binding-checker-2026-09-12"></a>
+### M3 sequential binding checker correction — 2026-09-12
+
+Before the first shared-byte proposal, inspection and four synthetic controls
+of the actual artifact-history validator proved a conflict with the existing
+sequential-holder rule. An M1 update leaves M2/M3 temporarily bound to old
+bytes; the checker rejects that historical revision even after their later
+updates. No bound artifact was changed while identifying this defect.
+
+The maintainer was asked:
+
+> May I fix the checker so M1, M2 and M3 can be updated one at a time as you approved, and extend the independent reviewer’s limited authority to approve that correction after testing and exact-commit review? Today the checker permanently rejects the temporary old bindings for milestones waiting their turn. The correction will still reject altered bytes, invalid update order, and any unfinished sequence at final validation. The diagnostics patch stays unchanged, and all final macOS/Linux gates remain required. Your previous approval was limited to that exact patch, so this additional checker change needs approval.
+
+The maintainer answered **"Approve checker correction (Recommended)"**.
+
+This extends the [shared-selector diagnostics approval](#override-disposition-m3-selector-diagnostics-2026-09-12)
+only to correcting the status checker and its governance tests so they enforce
+the already-required per-holder sequence. The diagnostic patch remains exactly
+`d2bfe33c46ff83c97fb80ff4406c78c37e1d878739854af03f26cc65a8e7c1c8`.
+The scope includes the current artifact/history validation path and an explicit
+internal holder scope for intermediate checks. It creates no new product API,
+command-line surface, ADR, transaction marker or gate criterion.
+
+Derive the old/new digest pairs for the shared artifacts changed by the first
+proposal, and their complete holder set, from that proposal and its real
+parent. Keep those shared identities fixed. Only holders still awaiting their
+own update may retain their old rows while actual source bytes must match the
+proposed new digests. Already-rebound holders remain strict. Holder-local
+bound files may change atomically at their owning holder's valid proposal
+within the previously approved inventory; these changes cannot introduce
+another shared-byte change or enlarge the pending holder set.
+
+Reuse the existing v1/v2 proposal and immediate one-parent rebind checks.
+Intermediate holder-scoped validation must identify the holder checked and
+the outstanding holders; it cannot claim global PASS. Normal global status
+must reject an unfinished sequence. A completed, validated sequence admits
+only its own temporary old rows, preserving rejection of missing or dropped
+bindings, unrelated mismatches, changed proposed bytes, invalid ordering,
+overlap and divergent lineage. No implementer-supplied mismatch allowlist
+substitutes for those checks.
+
+This permission lands in its own standalone commit and receives independent
+exact-SHA review before correction code is edited. Focused tests must prove
+the complete valid sequence and the refusal cases above against the actual
+validator, including truthful intermediate scope and final global validation.
+Retain commands, source attribution and results. The original four-control
+reproducer result has SHA-256
+`af33e5e106a6963612dd90e2623693abd38e49bf45b123376437103f6d8ea2ff`;
+it demonstrates the defect, not the correction.
+
+The independently recorded delegate remains **`/root/m3_independent_review`**.
+Its scope now also includes approval of the actual checker correction commit
+after focused testing and exact-commit review against these constraints.
+That review must complete before the first shared-byte proposal. Its later
+M1/M2/M3 acceptance scope and all separate sequential update/review obligations
+remain as recorded in the original approval. No unseen commit is accepted.
+
+Full M0–M3 gates remain required on the final candidate on macOS and Linux
+serenity. This correction changes no pass criterion, waives no failure and
+grants no additional supplemental provider calls, ADR changes, M3 closure,
+product integration to `main`, tag or release. Further deviations require the
+maintainer's decision.
+
+<a id="disposition-m1-gate-generation-9-2026-09-12"></a>
+### M1 gate generation 9 acceptance — 2026-09-12
+
+Under the maintainer's [diagnostics delegation](#override-disposition-m3-selector-diagnostics-2026-09-12)
+and [checker correction approval](#override-disposition-m3-sequential-binding-checker-2026-09-12),
+delegate **`/root/m3_independent_review`** independently reviewed exact proposal
+`08268e11317d0a57a95e374e7bf1f98c9aabd3ad` and explicitly stated:
+
+> I explicitly ACCEPT M1 gate generation 9 proposal A 08268e11317d0a57a95e374e7bf1f98c9aabd3ad, with gate SHA-256 57076985b3aab41d72f26c399d0177e115198f147f9c1c8168fc65df5fd2c066.
+
+The proposal changes exactly the five reviewed M1 paths and retains historical
+Acceptance, Closure and earlier generation rows. Its immediate one-parent rebind
+completes only generation 9 and adds this fresh disposition. The independently
+approved checker corrections `ad5e530952d3b08ee1a8a14773789e727012f90d`
+and `8abfee872c4dc2fb0e2d76680e8c4b2fb96afbeb` preceded this proposal.
+
+At the accepted proposal, focused checks verified nine bound artifacts, document
+links and pairing, unchanged historical governance records, and the exact
+pending-generation-9 refusal. The command exited 1 in 9.91 seconds and explicitly
+reported `global_pass=false`; its log SHA-256 is
+`9db3a52d6d90bc9a0ea1ebb137dc1173eafb1e52e92212ab40fb752944456bfa`.
+The seven-case diagnostics corpus remains attributed to retained, unaccepted
+`2368c9daab6a709226bd0a0ecf8616b83b1aa582`, whose shared runner and corpus
+bytes are identical. That earlier proposal's unexpected Closed-citation guard
+refusal remains recorded; it was preserved outside the integration lineage and
+was never accepted. The current and floor checker tests passed all 84 cases;
+the current run used the exact correction bytes before commit, and the floor
+run used exact `8abfee872c4dc2fb0e2d76680e8c4b2fb96afbeb`.
+
+Before M2 proceeds, this rebind requires complete real-history M1-scoped status
+validation identifying M2 and M3 as pending, plus independent exact-transition
+review. Those results belong to the rebind, not to its proposal. Full gates at
+these intermediate revisions are unrun under the recorded timing approval.
+Complete M0–M3 gates remain required at the final candidate on macOS and Linux
+serenity. No historical failure, later proposal, closure or release is accepted
+by this disposition.
+
+<a id="disposition-m2-gate-generation-10-2026-09-12"></a>
+### M2 gate generation 10 acceptance — 2026-09-12
+
+Under the [recorded maintainer delegation](#override-disposition-m3-selector-diagnostics-2026-09-12),
+delegate **`/root/m3_independent_review`**, named `m3_independent_review` in the
+generation table, independently reviewed exact proposal `1897d402a906212cc7c4118218352e4df9624591`
+and explicitly stated:
+
+> I explicitly ACCEPT M2 gate generation 10 proposal A 1897d402a906212cc7c4118218352e4df9624591, gate SHA-256 4c0ee04ab5d7838b6a38adeac81689749d9ba530cd6499c2ec3d4866f2bae864.
+
+The proposal changes exactly the three reviewed M2 paths. The shared runner and
+corpus retain the bytes settled by [M1 generation 9](#disposition-m1-gate-generation-9-2026-09-12).
+Only the approved diagnostics exception replaces M2's continuing old-M1-byte
+restriction. Historical Acceptance, Closure and Amendments 1–9 are preserved.
+The immediate one-parent rebind completes only generation 10 and adds this fresh
+disposition; it changes no gate or bound artifact.
+
+M1's reviewed rebind `7aebf6a3ecc8237e42aa7088a04480a6751542b3` completed
+its real-history status check before this proposal, with M2 and M3 explicitly
+pending. Its exit was 0 in 793.108 seconds, with log SHA-256
+`016762860ec9b141faea29ce89a7a08860ce2689d455ab762973352e763e704f`.
+At this M2 proposal, focused checks verified six bound artifacts, links, pairing,
+unchanged historical records, and the exact pending-generation-10 refusal.
+They exited 1 in 9.838 seconds with `global_pass=false`; the log SHA-256 is
+`047eb13baf11de2c4d2bf9566898726da83bcd2e4f1a4a18ccc54033af15edae`.
+Unchanged corpus evidence retains its original source attribution.
+
+Before M3 proceeds, this rebind requires complete real-history M2-scoped status
+validation identifying M3 as pending, plus independent exact-transition review.
+Full gates at these intermediate revisions are unrun under the recorded timing
+approval. Complete M0–M3 gates remain required at the final candidate on macOS
+and Linux serenity. This disposition waives no historical failure and accepts
+no later proposal, closure or release.
+
+<a id="disposition-m3-amendment-2-acceptance-2026-09-12"></a>
+### M3 Amendment 2 acceptance — 2026-09-12
+
+Under the [recorded diagnostics delegation](#override-disposition-m3-selector-diagnostics-2026-09-12)
+and [checker correction approval](#override-disposition-m3-sequential-binding-checker-2026-09-12),
+delegate **`/root/m3_independent_review`**, named `m3_independent_review` in the
+Acceptance table, independently reviewed exact proposal
+`89a848b6685fd2d6e7d4dfd4768b4d083dc9db36` and explicitly stated:
+
+> I explicitly ACCEPT M3 Amendment 2 proposal A 89a848b6685fd2d6e7d4dfd4768b4d083dc9db36: Concept envelope SHA-256 9c004acd94844a9f1369ac84e6b735076c537cc5caabf4ad0e825854334352e5; Technical envelope SHA-256 433947d010b8999966a9becb9b260647f2764fa0bbc8ef4448f6b395f0b0d227; gate SHA-256 c129c26a9a7a10edc57f4dbc22e624c70001ee7a780bfef643fc826fdde5ab1f.
+
+The proposal changes exactly the three reviewed M3 plan/gate documents. It
+matches the prepared patch with SHA-256
+`17c87646796a292e50c8fc6c6d330021f93f97404873ad6c17a4ca1779b8e66a`.
+The shared runner and corpus remain the exact bytes settled by M1 generation 9
+and M2 generation 10. Five outcomes, ADRs, product contracts, required witnesses
+and final pass criteria retain their meaning. This immediate one-parent rebind
+changes only the Acceptance row and adds this fresh disposition; the Accepted
+lifecycle, gate, normative envelopes and product bytes remain unchanged.
+
+M2's reviewed rebind `7320ee2093d181402e6512dc3166c719ecc4a767` completed
+its real-history status check before this proposal, with only M3 pending. It
+exited 0 in 735.46 seconds, with log SHA-256
+`dc396ee2866becb4405069fd2de4a08616d2dcc3573a5ae3357c36b1ca343cee`.
+At the M3 proposal, focused checks verified eight bound artifacts, links,
+pairing, unchanged prior governance records, and the exact expected stale
+Concept-digest refusal. They exited 1 in 9.45 seconds with `global_pass=false`;
+the log SHA-256 is
+`3f7500700adab1c2e5fb61d70d1fd1841ed6652cebb59c18a98e4bc696825b87`.
+Unchanged corpus evidence retains its original source attribution.
+
+Before final qualification, this rebind requires independent exact-transition
+review, complete default global status validation with no pending holder, and
+M3 gate inspection. Full gates at the intermediate revisions are unrun under
+the recorded timing approval. Complete M0–M3 gates remain required at the final
+candidate on macOS and Linux serenity. This disposition waives no historical
+failure and grants no M3 closure, product integration to `main`, tag or release.
+
+<a id="override-disposition-m3-checksum-portability-2026-09-12"></a>
+### M3 checksum portability repair — 2026-09-12
+
+The maintainer was asked:
+
+> Approve the reviewed M3 checksum fix and its M3 binding update? Linux’s isolated tests lack `shasum`; the fix also accepts `sha256sum` with the same digest checks. I recommend letting the independent reviewer accept only this exact patch and matching M3 update, after your permission is recorded and reviewed. Use focused checks during the update, then complete M0–M3 gates on macOS and Linux at the final candidate. Patch: 0468bc9e55adca559d37351257076c1dbd7cbb5f491b36cf66464193e1dd5b57. This grants no failure waiver, ADR change, closure, merge to main, or release.
+
+After the completed Linux control and the outstanding approval were reported,
+the maintainer answered **"Approved"**. This records approval of that exact
+packet, including its limited reviewer delegation and validation timing.
+
+Under [the explicit maintainer override](../../AGENTS.md#maintainer-override),
+this authorizes only patch SHA-256
+`0468bc9e55adca559d37351257076c1dbd7cbb5f491b36cf66464193e1dd5b57`
+to `scripts/check-m3-gate.sh`. At source
+`6d745eda73d8aaa6e88f3627fdefd71bdac43236`, the runner digest is
+`49cf9b8f7fc95846d105e045d86f73110f5de2fde80b9b6214ed30c565b87302`;
+the approved replacement digest is
+`d54c66098d971a9bdc0b26addb95d415db02c44e4b82ba55e325b5863cf4629b`.
+The sole holder is Accepted `M3`. Its Amendment 3 proposal changes the runner,
+that runner's Bound Artifacts row in `M3-gate.md`, and the appended amendment.
+The immediate one-parent rebind changes only M3's Acceptance row and adds its
+fresh acceptance disposition here. M1 and M2 bindings remain unchanged.
+
+The replacement accepts a validated `shasum` or `sha256sum`, checks the known
+empty-input SHA-256 digest and every returned lowercase 64-hex digest, and
+refuses unavailable, malformed or failed hashing. Artifact comparisons and the
+final gate digest retain their meaning. It changes no PATH isolation, role,
+command, witness, count, exclusion, timeout, provider path or final report field.
+A final hash failure must refuse before the authoritative PASS report.
+
+This disposition lands alone and receives independent exact-SHA review before
+dependent edits. Delegate **`/root/m3_independent_review`**, named
+`m3_independent_review` in the Acceptance table, may then accept only the actual
+Amendment 3 proposal SHA matching this patch and these M3 binding changes, after
+focused validation and exact-commit review. Deviations require the maintainer's
+decision. The delegate cannot approve another repair, failure waiver, ADR,
+closure, merge to `main`, tag or release.
+
+For this M3 proposal and rebind only, focused checksum controls, script and
+artifact inspection, applicable binding/status checks and independent exact-SHA
+review replace the full gates otherwise required at those intermediate
+checkpoints. The proposal retains its expected stale M3 binding. Its immediate
+rebind must settle that binding and pass complete default status validation
+with no pending holder. The complete M0–M3 gates remain required at the final
+candidate on macOS and Linux serenity. Intermediate full gates are unrun, never
+reported as passing, and prior failures retain their original status.
+
+The reviewed proposal evidence is retained in the maintainer's
+`loopex-reviews/m3-checksum-proposal-6d745ed-p5e86sdi` archive with manifest
+SHA-256 `8f752d5fcad0a8403098e05ab4e7766005f55545f884062ea3e05f878e0d6f14`.
+It contains nine local copied-runner inspection controls, three synthetic
+final-report controls and the actual Linux restricted-PATH control. On Linux,
+the original runner reproduced the exact missing-`shasum` refusal with exit 2;
+the proposed runner returned the unchanged inspection-only output with exit 0.
+The donor remained unchanged, and only the disposable fixture's runner and
+synthetic self-binding row changed. That evidence predates approval and is
+proposal evidence, not an accepted binding or full-gate result. No historical
+failure is waived by this instruction.
+
+<a id="disposition-m3-amendment-3-acceptance-2026-09-12"></a>
+### M3 Amendment 3 acceptance — 2026-09-12
+
+Under the [recorded checksum delegation](#override-disposition-m3-checksum-portability-2026-09-12),
+independent delegate **`/root/m3_independent_review`**, named
+`m3_independent_review` in the Acceptance table, reviewed exact proposal
+`887ff3733bde8f1560b23c85a4a23988072d5715` and explicitly stated:
+
+> I accept **M3 Amendment 3 proposal `887ff3733bde8f1560b23c85a4a23988072d5715`** under the recorded limited delegation.
+
+The delegate verified and accepted these exact bindings:
+
+- Concept envelope: `sha256:9c004acd94844a9f1369ac84e6b735076c537cc5caabf4ad0e825854334352e5`.
+- Technical envelope: `sha256:433947d010b8999966a9becb9b260647f2764fa0bbc8ef4448f6b395f0b0d227`.
+- Gate: `sha256:7a0140357954e5b465e3e6f41f79893e0f1c820bf0f221c95dc9794a47b1cbcc`.
+
+The proposal changes only the exact approved runner patch and its M3 gate
+binding plus Amendment 3. Both normative envelopes, prior amendment text,
+M1/M2 bindings, product bytes and the Accepted lifecycle are unchanged. This
+immediate one-parent administrative rebind changes only the Acceptance row and
+adds this fresh disposition. It accepts no further repair or amendment.
+
+At exact proposal A, the gate-support file passed all 12 cases with seed 3107,
+zero failures, skipped or excluded cases, in 7.585 seconds. Its log SHA-256 is
+`a66d540aa49b470aa05d0381273693f1713bf579745765de4e44376c014b40ad`.
+Artifact inspection exited 0 in 0.77 seconds with its unchanged inspection-only
+output; log SHA-256
+`ac766105a0ab0b8576719f9255b3a2c7be3cbebc528af9bf445dfc8332d88eb4`.
+Focused proposal validation exited 1 in 10.115 seconds only for the expected
+stale M3 gate binding. It verified all eight artifact hashes, links, pairing
+and unchanged prior governance records, with `global_pass=false`; log SHA-256
+`729af2ea6cdcbec98706191ab6e6f44af7d9e6e15456207bf3804874d7e5f666`.
+The reviewer read those exact results and logs before acceptance. Earlier
+checksum controls retain their original proposal-fixture attribution.
+
+Before final qualification, this rebind requires independent exact-transition
+review, complete default global status validation with no pending holder, and
+M3 artifact inspection. Intermediate full gates remain unrun under the approved
+timing exception. Complete M0–M3 gates remain required at the final candidate
+on macOS and Linux serenity. This acceptance waives no historical failure and
+grants no M3 closure, product integration to `main`, tag or release.
+
+<a id="override-disposition-m3-signal-delivery-witness-2026-09-13"></a>
+### M3 prepared signal-delivery witness correction — 2026-09-13
+
+The maintainer answered **"Approved"** to this outstanding request:
+
+> Do you approve the targeted correction: let this single test wait for confirmed delivery within the CLI’s existing **23.8-second limit**, preserving its assertions and failing promptly on refusal or process loss?
+
+The linked decision draft, SHA-256
+`ae7f97838ad2cff87b0c2fdca416ebaaf2e97e3733ddda7b3f471475055911e8`,
+named only `duplicate refusal preserves signal delivery while the incumbent
+presents` in `apps/loopex_cli/test/prepared_recovery_contract_test.exs`, declared
+at line 2242 of source `b839284c2a5770464496dbc3f98b26587d97d024`. The approval
+replaces that case's approximately three-second fixed-attempt mailbox wait
+under the [explicit maintainer override](../../AGENTS.md#maintainer-override).
+It permits no change to the shared `queued_abort?/1-2` helper or its other
+callers.
+
+The replacement observes actual abort enqueue at the still-suspended
+coordinator, using one monotonic cutoff established immediately before the
+signal. Its allowance is derived from the existing
+`Loopex.Executor.cancellation_bounds(@grace).cli_backstop_ms`: with this
+fixture's `@grace = 7_311`, the exact allowance is 23,828 milliseconds. It
+never restarts that cutoff. It requires an initially idle incumbent, the same
+handler identity and live relevant participants; observed refusal, handler
+replacement, participant loss and cutoff expiry are distinct failures. It
+retains the existing holder, attachment and live-backstop assertions,
+coordinator release, presentation result, session identity, durable interrupt
+admission and cleanup in their existing order. Diagnostic assertion output
+does not expose raw private terms.
+
+The reviewed controlled counterexample made the unchanged mailbox assertion
+fail after 3,305 milliseconds while the exact signal worker's routing call
+remained pending. Releasing Control let the same worker deliver the abort
+within the unchanged 5,000-millisecond routing bound, and all remaining
+original assertions passed. The evidence and its independent review are
+retained in the maintainer's
+`loopex-reviews/m3-control-counterexample-b839-xdrvevg1` archive, manifest
+SHA-256 `1205cb5d986881366ed03c0712bbd9f26a396e048d9d6e9c7b427f08d3012244`.
+This proves a possible false-failure schedule in the test; the original Linux
+failure's cause remains unknown. The later passive Linux diagnostic's 56
+passing cases at seed 243366 are diagnostic evidence only. The original
+Linux full-gate failure remains failed, and the macOS full-gate pass remains
+attributed to exact source `b839284c2a5770464496dbc3f98b26587d97d024`.
+
+This disposition lands alone and receives independent exact-SHA review before
+the dependent test edit. The approved validation covers normal delivery, the
+reviewed delayed-Control schedule, refusal or participant loss, and a cutoff
+that does not reset, followed by the owning selector's complete focused run.
+The correction is independently reviewed, committed and pushed to `m3` before
+final qualification. No additional broad mutation hunt is required by this
+instruction.
+
+The test file is not a digest-bound artifact of M2 or M3, so this correction
+requires no binding-generation transaction. Protected case names, selectors,
+exclusions and gate bindings retain their meaning. This changes only the
+named test's waiting allowance; product deadlines, runtime behavior, provider
+paths, ADR decisions, milestone scope and final pass criteria are unchanged.
+Complete M0–M3 gates remain required at the resulting final candidate on
+macOS and Linux serenity under the existing final-only cadence. The approval
+waives no historical or future failure and grants no failure disposition,
+M3 closure, integration to `main`, tag or release.
+
+<a id="override-disposition-m3-final-inherited-gates-waiver-2026-09-13"></a>
+### M3 final validation scope — 2026-09-13
+
+The maintainer explicitly directed:
+
+> i don't need you to run m0-m2 gates. just run m3 gates. that's. my decision. you've been waffling, we need to move on.
+
+Under the [explicit maintainer override](../../AGENTS.md#maintainer-override),
+this replaces the requirement to rerun M0, M1 and M2 gates for M3's final
+qualification on macOS and Linux serenity. It takes precedence over the final
+inherited-gate requirements in the earlier M3 cadence, diagnostics, checker,
+checksum and signal-delivery dispositions. Those historical records remain
+unchanged. Final M0–M2 evidence is **waived, not passed**.
+
+Run all remaining M3 gate checks on both platforms at the same committed and
+pushed candidate: bound-artifact and source/build identity checks, the opening
+witness, all deterministic outcome selectors, the full deterministic suite,
+formatting, documentation, dependency and bootstrap checks, and the attended
+real-provider workflow with complete selector accounting. The full suite may
+exercise inherited tests; do not invoke the M0, M1 or M2 gate runners or their
+aggregate. Preserve all remaining assertions, credentials handling and failure
+criteria.
+
+Use an external, reviewable derivative of the bound M3 runner that removes
+only its inherited-gate invocation/report requirement and labels its terminal
+report as M3-only with inherited evidence waived. Retain the exact derivative,
+its diff and digest with each run's evidence. The tracked runner, gate document
+and bindings remain unchanged. A scoped pass must never be reported as the
+unchanged full-gate PASS or as fresh M0–M2 qualification.
+
+This standalone disposition receives independent exact-SHA review before the
+dependent execution change. The instruction adds no product or ADR change,
+does not convert any historical failure into a pass, and grants no M3 closure,
+integration to `main`, tag or release.
+
+<a id="disposition-m3-historical-findings-acceptance-2026-09-13"></a>
+### M3 historical findings accepted for the reviewed candidate — 2026-09-13
+
+After receiving the completed eleven-finding decision packet and its clear
+independent evidence review, the maintainer explicitly directed:
+
+> pass the eleven hittorical decision as accepted for now and pass it to reviewer.
+
+This accepts the residual uncertainty of records 1–11 for qualified M3
+candidate `7d73707dca4953f91b3244ad43e09c1545f8f123` under the explicit
+finding-disposition rule in [AGENTS.md](../../AGENTS.md). The findings no longer
+block review of that candidate. "For now" limits this acceptance to these named
+historical occurrences and this candidate; it supplies no standing exception
+for a recurrence or a future milestone. Their original causes remain unknown
+where the packet says so. Failed results remain failed, and unavailable
+evidence remains unavailable.
+
+The accepted record identities are those in the retained packet:
+
+| Record | Historical occurrence | Historical source | Seed |
+| --- | --- | --- | --- |
+| 1 | macOS M0 fast-command executor result | `994184d` | 906860 |
+| 2 | Linux M0 provider failure after dispatch | `232df7a` | 817697 |
+| 3 | Linux M0 unknown provider result | `8e9a6c3` | 906644 |
+| 4 | macOS M0 repeated skill-import Git listing | `3e8ae23` | 928736 |
+| 5 | macOS floor materializer setup refusal | `0a1b57f` | No test seed |
+| 6 | Linux M1 recovery selector failure | `5c74164` | Unavailable |
+| 7 | macOS M1 launcher second interrupt | `44533d7` | 1734 |
+| 8 | macOS M3 queued-EOF deadline witness | `4372a57` | 3107 |
+| 9 | Linux M1 real-model request-count assertion | `7d2b6d1` | 10195 |
+| 10 | macOS M2 CLI queued-follow-up snapshot | `610671e` | 993077 |
+| 11 | Linux M2 prepared-recovery signal-delivery witness | `b839284` | 243366 |
+
+The decision packet is retained in the maintainer's
+`loopex-reviews/m3-final-review-packet-7d73707-4x2lkbb8` archive. Its manifest
+SHA-256 is
+`b97c7d9402ecf60c3bf8d1e490081e8d1fffaae9266cb48d6d5791ef9ca6b27a`;
+`packet/decision-packet.md` has SHA-256
+`76ec7848a95c23ae7f3270b2c2116c3d85a6dc184133730628ae1c51fefcb4a1`.
+The packet's original pending-decision state remains historical; this new
+disposition records the subsequent acceptance. The retained failures, repair
+reviews, causal limits and evidence map are unchanged.
+
+Both M3-only qualifications passed at exact candidate
+`7d73707dca4953f91b3244ad43e09c1545f8f123`: macOS and Linux serenity each
+completed 17 checks, nine selectors, 1,207 deterministic tests with zero
+failures at seed 3107, and one attended real-provider workflow. Their combined
+archive is `loopex-reviews/m3-only-final-evidence-7d73707-y8c1arat`, manifest
+SHA-256 `57da9db3c0cf1660abb9a0a06b089a8bc52f5fb149177d3f45648b1e8b8e96d6`.
+The final independent archive review is clear, with report SHA-256
+`4240044f92efe3b040207729d4850f21eb77304846e9d1ac966f252dbb316492`,
+retained as `archive-review/review.md` in the decision-packet archive.
+
+Final M0–M2 reruns remain waived under the
+[separate validation-scope disposition](#override-disposition-m3-final-inherited-gates-waiver-2026-09-13).
+This acceptance changes no required assertion, count, deadline, real path or
+future failure criterion. Qualification results keep their exact source
+attribution; this documentation-only recording commit makes no new test claim.
+The record lands alone, is committed and pushed to `m3`, and is passed with
+the retained evidence to an independent reviewer at its exact SHA. It grants
+no M3 closure, product integration to `main`, tag or release.
+
+<a id="override-disposition-m3-required-trust-witness-2026-09-13"></a>
+### M3 required-only trust witness correction — 2026-09-13
+
+For new finding H3 in the post-implementation review of
+`f92f19ee31e7ea62cb5614a487dfb22527c13c66`, the maintainer received this proposal:
+
+> For H3, may I keep ADR 0017’s existing promise and correct the protected test under a narrow override? Required-only failures would retain the exact reason project trust was declined. The test may observe a trust lookup, but must still prove zero optional-content reads, zero optional-inclusive measurements and zero model calls. The test name and gate bindings stay unchanged. I’ll record the approval separately before this fix.
+
+The recommended option was “Approve the narrow witness correction”. The
+maintainer answered:
+
+> Approved recommendations
+
+Under the [explicit maintainer override](../../AGENTS.md#maintainer-override),
+this replaces only the zero-project-resolution assertion in
+`apps/loopex/test/context_admission_test.exs`, in the protected witness
+“required only preflight refuses before any optional inclusive measurement”.
+The successor scope is the current M3 repair. A project trust lookup may occur
+before required-only refusal, so an already declined project retains the exact
+non-budget disposition required by ADR 0017. An eligible optional project
+still records `not_evaluated_required_failure` when the required request fails.
+
+The corrected witness must retain its name, required failure and positive
+controls, and prove zero optional-content reads, zero optional-inclusive
+measurements and admissions, and zero model calls on required-only failure.
+Focused evidence must cover eligible and declined project decisions. No
+bound-artifact bytes, gate digest, normative envelope or accepted ADR decision
+change. All unaffected protected assertions remain required.
+
+This disposition lands alone and receives independent exact-SHA review before
+the dependent source or witness correction. The approval waives no failure,
+changes no validation cadence, and grants no closure, main integration or
+release. Final M0–M2 reruns remain governed by the existing
+[separate waiver](#override-disposition-m3-final-inherited-gates-waiver-2026-09-13).
+
+<a id="disposition-m3-checker-ordering-exception-2026-09-13"></a>
+### M3 checker ordering occurrence accepted — 2026-09-13
+
+For new finding M1 in the post-implementation review of
+`f92f19ee31e7ea62cb5614a487dfb22527c13c66`, the maintainer received this proposal:
+
+> May I record a one-time acceptance of the new historical ordering exception: checker change 571c30f landed before its authorizing record e9722e9? The prior exception covered different commits, so it does not cover this occurrence. Acceptance preserves the actual history and all future approval-order requirements; it changes no product or test requirement.
+
+The recommended option was “Accept this named ordering exception”. The
+maintainer answered:
+
+> Approved recommendations
+
+This accepts only the ordering breach between checker/test commit
+`571c30ff9e7fa8e27da71911a21504d9dbc5de7c` and later disposition commit
+`e9722e98705bc8b3f2510e2630957983a6fa027b` in the M3 implementation lineage.
+The earlier planning-lineage exception did not cover this occurrence. The
+actual commit order remains a historical process defect; this record does not
+claim that authorization or an independent read preceded the checker change.
+
+This finding no longer blocks the current M3 repair candidate. The approval
+creates no exception for a recurrence, waives no product failure or required
+test, changes no accepted ADR or gate binding, and grants no closure, main
+integration or release. Future override records and exact-SHA reads must still
+precede dependent work. This acceptance is recorded in its own commit and is
+subject to an independent exact-SHA read.
+
+<a id="override-disposition-m3-repair-completion-packet-2026-09-13"></a>
+### M3 repair completion decisions — 2026-09-13
+
+After the approval dialogs did not appear, the maintainer received the three
+proposals again in plain text: retain the existing Git import limits, accept
+four named commit-title exceptions, and replace only the malformed final
+documentation commit with its reviewed correction and this approval record.
+The maintainer answered:
+
+> approve all three
+
+The approved scopes and replacement requirements are:
+
+1. **Git download limit.** For finding L1 in the post-implementation review of
+   `f92f19ee31e7ea62cb5614a487dfb22527c13c66`, retain the existing maximum
+   30-second acquisition deadline and existing pack admission limits. M3 does
+   not add a separate download-byte cap. The initial Git transfer can therefore
+   consume bytes beyond the admitted pack size before the existing deadline or
+   subsequent size validation refuses it. This is an accepted limitation for
+   this M3 repair, not evidence of a transfer-size bound or permission to relax
+   the deadline, admission checks, cancellation or cleanup guarantees.
+2. **Historical commit titles.** Accept only the milestone-marker naming
+   exceptions in `d158989f8b3f4e423bf00bdd0f940162433d46c1`,
+   `dafc42b8ded769dfe7aa6fd17875ad46ed5df32f`,
+   `d11af17050aa1fe96cc67171eb41fd25e76a66c9` and
+   `5e9db2edf711991b73899a78e82280d10fb39f2b`. Their titles used subsystem
+   markers instead of `M3`; their history remains unchanged. Future repair
+   commits use the `M3` marker. This disposition changes no checker, product
+   requirement or test result and creates no naming exception for later work.
+3. **Documentation-tip replacement.** Replace only
+   `92fcb6184ae286b8493f0cbf71e51bc1cf58c384` with the reviewed correction
+   `fde3eadc4fe90a78e8b9c0378f947a35689919c3`, followed by this standalone
+   approval-record commit. Both documentation candidates have sole parent
+   `873a1d759b367757aa21336babc6f4f4ff260695`. The correction places the same
+   explanatory text in the existing Workstreams section, preserves table-only
+   Progress and Governance sections, and wraps CHANGELOG lines. Full repository
+   status must pass before publication. The push must use an exact remote lease
+   expecting `92fcb6184ae286b8493f0cbf71e51bc1cf58c384`; any advancement of
+   local or remote `m3`, or another checkout using local `m3`, stops replacement
+   for reconciliation. The original tip is retained in the verified
+   `original-documentation-tip.bundle` in the maintainer's
+   `loopex-reviews/m3-review-repair-focused-92fcb61-0lob23r0` evidence archive.
+
+The third decision is the explicit destructive-history permission for this one
+unaccepted documentation tip. It does not rewrite earlier history, accepted
+candidates, product, tests, gates, ADRs or either normative plan envelope. The
+first two decisions accept their named limitations only; they do not relabel
+failed or unrun checks as passing. This record changes only this document and
+receives independent exact-SHA review before the dependent publication.
+
+Fresh qualification remains M3-only: macOS on Elixir 1.17.0 / OTP 26.0 and Linux
+serenity on the current toolchain, with exact source and retained evidence.
+Final M0–M2 reruns remain waived, not passed, under the
+[existing validation-scope disposition](#override-disposition-m3-final-inherited-gates-waiver-2026-09-13).
+These decisions grant no M3 closure, integration to `main`, tag or release.
+
+<a id="override-disposition-m3-formatting-evidence-carry-forward-2026-09-13"></a>
+### M3 formatting evidence carry-forward — 2026-09-13
+
+The maintainer received this exact question after the macOS floor run at
+`96a138a6298fcbc0d3a7b10f191578229bbd71e5` passed eight deterministic
+selectors and the 1,228-test suite, then failed `mix format --check-formatted`:
+
+> Approve reusing the passed deterministic tests from `96a138a` across the formatting-only fix, while I run fresh build, repository and real-provider checks on both macOS and Linux?
+
+The maintainer answered:
+
+> Appved
+
+This is approval to carry only those already passed deterministic results across
+the formatting-only source change in
+`8eafa984eda57229ba7df9d5f9cbb040aa9880c4`. The two changed files have
+equal parsed Elixir syntax trees at the prior and repaired sources on Elixir
+1.17.0 / OTP 26.0 and Elixir 1.20.3 / OTP 29.0.5 after removing only line and
+column metadata. Both toolchains pass the formatter on the repaired source.
+The earlier macOS run's overall result remains a formatting failure; its
+passed tests remain attributed to `96a138a` and are not relabelled as executed
+at the later source. The Linux M3-only pass at `96a138a` also keeps its own
+source attribution. The original macOS test log, formatting failure and syntax
+comparison are retained in the maintainer's
+`loopex-reviews/m3-formatting-compatibility-8eafa98-_dfshvvy` archive.
+
+The replacement validation at the standalone approval revision runs the M3
+opening core and local Store build, opening probe, isolated test build,
+formatting, documentation, dependency budget, bootstrap and attended real
+provider workflow afresh on macOS floor and Linux current. It retains the
+source/build identity and real-selector report checks, a real-only selector
+ledger of 1/1, and the existing M0–M2 inherited-gate waiver. The external
+executor emits only a `LOOPEX_M3_REMAINING_LANES_REPORT` with the exact fresh
+source and `deterministic=CARRIED_NOT_RERUN`; it cannot claim a complete new
+M3-only gate PASS. The original passing deterministic evidence and the fresh
+remaining-lanes evidence must both be presented to the reviewer with their
+separate source identities.
+
+Approved remaining-lanes executor: sha256:fe553d8f087160b868c2a59a1955ce884b9eb431f319007fe12f9463d2d92c28
+Carried deterministic evidence source: 96a138a6298fcbc0d3a7b10f191578229bbd71e5
+Formatting repair source: 8eafa984eda57229ba7df9d5f9cbb040aa9880c4
+Execution scope: fresh M3 opening/test builds, opening probe, format, docs, dependencies, bootstrap and attended real workflow; deterministic selectors and whole suite carried, not rerun.
+
+This disposition changes no product bytes, accepted ADR decision, M3 gate,
+protected assertion, provider requirement or deadline. It grants no M3
+closure, integration to `main`, tag or release. The disposition lands in its
+own commit, receives an independent exact-SHA read before the external
+remaining-lanes executor runs, and is pushed to `origin/m3` with the subsequent
+evidence handoff.
+
+<a id="disposition-m3-unlogged-process-probe-2026-09-13"></a>
+### M3 unlogged process-probe occurrence — 2026-09-13
+
+The `4282d9b3ee7718fd120a7bcbf9d1d78a2aaea818` hand-off packet mentioned
+one `{:process_incarnation_unavailable, :process_absent}` stop in a broad CLI
+test. It retained no failing command, raw log, selector, source-bound test
+report, or execution-environment record for that attempt. The original cause
+cannot be established and the attempt is **not a pass**. A separate diagnostic
+at that clean source, retained at
+`~/loopex-reviews/m3-closure-process-probe-4282d9b/README.md`, shows the
+floor-toolchain BEAM's `/bin/ps` command returning exit 1 with empty output
+under restricted execution and returning its process start time under
+permitted host execution. The source maps the first result to the reported
+error. This proves an environmental mechanism that can produce the signature,
+not what happened in the unlogged attempt.
+
+The maintainer was offered two choices: accept this one unlogged occurrence as
+unresolved historical uncertainty, conditional on final M3-only runs passing
+on macOS and Linux with any recurrence blocking closure; or keep it blocking
+and investigate the unrecorded attempt further. The maintainer answered:
+
+> i accept the recommended disposition. move on.
+
+This accepts only the first choice for this single historical occurrence.
+It does not label the old attempt a flake, product regression, environmental
+failure, or pass. Final M3-only qualification at the frozen candidate remains
+required on both platforms, and a repeated process-probe error or any other
+required failure blocks closure. M0–M2 final gate reruns remain **WAIVED**, not
+passed, under the separate validation-scope override. This disposition grants
+no M3 closure, integration to `main`, tag, or release.
+
+<a id="disposition-m3-closure-2026-09-13"></a>
+### M3 closure — 2026-09-13
+
+After the independent product review at source
+`f45354572840636b473ad7e40e42355fdff4fc17` found no blocking product
+defect and identified the remaining governance sequence, the maintainer directed:
+
+> Ok. Finish and let's close
+
+This closes M3 at the evidence-only candidate
+`159e7ea96826125e55b6c3dd1ce751dc1445c3f4`, the direct child of that
+product source. The child marks all five outcomes Proved and identifies the
+retained M3-only qualification at the product source: macOS Elixir 1.17.0 /
+OTP 26.0 and Linux Elixir 1.20.3 / OTP 29.0.5 each passed 17 lanes, all nine
+selector reports, the deterministic suite with zero failures, bootstrap, and
+the attended Anthropic workflow. Archive paths and SHA-256 digests are in the
+[source-bound evidence record](../plans/M3.md#concept-m3-final-qualification-f453545).
+The M0–M2 final gate reruns remain **WAIVED**, never described as passed, under
+the [recorded maintainer override](#override-disposition-m3-final-inherited-gates-waiver-2026-09-13).
+
+Closure binds the accepted envelopes and gate:
+
+| Artifact | Digest |
+| --- | --- |
+| Concept envelope | `sha256:9c004acd94844a9f1369ac84e6b735076c537cc5caabf4ad0e825854334352e5` |
+| Technical depth envelope | `sha256:433947d010b8999966a9becb9b260647f2764fa0bbc8ef4448f6b395f0b0d227` |
+| Gate | `sha256:7a0140357954e5b465e3e6f41f79893e0f1c820bf0f221c95dc9794a47b1cbcc` |
+
+The [Git transfer-byte-cap limitation](#override-disposition-m3-repair-completion-packet-2026-09-13)
+stands exactly as accepted: the 30-second deadline, pack caps, cancellation,
+and cleanup still apply. The eleven named historical findings and the
+formatting-only evidence carry-forward retain their own dispositions and
+source attribution; neither becomes a new pass at closure. The maintainer's
+`e17fb2e` task-checklist addition to `AGENTS.md` was their direct instruction
+on this milestone branch. The In progress and In review transitions and this
+closure transition receive separate exact-commit reviews. This record grants
+no tag, release, or publication.

@@ -148,13 +148,13 @@ and can print neither `CAPTURE` nor `M1 gate GREEN`.
 
 | SHA-256 | Path |
 | --- | --- |
-| `f9be16dd686fe0dc24847d3628bda890437728d154a4935d84cf397c6d166756` | `scripts/check-m1-gate.sh` |
+| `6c14c7ef012f3a9491974dfb9e851ef9377585f72c6804af3c06664c7bb1b14c` | `scripts/check-m1-gate.sh` |
 | `4bba03d218eee656991444a3c22c8753bfef1ab86f688036a4440048752f48bd` | `scripts/m1-gate-launcher.escript` |
-| `cc290e60d9f9588c75f1259b25976a58d1c30713e570cd5a88c70cdf3c2159a0` | `scripts/m1-exunit-runner.exs` |
+| `53d8219bdee584a3849a85a1102e405520d5dd0dfbe21d259434bc9edfc5fcc0` | `scripts/m1-exunit-runner.exs` |
 | `3e742f052f72aaea952cb8173692a3fd10f998a79c1dc35e1072d9e46657786c` | `scripts/m1-evidence-verifier.exs` |
 | `56d8e71b90af183d02e7e46d3bf10aae48129e3466e19325b40a81ea8abf31e9` | `apps/loopex/lib/mix/tasks/loopex.deps_budget.ex` |
 | `f97927194c5ab97d0ae20fc9a6586a53b838cea6998307e3c88d96fe8ec9773c` | `apps/loopex/test/m1_gate_evidence_test.exs` |
-| `0a8406ca080c70624e776b01e37c7ded210b54659064cf63723a847a54debe2d` | `apps/loopex/test/m1_exunit_runner_test.exs` |
+| `c36253cff3d74ddff1b330695edbc4bde0a4565c1412c67c1293b2fb7ca6129b` | `apps/loopex/test/m1_exunit_runner_test.exs` |
 | `9705bcd08f7d0b4b4e2d36c745f4fbf732d751a48fdc369aacb6ca99e8f598ac` | `apps/loopex/test/deps_budget_test.exs` |
 | `fad47299b27a767785d2a6a776155038054f5457ee3ce0195a37ae667f7a9999` | `.tool-versions` |
 
@@ -1156,3 +1156,46 @@ explicit maintainer acceptance, the immediate child `R` completes that row's
 authority, disposition, and the candidate it binds, which is exact `A`, and adds
 one new amendment-specific disposition anchor to an existing durable document. No
 product, selector, gate, envelope, or other byte may change in `R`.
+
+<a id="amendment-9"></a>
+## Amendment 9 — Retain bounded selector failure diagnostics
+
+**Acceptance: OUTSTANDING.** Closed M1 adds gate generation 9 under
+`amendment-transaction-v2`. Its historical Acceptance, Closure and prior
+generation rows remain unchanged. The new row carries this gate's digest and
+leaves authority, evidence and candidate unset until exact-proposal acceptance.
+
+The [approved M3 repair](../developer/agent-context-map.md#override-disposition-m3-selector-diagnostics-2026-09-12) applies exact patch
+`sha256:d2bfe33c46ff83c97fb80ff4406c78c37e1d878739854af03f26cc65a8e7c1c8` to the shared standalone runner and its corpus.
+Failure output now identifies the invocation mode and seed, bounded failed-case
+names and attributable source locations, and finite failure categories and
+operand types. It retains at most eight event records, two summaries per event
+and 4,096 bytes per detail line, with omitted counts. Arbitrary messages,
+assertion values, provider bodies, captured logs and stack arguments stay out.
+Two synthetic corpus cases cover these diagnostics; the existing five cases,
+success-report bytes and digest inputs, names, minima, exclusions, real-provider
+paths and exit predicates retain their meaning.
+
+The three rebound artifacts below contain only that shared repair and the two
+embedded digest replacements in this holder's gate script. This adds no M1
+outcome or scope and reopens no lifecycle state. The
+[approved checker correction](../developer/agent-context-map.md#override-disposition-m3-sequential-binding-checker-2026-09-12) must be reviewed before this proposal.
+Complete M1's proposal and immediate one-parent rebind before M2, then M3.
+Pending other holders remain explicit; their old rows are not global PASS.
+
+The same approval replaces full-gate execution at these three holders' A/R
+checkpoints with focused patch/corpus, success-report, script/digest and
+applicable status/binding checks. Retain exact source and results; proposal
+checks identify the pending binding. Full M0–M3 gates remain required at the
+final candidate on macOS and Linux serenity. Historical failures remain failures.
+
+After independent exact-SHA review, the recorded delegate must explicitly accept
+the actual A revision. Only its immediate child R completes generation 9 and
+adds one fresh acceptance disposition. R changes no bound artifact or gate byte.
+This proposal records no acceptance and grants no waiver, closure or release.
+
+| Generation | Artifact | Rebound SHA-256 |
+| --- | --- | --- |
+| 9 | `scripts/m1-exunit-runner.exs` | `53d8219bdee584a3849a85a1102e405520d5dd0dfbe21d259434bc9edfc5fcc0` |
+| 9 | `apps/loopex/test/m1_exunit_runner_test.exs` | `c36253cff3d74ddff1b330695edbc4bde0a4565c1412c67c1293b2fb7ca6129b` |
+| 9 | `scripts/check-m1-gate.sh` | `6c14c7ef012f3a9491974dfb9e851ef9377585f72c6804af3c06664c7bb1b14c` |

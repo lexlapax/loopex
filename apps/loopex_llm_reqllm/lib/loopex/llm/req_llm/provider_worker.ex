@@ -246,7 +246,14 @@ defmodule Loopex.LLM.ReqLLM.ProviderWorker do
   defp terminal({:error, {:not_dispatched, "model_call_failed"}}),
     do: %{"status" => "not_dispatched"}
 
-  defp terminal(_uncertain), do: %{"status" => "dispatched_or_unknown"}
+  defp terminal({:error, {:dispatched_or_unknown, "model_call_failed"}, failure}),
+    do: %{"status" => "dispatched_or_unknown", "failure" => failure}
+
+  defp terminal(_uncertain),
+    do: %{
+      "status" => "dispatched_or_unknown",
+      "failure" => %{"stage" => "unavailable", "class" => "unclassified"}
+    }
 
   defp write_frames(socket, nonce, digest, owner, slots) do
     binding = %{"nonce" => nonce, "staged_request_digest" => digest}

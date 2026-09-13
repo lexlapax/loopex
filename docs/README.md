@@ -12,8 +12,8 @@ order. This file is the index of what exists.
 
 | Directory | Contents |
 | --- | --- |
-| [operator/](operator/README.md) | How a run works with its flow and component diagrams; coding-session, tool, policy, runtime, shutdown, and recovery runbooks. |
-| [developer/](developer/README.md) | System architecture with its diagrams, development method, routing, and retained client evidence. |
+| [operator/](operator/README.md) | Coding sessions, project-skill installation and admission, tools and policy, run diagrams, shutdown and recovery. |
+| [developer/](developer/README.md) | Architecture, embedded resource snapshots and commands, progressive context and replay, development method and retained evidence. |
 | [adr/](adr/README.md) | Numbered architecture decisions and their governance records. |
 | [plans/](plans/README.md) | Milestone register, lifecycle, plan templates, and current status. |
 | [evidence/](evidence/README.md) | Retained gate run evidence. |
@@ -70,6 +70,7 @@ pairing, link, review, code-documentation, and enforcement contracts.
 | 0026 — development floor refresh | [Decision](adr/0026-development-floor-refresh.md#concept) | [Technical depth](adr/0026-development-floor-refresh-technical.md#technical-depth) |
 | 0027 — provider permit retirement | [Decision](adr/0027-provider-permit-retirement.md#concept) | [Technical depth](adr/0027-provider-permit-retirement-technical.md#technical-depth) |
 | 0028 — bounded artifact retrieval | [Decision](adr/0028-bounded-artifact-retrieval.md#concept) | [Technical depth](adr/0028-bounded-artifact-retrieval-technical.md#technical-depth) |
+| 0029 — bounded provider failure diagnostics | [Decision](adr/0029-bounded-provider-failure-diagnostics.md#concept) | [Technical depth](adr/0029-bounded-provider-failure-diagnostics-technical.md#technical-depth) |
 | 0030 — observability: tracing and telemetry | [Decision](adr/0030-observability-tracing-and-telemetry.md#concept) | [Technical depth](adr/0030-observability-tracing-and-telemetry-technical.md#technical-depth) |
 
 An ADR pair is one decision. Its status and governance record live in the
@@ -81,7 +82,7 @@ whose path or explicit fragment does not resolve.
 
 ## Planning and Development
 
-- [M3 foundations](plans/M3.md#concept) and [technical plan](plans/M3-technical.md#technical-depth) — project skills and core repairs; Accepted, implementation on its milestone branch.
+- [M3 foundations](plans/M3.md#concept) and [technical plan](plans/M3-technical.md#technical-depth) — project skills and core repairs; Closed with retained evidence in the plan.
 - [M4 headless external consumption](plans/M4.md#concept) and [technical plan](plans/M4-technical.md#technical-depth) — durable interactions, artifact transfers, floor refresh and protocol/TypeScript workflow over M3; Open planning lookahead with a red gate.
 
 - [Development contract](../AGENTS.md) — canonical tool-neutral authority,

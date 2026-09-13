@@ -148,8 +148,10 @@ defmodule Loopex.ContextAdmissionTest do
   alias Loopex.M1RuntimeTestStore
   alias Loopex.Model
   alias Loopex.ProjectResource
+  alias Loopex.ResourcePack
   alias Loopex.Runtime
   alias Loopex.Runtime.ContextAdmission
+  alias Loopex.Runtime.ResourceSnapshot
   alias Loopex.Runtime.SessionState
   alias Loopex.Store
   alias LoopexProtocol.Canonical
@@ -2412,6 +2414,296 @@ defmodule Loopex.ContextAdmissionTest do
             }} = ProjectResource.resolve(valid, huge_decision)
   end
 
+  test "required only preflight refuses before any optional inclusive measurement" do
+    control = observe_required_first(100)
+    assert control.finished["outcome"] == "completed"
+    assert control.calls == 1
+    assert control.trace.required_measurements > 0
+    assert control.trace.optional_measurements > 0
+    assert control.trace.optional_admissions > 0
+    assert control.trace.project_resolutions > 0
+
+    overflow = observe_required_first(32_000)
+    assert overflow.finished["outcome"] == "failed"
+    assert overflow.calls == 0
+    assert overflow.trace.required_measurements > 0
+    assert overflow.trace.optional_measurements == 0
+    assert overflow.trace.optional_admissions == 0
+    # Concept: required refusal preserves the project's actual trust disposition.
+    # Technical depth: override-disposition-m3-required-trust-witness-2026-09-13
+    # permits this single lookup while optional evaluation remains prohibited.
+    assert overflow.trace.project_resolutions == 1
+    assert overflow.trace.optional_resource_reads == 0
+    assert overflow.refusal["dimension"] == "context_record_bytes"
+    assert overflow.refusal["project_disposition"] == "not_evaluated_required_failure"
+    assert overflow.refusal["observed"] == overflow.refusal["record_byte_cost"]
+  end
+
+  test "required token and record refusals retain absent changed and revoked project decisions" do
+    for {decision, disposition, reason} <- [
+          {nil, "no_decision", nil},
+          {:binding_changed, "binding_changed", "digest_mismatch"},
+          {:revoked, "binding_changed", "invalid_decision"}
+        ] do
+      control = observe_required_first(100, decision: decision)
+      assert control.finished["outcome"] == "completed"
+      assert control.calls == 1
+      assert control.trace.project_resolutions == 1
+
+      assert control.project_receipt == %{
+               "class" => "project_resource",
+               "receipt_revision" => 2,
+               "disposition" => disposition,
+               "detail" =>
+                 if(is_nil(reason),
+                   do: %{"manifest_digest" => control.manifest_digest},
+                   else: %{
+                     "reason" => reason,
+                     "expected_manifest_digest" => control.manifest_digest,
+                     "decision_manifest_digest" => control.decision_digest
+                   }
+                 )
+             }
+
+      for {bytes, budget, dimension} <- [
+            {100, 1, "context_tokens"},
+            {32_000, @uint64_max, "context_record_bytes"}
+          ] do
+        refused = observe_required_first(bytes, decision: decision, context_token_budget: budget)
+        assert refused.finished["outcome"] == "failed"
+        assert refused.calls == 0
+        assert refused.refusal["project_disposition"] == disposition
+        assert refused.trace.project_resolutions == 1
+        assert refused.trace.optional_measurements == 0
+        assert refused.trace.optional_admissions == 0
+        assert refused.trace.optional_resource_reads == 0
+        assert refused.refusal["dimension"] == dimension
+        assert map_size(refused.refusal) == 19
+      end
+    end
+  end
+
+  test "required refusal reads no selected resource content while its positive control does" do
+    control = observe_required_first(100, resources: true)
+    assert control.finished["outcome"] == "completed"
+    assert control.calls == 1
+    assert control.trace.project_resolutions == 1
+    assert control.trace.optional_resource_reads > 0
+    assert control.trace.optional_measurements > 0
+    assert control.trace.optional_admissions > 0
+
+    for {decision, disposition} <- [
+          {:eligible, "not_evaluated_required_failure"},
+          {nil, "no_decision"},
+          {:binding_changed, "binding_changed"},
+          {:revoked, "binding_changed"}
+        ] do
+      refused = observe_required_first(32_000, resources: true, decision: decision)
+      assert refused.finished["outcome"] == "failed"
+      assert refused.calls == 0
+      assert refused.trace.required_measurements > 0
+      assert refused.trace.project_resolutions == 1
+      assert refused.trace.optional_measurements == 0
+      assert refused.trace.optional_admissions == 0
+      assert refused.trace.optional_resource_reads == 0
+      assert refused.refusal["dimension"] == "context_record_bytes"
+      assert refused.refusal["project_disposition"] == disposition
+    end
+  end
+
+  defp observe_required_first(bytes, options \\ []) do
+    manifest = %{
+      workspace: project_workspace(),
+      entries: [project_entry("Optional project body")]
+    }
+
+    {:ok, digest, _entries} = ProjectResource.digest(manifest)
+
+    decision =
+      case Keyword.get(options, :decision, :eligible) do
+        nil -> nil
+        :eligible -> project_decision(digest)
+        :binding_changed -> project_decision(String.duplicate("0", 64))
+        :revoked -> project_decision(digest, revocation_state: "revoked")
+      end
+
+    resource_manifest = if Keyword.get(options, :resources, false), do: required_first_resources()
+
+    fixture =
+      start_fixture(
+        context_token_budget: Keyword.get(options, :context_token_budget, @uint64_max),
+        script: [%{text: "done"}],
+        project_manifest: manifest,
+        project_decision: decision,
+        resource_manifest: resource_manifest
+      )
+
+    {session_id, attachment} = create_attached_session(fixture)
+    if resource_manifest, do: select_required_first_resource(attachment, resource_manifest)
+    coordinator = coordinator_of(fixture.runtime)
+
+    boundaries = [
+      {Store, :normalize_and_measure_item, 2},
+      {ContextAdmission, :preflight_required_candidate, 2},
+      {ProjectResource, :resolve, 2},
+      {ResourceSnapshot, :content, 3}
+    ]
+
+    for {module, _function, _arity} = boundary <- boundaries do
+      Code.ensure_loaded!(module)
+      assert :erlang.trace_pattern(boundary, true, [:local]) > 0
+    end
+
+    1 = :erlang.trace(coordinator, true, [:call, {:tracer, self()}])
+
+    finished =
+      try do
+        assert {:accepted, "required-first"} =
+                 Loopex.command(
+                   attachment,
+                   %{
+                     type: :prompt,
+                     command_id: "required-first",
+                     content: String.duplicate("x", bytes)
+                   }
+                 )
+
+        await_event(attachment, "run.finished")
+      after
+        :erlang.trace(coordinator, false, [:call])
+        for boundary <- boundaries, do: :erlang.trace_pattern(boundary, false, [:local])
+      end
+
+    barrier = :erlang.trace_delivered(coordinator)
+    assert_receive {:trace_delivered, ^coordinator, ^barrier}, 2_000
+
+    counts =
+      collect_context_measurements(coordinator, %{
+        required_measurements: 0,
+        optional_measurements: 0,
+        optional_admissions: 0,
+        project_resolutions: 0,
+        optional_resource_reads: 0
+      })
+
+    all_records = records(fixture, session_id)
+    refusal = Enum.find(all_records, &kind?(&1, "context_admission_refused_v1"))
+
+    staged =
+      Enum.find(all_records, fn record ->
+        kind?(record, "model_request_committed") or
+          kind?(record, "model_request_committed_resources_v1")
+      end)
+
+    %{
+      manifest_digest: digest,
+      decision_digest: decision && decision.manifest_digest,
+      project_receipt: staged && get_in(staged.payload, ["context_receipt", "project_resource"]),
+      finished: finished,
+      calls: length(Loopex.ContextAdmissionTestModel.requests(fixture.model)),
+      trace: counts,
+      refusal: refusal && refusal.payload
+    }
+  end
+
+  defp required_first_resources do
+    content = "Optional selected skill"
+
+    %{
+      version: "loopex.resource_pack/1",
+      workspace_ref: "workspace-ref",
+      revision: nil,
+      packs: [
+        %{
+          source_id: "project",
+          origin: nil,
+          commit: nil,
+          tree_digest: nil,
+          name: "required-first",
+          description: "Required-first resource witness",
+          manual_only: true,
+          files: [
+            %{
+              label: "SKILL.md",
+              content: content,
+              size: byte_size(content),
+              digest: Canonical.digest_bytes(content),
+              contained: true
+            }
+          ]
+        }
+      ]
+    }
+  end
+
+  defp select_required_first_resource(attachment, manifest) do
+    {:ok, digest, normalized} = ResourcePack.digest(manifest)
+    decision = project_decision(digest, trust_scope: "project_skills")
+
+    assert {:accepted, "admit-required-first"} =
+             Loopex.command(attachment, %{
+               type: :admit_resources,
+               command_id: "admit-required-first",
+               manifest_digest: digest,
+               decision: decision
+             })
+
+    [pack] = normalized["packs"]
+
+    assert {:accepted, "select-required-first"} =
+             Loopex.command(attachment, %{
+               type: :activate_skill,
+               command_id: "select-required-first",
+               manifest_digest: digest,
+               source_id: "project",
+               name: "required-first",
+               pack_digest: ResourcePack.pack_digest(pack),
+               supporting_labels: []
+             })
+  end
+
+  defp collect_context_measurements(coordinator, counts) do
+    receive do
+      {:trace, ^coordinator, :call,
+       {Store, :normalize_and_measure_item,
+        [:record, %{"context_receipt" => %{"blocks" => _}} = candidate]}} ->
+        key =
+          if optional_candidate?(candidate),
+            do: :optional_measurements,
+            else: :required_measurements
+
+        collect_context_measurements(coordinator, Map.update!(counts, key, &(&1 + 1)))
+
+      {:trace, ^coordinator, :call,
+       {ContextAdmission, :preflight_required_candidate, [candidate, _]}} ->
+        counts =
+          if optional_candidate?(candidate),
+            do: Map.update!(counts, :optional_admissions, &(&1 + 1)),
+            else: counts
+
+        collect_context_measurements(coordinator, counts)
+
+      {:trace, ^coordinator, :call, {ResourceSnapshot, :content, _args}} ->
+        collect_context_measurements(
+          coordinator,
+          Map.update!(counts, :optional_resource_reads, &(&1 + 1))
+        )
+
+      {:trace, ^coordinator, :call, {ProjectResource, :resolve, _args}} ->
+        collect_context_measurements(
+          coordinator,
+          Map.update!(counts, :project_resolutions, &(&1 + 1))
+        )
+    after
+      0 -> counts
+    end
+  end
+
+  defp optional_candidate?(%{"context_receipt" => %{"blocks" => blocks}}),
+    do: Enum.any?(blocks, &(&1["provenance_class"] in ["project_resource", "resource_pack"]))
+
+  defp optional_candidate?(_candidate), do: false
+
   defp start_fixture(options) do
     script = Keyword.fetch!(options, :script)
     context_token_budget = Keyword.fetch!(options, :context_token_budget)
@@ -2459,6 +2751,7 @@ defmodule Loopex.ContextAdmissionTest do
         bounds: %{max_turns: 8, token_budget: 1_000, deadline_ms: 60_000},
         project_manifest: Keyword.get(options, :project_manifest),
         project_decision: Keyword.get(options, :project_decision),
+        resource_manifest: Keyword.get(options, :resource_manifest),
         tools: tools,
         active_tools: Enum.map(tools, &Map.fetch!(&1, "tool_id"))
       ]

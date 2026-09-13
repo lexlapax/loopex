@@ -1,3 +1,5 @@
+Code.require_file("support/cleanup_trace.exs", __DIR__)
+
 defmodule Loopex.Executor.Local.CodingToolsTest.RecordingStore do
   @moduledoc false
 
@@ -231,6 +233,7 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
   alias Loopex.ArtifactStore
   alias Loopex.Executor.Local
   alias Loopex.Executor.Local.CodingTools
+  alias Loopex.Executor.Local.CodingToolsTest.CleanupTrace
   alias Loopex.Executor.Local.Ledger
   alias Loopex.Executor.Local.WorkspaceLease
 
@@ -242,10 +245,25 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
   # removed on exit, matching the inherited executor case in this application.
   # Nothing here reads or writes the operator's own workspace.
   defp temporary_root(prefix) do
-    Path.join([
-      System.tmp_dir!(),
-      "loopex-#{prefix}-#{System.unique_integer([:positive])}"
-    ])
+    nonce = Base.encode16(:crypto.strong_rand_bytes(12), case: :lower)
+
+    root =
+      Path.join([
+        System.tmp_dir!(),
+        "loopex-#{prefix}-#{System.unique_integer([:positive])}-#{nonce}"
+      ])
+
+    case File.mkdir(root) do
+      :ok ->
+        on_exit(fn -> File.rm_rf(root) end)
+        root
+
+      {:error, :eexist} ->
+        temporary_root(prefix)
+
+      {:error, reason} ->
+        raise File.Error, reason: reason, action: "make test directory", path: root
+    end
   end
 
   defp workspace do
@@ -598,6 +616,80 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
       execute_options,
       progress
     )
+  end
+
+  test "temporary roots cannot reuse a ledger carrying foreign open authority" do
+    root = workspace()
+
+    legacy_ledger =
+      Path.join(
+        System.tmp_dir!(),
+        "loopex-ledger-#{System.system_time(:nanosecond)}#{System.unique_integer([:positive])}"
+      )
+
+    on_exit(fn -> File.rm_rf(legacy_ledger) end)
+
+    assert {:ok, prepared} = Ledger.prepare(legacy_ledger, "executor-local", 5_000)
+
+    foreign = %{
+      job_id: "foreign-open-authority",
+      canonical_request_digest: String.duplicate("a", 64),
+      operation_id: "foreign-operation",
+      attempt: 1,
+      cleanup_grace_ms: 5_000,
+      origin_executor_epoch: 3
+    }
+
+    assert :ok =
+             Ledger.with_claim(prepared, fn claimed ->
+               Ledger.admit(
+                 claimed,
+                 Ledger.marker(foreign),
+                 Ledger.open_entry(foreign, "executor-local")
+               )
+             end)
+
+    lease_id = "lease-#{System.unique_integer([:positive])}"
+    {:ok, lease} = WorkspaceLease.start_link(id: lease_id, path: root, fencing_token: @fence)
+
+    {:ok, executor} =
+      Local.start_link(
+        identity: "executor-local",
+        epoch: 3,
+        fencing_token: @fence,
+        workspace_leases: %{lease_id => lease},
+        ledger_root: legacy_ledger
+      )
+
+    on_exit(fn ->
+      stop_test_process(executor)
+      stop_test_process(lease)
+    end)
+
+    assert {:error, {:reconciliation_required, 1}} =
+             run(
+               root,
+               "loopex.edit",
+               %{
+                 "path" => "missing.txt",
+                 "old" => "before",
+                 "new" => "after"
+               },
+               %{
+                 executor: executor,
+                 lease_id: lease_id
+               }
+             )
+
+    allocated = temporary_root("ledger")
+
+    assert File.dir?(allocated),
+           "the test allocator returned an unchecked basename that a later VM can reuse"
+
+    assert {:ok, fresh} = Ledger.prepare(allocated, "executor-local", 5_000)
+
+    assert {:ok, []} =
+             Ledger.with_claim(fresh, fn claimed -> Ledger.open_snapshot(claimed) end)
   end
 
   # Concept: a case about the cleanup budget needs an executor composed with the
@@ -5198,26 +5290,152 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     assert {"entered", 200} = Local.answer_within("/bin/sh", ["-c", command], 5_000)
   end
 
+  test "a stalled first quiescence probe leaves budget for a real successor probe and confirmed cleanup" do
+    # Concept: one failed observation must leave time to prove cleanup through a
+    # later real process table. This demonstrates budget starvation, not the
+    # cause of the previously observed fast-command failure.
+    # Technical depth: both fixtures fail their first observation. One exits
+    # immediately; the other waits behind an unreleased file until the executor
+    # cleans it up. Every later invocation execs the real /bin/ps with its
+    # original arguments, so no table, group identity or acknowledgement is faked.
+    CleanupTrace.observe(
+      [1, 2],
+      fn trace ->
+        for mode <- [:immediate, :stalled] do
+          :ok = CleanupTrace.mark(trace, if(mode == :immediate, do: 1, else: 2))
+          root = workspace()
+          first = Path.join(root, "first-probe")
+          ready = Path.join(root, "first-probe-ready")
+          first_group_path = Path.join(root, "first-probe-group")
+          release = Path.join(root, "release-first-probe")
+          released = Path.join(root, "first-probe-released")
+          successor = Path.join(root, "successor-probe-ran")
+          probe = Path.join(root, "process-probe")
+
+          first_answer =
+            case mode do
+              :immediate ->
+                "exit 1"
+
+              :stalled ->
+                "while [ ! -f #{shell_path(release)} ]; do /bin/sleep 0.01; done\n" <>
+                  "printf released > #{shell_path(released)}\nexit 1"
+            end
+
+          File.write!(probe, """
+          #!/bin/sh
+          if /bin/mkdir #{shell_path(first)} 2>/dev/null; then
+            /bin/ps -o pgid= -p "$$" > #{shell_path(first_group_path)}
+            printf ready > #{shell_path(ready)}
+            #{first_answer}
+          fi
+          printf invoked > #{shell_path(successor)}
+          exec /bin/ps "$@"
+          """)
+
+          File.chmod!(probe, 0o700)
+          {executor, lease_id} = executor_with_options(root, process_probe: probe)
+
+          running =
+            Task.async(fn ->
+              run(root, "loopex.bash", %{"argv" => ["/usr/bin/true"]}, %{
+                executor: executor,
+                lease_id: lease_id
+              })
+            end)
+
+          # Release a still-waiting fixture before stopping its owner and before the
+          # root-removal callbacks. Teardown never signals a sampled OS identity.
+          on_exit(fn ->
+            release_held_group(release, first_group_path)
+            stop_test_process(running.pid)
+          end)
+
+          assert {:ok, :ready} =
+                   await_path(
+                     fn -> if File.exists?(ready), do: {:ok, :ready}, else: :error end,
+                     5_000
+                   )
+
+          assert {:ok, first_group} = await_positive_integer_file(first_group_path, 5_000)
+          assert {:ok, receipt} = Task.await(running, 10_000)
+          assert receipt.cleanup_grace_ms == 5_000
+
+          first_group_empty =
+            await_path(
+              fn -> if process_group_empty?(first_group), do: {:ok, :empty}, else: :error end,
+              5_000
+            ) == {:ok, :empty}
+
+          facts = %{
+            mode: mode,
+            outcome: receipt.outcome,
+            cleanup_confirmation: receipt.cleanup_confirmation,
+            successor_probe_ran: File.exists?(successor),
+            first_probe_released: File.exists?(released),
+            first_probe_group_empty: first_group_empty
+          }
+
+          assert facts == %{
+                   mode: mode,
+                   outcome: :completed,
+                   cleanup_confirmation: :confirmed,
+                   successor_probe_ran: true,
+                   first_probe_released: false,
+                   first_probe_group_empty: true
+                 },
+                 "cleanup evidence: #{inspect(Map.put(facts, :output, receipt.output))}"
+        end
+      end,
+      fn report ->
+        stalled = Enum.filter(report.events, &(&1.iteration == 2))
+
+        assert Enum.any?(stalled, fn event ->
+                 event.function == :process_table_within and event.phase == :return and
+                   event.result == :no_answer
+               end)
+
+        assert Enum.any?(stalled, fn event ->
+                 event.function == :process_table_within and event.phase == :return and
+                   event.result == :answered and event.valid_shape and event.helper_witness
+               end)
+      end
+    )
+  end
+
   test "the launch guard preserves fast command status and remains the only group signal authority" do
-    root = workspace()
-    {executor, lease_id} = executor_for(root)
+    {root, executor, lease_id} =
+      CleanupTrace.observe(Enum.to_list(1..12), fn trace ->
+        root = workspace()
+        {executor, lease_id} = executor_for(root)
 
-    # A fast status wrapper may still be present in the first process-table
-    # sample taken after its authenticated frame arrives. Exercise that narrow
-    # ordering repeatedly through one real executor: the wrapper is terminal
-    # protocol evidence, never unfinished model work.
-    for _iteration <- 1..12 do
-      assert {:ok, succeeded} =
-               run(
-                 root,
-                 "loopex.bash",
-                 %{"argv" => ["/usr/bin/true"]},
-                 %{executor: executor, lease_id: lease_id}
-               )
+        # A fast status wrapper may still be present in the first process-table
+        # sample taken after its authenticated frame arrives. Exercise that narrow
+        # ordering repeatedly through one real executor: the wrapper is terminal
+        # protocol evidence, never unfinished model work.
+        for iteration <- 1..12 do
+          :ok = CleanupTrace.mark(trace, iteration)
+          started_at = System.monotonic_time(:millisecond)
 
-      assert succeeded.outcome == :completed
-      assert succeeded.cleanup_confirmation == :confirmed
-    end
+          assert {:ok, succeeded} =
+                   run(
+                     root,
+                     "loopex.bash",
+                     %{"argv" => ["/usr/bin/true"]},
+                     %{executor: executor, lease_id: lease_id}
+                   )
+
+          elapsed_ms = System.monotonic_time(:millisecond) - started_at
+          observed = Map.take(succeeded, [:outcome, :cleanup_confirmation, :output])
+
+          assert succeeded.outcome == :completed,
+                 "fast command iteration=#{iteration} elapsed_ms=#{elapsed_ms} result=#{inspect(observed, limit: :infinity)}"
+
+          assert succeeded.cleanup_confirmation == :confirmed
+        end
+
+        {root, executor, lease_id}
+      end)
 
     assert {:ok, failed} =
              run(
@@ -5303,7 +5521,7 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     assert script =~ "while IFS= read -r control"
 
     assert script =~
-             ~r/command_pid=\$!\n\s+trap '' TERM\n\s+wait "\$command_pid"\n\s+command_status=\$\?/
+             ~r/command_pid=\$!\n\s+trap '' TERM\n\s+wait "\$command_pid" 2>\/dev\/null\n\s+command_status=\$\?/
 
     assert script =~
              ~S|"$token" "$command_status"|,
@@ -5371,7 +5589,7 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
            "a pre-permit refusal signals a sampled process identifier"
 
     assert source =~
-             ~r/defp quiesce_launch_guard.*?if guard_children_gone\?\(guard, episode\) do.*?release_launch_guard\(guard, episode, status_known\?\)/s,
+             ~r/defp quiesce_launch_guard.*?if guard_children_gone\?\(guard, cooperative_episode\(episode\)\) do.*?release_launch_guard\(guard, episode, status_known\?\)/s,
            "the normal path can release the guard without first proving group quiescence"
 
     assert source =~
@@ -5401,6 +5619,172 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     assert source =~
              ~r/defp launch_guard_exit_proved\?.*?:release_sent ->\s+is_integer\(collector\.command_status\) and status == 0.*?:kill_sent ->\s+status != 0.*?_missing_transition ->\s+false/s,
            "normal release is not status-bound, or an unowned guard exit is treated as proof"
+  end
+
+  test "release wait diagnostics never become completed command output" do
+    # Concept: internal reaping diagnostics are not command stdout or stderr.
+    # Technical depth: use the emitted production program, pausing its wrapper
+    # after status publication so owned wrapper death before release is certain.
+    # This proves the guard stream boundary, not the historical import failure.
+    root = workspace()
+    fifo = Path.join(root, "wrapper-pause")
+    assert {"", 0} = System.cmd("/usr/bin/mkfifo", [fifo])
+    expected = "fixture-row\tSKILL.md" <> <<0>> <> "command-stderr\n"
+    command = "printf 'fixture-row\\tSKILL.md\\0'; printf 'command-stderr\\n' >&2"
+    {launcher, vector} = Local.launcher_vector(%{command: command})
+    script_index = Enum.find_index(vector, &(&1 == "loopex-port-carrier")) + 1
+    script = Enum.at(vector, script_index)
+    assert length(String.split(script, ~S|exit "$command_status"|)) == 2
+
+    paused =
+      String.replace(
+        script,
+        ~S|exit "$command_status"|,
+        "IFS= read -r diagnostic_pause < #{shell_path(fifo)}\n" <> ~S|exit "$command_status"|,
+        global: false
+      )
+
+    vector = List.replace_at(vector, script_index, paused)
+
+    port =
+      Port.open(
+        {:spawn_executable, String.to_charlist(launcher)},
+        [
+          :binary,
+          :exit_status,
+          :use_stdio,
+          :stderr_to_stdout,
+          :hide,
+          args: Enum.map(vector, &String.to_charlist/1),
+          cd: String.to_charlist(root)
+        ]
+      )
+
+    on_exit(fn -> close_test_port(port) end)
+    {:os_pid, carrier} = Port.info(port, :os_pid)
+    token = "release-wait-case"
+    assert Port.command(port, "loopex-init:#{token}\nloopex-run:#{token}\n")
+    stop = System.monotonic_time(:millisecond) + 5_000
+
+    {:ready, bytes} =
+      guard_wait_bytes(port, <<>>, stop, fn bytes ->
+        String.contains?(bytes, ":status:0\n") and
+          Regex.match?(~r/:wrapper:\d+\n/, bytes)
+      end)
+
+    [_, group_text, guard_text] =
+      Regex.run(~r/\Aloopex-guard:release-wait-case:(\d+):(\d+)\n/, bytes)
+
+    assert String.to_integer(group_text) == carrier
+    [_, wrapper_text] = Regex.run(~r/:wrapper:(\d+)\n/, bytes)
+    # Opening the FIFO writer synchronizes with the wrapper's blocked reader.
+    {:ok, hold} = File.open(fifo, [:write])
+
+    try do
+      {table, 0} = System.cmd("/bin/ps", ["-p", wrapper_text, "-o", "ppid=,pgid="])
+      assert String.split(table) == [guard_text, group_text]
+      assert {"", 0} = System.cmd("/bin/kill", ["-KILL", wrapper_text])
+      assert Port.command(port, "loopex-release:#{token}\n")
+
+      assert {:exit, 0, complete} =
+               guard_wait_bytes(port, bytes, System.monotonic_time(:millisecond) + 5_000, fn _ ->
+                 false
+               end)
+
+      assert {:ok, ^carrier} =
+               await_path(
+                 fn -> if process_group_empty?(carrier), do: {:ok, carrier}, else: :error end,
+                 5_000
+               )
+
+      output =
+        complete
+        |> String.replace(~r/\Aloopex-guard:release-wait-case:\d+:\d+\n/, "", global: false)
+        |> String.replace(
+          ~r/\nloopex-command-status:release-wait-case:(?:wrapper:\d+|status:0)\n/,
+          ""
+        )
+
+      assert output == expected
+    after
+      File.close(hold)
+      close_test_port(port)
+    end
+  end
+
+  test "command wait diagnostics preserve signalled status without polluting tool output" do
+    root = workspace()
+    expected = "signalled-row\tSKILL.md" <> <<0>> <> "command-stderr\n"
+
+    command =
+      "printf 'signalled-row\\tSKILL.md\\0'; printf 'command-stderr\\n' >&2; kill -KILL $$"
+
+    {launcher, vector} = Local.launcher_vector(%{command: command})
+
+    port =
+      Port.open(
+        {:spawn_executable, String.to_charlist(launcher)},
+        [
+          :binary,
+          :exit_status,
+          :use_stdio,
+          :stderr_to_stdout,
+          :hide,
+          args: Enum.map(vector, &String.to_charlist/1),
+          cd: String.to_charlist(root)
+        ]
+      )
+
+    on_exit(fn -> close_test_port(port) end)
+    {:os_pid, carrier} = Port.info(port, :os_pid)
+    token = "command-wait-case"
+    assert Port.command(port, "loopex-init:#{token}\nloopex-run:#{token}\n")
+
+    {:ready, bytes} =
+      guard_wait_bytes(port, <<>>, System.monotonic_time(:millisecond) + 5_000, fn bytes ->
+        String.contains?(bytes, ":status:137\n") and Regex.match?(~r/:wrapper:\d+\n/, bytes)
+      end)
+
+    [_, group_text] = Regex.run(~r/\Aloopex-guard:command-wait-case:(\d+):\d+\n/, bytes)
+    assert String.to_integer(group_text) == carrier
+    assert Port.command(port, "loopex-release:#{token}\n")
+
+    assert {:exit, 0, complete} =
+             guard_wait_bytes(port, bytes, System.monotonic_time(:millisecond) + 5_000, fn _ ->
+               false
+             end)
+
+    assert {:ok, ^carrier} =
+             await_path(
+               fn -> if process_group_empty?(carrier), do: {:ok, carrier}, else: :error end,
+               5_000
+             )
+
+    output =
+      complete
+      |> String.replace(~r/\Aloopex-guard:command-wait-case:\d+:\d+\n/, "", global: false)
+      |> String.replace(
+        ~r/\nloopex-command-status:command-wait-case:(?:wrapper:\d+|status:137)\n/,
+        ""
+      )
+
+    assert output == expected
+  end
+
+  defp guard_wait_bytes(port, bytes, stop, ready?) do
+    assert byte_size(bytes) <= 8_192, "guard boundary output exceeded its fixture bound"
+
+    if ready?.(bytes) do
+      {:ready, bytes}
+    else
+      receive do
+        {^port, {:data, chunk}} -> guard_wait_bytes(port, bytes <> chunk, stop, ready?)
+        {^port, {:exit_status, status}} -> {:exit, status, bytes}
+      after
+        max(stop - System.monotonic_time(:millisecond), 0) ->
+          flunk("guard boundary did not reach its synchronized terminal state")
+      end
+    end
   end
 
   test "a malformed control message makes the live guard reap its admitted group" do

@@ -63,7 +63,8 @@ defmodule Loopex.Checks.Status do
   ## Concept
 
   Validates a document set and returns the messages describing what is wrong, or
-  an empty list when everything holds.
+  an empty list when everything holds. Internal intermediate-holder validation
+  returns an explicit holder/pending-holders map instead of global success.
 
   ## Technical depth
 
@@ -78,12 +79,20 @@ defmodule Loopex.Checks.Status do
     * `:read_artifact` — a function returning one bound artifact's bytes from the
       working tree; without it the current-tree artifact comparison is skipped,
       because there is no tree to compare against.
+    * `:artifact_holder` — internal transaction inspection only. Requires complete
+      history and a current artifact reader; reports the rebound holder and every
+      pending holder. It does not bypass governance or declare global success.
   """
-  @spec validate(map(), keyword()) :: [String.t()]
+  @spec validate(map(), keyword()) ::
+          [String.t()] | %{binding_scope: String.t(), pending_holders: [String.t()]}
   def validate(documents, options \\ []) do
     resolve_file = Keyword.get(options, :resolve_file)
     plan_history = Keyword.get(options, :plan_history)
     read_artifact = Keyword.get(options, :read_artifact)
+    holder = Keyword.get(options, :artifact_holder)
+
+    if holder != nil and (not is_function(read_artifact, 1) or not is_function(plan_history, 0)),
+      do: raise(Invalid, "holder scope requires current artifact bytes and complete history")
 
     {adr_paths, plan_names} = Documents.document_topology(documents)
     Documents.validate_local_links(documents)
@@ -123,8 +132,6 @@ defmodule Loopex.Checks.Status do
     require_derived_capsule!(rows, values, adr_statuses)
     require_register_matches_plans!(rows, plan_names)
 
-    verify_current_artifacts!(documents, plan_names, read_artifact)
-
     state_by_name = Map.new(rows)
 
     history = plan_history && plan_history.()
@@ -135,7 +142,9 @@ defmodule Loopex.Checks.Status do
       resolve_file
     )
 
-    History.artifact_history(history)
+    binding_result = History.artifact_history(history, holder: holder)
+    allowed = if is_map(binding_result), do: binding_result.pending_bindings, else: %{}
+    verify_current_artifacts!(documents, plan_names, read_artifact, allowed)
 
     Enum.each(plan_names, fn name ->
       Plan.governance(
@@ -150,7 +159,7 @@ defmodule Loopex.Checks.Status do
     end)
 
     verify_rejoin_barrier!(documents)
-    []
+    if holder == nil, do: [], else: Map.take(binding_result, [:binding_scope, :pending_holders])
   rescue
     error in Invalid -> [Exception.message(error)]
   end
@@ -268,9 +277,9 @@ defmodule Loopex.Checks.Status do
   # compared against every digest the gate declares.
   # Technical depth: skipped when no reader is supplied, because an in-memory
   # document set has no working tree to read.
-  defp verify_current_artifacts!(_documents, _plan_names, nil), do: :ok
+  defp verify_current_artifacts!(_documents, _plan_names, nil, _allowed), do: :ok
 
-  defp verify_current_artifacts!(documents, plan_names, read_artifact) do
+  defp verify_current_artifacts!(documents, plan_names, read_artifact, allowed) do
     Enum.each(plan_names, fn name ->
       gate_path = "docs/plans/#{name}-gate.md"
 
@@ -283,7 +292,9 @@ defmodule Loopex.Checks.Status do
             raise Invalid, "#{gate_path}: bound artifact #{target} is missing"
 
           content ->
-            if Markdown.digest(content) != digest do
+            actual = Markdown.digest(content)
+
+            unless actual == digest or Map.get(allowed, {gate_path, target}) == {digest, actual} do
               raise Invalid,
                     "#{gate_path}: bound artifact #{target} does not match its locked digest"
             end

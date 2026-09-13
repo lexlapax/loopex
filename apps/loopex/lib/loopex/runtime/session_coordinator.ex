@@ -30,6 +30,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
   alias Loopex.Runtime.Control
   alias Loopex.Runtime.ExecutorStream
   alias Loopex.Runtime.ProviderLifetime
+  alias Loopex.Runtime.ResourceContext
   alias Loopex.Runtime.SessionState
   alias Loopex.Runtime.StreamRelay
   alias Loopex.Executor
@@ -180,6 +181,14 @@ defmodule Loopex.Runtime.SessionCoordinator do
   end
 
   @doc false
+  def resource_catalog(coordinator, owner),
+    do: safe_call(coordinator, {:resource_catalog, owner}, @session_status_timeout_ms)
+
+  @doc false
+  def read_resource(coordinator, owner, request),
+    do: safe_call(coordinator, {:read_resource, owner, request}, @session_status_timeout_ms)
+
+  @doc false
   @spec reconciliation_fields() :: [atom()]
   def reconciliation_fields, do: @reconciliation_fields
 
@@ -280,6 +289,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
        policy: Keyword.get(options, :policy),
        project_manifest: Keyword.get(options, :project_manifest),
        project_decision: Keyword.get(options, :project_decision),
+       resource_snapshot: Keyword.get(options, :resource_snapshot),
        sampling: Keyword.get(options, :sampling),
        grant_decision: Keyword.fetch!(options, :grant_decision),
        fault_to: Keyword.fetch!(options, :fault_to),
@@ -410,6 +420,24 @@ defmodule Loopex.Runtime.SessionCoordinator do
     else
       {:reply, {:error, :session_unavailable}, state}
     end
+  end
+
+  def handle_call({:resource_catalog, supplied_owner}, _from, state) do
+    reply =
+      if ready_current?(state, supplied_owner),
+        do: inspect_resource_catalog(state),
+        else: {:error, :session_unavailable}
+
+    {:reply, reply, state}
+  end
+
+  def handle_call({:read_resource, supplied_owner, request}, _from, state) do
+    reply =
+      if ready_current?(state, supplied_owner),
+        do: inspect_resource(state, request),
+        else: {:error, :session_unavailable}
+
+    {:reply, reply, state}
   end
 
   def handle_call({:activate_resume, supplied_owner, capability}, {caller, _tag}, state) do
@@ -1436,6 +1464,61 @@ defmodule Loopex.Runtime.SessionCoordinator do
   end
 
   defp commit_command(state, command) do
+    if resource_command?(command) do
+      commit_resource_command(state, command)
+    else
+      commit_loop_command(state, command)
+    end
+  end
+
+  defp resource_command?(command) do
+    Enum.any?([:type, "type"], fn key ->
+      Map.get(command, key) in [
+        :admit_resources,
+        "admit_resources",
+        :activate_skill,
+        "activate_skill"
+      ]
+    end)
+  end
+
+  defp commit_resource_command(state, command) do
+    case SessionState.prepare_resource_command(state.durable, command) do
+      {:new, normalized} ->
+        resolution =
+          if is_nil(state.durable.active_run_id) do
+            Loopex.Runtime.ResourceSnapshot.resolve(
+              state.resource_snapshot,
+              state.durable.resources,
+              normalized
+            )
+          else
+            {:refused, :run_active}
+          end
+
+        proposal = SessionState.propose_resource_command(state.durable, normalized, resolution)
+        commit_command_proposal(state, proposal)
+
+      {:replayed, reply} ->
+        {:reply, reply, state}
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
+  end
+
+  defp inspect_resource_catalog(state),
+    do: Loopex.Runtime.ResourceSnapshot.view(state.resource_snapshot, state.durable.resources)
+
+  defp inspect_resource(state, request),
+    do:
+      Loopex.Runtime.ResourceSnapshot.read(
+        state.resource_snapshot,
+        state.durable.resources,
+        request
+      )
+
+  defp commit_loop_command(state, command) do
     {state, resolved} = resolve_command(state, command)
 
     with {:ok, _declared} <- declared_bounds(resolved) do
@@ -1458,7 +1541,11 @@ defmodule Loopex.Runtime.SessionCoordinator do
     do: Bounds.declare(Map.take(resolved, [:max_turns, :token_budget, :deadline_ms]))
 
   defp propose_command(state, command, resolved) do
-    case SessionState.propose(state.durable, command, resolved) do
+    commit_command_proposal(state, SessionState.propose(state.durable, command, resolved))
+  end
+
+  defp commit_command_proposal(state, result) do
+    case result do
       {:replayed, reply} ->
         {:reply, reply, state}
 
@@ -1728,15 +1815,18 @@ defmodule Loopex.Runtime.SessionCoordinator do
     # against a request the run never sent.
     steer = SessionState.pending_steer(state.durable, run_id)
 
-    {blocks, project_receipt} = project_blocks(state)
-
-    staging = %{run_id: run_id, elements: elements, steer: steer}
+    staging = %{
+      run_id: run_id,
+      elements: elements,
+      steer: steer,
+      resources: Map.get(state.durable.run_resources, run_id)
+    }
 
     with {:ok, deadline} <- run_deadline(declared),
          staging = Map.put(staging, :deadline, deadline),
          {:ok, max_tokens} <- declared_max_tokens(state),
          staging = Map.put(staging, :max_tokens, max_tokens),
-         {:ok, proposal} <- stage_candidate(state, staging, blocks, project_receipt),
+         {:ok, proposal} <- stage_candidate(state, staging),
          {:ok, next} <- commit_internal(state, proposal) do
       send(self(), :advance_work)
       {:noreply, adopt_run(next, run_id)}
@@ -1755,71 +1845,168 @@ defmodule Loopex.Runtime.SessionCoordinator do
     end
   end
 
-  # Concept: optional project content is withheld whole, and only after the
-  # required request has been proved admissible without it.
+  # Concept: required refusal preserves project trust's exact disposition.
+  # Required context is proved writable before optional resource content is read;
+  # each eligible optional block then fits whole or records why it did not fit.
   #
-  # Technical depth: ADR 0017 permits withholding exactly one class and never
-  # trimming. If the optional-inclusive candidate exceeds the committed token
-  # total or the Store record ceiling, the whole project class is removed, the
-  # request is canonicalized again, and the record cost is resolved to its own
-  # fixed point. The declined receipt names the dimension, the optional-inclusive
-  # observation, and the limit, so an operator can see what was withheld and
-  # why, and the task continues. A required-only candidate that still fails has
-  # nothing optional left to remove and becomes the compact refusal.
-  defp stage_candidate(state, staging, [], project_receipt),
-    do: required_only_proposal(state, staging, project_receipt)
+  # Technical depth: the initial resource header has no selection-dependent
+  # rows. The maintainer approved reserving the longest closed empty header as
+  # the fixed resource-format cost on 2026-09-10: otherwise the shorter initial
+  # status could fit while the required withheld-status receipt could not.
+  # Resolve project trust once and reuse its result. Both required-only
+  # measurements precede optional-inclusive admission and resource content reads.
+  defp stage_candidate(state, staging) do
+    initial = ResourceContext.initial_header(staging.resources)
+    {blocks, receipt} = project_blocks(state)
 
-  defp stage_candidate(state, staging, blocks, project_receipt) do
-    case staged_proposal(state, staging, blocks, project_receipt) do
-      {:refused_not_required_only, %{"dimension" => dimension} = refusal}
-      when dimension in ["context_tokens", "context_record_bytes"] ->
-        required_only_proposal(state, staging, withheld_project_receipt(dimension, refusal))
+    project =
+      if receipt["disposition"] == "staged",
+        do: ProjectResource.receipt(:not_evaluated_required_failure, %{}),
+        else: receipt
 
-      {:refused_not_required_only, _refusal} ->
-        required_only_refusal(state, staging, project_receipt)
-
-      other ->
-        other
+    with {:ok, _required} <- measure_candidate(state, staging, [], project, initial),
+         :ok <- reserve_empty_resource_header(state, staging, project, initial),
+         {:ok, selected, project} <-
+           admit_project_block(state, staging, reserved_resource_header(initial), blocks, receipt),
+         {:ok, selected, resource_header} <-
+           admit_resource_blocks(state, staging, selected, project),
+         {:ok, candidate} <- model_candidate(state, staging, selected, project, resource_header) do
+      SessionState.propose_model_request(state.durable, staging.run_id, candidate.request,
+        applied_steer: staging.steer && staging.steer.command_id,
+        context_receipt: candidate.receipt
+      )
     end
   end
 
-  # Concept: a refusal is described by the same context that decided it.
-  #
-  # Technical depth: the compact refusal's four counts and ordered descriptor
-  # digest describe the required-only sequence ADR 0017 fixes at evaluation step
-  # 2, and those counts have no member for an optional project descriptor. A
-  # dimension no withholding can cure -- the strict system class ceiling, record
-  # depth, record cardinality -- is therefore re-decided over the required-only
-  # set before anything is retained, so the counts partition the sequence behind
-  # the digest and `not_evaluated_required_failure` is the truth about a project
-  # whose budget contribution was never reached. A required-only candidate
-  # admitted here is discarded rather than staged: its receipt still claims the
-  # project resolution that produced the optional block it does not contain, so
-  # retaining it would commit a receipt describing a different request. ADR 0017
-  # makes optional content unable to be the sole cause of a structural refusal in
-  # M2, so reaching that state means the invariant is broken and the session is
-  # unavailable rather than the owner inventing an operator verdict.
-  defp required_only_refusal(state, staging, project_receipt) do
-    case required_only_proposal(state, staging, project_receipt) do
-      {:ok, _admissible} -> {:error, :context_optional_class_sole_refusal}
-      required_only -> required_only
+  defp reserve_empty_resource_header(_state, _staging, _project, nil), do: :ok
+
+  defp reserve_empty_resource_header(state, staging, project, initial) do
+    # This exact legal projection supplies the measured reservation. No padding
+    # or synthetic record-byte count enters either a request or a refusal.
+    header = reserved_resource_header(initial)
+
+    case measure_candidate(state, staging, [], project, header) do
+      {:ok, _reserved} -> :ok
+      failure -> failure
     end
   end
 
-  # Technical depth: a required-only candidate carries no project descriptor, so
-  # its four counts always partition its own descriptor sequence. A refusal it
-  # cannot describe means the sequence and the counts have drifted apart in the
-  # live constructor, which is a broken invariant rather than an operator
-  # verdict, and nothing is staged or retained under it.
-  defp required_only_proposal(state, staging, project_receipt) do
-    case staged_proposal(state, staging, [], project_receipt) do
-      {:refused_not_required_only, _refusal} ->
-        {:error, :context_required_only_refusal_undescribable}
+  defp reserved_resource_header(nil), do: nil
 
-      other ->
-        other
+  defp reserved_resource_header(header),
+    do: Map.put(header, "status", "retained_content_missing")
+
+  defp admit_project_block(state, staging, resource_header, blocks, receipt) do
+    selected = Enum.zip(blocks, project_sources(receipt))
+
+    case measure_candidate(state, staging, selected, receipt, resource_header) do
+      {:ok, _candidate} ->
+        {:ok, selected, receipt}
+
+      {refusal_kind, %{"dimension" => dimension} = refusal}
+      when refusal_kind in [:refused, :refused_not_required_only] and
+             dimension in ["context_tokens", "context_record_bytes"] ->
+        withheld = withheld_project_receipt(dimension, refusal)
+
+        case measure_candidate(state, staging, [], withheld, resource_header) do
+          {:ok, _candidate} -> {:ok, [], withheld}
+          failure -> failure
+        end
+
+      {:refused_not_required_only, _structural} ->
+        {:error, :context_optional_class_sole_refusal}
+
+      failure ->
+        failure
     end
   end
+
+  defp admit_resource_blocks(_state, %{resources: nil}, selected, _project),
+    do: {:ok, selected, nil}
+
+  defp admit_resource_blocks(state, staging, selected, project) do
+    header = ResourceContext.plan(state.resource_snapshot, staging.resources)
+
+    if header["status"] == "evaluated" do
+      # Reserve the largest closed row status for every selected identity before
+      # reading content. Replacing it with an actual status can only reduce this
+      # part of the record; the final receipt contains no reservation markers.
+      reserved =
+        Map.update!(header, "blocks", fn rows ->
+          Enum.map(rows, &Map.put(&1, "status", "context_record_cardinality"))
+        end)
+
+      case measure_candidate(state, staging, selected, project, reserved) do
+        {:ok, _candidate} ->
+          case fold_resource_blocks(state, staging, selected, project, reserved) do
+            {:error, :resource_snapshot_unavailable} ->
+              # A later unavailable file invalidates the whole class, including
+              # any earlier resource block considered in this local fold. Root
+              # project content remains independently admitted.
+              withheld = %{header | "status" => "retained_content_missing", "blocks" => []}
+              {:ok, selected, withheld}
+
+            result ->
+              result
+          end
+
+        {kind, _refusal} when kind in [:refused, :refused_not_required_only] ->
+          withheld = %{header | "status" => "metadata_budget", "blocks" => []}
+          {:ok, selected, withheld}
+
+        failure ->
+          failure
+      end
+    else
+      {:ok, selected, header}
+    end
+  end
+
+  defp fold_resource_blocks(state, staging, selected, project, header) do
+    header["blocks"]
+    |> Enum.with_index()
+    |> Enum.reduce_while({:ok, selected, header}, fn {row, index}, {:ok, accepted, current} ->
+      case ResourceContext.resolve(state.resource_snapshot, staging.resources, row) do
+        {:ok, text, reference} ->
+          next_blocks = accepted ++ [{text, source(reference, "resource_pack")}]
+          next_header = resource_row_status(current, index, "staged")
+
+          case measure_candidate(state, staging, next_blocks, project, next_header) do
+            {:ok, _candidate} ->
+              {:cont, {:ok, next_blocks, next_header}}
+
+            {kind, %{"dimension" => dimension}}
+            when kind in [:refused, :refused_not_required_only] and
+                   dimension in [
+                     "context_tokens",
+                     "context_record_bytes",
+                     "context_record_depth",
+                     "context_record_cardinality"
+                   ] ->
+              {:cont, {:ok, accepted, resource_row_status(current, index, dimension)}}
+
+            failure ->
+              {:halt, failure}
+          end
+
+        {:withheld, reason} ->
+          {:cont, {:ok, accepted, resource_row_status(current, index, reason)}}
+
+        failure ->
+          {:halt, failure}
+      end
+    end)
+  end
+
+  defp resource_row_status(header, index, status),
+    do:
+      Map.update!(
+        header,
+        "blocks",
+        &List.update_at(&1, index, fn row ->
+          Map.put(row, "status", status)
+        end)
+      )
 
   defp withheld_project_receipt(dimension, refusal) do
     disposition =
@@ -1835,7 +2022,20 @@ defmodule Loopex.Runtime.SessionCoordinator do
     })
   end
 
-  defp staged_proposal(state, staging, blocks, project_receipt) do
+  defp measure_candidate(state, staging, selected, project, resource_header) do
+    with {:ok, candidate} <- model_candidate(state, staging, selected, project, resource_header),
+         {:ok, _record} <-
+           SessionState.preflight_model_request(state.durable, staging.run_id, candidate.request,
+             applied_steer: staging.steer && staging.steer.command_id,
+             context_receipt: candidate.receipt
+           ) do
+      {:ok, candidate}
+    end
+  end
+
+  defp model_candidate(state, staging, selected, project_receipt, resource_header) do
+    {blocks, sources} = Enum.unzip(selected)
+
     messages =
       Conversation.project(staging.elements, system: system_block(state), project_blocks: blocks)
 
@@ -1849,18 +2049,16 @@ defmodule Loopex.Runtime.SessionCoordinator do
            context_receipt(
              request,
              context_sources(
-               Enum.take(project_sources(project_receipt), length(blocks)),
+               sources,
                Conversation.session_entries(staging.elements),
                staging.steer,
                staging.run_id
              ),
              project_receipt,
-             state.context_token_budget
+             state.context_token_budget,
+             resource_header
            ) do
-      SessionState.propose_model_request(state.durable, staging.run_id, request,
-        applied_steer: staging.steer && staging.steer.command_id,
-        context_receipt: receipt
-      )
+      {:ok, %{request: request, receipt: receipt}}
     end
   end
 
@@ -1985,7 +2183,13 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # that identity without migrating the descriptor algebra. Project-resource
   # admission remains nested so a declined class keeps its exact reason even
   # though it contributes no block.
-  defp context_receipt(request, message_sources, project_receipt, context_token_budget) do
+  defp context_receipt(
+         request,
+         message_sources,
+         project_receipt,
+         context_token_budget,
+         resource_header
+       ) do
     # Technical depth: `Enum.zip/2` truncates silently. A projection/source
     # disagreement is therefore refused before commit instead of producing a
     # receipt that simply omits the tail of the request it claims to describe.
@@ -1998,27 +2202,30 @@ defmodule Loopex.Runtime.SessionCoordinator do
         end)
 
       blocks = message_blocks ++ Enum.map(request.tools, &tool_descriptor/1)
-      totals = context_totals(blocks)
+      totals = context_totals(blocks, resource_header)
+
+      receipt =
+        %{
+          "provider_identity" => "loopex.context.reference",
+          "provider_revision" => if(resource_header, do: 3, else: 2),
+          "transformer_identity" => nil,
+          "transformer_revision" => nil,
+          "selector_identity" => nil,
+          "selector_revision" => nil,
+          "token_estimator" => Bounds.estimator(),
+          "descriptor_canonicalization_version" => @descriptor_canonicalization_version,
+          "blocks" => blocks,
+          "totals" => totals,
+          "project_resource" => project_receipt,
+          "context_token_budget" => context_token_budget,
+          "provider_estimated_tokens" => totals["token_cost"],
+          "context_record_byte_ceiling" => Store.max_item_bytes(),
+          "record_byte_cost" => 0,
+          "ordered_descriptor_digest" => ordered_descriptor_digest(blocks)
+        }
 
       {:ok,
-       %{
-         "provider_identity" => "loopex.context.reference",
-         "provider_revision" => 2,
-         "transformer_identity" => nil,
-         "transformer_revision" => nil,
-         "selector_identity" => nil,
-         "selector_revision" => nil,
-         "token_estimator" => Bounds.estimator(),
-         "descriptor_canonicalization_version" => @descriptor_canonicalization_version,
-         "blocks" => blocks,
-         "totals" => totals,
-         "project_resource" => project_receipt,
-         "context_token_budget" => context_token_budget,
-         "provider_estimated_tokens" => totals["token_cost"],
-         "context_record_byte_ceiling" => Store.max_item_bytes(),
-         "record_byte_cost" => 0,
-         "ordered_descriptor_digest" => ordered_descriptor_digest(blocks)
-       }}
+       if(resource_header, do: Map.put(receipt, "resource_packs", resource_header), else: receipt)}
     else
       {:error, :context_receipt_source_mismatch}
     end
@@ -2130,9 +2337,14 @@ defmodule Loopex.Runtime.SessionCoordinator do
   defp source(source_reference, provenance_class) do
     trust_class =
       case provenance_class do
-        "system" -> "host_owned_trusted_brain_content"
-        "session" -> "session_owned_durable_truth"
-        "project_resource" -> "untrusted_behavior_shaping_data"
+        "system" ->
+          "host_owned_trusted_brain_content"
+
+        "session" ->
+          "session_owned_durable_truth"
+
+        class when class in ["project_resource", "resource_pack"] ->
+          "untrusted_behavior_shaping_data"
       end
 
     %{
@@ -2154,9 +2366,12 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # costs for a class with no block, so a consumer reads the same shape whether
   # or not a class contributed and the three buckets always sum back to both
   # outer totals.
-  defp context_totals(blocks) do
+  defp context_totals(blocks, resource_header) do
+    classes =
+      ~w(system session project_resource) ++ if(resource_header, do: ["resource_pack"], else: [])
+
     by_provenance =
-      Map.new(~w(system session project_resource), fn provenance ->
+      Map.new(classes, fn provenance ->
         {provenance, sum_costs(Enum.filter(blocks, &(&1["provenance_class"] == provenance)))}
       end)
 

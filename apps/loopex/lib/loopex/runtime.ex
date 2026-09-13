@@ -69,6 +69,7 @@ defmodule Loopex.Runtime do
           | {:policy, module() | nil}
           | {:project_manifest, map() | nil}
           | {:project_decision, map() | nil}
+          | {:resource_manifest, map() | nil}
           | {:sampling, map()}
           | {:grant_decision, term()}
           | {:fault_to, pid() | nil}
@@ -235,7 +236,7 @@ defmodule Loopex.Runtime do
            Attachment.routing(attachment) do
       dispatcher_call(
         runtime,
-        {:next_event, runtime.token, session_id, attachment_id, incarnation_id},
+        {:next_event, runtime.token, session_id, attachment_id, incarnation_id, make_ref()},
         :infinity
       )
     end
@@ -250,7 +251,7 @@ defmodule Loopex.Runtime do
            Attachment.routing(attachment) do
       dispatcher_call(
         runtime,
-        {:attachment_status, runtime.token, session_id, attachment_id, incarnation_id}
+        {:attachment_status, runtime.token, session_id, attachment_id, incarnation_id, make_ref()}
       )
     end
   end
@@ -289,6 +290,28 @@ defmodule Loopex.Runtime do
   end
 
   def session_status(_runtime, _session_id), do: {:error, :runtime_reference_required}
+
+  @doc false
+  @spec resource_catalog(t(), binary()) :: {:ok, map()} | {:error, term()}
+  def resource_catalog(%__MODULE__{} = runtime, session_id) do
+    with {:ok, coordinator, owner} <-
+           control_call(runtime, {:session_status, runtime.token, session_id}) do
+      SessionCoordinator.resource_catalog(coordinator, owner)
+    end
+  end
+
+  def resource_catalog(_runtime, _session_id), do: {:error, :runtime_reference_required}
+
+  @doc false
+  @spec read_resource(t(), binary(), map()) :: {:ok, map()} | {:error, term()}
+  def read_resource(%__MODULE__{} = runtime, session_id, request) do
+    with {:ok, coordinator, owner} <-
+           control_call(runtime, {:session_status, runtime.token, session_id}) do
+      SessionCoordinator.read_resource(coordinator, owner, request)
+    end
+  end
+
+  def read_resource(_runtime, _session_id, _request), do: {:error, :runtime_reference_required}
 
   @doc false
   @spec reconciliation_query(Attachment.t()) :: {:ok, map()} | {:error, term()}
@@ -362,11 +385,54 @@ defmodule Loopex.Runtime do
 
   defp dispatcher_call(%__MODULE__{supervisor: supervisor}, message, timeout \\ 5_000) do
     with {:ok, %{dispatcher: dispatcher}} <- RuntimeSupervisor.children(supervisor) do
-      safe_call(dispatcher, message, timeout)
+      deadline = if timeout == :infinity, do: :infinity, else: monotonic_now() + timeout
+      dispatcher_request(dispatcher, message, deadline)
     else
       _other -> {:error, :runtime_unavailable}
     end
   end
+
+  # Concept: concurrent readers wait without accumulating in the dispatcher.
+  # Technical depth: this private response never crosses the facade. The read
+  # worker exits after adoption or cancellation; a caller then revalidates its
+  # attachment and uses the remaining original call budget. Public event order,
+  # empty/refusal meanings and status deadlines remain unchanged.
+  defp dispatcher_request(dispatcher, message, deadline) do
+    case safe_call(dispatcher, message, remaining_call_time(deadline)) do
+      {:wait_for_attachment_read, worker} when is_pid(worker) ->
+        monitor = Process.monitor(worker)
+
+        receive do
+          {:DOWN, ^monitor, :process, ^worker, _reason} ->
+            dispatcher_request(dispatcher, message, deadline)
+        after
+          remaining_call_time(deadline) ->
+            Process.demonitor(monitor, [:flush])
+            cancel_dispatcher_read(dispatcher, message)
+            {:error, :runtime_unavailable}
+        end
+
+      {:error, :runtime_unavailable} = error ->
+        cancel_dispatcher_read(dispatcher, message)
+        error
+
+      reply ->
+        reply
+    end
+  end
+
+  defp cancel_dispatcher_read(
+         dispatcher,
+         {operation, _token, _session, id, _incarnation, call_id}
+       )
+       when operation in [:next_event, :attachment_status],
+       do: GenServer.cast(dispatcher, {:cancel_attachment_read, id, call_id})
+
+  defp cancel_dispatcher_read(_dispatcher, _message), do: :ok
+
+  defp remaining_call_time(:infinity), do: :infinity
+  defp remaining_call_time(deadline), do: max(deadline - monotonic_now(), 0)
+  defp monotonic_now, do: System.monotonic_time(:millisecond)
 
   defp safe_call(server, message, timeout) do
     try do
@@ -426,6 +492,7 @@ defmodule Loopex.Runtime do
              policy: nil,
              project_manifest: nil,
              project_decision: nil,
+             resource_manifest: nil,
              grant_decision: nil,
              fault_to: nil,
              cleanup_grace_ms: nil,
@@ -447,6 +514,8 @@ defmodule Loopex.Runtime do
          {:ok, policy} <-
            validate_policy(validated[:policy], validated[:tools], validated[:tool]),
          {:ok, sampling} <- validate_sampling(validated[:sampling]),
+         {:ok, resource_manifest} <-
+           validate_resource_manifest(validated[:resource_manifest], executor),
          {:ok, grant_decision} <- validate_grant_decision(validated[:grant_decision]),
          {:ok, fault_to} <- validate_sink(validated[:fault_to]),
          {:ok, cleanup_grace_ms} <- validate_cleanup_grace(validated[:cleanup_grace_ms]),
@@ -475,6 +544,7 @@ defmodule Loopex.Runtime do
          policy: policy,
          project_manifest: validated[:project_manifest],
          project_decision: validated[:project_decision],
+         resource_manifest: resource_manifest,
          grant_decision: grant_decision,
          fault_to: fault_to,
          cleanup_grace_ms: cleanup_grace_ms,
@@ -502,6 +572,20 @@ defmodule Loopex.Runtime do
 
       _other ->
         {:error, :invalid_identifier}
+    end
+  end
+
+  defp validate_resource_manifest(nil, _executor), do: {:ok, nil}
+
+  # Concept: a resource snapshot belongs to the workspace served by this runtime.
+  # Technical depth: core compares host-supplied opaque identities before children
+  # start. An executor-free runtime has no second workspace to reconcile.
+  defp validate_resource_manifest(manifest, executor) do
+    with {:ok, digest, normalized} <- Loopex.ResourcePack.digest(manifest),
+         true <- is_nil(executor) or normalized["workspace_ref"] == executor.workspace_ref do
+      {:ok, {digest, normalized}}
+    else
+      _ -> {:error, :invalid_resource_manifest}
     end
   end
 

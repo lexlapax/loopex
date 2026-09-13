@@ -55,6 +55,9 @@ flowchart TD
     FOUND{"AGENTS.md at the<br/>workspace root?"}
     ASK["you are shown the file, its size and digests<br/>admit these project resources for this run? [y/N]"]
     OPEN["journal opened, session created, interrupt handler installed"]
+    SKILLS{"project skills under<br/>.agents/skills?"}
+    TRUST["you are shown every skill identity and the complete manifest digest<br/>trust this exact skill manifest for the next run? [y/N]"]
+    SELECT["selected instructions and supporting labels are committed<br/>unselected files remain outside model context"]
     PROMPT["your prompt is committed, then echoed as '&gt; ...'"]
     STAGE["the exact request bytes are committed"]
     MODEL["model call over the network<br/>the answer streams onto your screen as it is written"]
@@ -73,7 +76,10 @@ flowchart TD
     TYPE --> CHECK --> LOCK --> FOUND
     FOUND -- yes --> ASK --> OPEN
     FOUND -- no --> OPEN
-    OPEN --> PROMPT --> STAGE --> MODEL --> REPLY --> WANTS
+    OPEN --> SKILLS
+    SKILLS -- yes --> TRUST --> SELECT --> PROMPT
+    SKILLS -- no --> PROMPT
+    PROMPT --> STAGE --> MODEL --> REPLY --> WANTS
     WANTS -- no --> DONE
     WANTS -- yes --> POLICY
     POLICY -- deny --> DENY --> BOUNDS
@@ -123,6 +129,15 @@ Full detail on the decision, and what it binds, is in
 the journal, the receipt ledger, the artifact directory, the session entry. The
 interrupt handler goes on at this point too, so an interrupt from here onward
 stops the run properly rather than killing the process.
+
+**Project skills are admitted and selected before the prompt.** Loopex discovers
+only `.agents/skills/<name>/` in this workspace. When it finds skills, it shows
+their source-qualified identities and the complete manifest digest. An
+affirmative answer admits that exact manifest for this run; any other answer
+withholds skill content. `--skill` selects an admitted instruction file, and
+repeatable `--skill-resource` flags select named supporting files for that same
+skill. Unselected files never enter the request. See
+[Install, inspect, and select project skills](coding-sessions.md#operator-sessions-skills).
 
 **Your prompt is committed, then echoed.** The echo comes from the journal, not
 from what you typed, so what you see on screen is what the session actually

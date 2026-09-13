@@ -25,7 +25,7 @@ while the session lives; a session "brain" can coordinate local or remote
 <!-- loopex:readme-status:start -->
 ## Where Things Stand
 
-**Revision status:** Closed milestone product baseline; active milestone `M3` is accepted; next candidate `M4` is open.
+**Revision status:** Closed milestone product baseline; active milestone `M4` is open; no next candidate is recorded.
 
 [Canonical milestone status and plan records](docs/plans/)
 <!-- loopex:readme-status:end -->
@@ -64,6 +64,20 @@ accounting, and bounded executor receipts. The
 and [integration disposition](docs/evidence/M2-recorded-limitations.md#final-repaired-source-integration)
 name the evidence and authority used for integration. Those repairs do not
 publish a package or label a public surface.
+
+The M3 implementation adds pinned Git skill installation, project-only discovery,
+explicit manifest admission, and operator-selected instructions and supporting
+files in model context. Skills use the existing tool, policy and artifact paths;
+downloaded scripts and metadata grant no permissions. Fresh-process CLI recovery
+uses the exact retained skill snapshot with its configured provider and executor.
+Core repairs keep required context ahead of optional content, let acknowledgements
+continue while Store reads wait, and retire settled provider permits safely. See
+[project skills](docs/operator/coding-sessions.md#operator-sessions-skills) for
+the commands and [embedding resources](docs/developer/runtime-and-embedding.md#technical-embedding-resources)
+for the host API. The exact M3 product source
+`f45354572840636b473ad7e40e42355fdff4fc17` passed M3-only qualification
+on the macOS floor pair and Linux; the [M3 plan](docs/plans/M3.md#concept-m3-final-qualification-f453545)
+records that evidence and the separate lifecycle decision.
 
 The repaired reference local executor requires `/bin/bash` for its internal
 supervision on Darwin and Linux; raw commands still use `/bin/sh`. See the
@@ -210,11 +224,10 @@ alongside explicit "AS IS", no-warranty terms that match the no-promises
 posture above. If you contribute, your contribution is licensed under the
 same terms — that is Apache-2.0 §5, and there is no separate CLA.
 
-The active milestone, `M3` (extensible local foundations), is accepted on
-branch `m3`; see the [canonical plan register](docs/plans/README.md).
+Milestone `M3` (extensible local foundations) is closed; see the
+[canonical plan register](docs/plans/README.md).
 
-The accepted [M3 plan](docs/plans/M3.md#concept) covers project skills and the remaining
-core repairs. Its Open [M4 successor](docs/plans/M4.md#concept) adds durable
-interactions, bounded artifact transfers and a foreground protocol/TypeScript
-consumer. The M3 opening runner now proves an actual required-only admission
-ordering defect. Implementation must now turn that declared opening red green.
+The closed [M3 plan](docs/plans/M3.md#concept) covers project skills and core
+repairs. Its Open [M4 successor](docs/plans/M4.md#concept) adds durable
+interactions, bounded artifact transfers, and a foreground protocol with a
+TypeScript consumer. M4 remains planning work until its gate is accepted.

@@ -85,19 +85,23 @@ is the only inherited witness-meaning change in this checkpoint.
 Acceptance binds these runner, manifest, configuration and authoritative-channel
 bytes. Product test bodies may grow during implementation; their protected
 identities and required state are fixed in `scripts/m3-outcomes.exs`. Existing
-Closed gate and bound-artifact bytes remain unchanged.
+Closed gate and bound-artifact bytes remain unchanged except for the exact
+shared selector diagnostic repair and named M1/M2/M3 replacement bindings in
+[Amendment 2](#amendment-2), under the
+[approved successor exception](../developer/agent-context-map.md#override-disposition-m3-selector-diagnostics-2026-09-12).
 The M3 gate-support tests follow the same witness rule; their whole-file bytes
-are not frozen. The inherited M1 harness corpus retains its existing binding.
+are not frozen. The inherited M1 harness corpus remains digest-bound, including
+its Amendment 2 replacement below.
 
 | SHA-256 | Path |
 | --- | --- |
-| `49cf9b8f7fc95846d105e045d86f73110f5de2fde80b9b6214ed30c565b87302` | `scripts/check-m3-gate.sh` |
+| `d54c66098d971a9bdc0b26addb95d415db02c44e4b82ba55e325b5863cf4629b` | `scripts/check-m3-gate.sh` |
 | `9bf18c61bdcd9292c1ad382ef373fe11acb4764b5535de744f75342c9f85a84a` | `scripts/m3-opening-probe.exs` |
 | `65d0de9dcd1218af542f00e32c2177d2612a2f1232f22db37b9942200c84cf66` | `scripts/m3-gate-support.exs` |
 | `c4d485ca3229441c678abe1e8733f90216e89e0dfb9e81786f58f525619aec29` | `scripts/check-closed-gates.sh` |
 | `bae4d114023091f9162fc0981c28e75db031ba3216adf1b1255d888f2dd3b5e8` | `scripts/m3-outcomes.exs` |
-| `cc290e60d9f9588c75f1259b25976a58d1c30713e570cd5a88c70cdf3c2159a0` | `scripts/m1-exunit-runner.exs` |
-| `0a8406ca080c70624e776b01e37c7ded210b54659064cf63723a847a54debe2d` | `apps/loopex/test/m1_exunit_runner_test.exs` |
+| `53d8219bdee584a3849a85a1102e405520d5dd0dfbe21d259434bc9edfc5fcc0` | `scripts/m1-exunit-runner.exs` |
+| `c36253cff3d74ddff1b330695edbc4bde0a4565c1412c67c1293b2fb7ca6129b` | `apps/loopex/test/m1_exunit_runner_test.exs` |
 | `fad47299b27a767785d2a6a776155038054f5457ee3ce0195a37ae667f7a9999` | `.tool-versions` |
 
 ## Runner Modes and Evidence Cost
@@ -221,3 +225,140 @@ failure is a blocking flake. No fixed review-round or runtime promise is made.
 | Documentation README | `docs/README.md` |
 | Root README | `README.md` |
 | Changelog | `CHANGELOG.md` |
+
+<a id="amendment-1"></a>
+## Amendment 1 — Bounded Private Provider Failure Diagnostics
+
+**Acceptance: OUTSTANDING.** This proposal retains the prior Acceptance row and
+`Accepted` lifecycle state. After exact-SHA review and explicit acceptance, its
+immediate one-parent child records a fresh amendment-specific disposition and
+rebinds Acceptance to this exact proposal under amendment-transaction-v1.
+No dependent implementation is authorized by the unaccepted proposal.
+
+The amended plan pair permits the finite private diagnostic contract of
+[**ADR 0029**](../adr/0029-bounded-provider-failure-diagnostics.md#concept),
+which must already be accepted before proposal A is committed. The ordinary
+sequence is ADR proposal/acceptance P/T, then M3 proposal/rebind A/R. Its schema, ownership,
+compatibility and evidence are described in the
+[evidence obligations](M3-technical.md#technical-plan-evidence).
+All five outcomes, existing commands, protected selector identities, Bound
+Artifacts rows and existing pass/failure rules remain unchanged. No guarantee
+is deferred, weakened or replaced by a supplemental diagnostic run.
+
+Conformance additions run in the existing required deterministic suite through
+existing provider test/support files; no invented selector or locked test name
+is added. Codec version fixtures are ordinary tests rather than locked version-1
+claims; only the approved schema/version expectations change. Preserve the
+actual M2 pre-transport refusal and generic-ambiguity witness and all unaffected
+protected assertions. Existing required real-provider,
+same-source build and attended workflow paths retain their original requests,
+deadlines, cleanup, execution counts and assertions and must pass on the amended
+candidate. An unavailable diagnostic never supplies cleanup or gate evidence.
+
+This amendment changes no digest-bound product, runner, harness or configuration
+artifact. The gate document and both normative envelopes change and require the
+M3 proposal/rebind transaction; historical Acceptance is not rewritten here.
+
+The diagnostic implementation and its evidence are unavailable at A and R even
+if the unchanged runner passes. Earlier S evidence proves no new diagnostic
+behavior. The first implementation checkpoint after R must first demonstrate
+a positive-control-backed behavioral failure against retained baseline
+production at the existing codec boundary, then add real-companion conformance
+cases through the existing required suite. Missing APIs/tests or setup failures
+are not that red; no new locked witness name is introduced by this amendment.
+
+For these documentation-only A/R revisions, the approved
+[Amendment 1 gate-cadence override](../developer/agent-context-map.md#override-disposition-m3-amendment1-gate-cadence-2026-09-11)
+defers full M0–M3 execution to the completed implementation candidate, including
+Linux serenity. Those A/R commands are **unrun**, never PASS. Keep focused
+status, artifact/envelope binding, documentation and bootstrap checks, plus
+independent exact-SHA review: A refuses only for its deliberately stale M3
+binding in binding-dependent checks, with binding-independent checks verified
+directly; R must be green on those focused checks. Final commands, required
+tests and pass/failure criteria are unchanged. Earlier evidence continues to
+name only its original source revision.
+
+<a id="amendment-2"></a>
+## Amendment 2 — Bind bounded shared selector diagnostics
+
+**Acceptance: OUTSTANDING.** This v1 proposal retains the current Acceptance
+row and Accepted lifecycle. M1 generation 9 and M2 generation 10 must already
+be settled through their separate immediate rebinds. After independent review
+and explicit acceptance of this actual A SHA by the recorded delegate, its
+immediate one-parent child R records one fresh disposition and rebinds Acceptance
+to A's Concept envelope, Technical envelope and gate digests.
+
+The [approved repair](../developer/agent-context-map.md#override-disposition-m3-selector-diagnostics-2026-09-12) binds the exact shared runner/corpus patch
+`sha256:d2bfe33c46ff83c97fb80ff4406c78c37e1d878739854af03f26cc65a8e7c1c8`. This proposal changes only their two M3 Bound Artifacts
+rows, this amendment and the plan pair's explanation of approved diagnostic and
+validation scope. M1 and M2 already own their script digest replacements; M3's
+gate script reads this table and needs no byte change. The plan also records
+the separately approved [sequential binding checker correction](../developer/agent-context-map.md#override-disposition-m3-sequential-binding-checker-2026-09-12).
+
+Failure-only records retain mode/seed, bounded case identifiers and attributable
+source locations, and closed failure categories and operand types. Limits remain
+eight retained event records, two summaries per record and 4,096 bytes per detail
+line, with omitted counts. Arbitrary messages, values, provider bodies, captured
+logs and stack arguments remain excluded. The two added synthetic cases leave
+the existing five corpus cases and authoritative success/report digest behavior
+unchanged. All five M3 outcomes, required selectors, counts/exclusions, provider
+paths, commands and final pass/failure criteria retain their meaning. No ADR or
+product contract changes.
+
+For these M1/M2/M3 proposal and rebind checkpoints, the approved final-only
+cadence uses focused exact-patch/corpus, success-report, script/digest and
+applicable status/binding checks with independent exact-SHA review. A retains
+the expected stale M3 binding; R must settle it and leave no outstanding holder.
+Intermediate scoped validation identifies pending holders and never claims
+global PASS. Complete M0–M3 gates remain required on the final candidate on
+macOS and Linux serenity. Deferred full commands are unrun at A/R, not passing
+evidence. Earlier focused results and gate failures retain their original source.
+
+This is test and repository-check infrastructure supporting the existing
+evidence obligations. It supplies no new product outcome, identifies no lost
+historical cause and grants no failure waiver, closure or release.
+
+| Generation | Artifact | Rebound SHA-256 |
+| --- | --- | --- |
+| 2 | `scripts/m1-exunit-runner.exs` | `53d8219bdee584a3849a85a1102e405520d5dd0dfbe21d259434bc9edfc5fcc0` |
+| 2 | `apps/loopex/test/m1_exunit_runner_test.exs` | `c36253cff3d74ddff1b330695edbc4bde0a4565c1412c67c1293b2fb7ca6129b` |
+
+<a id="amendment-3"></a>
+## Amendment 3 — Portable SHA-256 inspection
+
+**Acceptance: OUTSTANDING.** This v1 proposal retains the current Acceptance
+row, both normative envelopes and the Accepted lifecycle. After independent
+review and explicit acceptance of this actual proposal SHA by the recorded
+delegate, its immediate one-parent child records a fresh acceptance disposition
+and rebinds Acceptance to the proposal's unchanged envelope digests and new gate
+digest.
+
+The [approved checksum repair](../developer/agent-context-map.md#override-disposition-m3-checksum-portability-2026-09-12)
+authorizes exact patch
+`sha256:0468bc9e55adca559d37351257076c1dbd7cbb5f491b36cf66464193e1dd5b57`.
+This proposal changes only `scripts/check-m3-gate.sh`, that runner's Bound
+Artifacts row, and this amendment. M3 is its sole holder; M1 and M2 need no
+binding transaction. Prior amendment text and historical evidence remain true
+for the revisions they name.
+
+The runner accepts either `shasum` or `sha256sum`. It checks the chosen utility
+against the known empty-input SHA-256 digest and requires each returned digest
+to be lowercase 64-hex. Missing, malformed or failed hashing refuses. Every
+artifact comparison and the final gate digest use that validated utility; a
+failed final digest refuses before the authoritative PASS line. PATH isolation,
+roles, commands, outcome and selector sets, witness identities, counts,
+exclusions, timeouts, provider paths and final report fields remain unchanged.
+
+The recorded timing approval permits focused checksum controls, script and
+artifact inspection, applicable binding/status checks and independent exact-SHA
+review at this proposal and its immediate rebind. The proposal must retain the
+expected stale M3 gate binding, with binding-independent checks proved directly.
+The rebind must pass complete default status validation with no pending holder.
+The complete M0–M3 gates remain required at the final candidate on macOS and
+Linux serenity. Full gates at these intermediate revisions are unrun, not
+passing evidence. This changes no product outcome or ADR and grants no failure
+waiver, closure, merge to `main` or release.
+
+| Generation | Artifact | Rebound SHA-256 |
+| --- | --- | --- |
+| 3 | `scripts/check-m3-gate.sh` | `d54c66098d971a9bdc0b26addb95d415db02c44e4b82ba55e325b5863cf4629b` |

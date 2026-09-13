@@ -5083,7 +5083,7 @@ defmodule Loopex.Executor.Local do
       fi
       command_pid=$!
       trap '' TERM
-      wait "$command_pid"
+      wait "$command_pid" 2>/dev/null
       command_status=$?
       printf '\\n#{@guard_status}:%s:status:%s\\n' "$token" "$command_status" >&3
       exit "$command_status"
@@ -5104,7 +5104,7 @@ defmodule Loopex.Executor.Local do
           kill -s KILL -- -"$group_id" >/dev/null 2>&1
           ;;
         '#{@guard_release}:'"$token")
-          wait "$status_pid"
+          wait "$status_pid" 2>/dev/null
           exit 0
           ;;
         *) guard_abort ;;
@@ -5702,7 +5702,10 @@ defmodule Loopex.Executor.Local do
   end
 
   defp quiesce_launch_guard(guard, episode, status_known?) do
-    if guard_children_gone?(guard, episode) do
+    # Concept: a stalled first observation leaves time to recover cleanup proof.
+    # Technical depth: its cooperative share reserves the rest of the original
+    # deadline for termination and another positive observation.
+    if guard_children_gone?(guard, cooperative_episode(episode)) do
       {released, release_sent} = release_launch_guard(guard, episode, status_known?)
 
       if release_sent do

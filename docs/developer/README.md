@@ -28,9 +28,9 @@ load only the sections a task needs rather than reading it end to end.
 | --- | --- |
 | [Development charter](development-charter.md#concept) · [technical](development-charter-technical.md#technical-depth) | Clarity before mechanism, traceable depth, proportional documentation, capability routing. |
 | [Architecture](architecture.md#concept) · [technical](architecture-technical.md#technical-depth) | The eight applications and their inward dependency direction, the five replaceable ports, the truth planes and who may publish to each, the serial session owner, with an architecture diagram, a truth-plane diagram, the invariants and the module enforcing each, the record shapes, and a sequence diagram of one turn. |
-| [Runtime and embedding](runtime-and-embedding.md#concept) | Application shape, explicit runtime composition, commit ordering, embedded API, the shipped reference composition, recovery, and verification entrypoints. |
-| [Agent loop and tools](agent-loop-and-tools.md#concept) | The M2 turn machine: the tool contract and registry, canonical encoding, conversation projection, request digests, provider attempts and their settlement, bounds, streaming, policy, artifacts, context and record admission, project resources, and commit ordering. |
-| [Compatibility surfaces](compatibility-surfaces.md#concept) | Every surface M2 touches, why none is labelled or frozen, and what that means for an embedder. |
+| [Runtime and embedding](runtime-and-embedding.md#concept) | Application shape, explicit composition, immutable skill snapshots, resource commands and queries, commit ordering, recovery and verification entrypoints. |
+| [Agent loop and tools](agent-loop-and-tools.md#concept) | Turn ordering, tool registry, canonical requests, attempts and settlement, bounds, streaming, policy, artifacts, required-first admission, progressive skill context and replay. |
+| [Compatibility surfaces](compatibility-surfaces.md#concept) | M2/M3 surfaces, resource-record old-reader refusal and rollback, and why none is labelled or frozen. |
 | [Agent context map](agent-context-map.md) | Task-oriented routing into Concept first and exact Technical depth second; current client-ecosystem facts. |
 | [Adapter smoke evidence](agent-adapter-smoke.md) | Retained proof that development clients load the canonical contract and skills. |
 

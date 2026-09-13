@@ -99,6 +99,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderBridge do
               sender: nil,
               possible_delivery: false,
               result: nil,
+              failure: nil,
               delivered: false,
               cleanup: nil,
               proved: false,
@@ -317,6 +318,30 @@ defmodule Loopex.LLM.ReqLLM.ProviderBridge do
 
     receive do
       :next -> receive_frame(guardian, socket, deadline)
+      :terminal_end -> receive_eof(guardian, socket)
+      :stop -> :ok
+    end
+  end
+
+  # Concept: a terminal is complete only when no trailing byte follows it.
+  # Technical depth: the existing owned receiver waits for EOF instead of
+  # reading another frame, whose partial header could also end in `:closed`.
+  # The guardian keeps the original deadline and terminates this helper on
+  # expiry or owner loss. Only a fixed result reaches its mailbox.
+  defp receive_eof(guardian, socket) do
+    frame =
+      try do
+        case :gen_tcp.recv(socket, 1, :infinity) do
+          {:error, :closed} -> {:error, :closed}
+          _trailing_or_failed -> {:error, :invalid_frame}
+        end
+      catch
+        _kind, _reason -> {:error, :invalid_frame}
+      end
+
+    send(guardian, {:provider_frame, self(), frame})
+
+    receive do
       :stop -> :ok
     end
   end
@@ -469,9 +494,9 @@ defmodule Loopex.LLM.ReqLLM.ProviderBridge do
   defp data_frame(%{phase: phase} = state, {:ok, :terminal, payload})
        when phase in [:invocation, :running] do
     case terminal(state, payload) do
-      {:ok, result} ->
-        send(state.receiver, :next)
-        loop(%{state | phase: :terminal_end, result: result})
+      {:ok, result, failure} ->
+        send(state.receiver, :terminal_end)
+        loop(%{state | phase: :terminal_end, result: result, failure: failure})
 
       :error ->
         fail(state)
@@ -480,20 +505,38 @@ defmodule Loopex.LLM.ReqLLM.ProviderBridge do
 
   # EOF seals one already validated terminal frame; it is never cleanup proof.
   defp data_frame(%{phase: :terminal_end} = state, {:error, :closed}) do
-    stop_process(state.receiver)
-    state = %{state | receiver: nil}
-    if state.lifetime == :unmanaged, do: begin_cleanup(state, nil), else: deliver_or_retain(state)
+    if System.monotonic_time() < state.deadline do
+      stop_process(state.receiver)
+
+      case state.failure do
+        %{"stage" => stage, "class" => class} -> observe_failure(stage, class)
+        nil -> :ok
+      end
+
+      state = %{state | receiver: nil, failure: nil}
+
+      if state.lifetime == :unmanaged,
+        do: begin_cleanup(state, nil),
+        else: deliver_or_retain(state)
+    else
+      fail(state)
+    end
   end
 
   defp data_frame(state, _invalid), do: fail(%{state | protocol_failed: true})
 
+  # Concept: only a sealed, finite failure category is observable locally.
+  # Technical depth: test support may attach static arity-only trace patterns.
+  # Production installs no observer and the public result remains unchanged.
+  defp observe_failure(_stage, _class), do: :ok
+
   defp terminal(state, payload) do
-    if Map.drop(payload, ["status", "reply"]) == invocation_binding(state) do
+    if Map.drop(payload, ["status", "reply", "failure"]) == invocation_binding(state) do
       case {payload["status"], Map.fetch(payload, "reply"), state.phase} do
-        {"reply", {:ok, reply}, :running} -> {:ok, {:ok, reply}}
-        {"unreadable", :error, :running} -> {:ok, {:ok, %{}}}
-        {"not_dispatched", :error, :invocation} -> {:ok, @not_dispatched}
-        {"dispatched_or_unknown", :error, _phase} -> {:ok, @unknown}
+        {"reply", {:ok, reply}, :running} -> {:ok, {:ok, reply}, nil}
+        {"unreadable", :error, :running} -> {:ok, {:ok, %{}}, nil}
+        {"not_dispatched", :error, :invocation} -> {:ok, @not_dispatched, nil}
+        {"dispatched_or_unknown", :error, _phase} -> {:ok, @unknown, payload["failure"]}
         _contradiction -> :error
       end
     else
@@ -504,7 +547,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderBridge do
   defp identity(state),
     do: %{
       "nonce" => state.nonce,
-      "version" => 1,
+      "version" => ProviderCodec.version(),
       "build_manifest_sha256" => state.configuration.build_manifest_sha256
     }
 
@@ -533,7 +576,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderBridge do
     stop_process(state.receiver)
     close_socket(state.socket)
     if state.namespace, do: close_socket(state.namespace.listener)
-    state = %{state | sender: nil, receiver: nil, socket: nil}
+    state = %{state | sender: nil, receiver: nil, socket: nil, failure: nil}
 
     cleanup = state.cleanup || new_cleanup(state, request)
     cleanup = attach_request(cleanup, request)

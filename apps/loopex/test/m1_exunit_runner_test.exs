@@ -7,6 +7,163 @@ defmodule Loopex.M1ExUnitRunnerTest do
 
   alias Loopex.M1Gate.ExUnitReport
 
+  test "failure diagnostics retain only bounded source identity and closed failure shapes" do
+    formatter = Loopex.M1Gate.ExUnitFormatter
+    secret = "synthetic-provider-secret"
+    error = %ExUnit.AssertionError{message: secret, left: %{body: secret}, right: secret}
+
+    details =
+      formatter.failure_summary({:failed, [{:error, error, [{Fake, :run, [secret], []}]}]})
+
+    assert details == [%{kind: :error, category: :assertion, left: :map, right: :binary}]
+    events = %{failures: [%{name: "case " <> secret, line: 27, details: details}]}
+    invocation = %{selector: "apps/loopex/test/probe_test.exs", seed: 17, real_path: nil}
+    [_header, line] = formatter.failure_lines(events, invocation, secret)
+    assert line =~ "role=deterministic seed=17"
+    assert line =~ "line=27"
+    assert line =~ "[REDACTED]"
+    refute line =~ secret
+    assert [header] = formatter.failure_lines(%{failures: []}, invocation, secret)
+    assert header =~ "role=deterministic seed=17 retained=0 omitted=0"
+
+    assert length(formatter.failure_summary({:failed, List.duplicate({:exit, secret, []}, 50)})) ==
+             2
+  end
+
+  test "formatter failures include safe locations invalid setup and explicit omissions without changing success evidence" do
+    formatter = Loopex.M1Gate.ExUnitFormatter
+    root = Path.expand("/tmp/selector-diagnostic-controls")
+    selector = "apps/loopex/test/probe_test.exs"
+
+    make_collector = fn ->
+      {:ok, collector} = Agent.start_link(fn -> nil end)
+      on_exit(fn -> if Process.alive?(collector), do: Agent.stop(collector) end)
+
+      config = %{
+        collector: collector,
+        owner: self(),
+        root: root,
+        selector: selector,
+        seed: 17,
+        include: [],
+        exclude: [:real_provider]
+      }
+
+      opts = [
+        loopex_m1_gate: config,
+        formatters: [formatter],
+        seed: 17,
+        dry_run: false,
+        repeat_until_failure: 0,
+        only_test_ids: nil,
+        max_failures: :infinity,
+        include: [],
+        exclude: [:real_provider]
+      ]
+
+      assert {:ok, ^config} = formatter.init(opts)
+      config
+    end
+
+    config = make_collector.()
+    secret = "synthetic-credential-body"
+
+    failure =
+      {:failed,
+       [
+         {:error, %ExUnit.AssertionError{message: secret, left: secret, right: %{body: secret}},
+          [
+            {Enum, :map, 2, [file: ~c"lib/enum.ex", line: 100]},
+            {Probe, :helper, [secret],
+             [file: ~c"apps/loopex/test/support/probe_helper.exs", line: 91]},
+            {Probe, :outside, [secret], [file: ~c"/outside/private.exs", line: 1]}
+          ]}
+       ]}
+
+    for index <- 1..10 do
+      test = %ExUnit.Test{
+        module: Probe,
+        name: String.to_atom("test case #{index}"),
+        tags: %{file: Path.join(root, selector), line: 27},
+        state: if(index == 2, do: {:invalid, %ExUnit.TestModule{state: failure}}, else: failure)
+      }
+
+      assert {:noreply, ^config} = formatter.handle_cast({:test_finished, test}, config)
+    end
+
+    events = Agent.get(config.collector, & &1)
+    assert events.failure_count == 10
+    assert length(events.failures) == 8
+
+    assert Enum.at(events.failures, 1).details == [
+             %{kind: :error, category: :assertion, left: :binary, right: :map}
+           ]
+
+    assert hd(events.failures).location == %{
+             file: "apps/loopex/test/support/probe_helper.exs",
+             line: 91
+           }
+
+    ambiguous = make_collector.()
+
+    ambiguous_test = %ExUnit.Test{
+      module: Probe,
+      name: :"test ambiguous source",
+      tags: %{file: Path.join(root, selector), line: 27},
+      state:
+        {:failed, [{:error, :withheld, [{Enum, :map, 2, [file: ~c"lib/enum.ex", line: 100]}]}]}
+    }
+
+    formatter.handle_cast({:test_finished, ambiguous_test}, ambiguous)
+    assert [%{location: nil}] = Agent.get(ambiguous.collector, & &1.failures)
+
+    invocation = %{selector: selector, seed: 17, real_path: "combined"}
+    lines = formatter.failure_lines(events, invocation, secret)
+
+    assert hd(lines) ==
+             "LOOPEX_SELECTOR_FAILURE_SUMMARY role=combined seed=17 retained=8 omitted=2"
+
+    assert Enum.all?(tl(lines), &(byte_size(&1) <= 4_096))
+    refute Enum.join(lines) =~ secret
+    refute Enum.join(lines) =~ "/outside"
+    assert Enum.join(lines) =~ "probe_helper.exs"
+    setup = make_collector.()
+
+    test = %ExUnit.Test{
+      module: Probe,
+      name: :"test setup",
+      tags: %{file: Path.join(root, selector), line: 4}
+    }
+
+    module = %ExUnit.TestModule{tests: [test], state: failure}
+    formatter.handle_cast({:module_finished, module}, setup)
+    assert [%{name: "setup"}] = Agent.get(setup.collector, & &1.failures)
+    success = make_collector.()
+    formatter.handle_cast({:suite_started, []}, success)
+    formatter.handle_cast({:test_finished, %{test | name: :"test passes"}}, success)
+    formatter.handle_cast({:suite_finished, %{}}, success)
+    clean = Agent.get(success.collector, & &1)
+    stats = %{total: 1, failures: 0, skipped: 0, excluded: 0}
+
+    assert {:ok, report} =
+             ExUnitReport.validate(clean, stats, selector, 17, 1, :zero, [{"passed", "passes"}])
+
+    assert {:ok, ^report} =
+             ExUnitReport.validate(
+               Map.drop(clean, [:failures, :failure_count, :diagnostic_root]),
+               stats,
+               selector,
+               17,
+               1,
+               :zero,
+               [{"passed", "passes"}]
+             )
+
+    assert clean.failures == [] and clean.failure_count == 0
+    assert [header] = formatter.failure_lines(%{}, invocation, secret)
+    assert header == "LOOPEX_SELECTOR_FAILURE_SUMMARY role=combined seed=17 retained=0 omitted=0"
+  end
+
   @nonce "0123456789abcdef0123456789abcdef"
   @input_header "LOOPEX_M1_SELECTOR_V1"
   @max_provider_bytes 16_384

@@ -224,6 +224,11 @@ a recommendation. An incidental finding is not a report: resolve it within the
 current scope, fold it into a decision packet, or leave it out. Never hand over
 an unresolved observation for the maintainer to triage.
 
+Maintain a concise task checklist for multi-step work. Whenever a task completes,
+show the updated checklist with what is done, running, and remaining, including
+any blocker requiring a maintainer decision. Keep it current as scope changes;
+do not wait for the maintainer to ask for status.
+
 Naming a constraint is not raising it. Where a constraint degrades required
 evidence, blocks a check, hides a defect, or would leave a future failure
 undiagnosable, present it as a decision packet: the options, what each costs in

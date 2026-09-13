@@ -42,6 +42,78 @@ authority invariance, early integrated proof and self-audit. Specify focused
 checkpoints and stable clause witnesses while preserving full inherited checks
 at contract moments. Align proposed ADRs and roadmap/index documentation.
 
+M3 closed with project skills under the accepted [M3 plan](docs/plans/M3.md#concept).
+Add pinned Git import, contained project discovery, retained provenance and
+immutable runtime snapshots. Keep installation separate from explicit session
+admission and pre-run instruction/supporting-file selection. Stage optional
+blocks progressively after required context passes; downloaded scripts and
+metadata remain inert and grant no tool authority.
+
+Validate canonical resource roots and opened file identities across discovery,
+staging and publication. Check the selected Git object's type and complete file
+inventory before extraction, refuse normalized label collisions, and validate
+the complete pack before installation. Unsupported or duplicate frontmatter
+returns a bounded refusal. Ordinary files beside skill directories remain
+outside discovery.
+
+Retain versioned resource commands and resource-aware model receipts. Replay
+preserves exact staged bytes without refetch or ambiguous redispatch. Genuine
+integrated M2 histories remain readable; M2 readers refuse new resource records
+before effects, including a session containing only a refused resource command.
+
+Add `LoopexComposition.with_runtime/2` for operations that need a temporary stack
+with confirmed cleanup. CLI recovery prepares without activating work, reads the
+admitted manifest digest, closes the temporary stack and opens the final runtime
+with that exact retained snapshot and unchanged trusted launch configuration.
+Missing snapshots withhold skill content while ordinary recovery continues.
+
+Repair required-first context admission and move dispatcher reads off the
+acknowledgement path, with bounded retained readers, cancellation and late-result
+fences. Fix stale executor test-root reuse through atomic fresh-directory
+reservation. Retire spent provider permits after matching durable settlement,
+including bounded short-page reads and matching terminal-pair validation, while
+preserving delayed-identity refusal and retry/accounting rules. Add deterministic embedding/source-built CLI workflow, resource
+boundary and old-reader compatibility witnesses. M3's final M3-only
+qualification is recorded in its plan progress; closure is recorded at
+`d73a1030405ba5f55c5c7653c0a019f8b5c8bed7`. This entry claims no
+release or full inherited-gate result.
+
+Keep durable interactions, artifact transfers and the floor refresh in the
+[Open M4 plan](docs/plans/M4.md#concept). The reviewed M3 cadence uses focused
+implementation checks. The later [final validation override](docs/developer/agent-context-map.md#override-disposition-m3-final-inherited-gates-waiver-2026-09-13)
+required M3-only qualification on macOS and Linux, which passed at exact source
+`f45354572840636b473ad7e40e42355fdff4fc17`; M0–M2 gate reruns are waived,
+not passed. Deterministic and attended production-provider workflow proofs
+remain separately recorded in the M3 plan. The floor-toolchain M3 run passed.
+
+Accept [ADR 0029](docs/adr/0029-bounded-provider-failure-diagnostics.md#concept)
+and implement bounded provider-neutral failure diagnostics without retaining
+provider bodies or credentials. M3 Amendments 1–3 record that diagnostic scope,
+shared selector diagnostics and portable SHA-256 inspection. M1 generation 9
+and M2 generation 10 retain the corresponding reviewed shared-runner bindings.
+The prior generations and their evidence remain historical.
+
+Repair declined, EOF and headless CLI skill trust so ordinary coding without an
+explicit skill selection continues with skills withheld. An explicit `--skill`
+or `--skill-resource` selection refuses before prompt submission when trust is
+unavailable. Preserve the exact declined project-trust disposition on
+required-only context refusal, under the approved witness correction; eligible
+projects still report that optional content was not evaluated. Export pinned
+Git blobs without checkout transformations and verify each native Git object
+identity before publication. Compare resource and executor workspace identities
+before startup, using the same physical-root identity in CLI and composition
+while preserving retained job identities during recovery. Scope permit
+retirement reads to the committing session. Clean up owned runtime components
+when a linked component dies or stop returns an error. Preserve typed provider
+handoff errors returned by the transport. Strengthen real coordinator selection
+refusals, policy allow/deny invariance, launch-identity refusal and all three
+old-reader resource-record variants; temporary CLI proof artifacts no longer
+rewrite shared build beams.
+
+Keep attended CLI trust available on OTP 26 when output is captured but input
+remains a real terminal. The input-device check still refuses pipes and custom
+I/O devices that cannot prove operator presence.
+
 Replace the obsolete M3 gate probe with real local Store/session observations
 of required-only admission ordering and explicit inspection/checkpoint modes.
 Remove unopened M4 executable scaffolding from live scripts; its old bytes are
@@ -53,7 +125,7 @@ Record the maintainer-approved successor exception to M2's CLI inventory:
 preserve the five existing commands and permit `skill`, with negative checks
 for missing legacy commands and unapproved additions. Make scoped maintainer
 overrides an explicit governance route, preserving historical evidence and
-digest enforcement. No M3 product feature is implemented by these changes.
+digest enforcement. Historical plan, gate and authority records remain unchanged.
 
 ## [v0.0.0-m2] — 2026-09-09
 

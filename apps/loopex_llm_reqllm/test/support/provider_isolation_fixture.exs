@@ -135,14 +135,11 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
     {:ok, {_address, port}} = :inet.sockname(listener)
     expected = Keyword.get(options, :credential, System.get_env(Adapter.credential_variable()))
 
-    response_body =
-      if mode == :backpressure,
-        do: {root, Keyword.get(options, :stream_prelude), Keyword.fetch!(options, :stream_parts)},
-        else: Keyword.get(options, :response_body)
+    responses = response_plan!(mode, root, options)
 
     acceptor =
       spawn_link(fn ->
-        accept_loop(listener, events, transport_events, mode, expected, response_body)
+        accept_loop(listener, events, transport_events, mode, expected, responses)
       end)
 
     if mode == :closed_port, do: :gen_tcp.close(listener)
@@ -202,6 +199,26 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
 
   def complete(fixture, request \\ request(), progress \\ Model.discard_progress()),
     do: Adapter.complete(request, fixture.options, progress)
+
+  defp response_plan!(:backpressure, root, options) do
+    {:repeat,
+     {root, Keyword.get(options, :stream_prelude), Keyword.fetch!(options, :stream_parts)}}
+  end
+
+  defp response_plan!(_mode, _root, options) do
+    case Keyword.fetch(options, :response_bodies) do
+      {:ok, bodies} when is_list(bodies) and bodies != [] ->
+        if Enum.all?(bodies, &is_binary/1),
+          do: {:sequence, bodies},
+          else: raise(ArgumentError, "response_bodies must contain only binaries")
+
+      {:ok, _invalid} ->
+        raise ArgumentError, "response_bodies must be a non-empty list"
+
+      :error ->
+        {:repeat, Keyword.get(options, :response_body)}
+    end
+  end
 
   def managed(
         fixture,
@@ -624,6 +641,15 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
       end
 
       defp backpressure_observer(root, socket, owner, writer, slots, kind, calls) do
+        if File.exists?(Path.join(root, "drain-control")) do
+          if File.exists?(Path.join(root, "drain-control-drained")) and
+               not File.exists?(Path.join(root, "drain-control-carried")) do
+            publish(root, "drain-control-carried", %{actual_send_calls: calls})
+          end
+          if calls == 3 and not File.exists?(Path.join(root, "drain-control-third")) do
+            publish(root, "drain-control-third", %{actual_send_calls: calls})
+          end
+        end
         receive do
           {:trace, ^writer, :call,
             {Loopex.LLM.ReqLLM.ProviderCodec, :send, [^socket, next_kind, _payload]}} ->
@@ -631,7 +657,13 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
           {:DOWN, _, :process, ^writer, _} -> :ok
         after
           10 ->
-            try do
+            if calls == 1 and File.exists?(Path.join(root, "drain-control")) and
+                 not File.exists?(Path.join(root, "drain-control-ready")) do
+              publish(root, "drain-control-ready", %{actual_send_calls: calls})
+              await_drain_control(root, writer, socket)
+            end
+            # Carry the barrier's consumed trace count into the next turn.
+            {kind, calls} = try do
               {:ok, [send_pend: pending]} = :inet.getstat(socket, [:send_pend])
               info = Process.info(writer, [:current_stacktrace, :messages])
               in_send = Enum.any?(info[:current_stacktrace], fn
@@ -652,6 +684,10 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
                   do: synchronize_backpressure_trace(writer, socket, kind, calls),
                   else: {kind, calls}
 
+              if File.exists?(Path.join(root, "drain-control-ready")) and
+                   not File.exists?(Path.join(root, "drain-control-drained")) do
+                publish(root, "drain-control-drained", %{actual_send_calls: calls})
+              end
               publish(root, "backpressure-observation", %{
                 pending_bytes: pending, writer_in_send: in_send,
                 actual_send_calls: calls, kind: if(kind, do: Atom.to_string(kind), else: nil),
@@ -704,13 +740,38 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
                   _ -> :ok
                 end
               end
+              {kind, calls}
             catch
               _, _ ->
                 if Process.alive?(writer) and not File.exists?(Path.join(root, "backpressure-error")) do
                   publish(root, "backpressure-error", %{observation_failed: true})
                 end
+                {kind, calls}
             end
             backpressure_observer(root, socket, owner, writer, slots, kind, calls)
+        end
+      end
+
+      # Concept: the dedicated regression controls only this observer, while
+      # the production child writer and HTTP stream perform every send.
+      # Technical depth: leave the genuine call trace queued for the barrier
+      # drain; publish counts/flags only, and stop if the writer dies.
+      defp await_drain_control(root, writer, socket) do
+        {:messages, messages} = Process.info(self(), :messages)
+        queued = Enum.any?(messages, fn
+          {:trace, ^writer, :call,
+           {Loopex.LLM.ReqLLM.ProviderCodec, :send, [^socket, :delta, _]}} -> true
+          _ -> false
+        end)
+        if queued and not File.exists?(Path.join(root, "drain-control-queued")) do
+          publish(root, "drain-control-queued", %{actual_writer_trace_queued: true})
+        end
+        if not File.exists?(Path.join(root, "release-drain-control")) do
+          receive do
+            {:DOWN, _monitor, :process, ^writer, _reason} -> exit(:normal)
+          after
+            10 -> await_drain_control(root, writer, socket)
+          end
         end
       end
 
@@ -970,27 +1031,39 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
     end
   end
 
-  defp accept_loop(listener, events, transport_events, mode, expected, response_body) do
+  defp accept_loop(listener, events, transport_events, mode, expected, responses) do
     case :gen_tcp.accept(listener) do
       {:ok, socket} ->
         Agent.update(transport_events, &[:connected | &1])
+        {response_body, remaining_responses} = next_response(responses)
 
         handler =
           spawn_link(fn ->
             receive do
               {:socket, ^socket} ->
-                serve(socket, events, transport_events, mode, expected, response_body)
+                case response_body do
+                  :sequence_exhausted ->
+                    respond(socket, "500 Internal Server Error", "application/json", "{}")
+                    :gen_tcp.close(socket)
+
+                  body ->
+                    serve(socket, events, transport_events, mode, expected, body)
+                end
             end
           end)
 
         :ok = :gen_tcp.controlling_process(socket, handler)
         send(handler, {:socket, socket})
-        accept_loop(listener, events, transport_events, mode, expected, response_body)
+        accept_loop(listener, events, transport_events, mode, expected, remaining_responses)
 
       {:error, :closed} ->
         :ok
     end
   end
+
+  defp next_response({:repeat, response_body} = responses), do: {response_body, responses}
+  defp next_response({:sequence, [response_body | rest]}), do: {response_body, {:sequence, rest}}
+  defp next_response({:sequence, []} = responses), do: {:sequence_exhausted, responses}
 
   defp serve(socket, events, transport_events, mode, expected, response_body) do
     with {:ok, headers, body} <- read_request(socket, "") do

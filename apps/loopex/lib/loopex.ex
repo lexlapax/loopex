@@ -150,6 +150,35 @@ defmodule Loopex do
   @doc """
   ## Concept
 
+  Inspects the resource catalog admitted by this session's operator.
+
+  ## Technical depth
+
+  The response distinguishes configured and durable admitted manifest identities.
+  Missing or mismatched retained bytes withhold entries without changing trust,
+  selection or the session's ability to continue ordinary coding.
+  """
+  @spec resource_catalog(Runtime.t(), binary()) :: {:ok, map()} | {:error, term()}
+  def resource_catalog(runtime, session_id), do: Runtime.resource_catalog(runtime, session_id)
+
+  @doc """
+  ## Concept
+
+  Reads one already manifested resource for operator inspection.
+
+  ## Technical depth
+
+  Requires matching active admission and returns verified bytes up to 64 KiB.
+  The request names a manifest, source, skill and label, never a filesystem path.
+  Reading does not select content for a run or grant execution permission.
+  """
+  @spec read_resource(Runtime.t(), binary(), map()) :: {:ok, map()} | {:error, term()}
+  def read_resource(runtime, session_id, request),
+    do: Runtime.read_resource(runtime, session_id, request)
+
+  @doc """
+  ## Concept
+
   Returns the authoritative snapshot captured by an attachment.
 
   ## Technical depth

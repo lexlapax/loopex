@@ -210,29 +210,49 @@ defmodule Loopex.JournalOwnershipTest do
 
     parent = self()
     contenders = 32
+    reference = make_ref()
+    supervisor = start_supervised!({Task.Supervisor, []})
 
-    for _ <- 1..contenders do
-      spawn(fn -> send(parent, {:claim, Journal.claim_session(journal)}) end)
-    end
-
-    results =
+    pids =
       for _ <- 1..contenders do
-        receive do
-          {:claim, result} -> result
-        after
-          5_000 -> flunk("a contender never answered")
-        end
+        {:ok, pid} =
+          Task.Supervisor.start_child(supervisor, fn ->
+            send(parent, {reference, self(), Journal.claim_session(journal)})
+
+            receive do
+              {^reference, :stop} -> :ok
+            end
+          end)
+
+        pid
       end
 
-    winners = Enum.filter(results, &match?({:ok, _token}, &1))
-    losers = Enum.filter(results, &match?({:error, {:repair_already_held, _, _}}, &1))
+    try do
+      replies =
+        for _ <- 1..contenders do
+          receive do
+            {^reference, pid, result} when is_pid(pid) -> {pid, result}
+          after
+            5_000 -> flunk("a contender never answered")
+          end
+        end
 
-    assert length(winners) == 1,
-           "exactly one contender may take over a dead claim, got #{length(winners)}"
+      assert Enum.sort(Enum.map(replies, &elem(&1, 0))) == Enum.sort(pids)
+      assert Enum.all?(pids, &Process.alive?/1), "claimants must remain alive while counted"
+      results = Enum.map(replies, &elem(&1, 1))
+      winners = Enum.filter(results, &match?({:ok, _token}, &1))
+      losers = Enum.filter(results, &match?({:error, {:repair_already_held, _, _}}, &1))
 
-    assert length(winners) + length(losers) == contenders,
-           "every contender must either win or be told the claim is held: #{inspect(results)}"
+      assert length(winners) == 1,
+             "exactly one contender may take over a dead claim, got #{length(winners)}"
 
-    assert File.read!(lock) != dead, "the winner must have replaced the dead claim"
+      assert length(winners) + length(losers) == contenders,
+             "every contender must either win or be told the claim is held: #{inspect(results)}"
+
+      assert File.read!(lock) != dead, "the winner must have replaced the dead claim"
+      assert Enum.all?(pids, &Process.alive?/1), "claimants must stay alive through assertions"
+    after
+      stop_supervised!(Task.Supervisor)
+    end
   end
 end

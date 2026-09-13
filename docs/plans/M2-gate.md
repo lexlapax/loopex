@@ -33,11 +33,13 @@ both real-provider roles — are re-run beside `M2`'s.
 
 <a id="amendment-transaction-v1"></a>
 
-Any amendment to this gate follows the generic two-revision proposal and rebind
-transaction: proposal `A` advances the generation while retaining the prior
-Acceptance row and lifecycle state, and its immediate one-parent child `R`
-rebinds Acceptance to exact `A` and adds one new disposition anchor. Amendment
-sections appear below in physical document order with consecutive numbers.
+While M2 is Accepted or in its active implementation lifecycle, amendments use
+the generic v1 two-revision transaction: proposal `A` advances the generation
+while retaining the prior Acceptance row and lifecycle state; its immediate
+one-parent child `R` rebinds Acceptance to exact `A` and adds one new disposition
+anchor. After M2 is Closed, additive gate generations use v2 and preserve both
+historical Acceptance and Closure rows. Amendment sections appear below in
+physical document order with consecutive numbers.
 
 ## Opening Condition
 
@@ -156,20 +158,22 @@ print neither `capture` nor `M2 gate GREEN`.
 
 | SHA-256 | Path |
 | --- | --- |
-| `110ad320c252f1edf2661ebf2eeeb49f98faf47421470f371101ade99bd350f2` | `scripts/check-m2-gate.sh` |
-| `cc290e60d9f9588c75f1259b25976a58d1c30713e570cd5a88c70cdf3c2159a0` | `scripts/m1-exunit-runner.exs` |
-| `0a8406ca080c70624e776b01e37c7ded210b54659064cf63723a847a54debe2d` | `apps/loopex/test/m1_exunit_runner_test.exs` |
+| `156f54983ac0d32147819ec10a83992083c854fa4624d7c830a87467b98cc57e` | `scripts/check-m2-gate.sh` |
+| `53d8219bdee584a3849a85a1102e405520d5dd0dfbe21d259434bc9edfc5fcc0` | `scripts/m1-exunit-runner.exs` |
+| `c36253cff3d74ddff1b330695edbc4bde0a4565c1412c67c1293b2fb7ca6129b` | `apps/loopex/test/m1_exunit_runner_test.exs` |
 | `fad47299b27a767785d2a6a776155038054f5457ee3ce0195a37ae667f7a9999` | `.tool-versions` |
 | `809ca8b835182751f493ef1c931d309f36a73ae48cf78208f84b81fcb05e74a4` | `apps/loopex_composition/test/kernel_composition_test.exs` |
 | `50319510018a4b3e2fab2e5998f3b7979209982b9cabc15e7fa69cfc5782a8cc` | `apps/loopex/test/gate_isolation_test.exs` |
 
-`scripts/m1-exunit-runner.exs` is bound at exactly the bytes `M1` closed with.
-`M2` reuses that authoritative channel unchanged; changing it would change what
-every `M1` and `M2` protected result means. Its adversarial corpus,
-`apps/loopex/test/m1_exunit_runner_test.exs`, is bound with it: `M2` re-runs that
-corpus, `M2` does not change it, and one of its cases — `fake stdout at_exit and
-early halt cannot manufacture one authoritative result` — is the proof that the
-result channel every outcome below reports through cannot be spoofed. A channel
+Before Amendment 10, `scripts/m1-exunit-runner.exs` and its adversarial corpus,
+`apps/loopex/test/m1_exunit_runner_test.exs`, retained exactly the bytes M1 closed
+with. For this M3 repair only, the
+[approved successor exception](../developer/agent-context-map.md#override-disposition-m3-selector-diagnostics-2026-09-12) replaces that continuing byte
+restriction with the exact diagnostic bytes bound in this table and the separate
+M1/M2/M3 transactions. The authoritative success channel retains its meaning.
+M2 re-runs the corpus; its case `fake stdout at_exit and early halt cannot
+manufacture one authoritative result` still proves that the result channel
+every outcome below reports through cannot be spoofed. A channel
 bound without its corpus would be a digest without a meaning. The gate document
 externally binds `scripts/check-m2-gate.sh`, which `mix loopex.status` verifies,
 without pretending a runner can verify its own bytes before executing them.
@@ -1904,3 +1908,45 @@ disposition.
 | Generation | Artifact | Rebound SHA-256 |
 | --- | --- | --- |
 | 9 | `scripts/check-m2-gate.sh` | `110ad320c252f1edf2661ebf2eeeb49f98faf47421470f371101ade99bd350f2` |
+
+<a id="amendment-transaction-v2"></a>
+<a id="amendment-10"></a>
+## Amendment 10 — Bind the approved selector diagnostics
+
+**Acceptance: OUTSTANDING.** Closed M2 adds its first Gate Generations row,
+numbered 10 to follow its nine historical amendments. The additive v2 transaction
+preserves historical Acceptance, Closure and Amendments 1–9. At A the new row
+contains only the gate digest; authority, evidence and candidate remain unset.
+
+The [approved M3 repair](../developer/agent-context-map.md#override-disposition-m3-selector-diagnostics-2026-09-12) replaces only the continuing requirement
+to keep the old M1 runner/corpus bytes. It binds the exact shared diagnostic
+repair already settled by M1 generation 9, with patch SHA-256
+`d2bfe33c46ff83c97fb80ff4406c78c37e1d878739854af03f26cc65a8e7c1c8`. This proposal changes the two embedded digests in
+`scripts/check-m2-gate.sh` and the three corresponding Bound Artifacts rows.
+It does not change the shared files again. Failure records carry bounded mode,
+seed, case/location and finite category/type evidence; the existing success
+reports, digest inputs, protected assertions, counts, exclusions, provider paths
+and exit predicates remain unchanged. No M2 outcome, product scope or lifecycle
+state changes.
+
+M1's immediate rebind must be complete before this proposal. The
+[reviewed checker correction](../developer/agent-context-map.md#override-disposition-m3-sequential-binding-checker-2026-09-12) enforces the sequential holder rules;
+M3 remains explicitly pending until its own transaction. Scoped M2 validation
+cannot report global PASS while M3 still holds old rows.
+
+Under the same approval, focused patch/corpus, success-report, script/digest and
+applicable status/binding checks replace full-gate execution at these holders'
+proposal/rebind checkpoints. Pending proposal bindings remain visible. Full
+M0–M3 gates are required at the final candidate on macOS and Linux serenity;
+earlier failures keep their source and result.
+
+The recorded delegate must review and explicitly accept the actual A SHA.
+Its immediate one-parent child R completes row 10 and adds one fresh acceptance
+disposition without changing bound bytes. Only then may M3's transaction begin.
+This proposal records no acceptance, waiver, closure or release.
+
+| Generation | Artifact | Rebound SHA-256 |
+| --- | --- | --- |
+| 10 | `scripts/m1-exunit-runner.exs` | `53d8219bdee584a3849a85a1102e405520d5dd0dfbe21d259434bc9edfc5fcc0` |
+| 10 | `apps/loopex/test/m1_exunit_runner_test.exs` | `c36253cff3d74ddff1b330695edbc4bde0a4565c1412c67c1293b2fb7ca6129b` |
+| 10 | `scripts/check-m2-gate.sh` | `156f54983ac0d32147819ec10a83992083c854fa4624d7c830a87467b98cc57e` |

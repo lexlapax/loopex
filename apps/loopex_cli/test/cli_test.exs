@@ -172,6 +172,700 @@ defmodule LoopexCliTest do
 
   defp call(id \\ "c1"), do: %{id: id, name: "write", arguments: %{"path" => "notes.txt"}}
 
+  test "run accepts repeatable explicit skill and supporting resource selections" do
+    assert {:error, message} =
+             LoopexCli.dispatch([
+               "run",
+               "--skill",
+               "source-a:format",
+               "--skill",
+               "source-b:test",
+               "--skill-resource",
+               "source-a:format:references/checks.md",
+               "--skill-resource",
+               "source-a:format:templates/review.md",
+               "do the thing"
+             ])
+
+    assert message == "--policy is required; there is no default host authority"
+  end
+
+  test "skill add sends one explicitly authorized pinned Git import to the host" do
+    {state_root, workspace} = roots()
+    revision = String.duplicate("a", 40)
+    parent = self()
+
+    resource_packs = %{
+      add: fn actual_workspace, source, options ->
+        send(parent, {:skill_add, actual_workspace, source, options})
+
+        {:ok,
+         %{
+           "source_id" => "github.com/example/skills",
+           "name" => "format"
+         }}
+      end
+    }
+
+    output =
+      capture_io("y\n", fn ->
+        assert :ok =
+                 LoopexCli.dispatch(
+                   [
+                     "skill",
+                     "add",
+                     "https://github.com/example/skills.git",
+                     "--rev",
+                     revision,
+                     "--path",
+                     "skills/format",
+                     "--state-root",
+                     state_root,
+                     "--workspace",
+                     workspace
+                   ],
+                   resource_packs: resource_packs,
+                   executor_authorization: {:host_policy, :allow}
+                 )
+      end)
+
+    assert_receive {:skill_add, ^workspace, "https://github.com/example/skills.git", options}
+    assert Keyword.fetch!(options, :state_root) == state_root
+    assert Keyword.fetch!(options, :rev) == revision
+    assert Keyword.fetch!(options, :path) == "skills/format"
+    assert Keyword.fetch!(options, :executor_authorization) == {:host_policy, :allow}
+    assert is_binary(Keyword.fetch!(options, :git_executable))
+    assert String.starts_with?(Keyword.fetch!(options, :workspace_ref), "workspace:")
+    assert output =~ "github.com/example/skills:format"
+  end
+
+  test "skill add asks before fetching and installation grants no run trust" do
+    {state_root, workspace} = roots()
+    revision = String.duplicate("c", 40)
+    parent = self()
+
+    resource_packs = %{
+      add: fn _workspace, _source, options ->
+        send(parent, {:authorized_import, Keyword.fetch!(options, :executor_authorization)})
+        {:ok, %{"source_id" => "example.test/skills", "name" => "review"}}
+      end
+    }
+
+    _stdout =
+      capture_io("yes\n", fn ->
+        stderr =
+          capture_io(:stderr, fn ->
+            send(
+              parent,
+              {:skill_add_result,
+               LoopexCli.dispatch(
+                 [
+                   "skill",
+                   "add",
+                   "https://example.test/skills.git",
+                   "--rev",
+                   revision,
+                   "--path",
+                   "review",
+                   "--state-root",
+                   state_root,
+                   "--workspace",
+                   workspace
+                 ],
+                 resource_packs: resource_packs,
+                 operator_present: true
+               )}
+            )
+          end)
+
+        send(parent, {:skill_add_stderr, stderr})
+      end)
+
+    assert_receive {:authorized_import, {:host_policy, :allow}}
+    assert_receive {:skill_add_result, :ok}
+    assert_receive {:skill_add_stderr, stderr}
+    assert stderr =~ "fetch exact Git commit #{revision}"
+    assert stderr =~ "installation does not trust this skill for a run"
+  end
+
+  test "skill list inspects the host manifest without starting a runtime" do
+    {state_root, workspace} = roots()
+    parent = self()
+
+    manifest = %{
+      "packs" => [
+        %{
+          "source_id" => "example.test/skills",
+          "name" => "review",
+          "description" => "Review one change",
+          "manual_only" => true,
+          "files" => []
+        }
+      ]
+    }
+
+    resource_packs = %{
+      discover: fn actual_workspace, options ->
+        send(parent, {:skill_discover, actual_workspace, options})
+        {:ok, manifest}
+      end
+    }
+
+    output =
+      capture_io(fn ->
+        assert :ok =
+                 LoopexCli.dispatch(
+                   [
+                     "skill",
+                     "list",
+                     "--state-root",
+                     state_root,
+                     "--workspace",
+                     workspace
+                   ],
+                   resource_packs: resource_packs
+                 )
+      end)
+
+    assert_receive {:skill_discover, ^workspace, options}
+    assert Keyword.fetch!(options, :state_root) == state_root
+    assert String.starts_with?(Keyword.fetch!(options, :workspace_ref), "workspace:")
+    assert output =~ "example.test/skills:review"
+    assert output =~ "Review one change"
+    assert output =~ "manual only"
+  end
+
+  test "skill list and show escape untrusted description controls before terminal output" do
+    {state_root, workspace} = roots()
+    unsafe = "review\e]52;c;terminal-injection\a"
+
+    pack = %{
+      "source_id" => "example.test/skills",
+      "origin" => "https://example.test/skills.git",
+      "commit" => String.duplicate("d", 40),
+      "tree_digest" => String.duplicate("e", 40),
+      "name" => "review",
+      "description" => unsafe,
+      "manual_only" => true,
+      "files" => []
+    }
+
+    options = [
+      resource_packs: %{discover: fn _workspace, _options -> {:ok, %{"packs" => [pack]}} end}
+    ]
+
+    for command <- [["skill", "list"], ["skill", "show", "example.test/skills:review"]] do
+      output =
+        capture_io(fn ->
+          assert :ok =
+                   LoopexCli.dispatch(
+                     command ++ ["--state-root", state_root, "--workspace", workspace],
+                     options
+                   )
+        end)
+
+      refute output =~ "\e]52;c;terminal-injection\a"
+      assert output =~ "terminal-injection"
+      assert output =~ "\\e"
+    end
+  end
+
+  test "skill show prints the retained source and complete file identity" do
+    {state_root, workspace} = roots()
+    commit = String.duplicate("d", 40)
+    tree = String.duplicate("e", 40)
+    digest = String.duplicate("f", 64)
+
+    manifest = %{
+      "packs" => [
+        %{
+          "source_id" => "example.test/skills",
+          "origin" => "https://example.test/skills.git",
+          "commit" => commit,
+          "tree_digest" => tree,
+          "name" => "review",
+          "description" => "Review one change",
+          "manual_only" => true,
+          "files" => [
+            %{"label" => "SKILL.md", "size" => 18, "digest" => digest, "contained" => true}
+          ]
+        }
+      ]
+    }
+
+    output =
+      capture_io(fn ->
+        assert :ok =
+                 LoopexCli.dispatch(
+                   [
+                     "skill",
+                     "show",
+                     "example.test/skills:review",
+                     "--state-root",
+                     state_root,
+                     "--workspace",
+                     workspace
+                   ],
+                   resource_packs: %{discover: fn _workspace, _options -> {:ok, manifest} end}
+                 )
+      end)
+
+    assert output =~ "example.test/skills:review"
+    assert output =~ "https://example.test/skills.git"
+    assert output =~ commit
+    assert output =~ tree
+    assert output =~ Loopex.ResourcePack.pack_digest(hd(manifest["packs"]))
+    assert output =~ "SKILL.md  18 bytes  #{digest}"
+  end
+
+  test "fresh run passes the discovered immutable skill manifest to the shipped composition" do
+    {state_root, workspace} = roots()
+    parent = self()
+    manifest = %{"version" => "loopex.resource_pack/1", "packs" => [%{"name" => "review"}]}
+
+    assert {:error, "captured skill launch"} =
+             LoopexCli.dispatch(
+               [
+                 "run",
+                 "--policy",
+                 "allow-all",
+                 "--skill",
+                 "source:review",
+                 "--state-root",
+                 state_root,
+                 "--workspace",
+                 workspace,
+                 "review this"
+               ],
+               resource_packs: %{
+                 discover: fn actual_workspace, options ->
+                   send(parent, {:fresh_skill_discovery, actual_workspace, options})
+                   {:ok, manifest}
+                 end
+               },
+               runtime_starter: fn options ->
+                 send(parent, {:fresh_skill_launch, options})
+                 {:error, "captured skill launch"}
+               end
+             )
+
+    assert_receive {:fresh_skill_discovery, ^workspace, discovery_options}
+    assert Keyword.fetch!(discovery_options, :state_root) == state_root
+
+    assert_receive {:fresh_skill_launch, launch_options}
+    assert Keyword.fetch!(launch_options, :resource_manifest) == manifest
+    assert Keyword.fetch!(launch_options, :project_manifest) == nil
+    assert Keyword.has_key?(launch_options, :provider_launch)
+  end
+
+  for {label, operator_present, input} <- [
+        {"declined", true, "n\n"},
+        {"end of input", true, ""},
+        {"headless", false, ""}
+      ] do
+    test "#{label} skill trust withholds content while the CLI completes ordinary coding" do
+      {state_root, workspace} = roots()
+      skill = Path.join([workspace, ".agents", "skills", "review", "SKILL.md"])
+      instruction = "WITHHELD_SKILL_INSTRUCTIONS"
+      description = "WITHHELD_SKILL_CATALOG"
+      File.mkdir_p!(Path.dirname(skill))
+      File.write!(skill, "---\nname: review\ndescription: #{description}\n---\n#{instruction}\n")
+      model = Loopex.AgentLoopTestModel.start([%{text: "ordinary coding completed"}])
+      parent = self()
+
+      Process.put(:"$loopex_composition_edge_observer", fn
+        Loopex, :start_link, [options] ->
+          assert %{"packs" => [_pack]} = Keyword.fetch!(options, :resource_manifest)
+
+          configured =
+            Keyword.put(options, :model, %{
+              module: Loopex.AgentLoopTestModel,
+              model: "scripted:v1",
+              options: [script: model, max_tokens: 256]
+            })
+
+          result = Loopex.start_link(configured)
+          send(parent, {:skill_trust_runtime, result})
+          result
+
+        module, function, arguments ->
+          apply(module, function, arguments)
+      end)
+
+      try do
+        output =
+          capture_io(unquote(input), fn ->
+            stderr =
+              capture_io(:stderr, fn ->
+                assert :ok =
+                         LoopexCli.dispatch(
+                           [
+                             "run",
+                             "--policy",
+                             "allow-all",
+                             "--state-root",
+                             state_root,
+                             "--workspace",
+                             workspace,
+                             "Complete the ordinary coding task."
+                           ],
+                           operator_present: unquote(operator_present)
+                         )
+              end)
+
+            send(parent, {:skill_trust_stderr, stderr})
+          end)
+
+        assert output =~ "ordinary coding completed"
+        assert_receive {:skill_trust_stderr, stderr}
+        assert stderr =~ "complete manifest digest"
+
+        if unquote(operator_present),
+          do: assert(stderr =~ "trust this exact skill manifest"),
+          else: assert(stderr =~ "skill content is withheld")
+
+        assert [request] = Loopex.AgentLoopTestModel.dispatched(model)
+        assert request.canonical_request_bytes =~ "Complete the ordinary coding task."
+        refute request.canonical_request_bytes =~ instruction
+        refute request.canonical_request_bytes =~ description
+      after
+        Process.delete(:"$loopex_composition_edge_observer")
+
+        receive do
+          {:skill_trust_runtime, {:ok, runtime}} -> :ok = Loopex.stop(runtime)
+        after
+          0 -> :ok
+        end
+      end
+    end
+
+    for {selection, selection_flags} <- [
+          {"skill", ["--skill", "review"]},
+          {"supporting resource", ["--skill-resource", "review:SKILL.md"]}
+        ] do
+      test "#{label} trust refuses an explicit #{selection} before admission or prompt" do
+        {state_root, workspace} = roots()
+        skill = Path.join([workspace, ".agents", "skills", "review", "SKILL.md"])
+        File.mkdir_p!(Path.dirname(skill))
+
+        File.write!(
+          skill,
+          "---\nname: review\ndescription: Review one change\n---\nUse the checklist.\n"
+        )
+
+        model = Loopex.AgentLoopTestModel.start([%{text: "should not run"}])
+        parent = self()
+
+        Process.put(:"$loopex_composition_edge_observer", fn
+          Loopex, :start_link, [options] ->
+            configured =
+              Keyword.put(options, :model, %{
+                module: Loopex.AgentLoopTestModel,
+                model: "scripted:v1",
+                options: [script: model, max_tokens: 256]
+              })
+
+            result = Loopex.start_link(configured)
+            send(parent, {:declined_skill_runtime, result})
+            result
+
+          module, function, arguments ->
+            apply(module, function, arguments)
+        end)
+
+        Process.put(:"$loopex_cli_facade_observer", fn
+          Loopex, function, arguments when function in [:command, :resource_catalog] ->
+            send(parent, {:declined_skill_facade, function})
+            apply(Loopex, function, arguments)
+
+          module, function, arguments ->
+            apply(module, function, arguments)
+        end)
+
+        try do
+          capture_io(unquote(input), fn ->
+            capture_io(:stderr, fn ->
+              assert {:error, message} =
+                       LoopexCli.dispatch(
+                         [
+                           "run",
+                           "--policy",
+                           "allow-all",
+                           "--state-root",
+                           state_root,
+                           "--workspace",
+                           workspace
+                         ] ++ unquote(selection_flags) ++ ["Review this change."],
+                         operator_present: unquote(operator_present)
+                       )
+
+              assert message =~ "the selected skill requires trust"
+            end)
+          end)
+
+          refute_received {:declined_skill_facade, _function}
+          assert [] == Loopex.AgentLoopTestModel.dispatched(model)
+        after
+          Process.delete(:"$loopex_cli_facade_observer")
+          Process.delete(:"$loopex_composition_edge_observer")
+
+          receive do
+            {:declined_skill_runtime, {:ok, runtime}} -> :ok = Loopex.stop(runtime)
+          after
+            0 -> :ok
+          end
+        end
+      end
+    end
+  end
+
+  test "fresh run admits an explicit host decision and activates selected resources before the prompt" do
+    {state_root, workspace} = roots()
+    {:ok, workspace_ref} = LoopexCli.ProjectResources.workspace_reference(workspace)
+    instruction = "---\nname: review\ndescription: Review one change\n---\nUse the checklist.\n"
+    checklist = "Check the result.\n"
+
+    pack = %{
+      "source_id" => "example.test/skills",
+      "origin" => "https://example.test/skills.git",
+      "commit" => String.duplicate("a", 40),
+      "tree_digest" => String.duplicate("b", 40),
+      "name" => "review",
+      "description" => "Review one change",
+      "manual_only" => true,
+      "files" => [
+        %{
+          "label" => "SKILL.md",
+          "size" => byte_size(instruction),
+          "digest" => LoopexProtocol.Canonical.digest_bytes(instruction),
+          "content" => instruction,
+          "contained" => true
+        },
+        %{
+          "label" => "references/checklist.md",
+          "size" => byte_size(checklist),
+          "digest" => LoopexProtocol.Canonical.digest_bytes(checklist),
+          "content" => checklist,
+          "contained" => true
+        }
+      ]
+    }
+
+    manifest = %{
+      "version" => "loopex.resource_pack/1",
+      "workspace_ref" => workspace_ref,
+      "revision" => nil,
+      "packs" => [pack]
+    }
+
+    {:ok, manifest_digest, _normalized} = Loopex.ResourcePack.digest(manifest)
+    pack_digest = Loopex.ResourcePack.pack_digest(pack)
+
+    decision = %{
+      "manifest_digest" => manifest_digest,
+      "workspace_ref" => workspace_ref,
+      "trust_scope" => "project_skills",
+      "decision_source" => "host_supplied",
+      "issued_at" => "2026-09-10T20:00:00Z",
+      "expires_at" => nil,
+      "revocation_state" => "active"
+    }
+
+    parent = self()
+
+    Process.put(:"$loopex_cli_facade_observer", fn
+      Loopex, :runtime_placement_id, [_root] ->
+        {:ok, "runtime-skills"}
+
+      Loopex, :create_session, [:runtime, %{"surface" => "cli"}, [_command_id]] ->
+        {:ok, "session-skills"}
+
+      Loopex, :attach, [:runtime, "session-skills", [after_event_sequence: 0]] ->
+        {:ok, :attachment}
+
+      Loopex, :command, [:attachment, %{type: :admit_resources} = command] ->
+        send(parent, {:admit_resources, command})
+        {:accepted, command.command_id}
+
+      Loopex, :resource_catalog, [:runtime, "session-skills"] ->
+        {:ok,
+         %{
+           "configured_manifest_digest" => manifest_digest,
+           "admitted_manifest_digest" => manifest_digest,
+           "decision_disposition" => "active",
+           "entries" => [
+             %{
+               "pack_index" => 0,
+               "source_id" => "example.test/skills",
+               "name" => "review",
+               "description" => "Review one change",
+               "pack_digest" => pack_digest,
+               "manual_only" => true
+             }
+           ]
+         }}
+
+      Loopex, :command, [:attachment, %{type: :activate_skill} = command] ->
+        send(parent, {:activate_skill, command})
+        {:accepted, command.command_id}
+
+      Loopex, :session_status, [:runtime, "session-skills"] ->
+        {:ok, %{cleanup_grace_ms: 1_000}}
+
+      Loopex, :command, [:attachment, %{type: :prompt}] ->
+        {:error, :prompt_probe_complete}
+
+      module, function, arguments ->
+        apply(module, function, arguments)
+    end)
+
+    try do
+      assert {:error, message} =
+               LoopexCli.dispatch(
+                 [
+                   "run",
+                   "--policy",
+                   "allow-all",
+                   "--skill",
+                   "example.test/skills:review",
+                   "--skill-resource",
+                   "example.test/skills:review:references/checklist.md",
+                   "--state-root",
+                   state_root,
+                   "--workspace",
+                   workspace,
+                   "review this"
+                 ],
+                 resource_packs: %{
+                   discover: fn _workspace, _options -> {:ok, manifest} end
+                 },
+                 resource_decision: decision,
+                 runtime_starter: fn options ->
+                   assert Keyword.fetch!(options, :resource_manifest) == manifest
+                   {:ok, :runtime}
+                 end
+               )
+
+      assert message =~ "prompt_probe_complete"
+    after
+      Process.delete(:"$loopex_cli_facade_observer")
+    end
+
+    assert_receive {:admit_resources, admit}
+    assert admit.manifest_digest == manifest_digest
+    assert admit.decision == decision
+
+    assert_receive {:activate_skill, activate}
+    assert activate.manifest_digest == manifest_digest
+    assert activate.source_id == "example.test/skills"
+    assert activate.name == "review"
+    assert activate.pack_digest == pack_digest
+    assert activate.supporting_labels == ["references/checklist.md"]
+  end
+
+  test "skill add list and show use the real retained Git pack" do
+    {state_root, workspace} = roots()
+    source = state_root <> "-git-source"
+    skill_file = Path.join([source, "review", "SKILL.md"])
+    File.mkdir_p!(Path.dirname(skill_file))
+
+    File.write!(
+      skill_file,
+      "---\nname: review\ndescription: Review through the CLI.\n---\nRead the actual diff.\n"
+    )
+
+    File.mkdir_p!(Path.join([source, "review", "references"]))
+    File.write!(Path.join([source, "review", "references", "checklist.md"]), "Check it.\n")
+    on_exit(fn -> File.rm_rf(source) end)
+
+    git_cli!(source, ["init", "--quiet"])
+    git_cli!(source, ["add", "."])
+
+    git_cli!(source, [
+      "-c",
+      "user.name=Loopex Test",
+      "-c",
+      "user.email=test@loopex.invalid",
+      "commit",
+      "--quiet",
+      "-m",
+      "fixture"
+    ])
+
+    revision = git_cli!(source, ["rev-parse", "HEAD"])
+
+    added =
+      capture_io(fn ->
+        capture_io(:stderr, fn ->
+          assert :ok =
+                   LoopexCli.dispatch(
+                     [
+                       "skill",
+                       "add",
+                       source,
+                       "--rev",
+                       revision,
+                       "--path",
+                       "review",
+                       "--state-root",
+                       state_root,
+                       "--workspace",
+                       workspace
+                     ],
+                     executor_authorization: {:host_policy, :allow}
+                   )
+        end)
+      end)
+
+    assert added =~ "installed git:"
+    assert added =~ ":review"
+
+    listed =
+      capture_io(fn ->
+        assert :ok =
+                 LoopexCli.dispatch([
+                   "skill",
+                   "list",
+                   "--state-root",
+                   state_root,
+                   "--workspace",
+                   workspace
+                 ])
+      end)
+
+    assert listed =~ "review"
+    assert listed =~ "Review through the CLI."
+
+    {:ok, workspace_ref} = LoopexCli.ProjectResources.workspace_reference(workspace)
+
+    {:ok, %{"packs" => [pack]}} =
+      LoopexComposition.ResourcePacks.discover(workspace,
+        workspace_ref: workspace_ref,
+        state_root: state_root
+      )
+
+    qualified = "#{pack["source_id"]}:#{pack["name"]}"
+
+    shown =
+      capture_io(fn ->
+        assert :ok =
+                 LoopexCli.dispatch([
+                   "skill",
+                   "show",
+                   qualified,
+                   "--state-root",
+                   state_root,
+                   "--workspace",
+                   workspace
+                 ])
+      end)
+
+    assert shown =~ qualified
+    assert shown =~ revision
+    assert shown =~ "references/checklist.md"
+    assert shown =~ Loopex.ResourcePack.pack_digest(pack)
+  end
+
   # Concept: watch both planes at once, in the order they actually arrive.
   #
   # Technical depth: a case about a transient item reaching the terminal before a
@@ -393,7 +1087,9 @@ defmodule LoopexCliTest do
     {follow_root, follow_workspace} = roots()
 
     followed =
-      fixture(script: [%{text: "first done", hold: parent}, %{text: "follow-up done"}])
+      fixture(
+        script: [%{text: "first done", hold: parent}, %{text: "follow-up done", hold: parent}]
+      )
 
     follow_task =
       Task.async(fn ->
@@ -424,6 +1120,8 @@ defmodule LoopexCliTest do
 
     send(follow_model, :release)
     assert :ok = Task.await(follow_task, 10_000)
+    assert_receive {:holding, follow_up_model}, 2_000
+    send(follow_up_model, :release)
 
     [follow_session] = followed |> AgentLoopFixture.run_ids() |> Tuple.to_list()
     follow_events = AgentLoopFixture.events(followed, follow_session)
@@ -817,12 +1515,21 @@ defmodule LoopexCliTest do
                      "--workspace",
                      workspace
                    ],
+                   runtime_bracket: fn options, inspect ->
+                     assert Keyword.fetch!(options, :runtime_id) == placement
+                     refute Keyword.has_key?(options, :resource_manifest)
+                     result = inspect.(fixture.runtime)
+                     send(self(), {:resume_inspection_cleaned, result})
+                     result
+                   end,
                    runtime_starter: fn options ->
                      assert Keyword.fetch!(options, :runtime_id) == placement
                      {:ok, fixture.runtime}
                    end
                  )
       end)
+
+    assert_received {:resume_inspection_cleaned, {:ok, _digest}}
 
     assert output =~ "resume this session"
     assert output =~ "done"
@@ -980,7 +1687,7 @@ defmodule LoopexCliTest do
   # Ends the composition the way halting an emulator does, and answers with the
   # marker bytes the dead process left behind for its successor to recover.
   defp end_the_process(marker) do
-    assert_receive {:composed_store, store_pid}, 5_000
+    store_pid = next_live_composed_store()
     down = Process.monitor(store_pid)
     Process.exit(store_pid, :kill)
     assert_receive {:DOWN, ^down, :process, ^store_pid, :killed}, 5_000
@@ -994,6 +1701,14 @@ defmodule LoopexCliTest do
     # than silently replacing the previous terminal's handler.
     restore_signal_handlers()
     File.read!(marker)
+  end
+
+  # Prepared recovery opens and closes one inspection Store before the final
+  # runtime. The observer reports both real boundaries; only the live final
+  # Store models the command process that is about to halt.
+  defp next_live_composed_store do
+    assert_receive {:composed_store, store_pid}, 5_000
+    if Process.alive?(store_pid), do: store_pid, else: next_live_composed_store()
   end
 
   test "an interrupt signal delivered to a running loopex process cancels the task through the public facade" do
@@ -1212,6 +1927,7 @@ defmodule LoopexCliTest do
       "--workspace",
       workspace
     ],
+    runtime_bracket: fn _options, inspect -> inspect.(:probe_runtime) end,
     runtime_starter: fn _options -> {:ok, :probe_runtime} end
   )
   """
@@ -1321,9 +2037,18 @@ defmodule LoopexCliTest do
 
     File.write!(stand_in, """
     #!/bin/sh
-    trap 'echo "stand-in: interrupted" >&2' TERM
-    i=0
-    while [ $i -lt 6 ]; do sleep 1; i=$((i+1)); done
+    count=0
+    interrupted=0
+    trap 'interrupted=1; count=$((count + 1)); printf "ack:%s\\n" "$count"' TERM
+    printf 'ready\\n'
+    while :; do
+      interrupted=0
+      if IFS= read -r control; then
+        if [ "$control" = release ]; then break; fi
+      elif [ "$interrupted" -eq 0 ]; then
+        break
+      fi
+    done
     exit 130
     """)
 
@@ -1337,24 +2062,51 @@ defmodule LoopexCliTest do
         env: [{~c"LOOPEX_ESCRIPT", String.to_charlist(stand_in)}]
       ])
 
-    assert {:os_pid, launcher} = Port.info(port, :os_pid)
+    # One shared bound replaces guessed delays; the stand-in waits for release
+    # and also leaves on stdin EOF if the test process dies and closes its port.
+    deadline = System.monotonic_time(:millisecond) + 20_000
 
-    Process.sleep(1_000)
-    {_output, 0} = System.cmd("/bin/kill", ["-TERM", Integer.to_string(launcher)])
-    Process.sleep(2_000)
-    {_output, 0} = System.cmd("/bin/kill", ["-TERM", Integer.to_string(launcher)])
+    await_marker = fn await_marker, expected, received ->
+      if received == expected do
+        :ok
+      else
+        remaining = max(deadline - System.monotonic_time(:millisecond), 0)
 
-    # Asked of the operating system rather than of the port: the stand-in inherits
-    # the port's output, so the emulator reports the launcher's exit only once
-    # that descendant has gone too, and a launcher that left early looks the same
-    # from here as one that waited.
-    Process.sleep(500)
+        receive do
+          {^port, {:data, bytes}} ->
+            joined = received <> bytes
+            assert byte_size(joined) <= byte_size(expected)
+            await_marker.(await_marker, expected, joined)
 
-    assert {_output, 0} = System.cmd("/bin/kill", ["-0", Integer.to_string(launcher)]),
-           "the launcher left while its child was still running"
+          {^port, {:exit_status, status}} ->
+            flunk("launcher exited before marker with status #{status}")
+        after
+          remaining -> flunk("launcher stand-in did not acknowledge the expected phase")
+        end
+      end
+    end
 
-    assert_receive {^port, {:exit_status, status}}, 20_000
-    assert status == 130, "the launcher reported its own interrupted wait, not the child"
+    try do
+      assert {:os_pid, launcher} = Port.info(port, :os_pid)
+      :ok = await_marker.(await_marker, "ready\n", "")
+      {_output, 0} = System.cmd("/bin/kill", ["-TERM", Integer.to_string(launcher)])
+      :ok = await_marker.(await_marker, "ack:1\n", "")
+      {_output, 0} = System.cmd("/bin/kill", ["-TERM", Integer.to_string(launcher)])
+      :ok = await_marker.(await_marker, "ack:2\n", "")
+
+      # Query the OS while the stand-in remains held, before allowing it to exit.
+      assert {_output, 0} = System.cmd("/bin/kill", ["-0", Integer.to_string(launcher)]),
+             "the launcher left while its child was still running"
+
+      assert Port.command(port, "release\n")
+      remaining = max(deadline - System.monotonic_time(:millisecond), 0)
+      assert_receive {^port, {:exit_status, status}}, remaining
+      assert status == 130, "the launcher reported its own interrupted wait, not the child"
+    after
+      # Closing stdin lets the held stand-in leave on every assertion failure;
+      # the launcher retains its ordinary responsibility to reap that child.
+      if Port.info(port), do: Port.close(port)
+    end
   end
 
   test "an interrupt whose cleanup cannot be confirmed reports outcome unknown with its reconciliation reference" do
@@ -1399,6 +2151,9 @@ defmodule LoopexCliTest do
     assert {:error, message} =
              LoopexCli.dispatch(
                ["cancel", "s_known_1", "--state-root", state_root],
+               runtime_bracket: fn _options, _inspect ->
+                 flunk("a live placement owner must refuse before inspection starts")
+               end,
                runtime_starter: fn _options ->
                  flunk("a live placement owner must refuse before composition starts")
                end
@@ -1479,6 +2234,14 @@ defmodule LoopexCliTest do
                "--workspace",
                workspace
              ],
+             runtime_bracket: fn options, inspect ->
+               assert Keyword.fetch!(options, :runtime_id) == placement
+               assert Keyword.fetch!(options, :policy) == LoopexCli.Policy.RefuseAll
+               refute Keyword.has_key?(options, :resource_manifest)
+               result = inspect.(fixture.runtime)
+               send(self(), {:cancel_inspection_cleaned, result})
+               result
+             end,
              runtime_starter: fn options ->
                assert Keyword.fetch!(options, :runtime_id) == placement
                assert Keyword.fetch!(options, :policy) == LoopexCli.Policy.RefuseAll
@@ -1489,6 +2252,7 @@ defmodule LoopexCliTest do
       end)
 
     assert_received {:cancelled, :ok}
+    assert_received {:cancel_inspection_cleaned, {:ok, _digest}}
     assert output =~ "loopex: cancelled"
     refute output =~ "outcome is unknown"
     refute output =~ "--policy is required"
@@ -2063,6 +2827,21 @@ defmodule LoopexCliTest do
     assert silent =~ "no project resources found"
   end
 
+  test "a custom IO device without a stdin option cannot claim an operator" do
+    with_terminal_input(
+      "y\n",
+      fn ->
+        options = :io.getopts(:standard_io)
+        assert Keyword.get(options, :terminal) == true
+        refute Keyword.has_key?(options, :stdin)
+        refute LoopexCli.ProjectResources.operator_present?()
+      end,
+      binary: true,
+      encoding: :unicode,
+      terminal: true
+    )
+  end
+
   test "a project resource that resolves outside the workspace is excluded and reported rather than admitted as contained" do
     # Concept: containment is a fact about where the bytes actually are, and the
     # side holding the path is the only side that can establish it.
@@ -2439,13 +3218,17 @@ defmodule LoopexCliTest do
   #
   # Technical depth: `ProjectResources.operator_present?/0` asks the current
   # group leader through the ordinary Erlang IO protocol. This proxy delegates
-  # every request to `StringIO` except `:getopts`, where it truthfully describes
-  # the test device as an input terminal. No project-decision seam is injected:
+  # every request to `StringIO` except `:getopts`, where it describes the test
+  # device using the supplied options. No project-decision seam is injected:
   # the command still calls `decide/2`, asks through `IO.gets/1`, and consumes
   # the typed answer through `:standard_io`.
-  defp with_terminal_input(typed, work) do
+  defp with_terminal_input(
+         typed,
+         work,
+         options \\ [binary: true, encoding: :unicode, terminal: true, stdin: true]
+       ) do
     {:ok, input} = StringIO.open(typed)
-    terminal = spawn(fn -> terminal_io(input) end)
+    terminal = spawn(fn -> terminal_io(input, options) end)
     prior = Process.group_leader()
     true = Process.group_leader(self(), terminal)
 
@@ -2458,15 +3241,12 @@ defmodule LoopexCliTest do
     end
   end
 
-  defp terminal_io(input) do
+  defp terminal_io(input, options) do
     receive do
       {:io_request, from, reply_as, :getopts} ->
-        send(
-          from,
-          {:io_reply, reply_as, [binary: true, encoding: :unicode, terminal: true, stdin: true]}
-        )
+        send(from, {:io_reply, reply_as, options})
 
-        terminal_io(input)
+        terminal_io(input, options)
 
       {:io_request, from, reply_as, request} ->
         reference = make_ref()
@@ -2477,7 +3257,7 @@ defmodule LoopexCliTest do
             send(from, {:io_reply, reply_as, reply})
         end
 
-        terminal_io(input)
+        terminal_io(input, options)
 
       :stop ->
         :ok
@@ -3210,6 +3990,12 @@ defmodule LoopexCliTest do
   # shell child that has exited before its parent returns provides.
   defp dead_os_pid do
     {output, 0} = System.cmd("/bin/sh", ["-c", "sleep 0 & echo $!; wait"])
+    String.trim(output)
+  end
+
+  defp git_cli!(root, arguments) do
+    {output, status} = System.cmd("git", arguments, cd: root, stderr_to_stdout: true)
+    assert status == 0, output
     String.trim(output)
   end
 

@@ -373,6 +373,7 @@ defmodule Loopex.AgentLoopFixture do
         },
         project_manifest: Keyword.get(options, :project_manifest),
         project_decision: Keyword.get(options, :project_decision),
+        resource_manifest: Keyword.get(options, :resource_manifest),
         tools: definitions,
         active_tools: Enum.map(definitions, &Map.fetch!(&1, "tool_id")),
         policy: Keyword.get(options, :policy, Loopex.AgentLoopTestPolicy),

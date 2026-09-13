@@ -91,7 +91,16 @@ flowchart TB
     EXEC -. implements .-> PORTS
 ```
 
-Technical depth: [Exact inventory and the checks that hold it](architecture-technical.md#technical-arch-applications).
+M3 adds `LoopexComposition.with_runtime/2`
+for an embedding host that needs a temporary reference stack for one operation.
+It returns the operation's result after confirmed shutdown of the runtime and
+its directly owned processes. Forced or unconfirmed cleanup returns an error;
+an operation that raises propagates after cleanup. The existing `start/1`
+behavior remains. Prepared CLI recovery uses this helper to inspect the saved session before
+opening the final runtime with its
+exact retained resource snapshot and trusted launch configuration.
+
+Technical depth: [Exact inventory and temporary stack ownership](architecture-technical.md#technical-arch-applications).
 
 The direction is not a convention a reviewer remembers. `mix loopex.deps_budget`
 reads the umbrella's actual project inventory and refuses an application whose
@@ -269,6 +278,14 @@ closed that way at once, since a superseded owner commits nothing, while an
 executor cleanup keeps its worker alive until it answers, so a superseded owner
 lives exactly as long as that effectful work does.
 
+Control retains spent provider identities while their settlement is unresolved.
+After the matching durable settlement closes the attempt, it removes the spent
+entry. Current ownership and the exact current attempt still govern every permit,
+so removing an old entry cannot authorize another provider call. A terminal
+settlement requires its matching consecutive terminal record. An attempt with
+only a run terminal remains retained until the session is released, as required by
+[ADR 0027](../adr/0027-provider-permit-retirement.md#concept).
+
 Technical depth: [Succession, the post-commit fence, and the invariants](architecture-technical.md#technical-arch-session-owner).
 
 <a id="concept-arch-brains-hands"></a>
@@ -294,6 +311,13 @@ Surfaces are peers. The CLI, the reference client, and any embedder reach the
 same semantic contract through the public facade, and none of them owns a loop, a
 cursor, or durable session truth. If a surface disappeared, everything it does
 would still be reachable.
+
+Project skills use that same division. The host discovers or imports bounded
+resource packs and retains their provenance. Core holds an immutable snapshot,
+records the operator's admission and selection, and stages the selected bytes.
+The fixed resource class adds no application, behaviour, tool or plugin loader.
+Downloaded metadata and scripts remain data; ordinary host policy and executor
+grants still decide whether a requested effect runs.
 
 Technical depth: [The policy, grant, and lease path](architecture-technical.md#technical-arch-brains-hands).
 

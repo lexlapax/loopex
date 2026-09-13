@@ -43,9 +43,35 @@ if ! [ -t 0 ]; then
     die 'diagnostic roles accept no provider input'
   fi
 fi
-for command in git awk shasum cut elixir; do
+for command in git awk cut elixir; do
   command -v "$command" >/dev/null 2>&1 || die "required tool is absent: $command"
 done
+# Concept: supported platforms may supply either standard SHA-256 utility.
+# Technical depth: validate its empty-input digest and each returned digest before
+# comparing bound bytes; an absent or malformed utility is unavailable evidence.
+sha256_dialect=
+sha256_validated=false
+sha256_digest() {
+  local output digest
+  case "$sha256_dialect" in
+    shasum) output=$(shasum -a 256 "$@" 2>/dev/null) || return 1 ;;
+    sha256sum) output=$(sha256sum "$@" 2>/dev/null) || return 1 ;;
+    *) return 1 ;;
+  esac
+  digest=${output%% *}
+  [[ "$digest" =~ ^[0-9a-f]{64}$ ]] || return 1
+  printf '%s' "$digest"
+}
+for sha256_dialect in shasum sha256sum; do
+  command -v "$sha256_dialect" >/dev/null 2>&1 || continue
+  if [ "$(sha256_digest </dev/null)" = e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 ]; then
+    sha256_validated=true
+    break
+  fi
+  sha256_dialect=
+done
+[ "$sha256_validated" = true ] ||
+  die 'no validated SHA-256 command is available'
 root=$(git rev-parse --show-toplevel 2>/dev/null) || die 'not inside a Git checkout'
 cd "$root" || die 'cannot enter the checkout'
 for path in docs/plans/M3.md docs/plans/M3-technical.md docs/plans/M3-gate.md docs/plans/README.md; do
@@ -72,7 +98,7 @@ for required in scripts/m3-gate-support.exs scripts/check-closed-gates.sh script
 done
 printf '%s\n' "$artifacts" | while read -r expected path; do
   [ -r "$path" ] || die "bound artifact is unreadable: $path"
-  actual=$(shasum -a 256 "$path" | cut -d' ' -f1) || die "cannot hash $path"
+  actual=$(sha256_digest "$path") || die "cannot hash $path"
   [ "$actual" = "$expected" ] || die "bound artifact digest mismatch: $path"
 done
 support() { env LANG=C.UTF-8 LC_ALL=C.UTF-8 elixir scripts/m3-gate-support.exs --m3-gate-support "$@"; }
@@ -280,5 +306,6 @@ final_identity=$(support identity "$root" committed) || exit $?
 [ "$full_identity" = "$final_identity" ] || die 'source identity changed during the full gate'
 [ "$build_identity" = "$(support build "$task_root/build/test")" ] || die 'selector build identity changed during the full gate'
 printf '%s\n' "$final_identity"
+gate_digest=$(sha256_digest docs/plans/M3-gate.md) || die 'cannot hash the final gate'
 printf 'LOOPEX_M3_GATE_REPORT source=%s gate=sha256:%s seed=3107 outcome_ids=1,2,3,4,5 inherited=true real_workflow=true result=PASS\n' \
-  "$(git rev-parse HEAD)" "$(shasum -a 256 docs/plans/M3-gate.md | cut -d' ' -f1)"
+  "$(git rev-parse HEAD)" "$gate_digest"
