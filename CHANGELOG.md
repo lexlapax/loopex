@@ -71,8 +71,10 @@ shared selector diagnostics and portable SHA-256 inspection. M1 generation 9
 and M2 generation 10 retain the corresponding reviewed shared-runner bindings.
 The prior generations and their evidence remain historical.
 
-Repair declined, EOF and headless CLI skill trust so ordinary coding continues
-with skills withheld. Preserve the exact declined project-trust disposition on
+Repair declined, EOF and headless CLI skill trust so ordinary coding without an
+explicit skill selection continues with skills withheld. An explicit `--skill`
+or `--skill-resource` selection refuses before prompt submission when trust is
+unavailable. Preserve the exact declined project-trust disposition on
 required-only context refusal, under the approved witness correction; eligible
 projects still report that optional content was not evaluated. Export pinned
 Git blobs without checkout transformations and verify each native Git object
