@@ -926,7 +926,9 @@ defmodule LoopexCliTest do
     {follow_root, follow_workspace} = roots()
 
     followed =
-      fixture(script: [%{text: "first done", hold: parent}, %{text: "follow-up done"}])
+      fixture(
+        script: [%{text: "first done", hold: parent}, %{text: "follow-up done", hold: parent}]
+      )
 
     follow_task =
       Task.async(fn ->
@@ -957,6 +959,8 @@ defmodule LoopexCliTest do
 
     send(follow_model, :release)
     assert :ok = Task.await(follow_task, 10_000)
+    assert_receive {:holding, follow_up_model}, 2_000
+    send(follow_up_model, :release)
 
     [follow_session] = followed |> AgentLoopFixture.run_ids() |> Tuple.to_list()
     follow_events = AgentLoopFixture.events(followed, follow_session)
