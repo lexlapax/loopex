@@ -3456,3 +3456,65 @@ row, this disposition, the derived ADR index statuses and the derived plan
 register capsule, which now names the M4 plan pair and gate as the next
 decision. It does not accept the M4 plan pair or gate, authorizes no product
 implementation, and grants no merge, tag or release.
+
+<a id="disposition-m0-gate-generation-7-2026-09-13"></a>
+### M0 gate generation 7 acceptance — 2026-09-13
+
+The maintainer chose to accept each phase A floor-holder proposal directly in
+the review conversation while the reviewer authors them. Presented with M0
+gate generation 7 at pushed proposal
+`08a453d59d20acfff7314b7ad9abe5bf0e65f735`, whose evidence was the single
+prescribed `unfinished shared binding sequence` status stop, passing
+commit-message, hygiene, gitignore and agent-bootstrap checks, and the matrix
+task under both installed pairs refusing only the not-yet-recorded floor run,
+the maintainer answered **"Accept"**.
+
+That lineage was then re-created once, after the repository status checker
+was repaired at `47784aa`: its governance walk had required a plan's first
+acceptance to bind a gate at generation zero, which no Open holder of a
+shared artifact can satisfy once the sequential holder transaction makes it
+refresh that binding through an amendment. The re-created proposal
+`06f9adc0b1a85bffc8a954e4e01ad2759e985f9e` has exactly the tree of
+`08a453d59d20acfff7314b7ad9abe5bf0e65f735` plus that repair, verified by the
+reviewer with a tree diff before this rebind. On 2026-09-14 the maintainer
+approved the rebuild and accepted every re-created phase A proposal on that
+basis, answering **"Approve and accept rebuild all"** to the rule that each
+re-created proposal's tree equals the originally accepted tree plus the
+checker repair.
+
+The acceptance transition built on that first re-creation was refused by the
+same checker for two further readings of the same assumption in its plan
+validator: every generation-one candidate was read as an amendment proposal
+whose rebind must keep the Open state it was proposed under, and the empty
+original at the end of an acceptance chain had to sit at generation zero. The
+repair was widened at `d276f325169af6ab54464648a6578da6b4e499c7` so that a
+candidate whose own Acceptance row is still empty is read as a first
+acceptance that may move Open to Accepted only, and an original may carry
+generation one; every other shape is refused as before. The lineage was
+re-created a second time on that widened repair. The proposal
+`87bb87ec3ec5b86d6cf65b11fa5472a60072c5e4` has exactly the tree of
+`08a453d59d20acfff7314b7ad9abe5bf0e65f735` plus the widened repair, verified
+by the reviewer with a tree diff before this rebind. On 2026-09-14 the
+maintainer approved the second rebuild and accepted every re-created phase A
+proposal and the re-created M4 candidate on that basis, answering
+**"I accept recreated proposals and candidate. i need to do a second review
+after the final sha table is created"**. This row binds that proposal.
+
+This accepts generation 7 alone under `amendment-transaction-v2`: the
+`.tool-versions` floor pair Elixir 1.18.5 with OTP 27.3.4 that accepted
+[ADR 0026](../adr/0026-development-floor-refresh.md#concept) chose, bound at
+`fea095ecec784a4440b872ad5f53a8da2cb4e13e43b6f05add5cfd75bb352879`, and the
+amended M0 gate at
+`sha256:b86275a21d1041c7e72e8354367ff9036de2470abfb2f11559ed95145835dca1`.
+This immediate-child rebind changes only the generation-7 row in
+`docs/plans/M0.md` and adds this disposition. M0's historical Acceptance and
+Closure, earlier dispositions, envelopes, register and lifecycle state remain
+unchanged, and M0 remains Closed.
+
+M1, M2, M3 and M4 still hold the previous pins in their own tables; each
+settles through its own transaction in register order, and holder-scoped
+validation at this rebind names them as pending rather than reporting a
+global pass. A run of the M0 gate under the new floor pair, recorded in the
+matrix evidence, belongs to the inherited-green proof after the final Open
+M4 refresh. This record accepts no other holder, plan or ADR, waives no
+evidence, and grants no integration, tag or release.
