@@ -105,19 +105,20 @@ their adapters and parity smokes exist.
 
 ## Product Toolchain
 
-The bootstrap floor is OTP 26+ and Elixir 1.17+, and ADR 0002 locks two exact
-pairs, recorded in `.tool-versions`. The product scaffold exists, so installing
+The bootstrap floor is OTP 27+ and Elixir 1.18+, and accepted ADR 0026 fixes
+two exact pairs, recorded in `.tool-versions`. The product scaffold exists, so installing
 the toolchain lets you build and test today: `mix test` from the repository root,
 `bash scripts/check-bootstrap.sh` for the aggregate,
 `bash scripts/check-m0-gate.sh` for the closed M0 gate,
 `/bin/bash -p scripts/check-m1-gate.sh` for the closed M1 gate,
-`bash scripts/check-m2-gate.sh` for the closed M2 gate, and
-`bash scripts/check-m3-gate.sh` for the Open M3 scaffold. `--inspect` checks its
-artifact identities; `--preflight` and `--checkpoint` run the isolated real-session
-admission-ordering probe, currently RED for a missing repair. Checkpoint is not
-full-gate evidence. Complete integrated skills/witness/full lanes while M3 is
-Open before acceptance. The unopened M4 runner is unavailable; its superseded
-scaffolding is retained in Git at `ba51d1898bcca109a5ed32a8cc3ba831323113a1`. The
+`bash scripts/check-m2-gate.sh` for the closed M2 gate,
+`bash scripts/check-m3-gate.sh` for the accepted M3 gate, and
+`bash scripts/check-m4-gate.sh` for the Open M4 lookahead scaffold. For both,
+`--inspect` checks artifact identities; `--preflight` and `--checkpoint` run the
+isolated real-session opening probe, currently RED for a missing repair (M3:
+required-only admission ordering; M4: durable policy interactions). Checkpoint
+is not full-gate evidence. The M4 full lane stays unavailable until M3 is Closed
+and integrated, because its inherited aggregate is register-derived. The
 privileged-Bash flag is part of the command: the runner refuses an ordinary Bash
 because inherited functions and `BASH_ENV` would otherwise precede its
 environment boundary.
@@ -292,15 +293,20 @@ retained evidence; only `R` can be proposed for integration.
 
 ## Toolchain pairs
 
-ADR 0002 locks two validated pairs, recorded in `.tool-versions`. Homebrew carries
-only the current one, and it pairs Elixir against whatever OTP it ships, so the
-floor pair needs a version manager. `mise` was used to provide both:
+Accepted ADR 0026 chooses two validated pairs, recorded in `.tool-versions`:
+floor Elixir 1.18.5 with OTP 27.3.4 and current Elixir 1.20.3 with OTP 29.0.5.
+Homebrew carries only the current one, and it pairs Elixir against whatever OTP
+it ships, so the floor pair needs a version manager. `mise` provides both, and
+the floor toolchain needs Hex and rebar3 installed once before Mix can build
+dependencies under it:
 
 ```text
-mise install erlang@26.0
-mise install elixir@1.17.0-otp-26
-mise exec erlang@26.0 elixir@1.17.0-otp-26 -- bash scripts/check-m0-gate.sh
-mise exec erlang@26.0 elixir@1.17.0-otp-26 -- /bin/bash -p scripts/check-m1-gate.sh
+mise install erlang@27.3.4
+mise install elixir@1.18.5-otp-27
+mise exec erlang@27.3.4 elixir@1.18.5-otp-27 -- mix local.hex --force
+mise exec erlang@27.3.4 elixir@1.18.5-otp-27 -- mix local.rebar --force
+mise exec erlang@27.3.4 elixir@1.18.5-otp-27 -- bash scripts/check-m0-gate.sh
+mise exec erlang@27.3.4 elixir@1.18.5-otp-27 -- /bin/bash -p scripts/check-m1-gate.sh
 ```
 
 ### M1 retained toolchain evidence
@@ -310,7 +316,7 @@ committed source candidate `C` and run the three bound non-gate roles, retaining
 each final `capture ... verdict=CAPTURE exit=0` record:
 
 ```text
-Darwin floor     mise exec erlang@26.0 elixir@1.17.0-otp-26 -- /bin/bash -p scripts/check-m1-gate.sh --capture floor
+Darwin floor     mise exec erlang@27.3.4 elixir@1.18.5-otp-27 -- /bin/bash -p scripts/check-m1-gate.sh --capture floor
 Darwin current   /bin/bash -p scripts/check-m1-gate.sh --capture current
 Linux current    /bin/bash -p scripts/check-m1-gate.sh --capture linux-current
 ```
@@ -330,14 +336,14 @@ The three capture lanes vary one variable at a time from `darwin-current`:
 system.
 
 ```text
-darwin-floor     mise exec erlang@26.0 elixir@1.17.0-otp-26 -- bash scripts/check-m2-gate.sh --capture darwin-floor
+darwin-floor     mise exec erlang@27.3.4 elixir@1.18.5-otp-27 -- bash scripts/check-m2-gate.sh --capture darwin-floor
 darwin-current   bash scripts/check-m2-gate.sh --capture darwin-current
 linux-current    bash scripts/check-m2-gate.sh --capture linux-current
 ```
 
 Two `m0` re-proofs accompany them, the closed `M0` gate run once under each
 toolchain pair at the same candidate. `check-m0-gate.sh` sets no build root and
-compiles in the checkout's own `_build`, and OTP 26 cannot read a beam written by
+compiles in the checkout's own `_build`, and OTP 27 cannot read a beam written by
 OTP 29, so clear `_build` when switching between the pairs. A stale tree makes
 that gate report a formatter-coverage failure whose real cause is
 `Protocol.extract_from_beam/2`.

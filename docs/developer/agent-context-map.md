@@ -33,13 +33,13 @@ separate decision duty when a founding boundary or invariant would change.
 | Doctrine, product definition, principles | [Product definition](../vision.md#concept-vision-product-definition) and [principles](../vision.md#concept-vision-product-principles) | [Product boundaries](../vision-technical.md#technical-vision-product-definition) and [principle mechanics](../vision-technical.md#technical-vision-product-principles) | “Runtime is the framework”; what Loopex is and is not. |
 | Domain language | [Domain language](../vision.md#concept-vision-domain-language) | [Exact terms](../vision-technical.md#technical-vision-domain-language) | Session/run/turn, operation/attempt/epoch/fence, journal/public event, brain/hand. |
 | Ownership and trust boundaries | [Ownership](../vision.md#concept-vision-ownership-trust) | [Ownership mechanics](../vision-technical.md#technical-vision-ownership-trust) | Loopex/host/executor ownership, policy decisions, and grants. |
-| Stack, dependency budget, runtime floor | [Dependency doctrine](../vision.md#concept-vision-dependency-doctrine) and [ADR 0002 decision](../adr/0002-bootstrap-runtime-floor.md#concept-adr-0002-decision) | [Exact dependency constraints](../vision-technical.md#technical-vision-dependency-doctrine) and [ADR 0002 mechanics](../adr/0002-bootstrap-runtime-floor-technical.md#technical-adr-0002-decision) | Protocol/Core/Runtime, stdlib+OTP-only core, bootstrap floor. |
+| Stack, dependency budget, runtime floor | [Dependency doctrine](../vision.md#concept-vision-dependency-doctrine) and [ADR 0002 decision](../adr/0002-bootstrap-runtime-floor.md#concept-adr-0002-decision) | [Exact dependency constraints](../vision-technical.md#technical-vision-dependency-doctrine) and [ADR 0002 mechanics](../adr/0002-bootstrap-runtime-floor-technical.md#technical-adr-0002-decision) | Protocol/Core/Runtime, one admitted `:telemetry` dependency in core, bootstrap floor. Proposed [ADR 0026](../adr/0026-development-floor-refresh.md#concept) owns the M4 floor-holder decision; proposed [ADR 0030](../adr/0030-observability-tracing-and-telemetry.md#concept) owns telemetry mechanics. Neither is accepted yet. |
 | Runtime instances, supervision, reducer | [Runtime ownership](../vision.md#concept-vision-runtime-supervision) | [Supervision and reducer mechanics](../vision-technical.md#technical-vision-runtime-supervision) | Multi-instance supervision, pure reducer, bounded journal transaction; use the [M1 runtime and embedding guide](runtime-and-embedding.md#concept) for the implemented single-machine surface. |
 | Transactions, operations, recovery, cancellation | [Recovery truth](../vision.md#concept-vision-recovery-truth) | [Transaction and recovery mechanics](../vision-technical.md#technical-vision-recovery-truth) | `commit_unknown`, operation lifecycle, reconciliation, outcome algebra. |
 | Agent loop, queues, tool ordering | [Loop semantics](../vision.md#concept-vision-loop-semantics) | [Loop mechanics](../vision-technical.md#technical-vision-loop-semantics) | One run per session, input classes, ordering, and split payloads. |
-| Public protocol, events, attachments | [Public protocol](../vision.md#concept-vision-public-protocol) | [Protocol mechanics](../vision-technical.md#technical-vision-public-protocol) | Stream planes, envelopes, attach behavior, and authority boundaries; the headless protocol proposal is [ADR 0023](../adr/0023-experimental-public-session-protocol.md#concept); [ADR 0024](../adr/0024-durable-interaction-lifecycle-and-host-policy-authority.md#concept) places durable interactions in M4 core before wire mapping. Both remain Proposed; the external consumer remains the unopened [`M4` plan](../archive/M4.md). |
-| Journal, stores, branches, compaction, artifacts | [Sessions and storage](../vision.md#concept-vision-sessions-storage) | [Storage mechanics](../vision-technical.md#technical-vision-sessions-storage) | Recovery surfaces, private adapters, store decision, protection. |
-| Model boundary and continuation | [Model boundary](../vision.md#concept-vision-model-boundary) | [Model mechanics](../vision-technical.md#technical-vision-model-boundary) | Canonical types, `Loopex.LLM`, reference adapter and native sidecar. Accepted [ADR 0027](../adr/0027-provider-permit-retirement.md#concept) and its [retirement mechanics](../adr/0027-provider-permit-retirement-technical.md#technical-adr-0027-decision) govern the remaining M3 provider-attempt retention work. |
+| Public protocol, events, attachments | [Public protocol](../vision.md#concept-vision-public-protocol) | [Protocol mechanics](../vision-technical.md#technical-vision-public-protocol) | Stream planes, envelopes, attach behavior, and authority boundaries; the headless protocol proposal is [ADR 0023](../adr/0023-experimental-public-session-protocol.md#concept); [ADR 0024](../adr/0024-durable-interaction-lifecycle-and-host-policy-authority.md#concept) places durable interactions in M4 core before wire mapping. Read the [M4 pre-acceptance choices](#disposition-m4-preacceptance-contract-choices-2026-09-13); both ADRs remain Proposed prerequisites of the Open [`M4` plan](../plans/M4.md#concept) after M3 closure. |
+| Journal, stores, branches, compaction, artifacts | [Sessions and storage](../vision.md#concept-vision-sessions-storage) | [Storage mechanics](../vision-technical.md#technical-vision-sessions-storage) | Recovery surfaces, private adapters, store decision, protection. [ADR 0028](../adr/0028-bounded-artifact-retrieval.md#concept) proposes M4 transfer limits; its [selected profile](#disposition-m4-preacceptance-contract-choices-2026-09-13) is not ADR acceptance. |
+| Model boundary and continuation | [Model boundary](../vision.md#concept-vision-model-boundary) | [Model mechanics](../vision-technical.md#technical-vision-model-boundary) | Canonical types, `Loopex.LLM`, reference adapter and native sidecar. Accepted [ADR 0027](../adr/0027-provider-permit-retirement.md#concept) and its [retirement mechanics](../adr/0027-provider-permit-retirement-technical.md#technical-adr-0027-decision) govern M3 provider-attempt retention. |
 | Context pipeline | [Model boundary](../vision.md#concept-vision-model-boundary) | [Context-pipeline mechanics](../vision-technical.md#technical-vision-model-boundary) | The sole seam for memory, retrieval, prompts, provenance, and receipts. |
 | Tools and coding surface | [Tools](../vision.md#concept-vision-tools) | [Tool mechanics](../vision-technical.md#technical-vision-tools) | Seven-tool surface, budget, and non-authority of metadata. |
 | Executors, brain/hand, distribution | [Executor protocol](../vision.md#concept-vision-executor-protocol) | [Executor mechanics](../vision-technical.md#technical-vision-executor-protocol) | Job/receipt protocol, trust classes, trusted gateways. |
@@ -62,10 +62,15 @@ are Mix tasks: `mix loopex.deps_budget`, `loopex.core_only`, `loopex.matrix`,
 `loopex.format_scope`, `loopex.version_train`, `loopex.docs_check`,
 `loopex.hook_registration`, and `loopex.self_hosting`.
 `bash scripts/check-bootstrap.sh` runs the bootstrap aggregate.
-`bash scripts/check-m3-gate.sh` owns the complete M3 gate and its M0–M2
-predecessor aggregate. Inspection and focused checkpoints make narrower claims;
-the accepted opening red can become green during implementation without proving
-the rest of M3 complete.
+`bash scripts/check-m0-gate.sh`, `/bin/bash -p scripts/check-m1-gate.sh`,
+`bash scripts/check-m2-gate.sh`, and `bash scripts/check-m3-gate.sh` run the
+Closed gates. The M3 gate includes its M0–M2 predecessor aggregate.
+`bash scripts/check-m4-gate.sh` runs the Open M4 gate, which must be red for
+its declared missing behavior while every Closed gate stays green.
+After ADR 0026's floor-holder sequence and before M4 acceptance,
+`elixir -r scripts/check-m4-fixtures.exs -e 'Loopex.M4FixtureCheck.run!()'`
+and `elixir scripts/check_m4_fixtures_test.exs` check the bound schema and
+vectors. They do not prove client or server conformance.
 
 Product tests run against a temporary `LOOPEX_HOME`; the
 affected conformance suites (`conformance/`) run for any adapter or behaviour
@@ -73,10 +78,10 @@ change; property tests own reducer/replay claims; fault injection owns
 durable-transition claims. Real-provider runs are a tagged, explicitly invoked
 lane — never part of the default suite.
 
-Use focused checks during M3 implementation under the reviewed
-[end-only full-gate cadence](#override-disposition-m3-implementation-gate-cadence-2026-09-10).
-Complete M0–M3 evidence is required at the final candidate. Other milestones
-follow [AGENTS.md](../../AGENTS.md#milestones-and-gates) and their accepted plan.
+M3's implementation used focused checks under the reviewed
+[end-only full-gate cadence](#override-disposition-m3-implementation-gate-cadence-2026-09-10),
+with complete M0–M3 evidence at its final candidate. Other milestones follow
+[AGENTS.md](../../AGENTS.md#milestones-and-gates) and their accepted plan.
 Under the
 [reviewed M3 preparation-rule ratification](#override-disposition-m3-incremental-witness-ratification-2026-09-10),
 acceptance binds clauses, witness identities, runnable commands and a real
@@ -152,29 +157,78 @@ transaction is needed for the approved assertion change.
   and retain version-specific facts here. Material changes
   to development behavior require an option-and-implication packet and
   maintainer approval before adapter edits.
-- Maintainer decision (2026-08-15): development work uses the model-neutral
+- Maintainer decision (2026-09-14): development work keeps the model-neutral
   efficient, balanced, and deep capability classes in the
   [development charter](development-charter.md#concept-capability-follows-consequence)
   and its [technical routing](development-charter-technical.md#technical-capability-follows-consequence).
-  Current recommended mappings are Codex Luna/medium for efficient work,
-  Terra/high for balanced work, and Sol/high for deep work; Claude Haiku/medium,
-  Sonnet/high, and Opus/high respectively. A separately verified deeper setting
-  is reserved for unusually demanding work whose evidence justifies the extra
-  cost. These are
-  dated adapter recommendations, not project authority or repository model
-  pins. Profiles inherit the caller's model; the caller selects and verifies the
-  current mapping before invocation. Class labels and structural checks are
-  routing metadata, not capability proof. Use a separate direct invocation when
+  After Claude Fable 5.1 and GPT-6 Astra were released, the maintainer
+  directed that the client model-use rules in `.claude/` and `.codex/` be
+  rebuilt on current vendor documentation. The repository still pins no
+  model in either adapter and the roles still inherit the caller's model, so
+  the rebuild is this dated mapping, the role effort settings, and the
+  [adapter smoke record](agent-adapter-smoke.md). It supersedes the
+  2026-08-15 mapping retained below it. Current recommended mappings,
+  checked against primary vendor documentation on 2026-09-14:
+
+  | Class | Codex | Claude Code | Effort |
+  | --- | --- | --- | --- |
+  | Efficient | `gpt-5.6-luna` | `haiku` (Claude Haiku 4.5) | Codex: low for scans, extraction and log triage; medium when completeness needs judgment. Claude Haiku 4.5 accepts no effort setting, so the class alone routes it |
+  | Balanced | `gpt-5.6-terra` | `sonnet` (Claude Sonnet 5) | medium by default; high for multi-boundary integration or debugging |
+  | Deep | `gpt-5.6-sol` | `opus` (Claude Opus 5) | high; xhigh for long-running agentic implementation or a rejoin audit |
+  | Deepest, separately verified | `gpt-6-astra` | `fable` (Claude Fable 5.1) | high; max only where correctness outweighs cost, such as exact-SHA acceptance or closure review, gate design, or an ADR decision with conflicting evidence |
+
+  The adaptive rules that go with the table: effort is the first lever and
+  model the second, so raise effort within the current class before
+  escalating the class; escalate on conflicting evidence, an ambiguous
+  boundary, or repeated focused failure, and return settled follow-through to
+  the efficient class; a delegated subagent runs no deeper than its
+  delegation names, so in Claude Code the caller passes the alias per
+  delegation, and because the repository role files pin no effort, a Claude
+  Code subagent runs at its caller's effort: a caller at max lifts the
+  reviewer it spawns, and a caller wanting a cheaper child lowers the class
+  through the alias; in Codex each role's `model_reasoning_effort` applies
+  unless the spawn override passes another; a deep or deepest parent never
+  implicitly promotes a child, so the caller states the class at the call
+  site;
+  fan-out uses a lead of a higher class over workers of a lower class only
+  when there is bulk to hand off; and both vendors state that the deepest
+  models at low effort often match a smaller model at high effort, so a
+  measured comparison may replace an escalation. Availability is checked,
+  never assumed: Claude Fable 5.1 needs Claude Code 2.1.257 or later, appears
+  in the model picker only when the server reports it for the organization,
+  and may bill usage credits with a consent prompt; GPT-6 Astra needs
+  codex-cli 0.153.0 or later, so the 0.147.0 client installed on 2026-09-14
+  cannot select it and Astra is unavailable evidence there until the client
+  is upgraded; Claude Mythos 5.1 is invitation-only and belongs to no mapping;
+  the built-in Claude Code Explore agent is capped at Opus by the client. The
+  mapping is a dated adapter recommendation, not project authority or a
+  repository model pin. Class labels and structural checks are routing
+  metadata, not capability proof. Use a separate direct invocation when
   named-role delegation is unavailable. A stronger profile may perform
   lower-class work, while missing required deep capability or effective
   read-only review is unavailable evidence. Task-shaped smoke evidence records
   the effective model and effort when observable. Primary references checked
-  for this mapping are
-  [OpenAI's model guidance](https://developers.openai.com/api/docs/models) and
-  [Claude Code model configuration](https://code.claude.com/docs/en/model-config).
+  for this mapping are the
+  [Claude models overview](https://platform.claude.com/docs/en/about-claude/models/overview),
+  [choosing a model](https://platform.claude.com/docs/en/about-claude/models/choosing-a-model),
+  [effort guidance](https://platform.claude.com/docs/en/build-with-claude/effort),
+  [Claude Code subagents](https://code.claude.com/docs/en/sub-agents) and
+  [model configuration](https://code.claude.com/docs/en/model-config),
+  [OpenAI's model index](https://developers.openai.com/api/docs/models), the
+  [GPT-6 Astra model card](https://developers.openai.com/api/docs/models/gpt-6-astra),
+  the [reasoning guide](https://developers.openai.com/api/docs/guides/reasoning),
+  and the [Codex models](https://developers.openai.com/codex/models) and
+  [subagents](https://developers.openai.com/codex/subagents) pages.
   Recheck primary documentation, installed catalogs, representative task
   behavior, and smoke evidence when a client version, model family, catalog,
   profile, or relevant adapter byte changes.
+- Maintainer decision (2026-08-15), superseded by the 2026-09-14 mapping
+  above: the same three classes mapped to Codex Luna/medium, Terra/high and
+  Sol/high and to Claude Haiku/medium, Sonnet/high and Opus/high, with a
+  separately verified deeper setting reserved for unusually demanding work.
+  Its references were
+  [OpenAI's model guidance](https://developers.openai.com/api/docs/models) and
+  [Claude Code model configuration](https://code.claude.com/docs/en/model-config).
 - Current Codex compatibility: codex-cli 0.147.0 proves scoped-trust project
   instruction and direct skill discovery. In the current exact-source
   non-interactive smoke, named project-role delegation could not bind a child;
@@ -1927,6 +1981,165 @@ envelope, gate, ADR decision or product byte. Its own independent exact-diff
 review remains required before integration. M3 is not Closed, M4 remains an
 unopened draft, and no main merge, release, tag or publication is authorized.
 
+<a id="override-disposition-m4-planning-aggregate-2026-09-11"></a>
+### M4 planning-revision aggregate override — 2026-09-11
+
+The maintainer's actual instruction was: “no need to run m0 to m2 gates again
+during plan creation. override.” It was given while M4 was being revised on
+branch `m4` after a preliminary review, with the M0–M2 Closed aggregate already
+GREEN at the M4 opening candidate `4b13fd92904603dfe8476c50b98350bd70c5d7a8`
+on the integrated M3 acceptance base
+`4bba8b74f5e260dc2a364fcbd3554c7badd1a09c`.
+
+For the Open M4 planning lineage only, this replaces the procedure that would
+rerun the M0–M2 Closed aggregate for every later planning-only revision of the
+M4 plan pair, gate, runner, support scripts, manifest, prerequisite ADR
+proposals and documentation. The lineage may rely on the aggregate result
+recorded at `4b13fd9` while every later M4 planning revision changes no
+milestone product bytes; each such revision still runs status, formatting,
+bootstrap, runner inspection, the M4 opening probe and, separately, the M3
+opening probe, and receives exact-SHA review. A revision that changes product,
+portable-enforcement or bound Closed-gate bytes, the refresh of M4 onto the
+integrated M3 closure, M4 acceptance, any rejoin, rebind child or closure
+candidate remain under the ordinary inherited-aggregate obligations unless
+separately overridden. Any inherited regression actually observed still
+blocks.
+
+This override changes one development-time evidence procedure. It changes no
+released public surface or accepted ADR decision, does not weaken an M4 outcome
+or witness, and does not accept M4 or ADRs 0023, 0024, 0026 or 0028, authorize
+product implementation, approve integration, closure, release, tag or
+publication, or report an unrun check as PASS. This commit adds only this
+disposition; an independent exact-SHA read must approve its changed path and
+authority scope before the M4 plan cites it.
+
+<a id="override-disposition-m4-planning-aggregate-scope-2026-09-11"></a>
+### M4 planning-revision aggregate override scope — 2026-09-11
+
+The maintainer's actual instruction was: “I dont agree on you needing to run
+m0- m2 again for plan changes for m4”. It was given after the M4 planning
+revision `8fc7f5c65ba6ec3d62c69f3e9d841785bf58b59f` changed the derived
+status-capsule wording in `apps/loopex/lib/mix/tasks/status/register.ex` and
+its test, and the earlier
+[planning-revision aggregate override](#override-disposition-m4-planning-aggregate-2026-09-11)
+had been transcribed narrowly enough to exclude that change.
+
+This widens that override's scope and changes nothing else. For the Open M4
+planning lineage while M3 remains Accepted, the M0–M2 Closed aggregate proved
+GREEN at the opening candidate `4b13fd92904603dfe8476c50b98350bd70c5d7a8` is
+not rerun for any later M4 planning revision, including a revision that
+changes repository status enforcement, its tests, plan documents, gate
+documents, runner or support scripts, manifests, prerequisite ADR proposals or
+documentation, provided the revision adds no milestone product implementation
+and every changed enforcement check passes bootstrap at the revision. Each such
+revision still runs status, formatting, bootstrap, runner inspection, the M4
+opening probe and, separately, the M3 opening probe, and receives exact-SHA
+review. The refresh of M4 onto the integrated M3 closure, M4 acceptance, any
+rejoin, rebind child or closure candidate, and any change to a Closed gate's
+bound bytes remain under the ordinary inherited-aggregate obligations unless
+separately overridden. Any inherited regression actually observed still
+blocks.
+
+This override changes one development-time evidence procedure. It changes no
+released public surface or accepted ADR decision, does not weaken an M4
+outcome or witness, and does not accept M4 or ADRs 0023, 0024, 0026 or 0028,
+authorize product implementation, approve integration, closure, release, tag
+or publication, or report an unrun check as PASS. The aggregate rerun started
+for `8fc7f5c` was stopped without a result and is recorded as waived, not
+unavailable. This commit adds only this disposition; an independent exact-SHA
+read must approve its changed path and authority scope before the M4 plan
+cites it.
+
+<a id="disposition-m4-planning-packet-approval-2026-09-11"></a>
+### M4 planning packet approval — 2026-09-11
+
+The maintainer's actual instruction was: “ok i approve m4. we'll leave it open
+until m3 is done.” It was given after the independent completeness reviewer
+reported the frozen ledger resolved at
+`1b181f916b99556165395da0499d4dbb02a55542` on branch `m4`.
+
+This approves the Open M4 planning packet at that exact revision as complete
+for its lookahead purpose: the plan pair, gate, runner, support scripts,
+outcome manifest, opening probe, prerequisite ADR proposals 0023, 0024, 0026
+and 0028 as revised, and the documentation obligations. M4 stays `Open`. This
+is not acceptance: no Acceptance row is recorded, no envelope or gate digest
+is bound, no ADR is accepted, and no implementation, integration, release,
+tag or publication is authorized. Acceptance still requires M3 to be Closed
+and integrated, the refresh of M4 onto that exact base, every inherited gate
+green with M4's own distinct red, a fresh exact-SHA review, and the
+maintainer's explicit acceptance disposition recorded in its own transition.
+Until then, planning edits to M4 remain ordinary Open-lineage work under the
+recorded aggregate overrides.
+
+<a id="disposition-m4-vision-core-telemetry-2026-09-13"></a>
+### Vision change: telemetry admitted as core's one external dependency — 2026-09-13
+
+The independent M4 review at `fa897361598467ffc53d3042a6ae7212acd2e3dc`
+found that outcome 7 required `:telemetry` in core against the vision's
+no-external-core-dependency rule and `AGENTS.md`, and offered two resolutions:
+keep core stdlib-only and translate diagnostics to telemetry at an edge, or
+an explicit maintainer vision change. Asked to choose, the maintainer selected
+**"Explicit vision change to admit :telemetry in core"**, with the telemetry
+adapter living in a new edge application `loopex_telemetry` and the proposed
+trace limits bound.
+
+This disposition records that vision change under the rule that reversing a
+vision boundary names the principle, the evidence, the compatibility impact
+and the migration path:
+
+- **Principle changed.** Concept §7 (stack and dependency doctrine) and
+  Technical §7.2 (core dependency budget) said the core depends only on Elixir
+  and Erlang. They now admit exactly one external library, `:telemetry`, by
+  name; every other exclusion in §7.2 stands, and reporters, exporters and
+  OpenTelemetry remain edges. `AGENTS.md`'s product non-negotiable is updated
+  to the same wording.
+- **Evidence.** `:telemetry` is pure Erlang with no dependencies of its own; it
+  dispatches events and attaches nothing in core; a Loopex-owned dispatch
+  registry would re-implement it and every consumer would need a bespoke
+  adapter; OTP `:logger` reports are non-standard for metrics consumers. The
+  alternative edge translation was judged by the maintainer to cost more than
+  the boundary it preserved.
+- **Compatibility impact.** No released public surface, journal, event or
+  protocol record changes. The core dependency budget check and application
+  inventory change under the M1 dependency-oracle transaction the M4 plan
+  names; embedding hosts gain one transitive dependency.
+- **Migration and rollback.** Removing the dependency and the emission points
+  restores the previous behavior without data migration; the vision sentences
+  revert with it. The M4 plan carries the rollback obligation.
+
+This is a maintainer decision on a founding boundary, transcribed here and in
+the vision pair together. It accepts no ADR, plan or milestone, authorizes no
+product implementation, and changes nothing about M3. ADR 0030 carries the
+mechanics and remains Proposed until its own acceptance.
+
+<a id="disposition-m4-preacceptance-contract-choices-2026-09-13"></a>
+### M4 pre-acceptance contract choices — 2026-09-13
+
+During preparation of the Open M4 candidate, the maintainer approved the
+recommended scope and safety choices transcribed in Proposed ADRs 0023, 0024
+and 0028:
+
+- [ADR 0023](../adr/0023-experimental-public-session-protocol.md#concept)
+  defers `session.list` because the current directory query eagerly loads its
+  entries. A client resumes by a known session ID. Project-resource trust is
+  fixed at host launch; no `project_resources.inspect` or
+  `project_resources.decide` wire method is promised.
+- [ADR 0024](../adr/0024-durable-interaction-lifecycle-and-host-policy-authority.md#concept)
+  permits at most two committed answer-then-defer transitions after the first
+  question, for three operator questions in total. Another defer denies.
+- [ADR 0028](../adr/0028-bounded-artifact-retrieval.md#concept) uses safety
+  ceilings of a 64 MiB object, 60 seconds and 128 MiB of work to open, 32 KiB
+  per read with a five-second deadline, ten minutes per transfer, two concurrent
+  transfers per connection and four per runtime, and 1 GiB of cumulative work
+  per connection with at least 1 MiB debited per open. These are limits, not
+  throughput promises.
+
+These choices guide the proposed ADR text and bound M4 planning fixtures.
+They do not accept any ADR or the M4 plan, authorize product implementation,
+approve the floor-holder transactions, or authorize a merge, tag or release.
+Each ADR still needs its own explicit acceptance disposition and independent
+exact-SHA review before the M4 acceptance transition can rely on it.
+
 <a id="override-disposition-m3-implementation-gate-cadence-2026-09-10"></a>
 ### M3 implementation gate cadence — 2026-09-10
 
@@ -3143,3 +3356,597 @@ source attribution; neither becomes a new pass at closure. The maintainer's
 on this milestone branch. The In progress and In review transitions and this
 closure transition receive separate exact-commit reviews. This record grants
 no tag, release, or publication.
+
+<a id="disposition-adr-0023-acceptance-2026-09-13"></a>
+### ADR 0023 acceptance — 2026-09-13
+
+On 2026-09-13, after the independent read-only review of pushed `m4` SHA
+`3503992cbc0de02ef98ba261e7a19fdb7123e220` reported no blocking or high
+finding for that revision's delta and every earlier finding repaired, the
+maintainer directed the reviewer, in the review conversation, to record the
+acceptance dispositions for all five M4 prerequisite ADRs (0023, 0024, 0026,
+0028 and 0030) so that the maintainer can then accept M4.
+
+This transcribes that direction as the maintainer's acceptance of the exact
+Proposed [ADR 0023 Concept](../adr/0023-experimental-public-session-protocol.md#concept)
+and [Technical depth](../adr/0023-experimental-public-session-protocol-technical.md#technical-depth)
+pair at `3503992cbc0de02ef98ba261e7a19fdb7123e220`, with Concept SHA-256
+`5b1340e0baafdf834e04590b06825ee3cc17e27c32349945b0495e0017e4d6f7`
+and Technical SHA-256
+`3332ca23318353a9068f84a3ff40411bd612bda7a142ed26ac4588c22e7b577f`.
+The maintainer is the accepting authority; the reviewer who examined that
+candidate transcribed the record and accepted nothing. The earlier
+[pre-acceptance contract choices](#disposition-m4-preacceptance-contract-choices-2026-09-13)
+guided the proposal text; this record supplies the acceptance itself. It
+accepts the connection state table, the sixteen-method experimental
+generation, its bound schema and vector bytes, and the negotiated
+unavailability of session listing and project-trust methods as proposed.
+
+This administrative transition changes only the Concept status and Acceptance
+row, this disposition, the derived ADR index status and the derived plan
+register capsule. It accepts no other ADR, does not accept the M4 plan pair or
+gate, authorizes no product implementation, and grants no merge, tag or
+release.
+
+<a id="disposition-adr-0024-acceptance-2026-09-13"></a>
+### ADR 0024 acceptance — 2026-09-13
+
+Under the same maintainer direction recorded in the
+[ADR 0023 acceptance](#disposition-adr-0023-acceptance-2026-09-13), given on
+2026-09-13 after the independent read-only review of pushed `m4` SHA
+`3503992cbc0de02ef98ba261e7a19fdb7123e220`, this transcribes the maintainer's
+acceptance of the exact Proposed
+[ADR 0024 Concept](../adr/0024-durable-interaction-lifecycle-and-host-policy-authority.md#concept)
+and [Technical depth](../adr/0024-durable-interaction-lifecycle-and-host-policy-authority-technical.md#technical-depth)
+pair at `3503992cbc0de02ef98ba261e7a19fdb7123e220`, with Concept SHA-256
+`3fbc7ee6f866e76f85681f527243d79f386b8d97bb7442825f109514367951b8`
+and Technical SHA-256
+`482171eba55a5c86ca62e028cb6ae2368966c9cf2a0cf1e76a225d2c12544f3d`.
+The maintainer is the accepting authority; the reviewer transcribed the record
+and accepted nothing. It accepts the session-owned durable interaction
+lifecycle, the bounded choice request, and the ceiling of two committed
+answer-then-defer transitions after the first question that the
+[pre-acceptance contract choices](#disposition-m4-preacceptance-contract-choices-2026-09-13)
+selected; a further defer resolves as denial.
+
+This administrative transition changes only the Concept status and Acceptance
+row, this disposition, the derived ADR index status and the derived plan
+register capsule. It accepts no other ADR, does not accept the M4 plan pair or
+gate, authorizes no product implementation, and grants no merge, tag or
+release.
+
+<a id="disposition-adr-0026-acceptance-2026-09-13"></a>
+### ADR 0026 acceptance — 2026-09-13
+
+Under the same maintainer direction recorded in the
+[ADR 0023 acceptance](#disposition-adr-0023-acceptance-2026-09-13), given on
+2026-09-13 after the independent read-only review of pushed `m4` SHA
+`3503992cbc0de02ef98ba261e7a19fdb7123e220`, this transcribes the maintainer's
+acceptance of the exact Proposed
+[ADR 0026 Concept](../adr/0026-development-floor-refresh.md#concept)
+and [Technical depth](../adr/0026-development-floor-refresh-technical.md#technical-depth)
+pair at `3503992cbc0de02ef98ba261e7a19fdb7123e220`, with Concept SHA-256
+`ad0d3c48ee0ae9ef8ed8a713827949d32014dfb2eed8e8f2255a263bd607629c`
+and Technical SHA-256
+`8fb22a6cd1cdd7a5cf6b4d2da017ee4034746af9efc216f5d0f2aac221aa1d1c`.
+The maintainer is the accepting authority; the reviewer transcribed the record
+and accepted nothing. It accepts the explicit floor and current validation
+pairs, Elixir 1.18.5 with OTP 27.3.4 and Elixir 1.20.3 with OTP 29.0.5, in
+place of ADR 0002's derived pin rule. The pins in `.tool-versions` do not
+move here: they change only through the phase A holder transactions the M4
+technical plan names, Closed M0 through M3 in register order and then Open
+M4, each with matrix evidence on both pairs. Until those settle, the
+bootstrap floor sentence in `AGENTS.md` and every bound `.tool-versions`
+byte remain as they are.
+
+This administrative transition changes only the Concept status and Acceptance
+row, this disposition, the derived ADR index statuses and the derived plan
+register capsule. It accepts no other ADR, does not accept the M4 plan pair or
+gate, approves no holder transaction, authorizes no product implementation,
+and grants no merge, tag or release.
+
+<a id="disposition-adr-0028-acceptance-2026-09-13"></a>
+### ADR 0028 acceptance — 2026-09-13
+
+Under the same maintainer direction recorded in the
+[ADR 0023 acceptance](#disposition-adr-0023-acceptance-2026-09-13), given on
+2026-09-13 after the independent read-only review of pushed `m4` SHA
+`3503992cbc0de02ef98ba261e7a19fdb7123e220`, this transcribes the maintainer's
+acceptance of the exact Proposed
+[ADR 0028 Concept](../adr/0028-bounded-artifact-retrieval.md#concept)
+and [Technical depth](../adr/0028-bounded-artifact-retrieval-technical.md#technical-depth)
+pair at `3503992cbc0de02ef98ba261e7a19fdb7123e220`, with Concept SHA-256
+`38077331060dd94e09f5989e61763fc7b0f4a43bc5ff1509292eab6907b0262e`
+and Technical SHA-256
+`f6a8d1e14f98467999d137db922f3a6d0eca6f7e3684588704a2114a32797ce0`.
+The maintainer is the accepting authority; the reviewer transcribed the record
+and accepted nothing. It accepts one authorized, verified transfer per
+artifact use with distinct object and chunk digests, and the safety-ceiling
+profile the
+[pre-acceptance contract choices](#disposition-m4-preacceptance-contract-choices-2026-09-13)
+selected. Those ceilings are limits to prove under the M4 gate, not measured
+throughput promises; ADR 0015's object and use identities stay in force and
+are narrowly extended, not replaced.
+
+This administrative transition changes only the Concept status and Acceptance
+row, this disposition, the derived ADR index statuses and the derived plan
+register capsule. It accepts no other ADR, does not accept the M4 plan pair or
+gate, authorizes no product implementation, and grants no merge, tag or
+release.
+
+<a id="disposition-adr-0030-acceptance-2026-09-13"></a>
+### ADR 0030 acceptance — 2026-09-13
+
+Under the same maintainer direction recorded in the
+[ADR 0023 acceptance](#disposition-adr-0023-acceptance-2026-09-13), given on
+2026-09-13 after the independent read-only review of pushed `m4` SHA
+`3503992cbc0de02ef98ba261e7a19fdb7123e220`, this transcribes the maintainer's
+acceptance of the exact Proposed
+[ADR 0030 Concept](../adr/0030-observability-tracing-and-telemetry.md#concept)
+and [Technical depth](../adr/0030-observability-tracing-and-telemetry-technical.md#technical-depth)
+pair at `3503992cbc0de02ef98ba261e7a19fdb7123e220`, with Concept SHA-256
+`8e81e197816afa79aa1f43d69837c9f1ed4235a5fbf64dc7588056f1a4ddb65d`
+and Technical SHA-256
+`f7b24467fef2d326d2eb12eece87662b775586a0813fc958d78b82e0f5735eac`.
+The maintainer is the accepting authority; the reviewer transcribed the record
+and accepted nothing. It accepts runtime-owned isolated trace sessions with
+identity-only default capture and exact limits, telemetry spans at every port
+callback and transaction cut in the bound inventory, the `loopex_telemetry`
+edge owning the only Loopex-attached handler, and the dispatcher's bounded
+diagnostics admission. Under the previously recorded
+[vision change](#disposition-m4-vision-core-telemetry-2026-09-13) it
+supersedes exactly the two ADR 0001 clauses that required an empty
+`apps/loopex` dependency list; every other ADR 0001 clause stands. The
+dependency itself enters core only through the M1 dependency-oracle
+transaction the M4 technical plan names, after M4 acceptance.
+
+This administrative transition changes only the Concept status and Acceptance
+row, this disposition, the derived ADR index statuses and the derived plan
+register capsule, which now names the M4 plan pair and gate as the next
+decision. It does not accept the M4 plan pair or gate, authorizes no product
+implementation, and grants no merge, tag or release.
+
+<a id="disposition-m0-gate-generation-7-2026-09-13"></a>
+### M0 gate generation 7 acceptance — 2026-09-13
+
+The maintainer chose to accept each phase A floor-holder proposal directly in
+the review conversation while the reviewer authors them. Presented with M0
+gate generation 7 at pushed proposal
+`08a453d59d20acfff7314b7ad9abe5bf0e65f735`, whose evidence was the single
+prescribed `unfinished shared binding sequence` status stop, passing
+commit-message, hygiene, gitignore and agent-bootstrap checks, and the matrix
+task under both installed pairs refusing only the not-yet-recorded floor run,
+the maintainer answered **"Accept"**.
+
+That lineage was then re-created once, after the repository status checker
+was repaired at `47784aa`: its governance walk had required a plan's first
+acceptance to bind a gate at generation zero, which no Open holder of a
+shared artifact can satisfy once the sequential holder transaction makes it
+refresh that binding through an amendment. The re-created proposal
+`06f9adc0b1a85bffc8a954e4e01ad2759e985f9e` has exactly the tree of
+`08a453d59d20acfff7314b7ad9abe5bf0e65f735` plus that repair, verified by the
+reviewer with a tree diff before this rebind. On 2026-09-14 the maintainer
+approved the rebuild and accepted every re-created phase A proposal on that
+basis, answering **"Approve and accept rebuild all"** to the rule that each
+re-created proposal's tree equals the originally accepted tree plus the
+checker repair.
+
+The acceptance transition built on that first re-creation was refused by the
+same checker for two further readings of the same assumption in its plan
+validator: every generation-one candidate was read as an amendment proposal
+whose rebind must keep the Open state it was proposed under, and the empty
+original at the end of an acceptance chain had to sit at generation zero. The
+repair was widened at `d276f325169af6ab54464648a6578da6b4e499c7` so that a
+candidate whose own Acceptance row is still empty is read as a first
+acceptance that may move Open to Accepted only, and an original may carry
+generation one; every other shape is refused as before. The lineage was
+re-created a second time on that widened repair. The proposal
+`87bb87ec3ec5b86d6cf65b11fa5472a60072c5e4` has exactly the tree of
+`08a453d59d20acfff7314b7ad9abe5bf0e65f735` plus the widened repair, verified
+by the reviewer with a tree diff before this rebind. On 2026-09-14 the
+maintainer approved the second rebuild and accepted every re-created phase A
+proposal and the re-created M4 candidate on that basis, answering
+**"I accept recreated proposals and candidate. i need to do a second review
+after the final sha table is created"**. This row binds that proposal.
+
+This accepts generation 7 alone under `amendment-transaction-v2`: the
+`.tool-versions` floor pair Elixir 1.18.5 with OTP 27.3.4 that accepted
+[ADR 0026](../adr/0026-development-floor-refresh.md#concept) chose, bound at
+`fea095ecec784a4440b872ad5f53a8da2cb4e13e43b6f05add5cfd75bb352879`, and the
+amended M0 gate at
+`sha256:b86275a21d1041c7e72e8354367ff9036de2470abfb2f11559ed95145835dca1`.
+This immediate-child rebind changes only the generation-7 row in
+`docs/plans/M0.md` and adds this disposition. M0's historical Acceptance and
+Closure, earlier dispositions, envelopes, register and lifecycle state remain
+unchanged, and M0 remains Closed.
+
+M1, M2, M3 and M4 still hold the previous pins in their own tables; each
+settles through its own transaction in register order, and holder-scoped
+validation at this rebind names them as pending rather than reporting a
+global pass. A run of the M0 gate under the new floor pair, recorded in the
+matrix evidence, belongs to the inherited-green proof after the final Open
+M4 refresh. This record accepts no other holder, plan or ADR, waives no
+evidence, and grants no integration, tag or release.
+
+<a id="disposition-m1-gate-generation-10-2026-09-14"></a>
+### M1 gate generation 10 acceptance — 2026-09-14
+
+Continuing the phase A sequence under the maintainer's chosen route, the
+reviewer authored M1 gate generation 10 at pushed proposal
+`c8230d2f45c97afbaea6be3bd68a0804723d3b18` and presented its evidence: the
+single prescribed `unfinished shared binding sequence` status stop, the two
+M1 corpora passing on the current pair at seed 3107 with 38 cases against
+their locked minima, formatter and script-syntax checks passing, and
+holder-scoped validation at the M0 rebind naming M1, M2, M3 and M4 as
+pending. The maintainer answered **"Accept"**.
+
+That lineage was then re-created once after the status checker repair at
+`47784aa` described in the
+[M0 generation 7 record](#disposition-m0-gate-generation-7-2026-09-13). The
+re-created proposal `6b758aea80f93beefa8dfefbd559403e43e319fa` carries the
+same change as `c8230d2f45c97afbaea6be3bd68a0804723d3b18` on top of that
+repair and the re-created M0 rebind, verified by the reviewer with a tree
+diff before this rebind. On 2026-09-14 the maintainer approved the rebuild
+and accepted every re-created phase A proposal on that basis, answering
+**"Approve and accept rebuild all"**.
+
+That lineage was re-created a second time after the repair was widened at
+`d276f325169af6ab54464648a6578da6b4e499c7`, described in the
+[M0 generation 7 record](#disposition-m0-gate-generation-7-2026-09-13). The
+proposal `e3209179394a9be390abe8427ee15e97cfbef313` carries the same change
+as `c8230d2f45c97afbaea6be3bd68a0804723d3b18` on top of the widened repair and
+the preceding re-created rebinds, verified by the reviewer with a tree diff
+before this rebind. On 2026-09-14 the maintainer approved the second rebuild
+and accepted every re-created phase A proposal and the re-created M4
+candidate on that basis, answering **"I accept recreated proposals and
+candidate. i need to do a second review after the final sha table is
+created"**. This row binds that proposal.
+
+This accepts generation 10 alone under `amendment-transaction-v2`: the
+floor-only literal changes in M1's bound evidence verifier, dependency-budget
+reader and both corpora for the accepted pair Elixir 1.18.5 with OTP 27.3.4,
+the six embedded digests in its gate script, and the amended M1 gate at
+`sha256:a56b8279fcace125086b1b806d442ee6343ed23c44bd83b6d4abb28dc7134be5`.
+This immediate-child rebind changes only the generation-10 row in
+`docs/plans/M1.md` and adds this disposition. M1's historical Acceptance and
+Closure, earlier dispositions and generations, envelopes, register and
+lifecycle state remain unchanged, and M1 remains Closed.
+
+M2, M3 and M4 still hold the previous pins in their own tables and settle
+next in register order; holder-scoped validation at this rebind names them as
+pending rather than reporting a global pass. Captures of the M1 gate under
+the new floor pair belong to the inherited-green proof after the final Open
+M4 refresh. This record accepts no other holder, plan or ADR, waives no
+evidence, and grants no integration, tag or release.
+
+<a id="disposition-m2-gate-generation-11-2026-09-14"></a>
+### M2 gate generation 11 acceptance — 2026-09-14
+
+Continuing the phase A sequence under the maintainer's chosen route, the
+reviewer authored M2 gate generation 11 at pushed proposal
+`380e064ae886e271d5931aa58f3b00dfca2614d4` and presented its evidence: the
+single prescribed `unfinished shared binding sequence` status stop, the
+runner's syntax passing with no earlier floor literal remaining, and
+holder-scoped validation at the M1 rebind naming M2, M3 and M4 as pending.
+The maintainer answered **"accept"**.
+
+That lineage was then re-created once after the status checker repair at
+`47784aa` described in the
+[M0 generation 7 record](#disposition-m0-gate-generation-7-2026-09-13). The
+re-created proposal `671819a5e61418e6dea65e94e887d2a25f93d7a3` carries the
+same change as `380e064ae886e271d5931aa58f3b00dfca2614d4` on top of that
+repair and the re-created earlier rebinds, verified by the reviewer with a
+tree diff before this rebind. On 2026-09-14 the maintainer approved the
+rebuild and accepted every re-created phase A proposal on that basis,
+answering **"Approve and accept rebuild all"**.
+
+That lineage was re-created a second time after the repair was widened at
+`d276f325169af6ab54464648a6578da6b4e499c7`, described in the
+[M0 generation 7 record](#disposition-m0-gate-generation-7-2026-09-13). The
+proposal `6fdef34d959e4c2a37631c1cc6aaa18fc6de3187` carries the same change
+as `380e064ae886e271d5931aa58f3b00dfca2614d4` on top of the widened repair and
+the preceding re-created rebinds, verified by the reviewer with a tree diff
+before this rebind. On 2026-09-14 the maintainer approved the second rebuild
+and accepted every re-created phase A proposal and the re-created M4
+candidate on that basis, answering **"I accept recreated proposals and
+candidate. i need to do a second review after the final sha table is
+created"**. This row binds that proposal.
+
+This accepts generation 11 alone under `amendment-transaction-v2`: the
+floor-only literal changes in M2's bound gate runner for the accepted pair
+Elixir 1.18.5 with OTP 27.3.4, bound at
+`0d1feb8324367b27250cfa3093c2dff78963115d516f4d1601be2a7e53d9110c`, the
+rebound pins, and the amended M2 gate at
+`sha256:5b3df5304a7b69c6e86a93829be0c77cde05fcb9ff0df0230221fc961b8b84dd`.
+This immediate-child rebind changes only the generation-11 row in
+`docs/plans/M2.md` and adds this disposition. M2's historical Acceptance and
+Closure, earlier dispositions and generations, envelopes, register and
+lifecycle state remain unchanged, and M2 remains Closed.
+
+M3 and M4 still hold the previous pins in their own tables and settle next
+in register order; holder-scoped validation at this rebind names them as
+pending rather than reporting a global pass. A `darwin-floor` capture of the
+M2 gate under the new pair belongs to the inherited-green proof after the
+final Open M4 refresh. This record accepts no other holder, plan or ADR,
+waives no evidence, and grants no integration, tag or release.
+
+<a id="disposition-m3-gate-generation-4-2026-09-14"></a>
+### M3 gate generation 4 acceptance — 2026-09-14
+
+Completing the Closed holders of the phase A sequence under the maintainer's
+chosen route, the reviewer authored M3 gate generation 4 at pushed proposal
+`2f76946fa3c23e55e0f2e36103fc5dbd61bfd3fc` and presented its evidence: the
+single prescribed `unfinished shared binding sequence` status stop, the M3
+gate's inspection role verifying its bound artifacts against the rebound
+pins, and holder-scoped validation at the M2 rebind naming M3 and M4 as
+pending. The maintainer answered **"Accept"**.
+
+That lineage was then re-created once after the status checker repair at
+`47784aa` described in the
+[M0 generation 7 record](#disposition-m0-gate-generation-7-2026-09-13). The
+re-created proposal `77d9480c2f19c808bab5cc5d9efeac6d82a95ad3` carries the
+same change as `2f76946fa3c23e55e0f2e36103fc5dbd61bfd3fc` on top of that
+repair and the re-created earlier rebinds, verified by the reviewer with a
+tree diff before this rebind. On 2026-09-14 the maintainer approved the
+rebuild and accepted every re-created phase A proposal on that basis,
+answering **"Approve and accept rebuild all"**.
+
+That lineage was re-created a second time after the repair was widened at
+`d276f325169af6ab54464648a6578da6b4e499c7`, described in the
+[M0 generation 7 record](#disposition-m0-gate-generation-7-2026-09-13). The
+proposal `e0dbaef134ef770316931e03fe1caf1cf81851d1` carries the same change
+as `2f76946fa3c23e55e0f2e36103fc5dbd61bfd3fc` on top of the widened repair and
+the preceding re-created rebinds, verified by the reviewer with a tree diff
+before this rebind. On 2026-09-14 the maintainer approved the second rebuild
+and accepted every re-created phase A proposal and the re-created M4
+candidate on that basis, answering **"I accept recreated proposals and
+candidate. i need to do a second review after the final sha table is
+created"**. This row binds that proposal.
+
+This accepts generation 4 alone under `amendment-transaction-v2`: the
+rebound `.tool-versions` row for the accepted pair Elixir 1.18.5 with OTP
+27.3.4 at `fea095ecec784a4440b872ad5f53a8da2cb4e13e43b6f05add5cfd75bb352879`,
+the added v2 marker, and the amended M3 gate at
+`sha256:30b5c87de35e739ccc5743202ac770d25aae5d1bcd4af16ba62a34649a43fcf6`.
+This immediate-child rebind changes only the generation-4 row in
+`docs/plans/M3.md` and adds this disposition. M3's historical Acceptance and
+Closure, earlier dispositions, envelopes, register and lifecycle state remain
+unchanged, and M3 remains Closed.
+
+Open M4 is the last holder still naming the previous pins; it refreshes its
+own table directly, and holder-scoped validation at this rebind names it as
+pending rather than reporting a global pass. Runs of the M3 gate under the
+new floor pair belong to the inherited-green proof after that refresh. This
+record accepts no other holder, plan or ADR, waives no evidence, and grants
+no integration, tag or release.
+
+<a id="disposition-m4-plan-acceptance-2026-09-14"></a>
+### M4 plan acceptance — 2026-09-14
+
+With the five prerequisite ADRs accepted and every `.tool-versions` holder
+settled, the reviewer presented the Open M4 refresh at pushed
+`9810f308b48432b5787704a9dc6de0263afbed69` as the acceptance candidate,
+with this evidence: holder-scoped validation at the M3 rebind naming only M4
+as pending; the candidate's status check stopping only on the shared binding
+sequence that this Acceptance row completes; M4 gate inspection verifying all
+fourteen bound rows; M4 preflight reporting the compile control green and the
+declared `interaction_unsupported` opening red; the bound fixture check and
+its seven tests passing under both installed pairs; and the commit-message,
+hygiene and agent-bootstrap checks passing. The packet stated that the
+reviewer had authored the candidate and asked the maintainer to obtain an
+independent exact-SHA reading before accepting. The maintainer answered
+**"Accept"**.
+
+The transition recorded against that candidate was refused by the repository
+status checker, whose governance walk required a plan's first acceptance to
+bind a gate at generation zero while the sequential holder transaction had
+required Open M4 to refresh its shared `.tool-versions` binding through an
+amendment. The checker was repaired at `47784aa` so that a first acceptance
+may bind the direct proposal that advanced the gate by exactly one to
+complete such a refresh, and the phase A lineage was re-created on top of
+that repair, each proposal carrying the same change as its original and each
+rebind carrying its re-created record forward. The re-created candidate
+`34b4ac98ade7abfeac5c3709a3d6d92a7530b38d` carries the same change as
+`9810f308b48432b5787704a9dc6de0263afbed69`, verified by the reviewer with a
+tree diff. On 2026-09-14 the maintainer approved that rebuild and accepted
+the re-created M4 candidate on the same basis, answering **"Approve and
+accept rebuild all"**.
+
+The transition recorded against `34b4ac98ade7abfeac5c3709a3d6d92a7530b38d`
+was refused in turn by the plan validator, which read every generation-one
+candidate as an amendment proposal that must keep its Open state and required
+the original terminating an acceptance chain to sit at generation zero. The
+repair was widened at `d276f325169af6ab54464648a6578da6b4e499c7` and the
+phase A lineage re-created a second time on it, each proposal carrying the
+same change as its original and each rebind carrying its re-created record
+forward. The candidate `27e517b3391ddc7c12b5f638f66434923ab021e3` carries
+the same change as `9810f308b48432b5787704a9dc6de0263afbed69`, verified by
+the reviewer with a tree diff. On 2026-09-14 the maintainer approved the
+second rebuild and accepted the re-created M4 candidate on that basis,
+answering **"I accept recreated proposals and candidate. i need to do a
+second review after the final sha table is created"**, and so stated that a
+further review follows the final SHA table before integration.
+
+This transcribes those answers as the maintainer's acceptance of the exact
+[M4 Concept plan](../plans/M4.md#concept), its
+[Technical depth](../plans/M4-technical.md#technical-depth) and its
+[gate](../plans/M4-gate.md) at `27e517b3391ddc7c12b5f638f66434923ab021e3`,
+binding Concept envelope
+`940155e9a858080c88fca61df765def26b8b3dbbe45d7f54218a819d785d9263`,
+Technical depth envelope
+`08b59ec9514b99a97b48d8945cc10a4be414ebfaf9b007ee019359a54e7c0226`
+and gate `f0163872dff3314c3cefe3ecacf7f36a0090012f00a641c8004aa81503225e56`.
+The Acceptance row is also the rebind that completes the M4 floor-binding
+refresh recorded as that gate's Amendment 1. This transition changes only the
+Acceptance row, the register row and its derived capsule and README summary,
+and adds this disposition.
+
+Consequences and what remains owed. M4 moves to Accepted and implementation
+inside its envelopes may proceed on branch `m4`. The candidate was authored
+by the reviewer; the independent read-only exact-SHA review that the
+development contract requires before this governance checkpoint integrates
+to `main` is still owed by an actor other than the author, and this record
+does not substitute for it. The inherited M0–M3 gates on both pairs, the M0
+run under the new floor pair recorded in the matrix evidence, and M4's
+distinct red are proved at this transition and thereafter; they require the
+maintainer's provider key for the real lanes and have not yet run. This
+record grants no merge to `main`, integration, tag, publication or release.
+
+<a id="override-disposition-m4-inherited-evidence-before-integration-2026-09-14"></a>
+### M4 inherited evidence deferred to before integration — 2026-09-14
+
+The maintainer's second review of the pushed lineage at
+`722677ee50efdc3cddcb900d0ff1a4e268dad8ad` found no new product or
+locked-gate defect but would not integrate the checkpoint yet, because the
+[acceptance disposition](#disposition-m4-plan-acceptance-2026-09-14) above
+calls the inherited evidence "proved at this transition and thereafter"
+while stating in the same sentence that the real-provider lanes have not run,
+and because `mix loopex.matrix` exits 1 on the M0 toolchain matrix record,
+which carries no run under the new floor pair Elixir 1.18.5 with OTP 27.3.4.
+The review asked that the precise deferral be recorded in a standalone
+override, independently reviewed before integration relies on it, and that
+the deferred checks never be labelled green. The maintainer explicitly
+directed:
+
+> fix this so that some things we can do after acceptance, some things we
+> need to do before m4 acceptance - i want to move on .. no big feature
+> gotchas, just gate and ci/cd gotchas
+
+Under the [explicit maintainer override](../../AGENTS.md#maintainer-override),
+this names the continuing development-time requirement it moves. The
+[M4 technical plan](../plans/M4-technical.md#technical-depth) and its
+successor-enabling row require every inherited gate green and M4's own
+distinct red to be re-proved on the refreshed base before acceptance, and the
+development contract requires the full inherited set at the acceptance base.
+The keyless part of that obligation was met at acceptance transition
+`dcf033bc4b9c3c78462377576117aa799bbdeac6` and its candidate
+`27e517b3391ddc7c12b5f638f66434923ab021e3`: the bootstrap aggregate with the
+full history-aware status walk, holder-scoped binding validation at each
+rebind, M4 gate inspection of every bound artifact, and the M4 preflight
+reporting the compile control green and the declared
+`interaction_unsupported` opening red, each from a clean clone. The part that
+needs the maintainer's provider key or a floor-pair run is deferred, not
+waived: the real-provider lanes of the inherited M0, M1, M2 and M3 gates on
+both installed pairs, the M0 run under the new floor pair recorded in
+[the matrix evidence](../evidence/M0-toolchain-matrix.md), and M4's distinct
+red on its real lane. Those run at one pushed revision of this lineage after
+the acceptance transition and before the governance-only acceptance
+checkpoint integrates to `main`; each result is recorded against that
+revision's SHA in the ordinary evidence locations, and a red result blocks
+integration like any observed inherited regression.
+
+Until they run, those checks are **unavailable, not passed**. The acceptance
+disposition's sentence "are proved at this transition and thereafter" is read
+as "are required from this transition onward and are unavailable until they
+run"; that historical record stays unchanged and this disposition is the
+precise statement of its meaning. The matrix task stays red for the missing
+floor record until that run is recorded. No status capsule, register row,
+plan progress row, runner report or review may present a deferred check as
+green, and the M4 acceptance is not made retroactively false by this deferral.
+
+Preserved guarantees: the accepted candidate, its bound envelopes and gate,
+the M4 acceptance row and the register state are unchanged; no milestone
+product bytes are added; implementation inside the accepted envelopes may
+proceed on branch `m4` as the acceptance already allows; the independent
+read-only exact-SHA review of the transition by an actor other than its
+author remains owed before integration. This standalone disposition changes
+nothing else and receives independent exact-SHA review before integration
+relies on it. It grants no merge to `main`, tag, publication or release, and
+implies no approval of any other restriction, plan, ADR or closure.
+
+<a id="override-disposition-m4-m1-m2-inherited-reproof-waiver-2026-09-14"></a>
+### M1 and M2 inherited re-proof waived for the M4 acceptance checkpoint — 2026-09-14
+
+When the deferred lanes above were prepared, the reviewer found in the gate
+code that the Closed M1 and M2 gates cannot be re-proved green under the
+refreshed floor by running anything. The M1 evidence verifier bound at
+generation 10 requires the retained capture rows to sit on the current locked
+pairs, Elixir 1.18.5 with OTP 27.3.4 and Elixir 1.20.3 with OTP 29.0.5, and
+in the same validation requires M1's Closure row to bind the evidence commit
+those captures came from; the captures that closure bound were taken on
+Elixir 1.17.0 with OTP 26.0, and a fresh capture set would need an evidence
+commit that the immutable Closure row can never name. The M2 runner bound at
+generation 11 has the same shape: its evidence lifecycle admits only an
+evidence commit whose plan is still `In review` with an empty Closure row,
+which is true of the closure-time captures alone, and those were recorded
+on the old floor pair its Darwin floor lane no longer accepts. The M3 and M4
+full gates invoke both closed gates through the closed-gates aggregate, so
+neither can complete its inherited step while this holds. Presented with
+this as a decision packet with three options, the maintainer explicitly
+directed:
+
+> 1. waive m1 m2 re-proof approved. let's do it as a baseline floor when
+> implementing m4.
+
+Under the [explicit maintainer override](../../AGENTS.md#maintainer-override),
+this names the continuing development-time requirement it replaces: the
+part of the
+[inherited-evidence deferral](#override-disposition-m4-inherited-evidence-before-integration-2026-09-14)
+that required the real-provider lanes of the inherited M1 and M2 gates on
+both installed pairs to run before the governance-only M4 acceptance
+checkpoint integrates to `main`. For that integration those two re-proofs are
+**waived, not passed**. As a consequence the M3 full gate and the M4 full gate
+cannot run their inherited step at this checkpoint, so M3's real-lane green
+and M4's real-lane red are likewise unavailable evidence here, not passed and
+not waived by name; M4's declared opening red is carried by its preflight
+role, which runs no inherited gate. What is still required before
+integration and is not waived: the M0 gate green under both pairs at a pushed
+revision, with the floor-pair run recorded in
+[the matrix evidence](../evidence/M0-toolchain-matrix.md), the bootstrap
+aggregate green, and M4 inspection and preflight at that revision.
+
+Successor obligation, recorded from the same instruction: repairing the two
+runners is a baseline of M4 implementation, not a later milestone. Before M4
+closure, M1 and M2 each gain a gate generation under
+`amendment-transaction-v2` whose verifier or runner admits a post-closure
+re-capture set under the currently locked pairs without touching the
+immutable Closure rows, then the captures run on both hosts and the
+inherited aggregate is proved green at an M4 revision; until that lands, M4
+closure cannot claim inherited green and any M1 or M2 regression under the
+new floor is unobserved. This override adds no product change, converts no
+red into a pass, reopens no lifecycle state, and grants no merge to `main`,
+tag, publication or release. It is one standalone commit and receives
+independent exact-SHA review before integration relies on it.
+
+<a id="override-disposition-m4-m0-reproof-deferred-to-implementation-2026-09-14"></a>
+### M0 re-proof under the refreshed floor deferred to M4 implementation — 2026-09-14
+
+With the M1 and M2 re-proofs waived, the M0 gate under both pairs and its
+floor-pair matrix record were the last keyed evidence the
+[inherited-evidence deferral](#override-disposition-m4-inherited-evidence-before-integration-2026-09-14)
+still required before the governance-only M4 acceptance checkpoint
+integrates. Each green M0 run now carries the full bootstrap aggregate with
+its history walk, so the two runs and the record cost about an hour and a
+half more. Told that, the maintainer explicitly directed:
+
+> ok, do you need m0 runs? we can do that as part of m4 implementation as
+> baseline. this is plan mode
+
+Under the [explicit maintainer override](../../AGENTS.md#maintainer-override),
+this replaces the remaining M0 requirement of that deferral for this
+checkpoint's integration: the M0 gate green under both locked pairs at a
+pushed revision, and the run under the floor pair Elixir 1.18.5 with OTP
+27.3.4 recorded in [the matrix evidence](../evidence/M0-toolchain-matrix.md),
+are deferred to M4 implementation as a baseline task, not waived and not
+passed. Until they are recorded, `mix loopex.matrix` stays red for the
+missing floor record, the M0 gate is red at outcome 3 under every
+toolchain, and no status text may present either as green. The checkpoint
+carries no product bytes, so this defers proof of an unchanged closed gate
+rather than of anything the checkpoint adds. A diagnostic only, not
+evidence: a floor-pair M0 run at `4048ddc9dd603365f6cc2738a0316a3f40f4a4d5`
+with provisional matrix rows present cleared outcomes 1 through 7,
+including the real-provider call, before it was stopped inside outcome 8's
+aggregate on this instruction.
+
+What integration still relies on, unchanged: the bootstrap aggregate green
+at a pushed revision of this lineage, M4 inspection and preflight at the
+tip, and the reviews the earlier dispositions name. Successor obligation:
+the first M4 implementation baseline records the M0 runs under both pairs
+with the floor-pair row in the matrix evidence and re-proves the M0 gate at
+that revision, alongside the M1 and M2 runner repair the
+[waiver](#override-disposition-m4-m1-m2-inherited-reproof-waiver-2026-09-14)
+records; M4 closure cannot claim inherited green before both land. This
+override adds no product change, converts no red into a pass, reopens no
+lifecycle state, and grants no merge to `main`, tag, publication or release.
+It is one standalone commit and receives independent exact-SHA review before
+integration relies on it.

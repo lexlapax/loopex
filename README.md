@@ -25,12 +25,12 @@ while the session lives; a session "brain" can coordinate local or remote
 <!-- loopex:readme-status:start -->
 ## Where Things Stand
 
-**Revision status:** Closed milestone product baseline; no milestone is active; no next candidate is recorded.
+**Revision status:** Closed milestone product baseline; active milestone `M4` is accepted; no next candidate is recorded.
 
 [Canonical milestone status and plan records](docs/plans/)
 <!-- loopex:readme-status:end -->
 
-M1 and M2 are closed and integrated. M1 delivered the durability kernel: an explicit
+M1, M2 and M3 are closed and integrated. M1 delivered the durability kernel: an explicit
 embedded runtime, durable local Store, canonical model boundary, trusted-local
 executor, thin reference client, durable events, and receipt reconciliation
 across a real runtime-process crash. What it deliberately did not deliver is a
@@ -65,7 +65,7 @@ and [integration disposition](docs/evidence/M2-recorded-limitations.md#final-rep
 name the evidence and authority used for integration. Those repairs do not
 publish a package or label a public surface.
 
-The M3 implementation adds pinned Git skill installation, project-only discovery,
+M3 delivered pinned Git skill installation, project-only discovery,
 explicit manifest admission, and operator-selected instructions and supporting
 files in model context. Skills use the existing tool, policy and artifact paths;
 downloaded scripts and metadata grant no permissions. Fresh-process CLI recovery
@@ -78,6 +78,16 @@ for the host API. The exact M3 product source
 `f45354572840636b473ad7e40e42355fdff4fc17` passed M3-only qualification
 on the macOS floor pair and Linux; the [M3 plan](docs/plans/M3.md#concept-m3-final-qualification-f453545)
 records that evidence and the separate lifecycle decision.
+
+M4 is next, but its plan and gate remain Open: no M4 product implementation or
+release has started. Its proposed outcome is an operator-usable foreground
+server and TypeScript consumer over durable interactions and bounded artifact
+transfers, with runtime tracing and telemetry. The planned `0.1.0` release is
+source-only and would receive an annotated `v0.1.0` tag on the exact `main`
+integration commit only after M4 implementation, independent closure review,
+explicit closure and separate release/tag authority. See
+the [M4 plan](docs/plans/M4.md#concept) for the candidate scope and the
+[canonical register](docs/plans/README.md) for its current status.
 
 The repaired reference local executor requires `/bin/bash` for its internal
 supervision on Darwin and Linux; raw commands still use `/bin/sh`. See the
@@ -223,12 +233,3 @@ Erlang/OTP are both Apache-2.0 — and gives you an explicit patent grant
 alongside explicit "AS IS", no-warranty terms that match the no-promises
 posture above. If you contribute, your contribution is licensed under the
 same terms — that is Apache-2.0 §5, and there is no separate CLA.
-
-Milestone `M3` (extensible local foundations) is closed; see the
-[canonical plan register](docs/plans/README.md).
-
-The accepted [M3 plan](docs/plans/M3.md#concept) covers project skills and the remaining
-core repairs. Its [M4 successor draft](docs/archive/M4.md#concept) adds durable
-interactions, bounded artifact ranges and a foreground protocol/TypeScript
-consumer. The M3 opening probe verifies required-only context admission before
-optional content is evaluated.

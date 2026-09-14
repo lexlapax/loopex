@@ -343,6 +343,57 @@ defmodule Loopex.StatusCheckTest do
     end
   end
 
+  test "a merge accepts completed gate-generation extensions but not competing rows" do
+    rows =
+      for generation <- 1..9 do
+        "#{generation}\tMaintainer\t[disposition](x.md#y#{generation})\t" <>
+          "#{String.duplicate("a", 40)}\tgate-#{generation}"
+      end
+
+    eight = rows |> Enum.take(8) |> Enum.join("\n")
+    nine = Enum.join(rows, "\n")
+
+    # Direct A/R checks still reject a completed row arriving in one step.
+    refute Plan.supersedes?("gate generations", eight, nine)
+
+    assert History.reconcile_for_test(
+             [eight, nine],
+             "docs/plans/M1.md",
+             "merge",
+             "gate generations",
+             []
+           ) == nine
+
+    assert_raise Invalid, ~r/conflicting completed gate generations/, fn ->
+      History.reconcile_for_test(
+        [nil, nine],
+        "docs/plans/M1.md",
+        "merge",
+        "gate generations",
+        []
+      )
+    end
+
+    competing =
+      rows
+      |> List.replace_at(
+        8,
+        "9\tDelegate\t[disposition](x.md#other)\t" <>
+          "#{String.duplicate("b", 40)}\tother-gate"
+      )
+      |> Enum.join("\n")
+
+    assert_raise Invalid, ~r/conflicting completed gate generations/, fn ->
+      History.reconcile_for_test(
+        [nine, competing],
+        "docs/plans/M1.md",
+        "merge",
+        "gate generations",
+        []
+      )
+    end
+  end
+
   test "the in-review capsule does not widen authority either" do
     # Acceptance is the only transition that widens authorized work. If In review
     # derived a broader boundary, a reviewer's presence would authorise work.
@@ -814,6 +865,115 @@ defmodule Loopex.StatusCheckTest do
     end
   end
 
+  test "a first acceptance may bind a generation-one candidate that refreshed a shared binding" do
+    root = repository_root()
+    {candidate_revision, 0} = Git.run(root, ["rev-parse", "HEAD"])
+    candidate_revision = String.trim(candidate_revision)
+
+    refreshed_gate =
+      String.trim_trailing(Fixture.gate(), "\n") <>
+        "\n\n<a id=\"amendment-transaction-v1\"></a>\n" <>
+        "<a id=\"amendment-1\"></a>\n## Amendment 1\n"
+
+    # The candidate is the Open plan exactly as proposed: an empty Acceptance
+    # row beside a gate that already advanced one generation to refresh the
+    # shared binding.
+    open_candidate = Fixture.plan()
+    technical = Fixture.technical_plan()
+
+    accept = fn gate ->
+      Fixture.plan(governed: true, gate: gate)
+      |> String.replace(String.duplicate("a", 40), candidate_revision, global: false)
+      |> String.replace(
+        "[disposition](../vision.md#concept)",
+        "[disposition](../developer/agent-context-map.md#first-acceptance-test-disposition)",
+        global: false
+      )
+    end
+
+    accepted = accept.(refreshed_gate)
+
+    resolve = fn candidate, gate ->
+      fn revision, path ->
+        cond do
+          revision == candidate_revision and String.ends_with?(path, "M0.md") ->
+            candidate
+
+          revision == candidate_revision and String.ends_with?(path, "M0-technical.md") ->
+            technical
+
+          revision == candidate_revision and String.ends_with?(path, "M0-gate.md") ->
+            gate
+
+          revision == candidate_revision and path == "docs/plans/README.md" ->
+            Map.fetch!(Fixture.open_milestone_documents(refreshed_gate), "docs/plans/README.md")
+
+          revision == candidate_revision and path == "docs/developer/agent-context-map.md" ->
+            "# Context map\n"
+
+          true ->
+            nil
+        end
+      end
+    end
+
+    assert :ok ==
+             Plan.governance(
+               accepted,
+               technical,
+               refreshed_gate,
+               "M0",
+               "Accepted",
+               resolve.(open_candidate, refreshed_gate)
+             )
+
+    # Only Accepted may follow Open here: the transition is a first acceptance,
+    # not a licence to land any later state on a generation-one candidate.
+    assert_raise Invalid, ~r/must preserve amendment candidate lifecycle state Open/, fn ->
+      Plan.governance(
+        accepted,
+        technical,
+        refreshed_gate,
+        "M0",
+        "In progress",
+        resolve.(open_candidate, refreshed_gate)
+      )
+    end
+
+    # A candidate that already carries a complete Acceptance row is an amendment
+    # proposal, and its rebind keeps the strict rule even when the register it
+    # was proposed under still said Open.
+    accepted_candidate = Fixture.plan(governed: true)
+
+    assert_raise Invalid, ~r/must preserve amendment candidate lifecycle state Open/, fn ->
+      Plan.governance(
+        accepted,
+        technical,
+        refreshed_gate,
+        "M0",
+        "Accepted",
+        resolve.(accepted_candidate, refreshed_gate)
+      )
+    end
+
+    # One refresh is the whole allowance. An empty original two generations in
+    # is still gate bytes nobody amended into existence.
+    twice_refreshed_gate =
+      String.trim_trailing(refreshed_gate, "\n") <>
+        "\n\n<a id=\"amendment-2\"></a>\n## Amendment 2\n"
+
+    assert_raise Invalid, ~r/already at amendment generation 2/, fn ->
+      Plan.governance(
+        accept.(twice_refreshed_gate),
+        technical,
+        twice_refreshed_gate,
+        "M0",
+        "Accepted",
+        resolve.(open_candidate, twice_refreshed_gate)
+      )
+    end
+  end
+
   test "amendment proposal and rebind remain one exact history transaction" do
     original = String.duplicate("a", 40)
     accepted_revision = String.duplicate("b", 40)
@@ -1198,6 +1358,66 @@ defmodule Loopex.StatusCheckTest do
     clear = Register.expected_capsule("Open", "M3", accepted)
     refute clear["Blockers"] =~ "ADR"
     refute clear["Next maintainer decision"] =~ "ADR"
+  end
+
+  test "M4 names its protocol interaction floor and range decisions and cannot outrun any" do
+    adrs = [
+      {"docs/adr/0023-experimental-public-session-protocol.md", "ADR 0023"},
+      {"docs/adr/0024-durable-interaction-lifecycle-and-host-policy-authority.md", "ADR 0024"},
+      {"docs/adr/0026-development-floor-refresh.md", "ADR 0026"},
+      {"docs/adr/0028-bounded-artifact-retrieval.md", "ADR 0028"},
+      {"docs/adr/0030-observability-tracing-and-telemetry.md", "ADR 0030"}
+    ]
+
+    accepted = Map.new(adrs, fn {path, _name} -> {path, "Accepted"} end)
+    proposed = Map.new(adrs, fn {path, _name} -> {path, "Proposed"} end)
+    open = Register.expected_capsule("Open", "M4", proposed)
+
+    assert open["Next maintainer decision"] ==
+             "Disposition ADR 0023, ADR 0024, ADR 0026, ADR 0028, and ADR 0030"
+
+    assert open["Next transition"] =~ "After the prerequisites are accepted"
+
+    lookahead = Register.expected_capsule({"M3", "Accepted"}, {"M4", "Open"}, m3_and_m4(proposed))
+
+    assert lookahead["Blockers"] =~
+             "`M4` additionally waits on ADR 0023, ADR 0024, ADR 0026, ADR 0028, and ADR 0030"
+
+    assert lookahead["Next maintainer decision"] =~
+             "cannot be accepted before `M3` closes; `M4` also waits on"
+
+    for {path, name} <- adrs do
+      outstanding = Map.put(accepted, path, "Proposed")
+      open = Register.expected_capsule("Open", "M4", outstanding)
+      assert open["Blockers"] =~ name
+      assert open["Next maintainer decision"] == "Disposition #{name}"
+
+      for state <- ["Accepted", "In progress", "In review", "Closed"] do
+        assert_raise Invalid, ~r/`M4` cannot move to #{state} before #{name} is accepted/, fn ->
+          Register.expected_capsule(state, "M4", outstanding)
+        end
+
+        assert is_map(Register.expected_capsule(state, "M4", accepted))
+      end
+
+      assert_raise Invalid, ~r/M4` names #{name} as a prerequisite but/, fn ->
+        Register.expected_capsule("Open", "M4", Map.delete(accepted, path))
+      end
+    end
+
+    clear = Register.expected_capsule({"M3", "Accepted"}, {"M4", "Open"}, m3_and_m4(accepted))
+    refute clear["Blockers"] =~ "ADR"
+    refute clear["Next maintainer decision"] =~ "ADR"
+  end
+
+  defp m3_and_m4(m4_statuses) do
+    Map.merge(
+      %{
+        "docs/adr/0025-resource-packs-and-skill-admission.md" => "Accepted",
+        "docs/adr/0027-provider-permit-retirement.md" => "Accepted"
+      },
+      m4_statuses
+    )
   end
 
   test "a milestone state with no derived capsule fails closed" do
@@ -2698,8 +2918,9 @@ defmodule Loopex.StatusCheckTest do
                "None until `current` is ready for independent review; `next` cannot be " <>
                  "accepted before `current` closes",
              "Next transition" =>
-               "Turn the locked `current` gate green and close it; then refresh and " <>
-                 "independently review `next` on that closed base"
+               "Turn the locked `current` gate green, move `current` to In progress and " <>
+                 "then In review with cleared independent review, and close it; then " <>
+                 "refresh and independently review `next` on that closed base"
            }
   end
 

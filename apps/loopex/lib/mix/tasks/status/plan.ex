@@ -899,10 +899,12 @@ defmodule Loopex.Checks.Plan do
     cond do
       complete == [false, false] ->
         # An original snapshot predates any amendment, so its gate carries
-        # generation zero. Accepting an empty-governance candidate at a later
-        # generation let a reachable side commit terminate the chain while carrying
-        # gate bytes nobody amended into it.
-        terminal_generation_zero!(path, revision, resolve_file)
+        # generation zero, or generation one when the Open plan had to refresh a
+        # shared binding before its first acceptance. Accepting an
+        # empty-governance candidate at a later generation let a reachable side
+        # commit terminate the chain while carrying gate bytes nobody amended
+        # into it.
+        terminal_generation!(path, revision, resolve_file)
 
       not Enum.at(complete, 0) or Enum.at(bound, 0) == nil ->
         raise Invalid,
@@ -956,7 +958,17 @@ defmodule Loopex.Checks.Plan do
     end
   end
 
-  defp terminal_generation_zero!(path, revision, resolve_file) do
+  # Concept: the empty original at the end of an acceptance chain carries
+  # generation zero, or exactly generation one when the plan refreshed a shared
+  # binding while still Open, because that refresh is the one amendment a plan
+  # may carry before any authority accepts it.
+  #
+  # Technical depth: generation one is admitted here only structurally. The
+  # history walk proves that such an original is the first acceptance's direct
+  # parent and advanced the generation by exactly one over its own sole parent,
+  # so a side commit cannot mint that generation and then terminate a chain.
+  # Any higher generation is still an original nobody amended into existence.
+  defp terminal_generation!(path, revision, resolve_file) do
     gate_path = String.replace_suffix(path, ".md", "-gate.md")
     gate_text = resolve_file && resolve_file.(revision, gate_path)
 
@@ -966,10 +978,11 @@ defmodule Loopex.Checks.Plan do
         text -> gate_generation(text, "#{gate_path} at #{revision}")
       end
 
-    if generation != 0 do
+    if generation > 1 do
       raise Invalid,
             "#{path}: acceptance candidate chain terminates at #{revision}, whose gate is " <>
-              "already at amendment generation #{generation}; an original carries generation 0"
+              "already at amendment generation #{generation}; an original carries generation " <>
+              "0, or 1 after a shared-binding refresh before first acceptance"
     end
 
     :ok
@@ -1448,7 +1461,8 @@ defmodule Loopex.Checks.Plan do
             state,
             path,
             resolve_file,
-            lifecycle_history_verified
+            lifecycle_history_verified,
+            candidate
           )
       end
 
@@ -1484,13 +1498,29 @@ defmodule Loopex.Checks.Plan do
     :ok
   end
 
+  # Concept: a candidate whose gate already carries an amendment is normally the
+  # proposal of an amendment to an accepted plan, so its rebind must keep the
+  # lifecycle state it was proposed under. The one lawful exception is a first
+  # acceptance: an Open plan that shares a bound artifact with Closed gates must
+  # advance its own gate generation to refresh that binding before it can be
+  # accepted, and its acceptance then binds a generation-one candidate while
+  # moving the register from Open to Accepted.
+  #
+  # Technical depth: the exception is recognised by the candidate itself, not
+  # by the caller. A candidate whose own Acceptance row is still empty has never
+  # been accepted, so the transition binding it is a first acceptance rather
+  # than an administrative rebind; the history walk separately proves that such
+  # a candidate is the transition's direct parent and advanced the generation
+  # by exactly one. A candidate that already carries a complete Acceptance row
+  # is an amendment proposal and keeps the strict rule.
   defp amendment_candidate_lifecycle!(
          revision,
          name,
          current_state,
          path,
          resolve_file,
-         lifecycle_history_verified
+         lifecycle_history_verified,
+         candidate_text
        ) do
     index = resolve_file && resolve_file.(revision, "docs/plans/README.md")
 
@@ -1511,6 +1541,15 @@ defmodule Loopex.Checks.Plan do
         # against A's historical state rather than today's state.
         candidate_state
 
+      {^name, "Open"} when current_state == "Accepted" ->
+        if candidate_accepted?(candidate_text, path, revision) do
+          raise Invalid,
+                "#{path}: administrative rebind must preserve amendment candidate lifecycle " <>
+                  "state Open; current state is Accepted"
+        end
+
+        "Open"
+
       {^name, candidate_state} ->
         raise Invalid,
               "#{path}: administrative rebind must preserve amendment candidate lifecycle " <>
@@ -1520,6 +1559,13 @@ defmodule Loopex.Checks.Plan do
         raise Invalid,
               "#{path}: amendment candidate #{revision} does not register #{name}"
     end
+  end
+
+  defp candidate_accepted?(candidate_text, path, revision) do
+    {_rows, _bound, complete} =
+      Records.governance_records(candidate_text, "#{path} at amendment candidate #{revision}")
+
+    Enum.at(complete, 0) == true
   end
 
   @doc false

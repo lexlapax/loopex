@@ -1,21 +1,19 @@
-# Locked M0 toolchain matrix. These exact bytes are digested in
-# docs/plans/M0-gate.md and verified against this file by the status check.
-# Two pairs are validated individually; no cross-product is constructed.
-# Changing any version requires an amendment to ADR 0002, not a gate edit.
+# Locked toolchain matrix. These exact bytes are digested in the Closed M0, M1,
+# M2 and M3 gates and the Open M4 gate, and verified against this file by the
+# status check. Two pairs are validated individually; no cross-product is
+# constructed. Changing any version requires an accepted ADR and every
+# holder's governed transaction, not a gate edit.
 #
-# Verified against the official Elixir compatibility table on 2026-08-16:
-# 1.20 supports OTP 27-29, and 1.17 supports OTP 25-27.
-#
-# Pins are derived from accepted ADR 0002, not chosen. The floor is the lowest
-# supported pair in the 1.17 family, and the table offers no patch selector, so
-# the lowest patch of each is taken. The current pair is the newest supported
-# release, which is also Homebrew stable today. The floor lane predates what
-# brew carries and runs through a version manager or CI; the gate requires both
-# lanes recorded, not both run locally on every invocation.
+# Pins are the explicit pairs accepted ADR 0026 chose on 2026-09-13 in place of
+# ADR 0002's derived rule. The floor is Elixir 1.18.5 with OTP 27.3.4, the pair
+# that carries the standard-library JSON codec the M4 protocol needs; the
+# current pair is the newest supported release, which is also Homebrew stable
+# today. The floor lane runs through a version manager or CI; the gate requires
+# both lanes recorded, not both run locally on every invocation.
 #
 # floor pair
-elixir 1.17.0-otp-26
-erlang 26.0
+elixir 1.18.5-otp-27
+erlang 27.3.4
 #
 # current pair
 elixir 1.20.3-otp-29

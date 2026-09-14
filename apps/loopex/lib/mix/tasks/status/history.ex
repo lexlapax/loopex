@@ -857,25 +857,59 @@ defmodule Loopex.Checks.History do
     :ok
   end
 
+  # Concept: a plan's first acceptance normally binds a gate with no amendment,
+  # because an amendment before acceptance would let a proposal and its rebind
+  # collapse into one revision. The one legitimate exception is an Open plan
+  # that holds a shared bound artifact: the sequential holder transaction makes
+  # it advance its gate generation to refresh that binding before acceptance,
+  # and the Acceptance row is the rebind that completes the sequence.
+  #
+  # Technical depth: the exception keeps the two-revision shape. The candidate
+  # must be this revision's sole parent, must have advanced the gate generation
+  # by exactly one over its own sole parent, and must have carried the empty
+  # Acceptance row unchanged, so the accepted generation is the refresh the
+  # sequence required and nothing else. A candidate further back, a candidate
+  # that jumped more than one generation, or one that already held an
+  # Acceptance row is refused exactly as before.
   defp validate_plan_change_set!(
          [0, 2, 3],
          path,
          revision,
-         [_parent],
+         [parent],
          _governed,
          from,
          current,
-         _by_revision,
-         _parents_by_revision,
+         by_revision,
+         parents_by_revision,
          _resolve_file
        ) do
-    if Enum.at(from, 0) != nil or acceptance_generation(Enum.at(current, 0)) != 0 do
-      raise Invalid,
-            "#{path}: amendment proposal and Acceptance rebind must be distinct revisions at " <>
-              revision
-    end
+    generation = acceptance_generation(Enum.at(current, 0))
 
-    :ok
+    cond do
+      Enum.at(from, 0) != nil ->
+        raise Invalid,
+              "#{path}: amendment proposal and Acceptance rebind must be distinct revisions at " <>
+                revision
+
+      generation == 0 ->
+        :ok
+
+      is_integer(generation) ->
+        require_direct_candidate!(path, revision, parent, Enum.at(current, 0))
+
+        require_binding_refresh_proposal!(
+          path,
+          parent,
+          generation,
+          by_revision,
+          parents_by_revision
+        )
+
+      true ->
+        raise Invalid,
+              "#{path}: amendment proposal and Acceptance rebind must be distinct revisions at " <>
+                revision
+    end
   end
 
   defp validate_plan_change_set!(
@@ -1005,6 +1039,55 @@ defmodule Loopex.Checks.History do
     raise Invalid,
           "#{path}: governance fields #{inspect(changed)} changed together at #{revision}; " <>
             "proposal, rebind, and closure are distinct one-parent revisions"
+  end
+
+  defp require_binding_refresh_proposal!(
+         path,
+         candidate,
+         generation,
+         by_revision,
+         parents_by_revision
+       ) do
+    gate_path = Paths.strip_suffix(path, ".md") <> "-gate.md"
+
+    case Map.get(parents_by_revision, candidate) do
+      [proposal_parent] ->
+        candidate_files = Map.fetch!(by_revision, candidate)
+        parent_files = Map.fetch!(by_revision, proposal_parent)
+
+        candidate_generation =
+          candidate_files
+          |> Map.fetch!(gate_path)
+          |> Plan.gate_generation("#{gate_path} at #{candidate}")
+
+        parent_generation =
+          case Map.get(parent_files, gate_path) do
+            nil -> nil
+            text -> Plan.gate_generation(text, "#{gate_path} at #{proposal_parent}")
+          end
+
+        candidate_record = Map.get(candidate_files, path)
+        parent_record = Map.get(parent_files, path)
+
+        accepted_before? =
+          Enum.any?([candidate_record, parent_record], fn text ->
+            is_binary(text) and plan_accepted?(text, path, candidate)
+          end)
+
+        unless candidate_generation == generation and parent_generation != nil and
+                 candidate_generation == parent_generation + 1 and not accepted_before? do
+          raise Invalid,
+                "#{path}: a first acceptance may bind an amended gate only at the direct " <>
+                  "proposal that advanced its generation by one to refresh a shared binding; " <>
+                  "#{candidate} does not have that shape"
+        end
+
+        :ok
+
+      _other ->
+        raise Invalid,
+              "#{path}: binding refresh proposal #{candidate} must be a one-parent revision"
+    end
   end
 
   defp require_direct_candidate!(path, revision, parent, acceptance) do
@@ -1244,9 +1327,11 @@ defmodule Loopex.Checks.History do
   # accepted amendment unrepresentable -- the branch carrying it and the branch
   # without it meet with different anchors, which is the normal shape of landing
   # one. The gate generation governs the accepted gate, both plan envelopes, and
-  # the Acceptance rebind. Exactly one candidate must supersede every other, and
-  # anything else is still a conflict. Two sides at the same generation with
-  # different bytes remain irreconcilable.
+  # the Acceptance rebind. Exactly one candidate must supersede every other.
+  # A merge may also bring together two already completed gate-generation
+  # histories when the later one retains the earlier rows byte for byte. Their
+  # proposal and rebind steps were validated on their own parent lineage. Two
+  # sides at the same generation with different bytes remain irreconcilable.
   defp reconcile!(values, path, revision, label, adr_concepts) do
     amendable = plan_amendable?(label, path, adr_concepts)
 
@@ -1258,7 +1343,8 @@ defmodule Loopex.Checks.History do
         true ->
           Enum.find(values, fn candidate ->
             Enum.all?(values, fn other ->
-              other == candidate or Plan.supersedes?(label, other, candidate)
+              other == candidate or Plan.supersedes?(label, other, candidate) or
+                completed_generation_extension?(label, other, candidate)
             end)
           end)
       end
@@ -1271,6 +1357,19 @@ defmodule Loopex.Checks.History do
         winner
     end
   end
+
+  defp completed_generation_extension?("gate generations", earlier, later)
+       when is_binary(earlier) and is_binary(later) do
+    old = Plan.decode_generations(earlier)
+    new = Plan.decode_generations(later)
+
+    length(new) > length(old) and
+      Enum.take(new, length(old)) == old and
+      Enum.all?(old, &(not Plan.generation_proposal?(&1))) and
+      Enum.all?(new, &(not Plan.generation_proposal?(&1)))
+  end
+
+  defp completed_generation_extension?(_label, _earlier, _later), do: false
 
   defp require_absence_allowed!(path, revision, governed, from_parents) do
     if String.ends_with?(path, "-gate.md") do

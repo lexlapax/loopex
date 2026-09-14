@@ -139,12 +139,16 @@ later decision; failure or malformed input never falls through to allow.
 The stack has a transport-neutral protocol, a pure session core, an OTP runtime,
 and replaceable edges. Dependencies point inward: hosts and adapters depend on
 Loopex; the core does not import provider, store, executor, transport, client,
-or host implementations.
+or host implementations. The core admits exactly one external library, the
+BEAM's standard telemetry event dispatcher, so that its boundary events reach
+metrics and tracing edges without a second event system; reporters, exporters
+and OpenTelemetry remain edges.
 
 Technical depth: [Layers, dependency budget, and direct-OTP rules](vision-technical.md#technical-vision-dependency-doctrine)
 
-The initial core depends only on Elixir and Erlang. Repository or package
-splits require demonstrated pressure and a decision. Processes, supervision,
+The core depends only on Elixir, Erlang and the single telemetry event
+dispatcher admitted above. Repository or package splits require demonstrated
+pressure and a decision. Processes, supervision,
 messages, and behaviours remain visible rather than being hidden behind a
 private agent DSL.
 
@@ -431,7 +435,8 @@ real paths. Fakes do not replace evidence for a claimed provider, store,
 isolation boundary, or package.
 
 Minimalism is enforced through concrete exclusions and accepted-plan budgets,
-not a universal line count. The core has no external runtime dependency, one
+not a universal line count. The core has no external runtime dependency beyond
+the single telemetry event dispatcher the dependency doctrine admits, one
 semantic contract, a small public surface, and no built-in product governance
 or orchestration. Performance budgets follow measurement.
 
@@ -474,7 +479,8 @@ decision gates.
 
 The project is an independent greenfield implementation of a multi-instance,
 host-neutral OTP coding-session and effects runtime. It uses direct OTP, small
-edge behaviours, a standard-runtime-only core, a provider-neutral model port,
+edge behaviours, a core whose only external dependency is the standard
+telemetry event dispatcher, a provider-neutral model port,
 seven reference tool implementations, serial tool execution by default, and
 separate durable truth planes.
 

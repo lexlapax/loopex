@@ -3,7 +3,7 @@
 
 Technical depth: [Development floor refresh mechanics](0026-development-floor-refresh-technical.md#technical-depth).
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-09-09
 - **Decision owner:** Maintainer
 - **Supersedes:** 0002
@@ -20,10 +20,11 @@ patched floor honestly.
 Supersede ADR 0002's pin-selection rule for development validation with explicit
 chosen pairs: floor Elixir 1.18.5 / OTP 27.3.4, current Elixir 1.20.3 / OTP
 29.0.5. Preserve separate floor/current lanes and the core stdlib budget. Settle
-this decision and every affected Closed holder before M4 acceptance. M0/M1/M2
-are known holders; include M3 if its final lock binds changed artifacts. Do not
-promise exactly three transactions. No public runtime-support or moving-latest
-policy is added. Current pins remain unchanged by this proposal.
+this decision and every affected Closed holder before M4 acceptance. Closed
+M0, M1, M2 and M3 and Open M4 all bind `.tool-versions`. Settle each Closed
+holder through its own governed transaction in register order, then refresh
+Open M4's binding directly before acceptance. No public runtime-support or
+moving-latest policy is added. Current pins remain unchanged by this proposal.
 
 Technical depth: [Contract and evidence](0026-development-floor-refresh-technical.md#technical-adr-0026-decision).
 
@@ -46,4 +47,4 @@ Technical depth: [Compatibility mechanics](0026-development-floor-refresh-techni
 
 | Decision | Authority | Authority evidence | Bound bytes |
 | --- | --- | --- | --- |
-| Acceptance | — | — | — |
+| Acceptance | Maintainer | [disposition](../developer/agent-context-map.md#disposition-adr-0026-acceptance-2026-09-13) | candidate `3503992cbc0de02ef98ba261e7a19fdb7123e220`; concept `sha256:ad0d3c48ee0ae9ef8ed8a713827949d32014dfb2eed8e8f2255a263bd607629c`; technical `sha256:8fb22a6cd1cdd7a5cf6b4d2da017ee4034746af9efc216f5d0f2aac221aa1d1c` |

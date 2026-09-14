@@ -1108,6 +1108,85 @@ defmodule Loopex.HistoryAnchoringTest do
     end
   end
 
+  # Concept: an Open plan that holds a shared bound artifact must refresh its
+  # binding through an amendment before it is accepted, and the Acceptance row is
+  # the rebind that completes that sequence. The first acceptance may therefore
+  # bind a gate at generation one, but only at the direct proposal that made it.
+  #
+  # Technical depth: the fixture gate carries the v1 marker so the strict
+  # change-set walk runs. The positive shape is open -> refresh (gate +1, empty
+  # rows) -> accepted binding the refresh as its sole parent. Each negative
+  # keeps the same accepted bytes and breaks one condition: an interposed
+  # revision between refresh and acceptance, a refresh that did not advance the
+  # generation, and a refresh that jumped two generations at once.
+  test "a first acceptance may bind only the direct proposal that refreshed a shared binding" do
+    open_gate =
+      String.trim_trailing(Fixture.gate(), "\n") <>
+        "\n\n<a id=\"amendment-transaction-v1\"></a>\n"
+
+    refreshed_gate =
+      open_gate <> "\n<a id=\"amendment-1\"></a>\n## Amendment 1 — refresh a shared binding\n"
+
+    jumped_gate =
+      refreshed_gate <> "\n<a id=\"amendment-2\"></a>\n## Amendment 2 — a second jump\n"
+
+    open_plan = Fixture.plan()
+    accepted_plan = Fixture.plan(governed: true, gate: refreshed_gate)
+    accepted_after_jump = Fixture.plan(governed: true, gate: jumped_gate)
+    candidate = sha("a")
+
+    files = fn plan, gate -> Fixture.plan_snapshot(plan, gate) end
+
+    resolver = fn snapshots ->
+      lookup = Map.new(snapshots, fn {revision, _parents, contents} -> {revision, contents} end)
+      fn revision, path -> lookup |> Map.get(revision, %{}) |> Map.get(path) end
+    end
+
+    run = fn snapshots ->
+      {head, _parents, head_files} = List.last(snapshots)
+      History.governance_history(head_files, {head, snapshots}, resolver.(snapshots))
+    end
+
+    direct = [
+      {"root", [], %{}},
+      {"open", ["root"], files.(open_plan, open_gate)},
+      {candidate, ["open"], files.(open_plan, refreshed_gate)},
+      {"accepted", [candidate], files.(accepted_plan, refreshed_gate)}
+    ]
+
+    assert :ok == run.(direct)
+
+    interposed = [
+      {"root", [], %{}},
+      {"open", ["root"], files.(open_plan, open_gate)},
+      {candidate, ["open"], files.(open_plan, refreshed_gate)},
+      {"noop", [candidate], files.(open_plan, refreshed_gate)},
+      {"accepted", ["noop"], files.(accepted_plan, refreshed_gate)}
+    ]
+
+    assert_raise Invalid, ~r/must directly follow and bind its sole proposal parent/, fn ->
+      run.(interposed)
+    end
+
+    unadvanced = [
+      {"root", [], %{}},
+      {"open", ["root"], files.(open_plan, refreshed_gate)},
+      {candidate, ["open"], files.(open_plan, refreshed_gate)},
+      {"accepted", [candidate], files.(accepted_plan, refreshed_gate)}
+    ]
+
+    assert_raise Invalid, ~r/does not have that shape/, fn -> run.(unadvanced) end
+
+    jumped = [
+      {"root", [], %{}},
+      {"open", ["root"], files.(open_plan, open_gate)},
+      {candidate, ["open"], files.(open_plan, jumped_gate)},
+      {"accepted", [candidate], files.(accepted_after_jump, jumped_gate)}
+    ]
+
+    assert_raise Invalid, ~r/does not have that shape/, fn -> run.(jumped) end
+  end
+
   test "a declared generation advances envelopes without admitting drift or divergence" do
     original_gate = Fixture.gate()
 

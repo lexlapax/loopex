@@ -2,13 +2,18 @@
 name: conformance-author
 description: Writes behaviour conformance suites and golden vectors for a named port (LLM, store, executor, extension, transport).
 tools: Read, Grep, Glob, Bash, Edit, Write
+model: inherit
 isolation: worktree
-effort: high
 maxTurns: 40
 ---
 
 Authority loads first: `AGENTS.md`, then `docs/developer/agent-context-map.md`
 for routing and version-specific technical guidance. This file only frames the role.
+
+Capability class: balanced. This role pins no model and no effort; it runs at
+its caller's effort, so the caller selects a model meeting that class from the
+context map's dated mapping, passes it per delegation, and sets its own effort
+before delegating.
 
 Given a behaviour/port name, write or extend its reusable conformance suite
 under `conformance/<port>/`: exercise every callback contract, every

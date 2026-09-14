@@ -71,6 +71,7 @@ pairing, link, review, code-documentation, and enforcement contracts.
 | 0027 — provider permit retirement | [Decision](adr/0027-provider-permit-retirement.md#concept) | [Technical depth](adr/0027-provider-permit-retirement-technical.md#technical-depth) |
 | 0028 — bounded artifact retrieval | [Decision](adr/0028-bounded-artifact-retrieval.md#concept) | [Technical depth](adr/0028-bounded-artifact-retrieval-technical.md#technical-depth) |
 | 0029 — bounded provider failure diagnostics | [Decision](adr/0029-bounded-provider-failure-diagnostics.md#concept) | [Technical depth](adr/0029-bounded-provider-failure-diagnostics-technical.md#technical-depth) |
+| 0030 — observability: tracing and telemetry | [Decision](adr/0030-observability-tracing-and-telemetry.md#concept) | [Technical depth](adr/0030-observability-tracing-and-telemetry-technical.md#technical-depth) |
 
 An ADR pair is one decision. Its status and governance record live in the
 Concept file and bind both files when accepted.
@@ -81,8 +82,8 @@ whose path or explicit fragment does not resolve.
 
 ## Planning and Development
 
-- [M3 foundations](plans/M3.md#concept) and [technical plan](plans/M3-technical.md#technical-depth) — Accepted project-skills and core-repair plan; implementation checkpoints and remaining closure evidence are recorded in its progress table.
-- [M4 external consumer draft](archive/M4.md#concept) and [technical plan](archive/M4-technical.md#technical-depth) — unopened durable interactions, artifact ranges, floor refresh and protocol/TypeScript workflow over M3.
+- [M3 foundations](plans/M3.md#concept) and [technical plan](plans/M3-technical.md#technical-depth) — project skills and core repairs; Closed with retained evidence in the plan.
+- [M4 headless external consumption](plans/M4.md#concept) and [technical plan](plans/M4-technical.md#technical-depth) — durable interactions, artifact transfers, floor refresh and protocol/TypeScript workflow over M3; Open planning lookahead with a red gate.
 
 - [Development contract](../AGENTS.md) — canonical tool-neutral authority,
   autonomy, documentation, milestone, and enforcement rules.

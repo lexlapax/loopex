@@ -497,8 +497,15 @@ at adapter edges.
 
 ### 7.2 Core dependency budget
 
-The initial `loopex` OTP application depends only on the Elixir/Erlang runtime.
-The core has no compile-time dependency on:
+The `loopex` OTP application depends on the Elixir/Erlang runtime and on
+exactly one external library: `:telemetry`, the pure-Erlang, dependency-free
+event dispatcher, admitted by the maintainer's recorded vision decision of
+2026-09-13 so that core boundary events reach metrics and tracing edges
+without a Loopex-owned event system; ADR 0030 carries the mechanics and the
+limited supersession of ADR 0001.
+That library dispatches events; it attaches no handler in core, adds no
+transport, and carries no runtime behavior of its own. The core has no
+compile-time dependency on:
 
 - ReqLLM or another provider library;
 - Jido Agent, Action, Signal, or another agent-loop package;
@@ -509,10 +516,12 @@ The core has no compile-time dependency on:
 - Docker, Kubernetes, FLAME, or a cloud SDK;
 - OpenTelemetry or an external pub/sub system.
 
-Those dependencies belong in adapters or reference applications. Repository
+Those dependencies belong in adapters or reference applications, and so do
+telemetry reporters, exporters and OpenTelemetry mappings. Repository
 checks, mirrored by CI, enforce namespace and dependency direction with
 `mix xref`, compile-time checks, and tests that build the core against only fake
-edge implementations.
+edge implementations; they name `:telemetry` as the sole admitted core
+dependency and refuse any other.
 
 Use one repository and one release version through 0.x. Physical application
 or Hex-package splits require demonstrated compile, runtime, ownership,
@@ -1318,7 +1327,8 @@ The session-journal surface must:
 ### 12.2 Store posture
 
 The founding vision freezes the store contract, not a database engine. The core
-remains standard-runtime-only; store adapters are selected by evidence rather
+takes no store dependency, and no external dependency beyond the telemetry
+event dispatcher §7.2 admits; store adapters are selected by evidence rather
 than implementation-language purity. An in-memory adapter supports tests and
 simple embedding. A plain-text local adapter may be useful for the
 reference CLI, but its representation remains private and experimental.
@@ -2456,7 +2466,8 @@ Concept: [Repository seed](vision.md#concept-vision-repository-seed)
 ### 20.1 Initial layout
 
 The repository begins as one monorepo and version train with four visible
-areas: the standard-runtime-only protocol/core/runtime application; replaceable
+areas: the protocol/core/runtime application, standard-runtime-only apart from
+the telemetry event dispatcher §7.2 admits; replaceable
 adapter and reference-client applications; language-neutral conformance
 fixtures; and executable examples plus documentation. Physical package or
 repository splits require demonstrated external-consumer, deployment,
@@ -2731,7 +2742,8 @@ Minimalism is tested, not declared:
   project context; host budgets remain host-owned;
 - no built-in sub-agent, plan, objective, background job, team workflow,
   social channel, or policy engine;
-- no external runtime dependency in `loopex` core;
+- no external runtime dependency in `loopex` core beyond the single telemetry
+  event dispatcher §7.2 admits;
 - one canonical semantic contract across transports;
 - no public PIDs, module atoms, functions, or raw Erlang terms;
 - one page of code can start a runtime, create a session, submit a prompt, and
@@ -2888,7 +2900,8 @@ The following are project doctrine unless deliberately revised:
    behaviours, not an unstructured system and not an agent DSL.
 4. The runtime is multi-instance and host-neutral; executable code generation is
    explicitly VM-global, and conflicting code trust domains use separate VMs.
-5. The core application has no external runtime dependency.
+5. The core application has no external runtime dependency beyond the single
+   telemetry event dispatcher §7.2 admits.
 6. The model boundary is `Loopex.LLM`; the reference adapter uses ReqLLM
    directly; core has no Jido framework dependency.
 7. Loopex owns durable coding-session mechanics. Hosts own identity, policy,

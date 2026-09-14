@@ -148,15 +148,15 @@ and can print neither `CAPTURE` nor `M1 gate GREEN`.
 
 | SHA-256 | Path |
 | --- | --- |
-| `6c14c7ef012f3a9491974dfb9e851ef9377585f72c6804af3c06664c7bb1b14c` | `scripts/check-m1-gate.sh` |
+| `f15726fc6da8749c2108c7613f7bbd68ff21800595a3f4d603c3abb6a8af3e98` | `scripts/check-m1-gate.sh` |
 | `4bba03d218eee656991444a3c22c8753bfef1ab86f688036a4440048752f48bd` | `scripts/m1-gate-launcher.escript` |
 | `53d8219bdee584a3849a85a1102e405520d5dd0dfbe21d259434bc9edfc5fcc0` | `scripts/m1-exunit-runner.exs` |
-| `3e742f052f72aaea952cb8173692a3fd10f998a79c1dc35e1072d9e46657786c` | `scripts/m1-evidence-verifier.exs` |
-| `56d8e71b90af183d02e7e46d3bf10aae48129e3466e19325b40a81ea8abf31e9` | `apps/loopex/lib/mix/tasks/loopex.deps_budget.ex` |
-| `f97927194c5ab97d0ae20fc9a6586a53b838cea6998307e3c88d96fe8ec9773c` | `apps/loopex/test/m1_gate_evidence_test.exs` |
+| `e11f8e44d1402717bb151d878a0744778f55d3bd91f206420581801b7dbbb23d` | `scripts/m1-evidence-verifier.exs` |
+| `2c62019cde03e118a2b5ff23ba24a5ee50d8f118172ae4d71ce6bed2f7be1011` | `apps/loopex/lib/mix/tasks/loopex.deps_budget.ex` |
+| `3546e6601b74f54b2f8ea584e71aa65d0062156f07f21f2d291fc6af3bdb51be` | `apps/loopex/test/m1_gate_evidence_test.exs` |
 | `c36253cff3d74ddff1b330695edbc4bde0a4565c1412c67c1293b2fb7ca6129b` | `apps/loopex/test/m1_exunit_runner_test.exs` |
-| `9705bcd08f7d0b4b4e2d36c745f4fbf732d751a48fdc369aacb6ca99e8f598ac` | `apps/loopex/test/deps_budget_test.exs` |
-| `fad47299b27a767785d2a6a776155038054f5457ee3ce0195a37ae667f7a9999` | `.tool-versions` |
+| `bc4d5544229c3b15414a8ad9ac8ce8e5daf2e29d35a98ab868af1741fd9b44d4` | `apps/loopex/test/deps_budget_test.exs` |
+| `fea095ecec784a4440b872ad5f53a8da2cb4e13e43b6f05add5cfd75bb352879` | `.tool-versions` |
 
 These are the complete M1-specific verdict machinery and its adversarial
 corpora. The sealed inner shell verifies every delegated source/corpus digest
@@ -294,7 +294,7 @@ non-optional transitive closure, refuses missing, unsatisfied, or unreachable
 lock records, and accepts only checksum-bound archives whose literal Erlang
 `metadata.config` name, version, build tools, and dependencies exactly match the
 lock. Every Mix-managed package carries exactly one Elixir requirement that
-admits the bound 1.17.0 floor; another build tool may omit it, but any present
+admits the bound 1.18.5 floor; another build tool may omit it, but any present
 requirement must admit the floor. All authority is validated before the
 destination is touched. The materializer creates Hex SCM's `.hex` marker only
 from the verified lock checksums and metadata; an archive payload carrying that
@@ -449,7 +449,7 @@ The three bound non-gate commands are:
 
 ```text
 # Darwin, exact floor pair
-mise exec erlang@26.0 elixir@1.17.0-otp-26 -- /bin/bash -p scripts/check-m1-gate.sh --capture floor
+mise exec erlang@27.3.4 elixir@1.18.5-otp-27 -- /bin/bash -p scripts/check-m1-gate.sh --capture floor
 # Darwin, exact current pair
 /bin/bash -p scripts/check-m1-gate.sh --capture current
 # Linux, exact current pair
@@ -486,10 +486,10 @@ green-base invariant until implementation or closure.
 
 ```text
 matrix candidate=<C> gate_sha256=<digest> runner_sha256=<digest> launcher_sha256=<digest> exunit_runner_sha256=<digest> deps_budget_sha256=<digest> verifier_sha256=<digest> tool_versions_sha256=<digest> command=bash-p:scripts/check-m1-gate.sh
-capture lane=floor candidate=<C> gate_sha256=<M1 digest> command=bash-p:scripts/check-m1-gate.sh elixir=1.17.0 otp=26.0 erts=<exact> seed=<0..999999> executed=<positive> verdict=CAPTURE exit=0 wall=<ASCII-token> os=darwin arch=<ASCII-token> limits=core-soft-0,core-hard-0,nofile-<positive|unlimited>,nproc-<positive|unlimited> provider=<ASCII-token> model=<ASCII-token> endpoint=<ASCII-token> adapter_build=loopex_llm_reqllm@0.0.0 executor_build=loopex_executor_local@0.0.0 executor_identity=<ASCII-token> tool_identity=<ASCII-token> recorded=<UTC-RFC3339-second>
+capture lane=floor candidate=<C> gate_sha256=<M1 digest> command=bash-p:scripts/check-m1-gate.sh elixir=1.18.5 otp=27.3.4 erts=<exact> seed=<0..999999> executed=<positive> verdict=CAPTURE exit=0 wall=<ASCII-token> os=darwin arch=<ASCII-token> limits=core-soft-0,core-hard-0,nofile-<positive|unlimited>,nproc-<positive|unlimited> provider=<ASCII-token> model=<ASCII-token> endpoint=<ASCII-token> adapter_build=loopex_llm_reqllm@0.0.0 executor_build=loopex_executor_local@0.0.0 executor_identity=<ASCII-token> tool_identity=<ASCII-token> recorded=<UTC-RFC3339-second>
 capture lane=current candidate=<C> gate_sha256=<M1 digest> command=bash-p:scripts/check-m1-gate.sh elixir=1.20.3 otp=29.0.5 erts=<exact> seed=<0..999999> executed=<positive> verdict=CAPTURE exit=0 wall=<ASCII-token> os=darwin arch=<independent-ASCII-token> limits=core-soft-0,core-hard-0,nofile-<positive|unlimited>,nproc-<positive|unlimited> provider=<same> model=<same> endpoint=<same> adapter_build=loopex_llm_reqllm@0.0.0 executor_build=loopex_executor_local@0.0.0 executor_identity=<same> tool_identity=<same> recorded=<UTC-RFC3339-second>
 capture lane=linux-current candidate=<C> gate_sha256=<M1 digest> command=bash-p:scripts/check-m1-gate.sh elixir=1.20.3 otp=29.0.5 erts=<exact> seed=<0..999999> executed=<positive> verdict=CAPTURE exit=0 wall=<ASCII-token> os=linux arch=<independent-ASCII-token> limits=core-soft-0,core-hard-0,nofile-<positive|unlimited>,nproc-<positive|unlimited> provider=<same> model=<same> endpoint=<same> adapter_build=loopex_llm_reqllm@0.0.0 executor_build=loopex_executor_local@0.0.0 executor_identity=<same> tool_identity=<same> recorded=<UTC-RFC3339-second>
-m0 lane=floor candidate=<C> gate_sha256=<M0 digest> command=bash:scripts/check-m0-gate.sh elixir=1.17.0 otp=26.0 provider=<nonsecret> model=<nonsecret> endpoint=<nonsecret> verdict=GREEN exit=0
+m0 lane=floor candidate=<C> gate_sha256=<M0 digest> command=bash:scripts/check-m0-gate.sh elixir=1.18.5 otp=27.3.4 provider=<nonsecret> model=<nonsecret> endpoint=<nonsecret> verdict=GREEN exit=0
 m0 lane=current candidate=<C> gate_sha256=<M0 digest> command=bash:scripts/check-m0-gate.sh elixir=1.20.3 otp=29.0.5 provider=<nonsecret> model=<nonsecret> endpoint=<nonsecret> verdict=GREEN exit=0
 ```
 
@@ -1199,3 +1199,53 @@ This proposal records no acceptance and grants no waiver, closure or release.
 | 9 | `scripts/m1-exunit-runner.exs` | `53d8219bdee584a3849a85a1102e405520d5dd0dfbe21d259434bc9edfc5fcc0` |
 | 9 | `apps/loopex/test/m1_exunit_runner_test.exs` | `c36253cff3d74ddff1b330695edbc4bde0a4565c1412c67c1293b2fb7ca6129b` |
 | 9 | `scripts/check-m1-gate.sh` | `6c14c7ef012f3a9491974dfb9e851ef9377585f72c6804af3c06664c7bb1b14c` |
+
+<a id="amendment-10"></a>
+## Amendment 10 — Refresh the floor pair to Elixir 1.18.5 with OTP 27.3.4
+
+**Acceptance: OUTSTANDING.** Closed M1 adds gate generation 10 under
+`amendment-transaction-v2`. Its historical Acceptance, Closure and prior
+generation rows remain unchanged. The new row carries this gate's digest and
+leaves authority, evidence and candidate unset until exact-proposal acceptance.
+
+Accepted [ADR 0026](../adr/0026-development-floor-refresh.md#concept) chose
+the validation pairs explicitly: floor Elixir 1.18.5 with OTP 27.3.4 and
+current Elixir 1.20.3 with OTP 29.0.5. M0 settled the shared `.tool-versions`
+bytes first through its
+[generation 7](../developer/agent-context-map.md#disposition-m0-gate-generation-7-2026-09-13);
+M1 is the second holder in register order, M2 and M3 follow, and Open M4 then
+refreshes its own table directly. This proposal changes only floor literals in
+M1's own bound machinery: the evidence verifier's exact locked-pair
+declaration, the dependency-budget reader's bound floor version and its
+refusal text, the two corpora's floor fixtures and mutations, the six embedded
+digests in this holder's gate script, the six corresponding Bound Artifacts
+rows, and the floor pair named in this gate's command inventory and capture
+grammar above. The verifier's capture profiles, the reader's package rules,
+every selector, minimum, name, exclusion, real-provider path and exit
+predicate keep their meaning. No M1 outcome or scope changes and no lifecycle
+state reopens.
+
+Binding validation, bootstrap and every inherited gate that invokes them stop
+at this proposal only on the shared binding sequence still in flight; M2, M3
+and M4 remain explicitly pending and their old rows are not a global PASS.
+Binding-independent checks are proved directly: the two corpora pass on the
+current pair at seed 3107, formatting and script syntax pass, and the
+installed floor pair reports Elixir 1.18.5, OTP 27.3.4 and ERTS 15.2.7. A
+capture of this gate under the new floor pair, and the M0 re-proof it
+records, belong to the inherited-green proof after the final Open M4 refresh;
+the earlier captures on Elixir 1.17.0 with OTP 26.0 remain true for their
+revisions and satisfy no lane of the new matrix.
+
+Only explicit maintainer acceptance of the actual A revision authorizes R.
+Its immediate child completes generation 10 with exact A and adds one fresh
+acceptance disposition; R changes no bound artifact or gate byte. This
+proposal records no acceptance and grants no waiver, closure or release.
+
+| Generation | Artifact | Rebound SHA-256 |
+| --- | --- | --- |
+| 10 | `.tool-versions` | `fea095ecec784a4440b872ad5f53a8da2cb4e13e43b6f05add5cfd75bb352879` |
+| 10 | `scripts/m1-evidence-verifier.exs` | `e11f8e44d1402717bb151d878a0744778f55d3bd91f206420581801b7dbbb23d` |
+| 10 | `apps/loopex/lib/mix/tasks/loopex.deps_budget.ex` | `2c62019cde03e118a2b5ff23ba24a5ee50d8f118172ae4d71ce6bed2f7be1011` |
+| 10 | `apps/loopex/test/m1_gate_evidence_test.exs` | `3546e6601b74f54b2f8ea584e71aa65d0062156f07f21f2d291fc6af3bdb51be` |
+| 10 | `apps/loopex/test/deps_budget_test.exs` | `bc4d5544229c3b15414a8ad9ac8ce8e5daf2e29d35a98ab868af1741fd9b44d4` |
+| 10 | `scripts/check-m1-gate.sh` | `f15726fc6da8749c2108c7613f7bbd68ff21800595a3f4d603c3abb6a8af3e98` |

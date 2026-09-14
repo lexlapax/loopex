@@ -1,6 +1,8 @@
 name = "mechanical_worker"
 description = "Worker for narrow repeatable scans, inventories, extraction, mechanical transformations, fixture work, and test-log triage."
-# Inherit the parent model so this project does not pin account-specific aliases.
+# Efficient capability class. Inherit the parent model so this project does not
+# pin account-specific aliases; the caller selects a model meeting the class from
+# the context map's dated mapping before spawning, and may pass a lower effort.
 model_reasoning_effort = "medium"
 sandbox_mode = "workspace-write"
 developer_instructions = """

@@ -22,6 +22,26 @@ the exact document set its milestone must update.
 
 No package or compatibility-labelled surface is pending.
 
+Open the [M4 plan](docs/plans/M4.md#concept) as the one permitted planning
+lookahead on the integrated M3 acceptance checkpoint: move the draft triple
+into `docs/plans/`, bind a runner whose opening probe observes a policy
+`defer` denied as `interaction_unsupported`, and register `M4` as Open. No
+plan, ADR or product behavior is accepted by the opening.
+
+Add M4 outcome 7 and Proposed [ADR 0030](docs/adr/0030-observability-tracing-and-telemetry.md#concept):
+runtime-owned OTP trace sessions with identity-only capture by default and
+`:telemetry` boundary events, with `:telemetry` admitted as core's sole
+external dependency by an explicit maintainer vision change and a new
+`loopex_telemetry` edge application owning the only Loopex-attached handler.
+
+Narrow the Open [M3 plan](docs/plans/M3.md#concept) to project skills, three core
+repairs and reliable verification. Move durable interactions, artifact ranges
+and the floor refresh to the [M4 plan](docs/plans/M4.md#concept).
+Require Git-only acquisition, operator-only pre-run selection, hostile-pack
+authority invariance, early integrated proof and self-audit. Specify focused
+checkpoints and stable clause witnesses while preserving full inherited checks
+at contract moments. Align proposed ADRs and roadmap/index documentation.
+
 M3 closed with project skills under the accepted [M3 plan](docs/plans/M3.md#concept).
 Add pinned Git import, contained project discovery, retained provenance and
 immutable runtime snapshots. Keep installation separate from explicit session
@@ -58,8 +78,8 @@ qualification is recorded in its plan progress; closure is recorded at
 `d73a1030405ba5f55c5c7653c0a019f8b5c8bed7`. This entry claims no
 release or full inherited-gate result.
 
-Keep durable interactions, artifact ranges and the floor refresh in the
-[M4 draft](docs/archive/M4.md#concept). The reviewed M3 cadence uses focused
+Keep durable interactions, artifact transfers and the floor refresh in the
+[Open M4 plan](docs/plans/M4.md#concept). The reviewed M3 cadence uses focused
 implementation checks. The later [final validation override](docs/developer/agent-context-map.md#override-disposition-m3-final-inherited-gates-waiver-2026-09-13)
 required M3-only qualification on macOS and Linux, which passed at exact source
 `f45354572840636b473ad7e40e42355fdff4fc17`; M0–M2 gate reruns are waived,

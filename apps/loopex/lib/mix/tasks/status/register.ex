@@ -114,6 +114,13 @@ defmodule Loopex.Checks.Register do
     "M3" => [
       {"docs/adr/0025-resource-packs-and-skill-admission.md", "ADR 0025"},
       {"docs/adr/0027-provider-permit-retirement.md", "ADR 0027"}
+    ],
+    "M4" => [
+      {"docs/adr/0023-experimental-public-session-protocol.md", "ADR 0023"},
+      {"docs/adr/0024-durable-interaction-lifecycle-and-host-policy-authority.md", "ADR 0024"},
+      {"docs/adr/0026-development-floor-refresh.md", "ADR 0026"},
+      {"docs/adr/0028-bounded-artifact-retrieval.md", "ADR 0028"},
+      {"docs/adr/0030-observability-tracing-and-telemetry.md", "ADR 0030"}
     ]
   }
 
@@ -812,8 +819,9 @@ defmodule Loopex.Checks.Register do
     )
     |> Map.put(
       "Next transition",
-      "Turn the locked `#{delivery_name}` gate green and close it; then refresh and " <>
-        "independently review `#{lookahead_name}` on that closed base"
+      "Turn the locked `#{delivery_name}` gate green, move `#{delivery_name}` to In " <>
+        "progress and then In review with cleared independent review, and close it; " <>
+        "then refresh and independently review `#{lookahead_name}` on that closed base"
     )
   end
 

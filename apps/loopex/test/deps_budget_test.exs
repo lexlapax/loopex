@@ -898,8 +898,8 @@ defmodule Mix.Tasks.Loopex.DepsBudgetTest do
     end
 
     cases = [
-      {"transitive-floor", "excludes the bound 1.17.0 floor",
-       fn packages -> update_package(packages, "bridge", &Map.put(&1, :elixir, "~> 1.18")) end},
+      {"transitive-floor", "excludes the bound 1.18.5 floor",
+       fn packages -> update_package(packages, "bridge", &Map.put(&1, :elixir, "~> 1.19")) end},
       {"malformed-elixir", "Elixir requirement is malformed",
        fn packages -> update_package(packages, "bridge", &Map.put(&1, :elixir, "not a range")) end},
       {"duplicate-elixir", "duplicate \"elixir\" field",
