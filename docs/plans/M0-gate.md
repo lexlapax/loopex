@@ -9,11 +9,12 @@ Concept plan: `docs/plans/M0.md`. Technical depth: `docs/plans/M0-technical.md`.
 <a id="amendment-transaction-v1"></a>
 <a id="amendment-transaction-v2"></a>
 
-Amendments 1–5 are retained pre-v1 history. M0 is Closed; Amendment 6 proposes
-an additive gate generation under `amendment-transaction-v2`. Its acceptance
-belongs in M0's Gate Generations table, not in the immutable Acceptance or
-Closure rows. The v1 marker records the contract's marker requirement for an
-amended gate; it does not reopen M0 or replace v2 for this transaction.
+Amendments 1–5 are retained pre-v1 history. M0 is Closed; Amendment 6 added
+generation 6 and Amendment 7 proposes generation 7, each an additive gate
+generation under `amendment-transaction-v2`. Their acceptance belongs in M0's
+Gate Generations table, not in the immutable Acceptance or Closure rows. The
+v1 marker records the contract's marker requirement for an amended gate; it
+does not reopen M0 or replace v2 for these transactions.
 
 Every command form below was executed against a disposable umbrella scaffold
 before this gate was proposed. That check exists because a previous version of
@@ -45,7 +46,7 @@ against the file it names at every validation.
 | `60e371867bb4e142850fca4f3642025b41d7a804ba010d00c67c0f298d5f1f43` | `scripts/m0-child-env-check.exs` |
 | `cfad881eda27049b61b0e058817143d9dcd98b6c5fc5c42f486c124a2594ef92` | `apps/loopex/test/m0_child_env_check_test.exs` |
 | `b4d2de9ee3faad7e7f8a945161b12e528bdfb1420f1b43ec61e9a2061871204e` | `apps/loopex_llm_reqllm/test/m0_child_environment_conformance_test.exs` |
-| `fad47299b27a767785d2a6a776155038054f5457ee3ce0195a37ae667f7a9999` | `.tool-versions` |
+| `fea095ecec784a4440b872ad5f53a8da2cb4e13e43b6f05add5cfd75bb352879` | `.tool-versions` |
 | `ef67304cbf2e3be1f424eb6bad463a12a61538aaeee953f4bf8f16574759be9a` | `scripts/fixtures/hook-cases/guard-bash.stdin` |
 | `94538072921e9a56fb62f402766979ee7872df952228bd5ca8baaccaffe8729e` | `scripts/fixtures/hook-cases/guard-filesystem.stdin` |
 | `2611b0bdfdaefd9dec75a5afd6cf9325d8666ec360ce40a68b290df36add80db` | `scripts/fixtures/hook-cases/after-edit.stdin` |
@@ -163,20 +164,23 @@ fails, and a claim of both lanes without two recorded runs fails. The exact pair
 `.tool-versions` bytes bound above:
 
 ```text
-floor pair    Elixir 1.17.0 with OTP 26.0
+floor pair    Elixir 1.18.5 with OTP 27.3.4
 current pair  Elixir 1.20.3 with OTP 29.0.5
 ```
 
-Both pins are derived from accepted ADR 0002 rather than chosen: the floor is
-the lowest supported pair in the 1.17 family, and the compatibility table offers
-no patch selector, so the lowest patch of each is taken. The current pair is the
+Both pins are the explicit pairs accepted ADR 0026 chose, superseding ADR
+0002's derived lowest-patch rule: the floor is the pair that carries the
+standard-library JSON codec the M4 protocol needs, and the current pair is the
 newest supported release, which today is also what Homebrew ships. The floor
-lane predates what brew carries and runs through a version manager or CI; the
-gate requires both lanes recorded, not both run locally on every invocation.
+lane runs through a version manager or CI; the gate requires both lanes
+recorded, not both run locally on every invocation. Runs recorded under the
+earlier floor pair remain true for the revisions they name and satisfy no lane
+of this matrix.
 
-Changing a version changes those bytes and requires an amendment to ADR 0002,
-not a gate edit. A green run on one pair is not evidence for the other, and a
-green run on an unlisted pair satisfies neither lane.
+Changing a version changes those bytes and requires an accepted ADR and every
+holder's governed transaction, not a gate edit. A green run on one pair is not
+evidence for the other, and a green run on an unlisted pair satisfies neither
+lane.
 
 ## Evidence Classes
 
@@ -832,3 +836,65 @@ gates, with serial checks from clean checkouts. This proposal does not waive
 the failed M0 run, close or reopen a milestone, accept a product ADR, or authorize
 integration, release or substitution of provider evidence. Later source
 qualification must name the source where it actually runs.
+
+<a id="amendment-7"></a>
+## Amendment 7 — refresh the floor pair to Elixir 1.18.5 with OTP 27.3.4
+
+**Acceptance: OUTSTANDING.** Closed M0 adds gate generation 7 under
+`amendment-transaction-v2`. Its historical Acceptance, Closure and generation-6
+rows remain unchanged. The new row carries this gate's digest and leaves
+authority, evidence and candidate unset until exact-proposal acceptance.
+
+### Reason and exact change
+
+Accepted [ADR 0026](../adr/0026-development-floor-refresh.md#concept) replaces
+ADR 0002's derived lowest-patch rule with two explicitly chosen validation
+pairs: floor Elixir 1.18.5 with OTP 27.3.4 and current Elixir 1.20.3 with OTP
+29.0.5. This amendment changes exactly the floor lines and the explanatory
+header of `.tool-versions`; the current pair is unchanged. The Toolchain Matrix
+section above now names the accepted pair and the ADR it comes from. No
+runner, selector, minimum, fixture, hook check, retirement inventory,
+provider lane or shadowed-bootstrap invocation changes.
+
+`.tool-versions` is bound by Closed M0, M1, M2 and M3 and by Open M4. Under
+the M4 technical plan's phase A, M0 is the first holder; M1, M2 and M3 follow
+in register order, each through its own additive generation, and Open M4 then
+refreshes its own table directly. Until each later holder completes its own
+transaction, its Bound Artifacts row still names the previous pins; that
+pending row is a stale binding the sequence is on its way to fixing, not a
+pass and not a defect of this proposal.
+
+### Evidence at this proposal
+
+Binding validation, bootstrap and every inherited gate that invokes them stop
+at this proposal only on the shared binding sequence it opens; that is the
+prescribed stale-binding result, not a green. Binding-independent checks are
+proved directly: the pins parse as exactly two pairs, the installed floor pair
+reports Elixir 1.18.5, OTP 27.3.4 and ERTS 15.2.7 and decodes JSON with the
+standard library, and formatting, commit-message and hygiene checks pass.
+`mix loopex.matrix` correctly refuses until a run under the new floor pair is
+recorded in `docs/evidence/M0-toolchain-matrix.md`; that record comes from an
+actual M0 gate run under the new pair, which belongs to the inherited-green
+proof after the final Open M4 refresh, on both pairs. The runs recorded under
+Elixir 1.17.0 with OTP 26.0 remain true for their revisions and satisfy no
+lane of this matrix.
+
+### Transaction and re-verification
+
+The generation's amended bound artifact is:
+
+| SHA-256 | Path |
+| --- | --- |
+| `fea095ecec784a4440b872ad5f53a8da2cb4e13e43b6f05add5cfd75bb352879` | `.tool-versions` |
+
+Proposal A atomically carries this gate, the changed pins and the pending
+generation-7 row in M0's plan. That row names this gate's digest but no
+candidate, authority or disposition. It follows the six historical amendments
+without rewriting their text. Only explicit maintainer acceptance authorizes
+R. Its only changes complete generation 7 with exact A and add one new
+amendment-specific disposition to an existing durable document. At R,
+holder-scoped artifact validation names every still-pending holder and proves
+this holder's binding without claiming a global status, bootstrap or inherited
+pass; those become eligible for green only after the final Open M4 refresh.
+This proposal reopens no milestone, accepts no plan or product ADR, waives no
+evidence, and authorizes no integration, tag or release.
