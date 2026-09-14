@@ -72,6 +72,9 @@ pairing, link, review, code-documentation, and enforcement contracts.
 | 0028 — bounded artifact retrieval | [Decision](adr/0028-bounded-artifact-retrieval.md#concept) | [Technical depth](adr/0028-bounded-artifact-retrieval-technical.md#technical-depth) |
 | 0029 — bounded provider failure diagnostics | [Decision](adr/0029-bounded-provider-failure-diagnostics.md#concept) | [Technical depth](adr/0029-bounded-provider-failure-diagnostics-technical.md#technical-depth) |
 | 0030 — observability: tracing and telemetry | [Decision](adr/0030-observability-tracing-and-telemetry.md#concept) | [Technical depth](adr/0030-observability-tracing-and-telemetry-technical.md#technical-depth) |
+| 0031 — daemon-grade store selection and migration | [Decision](adr/0031-daemon-grade-store-selection-and-migration.md#concept) | [Technical depth](adr/0031-daemon-grade-store-selection-and-migration-technical.md#technical-depth) |
+| 0032 — daemon attachment residency and replay | [Decision](adr/0032-daemon-attachment-residency-and-replay.md#concept) | [Technical depth](adr/0032-daemon-attachment-residency-and-replay-technical.md#technical-depth) |
+| 0033 — collaboration: controller lease and takeover | [Decision](adr/0033-collaboration-controller-lease-and-takeover.md#concept) | [Technical depth](adr/0033-collaboration-controller-lease-and-takeover-technical.md#technical-depth) |
 
 An ADR pair is one decision. Its status and governance record live in the
 Concept file and bind both files when accepted.
@@ -83,7 +86,8 @@ whose path or explicit fragment does not resolve.
 ## Planning and Development
 
 - [M3 foundations](plans/M3.md#concept) and [technical plan](plans/M3-technical.md#technical-depth) — project skills and core repairs; Closed with retained evidence in the plan.
-- [M4 headless external consumption](plans/M4.md#concept) and [technical plan](plans/M4-technical.md#technical-depth) — durable interactions, artifact transfers, floor refresh and protocol/TypeScript workflow over M3; Open planning lookahead with a red gate.
+- [M4 headless external consumption](plans/M4.md#concept) and [technical plan](plans/M4-technical.md#technical-depth) — durable interactions, artifact transfers, floor refresh and protocol/TypeScript workflow over M3; Accepted, implementation on its milestone branch with a red gate.
+- [M5 durable service](plans/M5.md#concept) and [technical plan](plans/M5-technical.md#technical-depth) — daemon-owned session lifetime, Unix-domain-socket transport, controller lease with observers and takeover, replay and residency, and a daemon-grade store over M4; Open planning lookahead with a red gate.
 
 - [Development contract](../AGENTS.md) — canonical tool-neutral authority,
   autonomy, documentation, milestone, and enforcement rules.

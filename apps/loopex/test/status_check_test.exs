@@ -1420,6 +1420,64 @@ defmodule Loopex.StatusCheckTest do
     )
   end
 
+  test "M5 names its store residency and collaboration decisions and cannot outrun any" do
+    adrs = [
+      {"docs/adr/0031-daemon-grade-store-selection-and-migration.md", "ADR 0031"},
+      {"docs/adr/0032-daemon-attachment-residency-and-replay.md", "ADR 0032"},
+      {"docs/adr/0033-collaboration-controller-lease-and-takeover.md", "ADR 0033"}
+    ]
+
+    accepted = Map.new(adrs, fn {path, _name} -> {path, "Accepted"} end)
+    proposed = Map.new(adrs, fn {path, _name} -> {path, "Proposed"} end)
+    open = Register.expected_capsule("Open", "M5", proposed)
+
+    assert open["Next maintainer decision"] == "Disposition ADR 0031, ADR 0032, and ADR 0033"
+    assert open["Next transition"] =~ "After the prerequisites are accepted"
+
+    lookahead = Register.expected_capsule({"M4", "Accepted"}, {"M5", "Open"}, m4_and_m5(proposed))
+
+    assert lookahead["Blockers"] =~ "`M5` additionally waits on ADR 0031, ADR 0032, and ADR 0033"
+
+    assert lookahead["Next maintainer decision"] =~
+             "cannot be accepted before `M4` closes; `M5` also waits on"
+
+    for {path, name} <- adrs do
+      outstanding = Map.put(accepted, path, "Proposed")
+      open = Register.expected_capsule("Open", "M5", outstanding)
+      assert open["Blockers"] =~ name
+      assert open["Next maintainer decision"] == "Disposition #{name}"
+
+      for state <- ["Accepted", "In progress", "In review", "Closed"] do
+        assert_raise Invalid, ~r/`M5` cannot move to #{state} before #{name} is accepted/, fn ->
+          Register.expected_capsule(state, "M5", outstanding)
+        end
+
+        assert is_map(Register.expected_capsule(state, "M5", accepted))
+      end
+
+      assert_raise Invalid, ~r/M5` names #{name} as a prerequisite but/, fn ->
+        Register.expected_capsule("Open", "M5", Map.delete(accepted, path))
+      end
+    end
+
+    clear = Register.expected_capsule({"M4", "Accepted"}, {"M5", "Open"}, m4_and_m5(accepted))
+    refute clear["Blockers"] =~ "ADR"
+    refute clear["Next maintainer decision"] =~ "ADR"
+  end
+
+  defp m4_and_m5(m5_statuses) do
+    Map.merge(
+      %{
+        "docs/adr/0023-experimental-public-session-protocol.md" => "Accepted",
+        "docs/adr/0024-durable-interaction-lifecycle-and-host-policy-authority.md" => "Accepted",
+        "docs/adr/0026-development-floor-refresh.md" => "Accepted",
+        "docs/adr/0028-bounded-artifact-retrieval.md" => "Accepted",
+        "docs/adr/0030-observability-tracing-and-telemetry.md" => "Accepted"
+      },
+      m5_statuses
+    )
+  end
+
   test "a milestone state with no derived capsule fails closed" do
     assert "In review" in Register.delivery_states()
 

@@ -25,7 +25,7 @@ while the session lives; a session "brain" can coordinate local or remote
 <!-- loopex:readme-status:start -->
 ## Where Things Stand
 
-**Revision status:** Closed milestone product baseline; active milestone `M4` is accepted; no next candidate is recorded.
+**Revision status:** Closed milestone product baseline; active milestone `M4` is accepted; next candidate `M5` is open.
 
 [Canonical milestone status and plan records](docs/plans/)
 <!-- loopex:readme-status:end -->
@@ -100,6 +100,15 @@ explicit closure and separate release/tag authority. See
 the [M4 plan](docs/plans/M4.md#concept) for the accepted scope and its
 workstreams, and the [canonical register](docs/plans/README.md) for its
 current status.
+
+M5 is the Open planning lookahead on branch `m5`: a local daemon that owns
+session lifetime for a state root, a Unix-domain-socket transport carrying
+the same experimental protocol, one controller with observers and crash
+takeover, race-free replay with residency limits, and a daemon-grade store,
+toward a source-only `0.2.0` release. Its plan pair and gate are not accepted
+and no M5 implementation exists; its opening runner proves that a second
+process cannot attach to a live session today. See the
+[M5 plan](docs/plans/M5.md#concept) for the candidate scope.
 
 The repaired reference local executor requires `/bin/bash` for its internal
 supervision on Darwin and Linux; raw commands still use `/bin/sh`. See the
