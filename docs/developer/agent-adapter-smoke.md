@@ -107,29 +107,39 @@ a false pass.
 ### Capability routing
 
 The accepted shared policy uses provider-neutral classes. The dated documented
-recommendation was:
+recommendation, rebuilt on 2026-09-14 after Claude Fable 5.1 and GPT-6 Astra
+were released, is:
 
 | Class | Codex mapping | Claude Code mapping | Typical work |
 | --- | --- | --- | --- |
-| Efficient | Luna, medium effort | Haiku, medium effort | Objective, repeatable work |
-| Balanced | Terra, high effort | Sonnet, high effort | Bounded implementation and integration |
-| Deep | Sol, high effort | Opus, high effort | Architecture, durability, security, gates, rejoin decisions, and independent review |
+| Efficient | `gpt-5.6-luna`, low or medium effort | `haiku` (Claude Haiku 4.5), low or medium effort | Objective, repeatable work |
+| Balanced | `gpt-5.6-terra`, medium or high effort | `sonnet` (Claude Sonnet 5), medium or high effort | Bounded implementation and integration |
+| Deep | `gpt-5.6-sol`, high effort | `opus` (Claude Opus 5), high effort | Architecture, durability, security, gates, rejoin decisions, and independent review |
+| Deepest, separately verified | `gpt-6-astra`, high effort | `fable` (Claude Fable 5.1), high effort | Exact-SHA acceptance or closure review, gate design, and decisions with conflicting evidence |
 
 The caller selects a supported mapping before invocation and verifies the
 effective model and effort during or after invocation when the client exposes
 them. A stronger profile may perform lower-class work. A role name,
 description, or static check is routing metadata, not capability proof. Model
 selection never changes authority, scope, permissions, acceptance, or the
-evidence required by a gate.
+evidence required by a gate. The adaptive rules and the full reference list
+live with the mapping in the
+[context map](agent-context-map.md); the 2026-08-15 mapping it supersedes is
+retained there.
 
-Primary references checked on 2026-08-15 were
-[OpenAI model guidance](https://developers.openai.com/api/docs/models) and
-[Claude Code model configuration](https://code.claude.com/docs/en/model-config).
-Installed clients reported `codex-cli 0.147.0` and Claude Code `2.1.233`.
+Installed clients on 2026-09-14 reported `codex-cli 0.147.0` and Claude Code
+`2.1.270`. Claude Code 2.1.270 accepts the `fable`, `opus`, `sonnet` and
+`haiku` aliases and effort levels `low` through `max`. The installed Codex
+predates GPT-6 Astra, which needs codex-cli 0.153.0 or later, so the deepest
+Codex mapping is unavailable evidence on that client until it is upgraded.
+The 2026-08-15 check ran against `codex-cli 0.147.0` and Claude Code
+`2.1.233`.
 
 ### Static client evidence
 
-`scripts/check-agent-bootstrap.py` passed at the exact source. It proves:
+`scripts/check-agent-bootstrap.sh`, which delegates its structural half to
+`mix loopex.agent_bootstrap`, passed at the exact source and again on
+2026-09-14 after the rebuild. It proves:
 
 - every Codex role layer contains only the approved role keys and carries no
   project-local model or provider selector;

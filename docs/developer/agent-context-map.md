@@ -157,29 +157,73 @@ transaction is needed for the approved assertion change.
   and retain version-specific facts here. Material changes
   to development behavior require an option-and-implication packet and
   maintainer approval before adapter edits.
-- Maintainer decision (2026-08-15): development work uses the model-neutral
+- Maintainer decision (2026-09-14): development work keeps the model-neutral
   efficient, balanced, and deep capability classes in the
   [development charter](development-charter.md#concept-capability-follows-consequence)
   and its [technical routing](development-charter-technical.md#technical-capability-follows-consequence).
-  Current recommended mappings are Codex Luna/medium for efficient work,
-  Terra/high for balanced work, and Sol/high for deep work; Claude Haiku/medium,
-  Sonnet/high, and Opus/high respectively. A separately verified deeper setting
-  is reserved for unusually demanding work whose evidence justifies the extra
-  cost. These are
-  dated adapter recommendations, not project authority or repository model
-  pins. Profiles inherit the caller's model; the caller selects and verifies the
-  current mapping before invocation. Class labels and structural checks are
-  routing metadata, not capability proof. Use a separate direct invocation when
+  After Claude Fable 5.1 and GPT-6 Astra were released, the maintainer
+  directed that the client model-use rules in `.claude/` and `.codex/` be
+  rebuilt on current vendor documentation. The repository still pins no
+  model in either adapter and the roles still inherit the caller's model, so
+  the rebuild is this dated mapping, the role effort settings, and the
+  [adapter smoke record](agent-adapter-smoke.md). It supersedes the
+  2026-08-15 mapping retained below it. Current recommended mappings,
+  checked against primary vendor documentation on 2026-09-14:
+
+  | Class | Codex | Claude Code | Effort |
+  | --- | --- | --- | --- |
+  | Efficient | `gpt-5.6-luna` | `haiku` (Claude Haiku 4.5) | low for scans, extraction and log triage; medium when completeness needs judgment |
+  | Balanced | `gpt-5.6-terra` | `sonnet` (Claude Sonnet 5) | medium by default; high for multi-boundary integration or debugging |
+  | Deep | `gpt-5.6-sol` | `opus` (Claude Opus 5) | high; xhigh for long-running agentic implementation or a rejoin audit |
+  | Deepest, separately verified | `gpt-6-astra` | `fable` (Claude Fable 5.1) | high; max only where correctness outweighs cost, such as exact-SHA acceptance or closure review, gate design, or an ADR decision with conflicting evidence |
+
+  The adaptive rules that go with the table: effort is the first lever and
+  model the second, so raise effort within the current class before
+  escalating the class; escalate on conflicting evidence, an ambiguous
+  boundary, or repeated focused failure, and return settled follow-through to
+  the efficient class; delegated subagents run at low effort unless the
+  delegation names a class that requires more; a deep or deepest parent never
+  implicitly promotes a child, so in Claude Code the caller passes the alias
+  per delegation and in Codex names the role or passes the spawn override;
+  fan-out uses a lead of a higher class over workers of a lower class only
+  when there is bulk to hand off; and both vendors state that the deepest
+  models at low effort often match a smaller model at high effort, so a
+  measured comparison may replace an escalation. Availability is checked,
+  never assumed: Claude Fable 5.1 needs Claude Code 2.1.257 or later, appears
+  in the model picker only when the server reports it for the organization,
+  and may bill usage credits with a consent prompt; GPT-6 Astra needs
+  codex-cli 0.153.0 or later, so the 0.147.0 client installed on 2026-09-14
+  cannot select it and Astra is unavailable evidence there until the client
+  is upgraded; Claude Mythos 5.1 is invitation-only and belongs to no mapping;
+  the built-in Claude Code Explore agent is capped at Opus by the client. The
+  mapping is a dated adapter recommendation, not project authority or a
+  repository model pin. Class labels and structural checks are routing
+  metadata, not capability proof. Use a separate direct invocation when
   named-role delegation is unavailable. A stronger profile may perform
   lower-class work, while missing required deep capability or effective
   read-only review is unavailable evidence. Task-shaped smoke evidence records
   the effective model and effort when observable. Primary references checked
-  for this mapping are
-  [OpenAI's model guidance](https://developers.openai.com/api/docs/models) and
-  [Claude Code model configuration](https://code.claude.com/docs/en/model-config).
+  for this mapping are the
+  [Claude models overview](https://platform.claude.com/docs/en/about-claude/models/overview),
+  [choosing a model](https://platform.claude.com/docs/en/about-claude/models/choosing-a-model),
+  [effort guidance](https://platform.claude.com/docs/en/build-with-claude/effort),
+  [Claude Code subagents](https://code.claude.com/docs/en/sub-agents) and
+  [model configuration](https://code.claude.com/docs/en/model-config),
+  [OpenAI's model index](https://developers.openai.com/api/docs/models), the
+  [GPT-6 Astra model card](https://developers.openai.com/api/docs/models/gpt-6-astra),
+  the [reasoning guide](https://developers.openai.com/api/docs/guides/reasoning),
+  and the [Codex models](https://developers.openai.com/codex/models) and
+  [subagents](https://developers.openai.com/codex/subagents) pages.
   Recheck primary documentation, installed catalogs, representative task
   behavior, and smoke evidence when a client version, model family, catalog,
   profile, or relevant adapter byte changes.
+- Maintainer decision (2026-08-15), superseded by the 2026-09-14 mapping
+  above: the same three classes mapped to Codex Luna/medium, Terra/high and
+  Sol/high and to Claude Haiku/medium, Sonnet/high and Opus/high, with a
+  separately verified deeper setting reserved for unusually demanding work.
+  Its references were
+  [OpenAI's model guidance](https://developers.openai.com/api/docs/models) and
+  [Claude Code model configuration](https://code.claude.com/docs/en/model-config).
 - Current Codex compatibility: codex-cli 0.147.0 proves scoped-trust project
   instruction and direct skill discovery. In the current exact-source
   non-interactive smoke, named project-role delegation could not bind a child;

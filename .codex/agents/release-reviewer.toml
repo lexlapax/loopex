@@ -1,6 +1,10 @@
 name = "release_reviewer"
 description = "Read-only independent milestone reviewer for correctness, security, plan adherence, test honesty, rollback, and exact-SHA evidence."
-# Inherit the parent model so this project does not pin account-specific aliases.
+# Deep capability class, deepest for an exact-SHA acceptance or closure review.
+# Inherit the parent model so this project does not pin account-specific aliases;
+# the caller selects a model meeting the class from the context map's dated
+# mapping before spawning, and may pass a deeper effort only when the task
+# evidence warrants it.
 model_reasoning_effort = "high"
 sandbox_mode = "read-only"
 developer_instructions = """
