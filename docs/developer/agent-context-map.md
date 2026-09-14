@@ -3307,3 +3307,34 @@ source attribution; neither becomes a new pass at closure. The maintainer's
 on this milestone branch. The In progress and In review transitions and this
 closure transition receive separate exact-commit reviews. This record grants
 no tag, release, or publication.
+
+<a id="disposition-adr-0023-acceptance-2026-09-13"></a>
+### ADR 0023 acceptance — 2026-09-13
+
+On 2026-09-13, after the independent read-only review of pushed `m4` SHA
+`3503992cbc0de02ef98ba261e7a19fdb7123e220` reported no blocking or high
+finding for that revision's delta and every earlier finding repaired, the
+maintainer directed the reviewer, in the review conversation, to record the
+acceptance dispositions for all five M4 prerequisite ADRs (0023, 0024, 0026,
+0028 and 0030) so that the maintainer can then accept M4.
+
+This transcribes that direction as the maintainer's acceptance of the exact
+Proposed [ADR 0023 Concept](../adr/0023-experimental-public-session-protocol.md#concept)
+and [Technical depth](../adr/0023-experimental-public-session-protocol-technical.md#technical-depth)
+pair at `3503992cbc0de02ef98ba261e7a19fdb7123e220`, with Concept SHA-256
+`5b1340e0baafdf834e04590b06825ee3cc17e27c32349945b0495e0017e4d6f7`
+and Technical SHA-256
+`3332ca23318353a9068f84a3ff40411bd612bda7a142ed26ac4588c22e7b577f`.
+The maintainer is the accepting authority; the reviewer who examined that
+candidate transcribed the record and accepted nothing. The earlier
+[pre-acceptance contract choices](#disposition-m4-preacceptance-contract-choices-2026-09-13)
+guided the proposal text; this record supplies the acceptance itself. It
+accepts the connection state table, the sixteen-method experimental
+generation, its bound schema and vector bytes, and the negotiated
+unavailability of session listing and project-trust methods as proposed.
+
+This administrative transition changes only the Concept status and Acceptance
+row, this disposition, the derived ADR index status and the derived plan
+register capsule. It accepts no other ADR, does not accept the M4 plan pair or
+gate, authorizes no product implementation, and grants no merge, tag or
+release.

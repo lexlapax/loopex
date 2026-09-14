@@ -5,7 +5,7 @@
 
 Technical depth: [Protocol mechanics](0023-experimental-public-session-protocol-technical.md#technical-depth).
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-08-24
 - **Decision owner:** Maintainer
 - **Prerequisite for:** `M4` acceptance
@@ -14,7 +14,7 @@ Technical depth: [Protocol mechanics](0023-experimental-public-session-protocol-
 
 | Decision | Authority | Authority evidence | Bound bytes |
 | --- | --- | --- | --- |
-| Acceptance | — | — | — |
+| Acceptance | Maintainer | [disposition](../developer/agent-context-map.md#disposition-adr-0023-acceptance-2026-09-13) | candidate `3503992cbc0de02ef98ba261e7a19fdb7123e220`; concept `sha256:5b1340e0baafdf834e04590b06825ee3cc17e27c32349945b0495e0017e4d6f7`; technical `sha256:3332ca23318353a9068f84a3ff40411bd612bda7a142ed26ac4588c22e7b577f` |
 
 <a id="concept-adr-0023-context"></a>
 ## Context
