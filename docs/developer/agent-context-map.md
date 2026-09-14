@@ -3907,3 +3907,46 @@ new floor is unobserved. This override adds no product change, converts no
 red into a pass, reopens no lifecycle state, and grants no merge to `main`,
 tag, publication or release. It is one standalone commit and receives
 independent exact-SHA review before integration relies on it.
+
+<a id="override-disposition-m4-m0-reproof-deferred-to-implementation-2026-09-14"></a>
+### M0 re-proof under the refreshed floor deferred to M4 implementation — 2026-09-14
+
+With the M1 and M2 re-proofs waived, the M0 gate under both pairs and its
+floor-pair matrix record were the last keyed evidence the
+[inherited-evidence deferral](#override-disposition-m4-inherited-evidence-before-integration-2026-09-14)
+still required before the governance-only M4 acceptance checkpoint
+integrates. Each green M0 run now carries the full bootstrap aggregate with
+its history walk, so the two runs and the record cost about an hour and a
+half more. Told that, the maintainer explicitly directed:
+
+> ok, do you need m0 runs? we can do that as part of m4 implementation as
+> baseline. this is plan mode
+
+Under the [explicit maintainer override](../../AGENTS.md#maintainer-override),
+this replaces the remaining M0 requirement of that deferral for this
+checkpoint's integration: the M0 gate green under both locked pairs at a
+pushed revision, and the run under the floor pair Elixir 1.18.5 with OTP
+27.3.4 recorded in [the matrix evidence](../evidence/M0-toolchain-matrix.md),
+are deferred to M4 implementation as a baseline task, not waived and not
+passed. Until they are recorded, `mix loopex.matrix` stays red for the
+missing floor record, the M0 gate is red at outcome 3 under every
+toolchain, and no status text may present either as green. The checkpoint
+carries no product bytes, so this defers proof of an unchanged closed gate
+rather than of anything the checkpoint adds. A diagnostic only, not
+evidence: a floor-pair M0 run at `4048ddc9dd603365f6cc2738a0316a3f40f4a4d5`
+with provisional matrix rows present cleared outcomes 1 through 7,
+including the real-provider call, before it was stopped inside outcome 8's
+aggregate on this instruction.
+
+What integration still relies on, unchanged: the bootstrap aggregate green
+at a pushed revision of this lineage, M4 inspection and preflight at the
+tip, and the reviews the earlier dispositions name. Successor obligation:
+the first M4 implementation baseline records the M0 runs under both pairs
+with the floor-pair row in the matrix evidence and re-proves the M0 gate at
+that revision, alongside the M1 and M2 runner repair the
+[waiver](#override-disposition-m4-m1-m2-inherited-reproof-waiver-2026-09-14)
+records; M4 closure cannot claim inherited green before both land. This
+override adds no product change, converts no red into a pass, reopens no
+lifecycle state, and grants no merge to `main`, tag, publication or release.
+It is one standalone commit and receives independent exact-SHA review before
+integration relies on it.
