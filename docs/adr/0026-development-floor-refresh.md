@@ -20,10 +20,11 @@ patched floor honestly.
 Supersede ADR 0002's pin-selection rule for development validation with explicit
 chosen pairs: floor Elixir 1.18.5 / OTP 27.3.4, current Elixir 1.20.3 / OTP
 29.0.5. Preserve separate floor/current lanes and the core stdlib budget. Settle
-this decision and every affected Closed holder before M4 acceptance. M0/M1/M2
-are known holders; include M3 if its final lock binds changed artifacts. Do not
-promise exactly three transactions. No public runtime-support or moving-latest
-policy is added. Current pins remain unchanged by this proposal.
+this decision and every affected Closed holder before M4 acceptance. Closed
+M0, M1, M2 and M3 and Open M4 all bind `.tool-versions`. Settle each Closed
+holder through its own governed transaction in register order, then refresh
+Open M4's binding directly before acceptance. No public runtime-support or
+moving-latest policy is added. Current pins remain unchanged by this proposal.
 
 Technical depth: [Contract and evidence](0026-development-floor-refresh-technical.md#technical-adr-0026-decision).
 

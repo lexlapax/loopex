@@ -11,15 +11,15 @@ Concept: [Context and decision](0026-development-floor-refresh.md#concept-adr-00
 ### Transaction order and evidence
 
 Retain original ADR 0002 and `.tool-versions` until this proposal is accepted.
-Derive the exact holder inventory on integrated Closed M3. Settle M0, M1 and M2
-and any M3 holder in order, each as atomic v2 proposal A followed immediately by
-explicitly accepted rebind R. Each holder's proposal includes its changed bound
-artifacts and generation row together. Account for overlapping floor, app and
-version inventory edits before acceptance to avoid locking known future changes.
-No M4 holder exists yet. Moving the floor later reduces M3 prerequisites but
-may add a Closed M3 transaction; retain that cost explicitly. Unrelated fixes
-need their own scope and evidence rather than automatic inclusion in a floor
-proposal.
+On the integrated Closed M3 base, `.tool-versions` is bound by Closed M0, M1,
+M2 and M3 gates and by the Open M4 gate. Settle Closed M0–M3 in register order,
+each as atomic v2 proposal A followed immediately by explicitly accepted
+rebind R. Each holder's proposal includes its changed bound artifact and gate
+generation row together. Then refresh Open M4's bound-artifact table directly
+on the settled base, re-prove the inherited gates green and M4's distinct red,
+and submit the M4 candidate for independent review. App and version inventory
+edits remain in M4's separately governed later phases. Unrelated fixes need
+their own scope and evidence rather than automatic inclusion in a floor proposal.
 
 At each revision retain the prescribed stale-binding and binding-independent
 evidence, and at completion prove every inherited gate green. Run both pairs
