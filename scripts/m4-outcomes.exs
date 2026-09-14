@@ -159,7 +159,8 @@
   real: %{
     path: "apps/loopex_app_server/test/external_workflow_real_test.exs",
     names: [
-      "an attended real provider task completes the TypeScript skill answer reevaluation grant tool artifact and restart workflow"
+      "an attended real provider task completes the TypeScript skill answer reevaluation grant tool artifact and restart workflow",
+      "the attended workflow runs the foreground server and TypeScript consumer from the extracted source archive by following the operator guide with supplied inputs"
     ]
   }
 }

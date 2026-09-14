@@ -17,7 +17,7 @@ M4 opened as the one permitted planning lookahead after M3's accepted
 governance checkpoint integrated to `main`. Its opening base was
 `4bba8b74f5e260dc2a364fcbd3554c7badd1a09c`, retained as an ancestor without
 rebasing or squashing bound history. M3 subsequently Closed on `main` at
-`72c0a30`, and the M4 branch absorbed that Closed product base in `faf739b`.
+`72c0a30`, and the M4 branch absorbed that Closed product base in `e1b37b1`.
 The M0–M2 Closed aggregate was proved green once at the opening candidate.
 Before the M3 refresh, under the reviewed
 [planning-revision aggregate override](../developer/agent-context-map.md#override-disposition-m4-planning-aggregate-2026-09-11)
@@ -196,8 +196,8 @@ Concept: [Outcomes](M4.md#concept-plan-outcomes).
 | 2 | Identical command corpus through facade/wire; independent variation of request and command identity; snapshot-before-live; committed admission before correlated delivery; command replay after disconnect |
 | 3 | Durable interaction request/answer/policy/intent cuts, fixed timestamps through commit_unknown, expiry/abort/restart races, the exact successive-round bound and policy identity; catalog and selected content identity preserved; stale/missing trust withholds content; manual-only restriction; interaction answer admission separately observed from policy re-evaluation, grant/intent commit and tool receipt; every immutable launch input proved unreplaceable from the wire |
 | 4 | ADR 0028 one verification per transfer and bounded allocation proved at ArtifactStore and facade with object and chunk digests distinguished; wrong-session use, object/use swap and corruption outside the requested window refused at open; concurrent-transfer and connection-work exhaustion, lifetime expiry, cancellation and descriptor release; oversized/fragmented/multiple frames; malformed UTF-8/duplicate keys/depth; slow reader; bounded queue; late progress; stdout contamination; actual process-tree cleanup |
-| 5 | From a fresh extraction of the exact source candidate, an operator follows the documented prerequisites and commands, supplies their own workspace, provider and policy inputs, and launches the foreground app-server and TypeScript consumer; the consumer drives skill, interaction answer, policy re-evaluation, committed grant/intent, tool and artifact with real Store and executor, embedding no identities; real-provider task separately attended; abrupt kill and fresh-process resume; stdin EOF performs orderly shutdown with no cancellation and a still-pending interaction; `session.abort` is the separate deliberate-cancellation case |
-| 6 | Elixir, Python and TypeScript clients execute the same positive/negative vectors without importing the server codec; pinned interpreter versions verified before the lane, absence or mismatch reported as unavailable evidence; exact source archive, commit, VERSION, lockfile, schema/client versions and toolchain/platform identities recorded in retained source-release evidence and the gate report as applicable |
+| 5 | From a fresh extraction of the exact source candidate, an operator follows the documented prerequisites and commands, supplies their own workspace, provider and policy inputs, and launches the foreground app-server and TypeScript consumer; the attended real-provider selector itself runs from the extracted tree and drives skill, interaction answer, policy re-evaluation, committed grant/intent, tool and artifact with real Store and executor, embedding no identities; abrupt kill and fresh-process resume; stdin EOF performs orderly shutdown with no cancellation and a still-pending interaction; `session.abort` is the separate deliberate-cancellation case |
+| 6 | Elixir, Python and TypeScript clients execute the same positive/negative vectors without importing the server codec; pinned interpreter versions verified before the lane, absence or mismatch reported as unavailable evidence; the retained full-gate report records the exact candidate commit and tree, archive and extracted-build SHA-256, `VERSION`, lockfile SHA-256, schema/client versions and toolchain/platform identities, and the support verifier rejects missing, reordered or malformed fields |
 | 7 | With a real runtime and Store: a session traces only allowed modules and owned processes and leaves a second VM tracer unaffected; each level reports its documented fields; the `arguments` level redacts credential references, model content, tool arguments and artifact bytes to typed placeholders; the exact entry, rate and queue limits drop with a counted entry and never block a coordinator; no session command, client content, model output, project resource or app-server request can start, change or stop a session; stopping releases every trace flag; an OTP release without trace sessions reports unavailability; every callback and transaction cut in ADR 0030's emission inventory emits start/stop or exception with duration and only documented metadata; a crashing handler is isolated; a slow or blocked forwarding sink in `loopex_telemetry` never delays a coordinator and drops with a counted entry; enabled-trace and no-handler overheads are measured and retained |
 
 The opening runner binds one real behavioral red for outcome 3: through a
@@ -296,22 +296,26 @@ runtime cannot execute it, settle the validation-toolchain decision before
 acceptance rather than download a compiler during a gate.
 
 At the separately approved version transition set source VERSION/application
-versions to 0.1.0. Build the server and provider companion together and run
-outside the checkout. Stage a tar source archive from the exact reviewed
-product candidate with `git archive`; retain its SHA-256, candidate commit and
-tree, `VERSION`, `mix.lock` digest, toolchain and platform. Extract it into a
-fresh directory and run the operator-guide setup and workflow there with
-operator-supplied inputs. The source archive contains source and documentation,
-not credentials, installed data, a binary, an installer, or a service image.
-The gate proves this staged
-source candidate before closure; it does not require a tag that cannot yet
-exist. After independent exact-SHA closure review, explicit closure and
-release/tag authority, and integration to `main`, create one annotated
-`v0.1.0` tag on that integrated closure commit. Generate the release source
-archive from the tagged commit and retain its separate SHA-256, commit and tree;
-verify the tag, release archive and `VERSION` identify that commit. The earlier
-candidate archive smoke remains bound to its own exact SHA and is not relabeled
-as a test of the later governance-only closure commit. Do not move the tag or
+versions to 0.1.0. The full gate stages a tar source archive from its exact
+committed candidate with `git archive`, extracts it outside the checkout, and
+compiles that extracted source. It runs the attended real-provider selector
+from the extracted tree, using the operator guide to launch the server and
+TypeScript consumer with operator-supplied inputs. The retained full-gate
+report records the candidate commit and tree, archive and extracted-build
+SHA-256, `VERSION`,
+`mix.lock` SHA-256, schema and client-pin digests, and toolchain/platform. The
+source archive contains source and documentation, not credentials, installed
+data, a binary, an installer, or a service image. The gate proves this staged
+candidate before closure; it cannot require a tag that does not yet exist.
+After independent exact-SHA closure review, explicit closure and release/tag
+authority, and integration to `main`, create one annotated `v0.1.0` tag on
+the exact integration commit on `main` that contains the reviewed closure
+transition. Verify that the integration tree preserves the reviewed closure
+tree except the approved governance transition bytes. Generate the release
+source archive from the tagged commit and retain its separate SHA-256, commit
+and tree; verify that the tag, release archive and `VERSION` identify that
+commit. The candidate archive smoke remains bound to its own exact SHA and is
+not relabeled as a test of the later integration commit. Do not move the tag or
 publish Hex packages, binaries, installers or service artifacts.
 
 <a id="technical-plan-minimalism"></a>

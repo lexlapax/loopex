@@ -90,7 +90,7 @@ else
   source_identity=$(support identity "$root" committed) || exit $?
 fi
 printf '%s\n' "$source_identity"
-for command in mix elixir mktemp mkdir rm cat tail; do
+for command in mix elixir mktemp mkdir rm cat tail tar; do
   command -v "$command" >/dev/null 2>&1 || die "required tool is absent: $command"
 done
 
@@ -248,8 +248,13 @@ run_selector() {
   esac
   if [ "$kind" = real ]; then
     [ -n "$m4_provider_key" ] || die 'full gate requires provider input for the real workflow'
+    # The real selector and its compiled applications come from the staged
+    # archive, not from the checkout that supplied the deterministic lanes.
+    argv[0]=$source_root
+    argv[1]=$source_build/test
     builtin printf 'LOOPEX_M1_SELECTOR_V1\0%s\0%s\0' "$nonce" "$m4_provider_key" |
-      isolated elixir scripts/m1-exunit-runner.exs --loopex-m1-selector --only-real-provider --real-path combined "${argv[@]}" > "$task_root/selector.log" 2>&1 || result=$?
+      isolated env MIX_BUILD_ROOT="$source_build" GIT_DIR="$source_git_dir" GIT_WORK_TREE="$source_root" LOOPEX_M4_SOURCE_ROOT="$source_root" \
+        elixir "$source_root/scripts/m1-exunit-runner.exs" --loopex-m1-selector --only-real-provider --real-path combined "${argv[@]}" > "$task_root/selector.log" 2>&1 || result=$?
   else
     builtin printf 'LOOPEX_M1_SELECTOR_V1\0%s\0\0' "$nonce" |
       isolated elixir scripts/m1-exunit-runner.exs --loopex-m1-selector "${argv[@]}" > "$task_root/selector.log" 2>&1 || result=$?
@@ -301,9 +306,44 @@ lane_finished inherited "$task_inherited_started" "$result"
 [ "$result" = 0 ] || exit "$result"
 [ "$(tail -n 1 "$task_root/inherited.log")" = 'LOOPEX_CLOSED_GATES_REPORT caller=M4 complete=true' ] || die 'inherited gate invocation report missing'
 require_client_pins
+# Concept: prove the operator can build and use source bytes from one exact
+# archive. The later release tag is a separate, post-closure act.
+# Technical depth: bind the archive's commit, tree, lockfile and actual tar
+# digest in the retained report, then execute the attended selector from the
+# fresh extraction with an isolated build and the original tracked index.
+source_commit=$(git rev-parse HEAD) || die 'source commit is unavailable'
+source_tree=$(git rev-parse 'HEAD^{tree}') || die 'source tree is unavailable'
+source_git_dir=$(git rev-parse --absolute-git-dir) || die 'Git index is unavailable for the extracted selector'
+source_archive=$task_root/m4-candidate.tar
+source_root=$task_root/source-extract
+source_build=$task_root/source-build
+source_started=$SECONDS
+mkdir -p "$source_root" || die 'cannot allocate source extraction'
+git archive --format=tar --output="$source_archive" "$source_commit" || die 'cannot stage the source archive'
+source_archive_digest=$(shasum -a 256 "$source_archive" | cut -d' ' -f1) || die 'cannot hash the source archive'
+tar -xf "$source_archive" -C "$source_root" || die 'cannot extract the source archive'
+[ -r "$source_root/VERSION" ] && [ -r "$source_root/mix.lock" ] &&
+  [ -r "$source_root/docs/operator/app-server.md" ] || die 'source archive lacks the version, lockfile or operator guide'
+source_lock_digest=$(shasum -a 256 "$source_root/mix.lock" | cut -d' ' -f1) || die 'cannot hash the extracted lockfile'
+[ "$source_lock_digest" = "$(shasum -a 256 mix.lock | cut -d' ' -f1)" ] || die 'source archive lockfile differs from the candidate'
+[ "$(tr -d '[:space:]' < "$source_root/VERSION")" = "$(tr -d '[:space:]' < VERSION)" ] || die 'source archive VERSION differs from the candidate'
+(
+  cd "$source_root" &&
+  isolated env MIX_BUILD_ROOT="$source_build" mix compile --warnings-as-errors </dev/null
+) > "$task_root/source-compile.log" 2>&1 || {
+  cat "$task_root/source-compile.log" >&2
+  die 'fresh-source isolated compilation failed'
+}
+lane_finished source_archive_build "$source_started" 0
+source_build_identity=$(support build "$source_build/test") || exit $?
+source_build_digest=${source_build_identity#LOOPEX_M4_BUILD digest=sha256:}
+[ "${#source_build_digest}" -eq 64 ] || die 'fresh-source build digest is malformed'
 real_selector=$(support real "$root") || exit $?
 printf '%s\n' "$real_selector" >> "$task_root/selectors"
 run_selector "$real_selector" real
+env GIT_DIR="$source_git_dir" GIT_WORK_TREE="$source_root" git -C "$source_root" diff --quiet --exit-code HEAD -- . ||
+  die 'the attended workflow changed tracked extracted source bytes'
+[ "$source_build_identity" = "$(support build "$source_build/test")" ] || die 'fresh-source build identity changed during the attended workflow'
 support selector-account "$task_root/selectors" "$task_root/selector-ledger" </dev/null || exit $?
 final_identity=$(support identity "$root" committed) || exit $?
 [ "$full_identity" = "$final_identity" ] || die 'source identity changed during the full gate'
@@ -319,7 +359,7 @@ schema_path=apps/loopex_protocol/priv/schema/loopex-experimental-1.json
 schema_digest=$(shasum -a 256 "$schema_path" | cut -d' ' -f1) || die 'cannot hash the canonical schema'
 selector_count=$(grep -c . "$task_root/selector-ledger") || die 'selector ledger is empty'
 clients_digest=$(shasum -a 256 "$client_pins" | cut -d' ' -f1) || die 'cannot hash the client toolchain pins'
-report=$(printf 'LOOPEX_M4_GATE_REPORT source=%s gate=sha256:%s version=%s role=full seed=3107 outcome_ids=1,2,3,4,5,6,7 selectors=%s elapsed_seconds=%s %snode=%s python=%s clients=sha256:%s schema=sha256:%s inherited=true real_workflow=true result=PASS' \
-  "$(git rev-parse HEAD)" "$(shasum -a 256 docs/plans/M4-gate.md | cut -d' ' -f1)" "$source_version" "$selector_count" "$SECONDS" "$toolchain" "$pinned_node" "$pinned_python" "$clients_digest" "$schema_digest")
+report=$(printf 'LOOPEX_M4_GATE_REPORT source=%s tree=%s archive=sha256:%s archive_build=sha256:%s lock=sha256:%s gate=sha256:%s version=%s role=full seed=3107 outcome_ids=1,2,3,4,5,6,7 selectors=%s elapsed_seconds=%s %snode=%s python=%s clients=sha256:%s schema=sha256:%s inherited=true fresh_source=true real_workflow=true result=PASS' \
+  "$source_commit" "$source_tree" "$source_archive_digest" "$source_build_digest" "$source_lock_digest" "$(shasum -a 256 docs/plans/M4-gate.md | cut -d' ' -f1)" "$source_version" "$selector_count" "$SECONDS" "$toolchain" "$pinned_node" "$pinned_python" "$clients_digest" "$schema_digest")
 support evidence "$report" </dev/null || exit $?
 printf '%s\n' "$report"

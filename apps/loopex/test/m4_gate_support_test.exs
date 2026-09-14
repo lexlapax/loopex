@@ -91,18 +91,29 @@ defmodule Loopex.M4GateSupportTest do
   # Concept: the retained final line has one grammar and no tolerated variant.
   test "the final report grammar rejects missing duplicated reordered and malformed fields" do
     line =
-      "LOOPEX_M4_GATE_REPORT source=#{String.duplicate("a", 40)} gate=sha256:#{String.duplicate("b", 64)} " <>
+      "LOOPEX_M4_GATE_REPORT source=#{String.duplicate("a", 40)} tree=#{String.duplicate("f", 40)} " <>
+        "archive=sha256:#{String.duplicate("8", 64)} archive_build=sha256:#{String.duplicate("7", 64)} " <>
+        "lock=sha256:#{String.duplicate("9", 64)} " <>
+        "gate=sha256:#{String.duplicate("b", 64)} " <>
         "version=0.1.0 role=full seed=3107 outcome_ids=1,2,3,4,5,6,7 selectors=10 elapsed_seconds=4200 " <>
         "elixir=1.20.3 otp=29.0.5 erts=17.0.5 platform=aarch64-apple-darwin25.6.0 node=22.12.0 " <>
         "python=3.12.4 clients=sha256:#{String.duplicate("c", 64)} schema=sha256:#{String.duplicate("e", 64)} " <>
-        "inherited=true real_workflow=true result=PASS"
+        "inherited=true fresh_source=true real_workflow=true result=PASS"
 
     assert :ok = Support.verify_final_report(line)
     assert :ok = Support.verify_final_report(line <> "\n")
 
     for mutant <- [
           String.replace(line, " selectors=10", ""),
+          String.replace(line, " tree=#{String.duplicate("f", 40)}", ""),
+          String.replace(line, " archive=sha256:#{String.duplicate("8", 64)}", ""),
+          String.replace(line, " archive_build=sha256:#{String.duplicate("7", 64)}", ""),
+          String.replace(line, " lock=sha256:#{String.duplicate("9", 64)}", ""),
+          String.replace(line, " fresh_source=true", ""),
           line <> " selectors=10",
+          line <> " archive=sha256:#{String.duplicate("8", 64)}",
+          String.replace(line, "fresh_source=true", "fresh_source=false"),
+          String.replace(line, "archive=sha256:#{String.duplicate("8", 64)}", "archive=missing"),
           String.replace(line, "role=full seed=3107", "seed=3107 role=full"),
           String.replace(line, "otp=29.0.5", "otp=29"),
           String.replace(line, "version=0.1.0", "version=x"),

@@ -208,6 +208,10 @@ defmodule Loopex.M4Gate.Support do
   # retained as evidence.
   @report_grammar [
     {"source", ~r/\A[0-9a-f]{40}\z/},
+    {"tree", ~r/\A[0-9a-f]{40}\z/},
+    {"archive", ~r/\Asha256:[0-9a-f]{64}\z/},
+    {"archive_build", ~r/\Asha256:[0-9a-f]{64}\z/},
+    {"lock", ~r/\Asha256:[0-9a-f]{64}\z/},
     {"gate", ~r/\Asha256:[0-9a-f]{64}\z/},
     {"version", ~r/\A\d+\.\d+\.\d+\z/},
     {"role", ~r/\Afull\z/},
@@ -224,6 +228,7 @@ defmodule Loopex.M4Gate.Support do
     {"clients", ~r/\Asha256:[0-9a-f]{64}\z/},
     {"schema", ~r/\Asha256:[0-9a-f]{64}\z/},
     {"inherited", ~r/\Atrue\z/},
+    {"fresh_source", ~r/\Atrue\z/},
     {"real_workflow", ~r/\Atrue\z/},
     {"result", ~r/\APASS\z/}
   ]

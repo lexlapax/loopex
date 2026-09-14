@@ -155,12 +155,12 @@ binding.
 
 | SHA-256 | Path |
 | --- | --- |
-| `696b6a8c34cd3f92a7fe7e3473ec3e25e77384a48241c94aa777323fb085a502` | `scripts/check-m4-gate.sh` |
+| `0936224c28ee08ecb524e4b0ea56db7af65eb1027bfa71050109891bbd000e81` | `scripts/check-m4-gate.sh` |
 | `a559bd9f44f1f46f65aaff0bdcfcac2e5124301bc367c58c85966fd6409ba68f` | `scripts/m4-opening-probe.exs` |
-| `261ab4ad7627ff8d7091e9b5d6ee2894c069866da870db2800025a99e348aeb9` | `scripts/m4-gate-support.exs` |
+| `16e2fc85b7657049b7c89dff240b48a3dfeef656c9a4eafcd5dc3108f6434690` | `scripts/m4-gate-support.exs` |
 | `65d0de9dcd1218af542f00e32c2177d2612a2f1232f22db37b9942200c84cf66` | `scripts/m3-gate-support.exs` |
 | `c4d485ca3229441c678abe1e8733f90216e89e0dfb9e81786f58f525619aec29` | `scripts/check-closed-gates.sh` |
-| `d2c33a7f912f69cdb6e276996eba9acd911575f038fb4eb7098576c95f9f26c5` | `scripts/m4-outcomes.exs` |
+| `54f907d0e47c61f4f7ac473decd90a699e573d43ceb77e2003b9f055afa56381` | `scripts/m4-outcomes.exs` |
 | `53d8219bdee584a3849a85a1102e405520d5dd0dfbe21d259434bc9edfc5fcc0` | `scripts/m1-exunit-runner.exs` |
 | `c36253cff3d74ddff1b330695edbc4bde0a4565c1412c67c1293b2fb7ca6129b` | `apps/loopex/test/m1_exunit_runner_test.exs` |
 | `fad47299b27a767785d2a6a776155038054f5457ee3ce0195a37ae667f7a9999` | `.tool-versions` |
@@ -215,7 +215,8 @@ the gate rejects that invocation ledger.
 | Inherited | Bootstrap and all required Closed commands, including Closed M3, with credential lanes and truthful propagation |
 | Protected outcomes | Standalone authoritative ExUnit result channel, seed 3107, exact required witness identities and runnable states |
 | Whole suite | Complete deterministic suite, format, warning-free compile, documentation and dependency checks |
-| Real workflow | Separately selected attended real-provider task through the shipped server and TypeScript consumer |
+| Source archive | Stage `git archive` from the exact committed candidate, retain its SHA-256, commit, tree, `VERSION` and `mix.lock` digest, extract it outside the checkout and compile there; the attended selector executes from that extraction |
+| Real workflow | Separately selected attended real-provider task from the extracted source, following the operator guide with operator-supplied inputs through the shipped server and TypeScript consumer |
 | Retained evidence | One final report line in the exact grammar below, validated by the bound support script before it is printed; the real selector's authoritative report binds provider/model/endpoint and version-aware adapter/executor build identities; save that output without relabelling its source |
 
 The pinned Node and Python interpreters are verified immediately before each
@@ -227,12 +228,17 @@ The retained final report has exactly this grammar, one line, fields in this
 order, each present once:
 
 ```text
-LOOPEX_M4_GATE_REPORT source=<40 hex> gate=sha256:<64 hex> version=<major.minor.patch> role=full seed=3107 outcome_ids=1,2,3,4,5,6,7 selectors=<count> elapsed_seconds=<n> elixir=<exact> otp=<exact, e.g. 29.0.5> erts=<exact> platform=<system architecture> node=<pinned> python=<pinned> clients=sha256:<64 hex> schema=sha256:<64 hex> inherited=true real_workflow=true result=PASS
+LOOPEX_M4_GATE_REPORT source=<40 hex> tree=<40 hex> archive=sha256:<64 hex> archive_build=sha256:<64 hex> lock=sha256:<64 hex> gate=sha256:<64 hex> version=<major.minor.patch> role=full seed=3107 outcome_ids=1,2,3,4,5,6,7 selectors=<count> elapsed_seconds=<n> elixir=<exact> otp=<exact, e.g. 29.0.5> erts=<exact> platform=<system architecture> node=<pinned> python=<pinned> clients=sha256:<64 hex> schema=sha256:<64 hex> inherited=true fresh_source=true real_workflow=true result=PASS
 ```
 
-`role` names the command role that produced the line (only the full role
-reports); `selectors` is the number of authoritative selector reports the
-ledger accounted for; `elapsed_seconds` is the whole run's wall time;
+`source` and `tree` name the staged candidate commit and tree. `archive` is
+the SHA-256 of the tar file produced from that commit; `archive_build` names
+the extracted source's isolated test build. `lock` is the SHA-256 of the
+extracted `mix.lock`. `fresh_source=true` means the gate compiled the
+extraction and ran the attended selector from it. `role` names the command role
+that produced the line (only the full role reports); `selectors` is the number
+of authoritative selector reports the ledger accounted for;
+`elapsed_seconds` is the whole run's wall time;
 `clients` is the digest of the bound client toolchain pins; `schema` is the
 digest of `apps/loopex_protocol/priv/schema/loopex-experimental-1.json`, the
 canonical schema bytes the protocol application ships, which also carry every
@@ -242,7 +248,11 @@ reordered or malformed field, and the bound
 both report kinds and the final grammar.
 
 Real-provider tests live in the dedicated
-`apps/loopex_app_server/test/external_workflow_real_test.exs`. Full mode accepts
+`apps/loopex_app_server/test/external_workflow_real_test.exs`. Full mode runs
+that tracked selector and its compiled applications from the fresh source
+archive extraction. The selector follows `docs/operator/app-server.md` to
+launch the source-built server and TypeScript consumer; a checkout-only
+workflow cannot satisfy its protected case. Full mode accepts
 only the bounded stdin frame `LOOPEX_M4_PROVIDER_V1\0<key>\0` (key at most
 16,384 bytes); the unexported value reaches only the real selector and the
 existing required inherited credential lanes through the aggregate's declared
@@ -262,7 +272,7 @@ are pinned before acceptance, not by this opening.
 | 2 | `apps/loopex_app_server/test/session_mapping_test.exs` | Same corpus facade/wire; independent request and command identity with replay idempotency; admission vs completion; snapshot/live ordering; second-attach refusal or explicit replacement at the last emitted cursor; in-flight request-ID reuse refused and post-completion reuse ordinary; pre-admission pressure refusing before any durable write and post-admission pressure dropping progress first then detaching at the last emitted cursor; snapshot, event, progress and diagnostic record families kept separate with a fresh settled attachment as the final authority |
 | 3 | `apps/loopex/test/interaction_lifecycle_test.exs`, `apps/loopex_app_server/test/foundation_mapping_test.exs` | Durable request/answer/policy/intent cuts journaled before publication and before any intent, fixed timestamps through uncertain commits, expiry/abort/restart races, the exact successive-round bound, old-reader refusal; answered-but-unresolved recovery without speculation, acknowledgement or dispatch; identical replay returns the historical admission while changed content, wrong-target, resolved, expired or absent interactions refuse with stable reasons; invalid answers, malformed policy output and failed or timed-out re-evaluation dispatch nothing and resolve as denial; policy-request, interaction-request and answer digests with their preimages preserved through commit_unknown and restart under the same policy identity and revision; exact resources, missing/stale trust, manual-only selection, answer admission separate from re-evaluation and grant/intent, immutable launch inputs unreplaceable from the wire |
 | 4 | `apps/loopex_store_local/test/artifact_transfer_test.exs`, `apps/loopex_app_server/test/delivery_bounds_test.exs` | The attachment-owned open/read/close API refusing another attachment, session or runtime and disclosing no path; complete verification at open with one verification per transfer, distinct object/chunk digests, unsupported-store refusal; whole, first, last, empty and overrun windows and every distinct refusal reason; wrong-session use, object/use swap, corruption outside the requested window, post-open same-size rewrite never reaching a chunk; open deadline or work-budget exhaustion refusing before any snapshot bytes; per-connection and per-runtime transfer limits refusing independently; connection-work exhaustion, lifetime expiry, cancellation, descriptor and snapshot release across repeated kill/restart, streaming memory bounded well above the chunk ceiling and startup scavenging touching only owned regular files; genuine old-format artifacts readable and capability removal restoring the prior API; chunk/read-deadline budgets; at the wire, a transfer reference from another connection refused and connection loss closing every transfer it opened; malformed UTF-8, duplicate keys, nesting, fragmented/multiple/oversized frames, blocked reader, detach cursor, late progress and actual cleanup |
-| 5 | `apps/loopex_app_server/test/external_workflow_test.exs` | Fresh extraction of the exact source candidate follows the operator guide, builds the foreground server and TypeScript consumer, and runs them with operator-supplied inputs; TypeScript skill → interaction answer → policy re-evaluation → committed grant/intent → actual tool → artifact → abrupt restart with no embedded identities; clean stdin EOF performs orderly shutdown with no cancellation; abrupt death records nothing; a pending interaction survives both; `session.abort` is the only cancellation and an aborted interaction never reappears |
+| 5 | `apps/loopex_app_server/test/external_workflow_test.exs`, `apps/loopex_app_server/test/external_workflow_real_test.exs` | Fresh extraction of the exact source candidate follows the operator guide, builds the foreground server and TypeScript consumer, and runs them with operator-supplied inputs; the attended real-provider selector runs from that extraction and proves the same skill → interaction answer → policy re-evaluation → committed grant/intent → actual tool → artifact → abrupt restart workflow with no embedded identities; clean stdin EOF performs orderly shutdown with no cancellation; abrupt death records nothing; a pending interaction survives both; `session.abort` is the only cancellation and an aborted interaction never reappears |
 | 6 | `apps/loopex_protocol/test/public_schema_conformance_test.exs`, `apps/loopex/test/m4_gate_support_test.exs` | Independently executed Elixir, Python and TypeScript clients over canonical positive/negative vectors under the pinned interpreters; exact version and platform identities; retained refusal of missing, duplicated, reordered, wrong-kind, stale-version and malformed evidence fields |
 | 7 | `apps/loopex/test/trace_session_test.exs`, `apps/loopex/test/telemetry_boundary_test.exs` | Session scoped to owned processes and allowed modules with a second VM tracer unaffected; documented fields per level; redaction of credential references, model content, tool arguments and artifact bytes at the `arguments` level; the exact 4,096-byte, 2,000-per-second and 8,192-entry limits drop with a counted entry without blocking; no session command, client content, model output, project resource or wire request starts, changes or stops a session; stop releases every flag; unavailability on a release without trace sessions; every callback and transaction cut in the ADR 0030 inventory emits start/stop or exception with duration and documented metadata only; crashing handler isolated; a slow or blocked `loopex_telemetry` forwarding sink never delays a coordinator and drops with a counted entry; the dispatcher's bounded diagnostics admission (one atomic owner-recording slot claim before send under racing senders, 4,096-slot ceiling on the Loopex-owned backlog, a sender killed at each crash cut, after taking a ticket, after a failed claim, after a successful claim and after the send, holding afterwards exactly its claimed-but-unsent slots released at its `DOWN` while a concurrent sender's slot stays live and admits, a release freeing only the exact claim it names, counted drops without a send, a drain summary carrying the exact count of counted drops, host sink backpressured only) observed through the asynchronous path; overheads measured |
 
@@ -305,8 +315,11 @@ source-release tagging, package publication and compatibility acceptance retain
 their distinct authorities. The full gate proves a staged source candidate, not
 a pre-existing tag. After independent closure review, explicit closure and
 release/tag authority, and integration to `main`, an annotated `v0.1.0` tag names
-the integrated closure commit; the final source archive and its digest are
-generated from that tag and verified against its commit and `VERSION`. Neither
+the exact integration commit on `main` containing the reviewed closure
+transition. Verify that the integration tree preserves the reviewed closure
+tree apart from approved governance transition bytes. Generate the final
+source archive from that tag and verify its digest, commit, tree and `VERSION`
+against the tagged commit. Neither
 final tag nor final release archive is created by this gate.
 
 ## Documentation Obligations
