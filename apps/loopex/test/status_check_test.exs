@@ -865,6 +865,115 @@ defmodule Loopex.StatusCheckTest do
     end
   end
 
+  test "a first acceptance may bind a generation-one candidate that refreshed a shared binding" do
+    root = repository_root()
+    {candidate_revision, 0} = Git.run(root, ["rev-parse", "HEAD"])
+    candidate_revision = String.trim(candidate_revision)
+
+    refreshed_gate =
+      String.trim_trailing(Fixture.gate(), "\n") <>
+        "\n\n<a id=\"amendment-transaction-v1\"></a>\n" <>
+        "<a id=\"amendment-1\"></a>\n## Amendment 1\n"
+
+    # The candidate is the Open plan exactly as proposed: an empty Acceptance
+    # row beside a gate that already advanced one generation to refresh the
+    # shared binding.
+    open_candidate = Fixture.plan()
+    technical = Fixture.technical_plan()
+
+    accept = fn gate ->
+      Fixture.plan(governed: true, gate: gate)
+      |> String.replace(String.duplicate("a", 40), candidate_revision, global: false)
+      |> String.replace(
+        "[disposition](../vision.md#concept)",
+        "[disposition](../developer/agent-context-map.md#first-acceptance-test-disposition)",
+        global: false
+      )
+    end
+
+    accepted = accept.(refreshed_gate)
+
+    resolve = fn candidate, gate ->
+      fn revision, path ->
+        cond do
+          revision == candidate_revision and String.ends_with?(path, "M0.md") ->
+            candidate
+
+          revision == candidate_revision and String.ends_with?(path, "M0-technical.md") ->
+            technical
+
+          revision == candidate_revision and String.ends_with?(path, "M0-gate.md") ->
+            gate
+
+          revision == candidate_revision and path == "docs/plans/README.md" ->
+            Map.fetch!(Fixture.open_milestone_documents(refreshed_gate), "docs/plans/README.md")
+
+          revision == candidate_revision and path == "docs/developer/agent-context-map.md" ->
+            "# Context map\n"
+
+          true ->
+            nil
+        end
+      end
+    end
+
+    assert :ok ==
+             Plan.governance(
+               accepted,
+               technical,
+               refreshed_gate,
+               "M0",
+               "Accepted",
+               resolve.(open_candidate, refreshed_gate)
+             )
+
+    # Only Accepted may follow Open here: the transition is a first acceptance,
+    # not a licence to land any later state on a generation-one candidate.
+    assert_raise Invalid, ~r/must preserve amendment candidate lifecycle state Open/, fn ->
+      Plan.governance(
+        accepted,
+        technical,
+        refreshed_gate,
+        "M0",
+        "In progress",
+        resolve.(open_candidate, refreshed_gate)
+      )
+    end
+
+    # A candidate that already carries a complete Acceptance row is an amendment
+    # proposal, and its rebind keeps the strict rule even when the register it
+    # was proposed under still said Open.
+    accepted_candidate = Fixture.plan(governed: true)
+
+    assert_raise Invalid, ~r/must preserve amendment candidate lifecycle state Open/, fn ->
+      Plan.governance(
+        accepted,
+        technical,
+        refreshed_gate,
+        "M0",
+        "Accepted",
+        resolve.(accepted_candidate, refreshed_gate)
+      )
+    end
+
+    # One refresh is the whole allowance. An empty original two generations in
+    # is still gate bytes nobody amended into existence.
+    twice_refreshed_gate =
+      String.trim_trailing(refreshed_gate, "\n") <>
+        "\n\n<a id=\"amendment-2\"></a>\n## Amendment 2\n"
+
+    assert_raise Invalid, ~r/already at amendment generation 2/, fn ->
+      Plan.governance(
+        accept.(twice_refreshed_gate),
+        technical,
+        twice_refreshed_gate,
+        "M0",
+        "Accepted",
+        resolve.(open_candidate, twice_refreshed_gate)
+      )
+    end
+  end
+
   test "amendment proposal and rebind remain one exact history transaction" do
     original = String.duplicate("a", 40)
     accepted_revision = String.duplicate("b", 40)
