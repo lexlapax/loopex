@@ -3786,3 +3786,65 @@ run under the new floor pair recorded in the matrix evidence, and M4's
 distinct red are proved at this transition and thereafter; they require the
 maintainer's provider key for the real lanes and have not yet run. This
 record grants no merge to `main`, integration, tag, publication or release.
+
+<a id="override-disposition-m4-inherited-evidence-before-integration-2026-09-14"></a>
+### M4 inherited evidence deferred to before integration — 2026-09-14
+
+The maintainer's second review of the pushed lineage at
+`722677ee50efdc3cddcb900d0ff1a4e268dad8ad` found no new product or
+locked-gate defect but would not integrate the checkpoint yet, because the
+[acceptance disposition](#disposition-m4-plan-acceptance-2026-09-14) above
+calls the inherited evidence "proved at this transition and thereafter"
+while stating in the same sentence that the real-provider lanes have not run,
+and because `mix loopex.matrix` exits 1 on the M0 toolchain matrix record,
+which carries no run under the new floor pair Elixir 1.18.5 with OTP 27.3.4.
+The review asked that the precise deferral be recorded in a standalone
+override, independently reviewed before integration relies on it, and that
+the deferred checks never be labelled green. The maintainer explicitly
+directed:
+
+> fix this so that some things we can do after acceptance, some things we
+> need to do before m4 acceptance - i want to move on .. no big feature
+> gotchas, just gate and ci/cd gotchas
+
+Under the [explicit maintainer override](../../AGENTS.md#maintainer-override),
+this names the continuing development-time requirement it moves. The
+[M4 technical plan](../plans/M4-technical.md#technical-depth) and its
+successor-enabling row require every inherited gate green and M4's own
+distinct red to be re-proved on the refreshed base before acceptance, and the
+development contract requires the full inherited set at the acceptance base.
+The keyless part of that obligation was met at acceptance transition
+`dcf033bc4b9c3c78462377576117aa799bbdeac6` and its candidate
+`27e517b3391ddc7c12b5f638f66434923ab021e3`: the bootstrap aggregate with the
+full history-aware status walk, holder-scoped binding validation at each
+rebind, M4 gate inspection of every bound artifact, and the M4 preflight
+reporting the compile control green and the declared
+`interaction_unsupported` opening red, each from a clean clone. The part that
+needs the maintainer's provider key or a floor-pair run is deferred, not
+waived: the real-provider lanes of the inherited M0, M1, M2 and M3 gates on
+both installed pairs, the M0 run under the new floor pair recorded in
+[the matrix evidence](../evidence/M0-toolchain-matrix.md), and M4's distinct
+red on its real lane. Those run at one pushed revision of this lineage after
+the acceptance transition and before the governance-only acceptance
+checkpoint integrates to `main`; each result is recorded against that
+revision's SHA in the ordinary evidence locations, and a red result blocks
+integration like any observed inherited regression.
+
+Until they run, those checks are **unavailable, not passed**. The acceptance
+disposition's sentence "are proved at this transition and thereafter" is read
+as "are required from this transition onward and are unavailable until they
+run"; that historical record stays unchanged and this disposition is the
+precise statement of its meaning. The matrix task stays red for the missing
+floor record until that run is recorded. No status capsule, register row,
+plan progress row, runner report or review may present a deferred check as
+green, and the M4 acceptance is not made retroactively false by this deferral.
+
+Preserved guarantees: the accepted candidate, its bound envelopes and gate,
+the M4 acceptance row and the register state are unchanged; no milestone
+product bytes are added; implementation inside the accepted envelopes may
+proceed on branch `m4` as the acceptance already allows; the independent
+read-only exact-SHA review of the transition by an actor other than its
+author remains owed before integration. This standalone disposition changes
+nothing else and receives independent exact-SHA review before integration
+relies on it. It grants no merge to `main`, tag, publication or release, and
+implies no approval of any other restriction, plan, ADR or closure.
