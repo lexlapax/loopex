@@ -103,6 +103,7 @@
           path: "apps/loopex_app_server/test/external_workflow_test.exs",
           names: [
             "the TypeScript consumer completes skill answer reevaluation grant tool artifact and abrupt restart from operator input against the shipped server",
+            "a fresh extraction of the exact source candidate follows the operator guide to build and run the server and TypeScript consumer with operator supplied inputs",
             "stdin EOF performs orderly shutdown without cancellation and the pending interaction survives restart",
             "session abort is the only deliberate cancellation and an aborted interaction is never pending after restart"
           ]

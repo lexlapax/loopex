@@ -148,9 +148,10 @@ valid designs, never an activity log.
 - [Plans](../plans/README.md) — milestone register and lifecycle.
 
 0025 and 0027 are the two accepted M3 prerequisites: project-skill admission and
-safe permit retirement. M4 owns 0023/0024/0026/0028: protocol, durable interactions,
-floor refresh and bounded artifact retrieval. The floor transaction inventory
-must include every holder on integrated M3, rather than assume three. Proposed
+safe permit retirement. M4 owns 0023/0024/0026/0028/0030: protocol, durable
+interactions, floor refresh, bounded artifact retrieval and observability. The
+floor transaction inventory must include every holder on integrated M3, rather
+than assume three. Proposed
 status supplies no acceptance and changes no accepted ADR or Closed gate record.
 The protocol/interaction proposals were renumbered from the old draft's 0019/0020
 because those numbers are now accepted M2 decisions.

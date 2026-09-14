@@ -1,22 +1,23 @@
 # M4 Gate
 
-Open planning-lookahead candidate for the headless external consumer. No plan
-or ADR is accepted by this revision, and M3 remains the sole implementation
-authority. The runner binds a real behavioral opening probe, executable closure
-lanes and exact future witness identities. Under the same preparation rule M3
-recorded, future test bodies are written during implementation; every named
-witness must pass before closure. The
+Open candidate for the headless external consumer, refreshed onto M3's Closed
+product base. No M4 plan or ADR is accepted by this revision, and M4 product
+implementation has not begun. The runner binds a real behavioral opening probe,
+executable closure lanes and exact future witness identities. Under the same
+preparation rule M3 recorded, future test bodies are written during
+implementation; every named witness must pass before closure. The
 [Concept plan](M4.md#concept) owns the seven outcomes and the
 [technical plan](M4-technical.md#technical-depth) owns the contracts and evidence.
 The reviewed
 [planning-revision aggregate override](../developer/agent-context-map.md#override-disposition-m4-planning-aggregate-2026-09-11)
 and its reviewed
 [widened scope](../developer/agent-context-map.md#override-disposition-m4-planning-aggregate-scope-2026-09-11)
-let every revision of this Open lineage (plan and gate documents, manifests,
-runner and support work, ADR proposals, documentation, and repository-status
-enforcement with its tests, with no product bytes and bootstrap green) rely on
-the M0–M2 aggregate proved at the opening candidate; they waive nothing for
-product changes, Closed-bound bytes, the refresh, acceptance, rejoin, rebind or
+covered earlier revisions of this Open lineage (plan and gate documents,
+manifests, runner and support work, ADR proposals, documentation, and
+repository-status enforcement with its tests, with no product bytes and
+bootstrap green). Those revisions relied on the M0–M2 aggregate proved at the
+opening candidate; the override waives nothing for product changes,
+Closed-bound bytes, the refresh, acceptance, rejoin, rebind or
 closure.
 
 The complete command to bind at acceptance is:
@@ -91,9 +92,10 @@ Before acceptance:
    explicitly approved development-time procedural replacement, before M4
    binds replacement bytes. Name every holder and complete its own replacement
    commit, status check and exact-SHA review in sequence.
-4. After M3 closes and integrates, absorb that exact base, re-prove every
-   inherited gate green and this gate's own distinct red, and present the
-   refreshed candidate for fresh exact-SHA review and explicit acceptance.
+4. M3 is Closed and integrated, and M4 has absorbed its exact base. Re-prove
+   every inherited gate green and this gate's own distinct red on that refreshed
+   base, then present the candidate for fresh exact-SHA review and explicit
+   acceptance.
 
 After acceptance, during implementation:
 
@@ -158,7 +160,7 @@ binding.
 | `261ab4ad7627ff8d7091e9b5d6ee2894c069866da870db2800025a99e348aeb9` | `scripts/m4-gate-support.exs` |
 | `65d0de9dcd1218af542f00e32c2177d2612a2f1232f22db37b9942200c84cf66` | `scripts/m3-gate-support.exs` |
 | `c4d485ca3229441c678abe1e8733f90216e89e0dfb9e81786f58f525619aec29` | `scripts/check-closed-gates.sh` |
-| `c8df082146c46454098f8b9acd643f31162c415531ec77c91cdc1ec1ba4362d2` | `scripts/m4-outcomes.exs` |
+| `d2c33a7f912f69cdb6e276996eba9acd911575f038fb4eb7098576c95f9f26c5` | `scripts/m4-outcomes.exs` |
 | `53d8219bdee584a3849a85a1102e405520d5dd0dfbe21d259434bc9edfc5fcc0` | `scripts/m1-exunit-runner.exs` |
 | `c36253cff3d74ddff1b330695edbc4bde0a4565c1412c67c1293b2fb7ca6129b` | `apps/loopex/test/m1_exunit_runner_test.exs` |
 | `fad47299b27a767785d2a6a776155038054f5457ee3ce0195a37ae667f7a9999` | `.tool-versions` |
@@ -186,14 +188,13 @@ unavailable. Before either a checkpoint-success line or full-gate continuation,
 an exact ordered selector ledger must account for every manifest-derived lane.
 
 The inherited lane is register-derived through `scripts/check-closed-gates.sh
---before M4`. While M3 is not Closed that lane reports UNAVAILABLE. The
-lookahead posture was proved once at the opening candidate by running the
-Closed aggregate and the M3 opening probe separately, so neither red masks the
-other; under the widened override above, later Open-lineage revisions rely on
-that result and rerun only status, formatting, bootstrap, inspection and the
-two opening probes. Run the inherited aggregate at the refreshed acceptance
-base, every parallel-workstream rejoin, every rebind child, closure candidate
-and whenever product or Closed-bound bytes invalidate its later evidence.
+--before M4` and now includes Closed M3. The earlier lookahead posture was
+proved at the opening candidate by running the then-Closed aggregate and the
+M3 opening probe separately, so neither red masked the other; its recorded
+waiver did not cover the M3 refresh. Run the inherited aggregate at the
+refreshed acceptance base, every parallel-workstream rejoin, every rebind child,
+closure candidate and whenever product or Closed-bound bytes invalidate its
+later evidence.
 Unknown acceptance impact fails closed to the full gate. Protected-selector
 execution never invokes the aggregate itself.
 
@@ -261,7 +262,7 @@ are pinned before acceptance, not by this opening.
 | 2 | `apps/loopex_app_server/test/session_mapping_test.exs` | Same corpus facade/wire; independent request and command identity with replay idempotency; admission vs completion; snapshot/live ordering; second-attach refusal or explicit replacement at the last emitted cursor; in-flight request-ID reuse refused and post-completion reuse ordinary; pre-admission pressure refusing before any durable write and post-admission pressure dropping progress first then detaching at the last emitted cursor; snapshot, event, progress and diagnostic record families kept separate with a fresh settled attachment as the final authority |
 | 3 | `apps/loopex/test/interaction_lifecycle_test.exs`, `apps/loopex_app_server/test/foundation_mapping_test.exs` | Durable request/answer/policy/intent cuts journaled before publication and before any intent, fixed timestamps through uncertain commits, expiry/abort/restart races, the exact successive-round bound, old-reader refusal; answered-but-unresolved recovery without speculation, acknowledgement or dispatch; identical replay returns the historical admission while changed content, wrong-target, resolved, expired or absent interactions refuse with stable reasons; invalid answers, malformed policy output and failed or timed-out re-evaluation dispatch nothing and resolve as denial; policy-request, interaction-request and answer digests with their preimages preserved through commit_unknown and restart under the same policy identity and revision; exact resources, missing/stale trust, manual-only selection, answer admission separate from re-evaluation and grant/intent, immutable launch inputs unreplaceable from the wire |
 | 4 | `apps/loopex_store_local/test/artifact_transfer_test.exs`, `apps/loopex_app_server/test/delivery_bounds_test.exs` | The attachment-owned open/read/close API refusing another attachment, session or runtime and disclosing no path; complete verification at open with one verification per transfer, distinct object/chunk digests, unsupported-store refusal; whole, first, last, empty and overrun windows and every distinct refusal reason; wrong-session use, object/use swap, corruption outside the requested window, post-open same-size rewrite never reaching a chunk; open deadline or work-budget exhaustion refusing before any snapshot bytes; per-connection and per-runtime transfer limits refusing independently; connection-work exhaustion, lifetime expiry, cancellation, descriptor and snapshot release across repeated kill/restart, streaming memory bounded well above the chunk ceiling and startup scavenging touching only owned regular files; genuine old-format artifacts readable and capability removal restoring the prior API; chunk/read-deadline budgets; at the wire, a transfer reference from another connection refused and connection loss closing every transfer it opened; malformed UTF-8, duplicate keys, nesting, fragmented/multiple/oversized frames, blocked reader, detach cursor, late progress and actual cleanup |
-| 5 | `apps/loopex_app_server/test/external_workflow_test.exs` | TypeScript skill → interaction answer → policy re-evaluation → committed grant/intent → actual tool → artifact → abrupt restart from operator input with no embedded identities; clean stdin EOF performs orderly shutdown with no cancellation; abrupt death records nothing; a pending interaction survives both; `session.abort` is the only cancellation and an aborted interaction never reappears |
+| 5 | `apps/loopex_app_server/test/external_workflow_test.exs` | Fresh extraction of the exact source candidate follows the operator guide, builds the foreground server and TypeScript consumer, and runs them with operator-supplied inputs; TypeScript skill → interaction answer → policy re-evaluation → committed grant/intent → actual tool → artifact → abrupt restart with no embedded identities; clean stdin EOF performs orderly shutdown with no cancellation; abrupt death records nothing; a pending interaction survives both; `session.abort` is the only cancellation and an aborted interaction never reappears |
 | 6 | `apps/loopex_protocol/test/public_schema_conformance_test.exs`, `apps/loopex/test/m4_gate_support_test.exs` | Independently executed Elixir, Python and TypeScript clients over canonical positive/negative vectors under the pinned interpreters; exact version and platform identities; retained refusal of missing, duplicated, reordered, wrong-kind, stale-version and malformed evidence fields |
 | 7 | `apps/loopex/test/trace_session_test.exs`, `apps/loopex/test/telemetry_boundary_test.exs` | Session scoped to owned processes and allowed modules with a second VM tracer unaffected; documented fields per level; redaction of credential references, model content, tool arguments and artifact bytes at the `arguments` level; the exact 4,096-byte, 2,000-per-second and 8,192-entry limits drop with a counted entry without blocking; no session command, client content, model output, project resource or wire request starts, changes or stops a session; stop releases every flag; unavailability on a release without trace sessions; every callback and transaction cut in the ADR 0030 inventory emits start/stop or exception with duration and documented metadata only; crashing handler isolated; a slow or blocked `loopex_telemetry` forwarding sink never delays a coordinator and drops with a counted entry; the dispatcher's bounded diagnostics admission (one atomic owner-recording slot claim before send under racing senders, 4,096-slot ceiling on the Loopex-owned backlog, a sender killed at each crash cut, after taking a ticket, after a failed claim, after a successful claim and after the send, holding afterwards exactly its claimed-but-unsent slots released at its `DOWN` while a concurrent sender's slot stays live and admits, a release freeing only the exact claim it names, counted drops without a send, a drain summary carrying the exact count of counted drops, host sink backpressured only) observed through the asynchronous path; overheads measured |
 
@@ -300,7 +301,13 @@ A missing real path, platform, interpreter or artifact is unavailable evidence.
 A red required check, unresolved blocking finding or same-source disappearing
 failure blocks closure. Relevant byte changes invalidate affected evidence;
 shared or unknown impact requires the full gate. Closure, version transitions,
-publication and compatibility acceptance retain their distinct authorities.
+source-release tagging, package publication and compatibility acceptance retain
+their distinct authorities. The full gate proves a staged source candidate, not
+a pre-existing tag. After independent closure review, explicit closure and
+release/tag authority, and integration to `main`, an annotated `v0.1.0` tag names
+the integrated closure commit; the final source archive and its digest are
+generated from that tag and verified against its commit and `VERSION`. Neither
+final tag nor final release archive is created by this gate.
 
 ## Documentation Obligations
 
@@ -332,8 +339,9 @@ document is a pair:
   settlement; the exact meaning of clean EOF, abrupt death and `session.abort`;
   answering an interaction after a restart; the artifact transfer limits and
   what "one verification per transfer" costs; the refreshed floor pair, the
-  client interpreter pins and the 0.1.0 source version; and what remains
-  experimental or unavailable (no daemon, sockets, takeover or publication).
+  client interpreter pins, the 0.1.0 source version and the documented
+  source-only release workflow; and what remains experimental or unavailable
+  (no daemon, sockets, takeover, Hex package, binary or installer).
 - **Developer-facing.** The observability pair as the reference for the
   trace-session contract, the telemetry event catalog and the redaction and
   limit rules; the protocol pair as the normative wire reference
@@ -345,8 +353,9 @@ document is a pair:
   routing for M4's ADRs, documents and gate.
 - **Repository-wide.** `docs/README.md`, `README.md` and `CHANGELOG.md`
   describe the ninth and tenth applications, the new operator and developer documents,
-  the version transition and its non-release meaning, and the M4 outcome
-  evidence, without claiming any package, tag or publication.
+  the version transition, the source-only `v0.1.0` release and M4 outcome
+  evidence, without claiming a package, binary, installer, service image or
+  compatibility freeze.
 
 The status check limits the developer-facing row to `docs/developer/` paths, so
 two root documents are named here instead, and their drift blocks closure

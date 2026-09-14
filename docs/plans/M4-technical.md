@@ -13,25 +13,26 @@ Concept: [Scope](M4.md#concept-plan-scope).
 
 Concept: [non-goals](M4.md#concept-plan-non-goals).
 
-M4 is Open as the one permitted planning lookahead after M3's accepted
-governance checkpoint integrated to `main`. Its planning base is
+M4 opened as the one permitted planning lookahead after M3's accepted
+governance checkpoint integrated to `main`. Its opening base was
 `4bba8b74f5e260dc2a364fcbd3554c7badd1a09c`, retained as an ancestor without
-rebasing or squashing bound history. The M0–M2 Closed aggregate was proved
-green once at the opening candidate. Under the reviewed
+rebasing or squashing bound history. M3 subsequently Closed on `main` at
+`72c0a30`, and the M4 branch absorbed that Closed product base in `faf739b`.
+The M0–M2 Closed aggregate was proved green once at the opening candidate.
+Before the M3 refresh, under the reviewed
 [planning-revision aggregate override](../developer/agent-context-map.md#override-disposition-m4-planning-aggregate-2026-09-11)
 and its reviewed
 [widened scope](../developer/agent-context-map.md#override-disposition-m4-planning-aggregate-scope-2026-09-11),
-every later revision of this Open lineage relies on that result: plan and gate
+later planning revisions of the Open lineage relied on that result: plan and gate
 documents, manifests, runner and support work, prerequisite ADR proposals,
 documentation, and repository-status enforcement with its tests, provided the
-revision adds no milestone product implementation and bootstrap passes at the
-revision. Product changes, changes to a Closed gate's bound bytes, the refresh
-onto M3's closure, acceptance, rejoins, rebind children and closure candidates
-keep the ordinary aggregate obligation. While Open it records M3 as `Accepted` and
-holds no implementation authority. M4 cannot be accepted or implemented until
-M3 is Closed and integrated: absorb that exact closed product base, re-prove
-every inherited gate green and this milestone's own distinct red, complete its
-executable contract/vector tests and obtain fresh exact-SHA review. At final
+revision added no milestone product implementation and bootstrap passed at the
+revision. That override does not cover the M3 refresh, acceptance, rejoins,
+rebind children or closure candidates; those keep the ordinary inherited-gate
+obligation. M4 remains Open and holds no implementation authority. Before it
+can be accepted, re-prove every inherited gate green and its own distinct red on
+the refreshed base, complete its executable contract/vector tests and obtain
+fresh exact-SHA review. At final
 acceptance all inherited gates are green and the M4 boundary remains
 truthfully red for missing external behavior.
 
@@ -92,7 +93,7 @@ gates bind. The default sequence is exact:
 
 | Phase | When | Transactions and routes |
 | --- | --- | --- |
-| A. Successor enabling | After M3 closes and integrates, before M4 acceptance | Derive the exact M0–M3 holder inventory on the integrated closure; settle the floor refresh with every `.tool-versions` holder: Closed M0–M3 each through v2 `A`/`R` in register order, and Open M4 by refreshing its own table directly; refresh M4 on that base and re-prove every inherited gate green plus this gate's own red; then accept |
+| A. Successor enabling | M3 is Closed and integrated; before M4 acceptance | Derive the exact M0–M3 holder inventory on the integrated closure; settle the floor refresh with every `.tool-versions` holder: Closed M0–M3 each through v2 `A`/`R` in register order, and Open M4 by refreshing its own table directly; re-prove every inherited gate green plus this gate's own red on that base; then submit the candidate for independent review and maintainer acceptance |
 | B. Implementation | After acceptance, on branch `m4`, before the first rejoin that runs the full lanes | One Closed-M1 v2 proposal `A` that atomically carries M1's next gate generation, both dependency-oracle artifacts with the ten-application inventory, the client → contract edge, `:telemetry` admitted as core's sole external dependency, negative tests, and the minimal M4-authorized `loopex_app_server` and `loopex_telemetry` applications that make the new inventory true, following the M1 Amendment 7 pattern; exact-SHA review and explicit acceptance of `A`; immediate governance-only `R`; then ordinary implementation continues |
 | C. Closure rejoin | At the closure candidate | Apply the separately approved version transition to 0.1.0 and settle every version holder below: Closed M1, M2 and M3 through v2 `A`/`R` in register order, then Accepted M4 through its own v1 amendment proposal and rebind, last |
 
@@ -131,8 +132,9 @@ exact-SHA-reviewed commit before the next proceeds. No override ignores a stale
 hash or rewrites a prior Acceptance/Closure row. Phase A bindings settle before
 M4 acceptance; phase B and C bindings settle before the rejoin or closure
 candidate that depends on them, and closure cannot be recorded while any is
-stale. Publication and compatibility freezes still require separate authority.
-No floor change is made by this opening.
+stale. The source-only `v0.1.0` release requires the separate release/tag
+disposition specified below; no package publication or compatibility freeze is
+implied. No floor change is made by this planning edit.
 
 M3 owns resource admission, inherited-gate enforcement and the three repairs.
 M4 adds core defer/answer and ArtifactStore transfers before the app-server
@@ -194,8 +196,8 @@ Concept: [Outcomes](M4.md#concept-plan-outcomes).
 | 2 | Identical command corpus through facade/wire; independent variation of request and command identity; snapshot-before-live; committed admission before correlated delivery; command replay after disconnect |
 | 3 | Durable interaction request/answer/policy/intent cuts, fixed timestamps through commit_unknown, expiry/abort/restart races, the exact successive-round bound and policy identity; catalog and selected content identity preserved; stale/missing trust withholds content; manual-only restriction; interaction answer admission separately observed from policy re-evaluation, grant/intent commit and tool receipt; every immutable launch input proved unreplaceable from the wire |
 | 4 | ADR 0028 one verification per transfer and bounded allocation proved at ArtifactStore and facade with object and chunk digests distinguished; wrong-session use, object/use swap and corruption outside the requested window refused at open; concurrent-transfer and connection-work exhaustion, lifetime expiry, cancellation and descriptor release; oversized/fragmented/multiple frames; malformed UTF-8/duplicate keys/depth; slow reader; bounded queue; late progress; stdout contamination; actual process-tree cleanup |
-| 5 | TypeScript drives skill, interaction answer, policy re-evaluation, committed grant/intent, tool and artifact with real Store and executor from operator input, embedding no identities; real-provider task separately attended; abrupt kill and fresh-process resume; stdin EOF performs orderly shutdown with no cancellation and a still-pending interaction; `session.abort` is the separate deliberate-cancellation case |
-| 6 | Elixir, Python and TypeScript clients execute the same positive/negative vectors without importing the server codec; pinned interpreter versions verified before the lane, absence or mismatch reported as unavailable evidence; exact source/schema/client versions and toolchain/platform identities recorded in the retained report |
+| 5 | From a fresh extraction of the exact source candidate, an operator follows the documented prerequisites and commands, supplies their own workspace, provider and policy inputs, and launches the foreground app-server and TypeScript consumer; the consumer drives skill, interaction answer, policy re-evaluation, committed grant/intent, tool and artifact with real Store and executor, embedding no identities; real-provider task separately attended; abrupt kill and fresh-process resume; stdin EOF performs orderly shutdown with no cancellation and a still-pending interaction; `session.abort` is the separate deliberate-cancellation case |
+| 6 | Elixir, Python and TypeScript clients execute the same positive/negative vectors without importing the server codec; pinned interpreter versions verified before the lane, absence or mismatch reported as unavailable evidence; exact source archive, commit, VERSION, lockfile, schema/client versions and toolchain/platform identities recorded in retained source-release evidence and the gate report as applicable |
 | 7 | With a real runtime and Store: a session traces only allowed modules and owned processes and leaves a second VM tracer unaffected; each level reports its documented fields; the `arguments` level redacts credential references, model content, tool arguments and artifact bytes to typed placeholders; the exact entry, rate and queue limits drop with a counted entry and never block a coordinator; no session command, client content, model output, project resource or app-server request can start, change or stop a session; stopping releases every trace flag; an OTP release without trace sessions reports unavailability; every callback and transaction cut in ADR 0030's emission inventory emits start/stop or exception with duration and only documented metadata; a crashing handler is isolated; a slow or blocked forwarding sink in `loopex_telemetry` never delays a coordinator and drops with a counted entry; enabled-trace and no-handler overheads are measured and retained |
 
 The opening runner binds one real behavioral red for outcome 3: through a
@@ -240,8 +242,10 @@ no fixed review-round limit or retry-to-green rule.
 
 Concept: [Scope](M4.md#concept-plan-scope).
 
-All surfaces remain experimental. Exact generation/schema agreement is required;
-there is no mixed-generation promise, public-protocol freeze or daemon claim.
+The `v0.1.0` source tag identifies a numbered release, not a compatibility
+freeze. All surfaces remain experimental. Exact generation/schema agreement is
+required; there is no mixed-generation promise, public-protocol freeze or daemon
+claim.
 Unknown mutating discriminants refuse. ADR 0024 adds versioned core interaction
 records; the app-server itself writes no private record. M3 resource semantics
 remain intact. Source VERSION is distinct
@@ -293,8 +297,22 @@ acceptance rather than download a compiler during a gate.
 
 At the separately approved version transition set source VERSION/application
 versions to 0.1.0. Build the server and provider companion together and run
-outside the checkout; retain exact artifact identities. No publication, tag,
-package or service install follows from closure alone.
+outside the checkout. Stage a tar source archive from the exact reviewed
+product candidate with `git archive`; retain its SHA-256, candidate commit and
+tree, `VERSION`, `mix.lock` digest, toolchain and platform. Extract it into a
+fresh directory and run the operator-guide setup and workflow there with
+operator-supplied inputs. The source archive contains source and documentation,
+not credentials, installed data, a binary, an installer, or a service image.
+The gate proves this staged
+source candidate before closure; it does not require a tag that cannot yet
+exist. After independent exact-SHA closure review, explicit closure and
+release/tag authority, and integration to `main`, create one annotated
+`v0.1.0` tag on that integrated closure commit. Generate the release source
+archive from the tagged commit and retain its separate SHA-256, commit and tree;
+verify the tag, release archive and `VERSION` identify that commit. The earlier
+candidate archive smoke remains bound to its own exact SHA and is not relabeled
+as a test of the later governance-only closure commit. Do not move the tag or
+publish Hex packages, binaries, installers or service artifacts.
 
 <a id="technical-plan-minimalism"></a>
 ### Proportional Minimalism Budget
