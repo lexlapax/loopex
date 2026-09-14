@@ -3670,3 +3670,75 @@ pending rather than reporting a global pass. Runs of the M3 gate under the
 new floor pair belong to the inherited-green proof after that refresh. This
 record accepts no other holder, plan or ADR, waives no evidence, and grants
 no integration, tag or release.
+
+<a id="disposition-m4-plan-acceptance-2026-09-14"></a>
+### M4 plan acceptance — 2026-09-14
+
+With the five prerequisite ADRs accepted and every `.tool-versions` holder
+settled, the reviewer presented the Open M4 refresh at pushed
+`9810f308b48432b5787704a9dc6de0263afbed69` as the acceptance candidate,
+with this evidence: holder-scoped validation at the M3 rebind naming only M4
+as pending; the candidate's status check stopping only on the shared binding
+sequence that this Acceptance row completes; M4 gate inspection verifying all
+fourteen bound rows; M4 preflight reporting the compile control green and the
+declared `interaction_unsupported` opening red; the bound fixture check and
+its seven tests passing under both installed pairs; and the commit-message,
+hygiene and agent-bootstrap checks passing. The packet stated that the
+reviewer had authored the candidate and asked the maintainer to obtain an
+independent exact-SHA reading before accepting. The maintainer answered
+**"Accept"**.
+
+The transition recorded against that candidate was refused by the repository
+status checker, whose governance walk required a plan's first acceptance to
+bind a gate at generation zero while the sequential holder transaction had
+required Open M4 to refresh its shared `.tool-versions` binding through an
+amendment. The checker was repaired at `47784aa` so that a first acceptance
+may bind the direct proposal that advanced the gate by exactly one to
+complete such a refresh, and the phase A lineage was re-created on top of
+that repair, each proposal carrying the same change as its original and each
+rebind carrying its re-created record forward. The re-created candidate
+`34b4ac98ade7abfeac5c3709a3d6d92a7530b38d` carries the same change as
+`9810f308b48432b5787704a9dc6de0263afbed69`, verified by the reviewer with a
+tree diff. On 2026-09-14 the maintainer approved that rebuild and accepted
+the re-created M4 candidate on the same basis, answering **"Approve and
+accept rebuild all"**.
+
+The transition recorded against `34b4ac98ade7abfeac5c3709a3d6d92a7530b38d`
+was refused in turn by the plan validator, which read every generation-one
+candidate as an amendment proposal that must keep its Open state and required
+the original terminating an acceptance chain to sit at generation zero. The
+repair was widened at `d276f325169af6ab54464648a6578da6b4e499c7` and the
+phase A lineage re-created a second time on it, each proposal carrying the
+same change as its original and each rebind carrying its re-created record
+forward. The candidate `27e517b3391ddc7c12b5f638f66434923ab021e3` carries
+the same change as `9810f308b48432b5787704a9dc6de0263afbed69`, verified by
+the reviewer with a tree diff. On 2026-09-14 the maintainer approved the
+second rebuild and accepted the re-created M4 candidate on that basis,
+answering **"I accept recreated proposals and candidate. i need to do a
+second review after the final sha table is created"**, and so stated that a
+further review follows the final SHA table before integration.
+
+This transcribes those answers as the maintainer's acceptance of the exact
+[M4 Concept plan](../plans/M4.md#concept), its
+[Technical depth](../plans/M4-technical.md#technical-depth) and its
+[gate](../plans/M4-gate.md) at `27e517b3391ddc7c12b5f638f66434923ab021e3`,
+binding Concept envelope
+`940155e9a858080c88fca61df765def26b8b3dbbe45d7f54218a819d785d9263`,
+Technical depth envelope
+`08b59ec9514b99a97b48d8945cc10a4be414ebfaf9b007ee019359a54e7c0226`
+and gate `f0163872dff3314c3cefe3ecacf7f36a0090012f00a641c8004aa81503225e56`.
+The Acceptance row is also the rebind that completes the M4 floor-binding
+refresh recorded as that gate's Amendment 1. This transition changes only the
+Acceptance row, the register row and its derived capsule and README summary,
+and adds this disposition.
+
+Consequences and what remains owed. M4 moves to Accepted and implementation
+inside its envelopes may proceed on branch `m4`. The candidate was authored
+by the reviewer; the independent read-only exact-SHA review that the
+development contract requires before this governance checkpoint integrates
+to `main` is still owed by an actor other than the author, and this record
+does not substitute for it. The inherited M0–M3 gates on both pairs, the M0
+run under the new floor pair recorded in the matrix evidence, and M4's
+distinct red are proved at this transition and thereafter; they require the
+maintainer's provider key for the real lanes and have not yet run. This
+record grants no merge to `main`, integration, tag, publication or release.
