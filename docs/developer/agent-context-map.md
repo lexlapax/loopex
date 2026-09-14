@@ -3950,3 +3950,30 @@ override adds no product change, converts no red into a pass, reopens no
 lifecycle state, and grants no merge to `main`, tag, publication or release.
 It is one standalone commit and receives independent exact-SHA review before
 integration relies on it.
+
+<a id="disposition-m1-gate-generation-11-2026-09-14"></a>
+### M1 gate generation 11 acceptance — 2026-09-14
+
+Working M4's Workstream 0 baseline on branch `m4`, the implementer found that
+the Closed M1 gate could not be re-proved under the refreshed floor by
+running anything: its bound verifier judged the closure captures against the
+working tree's `.tool-versions` while tying every capture to the evidence
+commit the Closure row names. Asked in plain terms to choose between a second
+evidence block, replacing the closure captures, and running lanes live, the
+maintainer chose the second evidence block. The implementer then presented
+proposal `A` at `192611fd8dde220bcfd75ca55ea23ee2314a0951` with this evidence: the rewritten verifier
+and its bound corpus green on the current pair (eleven cases, one new),
+formatting, agent-bootstrap, commit-message and hygiene checks passing, and
+the full status walk at `A` stopping only on the pending generation row. The
+maintainer answered **"i accept 192611f"**.
+
+This accepts generation 11 alone under `amendment-transaction-v2`: the
+verifier reads the closure block against the pairs locked at its own
+candidate, admits exactly one post-closure re-capture block taken on the
+current pairs at a descendant of the closure transition and retained by every
+later revision, refuses a re-capture while the locked pairs are unchanged,
+and declares its absence the red once they differ. The Acceptance and Closure
+rows, every earlier generation and every historical revision remain exactly
+as recorded. This row binds the proposal; the re-capture itself and the M0
+re-proof it records follow as evidence commit `E'` and are not accepted
+here. It grants no closure, integration, tag or release.
