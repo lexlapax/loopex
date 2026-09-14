@@ -359,7 +359,7 @@ schema_path=apps/loopex_protocol/priv/schema/loopex-experimental-1.json
 schema_digest=$(shasum -a 256 "$schema_path" | cut -d' ' -f1) || die 'cannot hash the canonical schema'
 selector_count=$(grep -c . "$task_root/selector-ledger") || die 'selector ledger is empty'
 clients_digest=$(shasum -a 256 "$client_pins" | cut -d' ' -f1) || die 'cannot hash the client toolchain pins'
-report=$(printf 'LOOPEX_M4_GATE_REPORT source=%s tree=%s archive=sha256:%s archive_build=sha256:%s lock=sha256:%s gate=sha256:%s version=%s role=full seed=3107 outcome_ids=1,2,3,4,5,6,7 selectors=%s elapsed_seconds=%s %snode=%s python=%s clients=sha256:%s schema=sha256:%s inherited=true fresh_source=true real_workflow=true result=PASS' \
+report=$(printf 'LOOPEX_M4_GATE_REPORT source=%s tree=%s archive=sha256:%s archive_build=sha256:%s lock=sha256:%s gate=sha256:%s version=%s role=full seed=3107 outcome_ids=1,2,3,4,5,6,7 selectors=%s elapsed_seconds=%s %snode_pin=%s python_pin=%s clients=sha256:%s schema=sha256:%s inherited=true fresh_source=true real_workflow=true result=PASS' \
   "$source_commit" "$source_tree" "$source_archive_digest" "$source_build_digest" "$source_lock_digest" "$(shasum -a 256 docs/plans/M4-gate.md | cut -d' ' -f1)" "$source_version" "$selector_count" "$SECONDS" "$toolchain" "$pinned_node" "$pinned_python" "$clients_digest" "$schema_digest")
 support evidence "$report" </dev/null || exit $?
 printf '%s\n' "$report"

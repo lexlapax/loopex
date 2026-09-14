@@ -1,9 +1,11 @@
 # M4 Gate
 
-Open candidate for the headless external consumer, refreshed onto M3's Closed
-product base. Its five prerequisite ADRs are accepted, but this M4 plan pair
-and gate are not accepted by this revision, and M4 product implementation has
-not begun. The runner binds a real behavioral opening probe,
+Accepted gate for the headless external consumer on M3's Closed product
+base. Its five prerequisite ADRs are accepted, the M4 plan pair and this gate
+were accepted on 2026-09-14 as the plan's Acceptance row records, and M4
+product implementation proceeds on branch `m4` against this locked gate,
+which stays red until its declared missing behavior exists. The runner binds
+a real behavioral opening probe,
 executable closure lanes and exact future witness identities. Under the same
 preparation rule M3 recorded, future test bodies are written during
 implementation; every named witness must pass before closure. The
@@ -37,10 +39,11 @@ dependent work. It cannot replace an accepted ADR decision or released public
 contract. Each changed digest holder still lands its replacement row through
 that holder's own status-checked, exact-SHA-reviewed commit before the next
 holder proceeds. Historical bindings and unaffected evidence stay enforced. No
-acceptance or override is recorded by this Open gate. Its one amendment,
-[Amendment 1](#amendment-1), is the pre-acceptance binding refresh that the
-shared-holder sequence requires of every holder whose bound bytes change; it
-precedes acceptance and is completed by the Acceptance row itself.
+acceptance or override is recorded by this gate document itself.
+[Amendment 1](#amendment-1) is the pre-acceptance binding refresh that the
+shared-holder sequence required of every holder whose bound bytes changed; it
+preceded acceptance and was completed by the Acceptance row itself. Later
+amendments follow the transaction above.
 
 ## Current Opening Observation
 
@@ -169,9 +172,9 @@ binding.
 
 | SHA-256 | Path |
 | --- | --- |
-| `0936224c28ee08ecb524e4b0ea56db7af65eb1027bfa71050109891bbd000e81` | `scripts/check-m4-gate.sh` |
+| `baa80842b486abeb3f092f042d9ac64d83eb7eea4028d3b72b08bc62df398240` | `scripts/check-m4-gate.sh` |
 | `a559bd9f44f1f46f65aaff0bdcfcac2e5124301bc367c58c85966fd6409ba68f` | `scripts/m4-opening-probe.exs` |
-| `16e2fc85b7657049b7c89dff240b48a3dfeef656c9a4eafcd5dc3108f6434690` | `scripts/m4-gate-support.exs` |
+| `6eb691a5fd4b1b3c3896cc38f7719c21db637b12e3c17de9dd42f24a154cefdd` | `scripts/m4-gate-support.exs` |
 | `65d0de9dcd1218af542f00e32c2177d2612a2f1232f22db37b9942200c84cf66` | `scripts/m3-gate-support.exs` |
 | `c4d485ca3229441c678abe1e8733f90216e89e0dfb9e81786f58f525619aec29` | `scripts/check-closed-gates.sh` |
 | `8c94069e737ba66c658071c52232ae3f9462fb79ca8d0221fe071d63367765c7` | `scripts/m4-outcomes.exs` |
@@ -247,7 +250,7 @@ The retained final report has exactly this grammar, one line, fields in this
 order, each present once:
 
 ```text
-LOOPEX_M4_GATE_REPORT source=<40 hex> tree=<40 hex> archive=sha256:<64 hex> archive_build=sha256:<64 hex> lock=sha256:<64 hex> gate=sha256:<64 hex> version=<major.minor.patch> role=full seed=3107 outcome_ids=1,2,3,4,5,6,7 selectors=<count> elapsed_seconds=<n> elixir=<exact> otp=<exact, e.g. 29.0.5> erts=<exact> platform=<system architecture> node=<pinned> python=<pinned> clients=sha256:<64 hex> schema=sha256:<64 hex> inherited=true fresh_source=true real_workflow=true result=PASS
+LOOPEX_M4_GATE_REPORT source=<40 hex> tree=<40 hex> archive=sha256:<64 hex> archive_build=sha256:<64 hex> lock=sha256:<64 hex> gate=sha256:<64 hex> version=<major.minor.patch> role=full seed=3107 outcome_ids=1,2,3,4,5,6,7 selectors=<count> elapsed_seconds=<n> elixir=<exact> otp=<exact, e.g. 29.0.5> erts=<exact> platform=<system architecture> node_pin=<pinned> python_pin=<pinned> clients=sha256:<64 hex> schema=sha256:<64 hex> inherited=true fresh_source=true real_workflow=true result=PASS
 ```
 
 `source` and `tree` name the staged candidate commit and tree. `archive` is
@@ -438,3 +441,37 @@ and grants no waiver, closure or release.
 | Generation | Artifact | Rebound SHA-256 |
 | --- | --- | --- |
 | 1 | `.tool-versions` | `fea095ecec784a4440b872ad5f53a8da2cb4e13e43b6f05add5cfd75bb352879` |
+
+<a id="amendment-2"></a>
+## Amendment 2 — Rename the pinned-interpreter report fields
+
+**Acceptance: OUTSTANDING.** Accepted M4 amends its gate under
+`amendment-transaction-v1`: this proposal `A` advances the generation and
+retains the Acceptance row and lifecycle state; its immediate child `R`
+rebinds Acceptance to exact `A` after explicit acceptance.
+
+The first M0 gate run under the refreshed floor pair, taken as M4's
+Workstream 0 baseline on 2026-09-14, was red at outcome 8: the closed M0
+gate scans every tracked byte for an interpreter invocation that could bypass
+its retired-dependency shadow, and the report grammar above spelled the
+Python pin as an assignment token followed by a bare `python` field, which is
+one of the shapes that scan refuses however it is quoted. The M0 gate is
+locked, its scan is deliberate, and the bytes it refused are this gate's own,
+so the repair belongs here. The two pin fields are renamed to `node_pin` and
+`python_pin` in the report grammar, the runner's printed report and the
+support script's grammar table. The same revision conforms this document's
+opening paragraphs to the recorded acceptance, which they still described as
+pending; that is explanation, not a decision. No outcome, selector, witness,
+limit, client pin or evidence class changes, and no lifecycle state reopens.
+
+Binding validation, bootstrap and every inherited gate that invokes them stop
+at this proposal only on the stale binding of this gate; the M4 preflight
+reproduces the same declared opening red here as at the accepted candidate.
+After exact-SHA review and explicit acceptance of `A`, `R` rebinds the
+Acceptance row and adds one amendment-specific disposition. This proposal
+records no acceptance and grants no waiver, closure or release.
+
+| Generation | Artifact | Rebound SHA-256 |
+| --- | --- | --- |
+| 2 | `scripts/check-m4-gate.sh` | `baa80842b486abeb3f092f042d9ac64d83eb7eea4028d3b72b08bc62df398240` |
+| 2 | `scripts/m4-gate-support.exs` | `6eb691a5fd4b1b3c3896cc38f7719c21db637b12e3c17de9dd42f24a154cefdd` |
