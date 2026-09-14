@@ -31,8 +31,10 @@ revision. That override does not cover the M3 refresh, acceptance, rejoins,
 rebind children or closure candidates; those keep the ordinary inherited-gate
 obligation. M4 remains Open and holds no implementation authority. Before it
 can be accepted, re-prove every inherited gate green and its own distinct red on
-the refreshed base, complete its executable contract/vector tests and obtain
-fresh exact-SHA review. At final
+the refreshed base, bind the complete schema/vector contract bytes and prove
+their fixture shape and digest integrity, then obtain fresh exact-SHA review.
+Behavioral client conformance test bodies arrive during implementation and
+must pass before closure. At final
 acceptance all inherited gates are green and the M4 boundary remains
 truthfully red for missing external behavior.
 
@@ -53,19 +55,23 @@ verified it 4,096 times. On 2026-09-10, during the M4 planning task, the
 maintainer chose one authorized, verified transfer that verifies once and emits
 bounded chunks from an owned, cancellable reader, over independent range reads
 that would have reduced the feature to bounded excerpts. ADR 0028 now proposes
-that design. Both envelopes bind exact values at acceptance for: the opening
-verification's deadline and work budget, chunk bytes, per-read deadline,
-open-transfer lifetime, concurrent transfers per connection and per runtime,
-connection work budget, and read amplification (at most one complete
-verification plus one sequential emit per authorized transfer). Missing values
-block acceptance.
+that design. The proposed M4 ceiling is a 64 MiB transferable object; each
+opening is limited to 60 seconds and 128 MiB of source-read plus snapshot-write
+work; reads emit at most 32 KiB raw bytes within five seconds; transfers expire
+after ten minutes; concurrency is two per connection and four per runtime;
+and a connection admits 1 GiB of cumulative source-read, snapshot-write and
+emitted-read work with at least a 1 MiB debit per open. Read amplification is
+at most one complete verification plus one sequential emit per authorized
+transfer. These are unmeasured safety ceilings until the acceptance authority
+settles ADR 0028 and the required evidence proves them.
 
 **Connection state table (required content of ADR 0023).**
 
 | Situation | Required behavior |
 | --- | --- |
 | Before `initialize` | Every other frame refuses; nothing durable is created |
-| Repeated `initialize` or no common generation | Refuse; the connection stays uninitialized; each generation binds exactly one schema digest |
+| First `initialize` with no common generation | Refuse and remain uninitialized; no second negotiation attempt in that process |
+| Repeated `initialize` after success or refusal | Refuse without changing state; a successful connection remains initialized on its selected generation, and a refused one remains uninitialized |
 | Attachment | At most one active attachment per foreground process; a second `session.attach` refuses with a stable reason unless it names explicit replacement, which detaches the first at its last completely emitted cursor |
 | Request identity | `request_id` is unique among in-flight requests on the connection; reuse while in flight refuses; reuse after completion is ordinary correlation |
 | Pre-admission pressure | Refuse the mutation before any durable write |
@@ -93,7 +99,7 @@ gates bind. The default sequence is exact:
 
 | Phase | When | Transactions and routes |
 | --- | --- | --- |
-| A. Successor enabling | M3 is Closed and integrated; before M4 acceptance | Derive the exact M0–M3 holder inventory on the integrated closure; settle the floor refresh with every `.tool-versions` holder: Closed M0–M3 each through v2 `A`/`R` in register order, and Open M4 by refreshing its own table directly; re-prove every inherited gate green plus this gate's own red on that base; then submit the candidate for independent review and maintainer acceptance |
+| A. Successor enabling | M3 is Closed and integrated; before M4 acceptance | Derive the exact M0–M3 holder inventory on the integrated closure; settle the floor refresh and active floor literals: Closed M0–M3 each through v2 `A`/`R` in register order, with M1's bound verifier, dependency-budget task and tests and M2's bound runner changed in their own proposals; refresh Open M4's table directly; use holder-scoped artifact validation with named pending holders at intermediate `R` revisions, then re-prove global bootstrap and every inherited gate green plus this gate's own red after the final binding; submit that candidate for independent review and maintainer acceptance |
 | B. Implementation | After acceptance, on branch `m4`, before the first rejoin that runs the full lanes | One Closed-M1 v2 proposal `A` that atomically carries M1's next gate generation, both dependency-oracle artifacts with the ten-application inventory, the client → contract edge, `:telemetry` admitted as core's sole external dependency, negative tests, and the minimal M4-authorized `loopex_app_server` and `loopex_telemetry` applications that make the new inventory true, following the M1 Amendment 7 pattern; exact-SHA review and explicit acceptance of `A`; immediate governance-only `R`; then ordinary implementation continues |
 | C. Closure rejoin | At the closure candidate | Apply the separately approved version transition to 0.1.0 and settle every version holder below: Closed M1, M2 and M3 through v2 `A`/`R` in register order, then Accepted M4 through its own v1 amendment proposal and rebind, last |
 
@@ -107,7 +113,8 @@ satisfied by phase A. The ledger at the planning base is:
 
 | Artifact | Holders | Restriction today | Planned change | Phase | Route and checks |
 | --- | --- | --- | --- | --- | --- |
-| `.tool-versions` | M0, M1, M2, M3, M4 | Floor 1.17.0/OTP 26.0, current 1.20.3/OTP 29.0.5 | Floor 1.18.5/OTP 27.3.4 | A | v2 `A`/`R` for Closed M0–M3 in register order, or a recorded override naming all of them; Open M4 refreshes its own table; matrix evidence on both pairs; each holder's gate green at its `R`; bootstrap |
+| `.tool-versions` | M0, M1, M2, M3, M4 | Floor 1.17.0/OTP 26.0, current 1.20.3/OTP 29.0.5 | Floor 1.18.5/OTP 27.3.4 | A | v2 `A`/`R` for Closed M0–M3 in register order, or a recorded override naming all of them; Open M4 refreshes its own table; holder-scoped binding and pending-holder report at each intermediate `R`; matrix evidence on both pairs and global bootstrap/inherited greens only after the final M4 binding |
+| `scripts/m1-evidence-verifier.exs`, `apps/loopex/lib/mix/tasks/loopex.deps_budget.ex`, `apps/loopex/test/m1_gate_evidence_test.exs`, `apps/loopex/test/deps_budget_test.exs`, `scripts/check-m2-gate.sh` | M1 holds the verifier, dependency task and tests; M2 holds its gate runner | Active checks name the old floor literally | Change only the floor literals and their expectations | A | Include M1's files in its floor v2 proposal and M2's runner in its own floor v2 proposal; prove floor/current behavior without mixing Phase B's later ten-application dependency decision |
 | `apps/loopex/lib/mix/tasks/loopex.deps_budget.ex`, `apps/loopex/test/deps_budget_test.exs`, `apps/loopex_app_server`, `apps/loopex_telemetry` | M1 (the applications are unbound M4 product) | Eight-application inventory; a client may depend only on core and a composition; core admits no external dependency; both applications are absent | Ten-application inventory, permitted client → contract production edge, `:telemetry` admitted as core's sole external dependency, negative tests, and the minimal ninth and tenth applications in the same proposal | B | One M1 v2 `A` carrying all of these plus M1's generation row; review and accept `A`; governance-only `R`; M1 gate green at `R` |
 | `VERSION`, application versions | Every holder below | 0.0.0 | 0.1.0 | C | Separately approved version transition; evidence names the exact version |
 | `scripts/m1-exunit-runner.exs`, `apps/loopex/test/m1_exunit_runner_test.exs` | M1, M2, M3, M4 | The selector runner refuses a real report whose build identities are not `@0.0.0` | Version-aware build identities; required, because M4's real lane runs through this runner | C | v2 for M1, M2 and M3 in register order; Accepted M4 last through v1 |
@@ -178,6 +185,14 @@ must be tested before semantic decoding; an ordinary map decoder cannot recover
 lost duplicate-key evidence. Stdlib JSON at the accepted floor is the codec;
 no external dependency is added to the app-server.
 
+The wire set excludes `session.list` and the two `project_resources` trust
+methods. The consumer retains or asks for a known session ID for resume, and
+the host's launch configuration alone fixes root AGENTS.md trust.
+Unknown-method tests refuse those names without an eager directory scan, a
+trust change or durable admission. This preserves the bounded wire and M3
+facade-only mapping without adding a new listing index or host trust-management
+workflow to M4.
+
 A foreground app-server loss invokes the inherited host shutdown/recovery
 contract. Clean EOF shuts down in order without cancelling; abrupt loss leaves
 only what the journal proves; only `session.abort` cancels. Neither attachment
@@ -193,7 +208,7 @@ Concept: [Outcomes](M4.md#concept-plan-outcomes).
 | Outcome | Mandatory proof beyond a unit test |
 | --- | --- |
 | 1 | Independent raw-byte client launches actual server process, exact init/schema/limits vector, refusal before init, no durable work on malformed startup |
-| 2 | Identical command corpus through facade/wire; independent variation of request and command identity; snapshot-before-live; committed admission before correlated delivery; command replay after disconnect |
+| 2 | Identical command corpus through facade/wire; independent variation of request and command identity; snapshot-before-live with the unchanged revision-2 map and same-cursor open-interaction view; committed admission before correlated delivery; command replay after disconnect; core commits exactly one distinct `session.settled` after `run.finished` when no follow-up is queued, none on promotion, with replay and fresh attachment showing no duplicate |
 | 3 | Durable interaction request/answer/policy/intent cuts, fixed timestamps through commit_unknown, expiry/abort/restart races, the exact successive-round bound and policy identity; catalog and selected content identity preserved; stale/missing trust withholds content; manual-only restriction; interaction answer admission separately observed from policy re-evaluation, grant/intent commit and tool receipt; every immutable launch input proved unreplaceable from the wire |
 | 4 | ADR 0028 one verification per transfer and bounded allocation proved at ArtifactStore and facade with object and chunk digests distinguished; wrong-session use, object/use swap and corruption outside the requested window refused at open; concurrent-transfer and connection-work exhaustion, lifetime expiry, cancellation and descriptor release; oversized/fragmented/multiple frames; malformed UTF-8/duplicate keys/depth; slow reader; bounded queue; late progress; stdout contamination; actual process-tree cleanup |
 | 5 | From a fresh extraction of the exact source candidate, an operator follows the documented prerequisites and commands, supplies their own workspace, provider and policy inputs, and launches the foreground app-server and TypeScript consumer; the attended real-provider selector itself runs from the extracted tree and drives skill, interaction answer, policy re-evaluation, committed grant/intent, tool and artifact with real Store and executor, embedding no identities; abrupt kill and fresh-process resume; stdin EOF performs orderly shutdown with no cancellation and a still-pending interaction; `session.abort` is the separate deliberate-cancellation case |

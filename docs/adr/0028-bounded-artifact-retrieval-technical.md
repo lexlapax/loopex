@@ -21,7 +21,8 @@ unsupported through the facade when the capability is absent.
 
 The facade exposes the same triple, owned by the existing attachment
 capability: `Loopex.open_artifact_transfer(attachment, request)` receives
-exactly the opaque artifact use reference, a non-negative start offset and an
+exactly the ADR 0015 `use_locator` from a public compact artifact reference,
+a non-negative start offset and an
 optional window length; `Loopex.read_artifact_chunk(attachment, transfer_ref,
 length)` returns the next sequential chunk; `Loopex.close_artifact_transfer(attachment,
 transfer_ref)` releases it. The transfer reference is bound to the session and
@@ -54,7 +55,25 @@ could read or replace. Close, cancellation, connection loss and lifetime expiry
 close the descriptor. On startup the store scavenges its own scratch root,
 deleting only regular files it owns and never following links, as the bounded
 defense for a platform or failure that left an unlinked-before-open file
-behind. Disk use per transfer is bounded by the object ceiling. Missing or corrupt object,
+behind. Disk use per transfer is bounded by the object ceiling. The proposed M4
+limit profile is exact: an object larger than 64 MiB refuses before transfer;
+opening has a 60-second elapsed deadline and at most
+128 MiB of storage work, counting source reads and snapshot writes; each read
+emits at most 32 KiB of raw object bytes and has a five-second elapsed
+deadline; a transfer expires ten minutes after successful open; no more than
+two transfers may be live on one connection and four on one runtime. A
+connection has a 1 GiB cumulative storage-work allowance from successful
+initialization to connection close, counting source reads, snapshot writes,
+and emitted snapshot reads. Each open debits at least 1 MiB of that allowance
+even for an empty object, so repeated empty opens are bounded. Admission
+reserves enough budget for the requested work before touching storage; actual
+work is charged once, including a failed or cancelled operation. At the local
+store's existing 64 MiB object ceiling, a full save costs at most 64 MiB
+source read, 64 MiB snapshot write, and 64 MiB emitted read, or 192 MiB
+counted work. The maintainer selected these proposed safety ceilings on
+2026-09-13; they are not a measured service-level promise or an ADR acceptance.
+
+Missing or corrupt object,
 mismatched use, unsupported capability, invalid window, unknown or expired
 transfer, exhausted open deadline or work budget, and exhausted transfer or
 connection budgets have distinct bounded refusals. Every open transfer owns one
@@ -86,9 +105,8 @@ costs N * ceil(N/R) verified bytes, which for the local store's 64 MiB ceiling
 and a 16 KiB range is roughly 256 GiB per saved object. Before acceptance settle
 finite chunk-byte, per-read deadline, open-transfer lifetime,
 concurrent-transfer and connection-work budgets alongside ADR 0023; absent
-budgets block acceptance rather than imply unlimited work. Those budgets must
-be stated in both Concept and Technical contracts; this proposal does not claim
-them measured or accepted.
+or unapproved budgets block acceptance rather than imply unlimited work. The
+numeric proposal above is not a claim of measured performance or acceptance.
 
 <a id="technical-adr-0028-compatibility"></a>
 ### Compatibility and Rollback Mechanics

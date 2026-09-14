@@ -30,6 +30,19 @@ An interaction moves through `pending` to exactly one of `answered`, `denied`,
 resolution is owed; it does not imply `allowed`. The sibling policy-decision
 record holds `allowed` or `denied`, and only `allowed` can lead to a grant.
 
+The serial session owner has at most one open interaction: `pending` or
+`answered` with policy resolution still owed. The public attachment retains
+ADR 0017's exact revision-2 snapshot map and captures a separate open-interaction
+view at the same durable event cursor. The view is `null` when none is open;
+otherwise it carries the interaction, run, turn and tool-call identities,
+status, validated choice request, effective expiry instant, and the selected
+choice ID only after an answer. A fresh-process attach does not read a newer
+status and attach it to an older cursor. The current facade status returns the
+same bounded view with its observed event sequence. Terminal interaction
+events remain in the outbox; a terminal interaction is not presented as open
+on fresh attach. A new `Loopex.open_interaction/1` projection of the opaque
+attachment may expose the captured view without changing `Loopex.snapshot/1`.
+
 The record contains bounded plain data: interaction, session, run, turn, and
 tool-call identities; the canonical policy request and digest; the validated
 choice request and digest; created and effective-expiry instants; status; and,
@@ -88,6 +101,15 @@ bounded grant binding, and executor intent together before dispatch. Denial
 commits and dispatches nothing. Another defer resolves the answered round and
 atomically creates a fresh interaction identity.
 
+The serial tool decision retains a counter initialized to zero at its first
+defer. Each committed answer-then-defer transition increments it in the same
+transaction that resolves the old interaction and creates the next. A third
+such transition resolves as denial without creating another interaction or
+executor intent. Thus a decision can present at most three questions: the
+initial one and two successive defers. The counter survives restart and replay;
+resolving an uncertain commit or replaying the same answer command never debits
+it again. The absolute run deadline can end the sequence sooner.
+
 Expiry, abort, and deadline are ordinary competing commands/timers ordered at
 the journal. The first eligible committed transition wins. A later response is
 stale and cannot reopen the record. If deadline cleanup truth is insufficient,
@@ -120,7 +142,8 @@ Concept: [Consequences](0024-durable-interaction-lifecycle-and-host-policy-autho
 Conformance injects failure before and after interaction commit, answer
 admission, policy result, grant/intent commit, and publication. It covers
 restart, identical and conflicting replay, wrong-session and wrong-run answers,
-absence, expiry, repeated defer, abort and deadline races, malformed policy
+absence, expiry, repeated defer through and beyond the two-transition ceiling,
+abort and deadline races, malformed policy
 output, timeout, and policy crash. A negative authority property varies client
 content, request IDs, metadata, event order, and answer shape and proves none can
 mint or widen a grant without a committed host-policy allow.

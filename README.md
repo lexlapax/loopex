@@ -83,8 +83,9 @@ M4 is next, but its plan and gate remain Open: no M4 product implementation or
 release has started. Its proposed outcome is an operator-usable foreground
 server and TypeScript consumer over durable interactions and bounded artifact
 transfers, with runtime tracing and telemetry. The planned `0.1.0` release is
-source-only and would receive an annotated `v0.1.0` tag only after M4 acceptance,
-implementation, independent closure review and separate release authority. See
+source-only and would receive an annotated `v0.1.0` tag on the exact `main`
+integration commit only after M4 implementation, independent closure review,
+explicit closure and separate release/tag authority. See
 the [M4 plan](docs/plans/M4.md#concept) for the candidate scope and the
 [canonical register](docs/plans/README.md) for its current status.
 

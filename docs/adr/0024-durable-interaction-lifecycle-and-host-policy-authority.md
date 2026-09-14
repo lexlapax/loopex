@@ -68,8 +68,12 @@ Technical depth: [Missing durable decision point](0024-durable-interaction-lifec
   resolved, expired, aborted, mismatched, or absent interaction is refused with
   a stable reason.
 - Another `defer` resolves the current interaction and creates a fresh
-  interaction ID. At most one interaction is pending for the serial tool
-  decision, and the run's absolute deadline remains the outer bound.
+  interaction ID. The serial session owner exposes at most one open
+  interaction, pending or answered with policy resolution still owed. The
+  maintainer chose at most two successive committed
+  answer-then-defer transitions after the initial defer (three operator
+  questions in total) on 2026-09-13; another defer fails closed as denial.
+  The run's absolute deadline remains the outer bound.
 - Creation and expiry instants are chosen once before their transaction and
   retained through uncertain commit resolution. Graceful cancellation stays
   cancelled; abrupt-loss recovery resumes only retained pending/answered state.
@@ -80,9 +84,11 @@ Technical depth: [Missing durable decision point](0024-durable-interaction-lifec
 - Recovery reconstructs a recorded answer and resumes policy evaluation. A
   crash between answer admission and resolution leaves the run suspended; no
   recovery branch speculates, acknowledges permission, or dispatches first.
-- Snapshots and durable events expose enough pending and resolved interaction
-  state for a new app-server process to resume the question. Transport loss by
-  itself changes no interaction state.
+- The attachment response pairs the unchanged ADR 0017 revision-2 snapshot
+  and cursor with an interaction view captured at that same cursor. Status and
+  durable events also expose pending and answered state, so a new app-server
+  process can resume the question. Transport loss by itself changes no
+  interaction state.
 - Policy implementation selection is trusted host launch configuration. No
   protocol method, session parameter, model value, project resource, answer, or
   other client content selects a policy implementation or changes its profile.

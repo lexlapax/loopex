@@ -12,17 +12,26 @@ Concept: [Context and decision](0026-development-floor-refresh.md#concept-adr-00
 
 Retain original ADR 0002 and `.tool-versions` until this proposal is accepted.
 On the integrated Closed M3 base, `.tool-versions` is bound by Closed M0, M1,
-M2 and M3 gates and by the Open M4 gate. Settle Closed M0–M3 in register order,
-each as atomic v2 proposal A followed immediately by explicitly accepted
-rebind R. Each holder's proposal includes its changed bound artifact and gate
-generation row together. Then refresh Open M4's bound-artifact table directly
+M2 and M3 gates and by the Open M4 gate. The floor also appears in M1's bound
+evidence verifier and dependency-budget task and tests, and in M2's bound gate
+runner. Settle Closed M0–M3 in register order, each as atomic v2 proposal A
+followed immediately by explicitly accepted rebind R. M1's floor proposal
+includes the floor-only changes to its verifier, dependency-budget task and
+their tests; M2's includes its runner's floor-only checks. Each proposal
+carries all changed bound artifacts and that holder's generation row together.
+Phase B's later application-inventory and dependency-edge change remains a
+separate M1 generation. Then refresh Open M4's bound-artifact table directly
 on the settled base, re-prove the inherited gates green and M4's distinct red,
 and submit the M4 candidate for independent review. App and version inventory
 edits remain in M4's separately governed later phases. Unrelated fixes need
 their own scope and evidence rather than automatic inclusion in a floor proposal.
 
 At each revision retain the prescribed stale-binding and binding-independent
-evidence, and at completion prove every inherited gate green. Run both pairs
+evidence. At an intermediate R, use holder-scoped artifact validation with
+complete history and current bytes, name every pending holder, and prove that
+holder's binding without claiming a global status or bootstrap pass. Global
+status, bootstrap and every inherited gate become eligible for green only after
+the final Open M4 binding refresh. Run both pairs
 on Darwin and current on Linux with disjoint clean build/dependency roots.
 Record actual versions; unavailable images/downloads are not PASS. An identical
 pair in both lanes is not two environments. Candidate pin existence and JSON

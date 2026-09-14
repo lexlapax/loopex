@@ -22,11 +22,19 @@
       id: 2,
       selectors: [
         %{
+          path: "apps/loopex/test/session_settled_event_test.exs",
+          names: [
+            "a no follow up terminal atomically emits one run finished then one distinct session settled and replay or reattach never duplicates either",
+            "a promoted follow up emits no session settled before its successor finishes"
+          ]
+        },
+        %{
           path: "apps/loopex_app_server/test/session_mapping_test.exs",
           names: [
             "the same command corpus produces identical durable identities through facade and wire",
             "request identity varies independently of command identity and replay returns the historical admission",
             "attach returns a snapshot and cursor before live delivery and admission precedes correlated asynchronous delivery",
+            "a fresh attachment pairs its unchanged revision two snapshot with the exact same cursor open interaction view",
             "a second attach refuses with a stable reason unless it names explicit replacement which detaches the first at its last emitted cursor",
             "in flight request identity reuse refuses and reuse after completion is ordinary correlation",
             "pre admission pressure refuses before any durable write and post admission pressure drops progress first then detaches at the last emitted cursor",

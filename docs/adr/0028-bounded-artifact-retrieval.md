@@ -39,11 +39,18 @@ Terminal, embedded and M4 consumers save or inspect large tool output without
 loading it all in memory. Each transfer costs one complete sequential
 verification plus one sequential emit of the requested window; saving an N-byte
 object reads at most 2N bytes. Caching and Merkle formats remain outside scope.
-Resource packs do not enter the tool-output artifact namespace. Before M4
-acceptance, pair the transfer/frame contract with explicit budgets for the
-opening verification (its deadline and work), chunk bytes, per-read deadline,
-open-transfer lifetime, concurrent transfers and connection work. Missing
-budget decisions block acceptance; they are not an unlimited-I/O grant.
+Resource packs do not enter the tool-output artifact namespace. The proposed
+limits for M4 acceptance are a 64 MiB maximum transferable object, a
+60-second opening deadline and 128 MiB of
+opening read/write work; 32 KiB raw chunks with a five-second read deadline;
+a ten-minute transfer lifetime; at most two transfers per connection and four
+per runtime; and 1 GiB of cumulative transfer work per connection, with a
+1 MiB minimum debit for each open. These are safety ceilings to prove, not
+measured throughput promises. A full 64 MiB save consumes at most 192 MiB of
+counted work. The maintainer selected this profile on 2026-09-13; its ADR
+acceptance and measured evidence remain separate. The use reference is the
+existing public ADR 0015 `use_locator`, an opaque `use:<sha256>` value, not a
+path or a new client-minted token.
 
 Keep existing put/fetch callbacks and object/use formats. Add one optional
 bounded transfer capability to ArtifactStore and an experimental facade

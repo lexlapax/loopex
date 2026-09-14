@@ -71,27 +71,48 @@ Technical depth: [Boundary and ownership problem](0023-experimental-public-sessi
   admission, and no transport reply itself becomes session truth.
 - **Attachment is explicit.** `session.create` returns a durable session identity
   and does not silently attach the connection. `session.attach` must return an
-  authoritative snapshot and current cursor before that connection submits a
-  session command or receives later events and progress. There is no implicit
-  auto-attachment whose cursor a client cannot observe.
+  authoritative snapshot, current cursor and any open interaction captured at
+  that same cursor before that connection submits a session command or receives
+  later events and progress. The inherited revision-2 snapshot map stays exact;
+  the interaction view is a sibling, not a hidden field added to it. There is
+  no implicit auto-attachment whose cursor a client cannot observe.
 - **M4 exposes only implemented semantics.** The protocol covers session
-  create, list, resume, inspect, snapshot and current cursor; prompt, steer,
-  follow-up, abort, and interaction response; resource catalogs, explicit skill selection and project-resource trust; bounded
+  create, resume by a known ID, inspect, snapshot and current cursor; prompt, steer,
+  follow-up, abort, and interaction response; resource catalogs, explicit skill selection and admitted project-resource use; bounded
   artifact retrieval; durable events; and transient progress. Fork, compaction,
-  model switching, extension management, and daemon operations are negotiated
-  unavailable rather than invented at the wire.
+  model switching, extension management, daemon operations and session listing
+  are negotiated unavailable rather than invented at the wire. The M3 session
+  directory listing eagerly loads every entry, so exposing it would break this
+  generation's bounded-work promise. An operator retains or supplies a known
+  session ID for resume. The maintainer approved deferring `session.list` from
+  M4 on 2026-09-13 rather than adding a new bounded directory query to this
+  milestone.
+- **Project trust stays at host launch.** The host inspects the root AGENTS.md
+  and fixes its project-resource decision before starting the runtime. No live
+  `project_resources.inspect` or `project_resources.decide` wire method exists;
+  M3 has no corresponding session facade call, and a client decision could not
+  replace the runtime's launch-time trust state. The maintainer approved this
+  correction on 2026-09-13. Clients still use the admitted resource catalog,
+  verified read, explicit admission and skill selection methods.
 - **Truth planes remain explicit.** Authoritative snapshots, durable events,
   transient progress, and diagnostics are separate record families. A current
   process attachment starts from an authoritative snapshot and cursor before
   later live events. ADR 0011's `stream_domain_id` scopes progress continuity;
   a gap or absent closure falls back to durable state and never implies abort,
-  denial, approval, or abandonment.
+  denial, approval, or abandonment. M4 completes ADR 0011's distinct
+  `session.settled` public fact in core before projecting it; Closed M3 has the
+  settled state but does not emit that fact.
 - **The boundary fails closed and stays bounded.** Invalid UTF-8, duplicate
   object keys, unknown mutating discriminants, unsafe numeric identities,
   excessive nesting, oversized frames, strings, or collections, and atoms
   derived from input are refused. Slow output cannot block the coordinator or
   grow memory without bound: progress may coalesce or drop, while a durable
   stream detaches at a stated cursor or admission refuses under overload.
+  The proposed generation limits input to 64 KiB before initialization and
+  1 MiB afterwards, output records to 2 MiB, and decoded strings to 128 KiB;
+  it bounds depth, collection size, in-flight work and both output queues.
+  These are safety ceilings, not measured latency promises. A maximally
+  escaping M3 resource catalog must fit the output ceiling before acceptance.
 - **Source version and protocol generation are independent.** M4 changes the
   source-tree `VERSION` to `0.1.0` at closure, as ADRs 0009–0011 reserved. The
   experimental protocol generation is negotiated separately. The version change
@@ -110,6 +131,10 @@ Technical depth: [Exact protocol contract](0023-experimental-public-session-prot
 - **Ship a daemon and sockets now.** Rejected because controller leases,
   concurrent clients, takeover, residency, and disconnect semantics require a
   later serial barrier and different evidence.
+- **Expose the eager session directory as a wire list.** Rejected because
+  truncating its result would bound output but not directory work or memory.
+- **Let a running client decide project trust.** Rejected because M3 fixes that
+  decision before runtime start, and the wire cannot replace it.
 - **Use transport request IDs as command IDs.** Rejected because reconnect and
   retry would turn connection-local correlation into durable authority.
 

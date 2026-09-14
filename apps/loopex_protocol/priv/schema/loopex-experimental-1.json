@@ -1,0 +1,283 @@
+{
+  "format": "loopex.experimental.contract-manifest/1",
+  "generation": "loopex.experimental/1",
+  "status": "proposed_contract_candidate",
+  "authority": [
+    "docs/adr/0023-experimental-public-session-protocol.md",
+    "docs/adr/0023-experimental-public-session-protocol-technical.md",
+    "docs/adr/0024-durable-interaction-lifecycle-and-host-policy-authority.md",
+    "docs/adr/0028-bounded-artifact-retrieval.md"
+  ],
+  "framing": {
+    "transport": "stdio",
+    "encoding": "strict_utf8_json_object_lf",
+    "duplicate_object_keys": "refuse_before_map_conversion",
+    "crlf": "refuse",
+    "partial_frame_at_eof": "refuse"
+  },
+  "limits": {
+    "input_payload_bytes_before_initialize": 65536,
+    "input_payload_bytes_after_initialize": 1048576,
+    "output_record_bytes_including_lf": 2097152,
+    "decoded_string_utf8_bytes": 131072,
+    "nested_arrays_or_objects": 16,
+    "members_per_array_or_object": 1024,
+    "json_integer_exact_min": -9007199254740991,
+    "json_integer_exact_max": 9007199254740991,
+    "in_flight_requests_per_connection": 32,
+    "durable_output_records": 64,
+    "durable_output_encoded_bytes": 4194304,
+    "progress_records": 32,
+    "progress_encoded_bytes": 524288,
+    "diagnostic_stderr_lines": 64,
+    "diagnostic_stderr_encoded_bytes": 65536,
+    "initialize_query_attach_admission_wait_ms": 30000,
+    "blocked_writer_detach_ms": 5000,
+    "artifact_object_bytes": 67108864,
+    "artifact_open_deadline_ms": 60000,
+    "artifact_open_storage_work_bytes": 134217728,
+    "artifact_read_raw_chunk_bytes": 32768,
+    "artifact_read_deadline_ms": 5000,
+    "artifact_transfer_lifetime_ms": 600000,
+    "artifact_live_transfers_per_connection": 2,
+    "artifact_live_transfers_per_runtime": 4,
+    "artifact_connection_storage_work_bytes": 1073741824,
+    "artifact_open_minimum_storage_work_debit_bytes": 1048576,
+    "interaction_answer_then_defer_transitions": 2,
+    "interaction_choice_prompt_utf8_bytes": 2048,
+    "interaction_choice_count_min": 1,
+    "interaction_choice_count_max": 8,
+    "interaction_choice_id_bytes_min": 1,
+    "interaction_choice_id_bytes_max": 64,
+    "interaction_choice_label_utf8_bytes_max": 256,
+    "interaction_expires_in_ms_min": 1,
+    "interaction_expires_in_ms_max": 600000,
+    "session_create_resume_command_id_original_max_bytes": 256,
+    "session_input_command_id_original_max_bytes": 65536,
+    "resource_command_id_original_max_bytes": 256,
+    "artifact_locator_utf8_bytes_max": 1024,
+    "artifact_media_type_utf8_bytes_max": 255
+  },
+  "identities": {
+    "request_id": {
+      "encoding": "ascii",
+      "min_bytes": 1,
+      "max_bytes": 64,
+      "alphabet": "[A-Za-z0-9._~-]",
+      "scope": "connection_local_in_flight"
+    },
+    "opaque_binary_id": {
+      "encoding": "unpadded_base64url_of_original_opaque_bytes",
+      "original_min_bytes": 1,
+      "transport_original_max_bytes": 65536,
+      "transport_max_wire_characters": 87382,
+      "method_specific_bounds": {
+        "session_and_runtime_placement_id_original_max_bytes": 256,
+        "session_command_command_and_run_id_original_max_bytes": 65536
+      }
+    },
+    "uint64_sequence_cursor_size_offset": {
+      "encoding": "canonical_decimal_string",
+      "min": "0",
+      "max": "18446744073709551615"
+    }
+  },
+  "shape_categories_from_adr_0023_not_wire_type_values": [
+    "request",
+    "admission",
+    "query",
+    "snapshot",
+    "durable_event",
+    "transient_progress",
+    "interaction",
+    "error",
+    "capability"
+  ],
+  "server_record_type_enum": ["initialized", "result", "admission", "snapshot", "event", "progress", "error"],
+  "methods_declared": [
+    "session.create",
+    "session.resume",
+    "session.inspect",
+    "session.attach",
+    "session.prompt",
+    "session.steer",
+    "session.follow_up",
+    "session.abort",
+    "session.respond_interaction",
+    "resources.catalog",
+    "resources.read",
+    "session.admit_resources",
+    "session.activate_skill",
+    "artifact.open_transfer",
+    "artifact.read_chunk",
+    "artifact.close_transfer"
+  ],
+  "methods_unavailable_in_generation": [
+    {
+      "method": "session.list",
+      "reason": "deferred_from_m4"
+    },
+    {
+      "method": "project_resources.inspect",
+      "reason": "project_trust_is_host_launch_only"
+    },
+    {
+      "method": "project_resources.decide",
+      "reason": "project_trust_is_host_launch_only"
+    }
+  ],
+  "wire_primitives": {
+    "digest": "64_lowercase_hex_characters",
+    "u64": "canonical_unsigned_decimal_string_0_through_18446744073709551615",
+    "identity": "unpadded_base64url_of_opaque_binary_with_method_specific_facade_bounds",
+    "bytes": "unpadded_base64url_of_exact_bytes",
+    "plain_object": "bounded_recursive_json_object_without_runtime_terms",
+    "resource_request_string": "nonempty_utf8_1_through_1024_bytes_under_m3_validator",
+    "use_ref": "use_colon_followed_by_64_lowercase_hex_characters"
+  },
+  "request_contract": {
+    "common_required": ["method", "request_id"],
+    "unknown_fields": "refuse_before_facade_call",
+    "optional_null": "refuse_unless_explicitly_allowed",
+    "methods": {
+      "initialize": {"required": {"generations": "nonempty_ordered_generation_string_array", "capabilities": "capability_string_array"}, "response_type": "initialized"},
+      "session.create": {"required": {"command_id": "identity", "session_options": "plain_object"}, "response_type": "admission_with_session_id"},
+      "session.resume": {"required": {"session_id": "identity", "command_id": "identity"}, "response_type": "admission_with_session_id"},
+      "session.inspect": {"required": {"session_id": "identity"}, "response_type": "result_session_status"},
+      "session.attach": {"required": {"session_id": "identity"}, "optional": {"after_event_sequence": "u64", "replace": "boolean_default_false"}, "response_type": "snapshot"},
+      "session.prompt": {"required": {"command_id": "identity", "content_b64": "nonempty_bytes"}, "response_type": "admission"},
+      "session.steer": {"required": {"command_id": "identity", "run_id": "identity", "content_b64": "nonempty_bytes"}, "response_type": "admission"},
+      "session.follow_up": {"required": {"command_id": "identity", "content_b64": "nonempty_bytes"}, "response_type": "admission"},
+      "session.abort": {"required": {"command_id": "identity"}, "response_type": "admission"},
+      "session.respond_interaction": {"required": {"command_id": "identity", "interaction_id": "identity", "answer": "object_exactly_choice_id_identity"}, "response_type": "admission"},
+      "resources.catalog": {"required": {"session_id": "identity"}, "response_type": "result_resource_catalog"},
+      "resources.read": {"required": {"session_id": "identity", "manifest_digest": "resource_request_string", "source_id": "resource_request_string", "name": "resource_request_string", "label": "resource_request_string"}, "response_type": "result_resource_read"},
+      "session.admit_resources": {"required": {"command_id": "identity", "manifest_digest": "digest", "decision": "null_or_project_skills_decision"}, "response_type": "admission"},
+      "session.activate_skill": {"required": {"command_id": "identity", "manifest_digest": "digest", "pack_digest": "digest", "source_id": "resource_request_string", "name": "m3_skill_name", "supporting_labels": "ordered_unique_m3_label_array_max_8"}, "response_type": "admission"},
+      "artifact.open_transfer": {"required": {"use_ref": "use_ref", "start_offset": "u64"}, "optional": {"window_length": "u64"}, "response_type": "result_artifact_open"},
+      "artifact.read_chunk": {"required": {"transfer_ref": "identity", "length": "integer_1_through_32768"}, "response_type": "result_artifact_chunk"},
+      "artifact.close_transfer": {"required": {"transfer_ref": "identity"}, "response_type": "result_artifact_close"}
+    }
+  },
+  "nested_contracts": {
+    "interaction_answer": {"exact_fields": {"choice_id": "identity"}},
+    "project_skills_decision": {
+      "exact_fields": ["manifest_digest", "workspace_ref", "trust_scope", "decision_source", "issued_at", "expires_at", "revocation_state"],
+      "trust_scope": "project_skills",
+      "decision_source_enum": ["interactive_operator", "host_supplied"],
+      "expires_at": null,
+      "revocation_state_enum": ["active", "revoked"]
+    },
+    "session_status": {
+      "exact_fields": ["status", "event_sequence", "active_run_id", "cleanup_grace_ms", "active_context_token_budget", "pending_work_ids", "open_interaction"],
+      "status": "active",
+      "u64_fields": ["event_sequence", "cleanup_grace_ms"],
+      "nullable_fields": ["active_run_id", "active_context_token_budget", "open_interaction"],
+      "identity_array_fields": ["pending_work_ids"]
+    },
+    "snapshot": {
+      "exact_fields": ["snapshot_revision", "session_id", "event_sequence", "active_run_id", "active_run_phase"],
+      "snapshot_revision": 2,
+      "event_sequence": "u64_equal_to_event_cursor",
+      "active_run_phase_enum": ["admitted_unstaged", "started", null],
+      "active_run_id": "identity_or_null_paired_with_active_run_phase"
+    },
+    "resource_catalog": {
+      "exact_fields": ["configured_manifest_digest", "admitted_manifest_digest", "decision_disposition", "entries"],
+      "nullable_digest_fields": ["configured_manifest_digest", "admitted_manifest_digest"],
+      "decision_disposition_enum_from_m3": ["no_decision", "revoked", "active", "binding_changed", "retained_content_missing"],
+      "entry_exact_fields": ["pack_index", "source_id", "name", "description", "pack_digest", "manual_only"],
+      "m3_canonical_catalog_max_bytes": 262144
+    },
+    "resource_read": {"exact_fields": {"digest": "digest", "size": "u64", "content_b64": "bytes"}},
+    "artifact_object_reference": {"exact_fields": {"digest": "digest", "size": "u64", "locator": "safe_utf8_1_through_1024_bytes"}},
+    "artifact_use_reference": {
+      "exact_fields": ["digest", "size", "locator", "media_type", "role", "use_canonicalization_version", "use_digest", "use_locator"],
+      "size": "u64",
+      "digest_fields": ["digest", "use_digest"],
+      "locator": "safe_utf8_1_through_1024_bytes",
+      "media_type": "safe_utf8_1_through_255_bytes",
+      "role": "tool_output",
+      "use_canonicalization_version": "loopex.canonical.v1",
+      "use_locator": "use_ref"
+    },
+    "interaction_choice_request": {
+      "exact_fields": ["kind", "prompt", "choices"],
+      "kind": "choice",
+      "choice_exact_fields": ["id", "label"],
+      "choice_id": "identity",
+      "choice_label": "nonempty_utf8_max_256_bytes"
+    },
+    "open_interaction": {
+      "exact_fields": ["interaction_id", "run_id", "turn_id", "tool_call_id", "status", "request", "effective_expires_at_unix_ms", "answer_choice_id", "answer_command_id"],
+      "identity_fields": ["interaction_id", "run_id", "turn_id", "tool_call_id"],
+      "status_enum": ["pending", "answered"],
+      "request": "interaction_choice_request",
+      "effective_expires_at_unix_ms": "u64",
+      "pending_answer_fields": "both_null",
+      "answered_answer_fields": "paired_identities"
+    }
+  },
+  "server_records": {
+    "initialized": {"required": ["type", "request_id", "selected_generation", "exact_schema_sha256", "supported_methods", "record_families", "limits"], "selected_generation": "loopex.experimental/1", "supported_methods": "exact_methods_declared", "record_families": "exact_server_record_type_enum", "limits": "exact_limits_object"},
+    "result": {"required": ["type", "request_id", "method", "result"], "result_by_method": {
+      "session.inspect": "session_status",
+      "resources.catalog": "resource_catalog",
+      "resources.read": "resource_read",
+      "artifact.open_transfer": "artifact_open",
+      "artifact.read_chunk": "artifact_chunk",
+      "artifact.close_transfer": "artifact_close"
+    }},
+    "admission": {"required": ["type", "request_id", "method", "command_id", "status", "reason"], "status_enum": ["accepted", "refused"], "accepted_reason": null, "refused_reason": "bounded_stable_reason_code", "extra_session_id_methods": ["session.create", "session.resume"]},
+    "snapshot": {"required": ["type", "request_id", "session_id", "event_cursor", "snapshot", "open_interaction"], "event_cursor": "u64_equal_to_snapshot_event_sequence", "open_interaction": "null_or_open_interaction_at_same_cursor"},
+    "event": {"required": ["type", "session_id", "event"], "request_id": "absent", "event_required": ["kind", "event_id", "event_sequence", "data"], "event_sequence": "u64", "event_kind_enum": ["user.message_appended", "run.started", "assistant.message_appended", "tool.started", "tool.finished", "run.finished", "steer.resolved", "follow_up.resolved", "session.settled", "interaction.requested", "interaction.resolved", "interaction.expired", "interaction.cancelled"], "distinct_terminal_kinds": ["run.finished", "session.settled"], "interaction_kinds": ["interaction.requested", "interaction.resolved", "interaction.expired", "interaction.cancelled"]},
+    "progress": {"required": ["type", "session_id", "progress"], "request_id": "absent", "progress_required": ["kind", "stream_domain_id", "base_event_sequence"], "progress_kind_enum": ["text_delta", "reasoning_delta", "tool_call_delta", "tool_progress", "model_stream_closed", "tool_stream_closed"], "stream_closure_disposition_enum": ["complete", "abandoned"], "base_event_sequence": "u64"},
+    "error": {"correlated_required": ["type", "request_id", "code", "message"], "uncorrelated_required": ["type", "code", "message"], "uncorrelated_allowed_codes": ["invalid_frame", "invalid_request", "internal_failure"], "invalid_frame_request_id": "absent", "detached_uncorrelated_required": ["type", "code", "message", "session_id", "event_cursor"], "detached_request_id": "absent", "code_enum": ["invalid_frame", "invalid_request", "not_initialized", "already_initialized", "unsupported_generation", "unsupported_method", "not_attached", "attachment_conflict", "capacity_exceeded", "facade_unavailable", "recovery_required", "admission_unknown", "transfer_refused", "detached", "internal_failure"], "transfer_refused_reason": "required_only_for_transfer_refused", "transfer_refused_reason_enum": ["object_missing", "object_corrupt", "use_mismatch", "capability_unsupported", "invalid_window", "transfer_unknown", "transfer_expired", "open_deadline_exceeded", "open_work_exceeded", "connection_transfer_limit", "runtime_transfer_limit", "connection_work_exceeded", "attachment_mismatch", "session_mismatch", "runtime_mismatch", "transfer_closed", "read_deadline_exceeded", "read_length_exceeded", "transfer_cancelled"], "message": "bounded_server_authored_redacted_text"}
+  },
+  "result_bodies": {
+    "artifact_open": {"exact_fields": ["object_reference", "use_reference", "transfer_ref", "total_size", "window_start", "window_end_exclusive", "object_digest"], "u64_fields": ["total_size", "window_start", "window_end_exclusive"], "object_digest": "digest"},
+    "artifact_chunk": {"exact_fields": ["offset", "bytes_b64", "chunk_digest", "eof"], "offset": "u64", "bytes_b64": "bytes", "chunk_digest": "digest", "eof": "boolean"},
+    "artifact_close": {"exact_fields": {"closed": true}}
+  },
+  "inherited_m3_event_data_by_kind": {
+    "user.message_appended": {"exact_fields": {"command_id": "identity", "run_id": "identity", "content_b64": "bytes"}},
+    "run.started": {"exact_fields": {"command_id": "identity", "run_id": "identity"}},
+    "assistant.message_appended": {"exact_fields": {"run_id": "identity", "turn_id": "identity", "content_b64": "bytes"}},
+    "tool.started": {"exact_fields": {"run_id": "identity", "turn_id": "identity", "tool_call_id": "identity", "operation_id": "identity", "tool_id": "bounded_tool_id", "tool_version": "major_minor_patch_string"}},
+    "tool.finished": {"required": ["run_id", "turn_id", "tool_call_id", "operation_id", "tool_id", "outcome", "reason", "artifacts"], "identity_fields": ["run_id", "turn_id", "tool_call_id", "operation_id"], "outcome_enum": ["completed", "failed", "denied", "cancelled", "outcome_unknown", "cancelled_workspace_lease_lost"], "reason": null, "artifacts": "array_of_artifact_use_reference"},
+    "run.finished": {"required": ["run_id", "outcome", "reconciliation_ref", "cleanup_grace_ms", "command_id"], "run_id": "identity", "outcome_enum": ["completed", "bound_reached", "outcome_unknown", "cancelled", "failed"], "reconciliation_ref": "identity_or_null", "cleanup_grace_ms": "u64", "command_id": "identity_or_null", "bound_reached_additional_required": ["bound", "observed", "declared_limit", "accounting_source"], "failed_additional_optional": ["failure", "reason"], "other_outcomes_additional_fields": "none", "failure": "bounded_m3_failure_projection", "reason": "bounded_utf8"},
+    "steer.resolved": {"required": ["command_id", "run_id", "disposition", "reason"], "identity_fields": ["command_id", "run_id"], "disposition_enum": ["applied", "unapplied", "cancelled"], "reason": "bounded_string_or_null"},
+    "follow_up.resolved": {"required": ["command_id", "run_id", "disposition", "reason"], "identity_fields": ["command_id", "run_id"], "disposition": "cancelled", "reason": "aborted"}
+  },
+  "m4_event_data_by_kind": {
+    "session.settled": {"exact_fields": {"run_id": "identity"}},
+    "interaction.requested": {"required": ["interaction_id", "run_id", "turn_id", "tool_call_id", "status", "request", "effective_expires_at_unix_ms"], "identity_fields": ["interaction_id", "run_id", "turn_id", "tool_call_id"], "status": "pending", "request": "interaction_choice_request", "effective_expires_at_unix_ms": "u64"},
+    "interaction.resolved": {"required": ["interaction_id", "run_id", "turn_id", "tool_call_id", "status", "answer_choice_id", "answer_command_id"], "identity_fields": ["interaction_id", "run_id", "turn_id", "tool_call_id"], "status_enum": ["answered", "denied"], "answered_answer_fields": "paired_identities", "denied_answer_fields": "both_null"},
+    "interaction.expired": {"required": ["interaction_id", "run_id", "turn_id", "tool_call_id", "status"], "identity_fields": ["interaction_id", "run_id", "turn_id", "tool_call_id"], "status": "expired"},
+    "interaction.cancelled": {"required": ["interaction_id", "run_id", "turn_id", "tool_call_id", "status"], "identity_fields": ["interaction_id", "run_id", "turn_id", "tool_call_id"], "status": "cancelled"}
+  },
+  "progress_payloads_by_kind": {
+    "text_delta": {"exact_fields": ["kind", "turn_id", "stream_domain_id", "model_sequence", "base_event_sequence", "content_index", "text"], "identity_fields": ["turn_id", "stream_domain_id"], "u64_fields": ["model_sequence", "base_event_sequence"], "content_index": "safe_json_integer", "text": "bounded_utf8"},
+    "reasoning_delta": {"exact_fields": ["kind", "turn_id", "stream_domain_id", "model_sequence", "base_event_sequence", "content_index", "text"], "identity_fields": ["turn_id", "stream_domain_id"], "u64_fields": ["model_sequence", "base_event_sequence"], "content_index": "safe_json_integer", "text": "bounded_utf8_summary_only"},
+    "tool_call_delta": {"exact_fields": ["kind", "turn_id", "stream_domain_id", "model_sequence", "base_event_sequence", "call_index", "tool_call_id", "name", "arguments_fragment"], "identity_fields": ["turn_id", "stream_domain_id"], "u64_fields": ["model_sequence", "base_event_sequence"], "call_index": "safe_json_integer", "nullable_fields": ["tool_call_id", "name", "arguments_fragment"]},
+    "tool_progress": {"exact_fields": ["kind", "turn_id", "stream_domain_id", "tool_call_id", "progress_sequence", "base_event_sequence", "stream", "byte_offset", "chunk_b64"], "identity_fields": ["turn_id", "stream_domain_id", "tool_call_id"], "u64_fields": ["progress_sequence", "base_event_sequence", "byte_offset"], "stream_enum": ["stdout", "stderr", "progress"], "chunk_b64": "bytes"},
+    "model_stream_closed": {"exact_fields": ["kind", "turn_id", "stream_domain_id", "base_event_sequence", "disposition", "delta_count"], "identity_fields": ["turn_id", "stream_domain_id"], "u64_fields": ["base_event_sequence", "delta_count"], "disposition_enum": ["complete", "abandoned"]},
+    "tool_stream_closed": {"exact_fields": ["kind", "turn_id", "stream_domain_id", "tool_call_id", "base_event_sequence", "disposition", "progress_count"], "identity_fields": ["turn_id", "stream_domain_id", "tool_call_id"], "u64_fields": ["base_event_sequence", "progress_count"], "disposition_enum": ["complete", "abandoned"]}
+  },
+  "projection_rules": {
+    "event_data": "inherited_m3_event_data_by_kind_or_m4_event_data_by_kind_excluding_kind_event_id_event_sequence",
+    "progress_by_kind": "progress_payloads_by_kind",
+    "interaction_event_data": "retained_interaction_id_run_id_turn_id_tool_call_id_status_and_choice_request_no_private_policy_or_grant",
+    "tool_finished_artifact_reference": "artifact_use_reference_without_path"
+  },
+  "initialization_state": {
+    "first_success": "initialized_on_selected_generation",
+    "first_no_common_generation": "refused_and_uninitialized_no_second_negotiation",
+    "repeat_after_success": "refused_and_still_initialized",
+    "repeat_after_refusal": "refused_and_still_uninitialized"
+  },
+  "vectors": {
+    "path": "apps/loopex_protocol/priv/vectors/loopex-experimental-1.json",
+    "sha256": "a7f2dc36f9206dc48d258bc7b49a8d390ec3a0e93c51ed5a35f45153052e1951"
+  }
+}
