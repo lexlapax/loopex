@@ -130,14 +130,14 @@ esac
 # The exact toolchain and platform each capture lane must have been recorded on.
 lane_elixir() {
   case "$1" in
-    darwin-floor) printf '%s' "1.17.0" ;;
+    darwin-floor) printf '%s' "1.18.5" ;;
     darwin-current | linux-current) printf '%s' "1.20.3" ;;
   esac
 }
 
 lane_otp() {
   case "$1" in
-    darwin-floor) printf '%s' "26.0" ;;
+    darwin-floor) printf '%s' "27.3.4" ;;
     darwin-current | linux-current) printf '%s' "29.0.5" ;;
   esac
 }
@@ -1231,7 +1231,7 @@ require_bound_artifact \
   c36253cff3d74ddff1b330695edbc4bde0a4565c1412c67c1293b2fb7ca6129b \
   apps/loopex/test/m1_exunit_runner_test.exs
 require_bound_artifact \
-  fad47299b27a767785d2a6a776155038054f5457ee3ce0195a37ae667f7a9999 \
+  fea095ecec784a4440b872ad5f53a8da2cb4e13e43b6f05add5cfd75bb352879 \
   .tool-versions
 require_bound_artifact \
   809ca8b835182751f493ef1c931d309f36a73ae48cf78208f84b81fcb05e74a4 \
@@ -3085,8 +3085,8 @@ validate_matrix() {
     [ "$(matrix_field "$line" exit)" = "0" ] \
       || fail "the M0 $lane re-proof did not exit zero"
   done
-  [ "$(matrix_field "$(grep -E '^m0 lane=floor ' "$path" | head -1)" elixir)" = "1.17.0" ] \
-    || fail "the M0 floor re-proof was not recorded on Elixir 1.17.0"
+  [ "$(matrix_field "$(grep -E '^m0 lane=floor ' "$path" | head -1)" elixir)" = "1.18.5" ] \
+    || fail "the M0 floor re-proof was not recorded on Elixir 1.18.5"
   [ "$(matrix_field "$(grep -E '^m0 lane=current ' "$path" | head -1)" elixir)" = "1.20.3" ] \
     || fail "the M0 current re-proof was not recorded on Elixir 1.20.3"
 

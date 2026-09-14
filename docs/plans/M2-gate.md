@@ -158,10 +158,10 @@ print neither `capture` nor `M2 gate GREEN`.
 
 | SHA-256 | Path |
 | --- | --- |
-| `156f54983ac0d32147819ec10a83992083c854fa4624d7c830a87467b98cc57e` | `scripts/check-m2-gate.sh` |
+| `0d1feb8324367b27250cfa3093c2dff78963115d516f4d1601be2a7e53d9110c` | `scripts/check-m2-gate.sh` |
 | `53d8219bdee584a3849a85a1102e405520d5dd0dfbe21d259434bc9edfc5fcc0` | `scripts/m1-exunit-runner.exs` |
 | `c36253cff3d74ddff1b330695edbc4bde0a4565c1412c67c1293b2fb7ca6129b` | `apps/loopex/test/m1_exunit_runner_test.exs` |
-| `fad47299b27a767785d2a6a776155038054f5457ee3ce0195a37ae667f7a9999` | `.tool-versions` |
+| `fea095ecec784a4440b872ad5f53a8da2cb4e13e43b6f05add5cfd75bb352879` | `.tool-versions` |
 | `809ca8b835182751f493ef1c931d309f36a73ae48cf78208f84b81fcb05e74a4` | `apps/loopex_composition/test/kernel_composition_test.exs` |
 | `50319510018a4b3e2fab2e5998f3b7979209982b9cabc15e7fa69cfc5782a8cc` | `apps/loopex/test/gate_isolation_test.exs` |
 
@@ -769,7 +769,7 @@ The three bound non-gate commands are:
 
 ```text
 # Darwin, exact floor pair
-mise exec erlang@26.0 elixir@1.17.0-otp-26 -- bash scripts/check-m2-gate.sh --capture darwin-floor
+mise exec erlang@27.3.4 elixir@1.18.5-otp-27 -- bash scripts/check-m2-gate.sh --capture darwin-floor
 # Darwin, exact current pair
 bash scripts/check-m2-gate.sh --capture darwin-current
 # Linux, exact current pair
@@ -796,10 +796,10 @@ around one `text` fence containing these seven lines in order:
 
 ```text
 matrix candidate=<C> gate_sha256=<digest> runner_sha256=<digest> exunit_runner_sha256=<digest> exunit_corpus_sha256=<digest> gate_corpus_sha256=<digest> composition_corpus_sha256=<digest> tool_versions_sha256=<digest> command=bash:scripts/check-m2-gate.sh
-capture lane=darwin-floor candidate=<C> elixir=1.17.0 otp=26.0 seed=<0..999999> executed=<positive> verdict=CAPTURE exit=0 os=darwin arch=<ASCII-token> provider=<ASCII-token> model=<ASCII-token> endpoint=<ASCII-token> adapter_build=loopex_llm_reqllm@0.0.0 executor_build=loopex_executor_local@0.0.0 executor_identity=<ASCII-token> tool_identity=<ASCII-token> recorded=<UTC-RFC3339-second>
+capture lane=darwin-floor candidate=<C> elixir=1.18.5 otp=27.3.4 seed=<0..999999> executed=<positive> verdict=CAPTURE exit=0 os=darwin arch=<ASCII-token> provider=<ASCII-token> model=<ASCII-token> endpoint=<ASCII-token> adapter_build=loopex_llm_reqllm@0.0.0 executor_build=loopex_executor_local@0.0.0 executor_identity=<ASCII-token> tool_identity=<ASCII-token> recorded=<UTC-RFC3339-second>
 capture lane=darwin-current candidate=<C> elixir=1.20.3 otp=29.0.5 seed=<0..999999> executed=<positive> verdict=CAPTURE exit=0 os=darwin arch=<ASCII-token> provider=<same> model=<same> endpoint=<same> adapter_build=loopex_llm_reqllm@0.0.0 executor_build=loopex_executor_local@0.0.0 executor_identity=<same> tool_identity=<same> recorded=<UTC-RFC3339-second>
 capture lane=linux-current candidate=<C> elixir=1.20.3 otp=29.0.5 seed=<0..999999> executed=<positive> verdict=CAPTURE exit=0 os=linux arch=<ASCII-token> provider=<same> model=<same> endpoint=<same> adapter_build=loopex_llm_reqllm@0.0.0 executor_build=loopex_executor_local@0.0.0 executor_identity=<same> tool_identity=<same> recorded=<UTC-RFC3339-second>
-m0 lane=floor candidate=<C> gate_sha256=<M0 gate document digest> command=bash:scripts/check-m0-gate.sh elixir=1.17.0 otp=26.0 verdict=GREEN exit=0
+m0 lane=floor candidate=<C> gate_sha256=<M0 gate document digest> command=bash:scripts/check-m0-gate.sh elixir=1.18.5 otp=27.3.4 verdict=GREEN exit=0
 m0 lane=current candidate=<C> gate_sha256=<M0 gate document digest> command=bash:scripts/check-m0-gate.sh elixir=1.20.3 otp=29.0.5 verdict=GREEN exit=0
 m1 candidate=<C> gate_sha256=<M1 gate document digest> command=bash-p:scripts/check-m1-gate.sh elixir=1.20.3 otp=29.0.5 seed=<0..999999> executed=<positive> verdict=GREEN exit=0
 ```
@@ -1950,3 +1950,51 @@ This proposal records no acceptance, waiver, closure or release.
 | 10 | `scripts/m1-exunit-runner.exs` | `53d8219bdee584a3849a85a1102e405520d5dd0dfbe21d259434bc9edfc5fcc0` |
 | 10 | `apps/loopex/test/m1_exunit_runner_test.exs` | `c36253cff3d74ddff1b330695edbc4bde0a4565c1412c67c1293b2fb7ca6129b` |
 | 10 | `scripts/check-m2-gate.sh` | `156f54983ac0d32147819ec10a83992083c854fa4624d7c830a87467b98cc57e` |
+
+<a id="amendment-11"></a>
+## Amendment 11 — Refresh the floor pair to Elixir 1.18.5 with OTP 27.3.4
+
+**Acceptance: OUTSTANDING.** Closed M2 adds gate generation 11 under
+`amendment-transaction-v2`. Its historical Acceptance, Closure, Amendments 1–10
+and generation-10 row remain unchanged. At A the new row carries only this
+gate's digest; authority, evidence and candidate remain unset until
+exact-proposal acceptance.
+
+Accepted [ADR 0026](../adr/0026-development-floor-refresh.md#concept) chose
+the validation pairs explicitly: floor Elixir 1.18.5 with OTP 27.3.4 and
+current Elixir 1.20.3 with OTP 29.0.5. M0 settled the shared `.tool-versions`
+bytes through its
+[generation 7](../developer/agent-context-map.md#disposition-m0-gate-generation-7-2026-09-13)
+and M1 followed through its
+[generation 10](../developer/agent-context-map.md#disposition-m1-gate-generation-10-2026-09-14);
+M2 is the third holder in register order, M3 follows, and Open M4 then
+refreshes its own table directly. This proposal changes only floor literals in
+this holder's own runner: the Darwin floor lane's expected Elixir and OTP
+versions, the M0 floor re-proof's expected Elixir version, and the embedded
+`.tool-versions` digest; it rebinds that runner and the pins in the two Bound
+Artifacts rows and names the new pair in this gate's capture commands and
+matrix grammar above. Every selector, minimum, exclusion, protected assertion,
+provider path, credential contract and exit predicate keeps its meaning. No
+M2 outcome, product scope or lifecycle state changes.
+
+Binding validation, bootstrap and every inherited gate that invokes them stop
+at this proposal only on the shared binding sequence still in flight; M3 and
+M4 remain explicitly pending and their old rows are not a global PASS.
+Binding-independent checks are proved directly: the runner's syntax passes,
+its floor literals agree with the bound pins, and the installed floor pair
+reports Elixir 1.18.5, OTP 27.3.4 and ERTS 15.2.7. A `darwin-floor` capture
+of this gate under the new pair, and the M0 floor re-proof it requires, belong
+to the inherited-green proof after the final Open M4 refresh; captures
+recorded under Elixir 1.17.0 with OTP 26.0 remain true for their revisions and
+satisfy no lane of the new matrix.
+
+Only explicit maintainer acceptance of the actual A revision authorizes R.
+Its immediate child completes generation 11 with exact A and adds one fresh
+acceptance disposition; R changes no bound artifact or gate byte. Only then
+may M3's transaction begin. This proposal records no acceptance and grants no
+waiver, closure or release.
+
+| Generation | Artifact | Rebound SHA-256 |
+| --- | --- | --- |
+| 11 | `.tool-versions` | `fea095ecec784a4440b872ad5f53a8da2cb4e13e43b6f05add5cfd75bb352879` |
+| 11 | `scripts/check-m2-gate.sh` | `0d1feb8324367b27250cfa3093c2dff78963115d516f4d1601be2a7e53d9110c` |
