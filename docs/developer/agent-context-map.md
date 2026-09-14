@@ -3424,3 +3424,35 @@ row, this disposition, the derived ADR index statuses and the derived plan
 register capsule. It accepts no other ADR, does not accept the M4 plan pair or
 gate, authorizes no product implementation, and grants no merge, tag or
 release.
+
+<a id="disposition-adr-0030-acceptance-2026-09-13"></a>
+### ADR 0030 acceptance — 2026-09-13
+
+Under the same maintainer direction recorded in the
+[ADR 0023 acceptance](#disposition-adr-0023-acceptance-2026-09-13), given on
+2026-09-13 after the independent read-only review of pushed `m4` SHA
+`3503992cbc0de02ef98ba261e7a19fdb7123e220`, this transcribes the maintainer's
+acceptance of the exact Proposed
+[ADR 0030 Concept](../adr/0030-observability-tracing-and-telemetry.md#concept)
+and [Technical depth](../adr/0030-observability-tracing-and-telemetry-technical.md#technical-depth)
+pair at `3503992cbc0de02ef98ba261e7a19fdb7123e220`, with Concept SHA-256
+`8e81e197816afa79aa1f43d69837c9f1ed4235a5fbf64dc7588056f1a4ddb65d`
+and Technical SHA-256
+`f7b24467fef2d326d2eb12eece87662b775586a0813fc958d78b82e0f5735eac`.
+The maintainer is the accepting authority; the reviewer transcribed the record
+and accepted nothing. It accepts runtime-owned isolated trace sessions with
+identity-only default capture and exact limits, telemetry spans at every port
+callback and transaction cut in the bound inventory, the `loopex_telemetry`
+edge owning the only Loopex-attached handler, and the dispatcher's bounded
+diagnostics admission. Under the previously recorded
+[vision change](#disposition-m4-vision-core-telemetry-2026-09-13) it
+supersedes exactly the two ADR 0001 clauses that required an empty
+`apps/loopex` dependency list; every other ADR 0001 clause stands. The
+dependency itself enters core only through the M1 dependency-oracle
+transaction the M4 technical plan names, after M4 acceptance.
+
+This administrative transition changes only the Concept status and Acceptance
+row, this disposition, the derived ADR index statuses and the derived plan
+register capsule, which now names the M4 plan pair and gate as the next
+decision. It does not accept the M4 plan pair or gate, authorizes no product
+implementation, and grants no merge, tag or release.

@@ -3,7 +3,7 @@
 
 Technical depth: [Observability mechanics](0030-observability-tracing-and-telemetry-technical.md#technical-depth).
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-09-12
 - **Decision owner:** Maintainer
 - **Supersedes:** 0001, only the two clauses that require an empty `apps/loopex` dependency list
@@ -96,4 +96,4 @@ Technical depth: [Compatibility mechanics](0030-observability-tracing-and-teleme
 
 | Decision | Authority | Authority evidence | Bound bytes |
 | --- | --- | --- | --- |
-| Acceptance | — | — | — |
+| Acceptance | Maintainer | [disposition](../developer/agent-context-map.md#disposition-adr-0030-acceptance-2026-09-13) | candidate `3503992cbc0de02ef98ba261e7a19fdb7123e220`; concept `sha256:8e81e197816afa79aa1f43d69837c9f1ed4235a5fbf64dc7588056f1a4ddb65d`; technical `sha256:f7b24467fef2d326d2eb12eece87662b775586a0813fc958d78b82e0f5735eac` |

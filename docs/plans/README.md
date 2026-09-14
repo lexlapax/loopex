@@ -22,10 +22,10 @@ integrated product baseline.
 | --- | --- |
 | Integrated phase | Closed milestone product baseline |
 | Last closed product checkpoint | `M3` — 2026-09-13 |
-| Blockers | [ADR 0030](../adr/0030-observability-tracing-and-telemetry.md#concept) must be accepted before the `M4` plan pair and gate can be accepted |
+| Blockers | `M4` is open and not accepted; the recorded acceptance authority must accept both normative envelopes and the gate |
 | Authorized work | Explicitly authorized planning, ADR, bootstrap, and review work only; no product implementation |
-| Next maintainer decision | Disposition ADR 0030 |
-| Next transition | After the prerequisite is accepted, accept or reject the `M4` plan pair and gate |
+| Next maintainer decision | Accept or reject the `M4` plan pair and gate |
+| Next transition | Record the acceptance governance row and move `M4` to Accepted |
 | Validation | `bash scripts/check-bootstrap.sh` |
 <!-- loopex:current-status:end -->
 
