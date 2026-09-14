@@ -372,6 +372,7 @@ defmodule Loopex.M2EvidenceLifecycleGateTest do
       cd: context.root,
       env: [
         {"LOOPEX_M2_SOURCE_CANDIDATE", context.candidate},
+        {"LOOPEX_M2_RECAPTURE_CANDIDATE", Map.get(context, :recapture, "")},
         {"ERL_CRASH_DUMP", "/dev/null"},
         {"ERL_CRASH_DUMP_SECONDS", "0"}
       ],
@@ -489,6 +490,69 @@ defmodule Loopex.M2EvidenceLifecycleGateTest do
 
     _later_disposition = commit!(context.root, "later disposition")
     assert {"M2 evidence lifecycle OK\n", 0} = run_lifecycle(context)
+  end
+
+  test "the evidence lifecycle admits one post-closure re-capture block and retains both blocks" do
+    matrix = "docs/evidence/M2-toolchain-matrix.md"
+
+    recapture =
+      "\n<!-- loopex:m2-recapture:start -->\n```text\nrecapture rows\n```\n<!-- loopex:m2-recapture:end -->\n"
+
+    context = source_fixture!() |> commit_evidence!() |> close!()
+    closure_matrix = File.read!(Path.join(context.root, matrix))
+
+    # A re-capture needs a candidate after the closure transition and an
+    # evidence-only child of that candidate carrying exactly the appended block.
+    write!(context.root, "apps/fixture/lib/later.ex", "defmodule Fixture.Later, do: nil\n")
+    candidate = commit!(context.root, "later product work")
+    write!(context.root, matrix, closure_matrix <> recapture)
+    evidence = commit!(context.root, "re-capture evidence")
+
+    assert {"M2 evidence lifecycle OK\n", 0} = run_lifecycle(context)
+    admitted = Map.put(context, :recapture, candidate)
+    assert {"M2 evidence lifecycle OK\n", 0} = run_lifecycle(admitted)
+
+    write!(context.root, "apps/fixture/lib/after.ex", "defmodule Fixture.After, do: nil\n")
+    _after = commit!(context.root, "work after the re-capture")
+    assert {"M2 evidence lifecycle OK\n", 0} = run_lifecycle(admitted)
+
+    # The re-capture candidate cannot precede closure, and the closure part is
+    # still retained byte for byte beside the appended block.
+    assert_refused(
+      Map.put(context, :recapture, context.candidate),
+      "descend from the M2 closure transition"
+    )
+
+    drifted =
+      String.replace(File.read!(Path.join(context.root, matrix)), "recapture rows", "other rows")
+
+    write!(context.root, matrix, drifted)
+    _drift = commit!(context.root, "re-capture drift")
+    assert_refused(admitted, "changed the re-capture block")
+
+    git!(context.root, ["reset", "--hard", "--quiet", evidence])
+
+    closure_drift =
+      String.replace(File.read!(Path.join(context.root, matrix)), "captured docs", "altered docs")
+
+    write!(context.root, matrix, closure_drift)
+    _closure_drift = commit!(context.root, "closure drift")
+    assert_refused(admitted, "retained evidence changed after the evidence commit")
+
+    # A bundled evidence child is not a re-capture evidence commit.
+    git!(context.root, ["reset", "--hard", "--quiet", candidate])
+    write!(context.root, matrix, closure_matrix <> recapture)
+    write!(context.root, "apps/fixture/lib/bundled.ex", "defmodule Fixture.Bundled, do: nil\n")
+    _bundled = commit!(context.root, "bundled re-capture")
+    assert_refused(admitted, "no direct evidence-only child")
+
+    # Before closure there is no transition for a re-capture to follow.
+    open = source_fixture!() |> commit_evidence!()
+
+    assert_refused(
+      Map.put(open, :recapture, open.candidate),
+      "no unique first Closure transition"
+    )
   end
 
   test "the evidence lifecycle requires one atomic direct four document evidence child" do

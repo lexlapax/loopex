@@ -158,12 +158,12 @@ print neither `capture` nor `M2 gate GREEN`.
 
 | SHA-256 | Path |
 | --- | --- |
-| `0d1feb8324367b27250cfa3093c2dff78963115d516f4d1601be2a7e53d9110c` | `scripts/check-m2-gate.sh` |
+| `3f2d0592023099dea43ec31d600ed4b4d4013641bdcbd8eb484900800ec6e820` | `scripts/check-m2-gate.sh` |
 | `53d8219bdee584a3849a85a1102e405520d5dd0dfbe21d259434bc9edfc5fcc0` | `scripts/m1-exunit-runner.exs` |
 | `c36253cff3d74ddff1b330695edbc4bde0a4565c1412c67c1293b2fb7ca6129b` | `apps/loopex/test/m1_exunit_runner_test.exs` |
 | `fea095ecec784a4440b872ad5f53a8da2cb4e13e43b6f05add5cfd75bb352879` | `.tool-versions` |
 | `809ca8b835182751f493ef1c931d309f36a73ae48cf78208f84b81fcb05e74a4` | `apps/loopex_composition/test/kernel_composition_test.exs` |
-| `50319510018a4b3e2fab2e5998f3b7979209982b9cabc15e7fa69cfc5782a8cc` | `apps/loopex/test/gate_isolation_test.exs` |
+| `c4ab3706117d0189f83b4807af36a86be9abe7c4eb37b7eb0c3e5b59d7a4928e` | `apps/loopex/test/gate_isolation_test.exs` |
 
 Before Amendment 10, `scripts/m1-exunit-runner.exs` and its adversarial corpus,
 `apps/loopex/test/m1_exunit_runner_test.exs`, retained exactly the bytes M1 closed
@@ -845,6 +845,31 @@ that closed M2.
 Observation times and architectures are independent recorded facts and are not
 compared. Review, not the runner, cross-checks every retained field against the
 actual captured process output.
+
+Amendment 12 supersedes the single-block and current-lane halves of this
+section. The closure block, the seven lines between the `loopex:m2-matrix`
+markers, stays byte-identical after `T` and answers for the pairs locked in
+`.tool-versions` at `C`, read from that revision rather than from the lane
+literals above, with builds at `@0.0.0`; the `darwin-floor` lane names the
+floor pair locked at `C` and the two current lanes the current pair locked
+there. When an accepted floor decision changes the locked pairs after closure,
+the retained captures satisfy no lane of the new matrix, and the ordinary gate
+refuses until exactly one re-capture block follows the closure block: a blank
+line, the `loopex:m2-recapture` markers, one `text` fence and the same seven
+lines with a `recapture` row in place of `matrix`. Its candidate `C'` is a
+descendant of `T` whose `.tool-versions` locks exactly the current pairs; its
+seven digests are checked against `C'`; its three captures come from the three
+bound capture commands run against `C'` on the current pairs, with
+`adapter_build` and `executor_build` naming the `VERSION` committed at `C'`;
+its two `m0` rows and its `m1` row record the closed `M0` gate green under each
+current pair and the closed `M1` gate green under the current pair against
+`C'`, naming the gate digests at `C'`. The re-capture block is committed alone
+as evidence commit `E'`, the direct one-parent child of `C'` changing only the
+matrix; every later descendant retains the closure part and the re-capture
+block byte-identical, and the ordinary gate runs at `E'` and after. While the
+locked pairs equal those at `C`, a re-capture block is refused as unexplained;
+while they differ, its absence is the declared red. A re-capture adds no
+acceptance, closure or scope and is never back-projected onto `C` or `E`.
 
 ## Negative Demonstrations
 
@@ -1998,3 +2023,61 @@ waiver, closure or release.
 | --- | --- | --- |
 | 11 | `.tool-versions` | `fea095ecec784a4440b872ad5f53a8da2cb4e13e43b6f05add5cfd75bb352879` |
 | 11 | `scripts/check-m2-gate.sh` | `0d1feb8324367b27250cfa3093c2dff78963115d516f4d1601be2a7e53d9110c` |
+
+<a id="amendment-12"></a>
+## Amendment 12 — Admit a post-closure re-capture on refreshed locked pairs
+
+**Acceptance: OUTSTANDING.** Closed M2 adds gate generation 12 under
+`amendment-transaction-v2`. Its historical Acceptance, Closure, Amendments
+1–11 and prior generation rows remain unchanged. At A the new row carries only
+this gate's digest; authority, evidence and candidate remain unset until
+exact-proposal acceptance.
+
+Generation 11 refreshed the lane literals this runner names, but the retained
+matrix could answer only for the pairs locked when closure bound it: the
+runner judged the closure captures against its current lane literals, and its
+evidence lifecycle admitted only the evidence commit whose four blobs stay
+byte-identical for ever, so no capture taken after closure could validate and
+the ordinary gate was red on the refreshed floor with no route to green, which
+the
+[M4 waiver](../developer/agent-context-map.md#override-disposition-m4-m1-m2-inherited-reproof-waiver-2026-09-14)
+records and defers to M4 implementation. The maintainer chose on 2026-09-14,
+among a second evidence block, replacing the closure captures, and running
+lanes live, to add a second evidence block, the same choice M1 generation 11
+records.
+
+This proposal changes only this holder's runner and its bound gate corpus.
+The runner now reads the pairs each block answers for from `.tool-versions`
+at that block's own candidate, validates the closure block against the pairs
+locked at `C` with builds at `@0.0.0`, and admits exactly one re-capture block
+as the matrix section above now specifies: taken at a descendant `C'` of `T`
+that locks the current pairs, with builds naming the `VERSION` at `C'`,
+committed alone as `E'` and retained by every later descendant; its evidence
+lifecycle compares the closure part of the matrix rather than the whole blob
+and proves the re-capture's own evidence-only child and retention; a
+re-capture is refused while the locked pairs still equal those at `C`, and its
+absence is the declared red once they differ. The capture role's running-pair
+check and every selector, minimum, exclusion, protected assertion, provider
+path, credential contract and exit predicate keep their meaning. The corpus
+gains one case proving the accepting re-capture lifecycle and refusing a
+pre-closure candidate, a bundled evidence child, drift of either block and a
+re-capture before closure. No M2 outcome, product scope or lifecycle state
+changes.
+
+Binding validation, bootstrap and every inherited gate that invokes them are
+red at this proposal for its pending generation row, exactly as at any v2
+proposal. Binding-independent checks are proved directly: the runner's syntax
+passes, the bound corpus passes on the current pair, and formatting passes.
+The re-capture itself, its three captures on the current pairs and the M0 and
+M1 re-proofs they record, belong to the evidence commit `E'` that follows the
+rebind; nothing in this proposal is a capture.
+
+Only explicit maintainer acceptance of the actual A revision authorizes R.
+Its immediate child completes generation 12 with exact A and adds one fresh
+acceptance disposition; R changes no bound artifact or gate byte. This
+proposal records no acceptance and grants no waiver, closure or release.
+
+| Generation | Artifact | Rebound SHA-256 |
+| --- | --- | --- |
+| 12 | `scripts/check-m2-gate.sh` | `3f2d0592023099dea43ec31d600ed4b4d4013641bdcbd8eb484900800ec6e820` |
+| 12 | `apps/loopex/test/gate_isolation_test.exs` | `c4ab3706117d0189f83b4807af36a86be9abe7c4eb37b7eb0c3e5b59d7a4928e` |

@@ -1237,7 +1237,7 @@ require_bound_artifact \
   809ca8b835182751f493ef1c931d309f36a73ae48cf78208f84b81fcb05e74a4 \
   apps/loopex_composition/test/kernel_composition_test.exs
 require_bound_artifact \
-  50319510018a4b3e2fab2e5998f3b7979209982b9cabc15e7fa69cfc5782a8cc \
+  c4ab3706117d0189f83b4807af36a86be9abe7c4eb37b7eb0c3e5b59d7a4928e \
   apps/loopex/test/gate_isolation_test.exs
 
 closure_documents=(
@@ -2475,11 +2475,16 @@ defmodule Loopex.M2EvidenceLifecycle do
   @empty_closure "| Closure | — | — | — |"
   @closure_paths Enum.sort([@plan, @plans_index, @root_readme, @dispositions])
 
+  @recapture_marker "\n<!-- loopex:m2-recapture:start -->"
+
   def main do
     candidate = System.get_env("LOOPEX_M2_SOURCE_CANDIDATE", "")
+    recapture = System.get_env("LOOPEX_M2_RECAPTURE_CANDIDATE", "")
 
-    case validate(candidate) do
-      :ok -> IO.puts("M2 evidence lifecycle OK")
+    with :ok <- validate(candidate),
+         :ok <- validate_recapture(candidate, recapture) do
+      IO.puts("M2 evidence lifecycle OK")
+    else
       {:error, reason} ->
         IO.puts(:stderr, "M2 evidence lifecycle refused: #{reason}")
         System.halt(1)
@@ -2597,11 +2602,99 @@ defmodule Loopex.M2EvidenceLifecycle do
     end
   end
 
+  # Concept: the closure evidence stays exactly as closure bound it; the matrix
+  # may gain one post-closure re-capture block after its closure block, so
+  # for that one path the retained bytes are the closure part alone.
   defp evidence_blobs_retained(evidence, revision) do
-    case Enum.find(@evidence_paths, fn path -> blob_id(evidence, path) != blob_id(revision, path) end) do
+    case Enum.find(@evidence_paths, fn path -> not retained?(evidence, revision, path) end) do
       nil -> :ok
       path -> {:error, "retained evidence changed after the evidence commit: #{path}"}
     end
+  end
+
+  defp retained?(evidence, revision, "docs/evidence/M2-toolchain-matrix.md" = path) do
+    with {:ok, before} <- revision_file(evidence, path),
+         {:ok, after_bytes} <- revision_file(revision, path) do
+      closure_part(before) == closure_part(after_bytes)
+    else
+      _other -> false
+    end
+  end
+
+  defp retained?(evidence, revision, path), do: blob_id(evidence, path) == blob_id(revision, path)
+
+  defp closure_part(bytes), do: bytes |> String.split(@recapture_marker, parts: 2) |> hd()
+
+  defp recapture_part(bytes) do
+    case String.split(bytes, @recapture_marker, parts: 2) do
+      [_closure, rest] -> {:ok, @recapture_marker <> rest}
+      _other -> {:error, "the matrix carries no re-capture block"}
+    end
+  end
+
+  # Concept: a re-capture is evidence of the closure shape, taken after the
+  # closure transition: its candidate C' descends from T, its evidence-only
+  # child E' changes exactly the matrix, and every later revision retains the
+  # re-capture block byte for byte while the closure part stays retained too.
+  defp validate_recapture(_candidate, ""), do: :ok
+
+  defp validate_recapture(candidate, recapture) do
+    with :ok <- exact_candidate(recapture),
+         :ok <- commit_exists(recapture),
+         true <- ancestor?(recapture, "HEAD") || {:error, "re-capture candidate is not reachable"},
+         {:ok, revisions} <- revisions(),
+         {:ok, evidence} <- unique_evidence(candidate, revisions),
+         {:ok, transition} <- closure_transition(evidence, revisions),
+         true <-
+           ancestor?(transition, recapture) ||
+             {:error, "re-capture candidate must descend from the M2 closure transition"},
+         {:ok, recapture_evidence} <- unique_recapture_evidence(recapture, revisions),
+         {:ok, block} <- revision_file(recapture_evidence, "docs/evidence/M2-toolchain-matrix.md"),
+         {:ok, recapture_block} <- recapture_part(block),
+         :ok <- recapture_retained(recapture_evidence, recapture_block, revisions) do
+      :ok
+    else
+      false -> {:error, "evidence history is unavailable"}
+      {:error, _reason} = error -> error
+      _other -> {:error, "evidence history is unavailable"}
+    end
+  end
+
+  defp closure_transition(evidence, revisions) do
+    with {:ok, descendants} <- descendant_records(evidence, revisions),
+         {:ok, transition} <- unique_closure_transition(evidence, descendants) do
+      {:ok, transition}
+    end
+  end
+
+  defp unique_recapture_evidence(recapture, revisions) do
+    candidates =
+      revisions
+      |> Enum.filter(fn {_revision, parents} -> parents == [recapture] end)
+      |> Enum.map(&elem(&1, 0))
+      |> Enum.filter(fn revision ->
+        match?({:ok, ["docs/evidence/M2-toolchain-matrix.md"]}, changed_paths(recapture, revision))
+      end)
+
+    case candidates do
+      [evidence] -> {:ok, evidence}
+      [] -> {:error, "re-capture candidate has no direct evidence-only child"}
+      _many -> {:error, "re-capture candidate has more than one direct evidence-only child"}
+    end
+  end
+
+  defp recapture_retained(recapture_evidence, block, revisions) do
+    revisions
+    |> Map.keys()
+    |> Enum.filter(&ancestor?(recapture_evidence, &1))
+    |> Enum.reduce_while(:ok, fn revision, :ok ->
+      with {:ok, bytes} <- revision_file(revision, "docs/evidence/M2-toolchain-matrix.md"),
+           {:ok, ^block} <- recapture_part(bytes) do
+        {:cont, :ok}
+      else
+        _other -> {:halt, {:error, "a descendant of the re-capture evidence changed the re-capture block"}}
+      end
+    end)
   end
 
   defp validate_current_state(_candidate, evidence, @empty_closure, _revisions) do
@@ -2965,9 +3058,10 @@ LOOPEX_M2_EVIDENCE_LIFECYCLE
 }
 
 validate_evidence_lifecycle() {
-  local candidate="$1" output status
+  local candidate="$1" recapture_candidate="${2-}" output status
   output="$(
     LOOPEX_M2_SOURCE_CANDIDATE="$candidate" \
+    LOOPEX_M2_RECAPTURE_CANDIDATE="$recapture_candidate" \
       elixir -e "$(m2_evidence_lifecycle_program)" 2>&1
   )"
   status=$?
@@ -2988,30 +3082,47 @@ matrix_candidate_digest_artifacts() {
     "tool_versions_sha256|.tool-versions"
 }
 
-validate_matrix() {
-  local path=docs/evidence/M2-toolchain-matrix.md
-  [ -f "$path" ] || fail "the retained matrix does not exist"
-  grep -qF '<!-- loopex:m2-matrix:start -->' "$path" \
-    || fail "the retained matrix has no canonical start marker"
-  grep -qF '<!-- loopex:m2-matrix:end -->' "$path" \
-    || fail "the retained matrix has no canonical end marker"
+# Concept: the locked pairs a capture answers for are the pairs locked at its
+# own candidate, read from that revision rather than from whichever tree runs
+# the gate. Technical depth: prints "floor_elixir floor_otp current_elixir
+# current_otp" from the four exact declarations of `.tool-versions` at a
+# revision, refusing any other shape.
+candidate_pairs() {
+  local revision="$1" declarations
+  declarations="$(git show "$revision:.tool-versions" 2>/dev/null | grep -v '^#' | grep -v '^$')" \
+    || fail "cannot read .tool-versions at $revision"
+  printf '%s\n' "$declarations" | awk '
+    NR == 1 && $1 == "elixir" { split($2, floor, "-otp-"); floor_elixir = floor[1]; next }
+    NR == 2 && $1 == "erlang" { floor_otp = $2; next }
+    NR == 3 && $1 == "elixir" { split($2, current, "-otp-"); current_elixir = current[1]; next }
+    NR == 4 && $1 == "erlang" { current_otp = $2; next }
+    { exit 2 }
+    END { if (NR != 4) exit 2; print floor_elixir, floor_otp, current_elixir, current_otp }
+  ' || fail ".tool-versions at $revision does not declare two exact locked pairs"
+}
 
+# Concept: one fenced evidence block, judged against the candidate it names.
+# Technical depth: `kind` is `matrix` for the closure block and `recapture` for
+# the post-closure block; `version` is the source version the block's build
+# identities must name. The block file holds the fenced lines only.
+validate_matrix_block() {
+  local path="$1" kind="$2" version="$3"
   local header count
-  count="$(grep -cE '^matrix candidate=' "$path")"
+  count="$(grep -cE "^$kind candidate=" "$path")"
   [ "$count" -eq 1 ] \
-    || fail "the retained matrix must carry exactly one matrix row, not $count"
-  header="$(grep -E '^matrix candidate=' "$path" | head -1)"
+    || fail "the retained $kind block must carry exactly one $kind row, not $count"
+  header="$(grep -E "^$kind candidate=" "$path" | head -1)"
 
   local candidate expect
   candidate="$(matrix_field "$header" candidate)" \
-    || fail "the retained matrix names no source candidate"
+    || fail "the retained $kind block names no source candidate"
   [[ "$candidate" =~ ^[0-9a-f]{40}$ ]] \
-    || fail "the retained matrix names no exact source candidate"
+    || fail "the retained $kind block names no exact source candidate"
   git merge-base --is-ancestor "$candidate" HEAD 2>/dev/null \
-    || fail "the retained matrix names a candidate that is not reachable from this revision"
+    || fail "the retained $kind block names a candidate that is not reachable from this revision"
 
   [ "$(matrix_field "$header" command)" = "bash:scripts/check-m2-gate.sh" ] \
-    || fail "the retained matrix names a command other than the ordinary gate"
+    || fail "the retained $kind block names a command other than the ordinary gate"
 
   local key file
   while IFS='|' read -r key file; do
@@ -3021,33 +3132,40 @@ validate_matrix() {
       "$candidate" "$file" "$expect" "the retained matrix $key"
   done < <(matrix_candidate_digest_artifacts)
 
-  local lane line reference_identity="" identity field
+  local floor_elixir floor_otp current_elixir current_otp
+  read -r floor_elixir floor_otp current_elixir current_otp <<< "$(candidate_pairs "$candidate")"
+
+  local lane line reference_identity="" identity field lane_elixir_expected lane_otp_expected
   for lane in darwin-floor darwin-current linux-current; do
+    case "$lane" in
+      darwin-floor) lane_elixir_expected="$floor_elixir"; lane_otp_expected="$floor_otp" ;;
+      *) lane_elixir_expected="$current_elixir"; lane_otp_expected="$current_otp" ;;
+    esac
     count="$(grep -cE "^capture lane=$lane " "$path")"
     [ "$count" -eq 1 ] \
-      || fail "the retained matrix must carry exactly one $lane capture, not $count"
+      || fail "the retained $kind block must carry exactly one $lane capture, not $count"
     line="$(grep -E "^capture lane=$lane " "$path" | head -1)"
 
     [ "$(matrix_field "$line" candidate)" = "$candidate" ] \
-      || fail "the $lane capture names a different candidate than the matrix row"
+      || fail "the $lane capture names a different candidate than the $kind row"
     [ "$(matrix_field "$line" verdict)" = "CAPTURE" ] \
       || fail "the $lane capture is not a CAPTURE verdict"
     [ "$(matrix_field "$line" exit)" = "0" ] \
       || fail "the $lane capture did not exit zero"
-    [ "$(matrix_field "$line" elixir)" = "$(lane_elixir "$lane")" ] \
-      || fail "the $lane capture was not recorded on Elixir $(lane_elixir "$lane")"
-    [ "$(matrix_field "$line" otp)" = "$(lane_otp "$lane")" ] \
-      || fail "the $lane capture was not recorded on OTP $(lane_otp "$lane")"
+    [ "$(matrix_field "$line" elixir)" = "$lane_elixir_expected" ] \
+      || fail "the $lane capture was not recorded on Elixir $lane_elixir_expected"
+    [ "$(matrix_field "$line" otp)" = "$lane_otp_expected" ] \
+      || fail "the $lane capture was not recorded on OTP $lane_otp_expected"
     [ "$(matrix_field "$line" os)" = "$(lane_os "$lane")" ] \
       || fail "the $lane capture was not recorded on $(lane_os "$lane")"
     [[ "$(matrix_field "$line" seed)" =~ ^[0-9]{1,6}$ ]] \
       || fail "the $lane capture records no canonical seed"
     [[ "$(matrix_field "$line" executed)" =~ ^[1-9][0-9]*$ ]] \
       || fail "the $lane capture executed no protected cases"
-    [ "$(matrix_field "$line" adapter_build)" = "loopex_llm_reqllm@0.0.0" ] \
-      || fail "the $lane capture records an adapter build the bound selector runner cannot have sealed"
-    [ "$(matrix_field "$line" executor_build)" = "loopex_executor_local@0.0.0" ] \
-      || fail "the $lane capture records an executor build the bound selector runner cannot have sealed"
+    [ "$(matrix_field "$line" adapter_build)" = "loopex_llm_reqllm@$version" ] \
+      || fail "the $lane capture records an adapter build the bound selector runner cannot have sealed at $version"
+    [ "$(matrix_field "$line" executor_build)" = "loopex_executor_local@$version" ] \
+      || fail "the $lane capture records an executor build the bound selector runner cannot have sealed at $version"
 
     identity=""
     for field in provider model endpoint adapter_build executor_build executor_identity tool_identity; do
@@ -3069,10 +3187,10 @@ validate_matrix() {
   for lane in floor current; do
     count="$(grep -cE "^m0 lane=$lane " "$path")"
     [ "$count" -eq 1 ] \
-      || fail "the retained matrix must carry exactly one M0 $lane re-proof, not $count"
+      || fail "the retained $kind block must carry exactly one M0 $lane re-proof, not $count"
     line="$(grep -E "^m0 lane=$lane " "$path" | head -1)"
     [ "$(matrix_field "$line" candidate)" = "$candidate" ] \
-      || fail "the M0 $lane re-proof names a different candidate than the matrix row"
+      || fail "the M0 $lane re-proof names a different candidate than the $kind row"
     m0_digest="$(matrix_field "$line" gate_sha256)" \
       || fail "the M0 $lane re-proof names no gate digest"
     require_candidate_digest \
@@ -3085,23 +3203,23 @@ validate_matrix() {
     [ "$(matrix_field "$line" exit)" = "0" ] \
       || fail "the M0 $lane re-proof did not exit zero"
   done
-  [ "$(matrix_field "$(grep -E '^m0 lane=floor ' "$path" | head -1)" elixir)" = "1.18.5" ] \
-    || fail "the M0 floor re-proof was not recorded on Elixir 1.18.5"
-  [ "$(matrix_field "$(grep -E '^m0 lane=current ' "$path" | head -1)" elixir)" = "1.20.3" ] \
-    || fail "the M0 current re-proof was not recorded on Elixir 1.20.3"
+  [ "$(matrix_field "$(grep -E '^m0 lane=floor ' "$path" | head -1)" elixir)" = "$floor_elixir" ] \
+    || fail "the M0 floor re-proof was not recorded on Elixir $floor_elixir"
+  [ "$(matrix_field "$(grep -E '^m0 lane=current ' "$path" | head -1)" elixir)" = "$current_elixir" ] \
+    || fail "the M0 current re-proof was not recorded on Elixir $current_elixir"
 
   count="$(grep -cE '^m1 candidate=' "$path")"
   [ "$count" -eq 1 ] \
-    || fail "the retained matrix must carry exactly one M1 re-proof, not $count"
+    || fail "the retained $kind block must carry exactly one M1 re-proof, not $count"
   line="$(grep -E '^m1 candidate=' "$path" | head -1)"
   [ "$(matrix_field "$line" candidate)" = "$candidate" ] \
-    || fail "the M1 re-proof names a different candidate than the matrix row"
+    || fail "the M1 re-proof names a different candidate than the $kind row"
   [ "$(matrix_field "$line" command)" = "bash-p:scripts/check-m1-gate.sh" ] \
     || fail "the M1 re-proof names a command other than the privileged M1 gate"
-  [ "$(matrix_field "$line" elixir)" = "1.20.3" ] \
-    || fail "the M1 re-proof was not recorded on Elixir 1.20.3"
-  [ "$(matrix_field "$line" otp)" = "29.0.5" ] \
-    || fail "the M1 re-proof was not recorded on OTP 29.0.5"
+  [ "$(matrix_field "$line" elixir)" = "$current_elixir" ] \
+    || fail "the M1 re-proof was not recorded on Elixir $current_elixir"
+  [ "$(matrix_field "$line" otp)" = "$current_otp" ] \
+    || fail "the M1 re-proof was not recorded on OTP $current_otp"
   [[ "$(matrix_field "$line" seed)" =~ ^[0-9]{1,6}$ ]] \
     || fail "the M1 re-proof records no canonical seed"
   [[ "$(matrix_field "$line" executed)" =~ ^[1-9][0-9]*$ ]] \
@@ -3115,7 +3233,63 @@ validate_matrix() {
   require_candidate_digest \
     "$candidate" docs/plans/M1-gate.md "$expect" "the M1 re-proof"
 
-  validate_evidence_lifecycle "$candidate"
+  printf '%s' "$candidate"
+}
+
+# Concept: the closure block answers for the pairs locked when closure bound
+# it; a re-capture block answers for the pairs locked now. Technical depth:
+# the closure block stays exactly as closure bound it, so a floor refresh after
+# closure cannot make history false. When the locked pairs at the closure
+# candidate differ from the pairs locked now, exactly one re-capture block on
+# the current pairs is required, taken after the closure transition; when they
+# do not differ, a re-capture block is refused as unexplained.
+validate_matrix() {
+  local path=docs/evidence/M2-toolchain-matrix.md
+  [ -f "$path" ] || fail "the retained matrix does not exist"
+  grep -qF '<!-- loopex:m2-matrix:start -->' "$path" \
+    || fail "the retained matrix has no canonical start marker"
+  grep -qF '<!-- loopex:m2-matrix:end -->' "$path" \
+    || fail "the retained matrix has no canonical end marker"
+
+  local closure_block recapture_block candidate recapture_candidate="" recapture_version
+  closure_block="$task_root/matrix-closure-block"
+  recapture_block="$task_root/matrix-recapture-block"
+  awk '/<!-- loopex:m2-matrix:start -->/ { inside = 1; next }
+       /<!-- loopex:m2-matrix:end -->/ { inside = 0 }
+       inside && !/^```/ { print }' "$path" > "$closure_block"
+  awk '/<!-- loopex:m2-recapture:start -->/ { inside = 1; count++; next }
+       /<!-- loopex:m2-recapture:end -->/ { inside = 0 }
+       inside && !/^```/ { print }
+       END { if (count > 1) exit 2 }' "$path" > "$recapture_block" \
+    || fail "the retained matrix carries more than one re-capture block"
+
+  candidate="$(validate_matrix_block "$closure_block" matrix 0.0.0)"
+
+  local closure_pairs current_pairs
+  closure_pairs="$(candidate_pairs "$candidate")"
+  current_pairs="$(candidate_pairs HEAD)"
+
+  if [ "$closure_pairs" = "$current_pairs" ]; then
+    [ ! -s "$recapture_block" ] \
+      || fail "a re-capture block is admitted only after the locked pairs changed"
+  else
+    [ -s "$recapture_block" ] \
+      || fail "the locked pairs changed after the closure captures; a post-closure re-capture block on the current pairs is required"
+    recapture_candidate="$(grep -E '^recapture candidate=' "$recapture_block" | head -1 | awk '{ print $2 }')"
+    recapture_candidate="${recapture_candidate#candidate=}"
+    [[ "$recapture_candidate" =~ ^[0-9a-f]{40}$ ]] \
+      || fail "the re-capture block names no exact source candidate"
+    recapture_version="$(git show "$recapture_candidate:VERSION" 2>/dev/null | tr -d '[:space:]')" \
+      || fail "cannot read VERSION at the re-capture candidate"
+    [[ "$recapture_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] \
+      || fail "VERSION at the re-capture candidate is not one exact source version"
+    [ "$(candidate_pairs "$recapture_candidate")" = "$current_pairs" ] \
+      || fail "the re-capture candidate does not lock the current toolchain pairs"
+    [ "$(validate_matrix_block "$recapture_block" recapture "$recapture_version")" = "$recapture_candidate" ] \
+      || fail "the re-capture block names inconsistent candidates"
+  fi
+
+  validate_evidence_lifecycle "$candidate" "$recapture_candidate"
 }
 
 validate_negative_demonstrations
