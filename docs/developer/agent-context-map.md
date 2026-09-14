@@ -3977,3 +3977,28 @@ rows, every earlier generation and every historical revision remain exactly
 as recorded. This row binds the proposal; the re-capture itself and the M0
 re-proof it records follow as evidence commit `E'` and are not accepted
 here. It grants no closure, integration, tag or release.
+
+<a id="disposition-m4-gate-amendment-2-2026-09-14"></a>
+### M4 gate Amendment 2 acceptance — 2026-09-14
+
+The first M0 gate run taken for M4's Workstream 0 baseline was red at
+outcome 8 on both toolchain pairs: the closed M0 gate scans every tracked byte
+for an interpreter invocation shape that could bypass its retired-dependency
+shadow, and the accepted M4 gate document's report grammar spelled the Python
+pin as an assignment token followed by a bare `python` field, which that scan
+refuses. The M0 gate is locked and its scan deliberate, so the implementer
+proposed M4's Amendment 2 at `64bd3bb588ecf4db8274f8bd8369bcd8bdf034f0`: the two pin fields renamed to
+`node_pin` and `python_pin` in the grammar, the runner's printed report and
+the support script's grammar table, and the gate document's opening
+paragraphs conformed to the recorded acceptance. Evidence presented: M4
+inspection verifying the rebound runner and support bytes, the M4 preflight
+reproducing the accepted opening red, the bypass scan finding no remaining
+match on the branch, and formatting, agent-bootstrap, commit-message and
+hygiene checks passing. The maintainer answered **"Accept 64bd3bb (Recommended)"**.
+
+This transcribes that answer as acceptance of Amendment 2 under
+`amendment-transaction-v1`. The rebind binds the Acceptance row to exact
+`64bd3bb588ecf4db8274f8bd8369bcd8bdf034f0` with the unchanged Concept and Technical depth envelope
+digests and the amended gate digest; it changes no lifecycle state, outcome,
+selector, witness, limit or client pin, and grants no closure, integration,
+tag or release.
