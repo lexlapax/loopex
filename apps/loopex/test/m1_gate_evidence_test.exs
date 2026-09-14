@@ -369,10 +369,10 @@ defmodule Loopex.M1GateEvidenceTest do
     <!-- loopex:m1-matrix:start -->
     ```text
     matrix candidate=#{context.candidate} gate_sha256=#{context.gate_sha256} runner_sha256=#{context.runner_sha256} launcher_sha256=#{context.launcher_sha256} exunit_runner_sha256=#{context.exunit_runner_sha256} deps_budget_sha256=#{context.deps_budget_sha256} verifier_sha256=#{context.verifier_sha256} tool_versions_sha256=#{context.tool_versions_sha256} command=bash-p:scripts/check-m1-gate.sh
-    capture lane=floor candidate=#{context.candidate} gate_sha256=#{context.gate_sha256} command=bash-p:scripts/check-m1-gate.sh elixir=1.17.0 otp=26.0 erts=14.0 seed=11 executed=101 verdict=CAPTURE exit=0 wall=1s os=darwin arch=arm64 limits=core-soft-0,core-hard-0,nofile-256,nproc-709 #{floor_identity}
+    capture lane=floor candidate=#{context.candidate} gate_sha256=#{context.gate_sha256} command=bash-p:scripts/check-m1-gate.sh elixir=1.18.5 otp=27.3.4 erts=15.2.7 seed=11 executed=101 verdict=CAPTURE exit=0 wall=1s os=darwin arch=arm64 limits=core-soft-0,core-hard-0,nofile-256,nproc-709 #{floor_identity}
     capture lane=current candidate=#{context.candidate} gate_sha256=#{context.gate_sha256} command=bash-p:scripts/check-m1-gate.sh elixir=1.20.3 otp=29.0.5 erts=17.0.5 seed=12 executed=102 verdict=CAPTURE exit=0 wall=2s os=darwin arch=x86_64 limits=core-soft-0,core-hard-0,nofile-unlimited,nproc-709 #{current_identity}
     capture lane=linux-current candidate=#{context.candidate} gate_sha256=#{context.gate_sha256} command=bash-p:scripts/check-m1-gate.sh elixir=1.20.3 otp=29.0.5 erts=17.0.5 seed=13 executed=103 verdict=CAPTURE exit=0 wall=3s os=linux arch=aarch64 limits=core-soft-0,core-hard-0,nofile-1048576,nproc-unlimited #{linux_identity}
-    m0 lane=floor candidate=#{context.candidate} gate_sha256=#{context.m0_gate_sha256} command=bash:scripts/check-m0-gate.sh elixir=1.17.0 otp=26.0 provider=fixture-provider model=fixture-model endpoint=https://example.invalid verdict=GREEN exit=0
+    m0 lane=floor candidate=#{context.candidate} gate_sha256=#{context.m0_gate_sha256} command=bash:scripts/check-m0-gate.sh elixir=1.18.5 otp=27.3.4 provider=fixture-provider model=fixture-model endpoint=https://example.invalid verdict=GREEN exit=0
     m0 lane=current candidate=#{context.candidate} gate_sha256=#{context.m0_gate_sha256} command=bash:scripts/check-m0-gate.sh elixir=1.20.3 otp=29.0.5 provider=fixture-provider model=fixture-model endpoint=https://example.invalid verdict=GREEN exit=0
     ```
     <!-- loopex:m1-matrix:end -->
@@ -613,7 +613,7 @@ defmodule Loopex.M1GateEvidenceTest do
       assert output =~ "#{lane} capture limits"
     end
 
-    File.write!(path, replace_capture_field(original, "linux-current", "elixir", "1.17.0"))
+    File.write!(path, replace_capture_field(original, "linux-current", "elixir", "1.18.5"))
     assert {output, status} = run_loaded_verifier(context.root)
     assert status != 0
     assert output =~ "linux-current capture Elixir"

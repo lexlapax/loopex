@@ -122,14 +122,14 @@ defmodule Loopex.M1EvidenceVerifier do
 
       case declarations do
         [
-          "elixir 1.17.0-otp-26",
-          "erlang 26.0",
+          "elixir 1.18.5-otp-27",
+          "erlang 27.3.4",
           "elixir 1.20.3-otp-29",
           "erlang 29.0.5"
         ] ->
           {:ok,
            [
-             {"floor", %{elixir: "1.17.0", otp: "26.0"}},
+             {"floor", %{elixir: "1.18.5", otp: "27.3.4"}},
              {"current", %{elixir: "1.20.3", otp: "29.0.5"}}
            ]}
 

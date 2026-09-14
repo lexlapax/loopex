@@ -44,7 +44,7 @@ defmodule Loopex.Checks.DepsBudget do
     loopex_cli: :client
   }
   @reqllm_requirement "~> 1.17.1"
-  @floor_elixir_version Version.parse!("1.17.0")
+  @floor_elixir_version Version.parse!("1.18.5")
 
   @locked_aliases [
     :compile,
@@ -857,7 +857,7 @@ defmodule Loopex.Checks.DepsBudget do
           {:ok, parsed} ->
             if Version.match?(@floor_elixir_version, parsed),
               do: :ok,
-              else: {:error, "Elixir requirement excludes the bound 1.17.0 floor"}
+              else: {:error, "Elixir requirement excludes the bound 1.18.5 floor"}
 
           :error ->
             {:error, "Elixir requirement is malformed"}
