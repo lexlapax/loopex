@@ -172,7 +172,7 @@ transaction is needed for the approved assertion change.
 
   | Class | Codex | Claude Code | Effort |
   | --- | --- | --- | --- |
-  | Efficient | `gpt-5.6-luna` | `haiku` (Claude Haiku 4.5) | low for scans, extraction and log triage; medium when completeness needs judgment |
+  | Efficient | `gpt-5.6-luna` | `haiku` (Claude Haiku 4.5) | Codex: low for scans, extraction and log triage; medium when completeness needs judgment. Claude Haiku 4.5 accepts no effort setting, so the class alone routes it |
   | Balanced | `gpt-5.6-terra` | `sonnet` (Claude Sonnet 5) | medium by default; high for multi-boundary integration or debugging |
   | Deep | `gpt-5.6-sol` | `opus` (Claude Opus 5) | high; xhigh for long-running agentic implementation or a rejoin audit |
   | Deepest, separately verified | `gpt-6-astra` | `fable` (Claude Fable 5.1) | high; max only where correctness outweighs cost, such as exact-SHA acceptance or closure review, gate design, or an ADR decision with conflicting evidence |
@@ -181,10 +181,15 @@ transaction is needed for the approved assertion change.
   model the second, so raise effort within the current class before
   escalating the class; escalate on conflicting evidence, an ambiguous
   boundary, or repeated focused failure, and return settled follow-through to
-  the efficient class; delegated subagents run at low effort unless the
-  delegation names a class that requires more; a deep or deepest parent never
-  implicitly promotes a child, so in Claude Code the caller passes the alias
-  per delegation and in Codex names the role or passes the spawn override;
+  the efficient class; a delegated subagent runs no deeper than its
+  delegation names, so in Claude Code the caller passes the alias per
+  delegation, and because the repository role files pin no effort, a Claude
+  Code subagent runs at its caller's effort: a caller at max lifts the
+  reviewer it spawns, and a caller wanting a cheaper child lowers the class
+  through the alias; in Codex each role's `model_reasoning_effort` applies
+  unless the spawn override passes another; a deep or deepest parent never
+  implicitly promotes a child, so the caller states the class at the call
+  site;
   fan-out uses a lead of a higher class over workers of a lower class only
   when there is bulk to hand off; and both vendors state that the deepest
   models at low effort often match a smaller model at high effort, so a

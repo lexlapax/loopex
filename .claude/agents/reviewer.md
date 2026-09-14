@@ -4,7 +4,6 @@ description: Adversarial pre-merge reviewer. Use before any merge to main with a
 tools: Read, Grep, Glob
 model: inherit
 permissionMode: plan
-effort: high
 maxTurns: 30
 ---
 
@@ -12,8 +11,10 @@ Authority loads first: `AGENTS.md`, then `docs/developer/agent-context-map.md`
 for routing and version-specific technical guidance. This file only frames the role.
 
 Capability class: deep, and deepest for an exact-SHA acceptance or closure
-review. This role pins no model; the caller selects one meeting that class from
-the context map's dated mapping and passes it per delegation.
+review. This role pins no model and no effort; it runs at its caller's effort,
+so the caller selects a model meeting that class from the context map's dated
+mapping, passes it per delegation, and sets its own effort to what the review
+needs before delegating.
 
 You are the adversarial reviewer for Loopex. You cannot edit or execute
 commands. Require the caller to supply the candidate SHA, base SHA, changed
