@@ -3395,3 +3395,32 @@ row, this disposition, the derived ADR index statuses and the derived plan
 register capsule. It accepts no other ADR, does not accept the M4 plan pair or
 gate, approves no holder transaction, authorizes no product implementation,
 and grants no merge, tag or release.
+
+<a id="disposition-adr-0028-acceptance-2026-09-13"></a>
+### ADR 0028 acceptance — 2026-09-13
+
+Under the same maintainer direction recorded in the
+[ADR 0023 acceptance](#disposition-adr-0023-acceptance-2026-09-13), given on
+2026-09-13 after the independent read-only review of pushed `m4` SHA
+`3503992cbc0de02ef98ba261e7a19fdb7123e220`, this transcribes the maintainer's
+acceptance of the exact Proposed
+[ADR 0028 Concept](../adr/0028-bounded-artifact-retrieval.md#concept)
+and [Technical depth](../adr/0028-bounded-artifact-retrieval-technical.md#technical-depth)
+pair at `3503992cbc0de02ef98ba261e7a19fdb7123e220`, with Concept SHA-256
+`38077331060dd94e09f5989e61763fc7b0f4a43bc5ff1509292eab6907b0262e`
+and Technical SHA-256
+`f6a8d1e14f98467999d137db922f3a6d0eca6f7e3684588704a2114a32797ce0`.
+The maintainer is the accepting authority; the reviewer transcribed the record
+and accepted nothing. It accepts one authorized, verified transfer per
+artifact use with distinct object and chunk digests, and the safety-ceiling
+profile the
+[pre-acceptance contract choices](#disposition-m4-preacceptance-contract-choices-2026-09-13)
+selected. Those ceilings are limits to prove under the M4 gate, not measured
+throughput promises; ADR 0015's object and use identities stay in force and
+are narrowly extended, not replaced.
+
+This administrative transition changes only the Concept status and Acceptance
+row, this disposition, the derived ADR index statuses and the derived plan
+register capsule. It accepts no other ADR, does not accept the M4 plan pair or
+gate, authorizes no product implementation, and grants no merge, tag or
+release.

@@ -3,7 +3,7 @@
 
 Technical depth: [Bounded artifact retrieval mechanics](0028-bounded-artifact-retrieval-technical.md#technical-depth).
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-09-09
 - **Decision owner:** Maintainer
 - **Supersedes:** 0015
@@ -65,4 +65,4 @@ Technical depth: [Compatibility mechanics](0028-bounded-artifact-retrieval-techn
 
 | Decision | Authority | Authority evidence | Bound bytes |
 | --- | --- | --- | --- |
-| Acceptance | — | — | — |
+| Acceptance | Maintainer | [disposition](../developer/agent-context-map.md#disposition-adr-0028-acceptance-2026-09-13) | candidate `3503992cbc0de02ef98ba261e7a19fdb7123e220`; concept `sha256:38077331060dd94e09f5989e61763fc7b0f4a43bc5ff1509292eab6907b0262e`; technical `sha256:f6a8d1e14f98467999d137db922f3a6d0eca6f7e3684588704a2114a32797ce0` |
