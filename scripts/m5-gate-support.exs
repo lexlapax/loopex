@@ -18,25 +18,27 @@ defmodule Loopex.M5Gate.Support do
 
   defp outcome("apps/loopex_daemon/test/session_lifetime_test.exs"), do: [1]
   defp outcome("apps/loopex_daemon/test/socket_transport_test.exs"), do: [2]
+  defp outcome("apps/loopex_daemon/test/python_client_conformance_test.exs"), do: [2]
   defp outcome("apps/loopex_daemon/test/collaboration_test.exs"), do: [3]
   defp outcome("apps/loopex_daemon/test/replay_residency_test.exs"), do: [4]
+  defp outcome("apps/loopex/test/concurrent_attachments_test.exs"), do: [4]
   defp outcome("apps/loopex_store_daemon/test/store_conformance_test.exs"), do: [5]
   defp outcome("apps/loopex_store_daemon/test/migration_test.exs"), do: [5]
   defp outcome("apps/loopex_daemon/test/multi_client_workflow_test.exs"), do: [6]
   defp outcome("apps/loopex_daemon/test/multi_client_workflow_real_test.exs"), do: [6]
   # Concept: shared runtime, dispatcher, store and protocol paths select every
   # outcome that can observe them; only leaf test files select one outcome.
-  defp outcome("apps/loopex/lib/loopex/runtime/event_dispatcher" <> _), do: [2, 4, 6]
-  defp outcome("apps/loopex/lib/loopex/runtime/control" <> _), do: [1, 3, 6]
+  defp outcome("apps/loopex/lib/loopex/runtime/event_dispatcher" <> _), do: @all
+  defp outcome("apps/loopex/lib/loopex/runtime/control" <> _), do: @all
   defp outcome("apps/loopex/lib/loopex/session_directory.ex"), do: [1, 6]
   defp outcome("apps/loopex/lib/loopex/store.ex"), do: [1, 5, 6]
-  defp outcome("apps/loopex_store_local/lib/" <> _), do: [1, 5, 6]
+  defp outcome("apps/loopex_store_local/lib/" <> _), do: @all
   defp outcome("apps/loopex_store_daemon/" <> _), do: @all
   defp outcome("apps/loopex_daemon/lib/" <> _), do: @all
   defp outcome("apps/loopex_protocol/" <> _), do: @all
   defp outcome("apps/loopex_app_server/lib/" <> _), do: [2, 6]
-  defp outcome("apps/loopex_cli/lib/" <> _), do: [6]
-  defp outcome("clients/" <> _), do: [6]
+  defp outcome("apps/loopex_cli/lib/" <> _), do: [2, 3, 6]
+  defp outcome("clients/" <> _), do: [2, 3, 6]
   defp outcome("scripts/fixtures/m5/" <> _), do: @all
   defp outcome(_), do: @all
 

@@ -1,19 +1,10 @@
-# Concept: observe whether a second operating-system process can attach to a
-# live durable session. Today the local Store admits one writer per path and no
-# daemon owns the session, so the observer is refused twice: the Store path is
-# held and no Unix-domain socket exists. Two positive controls prove the
-# observation is about process boundaries and nothing else: a second attachment
-# inside the controller's own VM replays the same committed events, and a fresh
-# process attaches to the same session after the controller stops.
-# Technical depth: the controller runs a real local Store, runtime and session
-# with a deterministic model that answers in one turn without tools. The
-# observer is this same script re-executed as a separate `elixir` process on the
-# same isolated code path, so the boundary it crosses is an actual OS process
-# boundary. Green requires the observer to reach the live session through the
-# daemon socket at the state root's canonical path and receive a snapshot naming
-# the session at a cursor no older than the controller's committed tail, while
-# the direct Store open is still refused; a store that admits the second writer
-# is a broken exclusion and therefore a WITNESS ERROR, never green.
+# Concept: the local controls prove committed replay; the missing M5 behavior is
+# two client processes reaching one session owned by a third, daemon process.
+# Technical depth: all three processes share one isolated code path. The daemon
+# must own its Store and runtime. Clients speak only the generation-2 JSONL
+# socket protocol. Green requires a committed controller turn and a correlated
+# observer snapshot at or beyond that turn's tail. A socket connection alone
+# never suffices.
 defmodule Loopex.M5Opening.Model do
   def complete(request, options, _progress) do
     send(Keyword.fetch!(options, :observer), :model_called)
@@ -50,18 +41,10 @@ defmodule Loopex.M5Opening do
 
   @log_relative "probe-session.log"
 
-  # Concept: the daemon socket lives at a short, deterministic path derived
-  # from the state root, because a Unix-domain socket path is bounded by the
-  # platform (about 104 bytes on Darwin) while an isolated task root is not.
-  # Technical depth: both processes derive the same path from the same root, so
-  # a future daemon started for this root listens exactly where the observer
-  # connects. The directory is the fixed `/tmp`, not the ambient temporary
-  # directory, because the gate points that at its own long task root and the
-  # bound would then be exceeded before any daemon could listen there.
-  defp socket_path(root) do
-    digest = :crypto.hash(:sha256, root) |> Base.encode16(case: :lower) |> String.slice(0, 12)
-    "/tmp/loopex-m5-#{digest}.sock"
-  end
+  # Concept: use ADR 0032's default address, not a probe-only convention.
+  # Technical depth: the runner allocates a short root, so `daemon.sock` fits
+  # Darwin's 104-byte Unix address bound without an override.
+  defp socket_path(root), do: Path.join(root, "daemon.sock")
 
   @tool %{
     "tool_id" => "example.write",
@@ -84,12 +67,13 @@ defmodule Loopex.M5Opening do
   }
 
   # ---------------------------------------------------------------------------
-  # Controller
+  # Existing-runtime positive controls
   # ---------------------------------------------------------------------------
 
   def run(root) do
-    File.mkdir_p!(root)
-    path = Path.join(root, @log_relative)
+    local_root = Path.join(root, "local")
+    File.mkdir_p!(local_root)
+    path = Path.join(local_root, @log_relative)
     {:ok, store_pid} = Loopex.Store.Local.start_link(path: path)
     {:ok, store} = Store.new(Loopex.Store.Local, store_pid)
     {:ok, runtime} = start_runtime(store, "m5-probe-controller")
@@ -129,11 +113,7 @@ defmodule Loopex.M5Opening do
           "in_process_second_attachment_replay_differs"
         )
 
-        # The observation: a separate OS process tries to attach while this
-        # process still holds the session.
-        live = observe(root, session, "live", tail)
-
-        {session, %{tail: tail, live: live, count: length(committed)}}
+        {session, %{tail: tail, count: length(committed)}}
       after
         Loopex.stop(runtime)
       end
@@ -142,7 +122,7 @@ defmodule Loopex.M5Opening do
 
     # Positive control B: once the controller has released the path, a fresh
     # process opens the store, resumes the session and replays the same tail.
-    after_stop = observe(root, session, "after_stop", committed.tail)
+    after_stop = observe(local_root, session, "after_stop", committed.tail)
 
     require_witness(
       after_stop.exit == 0 and after_stop.fields["store"] == "opened" and
@@ -150,35 +130,55 @@ defmodule Loopex.M5Opening do
       "after_stop_control_failed"
     )
 
-    live = committed.live
+    daemon_root = Path.join(root, "daemon")
+    File.mkdir_p!(daemon_root)
+    require_witness(byte_size(socket_path(daemon_root)) < 104, "daemon_socket_path_too_long")
 
     IO.puts(
-      "LOOPEX_M5_OBSERVATION controls=2/2 committed_events=#{committed.count} tail=#{committed.tail} " <>
-        "live_store=#{live.fields["store"]} live_socket=#{live.fields["socket"]} " <>
-        "live_attach=#{live.fields["attach"]} live_exit=#{live.exit} " <>
-        "after_stop_events=#{after_stop.fields["events"]}"
+      "LOOPEX_M5_OBSERVATION controls=2/2 committed_events=#{committed.count} tail=#{committed.tail} after_stop_events=#{after_stop.fields["events"]}"
     )
 
-    cond do
-      live.exit == 1 and live.fields["store"] == "store_writer_active" and
-          live.fields["socket"] == "enoent" ->
+    daemon = start_daemon(daemon_root)
+
+    result =
+      try do
+        case wait_for_socket(
+               daemon,
+               socket_path(daemon_root),
+               "",
+               System.monotonic_time(:millisecond) + 5_000
+             ) do
+          :absent ->
+            :red
+
+          :ready ->
+            {live_session, tail} = drive_controller(socket_path(daemon_root))
+            live = observe(daemon_root, live_session, "live", tail)
+
+            require_witness(
+              live.exit == 0 and live.fields["socket"] == "connected" and
+                live.fields["attach"] == "ok",
+              "second_client_did_not_attach"
+            )
+
+            :green
+        end
+      after
+        stop_daemon(daemon)
+      end
+
+    case result do
+      :red ->
         IO.puts(
-          "M5 gate RED: a second process cannot attach to a live session; the local Store refuses the path as store_writer_active and no daemon socket exists"
+          "M5 gate RED: no daemon owns an attachable session at the state root's daemon.sock"
         )
 
         System.halt(1)
 
-      live.exit == 0 and live.fields["store"] == "store_writer_active" and
-        live.fields["socket"] == "connected" and live.fields["attach"] == "ok" ->
+      :green ->
         IO.puts(
-          "M5 opening GREEN: a second process attaches to the live session through the daemon socket while the store stays single-writer"
+          "M5 opening GREEN: two client processes attach to one daemon-owned session through daemon.sock at the committed cursor"
         )
-
-      live.fields["store"] == "opened" ->
-        throw({:witness_error, "second_process_opened_the_held_store"})
-
-      true ->
-        throw({:witness_error, "live_observation_neither_refused_nor_attached"})
     end
   end
 
@@ -188,7 +188,7 @@ defmodule Loopex.M5Opening do
     code_paths =
       :code.get_path()
       |> Enum.map(&List.to_string/1)
-      |> Enum.filter(&String.contains?(&1, "/lib/loopex"))
+      |> Enum.filter(&String.contains?(&1, "/prod/lib/"))
       |> Enum.flat_map(&["-pa", &1])
 
     {output, exit} =
@@ -221,43 +221,18 @@ defmodule Loopex.M5Opening do
   # ---------------------------------------------------------------------------
 
   def observe_live(root, session, tail) do
-    path = Path.join(root, @log_relative)
-    Process.flag(:trap_exit, true)
-
-    store =
-      case Loopex.Store.Local.start_link(path: path) do
-        {:error, {:store_writer_active, _path}} -> "store_writer_active"
-        {:ok, pid} -> GenServer.stop(pid) && "opened"
-        {:error, other} -> "error:" <> sanitize(inspect(other))
-      end
-
-    socket_path = socket_path(root)
-
     {socket, attach} =
-      try do
-        case :gen_tcp.connect({:local, socket_path}, 0, [:binary, active: false], 1_000) do
-          {:ok, socket} ->
-            {"connected", attach_over_socket(socket, session, tail)}
+      case :gen_tcp.connect({:local, socket_path(root)}, 0, socket_options(), 1_000) do
+        {:ok, socket} ->
+          {"connected", attach_over_socket(socket, session, tail)}
 
-          {:error, reason} ->
-            {sanitize(to_string(reason)), "none"}
-        end
-      catch
-        :exit, :badarg -> {"path_invalid", "none"}
+        {:error, reason} ->
+          {sanitize(to_string(reason)), "none"}
       end
 
-    IO.puts("LOOPEX_M5_OBSERVER phase=live store=#{store} socket=#{socket} attach=#{attach}")
+    IO.puts("LOOPEX_M5_OBSERVER phase=live socket=#{socket} attach=#{attach}")
 
-    cond do
-      store == "store_writer_active" and socket == "connected" and attach == "ok" ->
-        System.halt(0)
-
-      store == "store_writer_active" and socket == "enoent" ->
-        System.halt(1)
-
-      true ->
-        System.halt(2)
-    end
+    System.halt(if(socket == "connected" and attach == "ok", do: 0, else: 2))
   end
 
   def observe_after_stop(root, session, tail) do
@@ -290,73 +265,330 @@ defmodule Loopex.M5Opening do
     System.halt(0)
   end
 
-  # Concept: the green route is the ADR 0023 JSONL protocol carried over the
-  # daemon socket, so the observer speaks that protocol rather than a private
-  # shortcut. Technical depth: initialize, then attach at cursor 0 and accept
-  # only a snapshot record naming this session at a cursor no older than the
-  # controller's tail; anything else is not an attachment.
+  # Concept: the observer accepts only a negotiated, correlated attachment.
+  # Technical depth: the top-level cursor is a decimal string and must equal
+  # the nested snapshot sequence. A stray event or another request's snapshot
+  # cannot satisfy the witness.
   defp attach_over_socket(socket, session, tail) do
-    send_frame(socket, %{
-      "method" => "initialize",
-      "request_id" => "m5-observer-init",
-      "generations" => ["loopex.experimental/1"],
-      "capabilities" => []
-    })
+    initialize!(socket, "m5-observer-init")
 
     send_frame(socket, %{
       "method" => "session.attach",
       "request_id" => "m5-observer-attach",
       "session_id" => session,
-      "after_event_sequence" => 0
+      "after_event_sequence" => "0"
     })
 
-    deadline = System.monotonic_time(:millisecond) + 5_000
+    snapshot = read_correlated!(socket, "m5-observer-attach")
 
-    case read_until_attached(socket, session, tail, "", deadline) do
-      :ok -> "ok"
-      {:error, reason} -> "failed:" <> sanitize(reason)
-    end
+    require_witness(
+      snapshot_cursor(snapshot, session) >= tail,
+      "observer_snapshot_before_committed_tail"
+    )
+
+    "ok"
   after
     :gen_tcp.close(socket)
   end
 
   defp send_frame(socket, map), do: :ok = :gen_tcp.send(socket, JSON.encode!(map) <> "\n")
 
-  defp read_until_attached(socket, session, tail, buffer, deadline) do
+  defp socket_options,
+    do: [:binary, active: false, packet: :line, packet_size: 2_097_152]
+
+  defp connect!(path) do
+    case :gen_tcp.connect({:local, path}, 0, socket_options(), 1_000) do
+      {:ok, socket} -> socket
+      {:error, reason} -> throw({:witness_error, "daemon_socket_connect_#{reason}"})
+    end
+  end
+
+  defp initialize!(socket, request_id) do
+    schema_path = "apps/loopex_protocol/priv/schema/loopex-experimental-2.json"
+    require_witness(File.regular?(schema_path), "generation_2_schema_missing")
+    digest = :crypto.hash(:sha256, File.read!(schema_path)) |> Base.encode16(case: :lower)
+
+    send_frame(socket, %{
+      "method" => "initialize",
+      "request_id" => request_id,
+      "generations" => ["loopex.experimental/2"],
+      "capabilities" => []
+    })
+
+    initialized = read_correlated!(socket, request_id)
+
+    require_witness(
+      initialized["type"] == "initialized" and
+        initialized["selected_generation"] == "loopex.experimental/2" and
+        initialized["exact_schema_sha256"] == digest and is_map(initialized["limits"]),
+      "generation_2_initialize_mismatch"
+    )
+  end
+
+  defp read_correlated!(socket, request_id) do
+    read_correlated!(socket, request_id, System.monotonic_time(:millisecond) + 5_000)
+  end
+
+  defp read_correlated!(socket, request_id, deadline) do
     remaining = deadline - System.monotonic_time(:millisecond)
+    require_witness(remaining > 0, "protocol_response_timeout")
 
-    if remaining <= 0 do
-      {:error, "timeout"}
-    else
-      case :gen_tcp.recv(socket, 0, remaining) do
-        {:ok, bytes} ->
-          {records, rest} = split_records(buffer <> bytes)
+    case :gen_tcp.recv(socket, 0, remaining) do
+      {:ok, line} ->
+        case JSON.decode(line) do
+          {:ok, %{"request_id" => ^request_id} = record} ->
+            record
 
-          attached? =
-            Enum.any?(records, fn record ->
-              case JSON.decode(record) do
-                {:ok, %{"session_id" => ^session, "event_sequence" => sequence}}
-                when is_integer(sequence) and sequence >= tail ->
-                  true
+          {:ok, %{"type" => "event", "event" => %{"kind" => "session.settled"}}} ->
+            Process.put(:m5_saw_settled, true)
+            read_correlated!(socket, request_id, deadline)
 
-                _ ->
-                  false
-              end
-            end)
+          {:ok, %{"type" => "error"}} ->
+            throw({:witness_error, "uncorrelated_protocol_error"})
 
-          if attached?, do: :ok, else: read_until_attached(socket, session, tail, rest, deadline)
+          {:ok, %{} = _other} ->
+            read_correlated!(socket, request_id, deadline)
 
-        {:error, reason} ->
-          {:error, to_string(reason)}
+          _ ->
+            throw({:witness_error, "invalid_protocol_record"})
+        end
+
+      {:error, reason} ->
+        throw({:witness_error, "protocol_recv_#{reason}"})
+    end
+  end
+
+  defp snapshot_cursor(record, session) do
+    require_witness(
+      record["type"] == "snapshot" and record["session_id"] == session and
+        is_map(record["snapshot"]) and record["snapshot"]["session_id"] == session and
+        Map.has_key?(record, "open_interaction"),
+      "correlated_snapshot_shape_invalid"
+    )
+
+    cursor = u64!(record["event_cursor"])
+
+    require_witness(
+      u64!(record["snapshot"]["event_sequence"]) == cursor,
+      "snapshot_cursor_mismatch"
+    )
+
+    cursor
+  end
+
+  defp u64!(value) when is_binary(value) do
+    case Integer.parse(value) do
+      {number, ""} when number >= 0 ->
+        require_witness(Integer.to_string(number) == value, "invalid_u64")
+        number
+
+      _ ->
+        throw({:witness_error, "invalid_u64"})
+    end
+  end
+
+  defp u64!(_), do: throw({:witness_error, "invalid_u64"})
+
+  defp start_daemon(root) do
+    elixir = System.find_executable("elixir") || throw({:witness_error, "elixir_unavailable"})
+
+    Port.open({:spawn_executable, elixir}, [
+      :binary,
+      :exit_status,
+      :stderr_to_stdout,
+      {:args, code_paths() ++ [__ENV__.file, "--daemon", root]}
+    ])
+  end
+
+  defp stop_daemon(port) do
+    if Port.info(port) do
+      try do
+        Port.command(port, "stop\n")
+
+        receive do
+          {^port, {:exit_status, _}} -> :ok
+        after
+          2_000 -> Port.close(port)
+        end
+      catch
+        :error, :badarg -> :ok
       end
     end
   end
 
-  defp split_records(buffer) do
-    case String.split(buffer, "\n") do
-      [only] -> {[], only}
-      parts -> {Enum.drop(parts, -1), List.last(parts)}
+  defp wait_for_socket(port, path, output, deadline) do
+    if socket_ready?(path) do
+      :ready
+    else
+      require_witness(System.monotonic_time(:millisecond) < deadline, "daemon_start_timeout")
+
+      receive do
+        {^port, {:data, bytes}} ->
+          wait_for_socket(port, path, String.slice(output <> bytes, -1_000..-1), deadline)
+
+        {^port, {:exit_status, 1}} ->
+          require_witness(
+            String.contains?(output, "LOOPEX_M5_DAEMON module_absent"),
+            "daemon_start_refused_or_crashed"
+          )
+
+          :absent
+
+        {^port, {:exit_status, _}} ->
+          throw({:witness_error, "daemon_exited_before_socket"})
+      after
+        25 -> wait_for_socket(port, path, output, deadline)
+      end
     end
+  end
+
+  defp socket_ready?(path) do
+    if File.exists?(path) do
+      case :gen_tcp.connect({:local, path}, 0, socket_options(), 100) do
+        {:ok, socket} ->
+          :gen_tcp.close(socket)
+          true
+
+        _ ->
+          false
+      end
+    else
+      false
+    end
+  end
+
+  def run_daemon(root) do
+    # This exact, small test-start contract belongs to the M5 daemon. It must
+    # open its own Store and runtime, then listen at ADR 0032's default path.
+    if not Code.ensure_loaded?(Loopex.Daemon) do
+      IO.puts("LOOPEX_M5_DAEMON module_absent")
+      System.halt(1)
+    end
+
+    case Loopex.Daemon.start_link(
+           state_root: root,
+           runtime_options: runtime_options("m5-probe-daemon")
+         ) do
+      {:ok, _daemon} ->
+        IO.puts("LOOPEX_M5_DAEMON listening")
+        IO.gets("")
+        System.halt(0)
+
+      {:error, reason} ->
+        IO.puts("LOOPEX_M5_DAEMON start_refused=#{sanitize(inspect(reason))}")
+        System.halt(1)
+    end
+  end
+
+  defp drive_controller(path) do
+    socket = connect!(path)
+
+    try do
+      initialize!(socket, "m5-controller-init")
+
+      send_frame(socket, %{
+        "method" => "session.create",
+        "request_id" => "m5-controller-create",
+        "command_id" => wire_id("controller-create"),
+        "session_options" => %{}
+      })
+
+      created = read_correlated!(socket, "m5-controller-create")
+
+      require_witness(
+        created["type"] == "admission" and created["status"] == "accepted" and
+          is_binary(created["session_id"]),
+        "daemon_session_create_failed"
+      )
+
+      session = created["session_id"]
+
+      send_frame(socket, %{
+        "method" => "session.attach",
+        "request_id" => "m5-controller-attach",
+        "session_id" => session,
+        "after_event_sequence" => "0"
+      })
+
+      attached = read_correlated!(socket, "m5-controller-attach")
+      initial_cursor = snapshot_cursor(attached, session)
+
+      send_frame(socket, %{
+        "method" => "session.acquire_control",
+        "request_id" => "m5-controller-acquire",
+        "session_id" => session
+      })
+
+      acquired = read_correlated!(socket, "m5-controller-acquire")
+      epoch = get_in(acquired, ["result", "writer_epoch"])
+
+      require_witness(
+        acquired["type"] == "result" and u64!(epoch) > 0,
+        "daemon_control_acquire_failed"
+      )
+
+      Process.put(:m5_saw_settled, false)
+
+      send_frame(socket, %{
+        "method" => "session.prompt",
+        "request_id" => "m5-controller-prompt",
+        "command_id" => wire_id("controller-prompt"),
+        "content_b64" => wire_id("answer in one turn"),
+        "writer_epoch" => epoch
+      })
+
+      prompted = read_correlated!(socket, "m5-controller-prompt")
+
+      require_witness(
+        prompted["type"] == "admission" and prompted["status"] == "accepted",
+        "daemon_prompt_not_admitted"
+      )
+
+      tail =
+        inspect_until_settled(
+          socket,
+          session,
+          initial_cursor,
+          0,
+          System.monotonic_time(:millisecond) + 6_000
+        )
+
+      {session, tail}
+    after
+      :gen_tcp.close(socket)
+    end
+  end
+
+  defp inspect_until_settled(socket, session, initial_cursor, attempt, deadline) do
+    require_witness(System.monotonic_time(:millisecond) < deadline, "daemon_run_did_not_settle")
+    request_id = "m5-inspect-#{attempt}"
+
+    send_frame(socket, %{
+      "method" => "session.inspect",
+      "request_id" => request_id,
+      "session_id" => session
+    })
+
+    record = read_correlated!(socket, request_id)
+    status = record["result"]
+
+    if Process.get(:m5_saw_settled) and record["type"] == "result" and is_map(status) and
+         status["active_run_id"] == nil and
+         status["pending_work_ids"] == [] and u64!(status["event_sequence"]) > initial_cursor do
+      u64!(status["event_sequence"])
+    else
+      Process.sleep(20)
+      inspect_until_settled(socket, session, initial_cursor, attempt + 1, deadline)
+    end
+  end
+
+  defp wire_id(value), do: Base.url_encode64(value, padding: false)
+
+  defp code_paths do
+    :code.get_path()
+    |> Enum.map(&List.to_string/1)
+    |> Enum.filter(&String.contains?(&1, "/prod/lib/"))
+    |> Enum.flat_map(&["-pa", &1])
   end
 
   # ---------------------------------------------------------------------------
@@ -364,9 +596,12 @@ defmodule Loopex.M5Opening do
   # ---------------------------------------------------------------------------
 
   defp start_runtime(store, runtime_id) do
-    Loopex.start_link(
+    Loopex.start_link([store: store] ++ runtime_options(runtime_id))
+  end
+
+  defp runtime_options(runtime_id) do
+    [
       runtime_id: runtime_id,
-      store: store,
       model: %{
         module: Loopex.M5Opening.Model,
         model: "fixture:v1",
@@ -386,7 +621,7 @@ defmodule Loopex.M5Opening do
       context_token_budget: 100_000,
       tools: [@tool],
       active_tools: ["example.write"]
-    )
+    ]
   end
 
   defp settle(runtime, session, deadline) do
@@ -452,6 +687,9 @@ try do
   case System.argv() do
     [root] ->
       Loopex.M5Opening.run(root)
+
+    ["--daemon", root] ->
+      Loopex.M5Opening.run_daemon(root)
 
     ["--observe", root, session, "live", tail] ->
       Loopex.M5Opening.observe_live(root, session, String.to_integer(tail))

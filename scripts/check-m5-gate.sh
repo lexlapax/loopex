@@ -108,12 +108,16 @@ for task_protected_root in "${LOOPEX_HOME:-$operator_home/.loopex}" "${LOOPEX_WO
   fi
 done
 task_root=$(mktemp -d "$task_parent/loopex-m5-gate.XXXXXXXX") || die 'cannot allocate isolated task root'
-cleanup() { rm -rf "$task_root"; }
+# ADR 0032's default socket must fit Darwin's address bound even when TMPDIR
+# is a long path. The separate opening state root is still mktemp-owned.
+opening_state_root=$(mktemp -d /tmp/loopex-m5.XXXXXXXX) || die 'cannot allocate short opening state root'
+cleanup() { rm -rf "$task_root" "$opening_state_root"; }
 trap cleanup EXIT
 trap 'exit 2' INT TERM
 mkdir -p "$task_root/home" "$task_root/state" || die 'cannot create isolated directories'
 
-# Concept: only protocol, core and the real local Store are compiled, offline.
+# Concept: compile the local controls now and the daemon when its application
+# exists. An absent daemon is the behavioral opening red, not a compile error.
 # Technical depth: clear the higher-precedence build-path override and isolate
 # Mix, Hex, build and temporary state. Print failed compiler output before cleanup.
 task_compile_started=$SECONDS
@@ -131,10 +135,29 @@ else
   cat "$task_root/compile.log" >&2
   die 'isolated core/local-Store compilation failed'
 fi
+if [ -d apps/loopex_daemon ]; then
+  task_daemon_compile_started=$SECONDS
+  if (
+    cd apps/loopex_daemon &&
+    env -u MIX_BUILD_PATH -u MIX_DEPS_PATH LANG=C.UTF-8 LC_ALL=C.UTF-8 MIX_ENV=prod \
+      MIX_BUILD_ROOT="$task_root/build" HOME="$task_root/home" \
+      HEX_HOME="$task_root/home/.hex" MIX_HOME="$task_root/home/.mix" \
+      HEX_OFFLINE=1 TMPDIR="$task_root" mix compile </dev/null
+  ) >"$task_root/daemon-compile.log" 2>&1; then
+    lane_finished opening_daemon_compile "$task_daemon_compile_started" 0
+  else
+    task_daemon_compile_result=$?
+    lane_finished opening_daemon_compile "$task_daemon_compile_started" "$task_daemon_compile_result"
+    cat "$task_root/daemon-compile.log" >&2
+    die 'isolated daemon compilation failed'
+  fi
+fi
 beam_args=()
 for app in loopex_protocol loopex loopex_store_local; do
-  ebin="$task_root/build/prod/lib/$app/ebin"
-  [ -f "$ebin/$app.app" ] || die "isolated build lacks $app"
+  [ -f "$task_root/build/prod/lib/$app/ebin/$app.app" ] || die "isolated build lacks $app"
+done
+for ebin in "$task_root/build/prod/lib/"*/ebin; do
+  [ -d "$ebin" ] || continue
   beam_args+=(-pa "$ebin")
 done
 printf 'M5 %s: running the cross-process attachment opening witness only\n' "$role"
@@ -145,14 +168,14 @@ env -u MIX_BUILD_PATH -u MIX_DEPS_PATH LANG=C.UTF-8 LC_ALL=C.UTF-8 MIX_ENV=prod 
   MIX_BUILD_ROOT="$task_root/build" HOME="$task_root/home" \
   HEX_HOME="$task_root/home/.hex" MIX_HOME="$task_root/home/.mix" \
   HEX_OFFLINE=1 TMPDIR="$task_root" \
-  elixir "${beam_args[@]}" scripts/m5-opening-probe.exs "$task_root/state" </dev/null >"$task_root/probe.log" 2>&1 || result=$?
+  elixir "${beam_args[@]}" scripts/m5-opening-probe.exs "$opening_state_root" </dev/null >"$task_root/probe.log" 2>&1 || result=$?
 cat "$task_root/probe.log"
 lane_finished opening "$task_opening_started" "$result"
 case "$result" in
   0)
-    [ "$(tail -n 1 "$task_root/probe.log")" = 'M5 opening GREEN: a second process attaches to the live session through the daemon socket while the store stays single-writer' ] || die 'probe exited 0 without its completed behavioral witness' ;;
+    [ "$(tail -n 1 "$task_root/probe.log")" = 'M5 opening GREEN: two client processes attach to one daemon-owned session through daemon.sock at the committed cursor' ] || die 'probe exited 0 without its completed behavioral witness' ;;
   1)
-    [ "$(tail -n 1 "$task_root/probe.log")" = 'M5 gate RED: a second process cannot attach to a live session; the local Store refuses the path as store_writer_active and no daemon socket exists' ] || die 'probe exited 1 without its completed behavioral witness'
+    [ "$(tail -n 1 "$task_root/probe.log")" = "M5 gate RED: no daemon owns an attachable session at the state root's daemon.sock" ] || die 'probe exited 1 without its completed behavioral witness'
     if [ "$role" = checkpoint ]; then opening_result=1; else exit 1; fi ;;
   *)
     case "$(tail -n 1 "$task_root/probe.log")" in
@@ -244,7 +267,7 @@ run_selector() {
   printf 'M5 selector: %s kind=%s\n' "$selector" "$kind"
   # Client-backed selectors run only under the pinned interpreters.
   case "$selector" in
-    */multi_client_workflow_test.exs|*/multi_client_workflow_real_test.exs) require_client_pins ;;
+    */python_client_conformance_test.exs|*/multi_client_workflow_test.exs|*/multi_client_workflow_real_test.exs) require_client_pins ;;
   esac
   if [ "$kind" = real ]; then
     [ -n "$m5_provider_key" ] || die 'full gate requires provider input for the real workflow'
@@ -279,7 +302,6 @@ if [ "$role" = checkpoint ]; then
 fi
 run_step mix test --exclude real_provider --seed 3107
 run_step mix format --check-formatted
-run_step mix loopex.docs_check
 run_step mix loopex.deps_budget
 : > "$task_root/bootstrap-backedge-ledger"
 exec 9>"$task_root/bootstrap-backedge-ledger"
@@ -345,6 +367,8 @@ env GIT_DIR="$source_git_dir" GIT_WORK_TREE="$source_root" git -C "$source_root"
   die 'the attended workflow changed tracked extracted source bytes'
 [ "$source_build_identity" = "$(support build "$source_build/test")" ] || die 'fresh-source build identity changed during the attended workflow'
 support selector-account "$task_root/selectors" "$task_root/selector-ledger" </dev/null || exit $?
+run_step mix loopex.status
+run_step mix loopex.docs_check
 final_identity=$(support identity "$root" committed) || exit $?
 [ "$full_identity" = "$final_identity" ] || die 'source identity changed during the full gate'
 [ "$build_identity" = "$(support build "$task_root/build/test")" ] || die 'selector build identity changed during the full gate'
@@ -354,7 +378,7 @@ printf '%s\n' "$final_identity"
 source_version=$(tr -d '[:space:]' < VERSION) || die 'source VERSION is unreadable'
 toolchain=$(printf '%s\n' "$final_identity" | awk '{ for (i = 1; i <= NF; i++) if ($i ~ /^(elixir|otp|erts|platform)=/) printf "%s ", $i }')
 [ -n "$toolchain" ] || die 'toolchain identity is missing from the source identity line'
-schema_path=apps/loopex_protocol/priv/schema/loopex-experimental-1.json
+schema_path=apps/loopex_protocol/priv/schema/loopex-experimental-2.json
 [ -r "$schema_path" ] || die "canonical schema bytes are absent: $schema_path"
 schema_digest=$(shasum -a 256 "$schema_path" | cut -d' ' -f1) || die 'cannot hash the canonical schema'
 selector_count=$(grep -c . "$task_root/selector-ledger") || die 'selector ledger is empty'

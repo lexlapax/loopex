@@ -19,6 +19,24 @@ incarnation identities remain the commit-authority fence and the writer
 marker remains physical writer exclusion. The public protocol, the embedded
 API and every public event are unchanged by the adapter choice.
 
+Daemon-control leases have their own private storage boundary, outside the
+session Store callbacks and transaction types. It provides durable read,
+compare-and-transition, and request-ID resolution for one lease per session;
+each transition commits the prior epoch, holder, state and expiry comparison
+with the replacement record at one linearization point. The first
+implementation is a synced daemon-control log in the minimal
+`loopex_store_daemon` application, under the daemon state root's single-writer
+exclusion; the existing local adapter separately supplies session truth. The
+daemon acquires a root-scoped writer marker with an exclusive liveness probe
+before opening the control log or any local session log. A second daemon
+refuses at that marker even during the local-adapter stage; an unverified stale
+marker fails closed. The selected daemon-grade session adapter later
+implements session Store callbacks alongside that control namespace. Neither
+core nor `loopex_store_local` depends on the daemon application. Lease
+transitions need no atomic transaction with a session journal; the daemon
+serializes each session's transition and command-admission handoff as ADR 0033
+requires.
+
 ### Candidate one: BEAM-native segmented log
 
 - One root directory per state root with a `manifest` file naming the format
@@ -35,30 +53,47 @@ API and every public event are unchanged by the adapter choice.
 - A session index file listing session identity, source and fork lineage,
   genesis and tombstone state and the last known public sequence, rebuilt from
   the logs when absent or inconsistent rather than trusted.
-- The local adapter's writer marker held for the whole root, with the same
-  liveness probe and the same `store_writer_active` and
-  `store_writer_unverifiable` refusals.
+- The root-scoped daemon writer marker held for the whole root, using the
+  local adapter's liveness-probe discipline and the same
+  `store_writer_active` and `store_writer_unverifiable` refusals.
 
 ### Candidate two: SQLite through a NIF binding
 
 One database per state root with tables for sessions, private records,
 public outbox rows, snapshots and idempotency; transactions through the
-engine's journal; the same port mapping. It is evaluated on the same suite
-with three additional obligations: the NIF's failure containment (a crash or
+engine's journal; the same port mapping. Both candidates use a root manifest
+with format version, placement identity and migration ledger; SQLite keeps its
+session index as database lookup state rather than a separate index file. It
+is evaluated on the same suite with three additional obligations: the NIF's
+failure containment (a crash or
 a blocked scheduler is a VM-level risk the native candidate does not carry),
 its packaging (a compiled dependency joins the version train and the release
-archive), and its behaviour under the same torn-write and kill fixtures.
+archive), and equivalent crash and corruption outcomes under its own journal
+and database file format.
 
-### Selection evidence
+### Selection experiment and evidence
 
-Before this decision is accepted, both candidates run:
+After M4 closes and the refreshed M5 opening gate is established red on that
+closed base, both candidates run in separate isolated, disposable contract
+branches and task roots. The experiments may build only the adapter slices and
+fixtures necessary to measure this decision; they do not enter the Open M5
+candidate, integrate to `main`, become accepted M5 product bytes, or claim an
+inherited-gate result for the milestone
+branch. The gate-first checkpoint permits bounded contract experiments only
+after the one-lookahead planning restriction ends with M4 closure. Both run:
 
 - the shared store conformance suite that the local and in-memory adapters
   already pass, unchanged;
-- fault injection at every commit cut: kill between frame write and sync,
-  between sync and acknowledgement, and during snapshot write; a torn last
-  frame; a corrupt middle frame; a missing or corrupt index; a marker left by
-  a dead writer;
+- common semantic fault cut points: kill before durable commit, after durable
+  commit but before acknowledgement, and during snapshot or checkpoint write;
+  corrupt or incomplete durable bytes, missing or corrupt derived lookup state,
+  and a marker left by a dead writer. Each candidate uses physical injections
+  appropriate to its representation and proves the same Store-level recovery
+  or refusal outcomes. The native candidate additionally runs literal torn
+  last frame, corrupt middle frame, and missing or corrupt session-index
+  fixtures; SQLite runs its corresponding database and journal corruption and
+  index-rebuild fixtures. The decision packet records the exact injection and
+  observed outcome for each candidate and cut point;
 - commit-ambiguity resolution: a `transact` whose acknowledgement was lost is
   resolved by `transaction_status` to exactly one outcome;
 - bounded replay: open time and memory grow with the snapshot interval, not
@@ -67,34 +102,43 @@ Before this decision is accepted, both candidates run:
 - backup and restore: a quiescent copy reopens with every session identity and
   public sequence intact and the integrity check clean.
 
-The maintainer selects the adapter at acceptance on that evidence. Selection
-does not itself accept M5; M5 accepts only with this ADR accepted.
+Record each experiment's exact candidate SHA, commands, platform and measured
+results in the decision packet. Revise this still-Proposed ADR pair to name the
+winner, both experiment SHAs, its evidence and any packaging cost;
+independently review that candidate before the maintainer accepts it.
+Selection does not itself accept M5. Product implementation starts only after
+this ADR and M5 are accepted.
 
 ### Migration
 
 Supported pair: local adapter format `loopex_store_writer_v2` log to
 `loopex_store_daemon_v1` root. The import reads the original log through the
-local adapter's own reader, writes per-session logs and the index into a new
-root, records `started`, `session <id> imported`, `verified` and `completed`
+local adapter's own reader, writes each session and derived lookup state through
+the selected adapter into a new root, records `started`,
+`session <id> imported`, `verified` and `completed`
 in the manifest's migration ledger with the source log digest, and refuses to
 serve until `completed` is present. Reopen after interruption reads the
 ledger: a root without `completed` is either resumed from the last recorded
 session or discarded and restarted, both without touching the source log. The
 original log is never modified, moved or deleted by the import.
 
-An M4 binary opening a `loopex_store_daemon_v1` root refuses with
-`store_format_unsupported` naming the version it found and the newest it can
-read. A daemon binary opening a local log serves it only through explicit
+The exact M4 local-reader binary treats the daemon root directory as an
+invalid store file and returns its existing `store_file_invalid` reason. It
+cannot name `loopex_store_daemon_v1` or advertise a maximum format it never
+implemented. The M5 daemon reader validates the root manifest version and
+refuses unknown versions explicitly; it is the oldest reader of this new
+root. A daemon binary opening a local log serves it only through explicit
 import; it never upgrades in place.
 
 ### Evidence and alternatives
 
 Tests cover forward migration of a genuine M4 session log with identical
 replay afterwards, interruption at each ledger step with detection on reopen,
-the previous binary's refusal, and backup and restore. Mnesia and DETS were
-rejected: DETS carries a two-gigabyte table limit and no tail-repair story,
-and Mnesia's schema is VM-global state that contradicts the runtime-instance
-rule. A hosted PostgreSQL adapter remains a later choice under the same ports
+safe refusal by the exact M4 binary with its actual reason, and backup and
+restore. Mnesia and DETS were rejected: DETS carries a two-gigabyte table
+limit and no tail-repair story, and Mnesia's schema is VM-global state that
+contradicts the runtime-instance rule. A hosted PostgreSQL adapter remains a
+later choice under the same ports
 and is not evaluated here.
 
 <a id="technical-adr-0031-compatibility"></a>

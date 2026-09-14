@@ -1,9 +1,11 @@
 # M5 Gate
 
-Open candidate for the durable service, opened as the one permitted planning
-lookahead on M4's integrated acceptance checkpoint. Its three prerequisite
-ADRs are Proposed, this M5 plan pair and gate are not accepted by this
-revision, and M5 product implementation has not begun. The runner binds a
+Open planning candidate for the durable service, drafted on M4's integrated
+acceptance checkpoint. Its inherited M1 and M2 gates were unavailable there;
+the M4-specific waiver and deferral do not establish a valid M5 lookahead
+opening. Its three prerequisite ADRs are Proposed, this M5 plan pair and gate
+are not accepted by this revision, and M5 product implementation has not
+begun. The runner binds a
 real behavioral opening probe, executable closure lanes and exact future
 witness identities. Under the same preparation rule M3 recorded, future test
 bodies are written during implementation; every named witness must pass
@@ -31,69 +33,90 @@ acceptance, amendment or override is recorded by this Open gate.
 
 ## Current Opening Observation
 
-The runner compiles protocol, core and the real local Store into an isolated
-root and drives one actual session in one operating-system process with a
-deterministic model that answers in one turn without tools. A second
-attachment inside that process replays exactly the committed events, which
-proves the attach and replay path. The runner then executes the same probe
-as a second operating-system process while the first still holds the
-session: that process must reach the live session. Today the local Store
-refuses the path as `store_writer_active` and no daemon socket exists at the
-state root's canonical path, so the second process cannot attach. After the
-first process stops, a third process resumes the session under the same
-placement identity and replays the same tail, which proves that durable
-truth crosses processes once the writer is gone.
+The runner compiles protocol, core and the real local Store in an isolated
+root. Local positive controls first prove that a second attachment in one VM
+replays the committed events and that a fresh operating-system process
+resumes the session after Store release under the same placement identity.
+The runner then starts the daemon fixture in another operating-system process
+at a short state root with the default `<state root>/daemon.sock` address.
+The fixture calls
+`Loopex.Daemon.start_link(state_root: root, runtime_options: runtime_opts)`;
+the daemon alone owns the session Store, runtime and session lifetime. A
+controller socket client initializes generation 2, creates an uncontrolled
+session, attaches, acquires control and commits a deterministic turn with its
+writer epoch. An independent operating-system process acts only as another
+ADR 0023 JSONL socket client. It initializes generation 2 and attaches while
+the daemon retains that session, receiving a correlated snapshot whose
+top-level `event_cursor` equals `snapshot.event_sequence` and is no older
+than the controller's committed tail. The opening base has no daemon or
+socket, so this complete cross-process path is absent.
 
 ```text
-M5 gate RED: a second process cannot attach to a live session; the local Store refuses the path as store_writer_active and no daemon socket exists
+M5 gate RED: no daemon owns an attachable session at the state root's daemon.sock
 ```
 
 This is a credential-free behavioral red for outcomes 1 and 2. It observes
-a real writer marker and a real socket address through actual process
-boundaries; it does not depend on acceptance state, exported function names,
-source text or case counts. Its green is exact: while the first process still
-holds the session, the second process connects to the daemon socket,
-initializes with ADR 0023's handshake, attaches, and receives a snapshot
-naming the session at a cursor no older than the controller's committed
-tail, and the direct Store open is still refused. A second process that opens
-the held Store is a broken exclusion and a WITNESS ERROR; so is a socket that
-accepts a connection but never attaches. Compile or tool failure is
-UNAVAILABLE (exit 2); a failed positive control is a named WITNESS ERROR
-(exit 2); the observed defect is RED (exit 1). Inspection can pass without a
-behavior claim. Full mode continues into its closure lanes only after this
-probe becomes green. Checkpoint mode retains the observed red while running
-the selected diagnostics. A missing future selector or unavailable dependency
-is UNAVAILABLE, never a full-gate PASS.
+real daemon and client process boundaries, a real socket address, the
+correlated initialize and attach records, and the committed snapshot cursor.
+The daemon-start entrypoint is a fixture contract; merely exporting it cannot
+produce green. Acceptance state, source text and case counts cannot satisfy
+the observation. Its green is exact:
+
+```text
+M5 opening GREEN: two client processes attach to one daemon-owned session through daemon.sock at the committed cursor
+```
+
+A socket that accepts a connection but never attaches is a WITNESS ERROR.
+Second-daemon writer exclusion is proved separately under Outcome 1; the
+opening does not require a client to open the daemon's Store. Compile or tool
+failure is UNAVAILABLE (exit 2); a failed positive control is a named
+WITNESS ERROR (exit 2); the observed missing behavior is RED (exit 1).
+Inspection can pass without a behavior claim. Full mode continues into its
+closure lanes only after this probe becomes green. Checkpoint mode retains
+the observed red while running selected diagnostics. A missing future
+selector or unavailable dependency is UNAVAILABLE, never a full-gate PASS.
 
 ## Readiness Work Before Acceptance
 
 Before acceptance:
 
-1. Settle ADRs 0031, 0032 and 0033 and their complete daemon, store and
-   collaboration contracts. ADR 0031 fixes the adapter on the evidence of
-   both candidates through the shared suites; ADR 0032 must bind every
-   residency number the technical plan names and the generation-2 method
-   inventory; ADR 0033 must fix the lease terms. Advertise only implemented
-   semantic capabilities; unknown input rules and every limit are exact.
-2. Keep the real opening red on the unchanged base and bind the exact
-   selectors and witness names, the canonical generation-2 schema and vector
-   bytes, the client interpreter pins in
+1. Wait for M4 to be Closed and integrated. Reconstruct the M5 branch-only
+   checkpoint on that exact product base, proving every inherited gate green
+   and this gate's distinct daemon-absent red. The current M4 acceptance base
+   had unavailable M1 and M2 gates; M4's waiver and deferral do not authorize
+   an M5 exception or an acceptance candidate from that base.
+2. Under separate explicit bounded maintainer authorization, run the two ADR
+   0031 store candidates in isolated, disposable branches or task roots after
+   the valid opening checkpoint. Retain their exact source identities,
+   fixture identities, commands, shared conformance and fault results and
+   comparison with the ADR decision. No candidate product bytes enter the
+   Open M5 branch. Settle ADRs 0031, 0032 and 0033 before M5 acceptance.
+   ADR 0032 must bind every event-count and encoded-byte residency ceiling
+   and the generation-2 method inventory; ADR 0033 must bind durable control
+   storage, atomic admission, generation-1 exclusion and the lease terms.
+   Advertise only implemented semantic capabilities; unknown input rules
+   and every limit are exact.
+3. Keep the real opening red on the valid base and bind the exact selectors
+   and witness names, the canonical generation-2 schema and vector bytes,
+   and fixture shape and digest checks on both locked toolchain pairs. Bind
+   the client interpreter pins in
    `scripts/fixtures/m5/client-toolchain.txt`, the exact residency and lease
-   numbers and the fail-closed routing. Use the existing standalone result
-   channel; do not build a second result or evidence framework.
-3. Wait for M4 to be Closed and integrated, absorb that exact product base,
-   and re-prove every inherited gate green and this gate's own distinct red on
-   it. Inherited green requires M4's Workstream 0 to have repaired the Closed
-   M1 and M2 runners; until it lands, those gates are unavailable evidence
-   under the recorded waiver and this plan claims nothing for them.
+   numbers, generation-2 Python conformance execution, and fail-closed
+   routing. Refresh the schema digest that the runner and retained report
+   check from generation 1 to the canonical generation-2 file. Use the
+   existing standalone result channel; do not build a second result or
+   evidence framework.
 4. Present the refreshed candidate for fresh exact-SHA review and explicit
    acceptance.
 
 After acceptance, during implementation:
 
-5. Build the daemon over the local adapter to the full lifetime, socket,
-   collaboration and residency workflow; require local core and daemon greens
-   before the daemon-grade store rejoins.
+5. Land the two minimal applications through their holder transaction, then
+   the narrow core concurrent-attachment change and a separate durable
+   daemon-control storage surface. Build the daemon over the local session
+   adapter to the full lifetime, socket, collaboration and residency workflow;
+   require core and daemon greens before the selected daemon-grade session
+   adapter rejoins.
 6. Implement the store adapter, its migration, the CLI commands and the
    consumer workflow against the bound vectors and pins.
 
@@ -112,12 +135,16 @@ observe against one daemon:
 - one daemon per state root holding the writer marker; a second daemon
   refused;
 - initialize over the socket with the same generation, schema digest and
-  limits the foreground server negotiates, and generation-1 clients served
-  unchanged;
+  limits the foreground server negotiates; generation-1 records and methods
+  stay unchanged while its internal exclusive lease for attach or resume
+  excludes other connections from
+  the same session, including generation-2 connections;
 - snapshot anchored at the committed sequence, then contiguous buffered and
   live durable events, with `cursor_expired` beyond retention;
-- exactly one controller; observers read-only; a stale writer epoch refused
-  before any durable write;
+- exactly one controller; observers read-only; generation-2 session creation
+  creates an uncontrolled session, then existing-session mutation requires the
+  holder connection, current epoch, held state and unexpired term together
+  before any durable write; an observer's known current epoch grants nothing;
 - the controller killed, its late commands fenced, and the observer taking
   over after expiry with a durable epoch advance;
 - the new controller's abort cancelling work the old controller started, with
@@ -127,8 +154,10 @@ observe against one daemon:
 - protocol records only on the socket and bounded diagnostics only on the
   daemon's stderr.
 
-A daemon that forwards every connection to one in-process attachment, or
-that lets any connection command the session, fails this conjunction.
+A daemon that forwards every connection to one replaceable in-process
+attachment, or that lets any connection command the session, fails this
+conjunction. Independent concurrent core attachments must also keep their
+own cursors when one detaches or backpressures.
 
 ## Bound Artifacts
 
@@ -143,12 +172,12 @@ its existing binding.
 
 | SHA-256 | Path |
 | --- | --- |
-| `8fa87635eee9d0bff7e5378e84234017dd0387a0c91783f7fc7885c497560a3a` | `scripts/check-m5-gate.sh` |
-| `391439dcf72c0aad8ddebfa4e7a5798bb18b88c616f90592898e179bc3212ac7` | `scripts/m5-opening-probe.exs` |
-| `fffd6ffc6bf882c6359b8ac5411ab9982551f78500fad6778ca89f957558278f` | `scripts/m5-gate-support.exs` |
+| `5a9b79c449cccb5f123ad43e4496f2870f60a334869156a42278a37a39324ce1` | `scripts/check-m5-gate.sh` |
+| `f714516e94e77607a58892749ad2c2a39a1e4c57028fc0800cda586b4b4ba662` | `scripts/m5-opening-probe.exs` |
+| `839704d3cd304e523970770634ed1c79d9a0b03e6f74bfb7a01f09bea5ae1c1d` | `scripts/m5-gate-support.exs` |
 | `65d0de9dcd1218af542f00e32c2177d2612a2f1232f22db37b9942200c84cf66` | `scripts/m3-gate-support.exs` |
 | `c4d485ca3229441c678abe1e8733f90216e89e0dfb9e81786f58f525619aec29` | `scripts/check-closed-gates.sh` |
-| `df3e35c5e23850d1e8343eb9e2a8cbfadd9bfa8bc9f18ec4301abaa30d6439ac` | `scripts/m5-outcomes.exs` |
+| `c3d0e4a99db53e9a3a3e050ecc7f21282b3294774bbd868c4697350a445dd1a0` | `scripts/m5-outcomes.exs` |
 | `53d8219bdee584a3849a85a1102e405520d5dd0dfbe21d259434bc9edfc5fcc0` | `scripts/m1-exunit-runner.exs` |
 | `c36253cff3d74ddff1b330695edbc4bde0a4565c1412c67c1293b2fb7ca6129b` | `apps/loopex/test/m1_exunit_runner_test.exs` |
 | `fea095ecec784a4440b872ad5f53a8da2cb4e13e43b6f05add5cfd75bb352879` | `.tool-versions` |
@@ -201,18 +230,19 @@ activity sentinel M3 introduced and the gate rejects that invocation ledger.
 | Lane | Complete executable obligation |
 | --- | --- |
 | Inspection | Artifact identity, exact outcome manifest and bootstrap topology; full status and pairing checked by bootstrap |
-| Opening | Isolated compile; real Store, session and second-process observation with two positive controls |
+| Opening | Isolated compile; two local Store controls, then a separate daemon owner and two socket-client processes with correlated initialize, attach and snapshot records |
 | Inherited | Bootstrap and all required Closed commands, including Closed M4, with credential lanes and truthful propagation |
-| Protected outcomes | Standalone authoritative ExUnit result channel, seed 3107, exact required witness identities and runnable states |
+| Protected outcomes | Standalone authoritative ExUnit result channel, seed 3107, exact required witness identities and runnable states, including core concurrent attachments and generation-2 Python conformance |
 | Whole suite | Complete deterministic suite, format, warning-free compile, documentation and dependency checks |
 | Source archive | Stage `git archive` from the exact committed candidate, retain its SHA-256, commit, tree, `VERSION` and `mix.lock` digest, extract it outside the checkout and compile there; the attended selector executes from that extraction |
 | Real workflow | Separately selected attended real-provider task from the extracted source, following the operator guide with operator-supplied inputs through the daemon, the reference CLI and the TypeScript consumer |
+| Final documentation structure | At the end of full mode, run `mix loopex.status` and then `mix loopex.docs_check` against the exact committed source; status, pairing, index, link and public-code-documentation checks must pass before the final report. Per-file semantic audit and independent finding disposition remain required closure evidence, not a claimed automated semantic result |
 | Retained evidence | One final report line in the exact grammar below, validated by the bound support script before it is printed; the real selector's authoritative report binds provider, model, endpoint and version-aware adapter and executor build identities; save that output without relabelling its source |
 
 The pinned Node and Python interpreters are verified immediately before each
-client-backed selector (the two-process workflow and its real-provider file)
-in checkpoint and full modes alike; absence or mismatch is UNAVAILABLE, never
-RED.
+client-backed selector, including generation-2 Python conformance, the
+two-process workflow and its real-provider file, in checkpoint and full modes
+alike; absence or mismatch is UNAVAILABLE, never RED.
 
 The retained final report has exactly this grammar, one line, fields in this
 order, each present once:
@@ -253,11 +283,11 @@ the credential must belong to that Anthropic provider.
 | Outcome | Protected selector family | Required clauses |
 | --- | --- | --- |
 | 1 | `apps/loopex_daemon/test/session_lifetime_test.exs` | One daemon per state root owning every session; sessions progressing with zero attachments; orderly stop releasing the marker and recording nothing false; abrupt death then restart recovering every session under the same placement identity; a second daemon refused by the held marker; session list, open and stop only through the socket |
-| 2 | `apps/loopex_daemon/test/socket_transport_test.exs` | Same generation, schema digest and limits as the foreground server; identical durable identities for one command corpus through facade, foreground server and socket; foreign-uid peer refused before initialize; frame, fragment, malformed-input and over-long socket path refusals; client disconnect as transport loss with no cancellation and no interaction change |
-| 3 | `apps/loopex_daemon/test/collaboration_test.exs` | Exactly one controller with observers read-only; stale writer epoch refused before core admission; takeover only after release or expiry with a durable epoch advance; killed controller fenced and its late commands refused; controller abort cancelling work dispatched under an earlier process with a truthful outcome; no authority from content, metadata, answers or order |
-| 4 | `apps/loopex_daemon/test/replay_residency_test.exs` | Snapshot then contiguous stream with no gap; `cursor_expired` beyond retention; slow observer detached at its last emitted cursor while others continue; idle eviction with exact reconnect; per-daemon memory within the ceiling at maximum attachments; progress coalesced or dropped under pressure with no journal delay |
-| 5 | `apps/loopex_store_daemon/test/store_conformance_test.exs`, `apps/loopex_store_daemon/test/migration_test.exs` | Shared conformance suite unchanged; torn writes, crashes between framing and sync and corrupt frames detected, repaired or refused; commit ambiguity resolved to one outcome; writer ownership and epochs fencing a stale writer; bounded replay equal to full replay; forward migration of a genuine M4 log with identical replay; interrupted migration detected and completed or rolled back; previous binary refusing explicitly with the documented rollback; backup and restore preserving every identity and sequence |
-| 6 | `apps/loopex_daemon/test/multi_client_workflow_test.exs`, `apps/loopex_daemon/test/multi_client_workflow_real_test.exs` | Two real client processes over one daemon through controller work, observer following, controller kill and takeover; fresh extraction of the exact candidate following the operator guide with operator-supplied inputs; the reference CLI attaching, listing and aborting cross-process work; ADR 0030 spans at every daemon boundary and a daemon-scoped trace session capturing identities only; the attended real-provider workflow from the extracted source |
+| 2 | `apps/loopex_daemon/test/socket_transport_test.exs`, `apps/loopex_daemon/test/python_client_conformance_test.exs` | Same generation, schema digest and limits as the foreground server; identical durable identities for one command corpus through facade, foreground server and socket; foreign-uid peer refused before initialize; frame, fragment, malformed-input and over-long socket path refusals; client disconnect as transport loss with no cancellation and no interaction change; pinned Python client executes generation-2 schema and vectors over the socket and refuses a digest mismatch |
+| 3 | `apps/loopex_daemon/test/collaboration_test.exs` | Exactly one controller with observers read-only; an observer with a known current epoch refused because its connection is not holder; admission requires matching epoch, held state and unexpired term before core; generation-1 attach or resume acquires an internal exclusive lease before core and excludes other generation-1 and generation-2 connections without adding a wire epoch, with connected idle expiry detaching and fencing before successor access; takeover only after release or expiry with a durable epoch advance; killed controller fenced and its late commands refused; controller abort cancelling work dispatched under an earlier process with a truthful outcome; no authority from content, metadata, answers or order |
+| 4 | `apps/loopex/test/concurrent_attachments_test.exs`, `apps/loopex_daemon/test/replay_residency_test.exs` | Two core attachments to one session coexist with independent ordered delivery and one detaching without replacing the other; snapshot then contiguous stream with no gap; `cursor_expired` beyond retention; slow observer detached at its last emitted cursor while others continue; idle eviction with exact reconnect; 4 MiB per-attachment, 16 MiB per-session and 512 MiB aggregate retained encoded-event ceilings at count and payload pressure, with process RSS observed and reported; progress coalesced or dropped under pressure with no journal delay |
+| 5 | `apps/loopex_store_daemon/test/store_conformance_test.exs`, `apps/loopex_store_daemon/test/migration_test.exs` | Shared conformance suite unchanged; backend-specific injections at common commit, corruption and derived-lookup cut points detected, repaired or refused with the same Store-level outcome; commit ambiguity resolved to one outcome; writer ownership and epochs fencing a stale writer; bounded replay equal to full replay; forward migration of a genuine M4 log with identical replay; interrupted migration detected and completed or rolled back; exact M4 binary refusing a daemon root directory with `store_file_invalid` without mutation and documented rollback; backup and restore preserving every identity and sequence |
+| 6 | `apps/loopex_daemon/test/multi_client_workflow_test.exs`, `apps/loopex_daemon/test/multi_client_workflow_real_test.exs` | Two real client processes over one daemon through controller work, observer following, controller kill and takeover; fresh extraction of the exact candidate following the operator guide with operator-supplied inputs; the reference CLI attaching, listing and aborting cross-process work; ADR 0030 spans at every daemon boundary and a daemon-scoped trace session capturing identities only; the attended real-provider workflow from the extracted source. Required post-tag release evidence is checked after reviewed closure integration, outside the pre-closure full gate |
 
 Each required clause maps to a named decisive witness in
 `scripts/m5-outcomes.exs`. Related clauses may share one named case only when
@@ -292,14 +322,35 @@ introduced.
 A missing real path, platform, interpreter or artifact is unavailable
 evidence. A red required check, unresolved blocking finding or same-source
 disappearing failure blocks closure. Relevant byte changes invalidate affected
-evidence; shared or unknown impact requires the full gate. Closure, version
-transitions, source-release tagging, package publication and compatibility
-acceptance retain their distinct authorities. The full gate proves a staged
-source candidate, not a pre-existing tag. After independent closure review,
-explicit closure and release/tag authority, and integration to `main`, an
-annotated `v0.2.0` tag names the exact integration commit on `main`
-containing the reviewed closure transition. Neither final tag nor final
-release archive is created by this gate.
+evidence; shared or unknown impact requires the full gate. Version
+transitions, package publication and compatibility acceptance retain their
+distinct authorities. The full gate proves a staged source candidate, not a
+pre-existing tag. After gate green and independent closure review, an
+explicit combined closure and release/tag disposition authorizes the closure
+transition, integration and tag. Neither final tag nor final release archive
+is created by the pre-closure gate.
+
+## Post-Tag Closure Completion
+
+The closure workflow requires this sequence after the green full-gate report:
+the acceptance authority gives one explicit disposition naming both M5
+closure and source-only `v0.2.0` release/tag authority; the closure transition
+records it; an independent read-only reviewer checks that exact transition
+SHA; the unchanged reviewed commit integrates to `main`; the annotated tag
+is created on that commit; and source archive proof is retained. The same
+disposition does not approve an unrelated release, package or publication.
+
+The post-tag check takes the reviewed integrated closure SHA as its expected
+input and fails unless `git cat-file -t refs/tags/v0.2.0` returns `tag`,
+`git rev-parse refs/tags/v0.2.0^{commit}` equals that exact SHA, and
+`git merge-base --is-ancestor <reviewed-closure-SHA> main` succeeds. Generate
+the final tar with `git archive --format=tar <reviewed-closure-SHA>` from
+that commit. Retain its SHA-256, the commit and `git rev-parse
+<reviewed-closure-SHA>^{tree}`, and the annotated tag object's
+`git rev-parse refs/tags/v0.2.0` identity with the command outputs. A
+pre-closure staged archive or a green full gate cannot stand in for this
+proof. Only after the exact post-tag check passes and its evidence is
+retained is the M5 closure workflow complete.
 
 ## Documentation Obligations
 
@@ -307,17 +358,17 @@ release archive is created by this gate.
 | --- | --- |
 | Operator-facing documentation | `docs/operator/daemon.md`, `docs/operator/app-server.md`, `docs/operator/coding-sessions.md`, `docs/operator/runtime.md`, `docs/operator/observability.md`, `docs/operator/tools-and-policy.md`, `docs/operator/how-a-run-works.md`, `docs/operator/how-a-run-works-technical.md` |
 | Operator README | `docs/operator/README.md` |
-| Developer-facing documentation | `docs/developer/daemon.md`, `docs/developer/daemon-technical.md`, `docs/developer/app-server-protocol.md`, `docs/developer/app-server-protocol-technical.md`, `docs/developer/observability.md`, `docs/developer/observability-technical.md`, `docs/developer/architecture.md`, `docs/developer/architecture-technical.md`, `docs/developer/runtime-and-embedding.md`, `docs/developer/compatibility-surfaces.md`, `docs/developer/agent-context-map.md` |
+| Developer-facing documentation | `docs/developer/daemon.md`, `docs/developer/daemon-technical.md`, `docs/developer/app-server-protocol.md`, `docs/developer/app-server-protocol-technical.md`, `docs/developer/observability.md`, `docs/developer/observability-technical.md`, `docs/developer/architecture.md`, `docs/developer/architecture-technical.md`, `docs/developer/runtime-and-embedding.md`, `docs/developer/agent-loop-and-tools.md`, `docs/developer/compatibility-surfaces.md`, `docs/developer/agent-context-map.md` |
 | Developer README | `docs/developer/README.md` |
 | Documentation README | `docs/README.md` |
 | Root README | `README.md` |
 | Changelog | `CHANGELOG.md` |
 
-This set is inclusive of the M4 gate's complete documentation set: every
-document M4 must update at its closure appears above, because M5 builds on
-the same operator and developer surfaces and its closure re-describes them
-for the daemon, the socket, collaboration and the daemon-grade store. A
-document added to M4's set by an accepted amendment is added here too.
+This Open set includes every document in the current M4 gate's documentation
+table, plus M5's daemon documents. At the refreshed M5 acceptance candidate,
+compare it to M4's final Closed gate and fix the exact seven-row set before
+locking it. Once M5 is accepted, additions or removals require its governed
+amendment route; this gate cannot acquire new document paths implicitly.
 
 Each row is complete only when the documents state what M5 actually changed
 for its reader, in the charter's Concept-then-Technical-depth form where the
@@ -351,3 +402,32 @@ so `DEVELOPMENT.md` is named here instead, and its drift blocks closure
 exactly like a row above: it is updated for the two applications, the M5
 runner commands, the daemon launch during development and the client toolchain
 pins.
+
+## Final Documentation Gate
+
+At the final M5 source candidate, enumerate the complete committed file
+inventory below `docs/operator/` and `docs/developer/`, including files newly
+added by M5, files materially updated under the seven-row table, and files
+reviewed without edits. Retain one audit row for every file with its path,
+candidate source SHA, file SHA-256, reader role, `new`, `materially updated` or
+`reviewed unchanged` disposition, and any finding and its resolution. The
+inventory must match the exact source tree; an omitted file is a failed audit.
+
+Inspect each file for current M5 facts, relevance to its reader, working
+links and index routing where applicable, consistent Concept and Technical
+depth companion claims where paired, and stale foreground-only assertions.
+Check the daemon,
+socket, controller/observer, residency, migration and rollback descriptions
+against the accepted plan and ADRs. Release documentation must accurately
+describe the required source-only `v0.2.0` tag and archive sequence while
+making no pre-tag claim that they already exist. Resolve inaccurate or stale
+claims before the final gate and repeat invalidated checks on changed bytes.
+
+At the end of full mode, the runner executes `mix loopex.status` and then
+`mix loopex.docs_check` on the exact source candidate before it can print
+PASS. Their structural checks do not decide semantic accuracy: an
+independent read-only closure reviewer examines the per-file audit and exact
+source SHA, checks every finding disposition, and treats unresolved blocking
+or high-severity documentation findings as closure blockers. This final audit
+is broader than the seven-row material-update set and cannot be satisfied by
+the structural check alone.
