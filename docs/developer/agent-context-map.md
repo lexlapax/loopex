@@ -3569,3 +3569,54 @@ pending rather than reporting a global pass. Captures of the M1 gate under
 the new floor pair belong to the inherited-green proof after the final Open
 M4 refresh. This record accepts no other holder, plan or ADR, waives no
 evidence, and grants no integration, tag or release.
+
+<a id="disposition-m2-gate-generation-11-2026-09-14"></a>
+### M2 gate generation 11 acceptance — 2026-09-14
+
+Continuing the phase A sequence under the maintainer's chosen route, the
+reviewer authored M2 gate generation 11 at pushed proposal
+`380e064ae886e271d5931aa58f3b00dfca2614d4` and presented its evidence: the
+single prescribed `unfinished shared binding sequence` status stop, the
+runner's syntax passing with no earlier floor literal remaining, and
+holder-scoped validation at the M1 rebind naming M2, M3 and M4 as pending.
+The maintainer answered **"accept"**.
+
+That lineage was then re-created once after the status checker repair at
+`47784aa` described in the
+[M0 generation 7 record](#disposition-m0-gate-generation-7-2026-09-13). The
+re-created proposal `671819a5e61418e6dea65e94e887d2a25f93d7a3` carries the
+same change as `380e064ae886e271d5931aa58f3b00dfca2614d4` on top of that
+repair and the re-created earlier rebinds, verified by the reviewer with a
+tree diff before this rebind. On 2026-09-14 the maintainer approved the
+rebuild and accepted every re-created phase A proposal on that basis,
+answering **"Approve and accept rebuild all"**.
+
+That lineage was re-created a second time after the repair was widened at
+`d276f325169af6ab54464648a6578da6b4e499c7`, described in the
+[M0 generation 7 record](#disposition-m0-gate-generation-7-2026-09-13). The
+proposal `6fdef34d959e4c2a37631c1cc6aaa18fc6de3187` carries the same change
+as `380e064ae886e271d5931aa58f3b00dfca2614d4` on top of the widened repair and
+the preceding re-created rebinds, verified by the reviewer with a tree diff
+before this rebind. On 2026-09-14 the maintainer approved the second rebuild
+and accepted every re-created phase A proposal and the re-created M4
+candidate on that basis, answering **"I accept recreated proposals and
+candidate. i need to do a second review after the final sha table is
+created"**. This row binds that proposal.
+
+This accepts generation 11 alone under `amendment-transaction-v2`: the
+floor-only literal changes in M2's bound gate runner for the accepted pair
+Elixir 1.18.5 with OTP 27.3.4, bound at
+`0d1feb8324367b27250cfa3093c2dff78963115d516f4d1601be2a7e53d9110c`, the
+rebound pins, and the amended M2 gate at
+`sha256:5b3df5304a7b69c6e86a93829be0c77cde05fcb9ff0df0230221fc961b8b84dd`.
+This immediate-child rebind changes only the generation-11 row in
+`docs/plans/M2.md` and adds this disposition. M2's historical Acceptance and
+Closure, earlier dispositions and generations, envelopes, register and
+lifecycle state remain unchanged, and M2 remains Closed.
+
+M3 and M4 still hold the previous pins in their own tables and settle next
+in register order; holder-scoped validation at this rebind names them as
+pending rather than reporting a global pass. A `darwin-floor` capture of the
+M2 gate under the new pair belongs to the inherited-green proof after the
+final Open M4 refresh. This record accepts no other holder, plan or ADR,
+waives no evidence, and grants no integration, tag or release.
