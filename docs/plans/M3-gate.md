@@ -21,11 +21,16 @@ The [Concept plan](M3.md#concept) owns the five outcomes and the
 [technical plan](M3-technical.md#technical-depth) owns the contracts and evidence.
 
 <a id="amendment-transaction-v1"></a>
+<a id="amendment-transaction-v2"></a>
 
 After acceptance, amendments use the direct proposal/rebind transaction unless
 a named maintainer override expressly replaces that procedure. M3
 changes no floor pin or Closed gate as an opening prerequisite. M4 owns its
 future floor proposal and must derive all then-current artifact holders.
+Amendments 1–3 were v1 transactions while M3 was Accepted. M3 is now Closed,
+so Amendment 4 proposes an additive gate generation under
+`amendment-transaction-v2`; its acceptance belongs in M3's Gate Generations
+table, not in the immutable Acceptance or Closure rows.
 
 ## Current Opening Observation
 
@@ -102,7 +107,7 @@ its Amendment 2 replacement below.
 | `bae4d114023091f9162fc0981c28e75db031ba3216adf1b1255d888f2dd3b5e8` | `scripts/m3-outcomes.exs` |
 | `53d8219bdee584a3849a85a1102e405520d5dd0dfbe21d259434bc9edfc5fcc0` | `scripts/m1-exunit-runner.exs` |
 | `c36253cff3d74ddff1b330695edbc4bde0a4565c1412c67c1293b2fb7ca6129b` | `apps/loopex/test/m1_exunit_runner_test.exs` |
-| `fad47299b27a767785d2a6a776155038054f5457ee3ce0195a37ae667f7a9999` | `.tool-versions` |
+| `fea095ecec784a4440b872ad5f53a8da2cb4e13e43b6f05add5cfd75bb352879` | `.tool-versions` |
 
 ## Runner Modes and Evidence Cost
 
@@ -362,3 +367,50 @@ waiver, closure, merge to `main` or release.
 | Generation | Artifact | Rebound SHA-256 |
 | --- | --- | --- |
 | 3 | `scripts/check-m3-gate.sh` | `d54c66098d971a9bdc0b26addb95d415db02c44e4b82ba55e325b5863cf4629b` |
+
+<a id="amendment-4"></a>
+## Amendment 4 — Refresh the floor pair to Elixir 1.18.5 with OTP 27.3.4
+
+**Acceptance: OUTSTANDING.** Closed M3 adds its first Gate Generations row,
+numbered 4 to follow its three historical v1 amendments, under
+`amendment-transaction-v2`. Its historical Acceptance, Closure and Amendments
+1–3 remain unchanged. At A the new row carries only this gate's digest;
+authority, evidence and candidate remain unset until exact-proposal
+acceptance.
+
+Accepted [ADR 0026](../adr/0026-development-floor-refresh.md#concept) chose
+the validation pairs explicitly: floor Elixir 1.18.5 with OTP 27.3.4 and
+current Elixir 1.20.3 with OTP 29.0.5. M0, M1 and M2 settled the shared
+`.tool-versions` bytes through their
+[generation 7](../developer/agent-context-map.md#disposition-m0-gate-generation-7-2026-09-13),
+[generation 10](../developer/agent-context-map.md#disposition-m1-gate-generation-10-2026-09-14)
+and
+[generation 11](../developer/agent-context-map.md#disposition-m2-gate-generation-11-2026-09-14);
+M3 is the last Closed holder in register order, and Open M4 then refreshes
+its own table directly. This proposal rebinds only the `.tool-versions` row
+above and adds this amendment; the M3 runner reads its Bound Artifacts table
+rather than embedding the pins digest, so no runner, support script, manifest,
+selector, minimum, witness identity, exclusion, provider path, credential
+contract or exit predicate changes. No M3 outcome, product scope or lifecycle
+state changes.
+
+Binding validation, bootstrap and every inherited gate that invokes them stop
+at this proposal only on the shared binding sequence still in flight; M4
+remains explicitly pending and its old row is not a global PASS.
+Binding-independent checks are proved directly: the gate's inspection role
+verifies its bound artifacts against the current bytes once this row is
+rebound, and the installed floor pair reports Elixir 1.18.5, OTP 27.3.4 and
+ERTS 15.2.7. Runs of this gate under the new floor pair belong to the
+inherited-green proof after the final Open M4 refresh; the M3-only
+qualification recorded under Elixir 1.17.0 with OTP 26.0 remains true for
+the source it names and satisfies no lane of the new matrix.
+
+Only explicit maintainer acceptance of the actual A revision authorizes R.
+Its immediate child completes generation 4 with exact A and adds one fresh
+acceptance disposition; R changes no bound artifact or gate byte. Only then
+may Open M4 refresh its binding. This proposal records no acceptance and
+grants no waiver, closure or release.
+
+| Generation | Artifact | Rebound SHA-256 |
+| --- | --- | --- |
+| 4 | `.tool-versions` | `fea095ecec784a4440b872ad5f53a8da2cb4e13e43b6f05add5cfd75bb352879` |
