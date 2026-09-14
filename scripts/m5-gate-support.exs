@@ -8,7 +8,7 @@ Code.require_file("m3-gate-support.exs", __DIR__)
 defmodule Loopex.M5Gate.Support do
   alias Loopex.M3Gate.Support, as: Shared
 
-  @all [1, 2, 3, 4, 5, 6]
+  @all [1, 2, 3, 4, 5]
   @selector ~r/\Aapps\/[a-z][a-z0-9_]*\/test\/[A-Za-z0-9_.\/-]+_test\.exs\z/
   @real_path "apps/loopex_daemon/test/multi_client_workflow_real_test.exs"
 
@@ -22,23 +22,20 @@ defmodule Loopex.M5Gate.Support do
   defp outcome("apps/loopex_daemon/test/collaboration_test.exs"), do: [3]
   defp outcome("apps/loopex_daemon/test/replay_residency_test.exs"), do: [4]
   defp outcome("apps/loopex/test/concurrent_attachments_test.exs"), do: [4]
-  defp outcome("apps/loopex_store_daemon/test/store_conformance_test.exs"), do: [5]
-  defp outcome("apps/loopex_store_daemon/test/migration_test.exs"), do: [5]
-  defp outcome("apps/loopex_daemon/test/multi_client_workflow_test.exs"), do: [6]
-  defp outcome("apps/loopex_daemon/test/multi_client_workflow_real_test.exs"), do: [6]
+  defp outcome("apps/loopex_daemon/test/multi_client_workflow_test.exs"), do: [5]
+  defp outcome("apps/loopex_daemon/test/multi_client_workflow_real_test.exs"), do: [5]
   # Concept: shared runtime, dispatcher, store and protocol paths select every
   # outcome that can observe them; only leaf test files select one outcome.
   defp outcome("apps/loopex/lib/loopex/runtime/event_dispatcher" <> _), do: @all
   defp outcome("apps/loopex/lib/loopex/runtime/control" <> _), do: @all
-  defp outcome("apps/loopex/lib/loopex/session_directory.ex"), do: [1, 6]
-  defp outcome("apps/loopex/lib/loopex/store.ex"), do: [1, 5, 6]
+  defp outcome("apps/loopex/lib/loopex/session_directory.ex"), do: [1, 5]
+  defp outcome("apps/loopex/lib/loopex/store.ex"), do: [1, 5]
   defp outcome("apps/loopex_store_local/lib/" <> _), do: @all
-  defp outcome("apps/loopex_store_daemon/" <> _), do: @all
   defp outcome("apps/loopex_daemon/lib/" <> _), do: @all
   defp outcome("apps/loopex_protocol/" <> _), do: @all
-  defp outcome("apps/loopex_app_server/lib/" <> _), do: [2, 6]
-  defp outcome("apps/loopex_cli/lib/" <> _), do: [2, 3, 6]
-  defp outcome("clients/" <> _), do: [2, 3, 6]
+  defp outcome("apps/loopex_app_server/lib/" <> _), do: [2, 5]
+  defp outcome("apps/loopex_cli/lib/" <> _), do: [2, 3, 5]
+  defp outcome("clients/" <> _), do: [2, 3, 5]
   defp outcome("scripts/fixtures/m5/" <> _), do: @all
   defp outcome(_), do: @all
 
@@ -52,7 +49,7 @@ defmodule Loopex.M5Gate.Support do
 
     ensure(
       is_list(data.outcomes) and Enum.map(data.outcomes, & &1.id) == @all,
-      "outcome manifest must cover 1 through 6 once in order"
+      "outcome manifest must cover 1 through 5 once in order"
     )
 
     for row <- data.outcomes do
@@ -214,7 +211,7 @@ defmodule Loopex.M5Gate.Support do
     {"version", ~r/\A\d+\.\d+\.\d+\z/},
     {"role", ~r/\Afull\z/},
     {"seed", ~r/\A3107\z/},
-    {"outcome_ids", ~r/\A1,2,3,4,5,6\z/},
+    {"outcome_ids", ~r/\A1,2,3,4,5\z/},
     {"selectors", ~r/\A[1-9]\d*\z/},
     {"elapsed_seconds", ~r/\A\d+\z/},
     {"elixir", ~r/\A\d+\.\d+\.\d+(-[0-9A-Za-z.]+)?\z/},

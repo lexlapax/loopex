@@ -13,6 +13,7 @@
             "an orderly daemon stop settles nothing new records nothing false and releases the store writer marker",
             "an abrupt daemon death leaves only what the journal proves and a restarted daemon recovers every session under the same placement identity",
             "a second daemon for the same state root is refused by the held writer marker and never opens a second store on one log",
+            "after an orderly daemon stop the foreground server and the reference CLI reopen the same root and resume a daemon created session under the same placement identity with identical replay",
             "the daemon exposes session list open and stop through the socket without a client owning session lifetime"
           ]
         }
@@ -24,7 +25,8 @@
         %{
           path: "apps/loopex_daemon/test/socket_transport_test.exs",
           names: [
-            "an independent client process initializes over the Unix domain socket with the same generation schema digest and limits the foreground server negotiates",
+            "an independent client process initializes generation 2 over the Unix domain socket with the same schema digest and limits the foreground server negotiates for its generation",
+            "a client offering only generation 1 is refused at initialize with unsupported generation and nothing durable is created",
             "the same command corpus produces identical durable identities through facade foreground server and daemon socket",
             "socket permissions restrict connection to the owning operating system user and a foreign uid is refused before initialize",
             "frame size fragmented input malformed input and a socket path beyond the platform bound are refused with distinct stable reasons",
@@ -47,14 +49,13 @@
           names: [
             "exactly one controller holds the lease for a session while any number of observers attach read only",
             "a command carrying a stale writer epoch is refused before core admission and the current controller is unaffected",
-            "an observer takes over only after the controller lease expires or is released and the takeover advances the writer epoch durably",
+            "an observer takes over only after the controller lease expires or is released and the takeover advances the writer epoch before the successor's first command",
             "a controller killed mid run is fenced and its late commands are refused after takeover",
             "a session abort issued by the controller cancels work dispatched under an earlier client process with a truthful cleanup outcome",
             "a read only attachment never acquires command authority and no client content lease or metadata grants it",
             "a 30 second controller lease renews at 10 seconds and takeover at expiry has no extra grace",
             "an observer presenting the current writer epoch is refused because its connection does not hold the lease",
-            "a generation 1 daemon session has one exclusive controller connection and refuses a concurrent second connection",
-            "an idle connected generation 1 attachment is detached and fenced at lease expiry before generation 2 takeover or attach"
+            "a daemon restart leaves every session uncontrolled and an epoch minted by the previous daemon incarnation is refused"
           ]
         }
       ]
@@ -87,30 +88,6 @@
     },
     %{
       id: 5,
-      selectors: [
-        %{
-          path: "apps/loopex_store_daemon/test/store_conformance_test.exs",
-          names: [
-            "the daemon grade store passes the shared store conformance suite unchanged",
-            "backend specific injections at common commit corruption and derived lookup cut points are detected repaired or refused with the same Store level outcomes",
-            "commit ambiguity resolves to exactly one outcome after a crash during transact",
-            "writer ownership and owner epochs fence a stale writer after takeover",
-            "bounded replay from a snapshot reconstructs the same state as full replay"
-          ]
-        },
-        %{
-          path: "apps/loopex_store_daemon/test/migration_test.exs",
-          names: [
-            "a genuine M4 local log migrates forward and every session replays identically afterwards",
-            "an interrupted migration is detected on reopen and completed or rolled back without loss",
-            "the previous binary refuses a migrated store explicitly and the documented rollback restores the old root",
-            "backup and restore of a daemon store preserve every session identity and event sequence"
-          ]
-        }
-      ]
-    },
-    %{
-      id: 6,
       selectors: [
         %{
           path: "apps/loopex_daemon/test/multi_client_workflow_test.exs",

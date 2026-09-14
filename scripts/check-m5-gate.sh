@@ -194,7 +194,7 @@ fi
 if [ "$role" = full ]; then
   [ -n "$m5_provider_key" ] || die 'full gate requires provider input for the real workflow'
   full_identity=$source_identity
-  selected_ids=1,2,3,4,5,6
+  selected_ids=1,2,3,4,5
 fi
 
 if [ "$role" = checkpoint ] && [ -z "$selected_ids" ]; then
@@ -205,7 +205,7 @@ if [ "$role" = checkpoint ] && [ -z "$selected_ids" ]; then
 fi
 
 # Concept: client lanes run only under the pinned interpreters the gate binds.
-# Technical depth: outcome 6 executes external clients, so their pins are
+# Technical depth: outcome 5 executes external clients, so their pins are
 # verified before any selector for them runs; an absent or different interpreter
 # is unavailable evidence, never a product red. The pin file names exact
 # `node=` and `python=` versions.
@@ -383,7 +383,7 @@ schema_path=apps/loopex_protocol/priv/schema/loopex-experimental-2.json
 schema_digest=$(shasum -a 256 "$schema_path" | cut -d' ' -f1) || die 'cannot hash the canonical schema'
 selector_count=$(grep -c . "$task_root/selector-ledger") || die 'selector ledger is empty'
 clients_digest=$(shasum -a 256 "$client_pins" | cut -d' ' -f1) || die 'cannot hash the client toolchain pins'
-report=$(printf 'LOOPEX_M5_GATE_REPORT source=%s tree=%s archive=sha256:%s archive_build=sha256:%s lock=sha256:%s gate=sha256:%s version=%s role=full seed=3107 outcome_ids=1,2,3,4,5,6 selectors=%s elapsed_seconds=%s %snode=%s python=%s clients=sha256:%s schema=sha256:%s inherited=true fresh_source=true real_workflow=true result=PASS' \
+report=$(printf 'LOOPEX_M5_GATE_REPORT source=%s tree=%s archive=sha256:%s archive_build=sha256:%s lock=sha256:%s gate=sha256:%s version=%s role=full seed=3107 outcome_ids=1,2,3,4,5 selectors=%s elapsed_seconds=%s %snode=%s python=%s clients=sha256:%s schema=sha256:%s inherited=true fresh_source=true real_workflow=true result=PASS' \
   "$source_commit" "$source_tree" "$source_archive_digest" "$source_build_digest" "$source_lock_digest" "$(shasum -a 256 docs/plans/M5-gate.md | cut -d' ' -f1)" "$source_version" "$selector_count" "$SECONDS" "$toolchain" "$pinned_node" "$pinned_python" "$clients_digest" "$schema_digest")
 support evidence "$report" </dev/null || exit $?
 printf '%s\n' "$report"

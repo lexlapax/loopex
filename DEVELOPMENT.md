@@ -117,8 +117,8 @@ the toolchain lets you build and test today: `mix test` from the repository root
 `bash scripts/check-m5-gate.sh` for the Open M5 lookahead scaffold. For the
 last three, `--inspect` checks artifact identities; `--preflight` and
 `--checkpoint` run the isolated real-session opening probe, currently RED for
-a missing behavior (M4: durable policy interactions; M5: a second process
-attaching to a live session through a daemon socket). Checkpoint is not
+a missing behavior (M4: durable policy interactions; M5: two client processes
+attaching to one daemon-owned session through its socket). Checkpoint is not
 full-gate evidence. The M5 full lane stays unavailable until M4 is Closed and
 integrated, because its inherited aggregate is register-derived. The
 privileged-Bash flag is part of the command: the runner refuses an ordinary Bash

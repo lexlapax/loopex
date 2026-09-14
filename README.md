@@ -102,13 +102,14 @@ workstreams, and the [canonical register](docs/plans/README.md) for its
 current status.
 
 M5 is the Open planning lookahead on branch `m5`: a local daemon that owns
-session lifetime for a state root, a Unix-domain-socket transport carrying
-the same experimental protocol, one controller with observers and crash
-takeover, race-free replay with residency limits, and a daemon-grade store,
-toward a source-only `0.2.0` release. Its plan pair and gate are not accepted
-and no M5 implementation exists; its opening runner proves that a second
-process cannot attach to a live session today. See the
-[M5 plan](docs/plans/M5.md#concept) for the candidate scope.
+session lifetime for a state root on the existing local store, a
+Unix-domain-socket transport carrying generation 2 of the same experimental
+protocol, one controller with observers and crash takeover under an in-memory
+lease, and race-free replay with residency limits, toward a source-only
+`0.2.0` release. The daemon-grade store moved to a successor milestone. Its
+plan pair and gate are not accepted and no M5 implementation exists; its
+opening runner proves that no daemon owns an attachable session today. See
+the [M5 plan](docs/plans/M5.md#concept) for the candidate scope.
 
 The repaired reference local executor requires `/bin/bash` for its internal
 supervision on Darwin and Linux; raw commands still use `/bin/sh`. See the

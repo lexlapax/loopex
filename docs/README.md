@@ -87,7 +87,7 @@ whose path or explicit fragment does not resolve.
 
 - [M3 foundations](plans/M3.md#concept) and [technical plan](plans/M3-technical.md#technical-depth) — project skills and core repairs; Closed with retained evidence in the plan.
 - [M4 headless external consumption](plans/M4.md#concept) and [technical plan](plans/M4-technical.md#technical-depth) — durable interactions, artifact transfers, floor refresh and protocol/TypeScript workflow over M3; Accepted, implementation on its milestone branch with a red gate.
-- [M5 durable service](plans/M5.md#concept) and [technical plan](plans/M5-technical.md#technical-depth) — daemon-owned session lifetime, Unix-domain-socket transport, controller lease with observers and takeover, replay and residency, and a daemon-grade store over M4; Open planning lookahead with a red gate.
+- [M5 durable service](plans/M5.md#concept) and [technical plan](plans/M5-technical.md#technical-depth) — daemon-owned session lifetime on the local store, generation-2-only Unix-domain-socket transport, in-memory controller lease with observers and takeover, and replay and residency over M4; Open planning lookahead with a red gate.
 
 - [Development contract](../AGENTS.md) — canonical tool-neutral authority,
   autonomy, documentation, milestone, and enforcement rules.

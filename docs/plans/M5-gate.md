@@ -3,13 +3,13 @@
 Open planning candidate for the durable service, drafted on M4's integrated
 acceptance checkpoint. Its inherited M1 and M2 gates were unavailable there;
 the M4-specific waiver and deferral do not establish a valid M5 lookahead
-opening. Its three prerequisite ADRs are Proposed, this M5 plan pair and gate
+opening. Its two prerequisite ADRs are Proposed, this M5 plan pair and gate
 are not accepted by this revision, and M5 product implementation has not
 begun. The runner binds a
 real behavioral opening probe, executable closure lanes and exact future
 witness identities. Under the same preparation rule M3 recorded, future test
 bodies are written during implementation; every named witness must pass
-before closure. The [Concept plan](M5.md#concept) owns the six outcomes and
+before closure. The [Concept plan](M5.md#concept) owns the five outcomes and
 the [technical plan](M5-technical.md#technical-depth) owns the contracts and
 evidence.
 
@@ -85,17 +85,13 @@ Before acceptance:
    and this gate's distinct daemon-absent red. The current M4 acceptance base
    had unavailable M1 and M2 gates; M4's waiver and deferral do not authorize
    an M5 exception or an acceptance candidate from that base.
-2. Under separate explicit bounded maintainer authorization, run the two ADR
-   0031 store candidates in isolated, disposable branches or task roots after
-   the valid opening checkpoint. Retain their exact source identities,
-   fixture identities, commands, shared conformance and fault results and
-   comparison with the ADR decision. No candidate product bytes enter the
-   Open M5 branch. Settle ADRs 0031, 0032 and 0033 before M5 acceptance.
-   ADR 0032 must bind every event-count and encoded-byte residency ceiling
-   and the generation-2 method inventory; ADR 0033 must bind durable control
-   storage, atomic admission, generation-1 exclusion and the lease terms.
-   Advertise only implemented semantic capabilities; unknown input rules
-   and every limit are exact.
+2. Settle ADRs 0032 and 0033 before M5 acceptance. ADR 0032 must bind every
+   event-count and encoded-byte residency ceiling, the generation-2 method
+   inventory and the generation-2-only negotiation rule; ADR 0033 must bind
+   the in-memory lease, atomic admission, the incarnation-scoped writer epoch
+   and the lease terms. ADR 0031 is not an M5 prerequisite; the daemon-grade
+   store belongs to the successor milestone. Advertise only implemented
+   semantic capabilities; unknown input rules and every limit are exact.
 3. Keep the real opening red on the valid base and bind the exact selectors
    and witness names, the canonical generation-2 schema and vector bytes,
    and fixture shape and digest checks on both locked toolchain pairs. Bind
@@ -111,21 +107,20 @@ Before acceptance:
 
 After acceptance, during implementation:
 
-5. Land the two minimal applications through their holder transaction, then
-   the narrow core concurrent-attachment change and a separate durable
-   daemon-control storage surface. Build the daemon over the local session
-   adapter to the full lifetime, socket, collaboration and residency workflow;
-   require core and daemon greens before the selected daemon-grade session
-   adapter rejoins.
-6. Implement the store adapter, its migration, the CLI commands and the
-   consumer workflow against the bound vectors and pins.
+5. Land the one minimal application through its holder transaction, then
+   the narrow core concurrent-attachment change. Build the daemon over the
+   local adapter to the full lifetime, socket, collaboration and residency
+   workflow; require core and daemon greens before the client workflow
+   rejoins.
+6. Implement the CLI commands and the consumer workflow against the bound
+   vectors and pins.
 
 Before closure, every lane must pass: isolated compile and probe, inherited
 gates, authoritative protected selectors, whole suite, independent clients,
 attended two-process real-provider workflow and retained-evidence validation.
 Neither document presence nor acceptance state can satisfy the opening. The
 opening probe is proof of one missing cross-process behavior, not of leases,
-residency, migration or the operator workflow.
+residency or the operator workflow.
 
 ## Required Two-Process Conjunction
 
@@ -134,23 +129,25 @@ observe against one daemon:
 
 - one daemon per state root holding the writer marker; a second daemon
   refused;
-- initialize over the socket with the same generation, schema digest and
-  limits the foreground server negotiates; generation-1 records and methods
-  stay unchanged while its internal exclusive lease for attach or resume
-  excludes other connections from
-  the same session, including generation-2 connections;
+- initialize over the socket selecting generation 2 with the same schema
+  digest and limits the foreground server negotiates for its generation, and
+  a generation-1-only client refused at initialize with nothing created;
 - snapshot anchored at the committed sequence, then contiguous buffered and
   live durable events, with `cursor_expired` beyond retention;
-- exactly one controller; observers read-only; generation-2 session creation
-  creates an uncontrolled session, then existing-session mutation requires the
-  holder connection, current epoch, held state and unexpired term together
-  before any durable write; an observer's known current epoch grants nothing;
+- exactly one controller; observers read-only; session creation creates an
+  uncontrolled session, then existing-session mutation requires the holder
+  connection, current epoch, held state and unexpired term together before
+  any durable write; an observer's known current epoch grants nothing;
 - the controller killed, its late commands fenced, and the observer taking
-  over after expiry with a durable epoch advance;
+  over after expiry with an epoch advance;
+- a daemon restart leaving every session uncontrolled and an epoch from the
+  previous incarnation refused;
 - the new controller's abort cancelling work the old controller started, with
   a truthful cleanup outcome;
 - a slow observer detached at its last emitted cursor while the other client
   continues;
+- after an orderly daemon stop, the foreground server or the reference CLI
+  reopening the same root and resuming a daemon-created session;
 - protocol records only on the socket and bounded diagnostics only on the
   daemon's stderr.
 
@@ -172,12 +169,12 @@ its existing binding.
 
 | SHA-256 | Path |
 | --- | --- |
-| `5a9b79c449cccb5f123ad43e4496f2870f60a334869156a42278a37a39324ce1` | `scripts/check-m5-gate.sh` |
+| `523933694fbc16ff82583e536fe982e780a2dff9d1ad820a114e777d9cf917e8` | `scripts/check-m5-gate.sh` |
 | `f714516e94e77607a58892749ad2c2a39a1e4c57028fc0800cda586b4b4ba662` | `scripts/m5-opening-probe.exs` |
-| `839704d3cd304e523970770634ed1c79d9a0b03e6f74bfb7a01f09bea5ae1c1d` | `scripts/m5-gate-support.exs` |
+| `ed3246aa3324f03742b5d7ebc9856935d4de7e46c1bd3b23c37fdc2888ff4c42` | `scripts/m5-gate-support.exs` |
 | `65d0de9dcd1218af542f00e32c2177d2612a2f1232f22db37b9942200c84cf66` | `scripts/m3-gate-support.exs` |
 | `c4d485ca3229441c678abe1e8733f90216e89e0dfb9e81786f58f525619aec29` | `scripts/check-closed-gates.sh` |
-| `c3d0e4a99db53e9a3a3e050ecc7f21282b3294774bbd868c4697350a445dd1a0` | `scripts/m5-outcomes.exs` |
+| `1b9e9b05b8bbff814c213c54d41e3904d7681ef61a0307120a818c4a3520d174` | `scripts/m5-outcomes.exs` |
 | `53d8219bdee584a3849a85a1102e405520d5dd0dfbe21d259434bc9edfc5fcc0` | `scripts/m1-exunit-runner.exs` |
 | `c36253cff3d74ddff1b330695edbc4bde0a4565c1412c67c1293b2fb7ca6129b` | `apps/loopex/test/m1_exunit_runner_test.exs` |
 | `fea095ecec784a4440b872ad5f53a8da2cb4e13e43b6f05add5cfd75bb352879` | `.tool-versions` |
@@ -248,7 +245,7 @@ The retained final report has exactly this grammar, one line, fields in this
 order, each present once:
 
 ```text
-LOOPEX_M5_GATE_REPORT source=<40 hex> tree=<40 hex> archive=sha256:<64 hex> archive_build=sha256:<64 hex> lock=sha256:<64 hex> gate=sha256:<64 hex> version=<major.minor.patch> role=full seed=3107 outcome_ids=1,2,3,4,5,6 selectors=<count> elapsed_seconds=<n> elixir=<exact> otp=<exact, e.g. 29.0.5> erts=<exact> platform=<system architecture> node=<pinned> python=<pinned> clients=sha256:<64 hex> schema=sha256:<64 hex> inherited=true fresh_source=true real_workflow=true result=PASS
+LOOPEX_M5_GATE_REPORT source=<40 hex> tree=<40 hex> archive=sha256:<64 hex> archive_build=sha256:<64 hex> lock=sha256:<64 hex> gate=sha256:<64 hex> version=<major.minor.patch> role=full seed=3107 outcome_ids=1,2,3,4,5 selectors=<count> elapsed_seconds=<n> elixir=<exact> otp=<exact, e.g. 29.0.5> erts=<exact> platform=<system architecture> node=<pinned> python=<pinned> clients=sha256:<64 hex> schema=sha256:<64 hex> inherited=true fresh_source=true real_workflow=true result=PASS
 ```
 
 `source` and `tree` name the staged candidate commit and tree. `archive` is
@@ -282,12 +279,11 @@ the credential must belong to that Anthropic provider.
 
 | Outcome | Protected selector family | Required clauses |
 | --- | --- | --- |
-| 1 | `apps/loopex_daemon/test/session_lifetime_test.exs` | One daemon per state root owning every session; sessions progressing with zero attachments; orderly stop releasing the marker and recording nothing false; abrupt death then restart recovering every session under the same placement identity; a second daemon refused by the held marker; session list, open and stop only through the socket |
-| 2 | `apps/loopex_daemon/test/socket_transport_test.exs`, `apps/loopex_daemon/test/python_client_conformance_test.exs` | Same generation, schema digest and limits as the foreground server; identical durable identities for one command corpus through facade, foreground server and socket; foreign-uid peer refused before initialize; frame, fragment, malformed-input and over-long socket path refusals; client disconnect as transport loss with no cancellation and no interaction change; pinned Python client executes generation-2 schema and vectors over the socket and refuses a digest mismatch |
-| 3 | `apps/loopex_daemon/test/collaboration_test.exs` | Exactly one controller with observers read-only; an observer with a known current epoch refused because its connection is not holder; admission requires matching epoch, held state and unexpired term before core; generation-1 attach or resume acquires an internal exclusive lease before core and excludes other generation-1 and generation-2 connections without adding a wire epoch, with connected idle expiry detaching and fencing before successor access; takeover only after release or expiry with a durable epoch advance; killed controller fenced and its late commands refused; controller abort cancelling work dispatched under an earlier process with a truthful outcome; no authority from content, metadata, answers or order |
+| 1 | `apps/loopex_daemon/test/session_lifetime_test.exs` | One daemon per state root owning every session; sessions progressing with zero attachments; orderly stop releasing the marker and recording nothing false; abrupt death then restart recovering every session under the same placement identity; a second daemon refused by the held marker; after an orderly stop the foreground server and the reference CLI reopening the same root and resuming a daemon-created session under the same placement identity with identical replay; session list, open and stop only through the socket |
+| 2 | `apps/loopex_daemon/test/socket_transport_test.exs`, `apps/loopex_daemon/test/python_client_conformance_test.exs` | Generation 2 selected with the same schema digest and limits the foreground server negotiates for its generation; a generation-1-only initialize refused with `unsupported_generation` and nothing created; identical durable identities for one command corpus through facade, foreground server and socket; foreign-uid peer refused before initialize; frame, fragment, malformed-input and over-long socket path refusals; client disconnect as transport loss with no cancellation and no interaction change; pinned Python client executes generation-2 schema and vectors over the socket and refuses a digest mismatch |
+| 3 | `apps/loopex_daemon/test/collaboration_test.exs` | Exactly one controller with observers read-only; an observer with a known current epoch refused because its connection is not holder; admission requires matching epoch, held state and unexpired term before core; takeover only after release or expiry with an epoch advance before the successor's first command; killed controller fenced and its late commands refused; a daemon restart leaving every session uncontrolled with an epoch from the previous incarnation refused; controller abort cancelling work dispatched under an earlier process with a truthful outcome; no authority from content, metadata, answers or order |
 | 4 | `apps/loopex/test/concurrent_attachments_test.exs`, `apps/loopex_daemon/test/replay_residency_test.exs` | Two core attachments to one session coexist with independent ordered delivery and one detaching without replacing the other; snapshot then contiguous stream with no gap; `cursor_expired` beyond retention; slow observer detached at its last emitted cursor while others continue; idle eviction with exact reconnect; 4 MiB per-attachment, 16 MiB per-session and 512 MiB aggregate retained encoded-event ceilings at count and payload pressure, with process RSS observed and reported; progress coalesced or dropped under pressure with no journal delay |
-| 5 | `apps/loopex_store_daemon/test/store_conformance_test.exs`, `apps/loopex_store_daemon/test/migration_test.exs` | Shared conformance suite unchanged; backend-specific injections at common commit, corruption and derived-lookup cut points detected, repaired or refused with the same Store-level outcome; commit ambiguity resolved to one outcome; writer ownership and epochs fencing a stale writer; bounded replay equal to full replay; forward migration of a genuine M4 log with identical replay; interrupted migration detected and completed or rolled back; exact M4 binary refusing a daemon root directory with `store_file_invalid` without mutation and documented rollback; backup and restore preserving every identity and sequence |
-| 6 | `apps/loopex_daemon/test/multi_client_workflow_test.exs`, `apps/loopex_daemon/test/multi_client_workflow_real_test.exs` | Two real client processes over one daemon through controller work, observer following, controller kill and takeover; fresh extraction of the exact candidate following the operator guide with operator-supplied inputs; the reference CLI attaching, listing and aborting cross-process work; ADR 0030 spans at every daemon boundary and a daemon-scoped trace session capturing identities only; the attended real-provider workflow from the extracted source. Required post-tag release evidence is checked after reviewed closure integration, outside the pre-closure full gate |
+| 5 | `apps/loopex_daemon/test/multi_client_workflow_test.exs`, `apps/loopex_daemon/test/multi_client_workflow_real_test.exs` | Two real client processes over one daemon through controller work, observer following, controller kill and takeover; fresh extraction of the exact candidate following the operator guide with operator-supplied inputs; the reference CLI attaching, listing and aborting cross-process work; ADR 0030 spans at every daemon boundary and a daemon-scoped trace session capturing identities only; the attended real-provider workflow from the extracted source. Required post-tag release evidence is checked after reviewed closure integration, outside the pre-closure full gate |
 
 Each required clause maps to a named decisive witness in
 `scripts/m5-outcomes.exs`. Related clauses may share one named case only when
@@ -297,7 +293,7 @@ not locked. Canonical fixture, harness and result-channel bytes are
 digest-bound; mutable test files are protected by witness identity and
 required state. No protected witness may be removed, renamed, skipped or
 excluded without an accepted amendment or an explicitly approved scoped
-override. Exactly twelve application identities and the existing role set are
+override. Exactly eleven application identities and the existing role set are
 checked after their prerequisite transactions settle.
 
 ## Isolation, Evidence and Review
@@ -379,28 +375,29 @@ document is a pair:
   and the TypeScript consumer, what a controller and an observer each see,
   how takeover works after a crash and what an abort does to work another
   process started, what reconnecting after a disconnect or eviction returns,
-  the residency and lease numbers, how to import an M4 state root and how to
-  roll back, backup and restore, the `0.2.0` source version and the
-  source-only release workflow, and what remains experimental or unavailable
-  (no remote transport, no multi-user authorization, no service unit, no
-  package).
+  what a daemon restart does to control, the residency and lease numbers,
+  how to stop the daemon and reopen the same root with the foreground server
+  or CLI, the `0.2.0` source version and the source-only release workflow,
+  and what remains experimental or unavailable (no remote transport, no
+  multi-user authorization, no service unit, no package, no daemon-grade
+  store).
 - **Developer-facing.** The daemon pair as the reference for lifetime, socket,
   residency and lease contracts; the protocol pair extended with generation
-  2's methods, fields, schema and vector identities; the daemon-grade store
-  and its migration as embedding contracts; the eleventh and twelfth
-  applications and the dependency direction; the experimental labels and
-  exact-generation rule in the compatibility surfaces; and the context map's
-  routing for M5's ADRs, documents and gate.
+  2's methods, fields, schema and vector identities and the daemon's
+  generation-2-only negotiation; the eleventh application and the dependency
+  direction; the experimental labels and exact-generation rule in the
+  compatibility surfaces; and the context map's routing for M5's ADRs,
+  documents and gate.
 - **Repository-wide.** `docs/README.md`, `README.md` and `CHANGELOG.md`
-  describe the two applications, the new operator and developer documents,
-  the version transition, the source-only `v0.2.0` release and M5 outcome
+  describe the application, the new operator and developer documents, the
+  version transition, the source-only `v0.2.0` release and M5 outcome
   evidence, without claiming a package, binary, installer, service unit or
   compatibility freeze.
 
 The status check limits the developer-facing row to `docs/developer/` paths,
 so `DEVELOPMENT.md` is named here instead, and its drift blocks closure
-exactly like a row above: it is updated for the two applications, the M5
-runner commands, the daemon launch during development and the client toolchain
+exactly like a row above: it is updated for the application, the M5 runner
+commands, the daemon launch during development and the client toolchain
 pins.
 
 ## Final Documentation Gate
@@ -417,7 +414,7 @@ Inspect each file for current M5 facts, relevance to its reader, working
 links and index routing where applicable, consistent Concept and Technical
 depth companion claims where paired, and stale foreground-only assertions.
 Check the daemon,
-socket, controller/observer, residency, migration and rollback descriptions
+socket, controller/observer, residency, restart and rollback descriptions
 against the accepted plan and ADRs. Release documentation must accurately
 describe the required source-only `v0.2.0` tag and archive sequence while
 making no pre-tag claim that they already exist. Resolve inaccurate or stale

@@ -1420,9 +1420,8 @@ defmodule Loopex.StatusCheckTest do
     )
   end
 
-  test "M5 names its store residency and collaboration decisions and cannot outrun any" do
+  test "M5 names its residency and collaboration decisions and cannot outrun either" do
     adrs = [
-      {"docs/adr/0031-daemon-grade-store-selection-and-migration.md", "ADR 0031"},
       {"docs/adr/0032-daemon-attachment-residency-and-replay.md", "ADR 0032"},
       {"docs/adr/0033-collaboration-controller-lease-and-takeover.md", "ADR 0033"}
     ]
@@ -1431,12 +1430,12 @@ defmodule Loopex.StatusCheckTest do
     proposed = Map.new(adrs, fn {path, _name} -> {path, "Proposed"} end)
     open = Register.expected_capsule("Open", "M5", proposed)
 
-    assert open["Next maintainer decision"] == "Disposition ADR 0031, ADR 0032, and ADR 0033"
+    assert open["Next maintainer decision"] == "Disposition ADR 0032 and ADR 0033"
     assert open["Next transition"] =~ "After the prerequisites are accepted"
 
     lookahead = Register.expected_capsule({"M4", "Accepted"}, {"M5", "Open"}, m4_and_m5(proposed))
 
-    assert lookahead["Blockers"] =~ "`M5` additionally waits on ADR 0031, ADR 0032, and ADR 0033"
+    assert lookahead["Blockers"] =~ "`M5` additionally waits on ADR 0032 and ADR 0033"
 
     assert lookahead["Next maintainer decision"] =~
              "cannot be accepted before `M4` closes; `M5` also waits on"

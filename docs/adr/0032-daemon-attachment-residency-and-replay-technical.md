@@ -17,8 +17,9 @@ Linux) is refused at start with `socket_path_too_long` naming the bound, never
 truncated. The socket file is created with owner-only permissions and the
 daemon reads the connecting peer's credentials; a peer whose user identity
 differs from the daemon's is closed before any frame is read. A stale socket
-file left by a dead daemon is removed only after the writer marker proves the
-previous holder gone, using the same liveness probe the local store uses.
+file left by a dead daemon is removed only after the local store's writer
+marker proves the previous holder gone, using the same liveness probe the
+local store uses.
 
 Framing, the initialize handshake, request and admission records, snapshot,
 event and progress records, the frame ceiling, the strict UTF-8/LF rule and
@@ -42,32 +43,20 @@ fan-out owner nor reads coordinator state to repair an attachment race.
 | --- | --- | --- |
 | `session.list` | none | Bounded page of session identities with lineage, lifecycle state, last committed sequence and controller presence; never content |
 | `session.stop` | `session_id`, `command_id`, `writer_epoch` | Admission of a durable stop under the current controller; observers refuse |
-| `daemon.status` | none | Placement identity, socket path, format version, attachment and session counts against their limits, uptime |
-| `session.acquire_control`, `session.release_control` | `session_id`, `request_id` and the lease fields ADR 0033 fixes | Lease result naming the writer epoch |
+| `daemon.status` | none | Placement identity, daemon incarnation, socket path, attachment and session counts against their limits, uptime |
+| `session.acquire_control`, `session.release_control` | `session_id`, `request_id` and the lease fields ADR 0033 fixes | Lease result naming the writer epoch and the remaining lease term |
 
-The client supplies its ordered supported generations in `initialize`; the
-daemon selects the first generation in that client order it supports and
-returns one `selected_generation`, its exact schema digest, method inventory
-and limits as ADR 0023 requires. A client that negotiates generation 1
-receives the generation-1 method inventory and every generation-2 method
-refuses as unknown for that
-connection. The generation-2 schema and vectors are canonical bytes bound by
-the M5 gate before acceptance; a negotiation vector proves client-order
-selection and the generation-1 fallback.
-
-The daemon admits a generation-1 attachment only when the session has no other
-attachment of either generation and no other unexpired held lease. It refuses
-any later attach of either generation while a generation-1 lease remains held,
-even if its connection has gone and expiry is pending. A generation-1 attach
-also refuses while a generation-2 lease remains held after its connection
-goes. These are `attachment_conflict` errors under the existing generation-1
-error vocabulary. The attachment and internal lease grant are serialized as
-one daemon operation. A successful generation-1 attach is the sole controller
-connection under ADR 0033's internal lease; it cannot gain an observer peer or
-a second controller by opening another connection. At internal lease expiry,
-the daemon atomically detaches a still-connected generation-1 client and
-fences its commands before any successor lease or attachment is admitted.
-Generation-1 frames and the M4 foreground process limit do not change.
+The client supplies its ordered supported generations in `initialize`. The
+daemon supports exactly `loopex.experimental/2`: it selects that generation
+when the client lists it, at any position, and otherwise refuses with
+`unsupported_generation`, leaving the connection uninitialized with no second
+attempt, exactly as ADR 0023 fixes for a foreground process. The successful
+reply carries `selected_generation`, the exact generation-2 schema digest,
+the generation-2 method inventory and limits. The generation-2 schema and
+vectors are canonical bytes bound by the M5 gate before acceptance; a
+negotiation vector proves selection from a list that also names generation 1
+and refusal of a generation-1-only list. The M4 foreground server keeps
+serving generation 1 only, with its one-attachment-per-process rule.
 
 ### Attachment lifecycle
 
@@ -112,8 +101,8 @@ other attachments continue; the
 per-session and per-daemon limits refusing independently; idle eviction and
 reconnect with no duplicate or missing durable event; the three encoded-byte
 ceilings at maximum attachment count and payload pressure, with process RSS
-observed and reported separately; idle connected generation-1 lease expiry
-detaching and fencing before generation-2 takeover or attach; progress coalescing
+observed and reported separately; a generation-1-only initialize refused with
+`unsupported_generation` and nothing created; progress coalescing
 under pressure with counted drops and no journal delay; peer-credential
 refusal; a socket path beyond the bound refused at start; frame, fragment and
 malformed-input refusals identical to the foreground server's.
@@ -128,24 +117,25 @@ without bound. Keeping the M4 one-attachment-per-process rule was rejected
 because a daemon's clients are processes by definition. A daemon-owned proxy
 fan-out was rejected because it would duplicate core cursor and queue
 ownership and need a second replay boundary to preserve the
-subscribe/snapshot race. Allowing concurrent generation-1 daemon connections
-was rejected because their wire has no controller lease field.
+subscribe/snapshot race. Serving generation 1 on the daemon was rejected: its
+wire has no lease field, so it could only ever be served as one exclusive
+connection per session, which the foreground server already provides, and it
+would add a second fencing path with no wire epoch.
 
 <a id="technical-adr-0032-compatibility"></a>
 ### Compatibility and Rollback Mechanics
 
 Concept: [Consequences and rollback](0032-daemon-attachment-residency-and-replay.md#concept-adr-0032-consequences).
 
-Generation 2 is additive over generation 1 and both are experimental with the
-exact-generation rule; no mixed-generation stream promise exists. A
-generation-1 daemon client may attach only to a session with no other
-attachment or unexpired held lease; the existing foreground server still
-admits one attachment in its process. The residency limits are server-enforced
-ceilings advertised at initialize under the existing
-`limits` member. Removing the daemon leaves the foreground server unchanged;
-existing embedded callers retain their behavior, and the core supports
-independent same-session attachments. No durable record depends on residency
-state.
+Generation 2 is additive over generation 1's method set and both are
+experimental with the exact-generation rule; no mixed-generation stream
+promise exists. The daemon serves generation 2 only; the existing foreground
+server still serves generation 1 with one attachment in its process. The
+residency limits are server-enforced ceilings advertised at initialize under
+the existing `limits` member. Removing the daemon leaves the foreground server
+unchanged; existing embedded callers retain their behavior, and the core
+supports independent same-session attachments. No durable record depends on
+residency state.
 
 Acceptance binds this complete pair at an exact candidate. Its evidence and
 compatibility claims remain unproved until the M5 gate's required paths execute.

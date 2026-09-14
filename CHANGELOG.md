@@ -24,19 +24,21 @@ No package or compatibility-labelled surface is pending.
 
 Open the [M5 plan](docs/plans/M5.md#concept) as the one permitted planning
 lookahead on the integrated M4 acceptance checkpoint: a daemon that owns
-session lifetime for a state root, a Unix-domain-socket transport carrying the
-ADR 0023 protocol with a generation-2 daemon method set, one controller lease
-with observers and crash takeover, race-free replay with residency limits, a
-daemon-grade store with migration from the local log, and a two-process
-operator workflow toward a source-only `0.2.0` release. Propose
-[ADR 0031](docs/adr/0031-daemon-grade-store-selection-and-migration.md#concept),
+session lifetime for a state root on the existing local store, a
+Unix-domain-socket transport carrying the ADR 0023 protocol and serving its
+generation-2 daemon method set only, one in-memory controller lease with
+observers and crash takeover, race-free replay with residency limits, and a
+two-process operator workflow toward a source-only `0.2.0` release. Propose
 [ADR 0032](docs/adr/0032-daemon-attachment-residency-and-replay.md#concept) and
 [ADR 0033](docs/adr/0033-collaboration-controller-lease-and-takeover.md#concept)
-as its prerequisites, bind a runner whose opening probe observes that a
-second process cannot attach to a live session because the local Store
-refuses the path as `store_writer_active` and no daemon socket exists, and
-register `M5` as Open. No plan, ADR or product behavior is accepted by the
-opening.
+as its prerequisites, bind a runner whose opening probe observes that no
+daemon owns an attachable session at the state root's socket, and register
+`M5` as Open. Propose
+[ADR 0031](docs/adr/0031-daemon-grade-store-selection-and-migration.md#concept)
+for the daemon-grade store and its migration as the successor milestone's
+first decision; a 2026-09-14 revision moved the store, generation-1 daemon
+service and the durable lease record out of M5. No plan, ADR or product
+behavior is accepted by the opening.
 
 Open the [M4 plan](docs/plans/M4.md#concept) as the one permitted planning
 lookahead on the integrated M3 acceptance checkpoint: move the draft triple
