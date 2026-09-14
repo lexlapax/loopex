@@ -1,5 +1,6 @@
 # Concept: Prove that the proposed M4 wire fixtures are intact before acceptance.
-# Technical depth: Behavioral conformance belongs to the later protocol tests.
+# Technical depth: The ADR 0026 floor supplies stdlib JSON; no umbrella dependency
+# is loaded. Behavioral conformance belongs to the later protocol tests.
 defmodule Loopex.M4FixtureCheck do
   @schema "apps/loopex_protocol/priv/schema/loopex-experimental-1.json"
   @vectors "apps/loopex_protocol/priv/vectors/loopex-experimental-1.json"
@@ -39,7 +40,7 @@ defmodule Loopex.M4FixtureCheck do
       "#{label} must be ASCII JSON"
     )
 
-    value = Jason.decode!(bytes)
+    value = JSON.decode!(bytes)
     ensure(is_map(value), "#{label} must be a JSON object")
     {value, bytes}
   end
@@ -185,11 +186,11 @@ defmodule Loopex.M4FixtureCheck do
             nil
 
           "trailing_bytes_before_lf" ->
-            ensure(match?({:error, _}, Jason.decode(payload)), "trailing bytes now parse")
+            ensure(match?({:error, _}, JSON.decode(payload)), "trailing bytes now parse")
             nil
 
           "top_level_array" ->
-            ensure(is_list(Jason.decode!(payload)), "top_level_array is not an array")
+            ensure(is_list(JSON.decode!(payload)), "top_level_array is not an array")
             nil
 
           _ ->
@@ -202,8 +203,8 @@ defmodule Loopex.M4FixtureCheck do
               )
             end
 
-            ensure(is_map(Jason.decode!(payload)), "#{id} is not a JSON object")
-            Jason.decode!(payload)
+            ensure(is_map(JSON.decode!(payload)), "#{id} is not a JSON object")
+            JSON.decode!(payload)
         end
     end
   end

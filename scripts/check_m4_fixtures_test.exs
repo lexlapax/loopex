@@ -19,8 +19,8 @@ defmodule Loopex.M4FixtureCheckTest do
     {:ok,
      schema_path: schema_path,
      vector_path: vector_path,
-     schema: Jason.decode!(File.read!(@source_schema)),
-     vectors: Jason.decode!(File.read!(@source_vectors))}
+     schema: JSON.decode!(File.read!(@source_schema)),
+     vectors: JSON.decode!(File.read!(@source_vectors))}
   end
 
   test "canonical fixtures pass", context do
@@ -41,7 +41,7 @@ defmodule Loopex.M4FixtureCheckTest do
 
   test "the schema refuses a changed vector digest", context do
     vectors = update_in(context.vectors, ["cases"], &tl/1)
-    File.write!(context.vector_path, Jason.encode!(vectors) <> "\n")
+    File.write!(context.vector_path, JSON.encode!(vectors) <> "\n")
     assert_raise ArgumentError, ~r/vector digest does not match/, fn -> check!(context) end
   end
 
@@ -95,10 +95,10 @@ defmodule Loopex.M4FixtureCheckTest do
   defp check!(context), do: Loopex.M4FixtureCheck.check!(context.schema_path, context.vector_path)
 
   defp write_schema!(context, schema),
-    do: File.write!(context.schema_path, Jason.encode!(schema) <> "\n")
+    do: File.write!(context.schema_path, JSON.encode!(schema) <> "\n")
 
   defp write_pair!(context, schema, vectors) do
-    vector_bytes = Jason.encode!(vectors) <> "\n"
+    vector_bytes = JSON.encode!(vectors) <> "\n"
     digest = :crypto.hash(:sha256, vector_bytes) |> Base.encode16(case: :lower)
     File.write!(context.vector_path, vector_bytes)
     write_schema!(context, put_in(schema, ["vectors", "sha256"], digest))

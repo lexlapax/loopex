@@ -67,9 +67,9 @@ are Mix tasks: `mix loopex.deps_budget`, `loopex.core_only`, `loopex.matrix`,
 Closed gates. The M3 gate includes its M0–M2 predecessor aggregate.
 `bash scripts/check-m4-gate.sh` runs the Open M4 gate, which must be red for
 its declared missing behavior while every Closed gate stays green.
-Before M4 acceptance,
-`mix run -r scripts/check-m4-fixtures.exs -e 'Loopex.M4FixtureCheck.run!()'`
-and `mix run scripts/check_m4_fixtures_test.exs` check the bound schema and
+After ADR 0026's floor-holder sequence and before M4 acceptance,
+`elixir -r scripts/check-m4-fixtures.exs -e 'Loopex.M4FixtureCheck.run!()'`
+and `elixir scripts/check_m4_fixtures_test.exs` check the bound schema and
 vectors. They do not prove client or server conformance.
 
 Product tests run against a temporary `LOOPEX_HOME`; the
