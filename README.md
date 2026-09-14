@@ -79,15 +79,27 @@ for the host API. The exact M3 product source
 on the macOS floor pair and Linux; the [M3 plan](docs/plans/M3.md#concept-m3-final-qualification-f453545)
 records that evidence and the separate lifecycle decision.
 
-M4 is next, but its plan and gate remain Open: no M4 product implementation or
-release has started. Its proposed outcome is an operator-usable foreground
-server and TypeScript consumer over durable interactions and bounded artifact
-transfers, with runtime tracing and telemetry. The planned `0.1.0` release is
+M4 is the active milestone. The maintainer accepted its plan pair and locked
+gate on 2026-09-14, and that governance-only checkpoint is integrated here
+with no M4 product bytes: the five prerequisite ADRs (0023, 0024, 0026,
+0028 and 0030) are accepted, the development floor is refreshed to Elixir
+1.18.5 with OTP 27.3.4 through gate generations of the closed milestones,
+the repository status checker learned to accept a first acceptance that
+completes such a shared-binding refresh, and the client model-use rules were
+rebuilt for the current Claude and OpenAI models. M4's outcome is an
+operator-usable foreground server and TypeScript consumer over durable
+interactions and bounded artifact transfers, with runtime tracing and
+telemetry; its gate is red today for exactly the missing behavior it declares.
+Implementation proceeds on branch `m4` and begins with an inherited-gate
+baseline: recording the M0 gate under both toolchain pairs, and repairing the
+M1 and M2 gate runners so they can be re-proved under the refreshed floor,
+because their retained evidence predates it. The planned `0.1.0` release is
 source-only and would receive an annotated `v0.1.0` tag on the exact `main`
 integration commit only after M4 implementation, independent closure review,
 explicit closure and separate release/tag authority. See
-the [M4 plan](docs/plans/M4.md#concept) for the candidate scope and the
-[canonical register](docs/plans/README.md) for its current status.
+the [M4 plan](docs/plans/M4.md#concept) for the accepted scope and its
+workstreams, and the [canonical register](docs/plans/README.md) for its
+current status.
 
 The repaired reference local executor requires `/bin/bash` for its internal
 supervision on Darwin and Linux; raw commands still use `/bin/sh`. See the
