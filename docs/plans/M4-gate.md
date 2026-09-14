@@ -1,8 +1,9 @@
 # M4 Gate
 
 Open candidate for the headless external consumer, refreshed onto M3's Closed
-product base. No M4 plan or ADR is accepted by this revision, and M4 product
-implementation has not begun. The runner binds a real behavioral opening probe,
+product base. Its five prerequisite ADRs are accepted, but this M4 plan pair
+and gate are not accepted by this revision, and M4 product implementation has
+not begun. The runner binds a real behavioral opening probe,
 executable closure lanes and exact future witness identities. Under the same
 preparation rule M3 recorded, future test bodies are written during
 implementation; every named witness must pass before closure. The

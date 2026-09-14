@@ -151,7 +151,8 @@ valid designs, never an activity log.
 safe permit retirement. M4 owns 0023/0024/0026/0028/0030: protocol, durable
 interactions, floor refresh, bounded artifact retrieval and observability. The
 floor transaction inventory must include every holder on integrated M3, rather
-than assume three. Proposed
-status supplies no acceptance and changes no accepted ADR or Closed gate record.
+than assume three. All five were accepted on 2026-09-13 at candidate
+`3503992cbc0de02ef98ba261e7a19fdb7123e220`; their acceptance changes no Closed
+gate record and does not accept the M4 plan pair or gate.
 The protocol/interaction proposals were renumbered from the old draft's 0019/0020
 because those numbers are now accepted M2 decisions.

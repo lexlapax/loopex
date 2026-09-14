@@ -58,16 +58,16 @@ the complete object on every range, so saving a maximal object would have
 verified it 4,096 times. On 2026-09-10, during the M4 planning task, the
 maintainer chose one authorized, verified transfer that verifies once and emits
 bounded chunks from an owned, cancellable reader, over independent range reads
-that would have reduced the feature to bounded excerpts. ADR 0028 now proposes
-that design. The proposed M4 ceiling is a 64 MiB transferable object; each
+that would have reduced the feature to bounded excerpts. Accepted ADR 0028 carries
+that design. The accepted M4 ceiling is a 64 MiB transferable object; each
 opening is limited to 60 seconds and 128 MiB of source-read plus snapshot-write
 work; reads emit at most 32 KiB raw bytes within five seconds; transfers expire
 after ten minutes; concurrency is two per connection and four per runtime;
 and a connection admits 1 GiB of cumulative source-read, snapshot-write and
 emitted-read work with at least a 1 MiB debit per open. Read amplification is
 at most one complete verification plus one sequential emit per authorized
-transfer. These are unmeasured safety ceilings until the acceptance authority
-settles ADR 0028 and the required evidence proves them.
+transfer. ADR 0028 is accepted with these values; they remain unmeasured
+safety ceilings until the required evidence proves them.
 
 **Connection state table (required content of ADR 0023).**
 
@@ -95,7 +95,7 @@ working resource/launch/repair interfaces are inherited. Reconcile the schema
 with those interfaces and the new core contracts; no TODO member or unproved
 method earns an advertised capability.
 
-**Holder transactions.** The floor refresh (proposed Elixir 1.18.5/OTP 27.3.4
+**Holder transactions.** The floor refresh (accepted Elixir 1.18.5/OTP 27.3.4
 and current 1.20.3/OTP 29.0.5, with real matrix evidence), the ninth and
 tenth applications, the dependency-rule changes (client → contract edge and
 `:telemetry` in core) and source VERSION 0.1.0 each change bytes that Closed
