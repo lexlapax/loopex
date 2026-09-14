@@ -32,7 +32,10 @@ rebind children or closure candidates; those keep the ordinary inherited-gate
 obligation. M4 remains Open and holds no implementation authority. Before it
 can be accepted, re-prove every inherited gate green and its own distinct red on
 the refreshed base, bind the complete schema/vector contract bytes and prove
-their fixture shape and digest integrity, then obtain fresh exact-SHA review.
+their fixture shape and digest integrity with the bound Elixir check and
+mutation tests named in the gate, then obtain fresh exact-SHA review. This
+pre-acceptance check does not claim that a client or server conforms to those
+fixtures.
 Behavioral client conformance test bodies arrive during implementation and
 must pass before closure. At final
 acceptance all inherited gates are green and the M4 boundary remains

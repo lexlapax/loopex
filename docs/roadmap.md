@@ -71,21 +71,20 @@ package, publication, compatibility label, or public-surface freeze.
 Technical depth: [Foreground-harness candidate proof](roadmap-technical.md#technical-roadmap-foreground-harness)
 
 <a id="concept-roadmap-kernel-consolidation"></a>
-##### Extensible local foundations — M3 candidate
+##### Extensible local foundations — M3 closed
 
-Can an operator import a pinned Git skill, explicitly select it and inspect a
-real tool result through the same local runtime? M3 joins project-only resources
-to the remaining context, dispatcher and permit-retention repairs. It settles
-two prerequisite decisions, protects inherited guarantees with clause witnesses
-and proves one complete workflow before breadth. Focused checkpoints keep
-full inherited runs at contract moments and evidence-invalidating changes.
-Resource packs and registered tools provide bounded extensibility; trusted
-VM-global plugin activation remains at its later vision barrier.
+M3 proved that an operator can import a pinned Git skill, explicitly select it
+and inspect a real tool result through the same local runtime. It joined
+project-only resources to the context, dispatcher and permit-retention repairs,
+with one complete workflow and retained inherited evidence. Resource packs and
+registered tools provide bounded extensibility; trusted VM-global plugin
+activation remains at its later vision barrier. The [plans register](plans/README.md)
+records the exact Closed state and evidence.
 
 Technical depth: [Foundation candidate proof](roadmap-technical.md#technical-roadmap-kernel-consolidation)
 
 <a id="concept-roadmap-session-protocol"></a>
-##### Headless external consumption — M4 candidate
+##### Headless external consumption — M4 open candidate
 
 Can an independent program use those foundations without a second session or
 policy engine? M4 first makes the runtime observable: a host can trace every
@@ -98,6 +97,10 @@ It maps the shared facade through strict foreground stdio JSONL and demonstrates
 a TypeScript client selecting
 a skill, answering an interaction, observing a real tool result, retrieving an
 artifact and recovering after process loss. The daemon remains a later host.
+After closure review and separate release authority, M4 targets a source-only
+`0.1.0` release with an annotated `v0.1.0` tag on its exact integration commit
+on `main`; this is not a package, installer, service or public-surface freeze.
+The [plans register](plans/README.md) remains the authority for its current state.
 
 Technical depth: [External-consumer candidate proof](roadmap-technical.md#technical-roadmap-session-protocol)
 

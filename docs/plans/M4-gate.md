@@ -87,7 +87,13 @@ Before acceptance:
    exact limits and the fail-closed routing. The runner verifies the pinned
    executables before any client-backed selector; absence or mismatch is
    UNAVAILABLE, never PASS or an ordinary RED. Use the existing standalone
-   result channel; do not build a second result/evidence framework.
+   result channel; do not build a second result/evidence framework. Before
+   acceptance, run
+   `mix run -r scripts/check-m4-fixtures.exs -e 'Loopex.M4FixtureCheck.run!()'` and
+   `mix run scripts/check_m4_fixtures_test.exs` at the candidate. The bound
+   Elixir checker proves key schema/vector inventories, LF/hex frame shape and
+   their cross-file digest; its mutation tests reject altered shape or bytes.
+   Neither command is behavioral client conformance evidence.
 3. Settle the phase A floor holder transactions, including M3, or an
    explicitly approved development-time procedural replacement, before M4
    binds replacement bytes. Name every holder and complete its own replacement
@@ -164,6 +170,8 @@ binding.
 | `65d0de9dcd1218af542f00e32c2177d2612a2f1232f22db37b9942200c84cf66` | `scripts/m3-gate-support.exs` |
 | `c4d485ca3229441c678abe1e8733f90216e89e0dfb9e81786f58f525619aec29` | `scripts/check-closed-gates.sh` |
 | `8c94069e737ba66c658071c52232ae3f9462fb79ca8d0221fe071d63367765c7` | `scripts/m4-outcomes.exs` |
+| `633bf129795170bb53a8a4a13c2e48c255821a156ac0d3ab9af80216ba22f62d` | `scripts/check-m4-fixtures.exs` |
+| `d2e6435457a025c0ff0fea096d64ac456c75f670f8b21d7520023ab5b896d126` | `scripts/check_m4_fixtures_test.exs` |
 | `53d8219bdee584a3849a85a1102e405520d5dd0dfbe21d259434bc9edfc5fcc0` | `scripts/m1-exunit-runner.exs` |
 | `c36253cff3d74ddff1b330695edbc4bde0a4565c1412c67c1293b2fb7ca6129b` | `apps/loopex/test/m1_exunit_runner_test.exs` |
 | `fad47299b27a767785d2a6a776155038054f5457ee3ce0195a37ae667f7a9999` | `.tool-versions` |

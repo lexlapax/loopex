@@ -33,12 +33,12 @@ separate decision duty when a founding boundary or invariant would change.
 | Doctrine, product definition, principles | [Product definition](../vision.md#concept-vision-product-definition) and [principles](../vision.md#concept-vision-product-principles) | [Product boundaries](../vision-technical.md#technical-vision-product-definition) and [principle mechanics](../vision-technical.md#technical-vision-product-principles) | “Runtime is the framework”; what Loopex is and is not. |
 | Domain language | [Domain language](../vision.md#concept-vision-domain-language) | [Exact terms](../vision-technical.md#technical-vision-domain-language) | Session/run/turn, operation/attempt/epoch/fence, journal/public event, brain/hand. |
 | Ownership and trust boundaries | [Ownership](../vision.md#concept-vision-ownership-trust) | [Ownership mechanics](../vision-technical.md#technical-vision-ownership-trust) | Loopex/host/executor ownership, policy decisions, and grants. |
-| Stack, dependency budget, runtime floor | [Dependency doctrine](../vision.md#concept-vision-dependency-doctrine) and [ADR 0002 decision](../adr/0002-bootstrap-runtime-floor.md#concept-adr-0002-decision) | [Exact dependency constraints](../vision-technical.md#technical-vision-dependency-doctrine) and [ADR 0002 mechanics](../adr/0002-bootstrap-runtime-floor-technical.md#technical-adr-0002-decision) | Protocol/Core/Runtime, one admitted `:telemetry` dependency in core, bootstrap floor. |
+| Stack, dependency budget, runtime floor | [Dependency doctrine](../vision.md#concept-vision-dependency-doctrine) and [ADR 0002 decision](../adr/0002-bootstrap-runtime-floor.md#concept-adr-0002-decision) | [Exact dependency constraints](../vision-technical.md#technical-vision-dependency-doctrine) and [ADR 0002 mechanics](../adr/0002-bootstrap-runtime-floor-technical.md#technical-adr-0002-decision) | Protocol/Core/Runtime, one admitted `:telemetry` dependency in core, bootstrap floor. Proposed [ADR 0026](../adr/0026-development-floor-refresh.md#concept) owns the M4 floor-holder decision; proposed [ADR 0030](../adr/0030-observability-tracing-and-telemetry.md#concept) owns telemetry mechanics. Neither is accepted yet. |
 | Runtime instances, supervision, reducer | [Runtime ownership](../vision.md#concept-vision-runtime-supervision) | [Supervision and reducer mechanics](../vision-technical.md#technical-vision-runtime-supervision) | Multi-instance supervision, pure reducer, bounded journal transaction; use the [M1 runtime and embedding guide](runtime-and-embedding.md#concept) for the implemented single-machine surface. |
 | Transactions, operations, recovery, cancellation | [Recovery truth](../vision.md#concept-vision-recovery-truth) | [Transaction and recovery mechanics](../vision-technical.md#technical-vision-recovery-truth) | `commit_unknown`, operation lifecycle, reconciliation, outcome algebra. |
 | Agent loop, queues, tool ordering | [Loop semantics](../vision.md#concept-vision-loop-semantics) | [Loop mechanics](../vision-technical.md#technical-vision-loop-semantics) | One run per session, input classes, ordering, and split payloads. |
-| Public protocol, events, attachments | [Public protocol](../vision.md#concept-vision-public-protocol) | [Protocol mechanics](../vision-technical.md#technical-vision-public-protocol) | Stream planes, envelopes, attach behavior, and authority boundaries; the headless protocol proposal is [ADR 0023](../adr/0023-experimental-public-session-protocol.md#concept); [ADR 0024](../adr/0024-durable-interaction-lifecycle-and-host-policy-authority.md#concept) places durable interactions in M4 core before wire mapping. Both remain Proposed prerequisites of the Open [`M4` plan](../plans/M4.md#concept) after M3 closure. |
-| Journal, stores, branches, compaction, artifacts | [Sessions and storage](../vision.md#concept-vision-sessions-storage) | [Storage mechanics](../vision-technical.md#technical-vision-sessions-storage) | Recovery surfaces, private adapters, store decision, protection. |
+| Public protocol, events, attachments | [Public protocol](../vision.md#concept-vision-public-protocol) | [Protocol mechanics](../vision-technical.md#technical-vision-public-protocol) | Stream planes, envelopes, attach behavior, and authority boundaries; the headless protocol proposal is [ADR 0023](../adr/0023-experimental-public-session-protocol.md#concept); [ADR 0024](../adr/0024-durable-interaction-lifecycle-and-host-policy-authority.md#concept) places durable interactions in M4 core before wire mapping. Read the [M4 pre-acceptance choices](#disposition-m4-preacceptance-contract-choices-2026-09-13); both ADRs remain Proposed prerequisites of the Open [`M4` plan](../plans/M4.md#concept) after M3 closure. |
+| Journal, stores, branches, compaction, artifacts | [Sessions and storage](../vision.md#concept-vision-sessions-storage) | [Storage mechanics](../vision-technical.md#technical-vision-sessions-storage) | Recovery surfaces, private adapters, store decision, protection. [ADR 0028](../adr/0028-bounded-artifact-retrieval.md#concept) proposes M4 transfer limits; its [selected profile](#disposition-m4-preacceptance-contract-choices-2026-09-13) is not ADR acceptance. |
 | Model boundary and continuation | [Model boundary](../vision.md#concept-vision-model-boundary) | [Model mechanics](../vision-technical.md#technical-vision-model-boundary) | Canonical types, `Loopex.LLM`, reference adapter and native sidecar. Accepted [ADR 0027](../adr/0027-provider-permit-retirement.md#concept) and its [retirement mechanics](../adr/0027-provider-permit-retirement-technical.md#technical-adr-0027-decision) govern M3 provider-attempt retention. |
 | Context pipeline | [Model boundary](../vision.md#concept-vision-model-boundary) | [Context-pipeline mechanics](../vision-technical.md#technical-vision-model-boundary) | The sole seam for memory, retrieval, prompts, provenance, and receipts. |
 | Tools and coding surface | [Tools](../vision.md#concept-vision-tools) | [Tool mechanics](../vision-technical.md#technical-vision-tools) | Seven-tool surface, budget, and non-authority of metadata. |
@@ -67,6 +67,10 @@ are Mix tasks: `mix loopex.deps_budget`, `loopex.core_only`, `loopex.matrix`,
 Closed gates. The M3 gate includes its M0–M2 predecessor aggregate.
 `bash scripts/check-m4-gate.sh` runs the Open M4 gate, which must be red for
 its declared missing behavior while every Closed gate stays green.
+Before M4 acceptance,
+`mix run -r scripts/check-m4-fixtures.exs -e 'Loopex.M4FixtureCheck.run!()'`
+and `mix run scripts/check_m4_fixtures_test.exs` check the bound schema and
+vectors. They do not prove client or server conformance.
 
 Product tests run against a temporary `LOOPEX_HOME`; the
 affected conformance suites (`conformance/`) run for any adapter or behaviour
@@ -74,10 +78,10 @@ change; property tests own reducer/replay claims; fault injection owns
 durable-transition claims. Real-provider runs are a tagged, explicitly invoked
 lane — never part of the default suite.
 
-Use focused checks during M3 implementation under the reviewed
-[end-only full-gate cadence](#override-disposition-m3-implementation-gate-cadence-2026-09-10).
-Complete M0–M3 evidence is required at the final candidate. Other milestones
-follow [AGENTS.md](../../AGENTS.md#milestones-and-gates) and their accepted plan.
+M3's implementation used focused checks under the reviewed
+[end-only full-gate cadence](#override-disposition-m3-implementation-gate-cadence-2026-09-10),
+with complete M0–M3 evidence at its final candidate. Other milestones follow
+[AGENTS.md](../../AGENTS.md#milestones-and-gates) and their accepted plan.
 Under the
 [reviewed M3 preparation-rule ratification](#override-disposition-m3-incremental-witness-ratification-2026-09-10),
 acceptance binds clauses, witness identities, runnable commands and a real
@@ -2058,6 +2062,34 @@ This is a maintainer decision on a founding boundary, transcribed here and in
 the vision pair together. It accepts no ADR, plan or milestone, authorizes no
 product implementation, and changes nothing about M3. ADR 0030 carries the
 mechanics and remains Proposed until its own acceptance.
+
+<a id="disposition-m4-preacceptance-contract-choices-2026-09-13"></a>
+### M4 pre-acceptance contract choices — 2026-09-13
+
+During preparation of the Open M4 candidate, the maintainer approved the
+recommended scope and safety choices transcribed in Proposed ADRs 0023, 0024
+and 0028:
+
+- [ADR 0023](../adr/0023-experimental-public-session-protocol.md#concept)
+  defers `session.list` because the current directory query eagerly loads its
+  entries. A client resumes by a known session ID. Project-resource trust is
+  fixed at host launch; no `project_resources.inspect` or
+  `project_resources.decide` wire method is promised.
+- [ADR 0024](../adr/0024-durable-interaction-lifecycle-and-host-policy-authority.md#concept)
+  permits at most two committed answer-then-defer transitions after the first
+  question, for three operator questions in total. Another defer denies.
+- [ADR 0028](../adr/0028-bounded-artifact-retrieval.md#concept) uses safety
+  ceilings of a 64 MiB object, 60 seconds and 128 MiB of work to open, 32 KiB
+  per read with a five-second deadline, ten minutes per transfer, two concurrent
+  transfers per connection and four per runtime, and 1 GiB of cumulative work
+  per connection with at least 1 MiB debited per open. These are limits, not
+  throughput promises.
+
+These choices guide the proposed ADR text and bound M4 planning fixtures.
+They do not accept any ADR or the M4 plan, authorize product implementation,
+approve the floor-holder transactions, or authorize a merge, tag or release.
+Each ADR still needs its own explicit acceptance disposition and independent
+exact-SHA review before the M4 acceptance transition can rely on it.
 
 <a id="override-disposition-m3-implementation-gate-cadence-2026-09-10"></a>
 ### M3 implementation gate cadence — 2026-09-10
