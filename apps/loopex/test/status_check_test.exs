@@ -343,6 +343,57 @@ defmodule Loopex.StatusCheckTest do
     end
   end
 
+  test "a merge accepts completed gate-generation extensions but not competing rows" do
+    rows =
+      for generation <- 1..9 do
+        "#{generation}\tMaintainer\t[disposition](x.md#y#{generation})\t" <>
+          "#{String.duplicate("a", 40)}\tgate-#{generation}"
+      end
+
+    eight = rows |> Enum.take(8) |> Enum.join("\n")
+    nine = Enum.join(rows, "\n")
+
+    # Direct A/R checks still reject a completed row arriving in one step.
+    refute Plan.supersedes?("gate generations", eight, nine)
+
+    assert History.reconcile_for_test(
+             [eight, nine],
+             "docs/plans/M1.md",
+             "merge",
+             "gate generations",
+             []
+           ) == nine
+
+    assert_raise Invalid, ~r/conflicting completed gate generations/, fn ->
+      History.reconcile_for_test(
+        [nil, nine],
+        "docs/plans/M1.md",
+        "merge",
+        "gate generations",
+        []
+      )
+    end
+
+    competing =
+      rows
+      |> List.replace_at(
+        8,
+        "9\tDelegate\t[disposition](x.md#other)\t" <>
+          "#{String.duplicate("b", 40)}\tother-gate"
+      )
+      |> Enum.join("\n")
+
+    assert_raise Invalid, ~r/conflicting completed gate generations/, fn ->
+      History.reconcile_for_test(
+        [nine, competing],
+        "docs/plans/M1.md",
+        "merge",
+        "gate generations",
+        []
+      )
+    end
+  end
+
   test "the in-review capsule does not widen authority either" do
     # Acceptance is the only transition that widens authorized work. If In review
     # derived a broader boundary, a reviewer's presence would authorise work.

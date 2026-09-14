@@ -1244,9 +1244,11 @@ defmodule Loopex.Checks.History do
   # accepted amendment unrepresentable -- the branch carrying it and the branch
   # without it meet with different anchors, which is the normal shape of landing
   # one. The gate generation governs the accepted gate, both plan envelopes, and
-  # the Acceptance rebind. Exactly one candidate must supersede every other, and
-  # anything else is still a conflict. Two sides at the same generation with
-  # different bytes remain irreconcilable.
+  # the Acceptance rebind. Exactly one candidate must supersede every other.
+  # A merge may also bring together two already completed gate-generation
+  # histories when the later one retains the earlier rows byte for byte. Their
+  # proposal and rebind steps were validated on their own parent lineage. Two
+  # sides at the same generation with different bytes remain irreconcilable.
   defp reconcile!(values, path, revision, label, adr_concepts) do
     amendable = plan_amendable?(label, path, adr_concepts)
 
@@ -1258,7 +1260,8 @@ defmodule Loopex.Checks.History do
         true ->
           Enum.find(values, fn candidate ->
             Enum.all?(values, fn other ->
-              other == candidate or Plan.supersedes?(label, other, candidate)
+              other == candidate or Plan.supersedes?(label, other, candidate) or
+                completed_generation_extension?(label, other, candidate)
             end)
           end)
       end
@@ -1271,6 +1274,19 @@ defmodule Loopex.Checks.History do
         winner
     end
   end
+
+  defp completed_generation_extension?("gate generations", earlier, later)
+       when is_binary(earlier) and is_binary(later) do
+    old = Plan.decode_generations(earlier)
+    new = Plan.decode_generations(later)
+
+    length(new) > length(old) and
+      Enum.take(new, length(old)) == old and
+      Enum.all?(old, &(not Plan.generation_proposal?(&1))) and
+      Enum.all?(new, &(not Plan.generation_proposal?(&1)))
+  end
+
+  defp completed_generation_extension?(_label, _earlier, _later), do: false
 
   defp require_absence_allowed!(path, revision, governed, from_parents) do
     if String.ends_with?(path, "-gate.md") do
