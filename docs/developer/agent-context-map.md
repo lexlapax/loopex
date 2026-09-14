@@ -3338,3 +3338,30 @@ row, this disposition, the derived ADR index status and the derived plan
 register capsule. It accepts no other ADR, does not accept the M4 plan pair or
 gate, authorizes no product implementation, and grants no merge, tag or
 release.
+
+<a id="disposition-adr-0024-acceptance-2026-09-13"></a>
+### ADR 0024 acceptance — 2026-09-13
+
+Under the same maintainer direction recorded in the
+[ADR 0023 acceptance](#disposition-adr-0023-acceptance-2026-09-13), given on
+2026-09-13 after the independent read-only review of pushed `m4` SHA
+`3503992cbc0de02ef98ba261e7a19fdb7123e220`, this transcribes the maintainer's
+acceptance of the exact Proposed
+[ADR 0024 Concept](../adr/0024-durable-interaction-lifecycle-and-host-policy-authority.md#concept)
+and [Technical depth](../adr/0024-durable-interaction-lifecycle-and-host-policy-authority-technical.md#technical-depth)
+pair at `3503992cbc0de02ef98ba261e7a19fdb7123e220`, with Concept SHA-256
+`3fbc7ee6f866e76f85681f527243d79f386b8d97bb7442825f109514367951b8`
+and Technical SHA-256
+`482171eba55a5c86ca62e028cb6ae2368966c9cf2a0cf1e76a225d2c12544f3d`.
+The maintainer is the accepting authority; the reviewer transcribed the record
+and accepted nothing. It accepts the session-owned durable interaction
+lifecycle, the bounded choice request, and the ceiling of two committed
+answer-then-defer transitions after the first question that the
+[pre-acceptance contract choices](#disposition-m4-preacceptance-contract-choices-2026-09-13)
+selected; a further defer resolves as denial.
+
+This administrative transition changes only the Concept status and Acceptance
+row, this disposition, the derived ADR index status and the derived plan
+register capsule. It accepts no other ADR, does not accept the M4 plan pair or
+gate, authorizes no product implementation, and grants no merge, tag or
+release.

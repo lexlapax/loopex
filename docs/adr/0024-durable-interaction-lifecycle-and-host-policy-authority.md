@@ -5,7 +5,7 @@
 
 Technical depth: [Interaction mechanics](0024-durable-interaction-lifecycle-and-host-policy-authority-technical.md#technical-depth).
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-08-24
 - **Decision owner:** Maintainer
 - **Prerequisite for:** `M4` acceptance
@@ -14,7 +14,7 @@ Technical depth: [Interaction mechanics](0024-durable-interaction-lifecycle-and-
 
 | Decision | Authority | Authority evidence | Bound bytes |
 | --- | --- | --- | --- |
-| Acceptance | — | — | — |
+| Acceptance | Maintainer | [disposition](../developer/agent-context-map.md#disposition-adr-0024-acceptance-2026-09-13) | candidate `3503992cbc0de02ef98ba261e7a19fdb7123e220`; concept `sha256:3fbc7ee6f866e76f85681f527243d79f386b8d97bb7442825f109514367951b8`; technical `sha256:482171eba55a5c86ca62e028cb6ae2368966c9cf2a0cf1e76a225d2c12544f3d` |
 
 <a id="concept-adr-0024-context"></a>
 ## Context
