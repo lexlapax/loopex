@@ -37,7 +37,10 @@ dependent work. It cannot replace an accepted ADR decision or released public
 contract. Each changed digest holder still lands its replacement row through
 that holder's own status-checked, exact-SHA-reviewed commit before the next
 holder proceeds. Historical bindings and unaffected evidence stay enforced. No
-acceptance, amendment or override is recorded by this opening.
+acceptance or override is recorded by this Open gate. Its one amendment,
+[Amendment 1](#amendment-1), is the pre-acceptance binding refresh that the
+shared-holder sequence requires of every holder whose bound bytes change; it
+precedes acceptance and is completed by the Acceptance row itself.
 
 ## Current Opening Observation
 
@@ -176,7 +179,7 @@ binding.
 | `b237fb3c5dbd4d903255317f4ab0c521f8458a3cd64c49266582221690b6435e` | `scripts/check_m4_fixtures_test.exs` |
 | `53d8219bdee584a3849a85a1102e405520d5dd0dfbe21d259434bc9edfc5fcc0` | `scripts/m1-exunit-runner.exs` |
 | `c36253cff3d74ddff1b330695edbc4bde0a4565c1412c67c1293b2fb7ca6129b` | `apps/loopex/test/m1_exunit_runner_test.exs` |
-| `fad47299b27a767785d2a6a776155038054f5457ee3ce0195a37ae667f7a9999` | `.tool-versions` |
+| `fea095ecec784a4440b872ad5f53a8da2cb4e13e43b6f05add5cfd75bb352879` | `.tool-versions` |
 | `ac93646ab8af588f848de9f824e8d56e287ce311f12ca695ff0d1119c82f4a46` | `scripts/fixtures/m4/client-toolchain.txt` |
 | `a4c286cf45442273011d8f51d25d867334cb3dc0ce3621e86564cba520e1bcff` | `apps/loopex_protocol/priv/schema/loopex-experimental-1.json` |
 | `a7f2dc36f9206dc48d258bc7b49a8d390ec3a0e93c51ed5a35f45153052e1951` | `apps/loopex_protocol/priv/vectors/loopex-experimental-1.json` |
@@ -396,3 +399,42 @@ milestone, so its debugging guidance directs agents to use runtime trace
 sessions and telemetry events for diagnosing Loopex rather than ad hoc
 printing; that edit changes development guidance only and names no authority
 change.
+
+<a id="amendment-1"></a>
+## Amendment 1 — Refresh the floor pair binding to Elixir 1.18.5 with OTP 27.3.4
+
+This Open gate has no Acceptance row to rebind, so this section is not a
+post-acceptance amendment. It is the binding refresh the shared-holder
+sequence requires of the last holder of `.tool-versions`: accepted
+[ADR 0026](../adr/0026-development-floor-refresh.md#concept) chose the
+validation pairs explicitly, Closed M0, M1, M2 and M3 settled the shared
+bytes through their
+[generation 7](../developer/agent-context-map.md#disposition-m0-gate-generation-7-2026-09-13),
+[generation 10](../developer/agent-context-map.md#disposition-m1-gate-generation-10-2026-09-14),
+[generation 11](../developer/agent-context-map.md#disposition-m2-gate-generation-11-2026-09-14)
+and
+[generation 4](../developer/agent-context-map.md#disposition-m3-gate-generation-4-2026-09-14),
+and Open M4 now refreshes its own Bound Artifacts row directly, as its
+technical plan's phase A prescribes.
+
+This refresh rebinds only the `.tool-versions` row above; the runner reads
+this table rather than embedding the digest, so no runner, support script,
+manifest, fixture, selector or witness identity changes. The technical plan's
+holder ledger, the developer setup guide's toolchain commands and the
+development contract's bootstrap-floor sentence are updated in the same
+revision to name the accepted pair; those are conforming explanations of the
+accepted decision, not new decisions.
+
+The revision carrying this refresh is the M4 acceptance candidate. Until the
+Acceptance row binds that exact revision, binding validation, bootstrap and
+every inherited gate that invokes them stop only on the shared binding
+sequence this last holder closes; the Acceptance transition is the rebind
+that completes it. At that transition, and not before, global status and
+bootstrap become eligible for green, and the inherited M0–M3 gates and this
+gate's own distinct red are proved on both pairs; a recorded M0 run under
+the new floor pair is part of that proof. This refresh records no acceptance
+and grants no waiver, closure or release.
+
+| Generation | Artifact | Rebound SHA-256 |
+| --- | --- | --- |
+| 1 | `.tool-versions` | `fea095ecec784a4440b872ad5f53a8da2cb4e13e43b6f05add5cfd75bb352879` |

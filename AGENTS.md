@@ -591,7 +591,8 @@ requires it, and those workflows stay thin wrappers over repository commands.
   and relevant documentation/protocol checks.
 - Tests use temporary `LOOPEX_HOME` and workspaces; helpers fail before touching
   real user state.
-- OTP 26+/Elixir 1.17+ is the bootstrap floor until an accepted ADR changes it;
+- OTP 27+/Elixir 1.18+ is the bootstrap floor, set by accepted ADR 0026, until
+  another accepted ADR changes it;
   repository validation, mirrored by CI, covers the floor and current supported
   versions.
 - Replaceable store, model, executor, broker, extension, and transport boundaries
