@@ -1323,13 +1323,13 @@ require_bound_artifact "$selector_runner_source" \
   53d8219bdee584a3849a85a1102e405520d5dd0dfbe21d259434bc9edfc5fcc0 \
   "bound standalone selector runner"
 require_bound_artifact "$evidence_verifier_source" \
-  e11f8e44d1402717bb151d878a0744778f55d3bd91f206420581801b7dbbb23d \
+  572d9fac0b4be1fb792db8f5f8ff3b760e588c9e35f4cb1850c03f73c2f1f661 \
   "bound M1 evidence verifier"
 require_bound_artifact apps/loopex/lib/mix/tasks/loopex.deps_budget.ex \
   2c62019cde03e118a2b5ff23ba24a5ee50d8f118172ae4d71ce6bed2f7be1011 \
   "bound dependency-direction reader"
 require_bound_artifact apps/loopex/test/m1_gate_evidence_test.exs \
-  3546e6601b74f54b2f8ea584e71aa65d0062156f07f21f2d291fc6af3bdb51be \
+  24494a97d4c69b3646aeb6d6495bbb92559fc7b8349b10d3ba7be4f4a747cb1b \
   "bound M1 mechanics corpus"
 require_bound_artifact apps/loopex/test/m1_exunit_runner_test.exs \
   c36253cff3d74ddff1b330695edbc4bde0a4565c1412c67c1293b2fb7ca6129b \

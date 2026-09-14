@@ -12,6 +12,17 @@ defmodule Loopex.M1EvidenceVerifier do
   @matrix_prefix "# M1 Toolchain Matrix\n\n#{@matrix_start}\n```text\n"
   @matrix_suffix "```\n#{@matrix_end}\n"
 
+  # Concept: a post-closure re-capture lives in its own block after the closure
+  # block, so the bytes closure bound stay exactly as closure bound them while
+  # the gate can still be re-proved on locked pairs that changed later.
+  # Technical depth: the re-capture block has the same six-line grammar under
+  # its own markers; its metadata line is `recapture` rather than `matrix`.
+  @recapture_start "<!-- loopex:m1-recapture:start -->"
+  @recapture_end "<!-- loopex:m1-recapture:end -->"
+  @recapture_prefix "\n#{@recapture_start}\n```text\n"
+  @recapture_suffix "```\n#{@recapture_end}\n"
+  @matrix_command "bash-p:scripts/check-m1-gate.sh"
+
   @empty_closure "| Closure | — | — | — |"
   @sha ~r/\A[0-9a-f]{40}\z/u
   @digest ~r/\A[0-9a-f]{64}\z/u
@@ -96,8 +107,8 @@ defmodule Loopex.M1EvidenceVerifier do
          :ok <- negative(root, @negative_path),
          {:ok, matrix} <- current_blob(root, @matrix_path),
          :ok <- canonical_text(matrix, @matrix_path),
-         {:ok, metadata, captures, m0_rows} <- matrix_document(matrix),
-         :ok <- validate_matrix(root, matrix, metadata, captures, m0_rows) do
+         {:ok, closure, recapture} <- matrix_document(matrix),
+         :ok <- validate_matrix(root, closure, recapture) do
       :ok
     end
   end
@@ -157,27 +168,89 @@ defmodule Loopex.M1EvidenceVerifier do
     end
   end
 
+  # Concept: the document is the closure block, then optionally exactly one
+  # re-capture block; nothing else may appear between or after them.
+  # Technical depth: each block is parsed by the same six-line grammar. The
+  # closure block's bytes are retained for the lifecycle comparison so that a
+  # later re-capture never changes what closure bound.
   defp matrix_document(bytes) do
-    with true <- String.starts_with?(bytes, @matrix_prefix),
-         true <- String.ends_with?(bytes, @matrix_suffix),
-         size when size >= 0 <-
-           byte_size(bytes) - byte_size(@matrix_prefix) - byte_size(@matrix_suffix),
-         body <- binary_part(bytes, byte_size(@matrix_prefix), size),
+    with {:ok, closure_bytes, closure_body, rest} <-
+           split_block(bytes, @matrix_prefix, @matrix_suffix),
+         {:ok, closure} <- parse_block(closure_body, "matrix"),
+         {:ok, recapture} <- recapture_document(rest) do
+      {:ok, Map.put(closure, :bytes, closure_bytes), recapture}
+    end
+  end
+
+  defp recapture_document(""), do: {:ok, nil}
+
+  defp recapture_document(rest) do
+    with {:ok, recapture_bytes, body, ""} <-
+           split_block(rest, @recapture_prefix, @recapture_suffix),
+         {:ok, recapture} <- parse_block(body, "recapture") do
+      {:ok, Map.put(recapture, :bytes, recapture_bytes)}
+    else
+      {:ok, _bytes, _body, _trailing} ->
+        {:error, "#{@matrix_path} carries bytes after its re-capture block"}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp split_block(bytes, prefix, suffix) do
+    with true <- String.starts_with?(bytes, prefix),
+         {index, _length} <- :binary.match(bytes, suffix),
+         body <- binary_part(bytes, byte_size(prefix), index - byte_size(prefix)),
          true <- String.ends_with?(body, "\n"),
          false <- String.ends_with?(body, "\n\n"),
-         lines <- body |> String.trim_trailing("\n") |> String.split("\n"),
-         [metadata_line, floor_capture, current_capture, linux_capture, floor_m0, current_m0] <-
+         block_size <- index + byte_size(suffix),
+         block <- binary_part(bytes, 0, block_size),
+         rest <- binary_part(bytes, block_size, byte_size(bytes) - block_size) do
+      {:ok, block, body, rest}
+    else
+      _other -> {:error, "#{@matrix_path} must use the exact M1 six-line fenced grammar"}
+    end
+  end
+
+  defp parse_block(body, kind) do
+    lines = body |> String.trim_trailing("\n") |> String.split("\n")
+
+    with [metadata_line, floor_capture, current_capture, linux_capture, floor_m0, current_m0] <-
            lines,
-         {:ok, metadata} <- parse_record(metadata_line, "matrix", @metadata_fields),
+         {:ok, metadata} <- parse_record(metadata_line, kind, @metadata_fields),
          {:ok, floor_capture} <- parse_record(floor_capture, "capture", @capture_fields),
          {:ok, current_capture} <- parse_record(current_capture, "capture", @capture_fields),
          {:ok, linux_capture} <- parse_record(linux_capture, "capture", @capture_fields),
          {:ok, floor_m0} <- parse_record(floor_m0, "m0", @m0_fields),
          {:ok, current_m0} <- parse_record(current_m0, "m0", @m0_fields) do
-      {:ok, metadata, [floor_capture, current_capture, linux_capture], [floor_m0, current_m0]}
+      {:ok,
+       %{
+         metadata: metadata,
+         captures: [floor_capture, current_capture, linux_capture],
+         m0_rows: [floor_m0, current_m0]
+       }}
     else
       {:error, reason} -> {:error, reason}
       _other -> {:error, "#{@matrix_path} must use the exact M1 six-line fenced grammar"}
+    end
+  end
+
+  # Concept: the closure block of any revision's matrix is comparable on its
+  # own, so a re-capture appended later leaves the closure comparison intact.
+  defp closure_block(bytes) do
+    case split_block(bytes, @matrix_prefix, @matrix_suffix) do
+      {:ok, block, _body, _rest} -> {:ok, block}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp recapture_block(bytes) do
+    with {:ok, _block, _body, rest} <- split_block(bytes, @matrix_prefix, @matrix_suffix),
+         {:ok, block, _body, ""} <- split_block(rest, @recapture_prefix, @recapture_suffix) do
+      {:ok, block}
+    else
+      _other -> {:error, "re-capture block is absent or malformed"}
     end
   end
 
@@ -203,20 +276,184 @@ defmodule Loopex.M1EvidenceVerifier do
     end
   end
 
-  defp validate_matrix(root, matrix, metadata, captures, m0_rows) do
+  # Concept: the closure block answers for the pairs locked when it was taken;
+  # the re-capture block answers for the pairs locked now.
+  # Technical depth: the closure captures are judged against `.tool-versions`
+  # at their own candidate, so a later floor refresh cannot make history false.
+  # When the current locked pairs differ from those, exactly one re-capture
+  # block taken after the closure transition on the current pairs is required,
+  # and when they do not differ a re-capture block is refused as unexplained.
+  defp validate_matrix(root, closure, recapture) do
+    metadata = closure.metadata
     candidate = metadata["candidate"]
 
     with :ok <- sha(candidate, "matrix candidate"),
          :ok <- ancestor(root, candidate, "matrix candidate"),
-         :ok <- exact(metadata["command"], "bash-p:scripts/check-m1-gate.sh", "matrix command"),
+         :ok <- exact(metadata["command"], @matrix_command, "matrix command"),
          :ok <- bound_artifacts(root, candidate, metadata),
-         {:ok, pairs} <- locked_pairs(root),
-         :ok <- captures(captures, pairs, candidate, metadata),
-         :ok <- m0_rows(root, m0_rows, pairs, candidate),
-         {:ok, evidence} <- evidence_commit(root, candidate, matrix),
-         :ok <- lifecycle(root, evidence, matrix, metadata) do
+         {:ok, pairs} <- pairs_at(root, candidate),
+         :ok <- captures(closure.captures, pairs, candidate, metadata, "0.0.0"),
+         :ok <- m0_rows(root, closure.m0_rows, pairs, candidate),
+         {:ok, evidence} <- evidence_commit(root, candidate, closure.bytes),
+         {:ok, transition} <- lifecycle(root, evidence, closure.bytes, metadata),
+         {:ok, current} <- current_pairs(root),
+         :ok <- recapture_required(pairs, current, recapture, transition),
+         :ok <- validate_recapture(root, recapture, current, transition) do
       :ok
     end
+  end
+
+  defp recapture_required(pairs, current, nil, _transition) when pairs == current, do: :ok
+
+  defp recapture_required(pairs, current, nil, _transition) when pairs != current,
+    do:
+      {:error,
+       "the locked pairs changed after the closure captures; a post-closure re-capture block on the current pairs is required"}
+
+  defp recapture_required(pairs, current, _recapture, _transition) when pairs == current,
+    do: {:error, "a re-capture block is admitted only after the locked pairs changed"}
+
+  defp recapture_required(_pairs, _current, _recapture, nil),
+    do: {:error, "a re-capture block is admitted only after the M1 closure transition"}
+
+  defp recapture_required(_pairs, _current, _recapture, _transition), do: :ok
+
+  defp validate_recapture(_root, nil, _current, _transition), do: :ok
+
+  defp validate_recapture(root, recapture, current, transition) do
+    metadata = recapture.metadata
+    candidate = metadata["candidate"]
+
+    with :ok <- sha(candidate, "re-capture candidate"),
+         :ok <- ancestor(root, candidate, "re-capture candidate"),
+         true <-
+           ancestor?(root, transition, candidate) ||
+             {:error, "re-capture candidate must descend from the M1 closure transition"},
+         :ok <- exact(metadata["command"], @matrix_command, "re-capture command"),
+         :ok <- bound_artifacts(root, candidate, metadata),
+         {:ok, pairs} <- pairs_at(root, candidate),
+         {:ok, locked} <- locked_pairs(root),
+         true <-
+           (pairs == current and pairs == locked) ||
+             {:error, "re-capture candidate does not lock the current toolchain pairs"},
+         {:ok, version} <- source_version(root, candidate),
+         :ok <- captures(recapture.captures, pairs, candidate, metadata, version),
+         :ok <- m0_rows(root, recapture.m0_rows, pairs, candidate),
+         {:ok, evidence} <- recapture_evidence_commit(root, candidate, recapture.bytes),
+         :ok <- recapture_retained(root, evidence, recapture.bytes) do
+      :ok
+    else
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  # Concept: a re-capture is evidence of the same shape as the closure
+  # captures: one evidence-only child E' of its candidate, retained unchanged
+  # by every later revision.
+  defp recapture_evidence_commit(root, candidate, block) do
+    with {:ok, head} <- head(root),
+         {:ok, commits} <- ancestry_commits(root, candidate, head) do
+      matches =
+        Enum.filter(commits, fn %{commit: commit, parents: parents} ->
+          parents == [candidate] and
+            changed_paths(root, candidate, commit) == {:ok, [@matrix_path]} and
+            match?({:ok, ^block}, committed_matrix_block(root, commit, &recapture_block/1))
+        end)
+
+      case matches do
+        [%{commit: evidence}] ->
+          {:ok, evidence}
+
+        [] ->
+          {:error, "no direct evidence-only child E' of the re-capture candidate reaches HEAD"}
+
+        _other ->
+          {:error,
+           "more than one evidence-only child E' of the re-capture candidate reaches HEAD"}
+      end
+    end
+  end
+
+  defp recapture_retained(root, evidence, block) do
+    with {:ok, head} <- head(root),
+         {:ok, commits} <- ancestry_commits(root, evidence, head) do
+      Enum.reduce_while(commits, :ok, fn %{commit: commit}, :ok ->
+        case committed_matrix_block(root, commit, &recapture_block/1) do
+          {:ok, ^block} ->
+            {:cont, :ok}
+
+          _other ->
+            {:halt,
+             {:error, "a descendant of re-capture evidence E' changed the re-capture block"}}
+        end
+      end)
+    end
+  end
+
+  defp committed_matrix_block(root, commit, extract) do
+    with {:ok, bytes} <- committed_blob(root, commit, @matrix_path) do
+      extract.(bytes)
+    end
+  end
+
+  defp source_version(root, candidate) do
+    with {:ok, bytes} <- committed_blob(root, candidate, "VERSION"),
+         version <- String.trim(bytes),
+         true <- Regex.match?(~r/\A[0-9]+\.[0-9]+\.[0-9]+\z/u, version) do
+      {:ok, version}
+    else
+      _other -> {:error, "VERSION at the re-capture candidate is not one exact source version"}
+    end
+  end
+
+  # Concept: the pairs locked now decide whether the closure captures still
+  # answer for the current toolchain or a re-capture is owed.
+  # Technical depth: the working tree's `.tool-versions` is read generically
+  # here; the exact locked-pair check stays where the running VM is matched and
+  # where a re-capture is admitted, so a historical tree with the old floor
+  # still validates its own closure captures.
+  defp current_pairs(root) do
+    with {:ok, bytes} <- current_blob(root, ".tool-versions"),
+         :ok <- canonical_text(bytes, ".tool-versions") do
+      pairs_from_tool_versions(bytes, "HEAD")
+    end
+  end
+
+  # Concept: the pairs a capture answers for are the pairs locked at its own
+  # candidate, read from that revision rather than from the working tree.
+  defp pairs_at(root, candidate) do
+    with {:ok, bytes} <- committed_blob(root, candidate, ".tool-versions"),
+         :ok <- canonical_text(bytes, ".tool-versions at #{candidate}") do
+      pairs_from_tool_versions(bytes, candidate)
+    end
+  end
+
+  defp pairs_from_tool_versions(bytes, candidate) do
+    declarations =
+      bytes
+      |> String.split("\n")
+      |> Enum.reject(fn line -> line == "" or String.starts_with?(line, "#") end)
+
+    with [
+           "elixir " <> floor_elixir,
+           "erlang " <> floor_otp,
+           "elixir " <> current_elixir,
+           "erlang " <> current_otp
+         ] <- declarations,
+         {:ok, floor} <- pair(floor_elixir, floor_otp),
+         {:ok, current} <- pair(current_elixir, current_otp) do
+      {:ok, [{"floor", floor}, {"current", current}]}
+    else
+      _other -> {:error, ".tool-versions at #{candidate} does not declare two locked pairs"}
+    end
+  end
+
+  defp pair(elixir_declaration, otp) do
+    elixir = elixir_declaration |> String.split("-otp-", parts: 2) |> hd()
+
+    if Regex.match?(@version, elixir) and Regex.match?(@version, otp),
+      do: {:ok, %{elixir: elixir, otp: otp}},
+      else: {:error, "a locked pair is not an exact version pair"}
   end
 
   # Concept: retained evidence answers for the revision it names, not for the
@@ -246,14 +483,14 @@ defmodule Loopex.M1EvidenceVerifier do
     end)
   end
 
-  defp captures(rows, pairs, candidate, metadata) do
+  defp captures(rows, pairs, candidate, metadata, version) do
     profiles = capture_profiles(pairs)
     expected_lanes = Enum.map(profiles, &elem(&1, 0))
 
     if Enum.map(rows, & &1["lane"]) != expected_lanes do
       {:error, "capture rows must be exactly floor, current, then linux-current"}
     else
-      with :ok <- validate_capture_rows(rows, profiles, candidate, metadata),
+      with :ok <- validate_capture_rows(rows, profiles, candidate, metadata, version),
            :ok <- capture_identities_agree(rows) do
         :ok
       end
@@ -268,7 +505,7 @@ defmodule Loopex.M1EvidenceVerifier do
     ]
   end
 
-  defp validate_capture_rows(rows, profiles, candidate, metadata) do
+  defp validate_capture_rows(rows, profiles, candidate, metadata, version) do
     Enum.zip(rows, profiles)
     |> Enum.reduce_while(:ok, fn {row, {lane, pair, os}}, :ok ->
       with :ok <- exact(row["lane"], lane, "capture lane"),
@@ -286,7 +523,7 @@ defmodule Loopex.M1EvidenceVerifier do
            :ok <- exact(row["os"], os, "#{lane} capture os"),
            :ok <- audit_token(row["arch"], "#{lane} capture arch"),
            :ok <- resource_limits(row["limits"], "#{lane} capture limits"),
-           :ok <- validate_capture_identity(row, lane) do
+           :ok <- validate_capture_identity(row, lane, version) do
         {:cont, :ok}
       else
         {:error, reason} -> {:halt, {:error, reason}}
@@ -294,20 +531,24 @@ defmodule Loopex.M1EvidenceVerifier do
     end)
   end
 
-  defp validate_capture_identity(row, lane) do
+  # Concept: build identities name the source version the capture sealed.
+  # Technical depth: the closure captures were sealed at `0.0.0`; a re-capture
+  # names the `VERSION` committed at its own candidate, so a stale or foreign
+  # version fails while a truthful later source version passes.
+  defp validate_capture_identity(row, lane, version) do
     with :ok <- audit_token(row["provider"], "#{lane} capture provider"),
          :ok <- audit_token(row["model"], "#{lane} capture model"),
          :ok <- audit_token(row["endpoint"], "#{lane} capture endpoint"),
          :ok <-
            exact(
              row["adapter_build"],
-             "loopex_llm_reqllm@0.0.0",
+             "loopex_llm_reqllm@#{version}",
              "#{lane} capture adapter_build"
            ),
          :ok <-
            exact(
              row["executor_build"],
-             "loopex_executor_local@0.0.0",
+             "loopex_executor_local@#{version}",
              "#{lane} capture executor_build"
            ),
          :ok <- audit_token(row["executor_identity"], "#{lane} capture executor_identity"),
@@ -371,7 +612,7 @@ defmodule Loopex.M1EvidenceVerifier do
         Enum.filter(commits, fn %{commit: commit, parents: parents} ->
           parents == [candidate] and
             changed_paths(root, candidate, commit) == {:ok, [@matrix_path]} and
-            committed_blob(root, commit, @matrix_path) == {:ok, matrix}
+            match?({:ok, ^matrix}, committed_matrix_block(root, commit, &closure_block/1))
         end)
 
       case matches do
@@ -396,7 +637,7 @@ defmodule Loopex.M1EvidenceVerifier do
       case state do
         :empty ->
           if head == evidence,
-            do: :ok,
+            do: {:ok, nil},
             else: {:error, "an open descendant of evidence commit E is not an M1 gate candidate"}
 
         :closed ->
@@ -428,7 +669,7 @@ defmodule Loopex.M1EvidenceVerifier do
                :ok <-
                  closed_candidate(current_row, transition, evidence, metadata["gate_sha256"]),
                :ok <- retained_history(root, commits, transition, matrix, current_row) do
-            :ok
+            {:ok, transition}
           else
             false ->
               {:error, "the first closure completion is not the exact transition-only child T"}
@@ -501,7 +742,7 @@ defmodule Loopex.M1EvidenceVerifier do
       end)
 
     Enum.reduce_while(descendants, :ok, fn %{commit: commit}, :ok ->
-      with {:ok, ^matrix} <- committed_blob(root, commit, @matrix_path),
+      with {:ok, ^matrix} <- committed_matrix_block(root, commit, &closure_block/1),
            {:ok, plan} <- committed_blob(root, commit, @plan_path),
            {:ok, :closed, ^closure} <- closure_row(plan) do
         {:cont, :ok}
@@ -509,7 +750,7 @@ defmodule Loopex.M1EvidenceVerifier do
         _other ->
           {:halt,
            {:error,
-            "a descendant of transition T changed the retained matrix or M1 Closure binding"}}
+            "a descendant of transition T changed the retained closure block or M1 Closure binding"}}
       end
     end)
   end

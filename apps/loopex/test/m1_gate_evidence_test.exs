@@ -181,7 +181,11 @@ defmodule Loopex.M1GateEvidenceTest do
     _kind, _reason -> {"M1 evidence verifier refused: evidence is unavailable\n", 1}
   end
 
-  defp evidence_root do
+  @current_pairs %{floor: {"1.18.5", "27.3.4", "15.2.7"}, current: {"1.20.3", "29.0.5", "17.0.5"}}
+  @old_pairs %{floor: {"1.17.0", "26.0", "14.0"}, current: {"1.20.3", "29.0.5", "17.0.5"}}
+  @old_tool_versions "elixir 1.17.0-otp-26\nerlang 26.0\nelixir 1.20.3-otp-29\nerlang 29.0.5\n"
+
+  defp evidence_root(options \\ []) do
     root = Path.join(System.tmp_dir!(), "m1-evidence-#{System.unique_integer([:positive])}")
     File.mkdir_p!(root)
     git!(root, ["init", "-q"])
@@ -207,7 +211,9 @@ defmodule Loopex.M1GateEvidenceTest do
       "scripts/m1-exunit-runner.exs" => "# fixture selector runner\n",
       "scripts/m1-evidence-verifier.exs" => File.read!(verifier()),
       "apps/loopex/lib/mix/tasks/loopex.deps_budget.ex" => "# fixture dependency authority\n",
-      ".tool-versions" => File.read!(Path.join(repo_root(), ".tool-versions")),
+      ".tool-versions" =>
+        Keyword.get(options, :tool_versions, File.read!(Path.join(repo_root(), ".tool-versions"))),
+      "VERSION" => "0.0.0\n",
       "docs/evidence/M1-negative-demonstrations.md" => negative_document(base),
       "docs/evidence/M1-toolchain-matrix.md" => "capture pending\n",
       "docs/plans/M1.md" => plan_document(nil, nil),
@@ -240,7 +246,7 @@ defmodule Loopex.M1GateEvidenceTest do
 
     File.write!(
       Path.join(root, "docs/evidence/M1-toolchain-matrix.md"),
-      matrix_document(context)
+      matrix_document(context, Keyword.get(options, :pairs, @current_pairs))
     )
 
     evidence = commit!(root, "fixture evidence", ["docs/evidence/M1-toolchain-matrix.md"])
@@ -350,32 +356,44 @@ defmodule Loopex.M1GateEvidenceTest do
     """
   end
 
-  defp matrix_document(context) do
-    floor_identity = identity_suffix(context.capture_identity)
+  defp matrix_document(context, pairs) do
+    "# M1 Toolchain Matrix\n\n<!-- loopex:m1-matrix:start -->\n```text\n" <>
+      evidence_lines("matrix", context, context.candidate, pairs, "0.0.0") <>
+      "```\n<!-- loopex:m1-matrix:end -->\n"
+  end
+
+  # Concept: a re-capture block is the same six lines under its own markers,
+  # naming a post-closure candidate, the pairs locked there and that revision's
+  # source version.
+  defp recapture_document(context, candidate, pairs, version) do
+    "\n<!-- loopex:m1-recapture:start -->\n```text\n" <>
+      evidence_lines("recapture", context, candidate, pairs, version) <>
+      "```\n<!-- loopex:m1-recapture:end -->\n"
+  end
+
+  defp evidence_lines(kind, context, candidate, pairs, version) do
+    {floor_elixir, floor_otp, floor_erts} = pairs.floor
+    {current_elixir, current_otp, current_erts} = pairs.current
+
+    identity =
+      context.capture_identity
+      |> Map.put("adapter_build", "loopex_llm_reqllm@#{version}")
+      |> Map.put("executor_build", "loopex_executor_local@#{version}")
+
+    floor_identity = identity_suffix(identity)
 
     current_identity =
-      context.capture_identity
-      |> Map.put("recorded", "2026-08-21T12:34:57Z")
-      |> identity_suffix()
+      identity |> Map.put("recorded", "2026-08-21T12:34:57Z") |> identity_suffix()
 
-    linux_identity =
-      context.capture_identity
-      |> Map.put("recorded", "2026-08-21T12:34:58Z")
-      |> identity_suffix()
+    linux_identity = identity |> Map.put("recorded", "2026-08-21T12:34:58Z") |> identity_suffix()
 
     """
-    # M1 Toolchain Matrix
-
-    <!-- loopex:m1-matrix:start -->
-    ```text
-    matrix candidate=#{context.candidate} gate_sha256=#{context.gate_sha256} runner_sha256=#{context.runner_sha256} launcher_sha256=#{context.launcher_sha256} exunit_runner_sha256=#{context.exunit_runner_sha256} deps_budget_sha256=#{context.deps_budget_sha256} verifier_sha256=#{context.verifier_sha256} tool_versions_sha256=#{context.tool_versions_sha256} command=bash-p:scripts/check-m1-gate.sh
-    capture lane=floor candidate=#{context.candidate} gate_sha256=#{context.gate_sha256} command=bash-p:scripts/check-m1-gate.sh elixir=1.18.5 otp=27.3.4 erts=15.2.7 seed=11 executed=101 verdict=CAPTURE exit=0 wall=1s os=darwin arch=arm64 limits=core-soft-0,core-hard-0,nofile-256,nproc-709 #{floor_identity}
-    capture lane=current candidate=#{context.candidate} gate_sha256=#{context.gate_sha256} command=bash-p:scripts/check-m1-gate.sh elixir=1.20.3 otp=29.0.5 erts=17.0.5 seed=12 executed=102 verdict=CAPTURE exit=0 wall=2s os=darwin arch=x86_64 limits=core-soft-0,core-hard-0,nofile-unlimited,nproc-709 #{current_identity}
-    capture lane=linux-current candidate=#{context.candidate} gate_sha256=#{context.gate_sha256} command=bash-p:scripts/check-m1-gate.sh elixir=1.20.3 otp=29.0.5 erts=17.0.5 seed=13 executed=103 verdict=CAPTURE exit=0 wall=3s os=linux arch=aarch64 limits=core-soft-0,core-hard-0,nofile-1048576,nproc-unlimited #{linux_identity}
-    m0 lane=floor candidate=#{context.candidate} gate_sha256=#{context.m0_gate_sha256} command=bash:scripts/check-m0-gate.sh elixir=1.18.5 otp=27.3.4 provider=fixture-provider model=fixture-model endpoint=https://example.invalid verdict=GREEN exit=0
-    m0 lane=current candidate=#{context.candidate} gate_sha256=#{context.m0_gate_sha256} command=bash:scripts/check-m0-gate.sh elixir=1.20.3 otp=29.0.5 provider=fixture-provider model=fixture-model endpoint=https://example.invalid verdict=GREEN exit=0
-    ```
-    <!-- loopex:m1-matrix:end -->
+    #{kind} candidate=#{candidate} gate_sha256=#{context.gate_sha256} runner_sha256=#{context.runner_sha256} launcher_sha256=#{context.launcher_sha256} exunit_runner_sha256=#{context.exunit_runner_sha256} deps_budget_sha256=#{context.deps_budget_sha256} verifier_sha256=#{context.verifier_sha256} tool_versions_sha256=#{context.tool_versions_sha256} command=bash-p:scripts/check-m1-gate.sh
+    capture lane=floor candidate=#{candidate} gate_sha256=#{context.gate_sha256} command=bash-p:scripts/check-m1-gate.sh elixir=#{floor_elixir} otp=#{floor_otp} erts=#{floor_erts} seed=11 executed=101 verdict=CAPTURE exit=0 wall=1s os=darwin arch=arm64 limits=core-soft-0,core-hard-0,nofile-256,nproc-709 #{floor_identity}
+    capture lane=current candidate=#{candidate} gate_sha256=#{context.gate_sha256} command=bash-p:scripts/check-m1-gate.sh elixir=#{current_elixir} otp=#{current_otp} erts=#{current_erts} seed=12 executed=102 verdict=CAPTURE exit=0 wall=2s os=darwin arch=x86_64 limits=core-soft-0,core-hard-0,nofile-unlimited,nproc-709 #{current_identity}
+    capture lane=linux-current candidate=#{candidate} gate_sha256=#{context.gate_sha256} command=bash-p:scripts/check-m1-gate.sh elixir=#{current_elixir} otp=#{current_otp} erts=#{current_erts} seed=13 executed=103 verdict=CAPTURE exit=0 wall=3s os=linux arch=aarch64 limits=core-soft-0,core-hard-0,nofile-1048576,nproc-unlimited #{linux_identity}
+    m0 lane=floor candidate=#{candidate} gate_sha256=#{context.m0_gate_sha256} command=bash:scripts/check-m0-gate.sh elixir=#{floor_elixir} otp=#{floor_otp} provider=fixture-provider model=fixture-model endpoint=https://example.invalid verdict=GREEN exit=0
+    m0 lane=current candidate=#{candidate} gate_sha256=#{context.m0_gate_sha256} command=bash:scripts/check-m0-gate.sh elixir=#{current_elixir} otp=#{current_otp} provider=fixture-provider model=fixture-model endpoint=https://example.invalid verdict=GREEN exit=0
     """
   end
 
@@ -893,6 +911,122 @@ defmodule Loopex.M1GateEvidenceTest do
     assert {output, status} = run_verifier(split.root, args.(split))
     assert status != 0
     assert output =~ "more than one first closure completion"
+  end
+
+  test "M1 evidence verifier admits one post-closure re-capture only after the locked pairs change" do
+    args = fn root ->
+      [
+        "--root",
+        root,
+        "--matrix",
+        "docs/evidence/M1-toolchain-matrix.md",
+        "--negative",
+        "docs/evidence/M1-negative-demonstrations.md"
+      ]
+    end
+
+    matrix_path = "docs/evidence/M1-toolchain-matrix.md"
+    current_tool_versions = File.read!(Path.join(repo_root(), ".tool-versions"))
+
+    # Closure captured on the old floor pair; the closure block answers for it.
+    context = evidence_root(tool_versions: @old_tool_versions, pairs: @old_pairs)
+    transition = close_m1(context)
+    assert {"M1 evidence OK\n", 0} = run_verifier(context.root, args.(context.root))
+
+    # The floor refresh lands after closure: without a re-capture the retained
+    # captures answer for pairs that are no longer locked.
+    File.write!(Path.join(context.root, ".tool-versions"), current_tool_versions)
+    refresh = commit!(context.root, "fixture floor refresh", [".tool-versions"])
+    assert {output, status} = run_verifier(context.root, args.(context.root))
+    assert status != 0
+    assert output =~ "re-capture block on the current pairs is required"
+
+    refreshed = %{context | tool_versions_sha256: digest(current_tool_versions)}
+    closure_matrix = File.read!(Path.join(context.root, matrix_path))
+    recapture = recapture_document(refreshed, refresh, @current_pairs, "0.0.0")
+    File.write!(Path.join(context.root, matrix_path), closure_matrix <> recapture)
+    evidence = commit!(context.root, "fixture re-capture evidence", [matrix_path])
+    assert {"M1 evidence OK\n", 0} = run_verifier(context.root, args.(context.root))
+
+    # An ordinary later commit keeps the evidence valid; a later change to the
+    # re-capture block or to the closure block does not.
+    File.write!(Path.join(context.root, "later.txt"), "later work\n")
+    later = commit!(context.root, "fixture later work", ["later.txt"])
+    assert {"M1 evidence OK\n", 0} = run_verifier(context.root, args.(context.root))
+
+    recapture_marker = "<!-- loopex:m1-recapture:start -->"
+
+    drift_recapture = fn bytes ->
+      [head, tail] = String.split(bytes, recapture_marker, parts: 2)
+      head <> recapture_marker <> String.replace(tail, "wall=3s", "wall=4s", global: false)
+    end
+
+    for {label, edit, expected} <- [
+          {"re-capture", drift_recapture, "no direct evidence-only child E'"},
+          {"closure", &String.replace(&1, "wall=1s", "wall=9s", global: false),
+           "no direct evidence-only child E of source candidate C"}
+        ] do
+      git!(context.root, ["reset", "--hard", "--quiet", later])
+      bytes = File.read!(Path.join(context.root, matrix_path))
+      File.write!(Path.join(context.root, matrix_path), edit.(bytes))
+      commit!(context.root, "fixture #{label} drift", [matrix_path])
+      assert {output, status} = run_verifier(context.root, args.(context.root))
+      assert status != 0, "#{label} drift unexpectedly passed"
+      assert output =~ expected
+    end
+
+    # A re-capture must descend from the closure transition, be captured on
+    # the current pairs, name the source version at its candidate, and land as
+    # an evidence-only child.
+    negatives = [
+      {"pre-closure candidate",
+       recapture_document(refreshed, context.candidate, @current_pairs, "0.0.0"),
+       "descend from the M1 closure transition"},
+      {"old pairs", recapture_document(refreshed, refresh, @old_pairs, "0.0.0"),
+       "floor capture Elixir"},
+      {"foreign version", recapture_document(refreshed, refresh, @current_pairs, "9.9.9"),
+       "adapter_build"},
+      {"stale tool_versions digest",
+       recapture_document(context, refresh, @current_pairs, "0.0.0"),
+       "tool-versions at source candidate"}
+    ]
+
+    for {label, block, expected} <- negatives do
+      git!(context.root, ["reset", "--hard", "--quiet", refresh])
+      File.write!(Path.join(context.root, matrix_path), closure_matrix <> block)
+      commit!(context.root, "fixture #{label}", [matrix_path])
+      assert {output, status} = run_verifier(context.root, args.(context.root))
+      assert status != 0, "#{label} unexpectedly passed"
+      assert output =~ expected
+    end
+
+    git!(context.root, ["reset", "--hard", "--quiet", refresh])
+    File.write!(Path.join(context.root, matrix_path), closure_matrix <> recapture)
+    File.write!(Path.join(context.root, "bundled.txt"), "bundled byte\n")
+    commit!(context.root, "fixture bundled re-capture", [matrix_path, "bundled.txt"])
+    assert {output, status} = run_verifier(context.root, args.(context.root))
+    assert status != 0
+    assert output =~ "no direct evidence-only child E'"
+
+    # Without a floor change a re-capture block has nothing to explain.
+    unchanged = evidence_root()
+    close_m1(unchanged)
+    unchanged_matrix = File.read!(Path.join(unchanged.root, matrix_path))
+    File.write!(Path.join(unchanged.root, "later.txt"), "later work\n")
+    unchanged_candidate = commit!(unchanged.root, "fixture later work", ["later.txt"])
+
+    File.write!(
+      Path.join(unchanged.root, matrix_path),
+      unchanged_matrix <>
+        recapture_document(unchanged, unchanged_candidate, @current_pairs, "0.0.0")
+    )
+
+    commit!(unchanged.root, "fixture unexplained re-capture", [matrix_path])
+    assert {output, status} = run_verifier(unchanged.root, args.(unchanged.root))
+    assert status != 0
+    assert output =~ "admitted only after the locked pairs changed"
+
+    assert is_binary(transition) and is_binary(evidence)
   end
 
   test "M1 evidence verifier binds each negative mechanism to committed and restored bytes" do
