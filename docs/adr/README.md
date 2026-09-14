@@ -11,7 +11,7 @@ a decision adds a new record rather than rewriting the old one.
 | # | Decision | Status | Concept | Technical depth |
 | --- | --- | --- | --- | --- |
 | 0001 | Repository and application layout | Accepted | [Decision](0001-repository-and-application-layout.md#concept) | [Technical depth](0001-repository-and-application-layout-technical.md#technical-depth) |
-| 0002 | Bootstrap runtime floor and version matrix | Accepted | [Decision](0002-bootstrap-runtime-floor.md#concept) | [Technical depth](0002-bootstrap-runtime-floor-technical.md#technical-depth) |
+| 0002 | Bootstrap runtime floor and version matrix | Accepted (partially superseded by 0026) | [Decision](0002-bootstrap-runtime-floor.md#concept) | [Technical depth](0002-bootstrap-runtime-floor-technical.md#technical-depth) |
 | 0003 | Extension contract boundary and distribution constraints | Accepted | [Decision](0003-extension-contract-boundary.md#concept) | [Technical depth](0003-extension-contract-boundary-technical.md#technical-depth) |
 | 0004 | Plan amendment and supersession | Proposed (parked) | [Decision](0004-plan-amendment-supersession.md#concept) | [Technical depth](0004-plan-amendment-supersession-technical.md#technical-depth) |
 | 0005 | Milestone supersession | Proposed (parked) | [Decision](0005-milestone-supersession.md#concept) | [Technical depth](0005-milestone-supersession-technical.md#technical-depth) |
@@ -35,7 +35,7 @@ a decision adds a new record rather than rewriting the old one.
 | 0023 | Experimental public session protocol | Accepted | [Decision](0023-experimental-public-session-protocol.md#concept) | [Technical depth](0023-experimental-public-session-protocol-technical.md#technical-depth) |
 | 0024 | Durable interaction lifecycle and host-policy authority | Accepted | [Decision](0024-durable-interaction-lifecycle-and-host-policy-authority.md#concept) | [Technical depth](0024-durable-interaction-lifecycle-and-host-policy-authority-technical.md#technical-depth) |
 | 0025 | Resource packs and skill admission | Accepted | [Decision](0025-resource-packs-and-skill-admission.md#concept) | [Technical depth](0025-resource-packs-and-skill-admission-technical.md#technical-depth) |
-| 0026 | Development floor refresh | Proposed | [Decision](0026-development-floor-refresh.md#concept) | [Technical depth](0026-development-floor-refresh-technical.md#technical-depth) |
+| 0026 | Development floor refresh | Accepted | [Decision](0026-development-floor-refresh.md#concept) | [Technical depth](0026-development-floor-refresh-technical.md#technical-depth) |
 | 0027 | Provider permit retirement | Accepted | [Decision](0027-provider-permit-retirement.md#concept) | [Technical depth](0027-provider-permit-retirement-technical.md#technical-depth) |
 | 0028 | Bounded artifact retrieval | Proposed | [Decision](0028-bounded-artifact-retrieval.md#concept) | [Technical depth](0028-bounded-artifact-retrieval-technical.md#technical-depth) |
 | 0029 | Bounded provider failure diagnostics | Accepted | [Decision](0029-bounded-provider-failure-diagnostics.md#concept) | [Technical depth](0029-bounded-provider-failure-diagnostics-technical.md#technical-depth) |

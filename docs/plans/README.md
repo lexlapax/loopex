@@ -22,9 +22,9 @@ integrated product baseline.
 | --- | --- |
 | Integrated phase | Closed milestone product baseline |
 | Last closed product checkpoint | `M3` — 2026-09-13 |
-| Blockers | [ADR 0026](../adr/0026-development-floor-refresh.md#concept), [ADR 0028](../adr/0028-bounded-artifact-retrieval.md#concept), and [ADR 0030](../adr/0030-observability-tracing-and-telemetry.md#concept) must be accepted before the `M4` plan pair and gate can be accepted |
+| Blockers | [ADR 0028](../adr/0028-bounded-artifact-retrieval.md#concept) and [ADR 0030](../adr/0030-observability-tracing-and-telemetry.md#concept) must be accepted before the `M4` plan pair and gate can be accepted |
 | Authorized work | Explicitly authorized planning, ADR, bootstrap, and review work only; no product implementation |
-| Next maintainer decision | Disposition ADR 0026, ADR 0028, and ADR 0030 |
+| Next maintainer decision | Disposition ADR 0028 and ADR 0030 |
 | Next transition | After the prerequisites are accepted, accept or reject the `M4` plan pair and gate |
 | Validation | `bash scripts/check-bootstrap.sh` |
 <!-- loopex:current-status:end -->

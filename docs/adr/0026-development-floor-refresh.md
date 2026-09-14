@@ -3,7 +3,7 @@
 
 Technical depth: [Development floor refresh mechanics](0026-development-floor-refresh-technical.md#technical-depth).
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-09-09
 - **Decision owner:** Maintainer
 - **Supersedes:** 0002
@@ -47,4 +47,4 @@ Technical depth: [Compatibility mechanics](0026-development-floor-refresh-techni
 
 | Decision | Authority | Authority evidence | Bound bytes |
 | --- | --- | --- | --- |
-| Acceptance | — | — | — |
+| Acceptance | Maintainer | [disposition](../developer/agent-context-map.md#disposition-adr-0026-acceptance-2026-09-13) | candidate `3503992cbc0de02ef98ba261e7a19fdb7123e220`; concept `sha256:ad0d3c48ee0ae9ef8ed8a713827949d32014dfb2eed8e8f2255a263bd607629c`; technical `sha256:8fb22a6cd1cdd7a5cf6b4d2da017ee4034746af9efc216f5d0f2aac221aa1d1c` |

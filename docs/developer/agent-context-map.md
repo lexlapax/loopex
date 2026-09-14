@@ -3365,3 +3365,33 @@ row, this disposition, the derived ADR index status and the derived plan
 register capsule. It accepts no other ADR, does not accept the M4 plan pair or
 gate, authorizes no product implementation, and grants no merge, tag or
 release.
+
+<a id="disposition-adr-0026-acceptance-2026-09-13"></a>
+### ADR 0026 acceptance — 2026-09-13
+
+Under the same maintainer direction recorded in the
+[ADR 0023 acceptance](#disposition-adr-0023-acceptance-2026-09-13), given on
+2026-09-13 after the independent read-only review of pushed `m4` SHA
+`3503992cbc0de02ef98ba261e7a19fdb7123e220`, this transcribes the maintainer's
+acceptance of the exact Proposed
+[ADR 0026 Concept](../adr/0026-development-floor-refresh.md#concept)
+and [Technical depth](../adr/0026-development-floor-refresh-technical.md#technical-depth)
+pair at `3503992cbc0de02ef98ba261e7a19fdb7123e220`, with Concept SHA-256
+`ad0d3c48ee0ae9ef8ed8a713827949d32014dfb2eed8e8f2255a263bd607629c`
+and Technical SHA-256
+`8fb22a6cd1cdd7a5cf6b4d2da017ee4034746af9efc216f5d0f2aac221aa1d1c`.
+The maintainer is the accepting authority; the reviewer transcribed the record
+and accepted nothing. It accepts the explicit floor and current validation
+pairs, Elixir 1.18.5 with OTP 27.3.4 and Elixir 1.20.3 with OTP 29.0.5, in
+place of ADR 0002's derived pin rule. The pins in `.tool-versions` do not
+move here: they change only through the phase A holder transactions the M4
+technical plan names, Closed M0 through M3 in register order and then Open
+M4, each with matrix evidence on both pairs. Until those settle, the
+bootstrap floor sentence in `AGENTS.md` and every bound `.tool-versions`
+byte remain as they are.
+
+This administrative transition changes only the Concept status and Acceptance
+row, this disposition, the derived ADR index statuses and the derived plan
+register capsule. It accepts no other ADR, does not accept the M4 plan pair or
+gate, approves no holder transaction, authorizes no product implementation,
+and grants no merge, tag or release.
