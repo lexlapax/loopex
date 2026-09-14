@@ -4002,3 +4002,30 @@ This transcribes that answer as acceptance of Amendment 2 under
 digests and the amended gate digest; it changes no lifecycle state, outcome,
 selector, witness, limit or client pin, and grants no closure, integration,
 tag or release.
+
+<a id="disposition-m2-gate-generation-12-2026-09-14"></a>
+### M2 gate generation 12 acceptance — 2026-09-14
+
+Working M4's Workstream 0 baseline on branch `m4`, the implementer found that
+the Closed M2 gate, like M1's, could not be re-proved under the refreshed
+floor by running anything: its runner judged the closure captures against
+its current lane literals while its evidence lifecycle admitted only the
+evidence commit whose four blobs stay byte-identical for ever. The maintainer
+had already chosen the second-evidence-block design for M1 generation 11, and
+the implementer presented M2's proposal `A` at `a8be26ccd11e318a5497193bf3e3d087ead20bee` on the same
+design with this evidence: the rewritten runner's syntax passing, its bound
+isolation and lifecycle corpus green on the current pair (eight cases, one
+new), formatting, agent-bootstrap, commit-message and hygiene checks passing,
+and the full status walk at `A` stopping only on the pending generation row.
+The maintainer answered **"Accept a8be26c (Recommended)"**.
+
+This accepts generation 12 alone under `amendment-transaction-v2`: the runner
+reads the pairs each evidence block answers for from `.tool-versions` at that
+block's own candidate, admits exactly one post-closure re-capture block taken
+on the current pairs at a descendant of the closure transition and retained
+by every later revision, refuses a re-capture while the locked pairs are
+unchanged, and declares its absence the red once they differ. The Acceptance
+and Closure rows, every earlier generation and every historical revision
+remain exactly as recorded. This row binds the proposal; the re-capture
+itself and the M0 and M1 re-proofs it records follow as evidence commit `E'`
+and are not accepted here. It grants no closure, integration, tag or release.
