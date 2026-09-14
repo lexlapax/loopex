@@ -3853,3 +3853,57 @@ author remains owed before integration. This standalone disposition changes
 nothing else and receives independent exact-SHA review before integration
 relies on it. It grants no merge to `main`, tag, publication or release, and
 implies no approval of any other restriction, plan, ADR or closure.
+
+<a id="override-disposition-m4-m1-m2-inherited-reproof-waiver-2026-09-14"></a>
+### M1 and M2 inherited re-proof waived for the M4 acceptance checkpoint — 2026-09-14
+
+When the deferred lanes above were prepared, the reviewer found in the gate
+code that the Closed M1 and M2 gates cannot be re-proved green under the
+refreshed floor by running anything. The M1 evidence verifier bound at
+generation 10 requires the retained capture rows to sit on the current locked
+pairs, Elixir 1.18.5 with OTP 27.3.4 and Elixir 1.20.3 with OTP 29.0.5, and
+in the same validation requires M1's Closure row to bind the evidence commit
+those captures came from; the captures that closure bound were taken on
+Elixir 1.17.0 with OTP 26.0, and a fresh capture set would need an evidence
+commit that the immutable Closure row can never name. The M2 runner bound at
+generation 11 has the same shape: its evidence lifecycle admits only an
+evidence commit whose plan is still `In review` with an empty Closure row,
+which is true of the closure-time captures alone, and those were recorded
+on the old floor pair its Darwin floor lane no longer accepts. The M3 and M4
+full gates invoke both closed gates through the closed-gates aggregate, so
+neither can complete its inherited step while this holds. Presented with
+this as a decision packet with three options, the maintainer explicitly
+directed:
+
+> 1. waive m1 m2 re-proof approved. let's do it as a baseline floor when
+> implementing m4.
+
+Under the [explicit maintainer override](../../AGENTS.md#maintainer-override),
+this names the continuing development-time requirement it replaces: the
+part of the
+[inherited-evidence deferral](#override-disposition-m4-inherited-evidence-before-integration-2026-09-14)
+that required the real-provider lanes of the inherited M1 and M2 gates on
+both installed pairs to run before the governance-only M4 acceptance
+checkpoint integrates to `main`. For that integration those two re-proofs are
+**waived, not passed**. As a consequence the M3 full gate and the M4 full gate
+cannot run their inherited step at this checkpoint, so M3's real-lane green
+and M4's real-lane red are likewise unavailable evidence here, not passed and
+not waived by name; M4's declared opening red is carried by its preflight
+role, which runs no inherited gate. What is still required before
+integration and is not waived: the M0 gate green under both pairs at a pushed
+revision, with the floor-pair run recorded in
+[the matrix evidence](../evidence/M0-toolchain-matrix.md), the bootstrap
+aggregate green, and M4 inspection and preflight at that revision.
+
+Successor obligation, recorded from the same instruction: repairing the two
+runners is a baseline of M4 implementation, not a later milestone. Before M4
+closure, M1 and M2 each gain a gate generation under
+`amendment-transaction-v2` whose verifier or runner admits a post-closure
+re-capture set under the currently locked pairs without touching the
+immutable Closure rows, then the captures run on both hosts and the
+inherited aggregate is proved green at an M4 revision; until that lands, M4
+closure cannot claim inherited green and any M1 or M2 regression under the
+new floor is unobserved. This override adds no product change, converts no
+red into a pass, reopens no lifecycle state, and grants no merge to `main`,
+tag, publication or release. It is one standalone commit and receives
+independent exact-SHA review before integration relies on it.
