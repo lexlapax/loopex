@@ -387,6 +387,51 @@ defmodule Loopex.InteractionLifecycleTest do
              })
   end
 
+  defmodule AlwaysDeferringPolicy do
+    @moduledoc false
+    @behaviour Loopex.Policy
+
+    @impl Loopex.Policy
+    def decide(_request) do
+      {:defer,
+       %{
+         kind: :choice,
+         prompt: "Ask again?",
+         choices: [%{id: "allow", label: "Allow once"}],
+         expires_in_ms: 60_000
+       }}
+    end
+  end
+
+  test "successive answer and defer rounds stop at the exact bound with a stable refusal" do
+    fixture = loop_fixture(AlwaysDeferringPolicy)
+    {session_id, attachment} = loop_session(fixture)
+
+    assert {:accepted, "p1"} =
+             Loopex.command(attachment, %{type: :prompt, command_id: "p1", content: "do it"})
+
+    # Three questions is the whole allowance: the first, and two more after an
+    # answer. Answering the third does not buy a fourth.
+    first = await_nth_request(fixture, session_id, 1)
+    answer(attachment, "answer-1", first)
+
+    second = await_nth_request(fixture, session_id, 2)
+    assert second["interaction_id"] != first["interaction_id"]
+    answer(attachment, "answer-2", second)
+
+    third = await_nth_request(fixture, session_id, 3)
+    assert third["interaction_id"] != second["interaction_id"]
+    answer(attachment, "answer-3", third)
+
+    tool_finished = await_event(fixture, session_id, "tool.finished", 8_000)
+    assert tool_finished["outcome"] == "denied"
+    assert tool_finished["reason"] == "policy_denied"
+
+    events = Fixture.events(fixture, session_id)
+    assert Enum.count(events, &(&1.kind == "interaction.requested")) == 3
+    assert Enum.all?(events, &(&1.kind != "tool.started"))
+  end
+
   defmodule BlockingResumePolicy do
     @moduledoc false
     @behaviour Loopex.Policy
@@ -521,6 +566,29 @@ defmodule Loopex.InteractionLifecycleTest do
     {:ok, session_id} = Loopex.create_session(fixture.runtime, %{}, command_id: "cs")
     {:ok, attachment} = Loopex.attach(fixture.runtime, session_id, after_event_sequence: 0)
     {session_id, attachment}
+  end
+
+  defp answer(attachment, command_id, requested) do
+    assert {:accepted, ^command_id} =
+             Loopex.command(attachment, %{
+               type: :interaction_answer,
+               command_id: command_id,
+               interaction_id: requested["interaction_id"],
+               choice_id: "allow"
+             })
+  end
+
+  defp await_nth_request(fixture, session_id, position, deadline \\ 8_000) do
+    requests =
+      fixture
+      |> Fixture.events(session_id)
+      |> Enum.filter(&(&1.kind == "interaction.requested"))
+
+    cond do
+      length(requests) >= position -> Enum.at(requests, position - 1)
+      deadline <= 0 -> flunk("question #{position} never arrived")
+      true -> Process.sleep(20) && await_nth_request(fixture, session_id, position, deadline - 20)
+    end
   end
 
   defp await_event(fixture, session_id, kind, deadline \\ 2_000) do
