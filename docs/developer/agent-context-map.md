@@ -4304,3 +4304,53 @@ rebind binds the Acceptance row to exact
 and the amended gate digest. It adds no outcome, removes none, changes no
 selector, witness, limit or evidence class beyond outcome 6's client list,
 reopens no lifecycle state, and grants no closure, integration, tag or release.
+
+<a id="disposition-m4-gate-runnable-2026-09-15"></a>
+### M4 gate amendment acceptance, making the gate runnable — 2026-09-15
+
+The maintainer asked for the gate to be run, and for problems to be caught
+before they cost a full lane. Running it found that the gate could not run at
+all, in any role that compiles, and that every cause was one of its own bound
+artifacts left behind by a change M4 itself had accepted.
+
+The isolated compile lane builds core and the local Store under an isolated home,
+Hex home and Mix home with `HEX_OFFLINE=1`. An empty Mix home holds no Hex
+archive, so Mix could not resolve what kind of dependency `:telemetry` is. Every
+earlier milestone passed the lane because core declared no external dependency;
+Phase B admits the one the dependency doctrine names. The runner already copies
+the operator's Hex archive and per-Elixir Rebar into that isolated home and
+validates the copied tree against the protected-file inventory, but only on the
+full path, after the compile. The call moves to just after the isolated
+directories exist.
+
+The opening probe then failed four times in succession, each for its own reason.
+It composed a runtime with a policy and no policy identity, which the maintainer
+made a requirement on 2026-09-15, so the runtime refused the launch. Its
+hand-built code path omitted the telemetry beams, so the first span crashed the
+runtime control process; the same fault had been repaired for the CLI probe path
+and never carried here. Its deferred question used the string `"choice"` where
+accepted ADR 0024 fixes the atom and converts nothing, so the runtime denied it
+as `policy_unavailable` rather than as the declared red. And its pending-question
+predicate read a list called `pending_interactions` with atom keys and a
+`turn_id`, which the implementation never published: session status carries one
+`open_interaction` with string keys and a `turn`. That last was diagnosed by
+running an instrumented copy of the probe against a real build and reading the
+actual status map and durable record, not by guessing.
+
+Two bound artifacts change: `scripts/check-m4-gate.sh` and
+`scripts/m4-opening-probe.exs`. No outcome, selector, witness identity, limit,
+client pin, evidence class, credential rule or lane changes, neither envelope
+moves, and no lifecycle state reopens. What the opening witness asserts is what
+it asserted before: exactly one question, unsettled, after exactly one model
+call, carrying the same identity, run and tool call as its durable record.
+
+Evidence presented at the proposal: `--inspect` passing, and `--preflight`
+reporting `M4 opening GREEN: policy defer commits a pending interaction and
+suspends the run` with `defer_interaction_records=1` and `defer_settled=false`.
+The maintainer answered **"Accept f8b0511"**.
+
+This transcribes that answer as acceptance under `amendment-transaction-v1`. The
+rebind binds the Acceptance row to exact
+`f8b0511774e4a6d9bcc00867f5b3357e084290c5` with the amended gate digest and both
+envelope digests unchanged, since neither envelope moved. It grants no closure,
+integration, tag or release.
