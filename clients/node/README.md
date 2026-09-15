@@ -15,6 +15,7 @@ imports anything outside Node's own standard library.
 | --- | --- |
 | `loopex-client.mjs` | The connection, the request correlation, and the four wire representations |
 | `workflow.mjs` | The integrated workflow: negotiate, create, attach, prompt, follow events, inspect, leave |
+| `interaction-workflow.mjs` | The chain: find and select an admitted skill, submit a task, answer the host policy's question, watch the tool run, read the artifact it kept |
 
 ## Running it
 
@@ -32,6 +33,13 @@ workflow sets that for the process it launches.
 
 `apps/loopex_app_server/test/external_workflow_test.exs` runs exactly this and
 asserts what the client reported.
+
+`interaction-workflow.mjs` takes the same arguments and one operator input,
+`LOOPEX_WORKSPACE_REF`, the workspace reference the skill manifest was launched
+with. It is an input rather than something the client asks for, because the
+catalog withholds the reference along with every entry until a trust decision
+naming it is active. The client relays that decision; it does not judge it, and
+it could not construct one from anything the server told it.
 
 ## What it does not do
 

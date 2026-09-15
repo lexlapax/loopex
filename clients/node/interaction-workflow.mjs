@@ -1,9 +1,10 @@
 // Concept
 //
-// The chain outcome 5 names, driven from outside: the client submits a task,
-// the host policy asks a question rather than allowing, the client presents
-// that question and answers it, the policy is asked again and mints the
-// authorization, the tool runs, and the client reads back what it produced.
+// The chain outcome 5 names, driven from outside: the client finds an admitted
+// skill and selects it, submits a task, the host policy asks a question rather
+// than allowing, the client presents that question and answers it, the policy
+// is asked again and mints the authorization, the tool runs, and the client
+// reads back what it produced.
 //
 // Technical depth
 //
@@ -17,14 +18,26 @@
 // It prints one JSON summary on standard output so the Elixir case that runs it
 // can assert what the client observed rather than what the server logged.
 //
-// Usage: node interaction-workflow.mjs <elixir-executable> <path>...
+// The workspace reference is an operator input, read from the environment. It
+// is deliberately not derivable from anything this client can ask the server
+// for: the catalog withholds it, along with every entry, until a decision
+// naming it is active. A client that could reconstruct it could admit its own
+// trust, which is the thing this leg exists to show it cannot do.
+//
+// Usage: LOOPEX_WORKSPACE_REF=<ref> node interaction-workflow.mjs <elixir> <path>...
 
 import { Connection, wire } from "./loopex-client.mjs";
 
 const [elixir, ...paths] = process.argv.slice(2);
+const workspaceRef = process.env.LOOPEX_WORKSPACE_REF;
 
 if (!elixir || paths.length === 0) {
   console.error("usage: node interaction-workflow.mjs <elixir-executable> <path>...");
+  process.exit(2);
+}
+
+if (!workspaceRef) {
+  console.error("LOOPEX_WORKSPACE_REF is the operator's workspace reference and is required");
   process.exit(2);
 }
 
@@ -67,6 +80,86 @@ async function run(connection) {
 
   assert(attached.type === "snapshot", `expected a snapshot, received ${attached.type}`);
 
+  const summary = {};
+
+  // Before any trust decision the catalog names the manifest the host was
+  // launched with and nothing else: no workspace reference, no entries, no
+  // descriptions. Content is withheld, not merely unselected.
+  const withheld = await connection.request("resources.catalog", { session_id: sessionId });
+
+  assert(withheld.type === "result", `the catalog was refused: ${withheld.code}`);
+
+  const manifestDigest = withheld.result.configured_manifest_digest;
+
+  assert(typeof manifestDigest === "string", "the catalog named no configured manifest");
+
+  summary.catalog_before = {
+    disposition: withheld.result.decision_disposition,
+    entries: withheld.result.entries.length,
+    admitted: withheld.result.admitted_manifest_digest,
+    names_workspace: Object.keys(withheld.result).includes("workspace_ref"),
+  };
+
+  // The operator's decision is relayed, not minted. This client carries the
+  // reference it was given and the digest the catalog named; it judges neither.
+  const admitted = await connection.request("session.admit_resources", {
+    command_id: wire.identity("chain-admit"),
+    manifest_digest: manifestDigest,
+    decision: {
+      manifest_digest: manifestDigest,
+      workspace_ref: workspaceRef,
+      trust_scope: "project_skills",
+      decision_source: "interactive_operator",
+      issued_at: new Date().toISOString().replace(/\.\d{3}Z$/, "Z"),
+      expires_at: null,
+      revocation_state: "active",
+    },
+  });
+
+  assert(
+    admitted.status === "accepted",
+    `the admission was ${admitted.status}: ${admitted.reason ?? "no reason"}`,
+  );
+
+  summary.admission_accepted = true;
+
+  // Only now does the catalog describe anything.
+  const catalog = await connection.request("resources.catalog", { session_id: sessionId });
+
+  assert(catalog.type === "result", `the catalog was refused: ${catalog.code}`);
+
+  const entries = catalog.result.entries;
+
+  summary.catalog_after = {
+    disposition: catalog.result.decision_disposition,
+    entries: entries.length,
+    names: entries.map((entry) => entry.name),
+  };
+
+  const [skill] = entries;
+
+  assert(skill, "the admitted catalog described no skill");
+
+  // The selection carries exactly what the catalog gave, including the pack
+  // digest. A client that invented one is refused, which is why it is read
+  // here rather than computed.
+  const activated = await connection.request("session.activate_skill", {
+    command_id: wire.identity("chain-skill"),
+    manifest_digest: manifestDigest,
+    pack_digest: skill.pack_digest,
+    source_id: skill.source_id,
+    name: skill.name,
+    supporting_labels: ["notes.txt"],
+  });
+
+  assert(
+    activated.status === "accepted",
+    `the skill selection was ${activated.status}: ${activated.reason ?? "no reason"}`,
+  );
+
+  summary.skill_selected = skill.name;
+  summary.skill_pack_digest = skill.pack_digest;
+
   const prompted = await connection.request("session.prompt", {
     command_id: wire.identity("chain-prompt"),
     content_b64: wire.bytes("write the output file"),
@@ -79,12 +172,10 @@ async function run(connection) {
   const requested = await connection.waitForEvent((event) => event.kind === "interaction.requested");
   const question = requested.data;
 
-  const summary = {
-    session_created: true,
-    question_prompt: question.prompt,
-    choice_ids: (question.choices ?? []).map((choice) => choice.id),
-    interaction_id: question.interaction_id,
-  };
+  summary.session_created = true;
+  summary.question_prompt = question.prompt;
+  summary.choice_ids = (question.choices ?? []).map((choice) => choice.id);
+  summary.interaction_id = question.interaction_id;
 
   // The client answers with one of the identities the question offered, and
   // nothing else. It does not decide; it relays.

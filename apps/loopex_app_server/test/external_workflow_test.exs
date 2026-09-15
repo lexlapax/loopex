@@ -97,7 +97,7 @@ defmodule Loopex.AppServer.ExternalWorkflowTest do
     assert summary["survived_refusal"]
   end
 
-  test "an independent client answers the policy's question and reads what the tool produced" do
+  test "an independent client selects a skill, answers the question and reads what the tool kept" do
     node_executable = System.find_executable("node")
 
     if is_nil(node_executable) do
@@ -115,7 +115,7 @@ defmodule Loopex.AppServer.ExternalWorkflowTest do
           ebin(:loopex_app_server),
           ebin(:telemetry)
         ] ++ require_paths(),
-        env: child_environment(),
+        env: [{"LOOPEX_WORKSPACE_REF", "workspace-ref"} | child_environment()],
         stderr_to_stdout: false
       )
 
@@ -123,6 +123,27 @@ defmodule Loopex.AppServer.ExternalWorkflowTest do
 
     summary = decode(output)
     refute Map.has_key?(summary, "failed"), "the client reported: #{summary["failed"]}"
+
+    # Before a trust decision the catalog names the launched manifest and
+    # withholds everything else. The workspace reference the decision must carry
+    # is not among the fields a client can read, so it cannot admit its own
+    # trust from what the server told it.
+    assert summary["catalog_before"]["disposition"] == "no_decision"
+    assert summary["catalog_before"]["entries"] == 0
+    assert is_nil(summary["catalog_before"]["admitted"])
+    refute summary["catalog_before"]["names_workspace"]
+
+    # The client relayed the operator's decision and the runtime admitted it as
+    # a durable command.
+    assert summary["admission_accepted"]
+
+    # Only then did the catalog describe the skill, and the client selected it
+    # using the identity and pack digest the catalog gave it.
+    assert summary["catalog_after"]["disposition"] == "active"
+    assert summary["catalog_after"]["entries"] == 1
+    assert summary["catalog_after"]["names"] == ["writer"]
+    assert summary["skill_selected"] == "writer"
+    assert String.match?(summary["skill_pack_digest"], ~r/\A[0-9a-f]{64}\z/)
 
     # The host policy asked rather than allowing, and the question reached the
     # client with its exact wording and its offered choices.

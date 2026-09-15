@@ -265,6 +265,7 @@ defmodule Loopex.AppServer.Fixture do
     [
       artifact_store: %{module: Loopex.AppServer.WorkflowArtifacts, handle: artifacts},
       artifacts: %{"workflow-call" => [reference]},
+      resource_manifest: skill_manifest(),
       script: [
         %{
           text: "writing the file",
@@ -275,5 +276,46 @@ defmodule Loopex.AppServer.Fixture do
       policy: Loopex.AppServer.WorkflowPolicy,
       policy_identity: %{"id" => "loopex.app_server.workflow_policy", "revision" => "1"}
     ]
+  end
+
+  # Concept: one admitted skill for the client to find, read about and select.
+  #
+  # Technical depth: the workspace reference is a launch input and appears
+  # nowhere a client can read it, which is the point. A client that wants this
+  # manifest admitted must carry an operator's decision naming the same
+  # reference; it cannot derive one from the catalog, because the catalog
+  # withholds both the reference and every entry until a decision is active.
+  defp skill_manifest do
+    files =
+      for {label, content} <- [
+            {"SKILL.md", "Write the file the operator asked for."},
+            {"notes.txt", "Supporting notes."}
+          ] do
+        %{
+          label: label,
+          content: content,
+          size: byte_size(content),
+          digest: LoopexProtocol.Canonical.digest_bytes(content),
+          contained: true
+        }
+      end
+
+    %{
+      version: "loopex.resource_pack/1",
+      workspace_ref: "workspace-ref",
+      revision: nil,
+      packs: [
+        %{
+          source_id: "project",
+          origin: nil,
+          commit: nil,
+          tree_digest: nil,
+          name: "writer",
+          description: "Writes an output file",
+          manual_only: true,
+          files: files
+        }
+      ]
+    }
   end
 end
