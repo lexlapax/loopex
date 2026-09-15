@@ -735,6 +735,57 @@ defmodule Loopex.InteractionLifecycleTest do
              })
   end
 
+  test "a session whose policy binding changed stays suspended and dispatches nothing" do
+    Process.register(self(), :interaction_resume_observer)
+
+    fixture = loop_fixture(BlockingResumePolicy)
+    {session_id, attachment} = loop_session(fixture)
+
+    assert {:accepted, "p1"} =
+             Loopex.command(attachment, %{type: :prompt, command_id: "p1", content: "do it"})
+
+    requested = await_event(fixture, session_id, "interaction.requested")
+
+    assert {:accepted, "answer-1"} =
+             Loopex.command(attachment, %{
+               type: :interaction_answer,
+               command_id: "answer-1",
+               interaction_id: requested["interaction_id"],
+               choice_id: "allow"
+             })
+
+    assert_receive {:resumed, _held}, 4_000
+
+    # The session comes back under a policy that carries a different revision.
+    # The answer on disk was given to the one that asked, so this runtime waits
+    # rather than deciding under a binding it did not have.
+    :ok = Loopex.stop(fixture.runtime)
+
+    successor_fixture =
+      Fixture.start(
+        script: [%{text: "done", calls: []}],
+        policy: BlockingResumePolicy,
+        policy_identity: %{"id" => inspect(BlockingResumePolicy), "revision" => "2"},
+        store: fixture.store
+      )
+
+    on_exit(fn -> Fixture.stop(successor_fixture) end)
+    successor = successor_fixture.runtime
+
+    assert {:ok, ^session_id} =
+             Loopex.resume_session(successor, session_id, command_id: "successor")
+
+    refute_receive {:resumed, _second}, 1_000
+
+    assert {:ok, status} = Loopex.session_status(successor, session_id)
+    assert status.open_interaction["interaction_id"] == requested["interaction_id"]
+    assert status.open_interaction["status"] == "answered"
+
+    events = Fixture.events(fixture, session_id)
+    assert Enum.all?(events, &(&1.kind != "tool.started"))
+    assert Enum.all?(events, &(&1.kind != "interaction.resolved"))
+  end
+
   test "an abort cancels the open question and a later answer finds it resolved" do
     fixture = loop_fixture(AnsweringPolicy)
     {session_id, attachment} = loop_session(fixture)

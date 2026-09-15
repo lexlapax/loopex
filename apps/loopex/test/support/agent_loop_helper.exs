@@ -341,7 +341,17 @@ defmodule Loopex.AgentLoopFixture do
         Keyword.get(options, :artifacts, %{})
       )
 
-    {store_pid, store} = M1RuntimeTestStore.start_store(label: "agent-loop")
+    # A case about recovery starts a second fixture over the first one's Store,
+    # which is what makes the successor a successor rather than a new session.
+    {store_pid, store} =
+      case Keyword.get(options, :store) do
+        nil ->
+          M1RuntimeTestStore.start_store(label: "agent-loop")
+
+        existing ->
+          {:ok, store} = Loopex.Store.new(M1RuntimeTestStore, existing)
+          {existing, store}
+      end
 
     {:ok, runtime} =
       Loopex.start_link(
@@ -377,6 +387,9 @@ defmodule Loopex.AgentLoopFixture do
         tools: definitions,
         active_tools: Enum.map(definitions, &Map.fetch!(&1, "tool_id")),
         policy: Keyword.get(options, :policy, Loopex.AgentLoopTestPolicy),
+        # A case about the policy binding surviving a restart needs to name the
+        # identity itself; every other case takes the launch default.
+        policy_identity: Keyword.get(options, :policy_identity),
         grant_decision: {:host_policy, :allow}
       )
 

@@ -288,6 +288,10 @@ defmodule Loopex.Runtime.SessionCoordinator do
        diagnostics_to: Keyword.get(options, :diagnostics_to),
        bounds: Keyword.get(options, :bounds),
        policy: Keyword.get(options, :policy),
+       # The bounded identity of the policy implementation this runtime was
+       # launched with. It is retained with an interaction so a recovered owner
+       # can tell whether the policy it now holds is the one that asked.
+       policy_identity: Keyword.get(options, :policy_identity),
        project_manifest: Keyword.get(options, :project_manifest),
        project_decision: Keyword.get(options, :project_decision),
        resource_snapshot: Keyword.get(options, :resource_snapshot),
@@ -5450,7 +5454,8 @@ defmodule Loopex.Runtime.SessionCoordinator do
             question.expires_in_ms,
             committed_deadline(state, work.run_id)
           ),
-        policy_request_digest: Interaction.digest(policy_request_identity(state, work, call))
+        policy_request_digest: Interaction.digest(policy_request_identity(state, work, call)),
+        policy_identity: state.policy_identity
       }
 
       previous = SessionState.open_interaction_record(state.durable)
@@ -5483,6 +5488,29 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # in flight for this run is left alone: the answer it will come back to is
   # already on disk.
   defp resume_policy_evaluation(state, interaction) do
+    if policy_binding_matches?(state, interaction) do
+      resume_matched_evaluation(state, interaction)
+    else
+      # Concept: a question is resumed by the policy that asked it, or not at
+      # all.
+      #
+      # Technical depth: accepted ADR 0024 leaves a session whose policy binding
+      # is missing or changed suspended, dispatching nothing. Handing this
+      # answer to a different implementation, or to a different revision of the
+      # same one, would let a host change what a committed answer means after
+      # the fact, which is the one thing the retained identity exists to
+      # prevent. The session waits for the binding it had rather than deciding
+      # under one it did not.
+      {:noreply, state}
+    end
+  end
+
+  defp policy_binding_matches?(state, interaction) do
+    retained = Map.get(interaction, :policy_identity)
+    is_map(retained) and retained == state.policy_identity
+  end
+
+  defp resume_matched_evaluation(state, interaction) do
     case Map.get(state.durable.pending_work, interaction.run_id) do
       %{stage: "effect_pending", pending_calls: [call | _rest]} = work ->
         if policy_in_flight?(state, work.run_id) do

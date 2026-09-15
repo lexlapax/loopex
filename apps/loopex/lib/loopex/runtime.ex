@@ -541,7 +541,8 @@ defmodule Loopex.Runtime do
              cleanup_grace_ms: nil,
              context_token_budget: nil,
              trace_module: :trace,
-             diagnostics_ceiling: nil
+             diagnostics_ceiling: nil,
+             policy_identity: nil
            ),
          {:ok, runtime_id} <- fetch_identifier(validated, :runtime_id),
          {:ok, context_token_budget} <-
@@ -558,6 +559,8 @@ defmodule Loopex.Runtime do
          {:ok, bounds} <- validate_bounds(validated[:bounds]),
          {:ok, policy} <-
            validate_policy(validated[:policy], validated[:tools], validated[:tool]),
+         {:ok, policy_identity} <-
+           validate_policy_identity(validated[:policy_identity], policy),
          {:ok, sampling} <- validate_sampling(validated[:sampling]),
          {:ok, resource_manifest} <-
            validate_resource_manifest(validated[:resource_manifest], executor),
@@ -590,6 +593,7 @@ defmodule Loopex.Runtime do
          bounds: bounds,
          sampling: sampling,
          policy: policy,
+         policy_identity: policy_identity,
          project_manifest: validated[:project_manifest],
          project_decision: validated[:project_decision],
          resource_manifest: resource_manifest,
@@ -695,6 +699,29 @@ defmodule Loopex.Runtime do
       true -> {:error, :host_policy_required}
     end
   end
+
+  # Concept: which policy decided, named as bounded plain data that outlives the
+  # process that ran it.
+  #
+  # Technical depth: accepted ADR 0024 retains this identity with an interaction
+  # and never the module term, so a recovered owner can tell whether the policy
+  # it now holds is the one that asked the question. It is a launch argument: no
+  # request, model output or project resource reaches it, which is what keeps
+  # policy selection off the wire. A launch that names none is given the
+  # module's own name at revision zero, so every session has an identity to
+  # compare rather than an absence that compares equal to anything.
+  defp validate_policy_identity(_identity, nil), do: {:ok, nil}
+
+  defp validate_policy_identity(nil, policy),
+    do: {:ok, %{"id" => inspect(policy), "revision" => "0"}}
+
+  defp validate_policy_identity(%{"id" => id, "revision" => revision}, _policy)
+       when is_binary(id) and is_binary(revision) and byte_size(id) > 0 and
+              byte_size(id) <= @max_identifier_bytes and byte_size(revision) > 0 and
+              byte_size(revision) <= @max_identifier_bytes,
+       do: {:ok, %{"id" => id, "revision" => revision}}
+
+  defp validate_policy_identity(_identity, _policy), do: {:error, :invalid_policy_identity}
 
   defp validate_bounds(nil), do: {:ok, @default_bounds}
 

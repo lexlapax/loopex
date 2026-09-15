@@ -1443,6 +1443,7 @@ defmodule Loopex.Runtime.SessionState do
         "round" => interaction.round,
         "created_at" => interaction.created_at,
         "expires_at" => interaction.expires_at,
+        "policy_identity" => interaction.policy_identity,
         kind: "interaction_requested_v1"
       }
       |> then(fn row ->
@@ -2931,7 +2932,8 @@ defmodule Loopex.Runtime.SessionState do
         status: "pending",
         round: round,
         expires_at: expires_at,
-        choice_id: nil
+        choice_id: nil,
+        policy_identity: Map.get(record, "policy_identity")
       }
 
       {:ok,
