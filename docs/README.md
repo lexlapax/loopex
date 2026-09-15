@@ -37,6 +37,8 @@ pairing, link, review, code-documentation, and enforcement contracts.
 | Capability guidance | [Roadmap](roadmap.md#concept) | [Roadmap technical depth](roadmap-technical.md#technical-depth) | Non-normative projection; accepted plans authorize work. |
 | System architecture | [Architecture](developer/architecture.md#concept) | [Architecture technical depth](developer/architecture-technical.md#technical-depth) | Descriptive: applications, ports, truth planes, and invariants as implemented; accepted ADRs remain the deciding authority. |
 | Development method | [Development charter](developer/development-charter.md#concept) | [Charter technical depth](developer/development-charter-technical.md#technical-depth) | Shared development form and review expectations. |
+| Public session protocol | [App server protocol](developer/app-server-protocol.md#concept) | [Protocol technical depth](developer/app-server-protocol-technical.md#technical-depth) | The experimental wire generation; accepted ADR 0023 remains the deciding authority. |
+| Observability | [Observability](developer/observability.md#concept) | [Observability technical depth](developer/observability-technical.md#technical-depth) | Trace sessions and the telemetry inventory as the diagnostics plane; accepted ADR 0030 fixes the inventory. |
 
 ## Decisions
 
