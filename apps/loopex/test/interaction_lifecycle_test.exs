@@ -487,6 +487,84 @@ defmodule Loopex.InteractionLifecycleTest do
     assert Enum.count(records, &(&1.payload.kind == "interaction_resolved_v1")) == 1
   end
 
+  test "policy request interaction request and answer digests and their retained preimages survive commit unknown and restart under the same policy identity and revision" do
+    fixture = loop_fixture(AnsweringPolicy)
+    {session_id, attachment} = loop_session(fixture)
+
+    # The creation transaction is held, and the Store is told to linearize it
+    # and then report an unknown outcome. The owner must resolve that same
+    # transaction rather than composing a second question with a later clock.
+    :ok =
+      Loopex.M1RuntimeTestStore.hold_next_record_before_linearization(
+        fixture.store,
+        "interaction_requested_v1",
+        self()
+      )
+
+    assert {:accepted, "p1"} =
+             Loopex.command(attachment, %{type: :prompt, command_id: "p1", content: "do it"})
+
+    assert_receive {:record_held_before_linearization, waiter, _store, _kind, transaction}, 8_000
+    [proposed] = Enum.filter(transaction.records, &(&1.kind == "interaction_requested_v1"))
+
+    :ok =
+      Loopex.M1RuntimeTestStore.inject(
+        fixture.store,
+        {:session_journal_commit, :after_linearization_before_result}
+      )
+
+    send(waiter, :release)
+
+    requested = await_event(fixture, session_id, "interaction.requested", 8_000)
+
+    records = Fixture.records(fixture, session_id)
+    retained = Enum.filter(records, &(&1.payload.kind == "interaction_requested_v1"))
+    assert length(retained) == 1
+    retained = hd(retained).payload
+
+    # The resolved commit is the one that was proposed, byte for byte in every
+    # field the question is judged by: its identity, the instants, the three
+    # digests, and the policy binding that asked it.
+    assert retained["interaction_id"] == proposed["interaction_id"]
+    assert retained["created_at"] == proposed["created_at"]
+    assert retained["expires_at"] == proposed["expires_at"]
+    assert retained["interaction_request_digest"] == proposed["interaction_request_digest"]
+    assert retained["policy_request_digest"] == proposed["policy_request_digest"]
+    assert retained["policy_identity"] == proposed["policy_identity"]
+    assert requested["interaction_id"] == proposed["interaction_id"]
+
+    # The same preimages come back after owner succession, and the answer's own
+    # digest is the one the admission committed.
+    assert {:ok, ^session_id} =
+             Loopex.resume_session(fixture.runtime, session_id, command_id: "successor")
+
+    # The successor owns the session now, so the answer comes through an
+    # attachment to it rather than the superseded one.
+    {:ok, successor_attachment} =
+      Loopex.attach(fixture.runtime, session_id, after_event_sequence: 0)
+
+    answer(successor_attachment, "answer-1", requested)
+    resolved = await_event(fixture, session_id, "interaction.resolved", 8_000)
+    assert resolved["choice_id"] == "allow"
+
+    admission =
+      fixture
+      |> Fixture.records(session_id)
+      |> Enum.find(&(&1.payload["command_type"] == "interaction_answer"))
+
+    assert admission.payload["answer_digest"] ==
+             Loopex.Interaction.digest(%{choice_id: "allow"})
+
+    assert admission.payload["interaction_id"] == proposed["interaction_id"]
+
+    after_restart =
+      fixture
+      |> Fixture.records(session_id)
+      |> Enum.find(&(&1.payload.kind == "interaction_requested_v1"))
+
+    assert after_restart.payload == retained
+  end
+
   defp find_record(records, kind) do
     case Enum.find(records, &(&1.payload.kind == kind)) do
       nil -> flunk("no #{kind} record was journaled")
