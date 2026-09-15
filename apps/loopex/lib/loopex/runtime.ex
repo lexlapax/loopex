@@ -275,6 +275,55 @@ defmodule Loopex.Runtime do
   def progress(_attachment, _item), do: {:error, :attachment_required}
 
   @doc false
+  @spec open_artifact_transfer(Attachment.t(), map()) :: {:ok, map()} | {:error, term()}
+  def open_artifact_transfer(%Attachment{} = attachment, request) when is_map(request) do
+    with {:ok, runtime, session_id, attachment_id, incarnation_id} <-
+           Attachment.routing(attachment) do
+      dispatcher_call(
+        runtime,
+        {:open_transfer, runtime.token, session_id, attachment_id, incarnation_id, request},
+        :infinity
+      )
+    end
+  end
+
+  def open_artifact_transfer(_attachment, _request), do: {:error, :attachment_required}
+
+  @doc false
+  @spec read_artifact_chunk(Attachment.t(), binary(), pos_integer()) ::
+          {:ok, map()} | {:ok, :complete} | {:error, term()}
+  def read_artifact_chunk(%Attachment{} = attachment, transfer_ref, length)
+      when is_binary(transfer_ref) do
+    with {:ok, runtime, session_id, attachment_id, incarnation_id} <-
+           Attachment.routing(attachment) do
+      dispatcher_call(
+        runtime,
+        {:read_transfer, runtime.token, session_id, attachment_id, incarnation_id, transfer_ref,
+         length},
+        :infinity
+      )
+    end
+  end
+
+  def read_artifact_chunk(_attachment, _transfer_ref, _length), do: {:error, :attachment_required}
+
+  @doc false
+  @spec close_artifact_transfer(Attachment.t(), binary()) :: :ok | {:error, term()}
+  def close_artifact_transfer(%Attachment{} = attachment, transfer_ref)
+      when is_binary(transfer_ref) do
+    with {:ok, runtime, session_id, attachment_id, incarnation_id} <-
+           Attachment.routing(attachment) do
+      dispatcher_call(
+        runtime,
+        {:close_transfer, runtime.token, session_id, attachment_id, incarnation_id, transfer_ref},
+        :infinity
+      )
+    end
+  end
+
+  def close_artifact_transfer(_attachment, _transfer_ref), do: {:error, :attachment_required}
+
+  @doc false
   @spec diagnostic(t(), term()) :: :ok | {:error, term()}
   def diagnostic(%__MODULE__{} = runtime, item) do
     dispatcher_call(runtime, {:diagnostic, runtime.token, item})
@@ -542,7 +591,8 @@ defmodule Loopex.Runtime do
              context_token_budget: nil,
              trace_module: :trace,
              diagnostics_ceiling: nil,
-             policy_identity: nil
+             policy_identity: nil,
+             artifact_store: nil
            ),
          {:ok, runtime_id} <- fetch_identifier(validated, :runtime_id),
          {:ok, context_token_budget} <-
@@ -570,6 +620,7 @@ defmodule Loopex.Runtime do
          {:ok, trace_module} <- validate_trace_module(validated[:trace_module]),
          {:ok, diagnostics_ceiling} <-
            validate_diagnostics_ceiling(validated[:diagnostics_ceiling]),
+         {:ok, artifact_store} <- validate_artifact_store(validated[:artifact_store]),
          :ok <-
            validate_loop_configuration(
              model,
@@ -602,7 +653,8 @@ defmodule Loopex.Runtime do
          cleanup_grace_ms: cleanup_grace_ms,
          context_token_budget: context_token_budget,
          trace_module: trace_module,
-         diagnostics_ceiling: diagnostics_ceiling
+         diagnostics_ceiling: diagnostics_ceiling,
+         artifact_store: artifact_store
        ]}
     else
       {:error, :invalid_context_token_budget} -> {:error, :invalid_context_token_budget}
@@ -849,6 +901,20 @@ defmodule Loopex.Runtime do
   end
 
   defp validate_diagnostics_ceiling(_ceiling), do: {:error, :invalid_diagnostics_ceiling}
+
+  # Concept: the artifact store a host composed, if it composed one.
+  #
+  # Technical depth: the same shape every other composed port here uses, so a
+  # host that supplies its own implementation is followed rather than bypassed.
+  # A runtime without one refuses the bounded transfer family rather than
+  # reaching for a default placement, and core still never opens a path.
+  defp validate_artifact_store(nil), do: {:ok, nil}
+
+  defp validate_artifact_store(%{module: module, handle: handle})
+       when is_atom(module) and not is_nil(module),
+       do: {:ok, %{module: module, handle: handle}}
+
+  defp validate_artifact_store(_store), do: {:error, :invalid_artifact_store}
 
   defp validate_sink(nil), do: {:ok, nil}
   defp validate_sink(pid) when is_pid(pid), do: {:ok, pid}

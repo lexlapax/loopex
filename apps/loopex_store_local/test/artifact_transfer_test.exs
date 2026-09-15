@@ -158,6 +158,88 @@ defmodule Loopex.Store.Local.ArtifactTransferTest do
     assert ArtifactStore.supports_transfer?(Artifacts)
   end
 
+  test "a transfer belongs to the attachment that opened it and is released with it" do
+    %{handle: handle, reference: reference, bytes: bytes} = stored("bytes for one attachment")
+    %{runtime: runtime, session_id: session_id} = session(handle)
+
+    {:ok, first} = Loopex.attach(runtime, session_id, after_event_sequence: 0)
+
+    request = %{object: object(reference), use_locator: reference.use_locator, start: 0}
+    assert {:ok, transfer} = Loopex.open_artifact_transfer(first, request)
+    assert transfer.total_size == byte_size(bytes)
+    assert transfer.object_digest == reference.digest
+
+    # The open response carries no placement of its own: a caller learns the
+    # window and the digests, not where the bytes live.
+    refute Map.has_key?(transfer, :object)
+    refute Map.has_key?(transfer, :path)
+
+    assert {:ok, chunk} = Loopex.read_artifact_chunk(first, transfer.transfer_ref, 8)
+    assert chunk.bytes == binary_part(bytes, 0, 8)
+
+    # A second attachment replaces the first, which releases what the first
+    # held; the reference it was using is not readable through either.
+    {:ok, second} = Loopex.attach(runtime, session_id, after_event_sequence: 0)
+
+    assert {:error, :unknown_transfer} =
+             Loopex.read_artifact_chunk(second, transfer.transfer_ref, 8)
+
+    assert {:error, :stale_attachment} =
+             Loopex.read_artifact_chunk(first, transfer.transfer_ref, 8)
+
+    assert [] = Transfers.live(handle.transfers)
+  end
+
+  test "a runtime composed without a transfer capable store refuses the family" do
+    %{handle: handle, reference: reference} = stored("no transfers here")
+    %{runtime: runtime, session_id: session_id} = session(nil)
+
+    {:ok, attachment} = Loopex.attach(runtime, session_id, after_event_sequence: 0)
+
+    assert {:error, :artifact_transfer_unsupported} =
+             Loopex.open_artifact_transfer(attachment, %{
+               object: object(reference),
+               use_locator: reference.use_locator,
+               start: 0
+             })
+
+    assert [] = Transfers.live(handle.transfers)
+  end
+
+  # Concept: one runtime over this store, with the artifact placement composed
+  # in beside it when the case is about transfers.
+  defp session(artifact_handle) do
+    path = Path.join(System.tmp_dir!(), "loopex-store-#{:erlang.unique_integer([:positive])}")
+    {:ok, store_pid} = Loopex.Store.Local.start_link(path: path)
+    {:ok, store} = Loopex.Store.new(Loopex.Store.Local, store_pid)
+
+    options =
+      [context_token_budget: 8_192, runtime_id: "artifact-transfer", store: store]
+      |> then(fn options ->
+        case artifact_handle do
+          nil ->
+            options
+
+          handle ->
+            Keyword.put(options, :artifact_store, %{
+              module: Loopex.Store.Local.Artifacts,
+              handle: handle
+            })
+        end
+      end)
+
+    {:ok, runtime} = Loopex.start_link(options)
+    {:ok, session_id} = Loopex.create_session(runtime, %{}, command_id: "create")
+
+    on_exit(fn ->
+      if Loopex.Runtime.alive?(runtime), do: Loopex.stop(runtime)
+      stop_quietly(store_pid)
+      File.rm_rf(path)
+    end)
+
+    %{runtime: runtime, session_id: session_id}
+  end
+
   defp stored(bytes, handle \\ nil) do
     handle = handle || new_store()
     {:ok, reference} = Artifacts.put(handle, bytes, @use)
@@ -188,4 +270,12 @@ defmodule Loopex.Store.Local.ArtifactTransferTest do
   end
 
   defp digest(bytes), do: :sha256 |> :crypto.hash(bytes) |> Base.encode16(case: :lower)
+
+  # A store that is already going down is already down; teardown says so rather
+  # than failing a case that has otherwise finished.
+  defp stop_quietly(pid) do
+    if Process.alive?(pid), do: GenServer.stop(pid)
+  catch
+    :exit, _reason -> :ok
+  end
 end

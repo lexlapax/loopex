@@ -35,6 +35,7 @@ defmodule Loopex.Runtime.EventDispatcher do
 
   use GenServer
 
+  alias Loopex.ArtifactStore
   alias Loopex.Runtime.DiagnosticsAdmission
   alias Loopex.Runtime.Supervisor, as: RuntimeSupervisor
   alias Loopex.Runtime.SessionState
@@ -157,7 +158,9 @@ defmodule Loopex.Runtime.EventDispatcher do
        counter: 0,
        admission: DiagnosticsAdmission.new(diagnostics_ceiling(options)),
        diagnostic_monitors: %{},
-       drop_window_start: 0
+       drop_window_start: 0,
+       artifact_store: Keyword.get(options, :artifact_store),
+       transfer_limits: ArtifactStore.transfer_limits()
      }}
   end
 
@@ -268,6 +271,72 @@ defmodule Loopex.Runtime.EventDispatcher do
   # the ability to offer an item that may be dropped. It is fetched through the
   # token-checked call, so a process without the runtime reference cannot reach
   # the plane at all.
+  # Concept: the artifact transfer family, owned by the attachment that opened
+  # it.
+  #
+  # Technical depth: accepted ADR 0028 binds a transfer to one session and one
+  # attachment, so every call here revalidates that attachment before touching
+  # the store, and a reference another attachment opened is unknown rather than
+  # readable. The store does the reading; this process holds only the bounded
+  # plain references and the per-attachment ceiling.
+  def handle_call(
+        {:open_transfer, token, session_id, attachment_id, incarnation_id, request},
+        _from,
+        state
+      ) do
+    with {:ok, attachment} <-
+           fetch_attachment(state, token, session_id, attachment_id, incarnation_id),
+         {:ok, store} <- artifact_store(state),
+         :ok <- transfer_headroom(attachment, state),
+         {:ok, object} <- transfer_object(request),
+         {:ok, use_locator} <- transfer_use(request),
+         {:ok, transfer} <-
+           store.module.open_transfer(store.handle, object, use_locator, transfer_window(request)) do
+      next = %{
+        attachment
+        | transfers: Map.put(attachment.transfers, transfer.transfer_ref, transfer)
+      }
+
+      {:reply, {:ok, Map.delete(transfer, :object)}, put_attachment(state, next)}
+    else
+      {:error, reason} -> {:reply, {:error, reason}, state}
+    end
+  end
+
+  def handle_call(
+        {:read_transfer, token, session_id, attachment_id, incarnation_id, transfer_ref, length},
+        _from,
+        state
+      ) do
+    with {:ok, attachment} <-
+           fetch_attachment(state, token, session_id, attachment_id, incarnation_id),
+         {:ok, store} <- artifact_store(state),
+         {:ok, transfer} <- Map.fetch(attachment.transfers, transfer_ref) do
+      {:reply, store.module.read_transfer(store.handle, transfer, length), state}
+    else
+      :error -> {:reply, {:error, :unknown_transfer}, state}
+      {:error, reason} -> {:reply, {:error, reason}, state}
+    end
+  end
+
+  def handle_call(
+        {:close_transfer, token, session_id, attachment_id, incarnation_id, transfer_ref},
+        _from,
+        state
+      ) do
+    with {:ok, attachment} <-
+           fetch_attachment(state, token, session_id, attachment_id, incarnation_id),
+         {:ok, store} <- artifact_store(state),
+         {:ok, transfer} <- Map.fetch(attachment.transfers, transfer_ref) do
+      _released = store.module.close_transfer(store.handle, transfer)
+      next = %{attachment | transfers: Map.delete(attachment.transfers, transfer_ref)}
+      {:reply, :ok, put_attachment(state, next)}
+    else
+      :error -> {:reply, {:error, :unknown_transfer}, state}
+      {:error, reason} -> {:reply, {:error, reason}, state}
+    end
+  end
+
   def handle_call({:diagnostics_admission, token}, _from, state) do
     if token == state.token do
       {:reply, {:ok, state.admission}, state}
@@ -666,13 +735,28 @@ defmodule Loopex.Runtime.EventDispatcher do
         max_queue_depth: 0,
         capacity: state.capacity,
         status: :active,
-        metadata: transient_metadata(pending.options)
+        metadata: transient_metadata(pending.options),
+        # The artifact transfers this attachment opened. Accepted ADR 0028 binds
+        # a transfer to the attachment that opened it, so detaching, replacement
+        # and overflow all release exactly what that attachment held and nothing
+        # another one is still reading.
+        transfers: %{}
       }
 
-      retained =
-        state.attachments
-        |> Enum.reject(fn {_id, existing} -> existing.session_id == pending.session_id end)
-        |> Map.new()
+      # Concept: a replaced attachment's transfers end with it.
+      #
+      # Technical depth: accepted ADR 0028 releases every transfer the
+      # attachment opened when it goes away, and a replacement is one of the
+      # ways it goes away. Releasing here rather than waiting for the lifetime
+      # timer is what keeps a reconnecting caller from holding descriptors it
+      # can no longer read through.
+      {superseded, kept} =
+        Enum.split_with(state.attachments, fn {_id, existing} ->
+          existing.session_id == pending.session_id
+        end)
+
+      Enum.each(superseded, fn {_id, existing} -> release_transfers(state, existing) end)
+      retained = Map.new(kept)
 
       next = %{
         cancel_session_reads(state, pending.session_id)
@@ -858,6 +942,64 @@ defmodule Loopex.Runtime.EventDispatcher do
     bytes = :erlang.term_to_binary([namespace, session_id, counter, make_ref()], [:deterministic])
     encoded = :crypto.hash(:sha256, bytes) |> Base.encode16(case: :lower)
     namespace <> "_" <> binary_part(encoded, 0, 30)
+  end
+
+  # Concept: the artifact store this runtime was composed with, if any.
+  #
+  # Technical depth: a runtime without one refuses the transfer family as
+  # unsupported rather than reaching for a default, and so does a store whose
+  # adapter predates the transfer triple. Both are bounded refusals a caller can
+  # act on, which is what the capability check exists for.
+  defp artifact_store(%{artifact_store: %{module: module, handle: _handle} = store}) do
+    if ArtifactStore.supports_transfer?(module),
+      do: {:ok, store},
+      else: {:error, :artifact_transfer_unsupported}
+  end
+
+  defp artifact_store(_state), do: {:error, :artifact_transfer_unsupported}
+
+  defp transfer_headroom(attachment, state) do
+    if map_size(attachment.transfers) < state.transfer_limits.per_attachment,
+      do: :ok,
+      else: {:error, :transfer_limit_reached}
+  end
+
+  # Concept: a caller names an object and the use that describes it, and
+  # nothing else crosses this boundary.
+  #
+  # Technical depth: the request is bounded plain data. No path, no adapter
+  # handle and no private provenance appears in it or in what comes back: the
+  # open response drops the object record the store resolved, because a caller
+  # already holds the compact reference it named.
+  defp transfer_object(%{object: %{digest: digest, size: size, locator: locator}})
+       when is_binary(digest) and is_integer(size) and size >= 0 and is_binary(locator),
+       do: {:ok, %{digest: digest, size: size, locator: locator}}
+
+  defp transfer_object(_request), do: {:error, :invalid_artifact_request}
+
+  defp transfer_use(%{use_locator: "use:" <> _digest = use_locator}), do: {:ok, use_locator}
+  defp transfer_use(_request), do: {:error, :invalid_artifact_request}
+
+  defp transfer_window(request) do
+    %{start: Map.get(request, :start, 0)}
+    |> then(fn window ->
+      case Map.get(request, :length) do
+        nil -> window
+        length -> Map.put(window, :length, length)
+      end
+    end)
+  end
+
+  defp release_transfers(state, attachment) do
+    case artifact_store(state) do
+      {:ok, store} ->
+        Enum.each(attachment.transfers, fn {_ref, transfer} ->
+          store.module.close_transfer(store.handle, transfer)
+        end)
+
+      {:error, _unsupported} ->
+        :ok
+    end
   end
 
   # Concept: the ceiling this runtime admits, which a host may lower.

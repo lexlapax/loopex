@@ -282,6 +282,53 @@ defmodule Loopex do
   @doc """
   ## Concept
 
+  Opens one bounded, verified transfer of an artifact this session may read.
+
+  ## Technical depth
+
+  The request names the compact artifact reference a caller already holds, a
+  non-negative start offset and an optional window length. The store verifies
+  the whole object once before any chunk exists and the response carries the
+  window bounds, the total size, the object digest and an opaque transfer
+  reference. That reference belongs to this attachment: another attachment,
+  session or runtime does not know it, and detaching or being replaced releases
+  every transfer this attachment opened. A runtime composed without an artifact
+  store, or with an adapter that predates the capability, refuses here rather
+  than reaching for a default.
+  """
+  @spec open_artifact_transfer(Attachment.t(), map()) :: {:ok, map()} | {:error, term()}
+  def open_artifact_transfer(attachment, request),
+    do: Runtime.open_artifact_transfer(attachment, request)
+
+  @doc """
+  ## Concept
+
+  Reads the next bounded chunk of an open transfer.
+
+  ## Technical depth
+
+  Each chunk carries its offset, its bytes and its own digest, never crosses the
+  window fixed at open, and is bounded by the accepted chunk ceiling however
+  much a caller asks for. `{:ok, :complete}` means the window is exhausted; the
+  transfer stays open until it is closed or its lifetime ends.
+  """
+  @spec read_artifact_chunk(Attachment.t(), binary(), pos_integer()) ::
+          {:ok, map()} | {:ok, :complete} | {:error, term()}
+  def read_artifact_chunk(attachment, transfer_ref, length),
+    do: Runtime.read_artifact_chunk(attachment, transfer_ref, length)
+
+  @doc """
+  ## Concept
+
+  Releases one open transfer and everything it held.
+  """
+  @spec close_artifact_transfer(Attachment.t(), binary()) :: :ok | {:error, term()}
+  def close_artifact_transfer(attachment, transfer_ref),
+    do: Runtime.close_artifact_transfer(attachment, transfer_ref)
+
+  @doc """
+  ## Concept
+
   Observes the current runtime-owned session projection.
 
   ## Technical depth
