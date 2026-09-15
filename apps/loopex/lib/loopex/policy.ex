@@ -149,6 +149,17 @@ defmodule Loopex.Policy do
 
   def evaluate_callback(_module, _request), do: {:deny, :policy_unavailable}
 
+  @doc false
+  @spec evaluate_callback(module(), request(), :refuse_defer | :admit_defer) ::
+          {:allow, context()} | {:deny, reason_category()} | {:defer, Interaction.request()}
+  def evaluate_callback(module, request, :refuse_defer), do: evaluate_callback(module, request)
+
+  def evaluate_callback(module, request, :admit_defer)
+      when is_atom(module) and is_map(request),
+      do: evaluate_safely(module, request)
+
+  def evaluate_callback(_module, _request, :admit_defer), do: {:deny, :policy_unavailable}
+
   @doc """
   ## Concept
 

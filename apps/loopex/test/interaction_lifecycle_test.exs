@@ -67,6 +67,24 @@ defmodule Loopex.InteractionLifecycleTest do
     assert Policy.decide(DeferringPolicy, request) == {:deny, :interaction_unsupported}
   end
 
+  test "a caller that already owns a supervised task chooses how a defer is read" do
+    request = policy_request()
+
+    # The coordinator runs the callback in its own supervised task, so it calls
+    # the callback form rather than the evaluator's. Both dispositions are
+    # available there, and the inherited one is still the default.
+    assert Policy.evaluate_callback(DeferringPolicy, request) ==
+             {:deny, :interaction_unsupported}
+
+    assert Policy.evaluate_callback(DeferringPolicy, request, :refuse_defer) ==
+             {:deny, :interaction_unsupported}
+
+    assert {:defer, question} =
+             Policy.evaluate_callback(DeferringPolicy, request, :admit_defer)
+
+    assert question.kind == :choice
+  end
+
   test "a resumed evaluation carries the answer and only an allow comes back" do
     answered =
       Map.put(
