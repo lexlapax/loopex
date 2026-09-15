@@ -444,6 +444,103 @@ defmodule Loopex.InteractionLifecycleTest do
     assert length(admitted) == 1
   end
 
+  defmodule MisbehavingPolicy do
+    @moduledoc false
+    @behaviour Loopex.Policy
+
+    @impl Loopex.Policy
+    def decide(request) do
+      case Map.get(request, :interaction_response) do
+        nil ->
+          {:defer,
+           %{
+             kind: :choice,
+             prompt: "How should the host misbehave?",
+             choices: [
+               %{id: "malformed", label: "Return something that is not a decision"},
+               %{id: "crash", label: "Raise"},
+               %{id: "hang", label: "Never answer"}
+             ],
+             expires_in_ms: 60_000
+           }}
+
+        %{answer: %{choice_id: "malformed"}} ->
+          {:perhaps, "not a decision"}
+
+        %{answer: %{choice_id: "crash"}} ->
+          raise "host policy failed while resuming"
+
+        %{answer: %{choice_id: "hang"}} ->
+          Process.sleep(60_000)
+          {:allow, nil}
+      end
+    end
+  end
+
+  test "invalid answers malformed policy output and failed or timed out re-evaluation dispatch nothing and resolve as denial" do
+    # An answer that names no offered choice never reaches the host at all.
+    fixture = loop_fixture(MisbehavingPolicy)
+    {session_id, attachment} = loop_session(fixture)
+
+    assert {:accepted, "p1"} =
+             Loopex.command(attachment, %{type: :prompt, command_id: "p1", content: "do it"})
+
+    requested = await_event(fixture, session_id, "interaction.requested")
+
+    assert {:error, :invalid_interaction_answer} =
+             Loopex.command(attachment, %{
+               type: :interaction_answer,
+               command_id: "answer-invalid",
+               interaction_id: requested["interaction_id"],
+               choice_id: "invented"
+             })
+
+    assert {:ok, status} = Loopex.session_status(fixture.runtime, session_id)
+    assert status.open_interaction["status"] == "pending"
+
+    # A host that answers with something that is not a decision, one that
+    # raises, and one that never answers all resolve the same way: the question
+    # is denied and nothing is dispatched.
+    misbehaviour_denies(fixture, session_id, attachment, requested, "malformed")
+
+    for choice <- ["crash", "hang"] do
+      other = loop_fixture(MisbehavingPolicy)
+      {other_session, other_attachment} = loop_session(other)
+
+      assert {:accepted, "p1"} =
+               Loopex.command(other_attachment, %{
+                 type: :prompt,
+                 command_id: "p1",
+                 content: "do it"
+               })
+
+      asked = await_event(other, other_session, "interaction.requested")
+      misbehaviour_denies(other, other_session, other_attachment, asked, choice)
+    end
+  end
+
+  defp misbehaviour_denies(fixture, session_id, attachment, requested, choice) do
+    assert {:accepted, "answer-misbehaviour"} =
+             Loopex.command(attachment, %{
+               type: :interaction_answer,
+               command_id: "answer-misbehaviour",
+               interaction_id: requested["interaction_id"],
+               choice_id: choice
+             })
+
+    resolved = await_event(fixture, session_id, "interaction.resolved", 12_000)
+    assert resolved["resolution"] == "denied"
+    assert resolved["reason"] == "policy_unavailable"
+
+    tool_finished = await_event(fixture, session_id, "tool.finished", 12_000)
+    assert tool_finished["outcome"] == "denied"
+    assert tool_finished["reason"] == "policy_unavailable"
+
+    records = Fixture.records(fixture, session_id)
+    assert Enum.all?(records, &(&1.payload.kind != "effect_intent_committed"))
+    assert Enum.all?(Fixture.events(fixture, session_id), &(&1.kind != "tool.started"))
+  end
+
   defmodule AlwaysDeferringPolicy do
     @moduledoc false
     @behaviour Loopex.Policy
