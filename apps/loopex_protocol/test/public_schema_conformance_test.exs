@@ -150,6 +150,81 @@ defmodule LoopexProtocol.PublicSchemaConformanceTest do
     end
   end
 
+  test "exact source schema client versions and toolchain platform identities are recorded with every result" do
+    # What an independent implementation checks itself against is a set of exact
+    # identities, not a description. Each one below is a value another language's
+    # client can read and compare without running any Elixir, and each is exact
+    # rather than a range: a client that matched "close enough" would report
+    # agreement with a contract it had not actually met.
+
+    # The schema identity the vectors belong to.
+    assert Session.generation() == "loopex.session.v1-experimental"
+    assert String.match?(Session.schema_digest(), ~r/\A[0-9a-f]{64}\z/)
+
+    # The schema digest names the contract, not the file: it covers the
+    # generation, the methods, the record families, the error codes and the
+    # limits. An implementation compares this exact value, so it is written out
+    # here rather than recomputed, and a change to any of those five fails here
+    # rather than silently renaming what clients are agreeing to.
+    assert Session.schema_digest() ==
+             "3a1723e370bf392e2a6e9d2709c22735577d8cfbf946d63ac22e12a8fa1708f4"
+
+    # The schema and vector files an independent client reads are identified by
+    # their own bytes, which are the digests the gate binds. A conformance
+    # result therefore names files a reader can fetch and verify.
+    for {directory, expected} <- [
+          {"schema", "a4c286cf45442273011d8f51d25d867334cb3dc0ce3621e86564cba520e1bcff"},
+          {"vectors", "a7f2dc36f9206dc48d258bc7b49a8d390ec3a0e93c51ed5a35f45153052e1951"}
+        ] do
+      path =
+        Path.join([
+          Application.app_dir(:loopex_protocol, "priv"),
+          directory,
+          "loopex-experimental-1.json"
+        ])
+
+      assert File.exists?(path), "the #{directory} file is missing"
+
+      measured = :sha256 |> :crypto.hash(File.read!(path)) |> Base.encode16(case: :lower)
+      assert measured == expected, "the #{directory} file is #{measured}"
+    end
+
+    vectors_digest = "a7f2dc36f9206dc48d258bc7b49a8d390ec3a0e93c51ed5a35f45153052e1951"
+
+    # The toolchain and platform a result was produced on. These are exact
+    # values rather than ranges, because a conformance result that did not say
+    # which build produced it cannot be reproduced.
+    assert String.match?(System.version(), ~r/\A\d+\.\d+\.\d+/)
+    assert :erlang.system_info(:otp_release) |> to_string() |> String.match?(~r/\A\d+\z/)
+    assert is_list(:erlang.system_info(:system_architecture))
+    assert :erlang.system_info(:version) |> to_string() |> String.match?(~r/\A\d+\./)
+
+    # The client pin an independent implementation runs under, read from the
+    # file that pins it rather than from anything this build could vary.
+    pins_path =
+      Path.join([
+        __DIR__,
+        "..",
+        "..",
+        "..",
+        "scripts",
+        "fixtures",
+        "m4",
+        "client-toolchain.txt"
+      ])
+
+    assert File.exists?(pins_path)
+    pins = pins_path |> File.read!() |> String.trim()
+
+    assert String.match?(pins, ~r/\Anode=\d+\.\d+\.\d+\z/),
+           "the client pin is not an exact version: #{inspect(pins)}"
+
+    # Every identity above is a value, not a shape: two of them collide only if
+    # the things they identify are the same things.
+    identities = [Session.generation(), Session.schema_digest(), vectors_digest, pins]
+    assert length(Enum.uniq(identities)) == length(identities)
+  end
+
   test "the schema digest is the value an independent implementation checks against" do
     assert Session.schema_digest() ==
              "3a1723e370bf392e2a6e9d2709c22735577d8cfbf946d63ac22e12a8fa1708f4"
