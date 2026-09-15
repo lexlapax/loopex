@@ -22,10 +22,16 @@ defmodule Loopex.MixProject do
     [extra_applications: []]
   end
 
-  # Concept: the runtime's only dependency is the contract application. Core is
-  # stdlib and OTP otherwise; providers, stores, executors, and transports live
-  # in adapter applications that depend inward on this one.
+  # Concept: the contract application, and the one external dependency the
+  # vision admits by name.
+  #
+  # Technical depth: accepted ADR 0030 supersedes ADR 0001's empty-dependency
+  # clause for this application exactly far enough to admit `:telemetry`, the
+  # single dispatcher the dependency doctrine names, and nothing else. There is
+  # still no development, test, formatter, analysis or documentation dependency
+  # here, and providers, stores, executors and transports live in adapter
+  # applications that depend inward on this one.
   defp deps do
-    [{:loopex_protocol, in_umbrella: true}]
+    [{:loopex_protocol, in_umbrella: true}, {:telemetry, "~> 1.3"}]
   end
 end
