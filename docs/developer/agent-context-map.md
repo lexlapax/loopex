@@ -4061,3 +4061,33 @@ rows, every earlier generation and every historical revision remain exactly
 as recorded. This row binds the proposal; the re-capture itself and the M0
 re-proof it records follow as evidence commit `E'` and are not accepted
 here. It grants no closure, integration, tag or release.
+
+<a id="disposition-m1-gate-generation-13-2026-09-14"></a>
+### M1 gate generation 13 acceptance — 2026-09-14
+
+The first capture of the M1 gate after generation 12 failed on the Linux
+current lane at the protected corpus, on the case generation 12 had added:
+that witness read the path it inherited and compared the fixture role's
+answer against it, so run as a protected selector it inherited the isolated
+path the gate had already built, and on a host whose system directories carry
+the toolchain the case failed inside the gate it protects while passing when
+run directly. The implementer presented proposal `A` at `5997542d0e17079141364f760b53c63097091c46`,
+which changes only that case so it supplies the incoming path explicitly and
+computes its expectation from the same list, with this evidence: the
+runner's ordering unchanged from generation 12; the corrected case passing
+on both hosts against that runner, exercising the unchanged branch on Darwin
+and the reordered branch on Linux; formatting, agent-bootstrap,
+commit-message and hygiene checks passing. The full status walk at `A` was
+still running when the maintainer answered **"generation 13 accepted."**; it finished
+afterwards and stopped only on the pending generation row, which is the
+condition this record requires before binding.
+
+This accepts generation 13 alone under `amendment-transaction-v2`: the
+toolchain-path witness supplies the path it tests instead of inheriting one,
+asserts the established order where no system directory carries the
+toolchain and the reordered order where one does, and refuses a supplied path
+that carries no complete toolchain. The Acceptance and Closure rows, every
+earlier generation and every historical revision remain exactly as recorded.
+This row binds the proposal; the re-capture itself and the M0 re-proof it
+records follow as evidence commit `E'` and are not accepted here. It grants
+no closure, integration, tag or release.
