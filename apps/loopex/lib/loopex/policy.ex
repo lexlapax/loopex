@@ -53,6 +53,8 @@ defmodule Loopex.Policy do
 
   @decision_timeout_ms 5_000
 
+  alias Loopex.Interaction
+
   @reason_categories [
     :policy_denied,
     :effect_class_not_permitted,
@@ -176,6 +178,39 @@ defmodule Loopex.Policy do
   @doc """
   ## Concept
 
+  Asks the host the same question `decide/2` asks, and admits the deferred
+  answer `decide/2` must refuse.
+
+  ## Technical depth
+
+  Accepted ADR 0024 adds this evaluator around the same `decide/1` callback.
+  There is no second callback and no new arity: the host cannot tell which
+  caller it is answering, so a policy that defers is answering the one algebra
+  ADR 0009 always defined. `decide/2` keeps M2's fail-closed projection of a
+  defer, which the inherited gate still proves; this evaluator returns the
+  validated question instead, and a defer that is not inside the admitted
+  question family is `policy_unavailable`, not a malformed interaction.
+
+  A resumed evaluation calls this with the original request's exact fields plus
+  the one core-created response member, so the host sees byte-identical inputs
+  and its own answer. Evaluation is non-authorizing until its result commits:
+  nothing here mints a grant, and only an allow can lead to one.
+  """
+  @spec evaluate(module(), request()) ::
+          {:allow, context()} | {:deny, reason_category()} | {:defer, Interaction.request()}
+  def evaluate(module, request) when is_atom(module) and is_map(request) do
+    caller = self()
+    reply_ref = make_ref()
+
+    {:ok, pid} = Task.start(fn -> send(caller, {reply_ref, evaluate_safely(module, request)}) end)
+    await_policy(pid, Process.monitor(pid), reply_ref)
+  end
+
+  def evaluate(_module, _request), do: {:deny, :policy_unavailable}
+
+  @doc """
+  ## Concept
+
   Whether a term is a decision context this boundary will carry.
 
   ## Technical depth
@@ -255,8 +290,38 @@ defmodule Loopex.Policy do
   # noise. A policy that raises has not allowed anything, and the safe reading of
   # "I do not know" is no. Letting the exception escape would instead take down
   # the session owner, turning a host's bug into lost work.
+  # Concept: the same call as `safely/2`, with the defer branch admitted.
+  #
+  # Technical depth: every other branch resolves exactly as it does for
+  # `decide/2`, so a host sees one algebra and one callback. A deferred question
+  # outside the admitted family resolves to `policy_unavailable` rather than to
+  # a malformed interaction: the runtime refuses to retain a question it cannot
+  # bound, and refusing it as unavailable is the same fail-closed direction the
+  # rest of this boundary takes.
+  defp evaluate_safely(module, request) do
+    normalize(module.decide(request), :admit_defer)
+  rescue
+    _error -> {:deny, :policy_unavailable}
+  catch
+    _kind, _value -> {:deny, :policy_unavailable}
+  end
+
   defp safely(module, request) do
-    case module.decide(request) do
+    normalize(module.decide(request), :refuse_defer)
+  rescue
+    _error -> {:deny, :policy_unavailable}
+  catch
+    _kind, _value -> {:deny, :policy_unavailable}
+  end
+
+  # Concept: one host answer, read the same way by both callers.
+  #
+  # Technical depth: the callback is invoked exactly once per decision, here,
+  # and its result is interpreted afterwards. Calling it again to reinterpret an
+  # answer would run a host's policy twice for one tool call, which a policy
+  # with a side effect or a changing answer would notice.
+  defp normalize(result, defer_disposition) do
+    case result do
       {:allow, context} ->
         if valid_context?(context),
           do: {:allow, context},
@@ -279,15 +344,17 @@ defmodule Loopex.Policy do
       {:deny, category} when category in @reason_categories ->
         {:deny, category}
 
-      {:defer, _interaction} ->
+      {:defer, _interaction} when defer_disposition == :refuse_defer ->
         {:deny, :interaction_unsupported}
+
+      {:defer, interaction} ->
+        case Interaction.validate_request(interaction) do
+          {:ok, validated} -> {:defer, validated}
+          {:error, _reason} -> {:deny, :policy_unavailable}
+        end
 
       _other ->
         {:deny, :policy_unavailable}
     end
-  rescue
-    _error -> {:deny, :policy_unavailable}
-  catch
-    _kind, _value -> {:deny, :policy_unavailable}
   end
 end
