@@ -153,7 +153,7 @@ defmodule Loopex.M4GateSupportTest do
         "gate=sha256:#{String.duplicate("b", 64)} " <>
         "version=0.1.0 role=full seed=3107 outcome_ids=1,2,3,4,5,6,7 selectors=10 elapsed_seconds=4200 " <>
         "elixir=1.20.3 otp=29.0.5 erts=17.0.5 platform=aarch64-apple-darwin25.6.0 node_pin=22.12.0 " <>
-        "python_pin=3.12.4 clients=sha256:#{String.duplicate("c", 64)} schema=sha256:#{String.duplicate("e", 64)} " <>
+        "clients=sha256:#{String.duplicate("c", 64)} schema=sha256:#{String.duplicate("e", 64)} " <>
         "inherited=true fresh_source=true real_workflow=true result=PASS"
 
     assert :ok = Support.verify_final_report(line)

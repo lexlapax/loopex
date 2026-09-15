@@ -123,7 +123,7 @@ After acceptance, during implementation:
    artifact bytes and a settled snapshot. Require local core/port greens before
    the wire implementation rejoins.
 6. Implement the server, the Node consumer workflow and the independent
-   Elixir/Python conformance clients against the bound vectors and pins.
+   Elixir conformance client against the bound vectors and pins.
 
 Before closure, every lane must pass: isolated compile and probe, inherited
 gates, authoritative protected selectors, whole suite, independent clients,
@@ -172,9 +172,9 @@ binding.
 
 | SHA-256 | Path |
 | --- | --- |
-| `baa80842b486abeb3f092f042d9ac64d83eb7eea4028d3b72b08bc62df398240` | `scripts/check-m4-gate.sh` |
+| `60006e657605095a4d66f00d32a226a8245653b46799fca3434694e1864864d2` | `scripts/check-m4-gate.sh` |
 | `a559bd9f44f1f46f65aaff0bdcfcac2e5124301bc367c58c85966fd6409ba68f` | `scripts/m4-opening-probe.exs` |
-| `6eb691a5fd4b1b3c3896cc38f7719c21db637b12e3c17de9dd42f24a154cefdd` | `scripts/m4-gate-support.exs` |
+| `d9b8ac57a57ef39d50b581db78ac896fa12908ae9feae89b29b5d43564523d22` | `scripts/m4-gate-support.exs` |
 | `65d0de9dcd1218af542f00e32c2177d2612a2f1232f22db37b9942200c84cf66` | `scripts/m3-gate-support.exs` |
 | `c4d485ca3229441c678abe1e8733f90216e89e0dfb9e81786f58f525619aec29` | `scripts/check-closed-gates.sh` |
 | `8c94069e737ba66c658071c52232ae3f9462fb79ca8d0221fe071d63367765c7` | `scripts/m4-outcomes.exs` |
@@ -183,7 +183,7 @@ binding.
 | `53d8219bdee584a3849a85a1102e405520d5dd0dfbe21d259434bc9edfc5fcc0` | `scripts/m1-exunit-runner.exs` |
 | `c36253cff3d74ddff1b330695edbc4bde0a4565c1412c67c1293b2fb7ca6129b` | `apps/loopex/test/m1_exunit_runner_test.exs` |
 | `fea095ecec784a4440b872ad5f53a8da2cb4e13e43b6f05add5cfd75bb352879` | `.tool-versions` |
-| `ac93646ab8af588f848de9f824e8d56e287ce311f12ca695ff0d1119c82f4a46` | `scripts/fixtures/m4/client-toolchain.txt` |
+| `0566e1bddbae948b3f92c3c60f0de002393f84466a7f45ff961b21f20fee3e5d` | `scripts/fixtures/m4/client-toolchain.txt` |
 | `a4c286cf45442273011d8f51d25d867334cb3dc0ce3621e86564cba520e1bcff` | `apps/loopex_protocol/priv/schema/loopex-experimental-1.json` |
 | `a7f2dc36f9206dc48d258bc7b49a8d390ec3a0e93c51ed5a35f45153052e1951` | `apps/loopex_protocol/priv/vectors/loopex-experimental-1.json` |
 
@@ -241,7 +241,7 @@ the gate rejects that invocation ledger.
 | Real workflow | Separately selected attended real-provider task from the extracted source, following the operator guide with operator-supplied inputs through the shipped server and Node consumer |
 | Retained evidence | One final report line in the exact grammar below, validated by the bound support script before it is printed; the real selector's authoritative report binds provider/model/endpoint and version-aware adapter/executor build identities; save that output without relabelling its source |
 
-The pinned Node and Python interpreters are verified immediately before each
+The pinned Node interpreter is verified immediately before each
 client-backed selector (the external workflow, its real-provider file and the
 schema conformance file) in checkpoint and full modes alike; absence or
 mismatch is UNAVAILABLE, never RED.
@@ -250,7 +250,7 @@ The retained final report has exactly this grammar, one line, fields in this
 order, each present once:
 
 ```text
-LOOPEX_M4_GATE_REPORT source=<40 hex> tree=<40 hex> archive=sha256:<64 hex> archive_build=sha256:<64 hex> lock=sha256:<64 hex> gate=sha256:<64 hex> version=<major.minor.patch> role=full seed=3107 outcome_ids=1,2,3,4,5,6,7 selectors=<count> elapsed_seconds=<n> elixir=<exact> otp=<exact, e.g. 29.0.5> erts=<exact> platform=<system architecture> node_pin=<pinned> python_pin=<pinned> clients=sha256:<64 hex> schema=sha256:<64 hex> inherited=true fresh_source=true real_workflow=true result=PASS
+LOOPEX_M4_GATE_REPORT source=<40 hex> tree=<40 hex> archive=sha256:<64 hex> archive_build=sha256:<64 hex> lock=sha256:<64 hex> gate=sha256:<64 hex> version=<major.minor.patch> role=full seed=3107 outcome_ids=1,2,3,4,5,6,7 selectors=<count> elapsed_seconds=<n> elixir=<exact> otp=<exact, e.g. 29.0.5> erts=<exact> platform=<system architecture> node_pin=<pinned> clients=sha256:<64 hex> schema=sha256:<64 hex> inherited=true fresh_source=true real_workflow=true result=PASS
 ```
 
 `source` and `tree` name the staged candidate commit and tree. `archive` is
@@ -283,8 +283,8 @@ input. The aggregate emits each predecessor's existing input format; it does
 not change that predecessor's credential contract. No mixed-file exclusion
 inventory is locked. The inherited real-provider lanes use the reference model
 `anthropic:claude-haiku-4-5`; the credential must belong to that Anthropic
-provider. Node and Python execution versions for the client lanes
-are pinned before acceptance, not by this opening.
+provider. The Node execution version for the client lanes is
+pinned before acceptance, not by this opening.
 
 ## Protected Outcome Obligations
 
@@ -295,7 +295,7 @@ are pinned before acceptance, not by this opening.
 | 3 | `apps/loopex/test/interaction_lifecycle_test.exs`, `apps/loopex_app_server/test/foundation_mapping_test.exs` | Durable request/answer/policy/intent cuts journaled before publication and before any intent, fixed timestamps through uncertain commits, expiry/abort/restart races, the exact successive-round bound, old-reader refusal; answered-but-unresolved recovery without speculation, acknowledgement or dispatch; identical replay returns the historical admission while changed content, wrong-target, resolved, expired or absent interactions refuse with stable reasons; invalid answers, malformed policy output and failed or timed-out re-evaluation dispatch nothing and resolve as denial; policy-request, interaction-request and answer digests with their preimages preserved through commit_unknown and restart under the same policy identity and revision; exact resources, missing/stale trust, manual-only selection, answer admission separate from re-evaluation and grant/intent, immutable launch inputs unreplaceable from the wire |
 | 4 | `apps/loopex_store_local/test/artifact_transfer_test.exs`, `apps/loopex_app_server/test/delivery_bounds_test.exs` | The attachment-owned open/read/close API refusing another attachment, session or runtime and disclosing no path; complete verification at open with one verification per transfer, distinct object/chunk digests, unsupported-store refusal; whole, first, last, empty and overrun windows and every distinct refusal reason; wrong-session use, object/use swap, corruption outside the requested window, post-open same-size rewrite never reaching a chunk; open deadline or work-budget exhaustion refusing before any chunk bytes leave the store and removing any partial snapshot; per-connection and per-runtime transfer limits refusing independently; connection-work exhaustion, lifetime expiry, cancellation, descriptor and snapshot release across repeated kill/restart, streaming memory bounded well above the chunk ceiling and startup scavenging touching only owned regular files; genuine old-format artifacts readable and capability removal restoring the prior API; chunk/read-deadline budgets; at the wire, a transfer reference from another connection refused and connection loss closing every transfer it opened; malformed UTF-8, duplicate keys, nesting, fragmented/multiple/oversized frames, blocked reader, detach cursor, late progress and actual cleanup |
 | 5 | `apps/loopex_app_server/test/external_workflow_test.exs`, `apps/loopex_app_server/test/external_workflow_real_test.exs` | Fresh extraction of the exact source candidate follows the operator guide, builds the foreground server and Node consumer, and runs them with operator-supplied inputs; the attended real-provider selector runs from that extraction and proves the same skill → interaction answer → policy re-evaluation → committed grant/intent → actual tool → artifact → abrupt restart workflow with no embedded identities; clean stdin EOF performs orderly shutdown with no cancellation; abrupt death records nothing; a pending interaction survives both; `session.abort` is the only cancellation and an aborted interaction never reappears |
-| 6 | `apps/loopex_protocol/test/public_schema_conformance_test.exs`, `apps/loopex/test/m4_gate_support_test.exs` | Independently executed Elixir, Python and Node clients over canonical positive/negative vectors under the pinned interpreters; exact version and platform identities; retained refusal of missing, duplicated, reordered, wrong-kind, stale-version and malformed evidence fields |
+| 6 | `apps/loopex_protocol/test/public_schema_conformance_test.exs`, `apps/loopex/test/m4_gate_support_test.exs` | Independently executed Elixir and Node clients over canonical positive/negative vectors under the pinned interpreter; exact version and platform identities; retained refusal of missing, duplicated, reordered, wrong-kind, stale-version and malformed evidence fields |
 | 7 | `apps/loopex/test/trace_session_test.exs`, `apps/loopex/test/telemetry_boundary_test.exs` | Session scoped to owned processes and allowed modules with a second VM tracer unaffected; documented fields per level; redaction of credential references, model content, tool arguments and artifact bytes at the `arguments` level; the exact 4,096-byte, 2,000-per-second and 8,192-entry limits drop with a counted entry without blocking; no session command, client content, model output, project resource or wire request starts, changes or stops a session; stop releases every flag; unavailability on a release without trace sessions; every callback and transaction cut in the ADR 0030 inventory emits start/stop or exception with duration and documented metadata only; crashing handler isolated; a slow or blocked `loopex_telemetry` forwarding sink never delays a coordinator and drops with a counted entry; the dispatcher's bounded diagnostics admission (one atomic owner-recording slot claim before send under racing senders, 4,096-slot ceiling on the Loopex-owned backlog, a sender killed at each crash cut, after taking a ticket, after a failed claim, after a successful claim and after the send, holding afterwards exactly its claimed-but-unsent slots released at its `DOWN` while a concurrent sender's slot stays live and admits, a release freeing only the exact claim it names, counted drops without a send, a drain summary carrying the exact count of counted drops, host sink backpressured only) observed through the asynchronous path; overheads measured |
 
 Each required clause maps to a named decisive witness in `scripts/m4-outcomes.exs`.
@@ -507,3 +507,49 @@ at this proposal only on the stale binding of this gate and these envelopes.
 After exact-SHA review and explicit acceptance of `A`, `R` rebinds the
 Acceptance row and adds one amendment-specific disposition. This proposal
 records no acceptance and grants no waiver, closure or release.
+
+<a id="amendment-4"></a>
+## Amendment 4 — Drop the Python client pin and its report field
+
+**Acceptance: OUTSTANDING.** Accepted M4 amends its gate under
+`amendment-transaction-v1`: this proposal `A` advances the generation and
+retains the Acceptance row and lifecycle state; its immediate child `R`
+rebinds Acceptance to exact `A` after explicit acceptance.
+
+Outcome 6 committed to Elixir, Python and Node clients executing the same
+vectors, and this gate pinned a Python interpreter to run one of them. That pin
+was the one hole in a boundary the repository spends real effort holding: the
+closed M0 gate shadows every interpreter name it can reach, `python`,
+`python3.12`, `pipx`, `poetry`, `conda` and `xcrun` among them, and scans every
+tracked byte for an invocation shape that could slip past those stubs. A client
+lane that required a Python interpreter reopened exactly what that scan closes.
+
+The maintainer resolved it on 2026-09-15: drop Python from outcome 6 and let a
+later milestone add further clients from the vision and roadmap. Two independent
+implementations already prove the contract is bytes rather than an Elixir
+interface; a third adds breadth, not proof.
+
+Three bound artifacts change and no fourth. The pin file loses its `python=`
+line, the runner loses the Python verification and the `python_pin` field it
+printed, and the support script's report grammar loses that field's rule. Their
+rows in the Bound Artifacts table above move to the new digests, and the table
+below records the same rebinding under this generation. This document loses that
+field from its own report grammar too, along with every remaining sentence
+naming a Python client or a plural set of pinned interpreters: the readiness
+step, the verification sentence, the opening's client pin sentence and outcome
+6's obligation. No outcome, selector, witness, limit or evidence class changes
+beyond outcome 6's client list, no lifecycle state reopens, and the Concept and
+Technical depth envelopes move in the same revision because the pair is one
+authority unit.
+
+Binding validation, bootstrap and every inherited gate that invokes them stop at
+this proposal only on the stale binding of this gate and these envelopes. After
+exact-SHA review and explicit acceptance of `A`, `R` rebinds the Acceptance row
+and adds one amendment-specific disposition. This proposal records no
+acceptance and grants no waiver, closure or release.
+
+| Generation | Artifact | Rebound SHA-256 |
+| --- | --- | --- |
+| 4 | `scripts/fixtures/m4/client-toolchain.txt` | `0566e1bddbae948b3f92c3c60f0de002393f84466a7f45ff961b21f20fee3e5d` |
+| 4 | `scripts/check-m4-gate.sh` | `60006e657605095a4d66f00d32a226a8245653b46799fca3434694e1864864d2` |
+| 4 | `scripts/m4-gate-support.exs` | `d9b8ac57a57ef39d50b581db78ac896fa12908ae9feae89b29b5d43564523d22` |

@@ -182,22 +182,20 @@ if [ "$role" = checkpoint ] && [ -z "$selected_ids" ]; then
 fi
 
 # Concept: client lanes run only under the pinned interpreters the gate binds.
-# Technical depth: outcomes 5 and 6 execute external clients, so their pins are
+# Technical depth: outcomes 5 and 6 execute an external client, so its pin is
 # verified before any selector for them runs; an absent or different interpreter
-# is unavailable evidence, never a product red. The pin file names exact
-# `node=` and `python=` versions.
+# is unavailable evidence, never a product red. The pin file names the exact
+# `node=` version. Nothing here reaches for a Python interpreter: the M0 gate
+# spends real effort proving none is reachable, and a client lane that opened
+# that hole again would undo it.
 client_pins=scripts/fixtures/m4/client-toolchain.txt
 pinned_node=""
-pinned_python=""
 require_client_pins() {
   [ -r "$client_pins" ] || die "client toolchain pins are absent: $client_pins"
   pinned_node=$(awk -F= '$1 == "node" { print $2 }' "$client_pins")
-  pinned_python=$(awk -F= '$1 == "python" { print $2 }' "$client_pins")
-  [ -n "$pinned_node" ] && [ -n "$pinned_python" ] || die 'client toolchain pins are incomplete'
+  [ -n "$pinned_node" ] || die 'client toolchain pins are incomplete'
   observed_node=$(node --version 2>/dev/null </dev/null) || die 'pinned Node interpreter is unavailable'
-  observed_python=$(python3 --version 2>/dev/null </dev/null | cut -d' ' -f2) || die 'pinned Python interpreter is unavailable'
   [ "$observed_node" = "v$pinned_node" ] || die "Node version differs from the pin: $observed_node"
-  [ "$observed_python" = "$pinned_python" ] || die "Python version differs from the pin: $observed_python"
 }
 
 support prepare-build "$task_root" "$operator_mix_home" "${LOOPEX_HOME:-$operator_home/.loopex}" "${LOOPEX_WORKSPACE:-$root}" || exit $?
@@ -359,7 +357,7 @@ schema_path=apps/loopex_protocol/priv/schema/loopex-experimental-1.json
 schema_digest=$(shasum -a 256 "$schema_path" | cut -d' ' -f1) || die 'cannot hash the canonical schema'
 selector_count=$(grep -c . "$task_root/selector-ledger") || die 'selector ledger is empty'
 clients_digest=$(shasum -a 256 "$client_pins" | cut -d' ' -f1) || die 'cannot hash the client toolchain pins'
-report=$(printf 'LOOPEX_M4_GATE_REPORT source=%s tree=%s archive=sha256:%s archive_build=sha256:%s lock=sha256:%s gate=sha256:%s version=%s role=full seed=3107 outcome_ids=1,2,3,4,5,6,7 selectors=%s elapsed_seconds=%s %snode_pin=%s python_pin=%s clients=sha256:%s schema=sha256:%s inherited=true fresh_source=true real_workflow=true result=PASS' \
-  "$source_commit" "$source_tree" "$source_archive_digest" "$source_build_digest" "$source_lock_digest" "$(shasum -a 256 docs/plans/M4-gate.md | cut -d' ' -f1)" "$source_version" "$selector_count" "$SECONDS" "$toolchain" "$pinned_node" "$pinned_python" "$clients_digest" "$schema_digest")
+report=$(printf 'LOOPEX_M4_GATE_REPORT source=%s tree=%s archive=sha256:%s archive_build=sha256:%s lock=sha256:%s gate=sha256:%s version=%s role=full seed=3107 outcome_ids=1,2,3,4,5,6,7 selectors=%s elapsed_seconds=%s %snode_pin=%s clients=sha256:%s schema=sha256:%s inherited=true fresh_source=true real_workflow=true result=PASS' \
+  "$source_commit" "$source_tree" "$source_archive_digest" "$source_build_digest" "$source_lock_digest" "$(shasum -a 256 docs/plans/M4-gate.md | cut -d' ' -f1)" "$source_version" "$selector_count" "$SECONDS" "$toolchain" "$pinned_node" "$clients_digest" "$schema_digest")
 support evidence "$report" </dev/null || exit $?
 printf '%s\n' "$report"

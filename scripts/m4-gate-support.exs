@@ -224,7 +224,6 @@ defmodule Loopex.M4Gate.Support do
     {"erts", ~r/\A\d+(\.\d+)+\z/},
     {"platform", ~r/\A[A-Za-z0-9_.-]+\z/},
     {"node_pin", ~r/\A\d+\.\d+\.\d+\z/},
-    {"python_pin", ~r/\A\d+\.\d+\.\d+\z/},
     {"clients", ~r/\Asha256:[0-9a-f]{64}\z/},
     {"schema", ~r/\Asha256:[0-9a-f]{64}\z/},
     {"inherited", ~r/\Atrue\z/},
