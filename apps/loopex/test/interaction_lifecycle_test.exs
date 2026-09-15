@@ -616,15 +616,21 @@ defmodule Loopex.InteractionLifecycleTest do
     {_output, 0} = System.cmd("git", ["clone", "--quiet", "--no-hardlinks", repository, root])
     {_output, 0} = System.cmd("git", ["-C", root, "checkout", "--quiet", @old_reader_revision])
 
-    # The environment is named rather than inherited. A runner that exports
-    # `MIX_ENV=test` would otherwise build this reader into `_build/test` while
-    # the replay below loads `_build/dev`, and the child would fail for a reason
-    # that has nothing to do with what the reader can read.
+    # Every path this reader builds into is named rather than inherited. A runner
+    # that exports `MIX_BUILD_ROOT`, as the milestone gate does to isolate its
+    # lanes, sends these beams somewhere else entirely and leaves the tree below
+    # `root` with no build at all, so the replay finds nothing to load and the
+    # case fails for a reason that has nothing to do with what an old reader can
+    # read. `MIX_ENV` and the dependency path are named against the same leak.
     {output, status} =
       System.cmd("mix", ["compile"],
         cd: Path.join([root, "apps", "loopex"]),
         stderr_to_stdout: true,
-        env: [{"MIX_ENV", "dev"}]
+        env: [
+          {"MIX_ENV", "dev"},
+          {"MIX_BUILD_ROOT", Path.join(root, "_build")},
+          {"MIX_DEPS_PATH", Path.join(root, "deps")}
+        ]
       )
 
     assert status == 0, "the old reader did not build: #{output}"
