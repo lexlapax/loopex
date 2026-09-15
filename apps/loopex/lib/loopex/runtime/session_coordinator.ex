@@ -1675,12 +1675,28 @@ defmodule Loopex.Runtime.SessionCoordinator do
             # `:prepared`, `:abandoned`, and `:fenced` keep them paused, which is
             # what makes abandonment and the abort fence permanent rather than
             # merely current.
-            case Enum.reject(
-                   SessionState.pending_work(state.durable),
-                   &resume_paused?(state, &1)
-                 ) do
-              [] -> {:noreply, state}
-              [work | _rest] -> advance_run(state, work)
+            # Concept: an open question is where the session is, and scheduling
+            # stops there until it resolves.
+            #
+            # Technical depth: a pending question suspends the run; an answered
+            # one owes the host a resumed evaluation, and this is the single
+            # entry to scheduling where that is decided, so recovery, ownership
+            # and admission keep their ordinary paths.
+            case SessionState.open_interaction_record(state.durable) do
+              %{status: "pending"} ->
+                {:noreply, state}
+
+              %{status: "answered"} = interaction ->
+                resume_policy_evaluation(state, interaction)
+
+              _none ->
+                case Enum.reject(
+                       SessionState.pending_work(state.durable),
+                       &resume_paused?(state, &1)
+                     ) do
+                  [] -> {:noreply, state}
+                  [work | _rest] -> advance_run(state, work)
+                end
             end
 
           run_id ->
@@ -5279,20 +5295,41 @@ defmodule Loopex.Runtime.SessionCoordinator do
                  :ok <- validate_tool_arguments(definition, call.arguments) do
               case decision do
                 {:allow, context} ->
-                  dispatch_authorized_effect(state, work, call, definition, context)
+                  case settle_open_interaction(state, "allowed", nil) do
+                    {:ok, settled} ->
+                      dispatch_authorized_effect(settled, work, call, definition, context)
+
+                    {:error, reason} ->
+                      {:stop, {:interaction_resolution_failed, reason}, state}
+                  end
 
                 {:defer, question} ->
                   begin_interaction(state, work, call, question)
 
                 {:deny, category} when is_atom(category) ->
-                  if category in Policy.reason_categories() do
-                    commit_tool_terminal(state, work, call, :denied, Atom.to_string(category))
-                  else
-                    commit_tool_terminal(state, work, call, :denied, "policy_unavailable")
+                  denial =
+                    if category in Policy.reason_categories() do
+                      Atom.to_string(category)
+                    else
+                      "policy_unavailable"
+                    end
+
+                  case settle_open_interaction(state, "denied", denial) do
+                    {:ok, settled} ->
+                      commit_tool_terminal(settled, work, call, :denied, denial)
+
+                    {:error, reason} ->
+                      {:stop, {:interaction_resolution_failed, reason}, state}
                   end
 
                 _unavailable ->
-                  commit_tool_terminal(state, work, call, :denied, "policy_unavailable")
+                  case settle_open_interaction(state, "denied", "policy_unavailable") do
+                    {:ok, settled} ->
+                      commit_tool_terminal(settled, work, call, :denied, "policy_unavailable")
+
+                    {:error, reason} ->
+                      {:stop, {:interaction_resolution_failed, reason}, state}
+                  end
               end
             else
               {:error, reason} -> commit_tool_failure(state, work, call, reason)
@@ -5398,13 +5435,103 @@ defmodule Loopex.Runtime.SessionCoordinator do
         policy_request_digest: Interaction.digest(policy_request_identity(state, work, call))
       }
 
+      previous = SessionState.open_interaction_record(state.durable)
+
       with {:ok, proposal} <-
              SessionState.propose_interaction_request(state.durable, interaction),
            {:ok, next} <- commit_internal(state, proposal) do
+        # The creation is what ended the previous round, so its timer goes with
+        # it rather than firing against a question nobody can answer any more.
+        next =
+          case previous do
+            %{interaction_id: id} -> cancel_interaction_expiry(next, id)
+            _none -> next
+          end
+
         {:noreply, arm_interaction_expiry(next, interaction)}
       else
         {:error, reason} -> {:stop, {:interaction_request_failed, reason}, state}
       end
+    end
+  end
+
+  # Concept: an answered question goes back to the host, with its own answer.
+  #
+  # Technical depth: the host receives the original request's fields plus
+  # exactly one core-created response member, so a resumed evaluation is the
+  # same question with the answer attached rather than a new one. Evaluation is
+  # non-authorizing until its result commits, which is what makes retrying it
+  # after a crash safe where retrying an effect never is. A policy call already
+  # in flight for this run is left alone: the answer it will come back to is
+  # already on disk.
+  defp resume_policy_evaluation(state, interaction) do
+    case Map.get(state.durable.pending_work, interaction.run_id) do
+      %{stage: "effect_pending", pending_calls: [call | _rest]} = work ->
+        if policy_in_flight?(state, work.run_id) do
+          {:noreply, state}
+        else
+          case resolve_active_tool(state, call.name) do
+            {:ok, definition} ->
+              request =
+                state
+                |> policy_request(work, call, definition)
+                |> Map.put(
+                  :interaction_response,
+                  Interaction.response_member(
+                    interaction.interaction_id,
+                    interaction.request,
+                    interaction.choice_id
+                  )
+                )
+
+              task =
+                Task.Supervisor.async_nolink(state.owner_workers, fn ->
+                  Policy.evaluate_callback(state.policy, request, :admit_defer)
+                end)
+
+              state = put_in_flight(state, task.ref, {:policy, work.run_id, task.pid})
+              state = arm_policy_timeout(state, task.ref, work.run_id)
+              {:noreply, arm_deadline(state, work.run_id)}
+
+            {:error, reason} ->
+              commit_tool_failure(state, work, call, reason)
+          end
+        end
+
+      _no_pending_call ->
+        {:noreply, state}
+    end
+  end
+
+  defp policy_in_flight?(state, run_id) do
+    Enum.any?(state.in_flight, fn
+      {_reference, {:policy, ^run_id, _pid}} -> true
+      _other -> false
+    end)
+  end
+
+  # Concept: a verdict on an answered question ends that question first.
+  #
+  # Technical depth: the resolution is its own transaction, committed before the
+  # grant and intent that may follow it, so no dispatch exists for a question
+  # that still reads as open. A question that was never answered -- the ordinary
+  # policy path -- has nothing to settle here.
+  defp settle_open_interaction(state, resolution, reason) do
+    case SessionState.open_interaction_record(state.durable) do
+      %{status: "answered", interaction_id: interaction_id} ->
+        with {:ok, proposal} <-
+               SessionState.propose_interaction_resolution(
+                 state.durable,
+                 interaction_id,
+                 resolution,
+                 reason
+               ),
+             {:ok, next} <- commit_internal(state, proposal) do
+          {:ok, cancel_interaction_expiry(next, interaction_id)}
+        end
+
+      _none ->
+        {:ok, state}
     end
   end
 

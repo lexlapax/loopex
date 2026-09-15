@@ -253,6 +253,132 @@ defmodule Loopex.InteractionLifecycleTest do
     assert tool_finished["outcome"] == "denied"
   end
 
+  defmodule AnsweringPolicy do
+    @moduledoc false
+    @behaviour Loopex.Policy
+
+    @impl Loopex.Policy
+    def decide(request) do
+      case Map.get(request, :interaction_response) do
+        nil ->
+          {:defer,
+           %{
+             kind: :choice,
+             prompt: "May the tool write the file?",
+             choices: [%{id: "allow", label: "Allow once"}, %{id: "deny", label: "Deny"}],
+             expires_in_ms: 60_000
+           }}
+
+        %{answer: %{choice_id: "allow"}} ->
+          {:allow, nil}
+
+        %{answer: %{choice_id: _refused}} ->
+          {:deny, :policy_denied}
+      end
+    end
+  end
+
+  test "a committed answer re-enters host policy and an allow dispatches the call" do
+    fixture = loop_fixture(AnsweringPolicy)
+    {session_id, attachment} = loop_session(fixture)
+
+    assert {:accepted, "p1"} =
+             Loopex.command(attachment, %{type: :prompt, command_id: "p1", content: "do it"})
+
+    requested = await_event(fixture, session_id, "interaction.requested")
+
+    assert {:accepted, "answer-1"} =
+             Loopex.command(attachment, %{
+               type: :interaction_answer,
+               command_id: "answer-1",
+               interaction_id: requested["interaction_id"],
+               choice_id: "allow"
+             })
+
+    resolved = await_event(fixture, session_id, "interaction.resolved", 4_000)
+    assert resolved["resolution"] == "allowed"
+    assert resolved["choice_id"] == "allow"
+
+    tool_finished = await_event(fixture, session_id, "tool.finished", 4_000)
+    assert tool_finished["outcome"] == "completed"
+
+    finished = await_event(fixture, session_id, "run.finished", 4_000)
+    assert finished["outcome"] == "completed"
+  end
+
+  test "an answer choosing refusal resolves the question as denied and dispatches nothing" do
+    fixture = loop_fixture(AnsweringPolicy)
+    {session_id, attachment} = loop_session(fixture)
+
+    assert {:accepted, "p1"} =
+             Loopex.command(attachment, %{type: :prompt, command_id: "p1", content: "do it"})
+
+    requested = await_event(fixture, session_id, "interaction.requested")
+
+    assert {:accepted, "answer-1"} =
+             Loopex.command(attachment, %{
+               type: :interaction_answer,
+               command_id: "answer-1",
+               interaction_id: requested["interaction_id"],
+               choice_id: "deny"
+             })
+
+    resolved = await_event(fixture, session_id, "interaction.resolved", 4_000)
+    assert resolved["resolution"] == "denied"
+
+    tool_finished = await_event(fixture, session_id, "tool.finished", 4_000)
+    assert tool_finished["outcome"] == "denied"
+
+    assert Enum.all?(Fixture.events(fixture, session_id), &(&1.kind != "tool.started"))
+  end
+
+  test "an answer to a question that is absent wrong or already resolved refuses with its own reason" do
+    fixture = loop_fixture(AnsweringPolicy)
+    {session_id, attachment} = loop_session(fixture)
+
+    assert {:accepted, "p1"} =
+             Loopex.command(attachment, %{type: :prompt, command_id: "p1", content: "do it"})
+
+    requested = await_event(fixture, session_id, "interaction.requested")
+    interaction_id = requested["interaction_id"]
+
+    assert {:error, :interaction_absent} =
+             Loopex.command(attachment, %{
+               type: :interaction_answer,
+               command_id: "answer-absent",
+               interaction_id: "interaction-nobody-asked",
+               choice_id: "allow"
+             })
+
+    assert {:error, :invalid_interaction_answer} =
+             Loopex.command(attachment, %{
+               type: :interaction_answer,
+               command_id: "answer-invented",
+               interaction_id: interaction_id,
+               choice_id: "invented"
+             })
+
+    assert {:accepted, "answer-1"} =
+             Loopex.command(attachment, %{
+               type: :interaction_answer,
+               command_id: "answer-1",
+               interaction_id: interaction_id,
+               choice_id: "allow"
+             })
+
+    _resolved = await_event(fixture, session_id, "interaction.resolved", 4_000)
+
+    # A late answer to a question that has resolved refuses rather than
+    # reopening it.
+    assert {:error, :interaction_resolved} =
+             Loopex.command(attachment, %{
+               type: :interaction_answer,
+               command_id: "answer-late",
+               interaction_id: interaction_id,
+               choice_id: "deny"
+             })
+  end
+
   defp loop_fixture(policy) do
     fixture =
       Fixture.start(

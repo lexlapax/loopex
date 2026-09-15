@@ -1495,6 +1495,13 @@ defmodule Loopex.Runtime.SessionState do
     )
   end
 
+  @doc false
+  @spec open_interaction_record(t()) :: map() | nil
+  def open_interaction_record(%__MODULE__{open_interaction: nil}), do: nil
+
+  def open_interaction_record(%__MODULE__{open_interaction: interaction_id} = state),
+    do: Map.get(state.interactions, interaction_id)
+
   @doc """
   ## Concept
 
@@ -1683,6 +1690,49 @@ defmodule Loopex.Runtime.SessionState do
     )
   end
 
+  # Concept: an answer is admitted against the exact question it names, while
+  # that question is still open and unanswered.
+  #
+  # Technical depth: accepted ADR 0024 commits the answer and its public
+  # admission in one transaction. Every refusal here is a stable reason rather
+  # than a silent no-op: an answer to a question that is not open, to a
+  # different question than the one that is, to one already answered, or naming
+  # a choice that was never offered. None of them reopens anything, and none of
+  # them is evidence a host decided.
+  defp propose_new(%__MODULE__{} = state, %{type: :interaction_answer} = command, digest) do
+    case answerable(state, command) do
+      {:ok, interaction} ->
+        record = %{
+          "command_id" => command.command_id,
+          "command_digest" => digest,
+          "command_type" => "interaction_answer",
+          "admission" => "accepted",
+          "interaction_id" => interaction.interaction_id,
+          "choice_id" => command.choice_id,
+          "answer_digest" => Interaction.digest(%{choice_id: command.choice_id}),
+          kind: "command_admitted"
+        }
+
+        build_proposal(
+          state,
+          command.command_id,
+          record,
+          [],
+          {:accepted, command.command_id}
+        )
+
+      {:error, reason} ->
+        refusal(
+          state,
+          command,
+          digest,
+          "interaction_answer",
+          "rejected_" <> Atom.to_string(reason),
+          reason
+        )
+    end
+  end
+
   defp propose_new(%__MODULE__{} = state, %{type: :abort} = command, digest) do
     reply = {:error, :no_active_run}
 
@@ -1695,6 +1745,34 @@ defmodule Loopex.Runtime.SessionState do
     }
 
     build_proposal(state, command.command_id, record, [], reply)
+  end
+
+  # Concept: which answers this session will admit against which question.
+  #
+  # Technical depth: every refusal is a stable reason an operator can act on,
+  # and none of them is a no-op: a late answer to a question that has already
+  # resolved refuses rather than reopening it, and an answer naming a choice
+  # that was never offered never reaches the host as though it had been.
+  defp answerable(state, command) do
+    case Map.get(state.interactions, command.interaction_id) do
+      nil ->
+        {:error, :interaction_absent}
+
+      %{status: "pending"} = interaction ->
+        cond do
+          state.open_interaction != interaction.interaction_id ->
+            {:error, :interaction_resolved}
+
+          not Interaction.offered?(interaction.request, command.choice_id) ->
+            {:error, :invalid_interaction_answer}
+
+          true ->
+            {:ok, interaction}
+        end
+
+      _resolved ->
+        {:error, :interaction_resolved}
+    end
   end
 
   defp refusal(state, command, digest, type, admission, reason) do
@@ -2139,6 +2217,28 @@ defmodule Loopex.Runtime.SessionState do
     end
   end
 
+  # Concept: the admitted answer becomes the interaction's answered state.
+  #
+  # Technical depth: the same transaction that admitted the command carries this
+  # transition, so there is no moment in which an operator was told their answer
+  # was accepted while the question still reads as unanswered. The status means
+  # policy resolution is owed and nothing more.
+  defp command_effect(state, record, "interaction_answer", "accepted", command_id) do
+    with {:ok, interaction_id} <- record_binary(record, "interaction_id"),
+         {:ok, choice_id} <- record_binary(record, "choice_id"),
+         %{status: "pending"} = interaction <- Map.get(state.interactions, interaction_id),
+         true <- state.open_interaction == interaction_id,
+         true <- Interaction.offered?(interaction.request, choice_id) do
+      answered = %{interaction | status: "answered", choice_id: choice_id}
+
+      {:ok, {:accepted, command_id}, state.active_run_id, state.pending_work,
+       state.expected_events,
+       %{interactions: Map.put(state.interactions, interaction_id, answered)}}
+    else
+      _other -> {:error, :invalid_interaction_answer_record}
+    end
+  end
+
   # Technical depth: an oversized command installs no run, steer, or follow-up,
   # emits no public event, and leaves every queue exactly as it was. Its retained
   # answer is the same composite the live caller received.
@@ -2163,7 +2263,7 @@ defmodule Loopex.Runtime.SessionState do
   # writes for these two command types; any other token is invalid history and
   # takes the ordinary typed refusal, creating no atom on either path.
   defp command_effect(state, _record, type, "rejected_" <> reason, _command_id)
-       when type in ["steer", "follow_up"] do
+       when type in ["steer", "follow_up", "interaction_answer"] do
     case rejected_command_reason(reason) do
       {:ok, refusal} ->
         {:ok, {:error, refusal}, state.active_run_id, state.pending_work, state.expected_events,
@@ -2243,6 +2343,12 @@ defmodule Loopex.Runtime.SessionState do
   defp rejected_command_reason("steer_pending"), do: {:ok, :steer_pending}
   defp rejected_command_reason("no_active_run"), do: {:ok, :no_active_run}
   defp rejected_command_reason("follow_up_pending"), do: {:ok, :follow_up_pending}
+  defp rejected_command_reason("interaction_absent"), do: {:ok, :interaction_absent}
+  defp rejected_command_reason("interaction_resolved"), do: {:ok, :interaction_resolved}
+
+  defp rejected_command_reason("invalid_interaction_answer"),
+    do: {:ok, :invalid_interaction_answer}
+
   defp rejected_command_reason(_reason), do: :error
 
   # Concept: an internal transition keeps one identity while its exact Store
@@ -2803,7 +2909,7 @@ defmodule Loopex.Runtime.SessionState do
          {:ok, run_id} <- record_binary(record, "run_id"),
          {:ok, tool_call_id} <- record_binary(record, "tool_call_id"),
          true <- run_id == state.active_run_id,
-         true <- is_nil(state.open_interaction),
+         true <- creatable_round?(state, tool_call_id),
          false <- Map.has_key?(state.interactions, interaction_id),
          {:ok, request} <- interaction_request(record),
          {:ok, round} <- interaction_round(record),
@@ -2890,6 +2996,24 @@ defmodule Loopex.Runtime.SessionState do
   end
 
   defp apply_internal_record(_state, _record), do: {:error, :invalid_internal_transition}
+
+  # Concept: a new question is admitted when none is open, or when the open one
+  # has been answered and the host asked again about the same decision.
+  #
+  # Technical depth: accepted ADR 0024 makes another defer resolve the answered
+  # round and create the next identity atomically, and one record per
+  # transaction is what makes that atomic here: this creation is the transition
+  # that ends the previous round. A question is never created while another one
+  # is still pending, because the serial owner has at most one question
+  # outstanding and two would leave an operator unable to tell which was live.
+  defp creatable_round?(%{open_interaction: nil}, _tool_call_id), do: true
+
+  defp creatable_round?(state, tool_call_id) do
+    case Map.get(state.interactions, state.open_interaction) do
+      %{status: "answered", tool_call_id: ^tool_call_id} -> true
+      _other -> false
+    end
+  end
 
   # Concept: only an answered question can resolve as a policy verdict, and only
   # an open one can expire or be cancelled.
@@ -4708,6 +4832,27 @@ defmodule Loopex.Runtime.SessionState do
         :abort ->
           {:ok, %{type: :abort, command_id: command_id}}
 
+        # Concept: an answer names the question it answers and the choice it
+        # takes, and nothing else.
+        #
+        # Technical depth: neither field is inferred. An answer that named no
+        # interaction would have to be matched against whatever happened to be
+        # open, which is exactly how a late answer reopens a question that has
+        # already resolved.
+        :interaction_answer ->
+          with {:ok, interaction_id} <- fetch_binary(command, :interaction_id),
+               {:ok, choice_id} <- fetch_binary(command, :choice_id) do
+            {:ok,
+             %{
+               type: :interaction_answer,
+               command_id: command_id,
+               interaction_id: interaction_id,
+               choice_id: choice_id
+             }}
+          else
+            _other -> {:error, :invalid_command}
+          end
+
         # Concept: a steer must name the run it is steering.
         #
         # Technical depth: the runtime never infers whether new input is
@@ -4734,15 +4879,28 @@ defmodule Loopex.Runtime.SessionState do
 
   defp fetch_type(command) do
     case fetch(command, :type) do
-      {:ok, value} when value in [:prompt, "prompt"] -> {:ok, :prompt}
-      {:ok, value} when value in [:abort, "abort"] -> {:ok, :abort}
-      {:ok, value} when value in [:steer, "steer"] -> {:ok, :steer}
-      {:ok, value} when value in [:follow_up, "follow_up"] -> {:ok, :follow_up}
-      _other -> {:error, :invalid_command_type}
+      {:ok, value} when value in [:prompt, "prompt"] ->
+        {:ok, :prompt}
+
+      {:ok, value} when value in [:abort, "abort"] ->
+        {:ok, :abort}
+
+      {:ok, value} when value in [:steer, "steer"] ->
+        {:ok, :steer}
+
+      {:ok, value} when value in [:follow_up, "follow_up"] ->
+        {:ok, :follow_up}
+
+      {:ok, value} when value in [:interaction_answer, "interaction_answer"] ->
+        {:ok, :interaction_answer}
+
+      _other ->
+        {:error, :invalid_command_type}
     end
   end
 
-  defp fetch_binary(command, key) when key in [:command_id, :run_id] do
+  defp fetch_binary(command, key)
+       when key in [:command_id, :run_id, :interaction_id, :choice_id] do
     case fetch(command, key) do
       {:ok, value}
       when is_binary(value) and byte_size(value) > 0 and byte_size(value) <= @max_command_bytes ->
