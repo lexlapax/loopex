@@ -8,18 +8,54 @@ Concept: [Daemon-grade store selection and migration](0031-daemon-grade-store-se
 
 Concept: [Context and decision](0031-daemon-grade-store-selection-and-migration.md#concept-adr-0031-decision).
 
+### M5 selection: the local adapter and its limits
+
+The M5 daemon opens the state root through `loopex_store_local` exactly as
+the foreground server does, and holds its writer marker from before the
+socket is bound until the daemon process exits. The adapter's limits are the
+daemon's limits, and every one is an existing constant or refusal of
+`Loopex.Store.Local.Log`:
+
+- one append-only, length-prefixed, digest-checked log per state root, held
+  by one operating-system process through the writer marker with the
+  `store_writer_active` and `store_writer_unverifiable` refusals;
+- a hard log capacity of 256 MiB (`@max_log_bytes`): an append that would
+  exceed it refuses with `store_capacity_exceeded`, and a log already larger
+  than the bound refuses at open with `store_log_too_large`;
+- a 4 MiB frame ceiling (`@max_frame_bytes`) on any single record;
+- full-history retention: no compaction, no retention cutoff, and full replay
+  at every open, so replay time and memory grow with the root's history until
+  the root is retired;
+- session discovery through the existing session directory beside the log,
+  which lists every session the root knows.
+
+Root retirement is an operator procedure, not a store operation: stop the
+daemon so the marker is released; move the root directory aside under a name
+of the operator's choosing; start the daemon on a fresh root with the same
+placement identity source. A session in a retired root is resumed only by
+stopping the daemon and reopening that root, with the daemon or the
+foreground server. The daemon's operator documentation states the capacity,
+the refusal reason, the frame ceiling, full retention and this procedure.
+
+Evidence for the M5 selection lives in the M5 gate, not here: a root driven
+to the capacity ceiling refuses further mutation with the store's own reason
+while observers stay attached and an orderly stop still succeeds, and after
+that stop the foreground server reopens the same root. No new conformance
+evidence is required, because the adapter and its suites are unchanged.
+
 ### Boundary
 
-`loopex_store_daemon` implements the same private port set `Loopex.Store`
-already fixes for the local adapter: `transact/2`, `transaction_status/4`,
-`runtime_command/2`, `ownership_head/3`, `load_records/4` and
-`load_events/4`, plus the snapshot store and load calls the port declares.
-It changes no callback arity or result shape; ADR 0006 owner epochs and
-incarnation identities remain the commit-authority fence and the writer
-marker remains physical writer exclusion. The public protocol, the embedded
-API and every public event are unchanged by the adapter choice. Neither core
-nor `loopex_store_local` depends on the adapter, and the daemon's controller
-lease stays in daemon memory under ADR 0033; this adapter stores no lease.
+`loopex_store_daemon`, the successor's adapter, implements the same private
+port set `Loopex.Store` already fixes for the local adapter: `transact/2`,
+`transaction_status/4`, `runtime_command/2`, `ownership_head/3`,
+`load_records/4` and `load_events/4`, plus the snapshot store and load calls
+the port declares. It changes no callback arity or result shape; ADR 0006
+owner epochs and incarnation identities remain the commit-authority fence and
+the writer marker remains physical writer exclusion. The public protocol, the
+embedded API and every public event are unchanged by the adapter choice.
+Neither core nor `loopex_store_local` depends on the adapter, and the
+daemon's controller lease stays in daemon memory under ADR 0033; no adapter
+stores a lease.
 
 ### Candidate one: BEAM-native segmented log
 
@@ -88,12 +124,12 @@ closure. Both run:
   public sequence intact and the integrity check clean.
 
 Record each experiment's exact candidate SHA, commands, platform and measured
-results in the decision packet. Revise this still-Proposed ADR pair to name the
+results in the decision packet. Revise this still-Proposed pair to name the
 winner, both experiment SHAs, its evidence and any packaging cost;
 independently review that candidate before the maintainer accepts it.
 Selection does not itself accept the successor milestone. Product
-implementation starts only after this ADR and that milestone's plan are
-accepted.
+implementation of the adapter starts only after this revised pair and that
+milestone's plan are accepted.
 
 ### Migration
 
@@ -110,36 +146,43 @@ session or discarded and restarted, both without touching the source log. The
 original log is never modified, moved or deleted by the import.
 
 Every previous local-reader binary, the M5 daemon release included, treats
-the daemon root directory as an invalid store file and returns its existing
-`store_file_invalid` reason. It cannot name `loopex_store_daemon_v1` or
-advertise a maximum format it never implemented. The successor daemon reader
-validates the root manifest version and refuses unknown versions explicitly;
-it is the oldest reader of this new root. A daemon binary opening a local log
-serves it only through explicit import; it never upgrades in place.
+the daemon-grade root directory as an invalid store file and returns its
+existing `store_file_invalid` reason. It cannot name `loopex_store_daemon_v1`
+or advertise a maximum format it never implemented. The successor daemon
+reader validates the root manifest version and refuses unknown versions
+explicitly; it is the oldest reader of this new root. A daemon binary opening
+a local log serves it only through explicit import; it never upgrades in
+place.
 
 ### Evidence and alternatives
 
-Tests cover forward migration of a genuine local session log with identical
-replay afterwards, interruption at each ledger step with detection on reopen,
-safe refusal by the exact previous binary with its actual reason, and backup
-and restore. Mnesia and DETS were rejected: DETS carries a two-gigabyte table
-limit and no tail-repair story, and Mnesia's schema is VM-global state that
-contradicts the runtime-instance rule. A hosted PostgreSQL adapter remains a
-later choice under the same ports and is not evaluated here.
+Successor tests cover forward migration of a genuine local session log with
+identical replay afterwards, interruption at each ledger step with detection
+on reopen, safe refusal by the exact previous binary with its actual reason,
+and backup and restore. Mnesia and DETS were rejected: DETS carries a
+two-gigabyte table limit and no tail-repair story, and Mnesia's schema is
+VM-global state that contradicts the runtime-instance rule. A hosted
+PostgreSQL adapter remains a later choice under the same ports and is not
+evaluated here. Deferring this ADR entirely from M5 was rejected on
+2026-09-14: the daemon still needs a recorded selection, and the local
+adapter's ceilings are a fact the operator must be told rather than an
+absence of decision.
 
 <a id="technical-adr-0031-compatibility"></a>
 ### Compatibility and Rollback Mechanics
 
 Concept: [Consequences and rollback](0031-daemon-grade-store-selection-and-migration.md#concept-adr-0031-consequences).
 
-The private journal is a separate compatibility surface and stays experimental
-in 0.x; the adapter adds no public event, snapshot field, wire method or
-embedded function. Rollback is the retained original log plus the previous
-binary, which is a copy back, not a reverse migration. Backup is a quiescent
-copy of the root plus the adapter's integrity check; restore reopens the copy
-under the same placement identity and refuses a placement mismatch exactly as
-resume does today.
+In M5 no journal format changes; the daemon, the foreground server and the
+CLI reopen one another's roots, and rollback is stopping the daemon. The
+private journal is a separate compatibility surface and stays experimental
+in 0.x; the successor adapter adds no public event, snapshot field, wire
+method or embedded function. Successor rollback is the retained original log
+plus the previous binary, which is a copy back, not a reverse migration.
+Backup is a quiescent copy of the root plus the adapter's integrity check;
+restore reopens the copy under the same placement identity and refuses a
+placement mismatch exactly as resume does today.
 
-Acceptance binds this complete pair at an exact candidate. Its evidence and
-compatibility claims remain unproved until the adopting milestone's gate
-executes its required paths.
+Acceptance of the M5 selection binds this pair at an exact candidate under
+the M5 gate; the successor selection is bound again, with its experiment
+evidence, by the adopting milestone's gate.

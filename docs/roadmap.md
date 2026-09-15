@@ -111,9 +111,10 @@ Can independent clients attach, recover, and agree on one protocol candidate
 without owning session lifetime? M5 carries this rung: daemon-owned session
 lifetime, a local socket transport, concurrent independent clients,
 collaboration with crash takeover, snapshot and cursor replay, residency limits,
-and cancellation that crosses processes, all on the existing local store. The
-daemon-grade store and its migration follow in a successor milestone once the
-daemon exists to need them. The protocol still remains experimental. The
+and cancellation that crosses processes, all on the existing local store,
+selected for the release with its documented limits. The daemon-grade store
+adapter and its migration follow in a successor milestone once the daemon
+exists to need them. The protocol still remains experimental. The
 [Open M5 plan](plans/M5.md#concept) is the planning lookahead for this rung;
 it accepts nothing and targets a source-only `0.2.0` release after its own
 closure and separate release authority.

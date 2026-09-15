@@ -123,6 +123,7 @@ defmodule Loopex.Checks.Register do
       {"docs/adr/0030-observability-tracing-and-telemetry.md", "ADR 0030"}
     ],
     "M5" => [
+      {"docs/adr/0031-daemon-grade-store-selection-and-migration.md", "ADR 0031"},
       {"docs/adr/0032-daemon-attachment-residency-and-replay.md", "ADR 0032"},
       {"docs/adr/0033-collaboration-controller-lease-and-takeover.md", "ADR 0033"}
     ]

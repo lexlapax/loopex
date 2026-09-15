@@ -13,8 +13,12 @@
             "an orderly daemon stop settles nothing new records nothing false and releases the store writer marker",
             "an abrupt daemon death leaves only what the journal proves and a restarted daemon recovers every session under the same placement identity",
             "a second daemon for the same state root is refused by the held writer marker and never opens a second store on one log",
+            "simultaneous daemon starts on one root resolve at the writer marker with exactly one listener and the loser never touches the socket path",
+            "a daemon that loses its store child closes the listener and every connection before it exits",
+            "a root at the local log capacity refuses further mutation with store capacity exceeded while observers stay attached and an orderly stop still succeeds",
+            "session list returns pages of at most 256 sessions ordered by session id with an exact continuation cursor from the daemon index",
             "after an orderly daemon stop the foreground server and the reference CLI reopen the same root and resume a daemon created session under the same placement identity with identical replay",
-            "the daemon exposes session list open and stop through the socket without a client owning session lifetime"
+            "the daemon exposes session open and stop through the socket without a client owning session lifetime"
           ]
         }
       ]
@@ -49,13 +53,14 @@
           names: [
             "exactly one controller holds the lease for a session while any number of observers attach read only",
             "a command carrying a stale writer epoch is refused before core admission and the current controller is unaffected",
-            "an observer takes over only after the controller lease expires or is released and the takeover advances the writer epoch before the successor's first command",
+            "an observer takes over only after the controller lease expires or is released and the takeover mints a fresh writer epoch before the successor's first command",
             "a controller killed mid run is fenced and its late commands are refused after takeover",
+            "a crashed and restarted lease owner process never reuses a writer epoch while the daemon and client sockets survive and the previous holder's delayed command is refused",
             "a session abort issued by the controller cancels work dispatched under an earlier client process with a truthful cleanup outcome",
             "a read only attachment never acquires command authority and no client content lease or metadata grants it",
             "a 30 second controller lease renews at 10 seconds and takeover at expiry has no extra grace",
             "an observer presenting the current writer epoch is refused because its connection does not hold the lease",
-            "a daemon restart leaves every session uncontrolled and an epoch minted by the previous daemon incarnation is refused"
+            "a daemon restart leaves every session uncontrolled and an epoch minted before the restart is refused"
           ]
         }
       ]
@@ -72,14 +77,13 @@
         %{
           path: "apps/loopex_daemon/test/replay_residency_test.exs",
           names: [
-            "attach returns a snapshot anchored at the committed sequence and then the buffered and live stream contiguously with no gap",
-            "a cursor older than retained history returns cursor expired with a fresh snapshot and cursor instead of silent truncation",
-            "per attachment queues are bounded and a slow observer is detached at its last completely emitted cursor while the controller and other attachments continue",
-            "idle attachments are evicted at the residency limit and reconnect at their retained cursor with no duplicate or missing durable event",
-            "encoded durable bytes stay within 4 MiB per attachment queue 16 MiB per session window and 512 MiB per daemon at the attachment ceiling while BEAM RSS is reported separately",
+            "attach returns a snapshot anchored at the committed sequence and then the buffered and live stream contiguously at least once with no gap",
+            "per attachment output buffers are bounded and a slow observer is detached at its last completely emitted cursor while the controller and other attachments continue",
+            "idle attachments are evicted at the residency limit and reconnect at their retained cursor with no missing durable event and any duplicate deduplicated by session id event sequence and event id",
+            "encoded durable bytes stay within 4 MiB per connection output buffer 16 MiB per session window and 512 MiB per daemon in the daemon owned stages at the attachment ceiling while BEAM RSS is reported separately",
             "transient progress is coalesced or dropped under pressure and never delays a journal transaction",
             "64 attachments per session and 512 per daemon refuse independently at the exact ceilings",
-            "a 1024 durable event attachment queue detaches at its last emitted cursor on the next event",
+            "a 1024 durable event core attachment queue detaches at its last emitted cursor on the next event",
             "a 4096 durable event resident window replays from memory inside the window and from the store behind it",
             "a client idle for 10 minutes is evicted with the exact resumable cursor"
           ]

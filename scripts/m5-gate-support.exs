@@ -144,8 +144,8 @@ defmodule Loopex.M5Gate.Support do
   # rejects real-path fields on a non-real schema, so M5 owns the whole check:
   # exact key set for the kind, no duplicates, nonce/selector/seed identity,
   # minimum executed count, digest form, and build identities that name the
-  # source tree's `VERSION` so a truthful 0.1.0 closure passes and a stale or
-  # foreign version fails.
+  # source tree's exact `0.2.0` VERSION so a truthful M5 closure passes and a
+  # stale or foreign version fails.
   @base_fields ~w(nonce selector seed executed digest)
   @real_fields ~w(provider model endpoint adapter_build executor_build executor_identity tool_identity recorded)
 
@@ -182,7 +182,7 @@ defmodule Loopex.M5Gate.Support do
 
   defp verify_real_identities(root, map) do
     version = File.read!(Path.join(root, "VERSION")) |> String.trim()
-    ensure(Regex.match?(~r/\A\d+\.\d+\.\d+\z/, version), "source VERSION is malformed")
+    ensure(version == "0.2.0", "source VERSION must be exactly 0.2.0 for the M5 real lane")
 
     ensure(
       Enum.all?(
@@ -208,7 +208,7 @@ defmodule Loopex.M5Gate.Support do
     {"archive_build", ~r/\Asha256:[0-9a-f]{64}\z/},
     {"lock", ~r/\Asha256:[0-9a-f]{64}\z/},
     {"gate", ~r/\Asha256:[0-9a-f]{64}\z/},
-    {"version", ~r/\A\d+\.\d+\.\d+\z/},
+    {"version", ~r/\A0\.2\.0\z/},
     {"role", ~r/\Afull\z/},
     {"seed", ~r/\A3107\z/},
     {"outcome_ids", ~r/\A1,2,3,4,5\z/},

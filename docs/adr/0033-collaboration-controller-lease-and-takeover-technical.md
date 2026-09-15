@@ -19,28 +19,33 @@ deadline (monotonic), state ∈ {held, released, expired}
 ```
 
 `writer_epoch` is an opaque string from ADR 0023's identifier alphabet, at
-most 64 bytes, formed from the daemon incarnation identifier and a
-per-session counter. The counter starts at 1 when a session is first
-controlled under that incarnation and increases by one at every new grant
-after release or expiry. Clients treat the epoch as opaque and compare it
+most 64 bytes, carrying at least 128 bits of fresh randomness. It is minted
+at every grant and never reused: not across grants to the same connection,
+not across a restart of the per-session lease owner process, and not across
+a restart of the daemon. Clients treat the epoch as opaque and compare it
 only for equality. The daemon incarnation is a fresh opaque identifier
-generated at each daemon start and reported by `daemon.status`; an epoch
-minted by a previous incarnation never matches. It is a daemon fact: core
-session epochs, owner incarnations and receipts are unchanged and remain the
-commit-authority fence.
+generated at each daemon start and reported by `daemon.status` as a
+diagnostic; it confers nothing and is not part of the epoch. It is a daemon
+fact: core session epochs, owner incarnations and receipts are unchanged and
+remain the commit-authority fence.
 
 One owner process per session serializes every lease read, grant, renewal,
 release and expiry transition with that session's mutation-admission handoff,
 so a takeover cannot pass a mutation whose holder check has already started
 but whose core admission is unresolved; that admission first resolves or
-remains fenced. Expiry and admission use the daemon's monotonic clock: a
-deadline is set only by a successful grant or renewal, and a wall-clock jump
-cannot shorten or extend a live holder's authority. Nothing about a lease is
-persisted or recovered. After a daemon restart no lease exists, every session
-is uncontrolled, the previous socket and its connections are gone, and a
-client presenting an old epoch is refused both by the incarnation mismatch
-and by not being a holder connection. Writer exclusion between two daemons on
-one state root is the local store's writer marker, unchanged.
+remains fenced. If that owner process crashes and is restarted by the daemon
+while the daemon and its client sockets survive, the restarted owner holds no
+lease: the session is uncontrolled, the previous holder's epoch can never be
+minted again, and its delayed commands refuse on both the holder and the
+epoch check until it acquires again and receives a new epoch. Expiry and
+admission use the daemon's monotonic clock: a deadline is set only by a
+successful grant or renewal, and a wall-clock jump cannot shorten or extend
+a live holder's authority. Nothing about a lease is persisted or recovered.
+After a daemon restart no lease exists, every session is uncontrolled, the
+previous socket and its connections are gone, and a client presenting an old
+epoch is refused both because it can never match and because it is not a
+holder connection. Writer exclusion between two daemons on one state root is
+the local store's writer marker, unchanged.
 
 ### Methods and fields
 
@@ -114,17 +119,21 @@ Tests prove: exactly one controller with observers within the ADR 0032 bounds;
 a stale epoch, copied current epoch, non-holder connection, released state
 and expired state each refused before core admission with the current
 controller unaffected; a lease transition racing command admission preserves
-this order; takeover only after release or expiry with an epoch advance
+this order; takeover only after release or expiry with a fresh epoch minted
 before the successor's first command; a controller killed mid-run fenced
-after takeover, its late commands refused; an abort from the new controller
-cancelling work dispatched under the old controller's command with a truthful
-cleanup outcome; an observer never acquiring authority through content,
-metadata, answers or order; after a daemon restart every session uncontrolled,
-an epoch from the previous incarnation refused, and the first acquire
-granting a fresh epoch; forward and backward wall-clock jumps not changing
-live admission or takeover timing; creation yielding an uncontrolled session
-and requiring attach plus explicit acquire before prompt; a dormant session
-acquired by ID, then resumed with epoch and attached.
+after takeover, its late commands refused; the per-session lease owner
+process crashing and restarting while the daemon and client sockets survive,
+after which the previous holder's delayed command is refused, no epoch is
+ever reused, and a new acquire carries a new epoch; an abort from the new
+controller cancelling work dispatched under the old controller's command
+with a truthful cleanup outcome; an observer never acquiring authority
+through content, metadata, answers or order; after a daemon restart every
+session uncontrolled, an epoch from before the restart refused, and the
+first acquire granting a fresh epoch; forward and backward wall-clock jumps
+not changing live admission or takeover timing; creation yielding an
+uncontrolled session and requiring attach plus explicit acquire before
+prompt; a dormant session acquired by ID, then resumed with epoch and
+attached.
 
 ### Alternatives
 
@@ -135,9 +144,12 @@ would interleave with the successor's. A lease with no expiry was rejected
 because a crashed controller would hold the session forever. A durable lease
 record was rejected: after a daemon restart every connection is gone with its
 socket and admission already requires the holder connection, so durability
-could only preserve an epoch counter that nothing needs; the
-incarnation-scoped opaque epoch gives the same fencing with no control store,
-no compare-and-transition surface and no startup recovery rule.
+could only preserve an epoch counter that nothing needs. A counter-based
+epoch scoped to the daemon incarnation was rejected on 2026-09-14 because a
+lease-owner process restart under the same incarnation would mint values
+already issued, and a connection re-acquiring after such a restart could
+have its own earlier delayed command admitted; a fresh random epoch per
+grant costs nothing and closes that hole.
 
 <a id="technical-adr-0033-compatibility"></a>
 ### Compatibility and Rollback Mechanics

@@ -23,32 +23,34 @@ acquiring command authority.
 
 Decide the rule. Each daemon-owned session has at most one controller at a
 time, held under a lease the daemon owns and keeps in its own memory for the
-daemon's lifetime, never in the session journal or any durable record. Every
-other attachment is an observer: it receives the same snapshot and events and
-may not admit a command. For an existing session, the daemon admits a
-mutation only when the sending connection is the current holder, its supplied
-writer epoch matches, the lease is held and unexpired, and the attachment has
-command capability. The daemon checks those facts together before core
-admission and serializes that handoff with lease changes; an observer cannot
-reuse an epoch it learned from a result or status. `session.create` is the
-one exception because no session lease exists yet: it creates an uncontrolled
-session, after which the client attaches and explicitly acquires control
-before its first session command. For a known dormant session, a client may
-acquire control by session ID before `session.resume`, then resume with the
-granted epoch and attach. A controller renews its lease while it lives and
-releases it on an orderly disconnect; a lease that is not renewed expires.
-Takeover is explicit: an observer asks for control and receives it only when
-the lease is released or expired, and the grant advances the writer epoch
-before the new controller's first command can be admitted, so a controller
-that was killed mid-run and comes back late is fenced by its stale epoch. The
-writer epoch is an opaque value that carries the daemon's incarnation, so
-after a daemon restart every session is uncontrolled, every earlier epoch is
-stale, and every earlier connection is gone with the old socket; nothing about
-control survives the daemon that granted it, while session truth lives in the
-journal exactly as before. Cancellation crosses processes because the core
-owns dispatch: the current controller's `session.abort` cancels work that an
-earlier controller's command dispatched, with the truthful cleanup outcome
-the core already commits.
+daemon process's lifetime, never in the session journal or any durable
+record. Every other attachment is an observer: it receives the same snapshot
+and events and may not admit a command. For an existing session, the daemon
+admits a mutation only when the sending connection is the current holder,
+its supplied writer epoch matches, the lease is held and unexpired, and the
+attachment has command capability. The daemon checks those facts together
+before core admission and serializes that handoff with lease changes; an
+observer cannot reuse an epoch it learned from a result or status.
+`session.create` is the one exception because no session lease exists yet:
+it creates an uncontrolled session, after which the client attaches and
+explicitly acquires control before its first session command. For a known
+dormant session, a client may acquire control by session ID before
+`session.resume`, then resume with the granted epoch and attach. A
+controller renews its lease while it lives and releases it on an orderly
+disconnect; a lease that is not renewed expires. Takeover is explicit: an
+observer asks for control and receives it only when the lease is released or
+expired, and the grant mints a new writer epoch before the new controller's
+first command can be admitted, so a controller that was killed mid-run and
+comes back late is fenced by its stale epoch. The writer epoch is an opaque
+value minted fresh for every grant and never reused, so a stale epoch from
+any earlier tenure, including one issued before the lease owner or the whole
+daemon restarted, never matches. After a daemon restart every session is
+uncontrolled and every earlier connection is gone with the old socket;
+nothing about control survives the daemon that granted it, while session
+truth lives in the journal exactly as before. Cancellation crosses processes
+because the core owns dispatch: the current controller's `session.abort`
+cancels work that an earlier controller's command dispatched, with the
+truthful cleanup outcome the core already commits.
 
 Nothing but the lease grants control. No client content, model output,
 interaction answer, metadata field or attachment order confers it, and the

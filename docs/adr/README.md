@@ -160,11 +160,14 @@ gate record and does not accept the M4 plan pair or gate.
 The protocol/interaction proposals were renumbered from the old draft's 0019/0020
 because those numbers are now accepted M2 decisions.
 
-0032 and 0033 are the two Proposed M5 prerequisites: daemon attachment
-residency and replay over the generation-2-only Unix-domain-socket transport,
-and the collaboration rule of one in-memory controller lease with observers
-and takeover. 0031, the daemon-grade store and its migration, was proposed
-with them on 2026-09-14 and, after the same-day revision of the Open M5 plan,
-is the successor milestone's first decision rather than an M5 prerequisite.
-All three accept nothing; 0032 and 0033 must be dispositioned before the M5
-plan pair and gate can be accepted.
+0031, 0032 and 0033 are the three Proposed M5 prerequisites: the daemon's
+store selection, which for M5 is the existing local adapter with its
+documented limits and retirement procedure and for the successor milestone
+the daemon-grade adapter chosen by contract experiments plus its migration;
+daemon attachment residency and at-least-once replay over the
+generation-2-only Unix-domain-socket transport with bounded session pages;
+and the collaboration rule of one in-memory controller lease with fresh
+per-grant epochs, observers and takeover. They were proposed with the Open M5
+lookahead on 2026-09-14 and revised twice that day on independent review;
+they accept nothing, and each must be dispositioned before the M5 plan pair
+and gate can be accepted.

@@ -3,7 +3,7 @@
 Open planning candidate for the durable service, drafted on M4's integrated
 acceptance checkpoint. Its inherited M1 and M2 gates were unavailable there;
 the M4-specific waiver and deferral do not establish a valid M5 lookahead
-opening. Its two prerequisite ADRs are Proposed, this M5 plan pair and gate
+opening. Its three prerequisite ADRs are Proposed, this M5 plan pair and gate
 are not accepted by this revision, and M5 product implementation has not
 begun. The runner binds a
 real behavioral opening probe, executable closure lanes and exact future
@@ -85,13 +85,17 @@ Before acceptance:
    and this gate's distinct daemon-absent red. The current M4 acceptance base
    had unavailable M1 and M2 gates; M4's waiver and deferral do not authorize
    an M5 exception or an acceptance candidate from that base.
-2. Settle ADRs 0032 and 0033 before M5 acceptance. ADR 0032 must bind every
-   event-count and encoded-byte residency ceiling, the generation-2 method
-   inventory and the generation-2-only negotiation rule; ADR 0033 must bind
-   the in-memory lease, atomic admission, the incarnation-scoped writer epoch
-   and the lease terms. ADR 0031 is not an M5 prerequisite; the daemon-grade
-   store belongs to the successor milestone. Advertise only implemented
-   semantic capabilities; unknown input rules and every limit are exact.
+2. Settle ADRs 0031, 0032 and 0033 before M5 acceptance. ADR 0031 must bind
+   the local adapter as the daemon's store with its exact 256 MiB capacity,
+   4 MiB frame ceiling, full retention, `store_capacity_exceeded` refusal and
+   root-retirement procedure, reserving the daemon-grade adapter and
+   migration for the successor; ADR 0032 must bind every event-count and
+   encoded-byte residency ceiling with its daemon-owned stage, the
+   generation-2 method inventory, the generation-2-only negotiation rule,
+   the marker-first startup order and the `session.list` page contract; ADR
+   0033 must bind the in-memory lease, atomic admission, the fresh per-grant
+   writer epoch and the lease terms. Advertise only implemented semantic
+   capabilities; unknown input rules and every limit are exact.
 3. Keep the real opening red on the valid base and bind the exact selectors
    and witness names, the canonical generation-2 schema and vector bytes,
    and fixture shape and digest checks on both locked toolchain pairs. Bind
@@ -120,32 +124,39 @@ gates, authoritative protected selectors, whole suite, independent clients,
 attended two-process real-provider workflow and retained-evidence validation.
 Neither document presence nor acceptance state can satisfy the opening. The
 opening probe is proof of one missing cross-process behavior, not of leases,
-residency or the operator workflow.
+residency, store limits or the operator workflow.
 
 ## Required Two-Process Conjunction
 
 Two separate client processes, without loading any daemon-private module,
 observe against one daemon:
 
-- one daemon per state root holding the writer marker; a second daemon
-  refused;
+- one daemon per state root holding the writer marker before it touches the
+  socket path; simultaneous starts resolving at the marker with one listener
+  and the loser never touching the socket; store loss closing the listener
+  and every connection;
 - initialize over the socket selecting generation 2 with the same schema
   digest and limits the foreground server negotiates for its generation, and
   a generation-1-only client refused at initialize with nothing created;
-- snapshot anchored at the committed sequence, then contiguous buffered and
-  live durable events, with `cursor_expired` beyond retention;
+- snapshot anchored at the committed sequence, then contiguous at-least-once
+  buffered and live durable events with no gap, deduplicated by the client
+  by session ID, event sequence and event ID;
 - exactly one controller; observers read-only; session creation creates an
   uncontrolled session, then existing-session mutation requires the holder
   connection, current epoch, held state and unexpired term together before
   any durable write; an observer's known current epoch grants nothing;
 - the controller killed, its late commands fenced, and the observer taking
-  over after expiry with an epoch advance;
-- a daemon restart leaving every session uncontrolled and an epoch from the
-  previous incarnation refused;
+  over after expiry with a fresh epoch minted;
+- a lease-owner restart with surviving sockets never reusing an epoch, and a
+  daemon restart leaving every session uncontrolled with every earlier epoch
+  refused;
 - the new controller's abort cancelling work the old controller started, with
   a truthful cleanup outcome;
 - a slow observer detached at its last emitted cursor while the other client
   continues;
+- a root at the local log's capacity refusing further mutation with the
+  store's reason while observers stay attached, and `session.list` paging in
+  session-ID order with an exact continuation cursor;
 - after an orderly daemon stop, the foreground server or the reference CLI
   reopening the same root and resuming a daemon-created session;
 - protocol records only on the socket and bounded diagnostics only on the
@@ -171,10 +182,10 @@ its existing binding.
 | --- | --- |
 | `523933694fbc16ff82583e536fe982e780a2dff9d1ad820a114e777d9cf917e8` | `scripts/check-m5-gate.sh` |
 | `f714516e94e77607a58892749ad2c2a39a1e4c57028fc0800cda586b4b4ba662` | `scripts/m5-opening-probe.exs` |
-| `ed3246aa3324f03742b5d7ebc9856935d4de7e46c1bd3b23c37fdc2888ff4c42` | `scripts/m5-gate-support.exs` |
+| `9d6750854c407f31cdc3a609c19d3c449e74f4eeb171ad0c946dad9dfe3cdd2e` | `scripts/m5-gate-support.exs` |
 | `65d0de9dcd1218af542f00e32c2177d2612a2f1232f22db37b9942200c84cf66` | `scripts/m3-gate-support.exs` |
 | `c4d485ca3229441c678abe1e8733f90216e89e0dfb9e81786f58f525619aec29` | `scripts/check-closed-gates.sh` |
-| `1b9e9b05b8bbff814c213c54d41e3904d7681ef61a0307120a818c4a3520d174` | `scripts/m5-outcomes.exs` |
+| `79ab44eaf84c15a0027c3e23436146cc1566e583a3e826487f39404f591163b6` | `scripts/m5-outcomes.exs` |
 | `53d8219bdee584a3849a85a1102e405520d5dd0dfbe21d259434bc9edfc5fcc0` | `scripts/m1-exunit-runner.exs` |
 | `c36253cff3d74ddff1b330695edbc4bde0a4565c1412c67c1293b2fb7ca6129b` | `apps/loopex/test/m1_exunit_runner_test.exs` |
 | `fea095ecec784a4440b872ad5f53a8da2cb4e13e43b6f05add5cfd75bb352879` | `.tool-versions` |
@@ -258,8 +269,10 @@ selector reports the ledger accounted for; `elapsed_seconds` is the whole
 run's wall time; `clients` is the digest of the bound client toolchain pins;
 `schema` is the digest of the canonical schema bytes the protocol application
 ships for the negotiated generation, which the acceptance refresh binds as
-the generation-2 file. The support script refuses a line with a missing,
-duplicated, reordered or malformed field.
+the generation-2 file. `version` is accepted only as exactly `0.2.0`; a full
+run before the version transition therefore cannot print PASS. The support
+script refuses a line with a missing, duplicated, reordered or malformed
+field.
 
 Real-provider tests live in the dedicated
 `apps/loopex_daemon/test/multi_client_workflow_real_test.exs`. Full mode runs
@@ -279,11 +292,11 @@ the credential must belong to that Anthropic provider.
 
 | Outcome | Protected selector family | Required clauses |
 | --- | --- | --- |
-| 1 | `apps/loopex_daemon/test/session_lifetime_test.exs` | One daemon per state root owning every session; sessions progressing with zero attachments; orderly stop releasing the marker and recording nothing false; abrupt death then restart recovering every session under the same placement identity; a second daemon refused by the held marker; after an orderly stop the foreground server and the reference CLI reopening the same root and resuming a daemon-created session under the same placement identity with identical replay; session list, open and stop only through the socket |
+| 1 | `apps/loopex_daemon/test/session_lifetime_test.exs` | One daemon per state root owning every session; sessions progressing with zero attachments; orderly stop releasing the marker and recording nothing false; abrupt death then restart recovering every session under the same placement identity; a second daemon refused by the held marker; simultaneous starts resolving at the marker with exactly one listener and the loser never touching the socket path; Store-child failure closing the listener and every connection before exit; a root at the 256 MiB log capacity refusing further mutation with `store_capacity_exceeded` while observers stay attached and an orderly stop still succeeds; `session.list` pages of at most 256 entries in session-ID order with an exact continuation cursor from the daemon index; after an orderly stop the foreground server and the reference CLI reopening the same root and resuming a daemon-created session under the same placement identity with identical replay; session open and stop only through the socket |
 | 2 | `apps/loopex_daemon/test/socket_transport_test.exs`, `apps/loopex_daemon/test/python_client_conformance_test.exs` | Generation 2 selected with the same schema digest and limits the foreground server negotiates for its generation; a generation-1-only initialize refused with `unsupported_generation` and nothing created; identical durable identities for one command corpus through facade, foreground server and socket; foreign-uid peer refused before initialize; frame, fragment, malformed-input and over-long socket path refusals; client disconnect as transport loss with no cancellation and no interaction change; pinned Python client executes generation-2 schema and vectors over the socket and refuses a digest mismatch |
-| 3 | `apps/loopex_daemon/test/collaboration_test.exs` | Exactly one controller with observers read-only; an observer with a known current epoch refused because its connection is not holder; admission requires matching epoch, held state and unexpired term before core; takeover only after release or expiry with an epoch advance before the successor's first command; killed controller fenced and its late commands refused; a daemon restart leaving every session uncontrolled with an epoch from the previous incarnation refused; controller abort cancelling work dispatched under an earlier process with a truthful outcome; no authority from content, metadata, answers or order |
-| 4 | `apps/loopex/test/concurrent_attachments_test.exs`, `apps/loopex_daemon/test/replay_residency_test.exs` | Two core attachments to one session coexist with independent ordered delivery and one detaching without replacing the other; snapshot then contiguous stream with no gap; `cursor_expired` beyond retention; slow observer detached at its last emitted cursor while others continue; idle eviction with exact reconnect; 4 MiB per-attachment, 16 MiB per-session and 512 MiB aggregate retained encoded-event ceilings at count and payload pressure, with process RSS observed and reported; progress coalesced or dropped under pressure with no journal delay |
-| 5 | `apps/loopex_daemon/test/multi_client_workflow_test.exs`, `apps/loopex_daemon/test/multi_client_workflow_real_test.exs` | Two real client processes over one daemon through controller work, observer following, controller kill and takeover; fresh extraction of the exact candidate following the operator guide with operator-supplied inputs; the reference CLI attaching, listing and aborting cross-process work; ADR 0030 spans at every daemon boundary and a daemon-scoped trace session capturing identities only; the attended real-provider workflow from the extracted source. Required post-tag release evidence is checked after reviewed closure integration, outside the pre-closure full gate |
+| 3 | `apps/loopex_daemon/test/collaboration_test.exs` | Exactly one controller with observers read-only; an observer with a known current epoch refused because its connection is not holder; admission requires matching epoch, held state and unexpired term before core; takeover only after release or expiry with a fresh epoch minted before the successor's first command; killed controller fenced and its late commands refused; a lease-owner process crash and restart with surviving daemon and client sockets never reusing an epoch and refusing the previous holder's delayed command; a daemon restart leaving every session uncontrolled with every epoch minted before it refused; controller abort cancelling work dispatched under an earlier process with a truthful outcome; no authority from content, metadata, answers or order |
+| 4 | `apps/loopex/test/concurrent_attachments_test.exs`, `apps/loopex_daemon/test/replay_residency_test.exs` | Two core attachments to one session coexist with independent ordered delivery and one detaching without replacing the other; snapshot then contiguous at-least-once stream with no gap and client deduplication by session ID, sequence and event ID; slow observer detached at its last emitted cursor while others continue; idle eviction with exact reconnect and no missing durable event; 4 MiB per-connection output buffer, 16 MiB per-session window and 512 MiB aggregate retained encoded-event ceilings enforced in the daemon-owned stages at count and payload pressure, with process RSS observed and reported; progress coalesced or dropped under pressure with no journal delay |
+| 5 | `apps/loopex_daemon/test/multi_client_workflow_test.exs`, `apps/loopex_daemon/test/multi_client_workflow_real_test.exs` | Two real client processes over one daemon through controller work, observer following, controller kill and takeover; fresh extraction of the exact candidate following the operator guide with operator-supplied inputs; the reference CLI attaching, listing and aborting cross-process work; ADR 0030 spans at every daemon boundary and a daemon-scoped trace session capturing identities only; the attended real-provider workflow from the extracted source; the staged, release-ready source archive report with `version` exactly `0.2.0`. The post-tag release completion is checked after closure and integration, outside this gate and outside the Purpose outcomes |
 
 Each required clause maps to a named decisive witness in
 `scripts/m5-outcomes.exs`. Related clauses may share one named case only when
@@ -326,27 +339,31 @@ explicit combined closure and release/tag disposition authorizes the closure
 transition, integration and tag. Neither final tag nor final release archive
 is created by the pre-closure gate.
 
-## Post-Tag Closure Completion
+## Post-Closure Release Completion
 
-The closure workflow requires this sequence after the green full-gate report:
-the acceptance authority gives one explicit disposition naming both M5
-closure and source-only `v0.2.0` release/tag authority; the closure transition
-records it; an independent read-only reviewer checks that exact transition
-SHA; the unchanged reviewed commit integrates to `main`; the annotated tag
-is created on that commit; and source archive proof is retained. The same
-disposition does not approve an unrelated release, package or publication.
+Closure depends on the five Purpose outcomes and ends at the staged,
+release-ready source archive the full gate proves. The release then completes
+after closure, in this sequence: the acceptance authority gives one explicit
+disposition naming both M5 closure and source-only `v0.2.0` release/tag
+authority; the closure transition records it; an independent read-only
+reviewer checks that exact transition SHA; the unchanged reviewed commit
+integrates to `main`; the annotated tag is created on that commit; and source
+archive proof is retained. The same disposition does not approve an unrelated
+release, package or publication. Closure never waits on the tag, because the
+tag is what closure authorizes.
 
 The post-tag check takes the reviewed integrated closure SHA as its expected
 input and fails unless `git cat-file -t refs/tags/v0.2.0` returns `tag`,
-`git rev-parse refs/tags/v0.2.0^{commit}` equals that exact SHA, and
-`git merge-base --is-ancestor <reviewed-closure-SHA> main` succeeds. Generate
-the final tar with `git archive --format=tar <reviewed-closure-SHA>` from
-that commit. Retain its SHA-256, the commit and `git rev-parse
+`git rev-parse refs/tags/v0.2.0^{commit}` equals that exact SHA,
+`git merge-base --is-ancestor <reviewed-closure-SHA> main` succeeds, and
+`git show <reviewed-closure-SHA>:VERSION` is exactly `0.2.0`. Generate the
+final tar with `git archive --format=tar <reviewed-closure-SHA>` from that
+commit. Retain its SHA-256, the commit and `git rev-parse
 <reviewed-closure-SHA>^{tree}`, and the annotated tag object's
 `git rev-parse refs/tags/v0.2.0` identity with the command outputs. A
 pre-closure staged archive or a green full gate cannot stand in for this
 proof. Only after the exact post-tag check passes and its evidence is
-retained is the M5 closure workflow complete.
+retained is the M5 release complete.
 
 ## Documentation Obligations
 
@@ -375,12 +392,16 @@ document is a pair:
   and the TypeScript consumer, what a controller and an observer each see,
   how takeover works after a crash and what an abort does to work another
   process started, what reconnecting after a disconnect or eviction returns,
-  what a daemon restart does to control, the residency and lease numbers,
-  how to stop the daemon and reopen the same root with the foreground server
-  or CLI, the `0.2.0` source version and the source-only release workflow,
-  and what remains experimental or unavailable (no remote transport, no
+  what a daemon restart does to control and that no lease state is stored
+  anywhere, that a generation-1-only client is refused and must use the
+  foreground server, the residency and lease numbers, the local store's
+  256 MiB log capacity, 4 MiB frame ceiling, full retention and
+  `store_capacity_exceeded` refusal with the root-retirement procedure, how
+  to stop the daemon and reopen the same root with the foreground server or
+  CLI, the `0.2.0` source version and the source-only release workflow, and
+  what remains experimental or unavailable (no remote transport, no
   multi-user authorization, no service unit, no package, no daemon-grade
-  store).
+  store, no compaction).
 - **Developer-facing.** The daemon pair as the reference for lifetime, socket,
   residency and lease contracts; the protocol pair extended with generation
   2's methods, fields, schema and vector identities and the daemon's
@@ -414,8 +435,11 @@ Inspect each file for current M5 facts, relevance to its reader, working
 links and index routing where applicable, consistent Concept and Technical
 depth companion claims where paired, and stale foreground-only assertions.
 Check the daemon,
-socket, controller/observer, residency, restart and rollback descriptions
-against the accepted plan and ADRs. Release documentation must accurately
+socket, controller/observer, at-least-once delivery, residency, local-store
+limit, restart and rollback descriptions against the accepted plan and ADRs,
+and confirm each operator document names generation-1 refusal, the local
+Store's limits and the absence of durable lease state where its reader would
+otherwise assume the opposite. Release documentation must accurately
 describe the required source-only `v0.2.0` tag and archive sequence while
 making no pre-tag claim that they already exist. Resolve inaccurate or stale
 claims before the final gate and repeat invalidated checks on changed bytes.
