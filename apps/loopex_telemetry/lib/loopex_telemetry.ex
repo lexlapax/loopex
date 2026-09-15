@@ -73,9 +73,14 @@ defmodule Loopex.Telemetry do
   ## Technical depth
 
   The inventory accepted ADR 0030 fixes: the five ports and the six coordinator
-  cuts, each as a span, and no others. A callback or cut absent from this list
-  is not instrumented, and adding one is an amendment to that decision rather
-  than a line here.
+  cuts, and no others. A callback or cut absent from this list is not
+  instrumented, and adding one is an amendment to that decision rather than a
+  line here.
+
+  Every entry is a span, including the artifact-transfer lifecycle: it opens, is
+  read many times and closes across three separate calls, so core emits its
+  start and stop directly instead of wrapping one function, and the pair a
+  handler sees is the same pair every other entry produces.
   """
   @spec events() :: [[atom()]]
   def events do

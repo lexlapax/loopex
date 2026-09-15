@@ -25,6 +25,7 @@ defmodule Loopex.Runtime.Control do
 
   use GenServer
 
+  alias Loopex.Instrumentation
   alias Loopex.ResumeActivation
   alias Loopex.Runtime.EventDispatcher
   alias Loopex.Runtime.OwnerGroup
@@ -179,15 +180,32 @@ defmodule Loopex.Runtime.Control do
   @spec post_commit(pid(), binary(), SessionCoordinator.owner(), map(), map()) ::
           :ok | {:error, term()}
   def post_commit(control, session_id, owner, positions, receipt) do
-    try do
-      GenServer.call(
-        control,
-        {:post_commit, session_id, owner, positions, receipt},
-        :infinity
-      )
-    catch
-      :exit, _reason -> {:error, :runtime_unavailable}
-    end
+    # Concept: accepted ADR 0030's receipt-and-publication cut.
+    #
+    # Technical depth: this is where a committed receipt becomes readable
+    # history, so the span measures the whole installation of the publication
+    # fence rather than the dispatcher call inside it. The cursor the commit
+    # reached is an identity; no event body and no receipt field crosses into
+    # the metadata.
+    Instrumentation.span(
+      [:events, :publish],
+      %{
+        session_id: session_id,
+        journal_version: Map.get(positions, :journal_version),
+        event_sequence: Map.get(positions, :event_sequence)
+      },
+      fn ->
+        try do
+          GenServer.call(
+            control,
+            {:post_commit, session_id, owner, positions, receipt},
+            :infinity
+          )
+        catch
+          :exit, _reason -> {:error, :runtime_unavailable}
+        end
+      end
+    )
   end
 
   @impl GenServer

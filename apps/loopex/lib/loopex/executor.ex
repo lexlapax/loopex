@@ -60,6 +60,7 @@ defmodule Loopex.Executor do
   ]
 
   alias Loopex.Executor.JobRequest
+  alias Loopex.Instrumentation
 
   @job_fields JobRequest.semantic_fields()
 
@@ -273,23 +274,39 @@ defmodule Loopex.Executor do
   """
   @spec cancel(module(), term(), binary()) :: {:ok, :cleaned} | {:ok, :unconfirmed}
   def cancel(module, reference, job_id) when is_atom(module) and is_binary(job_id) do
-    if function_exported?(module, :cancel, 2) do
-      bounded_cancel(module, reference, job_id, @cancel_bound_ms)
-    else
-      # Concept: an executor that declares no cancellation has confirmed
-      # nothing, and silence is not a clean stop.
-      #
-      # Technical depth: this used to answer `cleaned`, on the reasoning that an
-      # implementation without the callback has nothing to leave behind. That is
-      # a statement about the implementation this repository ships, not about the
-      # port: a legacy or nonconforming module may own an operating-system process
-      # and not export `cancel/2`, and reading its silence as confirmed cleanup
-      # committed `cancelled` for a tree nobody signalled and nobody looked at.
-      # `unconfirmed` is what this runtime actually knows, and it ends the run
-      # `outcome_unknown` with a reconciliation reference instead.
-      {:ok, :unconfirmed}
-    end
+    span([:executor, :cancel], %{job_id: job_id}, fn ->
+      if function_exported?(module, :cancel, 2) do
+        bounded_cancel(module, reference, job_id, @cancel_bound_ms)
+      else
+        # Concept: an executor that declares no cancellation has confirmed
+        # nothing, and silence is not a clean stop.
+        #
+        # Technical depth: this used to answer `cleaned`, on the reasoning that an
+        # implementation without the callback has nothing to leave behind. That is
+        # a statement about the implementation this repository ships, not about the
+        # port: a legacy or nonconforming module may own an operating-system process
+        # and not export `cancel/2`, and reading its silence as confirmed cleanup
+        # committed `cancelled` for a tree nobody signalled and nobody looked at.
+        # `unconfirmed` is what this runtime actually knows, and it ends the run
+        # `outcome_unknown` with a reconciliation reference instead.
+        {:ok, :unconfirmed}
+      end
+    end)
   end
+
+  # Concept: one instrumented Executor dispatch, named in the accepted
+  # inventory.
+  #
+  # Technical depth: `{:ok, :cleaned}` and `{:ok, :unconfirmed}` are different
+  # facts about the same run, and a generic classifier would report both as
+  # `ok`, so this boundary names its own outcomes.
+  defp span(event, metadata, work) do
+    Instrumentation.span(event, metadata, work, &executor_outcome/1)
+  end
+
+  defp executor_outcome({:ok, answer}) when is_atom(answer), do: answer
+  defp executor_outcome(:absent), do: :absent
+  defp executor_outcome(result), do: Instrumentation.outcome(result)
 
   # Concept: run it somewhere it can be abandoned, and abandon it at the bound.
   #
@@ -369,11 +386,13 @@ defmodule Loopex.Executor do
   @spec retained_receipt(module(), term(), binary()) ::
           {:ok, map()} | :absent | {:error, term()}
   def retained_receipt(module, reference, job_id) when is_atom(module) and is_binary(job_id) do
-    if Code.ensure_loaded?(module) and function_exported?(module, :retained_receipt, 2) do
-      bounded_receipt(module, reference, job_id, @receipt_bound_ms)
-    else
-      {:error, :receipt_lookup_unsupported}
-    end
+    span([:executor, :retained_receipt], %{job_id: job_id}, fn ->
+      if Code.ensure_loaded?(module) and function_exported?(module, :retained_receipt, 2) do
+        bounded_receipt(module, reference, job_id, @receipt_bound_ms)
+      else
+        {:error, :receipt_lookup_unsupported}
+      end
+    end)
   end
 
   defp bounded_receipt(module, reference, job_id, bound) do
@@ -477,17 +496,19 @@ defmodule Loopex.Executor do
           {:ok, :cleaned} | {:ok, :unconfirmed} | {:error, :invalid_cleanup_grace}
   def cancel(module, reference, job_id, grace_ms)
       when is_atom(module) and is_binary(job_id) do
-    case cancellation_bounds(grace_ms) do
-      {:ok, %{executor_observe_ms: bound}} ->
-        if function_exported?(module, :cancel, 2) do
-          bounded_cancel(module, reference, job_id, bound)
-        else
-          {:ok, :unconfirmed}
-        end
+    span([:executor, :cancel], %{job_id: job_id}, fn ->
+      case cancellation_bounds(grace_ms) do
+        {:ok, %{executor_observe_ms: bound}} ->
+          if function_exported?(module, :cancel, 2) do
+            bounded_cancel(module, reference, job_id, bound)
+          else
+            {:ok, :unconfirmed}
+          end
 
-      {:error, reason} ->
-        {:error, reason}
-    end
+        {:error, reason} ->
+          {:error, reason}
+      end
+    end)
   end
 
   defp admitted_cancel({:ok, :cleaned}), do: {:ok, :cleaned}

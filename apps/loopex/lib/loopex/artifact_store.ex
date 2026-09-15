@@ -70,6 +70,7 @@ defmodule Loopex.ArtifactStore do
   a reconciliation was about to need.
   """
 
+  alias Loopex.Instrumentation
   alias LoopexProtocol.Canonical
 
   @roles ["tool_output"]
@@ -433,6 +434,14 @@ defmodule Loopex.ArtifactStore do
   @spec put(store(), binary(), map()) :: {:ok, artifact_reference()} | {:error, term()}
   def put(%{module: module, handle: handle}, bytes, metadata)
       when is_atom(module) and is_binary(bytes) do
+    span([:artifact, :put], %{bytes: byte_size(bytes)}, fn ->
+      put_verified(module, handle, bytes, metadata)
+    end)
+  end
+
+  def put(_store, _bytes, _metadata), do: {:error, :invalid_artifact_metadata}
+
+  defp put_verified(module, handle, bytes, metadata) do
     with {:ok, use} <- normalize_use(metadata),
          {:ok, reference} <- adapter_put(module, handle, bytes, use),
          :ok <- object_matches_input(reference, bytes),
@@ -441,8 +450,6 @@ defmodule Loopex.ArtifactStore do
       {:ok, reference}
     end
   end
-
-  def put(_store, _bytes, _metadata), do: {:error, :invalid_artifact_metadata}
 
   @doc """
   ## Concept
@@ -463,11 +470,13 @@ defmodule Loopex.ArtifactStore do
           {:ok, binary()} | {:error, term()}
   def fetch(%{module: module, handle: handle}, artifact) when is_atom(module) do
     with {:ok, object} <- object_identity(artifact) do
-      case module.fetch(handle, object) do
-        {:ok, bytes} when is_binary(bytes) -> verify_bytes(bytes, object)
-        {:error, reason} -> {:error, reason}
-        _other -> {:error, :artifact_integrity_failed}
-      end
+      span([:artifact, :fetch], %{locator: object.locator, bytes: object.size}, fn ->
+        case module.fetch(handle, object) do
+          {:ok, bytes} when is_binary(bytes) -> verify_bytes(bytes, object)
+          {:error, reason} -> {:error, reason}
+          _other -> {:error, :artifact_integrity_failed}
+        end
+      end)
     end
   end
 
@@ -494,18 +503,20 @@ defmodule Loopex.ArtifactStore do
   def stat(%{module: module, handle: handle}, locator)
       when is_atom(module) and is_binary(locator) do
     if valid_locator?(locator) do
-      case module.stat(handle, locator) do
-        {:ok, object} ->
-          if valid_object?(object) and object.locator == locator,
-            do: {:ok, object},
-            else: {:error, :invalid_artifact_reference}
+      span([:artifact, :stat], %{locator: locator}, fn ->
+        case module.stat(handle, locator) do
+          {:ok, object} ->
+            if valid_object?(object) and object.locator == locator,
+              do: {:ok, object},
+              else: {:error, :invalid_artifact_reference}
 
-        {:error, reason} ->
-          {:error, reason}
+          {:error, reason} ->
+            {:error, reason}
 
-        _other ->
-          {:error, :invalid_artifact_reference}
-      end
+          _other ->
+            {:error, :invalid_artifact_reference}
+        end
+      end)
     else
       {:error, :invalid_artifact_reference}
     end
@@ -531,11 +542,13 @@ defmodule Loopex.ArtifactStore do
   @spec describe(store(), artifact_reference()) :: {:ok, artifact_use()} | {:error, term()}
   def describe(%{module: module, handle: handle}, reference) when is_atom(module) do
     if valid_reference?(reference) do
-      case module.describe(handle, reference.use_locator) do
-        {:ok, use} -> validate_described_use(use, reference)
-        {:error, reason} -> {:error, reason}
-        _other -> {:error, :artifact_use_mismatch}
-      end
+      span([:artifact, :describe], %{use_locator: reference.use_locator}, fn ->
+        case module.describe(handle, reference.use_locator) do
+          {:ok, use} -> validate_described_use(use, reference)
+          {:error, reason} -> {:error, reason}
+          _other -> {:error, :artifact_use_mismatch}
+        end
+      end)
     else
       {:error, :invalid_artifact_reference}
     end
@@ -608,6 +621,17 @@ defmodule Loopex.ArtifactStore do
   # journal, event, artifact, or fixture. The role is checked before the rest
   # because reporting a name this store cannot honour as "invalid metadata" would
   # send a caller looking at the wrong field.
+  # Concept: one instrumented artifact-store dispatch, named in the accepted
+  # inventory.
+  #
+  # Technical depth: the span wraps the verified operation, not just the adapter
+  # call, because a store that answers with the wrong bytes has not succeeded and
+  # the span must not say it did. Metadata carries object and use references and
+  # byte totals; the bytes themselves and a caller's own metadata never reach it.
+  defp span(event, metadata, work) do
+    Instrumentation.span(event, metadata, work, &Instrumentation.outcome/1)
+  end
+
   defp normalize_use(metadata) when is_map(metadata) and not is_struct(metadata) do
     role = Map.get(metadata, "role", "tool_output")
     media_type = Map.get(metadata, "media_type", @default_media_type)

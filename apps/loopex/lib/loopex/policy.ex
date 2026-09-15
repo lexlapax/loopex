@@ -53,6 +53,7 @@ defmodule Loopex.Policy do
 
   @decision_timeout_ms 5_000
 
+  alias Loopex.Instrumentation
   alias Loopex.Interaction
 
   @reason_categories [
@@ -310,7 +311,7 @@ defmodule Loopex.Policy do
   # bound, and refusing it as unavailable is the same fail-closed direction the
   # rest of this boundary takes.
   defp evaluate_safely(module, request) do
-    normalize(module.decide(request), :admit_defer)
+    instrumented(module, request, fn -> normalize(module.decide(request), :admit_defer) end)
   rescue
     _error -> {:deny, :policy_unavailable}
   catch
@@ -318,12 +319,45 @@ defmodule Loopex.Policy do
   end
 
   defp safely(module, request) do
-    normalize(module.decide(request), :refuse_defer)
+    instrumented(module, request, fn -> normalize(module.decide(request), :refuse_defer) end)
   rescue
     _error -> {:deny, :policy_unavailable}
   catch
     _kind, _value -> {:deny, :policy_unavailable}
   end
+
+  # Concept: one host decision, timed and named by its category.
+  #
+  # Technical depth: the span wraps the callback rather than the caller, so what
+  # it measures is the host's own answer and not the task machinery around it.
+  # The metadata carries the identities the request already names and the result
+  # category; the context, the arguments and the reason's own words never reach
+  # it.
+  defp instrumented(module, request, work) do
+    Instrumentation.span(
+      [:policy, :decide],
+      %{
+        session_id: Map.get(request, :session_id),
+        run_id: Map.get(request, :run_id),
+        tool_call_id: Map.get(request, :tool_call_id),
+        policy: inspect(module)
+      },
+      work,
+      &decision_category/1
+    )
+  end
+
+  # Concept: the category a policy span reports, which is the decision itself.
+  #
+  # Technical depth: the enumeration is the one this port already closes, so a
+  # reader sees whether the host allowed, denied or asked, and never why or with
+  # what. The reason and the interaction request stay out: a denial category is
+  # operator-facing text elsewhere, and an interaction request carries a
+  # question a host wrote.
+  defp decision_category({:allow, _context}), do: :allow
+  defp decision_category({:deny, _category}), do: :deny
+  defp decision_category({:defer, _interaction}), do: :defer
+  defp decision_category(result), do: Instrumentation.outcome(result)
 
   # Concept: one host answer, read the same way by both callers.
   #

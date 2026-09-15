@@ -34,6 +34,7 @@ defmodule Loopex.Store do
   loaded.
   """
 
+  alias Loopex.Instrumentation
   alias Loopex.Store.Transitions
 
   @max_identifier_bytes 256
@@ -955,15 +956,59 @@ defmodule Loopex.Store do
   def transact(%__MODULE__{adapter: adapter, reference: reference}, transaction) do
     with {:ok, _transition} <- Transitions.id(transaction),
          {:ok, tx_id} <- transaction_id(transaction) do
-      adapter_call(
-        fn -> adapter.transact(reference, transaction) end,
-        {:commit_unknown, tx_id}
+      span(
+        [:store, :transact],
+        %{
+          type: Map.get(transaction, :type),
+          session_id: Map.get(transaction, :session_id),
+          records: record_count(transaction)
+        },
+        fn ->
+          adapter_call(
+            fn -> adapter.transact(reference, transaction) end,
+            {:commit_unknown, tx_id}
+          )
+          |> normalize_outcome(tx_id)
+        end
       )
-      |> normalize_outcome(tx_id)
     else
       {:error, _reason} -> {:not_committed, :invalid_transaction}
     end
   end
+
+  # How many durable rows one transaction carries, which is a count rather than
+  # anything about what they say.
+  # Concept: how much this transaction is about to write, as a count only.
+  #
+  # Technical depth: a create_session transaction carries its single genesis
+  # record under its own key rather than the ordered list the session commits
+  # use, so counting only `:records` would report every session's first write
+  # as zero.
+  # Concept: one instrumented Store dispatch, named in the accepted inventory.
+  #
+  # Technical depth: the Store's results are neither `:ok` nor `{:error, _}`
+  # shaped, so the span is told how to name what happened here rather than
+  # teaching the generic instrumentation this boundary's vocabulary.
+  defp span(event, metadata, work) do
+    Instrumentation.span(event, metadata, work, &store_outcome/1)
+  end
+
+  # Concept: the bounded word a Store span reports for a dispatch result.
+  #
+  # Technical depth: every word is a category this module already defines. A
+  # `not_committed` reason is a core atom naming which precondition failed, so
+  # it is carried; nothing else in a result crosses the boundary.
+  defp store_outcome({:committed, _tx_id, _receipt}), do: :committed
+  defp store_outcome({:not_committed, reason}) when is_atom(reason), do: reason
+  defp store_outcome({:commit_unknown, _tx_id}), do: :commit_unknown
+  defp store_outcome({:terminal, :committed}), do: :committed
+  defp store_outcome({:terminal, {:not_committed, reason}}) when is_atom(reason), do: reason
+  defp store_outcome(:absent), do: :absent
+  defp store_outcome(:unavailable), do: :unavailable
+  defp store_outcome(result), do: Instrumentation.outcome(result)
+
+  defp record_count(%{type: :create_session}), do: 1
+  defp record_count(transaction), do: transaction |> Map.get(:records, []) |> length()
 
   @doc """
   ## Concept
@@ -987,11 +1032,17 @@ defmodule Loopex.Store do
     with {:ok, _session_id} <- validate_identifier(session_id),
          {:ok, _mutation_domain} <- validate_identifier(mutation_domain),
          {:ok, _tx_id} <- validate_identifier(tx_id) do
-      adapter_call(
-        fn -> adapter.transaction_status(reference, session_id, mutation_domain, tx_id) end,
-        :unavailable
+      span(
+        [:store, :transaction_status],
+        %{session_id: session_id, mutation_domain: mutation_domain},
+        fn ->
+          adapter_call(
+            fn -> adapter.transaction_status(reference, session_id, mutation_domain, tx_id) end,
+            :unavailable
+          )
+          |> normalize_transaction_status()
+        end
       )
-      |> normalize_transaction_status()
     else
       _invalid -> :unavailable
     end
@@ -1001,9 +1052,15 @@ defmodule Loopex.Store do
   def runtime_command(%__MODULE__{adapter: adapter, reference: reference}, command)
       when is_map(command) do
     with :ok <- validate_runtime_command_binding(command) do
-      adapter_call(
-        fn -> adapter.runtime_command(reference, command) end,
-        :unavailable
+      span(
+        [:store, :runtime_command],
+        %{session_id: Map.get(command, :session_id), kind: Map.get(command, :kind)},
+        fn ->
+          adapter_call(
+            fn -> adapter.runtime_command(reference, command) end,
+            :unavailable
+          )
+        end
       )
     else
       _invalid -> {:error, :runtime_command_conflict}
@@ -1033,11 +1090,17 @@ defmodule Loopex.Store do
       ) do
     with {:ok, _session_id} <- validate_identifier(session_id),
          {:ok, _mutation_domain} <- validate_identifier(mutation_domain) do
-      adapter_call(
-        fn -> adapter.ownership_head(reference, session_id, mutation_domain) end,
-        :unavailable
+      span(
+        [:store, :ownership_head],
+        %{session_id: session_id, mutation_domain: mutation_domain},
+        fn ->
+          adapter_call(
+            fn -> adapter.ownership_head(reference, session_id, mutation_domain) end,
+            :unavailable
+          )
+          |> normalize_ownership_head()
+        end
       )
-      |> normalize_ownership_head()
     else
       _invalid -> :unavailable
     end
@@ -1058,11 +1121,19 @@ defmodule Loopex.Store do
   def load_records(%__MODULE__{} = store, session_id, after_version, limit) do
     with {:ok, _session_id} <- validate_identifier(session_id),
          :ok <- validate_page(after_version, limit) do
-      adapter_call(
-        fn -> store.adapter.load_records(store.reference, session_id, after_version, limit) end,
-        :unavailable
+      span(
+        [:store, :load_records],
+        %{session_id: session_id, after_version: after_version, limit: limit},
+        fn ->
+          adapter_call(
+            fn ->
+              store.adapter.load_records(store.reference, session_id, after_version, limit)
+            end,
+            :unavailable
+          )
+          |> normalize_private_page(after_version, limit)
+        end
       )
-      |> normalize_private_page(after_version, limit)
     end
   end
 
@@ -1082,11 +1153,19 @@ defmodule Loopex.Store do
   def load_events(%__MODULE__{} = store, session_id, after_sequence, limit) do
     with {:ok, _session_id} <- validate_identifier(session_id),
          :ok <- validate_page(after_sequence, limit) do
-      adapter_call(
-        fn -> store.adapter.load_events(store.reference, session_id, after_sequence, limit) end,
-        :unavailable
+      span(
+        [:store, :load_events],
+        %{session_id: session_id, after_sequence: after_sequence, limit: limit},
+        fn ->
+          adapter_call(
+            fn ->
+              store.adapter.load_events(store.reference, session_id, after_sequence, limit)
+            end,
+            :unavailable
+          )
+          |> normalize_event_page(after_sequence, limit)
+        end
       )
-      |> normalize_event_page(after_sequence, limit)
     end
   end
 

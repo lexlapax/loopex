@@ -1,4 +1,5 @@
 Code.require_file("support/m1_runtime_helper.exs", __DIR__)
+Code.require_file("support/agent_loop_helper.exs", __DIR__)
 
 defmodule Loopex.TelemetryBoundaryTest do
   @moduledoc """
@@ -23,11 +24,127 @@ defmodule Loopex.TelemetryBoundaryTest do
 
   use ExUnit.Case, async: false
 
+  alias Loopex.AgentLoopFixture
   alias Loopex.M1RuntimeTestStore, as: TestStore
   alias Loopex.Runtime
   alias Loopex.Runtime.DiagnosticsAdmission, as: Admission
 
   @ceiling 8
+
+  test "the coordinator cuts emit spans for one prompt, naming the run and never its words" do
+    handler = {__MODULE__, :cut_spans, make_ref()}
+    parent = self()
+
+    :ok =
+      :telemetry.attach_many(
+        handler,
+        [
+          [:loopex, :command, :admit, :stop],
+          [:loopex, :commit, :stop],
+          [:loopex, :events, :publish, :stop],
+          [:loopex, :model, :complete, :stop]
+        ],
+        fn event, measurements, metadata, _config ->
+          send(parent, {:span, event, measurements, metadata})
+        end,
+        nil
+      )
+
+    on_exit(fn -> :telemetry.detach(handler) end)
+
+    fixture = AgentLoopFixture.start(script: [%{text: "done", calls: []}])
+    on_exit(fn -> AgentLoopFixture.stop(fixture) end)
+
+    {:ok, session_id} = Loopex.create_session(fixture.runtime, %{}, command_id: "cs")
+    {:ok, attachment} = Loopex.attach(fixture.runtime, session_id, after_event_sequence: 0)
+
+    assert {:accepted, "p1"} =
+             Loopex.command(attachment, %{
+               type: :prompt,
+               command_id: "p1",
+               content: "the task nobody may read here"
+             })
+
+    assert_receive {:span, [:loopex, :command, :admit, :stop], measured, admitted}, 5_000
+    assert is_integer(measured.duration)
+    assert admitted.session_id == session_id
+    assert admitted.command_id == "p1"
+    assert admitted.type == :prompt
+    assert admitted.outcome == :accepted
+
+    assert_receive {:span, [:loopex, :commit, :stop], _committed_measured, committed}, 5_000
+    assert committed.session_id == session_id
+    assert committed.kind == :session_commit
+    assert committed.outcome == :committed
+
+    assert_receive {:span, [:loopex, :events, :publish, :stop], _published_measured, published},
+                   5_000
+
+    assert published.session_id == session_id
+    assert is_integer(published.event_sequence)
+    assert is_integer(published.journal_version)
+
+    assert_receive {:span, [:loopex, :model, :complete, :stop], _model_measured, model}, 5_000
+    assert model.session_id == session_id
+    assert is_binary(model.run_id)
+    assert model.attempt == 1
+
+    # No cut carried the operator's words, the staged request, or the reply.
+    for metadata <- [admitted, committed, published, model] do
+      rendered = inspect(metadata, limit: :infinity)
+      refute rendered =~ "the task nobody may read here"
+      refute rendered =~ "done"
+    end
+  end
+
+  test "instrumented port callbacks emit start stop spans carrying identities and no content" do
+    handler = {__MODULE__, :port_spans, make_ref()}
+    parent = self()
+
+    :ok =
+      :telemetry.attach_many(
+        handler,
+        [
+          [:loopex, :store, :transact, :start],
+          [:loopex, :store, :transact, :stop],
+          [:loopex, :store, :load_events, :stop]
+        ],
+        fn event, measurements, metadata, _config ->
+          send(parent, {:span, event, measurements, metadata})
+        end,
+        nil
+      )
+
+    on_exit(fn -> :telemetry.detach(handler) end)
+
+    %{runtime: runtime} = fixture()
+    {:ok, session_id} = Loopex.create_session(runtime, %{}, command_id: "instrumented")
+    {:ok, _attachment} = Loopex.attach(runtime, session_id, after_event_sequence: 0)
+
+    assert_receive {:span, [:loopex, :store, :transact, :start], start_measurements, _metadata},
+                   2_000
+
+    assert is_integer(start_measurements.monotonic_time)
+
+    assert_receive {:span, [:loopex, :store, :transact, :stop], measurements, metadata}, 2_000
+    assert is_integer(measurements.duration)
+    assert metadata.type == :create_session
+    assert metadata.records == 1
+    assert metadata.outcome == :committed
+
+    # The span carries what happened and to which session, and nothing about
+    # what the rows say.
+    rendered = inspect(metadata, limit: :infinity)
+    refute rendered =~ "payload"
+    refute rendered =~ "canonical_request_bytes"
+
+    assert_receive {:span, [:loopex, :store, :load_events, :stop], _measured, read_metadata},
+                   2_000
+
+    assert read_metadata.session_id == session_id
+    assert Map.has_key?(read_metadata, :limit)
+    assert read_metadata.outcome == :ok
+  end
 
   test "racing senders claim a slot with one atomic owner recording insert before sending so the backlog never exceeds the ceiling and drops are counted without a send" do
     %{runtime: runtime, dispatcher: dispatcher, admission: admission} = fixture()

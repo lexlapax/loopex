@@ -36,6 +36,7 @@ defmodule Loopex.Runtime.EventDispatcher do
   use GenServer
 
   alias Loopex.ArtifactStore
+  alias Loopex.Instrumentation
   alias Loopex.Runtime.DiagnosticsAdmission
   alias Loopex.Runtime.Supervisor, as: RuntimeSupervisor
   alias Loopex.Runtime.SessionState
@@ -291,10 +292,32 @@ defmodule Loopex.Runtime.EventDispatcher do
          {:ok, object} <- transfer_object(request),
          {:ok, use_locator} <- transfer_use(request),
          {:ok, transfer} <-
-           store.module.open_transfer(store.handle, object, use_locator, transfer_window(request)) do
+           Instrumentation.span(
+             [:artifact, :open_transfer],
+             %{
+               session_id: attachment.session_id,
+               attachment_id: attachment.id,
+               locator: object.locator,
+               bytes: object.size
+             },
+             fn ->
+               store.module.open_transfer(
+                 store.handle,
+                 object,
+                 use_locator,
+                 transfer_window(request)
+               )
+             end
+           ) do
       next = %{
         attachment
-        | transfers: Map.put(attachment.transfers, transfer.transfer_ref, transfer)
+        | transfers: Map.put(attachment.transfers, transfer.transfer_ref, transfer),
+          transfer_progress:
+            Map.put(
+              attachment.transfer_progress,
+              transfer.transfer_ref,
+              new_progress(attachment, transfer.transfer_ref, object)
+            )
       }
 
       {:reply, {:ok, Map.delete(transfer, :object)}, put_attachment(state, next)}
@@ -312,7 +335,20 @@ defmodule Loopex.Runtime.EventDispatcher do
            fetch_attachment(state, token, session_id, attachment_id, incarnation_id),
          {:ok, store} <- artifact_store(state),
          {:ok, transfer} <- Map.fetch(attachment.transfers, transfer_ref) do
-      {:reply, store.module.read_transfer(store.handle, transfer, length), state}
+      result =
+        Instrumentation.span(
+          [:artifact, :read_transfer],
+          %{
+            session_id: attachment.session_id,
+            attachment_id: attachment.id,
+            transfer_ref: transfer_ref,
+            requested: length
+          },
+          fn -> store.module.read_transfer(store.handle, transfer, length) end,
+          &read_category/1
+        )
+
+      {:reply, result, put_attachment(state, record_read(attachment, transfer_ref, result))}
     else
       :error -> {:reply, {:error, :unknown_transfer}, state}
       {:error, reason} -> {:reply, {:error, reason}, state}
@@ -328,8 +364,25 @@ defmodule Loopex.Runtime.EventDispatcher do
            fetch_attachment(state, token, session_id, attachment_id, incarnation_id),
          {:ok, store} <- artifact_store(state),
          {:ok, transfer} <- Map.fetch(attachment.transfers, transfer_ref) do
-      _released = store.module.close_transfer(store.handle, transfer)
-      next = %{attachment | transfers: Map.delete(attachment.transfers, transfer_ref)}
+      _released =
+        Instrumentation.span(
+          [:artifact, :close_transfer],
+          %{
+            session_id: attachment.session_id,
+            attachment_id: attachment.id,
+            transfer_ref: transfer_ref
+          },
+          fn -> store.module.close_transfer(store.handle, transfer) end
+        )
+
+      report_transfer(attachment, transfer_ref, :closed)
+
+      next = %{
+        attachment
+        | transfers: Map.delete(attachment.transfers, transfer_ref),
+          transfer_progress: Map.delete(attachment.transfer_progress, transfer_ref)
+      }
+
       {:reply, :ok, put_attachment(state, next)}
     else
       :error -> {:reply, {:error, :unknown_transfer}, state}
@@ -740,7 +793,12 @@ defmodule Loopex.Runtime.EventDispatcher do
         # a transfer to the attachment that opened it, so detaching, replacement
         # and overflow all release exactly what that attachment held and nothing
         # another one is still reading.
-        transfers: %{}
+        transfers: %{},
+        # What each open transfer has moved so far, for the lifecycle report a
+        # transfer owes when it ends. Kept beside the transfers rather than
+        # inside them, because the transfer term is the store's and is handed
+        # back to it on every read.
+        transfer_progress: %{}
       }
 
       # Concept: a replaced attachment's transfers end with it.
@@ -958,6 +1016,58 @@ defmodule Loopex.Runtime.EventDispatcher do
 
   defp artifact_store(_state), do: {:error, :artifact_transfer_unsupported}
 
+  # Concept: what one transfer has moved, from the moment it opened.
+  #
+  # Technical depth: accepted ADR 0030's transfer-lifecycle cut reports bytes and
+  # chunks over a lifetime that spans three separate calls, so no single span can
+  # measure it. The totals accumulate here and are reported exactly once, when
+  # the transfer ends -- closed by its caller or released with its attachment.
+  defp new_progress(attachment, transfer_ref, object) do
+    span =
+      Instrumentation.open_span([:artifact, :transfer], %{
+        session_id: attachment.session_id,
+        attachment_id: attachment.id,
+        transfer_ref: transfer_ref,
+        locator: object.locator
+      })
+
+    %{bytes: 0, chunks: 0, span: span}
+  end
+
+  defp record_read(attachment, transfer_ref, {:ok, %{bytes: bytes}}) when is_binary(bytes) do
+    update_in(attachment.transfer_progress[transfer_ref], fn
+      nil ->
+        nil
+
+      progress ->
+        %{progress | bytes: progress.bytes + byte_size(bytes), chunks: progress.chunks + 1}
+    end)
+  end
+
+  defp record_read(attachment, _transfer_ref, _result), do: attachment
+
+  defp report_transfer(attachment, transfer_ref, disposition) do
+    case Map.fetch(attachment.transfer_progress, transfer_ref) do
+      {:ok, progress} ->
+        Instrumentation.close_span(
+          progress.span,
+          %{bytes: progress.bytes, chunks: progress.chunks},
+          %{
+            session_id: attachment.session_id,
+            attachment_id: attachment.id,
+            transfer_ref: transfer_ref,
+            disposition: disposition
+          }
+        )
+
+      :error ->
+        :ok
+    end
+  end
+
+  defp read_category({:ok, :complete}), do: :complete
+  defp read_category(result), do: Instrumentation.outcome(result)
+
   defp transfer_headroom(attachment, state) do
     if map_size(attachment.transfers) < state.transfer_limits.per_attachment,
       do: :ok,
@@ -993,8 +1103,9 @@ defmodule Loopex.Runtime.EventDispatcher do
   defp release_transfers(state, attachment) do
     case artifact_store(state) do
       {:ok, store} ->
-        Enum.each(attachment.transfers, fn {_ref, transfer} ->
+        Enum.each(attachment.transfers, fn {ref, transfer} ->
           store.module.close_transfer(store.handle, transfer)
+          report_transfer(attachment, ref, :released)
         end)
 
       {:error, _unsupported} ->

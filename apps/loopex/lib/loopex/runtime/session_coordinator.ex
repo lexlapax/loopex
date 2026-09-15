@@ -35,6 +35,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
   alias Loopex.Runtime.SessionState
   alias Loopex.Runtime.StreamRelay
   alias Loopex.Executor
+  alias Loopex.Instrumentation
   alias Loopex.Model
   alias Loopex.Policy
   alias Loopex.ProjectResource
@@ -1507,13 +1508,93 @@ defmodule Loopex.Runtime.SessionCoordinator do
     "owner_" <> binary_part(encoded, 0, 40)
   end
 
+  # Concept: accepted ADR 0030's command-admission cut, measured around the
+  # whole admission rather than around the Store call inside it.
+  #
+  # Technical depth: what an operator waits for is the verdict, which includes
+  # replay resolution and the durable commit, so the span wraps both. The
+  # metadata names the command; its payload -- a message, an answer, a resource
+  # set -- stays out. An answered interaction is also a transition of accepted
+  # ADR 0024's lifecycle, and is reported as one exactly when its admission
+  # succeeded.
   defp commit_command(state, command) do
-    if resource_command?(command) do
-      commit_resource_command(state, command)
-    else
-      commit_loop_command(state, command)
+    type = command_field(command, :type)
+
+    admit = fn ->
+      Instrumentation.span(
+        [:command, :admit],
+        %{
+          session_id: state.session_id,
+          command_id: command_field(command, :command_id),
+          type: type
+        },
+        fn ->
+          if resource_command?(command) do
+            commit_resource_command(state, command)
+          else
+            commit_loop_command(state, command)
+          end
+        end,
+        &admission_category/1
+      )
+    end
+
+    answered_interaction(state, type, admit)
+  end
+
+  # Concept: an operator answering a question is a transition of accepted ADR
+  # 0024's lifecycle as well as an ordinary command.
+  #
+  # Technical depth: the two spans nest rather than duplicate. The outer one
+  # names the interaction that moved and what it moved to, which the command
+  # admission cannot, and it measures the same thing that admission measures:
+  # how long the answer took to become durable. The interaction is read before
+  # the commit, because after it the record is no longer the open one.
+  defp answered_interaction(state, type, admit)
+       when type in [:interaction_answer, "interaction_answer"] do
+    interaction_id =
+      case SessionState.open_interaction_record(state.durable) do
+        %{interaction_id: id} -> id
+        _none -> nil
+      end
+
+    Instrumentation.span(
+      [:interaction],
+      %{
+        session_id: state.session_id,
+        interaction_id: interaction_id,
+        transition: :answered
+      },
+      admit,
+      &admission_category/1
+    )
+  end
+
+  defp answered_interaction(_state, _type, admit), do: admit.()
+
+  defp command_field(command, key) do
+    case Map.get(command, key, Map.get(command, Atom.to_string(key))) do
+      value when is_atom(value) or is_binary(value) -> value
+      _other -> nil
     end
   end
+
+  # Concept: the verdict word, taken from the reply the operator receives.
+  #
+  # Technical depth: an admission's reply is a tagged tuple whose tag is the
+  # verdict -- accepted, rejected, replayed -- so the tag is the category, and a
+  # refusal's own atom reason is carried because it is a closed core word. The
+  # command's content is in the same tuple and never leaves it.
+  defp admission_category({:reply, reply, _state}), do: reply_category(reply)
+  defp admission_category(_result), do: :other
+
+  defp reply_category(:ok), do: :ok
+  defp reply_category({:ok, _value}), do: :ok
+  defp reply_category({:error, reason}) when is_atom(reason), do: reason
+  defp reply_category({:error, _reason}), do: :error
+  defp reply_category({tag, _detail}) when is_atom(tag), do: tag
+  defp reply_category(reply) when is_atom(reply), do: reply
+  defp reply_category(_reply), do: :other
 
   defp resource_command?(command) do
     Enum.any?([:type, "type"], fn key ->
@@ -1661,12 +1742,36 @@ defmodule Loopex.Runtime.SessionCoordinator do
     end
   end
 
+  # Concept: accepted ADR 0030's durable-commit cut, which covers the
+  # re-presentation an unknown commit forces as part of the same commit.
+  #
+  # Technical depth: the span measures what the session actually waited for. A
+  # `commit_unknown` and its resolving second presentation are one commit from
+  # the session's point of view, so they are one span with the outcome the
+  # resolution reached, not two with a misleading first verdict.
   defp resolve_transaction(lane, transaction) do
-    case OwnerLane.transact(lane, transaction) do
-      {{:commit_unknown, _tx_id}, next_lane} -> OwnerLane.transact(next_lane, transaction)
-      result -> result
-    end
+    Instrumentation.span(
+      [:commit],
+      %{
+        session_id: Map.get(transaction, :session_id),
+        kind: Map.get(transaction, :type),
+        mutation_domain: Map.get(transaction, :mutation_domain)
+      },
+      fn ->
+        case OwnerLane.transact(lane, transaction) do
+          {{:commit_unknown, _tx_id}, next_lane} -> OwnerLane.transact(next_lane, transaction)
+          result -> result
+        end
+      end,
+      &commit_category/1
+    )
   end
+
+  defp commit_category({{:committed, _tx_id, _receipt}, _lane}), do: :committed
+  defp commit_category({{:not_committed, reason}, _lane}) when is_atom(reason), do: reason
+  defp commit_category({{:commit_unknown, _tx_id}, _lane}), do: :commit_unknown
+  defp commit_category({{:fenced, disposition}, _lane}) when is_atom(disposition), do: :fenced
+  defp commit_category(_result), do: :other
 
   defp advance_work(%{phase: :ready, superseded: false, model: model} = state)
        when is_map(model) do
@@ -2711,6 +2816,21 @@ defmodule Loopex.Runtime.SessionCoordinator do
     provider_reference = make_ref()
     binding = attempt_binding(state, work)
 
+    # Concept: who this provider call is for, carried to the span at the
+    # callback itself.
+    #
+    # Technical depth: the adapter call happens three processes away from here,
+    # and nothing in a model request names the session. The identities travel
+    # with the call rather than being read back at the coordinator, so what the
+    # span measures is exactly the host's own `complete/3`.
+    identities = %{
+      session_id: state.session_id,
+      run_id: run_id,
+      attempt: work.model_attempt,
+      model: Map.get(request, :model),
+      provider: inspect(module)
+    }
+
     {:ok, guard} =
       Task.Supervisor.start_child(state.owner_workers, fn ->
         guard_provider_call(coordinator, provider_reference, cleanup_grace_ms)
@@ -2728,7 +2848,8 @@ defmodule Loopex.Runtime.SessionCoordinator do
               options,
               progress,
               deadline,
-              cleanup_grace_ms
+              cleanup_grace_ms,
+              identities
             )
         end
       end)
@@ -2814,7 +2935,8 @@ defmodule Loopex.Runtime.SessionCoordinator do
          options,
          progress,
          deadline,
-         cleanup_grace_ms
+         cleanup_grace_ms,
+         identities
        )
        when is_integer(deadline) and is_integer(cleanup_grace_ms) do
     observed = System.system_time(:millisecond)
@@ -2831,7 +2953,8 @@ defmodule Loopex.Runtime.SessionCoordinator do
          request,
          options,
          progress,
-         cleanup_grace_ms
+         cleanup_grace_ms,
+         identities
        )}
     end
   end
@@ -2855,12 +2978,22 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # deliberately cannot forge the one exact `not_dispatched` shape;
   # `accept_model_result/3` therefore settles it dispatched-or-unknown without
   # retrying.
-  defp call_provider(guard, reference, module, request, options, progress, cleanup_grace_ms) do
+  defp call_provider(
+         guard,
+         reference,
+         module,
+         request,
+         options,
+         progress,
+         cleanup_grace_ms,
+         identities
+       ) do
     guard_monitor = Process.monitor(guard)
 
     send(
       guard,
-      {:loopex_provider_guard_start, reference, self(), module, request, options, progress}
+      {:loopex_provider_guard_start, reference, self(), module, request, options, progress,
+       identities}
     )
 
     await_provider_guard(
@@ -3006,7 +3139,8 @@ defmodule Loopex.Runtime.SessionCoordinator do
          cleanup_grace_ms
        ) do
     receive do
-      {:loopex_provider_guard_start, ^reference, ^owner, module, request, options, progress} ->
+      {:loopex_provider_guard_start, ^reference, ^owner, module, request, options, progress,
+       identities} ->
         guard = self()
 
         {callback, callback_monitor} =
@@ -3023,7 +3157,8 @@ defmodule Loopex.Runtime.SessionCoordinator do
                       request,
                       options,
                       progress,
-                      cleanup_grace_ms
+                      cleanup_grace_ms,
+                      identities
                     )
 
                   send(guard, {:loopex_provider_callback_result, reference, self(), result})
@@ -3073,7 +3208,8 @@ defmodule Loopex.Runtime.SessionCoordinator do
          request,
          options,
          progress,
-         cleanup_grace_ms
+         cleanup_grace_ms,
+         identities
        ) do
     callback = self()
 
@@ -3090,11 +3226,13 @@ defmodule Loopex.Runtime.SessionCoordinator do
         )
       end,
       fn ->
-        try do
-          module.complete(request, options, progress)
-        catch
-          _kind, _reason -> {:error, :provider_call_failed}
-        end
+        Instrumentation.span([:model, :complete], identities, fn ->
+          try do
+            module.complete(request, options, progress)
+          catch
+            _kind, _reason -> {:error, :provider_call_failed}
+          end
+        end)
       end
     )
   end
@@ -4518,6 +4656,36 @@ defmodule Loopex.Runtime.SessionCoordinator do
     end
   end
 
+  # Concept: accepted ADR 0030's effect-intent cut. Intent commits before any
+  # effect is dispatched, and this is where that happens.
+  #
+  # Technical depth: the span covers proposal and commit together, because a
+  # proposal the Store refused is an intent that did not commit. The validated
+  # arguments, the grant and the job's own fields stay out of the metadata.
+  defp commit_effect_intent(state, work, call, job, grant) do
+    Instrumentation.span(
+      [:effect, :intent],
+      %{
+        session_id: state.session_id,
+        run_id: work.run_id,
+        tool_call_id: call.tool_call_id,
+        operation_id: Map.get(job, :operation_id),
+        attempt: Map.get(job, :attempt)
+      },
+      fn ->
+        with {:ok, proposal} <-
+               SessionState.propose_effect_intent(state.durable, work.run_id, job, grant) do
+          commit_internal(state, proposal)
+        end
+      end,
+      &intent_category/1
+    )
+  end
+
+  defp intent_category({:ok, _state}), do: :committed
+  defp intent_category({:error, reason}) when is_atom(reason), do: reason
+  defp intent_category(_result), do: :other
+
   defp dispatch_effect(state, work, call) do
     with {:ok, definition} <- resolve_active_tool(state, call.name),
          :ok <- validate_tool_arguments(definition, call.arguments) do
@@ -4537,9 +4705,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
              System.system_time(:millisecond) + 60_000,
              policy_context(context)
            ),
-         {:ok, proposal} <-
-           SessionState.propose_effect_intent(state.durable, work.run_id, job, grant),
-         {:ok, next} <- commit_internal(state, proposal) do
+         {:ok, next} <- commit_effect_intent(state, work, call, job, grant) do
       # Concept: committing intent does not buy permission to start after the
       # operator's deadline.
       #
@@ -5460,9 +5626,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
 
       previous = SessionState.open_interaction_record(state.durable)
 
-      with {:ok, proposal} <-
-             SessionState.propose_interaction_request(state.durable, interaction),
-           {:ok, next} <- commit_internal(state, proposal) do
+      with {:ok, next} <- commit_interaction_transition(state, interaction, :requested) do
         # The creation is what ended the previous round, so its timer goes with
         # it rather than firing against a question nobody can answer any more.
         next =
@@ -5565,20 +5729,39 @@ defmodule Loopex.Runtime.SessionCoordinator do
   defp settle_open_interaction(state, resolution, reason) do
     case SessionState.open_interaction_record(state.durable) do
       %{status: "answered", interaction_id: interaction_id} ->
-        with {:ok, proposal} <-
-               SessionState.propose_interaction_resolution(
-                 state.durable,
-                 interaction_id,
-                 resolution,
-                 reason
-               ),
-             {:ok, next} <- commit_internal(state, proposal) do
+        with {:ok, next} <-
+               commit_interaction_resolution(state, interaction_id, resolution, reason) do
           {:ok, cancel_interaction_expiry(next, interaction_id)}
         end
 
       _none ->
         {:ok, state}
     end
+  end
+
+  # Concept: accepted ADR 0030's interaction-transition cut, around the commit
+  # that makes a transition durable.
+  #
+  # Technical depth: a question's own words, an operator's answer and a denial's
+  # text never reach the metadata; what is reported is which interaction moved
+  # and where to. An expiry, an abort and an operator's answer are different
+  # transitions of the same lifecycle and are named as such.
+  defp commit_interaction_transition(state, interaction, transition) do
+    Instrumentation.span(
+      [:interaction],
+      %{
+        session_id: state.session_id,
+        interaction_id: interaction.interaction_id,
+        transition: transition
+      },
+      fn ->
+        with {:ok, proposal} <-
+               SessionState.propose_interaction_request(state.durable, interaction) do
+          commit_internal(state, proposal)
+        end
+      end,
+      &intent_category/1
+    )
   end
 
   # Concept: one open question ends, and the call it suspended ends with it.
@@ -5589,15 +5772,33 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # in which the call has ended while the question still reads as open. Only a
   # resolution that leaves the decision denied reaches here; an allow dispatches
   # instead, and commits its grant and intent before anything runs.
+  defp commit_interaction_resolution(state, interaction_id, resolution, reason) do
+    Instrumentation.span(
+      [:interaction],
+      %{
+        session_id: state.session_id,
+        interaction_id: interaction_id,
+        transition: :resolved,
+        resolution: resolution
+      },
+      fn ->
+        with {:ok, proposal} <-
+               SessionState.propose_interaction_resolution(
+                 state.durable,
+                 interaction_id,
+                 resolution,
+                 reason
+               ) do
+          commit_internal(state, proposal)
+        end
+      end,
+      &intent_category/1
+    )
+  end
+
   defp resolve_interaction(state, interaction_id, run_id, resolution, reason) do
-    with {:ok, proposal} <-
-           SessionState.propose_interaction_resolution(
-             state.durable,
-             interaction_id,
-             resolution,
-             reason
-           ),
-         {:ok, next} <- commit_internal(state, proposal) do
+    with {:ok, next} <-
+           commit_interaction_resolution(state, interaction_id, resolution, reason) do
       case Map.get(next.durable.pending_work, run_id) do
         %{stage: "effect_pending", pending_calls: [call | _rest]} = work ->
           commit_tool_terminal(next, work, call, :denied, reason)
@@ -5766,9 +5967,28 @@ defmodule Loopex.Runtime.SessionCoordinator do
           publish
         )
 
+      # Concept: the executor call is instrumented where it is made, in the
+      # worker that makes it.
+      #
+      # Technical depth: the job already names every identity this span carries,
+      # so nothing is threaded here; the validated arguments, the grant and the
+      # receipt stay out of the metadata.
+      job = work.job
+
+      identities = %{
+        session_id: Map.get(job, :session_id),
+        run_id: Map.get(job, :run_id),
+        tool_call_id: Map.get(job, :tool_call_id),
+        tool_id: Map.get(job, :tool_id),
+        operation_id: Map.get(job, :operation_id),
+        attempt: Map.get(job, :attempt)
+      }
+
       task =
         Task.Supervisor.async_nolink(state.workers, fn ->
-          executor.module.execute(executor.reference, work.job, work.grant, [], progress)
+          Instrumentation.span([:executor, :execute], identities, fn ->
+            executor.module.execute(executor.reference, job, work.grant, [], progress)
+          end)
         end)
 
       state = %{state | streams: Map.put(state.streams, {:executor, work.run_id}, stream)}
