@@ -54,7 +54,9 @@ defmodule Loopex.EventDispatcherAvailabilityTest do
         assert {:accepted, "abort"} =
                  Loopex.command(attachment, %{type: :abort, command_id: "abort"})
 
-        await(fn -> :sys.get_state(fixture.dispatcher).acknowledged[session_id] == 2 end)
+        # The abort publishes the run's ending and the session's settled fact
+        # in one transaction, so the watermark stands at the third row.
+        await(fn -> :sys.get_state(fixture.dispatcher).acknowledged[session_id] == 3 end)
       end
 
       {reader, waiter} = held_read(fixture, session_id, attachment, :attachment_status)
@@ -239,7 +241,10 @@ defmodule Loopex.EventDispatcherAvailabilityTest do
     assert {:accepted, "abort"} =
              Loopex.command(attachment, %{type: :abort, command_id: "abort"})
 
-    await(fn -> :sys.get_state(fixture.dispatcher).acknowledged[session_id] == 2 end)
+    # The abort's terminal transaction publishes the run's ending and the
+    # settled fact accepted ADR 0011 keeps distinct from it, so the watermark
+    # this fence is rebuilt against stands at the third row.
+    await(fn -> :sys.get_state(fixture.dispatcher).acknowledged[session_id] == 3 end)
     :ok = EventDispatcher.release_fence(fixture.runtime.supervisor, session_id)
     refute Map.has_key?(:sys.get_state(fixture.dispatcher).acknowledged, session_id)
     {reader, waiter} = held_read(fixture, session_id, attachment, :attachment_status)
@@ -253,7 +258,7 @@ defmodule Loopex.EventDispatcherAvailabilityTest do
 
     :ok = EventDispatcher.acknowledge(fixture.runtime.supervisor, session_id, 2)
     assert {:ok, second} = Loopex.next_event(attachment)
-    assert second == List.last(events(fixture, session_id))
+    assert second == Enum.at(events(fixture, session_id), 1)
   end
 
   defp fixture(options \\ []) do

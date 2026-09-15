@@ -2632,7 +2632,9 @@ defmodule Loopex.Runtime.SessionState do
       {state, promotion_events} = promote_follow_up(state, run_id)
 
       {:ok, %{state | aborting: nil},
-       settled_events ++ [event] ++ steer_events ++ promotion_events}
+       settled_events ++
+         [event] ++
+         steer_events ++ promotion_events ++ session_settled(state, run_id, promotion_events)}
     else
       _other -> {:error, :invalid_run_terminal_transition}
     end
@@ -2667,7 +2669,9 @@ defmodule Loopex.Runtime.SessionState do
       {state, steer_events} = resolve_steer(state, run_id, "run_terminal")
       {state, promotion_events} = promote_follow_up(state, run_id)
 
-      {:ok, state, events ++ steer_events ++ promotion_events}
+      {:ok, state,
+       events ++
+         steer_events ++ promotion_events ++ session_settled(state, run_id, promotion_events)}
     else
       _other -> {:error, :invalid_outcome_unknown_transition}
     end
@@ -3877,6 +3881,28 @@ defmodule Loopex.Runtime.SessionState do
 
   defp run_finished_event(session_id, run_id, outcome, reconciliation_ref, grace),
     do: run_finished_event(session_id, run_id, outcome, reconciliation_ref, grace, nil)
+
+  # Concept: a session that ends a run with nothing queued behind it says so,
+  # once, as a fact distinct from the run's own ending.
+  #
+  # Technical depth: accepted ADR 0011 fixes this shape: the terminal
+  # transaction publishes `run.finished`, resolves the steer, and then either
+  # promotes a queued follow-up or publishes `session.settled`. A finished run
+  # whose follow-up was promoted publishes no settled fact, because the session
+  # still owes work and an operator told otherwise would act on it. The event's
+  # identity is derived from the session and the run that ended, so replaying
+  # the same terminal produces the same fact rather than a second one.
+  defp session_settled(_state, _run_id, [_promoted | _rest]), do: []
+
+  defp session_settled(state, run_id, []) do
+    [
+      %{
+        "run_id" => run_id,
+        event_id: stable_id("event-session-settled", state.session_id, run_id),
+        kind: "session.settled"
+      }
+    ]
+  end
 
   defp run_terminal_record(state, run_id, proposed, detail) do
     outcome = run_outcome(state, run_id, proposed)

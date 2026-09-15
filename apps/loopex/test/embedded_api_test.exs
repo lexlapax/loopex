@@ -93,7 +93,11 @@ defmodule Loopex.EmbeddedApiTest do
     assert {:accepted, "delivery-abort"} =
              Loopex.command(attachment, %{type: :abort, command_id: "delivery-abort"})
 
-    eventually(fn -> committed_event_count(fixture, session_id) == 2 end)
+    # The abort's terminal transaction commits the run's ending and, with
+    # nothing queued behind it, the session's settled fact that accepted ADR
+    # 0011 makes distinct from it, so the history this witness reads across is
+    # three events rather than two.
+    eventually(fn -> committed_event_count(fixture, session_id) == 3 end)
     stored = M1RuntimeTestStore.inspect_state(fixture.store_pid).sessions[session_id].events
 
     :ok = M1RuntimeTestStore.block_next_event_read(fixture.store_pid, self())
@@ -107,7 +111,7 @@ defmodule Loopex.EmbeddedApiTest do
     delivery = Task.async(fn -> Loopex.next_event(attachment) end)
 
     assert_receive {:event_history_read, waiter, _store, ^session_id, committed_events}
-    assert Enum.map(committed_events, & &1.event_sequence) == [2]
+    assert Enum.map(committed_events, & &1.event_sequence) == [2, 3]
 
     {:ok, %{dispatcher: dispatcher}} = Runtime.children(fixture.runtime)
     Process.exit(dispatcher, :kill)
@@ -156,19 +160,26 @@ defmodule Loopex.EmbeddedApiTest do
     # still to come when `command/2` returns. And ADR 0018 fences delivery on
     # the publication watermark, so the durable count is not the delivery
     # signal either: the terminal is polled off the attachment itself.
-    assert [%{event_sequence: 2, kind: "run.finished"}] = await_delivered(original, 1)
+    # That terminal transaction also publishes the settled fact accepted ADR
+    # 0011 keeps distinct from the run's ending, so the ending and the session
+    # settling arrive together and the anchor below is the settled fact.
+    assert [
+             %{event_sequence: 2, kind: "run.finished"},
+             %{event_sequence: 3, kind: "session.settled"}
+           ] = await_delivered(original, 2)
+
     :ok = M1RuntimeTestStore.block_next_event_read(fixture.store_pid, self())
 
     attaching =
       Task.async(fn ->
         Loopex.attach(fixture.runtime, session_id,
           request_id: "snapshot-race",
-          after_event_sequence: 2
+          after_event_sequence: 3
         )
       end)
 
-    assert_receive {:event_history_read, waiter, _store, ^session_id, scanned_at_three}
-    assert Enum.map(scanned_at_three, & &1.event_sequence) == [1, 2]
+    assert_receive {:event_history_read, waiter, _store, ^session_id, scanned_at_anchor}
+    assert Enum.map(scanned_at_anchor, & &1.event_sequence) == [1, 2, 3]
 
     assert {:accepted, "during-snapshot"} =
              Loopex.command(original, %{
@@ -180,18 +191,18 @@ defmodule Loopex.EmbeddedApiTest do
     M1RuntimeTestStore.release(waiter)
     assert {:ok, replacement} = Task.await(attaching)
 
-    assert %{session_id: ^session_id, event_sequence: 2, active_run_id: nil} =
+    assert %{session_id: ^session_id, event_sequence: 3, active_run_id: nil} =
              Loopex.snapshot(replacement)
 
     streamed = drain_events(replacement)
-    assert Enum.map(streamed, & &1.event_sequence) == [3]
+    assert Enum.map(streamed, & &1.event_sequence) == [4]
     assert Enum.map(streamed, & &1.kind) == ["user.message_appended"]
 
     assert {:error, :stale_attachment} = Loopex.next_event(original)
 
     stored = M1RuntimeTestStore.inspect_state(fixture.store_pid).sessions[session_id].events
-    assert Enum.map(stored, & &1.event_sequence) == [1, 2, 3]
-    assert scanned_at_three ++ streamed == stored
+    assert Enum.map(stored, & &1.event_sequence) == [1, 2, 3, 4]
+    assert scanned_at_anchor ++ streamed == stored
 
     paged = start_fixture("paged-snapshot-runtime")
 
@@ -228,19 +239,21 @@ defmodule Loopex.EmbeddedApiTest do
                    command_id: abort_id
                  })
 
-        eventually(fn -> committed_event_count(paged, paged_session) == index * 2 end)
+        # Each iteration commits the prompt, the run's ending and the settled
+        # fact that ending publishes with nothing queued behind it.
+        eventually(fn -> committed_event_count(paged, paged_session) == index * 3 end)
       end)
 
       paged_events =
         M1RuntimeTestStore.inspect_state(paged.store_pid).sessions[paged_session].events
 
-      assert length(paged_events) == 1_026
+      assert length(paged_events) == 1_539
 
       {:ok, paged_attachment} = Loopex.attach(paged.runtime, paged_session)
 
       assert %{
                session_id: ^paged_session,
-               event_sequence: 1_026,
+               event_sequence: 1_539,
                active_run_id: nil
              } = Loopex.snapshot(paged_attachment)
 
@@ -253,8 +266,8 @@ defmodule Loopex.EmbeddedApiTest do
       assert Enum.all?(reads, &(&1.limit <= 1_024))
 
       assert Enum.any?(reads, &match?(%{after_sequence: 0, returned: 1_024}, &1))
-      assert Enum.any?(reads, &match?(%{after_sequence: 1_024, returned: 2}, &1))
-      assert Enum.any?(reads, &match?(%{after_sequence: 1_026, returned: 0}, &1))
+      assert Enum.any?(reads, &match?(%{after_sequence: 1_024, returned: 515}, &1))
+      assert Enum.any?(reads, &match?(%{after_sequence: 1_539, returned: 0}, &1))
 
       {:ok, scan} = SessionState.start_snapshot_scan(paged_session, nil)
 
@@ -267,7 +280,7 @@ defmodule Loopex.EmbeddedApiTest do
           next
         end)
 
-      assert {:ok, %{tail: 1_026, snapshot: snapshot}} =
+      assert {:ok, %{tail: 1_539, snapshot: snapshot}} =
                SessionState.finish_snapshot_scan(scan)
 
       assert snapshot == Loopex.snapshot(paged_attachment)
@@ -313,10 +326,14 @@ defmodule Loopex.EmbeddedApiTest do
     assert {:disconnected, 0} = Loopex.next_event(first)
 
     {:ok, live} = Loopex.attach(fixture.runtime, session_id, after_event_sequence: 0)
-    assert Enum.map(drain_events(live), & &1.event_sequence) == [1, 2]
+
+    # The abort's terminal transaction published the run's ending and, with
+    # nothing queued behind it, the settled fact accepted ADR 0011 keeps
+    # distinct from it.
+    assert Enum.map(drain_events(live), & &1.event_sequence) == [1, 2, 3]
 
     # The reconnected attachment's own event source: a prompt admitted on the
-    # settled session publishes its user message as the third event.
+    # settled session publishes its user message as the next event.
     assert {:accepted, "reconnect-prompt"} =
              Loopex.command(live, %{
                type: :prompt,
@@ -332,14 +349,15 @@ defmodule Loopex.EmbeddedApiTest do
         end
       end)
 
-    assert [%{event_sequence: 3}] = ended
+    assert [%{event_sequence: 4}] = ended
 
     # The abort's acceptance says it was admitted, not that the run has ended;
-    # its terminal is the fourth event and lands once the cleanup answers.
+    # its terminal lands once the cleanup answers, and publishes the ending and
+    # the settled fact together.
     assert {:accepted, "reconnect-abort"} =
              Loopex.command(live, %{type: :abort, command_id: "reconnect-abort"})
 
-    eventually(fn -> committed_event_count(fixture, session_id) == 4 end)
+    eventually(fn -> committed_event_count(fixture, session_id) == 6 end)
 
     assert {:accepted, "second-prompt"} =
              Loopex.command(live, %{
@@ -349,9 +367,9 @@ defmodule Loopex.EmbeddedApiTest do
              })
 
     expected = M1RuntimeTestStore.inspect_state(fixture.store_pid).sessions[session_id].events
-    assert Enum.map(expected, & &1.event_sequence) == [1, 2, 3, 4, 5]
+    assert Enum.map(expected, & &1.event_sequence) == [1, 2, 3, 4, 5, 6, 7]
 
-    assert {:ok, %{status: {:disconnected, :overflow}, cursor: 3, max_queue_depth: 1}} =
+    assert {:ok, %{status: {:disconnected, :overflow}, cursor: 4, max_queue_depth: 1}} =
              Loopex.attachment_status(live)
 
     prior_owner_tx = current_owner_transaction_id(fixture.runtime, session_id)
@@ -380,7 +398,7 @@ defmodule Loopex.EmbeddedApiTest do
     assert Loopex.snapshot(after_restart).event_sequence == 3
     assert drain_events(after_restart) == Enum.drop(expected, 3)
 
-    assert {:ok, %{status: :active, cursor: 5, max_queue_depth: 1, capacity: 1}} =
+    assert {:ok, %{status: :active, cursor: 7, max_queue_depth: 1, capacity: 1}} =
              Loopex.attachment_status(after_restart)
 
     records = M1RuntimeTestStore.inspect_state(fixture.store_pid).sessions[session_id].records
