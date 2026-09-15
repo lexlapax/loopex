@@ -4029,3 +4029,35 @@ and Closure rows, every earlier generation and every historical revision
 remain exactly as recorded. This row binds the proposal; the re-capture
 itself and the M0 and M1 re-proofs it records follow as evidence commit `E'`
 and are not accepted here. It grants no closure, integration, tag or release.
+
+<a id="disposition-m1-gate-generation-12-2026-09-14"></a>
+### M1 gate generation 12 acceptance — 2026-09-14
+
+Taking the generation 11 re-capture exposed a defect in the M1 runner's own
+environment boundary: it appended the four system directories to the isolated
+toolchain path before the directories it discovered for `mix`, `elixir` and
+`erl`, so on a host that also carries those entrypoints in a system directory
+the system copy decided the running pair and the bound verifier refused the
+lane as not one exact locked pair. The Linux current lane could not be
+captured at all. Presented with three ways to scope the re-capture lanes, the
+maintainer chose to keep all three lanes and allow the Linux lane to run on
+the host toolchain, which requires this change to bound gate machinery. The
+implementer then presented proposal `A` at `3181ad25a98360d12b47a93a82ad070d3c9851a9` with this
+evidence: the runner's syntax passing; the new corpus case passing on both
+hosts, exercising the unchanged order on Darwin and the reordered order on
+Linux; the fixture role reporting a byte-identical path on Darwin and the
+locked pair first on Linux; formatting, agent-bootstrap, commit-message and
+hygiene checks passing; and the full status walk at `A` stopping only on the
+pending generation row. The maintainer answered **"Accept 3181ad2 (Recommended)"**.
+
+This accepts generation 12 alone under `amendment-transaction-v2`: the runner
+places the discovered toolchain directories ahead of the system directories
+only where a system directory would otherwise decide the running pair, leaves
+the constructed path unchanged everywhere else, and keeps every system
+directory on the path so ordinary tools keep their platform identity. The
+running pair is still proved by the bound evidence verifier, which this
+ordering feeds rather than replaces. The Acceptance and Closure
+rows, every earlier generation and every historical revision remain exactly
+as recorded. This row binds the proposal; the re-capture itself and the M0
+re-proof it records follow as evidence commit `E'` and are not accepted
+here. It grants no closure, integration, tag or release.
