@@ -4243,3 +4243,64 @@ rebind binds the Acceptance row to exact
 and the amended gate digest. It changes no lifecycle state, outcome count, gate
 selector, witness, limit, client pin, bound artifact or evidence class, and
 grants no closure, integration, tag or release.
+
+<a id="disposition-m4-drop-python-client-2026-09-15"></a>
+### M4 drops the Python conformance client — 2026-09-15
+
+The maintainer asked what Python was being used for. The answer had two halves
+that pull against each other. Python was a seed and M0 bridge dependency and was
+removed: repository checks run on Elixir and Mix entrypoints, and the closed M0
+gate holds that boundary actively, shadowing every interpreter name it can reach
+and scanning every tracked byte for an invocation shape that could slip past
+those stubs. But accepted M4's outcome 6 committed to Elixir, Python and
+TypeScript clients executing the same conformance vectors, and the M4 gate
+pinned a Python interpreter to run one of them. A client lane requiring that
+interpreter reopened exactly the hole the M0 scan exists to close.
+
+The implementer reported the tension rather than leaving it, and noted that two
+independent implementations already prove the wire contract is bytes rather than
+an Elixir interface, so a third adds breadth rather than proof. The maintainer
+answered **"yes, drop python from outcome 6, we can introduce additional clients
+later in m6, m7 etc.. based on vision and roadmap"**, and then, of the change
+itself, **"go do the change. this is my acceptance of the change."**
+
+The revision that first carried it, `fdaa8d8a43ba8f2161e69d383ec118806b667ccf`,
+was invalid in three ways nobody saw until the status walk ran the next day. It
+headed a gate section "Amendment 3" without the anchor that declares one, so the
+gate stayed at the generation Amendment 2 had set and the envelope change read
+as a silent edit. It recorded the three new artifact digests only inside that
+section, leaving the authoritative Bound Artifacts table still naming the bytes
+it had just replaced. And it left the gate's own text naming a Python client and
+a plural set of pinned interpreters, so outcome 6's locked obligation still
+demanded evidence the amended envelopes said would not exist. The maintainer
+chose to rewrite that lineage rather than override the rule that caught it.
+
+The rewritten proposal is `72a8d3f2efdc5490ddd87e40a8192f20ba6564d6`. Its
+Concept envelope digest is byte-identical to the one the discarded revision
+recorded, so the accepted change itself is unaltered; what moves is the anchor,
+the Bound Artifacts rows and the four cleared sentences. Presented with that,
+the maintainer answered **"accept 2800eaf"**.
+
+That revision no longer exists either, and for the same reason as its
+predecessor: repairing the closed M1 gate's bound dependency oracle, which M4's
+Phase B had rewritten without M1's own transaction, moved every identity after
+it. The content is unchanged and its three digests are byte-identical to the
+ones accepted at the discarded identity. Presented with that, the maintainer
+answered **"accept 72a8d3f"**.
+
+Both envelopes move together, because the pair is one authority unit. Outcome 6
+now names Elixir and Node clients. Three bound artifacts change and no fourth:
+the pin file loses its `python=` line, the runner loses the Python verification
+and the `python_pin` field it printed, and the support script's report grammar
+loses that field's rule. The gate's own report grammar loses it too, its Bound
+Artifacts rows move to the new digests, and the gate's Amendment 4 records the
+same rebinding under its generation. Amendment 2's text still
+describes renaming a Python pin field and stays exactly as written, because it
+records what was true when it was accepted.
+
+This transcribes that answer as acceptance under `amendment-transaction-v1`. The
+rebind binds the Acceptance row to exact
+`72a8d3f2efdc5490ddd87e40a8192f20ba6564d6` with both amended envelope digests
+and the amended gate digest. It adds no outcome, removes none, changes no
+selector, witness, limit or evidence class beyond outcome 6's client list,
+reopens no lifecycle state, and grants no closure, integration, tag or release.
