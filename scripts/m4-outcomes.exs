@@ -157,7 +157,7 @@
             "a crashing telemetry handler is isolated and emission with no handler stays within the measured overhead",
             "a slow or blocked forwarding sink never delays a coordinator and drops with a counted entry",
             "racing senders claim a slot with one atomic owner recording insert before sending so the backlog never exceeds the ceiling and drops are counted without a send",
-            "a sender killed at each crash cut after taking a ticket after a failed claim after a successful claim and after the send holds afterwards exactly its claimed but unsent slots released at its DOWN while a concurrent sender's slot stays live and admits and a release frees only the exact claim it names",
+            "a sender killed at each crash cut holds exactly its claimed but unsent slots released at its DOWN while a concurrent sender's slot stays live and admits and a release frees only the claim it names",
             "the drain summary carries the exact number of counted drops taken by one atomic exchange"
           ]
         }

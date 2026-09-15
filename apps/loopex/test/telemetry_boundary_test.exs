@@ -208,7 +208,7 @@ defmodule Loopex.TelemetryBoundaryTest do
     assert Runtime.alive?(runtime)
   end
 
-  test "a sender killed at each crash cut after taking a ticket after a failed claim after a successful claim and after the send holds afterwards exactly its claimed but unsent slots released at its DOWN while a concurrent sender's slot stays live and admits and a release frees only the exact claim it names" do
+  test "a sender killed at each crash cut holds exactly its claimed but unsent slots released at its DOWN while a concurrent sender's slot stays live and admits and a release frees only the claim it names" do
     %{dispatcher: dispatcher, admission: admission} = fixture()
     :ok = :sys.suspend(dispatcher)
 
@@ -218,9 +218,8 @@ defmodule Loopex.TelemetryBoundaryTest do
     {:ok, live_slot, live_ticket} = sender_step(live, :claim)
     assert owner(admission, live_slot) == {live, live_ticket}
 
-    # Each cut is taken in turn, and the case is written as five calls rather
-    # than a comprehension because a comprehension inside a test with a name
-    # this long generates a function name past the atom limit.
+    # Each cut is taken in turn as its own call rather than a comprehension, so
+    # a failure names the cut that produced it rather than an iteration of one.
     state = %{admission: admission, dispatcher: dispatcher, slot: live_slot}
     crash_cut(state, :before_register, {live, live_ticket})
     crash_cut(state, :after_ticket, {live, live_ticket})
@@ -720,9 +719,8 @@ defmodule Loopex.TelemetryBoundaryTest do
 
   # Concept: wait for the dispatcher to have released what a DOWN freed.
   #
-  # Technical depth: this lives in its own function because the case that uses
-  # it carries one of the gate's locked witness names, and a closure written
-  # inside a test that long generates a function name past the atom limit.
+  # Technical depth: every cut waits for the same condition, so the wait is one
+  # named helper rather than a closure repeated at each of them.
   defp await_held(admission, expected, deadline \\ 2_000) do
     cond do
       Admission.held(admission) == expected ->

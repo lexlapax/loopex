@@ -177,7 +177,7 @@ binding.
 | `d9b8ac57a57ef39d50b581db78ac896fa12908ae9feae89b29b5d43564523d22` | `scripts/m4-gate-support.exs` |
 | `65d0de9dcd1218af542f00e32c2177d2612a2f1232f22db37b9942200c84cf66` | `scripts/m3-gate-support.exs` |
 | `c4d485ca3229441c678abe1e8733f90216e89e0dfb9e81786f58f525619aec29` | `scripts/check-closed-gates.sh` |
-| `1126f8ca6944b6c8a1e8d67ea97ecc8f6b46987c029bf4a15bfe977a51346212` | `scripts/m4-outcomes.exs` |
+| `d0e63814c760bec681161275c36666421a709e6cd321e7f7b67ef098c48ea45a` | `scripts/m4-outcomes.exs` |
 | `f04f17db1f5f26e558366cf8c9c73c439647ad3da6a2eee255f59123cc1ccc4e` | `scripts/check-m4-fixtures.exs` |
 | `b237fb3c5dbd4d903255317f4ab0c521f8458a3cd64c49266582221690b6435e` | `scripts/check_m4_fixtures_test.exs` |
 | `53d8219bdee584a3849a85a1102e405520d5dd0dfbe21d259434bc9edfc5fcc0` | `scripts/m1-exunit-runner.exs` |
@@ -664,3 +664,51 @@ waiver, closure or release.
 | Generation | Artifact | Rebound SHA-256 |
 | --- | --- | --- |
 | 6 | `scripts/m4-outcomes.exs` | `1126f8ca6944b6c8a1e8d67ea97ecc8f6b46987c029bf4a15bfe977a51346212` |
+
+<a id="amendment-7"></a>
+## Amendment 7 — Shorten an outcome 7 witness identity to a name a test can carry
+
+**Acceptance: OUTSTANDING.** Accepted M4 amends its gate under
+`amendment-transaction-v1`: this proposal `A` advances the generation and
+retains the Acceptance row and lifecycle state; its immediate child `R`
+rebinds Acceptance to exact `A` after explicit acceptance.
+
+One of outcome 7's locked witness identities is 300 bytes long, which ExUnit
+registers as the atom `test ` followed by that name: 305 bytes. Atoms are
+capped at 255, and a longer name is truncated in the middle and given a short
+hash to keep it unique. The name that file registers is therefore 254 bytes
+ending `stays live a... saTS`, and the selector runner compares locked
+identities to reported names exactly. The identity could never match a test, so
+the lane refused with `a locked test did not appear` while all ten of that
+file's cases passed. A locked name that no test can carry is not a strict lock;
+it is an unsatisfiable one, and it would have blocked this gate however the
+implementation went.
+
+The identity is shortened and the case is renamed to match. Its claim is
+unchanged: what a sender killed at each crash cut holds afterwards, that a
+concurrent sender's slot stays live and admits, and that a release frees only
+the claim it names. What leaves the name is the enumeration of the four cuts --
+after the ticket, after a failed claim, after a successful claim, after the send
+-- which the test body drives and asserts rather than describes. The other 66
+locked identities are unaffected; the next longest is 161 bytes, 166 as the
+atom for it.
+
+One string changes in `scripts/m4-outcomes.exs` and the same string in the case
+it names. No outcome, selector path, count, limit, client pin, evidence class or
+credential rule changes, no lifecycle state reopens, and neither envelope moves.
+
+Witness identities are locked at acceptance, which is why this is an amendment
+rather than an edit. The lesson is recorded here rather than left implicit: an
+identity is a name before it is a description, and a sentence long enough to
+enumerate everything a case drives is longer than a name is allowed to be. The
+limit belongs to the language, so the lock has to be written to fit it.
+
+Binding validation, bootstrap and every inherited gate that invokes them stop at
+this proposal only on the stale binding of this gate. After exact-SHA review and
+explicit acceptance of `A`, `R` rebinds the Acceptance row and adds one
+amendment-specific disposition. This proposal records no acceptance and grants no
+waiver, closure or release.
+
+| Generation | Artifact | Rebound SHA-256 |
+| --- | --- | --- |
+| 7 | `scripts/m4-outcomes.exs` | `d0e63814c760bec681161275c36666421a709e6cd321e7f7b67ef098c48ea45a` |
