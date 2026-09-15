@@ -281,6 +281,112 @@ defmodule Loopex.AppServer.ExternalWorkflowTest do
     assert File.exists?(store)
   end
 
+  @tag timeout: 600_000
+  test "a fresh extraction of the exact source candidate follows the operator guide to build and run the server and Node consumer with operator supplied inputs" do
+    node_executable = System.find_executable("node") || flunk("Node is unavailable")
+    elixir = System.find_executable("elixir") || flunk("Elixir is unavailable")
+    mix = System.find_executable("mix") || flunk("Mix is unavailable")
+
+    root = repository_root()
+    {committed, 0} = System.cmd("git", ["rev-parse", "HEAD"], cd: root)
+    committed = String.trim(committed)
+
+    {dirty, 0} = System.cmd("git", ["status", "--porcelain"], cd: root)
+
+    assert dirty == "",
+           "the tree is not the committed candidate; extracting it would prove nothing: #{dirty}"
+
+    workspace =
+      Path.join(System.tmp_dir!(), "loopex-extract-#{System.unique_integer([:positive])}")
+
+    File.mkdir_p!(workspace)
+    on_exit(fn -> File.rm_rf(workspace) end)
+
+    # The archive is staged from the exact committed revision, not from the
+    # working tree, so what is built is what a reader could fetch by that name.
+    archive = Path.join(workspace, "source.tar")
+
+    {_output, 0} =
+      System.cmd("git", ["archive", "--format=tar", "-o", archive, committed], cd: root)
+
+    archive_digest =
+      archive |> File.read!() |> then(&:crypto.hash(:sha256, &1)) |> Base.encode16(case: :lower)
+
+    assert String.match?(archive_digest, ~r/\A[0-9a-f]{64}\z/)
+
+    extracted = Path.join(workspace, "source")
+    File.mkdir_p!(extracted)
+    {_output, 0} = System.cmd("tar", ["-xf", archive, "-C", extracted])
+
+    # It is an extraction, not the checkout: no build, no dependencies, and no
+    # Git directory travel with it.
+    refute File.exists?(Path.join(extracted, "_build"))
+    refute File.exists?(Path.join(extracted, "deps"))
+    refute File.exists?(Path.join(extracted, ".git"))
+    assert File.exists?(Path.join(extracted, "mix.exs"))
+    assert File.exists?(Path.join([extracted, "clients", "node", "workflow.mjs"]))
+
+    # Dependencies are supplied rather than fetched, because a build that
+    # reached the network would be proving something about the network.
+    File.cp_r!(Path.join(root, "deps"), Path.join(extracted, "deps"))
+
+    {build_output, build_status} =
+      System.cmd(mix, ["compile"],
+        cd: extracted,
+        stderr_to_stdout: true,
+        env: [{"MIX_ENV", "dev"}]
+      )
+
+    assert build_status == 0, "the extracted source did not build: #{build_output}"
+
+    for application <- ~w(loopex_protocol loopex loopex_app_server loopex_store_local) do
+      assert File.dir?(Path.join([extracted, "_build", "dev", "lib", application, "ebin"])),
+             "#{application} is missing from the extracted build"
+    end
+
+    # And then it is run, from that tree, with inputs an operator supplies: the
+    # consumer the operator guide names, driving the server the same guide says
+    # to launch.
+    %{environment: environment} = durable_environment()
+
+    {output, status} =
+      System.cmd(
+        node_executable,
+        [
+          Path.join([extracted, "clients", "node", "workflow.mjs"]),
+          elixir,
+          Path.join([extracted, "_build", "dev", "lib", "loopex_protocol", "ebin"]),
+          Path.join([extracted, "_build", "dev", "lib", "loopex", "ebin"]),
+          Path.join([extracted, "_build", "dev", "lib", "loopex_app_server", "ebin"]),
+          Path.join([extracted, "_build", "dev", "lib", "loopex_store_local", "ebin"]),
+          Path.join([extracted, "_build", "dev", "lib", "telemetry", "ebin"]),
+          Path.join([extracted, "apps", "loopex", "test", "support", "m1_runtime_helper.exs"]),
+          Path.join([extracted, "apps", "loopex", "test", "support", "agent_loop_helper.exs"]),
+          Path.join([
+            extracted,
+            "apps",
+            "loopex_app_server",
+            "test",
+            "support",
+            "fixture_server.exs"
+          ])
+        ],
+        env: Keyword.drop(environment, ["LOOPEX_WORKFLOW_SCRIPT", "LOOPEX_WORKFLOW_STORE"]),
+        stderr_to_stdout: false
+      )
+
+    assert status == 0, "the extracted consumer failed: #{output}"
+
+    summary = decode(output)
+
+    refute Map.has_key?(summary, "failed"),
+           "the extracted consumer reported: #{summary["failed"]}"
+
+    assert summary["session_created"]
+    assert summary["event_kinds"] != [], "the extracted consumer observed nothing"
+    assert "run.finished" in summary["event_kinds"]
+  end
+
   test "stdin EOF performs orderly shutdown without cancellation and the pending interaction survives restart" do
     %{environment: environment, store: store} = durable_environment()
 

@@ -350,8 +350,12 @@ defmodule Loopex.AppServer.Fixture do
         # nothing away: a marker whose holder is still alive refuses an opener
         # however this option is set, so the one live writer rule stands and only
         # a marker nobody holds can be reclaimed.
-        {:ok, pid} = Loopex.Store.Local.start_link(path: path, recover_stale_writer: true)
-        [store: pid, store_module: Loopex.Store.Local]
+        # The Store module is a launch input rather than a compile-time link: this
+        # application does not depend on the edge one that provides it, and a host
+        # composing a different Store would name a different module here.
+        store_module = Module.concat(["Loopex", "Store", "Local"])
+        {:ok, pid} = store_module.start_link(path: path, recover_stale_writer: true)
+        [store: pid, store_module: store_module]
     end
   end
 end
