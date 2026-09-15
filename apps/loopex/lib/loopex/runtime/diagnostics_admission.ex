@@ -89,20 +89,76 @@ defmodule Loopex.Runtime.DiagnosticsAdmission do
   left to count into, and the sender's next handle comes from the live runtime.
   """
   @spec admit(t(), term()) :: :ok | :dropped | :unavailable
-  def admit(%{slots: slots, counters: counters, ceiling: ceiling, dispatcher: dispatcher}, item) do
-    ensure_monitor(dispatcher)
-    ticket = :atomics.add_get(counters, 1, 1)
-    slot = rem(ticket, ceiling)
+  def admit(handle, item) do
+    register(handle)
+    ticket = take_ticket(handle)
 
-    if :ets.insert_new(slots, {slot, self(), ticket}) do
-      send(dispatcher, {:loopex_diagnostic_admission, self(), slot, ticket, item})
-      :ok
-    else
-      :atomics.add(counters, 2, 1)
-      :dropped
+    case claim(handle, ticket) do
+      {:ok, slot} ->
+        deliver(handle, slot, ticket, item)
+        :ok
+
+      :taken ->
+        count_drop(handle)
+        :dropped
     end
   rescue
     ArgumentError -> :unavailable
+  end
+
+  @doc """
+  ## Concept
+
+  Registers this sender for monitoring by the dispatcher, once.
+  """
+  @spec register(t()) :: :ok
+  def register(%{dispatcher: dispatcher}), do: ensure_monitor(dispatcher)
+
+  @doc """
+  ## Concept
+
+  Takes the next ticket. A ticket alone reserves nothing.
+
+  ## Technical depth
+
+  `:atomics.add_get/3` is one atomic step, so two senders never hold the same
+  ticket and a sender killed here holds nothing at all.
+  """
+  @spec take_ticket(t()) :: integer()
+  def take_ticket(%{counters: counters}), do: :atomics.add_get(counters, 1, 1)
+
+  @doc """
+  ## Concept
+
+  Claims the slot a ticket maps to, or reports that it is still held.
+
+  ## Technical depth
+
+  The claim is one `:ets.insert_new/2` recording this process and its ticket as
+  the slot's owner. There is nothing to roll back: it either records the owner
+  or changes nothing, so a sender killed immediately afterwards holds exactly
+  the slot its `DOWN` releases.
+  """
+  @spec claim(t(), integer()) :: {:ok, non_neg_integer()} | :taken
+  def claim(%{slots: slots, ceiling: ceiling}, ticket) do
+    slot = rem(ticket, ceiling)
+    if :ets.insert_new(slots, {slot, self(), ticket}), do: {:ok, slot}, else: :taken
+  end
+
+  @doc """
+  ## Concept
+
+  Sends the claimed item to the dispatcher.
+
+  ## Technical depth
+
+  Only a sender holding the slot sends, and it sends immediately after the
+  claim, so the dispatcher's backlog never exceeds the number of slots.
+  """
+  @spec deliver(t(), non_neg_integer(), integer(), term()) :: :ok
+  def deliver(%{dispatcher: dispatcher}, slot, ticket, item) do
+    send(dispatcher, {:loopex_diagnostic_admission, self(), slot, ticket, item})
+    :ok
   end
 
   @doc """

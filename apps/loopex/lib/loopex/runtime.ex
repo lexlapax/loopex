@@ -23,6 +23,7 @@ defmodule Loopex.Runtime do
 
   alias Loopex.Attachment
   alias Loopex.Executor
+  alias Loopex.Runtime.DiagnosticsAdmission
   alias Loopex.Runtime.SessionCoordinator
   alias Loopex.Runtime.Supervisor, as: RuntimeSupervisor
   alias Loopex.Store
@@ -538,7 +539,9 @@ defmodule Loopex.Runtime do
              grant_decision: nil,
              fault_to: nil,
              cleanup_grace_ms: nil,
-             context_token_budget: nil
+             context_token_budget: nil,
+             trace_module: :trace,
+             diagnostics_ceiling: nil
            ),
          {:ok, runtime_id} <- fetch_identifier(validated, :runtime_id),
          {:ok, context_token_budget} <-
@@ -561,6 +564,9 @@ defmodule Loopex.Runtime do
          {:ok, grant_decision} <- validate_grant_decision(validated[:grant_decision]),
          {:ok, fault_to} <- validate_sink(validated[:fault_to]),
          {:ok, cleanup_grace_ms} <- validate_cleanup_grace(validated[:cleanup_grace_ms]),
+         {:ok, trace_module} <- validate_trace_module(validated[:trace_module]),
+         {:ok, diagnostics_ceiling} <-
+           validate_diagnostics_ceiling(validated[:diagnostics_ceiling]),
          :ok <-
            validate_loop_configuration(
              model,
@@ -590,7 +596,9 @@ defmodule Loopex.Runtime do
          grant_decision: grant_decision,
          fault_to: fault_to,
          cleanup_grace_ms: cleanup_grace_ms,
-         context_token_budget: context_token_budget
+         context_token_budget: context_token_budget,
+         trace_module: trace_module,
+         diagnostics_ceiling: diagnostics_ceiling
        ]}
     else
       {:error, :invalid_context_token_budget} -> {:error, :invalid_context_token_budget}
@@ -786,6 +794,34 @@ defmodule Loopex.Runtime do
        do: {:ok, value}
 
   defp validate_cleanup_grace(_value), do: {:error, :invalid_cleanup_grace_ms}
+
+  # Concept: which module must supply OTP trace sessions for this runtime.
+  #
+  # Technical depth: production names `:trace`, and naming another module is how
+  # a caller runs against the capability an older release would have, so the
+  # unavailable path is exercised as itself rather than simulated.
+  defp validate_trace_module(module) when is_atom(module) and not is_nil(module),
+    do: {:ok, module}
+
+  defp validate_trace_module(_module), do: {:error, :invalid_trace_module}
+
+  # Concept: how many diagnostics this runtime admits before senders drop.
+  #
+  # Technical depth: absent means the contract's own ceiling. A host may name a
+  # lower one; a larger one is refused, because the bound on the dispatcher's
+  # backlog is what the admission path exists to guarantee.
+  defp validate_diagnostics_ceiling(nil), do: {:ok, DiagnosticsAdmission.default_ceiling()}
+
+  defp validate_diagnostics_ceiling(ceiling)
+       when is_integer(ceiling) and ceiling > 0 do
+    if ceiling <= DiagnosticsAdmission.default_ceiling() do
+      {:ok, ceiling}
+    else
+      {:error, :invalid_diagnostics_ceiling}
+    end
+  end
+
+  defp validate_diagnostics_ceiling(_ceiling), do: {:error, :invalid_diagnostics_ceiling}
 
   defp validate_sink(nil), do: {:ok, nil}
   defp validate_sink(pid) when is_pid(pid), do: {:ok, pid}

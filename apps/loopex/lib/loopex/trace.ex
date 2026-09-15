@@ -72,8 +72,22 @@ defmodule Loopex.Trace do
   changes nothing.
   """
   @spec available?() :: boolean()
-  def available? do
-    Code.ensure_loaded?(:trace) and function_exported?(:trace, :session_create, 3)
+  def available?, do: available?(:trace)
+
+  @doc """
+  ## Concept
+
+  Whether the named module provides OTP trace sessions.
+
+  ## Technical depth
+
+  The module is a parameter so a runtime can be started against the module an
+  older release would have, and the unavailable path is then the real path
+  rather than a simulated one. Production always names `:trace`.
+  """
+  @spec available?(module()) :: boolean()
+  def available?(module) when is_atom(module) do
+    Code.ensure_loaded?(module) and function_exported?(module, :session_create, 3)
   end
 
   @impl GenServer
@@ -82,6 +96,7 @@ defmodule Loopex.Trace do
      %{
        root: Keyword.fetch!(options, :root),
        token: Keyword.fetch!(options, :token),
+       trace_module: Keyword.get(options, :trace_module, :trace),
        session: nil,
        config: nil,
        admission: nil,
@@ -95,7 +110,7 @@ defmodule Loopex.Trace do
   @impl GenServer
   def handle_call({:start_session, token, config}, _from, state) do
     with :ok <- authorize(token, state),
-         :ok <- ensure_available(),
+         :ok <- ensure_available(state),
          :ok <- ensure_idle(state),
          {:ok, validated} <- Config.validate(config),
          {:ok, session} <- create_session(validated, state) do
@@ -294,8 +309,8 @@ defmodule Loopex.Trace do
   defp authorize(token, %{token: token}), do: :ok
   defp authorize(_token, _state), do: {:error, :invalid_runtime_reference}
 
-  defp ensure_available do
-    if available?(), do: :ok, else: {:error, :trace_sessions_unavailable}
+  defp ensure_available(state) do
+    if available?(state.trace_module), do: :ok, else: {:error, :trace_sessions_unavailable}
   end
 
   defp ensure_idle(%{session: nil}), do: :ok
