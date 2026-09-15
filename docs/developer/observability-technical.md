@@ -12,7 +12,7 @@ enforces each, and the tests that hold them.
 <a id="technical-observability-inventory"></a>
 ## The Emission Inventory
 
-Accepted [ADR 0030](../adr/0030-observability-tracing-and-telemetry.md#technical-depth)
+Accepted [ADR 0030](../adr/0030-observability-tracing-and-telemetry-technical.md#technical-depth)
 fixes this set exactly. Every name emits `start`, `stop` and `exception`. Adding
 a name, removing one, or emitting a second span from one boundary is an ADR
 amendment, not an implementation choice.
