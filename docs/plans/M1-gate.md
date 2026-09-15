@@ -148,12 +148,12 @@ and can print neither `CAPTURE` nor `M1 gate GREEN`.
 
 | SHA-256 | Path |
 | --- | --- |
-| `9d77dc2b87bd6a713d157baf91d4feff765e33e04da54b7680c73fd2f8bd9eb1` | `scripts/check-m1-gate.sh` |
+| `f092099d771e003218af3ec57a255173a1954f4157f2ed8ca3520a6a377b3e62` | `scripts/check-m1-gate.sh` |
 | `4bba03d218eee656991444a3c22c8753bfef1ab86f688036a4440048752f48bd` | `scripts/m1-gate-launcher.escript` |
 | `53d8219bdee584a3849a85a1102e405520d5dd0dfbe21d259434bc9edfc5fcc0` | `scripts/m1-exunit-runner.exs` |
 | `572d9fac0b4be1fb792db8f5f8ff3b760e588c9e35f4cb1850c03f73c2f1f661` | `scripts/m1-evidence-verifier.exs` |
 | `2c62019cde03e118a2b5ff23ba24a5ee50d8f118172ae4d71ce6bed2f7be1011` | `apps/loopex/lib/mix/tasks/loopex.deps_budget.ex` |
-| `24494a97d4c69b3646aeb6d6495bbb92559fc7b8349b10d3ba7be4f4a747cb1b` | `apps/loopex/test/m1_gate_evidence_test.exs` |
+| `52cbf574673acc43c5eb5dbf2c8676869e76ea964e5ba980b2725fc522a6efeb` | `apps/loopex/test/m1_gate_evidence_test.exs` |
 | `c36253cff3d74ddff1b330695edbc4bde0a4565c1412c67c1293b2fb7ca6129b` | `apps/loopex/test/m1_exunit_runner_test.exs` |
 | `bc4d5544229c3b15414a8ad9ac8ce8e5daf2e29d35a98ab868af1741fd9b44d4` | `apps/loopex/test/deps_budget_test.exs` |
 | `fea095ecec784a4440b872ad5f53a8da2cb4e13e43b6f05add5cfd75bb352879` | `.tool-versions` |
@@ -1325,3 +1325,53 @@ proposal records no acceptance and grants no waiver, closure or release.
 | 11 | `scripts/m1-evidence-verifier.exs` | `572d9fac0b4be1fb792db8f5f8ff3b760e588c9e35f4cb1850c03f73c2f1f661` |
 | 11 | `apps/loopex/test/m1_gate_evidence_test.exs` | `24494a97d4c69b3646aeb6d6495bbb92559fc7b8349b10d3ba7be4f4a747cb1b` |
 | 11 | `scripts/check-m1-gate.sh` | `9d77dc2b87bd6a713d157baf91d4feff765e33e04da54b7680c73fd2f8bd9eb1` |
+
+<a id="amendment-12"></a>
+## Amendment 12 — Let the selected toolchain win the isolated path
+
+**Acceptance: OUTSTANDING.** Closed M1 adds gate generation 12 under
+`amendment-transaction-v2`. Its historical Acceptance, Closure and prior
+generation rows remain unchanged. The new row carries this gate's digest and
+leaves authority, evidence and candidate unset until exact-proposal acceptance.
+
+Taking the generation 11 re-capture exposed a defect in this runner's own
+environment boundary. It builds the isolated toolchain path by appending the
+four system directories first, so that ordinary tools keep their platform
+identity, and the directories it discovered for `mix`, `elixir` and `erl`
+after them. On a host that also carries those three entrypoints in a system
+directory, the system copy therefore decides the running pair, and the bound
+evidence verifier refuses the lane as "not one exact locked M1 toolchain
+pair" however the operator selected the locked pair. The Linux current lane
+could not be captured at all, and the failure named the pair rather than the
+path that chose it.
+
+This proposal changes only the order, and only where it is wrong. When no
+system directory carries `elixir`, `mix` or `erl`, the constructed path is
+byte-identical to the one this gate has always built, so the Darwin lanes
+keep exactly their established environment. When one does carry them, the
+three discovered directories are placed ahead of the system directories and
+nothing else moves; the system directories stay on the path, so ordinary
+tools keep their platform identity either way. The running pair remains
+proved by the bound evidence verifier, which this ordering feeds rather than
+replaces. The bound corpus gains one case that reads the environment the
+fixture role reports and asserts the established order on a host with no
+shadow and the reordered one on a host with a shadow, with every selected and
+system directory reachable in both. Every selector, minimum, name, exclusion,
+real-provider path, credential rule and exit predicate keeps its meaning. No
+M1 outcome or scope changes and no lifecycle state reopens.
+
+Binding validation, bootstrap and every inherited gate that invokes them are
+red at this proposal for its pending generation row, exactly as at any v2
+proposal. Binding-independent checks are proved directly: the runner's syntax
+passes, and the new corpus case passes on both hosts, exercising the
+unchanged branch on Darwin and the reordered branch on Linux.
+
+Only explicit maintainer acceptance of the actual A revision authorizes R.
+Its immediate child completes generation 12 with exact A and adds one fresh
+acceptance disposition; R changes no bound artifact or gate byte. This
+proposal records no acceptance and grants no waiver, closure or release.
+
+| Generation | Artifact | Rebound SHA-256 |
+| --- | --- | --- |
+| 12 | `scripts/check-m1-gate.sh` | `f092099d771e003218af3ec57a255173a1954f4157f2ed8ca3520a6a377b3e62` |
+| 12 | `apps/loopex/test/m1_gate_evidence_test.exs` | `52cbf574673acc43c5eb5dbf2c8676869e76ea964e5ba980b2725fc522a6efeb` |

@@ -503,13 +503,48 @@ outer_launch_captured() {
       append_safe_tool_path "$loopex_m1_absence_root"
       ;;
   esac
-  append_safe_tool_path /usr/bin
-  append_safe_tool_path /bin
-  append_safe_tool_path /usr/sbin
-  append_safe_tool_path /sbin
-  append_safe_tool_path "$loopex_m1_mix_directory"
-  append_safe_tool_path "$loopex_m1_elixir_directory"
-  append_safe_tool_path "$loopex_m1_erl_directory"
+  # Concept: the toolchain the operator selected is the toolchain the gate
+  # runs. A system directory that also carries `elixir`, `mix` or `erl` would
+  # otherwise decide the running pair, because system directories are ordered
+  # first so that ordinary tools keep their platform identity.
+  #
+  # Technical depth: the reorder is conditional and narrow. Where no system
+  # directory shadows a toolchain entrypoint the order is unchanged, so a host
+  # whose toolchain lives outside them keeps exactly the environment it had.
+  # Where one does shadow, the three discovered directories move ahead of the
+  # system directories and nothing else moves; the resolution assertion below
+  # then refuses any remaining mismatch rather than capturing the wrong pair.
+  loopex_m1_toolchain_shadowed=0
+  for loopex_m1_system_directory in /usr/bin /bin /usr/sbin /sbin; do
+    for loopex_m1_toolchain_tool in elixir mix erl; do
+      if [ -x "$loopex_m1_system_directory/$loopex_m1_toolchain_tool" ] &&
+        [ ! -d "$loopex_m1_system_directory/$loopex_m1_toolchain_tool" ]; then
+        loopex_m1_toolchain_shadowed=1
+      fi
+    done
+  done
+
+  loopex_m1_safe_path_entries=()
+  if [ "$loopex_m1_toolchain_shadowed" -eq 1 ]; then
+    loopex_m1_safe_path_entries+=(
+      "$loopex_m1_mix_directory"
+      "$loopex_m1_elixir_directory"
+      "$loopex_m1_erl_directory"
+    )
+  fi
+  loopex_m1_safe_path_entries+=(/usr/bin /bin /usr/sbin /sbin)
+  loopex_m1_safe_path_entries+=(
+    "$loopex_m1_mix_directory"
+    "$loopex_m1_elixir_directory"
+    "$loopex_m1_erl_directory"
+  )
+  for loopex_m1_safe_path_entry in "${loopex_m1_safe_path_entries[@]}"; do
+    append_safe_tool_path "$loopex_m1_safe_path_entry"
+  done
+
+  # The running pair itself is still proved downstream by the bound evidence
+  # verifier, which refuses any VM that is not one exact locked pair. This
+  # ordering decides which toolchain that check sees; it does not replace it.
 
   loopex_m1_launcher="$PWD/scripts/m1-gate-launcher.escript"
   [ -f "$loopex_m1_launcher" ] && [ ! -L "$loopex_m1_launcher" ] \
@@ -1329,7 +1364,7 @@ require_bound_artifact apps/loopex/lib/mix/tasks/loopex.deps_budget.ex \
   2c62019cde03e118a2b5ff23ba24a5ee50d8f118172ae4d71ce6bed2f7be1011 \
   "bound dependency-direction reader"
 require_bound_artifact apps/loopex/test/m1_gate_evidence_test.exs \
-  24494a97d4c69b3646aeb6d6495bbb92559fc7b8349b10d3ba7be4f4a747cb1b \
+  52cbf574673acc43c5eb5dbf2c8676869e76ea964e5ba980b2725fc522a6efeb \
   "bound M1 mechanics corpus"
 require_bound_artifact apps/loopex/test/m1_exunit_runner_test.exs \
   c36253cff3d74ddff1b330695edbc4bde0a4565c1412c67c1293b2fb7ca6129b \

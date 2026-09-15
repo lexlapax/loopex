@@ -913,6 +913,66 @@ defmodule Loopex.M1GateEvidenceTest do
     assert output =~ "more than one first closure completion"
   end
 
+  test "the isolated toolchain path resolves the selected toolchain and not a system copy" do
+    # Concept: whichever directory the operator's own path used for the
+    # toolchain is the directory the gate must run, on every platform.
+    #
+    # Technical depth: the runner orders system directories first so ordinary
+    # tools keep their platform identity, which on a host that also ships
+    # `elixir`, `mix` or `erl` there silently selected that copy instead of the
+    # locked pair. The fixture role prints the environment the gate would use,
+    # so the resolved directory is observed rather than asserted from source.
+    system_directories = ["/usr/bin", "/bin", "/usr/sbin", "/sbin"]
+    tools = ["mix", "elixir", "erl"]
+
+    carries? = fn directory, tool ->
+      match?({:ok, %File.Stat{type: :regular}}, File.stat(Path.join(directory, tool)))
+    end
+
+    incoming = System.get_env("PATH") |> String.split(":", trim: true)
+
+    selected =
+      Enum.map(tools, fn tool ->
+        Enum.find(incoming, &(String.starts_with?(&1, "/") and carries?.(&1, tool)))
+      end)
+
+    shadowed? =
+      Enum.any?(system_directories, fn directory ->
+        Enum.any?(tools, &carries?.(directory, &1))
+      end)
+
+    assert {output, 0} = run_gate_without_input(["--environment-fixture"], [])
+    assert output =~ "M1 environment preflight OK"
+
+    [path] =
+      output
+      |> String.split("\n")
+      |> Enum.filter(&String.starts_with?(&1, "PATH="))
+      |> Enum.map(&String.replace_prefix(&1, "PATH=", ""))
+
+    entries = String.split(path, ":", trim: true)
+    leading = Enum.take(entries, length(Enum.uniq(selected)))
+
+    if shadowed? do
+      assert leading == Enum.uniq(selected),
+             "a system directory carries the toolchain, so the selected directories must lead: #{path}"
+    else
+      assert Enum.take(entries, 2) == ["/usr/bin", "/bin"],
+             "no system directory carries the toolchain, so the established order must be unchanged: #{path}"
+    end
+
+    # The system directories stay on the path either way, so ordinary tools
+    # keep their platform identity whichever branch the order took.
+    for directory <- system_directories do
+      assert directory in entries
+    end
+
+    # Whichever branch ran, every selected toolchain directory is reachable.
+    for directory <- Enum.uniq(selected), directory != nil do
+      assert directory in entries
+    end
+  end
+
   test "M1 evidence verifier admits one post-closure re-capture only after the locked pairs change" do
     args = fn root ->
       [
