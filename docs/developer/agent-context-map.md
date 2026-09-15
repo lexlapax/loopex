@@ -4169,3 +4169,77 @@ disposition and the candidate it binds, which is exact
 Closed M1 stay byte-immutable, no earlier generation stops being enforced for the
 revisions it governed, and this adds no scope, changes no outcome and reopens no
 lifecycle state. It grants no closure, integration, tag or release.
+
+<a id="disposition-m4-plan-amendment-node-consumer-2026-09-15"></a>
+### M4 plan amendment acceptance, the Node consumer — 2026-09-15
+
+Accepted M4's plan pair described the outcome 5 consumer as a TypeScript one.
+Building it raised a question the pair could not answer: a TypeScript client
+needs either a compiler and a lockfile, or a runtime new enough to strip types,
+and both add a second package manager or a version floor to a repository that
+carries neither. The implementer put three options to the maintainer with their
+costs, and the maintainer answered **"Plain Node, no build step"**, together
+with **"A new top-level clients directory"** and **"Build everything else,
+leave the demo for you"**. Asked afterwards how the record should read, the
+maintainer answered **"Amend the outcome text to say Node"**.
+
+The implementer first proposed an amendment to the Concept envelope alone. The
+repository status check refused it: the plan pair is one authority unit, and an
+amendment that moves one envelope without the other would leave the two
+describing different programs. That proposal was discarded unpushed and rebuilt
+to move both, which is half of what the checker admits; the other half, that
+the gate must declare the amendment, went unnoticed.
+
+That second proposal was accepted at
+`9c54456de24a1be6bb909ad57eb0a80f84c088f3` and was itself invalid, for a reason
+neither the implementer nor the maintainer saw at the time. It moved both
+envelopes while leaving the gate untouched, and an amendment is declared in the
+gate: the generation never advanced, so the repository status check reads such a
+revision as a silent envelope edit and refuses it. Nothing had run the check
+between that acceptance and the next day's, so the refusal surfaced only later,
+by which time the revision and its rebind were pushed. The same walk showed two
+further faults in that lineage: the bound candidate was left naming a revision
+no ref reached, so a fresh clone could not resolve it at all, and the gate's own
+text still named the consumer the pair had stopped naming.
+
+The implementer put the repair to the maintainer on 2026-09-15 with three
+options — rewrite the affected revisions, repair additively on top, or override
+the rule that caught it — and the costs of each. Additive repair cannot work,
+because history validation walks every reachable revision and the invalid ones
+stay reachable. Overriding removes the protection that found the fault. The
+maintainer answered **"Rewrite, fix everything"** and then **"Agreed with
+rewrite. Go."**
+
+The rewritten proposal is `62ad8188a658fb739d2144ac1a982beb44953708`. It carries
+the same seven envelope lines, whose Concept digest is byte-identical to the one
+the discarded lineage recorded, and adds what that lineage lacked: an anchored
+`## Amendment 3` section that advances the gate to generation three, the same
+rename carried through the gate's own readiness step, opening-probe scope
+sentence, real-workflow lane, fresh-source paragraph, client pin sentence,
+outcome 5 and outcome 6 obligations and operator documentation row, and the
+repair of a botched replacement in outcome 5's evidence row that had left the
+word "cript" standing where the old name had been.
+
+Which languages check themselves against the conformance vectors is a different
+commitment from which language the outcome 5 consumer is written in, and
+narrowing it was not asked for here. Evidence presented: the exact diff, the
+four faults named above with the status output that found the first, and the
+client at `clients/node` with
+`apps/loopex_app_server/test/external_workflow_test.exs` asserting what it
+observed over the wire. The maintainer answered **"accept ce23031 proposal A"**.
+
+That revision no longer exists. A third fault came to light while this one was
+being repaired: the closed M1 gate binds the dependency oracle, and M4 Phase B
+rewrote it without M1's own transaction, leaving every revision from that work to
+the branch tip naming a digest no authority accepted. Repairing it meant
+restructuring the two Phase B revisions beneath this proposal, which moved every
+later identity. The content did not move: this proposal's Concept, Technical depth
+and gate digests are byte-identical to the ones accepted at the discarded
+identity. Presented with that, the maintainer answered **"62ad818 accepted"**.
+
+This transcribes that answer as acceptance under `amendment-transaction-v1`. The
+rebind binds the Acceptance row to exact
+`62ad8188a658fb739d2144ac1a982beb44953708` with both amended envelope digests
+and the amended gate digest. It changes no lifecycle state, outcome count, gate
+selector, witness, limit, client pin, bound artifact or evidence class, and
+grants no closure, integration, tag or release.
