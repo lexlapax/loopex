@@ -452,7 +452,7 @@ defmodule Loopex.Runtime.SessionState do
       when is_binary(session_id) and
              (is_nil(requested_anchor) or
                 (is_integer(requested_anchor) and requested_anchor >= 0)) do
-    anchor_projection = if requested_anchor == 0, do: {:set, nil}, else: :pending
+    anchor_projection = if requested_anchor == 0, do: {:set, {nil, nil}}, else: :pending
 
     {:ok,
      %{
@@ -460,6 +460,7 @@ defmodule Loopex.Runtime.SessionState do
        requested_anchor: requested_anchor,
        tail: 0,
        active_run: nil,
+       open_interaction: nil,
        anchor_projection: anchor_projection
      }}
   end
@@ -508,14 +509,23 @@ defmodule Loopex.Runtime.SessionState do
         requested_anchor: requested_anchor,
         tail: tail,
         active_run: active_run,
+        open_interaction: open_interaction,
         anchor_projection: anchor_projection
       }) do
     case {requested_anchor, anchor_projection} do
       {nil, _projection} ->
-        {:ok, %{tail: tail, snapshot: public_snapshot(session_id, tail, active_run)}}
+        {:ok,
+         %{
+           tail: tail,
+           snapshot: public_snapshot(session_id, tail, active_run, open_interaction)
+         }}
 
-      {anchor, {:set, anchor_active_run}} when anchor <= tail ->
-        {:ok, %{tail: tail, snapshot: public_snapshot(session_id, anchor, anchor_active_run)}}
+      {anchor, {:set, {anchor_active_run, anchor_interaction}}} when anchor <= tail ->
+        {:ok,
+         %{
+           tail: tail,
+           snapshot: public_snapshot(session_id, anchor, anchor_active_run, anchor_interaction)
+         }}
 
       {_anchor, _projection} ->
         {:error, :cursor_expired}
@@ -531,23 +541,27 @@ defmodule Loopex.Runtime.SessionState do
   # request can tell an admitted, unstaged run from a started one. The two active
   # members are nil together or non-nil together; no phase is ever inferred from
   # the identity alone.
-  defp public_snapshot(session_id, event_sequence, nil) do
+  defp public_snapshot(session_id, event_sequence, active_run, open_interaction \\ nil)
+
+  defp public_snapshot(session_id, event_sequence, nil, open_interaction) do
     %{
       snapshot_revision: 2,
       session_id: session_id,
       event_sequence: event_sequence,
       active_run_id: nil,
-      active_run_phase: nil
+      active_run_phase: nil,
+      open_interaction: open_interaction
     }
   end
 
-  defp public_snapshot(session_id, event_sequence, {run_id, phase}) do
+  defp public_snapshot(session_id, event_sequence, {run_id, phase}, open_interaction) do
     %{
       snapshot_revision: 2,
       session_id: session_id,
       event_sequence: event_sequence,
       active_run_id: run_id,
-      active_run_phase: phase
+      active_run_phase: phase,
+      open_interaction: open_interaction
     }
   end
 
@@ -4155,15 +4169,56 @@ defmodule Loopex.Runtime.SessionState do
     expected = scan.tail + 1
 
     with {:ok, active_run} <- advance_public_projection(scan.active_run, event, expected) do
+      open_interaction = advance_open_interaction(scan.open_interaction, event)
+
       anchor_projection =
         if scan.requested_anchor == expected,
-          do: {:set, active_run},
+          do: {:set, {active_run, open_interaction}},
           else: scan.anchor_projection
 
       {:ok,
-       %{scan | tail: expected, active_run: active_run, anchor_projection: anchor_projection}}
+       %{
+         scan
+         | tail: expected,
+           active_run: active_run,
+           open_interaction: open_interaction,
+           anchor_projection: anchor_projection
+       }}
     end
   end
+
+  # Concept: the question that is open at this point in history, if any.
+  #
+  # Technical depth: accepted ADR 0023 gives an attachment a `open_interaction`
+  # view at the same cursor as its snapshot, so two clients attaching at one
+  # cursor cannot disagree about whether a question was waiting there. It is
+  # projected from the same public events a client replays rather than read from
+  # live coordinator state, because live state answers a different question: what
+  # is open now, not what was open then. A resolution of any kind closes it, and
+  # the kinds are distinct so a reader can tell an expiry from an abort.
+  defp advance_open_interaction(_open, %{kind: "interaction.requested"} = event) do
+    %{
+      "interaction_id" => Map.get(event, "interaction_id"),
+      "run_id" => Map.get(event, "run_id"),
+      "turn" => Map.get(event, "turn"),
+      "tool_call_id" => Map.get(event, "tool_call_id"),
+      "prompt" => Map.get(event, "prompt"),
+      "choices" => Map.get(event, "choices"),
+      "expires_at" => Map.get(event, "expires_at"),
+      "status" => "pending"
+    }
+  end
+
+  defp advance_open_interaction(%{"interaction_id" => open} = current, %{kind: kind} = event)
+       when is_binary(kind) do
+    closes? =
+      String.starts_with?(kind, "interaction.") and kind != "interaction.requested" and
+        Map.get(event, "interaction_id") == open
+
+    if closes?, do: nil, else: current
+  end
+
+  defp advance_open_interaction(open, _event), do: open
 
   # Concept: a run becomes publicly visible when its prompt is admitted, and
   # publicly started only when its first request is staged.

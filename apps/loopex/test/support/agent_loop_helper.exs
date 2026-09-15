@@ -343,13 +343,22 @@ defmodule Loopex.AgentLoopFixture do
 
     # A case about recovery starts a second fixture over the first one's Store,
     # which is what makes the successor a successor rather than a new session.
+    #
+    # A case about recovery across operating-system processes needs a Store that
+    # outlives one, so it names the module as well as the handle. The in-memory
+    # default stays the default, because most cases want a Store that disappears
+    # with them.
     {store_pid, store} =
-      case Keyword.get(options, :store) do
-        nil ->
+      case {Keyword.get(options, :store), Keyword.get(options, :store_module)} do
+        {nil, _module} ->
           M1RuntimeTestStore.start_store(label: "agent-loop")
 
-        existing ->
+        {existing, nil} ->
           {:ok, store} = Loopex.Store.new(M1RuntimeTestStore, existing)
+          {existing, store}
+
+        {existing, module} ->
+          {:ok, store} = Loopex.Store.new(module, existing)
           {existing, store}
       end
 

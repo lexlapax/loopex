@@ -241,8 +241,18 @@ defmodule Loopex.AppServer.Fixture do
         _plain -> [script: [%{text: "the task is done", calls: []}]]
       end
 
-    fixture = Loopex.AgentLoopFixture.start(options)
+    store = durable_store()
+    fixture = Loopex.AgentLoopFixture.start(options ++ store)
     Loopex.AppServer.Stdio.serve(fixture.runtime)
+
+    # Ending input ends the process, and a virtual machine that simply halts runs
+    # no `terminate/2`. A durable Store would then keep its writer marker and
+    # refuse the next process, so the shutdown is orderly here rather than
+    # abrupt: the Store is stopped, which is what gives the marker back.
+    case Keyword.get(store, :store) do
+      nil -> :ok
+      pid -> GenServer.stop(pid, :normal, 5_000)
+    end
   end
 
   # Concept: a run that calls a tool and keeps what it produced.
@@ -317,5 +327,25 @@ defmodule Loopex.AppServer.Fixture do
         }
       ]
     }
+  end
+
+  # Concept: a Store that outlives the process serving it, when the launching
+  # host asks for one.
+  #
+  # Technical depth: outcome 5 restarts a server over one session, which only
+  # means anything if the session is still there afterwards. The path comes from
+  # the environment for the same reason every other launch input does: a frame
+  # cannot choose where a session lives. Without it the fixture keeps its
+  # in-memory Store, which is what a case that only drives one process wants.
+  defp durable_store do
+    case System.get_env("LOOPEX_WORKFLOW_STORE") do
+      nil ->
+        []
+
+      path ->
+        File.mkdir_p!(Path.dirname(path))
+        {:ok, pid} = Loopex.Store.Local.start_link(path: path)
+        [store: pid, store_module: Loopex.Store.Local]
+    end
   end
 end
