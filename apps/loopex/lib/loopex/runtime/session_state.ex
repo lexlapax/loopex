@@ -3764,8 +3764,36 @@ defmodule Loopex.Runtime.SessionState do
 
   defp expected_public_history?(events, expected_events) do
     Enum.all?(events, &is_map/1) and
-      Enum.map(events, &Map.delete(&1, :event_sequence)) == expected_events
+      public_history_matches?(
+        Enum.map(events, &Map.delete(&1, :event_sequence)),
+        expected_events
+      )
   end
+
+  # Concept: retained public history must be exactly what replaying the private
+  # records expects, except that a session recorded before the settled fact
+  # existed stays readable.
+  #
+  # Technical depth: `session.settled` is an M4 repair of an accepted ADR 0011
+  # fact core never published, so every session written before it ends its runs
+  # with `run.finished` and nothing after. Requiring it here would make every
+  # such session unreadable by this reducer, which is a migration no durable
+  # history can perform: the rows are immutable and the fact was never written.
+  # Only that one kind may be absent, and only where replay expects it; a
+  # retained event the replay does not expect, a missing event of any other
+  # kind, or any reordering still fails as it always did. The cost is that a
+  # settled fact deleted from a recent history reads like an older session,
+  # which is a fact derivable from the terminal beside it rather than durable
+  # truth that would be falsified by its absence.
+  defp public_history_matches?([], []), do: true
+
+  defp public_history_matches?([event | retained], [event | expected]),
+    do: public_history_matches?(retained, expected)
+
+  defp public_history_matches?(retained, [%{kind: "session.settled"} | expected]),
+    do: public_history_matches?(retained, expected)
+
+  defp public_history_matches?(_retained, _expected), do: false
 
   defp prompt_events(session_id, command_id, run_id, content) do
     [

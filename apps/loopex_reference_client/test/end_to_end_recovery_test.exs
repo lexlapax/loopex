@@ -72,8 +72,13 @@ defmodule Loopex.ReferenceClient.EndToEndRecoveryTest do
              "effect-unknown-without-receipt"
 
     events = Fixture.events(fixture, session_id)
-    assert List.last(events).kind == "run.finished"
-    assert List.last(events)["outcome"] == "outcome_unknown"
+    # The recovered terminal ends the run and, with nothing queued behind it,
+    # settles the session in the same transaction, so the run's own ending is
+    # the last event before that settled fact.
+    assert List.last(events).kind == "session.settled"
+    terminal = Enum.at(events, -2)
+    assert terminal.kind == "run.finished"
+    assert terminal["outcome"] == "outcome_unknown"
   end
 
   test "every acknowledged fact survives the restart" do

@@ -23,6 +23,7 @@ defmodule Loopex.SessionSettledEventTest do
   use ExUnit.Case, async: false
 
   alias Loopex.AgentLoopFixture, as: Fixture
+  alias Loopex.Runtime.SessionState
 
   test "a no follow up terminal atomically emits one run finished then one distinct session settled and replay or reattach never duplicates either" do
     fixture = start(script: [%{text: "done", calls: []}])
@@ -111,6 +112,45 @@ defmodule Loopex.SessionSettledEventTest do
       )
 
     assert Enum.all?(between, &(&1.kind != "session.settled"))
+  end
+
+  test "a session recorded before the settled fact existed still recovers" do
+    fixture = start(script: [%{text: "done", calls: []}])
+    {session_id, attachment} = session(fixture)
+
+    assert {:accepted, "p1"} =
+             Loopex.command(attachment, %{type: :prompt, command_id: "p1", content: "the task"})
+
+    assert :settled = settle(fixture, session_id)
+
+    records = Fixture.records(fixture, session_id)
+    events = Fixture.events(fixture, session_id)
+    assert Enum.any?(events, &(&1.kind == "session.settled"))
+
+    # An older history is exactly this one without the fact core never used to
+    # publish. Recovery must read it, because those rows are immutable and no
+    # migration can add a fact that was never written.
+    older = Enum.reject(events, &(&1.kind == "session.settled"))
+    assert {:ok, recovered} = SessionState.recover(session_id, records, older)
+    assert recovered.event_sequence == List.last(older).event_sequence
+
+    # What a reader may not do is invent history: an event replay does not
+    # expect is still refused.
+    last = List.last(older)
+
+    invented =
+      older ++
+        [
+          %{
+            last
+            | event_sequence: last.event_sequence + 1,
+              event_id: "event-invented",
+              kind: "assistant.message_appended"
+          }
+        ]
+
+    assert {:error, :private_public_projection_mismatch} =
+             SessionState.recover(session_id, records, invented)
   end
 
   defp start(options) do

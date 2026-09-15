@@ -32,7 +32,10 @@ defmodule Loopex.ReferenceClientTest do
              "tool.started",
              "tool.finished",
              "assistant.message_appended",
-             "run.finished"
+             "run.finished",
+             # Accepted ADR 0011 keeps the session settling distinct from the
+             # run ending, and this session had nothing queued behind it.
+             "session.settled"
            ]
 
     assert File.read!(Path.join(fixture.workspace, "thin-client.txt")) ==
