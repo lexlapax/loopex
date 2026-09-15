@@ -97,8 +97,70 @@ defmodule Loopex.AppServer.ExternalWorkflowTest do
     assert summary["survived_refusal"]
   end
 
+  test "an independent client answers the policy's question and reads what the tool produced" do
+    node_executable = System.find_executable("node")
+
+    if is_nil(node_executable) do
+      flunk("Node is required for the independent client workflow and was not found")
+    end
+
+    {output, status} =
+      System.cmd(
+        node_executable,
+        [
+          client("interaction-workflow.mjs"),
+          System.find_executable("elixir") || flunk("Elixir executable unavailable"),
+          ebin(:loopex_protocol),
+          ebin(:loopex),
+          ebin(:loopex_app_server),
+          ebin(:telemetry)
+        ] ++ require_paths(),
+        env: child_environment(),
+        stderr_to_stdout: false
+      )
+
+    assert status == 0, "the independent client failed: #{output}"
+
+    summary = decode(output)
+    refute Map.has_key?(summary, "failed"), "the client reported: #{summary["failed"]}"
+
+    # The host policy asked rather than allowing, and the question reached the
+    # client with its exact wording and its offered choices.
+    assert summary["question_prompt"] == "May the tool write the file?"
+    assert summary["choice_ids"] == ["allow", "deny"]
+    assert is_binary(summary["interaction_id"])
+
+    # The client answered with one of those identities and the runtime admitted
+    # it as a durable command.
+    assert summary["answer_accepted"]
+    assert summary["resolution"] in ["allowed", "resolved", "answered"]
+
+    # Only after that answer committed did the policy mint an allow and the
+    # tool run. The client never decided anything.
+    assert summary["tool_finished"]
+    assert "interaction.requested" in summary["event_kinds"]
+    assert "interaction.resolved" in summary["event_kinds"]
+    assert "tool.finished" in summary["event_kinds"]
+    assert "run.finished" in summary["event_kinds"]
+
+    # The tool kept an artifact, and the client read it back over the wire in a
+    # verified bounded transfer rather than being handed a path.
+    assert summary["artifacts"] == 1
+    assert summary["transfer_opened"]
+    assert summary["total_size"] == "23"
+    assert summary["chunk_bytes"] == 23
+    assert summary["chunk_has_digest"]
+    assert summary["transfer_closed"]
+
+    # The request came before the resolution, and the tool after both.
+    kinds = summary["event_kinds"]
+
+    assert index_of(kinds, "interaction.requested") < index_of(kinds, "interaction.resolved")
+    assert index_of(kinds, "interaction.resolved") < index_of(kinds, "tool.finished")
+  end
+
   test "the client library and workflow are plain source with no package manifest" do
-    for name <- ["loopex-client.mjs", "workflow.mjs"] do
+    for name <- ["loopex-client.mjs", "workflow.mjs", "interaction-workflow.mjs"] do
       assert File.regular?(client(name))
     end
 
@@ -111,7 +173,9 @@ defmodule Loopex.AppServer.ExternalWorkflowTest do
     refute File.exists?(Path.join(directory, "node_modules"))
 
     # And nothing it imports comes from outside Node itself or this directory.
-    source = File.read!(client("loopex-client.mjs")) <> File.read!(client("workflow.mjs"))
+    source =
+      ["loopex-client.mjs", "workflow.mjs", "interaction-workflow.mjs"]
+      |> Enum.map_join("\n", &File.read!(client(&1)))
 
     imports =
       Regex.scan(~r/from "([^"]+)"/, source)
@@ -125,6 +189,8 @@ defmodule Loopex.AppServer.ExternalWorkflowTest do
   end
 
   defp client(name), do: Path.join([repository_root(), "clients", "node", name])
+
+  defp index_of(list, value), do: Enum.find_index(list, &(&1 == value))
 
   defp repository_root do
     File.cwd!() |> Path.join("../..") |> Path.expand()
