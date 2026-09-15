@@ -396,8 +396,16 @@ defmodule LoopexCli.FoundationWorkflowTest do
     ]
   end
 
+  # Concept: everything the current reader needs loaded, in the order this case
+  # reads back.
+  #
+  # Technical depth: core carries one external dependency since the maintainer's
+  # recorded vision change of 2026-09-13, and a probe launched with a hand-built
+  # code path does not inherit it from a mix project. It is appended rather than
+  # inserted, because the assertion below identifies core's own beams by this
+  # list's second entry.
   defp current_reader_paths do
-    for application <- [:loopex_protocol, :loopex, :loopex_store_local] do
+    for application <- [:loopex_protocol, :loopex, :loopex_store_local, :telemetry] do
       path = Application.app_dir(application, "ebin")
       assert File.dir?(path)
       path
