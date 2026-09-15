@@ -219,7 +219,7 @@ defmodule Loopex.InteractionLifecycleTest do
     end
   end
 
-  test "a deferred question suspends the run, publishes its request and dispatches nothing" do
+  test "policy defer commits one pending interaction before publication and suspends the run without executor intent" do
     fixture = loop_fixture(SuspendingPolicy)
     {session_id, attachment} = loop_session(fixture)
 
@@ -242,6 +242,16 @@ defmodule Loopex.InteractionLifecycleTest do
     events = Fixture.events(fixture, session_id)
     assert Enum.all?(events, &(&1.kind != "tool.started"))
     assert Enum.all?(events, &(&1.kind != "run.finished"))
+
+    # The question is on disk as one private record, and no executor intent
+    # exists beside it: the transaction that publishes the request is the one
+    # that retained it, and nothing was authorized by asking.
+    records = Fixture.records(fixture, session_id)
+    retained = Enum.filter(records, &(&1.payload.kind == "interaction_requested_v1"))
+    assert length(retained) == 1
+    assert Enum.all?(records, &(&1.payload.kind != "effect_intent_committed"))
+    assert hd(retained).payload["interaction_id"] == requested["interaction_id"]
+    assert hd(retained).payload["round"] == 0
 
     # The question stands: the run is suspended rather than finished, and the
     # executor was never asked to do anything.
@@ -286,7 +296,7 @@ defmodule Loopex.InteractionLifecycleTest do
     end
   end
 
-  test "a committed answer re-enters host policy and an allow dispatches the call" do
+  test "a committed answer re-enters host policy and only an allow result mints a grant before dispatch" do
     fixture = loop_fixture(AnsweringPolicy)
     {session_id, attachment} = loop_session(fixture)
 
@@ -312,6 +322,21 @@ defmodule Loopex.InteractionLifecycleTest do
 
     finished = await_event(fixture, session_id, "run.finished", 4_000)
     assert finished["outcome"] == "completed"
+
+    # The grant and the intent exist only after the allow, and the allow only
+    # after the answer: asking the question minted nothing.
+    records = Fixture.records(fixture, session_id)
+    intents = Enum.filter(records, &(&1.payload.kind == "effect_intent_committed"))
+    assert length(intents) == 1
+
+    resolution = Enum.find(records, &(&1.payload.kind == "interaction_resolved_v1"))
+    assert resolution.payload["resolution"] == "allowed"
+    assert hd(intents).journal_version > resolution.journal_version
+
+    answer_record =
+      Enum.find(records, &(&1.payload["command_type"] == "interaction_answer"))
+
+    assert answer_record.journal_version < resolution.journal_version
   end
 
   test "an answer choosing refusal resolves the question as denied and dispatches nothing" do
@@ -340,7 +365,7 @@ defmodule Loopex.InteractionLifecycleTest do
     assert Enum.all?(Fixture.events(fixture, session_id), &(&1.kind != "tool.started"))
   end
 
-  test "an answer to a question that is absent wrong or already resolved refuses with its own reason" do
+  test "identical response replay returns the historical admission and changed content wrong target resolved expired or absent interactions refuse with stable reasons" do
     fixture = loop_fixture(AnsweringPolicy)
     {session_id, attachment} = loop_session(fixture)
 
@@ -374,6 +399,26 @@ defmodule Loopex.InteractionLifecycleTest do
                choice_id: "allow"
              })
 
+    # The same command replayed returns the admission history already holds,
+    # rather than being admitted a second time or refused as late.
+    assert {:accepted, "answer-1"} =
+             Loopex.command(attachment, %{
+               type: :interaction_answer,
+               command_id: "answer-1",
+               interaction_id: interaction_id,
+               choice_id: "allow"
+             })
+
+    # The same command id carrying different content is a different command,
+    # and is refused rather than silently answered by the historical one.
+    assert {:error, :idempotency_conflict} =
+             Loopex.command(attachment, %{
+               type: :interaction_answer,
+               command_id: "answer-1",
+               interaction_id: interaction_id,
+               choice_id: "deny"
+             })
+
     _resolved = await_event(fixture, session_id, "interaction.resolved", 4_000)
 
     # A late answer to a question that has resolved refuses rather than
@@ -385,6 +430,18 @@ defmodule Loopex.InteractionLifecycleTest do
                interaction_id: interaction_id,
                choice_id: "deny"
              })
+
+    # Exactly one admission is on disk for that answer.
+    records = Fixture.records(fixture, session_id)
+
+    admitted =
+      Enum.filter(
+        records,
+        &(&1.payload["command_type"] == "interaction_answer" and
+            &1.payload["admission"] == "accepted")
+      )
+
+    assert length(admitted) == 1
   end
 
   defmodule AlwaysDeferringPolicy do
@@ -473,7 +530,7 @@ defmodule Loopex.InteractionLifecycleTest do
     end
   end
 
-  test "recovery resumes an answered but unresolved question without dispatching first" do
+  test "recovery resumes an answered but unresolved interaction without speculating acknowledging or dispatching first" do
     # The name dies with this process, so the policy above finds no observer in
     # any other case.
     Process.register(self(), :interaction_resume_observer)
