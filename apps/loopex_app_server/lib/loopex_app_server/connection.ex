@@ -22,23 +22,51 @@ defmodule Loopex.AppServer.Connection do
   a client holding.
   """
 
+  alias Loopex.AppServer.Mapping
   alias LoopexProtocol.Session
 
   @enforce_keys [:state]
-  defstruct state: :uninitialized, generation: nil
+  defstruct state: :uninitialized, generation: nil, runtime: nil, attachment: nil
 
   @type t :: %__MODULE__{
           state: :uninitialized | :initialized | :refused,
-          generation: binary() | nil
+          generation: binary() | nil,
+          runtime: term() | nil,
+          attachment: term() | nil
         }
 
   @doc """
   ## Concept
 
   A connection that has negotiated nothing yet.
+
+  ## Technical depth
+
+  The runtime is the host's, handed in at launch rather than named by a client
+  frame: accepted ADR 0023 keeps launch inputs outside the protocol, so no
+  request can change which runtime a connection speaks to. A connection without
+  one still negotiates and still refuses correctly; it simply has nothing to
+  call, which is the shape a protocol-only test wants.
   """
-  @spec new() :: t()
-  def new, do: %__MODULE__{state: :uninitialized}
+  @spec new(keyword()) :: t()
+  def new(options \\ []) do
+    %__MODULE__{state: :uninitialized, runtime: Keyword.get(options, :runtime)}
+  end
+
+  @doc """
+  ## Concept
+
+  Binds the attachment a session's commands are admitted through.
+
+  ## Technical depth
+
+  One connection maps to one attachment, which is what lets a command, a
+  transfer and a subscription belong to the same caller without a second table
+  to keep in step.
+  """
+  @spec attach(t(), term()) :: t()
+  def attach(%__MODULE__{} = connection, attachment),
+    do: %{connection | attachment: attachment}
 
   @doc """
   ## Concept
@@ -116,19 +144,14 @@ defmodule Loopex.AppServer.Connection do
   which method names exist. Neither refusal reaches a facade, so neither
   creates durable work.
   """
-  @spec dispatch(t(), map()) :: {:error, map(), t()}
+  @spec dispatch(t(), map()) :: {:ok, map(), t()} | {:error, map(), t()}
   def dispatch(%__MODULE__{state: :initialized} = connection, request) do
     request_id = safe_request_id(request)
 
     case Map.get(request, "method") do
       method when is_binary(method) ->
         if method in Session.methods() do
-          {:error,
-           error(
-             "unsupported_method",
-             "this build does not yet answer that method",
-             request_id
-           ), connection}
+          answer(connection, request, request_id)
         else
           {:error, error("unsupported_method", "no such method in this generation", request_id),
            connection}
@@ -146,6 +169,46 @@ defmodule Loopex.AppServer.Connection do
        "this connection must initialize before anything else",
        safe_request_id(request)
      ), connection}
+  end
+
+  # Concept: a named method reaches the mapping, or says it is not answered yet.
+  #
+  # Technical depth: a method this generation names but this build has not
+  # implemented is refused as unsupported rather than answered with a guess, and
+  # a connection with no runtime cannot call a facade at all. Both refusals stop
+  # before any durable work, which is what keeps an unfinished build safe to
+  # speak to.
+  defp answer(connection, request, request_id) do
+    cond do
+      not Mapping.implemented?(Map.fetch!(request, "method")) ->
+        {:error,
+         error("unsupported_method", "this build does not yet answer that method", request_id),
+         connection}
+
+      is_nil(connection.runtime) ->
+        {:error,
+         error("facade_unavailable", "this connection has no runtime to answer with", request_id),
+         connection}
+
+      true ->
+        context = %{runtime: connection.runtime, attachment: connection.attachment}
+
+        case Mapping.call(request, context) do
+          {:ok, record} ->
+            {:ok, record, connection}
+
+          {:error, record} ->
+            {:error, Map.put_new(record, "request_id", request_id), connection}
+
+          :unsupported ->
+            {:error,
+             error(
+               "unsupported_method",
+               "this build does not yet answer that method",
+               request_id
+             ), connection}
+        end
+    end
   end
 
   # Concept: the request identity, which must be safe before it correlates

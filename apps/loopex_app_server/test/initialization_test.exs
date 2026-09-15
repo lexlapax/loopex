@@ -106,9 +106,9 @@ defmodule Loopex.AppServer.InitializationTest do
 
     assert {:error, refusal, _connection} =
              Connection.dispatch(connection, %{
-               "method" => "session.create",
+               "method" => "artifact.open_transfer",
                "request_id" => "r2",
-               "command_id" => "c1"
+               "use_ref" => "dXNl"
              })
 
     assert refusal["code"] == "unsupported_method"
@@ -116,6 +116,20 @@ defmodule Loopex.AppServer.InitializationTest do
     # It is refused, never answered with a fabricated admission.
     refute refusal["type"] == "admission"
     assert refusal["type"] == "error"
+  end
+
+  test "a connection with no runtime says so rather than pretending to answer" do
+    assert {:ok, _reply, connection} = initialize([Session.generation()])
+
+    assert {:error, refusal, _connection} =
+             Connection.dispatch(connection, %{
+               "method" => "session.create",
+               "request_id" => "r2",
+               "command_id" => "Y18x"
+             })
+
+    assert refusal["code"] == "facade_unavailable"
+    assert refusal["request_id"] == "r2"
   end
 
   test "a malformed request correlates nothing rather than echoing bytes a client chose" do
