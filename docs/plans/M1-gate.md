@@ -152,10 +152,10 @@ and can print neither `CAPTURE` nor `M1 gate GREEN`.
 | `4bba03d218eee656991444a3c22c8753bfef1ab86f688036a4440048752f48bd` | `scripts/m1-gate-launcher.escript` |
 | `53d8219bdee584a3849a85a1102e405520d5dd0dfbe21d259434bc9edfc5fcc0` | `scripts/m1-exunit-runner.exs` |
 | `572d9fac0b4be1fb792db8f5f8ff3b760e588c9e35f4cb1850c03f73c2f1f661` | `scripts/m1-evidence-verifier.exs` |
-| `2c62019cde03e118a2b5ff23ba24a5ee50d8f118172ae4d71ce6bed2f7be1011` | `apps/loopex/lib/mix/tasks/loopex.deps_budget.ex` |
+| `7f5dfc6c701264ae0d7988e8b9599dc8f85c4a139c141c81c03a290ba77ed4f8` | `apps/loopex/lib/mix/tasks/loopex.deps_budget.ex` |
 | `61edf8d5ca5516fe4d0ec96cd82079d8736b0fdb22175b9bbe49da5bccb35786` | `apps/loopex/test/m1_gate_evidence_test.exs` |
 | `c36253cff3d74ddff1b330695edbc4bde0a4565c1412c67c1293b2fb7ca6129b` | `apps/loopex/test/m1_exunit_runner_test.exs` |
-| `bc4d5544229c3b15414a8ad9ac8ce8e5daf2e29d35a98ab868af1741fd9b44d4` | `apps/loopex/test/deps_budget_test.exs` |
+| `fe801bfc4ed7546cf07ce726cd7a9cc8c0fbaea7e4602e17e7baca7c35c8095d` | `apps/loopex/test/deps_budget_test.exs` |
 | `fea095ecec784a4440b872ad5f53a8da2cb4e13e43b6f05add5cfd75bb352879` | `.tool-versions` |
 
 These are the complete M1-specific verdict machinery and its adversarial
@@ -1477,3 +1477,58 @@ records no acceptance and grants no waiver, closure or release.
 | --- | --- | --- |
 | 14 | `apps/loopex/test/m1_gate_evidence_test.exs` | `61edf8d5ca5516fe4d0ec96cd82079d8736b0fdb22175b9bbe49da5bccb35786` |
 | 14 | `scripts/check-m1-gate.sh` | `9f13f6e44c3baf0ced53711518f4f6493dc9b271bbb3401f13c78e561761f309` |
+
+<a id="amendment-15"></a>
+## Amendment 15 — Rebind the dependency oracle to the applications M4 adds
+
+**Acceptance: OUTSTANDING.** Closed M1 adds gate generation 15 under
+`amendment-transaction-v2`. Its historical Acceptance, Closure and prior
+generation rows remain unchanged. The new row carries this gate's digest and
+leaves authority, evidence and candidate unset until exact-proposal acceptance.
+
+This gate binds the dependency oracle and its test, because
+`apps/loopex/lib/mix/tasks/loopex.deps_budget.ex` is the whole surface that
+keeps core on the standard library and the single admitted event dispatcher.
+M4's Phase B adds a ninth and a tenth application, `loopex_telemetry` at the
+edge and `loopex_app_server` as a client, and admits one external dependency in
+core, the telemetry event dispatcher the vision's dependency doctrine names.
+None of that is reachable while the oracle still describes the exact M1
+inventory: it refuses both new applications by name and refuses core's
+declaration of that dependency.
+
+The oracle is a bound artifact of this gate and of no other, so the change
+belongs to this holder and to this transaction. It arrives here as one atomic
+revision carrying the new bytes, the rebound rows above and this generation's
+row, because splitting a bound artifact's bytes from the row that accepts them
+leaves every revision between the two naming a digest no authority ever
+accepted.
+
+What the oracle now admits is exactly what the M4 plan pair names and no more.
+The two applications are added to the planned inventory with their roles, core
+gains the single named external dependency at its pinned requirement, and the
+edge application that forwards telemetry may declare the same one. Direction is
+unchanged: hosts and implementations still depend inward, core still imports no
+host or adapter concept, and a client application may still compose only edge
+applications and only in tests. The test moves with it and asserts the same
+refusals against the widened inventory, so an eleventh application, a second
+external dependency or a reversed direction still fails.
+
+No M1 outcome, selector, witness, minimum, exclusion, real-provider path,
+credential rule or exit predicate changes, and no lifecycle state reopens. M1's
+own product bytes are untouched.
+
+Binding validation, bootstrap and every inherited gate that invokes them are red
+at this proposal for its pending generation row, exactly as at any v2 proposal.
+Binding-independent checks are proved directly: `mix loopex.deps_budget` passes
+on this tree, which it cannot do on either neighbour, and the bound test passes
+with it.
+
+Only explicit maintainer acceptance of the actual A revision authorizes R. Its
+immediate child completes generation 15 with exact A and adds one fresh
+acceptance disposition; R changes no bound artifact or gate byte. This proposal
+records no acceptance and grants no waiver, closure or release.
+
+| Generation | Artifact | Rebound SHA-256 |
+| --- | --- | --- |
+| 15 | `apps/loopex/lib/mix/tasks/loopex.deps_budget.ex` | `7f5dfc6c701264ae0d7988e8b9599dc8f85c4a139c141c81c03a290ba77ed4f8` |
+| 15 | `apps/loopex/test/deps_budget_test.exs` | `fe801bfc4ed7546cf07ce726cd7a9cc8c0fbaea7e4602e17e7baca7c35c8095d` |

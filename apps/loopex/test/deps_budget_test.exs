@@ -6,6 +6,9 @@ defmodule Mix.Tasks.Loopex.DepsBudgetTest do
 
   @fixture "scripts/fixtures/deps-budget-invalid/mix.exs"
   @reqllm_requirement "~> 1.17.1"
+  # The one external dependency accepted ADR 0030 admits for core and for the
+  # telemetry edge, pinned here exactly as the oracle pins it.
+  @telemetry_requirement "~> 1.3"
 
   defp repo_root, do: Path.expand("../../..", __DIR__)
 
@@ -340,6 +343,49 @@ defmodule Mix.Tasks.Loopex.DepsBudgetTest do
     assert Budget.check_repository(positive) == :ok
 
     negative_cases = [
+      # The one admitted external dependency is admitted exactly: for the two
+      # applications ADR 0030 names, at the pinned requirement, in production,
+      # and never beside a second one.
+      {"core-second-external", "core applications must depend only on the production protocol",
+       fn root ->
+         write_child(root, "loopex", :core, [
+           {:loopex_protocol, [in_umbrella: true]},
+           {:telemetry, @telemetry_requirement},
+           {:req_llm, @reqllm_requirement}
+         ])
+       end},
+      {"core-widened-telemetry", "must be pinned to",
+       fn root ->
+         write_child(root, "loopex", :core, [
+           {:loopex_protocol, [in_umbrella: true]},
+           {:telemetry, ">= 0.0.0"}
+         ])
+       end},
+      # A requirement beside options is refused as an ambiguous record before
+      # any role rule reads it, which is how a test-only telemetry never
+      # reaches core in the first place.
+      {"core-test-only-telemetry", "unambiguous record",
+       fn root ->
+         write_child(root, "loopex", :core, [
+           {:loopex_protocol, [in_umbrella: true]},
+           {:telemetry, @telemetry_requirement, [only: :test]}
+         ])
+       end},
+      {"executor-telemetry", "may not declare external dependencies",
+       fn root ->
+         write_child(root, "loopex_executor_local", :edge, [
+           {:loopex, [in_umbrella: true]},
+           {:telemetry, @telemetry_requirement}
+         ])
+       end},
+      {"client-test-only-contract", "contract dependency must be production",
+       fn root ->
+         write_child(root, "loopex_app_server", :client, [
+           {:loopex, [in_umbrella: true]},
+           {:loopex_protocol, [in_umbrella: true, only: :test]},
+           {:loopex_composition, [in_umbrella: true]}
+         ])
+       end},
       {"extra-extension", "outside the exact M1 planned inventory",
        fn root ->
          write_child(root, "loopex_probe_extension", :extension, [
@@ -553,7 +599,9 @@ defmodule Mix.Tasks.Loopex.DepsBudgetTest do
       {:req_llm, @reqllm_requirement}
     ])
 
-    write_lock!(dir, [{:req_llm, "1.17.1"}])
+    # The lock names every external dependency the repository declares, which
+    # now includes core's own.
+    write_lock!(dir, [{:req_llm, "1.17.1"}, {:telemetry, "1.3.0"}])
     core = Path.join(dir, "apps/loopex/mix.exs")
 
     File.write!(
@@ -934,7 +982,7 @@ defmodule Mix.Tasks.Loopex.DepsBudgetTest do
            Map.put(package, :deps, [lock_dependency("bridge", "~> 9.0")])
          end)
        end},
-      {"unreachable-lock", "outside the exact non-optional ReqLLM closure",
+      {"unreachable-lock", "outside the exact non-optional closure of the declared external",
        fn packages -> packages ++ [package("orphan", "4.0.0", [:mix], "~> 1.17", [])] end}
     ]
 
@@ -1098,8 +1146,15 @@ defmodule Mix.Tasks.Loopex.DepsBudgetTest do
     write_child(root, "loopex_protocol", :contract, [])
 
     write_child(root, "loopex", :core, [
-      {:loopex_protocol, [in_umbrella: true]}
+      {:loopex_protocol, [in_umbrella: true]},
+      {:telemetry, @telemetry_requirement}
     ])
+
+    # Core now declares one external dependency, so even the smallest fixture
+    # repository carries the lock that names it; a repository that declared one
+    # and locked nothing is a different refusal than the ones these cases are
+    # about.
+    write_lock!(root, [{:telemetry, "1.3.0"}])
   end
 
   defp write_m1_inventory(root) do
@@ -1139,7 +1194,21 @@ defmodule Mix.Tasks.Loopex.DepsBudgetTest do
       {:loopex_executor_local, [in_umbrella: true, only: :test]}
     ])
 
-    write_lock!(root, [{:req_llm, "1.17.1"}])
+    # The ninth and tenth applications accepted ADR 0030 and ADR 0023 add: a
+    # client that speaks the wire and names the contract it speaks, and the edge
+    # that owns the only Loopex-attached telemetry handler.
+    write_child(root, "loopex_app_server", :client, [
+      {:loopex, [in_umbrella: true]},
+      {:loopex_protocol, [in_umbrella: true]},
+      {:loopex_composition, [in_umbrella: true]}
+    ])
+
+    write_child(root, "loopex_telemetry", :edge, [
+      {:loopex, [in_umbrella: true]},
+      {:telemetry, @telemetry_requirement}
+    ])
+
+    write_lock!(root, [{:req_llm, "1.17.1"}, {:telemetry, "1.3.0"}])
   end
 
   defp write_child(root, directory, role, dependencies) do
@@ -1244,7 +1313,10 @@ defmodule Mix.Tasks.Loopex.DepsBudgetTest do
       package("bridge", "2.0.0", [:mix], ">= 1.17.0", [
         lock_dependency("leaf", "~> 3.0")
       ]),
-      package("leaf", "3.0.0", [:rebar3], nil, [])
+      package("leaf", "3.0.0", [:rebar3], nil, []),
+      # Core's own admitted dependency is a second root of the closure, with no
+      # dependencies of its own, exactly as the real package has none.
+      package("telemetry", "1.3.0", [:rebar3], nil, [])
     ]
   end
 

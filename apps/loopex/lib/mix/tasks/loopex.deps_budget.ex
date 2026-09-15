@@ -41,8 +41,20 @@ defmodule Loopex.Checks.DepsBudget do
     loopex_executor_local: :edge,
     loopex_composition: :composition,
     loopex_reference_client: :client,
-    loopex_cli: :client
+    loopex_cli: :client,
+    loopex_app_server: :client,
+    loopex_telemetry: :edge
   }
+  # Concept: the one external dependency core may carry, named here rather than
+  # implied by a count.
+  #
+  # Technical depth: accepted ADR 0030 admits `:telemetry` for `apps/loopex` and
+  # supersedes exactly that much of ADR 0001; every other external dependency in
+  # core, and every development, test, formatter, analysis or documentation
+  # dependency, stays forbidden. The requirement is pinned here so a different
+  # version range is a visible change to this oracle rather than a silent one in
+  # a project file.
+  @core_external %{telemetry: "~> 1.3"}
   @reqllm_requirement "~> 1.17.1"
   @floor_elixir_version Version.parse!("1.18.5")
 
@@ -582,46 +594,73 @@ defmodule Loopex.Checks.DepsBudget do
   defp materialization_closure(root, lock) do
     with {:ok, tracked} <- tracked_projects(root),
          {:ok, records} <- records(root, tracked),
-         {:ok, {root_name, requirement}} <- sole_external_materialization_root(records),
-         {:ok, closure} <- exact_nonoptional_lock_closure(lock, root_name, requirement) do
+         {:ok, roots} <- external_materialization_roots(records),
+         {:ok, closure} <- exact_nonoptional_lock_closure(lock, roots) do
       {:ok, closure}
     end
   end
 
-  defp sole_external_materialization_root(records) do
+  # Concept: the exact set of external dependencies this repository declares,
+  # and the roots the lock closure is computed from.
+  #
+  # Technical depth: two names are admitted and no others: ReqLLM in its edge,
+  # and `:telemetry`, which accepted ADR 0030 admits for core and for the
+  # telemetry edge. The set is compared as a set rather than counted, so an
+  # application declaring a name it may not, or a requirement other than the
+  # pinned one, refuses here exactly as a third dependency would.
+  defp external_materialization_roots(records) do
     internal =
       records
       |> Enum.reject(&is_nil(&1.app))
       |> MapSet.new(& &1.app)
 
-    external =
+    declared =
       for record <- records,
           {name, requirement, options} <- record.dependencies,
           not MapSet.member?(internal, name) and not in_umbrella?(options),
           do: {record.app, name, requirement, options}
 
-    case external do
-      [{:loopex_llm_reqllm, :req_llm, @reqllm_requirement, []}] ->
-        {:ok, {"req_llm", @reqllm_requirement}}
+    telemetry_requirement = Map.fetch!(@core_external, :telemetry)
 
-      _other ->
-        {:error,
-         "materialization requires the sole direct ReqLLM dependency " <>
-           inspect({:req_llm, @reqllm_requirement})}
+    admitted =
+      MapSet.new([
+        {:loopex_llm_reqllm, :req_llm, @reqllm_requirement, []},
+        {:loopex, :telemetry, telemetry_requirement, []},
+        {:loopex_telemetry, :telemetry, telemetry_requirement, []}
+      ])
+
+    if declared != [] and MapSet.subset?(MapSet.new(declared), admitted) do
+      roots =
+        declared
+        |> Enum.map(fn {_app, name, requirement, _options} ->
+          {Atom.to_string(name), requirement}
+        end)
+        |> Enum.uniq()
+
+      {:ok, roots}
+    else
+      {:error,
+       "materialization admits only the declared external dependencies " <>
+         inspect(
+           Enum.map(MapSet.to_list(admitted), fn {app, name, requirement, _options} ->
+             {app, name, requirement}
+           end)
+         )}
     end
   end
 
-  defp exact_nonoptional_lock_closure(lock, root_name, root_requirement) do
+  defp exact_nonoptional_lock_closure(lock, roots) do
     by_name = Map.new(lock, &{&1.name, &1})
 
-    with {:ok, names} <-
-           visit_lock_closure(by_name, [{root_name, root_requirement}], MapSet.new()),
+    with {:ok, names} <- visit_lock_closure(by_name, roots, MapSet.new()),
          lock_names <- MapSet.new(Map.keys(by_name)),
          true <- names == lock_names do
       {:ok, Enum.filter(lock, &MapSet.member?(names, &1.name))}
     else
       false ->
-        {:error, "mix.lock contains records outside the exact non-optional ReqLLM closure"}
+        {:error,
+         "mix.lock contains records outside the exact non-optional closure of the declared " <>
+           "external dependencies"}
 
       {:error, reason} ->
         {:error, reason}
@@ -1516,6 +1555,22 @@ defmodule Loopex.Checks.DepsBudget do
               "{:req_llm, #{inspect(@reqllm_requirement)}}; found #{inspect(found)}"
           ]
 
+        # Concept: core and the telemetry edge each declare exactly the one
+        # external dependency the vision admits by name, and nothing else.
+        #
+        # Technical depth: accepted ADR 0030 admits `:telemetry` for those two
+        # applications alone. The requirement is compared exactly, so a widened
+        # range is as visible here as a second dependency would be, and every
+        # other application in the inventory still declares none.
+        {application, [{:telemetry, requirement, []}]}
+        when application in [:loopex, :loopex_telemetry] ->
+          if requirement == Map.fetch!(@core_external, :telemetry),
+            do: [],
+            else: [
+              "#{record.path}: the admitted #{inspect(application)} dependency :telemetry must " <>
+                "be pinned to #{Map.fetch!(@core_external, :telemetry)}"
+            ]
+
         {_application, []} ->
           []
 
@@ -1602,8 +1657,24 @@ defmodule Loopex.Checks.DepsBudget do
   defp record_reasons(%{role: :contract} = record, _roles),
     do: ["#{record.path}: contract applications must carry no dependency"]
 
-  defp record_reasons(%{role: :core} = record, roles),
-    do: exact_protocol_dependency(record, roles, "core")
+  # Concept: core carries the contract application and the one external
+  # dependency the vision admits by name.
+  #
+  # Technical depth: the protocol dependency is checked exactly as it always
+  # was; `:telemetry` is admitted only under its pinned requirement, only as a
+  # production dependency, and only for core. Anything else in that list, and
+  # any second external dependency, is refused with the same reason it always
+  # produced, so the rule reads as one admitted name rather than as a relaxed
+  # check.
+  defp record_reasons(%{role: :core} = record, roles) do
+    {external, internal} =
+      Enum.split_with(record.dependencies, fn {name, _requirement, _options} ->
+        Map.has_key?(@core_external, name)
+      end)
+
+    exact_protocol_dependency(%{record | dependencies: internal}, roles, "core") ++
+      core_external_reasons(record, external)
+  end
 
   defp record_reasons(%{role: :edge} = record, roles), do: edge_reasons(record, roles)
   defp record_reasons(%{role: :extension} = record, roles), do: extension_reasons(record, roles)
@@ -1615,6 +1686,31 @@ defmodule Loopex.Checks.DepsBudget do
 
   defp record_reasons(record, _roles),
     do: ["#{record.path}: application has no valid dependency role"]
+
+  defp core_external_reasons(_record, []), do: []
+
+  defp core_external_reasons(record, [{name, requirement, options}]) do
+    cond do
+      requirement != Map.fetch!(@core_external, name) ->
+        [
+          "#{record.path}: the admitted core dependency #{inspect(name)} must be pinned to " <>
+            "#{Map.fetch!(@core_external, name)}"
+        ]
+
+      not production?(options) ->
+        ["#{record.path}: the admitted core dependency #{inspect(name)} must be production"]
+
+      true ->
+        []
+    end
+  end
+
+  defp core_external_reasons(record, dependencies) do
+    [
+      "#{record.path}: core admits exactly one external dependency; found " <>
+        inspect(names(dependencies))
+    ]
+  end
 
   defp exact_protocol_dependency(record, roles, label) do
     case record.dependencies do
@@ -1726,7 +1822,16 @@ defmodule Loopex.Checks.DepsBudget do
     # `known -- core -- compositions` reads as `known -- (core -- compositions)`
     # and leaves the composition in `other`, where the edge-only rule below then
     # rejects the very dependency this role exists to permit.
-    other = (known -- core) -- compositions
+    # Concept: a client that speaks the wire may name the contract application
+    # it speaks, rather than reaching it through core.
+    #
+    # Technical depth: accepted ADR 0023 puts the public schema in the contract
+    # application, and the app-server serves it directly. Declaring that edge
+    # here makes what a client speaks visible in its own project file instead of
+    # hidden behind a transitive dependency; it is still one production
+    # in-umbrella dependency on the contract and nothing else.
+    contracts = Enum.filter(known, &(target_role(roles, elem(&1, 0)) == :contract))
+    other = ((known -- core) -- compositions) -- contracts
 
     external =
       Enum.reject(record.dependencies, fn {name, _requirement, options} ->
@@ -1753,6 +1858,14 @@ defmodule Loopex.Checks.DepsBudget do
         production_internal?(options)
       end) ->
         ["#{record.path}: a client's composition dependency must be production and in-umbrella"]
+
+      length(contracts) > 1 ->
+        ["#{record.path}: clients may depend on at most one contract application"]
+
+      not Enum.all?(contracts, fn {_name, _requirement, options} ->
+        production_internal?(options)
+      end) ->
+        ["#{record.path}: a client's contract dependency must be production and in-umbrella"]
 
       not Enum.all?(other, fn {name, _requirement, options} ->
         target_role(roles, name) == :edge and test_only_internal?(options)
@@ -1783,12 +1896,20 @@ defmodule Loopex.Checks.DepsBudget do
     end)
   end
 
+  # Concept: what one project file may be judged against on its own.
+  #
+  # Technical depth: a single file cannot see the repository, so the roles it is
+  # judged against are the contract, core, its own, and the planned inventory
+  # this oracle already fixes. Without the planned roles a client that depends
+  # on a composition -- which the client rule exists to permit -- reads as an
+  # unknown in-umbrella dependency whenever its own file is checked alone.
   defp standalone_roles(record) do
-    %{
+    @m1_planned_roles
+    |> Map.merge(%{
       @contract_app => :contract,
       @runtime_app => :core,
       record.app => record.role
-    }
+    })
   end
 
   defp target_role(roles, name), do: Map.get(roles, name)
@@ -1797,6 +1918,10 @@ defmodule Loopex.Checks.DepsBudget do
 
   defp production_internal?(options),
     do: Map.new(options) == %{in_umbrella: true}
+
+  # An external production dependency carries no environment restriction and no
+  # umbrella marker: it is what the built application actually ships with.
+  defp production?(options), do: Map.new(options) == %{}
 
   defp test_only_internal?(options) do
     case Map.new(options) do
