@@ -4091,3 +4091,33 @@ earlier generation and every historical revision remain exactly as recorded.
 This row binds the proposal; the re-capture itself and the M0 re-proof it
 records follow as evidence commit `E'` and are not accepted here. It grants
 no closure, integration, tag or release.
+
+<a id="disposition-m1-gate-generation-14-2026-09-15"></a>
+### M1 gate generation 14 acceptance — 2026-09-15
+
+The M1 gate's evidence case builds a fixture repository and runs it under the
+gate's own sanitized environment, supplying the home directory that environment
+provides. On a real Linux host the child refused, reporting that the supplied
+home does not physically match the operating-system account home. The
+implementer reproduced the refusal by hand under the gate's exact sanitized
+environment before writing anything, so the cause is the witness rather than the
+host: generation 13's case handed the child a home the account did not own.
+
+Generation 14 repairs it at `994421ffe0023445926f727cdaf1a1f352f609f3`. The case
+reads the account home from the passwd database and passes it to the fixture
+child beside the path; the gate script's embedded corpus digest follows the
+changed case bytes; and the gate and plan documents gain the amendment section
+and the generation row. Nothing else in the case changes and nothing outside it
+changes. Evidence presented: the full bound corpus passing on the current
+toolchain pair, and the repaired case passing on Linux under the gate's own
+isolated home, which is the condition that refused it.
+
+The maintainer answered **"I already accepted generation 14 for m1. i accept."**
+
+This transcribes that answer as acceptance under `amendment-transaction-v2`.
+The rebind completes generation 14's row with the accepting authority, this
+disposition and the candidate it binds, which is exact
+`994421ffe0023445926f727cdaf1a1f352f609f3`. The Acceptance and Closure rows of
+Closed M1 stay byte-immutable, no earlier generation stops being enforced for
+the revisions it governed, and this adds no scope, changes no outcome and
+reopens no lifecycle state. It grants no closure, integration, tag or release.
