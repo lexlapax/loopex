@@ -47,6 +47,14 @@ that cannot find the pinned version reports unavailable evidence rather than
 failing the product. The consumer is plain JavaScript with no build step,
 package manifest, lockfile or dependency, so there is nothing to install.
 
+Debugging Loopex during development means turning on what the runtime already
+offers rather than adding printing to the code under test. A trace session is
+started through the runtime reference a host holds and stopped the same way;
+telemetry spans arrive at every port callback and transaction cut. The
+[operator runbook](docs/operator/observability.md#concept) has the levels,
+what redaction removes, the ceilings and the event inventory; the
+[developer pair](docs/developer/observability.md#concept) has the contract.
+
 Core also declares one external dependency now, the telemetry event dispatcher
 the vision's dependency doctrine admits by name. `mix loopex.deps_budget`
 enforces that this stays at one, and that the two applications M4 adds,

@@ -589,6 +589,19 @@ requires it, and those workflows stay thin wrappers over repository commands.
   CI, enforce the dependency budget and direction.
 - Checkpoints are warning-free under formatting, compilation, static analysis,
   and relevant documentation/protocol checks.
+- Diagnose Loopex through the runtime's own observability rather than ad hoc
+  printing. A host starts a runtime-scoped trace session through the runtime
+  reference it already holds, names the modules it wants, and stops it again;
+  every port callback and transaction cut emits a telemetry span with its
+  duration and outcome. Both are bounded, both redact content, and neither
+  requires changing a line of source to turn on, which is why an inserted
+  `IO.inspect` is a worse tool for the same job: it changes the code under
+  observation, survives longer than intended, and prints what redaction exists
+  to remove. See the
+  [observability pair](docs/developer/observability.md#concept) for the contract
+  and the
+  [operator runbook](docs/operator/observability.md#concept) for the levels,
+  ceilings and events.
 - Tests use temporary `LOOPEX_HOME` and workspaces; helpers fail before touching
   real user state.
 - OTP 27+/Elixir 1.18+ is the bootstrap floor, set by accepted ADR 0026, until
