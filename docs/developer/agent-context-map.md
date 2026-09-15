@@ -4354,3 +4354,38 @@ rebind binds the Acceptance row to exact
 `f8b0511774e4a6d9bcc00867f5b3357e084290c5` with the amended gate digest and both
 envelope digests unchanged, since neither envelope moved. It grants no closure,
 integration, tag or release.
+
+<a id="disposition-m4-witness-identities-2026-09-15"></a>
+### M4 gate amendment acceptance, the witness identities — 2026-09-15
+
+Amendment 3 renamed outcome 5's consumer from TypeScript to Node and listed
+seven places it had done so. Amendment 4 dropped Python from outcome 6. Neither
+reached `scripts/m4-outcomes.exs`, the bound artifact holding the locked witness
+identities the selector runner matches by exact string. Two of outcome 5's still
+named a TypeScript consumer and outcome 6's first still named Elixir, Python and
+TypeScript clients.
+
+Both omissions were found the same way: by writing the tests those identities
+name. Satisfying the lock verbatim would have produced a case called "the
+TypeScript consumer completes skill answer reevaluation..." exercising a plain
+JavaScript client with no build step, and another promising a Python client this
+milestone had decided not to have. A milestone's evidence cannot quietly
+disagree with its own accepted decisions, and witness identities are locked at
+acceptance, so correcting them is an amendment rather than an edit.
+
+The general lesson is recorded in the amendment itself rather than left implicit:
+a rename must reach the file that names the evidence, not only the documents that
+describe it. Two amendments made the same mistake in the same file.
+
+Three strings change and no others. The proposal is
+`2e06da13ee01391690c1731edbf6190ab4471f1c`. No outcome, selector path, count,
+limit, client pin, evidence class or credential rule changes, neither envelope
+moves, and no lifecycle state reopens. Evidence presented: the two stale strings
+in outcome 5 and the one in outcome 6, each quoted against the decision that
+superseded it. The maintainer answered **"Accept 2e06da1"**.
+
+This transcribes that answer as acceptance under `amendment-transaction-v1`. The
+rebind binds the Acceptance row to exact
+`2e06da13ee01391690c1731edbf6190ab4471f1c` with the amended gate digest and both
+envelope digests unchanged, since neither envelope moved. It grants no closure,
+integration, tag or release.
