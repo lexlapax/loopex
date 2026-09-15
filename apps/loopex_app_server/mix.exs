@@ -13,6 +13,10 @@ defmodule Loopex.AppServer.MixProject do
       deps_path: "../../deps",
       lockfile: "../../mix.lock",
       elixir: "~> 1.17",
+      # The launch configuration a workflow case starts its server process with
+      # is required by that case, not run as a selector. Current Mix warns on an
+      # unclassified .exs file; no *_test.exs is ignored here.
+      test_ignore_filters: ["test/support/fixture_server.exs"],
       start_permanent: Mix.env() == :prod,
       deps: deps()
     ]

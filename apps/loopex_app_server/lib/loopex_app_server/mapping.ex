@@ -72,7 +72,8 @@ defmodule Loopex.AppServer.Mapping do
   build does not yet answer returns `:unsupported`, so the caller reports the
   one refusal rather than each method inventing its own.
   """
-  @spec call(map(), map()) :: {:ok, map()} | {:error, map()} | :unsupported
+  @spec call(map(), map()) ::
+          {:ok, map()} | {:ok, map(), map()} | {:error, map()} | :unsupported
   def call(%{"method" => "session.create"} = request, context) do
     with {:ok, command_id} <- field(request, "command_id", &Wire.identity/1),
          {:ok, options} <- session_options(request) do
@@ -151,7 +152,10 @@ defmodule Loopex.AppServer.Mapping do
          {:ok, options} <- attach_options(request) do
       case Loopex.attach(context.runtime, session_id, options) do
         {:ok, attachment} ->
-          {:ok, snapshot_record(request, attachment)}
+          # The attachment goes back with the snapshot because the connection,
+          # not this call, is what holds it: a later command is admitted through
+          # the same one, and a transport delivers what it publishes.
+          {:ok, snapshot_record(request, attachment), %{attachment: attachment}}
 
         {:error, :attachment_conflict} ->
           {:error, error(request, "attachment_conflict", :attachment_conflict)}

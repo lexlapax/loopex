@@ -186,6 +186,8 @@ defmodule Loopex.AppServer.StdioProbeTest do
           input_path,
           output_path
         ],
+        # The server owns standard input, so the machine must not.
+        env: [{"ELIXIR_ERL_OPTIONS", "-noinput"}],
         stderr_to_stdout: false
       )
 

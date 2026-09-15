@@ -71,6 +71,20 @@ defmodule Loopex.AppServer.Connection do
   @doc """
   ## Concept
 
+  The attachment this connection holds, if it has one.
+
+  ## Technical depth
+
+  Read by a transport that has to deliver what the attachment publishes. It is
+  the same attachment the mapping admits commands through, because one
+  connection has exactly one.
+  """
+  @spec attachment(t()) :: term() | nil
+  def attachment(%__MODULE__{attachment: attachment}), do: attachment
+
+  @doc """
+  ## Concept
+
   Whether this connection has settled on a generation.
   """
   @spec initialized?(t()) :: boolean()
@@ -196,6 +210,9 @@ defmodule Loopex.AppServer.Connection do
         case Mapping.call(request, context) do
           {:ok, record} ->
             {:ok, record, connection}
+
+          {:ok, record, %{attachment: attachment}} ->
+            {:ok, record, attach(connection, attachment)}
 
           {:error, record} ->
             {:error, Map.put_new(record, "request_id", request_id), connection}
