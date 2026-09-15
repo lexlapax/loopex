@@ -330,11 +330,21 @@ defmodule Loopex.AppServer.ExternalWorkflowTest do
     # reached the network would be proving something about the network.
     File.cp_r!(Path.join(root, "deps"), Path.join(extracted, "deps"))
 
+    # The build is named into the extraction itself. A runner that exports
+    # `MIX_BUILD_ROOT` to isolate its own lanes would otherwise send these beams
+    # to that root, leaving the extracted tree with no build for the consumer
+    # below to load, and the extraction would be proving something about the
+    # runner. Naming the dependency path is what makes the copy above the source
+    # of what gets compiled.
     {build_output, build_status} =
       System.cmd(mix, ["compile"],
         cd: extracted,
         stderr_to_stdout: true,
-        env: [{"MIX_ENV", "dev"}]
+        env: [
+          {"MIX_ENV", "dev"},
+          {"MIX_BUILD_ROOT", Path.join(extracted, "_build")},
+          {"MIX_DEPS_PATH", Path.join(extracted, "deps")}
+        ]
       )
 
     assert build_status == 0, "the extracted source did not build: #{build_output}"
