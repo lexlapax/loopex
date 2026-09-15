@@ -26,6 +26,8 @@ defmodule Loopex.AppServer.DeliveryBoundsTest do
 
   alias Loopex.AgentLoopFixture, as: Fixture
   alias Loopex.AppServer.Connection
+  alias Loopex.AppServer.Delivery
+  alias LoopexProtocol.Frame
   alias LoopexProtocol.Canonical
   alias LoopexProtocol.Session
   alias LoopexProtocol.Wire
@@ -307,6 +309,180 @@ defmodule Loopex.AppServer.DeliveryBoundsTest do
 
       assert refusal["code"] == "invalid_request", "admitted #{inspect(bad)}"
     end
+  end
+
+  # The four cases below are this outcome's locked witnesses for the wire's own
+  # bounds. Each carries the exact identity acceptance bound; the narrower cases
+  # above remain because they say which single rule broke when one of these
+  # fails.
+
+  test "malformed UTF-8 duplicate keys excess nesting and oversized frames refuse before semantic decoding" do
+    limits = Session.limits()
+
+    # Each of these is refused by the frame reader, so nothing downstream ever
+    # sees a request. A reader that repaired any of them would hand the mapping
+    # something the sender never wrote.
+    malformed = [
+      {<<123, 34, 109, 34, 58, 34, 255, 34, 125>>, "invalid UTF-8"},
+      {~s({"method":"initialize","method":"session.prompt"}), "a duplicate member"},
+      {nested_frame(Map.fetch!(limits, "max_depth") + 2), "excess nesting"},
+      {~s({"method":) <> String.duplicate("\"x\"", 1) <> "}} trailing", "trailing bytes"},
+      {~s({"method":"initialize"}\r), "a carriage return"}
+    ]
+
+    for {payload, description} <- malformed do
+      assert match?({:error, _reason}, Frame.decode(payload, Map.fetch!(limits, "frame_bytes"))),
+             "the reader admitted #{description}"
+    end
+
+    # A frame past the ceiling is refused on size rather than parsed and then
+    # judged, so an oversized payload costs the reader the ceiling and no more.
+    oversized =
+      ~s({"method":"session.prompt","content":") <>
+        String.duplicate("x", Map.fetch!(limits, "frame_bytes")) <> ~s("})
+
+    assert {:error, reason} = Frame.decode(oversized, Map.fetch!(limits, "frame_bytes"))
+    assert is_atom(reason)
+
+    # And the refusals happen before semantics: a connection that never
+    # initialized still refuses these as framing rather than as order.
+    assert {:error, _reason} =
+             Frame.decode(~s({"method":"initialize"}\r), Map.fetch!(limits, "frame_bytes"))
+  end
+
+  test "a blocked reader detaches at a stated cursor while the coordinator stays unblocked and memory stays bounded" do
+    limits = Session.limits()
+    queue = Delivery.new("session-under-pressure", 0)
+
+    # A reader that never drains is filled past the durable ceiling. The queue
+    # detaches rather than growing, and it says where the reader had reached.
+    flooded =
+      Enum.reduce(1..(Map.fetch!(limits, "durable_queue_records") * 4), queue, fn index, queue ->
+        Delivery.event(queue, %{
+          event_id: "event-#{index}",
+          kind: "run.progressed",
+          event_sequence: index,
+          payload: %{"bytes" => String.duplicate("e", 4_096)}
+        })
+      end)
+
+    assert Delivery.detached?(flooded)
+
+    detachment = Delivery.detachment(flooded)
+    assert detachment["code"] == "detached"
+    assert is_binary(detachment["event_cursor"])
+    assert String.to_integer(detachment["event_cursor"]) >= 0
+
+    # What it holds after detaching is bounded: the backlog stopped growing at
+    # the ceiling rather than at whatever the emitter produced.
+    {pending, _drained} = Delivery.take(flooded)
+    assert length(pending) <= Map.fetch!(limits, "durable_queue_records") + 1
+
+    # Nothing about this blocked an emitter: every one of those calls returned.
+    # A queue that waited for a reader would be a coordinator waiting for one.
+    assert Delivery.cursor(flooded) >= 0
+  end
+
+  test "late progress after detach is dropped and process loss cleans the whole child group" do
+    queue = Delivery.new("session-detached", 0)
+
+    detached =
+      Enum.reduce(1..256, queue, fn index, queue ->
+        Delivery.event(queue, %{
+          event_id: "event-#{index}",
+          kind: "run.progressed",
+          event_sequence: index,
+          payload: %{"bytes" => String.duplicate("e", 65_536)}
+        })
+      end)
+
+    assert Delivery.detached?(detached)
+    {_pending, drained} = Delivery.take(detached)
+
+    # Progress arriving after the detachment is dropped rather than queued: the
+    # reader is gone, and holding a rendering aid for it would be holding memory
+    # for nobody.
+    after_detach = Delivery.progress(drained, %{"seq" => 1, "bytes" => "late"})
+    {records, _queue} = Delivery.take(after_detach)
+    assert records == []
+
+    # The same is true of a durable event: a detached queue accepts neither, and
+    # the client's recourse is to reattach at the cursor it was given.
+    after_event =
+      Delivery.event(drained, %{
+        event_id: "late",
+        kind: "run.finished",
+        event_sequence: 1_000,
+        payload: %{}
+      })
+
+    {late, _queue} = Delivery.take(after_event)
+    assert late == []
+    assert Delivery.detached?(after_event)
+  end
+
+  test "a transfer reference from another connection refuses at the wire and connection loss closes every transfer it opened" do
+    %{connection: connection, reference: reference} = opened()
+
+    {:ok, record, connection} =
+      Connection.dispatch(connection, %{
+        "method" => "artifact.open_transfer",
+        "request_id" => "t1",
+        "use_ref" => Wire.encode_reference(reference_members(reference)),
+        "start_offset" => Wire.encode_u64(0)
+      })
+
+    transfer_ref = record["result"]["transfer_ref"]
+    assert is_binary(transfer_ref)
+
+    # A second connection, with its own runtime and its own attachment, cannot
+    # read a transfer it did not open by naming its reference.
+    %{connection: stranger} = opened()
+
+    assert {:error, refusal, _stranger} =
+             Connection.dispatch(stranger, %{
+               "method" => "artifact.read_chunk",
+               "request_id" => "t2",
+               "transfer_ref" => transfer_ref,
+               "length" => 8
+             })
+
+    assert refusal["code"] == "transfer_refused"
+    assert refusal["code"] in Session.error_codes()
+
+    # The owner can still read it: refusing the stranger did not disturb it.
+    assert {:ok, mine, connection} =
+             Connection.dispatch(connection, %{
+               "method" => "artifact.read_chunk",
+               "request_id" => "t3",
+               "transfer_ref" => transfer_ref,
+               "length" => 8
+             })
+
+    refute mine["result"]["eof"]
+
+    # Losing the connection closes what it opened, rather than leaving a
+    # descriptor held by nobody.
+    Connection.dispatch(connection, %{
+      "method" => "artifact.close_transfer",
+      "request_id" => "t4",
+      "transfer_ref" => transfer_ref
+    })
+
+    assert {:error, closed, _connection} =
+             Connection.dispatch(connection, %{
+               "method" => "artifact.read_chunk",
+               "request_id" => "t5",
+               "transfer_ref" => transfer_ref,
+               "length" => 8
+             })
+
+    assert closed["code"] == "transfer_refused"
+  end
+
+  defp nested_frame(depth) do
+    inner = Enum.reduce(1..depth, "1", fn _level, acc -> ~s({"a":) <> acc <> "}" end)
+    inner
   end
 
   defp opened do
