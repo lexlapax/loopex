@@ -23,6 +23,9 @@ defmodule Loopex.AppServer.ExternalWorkflowTest do
 
   use ExUnit.Case, async: false
 
+  alias LoopexProtocol.Frame
+  alias LoopexProtocol.Session
+
   @moduletag timeout: 120_000
 
   test "an independent client completes a session over the wire and reports what it saw" do
@@ -207,6 +210,312 @@ defmodule Loopex.AppServer.ExternalWorkflowTest do
              String.starts_with?(target, "node:") or String.starts_with?(target, "./")
            end),
            "unexpected imports: #{inspect(imports)}"
+  end
+
+  test "stdin EOF performs orderly shutdown without cancellation and the pending interaction survives restart" do
+    %{environment: environment, store: store} = durable_environment()
+
+    # First process: drive the session to a question the host policy asked, then
+    # close standard input and nothing else.
+    first = launch(environment)
+    session_id = create_and_prompt(first)
+    interaction = await_record(first, "interaction.requested")
+
+    assert is_binary(interaction["interaction_id"])
+
+    Port.close(first)
+
+    # An orderly shutdown releases the Store's writer claim. A process that had
+    # been killed would leave it held, and the second server below would refuse
+    # to start rather than reporting anything about the session.
+    await_release(store)
+
+    # A second process over the same Store. The session is still there, the
+    # question is still open, and nothing recorded a cancellation: closing a pipe
+    # is not a decision about a run.
+    second = launch(environment)
+
+    resumed =
+      request(second, %{
+        "method" => "session.resume",
+        "request_id" => "rs1",
+        "session_id" => session_id,
+        "command_id" => encode("crs")
+      })
+
+    assert resumed["type"] != "error", "the session did not resume: #{inspect(resumed)}"
+
+    # Recovery re-arms the question as part of resuming, and the attachment's
+    # snapshot is anchored rather than live, so this reattaches until the
+    # recovered state is the state it reports. Waiting is the test's patience,
+    # not a verdict about the session.
+    open_interaction = await_open_interaction(second, session_id)
+
+    assert is_map(open_interaction), "the question did not survive the restart"
+    assert open_interaction["interaction_id"] == interaction["interaction_id"]
+    assert open_interaction["status"] == "pending"
+
+    Port.close(second)
+
+    # The store outlived both processes, which is what made the restart a
+    # restart rather than a new session.
+    assert File.exists?(store)
+  end
+
+  test "session abort is the only deliberate cancellation and an aborted interaction is never pending after restart" do
+    %{environment: environment, store: store} = durable_environment()
+
+    first = launch(environment)
+    session_id = create_and_prompt(first)
+    interaction = await_record(first, "interaction.requested")
+
+    assert is_binary(interaction["interaction_id"])
+
+    # Abort says what EOF does not: end this run. The question goes with it.
+    abort =
+      request(first, %{
+        "method" => "session.abort",
+        "request_id" => "ab",
+        "command_id" => encode("cab")
+      })
+
+    assert abort["status"] == "accepted", "the abort was #{inspect(abort)}"
+
+    Port.close(first)
+    await_release(store)
+
+    # After a restart the question is gone rather than waiting: an aborted
+    # interaction never reappears, which is the difference between cancelling a
+    # run and losing a connection.
+    second = launch(environment)
+
+    resumed =
+      request(second, %{
+        "method" => "session.resume",
+        "request_id" => "rs2",
+        "session_id" => session_id,
+        "command_id" => encode("crs2")
+      })
+
+    assert resumed["type"] != "error", "the session did not resume: #{inspect(resumed)}"
+
+    # The same patience the surviving case uses, spent the other way: the
+    # question is given every chance to come back, and must not. Asserting its
+    # absence immediately would pass before recovery had finished and prove
+    # nothing.
+    recovered = await_open_interaction(second, session_id)
+
+    refute is_map(recovered) and recovered["status"] == "pending",
+           "an aborted question was pending again: #{inspect(recovered)}"
+
+    Port.close(second)
+    assert File.exists?(store)
+  end
+
+  # Concept: one isolated home, workspace and durable Store, shared by every
+  # process a case launches.
+  #
+  # Technical depth: a restart across operating-system processes is only a
+  # restart if the session outlives the process, so the Store is a real local one
+  # on a path both processes are given. It is named in the environment rather
+  # than in a frame, because where a session lives is a launch input.
+  defp durable_environment do
+    root = Path.join(System.tmp_dir!(), "loopex-restart-#{System.unique_integer([:positive])}")
+    File.mkdir_p!(Path.join(root, "home"))
+    File.mkdir_p!(Path.join(root, "workspace"))
+    on_exit(fn -> File.rm_rf(root) end)
+
+    store = Path.join(root, "store.log")
+
+    environment = [
+      {"LOOPEX_HOME", Path.join(root, "home")},
+      {"LOOPEX_WORKSPACE", Path.join(root, "workspace")},
+      {"LOOPEX_WORKFLOW_SCRIPT", "tool"},
+      {"LOOPEX_WORKFLOW_STORE", store},
+      {"ELIXIR_ERL_OPTIONS", "-noinput"}
+    ]
+
+    %{environment: environment, store: store}
+  end
+
+  defp launch(environment) do
+    elixir = System.find_executable("elixir") || flunk("Elixir executable unavailable")
+
+    arguments =
+      ["-pa", ebin(:loopex_protocol), "-pa", ebin(:loopex), "-pa", ebin(:loopex_app_server)] ++
+        ["-pa", ebin(:loopex_store_local), "-pa", ebin(:telemetry)] ++
+        Enum.flat_map(require_paths(), &["-r", &1]) ++
+        ["-e", "Loopex.AppServer.Fixture.serve()"]
+
+    port =
+      Port.open({:spawn_executable, elixir}, [
+        :binary,
+        :exit_status,
+        args: arguments,
+        env: for({key, value} <- environment, do: {to_charlist(key), to_charlist(value)})
+      ])
+
+    initialized = request(port, %{"method" => "initialize", "request_id" => "i1"})
+    assert initialized["type"] == "initialized"
+    port
+  end
+
+  defp create_and_prompt(port) do
+    created =
+      request(port, %{
+        "method" => "session.create",
+        "request_id" => "c1",
+        "command_id" => encode("cs")
+      })
+
+    assert created["status"] == "accepted"
+    session_id = created["session_id"]
+
+    attached = attach(port, session_id)
+    assert attached["type"] == "snapshot"
+
+    prompted =
+      request(port, %{
+        "method" => "session.prompt",
+        "request_id" => "p1",
+        "command_id" => encode("cp"),
+        "content_b64" => Base.url_encode64("write the file", padding: false)
+      })
+
+    assert prompted["status"] == "accepted"
+    session_id
+  end
+
+  defp attach(port, session_id) do
+    request(port, %{
+      "method" => "session.attach",
+      "request_id" => "a#{System.unique_integer([:positive])}",
+      "session_id" => session_id,
+      "replace" => true
+    })
+  end
+
+  # Concept: one request, and the first record that answers it.
+  #
+  # Technical depth: events arrive unasked between an answer and the next
+  # request, so a reader that took the next line would sometimes read one. This
+  # keeps reading until a record carries the identity it asked under.
+  defp request(port, frame) do
+    request_id = Map.fetch!(frame, "request_id")
+    {:ok, encoded} = Frame.encode(negotiation(frame))
+    Port.command(port, IO.iodata_to_binary(encoded))
+    await_reply(port, request_id, System.monotonic_time(:millisecond) + 20_000)
+  end
+
+  # An initialize frame carries both negotiation members; every other frame
+  # carries neither, because a member a method does not name is not an input.
+  defp negotiation(%{"method" => "initialize"} = frame) do
+    frame
+    |> Map.put("generations", [Session.generation()])
+    |> Map.put("capabilities", [])
+  end
+
+  defp negotiation(frame), do: frame
+
+  defp await_reply(port, request_id, deadline) do
+    record = next_record(port, deadline)
+
+    if record["request_id"] == request_id do
+      record
+    else
+      await_reply(port, request_id, deadline)
+    end
+  end
+
+  defp await_record(port, kind, deadline \\ nil) do
+    deadline = deadline || System.monotonic_time(:millisecond) + 20_000
+    record = next_record(port, deadline)
+
+    cond do
+      record["type"] == "event" and record["event"]["kind"] == kind -> record["event"]["data"]
+      true -> await_record(port, kind, deadline)
+    end
+  end
+
+  defp next_record(port, deadline) do
+    remaining = deadline - System.monotonic_time(:millisecond)
+    if remaining <= 0, do: flunk("the server said nothing in time")
+
+    receive do
+      {^port, {:data, chunk}} ->
+        lines = chunk |> String.split("\n", trim: true)
+
+        case lines do
+          [] ->
+            next_record(port, deadline)
+
+          [line | rest] ->
+            Enum.each(rest, fn extra -> send(self(), {port, {:data, extra <> "\n"}}) end)
+            {:ok, record} = Frame.decode(line, 2_097_152)
+            record
+        end
+
+      {^port, {:exit_status, status}} ->
+        flunk("the server exited with #{status}")
+    after
+      remaining -> flunk("the server said nothing in time")
+    end
+  end
+
+  defp encode(value), do: Base.url_encode64(value, padding: false)
+
+  # Concept: the open question a restarted server reports, once it has finished
+  # recovering.
+  #
+  # Technical depth: resuming re-arms a pending interaction, and an attachment's
+  # snapshot is anchored at a cursor rather than following the session, so a
+  # single attach can read the moment before recovery completed. This reattaches
+  # until one reports a question or the patience runs out, and returns whatever
+  # the last snapshot said either way, so a case asserting absence waits exactly
+  # as long as one asserting presence.
+  defp await_open_interaction(port, session_id, deadline \\ nil) do
+    deadline = deadline || System.monotonic_time(:millisecond) + 10_000
+    snapshot = attach(port, session_id)
+
+    assert snapshot["type"] == "snapshot", "the restart could not attach: #{inspect(snapshot)}"
+
+    open_interaction = snapshot["open_interaction"]
+
+    cond do
+      is_map(open_interaction) ->
+        open_interaction
+
+      System.monotonic_time(:millisecond) > deadline ->
+        open_interaction
+
+      true ->
+        Process.sleep(100)
+        await_open_interaction(port, session_id, deadline)
+    end
+  end
+
+  # Concept: waiting until the Store has no writer.
+  #
+  # Technical depth: the local Store claims a writer beside its log and releases
+  # it when the owning process ends. Waiting for that release is how a case knows
+  # the first server actually finished rather than merely stopped being spoken
+  # to, and it is also what makes the second server's start meaningful: a Store
+  # still claimed refuses a second writer outright.
+  defp await_release(store, deadline \\ nil) do
+    deadline = deadline || System.monotonic_time(:millisecond) + 30_000
+    claim = store <> ".writer"
+
+    cond do
+      not File.exists?(claim) ->
+        :released
+
+      System.monotonic_time(:millisecond) > deadline ->
+        flunk("the Store's writer claim was still held after an orderly shutdown")
+
+      true ->
+        Process.sleep(25)
+        await_release(store, deadline)
+    end
   end
 
   defp client(name), do: Path.join([repository_root(), "clients", "node", name])

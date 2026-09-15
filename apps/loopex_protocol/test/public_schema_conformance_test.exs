@@ -29,6 +29,15 @@ defmodule LoopexProtocol.PublicSchemaConformanceTest do
 
   @frame_limit 65_536
 
+  # Concept: vectors the contract calls protocol errors that a codec still
+  # admits, because what is wrong with them is not the framing.
+  #
+  # Technical depth: an identity outside the admitted alphabet is exactly one
+  # well-formed object on one line. Both independent implementations decode it
+  # and both are correct; the refusal belongs to the layer that reads the
+  # identity. Listing it by name keeps the rule above honest rather than broad.
+  @refused_above_the_codec ["request_id_outside_alphabet"]
+
   # Concept: the admitted vectors, as bytes and the value they mean.
   #
   # Technical depth: written as literal frames a client can copy. A vector that
@@ -149,6 +158,117 @@ defmodule LoopexProtocol.PublicSchemaConformanceTest do
       assert :error = Wire.u64(wire), "admitted #{inspect(wire)}"
     end
   end
+
+  test "Elixir and Node clients execute the same positive and negative vectors without the server codec" do
+    node_executable = System.find_executable("node")
+
+    if is_nil(node_executable) do
+      flunk("Node is required for the independent client and was not found")
+    end
+
+    vectors_path =
+      Path.join([
+        Application.app_dir(:loopex_protocol, "priv"),
+        "vectors",
+        "loopex-experimental-1.json"
+      ])
+
+    executor = Path.join([repository_root(), "clients", "node", "vectors.mjs"])
+    assert File.exists?(executor)
+
+    {output, status} =
+      System.cmd(node_executable, [executor, vectors_path], stderr_to_stdout: false)
+
+    assert status == 0, "the Node client failed: #{output}"
+
+    reported = decode_report(output)
+    assert reported["format"] == "loopex.experimental.hex-vectors/1"
+
+    results = reported["results"]
+    assert length(results) >= 30, "only #{length(results)} vectors were executed"
+
+    # The Elixir side reads the same file and decides the same question with its
+    # own decoder. Neither client uses the other's: what makes this conformance
+    # rather than a self-check is that two implementations reached the same
+    # verdict on the same exact bytes.
+    cases = vectors_path |> File.read!() |> decode_cases()
+    assert length(cases) == length(results)
+
+    disagreements =
+      for {%{"id" => id, "raw_hex" => hex, "expect" => expect}, index} <-
+            Enum.with_index(cases),
+          reduce: [] do
+        found ->
+          node_result = Enum.at(results, index)
+          assert node_result["id"] == id, "the two ran the cases in different orders"
+
+          bytes = Base.decode16!(hex, case: :lower)
+          mine = elixir_admits?(bytes)
+
+          # A case whose expectation begins `protocol_error` is refused by
+          # framing alone, with one named exception: a request identity outside
+          # the admitted alphabet is a well-formed frame carrying a value the
+          # layer above refuses, so both codecs admit it and are right to. Naming
+          # the exception is the point — a rule with a silent hole would let a
+          # second one in unnoticed.
+          expected =
+            not String.starts_with?(expect, "protocol_error") or
+              id in @refused_above_the_codec
+
+          cond do
+            mine != node_result["admitted"] ->
+              [{id, :clients_disagree, mine, node_result["admitted"]} | found]
+
+            mine != expected ->
+              [{id, :contract_disagrees, mine, expected} | found]
+
+            true ->
+              found
+          end
+      end
+
+    assert disagreements == [], "vector disagreements: #{inspect(disagreements)}"
+
+    # Both halves carry weight: a run that admitted everything, or refused
+    # everything, would agree with itself and prove nothing.
+    admitted = Enum.count(results, & &1["admitted"])
+    refused = length(results) - admitted
+
+    assert admitted > 0, "no vector was admitted"
+    assert refused > 0, "no vector was refused"
+  end
+
+  # Concept: the vector file's cases and the Node client's report.
+  #
+  # Technical depth: this application's whole point is that it carries no JSON
+  # dependency, so the fixture is read with the decoder under test. That is
+  # admissible here and nowhere else in this case: what is being compared is the
+  # verdict on each `raw_hex`, and the file that holds them is not one of them.
+  defp decode_cases(document), do: document |> JSON.decode!() |> Map.fetch!("cases")
+
+  defp decode_report(output), do: JSON.decode!(output)
+
+  # Concept: whether these exact bytes are one well-formed frame, decided here.
+  #
+  # Technical depth: the same question the Node client answers, asked of this
+  # implementation. The trailing newline is the framing, so it is removed before
+  # the frame itself is decoded, exactly as a transport reading a line would.
+  defp elixir_admits?(bytes) do
+    case bytes do
+      <<>> ->
+        false
+
+      _other ->
+        if String.ends_with?(bytes, "\n") do
+          line = binary_part(bytes, 0, byte_size(bytes) - 1)
+          match?({:ok, _record}, Frame.decode(line, @frame_limit))
+        else
+          false
+        end
+    end
+  end
+
+  defp repository_root, do: File.cwd!() |> Path.join("../..") |> Path.expand()
 
   test "exact source schema client versions and toolchain platform identities are recorded with every result" do
     # What an independent implementation checks itself against is a set of exact
