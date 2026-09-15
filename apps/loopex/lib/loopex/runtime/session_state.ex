@@ -86,6 +86,7 @@ defmodule Loopex.Runtime.SessionState do
   alias Loopex.ArtifactStore
   alias Loopex.Bounds
   alias Loopex.Conversation
+  alias Loopex.Interaction
   alias Loopex.ResourcePack
   alias Loopex.Runtime.ContextAdmission
   alias Loopex.Runtime.ProviderAttempt
@@ -175,6 +176,8 @@ defmodule Loopex.Runtime.SessionState do
           run_resources: map(),
           charged: map(),
           provider_settlement_version: 1 | 2,
+          interactions: map(),
+          open_interaction: binary() | nil,
           expected_events: [map()]
         }
 
@@ -226,6 +229,15 @@ defmodule Loopex.Runtime.SessionState do
             # what lets a recovering owner tell "nobody asked to stop" from
             # "somebody asked and this owner never wrote down what happened".
             aborting: nil,
+            # The durable interactions accepted ADR 0024 adds, keyed by their
+            # own identity, and the identity of the one that is still open. The
+            # serial owner has at most one: `pending` while the question stands,
+            # or `answered` while its policy resolution is still owed. A round
+            # count lives with each interaction rather than beside it, because
+            # the ceiling it enforces belongs to one tool decision and dies with
+            # it.
+            interactions: %{},
+            open_interaction: nil,
             expected_events: []
 
   @typedoc """
@@ -1827,7 +1839,10 @@ defmodule Loopex.Runtime.SessionState do
               "executor_receipt_committed",
               "outcome_unknown_committed",
               "run_terminal_committed",
-              "tool_result_committed"
+              "tool_result_committed",
+              "interaction_requested_v1",
+              "interaction_answer_admitted_v1",
+              "interaction_resolved_v1"
             ] do
     if version == state.journal_version + 1 and owner_epoch == state.owner_epoch and
          incarnation == state.owner_incarnation_id and is_binary(incarnation) and
@@ -2677,7 +2692,207 @@ defmodule Loopex.Runtime.SessionState do
     end
   end
 
+  # Concept: the host asked a bounded question instead of deciding, and the
+  # session retains it before anyone can be told it was asked.
+  #
+  # Technical depth: accepted ADR 0024 gives the serial owner at most one open
+  # interaction, so a request arriving while another is open is invalid history
+  # rather than a second question. The round this creation carries is the count
+  # of answer-then-defer transitions already spent on this tool decision, and a
+  # fourth question is refused here: the ceiling lives in the reducer because it
+  # must survive restart and replay rather than in whichever process happened to
+  # ask.
+  defp apply_internal_record(state, %{kind: "interaction_requested_v1"} = record) do
+    with {:ok, interaction_id} <- record_binary(record, "interaction_id"),
+         {:ok, run_id} <- record_binary(record, "run_id"),
+         {:ok, tool_call_id} <- record_binary(record, "tool_call_id"),
+         true <- run_id == state.active_run_id,
+         true <- is_nil(state.open_interaction),
+         false <- Map.has_key?(state.interactions, interaction_id),
+         {:ok, request} <- interaction_request(record),
+         {:ok, round} <- interaction_round(record),
+         true <- round <= 2,
+         {:ok, expires_at} <- record_integer(record, "expires_at"),
+         {:ok, turn} <- record_integer(record, "turn") do
+      interaction = %{
+        interaction_id: interaction_id,
+        run_id: run_id,
+        turn: turn,
+        tool_call_id: tool_call_id,
+        request: request,
+        status: "pending",
+        round: round,
+        expires_at: expires_at,
+        choice_id: nil
+      }
+
+      {:ok,
+       %{
+         state
+         | interactions: Map.put(state.interactions, interaction_id, interaction),
+           open_interaction: interaction_id
+       }, [interaction_requested_event(state.session_id, interaction)]}
+    else
+      _other -> {:error, :invalid_interaction_transition}
+    end
+  end
+
+  # Concept: an answer is evidence that a choice was offered and taken; it is
+  # never a decision.
+  #
+  # Technical depth: the status becomes `answered`, which means policy
+  # resolution is owed and nothing more. The choice must be one the retained
+  # question offered, so an answer naming anything else is refused here rather
+  # than reaching the host as if it had been asked about it.
+  defp apply_internal_record(state, %{kind: "interaction_answer_admitted_v1"} = record) do
+    with {:ok, interaction_id} <- record_binary(record, "interaction_id"),
+         {:ok, choice_id} <- record_binary(record, "choice_id"),
+         {:ok, command_id} <- record_binary(record, "command_id"),
+         %{status: "pending"} = interaction <- Map.get(state.interactions, interaction_id),
+         true <- state.open_interaction == interaction_id,
+         true <- Interaction.offered?(interaction.request, choice_id) do
+      answered = %{
+        interaction
+        | status: "answered",
+          choice_id: choice_id,
+          command_id: command_id
+      }
+
+      {:ok, %{state | interactions: Map.put(state.interactions, interaction_id, answered)}, []}
+    else
+      _other -> {:error, :invalid_interaction_transition}
+    end
+  end
+
+  # Concept: every open question ends exactly once, and the way it ended is
+  # public.
+  #
+  # Technical depth: an expiry, an abort and a policy result are ordinary
+  # competing transitions ordered at the journal, and the first committed one
+  # wins; a later one finds no open interaction and is invalid history rather
+  # than a reopening. `allowed` is the only resolution a grant may follow, and
+  # it is recorded here as the sibling decision rather than inferred from the
+  # answer.
+  defp apply_internal_record(state, %{kind: "interaction_resolved_v1"} = record) do
+    with {:ok, interaction_id} <- record_binary(record, "interaction_id"),
+         {:ok, resolution} <- interaction_resolution(record),
+         %{} = interaction <- Map.get(state.interactions, interaction_id),
+         true <- interaction.status in ["pending", "answered"],
+         true <- state.open_interaction == interaction_id,
+         true <- resolvable?(interaction, resolution) do
+      resolved = %{interaction | status: resolution_status(resolution)}
+
+      {:ok,
+       %{
+         state
+         | interactions: Map.put(state.interactions, interaction_id, resolved),
+           open_interaction: nil
+       }, [interaction_resolved_event(state.session_id, resolved, resolution, record)]}
+    else
+      _other -> {:error, :invalid_interaction_transition}
+    end
+  end
+
   defp apply_internal_record(_state, _record), do: {:error, :invalid_internal_transition}
+
+  # Concept: only an answered question can resolve as a policy verdict, and only
+  # an open one can expire or be cancelled.
+  defp resolvable?(%{status: "answered"}, resolution) when resolution in ["allowed", "denied"],
+    do: true
+
+  defp resolvable?(%{status: status}, resolution)
+       when status in ["pending", "answered"] and resolution in ["expired", "cancelled"],
+       do: true
+
+  defp resolvable?(_interaction, _resolution), do: false
+
+  defp resolution_status("allowed"), do: "answered"
+  defp resolution_status("denied"), do: "denied"
+  defp resolution_status("expired"), do: "expired"
+  defp resolution_status("cancelled"), do: "cancelled"
+
+  defp interaction_resolution(record) do
+    case Map.get(record, "resolution") do
+      resolution when resolution in ["allowed", "denied", "expired", "cancelled"] ->
+        {:ok, resolution}
+
+      _other ->
+        {:error, :invalid_interaction_resolution}
+    end
+  end
+
+  defp interaction_round(record) do
+    case Map.get(record, "round") do
+      round when is_integer(round) and round >= 0 -> {:ok, round}
+      _other -> {:error, :invalid_interaction_round}
+    end
+  end
+
+  defp record_integer(record, key) do
+    case Map.get(record, key) do
+      value when is_integer(value) -> {:ok, value}
+      _other -> {:error, :invalid_interaction_record}
+    end
+  end
+
+  # Concept: a retained question is validated again on the way in.
+  #
+  # Technical depth: the journal is the only place this comes back from after a
+  # restart, and a row written by another version or edited by hand is not a
+  # question this owner will carry. Validating it here means the shape a
+  # recovered owner acts on is the shape the accepted family admits.
+  defp interaction_request(record) do
+    case Interaction.validate_request(Map.get(record, "interaction_request")) do
+      {:ok, request} -> {:ok, request}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp interaction_requested_event(session_id, interaction) do
+    %{
+      "interaction_id" => interaction.interaction_id,
+      "run_id" => interaction.run_id,
+      "turn" => interaction.turn,
+      "tool_call_id" => interaction.tool_call_id,
+      "prompt" => interaction.request.prompt,
+      "choices" => Enum.map(interaction.request.choices, &%{"id" => &1.id, "label" => &1.label}),
+      "expires_at" => interaction.expires_at,
+      event_id: stable_id("event-interaction-requested", session_id, interaction.interaction_id),
+      kind: "interaction.requested"
+    }
+  end
+
+  # Concept: how a question ended, named as its own public fact.
+  #
+  # Technical depth: expiry and cancellation are distinct kinds rather than a
+  # field of one, because a reader that filters on kind must be able to tell an
+  # unanswered question that ran out of time from one an abort closed. A
+  # resolution carries the choice only where an answer was admitted, and never
+  # carries the host's private reference.
+  defp interaction_resolved_event(session_id, interaction, resolution, record) do
+    %{
+      "interaction_id" => interaction.interaction_id,
+      "run_id" => interaction.run_id,
+      "tool_call_id" => interaction.tool_call_id,
+      "resolution" => resolution,
+      event_id:
+        stable_id("event-interaction-" <> resolution, session_id, interaction.interaction_id),
+      kind: interaction_event_kind(resolution)
+    }
+    |> then(
+      &if(interaction.choice_id, do: Map.put(&1, "choice_id", interaction.choice_id), else: &1)
+    )
+    |> then(fn event ->
+      case Map.get(record, "reason") do
+        reason when is_binary(reason) -> Map.put(event, "reason", reason)
+        _absent -> event
+      end
+    end)
+  end
+
+  defp interaction_event_kind("expired"), do: "interaction.expired"
+  defp interaction_event_kind("cancelled"), do: "interaction.cancelled"
+  defp interaction_event_kind(_resolved), do: "interaction.resolved"
 
   # Concept: only the deadline and an unprovable effect may end a run that is
   # still mid-turn.
