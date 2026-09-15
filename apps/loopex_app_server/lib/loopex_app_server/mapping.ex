@@ -29,10 +29,14 @@ defmodule Loopex.AppServer.Mapping do
   @implemented [
     "session.create",
     "session.inspect",
+    "session.attach",
     "session.prompt",
     "session.follow_up",
     "session.steer",
-    "session.abort"
+    "session.abort",
+    "session.respond_interaction",
+    "resources.catalog",
+    "resources.read"
   ]
 
   @doc """
@@ -91,6 +95,51 @@ defmodule Loopex.AppServer.Mapping do
     end
   end
 
+  def call(%{"method" => "session.attach"} = request, context) do
+    with {:ok, session_id} <- field(request, "session_id", &Wire.session_identity/1),
+         {:ok, options} <- attach_options(request) do
+      case Loopex.attach(context.runtime, session_id, options) do
+        {:ok, attachment} ->
+          {:ok, snapshot_record(request, attachment)}
+
+        {:error, :attachment_conflict} ->
+          {:error, error(request, "attachment_conflict", :attachment_conflict)}
+
+        {:error, reason} ->
+          {:error, error(request, "facade_unavailable", reason)}
+      end
+    end
+  end
+
+  def call(%{"method" => "resources.catalog"} = request, context) do
+    with {:ok, session_id} <- field(request, "session_id", &Wire.session_identity/1) do
+      case Loopex.resource_catalog(context.runtime, session_id) do
+        {:ok, catalog} -> {:ok, result(request, catalog)}
+        {:error, reason} -> {:error, error(request, "facade_unavailable", reason)}
+      end
+    end
+  end
+
+  def call(%{"method" => "resources.read"} = request, context) do
+    with {:ok, session_id} <- field(request, "session_id", &Wire.session_identity/1),
+         {:ok, read} <- resource_request(request) do
+      case Loopex.read_resource(context.runtime, session_id, read) do
+        {:ok, resource} -> {:ok, result(request, read_projection(resource))}
+        {:error, reason} -> {:error, error(request, "facade_unavailable", reason)}
+      end
+    end
+  end
+
+  def call(%{"method" => "session.respond_interaction"} = request, context) do
+    with {:ok, interaction_id} <- field(request, "interaction_id", &Wire.identity/1),
+         {:ok, choice_id} <- answer_choice(request) do
+      admit(request, context, :interaction_answer, [],
+        interaction_id: interaction_id,
+        choice_id: choice_id
+      )
+    end
+  end
+
   def call(%{"method" => "session.prompt"} = request, context) do
     admit(request, context, :prompt, ["content_b64"])
   end
@@ -116,11 +165,14 @@ defmodule Loopex.AppServer.Mapping do
   # admitted through one; a client that has not attached is told that rather
   # than having an attachment opened on its behalf, which would make this layer
   # the owner of a cursor it has no right to.
-  defp admit(request, context, type, extra) do
+  defp admit(request, context, type, extra, fixed \\ []) do
     with :ok <- attached(context),
          {:ok, command_id} <- field(request, "command_id", &Wire.identity/1),
          {:ok, fields} <- command_fields(request, extra) do
-      command = Map.merge(%{type: type, command_id: command_id}, fields)
+      command =
+        %{type: type, command_id: command_id}
+        |> Map.merge(fields)
+        |> Map.merge(Map.new(fixed))
 
       case Loopex.command(context.attachment, command) do
         {:accepted, accepted_id} ->
@@ -156,6 +208,135 @@ defmodule Loopex.AppServer.Mapping do
         end
     end)
   end
+
+  # Concept: what a client may say about where its attachment starts.
+  #
+  # Technical depth: an absent cursor asks for the current tail, which is what a
+  # client with no history of its own wants; a supplied one invokes the facade's
+  # retained-cursor replay. `replace` is explicit because detaching another
+  # attachment is a decision rather than a default.
+  defp attach_options(request) do
+    with {:ok, after_sequence} <- optional_u64_field(request, "after_event_sequence"),
+         {:ok, replace} <- optional_boolean(request, "replace") do
+      options = if replace, do: [replace: true], else: []
+
+      options =
+        if after_sequence,
+          do: [{:after_event_sequence, after_sequence} | options],
+          else: options
+
+      {:ok, options}
+    end
+  end
+
+  defp optional_u64_field(request, name) do
+    case Map.get(request, name) do
+      nil ->
+        {:ok, nil}
+
+      value ->
+        case Wire.u64(value) do
+          {:ok, decoded} -> {:ok, decoded}
+          :error -> {:error, error(request, "invalid_request", :invalid_field)}
+        end
+    end
+  end
+
+  defp optional_boolean(request, name) do
+    case Map.get(request, name) do
+      nil -> {:ok, false}
+      value when is_boolean(value) -> {:ok, value}
+      _other -> {:error, error(request, "invalid_request", :invalid_field)}
+    end
+  end
+
+  # Concept: an answer is exactly one offered choice, named by its identity.
+  #
+  # Technical depth: accepted ADR 0023 fixes the shape as a single-member object
+  # so an answer cannot carry anything else a policy might read. Whether that
+  # choice was offered is the reducer's decision, not this layer's: an answer is
+  # not an allow and never becomes one here.
+  defp answer_choice(request) do
+    case Map.get(request, "answer") do
+      %{"choice_id" => choice_id} = answer when map_size(answer) == 1 ->
+        case Wire.identity(choice_id) do
+          {:ok, decoded} -> {:ok, decoded}
+          :error -> {:error, error(request, "invalid_request", :invalid_field)}
+        end
+
+      _other ->
+        {:error, error(request, "invalid_request", :invalid_answer)}
+    end
+  end
+
+  # Concept: the resource request a client named, in the facade's own terms.
+  #
+  # Technical depth: the four selectors are M3 strings and are passed through
+  # unchanged. A request naming none of them is refused here, because the facade
+  # would otherwise be asked to resolve nothing at all.
+  defp resource_request(request) do
+    fields =
+      for {wire, key} <- [
+            {"manifest_digest", :manifest_digest},
+            {"source_id", :source_id},
+            {"name", :name},
+            {"label", :label}
+          ],
+          value = Map.get(request, wire),
+          is_binary(value),
+          into: %{},
+          do: {key, value}
+
+    if map_size(fields) == 0,
+      do: {:error, error(request, "invalid_request", :invalid_field)},
+      else: {:ok, fields}
+  end
+
+  # Concept: a resource read, with its bytes as bytes.
+  #
+  # Technical depth: content crosses base64url rather than as text, because a
+  # project resource may hold anything and rendering it as a string would
+  # corrupt what is not valid UTF-8.
+  defp read_projection(%{digest: digest, size: size, content: content}) do
+    %{
+      "digest" => digest,
+      "size" => Wire.encode_u64(size),
+      "content_b64" => Wire.encode_bytes(content)
+    }
+  end
+
+  defp read_projection(resource), do: resource
+
+  # Concept: the attachment's authoritative snapshot, at its own cursor.
+  #
+  # Technical depth: the cursor and the snapshot's event sequence are the same
+  # number, reported twice because a client reads one to place later events and
+  # the other as part of the state it was handed. The open interaction is the
+  # view at that same cursor, so a client never receives a question belonging to
+  # a later moment than the snapshot it arrived with.
+  defp snapshot_record(request, attachment) do
+    snapshot = Loopex.snapshot(attachment)
+    cursor = Map.get(snapshot, :event_sequence, 0)
+
+    %{
+      "type" => "snapshot",
+      "request_id" => Map.get(request, "request_id"),
+      "session_id" => Wire.encode_identity(Map.fetch!(snapshot, :session_id)),
+      "event_cursor" => Wire.encode_u64(cursor),
+      "snapshot" => %{
+        "snapshot_revision" => Map.fetch!(snapshot, :snapshot_revision),
+        "session_id" => Wire.encode_identity(Map.fetch!(snapshot, :session_id)),
+        "event_sequence" => Wire.encode_u64(cursor),
+        "active_run_id" => optional_identity(Map.get(snapshot, :active_run_id)),
+        "active_run_phase" => optional_word(Map.get(snapshot, :active_run_phase))
+      },
+      "open_interaction" => Map.get(snapshot, :open_interaction)
+    }
+  end
+
+  defp optional_word(nil), do: nil
+  defp optional_word(value) when is_atom(value), do: Atom.to_string(value)
+  defp optional_word(value) when is_binary(value), do: value
 
   defp attached(%{attachment: attachment}) when not is_nil(attachment), do: :ok
   defp attached(_context), do: {:error, %{"type" => "error", "code" => "not_attached"}}
@@ -262,6 +443,8 @@ defmodule Loopex.AppServer.Mapping do
   defp message(:invalid_field), do: "a field is missing or not in its wire representation"
   defp message(:empty_content), do: "content must not be empty"
   defp message(:invalid_session_options), do: "session_options must be an object"
+  defp message(:invalid_answer), do: "an answer must name exactly one offered choice"
+  defp message(:attachment_conflict), do: "another attachment holds this session"
   defp message(:commit_unknown), do: "the outcome of this command is not yet known"
   defp message(reason) when is_atom(reason), do: Atom.to_string(reason)
   defp message(_reason), do: "the request could not be answered"
