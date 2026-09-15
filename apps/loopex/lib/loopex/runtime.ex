@@ -759,13 +759,19 @@ defmodule Loopex.Runtime do
   # and never the module term, so a recovered owner can tell whether the policy
   # it now holds is the one that asked the question. It is a launch argument: no
   # request, model output or project resource reaches it, which is what keeps
-  # policy selection off the wire. A launch that names none is given the
-  # module's own name at revision zero, so every session has an identity to
-  # compare rather than an absence that compares equal to anything.
+  # policy selection off the wire.
+  #
+  # A host that sets a policy must name its identity. The runtime used to invent
+  # one from the module's own name at revision zero, which reads as harmless and
+  # is not: a host that changes its policy without changing its module keeps the
+  # same invented identity, so a question asked by the old policy is answered
+  # under the new one and the binding that exists to catch exactly that compares
+  # equal. Refusing the launch puts the choice where it belongs, with the host
+  # that knows what changed. A runtime with no policy still needs no identity,
+  # because there is nothing to have changed.
   defp validate_policy_identity(_identity, nil), do: {:ok, nil}
 
-  defp validate_policy_identity(nil, policy),
-    do: {:ok, %{"id" => inspect(policy), "revision" => "0"}}
+  defp validate_policy_identity(nil, _policy), do: {:error, :policy_identity_required}
 
   defp validate_policy_identity(%{"id" => id, "revision" => revision}, _policy)
        when is_binary(id) and is_binary(revision) and byte_size(id) > 0 and

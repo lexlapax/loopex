@@ -106,6 +106,7 @@ defmodule LoopexCli.FoundationWorkflowTest do
         workspace: embedded.workspace,
         runtime_id: "foundation-embedded",
         policy: AllowAll,
+        policy_identity: %{"id" => "loopex.test.policy", "revision" => "1"},
         provider_launch: embedded.provider.options,
         resource_manifest: embedded.manifest
       )
@@ -296,7 +297,7 @@ defmodule LoopexCli.FoundationWorkflowTest do
     current_journal = File.read!(Path.join(new_control, "store.log"))
 
     current_ready =
-      run_compatibility_probe(current_paths, old.probe, "read-v1", new_control, root)
+      run_compatibility_probe(current_paths, old.launching_probe, "read-v1", new_control, root)
 
     assert current_ready =~ "reader=ready model_calls=0 semantic_records=0 public_events=0"
     assert current_ready =~ "session_state_beam=#{Enum.at(current_paths, 1)}/"
@@ -369,11 +370,48 @@ defmodule LoopexCli.FoundationWorkflowTest do
 
     assert Enum.all?(paths, &File.dir?/1)
 
+    probe = Path.join([source, "scripts", "provider-accounting-rollback.exs"])
+
     %{
       build: build,
       paths: paths,
-      probe: Path.join([source, "scripts", "provider-accounting-rollback.exs"])
+      probe: probe,
+      launching_probe: launching_probe(probe, root)
     }
+  end
+
+  # Concept: the same M2 probe, able to start a current runtime.
+  #
+  # Technical depth: the current runtime refuses a launch that names a policy
+  # without naming which policy it is, which the maintainer accepted on
+  # 2026-09-15 as a launch-contract break. An M2-era host therefore cannot start
+  # a current runtime unchanged, and this probe is one. What it exists to prove
+  # is that a current reader still reads genuine M2 history and an old reader
+  # still refuses new records; the launch is scaffolding around that comparison.
+  #
+  # So the copy used against current beams gains the one option the new contract
+  # requires and nothing else, and the original is still what runs against the
+  # M2 beams, where the old contract still holds. The difference between the two
+  # files is exactly the size of the break, which is the honest way to carry it.
+  defp launching_probe(probe, root) do
+    original = File.read!(probe)
+    marker = "        policy: Loopex.AccountingRollbackProbe.Policy,"
+
+    assert String.contains?(original, marker),
+           "the M2 probe no longer launches the way this adaptation expects"
+
+    adapted =
+      String.replace(
+        original,
+        marker,
+        marker <>
+          ~s(\n        policy_identity: %{"id" => "loopex.m2.accounting_rollback_probe", "revision" => "1"},),
+        global: false
+      )
+
+    path = Path.join(root, "provider-accounting-rollback-current.exs")
+    File.write!(path, adapted)
+    path
   end
 
   defp isolated_mix_environment(root, build) do
@@ -520,6 +558,7 @@ defmodule LoopexCli.FoundationWorkflowTest do
           workspace_lease: "m3-resource-workspace"
         },
         policy: AllowAll,
+        policy_identity: %{"id" => "loopex.test.policy", "revision" => "1"},
         tools: [],
         active_tools: [],
         bounds: %{max_turns: 2, token_budget: 10_000, deadline_ms: 30_000},

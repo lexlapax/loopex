@@ -252,7 +252,8 @@ defmodule Loopex.SkillContextTest do
       start_context(
         script: script,
         hostile_metadata: true,
-        policy: Loopex.SkillContextSelectivePolicy
+        policy: Loopex.SkillContextSelectivePolicy,
+        policy_identity: %{"id" => "loopex.test.policy", "revision" => "1"}
       )
 
     for context <- [baseline, hostile] do
@@ -505,6 +506,7 @@ defmodule Loopex.SkillContextTest do
         tools: context.fixture.definitions,
         active_tools: Enum.map(context.fixture.definitions, &Map.fetch!(&1, "tool_id")),
         policy: Loopex.AgentLoopTestPolicy,
+        policy_identity: %{"id" => "loopex.test.policy", "revision" => "1"},
         grant_decision: {:host_policy, :allow}
       )
 
@@ -616,7 +618,8 @@ defmodule Loopex.SkillContextTest do
         project_manifest: project,
         project_decision: project_decision,
         tools: Keyword.get(options, :tools, [Fixture.tool_definition()]),
-        policy: Keyword.get(options, :policy, Loopex.AgentLoopTestPolicy)
+        policy: Keyword.get(options, :policy, Loopex.AgentLoopTestPolicy),
+        policy_identity: %{"id" => "loopex.test.policy", "revision" => "1"}
       )
 
     on_exit(fn -> Fixture.stop(fixture) end)
@@ -722,6 +725,7 @@ defmodule Loopex.SkillContextTest do
         tools: definitions,
         active_tools: Enum.map(definitions, &Map.fetch!(&1, "tool_id")),
         policy: Keyword.fetch!(options, :policy),
+        policy_identity: %{"id" => "loopex.test.policy", "revision" => "1"},
         grant_decision: {:host_policy, :allow}
       )
 

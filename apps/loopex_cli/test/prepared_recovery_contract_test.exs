@@ -3477,6 +3477,7 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
         tools: tools,
         active_tools: Enum.map(tools, &Map.fetch!(&1, "tool_id")),
         policy: Loopex.AgentLoopTestPolicy,
+        policy_identity: %{"id" => "loopex.test.policy", "revision" => "1"},
         grant_decision: {:host_policy, :allow},
         cleanup_grace_ms: @grace,
         progress_to: Keyword.get(options, :progress_to)

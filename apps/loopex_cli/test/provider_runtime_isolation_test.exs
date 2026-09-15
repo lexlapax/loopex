@@ -230,6 +230,7 @@ defmodule LoopexCli.ProviderRuntimeIsolationTest do
         tools: [definition],
         active_tools: [definition["tool_id"]],
         policy: Loopex.AgentLoopTestPolicy,
+        policy_identity: %{"id" => "loopex.test.policy", "revision" => "1"},
         grant_decision: {:host_policy, :allow},
         bounds: %{max_turns: 2, token_budget: 256, deadline_ms: 30_000}
       )

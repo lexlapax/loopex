@@ -393,7 +393,11 @@ defmodule Loopex.AgentLoopFixture do
         policy: Keyword.get(options, :policy, Loopex.AgentLoopTestPolicy),
         # A case about the policy binding surviving a restart needs to name the
         # identity itself; every other case takes the launch default.
-        policy_identity: Keyword.get(options, :policy_identity),
+        policy_identity:
+          Keyword.get(options, :policy_identity, %{
+            "id" => "loopex.test.agent_loop_policy",
+            "revision" => "1"
+          }),
         grant_decision: {:host_policy, :allow}
       )
 

@@ -78,7 +78,8 @@ defmodule LoopexCli.LiveStoreHolderTest do
         runtime_id: "embedder",
         state_root: #{inspect(root)},
         workspace: #{inspect(workspace)},
-        policy: Holder
+        policy: Holder,
+        policy_identity: %{"id" => "loopex.test.policy", "revision" => "1"}
       )
 
     IO.puts("HOLDING")

@@ -5268,6 +5268,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
         tools: fixture.definitions,
         active_tools: Enum.map(fixture.definitions, &Map.fetch!(&1, "tool_id")),
         policy: Keyword.get(options, :policy, Loopex.AgentLoopTestPolicy),
+        policy_identity: %{"id" => "loopex.test.policy", "revision" => "1"},
         grant_decision: {:host_policy, :allow}
       )
 
@@ -5316,6 +5317,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
         tools: fixture.definitions,
         active_tools: Enum.map(fixture.definitions, &Map.fetch!(&1, "tool_id")),
         policy: Keyword.get(options, :policy, Loopex.AgentLoopTestPolicy),
+        policy_identity: %{"id" => "loopex.test.policy", "revision" => "1"},
         grant_decision: {:host_policy, :allow}
       )
 

@@ -2490,7 +2490,8 @@ defmodule LoopexCliTest do
     fixture =
       fixture(
         script: [%{text: "", calls: [call()]}, %{text: "I could not do that"}],
-        policy: LoopexCliTest.DenyingPolicy
+        policy: LoopexCliTest.DenyingPolicy,
+        policy_identity: %{"id" => "loopex.test.policy", "revision" => "1"}
       )
 
     {_session_id, attachment, {:accepted, _id}} = AgentLoopFixture.run(fixture, "write the file")

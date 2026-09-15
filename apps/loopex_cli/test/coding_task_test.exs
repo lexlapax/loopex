@@ -152,7 +152,8 @@ defmodule LoopexCli.CodingTaskTest do
       stack(
         label: "denied",
         script: coding_script(),
-        policy: LoopexCli.CodingTaskTest.NoShellPolicy
+        policy: LoopexCli.CodingTaskTest.NoShellPolicy,
+        policy_identity: %{"id" => "loopex.test.policy", "revision" => "1"}
       )
 
     {_session_id, attachment} = Demonstration.prompt(stack, "edit the notes and verify")

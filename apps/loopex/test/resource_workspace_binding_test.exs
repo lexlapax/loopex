@@ -126,6 +126,7 @@ defmodule Loopex.ResourceWorkspaceBindingTest do
       context_token_budget: 8192,
       resource_manifest: manifest,
       policy: Loopex.AgentLoopTestPolicy,
+      policy_identity: %{"id" => "loopex.test.policy", "revision" => "1"},
       model: %{module: Loopex.AgentLoopTestModel, model: "scripted:test", options: []},
       executor: %{
         module: Loopex.AgentLoopTestExecutor,

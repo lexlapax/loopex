@@ -47,7 +47,8 @@ defmodule Loopex.ToolRegistryTest do
           context_token_budget: 8_192,
           runtime_id: label,
           store: store,
-          policy: Loopex.AgentLoopTestPolicy
+          policy: Loopex.AgentLoopTestPolicy,
+          policy_identity: %{"id" => "loopex.test.policy", "revision" => "1"}
         ] ++ options
       )
 

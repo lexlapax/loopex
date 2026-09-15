@@ -140,6 +140,7 @@ defmodule Loopex.TimerDomainTest do
         tools: definitions,
         active_tools: Enum.map(definitions, &Map.fetch!(&1, "tool_id")),
         policy: Loopex.AgentLoopTestPolicy,
+        policy_identity: %{"id" => "loopex.test.policy", "revision" => "1"},
         grant_decision: {:host_policy, :allow}
       ] ++ Keyword.take(options, [:cleanup_grace_ms])
 

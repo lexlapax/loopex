@@ -550,6 +550,7 @@ defmodule LoopexCli.ContextBudgetCommandsTest do
         tools: [],
         active_tools: [],
         policy: Loopex.AgentLoopTestPolicy,
+        policy_identity: %{"id" => "loopex.test.policy", "revision" => "1"},
         grant_decision: {:host_policy, :allow},
         cleanup_grace_ms: @cleanup_grace,
         context_token_budget: @context_budget

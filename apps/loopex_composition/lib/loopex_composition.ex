@@ -165,7 +165,14 @@ defmodule LoopexComposition do
 
       start_edge(
         Loopex,
-        [runtime_id: runtime_id, store: store, policy: policy, executor: executor, tools: tools] ++
+        [
+          runtime_id: runtime_id,
+          store: store,
+          policy: policy,
+          policy_identity: policy_identity(options, policy),
+          executor: executor,
+          tools: tools
+        ] ++
           [
             model: %{
               module: ReqLLM,
@@ -182,6 +189,24 @@ defmodule LoopexComposition do
 
   # Concept: whether a stale writer marker may be broken is asked for here and
   # decided by the store, so the option is forwarded rather than acted on.
+  # Concept: which policy decided, named by this host rather than invented by the
+  # runtime.
+  #
+  # Technical depth: accepted ADR 0024 compares this identity when a recovered
+  # owner resumes an interaction, so the runtime refuses a launch that names a
+  # policy without one. This reference host names its own: the module an
+  # embedder chose, paired with the build that ran it. The pairing is what makes
+  # the comparison useful, because a build can change what a policy module does
+  # while keeping its name, and a revision that never moved would compare equal
+  # across that change. An embedder that knows better passes its own and this
+  # defers to it.
+  defp policy_identity(_options, nil), do: nil
+
+  defp policy_identity(options, policy) do
+    Keyword.get(options, :policy_identity) ||
+      %{"id" => inspect(policy), "revision" => Loopex.version()}
+  end
+
   defp store_options(root, options),
     do: [
       path: Path.join(root, "store.log"),

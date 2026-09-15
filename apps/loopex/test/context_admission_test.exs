@@ -2748,6 +2748,7 @@ defmodule Loopex.ContextAdmissionTest do
           workspace_lease: "workspace-lease"
         },
         policy: Loopex.ContextAdmissionTestPolicy,
+        policy_identity: %{"id" => "loopex.test.policy", "revision" => "1"},
         bounds: %{max_turns: 8, token_budget: 1_000, deadline_ms: 60_000},
         project_manifest: Keyword.get(options, :project_manifest),
         project_decision: Keyword.get(options, :project_decision),

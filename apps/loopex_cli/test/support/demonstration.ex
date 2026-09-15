@@ -55,6 +55,11 @@ defmodule LoopexCli.Demonstration do
         runtime_id: Keyword.get(options, :runtime_id, "demonstration"),
         store: store,
         policy: Keyword.get(options, :policy, LoopexCli.Policy.AllowAll),
+        policy_identity:
+          Keyword.get(options, :policy_identity, %{
+            "id" => "loopex.cli.demonstration",
+            "revision" => "1"
+          }),
         model: %{
           module: Loopex.AgentLoopTestModel,
           model: "scripted:v1",

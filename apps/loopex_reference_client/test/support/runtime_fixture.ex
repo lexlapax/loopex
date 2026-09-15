@@ -172,6 +172,7 @@ defmodule Loopex.ReferenceClientRuntimeFixture do
       tools: [tool],
       active_tools: ["loopex.demo.write"],
       policy: Loopex.ReferenceClient.Policy.AllowAll,
+      policy_identity: %{"id" => "loopex.reference_client.allow_all", "revision" => "1"},
       grant_decision: {:host_policy, :allow},
       fault_to: Keyword.get(options, :fault_to)
     ]

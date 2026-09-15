@@ -780,6 +780,7 @@ defmodule Loopex.AgentLoopTest do
         tools: definitions,
         active_tools: Enum.map(definitions, &Map.fetch!(&1, "tool_id")),
         policy: Loopex.AgentLoopTestPolicy,
+        policy_identity: %{"id" => "loopex.test.policy", "revision" => "1"},
         grant_decision: {:host_policy, :allow}
       )
 
@@ -1332,7 +1333,8 @@ defmodule Loopex.AgentLoopTest do
       start(
         script: [%{text: "use the threshold", calls: [call]}, %{text: "done", calls: []}],
         tools: [definition],
-        policy: Loopex.AgentLoopUnexpectedPolicy
+        policy: Loopex.AgentLoopUnexpectedPolicy,
+        policy_identity: %{"id" => "loopex.test.policy", "revision" => "1"}
       )
 
     {_session_id, attachment, _reply} = Fixture.run(fixture, "go")
@@ -1527,6 +1529,7 @@ defmodule Loopex.AgentLoopTest do
       start(
         script: [%{text: "ask permission", calls: [call("c1")]}],
         policy: Loopex.AgentLoopBlockingPolicy,
+        policy_identity: %{"id" => "loopex.test.policy", "revision" => "1"},
         bounds_deadline_ms: 500
       )
 
@@ -1567,6 +1570,7 @@ defmodule Loopex.AgentLoopTest do
       start(
         script: [%{text: "ask permission", calls: [call("c1")]}],
         policy: Loopex.AgentLoopBlockingPolicy,
+        policy_identity: %{"id" => "loopex.test.policy", "revision" => "1"},
         bounds_deadline_ms: 500
       )
 
@@ -1684,6 +1688,7 @@ defmodule Loopex.AgentLoopTest do
       start(
         script: [%{text: "ask permission", calls: [call("c1")]}],
         policy: Loopex.AgentLoopBlockingPolicy,
+        policy_identity: %{"id" => "loopex.test.policy", "revision" => "1"},
         bounds_deadline_ms: 60_000
       )
 
@@ -3754,6 +3759,7 @@ defmodule Loopex.AgentLoopTest do
           tools: definitions,
           active_tools: Enum.map(definitions, &Map.fetch!(&1, "tool_id")),
           policy: Loopex.AgentLoopTestPolicy,
+          policy_identity: %{"id" => "loopex.test.policy", "revision" => "1"},
           grant_decision: {:host_policy, :allow}
         ] ++ declared
       )
