@@ -36,7 +36,13 @@ defmodule Loopex.AppServer.Mapping do
     "session.abort",
     "session.respond_interaction",
     "resources.catalog",
-    "resources.read"
+    "resources.read",
+    "artifact.open_transfer",
+    "artifact.read_chunk",
+    "artifact.close_transfer",
+    "session.resume",
+    "session.admit_resources",
+    "session.activate_skill"
   ]
 
   @doc """
@@ -80,6 +86,51 @@ defmodule Loopex.AppServer.Mapping do
         {:error, reason} ->
           {:ok, refused(request, command_id, reason)}
       end
+    end
+  end
+
+  def call(%{"method" => "session.resume"} = request, context) do
+    with {:ok, session_id} <- field(request, "session_id", &Wire.session_identity/1),
+         {:ok, command_id} <- field(request, "command_id", &Wire.identity/1) do
+      case Loopex.resume_session(context.runtime, session_id, command_id: command_id) do
+        {:ok, resumed} ->
+          {:ok,
+           admission(request, command_id, "accepted", %{
+             "session_id" => Wire.encode_identity(resumed)
+           })}
+
+        {:error, :recovery_required} ->
+          {:error, error(request, "recovery_required", :recovery_required)}
+
+        {:error, reason} ->
+          {:ok, refused(request, command_id, reason)}
+      end
+    end
+  end
+
+  def call(%{"method" => "session.admit_resources"} = request, context) do
+    with {:ok, manifest_digest} <- field(request, "manifest_digest", &Wire.digest/1),
+         {:ok, decision} <- resource_decision(request) do
+      admit(request, context, :admit_resources, [],
+        manifest_digest: manifest_digest,
+        decision: decision
+      )
+    end
+  end
+
+  def call(%{"method" => "session.activate_skill"} = request, context) do
+    with {:ok, manifest_digest} <- field(request, "manifest_digest", &Wire.digest/1),
+         {:ok, pack_digest} <- field(request, "pack_digest", &Wire.digest/1),
+         {:ok, source_id} <- required_string(request, "source_id"),
+         {:ok, name} <- required_string(request, "name"),
+         {:ok, labels} <- supporting_labels(request) do
+      admit(request, context, :activate_skill, [],
+        manifest_digest: manifest_digest,
+        pack_digest: pack_digest,
+        source_id: source_id,
+        name: name,
+        supporting_labels: labels
+      )
     end
   end
 
@@ -137,6 +188,49 @@ defmodule Loopex.AppServer.Mapping do
         interaction_id: interaction_id,
         choice_id: choice_id
       )
+    end
+  end
+
+  def call(%{"method" => "artifact.open_transfer"} = request, context) do
+    with :ok <- attached(context),
+         {:ok, open} <- transfer_window(request) do
+      case Loopex.open_artifact_transfer(context.attachment, open) do
+        {:ok, transfer} -> {:ok, result(request, opened(transfer))}
+        {:error, reason} -> {:error, transfer_refused(request, reason)}
+      end
+    end
+  end
+
+  def call(%{"method" => "artifact.read_chunk"} = request, context) do
+    with :ok <- attached(context),
+         {:ok, transfer_ref} <- field(request, "transfer_ref", &Wire.identity/1),
+         {:ok, length} <- chunk_length(request) do
+      case Loopex.read_artifact_chunk(context.attachment, transfer_ref, length) do
+        {:ok, :complete} ->
+          {:ok, result(request, %{"eof" => true})}
+
+        {:ok, chunk} ->
+          {:ok,
+           result(request, %{
+             "offset" => Wire.encode_u64(Map.fetch!(chunk, :offset)),
+             "bytes_b64" => Wire.encode_bytes(Map.fetch!(chunk, :bytes)),
+             "chunk_digest" => Map.fetch!(chunk, :chunk_digest),
+             "eof" => false
+           })}
+
+        {:error, reason} ->
+          {:error, transfer_refused(request, reason)}
+      end
+    end
+  end
+
+  def call(%{"method" => "artifact.close_transfer"} = request, context) do
+    with :ok <- attached(context),
+         {:ok, transfer_ref} <- field(request, "transfer_ref", &Wire.identity/1) do
+      case Loopex.close_artifact_transfer(context.attachment, transfer_ref) do
+        :ok -> {:ok, result(request, %{"closed" => true})}
+        {:error, reason} -> {:error, transfer_refused(request, reason)}
+      end
     end
   end
 
@@ -207,6 +301,128 @@ defmodule Loopex.AppServer.Mapping do
           {:error, refusal} -> {:halt, {:error, refusal}}
         end
     end)
+  end
+
+  # Concept: the window a client asked to read, in the facade's own terms.
+  #
+  # Technical depth: the object and use identities are the compact reference the
+  # client already holds, decoded here and never re-derived. A window length is
+  # optional because an absent one means the rest of the object, which is
+  # different from a length of zero and must stay different.
+  defp transfer_window(request) do
+    with {:ok, reference} <- field(request, "use_ref", &Wire.reference/1),
+         {:ok, start_offset} <- required_u64(request, "start_offset"),
+         {:ok, length} <- optional_u64_field(request, "window_length") do
+      open = %{
+        object: %{
+          digest: reference.digest,
+          size: reference.size,
+          locator: reference.locator
+        },
+        use_locator: reference.use_locator,
+        start: start_offset
+      }
+
+      {:ok, if(length, do: Map.put(open, :length, length), else: open)}
+    end
+  end
+
+  defp required_u64(request, name) do
+    case Wire.u64(Map.get(request, name)) do
+      {:ok, value} -> {:ok, value}
+      :error -> {:error, error(request, "invalid_request", :invalid_field)}
+    end
+  end
+
+  # Concept: how many bytes of object a client wants in one chunk.
+  #
+  # Technical depth: an ordinary integer rather than a decimal string, because
+  # accepted ADR 0023 bounds it by the negotiated raw-chunk ceiling and a value
+  # that small always fits a number both sides round-trip. The runtime bounds it
+  # again regardless of what is asked.
+  defp chunk_length(request) do
+    case Map.get(request, "length") do
+      length when is_integer(length) and length > 0 -> {:ok, length}
+      _other -> {:error, error(request, "invalid_request", :invalid_field)}
+    end
+  end
+
+  # Concept: the opened transfer, as identities and numbers.
+  #
+  # Technical depth: no path, no adapter handle and no private provenance
+  # crosses. The transfer reference is opaque and belongs to the attachment that
+  # opened it; the window bounds and the object digest are what let a client
+  # verify the bytes it later receives.
+  defp opened(transfer) do
+    %{
+      "transfer_ref" => Wire.encode_identity(Map.fetch!(transfer, :transfer_ref)),
+      "total_size" => Wire.encode_u64(Map.fetch!(transfer, :total_size)),
+      "window_start" => Wire.encode_u64(Map.fetch!(transfer, :window_start)),
+      "window_end_exclusive" =>
+        Wire.encode_u64(
+          Map.fetch!(transfer, :window_start) + Map.fetch!(transfer, :window_length)
+        ),
+      "object_digest" => Map.fetch!(transfer, :object_digest)
+    }
+  end
+
+  # Concept: a refused transfer, named by the cause accepted ADR 0028 closed.
+  #
+  # Technical depth: the reason is a core atom from that closed set, so it
+  # carries a cause and never an adapter exception or a storage path. A reason
+  # outside the set is not a cause a client can act on and collapses instead.
+  defp transfer_refused(request, reason) when is_atom(reason) do
+    %{
+      "type" => "error",
+      "code" => "transfer_refused",
+      "reason" => Atom.to_string(reason),
+      "message" => "the transfer was refused",
+      "request_id" => Map.get(request, "request_id")
+    }
+  end
+
+  defp transfer_refused(request, _reason), do: error(request, "internal_failure", :unknown)
+
+  # Concept: the operator's decision about a project manifest, or none.
+  #
+  # Technical depth: accepted ADR 0023 admits `null` as well as the seven-field
+  # M3 decision, because admitting resources without deciding anything about
+  # them is a real operator action. What is present is passed through unchanged:
+  # the decision is part of the durable command identity, so altering a member
+  # here would change what the operator approved.
+  defp resource_decision(request) do
+    case Map.get(request, "decision") do
+      nil -> {:ok, nil}
+      decision when is_map(decision) -> {:ok, decision}
+      _other -> {:error, error(request, "invalid_request", :invalid_field)}
+    end
+  end
+
+  defp required_string(request, name) do
+    case Map.get(request, name) do
+      value when is_binary(value) and value != "" -> {:ok, value}
+      _other -> {:error, error(request, "invalid_request", :invalid_field)}
+    end
+  end
+
+  # Concept: the ordered labels a skill activation carries.
+  #
+  # Technical depth: order is part of the command, so the list is passed
+  # through as given rather than sorted or deduplicated. An absent list is an
+  # empty one, which is an activation that supports nothing further.
+  defp supporting_labels(request) do
+    case Map.get(request, "supporting_labels") do
+      nil ->
+        {:ok, []}
+
+      labels when is_list(labels) ->
+        if Enum.all?(labels, &is_binary/1),
+          do: {:ok, labels},
+          else: {:error, error(request, "invalid_request", :invalid_field)}
+
+      _other ->
+        {:error, error(request, "invalid_request", :invalid_field)}
+    end
   end
 
   # Concept: what a client may say about where its attachment starts.
@@ -445,6 +661,8 @@ defmodule Loopex.AppServer.Mapping do
   defp message(:invalid_session_options), do: "session_options must be an object"
   defp message(:invalid_answer), do: "an answer must name exactly one offered choice"
   defp message(:attachment_conflict), do: "another attachment holds this session"
+  defp message(:unknown), do: "the request could not be answered"
+  defp message(:recovery_required), do: "this session cannot be resumed without recovery"
   defp message(:commit_unknown), do: "the outcome of this command is not yet known"
   defp message(reason) when is_atom(reason), do: Atom.to_string(reason)
   defp message(_reason), do: "the request could not be answered"

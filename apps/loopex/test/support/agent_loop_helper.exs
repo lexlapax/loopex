@@ -384,6 +384,10 @@ defmodule Loopex.AgentLoopFixture do
         project_manifest: Keyword.get(options, :project_manifest),
         project_decision: Keyword.get(options, :project_decision),
         resource_manifest: Keyword.get(options, :resource_manifest),
+        # A case about ADR 0028 transfers needs the runtime composed with a
+        # store that implements them; every other case leaves it absent, which
+        # is what makes the unsupported refusal reachable.
+        artifact_store: Keyword.get(options, :artifact_store),
         tools: definitions,
         active_tools: Enum.map(definitions, &Map.fetch!(&1, "tool_id")),
         policy: Keyword.get(options, :policy, Loopex.AgentLoopTestPolicy),

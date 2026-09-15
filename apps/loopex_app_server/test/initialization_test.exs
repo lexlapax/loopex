@@ -101,21 +101,26 @@ defmodule Loopex.AppServer.InitializationTest do
     assert refusal["request_id"] == "r2"
   end
 
-  test "a named method this build has not implemented is unsupported, not invented" do
+  test "every method the generation names is one this build answers" do
+    for method <- Session.methods() do
+      assert Loopex.AppServer.Mapping.implemented?(method),
+             "#{method} is named by the generation but not answered"
+    end
+  end
+
+  test "a request refused before a facade is an error, never a fabricated admission" do
     assert {:ok, _reply, connection} = initialize([Session.generation()])
 
     assert {:error, refusal, _connection} =
              Connection.dispatch(connection, %{
                "method" => "artifact.open_transfer",
                "request_id" => "r2",
-               "use_ref" => "dXNl"
+               "use_ref" => "not base64url!"
              })
 
-    assert refusal["code"] == "unsupported_method"
-
-    # It is refused, never answered with a fabricated admission.
-    refute refusal["type"] == "admission"
     assert refusal["type"] == "error"
+    refute refusal["type"] == "admission"
+    refute Map.has_key?(refusal, "status")
   end
 
   test "a connection with no runtime says so rather than pretending to answer" do

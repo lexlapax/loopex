@@ -157,6 +157,86 @@ defmodule LoopexProtocol.Wire do
   @spec encode_bytes(binary()) :: binary()
   def encode_bytes(value) when is_binary(value), do: Base.url_encode64(value, padding: false)
 
+  @reference_bytes 8_192
+
+  @doc """
+  ## Concept
+
+  Encodes the compact artifact reference a client holds as one opaque value.
+
+  ## Technical depth
+
+  A client receives a reference in an event and hands it back to open a
+  transfer. Accepted ADR 0023 makes that one opaque identity rather than four
+  fields, so the client cannot assemble a reference it was never given by
+  mixing parts of two. The bytes inside are this protocol's own bounded JSON,
+  which is what makes the value safe to decode again: nothing here ever calls
+  the term decoder on something a client sent.
+  """
+  @spec encode_reference(map()) :: binary()
+  def encode_reference(%{} = reference) do
+    {:ok, encoded} =
+      reference
+      |> normalize_reference()
+      |> LoopexProtocol.Frame.encode()
+
+    encoded
+    |> IO.iodata_to_binary()
+    |> String.trim_trailing("\n")
+    |> encode_bytes()
+  end
+
+  # Concept: the four members a reference carries, in their wire forms.
+  #
+  # Technical depth: a compact reference holds its size as an integer, and this
+  # protocol carries every size as a decimal string. Converting here rather than
+  # asking each caller to means the value inside an opaque identity obeys the
+  # same rules as a value beside it, which is what lets the decoder validate it
+  # with the same functions.
+  defp normalize_reference(reference) do
+    for key <- ["digest", "size", "locator", "use_locator"],
+        value = reference_member(reference, key),
+        into: %{} do
+      case key do
+        "size" when is_integer(value) -> {key, encode_u64(value)}
+        _other -> {key, value}
+      end
+    end
+  end
+
+  defp reference_member(reference, key) do
+    case Map.fetch(reference, key) do
+      {:ok, value} -> value
+      :error -> Map.get(reference, String.to_existing_atom(key))
+    end
+  end
+
+  @doc """
+  ## Concept
+
+  Decodes an opaque artifact reference back to its members.
+
+  ## Technical depth
+
+  Bounded twice: once by the base64url decode and again by the frame decoder's
+  own limits, with a ceiling far below a frame's because a reference is a handful
+  of short members. A value that decodes but does not carry the exact members is
+  refused, so a client cannot open a transfer with half a reference.
+  """
+  @spec reference(term()) :: {:ok, map()} | :error
+  def reference(value) do
+    with {:ok, payload} <- bytes(value, @reference_bytes),
+         {:ok, decoded} <- LoopexProtocol.Frame.decode(payload, @reference_bytes),
+         {:ok, digest} <- digest(Map.get(decoded, "digest")),
+         {:ok, size} <- u64(Map.get(decoded, "size")),
+         locator when is_binary(locator) <- Map.get(decoded, "locator"),
+         "use:" <> _rest = use_locator <- Map.get(decoded, "use_locator") do
+      {:ok, %{digest: digest, size: size, locator: locator, use_locator: use_locator}}
+    else
+      _other -> :error
+    end
+  end
+
   defp canonical_decimal?(""), do: false
   defp canonical_decimal?("0"), do: true
   defp canonical_decimal?(<<?0, _rest::binary>>), do: false
