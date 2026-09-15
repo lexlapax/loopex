@@ -192,6 +192,47 @@ defmodule Loopex.ArtifactStore do
   """
   @type store :: %{required(:module) => module(), required(:handle) => term()}
 
+  @typedoc """
+  ## Concept
+
+  One authorized, verified transfer of one immutable artifact object, and the
+  window of it a caller asked for.
+
+  ## Technical depth
+
+  Accepted ADR 0028 verifies the whole object once at open and emits chunks
+  afterwards, so the digest this carries covers every byte a later chunk can
+  contain. `window_start` and `window_length` are fixed at open: a chunk never
+  crosses the window, and the window cannot be moved afterwards. The reference
+  is opaque and belongs to the attachment that opened it.
+  """
+  @type transfer :: %{
+          required(:transfer_ref) => binary(),
+          required(:object) => artifact_object(),
+          required(:use_locator) => binary(),
+          required(:total_size) => non_neg_integer(),
+          required(:window_start) => non_neg_integer(),
+          required(:window_length) => non_neg_integer(),
+          required(:object_digest) => binary()
+        }
+
+  @typedoc """
+  ## Concept
+
+  One bounded piece of a transfer, with its own digest.
+
+  ## Technical depth
+
+  The chunk digest covers exactly the bytes in this chunk, and is distinct from
+  the object digest the open response carried; a reader can check what it just
+  received without holding the whole object to check the one that covers it.
+  """
+  @type chunk :: %{
+          required(:offset) => non_neg_integer(),
+          required(:bytes) => binary(),
+          required(:chunk_digest) => binary()
+        }
+
   @callback put(handle :: term(), bytes :: binary(), normalized_use()) ::
               {:ok, artifact_reference()} | {:error, term()}
 
@@ -203,6 +244,29 @@ defmodule Loopex.ArtifactStore do
 
   @callback describe(handle :: term(), use_locator :: binary()) ::
               {:ok, artifact_use()} | {:error, term()}
+
+  @callback open_transfer(
+              handle :: term(),
+              artifact_object(),
+              use_locator :: binary(),
+              window :: %{
+                required(:start) => non_neg_integer(),
+                optional(:length) => non_neg_integer()
+              }
+            ) :: {:ok, transfer()} | {:error, term()}
+
+  @callback read_transfer(handle :: term(), transfer(), length :: pos_integer()) ::
+              {:ok, chunk()} | {:ok, :complete} | {:error, term()}
+
+  @callback close_transfer(handle :: term(), transfer()) :: :ok | {:error, term()}
+
+  # Concept: the transfer triple is a capability, not a requirement.
+  #
+  # Technical depth: accepted ADR 0028 narrowly extends ADR 0015's callback
+  # inventory rather than replacing it, so an adapter written before this
+  # decision stays conformant and the facade refuses the query family as
+  # unsupported rather than crashing on a missing function.
+  @optional_callbacks open_transfer: 4, read_transfer: 3, close_transfer: 2
 
   @doc """
   ## Concept
@@ -234,6 +298,59 @@ defmodule Loopex.ArtifactStore do
   """
   @spec max_use_bytes() :: pos_integer()
   def max_use_bytes, do: @max_use_bytes
+
+  @doc """
+  ## Concept
+
+  The exact ceilings a bounded transfer runs under.
+
+  ## Technical depth
+
+  The maintainer selected this profile on 2026-09-13 and accepted ADR 0028
+  carries it: an object above `object_bytes` refuses before any transfer
+  exists; an open has `open_deadline_ms` and `open_work_bytes` of storage work
+  counting source reads and snapshot writes; a read emits at most `chunk_bytes`
+  of object bytes under `read_deadline_ms`; a transfer expires
+  `lifetime_ms` after a successful open; and at most `per_attachment` transfers
+  are live on one attachment and `per_runtime` on one runtime. They are safety
+  ceilings rather than a measured service-level promise.
+  """
+  @spec transfer_limits() :: %{atom() => pos_integer()}
+  def transfer_limits do
+    %{
+      object_bytes: 67_108_864,
+      open_deadline_ms: 60_000,
+      open_work_bytes: 134_217_728,
+      chunk_bytes: 32_768,
+      read_deadline_ms: 5_000,
+      lifetime_ms: 600_000,
+      per_attachment: 2,
+      per_runtime: 4
+    }
+  end
+
+  @doc """
+  ## Concept
+
+  Whether a composed store implements the bounded transfer triple.
+
+  ## Technical depth
+
+  Asked of the module rather than assumed, because a legacy adapter that
+  predates accepted ADR 0028 is still conformant; the facade turns a missing
+  capability into a bounded refusal instead of a crash. All three callbacks
+  must be present: an adapter that opened a transfer it could not read or
+  release would strand a descriptor for its lifetime.
+  """
+  @spec supports_transfer?(module()) :: boolean()
+  def supports_transfer?(module) when is_atom(module) do
+    Code.ensure_loaded?(module) and
+      function_exported?(module, :open_transfer, 4) and
+      function_exported?(module, :read_transfer, 3) and
+      function_exported?(module, :close_transfer, 2)
+  end
+
+  def supports_transfer?(_module), do: false
 
   @doc """
   ## Concept
