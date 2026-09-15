@@ -148,12 +148,12 @@ and can print neither `CAPTURE` nor `M1 gate GREEN`.
 
 | SHA-256 | Path |
 | --- | --- |
-| `c7a952e2da02ecc23e3f0b3e71c82a6e4cd0e6d038d60851aeb309f583cfa8d9` | `scripts/check-m1-gate.sh` |
+| `9f13f6e44c3baf0ced53711518f4f6493dc9b271bbb3401f13c78e561761f309` | `scripts/check-m1-gate.sh` |
 | `4bba03d218eee656991444a3c22c8753bfef1ab86f688036a4440048752f48bd` | `scripts/m1-gate-launcher.escript` |
 | `53d8219bdee584a3849a85a1102e405520d5dd0dfbe21d259434bc9edfc5fcc0` | `scripts/m1-exunit-runner.exs` |
 | `572d9fac0b4be1fb792db8f5f8ff3b760e588c9e35f4cb1850c03f73c2f1f661` | `scripts/m1-evidence-verifier.exs` |
 | `2c62019cde03e118a2b5ff23ba24a5ee50d8f118172ae4d71ce6bed2f7be1011` | `apps/loopex/lib/mix/tasks/loopex.deps_budget.ex` |
-| `82b9a8f853264abeaf4a6c3afda5988c7fa848287d6061f77633782ca6a9d3d2` | `apps/loopex/test/m1_gate_evidence_test.exs` |
+| `61edf8d5ca5516fe4d0ec96cd82079d8736b0fdb22175b9bbe49da5bccb35786` | `apps/loopex/test/m1_gate_evidence_test.exs` |
 | `c36253cff3d74ddff1b330695edbc4bde0a4565c1412c67c1293b2fb7ca6129b` | `apps/loopex/test/m1_exunit_runner_test.exs` |
 | `bc4d5544229c3b15414a8ad9ac8ce8e5daf2e29d35a98ab868af1741fd9b44d4` | `apps/loopex/test/deps_budget_test.exs` |
 | `fea095ecec784a4440b872ad5f53a8da2cb4e13e43b6f05add5cfd75bb352879` | `.tool-versions` |
@@ -1422,3 +1422,58 @@ proposal records no acceptance and grants no waiver, closure or release.
 | --- | --- | --- |
 | 13 | `scripts/check-m1-gate.sh` | `c7a952e2da02ecc23e3f0b3e71c82a6e4cd0e6d038d60851aeb309f583cfa8d9` |
 | 13 | `apps/loopex/test/m1_gate_evidence_test.exs` | `82b9a8f853264abeaf4a6c3afda5988c7fa848287d6061f77633782ca6a9d3d2` |
+
+<a id="amendment-14"></a>
+## Amendment 14 — Give the fixture the account's own home
+
+**Acceptance: OUTSTANDING.** Closed M1 adds gate generation 14 under
+`amendment-transaction-v2`. Its historical Acceptance, Closure and prior
+generation rows remain unchanged. The new row carries this gate's digest and
+leaves authority, evidence and candidate unset until exact-proposal acceptance.
+
+Generation 13's witness spawns this gate's own fixture role to observe the path
+it would build. It passed that child the path under test and let every other
+variable be inherited, including `HOME`, which inside the gate is the isolated
+home this gate creates rather than the account's. The outer preflight refuses a
+supplied `HOME` whose physical identity is not the operating-system account
+home, so the child failed before it could report a path, and the case failed
+inside the gate it was written to protect. Generation 13's own text records that
+the corrected case passed on both hosts; that run was direct, and the isolated
+home it would meet as a protected selector is exactly what it did not have.
+
+The Linux current capture lane refused on this case at
+`d1382ea02607cd01dd9d029724393679a853c963`, which is how it was found. The
+message naming the cause does not appear in the lane's output, because a
+refused selector is reported to the gate as a summary and its failure text is
+not retained; the cause was recovered by reproducing the selector under the
+gate's own environment by hand. That retention gap is named here rather than
+repaired, because repairing it changes a different bound artifact and is its own
+decision.
+
+This proposal changes only the bound corpus and the embedded corpus digest in
+this holder's gate script. The case now reads the account home from the passwd
+database and passes it to the fixture child beside the path, so the child is
+admitted on any host whose isolated home differs from the account's, which is
+every host this gate runs on. Nothing else about the case changes: it still
+supplies the incoming path explicitly, computes its expectation from the same
+list, asserts the established order without a shadow and the reordered order
+with one, and refuses a path that carries no complete toolchain. Every selector,
+minimum, name, exclusion, real-provider path, credential rule and exit predicate
+keeps its meaning. No M1 outcome or scope changes and no lifecycle state
+reopens.
+
+Binding validation, bootstrap and every inherited gate that invokes them are red
+at this proposal for its pending generation row, exactly as at any v2 proposal.
+Binding-independent checks are proved directly: the full bound corpus passes on
+the current pair on Darwin, and the repaired case passes on Linux under the
+gate's own isolated home, which is the condition that refused it.
+
+Only explicit maintainer acceptance of the actual A revision authorizes R. Its
+immediate child completes generation 14 with exact A and adds one fresh
+acceptance disposition; R changes no bound artifact or gate byte. This proposal
+records no acceptance and grants no waiver, closure or release.
+
+| Generation | Artifact | Rebound SHA-256 |
+| --- | --- | --- |
+| 14 | `apps/loopex/test/m1_gate_evidence_test.exs` | `61edf8d5ca5516fe4d0ec96cd82079d8736b0fdb22175b9bbe49da5bccb35786` |
+| 14 | `scripts/check-m1-gate.sh` | `9f13f6e44c3baf0ced53711518f4f6493dc9b271bbb3401f13c78e561761f309` |

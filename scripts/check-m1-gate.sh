@@ -1364,7 +1364,7 @@ require_bound_artifact apps/loopex/lib/mix/tasks/loopex.deps_budget.ex \
   2c62019cde03e118a2b5ff23ba24a5ee50d8f118172ae4d71ce6bed2f7be1011 \
   "bound dependency-direction reader"
 require_bound_artifact apps/loopex/test/m1_gate_evidence_test.exs \
-  82b9a8f853264abeaf4a6c3afda5988c7fa848287d6061f77633782ca6a9d3d2 \
+  61edf8d5ca5516fe4d0ec96cd82079d8736b0fdb22175b9bbe49da5bccb35786 \
   "bound M1 mechanics corpus"
 require_bound_artifact apps/loopex/test/m1_exunit_runner_test.exs \
   c36253cff3d74ddff1b330695edbc4bde0a4565c1412c67c1293b2fb7ca6129b \

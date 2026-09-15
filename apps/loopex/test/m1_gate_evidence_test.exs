@@ -126,6 +126,14 @@ defmodule Loopex.M1GateEvidenceTest do
     )
   end
 
+  # The home the passwd database gives this account, which is what the gate
+  # compares a supplied HOME against. Read here rather than taken from the
+  # environment, because a selector runs under the gate's isolated home.
+  defp account_home do
+    {home, 0} = System.cmd("sh", ["-c", "eval echo ~$(id -un)"], stderr_to_stdout: true)
+    String.trim(home)
+  end
+
   defp run_gate_without_input(args, env, root \\ repo_root()) do
     System.cmd(
       "/bin/bash",
@@ -956,9 +964,19 @@ defmodule Loopex.M1GateEvidenceTest do
         Enum.any?(tools, &carries?.(directory, &1))
       end)
 
+    # Concept: the fixture child is given the account's own home, not the one
+    # this case inherited.
+    #
+    # Technical depth: the gate refuses a supplied HOME whose physical identity
+    # is not the operating-system account home, and every selector runs inside
+    # the gate's isolated home, so a child that inherited it was refused before
+    # it could report a path. The account home is read from the passwd database
+    # rather than from the environment, which is what makes that true on a host
+    # where the two differ.
     assert {output, 0} =
              run_gate_without_input(["--environment-fixture"], [
-               {"PATH", Enum.join(incoming, ":")}
+               {"PATH", Enum.join(incoming, ":")},
+               {"HOME", account_home()}
              ])
 
     assert output =~ "M1 environment preflight OK"
