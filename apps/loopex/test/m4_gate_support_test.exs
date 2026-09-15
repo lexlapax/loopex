@@ -19,6 +19,62 @@ defmodule Loopex.M4GateSupportTest do
     "noise\nLOOPEX_EXUNIT_REPORT nonce=n1 selector=#{path} seed=3107 executed=1 digest=#{@digest}#{extra}\n"
   end
 
+  # Concept: a real-provider identity that is not a real identity is refused.
+  #
+  # Concept, continued: the danger this closes is not a malformed report but a
+  # well-formed one that says nothing. A lane can be wired, run, and emit every
+  # field the grammar demands while those fields carry placeholders, and the
+  # evidence would then record that a real provider was exercised when no such
+  # thing happened.
+  #
+  # Technical depth: accepted M4 requires retained evidence to refuse incomplete
+  # or stale identities, and the support script enforces three separable rules
+  # that nothing exercised until now: a placeholder word standing in for an
+  # identity, a byte outside printable ASCII inside one, and a timestamp that is
+  # not an exact instant. Each is asserted on its own, because a single case
+  # covering all three would pass while two of the rules were missing.
+  test "a real report refuses placeholder, unprintable and inexact identities" do
+    real = fn tail ->
+      assert_raise ArgumentError, fn ->
+        Support.verify_report(@root, report(@real, " " <> tail), "n1", @real, 1, true)
+      end
+    end
+
+    # A placeholder is a field that parses and means nothing.
+    for placeholder <- ~w(tbd TODO pending Unknown -) do
+      real.(String.replace(@real_tail, "provider=anthropic", "provider=" <> placeholder))
+    end
+
+    # An identity is printable ASCII, so a tab or a control byte inside one is
+    # not a name a later reader can compare.
+    real.(String.replace(@real_tail, "executor_identity=local", "executor_identity=lo\tcal"))
+    real.(String.replace(@real_tail, "tool_identity=write", "tool_identity=wr\x7fite"))
+
+    # An empty field is the emptiest placeholder of all.
+    real.(String.replace(@real_tail, "model=claude-haiku-4-5", "model="))
+
+    # `recorded` is an exact instant, and an offset that is not zero names a
+    # moment whose ordering against another lane's evidence is ambiguous.
+    real.(String.replace(@real_tail, "recorded=2026-09-11T00:00:00Z", "recorded=2026-09-11"))
+
+    real.(
+      String.replace(@real_tail, "recorded=2026-09-11T00:00:00Z", "recorded=2026-09-11T00:00:00")
+    )
+
+    real.(
+      String.replace(
+        @real_tail,
+        "recorded=2026-09-11T00:00:00Z",
+        "recorded=2026-09-11T00:00:00+01:00"
+      )
+    )
+
+    # The unaltered tail is still admitted, so each refusal above is the field
+    # it names rather than the shape of the report.
+    assert :ok =
+             Support.verify_report(@root, report(@real, " " <> @real_tail), "n1", @real, 1, true)
+  end
+
   # Concept: the authoritative report is judged once against its complete
   # schema for its kind; every incomplete or foreign shape is refused.
   test "authoritative reports reject missing duplicate reordered wrong kind and stale version fields" do
