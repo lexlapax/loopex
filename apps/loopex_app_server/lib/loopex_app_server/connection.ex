@@ -1,0 +1,222 @@
+defmodule Loopex.AppServer.Connection do
+  @moduledoc """
+  ## Concept
+
+  One connection's protocol state. Before a client and server have agreed on a
+  generation nothing else is answered, and they agree exactly once: a second
+  attempt is refused whether the first succeeded or failed, and a refused
+  connection stays refused for as long as it lives.
+
+  ## Technical depth
+
+  Accepted ADR 0023 makes initialization mandatory, exact and one-time, and this
+  is where that is enforced rather than assumed by the transport above it. The
+  state is plain data with no process of its own, so the same rules hold for a
+  stdio process, a test driving frames directly, and any later transport: a
+  transport that forgot to check would have to reimplement the refusals instead
+  of inheriting them.
+
+  Nothing here reaches a runtime. A request that survives these rules is handed
+  on with its generation settled; a request that does not never becomes durable
+  work, which is the property that makes a refused initialization safe to leave
+  a client holding.
+  """
+
+  alias LoopexProtocol.Session
+
+  @enforce_keys [:state]
+  defstruct state: :uninitialized, generation: nil
+
+  @type t :: %__MODULE__{
+          state: :uninitialized | :initialized | :refused,
+          generation: binary() | nil
+        }
+
+  @doc """
+  ## Concept
+
+  A connection that has negotiated nothing yet.
+  """
+  @spec new() :: t()
+  def new, do: %__MODULE__{state: :uninitialized}
+
+  @doc """
+  ## Concept
+
+  Whether this connection has settled on a generation.
+  """
+  @spec initialized?(t()) :: boolean()
+  def initialized?(%__MODULE__{state: state}), do: state == :initialized
+
+  @doc """
+  ## Concept
+
+  The generation this connection speaks, once it has one.
+  """
+  @spec generation(t()) :: binary() | nil
+  def generation(%__MODULE__{generation: generation}), do: generation
+
+  @doc """
+  ## Concept
+
+  Handles one `initialize` request.
+
+  ## Technical depth
+
+  The one negotiation this connection gets. A success fixes the generation for
+  the connection's life; a refusal leaves it uninitialized and spends the
+  attempt, because a client allowed to retry could walk a server's list until it
+  found something, which is the negotiation this decision forbids. Both
+  outcomes return the connection they produced, so a caller cannot answer a
+  second attempt by forgetting the first.
+  """
+  @spec initialize(t(), map()) :: {:ok, map(), t()} | {:error, map(), t()}
+  def initialize(%__MODULE__{state: :uninitialized} = connection, request) do
+    with {:ok, request_id} <- request_id(request),
+         {:ok, generations} <- generations(request),
+         {:ok, capabilities} <- capabilities(request) do
+      case Session.negotiate(generations, capabilities) do
+        {:ok, reply} ->
+          {:ok, Map.put(reply, "request_id", request_id),
+           %{connection | state: :initialized, generation: reply["selected_generation"]}}
+
+        {:error, :unsupported_generation} ->
+          {:error,
+           error(
+             "unsupported_generation",
+             "no offered protocol generation is supported by this server",
+             request_id
+           ), %{connection | state: :refused}}
+      end
+    else
+      {:error, reason, request_id} ->
+        {:error, error("invalid_request", reason, request_id), connection}
+    end
+  end
+
+  def initialize(%__MODULE__{} = connection, request) do
+    {:error,
+     error(
+       "already_initialized",
+       "this connection has already spent its one initialization",
+       safe_request_id(request)
+     ), connection}
+  end
+
+  @doc """
+  ## Concept
+
+  Handles one request that is not `initialize`.
+
+  ## Technical depth
+
+  Order first, then existence. A method this generation does not name is
+  refused as unsupported only once the connection is entitled to be asking at
+  all, so a client that has not initialized learns that rather than learning
+  which method names exist. Neither refusal reaches a facade, so neither
+  creates durable work.
+  """
+  @spec dispatch(t(), map()) :: {:error, map(), t()}
+  def dispatch(%__MODULE__{state: :initialized} = connection, request) do
+    request_id = safe_request_id(request)
+
+    case Map.get(request, "method") do
+      method when is_binary(method) ->
+        if method in Session.methods() do
+          {:error,
+           error(
+             "unsupported_method",
+             "this build does not yet answer that method",
+             request_id
+           ), connection}
+        else
+          {:error, error("unsupported_method", "no such method in this generation", request_id),
+           connection}
+        end
+
+      _absent ->
+        {:error, error("invalid_request", "method must be a string", request_id), connection}
+    end
+  end
+
+  def dispatch(%__MODULE__{} = connection, request) do
+    {:error,
+     error(
+       "not_initialized",
+       "this connection must initialize before anything else",
+       safe_request_id(request)
+     ), connection}
+  end
+
+  # Concept: the request identity, which must be safe before it correlates
+  # anything.
+  #
+  # Technical depth: accepted ADR 0023 bounds it to 1-64 characters from a
+  # closed alphabet, and an error copies it back only when it parsed. A reply
+  # that echoed an unvalidated identity would let a client choose bytes the
+  # server then repeats, so a malformed one correlates nothing.
+  defp request_id(request) do
+    case Map.get(request, "request_id") do
+      id when is_binary(id) ->
+        if valid_request_id?(id),
+          do: {:ok, id},
+          else: {:error, "request_id is outside the admitted alphabet or length", nil}
+
+      _other ->
+        {:error, "request_id must be a string", nil}
+    end
+  end
+
+  defp safe_request_id(request) do
+    case Map.get(request, "request_id") do
+      id when is_binary(id) -> if valid_request_id?(id), do: id, else: nil
+      _other -> nil
+    end
+  end
+
+  defp valid_request_id?(id) do
+    byte_size(id) in 1..64 and
+      id |> :binary.bin_to_list() |> Enum.all?(&admitted_request_id_byte?/1)
+  end
+
+  defp admitted_request_id_byte?(byte) do
+    byte in ?A..?Z or byte in ?a..?z or byte in ?0..?9 or byte in [?., ?_, ?~, ?-]
+  end
+
+  defp generations(request) do
+    case Map.get(request, "generations") do
+      [_first | _rest] = generations ->
+        if Enum.all?(generations, &is_binary/1),
+          do: {:ok, generations},
+          else: {:error, "generations must be strings", safe_request_id(request)}
+
+      _other ->
+        {:error, "generations must be a non-empty array", safe_request_id(request)}
+    end
+  end
+
+  defp capabilities(request) do
+    case Map.get(request, "capabilities") do
+      capabilities when is_list(capabilities) ->
+        if Enum.all?(capabilities, &is_binary/1),
+          do: {:ok, capabilities},
+          else: {:error, "capabilities must be strings", safe_request_id(request)}
+
+      _other ->
+        {:error, "capabilities must be an array", safe_request_id(request)}
+    end
+  end
+
+  # Concept: one error record, carrying a correlation only when there is one.
+  #
+  # Technical depth: the message is server-authored text from this module. No
+  # exception, no command content, no path and no policy term reaches it, which
+  # is why every call site passes a fixed sentence rather than a formatted term.
+  defp error(code, message, nil) do
+    %{"type" => "error", "code" => code, "message" => message}
+  end
+
+  defp error(code, message, request_id) do
+    %{"type" => "error", "code" => code, "message" => message, "request_id" => request_id}
+  end
+end
