@@ -291,9 +291,28 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
   def pid(fixture), do: fixture |> marker("pid") |> File.read!() |> String.to_integer()
   def namespace(fixture), do: fixture |> marker("namespace") |> File.read!()
 
+  # Concept: the child is gone, and the directory it ran out of is gone with it.
+  #
+  # Technical depth: the namespace marker is the second line the entry writes,
+  # immediately after its process id, so a child killed between those two writes
+  # leaves a fixture whose own name for its namespace does not exist. Reading it
+  # unconditionally turned that into a file error naming a path, which says
+  # nothing about what happened and leaves the occurrence unattributable. The
+  # absent marker is now reported as what it is, with the markers the child did
+  # reach, so a future occurrence names the step it died on.
   def assert_gone(fixture) do
     assert eventually(fn -> not alive?(pid(fixture)) end, 2_500)
-    refute File.exists?(namespace(fixture))
+
+    case File.read(marker(fixture, "namespace")) do
+      {:ok, namespace} ->
+        refute File.exists?(namespace)
+
+      {:error, :enoent} ->
+        flunk(
+          "the isolated child never named its namespace, so it died between writing its " <>
+            "process id and its namespace; markers reached: #{inspect(File.ls(fixture.root))}"
+        )
+    end
   end
 
   def alive?(pid) do

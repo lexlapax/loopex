@@ -44,11 +44,43 @@ defmodule Loopex.Instrumentation do
   @spec span([atom()], map(), (-> result), (result -> atom())) :: result when result: term()
   def span(event, metadata, work, classify \\ &__MODULE__.outcome/1)
       when is_list(event) and is_map(metadata) do
-    :telemetry.span([:loopex | event], metadata, fn ->
+    token = open_span(event, metadata)
+
+    try do
       result = work.()
-      {result, Map.put(metadata, :outcome, classify.(result))}
-    end)
+      close_span(token, %{}, Map.put(metadata, :outcome, classify.(result)))
+      result
+    catch
+      kind, reason ->
+        stacktrace = __STACKTRACE__
+        raised_span(token, metadata, kind, reason)
+        :erlang.raise(kind, reason, stacktrace)
+    end
   end
+
+  # Concept: a boundary that raised says so, and says nothing about what it
+  # raised.
+  #
+  # Technical depth: `:telemetry.span/3` would emit this event with the kind,
+  # the reason and the stacktrace in its metadata, and a reason carries whatever
+  # the failing code put in it -- a provider's words, an argument, a path. The
+  # class of failure is an identity and is enough to tell an operator which
+  # boundary broke; the exception itself continues to whoever handles it,
+  # unchanged and with its original stacktrace.
+  defp raised_span(token, metadata, kind, reason) do
+    close_span(
+      token,
+      %{},
+      metadata
+      |> Map.put(:outcome, :exception)
+      |> Map.put(:error_class, error_class(kind, reason)),
+      :exception
+    )
+  end
+
+  defp error_class(:error, %{__struct__: module}), do: inspect(module)
+  defp error_class(:error, reason) when is_atom(reason), do: inspect(reason)
+  defp error_class(kind, _reason), do: Atom.to_string(kind)
 
   @doc """
   ## Concept
@@ -90,12 +122,18 @@ defmodule Loopex.Instrumentation do
   the pair. Supplied measurements are counts and byte totals; a supplied
   duration is ignored, because the elapsed time is not the caller's to state.
   """
-  @spec close_span(map(), map(), map()) :: :ok
-  def close_span(%{event: event, started: started}, measurements, metadata)
-      when is_map(measurements) and is_map(metadata) do
+  @spec close_span(map(), map(), map(), :stop | :exception) :: :ok
+  def close_span(token, measurements, metadata, suffix \\ :stop)
+
+  def close_span(%{event: event, started: started}, measurements, metadata, suffix)
+      when is_map(measurements) and is_map(metadata) and suffix in [:stop, :exception] do
+    now = System.monotonic_time()
+
     :telemetry.execute(
-      [:loopex | event] ++ [:stop],
-      Map.put(measurements, :duration, System.monotonic_time() - started),
+      [:loopex | event] ++ [suffix],
+      measurements
+      |> Map.put(:duration, now - started)
+      |> Map.put(:monotonic_time, now),
       metadata
     )
   end

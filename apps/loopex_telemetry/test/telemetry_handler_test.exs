@@ -115,6 +115,31 @@ defmodule Loopex.TelemetryTest do
     refute_receive {:loopex_diagnostic_admission, _pid, _slot, _ticket, _item}, 200
   end
 
+  test "a boundary that raised reports the class of failure and none of its words" do
+    admission = attached()
+
+    assert_raise ArgumentError, "a provider said something private", fn ->
+      Instrumentation.span([:store, :transact], %{session_id: "s_1"}, fn ->
+        raise ArgumentError, "a provider said something private"
+      end)
+    end
+
+    assert %{"event" => "loopex.store.transact.start"} = admitted(admission)
+
+    raised = admitted(admission)
+    assert raised["event"] == "loopex.store.transact.exception"
+    assert raised["metadata"]["outcome"] == "exception"
+    assert raised["metadata"]["error_class"] == "ArgumentError"
+    assert raised["metadata"]["session_id"] == "s_1"
+    assert is_integer(raised["measurements"]["duration"])
+
+    # The message the boundary raised with is the one thing that must not
+    # travel, and neither is a stacktrace.
+    rendered = inspect(raised, limit: :infinity, printable_limit: :infinity)
+    refute rendered =~ "a provider said something private"
+    refute rendered =~ "stacktrace"
+  end
+
   test "a value the inventory does not admit is replaced rather than carried" do
     admission = Admission.new(16)
 
