@@ -113,6 +113,18 @@ trap cleanup EXIT
 trap 'exit 2' INT TERM
 mkdir -p "$task_root/home" "$task_root/state" || die 'cannot create isolated directories'
 
+# Concept: the isolated build needs the operator's own build tooling, copied in
+# rather than reached out to.
+#
+# Technical depth: core declares one external dependency, so Mix must resolve a
+# Hex SCM before it can compile anything here, and the isolated Mix home starts
+# empty. Telemetry is a rebar project, so the per-Elixir Rebar archive is needed
+# with it. This copy used to happen only on the full path, which was enough while
+# core had no external dependency at all; the opening compile lane runs first and
+# now needs it too, so it happens here for every role that compiles.
+support prepare-build "$task_root" "$operator_mix_home" "${LOOPEX_HOME:-$operator_home/.loopex}" "${LOOPEX_WORKSPACE:-$root}" || exit $?
+
+
 # Concept: only protocol, core and the real local Store are compiled, offline.
 # Technical depth: clear the higher-precedence build-path override and isolate
 # Mix, Hex, build and temporary state. Print failed compiler output before cleanup.
@@ -132,7 +144,10 @@ else
   die 'isolated core/local-Store compilation failed'
 fi
 beam_args=()
-for app in loopex_protocol loopex loopex_store_local; do
+# Core carries one external dependency, and a probe launched with a hand-built
+# code path does not inherit it from a Mix project. It is appended rather than
+# inserted so the three Loopex applications keep their positions.
+for app in loopex_protocol loopex loopex_store_local telemetry; do
   ebin="$task_root/build/prod/lib/$app/ebin"
   [ -f "$ebin/$app.app" ] || die "isolated build lacks $app"
   beam_args+=(-pa "$ebin")
@@ -198,7 +213,6 @@ require_client_pins() {
   [ "$observed_node" = "v$pinned_node" ] || die "Node version differs from the pin: $observed_node"
 }
 
-support prepare-build "$task_root" "$operator_mix_home" "${LOOPEX_HOME:-$operator_home/.loopex}" "${LOOPEX_WORKSPACE:-$root}" || exit $?
 if ! env LANG=C.UTF-8 LC_ALL=C.UTF-8 elixir -r apps/loopex/lib/mix/tasks/loopex.deps_budget.ex \
   -e 'Loopex.Checks.DepsBudget.main(System.argv())' -- \
   --materialize "$operator_hex_home/packages" "$task_root/deps" "$task_root/protected-file-ids" </dev/null; then

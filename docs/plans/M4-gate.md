@@ -172,8 +172,8 @@ binding.
 
 | SHA-256 | Path |
 | --- | --- |
-| `60006e657605095a4d66f00d32a226a8245653b46799fca3434694e1864864d2` | `scripts/check-m4-gate.sh` |
-| `a559bd9f44f1f46f65aaff0bdcfcac2e5124301bc367c58c85966fd6409ba68f` | `scripts/m4-opening-probe.exs` |
+| `0fa05a036dd7e7c6ec36238cac34f03cc99552de3b1e02765fb3cc8e66ac40f4` | `scripts/check-m4-gate.sh` |
+| `b1ef94ba0ae25ac845396206ba5bbe4d7cd7355d505f6f127123bc3106329d86` | `scripts/m4-opening-probe.exs` |
 | `d9b8ac57a57ef39d50b581db78ac896fa12908ae9feae89b29b5d43564523d22` | `scripts/m4-gate-support.exs` |
 | `65d0de9dcd1218af542f00e32c2177d2612a2f1232f22db37b9942200c84cf66` | `scripts/m3-gate-support.exs` |
 | `c4d485ca3229441c678abe1e8733f90216e89e0dfb9e81786f58f525619aec29` | `scripts/check-closed-gates.sh` |
@@ -553,3 +553,65 @@ acceptance and grants no waiver, closure or release.
 | 4 | `scripts/fixtures/m4/client-toolchain.txt` | `0566e1bddbae948b3f92c3c60f0de002393f84466a7f45ff961b21f20fee3e5d` |
 | 4 | `scripts/check-m4-gate.sh` | `60006e657605095a4d66f00d32a226a8245653b46799fca3434694e1864864d2` |
 | 4 | `scripts/m4-gate-support.exs` | `d9b8ac57a57ef39d50b581db78ac896fa12908ae9feae89b29b5d43564523d22` |
+
+<a id="amendment-5"></a>
+## Amendment 5 — Give the opening compile the build tooling it now needs
+
+**Acceptance: OUTSTANDING.** Accepted M4 amends its gate under
+`amendment-transaction-v1`: this proposal `A` advances the generation and
+retains the Acceptance row and lifecycle state; its immediate child `R`
+rebinds Acceptance to exact `A` after explicit acceptance.
+
+The gate could not run in any role that compiles. `--preflight` died at its
+first lane:
+
+```
+LOOPEX_M4_LANE name=opening_compile elapsed_seconds=1 exit=1
+** (Mix) Could not find an SCM for dependency :telemetry from Loopex.MixProject
+M4 gate UNAVAILABLE: isolated core/local-Store compilation failed
+```
+
+The opening compile lane builds core and the local Store under an isolated home,
+Hex home and Mix home with `HEX_OFFLINE=1`, which is the isolation that keeps a
+gate lane away from operator state. An empty Mix home holds no Hex archive, so
+Mix cannot resolve what kind of dependency `:telemetry` is, let alone use the
+copy already on disk. The lane passed for every earlier milestone because core
+declared no external dependency at all; M4 Phase B admits the one the vision's
+dependency doctrine names, and nothing put the tooling where that lane could
+reach it.
+
+The runner already knows how to solve this. Its `prepare-build` step copies the
+operator's Hex archive and per-Elixir Rebar into the isolated Mix home, and
+validates the copied tree against the protected-file inventory both before and
+after. It was invoked only on the full path, after the opening compile. This
+amendment moves that single call to run as soon as the isolated directories
+exist, so every role that compiles has the tooling and none reaches outside its
+own task root for it. Rebar moves with the archive because `telemetry` is a
+rebar project and the archive alone would not build it.
+
+The opening probe stops for a second reason once the compile lane passes, and it
+is the same shape of fault. Accepted M4 requires a launch that names a policy to
+name whose policy it is; the maintainer chose that on 2026-09-15, refusing a
+launch without one. This gate's own probe composes a runtime with a policy and no
+identity, so the runtime refuses it as `invalid_runtime_options` before the
+witness observes anything. The probe now supplies its own identity. What it
+observes is untouched: the same model, executor, tool, bounds and commands, and
+the same declared red — a policy `defer` denied as `interaction_unsupported`
+rather than committing a durable pending interaction.
+
+Two bound artifacts change and no others. No outcome, selector, witness identity,
+limit, client pin, evidence class or credential rule changes, no lane is added or
+removed, no lifecycle state reopens, and neither envelope moves: this is the
+runner performing an existing step earlier, and the probe supplying a launch
+input the accepted runtime requires.
+
+Binding validation, bootstrap and every inherited gate that invokes them stop at
+this proposal only on the stale binding of this gate. After exact-SHA review and
+explicit acceptance of `A`, `R` rebinds the Acceptance row and adds one
+amendment-specific disposition. This proposal records no acceptance and grants no
+waiver, closure or release.
+
+| Generation | Artifact | Rebound SHA-256 |
+| --- | --- | --- |
+| 5 | `scripts/check-m4-gate.sh` | `0fa05a036dd7e7c6ec36238cac34f03cc99552de3b1e02765fb3cc8e66ac40f4` |
+| 5 | `scripts/m4-opening-probe.exs` | `b1ef94ba0ae25ac845396206ba5bbe4d7cd7355d505f6f127123bc3106329d86` |

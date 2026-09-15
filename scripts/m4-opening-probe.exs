@@ -39,7 +39,8 @@ defmodule Loopex.M4Opening.DeferPolicy do
   def decide(_request) do
     {:defer,
      %{
-       kind: "choice",
+       # Accepted ADR 0024 fixes this as the atom; nothing converts input to one.
+       kind: :choice,
        prompt: "Allow the bounded M4 probe write?",
        choices: [%{id: "continue", label: "Continue"}, %{id: "deny", label: "Deny"}],
        expires_in_ms: 10_000
@@ -177,12 +178,28 @@ defmodule Loopex.M4Opening do
   # `interaction_requested_v1` record with the same run, turn, tool-call and
   # interaction identities in pending status. A deadlocked or merely slow run,
   # a second model turn, or a record under another kind is not green.
+  # Concept: one open question, bound to the run and the call that raised it, and
+  # the durable record that says so.
+  #
+  # Technical depth: this reads the names session status actually publishes. The
+  # probe was written before the interaction lifecycle existed and guessed a list
+  # called `pending_interactions` with atom keys and a `turn_id`; accepted ADR
+  # 0024 landed a single `open_interaction` with string keys and a `turn`. What
+  # is asserted is unchanged: exactly one question, not settled, after exactly one
+  # model call, carrying the same identity, run and tool call as the durable
+  # record, and marked pending.
   defp durably_pending?(observation) do
     with false <- observation.settled,
          1 <- observation.model_calls,
-         {:ok, %{active_run_id: run_id, pending_interactions: [pending]}} <- observation.status,
-         %{interaction_id: id, run_id: ^run_id, turn_id: turn_id, tool_call_id: "m4-probe-call"}
-         when is_binary(id) and id != "" and is_binary(run_id) and is_binary(turn_id) <-
+         {:ok, %{active_run_id: run_id, open_interaction: pending}} <- observation.status,
+         %{
+           "interaction_id" => id,
+           "run_id" => ^run_id,
+           "turn" => turn,
+           "tool_call_id" => "m4-probe-call",
+           "status" => "pending"
+         }
+         when is_binary(id) and id != "" and is_binary(run_id) and is_integer(turn) <-
            pending,
          [record] <-
            Enum.filter(
@@ -190,8 +207,7 @@ defmodule Loopex.M4Opening do
              &(&1[:kind] == "interaction_requested_v1")
            ) do
       record["interaction_id"] == id and record["run_id"] == run_id and
-        record["turn_id"] == turn_id and record["tool_call_id"] == "m4-probe-call" and
-        record["status"] == "pending"
+        record["turn"] == turn and record["tool_call_id"] == "m4-probe-call"
     else
       _other -> false
     end
@@ -229,6 +245,9 @@ defmodule Loopex.M4Opening do
           workspace_lease: "workspace-lease"
         },
         policy: policy,
+        # A launch that names a policy must name whose policy it is; the runtime
+        # refuses one without an identity, so the probe supplies its own.
+        policy_identity: %{"id" => "loopex.m4_opening_probe", "revision" => "1"},
         bounds: %{max_turns: 4, token_budget: 100_000, deadline_ms: 60_000},
         context_token_budget: 100_000,
         tools: [@tool],
