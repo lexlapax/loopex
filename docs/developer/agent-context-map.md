@@ -4121,3 +4121,51 @@ disposition and the candidate it binds, which is exact
 Closed M1 stay byte-immutable, no earlier generation stops being enforced for
 the revisions it governed, and this adds no scope, changes no outcome and
 reopens no lifecycle state. It grants no closure, integration, tag or release.
+
+<a id="disposition-m1-gate-generation-15-2026-09-15"></a>
+### M1 gate generation 15 acceptance — 2026-09-15
+
+The closed M1 gate binds `apps/loopex/lib/mix/tasks/loopex.deps_budget.ex` and
+`apps/loopex/test/deps_budget_test.exs`, because that oracle is the whole surface
+keeping core on the standard library and the single event dispatcher the vision's
+dependency doctrine admits by name. M4's Phase B rewrote both, which is how the
+oracle learned about `loopex_telemetry` and `loopex_app_server`, and no M1
+transaction rebound them. The oracle has read `7f5dfc6c` since that work landed
+while this gate went on naming `2c62019c`.
+
+It was found by a repository status walk rather than by any gate run, and only
+because two unrelated M4 amendment faults were being repaired ahead of it: the
+walk had never reached this far before, stopping earlier on those. Every revision
+from `03d0ed6c3e0241c6a7e7df85e208ea44f167fd23` to the branch tip failed the
+binding check, so the defect was not historical at all — it was the state of the
+branch.
+
+A later generation cannot repair it, because each revision is judged against the
+gate table as it stood at that revision. The repair therefore rewrites the two
+Phase B revisions: the first now adds the applications and leaves the bound
+artifacts alone, so the binding holds there, and the second is this generation's
+proposal, carrying the new oracle bytes, the new test bytes, both rebound rows,
+the amendment section and the generation row in one atomic revision. Between the
+two the budget check is red, because an oracle written for the exact M1 inventory
+cannot admit applications that did not exist then; that is an intermediate red in
+a two-step change and it is named in both commit messages rather than hidden.
+
+Generation 15 is proposed at `e5f87fda567cae616247a8e990514c145c03d452`. What the
+oracle now admits is what the M4 plan pair names and no more: two applications
+with their roles, one external dependency in core at its pinned requirement, and
+the same one in the edge application that forwards telemetry. Direction is
+unchanged, and the bound test moves with the oracle, still refusing an unplanned
+application, a second external dependency and a reversed edge. Evidence presented
+at that exact revision: `mix loopex.deps_budget` reporting that the budget and
+direction hold, which neither neighbouring revision can do, and the bound test
+passing with 28 cases.
+
+The maintainer answered **"e5f87fd accepted."**
+
+This transcribes that answer as acceptance under `amendment-transaction-v2`. The
+rebind completes generation 15's row with the accepting authority, this
+disposition and the candidate it binds, which is exact
+`e5f87fda567cae616247a8e990514c145c03d452`. The Acceptance and Closure rows of
+Closed M1 stay byte-immutable, no earlier generation stops being enforced for the
+revisions it governed, and this adds no scope, changes no outcome and reopens no
+lifecycle state. It grants no closure, integration, tag or release.
