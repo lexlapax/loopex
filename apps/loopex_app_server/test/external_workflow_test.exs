@@ -212,6 +212,75 @@ defmodule Loopex.AppServer.ExternalWorkflowTest do
            "unexpected imports: #{inspect(imports)}"
   end
 
+  test "the Node consumer completes skill answer reevaluation grant tool artifact and abrupt restart from operator input against the shipped server" do
+    node_executable = System.find_executable("node")
+
+    if is_nil(node_executable) do
+      flunk("Node is required for the independent client workflow and was not found")
+    end
+
+    %{environment: environment, store: store} = durable_environment()
+
+    # Every input the client needs it is given: the workspace reference the
+    # trust decision must carry, and where the session lives. It invents
+    # neither, and it cannot read either from the server.
+    operator_inputs =
+      environment
+      |> Keyword.new(fn {key, value} -> {String.to_atom(key), value} end)
+      |> Keyword.take([:LOOPEX_HOME, :LOOPEX_WORKSPACE, :LOOPEX_WORKFLOW_STORE])
+
+    assert Keyword.fetch!(operator_inputs, :LOOPEX_WORKFLOW_STORE) == store
+
+    {output, status} =
+      System.cmd(
+        node_executable,
+        [
+          client("interaction-workflow.mjs"),
+          System.find_executable("elixir") || flunk("Elixir executable unavailable"),
+          ebin(:loopex_protocol),
+          ebin(:loopex),
+          ebin(:loopex_app_server),
+          ebin(:loopex_store_local),
+          ebin(:telemetry)
+        ] ++ require_paths(),
+        env: [{"LOOPEX_WORKSPACE_REF", "workspace-ref"} | environment],
+        stderr_to_stdout: false
+      )
+
+    assert status == 0, "the independent client failed: #{output}"
+
+    summary = decode(output)
+    refute Map.has_key?(summary, "failed"), "the client reported: #{summary["failed"]}"
+
+    # The whole chain, in one run, driven from outside: a skill found and
+    # selected under an operator's trust decision, a question the host asked
+    # rather than an allow, an answer relayed, the authorization minted only
+    # afterwards, the tool finishing, and its artifact read back in a verified
+    # bounded transfer.
+    assert summary["catalog_before"]["entries"] == 0
+    assert summary["admission_accepted"]
+    assert summary["skill_selected"] == "writer"
+    assert summary["question_prompt"] == "May the tool write the file?"
+    assert summary["answer_accepted"]
+    assert summary["tool_finished"]
+    assert summary["artifacts"] == 1
+    assert summary["transfer_opened"]
+    assert summary["chunk_has_digest"]
+    assert summary["transfer_closed"]
+
+    # And then the server was killed rather than closed. What the successor
+    # reports survived because it was already durable when the first process
+    # died, not because anything was tidied up on the way out.
+    assert summary["restarted"], "the client never restarted the server"
+    assert summary["resume_refused"] == false, "the resume was refused: #{inspect(summary)}"
+    assert summary["reattached"], "the successor could not attach after an abrupt loss"
+    assert summary["session_known_after_restart"]
+
+    # The Store outlived both processes, which is what made the second one a
+    # successor rather than a fresh start.
+    assert File.exists?(store)
+  end
+
   test "stdin EOF performs orderly shutdown without cancellation and the pending interaction survives restart" do
     %{environment: environment, store: store} = durable_environment()
 

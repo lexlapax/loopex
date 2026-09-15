@@ -132,6 +132,17 @@ export class Connection {
     this.#child.stdin.end();
   }
 
+  // Concept: the server process dies without being told anything.
+  //
+  // Technical depth: closing standard input is an orderly shutdown and is a
+  // different event entirely. A kill leaves no chance to finish a write, run a
+  // shutdown, or say goodbye, which is the point: what survives it survived
+  // because it was already durable, not because anything tidied up.
+  kill() {
+    this.#closed = true;
+    this.#child.kill("SIGKILL");
+  }
+
   async ended() {
     if (this.#child.exitCode !== null) return this.#child.exitCode;
     return new Promise((resolve) => this.#child.on("exit", resolve));

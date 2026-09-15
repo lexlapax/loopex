@@ -344,7 +344,13 @@ defmodule Loopex.AppServer.Fixture do
 
       path ->
         File.mkdir_p!(Path.dirname(path))
-        {:ok, pid} = Loopex.Store.Local.start_link(path: path)
+
+        # A successor started after an abrupt loss meets a writer marker its dead
+        # predecessor never gave back, so it is allowed to break one. This takes
+        # nothing away: a marker whose holder is still alive refuses an opener
+        # however this option is set, so the one live writer rule stands and only
+        # a marker nobody holds can be reclaimed.
+        {:ok, pid} = Loopex.Store.Local.start_link(path: path, recover_stale_writer: true)
         [store: pid, store_module: Loopex.Store.Local]
     end
   end

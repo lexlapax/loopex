@@ -31,6 +31,10 @@ import { Connection, wire } from "./loopex-client.mjs";
 const [elixir, ...paths] = process.argv.slice(2);
 const workspaceRef = process.env.LOOPEX_WORKSPACE_REF;
 
+// A durable Store is an operator input like any other. Without one this client
+// drives one process and stops; with one it also proves what survives losing it.
+const storePath = process.env.LOOPEX_WORKFLOW_STORE;
+
 if (!elixir || paths.length === 0) {
   console.error("usage: node interaction-workflow.mjs <elixir-executable> <path>...");
   process.exit(2);
@@ -48,9 +52,8 @@ for (const path of paths) {
 }
 serverArgs.push("-e", "Loopex.AppServer.Fixture.serve()");
 
-const connection = new Connection(elixir, serverArgs, {
-  env: { ...process.env, LOOPEX_WORKFLOW_SCRIPT: "tool" },
-});
+const childEnvironment = { ...process.env, LOOPEX_WORKFLOW_SCRIPT: "tool" };
+const connection = new Connection(elixir, serverArgs, { env: childEnvironment });
 
 try {
   const summary = await run(connection);
@@ -236,7 +239,49 @@ async function run(connection) {
   await connection.waitForEvent((event) => event.kind === "run.finished", 20_000);
   summary.event_kinds = connection.events().map((event) => event.kind);
 
+  if (storePath) {
+    Object.assign(summary, await surviveAbruptLoss(sessionId));
+  }
+
   return summary;
+}
+
+// Concept: the session outlives the process that was serving it.
+//
+// Technical depth: the first server is killed rather than closed, so nothing it
+// held was written on the way out. A second server over the same Store then
+// resumes the session and reads it back. What it reports is what was already
+// durable when the first process died, which is the only kind of survival worth
+// claiming.
+async function surviveAbruptLoss(sessionId) {
+  connection.kill();
+
+  const successor = new Connection(elixir, serverArgs, { env: childEnvironment });
+
+  try {
+    await successor.initialize();
+
+    const resumed = await successor.request("session.resume", {
+      command_id: wire.identity("chain-resume"),
+      session_id: sessionId,
+    });
+
+    const reattached = await successor.request("session.attach", {
+      session_id: sessionId,
+      after_event_sequence: wire.u64(0),
+    });
+
+    const inspected = await successor.request("session.inspect", { session_id: sessionId });
+
+    return {
+      restarted: true,
+      resume_refused: resumed.type === "error" ? (resumed.code ?? true) : false,
+      reattached: reattached.type === "snapshot",
+      session_known_after_restart: inspected.type === "result",
+    };
+  } finally {
+    successor.close();
+  }
 }
 
 function assert(condition, message) {
