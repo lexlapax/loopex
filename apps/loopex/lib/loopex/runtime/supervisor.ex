@@ -25,6 +25,7 @@ defmodule Loopex.Runtime.Supervisor do
   alias Loopex.Runtime.EventDispatcher
   alias Loopex.Runtime.ResourceSnapshot
   alias Loopex.ToolRegistry
+  alias Loopex.Trace
 
   @registry_id Loopex.ToolRegistry
   @control_id Loopex.Runtime.Control
@@ -32,6 +33,7 @@ defmodule Loopex.Runtime.Supervisor do
   @owner_groups_id Loopex.Runtime.OwnerGroups
   @sessions_id Loopex.Runtime.SessionSupervisor
   @dispatcher_id Loopex.Runtime.EventDispatcher
+  @trace_id Loopex.Trace
 
   @doc """
   ## Concept
@@ -80,6 +82,10 @@ defmodule Loopex.Runtime.Supervisor do
       %{
         id: @dispatcher_id,
         start: {EventDispatcher, :start_link, [[root: root] ++ options]}
+      },
+      %{
+        id: @trace_id,
+        start: {Trace, :start_link, [[root: root] ++ options]}
       }
     ]
 
@@ -98,7 +104,8 @@ defmodule Loopex.Runtime.Supervisor do
            workers when is_pid(workers) <- Map.get(resolved, @workers_id),
            owner_groups when is_pid(owner_groups) <- Map.get(resolved, @owner_groups_id),
            sessions when is_pid(sessions) <- Map.get(resolved, @sessions_id),
-           dispatcher when is_pid(dispatcher) <- Map.get(resolved, @dispatcher_id) do
+           dispatcher when is_pid(dispatcher) <- Map.get(resolved, @dispatcher_id),
+           tracer when is_pid(tracer) <- Map.get(resolved, @trace_id) do
         {:ok,
          %{
            registry: registry,
@@ -106,7 +113,8 @@ defmodule Loopex.Runtime.Supervisor do
            workers: workers,
            owner_groups: owner_groups,
            sessions: sessions,
-           dispatcher: dispatcher
+           dispatcher: dispatcher,
+           tracer: tracer
          }}
       else
         _other -> {:error, :runtime_unavailable}

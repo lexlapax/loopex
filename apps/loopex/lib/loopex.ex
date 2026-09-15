@@ -246,6 +246,42 @@ defmodule Loopex do
   @doc """
   ## Concept
 
+  Turns on a runtime-scoped trace of the modules a host names, inside the
+  processes this runtime owns, without changing any source.
+
+  ## Technical depth
+
+  The configuration is bounded plain data: an allowlist whose only wildcards
+  are the two Loopex namespaces, a level of `:calls`, `:returns` or the
+  administrative `:arguments`, ceilings a host may lower and never raise, and
+  a sink. It is accepted only from the caller holding this runtime reference;
+  no session command, client content, model output or project resource reaches
+  it. On a release without OTP trace sessions this reports
+  `{:error, :trace_sessions_unavailable}` and changes nothing.
+  """
+  @spec trace(Runtime.t(), map()) :: {:ok, map()} | {:error, term()}
+  def trace(runtime, config \\ %{}), do: Runtime.trace(runtime, config)
+
+  @doc """
+  ## Concept
+
+  Stops this runtime's trace session and releases every trace flag it set.
+  """
+  @spec trace_stop(Runtime.t()) :: :ok | {:error, term()}
+  def trace_stop(runtime), do: Runtime.trace_stop(runtime)
+
+  @doc """
+  ## Concept
+
+  Reports the running trace session's configuration and its emitted and
+  dropped counts, or that there is none.
+  """
+  @spec trace_status(Runtime.t()) :: {:ok, map()} | {:error, term()}
+  def trace_status(runtime), do: Runtime.trace_status(runtime)
+
+  @doc """
+  ## Concept
+
   Observes the current runtime-owned session projection.
 
   ## Technical depth

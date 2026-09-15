@@ -35,6 +35,7 @@ defmodule Loopex.Runtime.EventDispatcher do
 
   use GenServer
 
+  alias Loopex.Runtime.DiagnosticsAdmission
   alias Loopex.Runtime.Supervisor, as: RuntimeSupervisor
   alias Loopex.Runtime.SessionState
   alias Loopex.Store
@@ -153,7 +154,10 @@ defmodule Loopex.Runtime.EventDispatcher do
        pending_reads: %{},
        read_monitors: %{},
        acknowledged: %{},
-       counter: 0
+       counter: 0,
+       admission: DiagnosticsAdmission.new(diagnostics_ceiling(options)),
+       diagnostic_monitors: %{},
+       drop_window_start: 0
      }}
   end
 
@@ -256,6 +260,22 @@ defmodule Loopex.Runtime.EventDispatcher do
     {:reply, reply, state}
   end
 
+  # Concept: a sender on the asynchronous plane needs this runtime's admission
+  # handle before it can claim a slot.
+  #
+  # Technical depth: the handle is plain data -- a table identifier, an atomics
+  # reference, the ceiling and this dispatcher's pid -- and grants nothing but
+  # the ability to offer an item that may be dropped. It is fetched through the
+  # token-checked call, so a process without the runtime reference cannot reach
+  # the plane at all.
+  def handle_call({:diagnostics_admission, token}, _from, state) do
+    if token == state.token do
+      {:reply, {:ok, state.admission}, state}
+    else
+      {:reply, {:error, :invalid_diagnostic}, state}
+    end
+  end
+
   def handle_call({:acknowledge, session_id, position}, _from, state) do
     acknowledged = Map.update(state.acknowledged, session_id, position, &max(&1, position))
     {:reply, :ok, %{state | acknowledged: acknowledged}}
@@ -329,6 +349,42 @@ defmodule Loopex.Runtime.EventDispatcher do
             GenServer.reply(pending.from, error)
             {:noreply, next}
         end
+    end
+  end
+
+  # Concept: one monitor per live sender on the asynchronous plane.
+  #
+  # Technical depth: a duplicate registration is ignored, and a registration
+  # from a process that has already exited installs a monitor the VM resolves
+  # at once, so the reconciliation below still runs for it.
+  def handle_info({:loopex_diagnostic_monitor_me, pid}, state) when is_pid(pid) do
+    {:noreply, monitor_sender(state, pid)}
+  end
+
+  # Concept: one admitted diagnostic item, forwarded and then released.
+  #
+  # Technical depth: the slot is freed once per admitted item, after the item
+  # has been forwarded or discarded, with the exact triple the message carried.
+  # The drop summary is published immediately after that release and therefore
+  # before any further item this dispatcher forwards.
+  def handle_info({:loopex_diagnostic_admission, pid, slot, ticket, item}, state) do
+    state = forward_admitted(state, item)
+    DiagnosticsAdmission.release(state.admission, slot, pid, ticket)
+    {:noreply, report_drops(state)}
+  end
+
+  def handle_info({:DOWN, monitor, :process, pid, _reason}, state)
+      when is_map_key(state.diagnostic_monitors, pid) do
+    if Map.fetch!(state.diagnostic_monitors, pid) == monitor do
+      DiagnosticsAdmission.reconcile(state.admission, pid)
+
+      {:noreply,
+       report_drops(%{
+         state
+         | diagnostic_monitors: Map.delete(state.diagnostic_monitors, pid)
+       })}
+    else
+      {:noreply, state}
     end
   end
 
@@ -802,6 +858,87 @@ defmodule Loopex.Runtime.EventDispatcher do
     bytes = :erlang.term_to_binary([namespace, session_id, counter, make_ref()], [:deterministic])
     encoded = :crypto.hash(:sha256, bytes) |> Base.encode16(case: :lower)
     namespace <> "_" <> binary_part(encoded, 0, 30)
+  end
+
+  # Concept: the ceiling this runtime admits, which a host may lower.
+  defp diagnostics_ceiling(options) do
+    case Keyword.get(options, :diagnostics_ceiling) do
+      ceiling when is_integer(ceiling) and ceiling > 0 -> ceiling
+      _absent -> DiagnosticsAdmission.default_ceiling()
+    end
+  end
+
+  defp monitor_sender(state, pid) do
+    if Map.has_key?(state.diagnostic_monitors, pid) do
+      state
+    else
+      monitor = Process.monitor(pid)
+      %{state | diagnostic_monitors: Map.put(state.diagnostic_monitors, pid, monitor)}
+    end
+  end
+
+  # Concept: an admitted item reaches the sink, or is discarded and counted.
+  #
+  # Technical depth: a runtime with no diagnostics sink has the plane switched
+  # off and discards without counting, because a drop nobody can read is not a
+  # loss a summary should report forever. A configured sink that is dead or
+  # already holding a ceiling's worth of messages is the host's mailbox, which
+  # Loopex cannot bound; discarding there is best-effort backpressure and is
+  # counted as the loss it is.
+  defp forward_admitted(%{diagnostics_to: nil} = state, _item), do: state
+
+  defp forward_admitted(state, item) do
+    if plain_transient?(item) and not sink_saturated?(state) do
+      maybe_send(state.diagnostics_to, {:loopex_diagnostic, item})
+      state
+    else
+      DiagnosticsAdmission.count_drop(state.admission)
+      state
+    end
+  end
+
+  defp sink_saturated?(%{diagnostics_to: sink, admission: admission}) do
+    case Process.info(sink, :message_queue_len) do
+      {:message_queue_len, queued} -> queued >= admission.ceiling
+      nil -> true
+    end
+  end
+
+  # Concept: once the backlog has drained, the host learns how much it lost.
+  #
+  # Technical depth: the count is taken with one atomic exchange, and the
+  # window is the ticket range since the previous summary, which both sides can
+  # agree on without a shared clock. Reporting only below half the ceiling
+  # keeps the summary from displacing an admitted item in a full backlog.
+  defp report_drops(%{diagnostics_to: nil} = state), do: state
+
+  defp report_drops(state) do
+    if DiagnosticsAdmission.drained?(state.admission) and
+         DiagnosticsAdmission.pending_drops(state.admission) > 0 do
+      window_end = DiagnosticsAdmission.ticket(state.admission)
+      dropped = DiagnosticsAdmission.take_drops(state.admission)
+
+      if dropped > 0 do
+        maybe_send(
+          state.diagnostics_to,
+          {:loopex_diagnostic, drop_summary(state.drop_window_start, window_end, dropped)}
+        )
+
+        %{state | drop_window_start: window_end}
+      else
+        state
+      end
+    else
+      state
+    end
+  end
+
+  defp drop_summary(from_ticket, to_ticket, dropped) do
+    %{
+      "kind" => "diagnostics_dropped",
+      "dropped" => dropped,
+      "window" => %{"from_ticket" => from_ticket, "to_ticket" => to_ticket}
+    }
   end
 
   defp maybe_send(nil, _message), do: :ok
