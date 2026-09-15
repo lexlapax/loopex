@@ -26,13 +26,18 @@ defmodule Loopex.AppServer.Connection do
   alias LoopexProtocol.Session
 
   @enforce_keys [:state]
-  defstruct state: :uninitialized, generation: nil, runtime: nil, attachment: nil
+  defstruct state: :uninitialized,
+            generation: nil,
+            runtime: nil,
+            attachment: nil,
+            in_flight: MapSet.new()
 
   @type t :: %__MODULE__{
           state: :uninitialized | :initialized | :refused,
           generation: binary() | nil,
           runtime: term() | nil,
-          attachment: term() | nil
+          attachment: term() | nil,
+          in_flight: MapSet.t(binary())
         }
 
   @doc """
@@ -81,6 +86,74 @@ defmodule Loopex.AppServer.Connection do
   """
   @spec attachment(t()) :: term() | nil
   def attachment(%__MODULE__{attachment: attachment}), do: attachment
+
+  @doc """
+  ## Concept
+
+  Claims a request identity for work that has begun and not yet answered.
+
+  ## Technical depth
+
+  Accepted ADR 0023 says a `request_id` is unique among the in-flight requests
+  on a connection, that reuse while in flight refuses, and that no more than
+  `max_requests_in_flight` are in flight at once. The rule lives here rather
+  than in a transport, because a transport that answers serially can never
+  break it and a transport that pipelines would have to reinvent it. This
+  connection's own `dispatch/2` claims and releases around one synchronous
+  answer, so the ceiling is never reached through it; a caller that answers
+  asynchronously claims and releases around its own work and inherits the rule
+  for free.
+
+  The ceiling is checked before the identity is claimed, because checking after
+  would make the bound whatever arrived plus one.
+  """
+  @spec begin_request(t(), binary()) :: {:ok, t()} | {:error, map(), t()}
+  def begin_request(%__MODULE__{} = connection, request_id) when is_binary(request_id) do
+    cond do
+      MapSet.member?(connection.in_flight, request_id) ->
+        {:error,
+         error(
+           "invalid_request",
+           "this request identity is already in flight on this connection",
+           request_id
+         ), connection}
+
+      MapSet.size(connection.in_flight) >= Map.fetch!(Session.limits(), "max_requests_in_flight") ->
+        {:error,
+         error("capacity_exceeded", "too many requests are in flight on this connection", nil),
+         connection}
+
+      true ->
+        {:ok, %{connection | in_flight: MapSet.put(connection.in_flight, request_id)}}
+    end
+  end
+
+  @doc """
+  ## Concept
+
+  Releases a request identity once its answer has been produced.
+
+  ## Technical depth
+
+  Releasing an identity that was never claimed is not an error: a caller that
+  released twice, or released after a refusal that never claimed, is describing
+  the same end state this function guarantees. Reuse after completion is
+  ordinary correlation, so nothing here remembers that an identity was once
+  used.
+  """
+  @spec complete_request(t(), binary()) :: t()
+  def complete_request(%__MODULE__{} = connection, request_id) when is_binary(request_id) do
+    %{connection | in_flight: MapSet.delete(connection.in_flight, request_id)}
+  end
+
+  @doc """
+  ## Concept
+
+  The request identities this connection is currently answering.
+  """
+  @spec in_flight(t()) :: [binary()]
+  def in_flight(%__MODULE__{in_flight: in_flight}),
+    do: in_flight |> MapSet.to_list() |> Enum.sort()
 
   @doc """
   ## Concept
@@ -165,7 +238,7 @@ defmodule Loopex.AppServer.Connection do
     case Map.get(request, "method") do
       method when is_binary(method) ->
         if method in Session.methods() do
-          answer(connection, request, request_id)
+          claimed(connection, request_id, &answer(&1, request, request_id))
         else
           {:error, error("unsupported_method", "no such method in this generation", request_id),
            connection}
@@ -183,6 +256,24 @@ defmodule Loopex.AppServer.Connection do
        "this connection must initialize before anything else",
        safe_request_id(request)
      ), connection}
+  end
+
+  # Concept: one answer, with its identity claimed for exactly as long as it
+  # takes to produce.
+  #
+  # Technical depth: an identity that did not parse claims nothing, because an
+  # unusable identity correlates nothing and two of them are not a collision.
+  # The release runs on both outcomes, so a refusal does not strand an identity
+  # a client may legitimately use again.
+  defp claimed(connection, nil, answer), do: answer.(connection)
+
+  defp claimed(connection, request_id, answer) do
+    with {:ok, claimed} <- begin_request(connection, request_id) do
+      case answer.(claimed) do
+        {:ok, record, answered} -> {:ok, record, complete_request(answered, request_id)}
+        {:error, record, answered} -> {:error, record, complete_request(answered, request_id)}
+      end
+    end
   end
 
   # Concept: a named method reaches the mapping, or says it is not answered yet.
