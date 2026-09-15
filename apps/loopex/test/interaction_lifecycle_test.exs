@@ -379,6 +379,32 @@ defmodule Loopex.InteractionLifecycleTest do
              })
   end
 
+  test "an abort cancels the open question and a later answer finds it resolved" do
+    fixture = loop_fixture(AnsweringPolicy)
+    {session_id, attachment} = loop_session(fixture)
+
+    assert {:accepted, "p1"} =
+             Loopex.command(attachment, %{type: :prompt, command_id: "p1", content: "do it"})
+
+    requested = await_event(fixture, session_id, "interaction.requested")
+
+    assert {:accepted, "abort-1"} =
+             Loopex.command(attachment, %{type: :abort, command_id: "abort-1"})
+
+    cancelled = await_event(fixture, session_id, "interaction.cancelled", 4_000)
+    assert cancelled["interaction_id"] == requested["interaction_id"]
+
+    assert {:error, :interaction_resolved} =
+             Loopex.command(attachment, %{
+               type: :interaction_answer,
+               command_id: "answer-late",
+               interaction_id: requested["interaction_id"],
+               choice_id: "allow"
+             })
+
+    assert Enum.all?(Fixture.events(fixture, session_id), &(&1.kind != "tool.started"))
+  end
+
   defp loop_fixture(policy) do
     fixture =
       Fixture.start(

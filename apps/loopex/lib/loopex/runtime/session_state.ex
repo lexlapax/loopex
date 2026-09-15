@@ -3243,7 +3243,30 @@ defmodule Loopex.Runtime.SessionState do
            ]}
       end
 
-    {Map.merge(steer_patch, follow_patch), steer_events ++ follow_events}
+    # Concept: an abort closes the open question too, in the same transaction
+    # that admits it.
+    #
+    # Technical depth: accepted ADR 0024 makes a cancelled run leave its
+    # interaction cancelled, and doing it here means an operator never sees a
+    # question standing open against a run that is being stopped. A later answer
+    # then finds it resolved and refuses, which is the race resolving in the
+    # order the journal fixed rather than a reopening.
+    {interaction_patch, interaction_events} =
+      case open_interaction_record(state) do
+        %{run_id: ^run_id, interaction_id: interaction_id} = interaction ->
+          cancelled = %{interaction | status: "cancelled"}
+
+          {%{
+             interactions: Map.put(state.interactions, interaction_id, cancelled),
+             open_interaction: nil
+           }, [interaction_resolved_event(state.session_id, cancelled, "cancelled", %{})]}
+
+        _none ->
+          {%{}, []}
+      end
+
+    {steer_patch |> Map.merge(follow_patch) |> Map.merge(interaction_patch),
+     steer_events ++ follow_events ++ interaction_events}
   end
 
   defp steer_event(session_id, command_id, run_id, disposition, reason) do
