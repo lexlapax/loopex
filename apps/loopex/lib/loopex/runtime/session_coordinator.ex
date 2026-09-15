@@ -1407,6 +1407,15 @@ defmodule Loopex.Runtime.SessionCoordinator do
           prepared: recovered_runs(state.prepared, durable)
       }
 
+      # Concept: a question this session retained is still on the clock after a
+      # restart.
+      #
+      # Technical depth: timers die with the process that armed them, so a
+      # recovered owner arms this one again against the expiry the creation
+      # committed rather than against a fresh duration. An instant already past
+      # fires at once, which is the same answer the old owner would have given.
+      ready = rearm_recovered_interaction(ready)
+
       GenServer.cast(state.control, {:owner_ready, self(), state.owner, durable})
       send(self(), :advance_work)
       {:noreply, ready}
@@ -5586,6 +5595,18 @@ defmodule Loopex.Runtime.SessionCoordinator do
     |> Enum.map(& &1.round)
     |> Enum.max(fn -> -1 end)
     |> Kernel.+(1)
+  end
+
+  # Concept: a recovered owner takes over the open question's clock.
+  #
+  # Technical depth: only a pending question needs one. An answered question is
+  # owed a resumed evaluation instead, and scheduling reaches that on its own;
+  # arming an expiry against it would race the host's own answer with a timer.
+  defp rearm_recovered_interaction(state) do
+    case SessionState.open_interaction_record(state.durable) do
+      %{status: "pending"} = interaction -> arm_interaction_expiry(state, interaction)
+      _other -> state
+    end
   end
 
   defp arm_interaction_expiry(state, interaction) do

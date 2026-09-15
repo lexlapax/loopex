@@ -387,6 +387,96 @@ defmodule Loopex.InteractionLifecycleTest do
              })
   end
 
+  defmodule BlockingResumePolicy do
+    @moduledoc false
+    @behaviour Loopex.Policy
+
+    @impl Loopex.Policy
+    def decide(request) do
+      case Map.get(request, :interaction_response) do
+        nil ->
+          {:defer,
+           %{
+             kind: :choice,
+             prompt: "May the tool write the file?",
+             choices: [%{id: "allow", label: "Allow once"}],
+             expires_in_ms: 60_000
+           }}
+
+        %{answer: %{choice_id: "allow"}} ->
+          hold()
+          {:allow, nil}
+      end
+    end
+
+    # The resumed evaluation waits where a slow host would, so a test can force
+    # owner succession while the question is answered and unresolved.
+    defp hold do
+      case Process.whereis(:interaction_resume_observer) do
+        nil ->
+          :ok
+
+        observer ->
+          send(observer, {:resumed, self()})
+
+          receive do
+            :release -> :ok
+          after
+            5_000 -> :ok
+          end
+      end
+    end
+  end
+
+  test "recovery resumes an answered but unresolved question without dispatching first" do
+    # The name dies with this process, so the policy above finds no observer in
+    # any other case.
+    Process.register(self(), :interaction_resume_observer)
+
+    fixture = loop_fixture(BlockingResumePolicy)
+    {session_id, attachment} = loop_session(fixture)
+
+    assert {:accepted, "p1"} =
+             Loopex.command(attachment, %{type: :prompt, command_id: "p1", content: "do it"})
+
+    requested = await_event(fixture, session_id, "interaction.requested")
+
+    assert {:accepted, "answer-1"} =
+             Loopex.command(attachment, %{
+               type: :interaction_answer,
+               command_id: "answer-1",
+               interaction_id: requested["interaction_id"],
+               choice_id: "allow"
+             })
+
+    # The host is mid-decision when this owner is replaced.
+    assert_receive {:resumed, _first_evaluation}, 4_000
+
+    assert {:ok, ^session_id} =
+             Loopex.resume_session(fixture.runtime, session_id, command_id: "successor")
+
+    # The successor finds the answer on disk and asks the host again rather than
+    # assuming what the first evaluation would have said. Nothing was dispatched
+    # in between.
+    assert_receive {:resumed, second_evaluation}, 8_000
+    assert Enum.all?(Fixture.events(fixture, session_id), &(&1.kind != "tool.started"))
+    send(second_evaluation, :release)
+
+    resolved = await_event(fixture, session_id, "interaction.resolved", 8_000)
+    assert resolved["resolution"] == "allowed"
+
+    tool_finished = await_event(fixture, session_id, "tool.finished", 8_000)
+    assert tool_finished["outcome"] == "completed"
+
+    events = Fixture.events(fixture, session_id)
+    assert Enum.count(events, &(&1.kind == "interaction.resolved")) == 1
+    assert Enum.count(events, &(&1.kind == "interaction.requested")) == 1
+
+    started = Enum.find(events, &(&1.kind == "tool.started"))
+    resolution = Enum.find(events, &(&1.kind == "interaction.resolved"))
+    assert started.event_sequence > resolution.event_sequence
+  end
+
   test "an abort cancels the open question and a later answer finds it resolved" do
     fixture = loop_fixture(AnsweringPolicy)
     {session_id, attachment} = loop_session(fixture)
