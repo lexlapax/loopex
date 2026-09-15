@@ -22,6 +22,37 @@ the exact document set its milestone must update.
 
 No package or compatibility-labelled surface is pending.
 
+Implement M4 on branch `m4`. Two applications join the eight:
+`loopex_telemetry` at the edge, owning the only Loopex-attached telemetry
+handler, and `loopex_app_server` as a client, serving the experimental session
+protocol `loopex.session.v1-experimental` over one foreground process on
+standard input and output. Core admits one external dependency, the telemetry
+event dispatcher the vision's dependency doctrine names; the dependency oracle
+that decides this is rebound through M1 gate generation 15.
+
+Add the independent consumer in [`clients/node`](clients/node/README.md): plain
+JavaScript the pinned Node runs directly, with no build step, package manifest,
+lockfile or dependency. It drives a session end to end over the wire, selecting
+an admitted skill, answering the host policy's question, watching the
+authorization the host mints only after that answer commits, and reading back a
+verified bounded transfer of what the tool produced.
+
+Enforce two rules the protocol advertised and nothing applied: a `request_id` is
+unique among the in-flight requests on a connection and no more than
+`max_requests_in_flight` are in flight at once, and a connection holds one
+attachment at a time, replaced only when a request says so. Both were found by
+running the M4 gate, which had never been run.
+
+Add four documents the M4 gate's obligations name:
+[app server operations](docs/operator/app-server.md#concept),
+[observability](docs/operator/observability.md#concept) for operators, and the
+[app server protocol](docs/developer/app-server-protocol.md#concept) and
+[observability](docs/developer/observability.md#concept) pairs for developers.
+
+None of this is a release, a package, a binary, an installer, a service image or
+a compatibility label, and none of it is closed. The generation is experimental
+in its own name and may change in any later milestone without a migration path.
+
 Open the [M4 plan](docs/plans/M4.md#concept) as the one permitted planning
 lookahead on the integrated M3 acceptance checkpoint: move the draft triple
 into `docs/plans/`, bind a runner whose opening probe observes a policy

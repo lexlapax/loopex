@@ -38,6 +38,21 @@ that calls Mix, and several do.
 Adding another development dependency requires the ordinary dependency
 decision.
 
+M4 adds one that is not a bootstrap prerequisite: the client lanes run the
+independent consumer in `clients/node` under the Node version pinned in
+`scripts/fixtures/m4/client-toolchain.txt`. It is an isolated client-validation
+prerequisite rather than a bootstrap or production dependency — the bootstrap
+check above does not need it, nothing in the product uses it, and a gate lane
+that cannot find the pinned version reports unavailable evidence rather than
+failing the product. The consumer is plain JavaScript with no build step,
+package manifest, lockfile or dependency, so there is nothing to install.
+
+Core also declares one external dependency now, the telemetry event dispatcher
+the vision's dependency doctrine admits by name. `mix loopex.deps_budget`
+enforces that this stays at one, and that the two applications M4 adds,
+`loopex_telemetry` at the edge and `loopex_app_server` as a client, keep their
+roles and their direction.
+
 The reference local executor has a separate **runtime** prerequisite:
 executable `/bin/bash` for its internal supervision scripts on Darwin and Linux.
 Model-supplied raw commands still use `/bin/sh`, and argv commands remain literal.

@@ -87,13 +87,23 @@ with no M4 product bytes: the five prerequisite ADRs (0023, 0024, 0026,
 the repository status checker learned to accept a first acceptance that
 completes such a shared-binding refresh, and the client model-use rules were
 rebuilt for the current Claude and OpenAI models. M4's outcome is an
-operator-usable foreground server and TypeScript consumer over durable
+operator-usable foreground server and Node consumer over durable
 interactions and bounded artifact transfers, with runtime tracing and
-telemetry; its gate is red today for exactly the missing behavior it declares.
-Implementation proceeds on branch `m4` and begins with an inherited-gate
-baseline: recording the M0 gate under both toolchain pairs, and repairing the
-M1 and M2 gate runners so they can be re-proved under the refreshed floor,
-because their retained evidence predates it. The planned `0.1.0` release is
+telemetry.
+
+Implementation proceeds on branch `m4`. Two applications join the eight:
+`loopex_telemetry` at the edge, owning the only Loopex-attached telemetry
+handler, and `loopex_app_server` as a client, serving the experimental session
+protocol over one foreground process on standard input and output. Core admits
+one external dependency, the telemetry event dispatcher the dependency doctrine
+names. The independent consumer lives in [`clients/node`](clients/node/README.md)
+as plain JavaScript the pinned Node runs directly, with no build step, package
+manifest, lockfile or dependency; it drives a session end to end over the wire,
+selecting an admitted skill, answering the host policy's question, watching the
+authorization the host mints afterwards, and reading back a verified bounded
+transfer of what the tool produced. None of this is closed: the gate's own
+witnesses are still being written, and a green suite is not a closure. The
+planned `0.1.0` release is
 source-only and would receive an annotated `v0.1.0` tag on the exact `main`
 integration commit only after M4 implementation, independent closure review,
 explicit closure and separate release/tag authority. See
