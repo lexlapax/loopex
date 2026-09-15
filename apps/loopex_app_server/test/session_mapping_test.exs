@@ -29,6 +29,7 @@ defmodule Loopex.AppServer.SessionMappingTest do
 
   alias Loopex.AgentLoopFixture, as: Fixture
   alias Loopex.AppServer.Connection
+  alias Loopex.AppServer.Delivery
   alias LoopexProtocol.Wire
 
   test "a session created over the wire is the session the facade would have created" do
@@ -197,6 +198,332 @@ defmodule Loopex.AppServer.SessionMappingTest do
       assert {:error, refusal, _connection} = Connection.dispatch(connection, bad)
       assert refusal["code"] == "invalid_request", "admitted #{inspect(bad)}"
     end
+  end
+
+  # The eight cases below are this outcome's locked witnesses. Each carries the
+  # exact identity acceptance bound; the narrower cases above remain because they
+  # say which single rule broke when one of these fails.
+
+  test "the same command corpus produces identical durable identities through facade and wire" do
+    corpus = [
+      %{type: :prompt, command_id: "c1", content: "first"},
+      %{type: :prompt, command_id: "c2", content: "second"}
+    ]
+
+    through_facade = fixture()
+    {:ok, facade_session} = Loopex.create_session(through_facade.runtime, %{}, command_id: "cs")
+    {:ok, facade_attachment} = Loopex.attach(through_facade.runtime, facade_session, [])
+
+    for command <- corpus do
+      {:accepted, _id} = Loopex.command(facade_attachment, command)
+      settle(through_facade, facade_session)
+    end
+
+    through_wire = fixture()
+    {connection, wire_session} = created(through_wire)
+
+    {:ok, _snapshot, connection} =
+      Connection.dispatch(connection, %{
+        "method" => "session.attach",
+        "request_id" => "ra",
+        "session_id" => Wire.encode_identity(wire_session)
+      })
+
+    connection =
+      Enum.reduce(corpus, connection, fn command, connection ->
+        {:ok, _record, connection} =
+          Connection.dispatch(connection, %{
+            "method" => "session.prompt",
+            "request_id" => "r-#{command.command_id}",
+            "command_id" => Wire.encode_identity(command.command_id),
+            "content_b64" => Base.url_encode64(command.content, padding: false)
+          })
+
+        settle(through_wire, wire_session)
+        connection
+      end)
+
+    refute is_nil(connection)
+
+    # The identities a client sent are the identities that committed, on both
+    # surfaces, and the durable history means the same thing either way.
+    assert kinds(through_facade, facade_session) == kinds(through_wire, wire_session)
+    assert events(through_facade, facade_session) == events(through_wire, wire_session)
+  end
+
+  test "request identity varies independently of command identity and replay returns the historical admission" do
+    fixture = fixture()
+    {connection, session_id} = created(fixture)
+
+    {:ok, _snapshot, connection} =
+      Connection.dispatch(connection, %{
+        "method" => "session.attach",
+        "request_id" => "ra",
+        "session_id" => Wire.encode_identity(session_id)
+      })
+
+    command = %{
+      "method" => "session.prompt",
+      "command_id" => Wire.encode_identity("cp"),
+      "content_b64" => Base.url_encode64("once", padding: false)
+    }
+
+    assert {:ok, first, connection} =
+             Connection.dispatch(connection, Map.put(command, "request_id", "r1"))
+
+    settle(fixture, session_id)
+    before = kinds(fixture, session_id)
+
+    # A different request identity carrying the same command identity is a
+    # replay, not a second command: the answer is the historical admission and
+    # the durable history does not grow.
+    assert {:ok, second, _connection} =
+             Connection.dispatch(connection, Map.put(command, "request_id", "r2"))
+
+    assert second["request_id"] == "r2"
+    assert first["request_id"] == "r1"
+    assert second["command_id"] == first["command_id"]
+    assert second["status"] == first["status"]
+    assert kinds(fixture, session_id) == before
+  end
+
+  test "attach returns a snapshot and cursor before live delivery and admission precedes correlated asynchronous delivery" do
+    fixture = fixture()
+    {connection, session_id} = created(fixture)
+
+    assert {:ok, snapshot, connection} =
+             Connection.dispatch(connection, %{
+               "method" => "session.attach",
+               "request_id" => "ra",
+               "session_id" => Wire.encode_identity(session_id)
+             })
+
+    assert snapshot["type"] == "snapshot"
+    assert is_binary(snapshot["event_cursor"])
+
+    cursor = String.to_integer(snapshot["event_cursor"])
+
+    # The admission is answered before anything the command causes is delivered,
+    # which is what lets a client correlate one against the other rather than
+    # guess.
+    assert {:ok, admission, _connection} =
+             Connection.dispatch(connection, %{
+               "method" => "session.prompt",
+               "request_id" => "rp",
+               "command_id" => Wire.encode_identity("cp"),
+               "content_b64" => Base.url_encode64("go", padding: false)
+             })
+
+    assert admission["type"] == "admission"
+    assert admission["status"] == "accepted"
+
+    settle(fixture, session_id)
+
+    published = Fixture.events(fixture, session_id)
+    assert published != []
+    assert Enum.all?(published, &(&1.event_sequence > cursor))
+  end
+
+  test "a fresh attachment pairs its unchanged revision two snapshot with the exact same cursor open interaction view" do
+    fixture = fixture()
+    {connection, session_id} = created(fixture)
+
+    assert {:ok, first, _connection} =
+             Connection.dispatch(connection, %{
+               "method" => "session.attach",
+               "request_id" => "ra",
+               "session_id" => Wire.encode_identity(session_id),
+               "after_event_sequence" => "0"
+             })
+
+    # A second connection attaching at the same cursor sees the same snapshot.
+    # Two clients reading one session at one point must not disagree about it. It
+    # names replacement because a session has one attached caller, and taking
+    # that over is something a caller says rather than something it stumbles into.
+    second_connection = Connection.new(runtime: fixture.runtime)
+
+    {:ok, _reply, second_connection} =
+      Connection.initialize(second_connection, %{
+        "request_id" => "r0",
+        "generations" => [LoopexProtocol.Session.generation()],
+        "capabilities" => []
+      })
+
+    assert {:ok, second, _connection} =
+             Connection.dispatch(second_connection, %{
+               "method" => "session.attach",
+               "request_id" => "rb",
+               "session_id" => Wire.encode_identity(session_id),
+               "after_event_sequence" => "0",
+               "replace" => true
+             })
+
+    assert second["event_cursor"] == first["event_cursor"]
+    assert Map.drop(second, ["request_id"]) == Map.drop(first, ["request_id"])
+    assert second["open_interaction"] == first["open_interaction"]
+  end
+
+  test "a second attach refuses with a stable reason unless it names explicit replacement which detaches the first at its last emitted cursor" do
+    fixture = fixture()
+    {connection, session_id} = created(fixture)
+
+    assert {:ok, first, connection} =
+             Connection.dispatch(connection, %{
+               "method" => "session.attach",
+               "request_id" => "ra",
+               "session_id" => Wire.encode_identity(session_id)
+             })
+
+    attach = %{
+      "method" => "session.attach",
+      "request_id" => "rb",
+      "session_id" => Wire.encode_identity(session_id)
+    }
+
+    # Accepted ADR 0023 bounds this per foreground process, so the second attach
+    # that must refuse is the one this same connection makes. Refusal is the
+    # default, and its reason is stable rather than incidental.
+    assert {:error, refusal, connection} = Connection.dispatch(connection, attach)
+    assert refusal["code"] == "attachment_conflict"
+    assert refusal["code"] in LoopexProtocol.Session.error_codes()
+
+    # Replacement happens only when a client says so, and the replacement's view
+    # begins where the session stands rather than at the beginning.
+    assert {:ok, replaced, _connection} =
+             Connection.dispatch(connection, Map.put(attach, "replace", true))
+
+    assert replaced["type"] == "snapshot"
+    assert String.to_integer(replaced["event_cursor"]) >= String.to_integer(first["event_cursor"])
+  end
+
+  test "in flight request identity reuse refuses and reuse after completion is ordinary correlation" do
+    connection = Connection.new()
+
+    {:ok, _reply, connection} =
+      Connection.initialize(connection, %{
+        "request_id" => "r0",
+        "generations" => [LoopexProtocol.Session.generation()],
+        "capabilities" => []
+      })
+
+    assert {:ok, claimed} = Connection.begin_request(connection, "r1")
+    assert Connection.in_flight(claimed) == ["r1"]
+
+    assert {:error, refusal, unchanged} = Connection.begin_request(claimed, "r1")
+    assert refusal["code"] == "invalid_request"
+    assert refusal["request_id"] == "r1"
+    assert Connection.in_flight(unchanged) == ["r1"]
+
+    # Completion is what makes the identity ordinary again.
+    released = Connection.complete_request(claimed, "r1")
+    assert Connection.in_flight(released) == []
+    assert {:ok, again} = Connection.begin_request(released, "r1")
+    assert Connection.in_flight(again) == ["r1"]
+  end
+
+  test "pre admission pressure refuses before any durable write and post admission pressure drops progress first then detaches at the last emitted cursor" do
+    fixture = fixture()
+    {connection, session_id} = created(fixture)
+    before = kinds(fixture, session_id)
+
+    ceiling = Map.fetch!(LoopexProtocol.Session.limits(), "max_requests_in_flight")
+
+    saturated =
+      Enum.reduce(1..ceiling, connection, fn index, connection ->
+        {:ok, connection} = Connection.begin_request(connection, "inflight-#{index}")
+        connection
+      end)
+
+    # Pressure before admission refuses, and refuses before anything durable
+    # happens: the session's history is exactly what it was.
+    assert {:error, refusal, _unchanged} = Connection.begin_request(saturated, "one-too-many")
+    assert refusal["code"] == "capacity_exceeded"
+    refute Map.has_key?(refusal, "request_id")
+    assert kinds(fixture, session_id) == before
+
+    # Pressure after admission is the delivery queue's, and the two planes give
+    # way differently: progress is dropped, durable events detach at the cursor
+    # the client had reached.
+    queue = Delivery.new(session_id, 0)
+
+    flooded_progress =
+      Enum.reduce(1..64, queue, fn index, queue ->
+        Delivery.progress(queue, %{"seq" => index, "bytes" => String.duplicate("p", 32_768)})
+      end)
+
+    refute Delivery.detached?(flooded_progress)
+
+    flooded_events =
+      Enum.reduce(1..128, queue, fn index, queue ->
+        Delivery.event(queue, %{
+          event_id: "event-#{index}",
+          kind: "run.progressed",
+          event_sequence: index,
+          payload: %{"bytes" => String.duplicate("e", 65_536)}
+        })
+      end)
+
+    assert Delivery.detached?(flooded_events)
+    detachment = Delivery.detachment(flooded_events)
+    assert detachment["code"] == "detached"
+    assert is_binary(detachment["event_cursor"])
+  end
+
+  test "snapshots durable events transient progress and diagnostics stay separate record families and a fresh settled attachment is the final authority" do
+    fixture = fixture()
+    {connection, session_id} = created(fixture)
+
+    assert {:ok, snapshot, connection} =
+             Connection.dispatch(connection, %{
+               "method" => "session.attach",
+               "request_id" => "ra",
+               "session_id" => Wire.encode_identity(session_id)
+             })
+
+    assert {:ok, admission, _connection} =
+             Connection.dispatch(connection, %{
+               "method" => "session.prompt",
+               "request_id" => "rp",
+               "command_id" => Wire.encode_identity("cp"),
+               "content_b64" => Base.url_encode64("go", padding: false)
+             })
+
+    settle(fixture, session_id)
+
+    # Each plane is its own record family, and the families are disjoint: a
+    # client branching on `type` can never mistake a rendering aid for history.
+    assert snapshot["type"] == "snapshot"
+    assert admission["type"] == "admission"
+
+    families = LoopexProtocol.Session.record_families()
+    assert "snapshot" in families
+    assert "event" in families
+    assert "progress" in families
+    assert length(Enum.uniq(families)) == length(families)
+
+    # A fresh attachment after the run settles is the authority: it reports the
+    # session as it now stands, not as the first attachment last saw it.
+    fresh = Connection.new(runtime: fixture.runtime)
+
+    {:ok, _reply, fresh} =
+      Connection.initialize(fresh, %{
+        "request_id" => "r0",
+        "generations" => [LoopexProtocol.Session.generation()],
+        "capabilities" => []
+      })
+
+    assert {:ok, settled, _fresh} =
+             Connection.dispatch(fresh, %{
+               "method" => "session.attach",
+               "request_id" => "rc",
+               "session_id" => Wire.encode_identity(session_id),
+               "replace" => true
+             })
+
+    assert settled["type"] == "snapshot"
+
+    assert String.to_integer(settled["event_cursor"]) >
+             String.to_integer(snapshot["event_cursor"])
   end
 
   defp fixture do

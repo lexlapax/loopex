@@ -147,8 +147,20 @@ defmodule Loopex.AppServer.Mapping do
     end
   end
 
+  # Concept: one attachment at a time, on this process, replaced only when a
+  # caller says so.
+  #
+  # Technical depth: accepted ADR 0023 bounds this per foreground process, which
+  # is what this connection is, so the rule belongs here rather than in the
+  # runtime. Core admits concurrent attachments on purpose — replaying history by
+  # reattaching is an ordinary embedded operation and an M4 witness requires it —
+  # and a transport that needed exclusivity therefore states it for itself.
+  # `replace` never reaches the facade, because it is this rule's input and not
+  # the runtime's.
   def call(%{"method" => "session.attach"} = request, context) do
     with {:ok, session_id} <- field(request, "session_id", &Wire.session_identity/1),
+         {:ok, replace} <- attach_replacement(request),
+         :ok <- attachable(context, replace, request),
          {:ok, options} <- attach_options(request) do
       case Loopex.attach(context.runtime, session_id, options) do
         {:ok, attachment} ->
@@ -436,18 +448,26 @@ defmodule Loopex.AppServer.Mapping do
   # retained-cursor replay. `replace` is explicit because detaching another
   # attachment is a decision rather than a default.
   defp attach_options(request) do
-    with {:ok, after_sequence} <- optional_u64_field(request, "after_event_sequence"),
-         {:ok, replace} <- optional_boolean(request, "replace") do
-      options = if replace, do: [replace: true], else: []
-
-      options =
-        if after_sequence,
-          do: [{:after_event_sequence, after_sequence} | options],
-          else: options
-
-      {:ok, options}
+    with {:ok, after_sequence} <- optional_u64_field(request, "after_event_sequence") do
+      if after_sequence,
+        do: {:ok, [after_event_sequence: after_sequence]},
+        else: {:ok, []}
     end
   end
+
+  defp attach_replacement(request), do: optional_boolean(request, "replace")
+
+  # Concept: a connection already holding an attachment refuses a second one.
+  #
+  # Technical depth: the refusal names a code from the closed set, so a client
+  # branches on it rather than on text. Replacement is admitted only when the
+  # request says so; the incumbent is released when the new attachment takes its
+  # place on this connection, which is the last cursor it was emitted.
+  defp attachable(%{attachment: nil}, _replace, _request), do: :ok
+  defp attachable(_context, true, _request), do: :ok
+
+  defp attachable(_context, _replace, request),
+    do: {:error, error(request, "attachment_conflict", :attachment_conflict)}
 
   defp optional_u64_field(request, name) do
     case Map.get(request, name) do
