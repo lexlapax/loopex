@@ -148,12 +148,12 @@ and can print neither `CAPTURE` nor `M1 gate GREEN`.
 
 | SHA-256 | Path |
 | --- | --- |
-| `f092099d771e003218af3ec57a255173a1954f4157f2ed8ca3520a6a377b3e62` | `scripts/check-m1-gate.sh` |
+| `c7a952e2da02ecc23e3f0b3e71c82a6e4cd0e6d038d60851aeb309f583cfa8d9` | `scripts/check-m1-gate.sh` |
 | `4bba03d218eee656991444a3c22c8753bfef1ab86f688036a4440048752f48bd` | `scripts/m1-gate-launcher.escript` |
 | `53d8219bdee584a3849a85a1102e405520d5dd0dfbe21d259434bc9edfc5fcc0` | `scripts/m1-exunit-runner.exs` |
 | `572d9fac0b4be1fb792db8f5f8ff3b760e588c9e35f4cb1850c03f73c2f1f661` | `scripts/m1-evidence-verifier.exs` |
 | `2c62019cde03e118a2b5ff23ba24a5ee50d8f118172ae4d71ce6bed2f7be1011` | `apps/loopex/lib/mix/tasks/loopex.deps_budget.ex` |
-| `52cbf574673acc43c5eb5dbf2c8676869e76ea964e5ba980b2725fc522a6efeb` | `apps/loopex/test/m1_gate_evidence_test.exs` |
+| `82b9a8f853264abeaf4a6c3afda5988c7fa848287d6061f77633782ca6a9d3d2` | `apps/loopex/test/m1_gate_evidence_test.exs` |
 | `c36253cff3d74ddff1b330695edbc4bde0a4565c1412c67c1293b2fb7ca6129b` | `apps/loopex/test/m1_exunit_runner_test.exs` |
 | `bc4d5544229c3b15414a8ad9ac8ce8e5daf2e29d35a98ab868af1741fd9b44d4` | `apps/loopex/test/deps_budget_test.exs` |
 | `fea095ecec784a4440b872ad5f53a8da2cb4e13e43b6f05add5cfd75bb352879` | `.tool-versions` |
@@ -1375,3 +1375,50 @@ proposal records no acceptance and grants no waiver, closure or release.
 | --- | --- | --- |
 | 12 | `scripts/check-m1-gate.sh` | `f092099d771e003218af3ec57a255173a1954f4157f2ed8ca3520a6a377b3e62` |
 | 12 | `apps/loopex/test/m1_gate_evidence_test.exs` | `52cbf574673acc43c5eb5dbf2c8676869e76ea964e5ba980b2725fc522a6efeb` |
+
+<a id="amendment-13"></a>
+## Amendment 13 — Supply the witness path instead of inheriting it
+
+**Acceptance: OUTSTANDING.** Closed M1 adds gate generation 13 under
+`amendment-transaction-v2`. Its historical Acceptance, Closure and prior
+generation rows remain unchanged. The new row carries this gate's digest and
+leaves authority, evidence and candidate unset until exact-proposal acceptance.
+
+The witness generation 12 added read the path it happened to inherit and
+compared the fixture's answer against it. Run directly that inherits the
+operator's path; run as a protected selector it inherits the isolated path
+this gate already built, and on a host whose system directories carry the
+toolchain the two disagree, so the case failed inside the gate it was written
+to protect while passing outside it. A witness whose subject is the path must
+not depend on the path it was launched with.
+
+The case now supplies the incoming path explicitly: it selects the complete
+toolchain directories it can see, appends the four system directories, passes
+that exact list to the fixture role, and computes its expectation from the
+same list. Whichever way the case is launched, the run and the expectation
+agree by construction, and the only environment-dependent fact left is the
+branch under test, which is whether a system directory carries the toolchain.
+It asserts the established order on a host with no shadow and the reordered
+order on a host with one, with every selected and system directory reachable
+in both, and it refuses a supplied path that carries no complete toolchain
+rather than passing vacuously. Nothing outside this case changes: the runner
+keeps generation 12's ordering exactly, and every selector, minimum, name,
+exclusion, real-provider path, credential rule and exit predicate keeps its
+meaning. No M1 outcome or scope changes and no lifecycle state reopens.
+
+Binding validation, bootstrap and every inherited gate that invokes them are
+red at this proposal for its pending generation row, exactly as at any v2
+proposal. Binding-independent checks are proved directly: the runner's syntax
+passes, and the corrected case passes on both hosts, exercising the unchanged
+branch on Darwin and the reordered branch on Linux against the generation 12
+runner.
+
+Only explicit maintainer acceptance of the actual A revision authorizes R.
+Its immediate child completes generation 13 with exact A and adds one fresh
+acceptance disposition; R changes no bound artifact or gate byte. This
+proposal records no acceptance and grants no waiver, closure or release.
+
+| Generation | Artifact | Rebound SHA-256 |
+| --- | --- | --- |
+| 13 | `scripts/check-m1-gate.sh` | `c7a952e2da02ecc23e3f0b3e71c82a6e4cd0e6d038d60851aeb309f583cfa8d9` |
+| 13 | `apps/loopex/test/m1_gate_evidence_test.exs` | `82b9a8f853264abeaf4a6c3afda5988c7fa848287d6061f77633782ca6a9d3d2` |

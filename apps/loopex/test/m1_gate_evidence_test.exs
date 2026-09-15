@@ -929,19 +929,38 @@ defmodule Loopex.M1GateEvidenceTest do
       match?({:ok, %File.Stat{type: :regular}}, File.stat(Path.join(directory, tool)))
     end
 
-    incoming = System.get_env("PATH") |> String.split(":", trim: true)
+    # The incoming path is supplied rather than inherited, so the expectation
+    # and the run agree by construction however this case was launched.
+    toolchain_directories =
+      System.get_env("PATH")
+      |> String.split(":", trim: true)
+      |> Enum.filter(fn entry ->
+        String.starts_with?(entry, "/") and entry not in system_directories and
+          Enum.any?(tools, &carries?.(entry, &1)) and
+          carries?.(entry, "erl") == carries?.(entry, "escript")
+      end)
+      |> Enum.uniq()
+
+    incoming = toolchain_directories ++ system_directories
 
     selected =
       Enum.map(tools, fn tool ->
-        Enum.find(incoming, &(String.starts_with?(&1, "/") and carries?.(&1, tool)))
+        Enum.find(incoming, &carries?.(&1, tool))
       end)
+
+    assert Enum.all?(selected, &(&1 != nil)),
+           "the supplied path carries no complete toolchain: #{inspect(incoming)}"
 
     shadowed? =
       Enum.any?(system_directories, fn directory ->
         Enum.any?(tools, &carries?.(directory, &1))
       end)
 
-    assert {output, 0} = run_gate_without_input(["--environment-fixture"], [])
+    assert {output, 0} =
+             run_gate_without_input(["--environment-fixture"], [
+               {"PATH", Enum.join(incoming, ":")}
+             ])
+
     assert output =~ "M1 environment preflight OK"
 
     [path] =
