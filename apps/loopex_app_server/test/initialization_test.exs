@@ -244,6 +244,7 @@ defmodule Loopex.AppServer.InitializationTest do
              |> IO.iodata_to_binary()
              |> String.trim_trailing("\n")
              |> Frame.decode(@frame_limit)
+
     assert decoded["exact_schema_sha256"] == Session.schema_digest()
 
     # Negotiation comes first: the same mutation is refused before it, and is
@@ -328,6 +329,7 @@ defmodule Loopex.AppServer.InitializationTest do
     for line <- lines do
       assert {:ok, record} = Frame.decode(line, @frame_limit),
              "not a protocol record: #{inspect(line)}"
+
       assert record["type"] in Session.record_families()
     end
 
