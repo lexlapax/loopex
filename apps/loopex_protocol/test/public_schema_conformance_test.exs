@@ -268,7 +268,7 @@ defmodule LoopexProtocol.PublicSchemaConformanceTest do
     end
   end
 
-  defp repository_root, do: File.cwd!() |> Path.join("../..") |> Path.expand()
+  defp repository_root, do: Path.expand(Path.join([__DIR__, "..", "..", ".."]))
 
   test "exact source schema client versions and toolchain platform identities are recorded with every result" do
     # What an independent implementation checks itself against is a set of exact

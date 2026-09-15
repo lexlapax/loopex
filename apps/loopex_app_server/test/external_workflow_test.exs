@@ -698,7 +698,7 @@ defmodule Loopex.AppServer.ExternalWorkflowTest do
   defp index_of(list, value), do: Enum.find_index(list, &(&1 == value))
 
   defp repository_root do
-    File.cwd!() |> Path.join("../..") |> Path.expand()
+    Path.expand(Path.join([__DIR__, "..", "..", ".."]))
   end
 
   defp ebin(application) do

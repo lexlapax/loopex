@@ -446,7 +446,7 @@ defmodule Loopex.AppServer.InitializationTest do
     path
   end
 
-  defp repository_root, do: File.cwd!() |> Path.join("../..") |> Path.expand()
+  defp repository_root, do: Path.expand(Path.join([__DIR__, "..", "..", ".."]))
 
   defp require_paths do
     support = Path.join([repository_root(), "apps", "loopex", "test", "support"])
