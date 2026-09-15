@@ -444,6 +444,56 @@ defmodule Loopex.InteractionLifecycleTest do
     assert length(admitted) == 1
   end
 
+  test "every interaction transaction cut is journaled before publication and before any effect intent" do
+    fixture = loop_fixture(AnsweringPolicy)
+    {session_id, attachment} = loop_session(fixture)
+
+    assert {:accepted, "p1"} =
+             Loopex.command(attachment, %{type: :prompt, command_id: "p1", content: "do it"})
+
+    requested = await_event(fixture, session_id, "interaction.requested")
+    answer(attachment, "answer-1", requested)
+    _resolved = await_event(fixture, session_id, "interaction.resolved", 8_000)
+    _finished = await_event(fixture, session_id, "tool.finished", 8_000)
+
+    records = Fixture.records(fixture, session_id)
+    events = Fixture.events(fixture, session_id)
+
+    creation = find_record(records, "interaction_requested_v1")
+    admission = Enum.find(records, &(&1.payload["command_type"] == "interaction_answer"))
+    resolution = find_record(records, "interaction_resolved_v1")
+    intent = find_record(records, "effect_intent_committed")
+
+    # The three cuts are journaled in order, and the effect intent is after all
+    # of them: nothing was dispatched on the strength of a question, an answer,
+    # or anything short of the committed resolution.
+    assert creation.journal_version < admission.journal_version
+    assert admission.journal_version < resolution.journal_version
+    assert resolution.journal_version < intent.journal_version
+
+    # Each published fact follows the record that made it true, and the tool
+    # starts only after the last of them.
+    request_event = Enum.find(events, &(&1.kind == "interaction.requested"))
+    resolved_event = Enum.find(events, &(&1.kind == "interaction.resolved"))
+    started_event = Enum.find(events, &(&1.kind == "tool.started"))
+
+    assert request_event["interaction_id"] == creation.payload["interaction_id"]
+    assert resolved_event["interaction_id"] == resolution.payload["interaction_id"]
+    assert request_event.event_sequence < resolved_event.event_sequence
+    assert resolved_event.event_sequence < started_event.event_sequence
+
+    # The question was retained exactly once, and so was its ending.
+    assert Enum.count(records, &(&1.payload.kind == "interaction_requested_v1")) == 1
+    assert Enum.count(records, &(&1.payload.kind == "interaction_resolved_v1")) == 1
+  end
+
+  defp find_record(records, kind) do
+    case Enum.find(records, &(&1.payload.kind == kind)) do
+      nil -> flunk("no #{kind} record was journaled")
+      record -> record
+    end
+  end
+
   defmodule MisbehavingPolicy do
     @moduledoc false
     @behaviour Loopex.Policy
