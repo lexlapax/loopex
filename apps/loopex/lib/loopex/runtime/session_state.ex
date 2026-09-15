@@ -2846,12 +2846,15 @@ defmodule Loopex.Runtime.SessionState do
       # transaction, so there is no window in which the session looks settled
       # while work is still owed.
       {state, steer_events} = resolve_steer(state, run_id, unapplied_reason(outcome, bound))
+      {state, interaction_events} = cancel_open_interaction(state, run_id)
       {state, promotion_events} = promote_follow_up(state, run_id)
 
       {:ok, %{state | aborting: nil},
        settled_events ++
          [event] ++
-         steer_events ++ promotion_events ++ session_settled(state, run_id, promotion_events)}
+         steer_events ++
+         interaction_events ++
+         promotion_events ++ session_settled(state, run_id, promotion_events)}
     else
       _other -> {:error, :invalid_run_terminal_transition}
     end
@@ -2884,11 +2887,14 @@ defmodule Loopex.Runtime.SessionState do
       # unrelated run. Resolve and promote inside this proposal so the public
       # terminal and everything it unblocks remain one durable transaction.
       {state, steer_events} = resolve_steer(state, run_id, "run_terminal")
+      {state, interaction_events} = cancel_open_interaction(state, run_id)
       {state, promotion_events} = promote_follow_up(state, run_id)
 
       {:ok, state,
        events ++
-         steer_events ++ promotion_events ++ session_settled(state, run_id, promotion_events)}
+         steer_events ++
+         interaction_events ++
+         promotion_events ++ session_settled(state, run_id, promotion_events)}
     else
       _other -> {:error, :invalid_outcome_unknown_transition}
     end
@@ -2996,6 +3002,29 @@ defmodule Loopex.Runtime.SessionState do
   end
 
   defp apply_internal_record(_state, _record), do: {:error, :invalid_internal_transition}
+
+  # Concept: a run that ends takes its open question with it.
+  #
+  # Technical depth: every ending reaches here -- a deadline, a bound, a
+  # failure, an abort's terminal -- so no path leaves a question standing
+  # against a run that is over. Leaving one would be worse than cosmetic: the
+  # session would refuse every later question, because the serial owner may hold
+  # only one open, and an operator would be shown a question nobody can answer.
+  defp cancel_open_interaction(state, run_id) do
+    case open_interaction_record(state) do
+      %{run_id: ^run_id, interaction_id: interaction_id} = interaction ->
+        cancelled = %{interaction | status: "cancelled"}
+
+        {%{
+           state
+           | interactions: Map.put(state.interactions, interaction_id, cancelled),
+             open_interaction: nil
+         }, [interaction_resolved_event(state.session_id, cancelled, "cancelled", %{})]}
+
+      _none ->
+        {state, []}
+    end
+  end
 
   # Concept: a new question is admitted when none is open, or when the open one
   # has been answered and the host asked again about the same decision.

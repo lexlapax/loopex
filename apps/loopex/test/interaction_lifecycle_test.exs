@@ -579,6 +579,65 @@ defmodule Loopex.InteractionLifecycleTest do
     assert started.event_sequence > resolution.event_sequence
   end
 
+  test "expiry abort deadline and restart races resolve by journal order and recovery resumes only retained pending state" do
+    # The deadline is the race this case owns; expiry, abort and restart each
+    # have their own beside it.
+    fixture =
+      Fixture.start(
+        script: [
+          %{text: "working", calls: [%{id: "c1", name: "write", arguments: %{"path" => "c1"}}]},
+          %{text: "done", calls: []}
+        ],
+        policy: AnsweringPolicy,
+        bounds_deadline_ms: 900
+      )
+
+    on_exit(fn -> Fixture.stop(fixture) end)
+    {session_id, attachment} = loop_session(fixture)
+
+    assert {:accepted, "p1"} =
+             Loopex.command(attachment, %{type: :prompt, command_id: "p1", content: "do it"})
+
+    requested = await_event(fixture, session_id, "interaction.requested")
+
+    # The question's effective expiry is capped at the run's deadline, so the
+    # two timers race by design. Which one wins is the journal's to decide; what
+    # this case fixes is that exactly one of them does, and that the question
+    # never outlives the run either way.
+    assert requested["expires_at"] <= run_deadline(fixture, session_id)
+
+    finished = await_event(fixture, session_id, "run.finished", 8_000)
+    assert finished["outcome"] in ["bound_reached", "completed"]
+
+    ending =
+      Enum.find(Fixture.events(fixture, session_id), fn event ->
+        event.kind in ["interaction.cancelled", "interaction.expired", "interaction.resolved"]
+      end)
+
+    assert ending["interaction_id"] == requested["interaction_id"]
+    assert ending.event_sequence < finished.event_sequence or finished["outcome"] == "completed"
+
+    # Exactly one ending for that question, and the session is answerable
+    # again: nothing is left open against a run that is over.
+    events = Fixture.events(fixture, session_id)
+
+    assert Enum.count(
+             events,
+             &(&1.kind in ["interaction.cancelled", "interaction.expired", "interaction.resolved"])
+           ) == 1
+
+    assert {:ok, status} = Loopex.session_status(fixture.runtime, session_id)
+    assert status.open_interaction == nil
+
+    assert {:error, :interaction_resolved} =
+             Loopex.command(attachment, %{
+               type: :interaction_answer,
+               command_id: "answer-late",
+               interaction_id: requested["interaction_id"],
+               choice_id: "allow"
+             })
+  end
+
   test "an abort cancels the open question and a later answer finds it resolved" do
     fixture = loop_fixture(AnsweringPolicy)
     {session_id, attachment} = loop_session(fixture)
@@ -623,6 +682,16 @@ defmodule Loopex.InteractionLifecycleTest do
     {:ok, session_id} = Loopex.create_session(fixture.runtime, %{}, command_id: "cs")
     {:ok, attachment} = Loopex.attach(fixture.runtime, session_id, after_event_sequence: 0)
     {session_id, attachment}
+  end
+
+  # The instant the run committed as its deadline, read from the request the run
+  # staged rather than recomputed from a clock here.
+  defp run_deadline(fixture, session_id) do
+    fixture
+    |> Fixture.records(session_id)
+    |> Enum.filter(&(&1.payload.kind == "model_request_committed"))
+    |> List.last()
+    |> then(& &1.payload["request"]["deadline"])
   end
 
   defp answer(attachment, command_id, requested) do
