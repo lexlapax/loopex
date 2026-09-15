@@ -296,8 +296,21 @@ defmodule Loopex.AppServer.ExternalWorkflowTest do
     assert dirty == "",
            "the tree is not the committed candidate; extracting it would prove nothing: #{dirty}"
 
+    # The workspace is placed under the physical temporary directory. On macOS
+    # `System.tmp_dir!/0` answers through `/var`, which is a symlink to
+    # `/private/var`. Mix resolves its own working directory but not the paths
+    # it is handed, so given the unresolved form it computes the relative link
+    # for a dependency's `priv` between two spellings of the same place and
+    # emits one that climbs past the filesystem root. The dependency then fails
+    # to read its own `priv` at compile time. Resolving once here keeps every
+    # path below it physical.
+    {physical_tmp, 0} = System.cmd("pwd", ["-P"], cd: System.tmp_dir!())
+
     workspace =
-      Path.join(System.tmp_dir!(), "loopex-extract-#{System.unique_integer([:positive])}")
+      Path.join(
+        String.trim(physical_tmp),
+        "loopex-extract-#{System.unique_integer([:positive])}"
+      )
 
     File.mkdir_p!(workspace)
     on_exit(fn -> File.rm_rf(workspace) end)
