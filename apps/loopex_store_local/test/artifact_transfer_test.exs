@@ -320,6 +320,68 @@ defmodule Loopex.Store.Local.ArtifactTransferTest do
     assert [] = Transfers.live(handle.transfers)
   end
 
+  defmodule LegacyStore do
+    @moduledoc false
+    @behaviour Loopex.ArtifactStore
+
+    alias Loopex.Store.Local.Artifacts
+
+    @impl Loopex.ArtifactStore
+    def put(handle, bytes, use_record), do: Artifacts.put(handle, bytes, use_record)
+
+    @impl Loopex.ArtifactStore
+    def fetch(handle, object), do: Artifacts.fetch(handle, object)
+
+    @impl Loopex.ArtifactStore
+    def stat(handle, locator), do: Artifacts.stat(handle, locator)
+
+    @impl Loopex.ArtifactStore
+    def describe(handle, use_locator), do: Artifacts.describe(handle, use_locator)
+  end
+
+  test "an adapter without the capability keeps the prior API and refuses only the transfer family" do
+    %{handle: handle, reference: reference, bytes: bytes} = stored("bytes an old adapter holds")
+
+    # The four callbacks that predate the decision answer exactly as before.
+    refute ArtifactStore.supports_transfer?(LegacyStore)
+    assert {:ok, ^bytes} = LegacyStore.fetch(handle, object(reference))
+    assert {:ok, stat} = LegacyStore.stat(handle, reference.locator)
+    assert stat.digest == reference.digest
+    assert {:ok, described} = LegacyStore.describe(handle, reference.use_locator)
+    assert described.object_locator == reference.locator
+
+    %{runtime: runtime, session_id: session_id} = session(handle, LegacyStore)
+    {:ok, attachment} = Loopex.attach(runtime, session_id, after_event_sequence: 0)
+
+    assert {:error, :artifact_transfer_unsupported} =
+             Loopex.open_artifact_transfer(attachment, %{
+               object: object(reference),
+               use_locator: reference.use_locator,
+               start: 0
+             })
+  end
+
+  test "one attachment may hold only its share of the live transfers" do
+    %{handle: handle, reference: reference} = stored("bytes for two at a time")
+    %{runtime: runtime, session_id: session_id} = session(handle)
+    {:ok, attachment} = Loopex.attach(runtime, session_id, after_event_sequence: 0)
+
+    request = %{object: object(reference), use_locator: reference.use_locator, start: 0}
+    limits = ArtifactStore.transfer_limits()
+
+    opened =
+      for _index <- 1..limits.per_attachment do
+        assert {:ok, transfer} = Loopex.open_artifact_transfer(attachment, request)
+        transfer
+      end
+
+    assert {:error, :transfer_limit_reached} = Loopex.open_artifact_transfer(attachment, request)
+
+    assert :ok = Loopex.close_artifact_transfer(attachment, hd(opened).transfer_ref)
+    assert {:ok, _replacement} = Loopex.open_artifact_transfer(attachment, request)
+    assert {:error, :transfer_limit_reached} = Loopex.open_artifact_transfer(attachment, request)
+  end
+
   test "a runtime composed without a transfer capable store refuses the family" do
     %{handle: handle, reference: reference} = stored("no transfers here")
     %{runtime: runtime, session_id: session_id} = session(nil)
@@ -338,7 +400,7 @@ defmodule Loopex.Store.Local.ArtifactTransferTest do
 
   # Concept: one runtime over this store, with the artifact placement composed
   # in beside it when the case is about transfers.
-  defp session(artifact_handle) do
+  defp session(artifact_handle, adapter \\ Loopex.Store.Local.Artifacts) do
     path = Path.join(System.tmp_dir!(), "loopex-store-#{:erlang.unique_integer([:positive])}")
     {:ok, store_pid} = Loopex.Store.Local.start_link(path: path)
     {:ok, store} = Loopex.Store.new(Loopex.Store.Local, store_pid)
@@ -351,10 +413,7 @@ defmodule Loopex.Store.Local.ArtifactTransferTest do
             options
 
           handle ->
-            Keyword.put(options, :artifact_store, %{
-              module: Loopex.Store.Local.Artifacts,
-              handle: handle
-            })
+            Keyword.put(options, :artifact_store, %{module: adapter, handle: handle})
         end
       end)
 
