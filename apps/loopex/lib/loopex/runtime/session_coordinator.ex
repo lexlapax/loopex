@@ -27,6 +27,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
 
   alias Loopex.Bounds
   alias Loopex.Conversation
+  alias Loopex.Interaction
   alias Loopex.Runtime.Control
   alias Loopex.Runtime.ExecutorStream
   alias Loopex.Runtime.ProviderLifetime
@@ -328,6 +329,10 @@ defmodule Loopex.Runtime.SessionCoordinator do
        streams: %{},
        deadline_timers: %{},
        policy_timers: %{},
+       # The expiry timer of each open interaction. A question that nobody
+       # answers must end as a fact rather than stand until the run's deadline
+       # with nothing saying why, so every retained question arms one.
+       interaction_timers: %{},
        pending_fault: nil,
        query: nil,
        # Concept: whether this owner still owes the reconciliation of a
@@ -1053,6 +1058,23 @@ defmodule Loopex.Runtime.SessionCoordinator do
 
       _other ->
         {:noreply, state}
+    end
+  end
+
+  # Concept: a question nobody answered in time ends as an expiry, and the tool
+  # call it suspended is denied.
+  #
+  # Technical depth: expiry, an answer, an abort and the run's deadline are
+  # ordinary competing transitions ordered at the journal, and the first
+  # committed one wins. A timer that fires for a question this owner no longer
+  # holds open is exactly that race resolved elsewhere, so it changes nothing.
+  def handle_info({:interaction_expired, interaction_id, run_id}, state) do
+    state = cancel_interaction_expiry(state, interaction_id)
+
+    if state.durable.open_interaction == interaction_id do
+      resolve_interaction(state, interaction_id, run_id, "expired", "interaction_expired")
+    else
+      {:noreply, state}
     end
   end
 
@@ -5234,7 +5256,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
 
     task =
       Task.Supervisor.async_nolink(state.owner_workers, fn ->
-        Policy.evaluate_callback(state.policy, request)
+        Policy.evaluate_callback(state.policy, request, :admit_defer)
       end)
 
     state = put_in_flight(state, task.ref, {:policy, work.run_id, task.pid})
@@ -5258,6 +5280,9 @@ defmodule Loopex.Runtime.SessionCoordinator do
               case decision do
                 {:allow, context} ->
                   dispatch_authorized_effect(state, work, call, definition, context)
+
+                {:defer, question} ->
+                  begin_interaction(state, work, call, question)
 
                 {:deny, category} when is_atom(category) ->
                   if category in Policy.reason_categories() do
@@ -5335,6 +5360,140 @@ defmodule Loopex.Runtime.SessionCoordinator do
 
   defp commit_tool_failure(state, work, call, reason),
     do: commit_tool_terminal(state, work, call, :failed, failure_reason(reason))
+
+  # Concept: a host that asks a question instead of deciding suspends the run
+  # until it is answered, and nothing is dispatched while it stands.
+  #
+  # Technical depth: accepted ADR 0024 commits the pending interaction and its
+  # public event in one transaction, and no executor intent exists on this path
+  # at all: the call stays where it was, and this coordinator stops advancing
+  # rather than holding a worker or a lease open. The identity, creation instant
+  # and effective expiry are chosen here, before the transaction is attempted,
+  # so resolving an uncertain commit reuses the same preimage. Every question
+  # carries a timer: a run whose host never answers would otherwise stand until
+  # its deadline with no fact saying why.
+  defp begin_interaction(state, work, call, question) do
+    round = next_interaction_round(state, call.tool_call_id)
+
+    if round > 2 do
+      commit_tool_terminal(state, work, call, :denied, "policy_denied")
+    else
+      created_at = System.system_time(:millisecond)
+
+      interaction = %{
+        interaction_id:
+          stable_id("interaction", state.session_id, "#{call.tool_call_id}-#{round}"),
+        run_id: work.run_id,
+        turn: Map.get(work, :turn_number, 1),
+        tool_call_id: call.tool_call_id,
+        request: question,
+        round: round,
+        created_at: created_at,
+        expires_at:
+          Interaction.effective_expiry(
+            created_at,
+            question.expires_in_ms,
+            committed_deadline(state, work.run_id)
+          ),
+        policy_request_digest: Interaction.digest(policy_request_identity(state, work, call))
+      }
+
+      with {:ok, proposal} <-
+             SessionState.propose_interaction_request(state.durable, interaction),
+           {:ok, next} <- commit_internal(state, proposal) do
+        {:noreply, arm_interaction_expiry(next, interaction)}
+      else
+        {:error, reason} -> {:stop, {:interaction_request_failed, reason}, state}
+      end
+    end
+  end
+
+  # Concept: one open question ends, and the call it suspended ends with it.
+  #
+  # Technical depth: the resolution and the tool call's own denial are two
+  # transactions in order rather than one, because the reducer applies one
+  # record per transaction; the interaction resolves first, so no window exists
+  # in which the call has ended while the question still reads as open. Only a
+  # resolution that leaves the decision denied reaches here; an allow dispatches
+  # instead, and commits its grant and intent before anything runs.
+  defp resolve_interaction(state, interaction_id, run_id, resolution, reason) do
+    with {:ok, proposal} <-
+           SessionState.propose_interaction_resolution(
+             state.durable,
+             interaction_id,
+             resolution,
+             reason
+           ),
+         {:ok, next} <- commit_internal(state, proposal) do
+      case Map.get(next.durable.pending_work, run_id) do
+        %{stage: "effect_pending", pending_calls: [call | _rest]} = work ->
+          commit_tool_terminal(next, work, call, :denied, reason)
+
+        _no_pending_call ->
+          {:noreply, next}
+      end
+    else
+      {:error, commit_reason} -> {:stop, {:interaction_resolution_failed, commit_reason}, state}
+    end
+  end
+
+  # Concept: how many answer-then-defer transitions this tool decision has
+  # already spent.
+  #
+  # Technical depth: read from the durable interactions rather than from a
+  # counter beside them, so it survives restart and replay exactly as the
+  # decision it bounds does.
+  defp next_interaction_round(state, tool_call_id) do
+    state.durable.interactions
+    |> Map.values()
+    |> Enum.filter(&(&1.tool_call_id == tool_call_id))
+    |> Enum.map(& &1.round)
+    |> Enum.max(fn -> -1 end)
+    |> Kernel.+(1)
+  end
+
+  defp arm_interaction_expiry(state, interaction) do
+    delay = max(interaction.expires_at - System.system_time(:millisecond), 0)
+
+    timer =
+      Process.send_after(
+        self(),
+        {:interaction_expired, interaction.interaction_id, interaction.run_id},
+        delay
+      )
+
+    %{
+      state
+      | interaction_timers: Map.put(state.interaction_timers, interaction.interaction_id, timer)
+    }
+  end
+
+  defp cancel_interaction_expiry(state, interaction_id) do
+    case Map.pop(state.interaction_timers, interaction_id) do
+      {nil, _remaining} ->
+        state
+
+      {timer, remaining} ->
+        Process.cancel_timer(timer)
+        %{state | interaction_timers: remaining}
+    end
+  end
+
+  # Concept: the part of the policy request an interaction is retained against.
+  #
+  # Technical depth: the digest names the question the host was asked, so a
+  # resumed evaluation can be proved to have received the same one. It is taken
+  # over the identities that fix the decision rather than over the whole request
+  # map, whose workspace lease is a live value that a later evaluation would
+  # legitimately carry differently.
+  defp policy_request_identity(state, work, call) do
+    %{
+      session_id: state.session_id,
+      run_id: work.run_id,
+      tool_call_id: call.tool_call_id,
+      arguments: call.arguments
+    }
+  end
 
   defp commit_tool_terminal(state, work, call, outcome, reason) do
     with {:ok, proposal} <-

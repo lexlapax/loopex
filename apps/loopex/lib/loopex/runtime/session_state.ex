@@ -1420,6 +1420,102 @@ defmodule Loopex.Runtime.SessionState do
     internal_proposal(state, stable_id("outcome-unknown", run_id, reconciliation_ref), record)
   end
 
+  # Concept: the transaction that retains one deferred question.
+  #
+  # Technical depth: everything the question is judged by is decided before the
+  # transaction is attempted -- its identity, creation instant, effective expiry
+  # and round -- so resolving an uncertain commit reuses this same preimage.
+  # That is what stops two owners recovering the same creation from giving the
+  # question two different lifetimes. The host's opaque reference rides as a
+  # sibling field, retained and never projected.
+  @doc false
+  @spec propose_interaction_request(t(), map()) :: {:ok, proposal()} | {:error, term()}
+  def propose_interaction_request(%__MODULE__{} = state, interaction) when is_map(interaction) do
+    record =
+      %{
+        "interaction_id" => interaction.interaction_id,
+        "run_id" => interaction.run_id,
+        "turn" => interaction.turn,
+        "tool_call_id" => interaction.tool_call_id,
+        "interaction_request" => Interaction.to_record(interaction.request),
+        "interaction_request_digest" => Interaction.digest(interaction.request),
+        "policy_request_digest" => interaction.policy_request_digest,
+        "round" => interaction.round,
+        "created_at" => interaction.created_at,
+        "expires_at" => interaction.expires_at,
+        kind: "interaction_requested_v1"
+      }
+      |> then(fn row ->
+        case Map.get(interaction.request, :decision_ref) do
+          nil -> row
+          reference -> Map.put(row, "decision_ref", reference)
+        end
+      end)
+
+    internal_proposal(
+      state,
+      stable_id("interaction", state.session_id, interaction.interaction_id),
+      record
+    )
+  end
+
+  @doc false
+  @spec propose_interaction_answer(t(), binary(), binary(), binary()) ::
+          {:ok, proposal()} | {:error, term()}
+  def propose_interaction_answer(%__MODULE__{} = state, interaction_id, command_id, choice_id)
+      when is_binary(interaction_id) and is_binary(command_id) and is_binary(choice_id) do
+    record = %{
+      "interaction_id" => interaction_id,
+      "command_id" => command_id,
+      "choice_id" => choice_id,
+      "answer_digest" => Interaction.digest(%{choice_id: choice_id}),
+      kind: "interaction_answer_admitted_v1"
+    }
+
+    internal_proposal(state, stable_id("interaction-answer", interaction_id, command_id), record)
+  end
+
+  @doc false
+  @spec propose_interaction_resolution(t(), binary(), binary(), binary() | nil) ::
+          {:ok, proposal()} | {:error, term()}
+  def propose_interaction_resolution(%__MODULE__{} = state, interaction_id, resolution, reason)
+      when is_binary(interaction_id) and is_binary(resolution) do
+    record =
+      %{
+        "interaction_id" => interaction_id,
+        "resolution" => resolution,
+        kind: "interaction_resolved_v1"
+      }
+      |> then(&if(is_binary(reason), do: Map.put(&1, "reason", reason), else: &1))
+
+    internal_proposal(
+      state,
+      stable_id("interaction-resolution", interaction_id, resolution),
+      record
+    )
+  end
+
+  @doc """
+  ## Concept
+
+  The open interaction, as a reader outside the session may see it.
+
+  ## Technical depth
+
+  `nil` when none is open. A terminal interaction is never presented as open,
+  which is what keeps a fresh attach from showing a question that has already
+  been answered, expired or cancelled.
+  """
+  @spec open_interaction(t()) :: map() | nil
+  def open_interaction(%__MODULE__{open_interaction: nil}), do: nil
+
+  def open_interaction(%__MODULE__{open_interaction: interaction_id} = state) do
+    case Map.get(state.interactions, interaction_id) do
+      nil -> nil
+      interaction -> Interaction.view(interaction)
+    end
+  end
+
   defp propose_new(%__MODULE__{active_run_id: nil} = state, %{type: :prompt} = command, digest) do
     run_id = stable_id("run", state.session_id, command.command_id)
     reply = {:accepted, command.command_id}
@@ -2841,12 +2937,8 @@ defmodule Loopex.Runtime.SessionState do
   # restart, and a row written by another version or edited by hand is not a
   # question this owner will carry. Validating it here means the shape a
   # recovered owner acts on is the shape the accepted family admits.
-  defp interaction_request(record) do
-    case Interaction.validate_request(Map.get(record, "interaction_request")) do
-      {:ok, request} -> {:ok, request}
-      {:error, reason} -> {:error, reason}
-    end
-  end
+  defp interaction_request(record),
+    do: Interaction.from_record(Map.get(record, "interaction_request"))
 
   defp interaction_requested_event(session_id, interaction) do
     %{

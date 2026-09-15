@@ -1,3 +1,6 @@
+Code.require_file("support/m1_runtime_helper.exs", __DIR__)
+Code.require_file("support/agent_loop_helper.exs", __DIR__)
+
 defmodule Loopex.InteractionLifecycleTest do
   @moduledoc """
   ## Concept
@@ -15,8 +18,9 @@ defmodule Loopex.InteractionLifecycleTest do
   the case below proves against the same policy module.
   """
 
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
 
+  alias Loopex.AgentLoopFixture, as: Fixture
   alias Loopex.Interaction
   alias Loopex.Policy
 
@@ -197,6 +201,89 @@ defmodule Loopex.InteractionLifecycleTest do
     assert Interaction.effective_expiry(1_000, 60_000, 5_000) == 5_000
     assert Interaction.effective_expiry(1_000, 60_000, 500_000) == 61_000
     assert Interaction.effective_expiry(1_000, 60_000, nil) == 61_000
+  end
+
+  defmodule SuspendingPolicy do
+    @moduledoc false
+    @behaviour Loopex.Policy
+
+    @impl Loopex.Policy
+    def decide(_request) do
+      {:defer,
+       %{
+         kind: :choice,
+         prompt: "May the tool write the file?",
+         choices: [%{id: "allow", label: "Allow once"}, %{id: "deny", label: "Deny"}],
+         expires_in_ms: 700
+       }}
+    end
+  end
+
+  test "a deferred question suspends the run, publishes its request and dispatches nothing" do
+    fixture = loop_fixture(SuspendingPolicy)
+    {session_id, attachment} = loop_session(fixture)
+
+    assert {:accepted, "p1"} =
+             Loopex.command(attachment, %{type: :prompt, command_id: "p1", content: "do it"})
+
+    requested = await_event(fixture, session_id, "interaction.requested")
+    assert requested["prompt"] == "May the tool write the file?"
+    assert Enum.map(requested["choices"], & &1["id"]) == ["allow", "deny"]
+    assert is_integer(requested["expires_at"])
+
+    events = Fixture.events(fixture, session_id)
+    assert Enum.all?(events, &(&1.kind != "tool.started"))
+    assert Enum.all?(events, &(&1.kind != "run.finished"))
+
+    # The question stands: the run is suspended rather than finished, and the
+    # executor was never asked to do anything.
+    assert {:ok, %{active_run_id: run_id}} = Loopex.session_status(fixture.runtime, session_id)
+    assert is_binary(run_id)
+
+    # Nobody answers, so the question expires and the call it suspended is
+    # denied rather than left standing.
+    expired = await_event(fixture, session_id, "interaction.expired", 4_000)
+    assert expired["interaction_id"] == requested["interaction_id"]
+    refute Map.has_key?(expired, "choice_id")
+
+    finished = await_event(fixture, session_id, "run.finished", 4_000)
+    assert finished["outcome"] == "completed"
+
+    tool_finished = await_event(fixture, session_id, "tool.finished", 4_000)
+    assert tool_finished["outcome"] == "denied"
+  end
+
+  defp loop_fixture(policy) do
+    fixture =
+      Fixture.start(
+        script: [
+          %{text: "working", calls: [%{id: "c1", name: "write", arguments: %{"path" => "c1"}}]},
+          %{text: "done", calls: []}
+        ],
+        policy: policy
+      )
+
+    on_exit(fn -> Fixture.stop(fixture) end)
+    fixture
+  end
+
+  defp loop_session(fixture) do
+    {:ok, session_id} = Loopex.create_session(fixture.runtime, %{}, command_id: "cs")
+    {:ok, attachment} = Loopex.attach(fixture.runtime, session_id, after_event_sequence: 0)
+    {session_id, attachment}
+  end
+
+  defp await_event(fixture, session_id, kind, deadline \\ 2_000) do
+    found =
+      fixture
+      |> Fixture.events(session_id)
+      |> Enum.find(&(&1.kind == kind))
+
+    cond do
+      found -> found
+      deadline <= 0 -> flunk("no #{kind} event arrived")
+      true -> Process.sleep(20) && await_event(fixture, session_id, kind, deadline - 20)
+    end
   end
 
   defp policy_request do

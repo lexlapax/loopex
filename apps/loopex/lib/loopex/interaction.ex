@@ -121,6 +121,61 @@ defmodule Loopex.Interaction do
   @doc """
   ## Concept
 
+  The durable form of a validated question.
+
+  ## Technical depth
+
+  Durable rows carry string-keyed bounded plain data, so the atoms this module
+  uses in memory stop at the journal boundary. The host's opaque reference is
+  not part of this map: it is retained as a sibling field of the record, which
+  is what keeps it out of every projection built from the question itself.
+  """
+  @spec to_record(request()) :: map()
+  def to_record(%{kind: @kind} = request) do
+    %{
+      "kind" => "choice",
+      "prompt" => request.prompt,
+      "choices" => Enum.map(request.choices, &%{"id" => &1.id, "label" => &1.label}),
+      "expires_in_ms" => request.expires_in_ms
+    }
+  end
+
+  @doc """
+  ## Concept
+
+  Reads a retained question back, refusing anything the family does not admit.
+
+  ## Technical depth
+
+  A recovered owner acts on this, so the same bounds are enforced coming out of
+  the journal as going in. A row written by another version, or edited by hand,
+  is refused rather than carried: the alternative is an owner asking a question
+  it cannot bound or answering one it cannot check.
+  """
+  @spec from_record(term()) :: {:ok, request()} | {:error, :invalid_interaction_request}
+  def from_record(record) when is_map(record) and not is_struct(record) do
+    with %{"kind" => "choice", "prompt" => prompt, "choices" => choices} <- record,
+         expires_in_ms when is_integer(expires_in_ms) <- Map.get(record, "expires_in_ms"),
+         true <- is_list(choices),
+         true <- Enum.all?(choices, &is_map/1),
+         restored = Enum.map(choices, &%{id: Map.get(&1, "id"), label: Map.get(&1, "label")}),
+         true <- Enum.all?(restored, &(is_binary(&1.id) and is_binary(&1.label))) do
+      validate_request(%{
+        kind: @kind,
+        prompt: prompt,
+        choices: restored,
+        expires_in_ms: expires_in_ms
+      })
+    else
+      _refused -> {:error, :invalid_interaction_request}
+    end
+  end
+
+  def from_record(_record), do: {:error, :invalid_interaction_request}
+
+  @doc """
+  ## Concept
+
   Whether an answer names one of the choices that were offered.
   """
   @spec offered?(request(), term()) :: boolean()
