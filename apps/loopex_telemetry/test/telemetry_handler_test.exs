@@ -158,6 +158,34 @@ defmodule Loopex.TelemetryTest do
     assert item["measurements"]["duration"] == 17
   end
 
+  test "a sink that never drains neither blocks a boundary nor exceeds the ceiling" do
+    admission = attached()
+    ceiling = 16
+
+    # The dispatcher is this process, and this process never receives while the
+    # loop runs, so every slot it claims stays held: this is the slowest sink
+    # there is.
+    started = System.monotonic_time(:millisecond)
+
+    for index <- 1..200 do
+      Instrumentation.span([:store, :transact], %{session_id: "s_#{index}"}, fn -> :ok end)
+    end
+
+    elapsed = System.monotonic_time(:millisecond) - started
+
+    # A boundary pays a send at most. The bound is far above any real cost and
+    # far below what waiting on a sink would take.
+    assert elapsed < 2_000, "400 spans against a stalled sink took #{elapsed}ms"
+
+    # The backlog is bounded by the ceiling however many spans were offered.
+    assert Admission.held(admission) <= ceiling
+    assert length(queued()) <= ceiling
+
+    # What could not be admitted was dropped and counted, not queued and not
+    # lost silently.
+    assert Admission.pending_drops(admission) > 0
+  end
+
   test "attaching to something that is not a runtime reports that, and attaches nothing" do
     before = length(:telemetry.list_handlers([]))
 
@@ -186,6 +214,20 @@ defmodule Loopex.TelemetryTest do
 
     on_exit(fn -> :telemetry.detach({__MODULE__, admission.dispatcher}) end)
     admission
+  end
+
+  # Concept: the admission messages sitting in this process's own mailbox.
+  #
+  # Technical depth: read without removing them, so the count is the backlog a
+  # dispatcher would still have to drain rather than a number this helper
+  # changed by looking.
+  defp queued do
+    {:messages, messages} = Process.info(self(), :messages)
+
+    Enum.filter(messages, fn
+      {:loopex_diagnostic_admission, _pid, _slot, _ticket, _item} -> true
+      _other -> false
+    end)
   end
 
   defp admitted(admission) do

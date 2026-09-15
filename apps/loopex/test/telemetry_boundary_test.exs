@@ -25,11 +25,41 @@ defmodule Loopex.TelemetryBoundaryTest do
   use ExUnit.Case, async: false
 
   alias Loopex.AgentLoopFixture
+  alias Loopex.Instrumentation
   alias Loopex.M1RuntimeTestStore, as: TestStore
   alias Loopex.Runtime
   alias Loopex.Runtime.DiagnosticsAdmission, as: Admission
 
   @ceiling 8
+
+  test "an uninstrumented build pays a bounded cost and gets its result back unchanged" do
+    # Nothing is listening, which is what a host that attached no handler has.
+    assert :telemetry.list_handlers([:loopex, :store, :transact, :stop]) == []
+
+    rounds = 10_000
+    started = System.monotonic_time(:millisecond)
+
+    outcome =
+      Enum.reduce(1..rounds, 0, fn index, total ->
+        {:ok, value} =
+          Instrumentation.span([:store, :transact], %{session_id: "s_1", records: 1}, fn ->
+            {:ok, index}
+          end)
+
+        total + value
+      end)
+
+    elapsed = System.monotonic_time(:millisecond) - started
+
+    # The result of the work crosses the span untouched, every time.
+    assert outcome == div(rounds * (rounds + 1), 2)
+
+    # Two `:telemetry` dispatches over an empty handler list, ten thousand
+    # times. The bound is generous enough to survive a loaded machine and small
+    # enough to fail if a span ever starts doing work of its own.
+    assert elapsed < 2_000,
+           "#{rounds} spans with no handler attached took #{elapsed}ms"
+  end
 
   test "the coordinator cuts emit spans for one prompt, naming the run and never its words" do
     handler = {__MODULE__, :cut_spans, make_ref()}
