@@ -24,6 +24,10 @@ defmodule Loopex.InteractionLifecycleTest do
   alias Loopex.Interaction
   alias Loopex.Policy
 
+  # The M3 closure candidate: the last revision whose reducer knew nothing of
+  # interaction records, and so the reader an operator could still be running.
+  @old_reader_revision "72c0a3091a8ec08cf04ac08e29d60f9ac6e4ce26"
+
   defmodule DeferringPolicy do
     @moduledoc false
     @behaviour Loopex.Policy
@@ -563,6 +567,103 @@ defmodule Loopex.InteractionLifecycleTest do
       |> Enum.find(&(&1.payload.kind == "interaction_requested_v1"))
 
     assert after_restart.payload == retained
+  end
+
+  @tag timeout: 300_000
+  test "old readers refuse interaction records before effects beside an old format positive control" do
+    fixture = loop_fixture(AnsweringPolicy)
+    {session_id, attachment} = loop_session(fixture)
+
+    assert {:accepted, "p1"} =
+             Loopex.command(attachment, %{type: :prompt, command_id: "p1", content: "do it"})
+
+    requested = await_event(fixture, session_id, "interaction.requested")
+    records = Fixture.records(fixture, session_id)
+    events = Fixture.events(fixture, session_id)
+    assert Enum.any?(records, &(&1.payload.kind == "interaction_requested_v1"))
+    assert requested["interaction_id"]
+
+    reader = build_old_reader()
+
+    # The positive control: history this reader's own version could have
+    # written replays, so a refusal below is about the new record rather than
+    # about the reader being unable to read anything.
+    old_format = Enum.reject(records, &(&1.payload.kind == "interaction_requested_v1"))
+    old_events = Enum.reject(events, &String.starts_with?(&1.kind, "interaction."))
+
+    assert replay(reader, session_id, old_format, old_events) =~ "ok"
+
+    # The new record is refused as private history this reader cannot read, and
+    # it is refused before any effect: nothing in that history dispatched.
+    refusal = replay(reader, session_id, records, old_events)
+    assert refusal =~ "error"
+    assert refusal =~ "invalid_private_history"
+    assert Enum.all?(records, &(&1.payload.kind != "effect_intent_committed"))
+  end
+
+  # Concept: a reader built from the milestone before interactions existed.
+  #
+  # Technical depth: the source is the M3 closure candidate, which is the last
+  # revision whose reducer knew nothing of these records, and it is compiled
+  # here rather than mocked, so what refuses is the real older reducer. Core
+  # carries no external dependency, which is why this can be built offline.
+  defp build_old_reader do
+    root =
+      Path.join(System.tmp_dir!(), "loopex-old-reader-#{:erlang.unique_integer([:positive])}")
+
+    repository = repository_root()
+
+    {_output, 0} = System.cmd("git", ["clone", "--quiet", "--no-hardlinks", repository, root])
+    {_output, 0} = System.cmd("git", ["-C", root, "checkout", "--quiet", @old_reader_revision])
+
+    {output, status} =
+      System.cmd("mix", ["compile"],
+        cd: Path.join([root, "apps", "loopex"]),
+        stderr_to_stdout: true
+      )
+
+    assert status == 0, "the old reader did not build: #{output}"
+
+    on_exit(fn -> File.rm_rf(root) end)
+    root
+  end
+
+  defp repository_root do
+    {root, 0} = System.cmd("git", ["rev-parse", "--show-toplevel"])
+    String.trim(root)
+  end
+
+  # Runs the old reader's own `recover/3` over a supplied history and reports
+  # what it made of it, in its own VM against its own beams.
+  defp replay(reader, session_id, records, events) do
+    input = Path.join(reader, "history.bin")
+    File.write!(input, :erlang.term_to_binary({session_id, records, events}))
+
+    script = Path.join(reader, "replay.exs")
+
+    File.write!(script, """
+    {session_id, records, events} = :erlang.binary_to_term(File.read!(#{inspect(input)}))
+
+    case Loopex.Runtime.SessionState.recover(session_id, records, events) do
+      {:ok, _state} -> IO.puts("ok")
+      {:error, reason} -> IO.puts("error " <> inspect(reason))
+    end
+    """)
+
+    {output, 0} =
+      System.cmd(
+        "elixir",
+        [
+          "-pa",
+          Path.join([reader, "_build", "dev", "lib", "loopex", "ebin"]),
+          "-pa",
+          Path.join([reader, "_build", "dev", "lib", "loopex_protocol", "ebin"]),
+          script
+        ],
+        stderr_to_stdout: true
+      )
+
+    output
   end
 
   defp find_record(records, kind) do
