@@ -275,6 +275,242 @@ defmodule Loopex.TelemetryBoundaryTest do
     assert Process.alive?(dispatcher)
   end
 
+  # The three cases below complete this outcome's locked witnesses. The three
+  # already present above carry their own locked identities; the narrower cases
+  # remain because they say which single rule broke when one of these fails.
+
+  test "every callback and transaction cut in the emission inventory emits start stop or exception spans with durations and only documented metadata" do
+    # Accepted ADR 0030's inventory, written out rather than read from the edge
+    # application that forwards it: core does not depend on that application, and
+    # a list derived from the code under test would only ever agree with itself.
+    spans = [
+      [:loopex, :model, :complete],
+      [:loopex, :store, :transact],
+      [:loopex, :store, :transaction_status],
+      [:loopex, :store, :runtime_command],
+      [:loopex, :store, :ownership_head],
+      [:loopex, :store, :load_records],
+      [:loopex, :store, :load_events],
+      [:loopex, :artifact, :put],
+      [:loopex, :artifact, :fetch],
+      [:loopex, :artifact, :stat],
+      [:loopex, :artifact, :describe],
+      [:loopex, :artifact, :open_transfer],
+      [:loopex, :artifact, :read_transfer],
+      [:loopex, :artifact, :close_transfer],
+      [:loopex, :executor, :execute],
+      [:loopex, :executor, :cancel],
+      [:loopex, :executor, :retained_receipt],
+      [:loopex, :policy, :decide],
+      [:loopex, :command, :admit],
+      [:loopex, :commit],
+      [:loopex, :effect, :intent],
+      [:loopex, :events, :publish],
+      [:loopex, :interaction],
+      [:loopex, :artifact, :transfer]
+    ]
+
+    # Five ports and six coordinator cuts. Counting them means adding one
+    # silently fails here rather than passing unnoticed.
+    assert length(spans) == 24
+    assert length(Enum.uniq(spans)) == 24
+
+    inventory =
+      Enum.flat_map(spans, fn span -> Enum.map([:start, :stop, :exception], &(span ++ [&1])) end)
+
+    handler = {__MODULE__, :inventory_spans, make_ref()}
+    parent = self()
+
+    :ok =
+      :telemetry.attach_many(
+        handler,
+        inventory,
+        fn event, measurements, metadata, _config ->
+          send(parent, {:span, event, measurements, metadata})
+        end,
+        nil
+      )
+
+    on_exit(fn -> :telemetry.detach(handler) end)
+
+    loop = AgentLoopFixture.start(script: [%{text: "done", calls: []}])
+    on_exit(fn -> AgentLoopFixture.stop(loop) end)
+    runtime = loop.runtime
+
+    {:ok, session} = Loopex.create_session(runtime, %{}, command_id: "inventory-create")
+    {:ok, attachment} = Loopex.attach(runtime, session, after_event_sequence: 0)
+
+    {:accepted, _id} =
+      Loopex.command(attachment, %{
+        type: :prompt,
+        command_id: "inventory-prompt",
+        content: "say something"
+      })
+
+    observed = collect_spans([])
+    assert observed != [], "a whole prompt emitted no span at all"
+
+    for {event, measurements, metadata} <- observed do
+      case List.last(event) do
+        :start ->
+          assert Map.has_key?(measurements, :monotonic_time)
+          assert Map.has_key?(measurements, :system_time)
+
+        :stop ->
+          assert Map.has_key?(measurements, :duration),
+                 "#{inspect(event)} stopped without a duration"
+
+        :exception ->
+          assert Map.has_key?(metadata, :error_class)
+          refute Map.has_key?(metadata, :reason)
+          refute Map.has_key?(metadata, :stacktrace)
+      end
+
+      # Whatever a member is called, its value is an identity, a count or a
+      # name. Content does not fit through any of those shapes, so a member
+      # nobody anticipated still cannot carry a model's words out.
+      for {key, value} <- metadata do
+        assert bounded_value?(value),
+               "#{inspect(event)} carried #{inspect(key)} => #{inspect(value)}"
+      end
+    end
+
+    # Only documented metadata. Reported together rather than one at a time, so
+    # a new member is a list to read rather than a sequence of runs.
+    undocumented =
+      observed
+      |> Enum.flat_map(fn {event, _measurements, metadata} ->
+        Enum.map(undocumented_metadata(metadata), &{event, &1})
+      end)
+      |> Enum.uniq()
+
+    assert undocumented == [], "undocumented metadata: #{inspect(undocumented)}"
+  end
+
+  test "a crashing telemetry handler is isolated and emission with no handler stays within the measured overhead" do
+    # `span/4` prepends the root, so a caller names the boundary without it.
+    event = [:store, :transact]
+    emitted = [:loopex | event]
+    crashing = {__MODULE__, :crashing, make_ref()}
+
+    :ok =
+      :telemetry.attach(
+        crashing,
+        emitted ++ [:stop],
+        fn _event, _measurements, _metadata, _config -> raise "this handler is broken" end,
+        nil
+      )
+
+    # The emitter is unharmed: the span returns its own work's result, and the
+    # library detaches the handler that raised rather than letting it take the
+    # emitting process with it.
+    assert Instrumentation.span(event, %{}, fn -> {:ok, :work} end) == {:ok, :work}
+    assert :telemetry.list_handlers(emitted ++ [:stop]) == []
+
+    # And with nothing attached at all, emission stays inside a bounded cost and
+    # hands back every result untouched.
+    assert :telemetry.list_handlers(emitted ++ [:stop]) == []
+
+    rounds = 10_000
+    started = System.monotonic_time(:millisecond)
+
+    results =
+      for index <- 1..rounds do
+        Instrumentation.span(event, %{}, fn -> {:ok, index} end)
+      end
+
+    elapsed = System.monotonic_time(:millisecond) - started
+
+    assert results == for(index <- 1..rounds, do: {:ok, index})
+    assert elapsed < 5_000, "#{rounds} uninstrumented spans took #{elapsed}ms"
+  end
+
+  test "a slow or blocked forwarding sink never delays a coordinator and drops with a counted entry" do
+    %{runtime: runtime, dispatcher: dispatcher, admission: admission} = fixture()
+
+    # A sink that never drains: the dispatcher is suspended, so nothing it holds
+    # moves while the emitters keep emitting.
+    :ok = :sys.suspend(dispatcher)
+
+    offered = @ceiling * 4
+    started = System.monotonic_time(:millisecond)
+
+    results =
+      for index <- 1..offered do
+        Admission.admit(admission, %{"kind" => "diagnostic", "index" => index})
+      end
+
+    elapsed = System.monotonic_time(:millisecond) - started
+
+    # Emitting past the ceiling against a stalled sink is not a wait. A sink that
+    # could block here would be a coordinator blocked by a diagnostic.
+    assert elapsed < 2_000, "emitting against a stalled sink took #{elapsed}ms"
+
+    # The backlog stopped at the ceiling and every further offer was dropped by
+    # its own sender rather than queued for one that was not draining.
+    admitted = Enum.count(results, &(&1 == :ok))
+    dropped = Enum.count(results, &(&1 == :dropped))
+
+    assert admitted <= @ceiling
+    assert dropped == offered - admitted
+    assert Admission.pending_drops(admission) == dropped
+
+    # The drops are reported rather than left to be inferred from a gap.
+    :ok = :sys.resume(dispatcher)
+    summary = await_entry("diagnostics_dropped")
+    assert summary["dropped"] == dropped
+
+    assert Runtime.alive?(runtime)
+  end
+
+  # Concept: every span this handler saw, once the emitters have stopped.
+  #
+  # Technical depth: a fixed wait would either be flaky or slow. Collecting until
+  # the mailbox is quiet for a beat is neither, and the assertion that at least
+  # one span arrived is what keeps an empty collection from passing.
+  defp collect_spans(collected) do
+    receive do
+      {:span, event, measurements, metadata} ->
+        collect_spans([{event, measurements, metadata} | collected])
+    after
+      500 -> Enum.reverse(collected)
+    end
+  end
+
+  # Concept: metadata members accepted ADR 0030 does not admit.
+  #
+  # Technical depth: the admitted set is identities, totals and the outcome a
+  # boundary names for itself. Anything else is content by another name, so the
+  # check is a whitelist rather than a list of things to exclude: a member nobody
+  # thought of is refused by default rather than admitted by oversight.
+  @documented_metadata ~w(
+    outcome error_class type kind role identity module
+    session_id run_id turn_id command_id attempt_id tool_call_id
+    interaction_id transfer_ref request_id operation_id
+    epoch generation records events event_count byte_count
+    count size total attempt bytes duration reason_class
+    after_version limit cursor from_version to_version version sequence
+    mutation_domain tx_id incarnation_id owner_epoch journal_version
+    after_sequence event_sequence model provider
+  )a
+
+  defp undocumented_metadata(metadata) do
+    metadata |> Map.keys() |> Enum.reject(&(&1 in @documented_metadata)) |> Enum.sort()
+  end
+
+  # Concept: a value small and simple enough to be an identity, a count or a
+  # name.
+  #
+  # Technical depth: content is long, or nested, or both. Requiring every value
+  # to be an atom, a number, a boolean, or a binary no longer than an identity
+  # refuses a model's words and a tool's arguments by shape rather than by
+  # recognising them, which is what makes it hold for a member nobody listed.
+  defp bounded_value?(value) when is_atom(value) or is_number(value) or is_boolean(value),
+    do: true
+
+  defp bounded_value?(value) when is_binary(value), do: byte_size(value) <= 128
+  defp bounded_value?(_value), do: false
+
   defp fixture(options \\ []) do
     {store_pid, store} = TestStore.start_store()
 
