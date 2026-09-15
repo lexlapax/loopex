@@ -110,8 +110,8 @@
         %{
           path: "apps/loopex_app_server/test/external_workflow_test.exs",
           names: [
-            "the TypeScript consumer completes skill answer reevaluation grant tool artifact and abrupt restart from operator input against the shipped server",
-            "a fresh extraction of the exact source candidate follows the operator guide to build and run the server and TypeScript consumer with operator supplied inputs",
+            "the Node consumer completes skill answer reevaluation grant tool artifact and abrupt restart from operator input against the shipped server",
+            "a fresh extraction of the exact source candidate follows the operator guide to build and run the server and Node consumer with operator supplied inputs",
             "stdin EOF performs orderly shutdown without cancellation and the pending interaction survives restart",
             "session abort is the only deliberate cancellation and an aborted interaction is never pending after restart"
           ]
@@ -124,7 +124,7 @@
         %{
           path: "apps/loopex_protocol/test/public_schema_conformance_test.exs",
           names: [
-            "Elixir Python and TypeScript clients execute the same positive and negative vectors without the server codec",
+            "Elixir and Node clients execute the same positive and negative vectors without the server codec",
             "exact source schema client versions and toolchain platform identities are recorded with every result"
           ]
         },

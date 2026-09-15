@@ -177,7 +177,7 @@ binding.
 | `d9b8ac57a57ef39d50b581db78ac896fa12908ae9feae89b29b5d43564523d22` | `scripts/m4-gate-support.exs` |
 | `65d0de9dcd1218af542f00e32c2177d2612a2f1232f22db37b9942200c84cf66` | `scripts/m3-gate-support.exs` |
 | `c4d485ca3229441c678abe1e8733f90216e89e0dfb9e81786f58f525619aec29` | `scripts/check-closed-gates.sh` |
-| `8c94069e737ba66c658071c52232ae3f9462fb79ca8d0221fe071d63367765c7` | `scripts/m4-outcomes.exs` |
+| `1126f8ca6944b6c8a1e8d67ea97ecc8f6b46987c029bf4a15bfe977a51346212` | `scripts/m4-outcomes.exs` |
 | `f04f17db1f5f26e558366cf8c9c73c439647ad3da6a2eee255f59123cc1ccc4e` | `scripts/check-m4-fixtures.exs` |
 | `b237fb3c5dbd4d903255317f4ab0c521f8458a3cd64c49266582221690b6435e` | `scripts/check_m4_fixtures_test.exs` |
 | `53d8219bdee584a3849a85a1102e405520d5dd0dfbe21d259434bc9edfc5fcc0` | `scripts/m1-exunit-runner.exs` |
@@ -615,3 +615,52 @@ waiver, closure or release.
 | --- | --- | --- |
 | 5 | `scripts/check-m4-gate.sh` | `0fa05a036dd7e7c6ec36238cac34f03cc99552de3b1e02765fb3cc8e66ac40f4` |
 | 5 | `scripts/m4-opening-probe.exs` | `b1ef94ba0ae25ac845396206ba5bbe4d7cd7355d505f6f127123bc3106329d86` |
+
+<a id="amendment-6"></a>
+## Amendment 6 — Finish the Node rename and the Python drop in the locked witness identities
+
+**Acceptance: OUTSTANDING.** Accepted M4 amends its gate under
+`amendment-transaction-v1`: this proposal `A` advances the generation and
+retains the Acceptance row and lifecycle state; its immediate child `R`
+rebinds Acceptance to exact `A` after explicit acceptance.
+
+Amendment 3 renamed outcome 5's consumer from TypeScript to Node, and listed
+where: the readiness step, the opening probe's scope sentence, the real-workflow
+lane, the fresh-source paragraph, the client pin sentence, outcome 5's and
+outcome 6's obligations, and the operator documentation row. It missed
+`scripts/m4-outcomes.exs`, where two of outcome 5's locked witness identities
+still name a TypeScript consumer. That file is a bound artifact and the selector
+runner matches those strings exactly, so the omission is not cosmetic: a test
+written to satisfy the lock would carry a name contradicting the decision the
+maintainer made twice.
+
+Amendment 4 left the same kind of omission in the same file. It dropped Python
+from outcome 6, and outcome 6's first locked identity still names Elixir, Python
+and TypeScript clients executing the vectors. Both amendments changed the
+documents that describe the outcomes and neither changed the file that names
+their evidence.
+
+Three strings change and nothing else. The consumer is plain JavaScript that the
+pinned Node runs directly, with no build step, package manifest, lockfile or
+dependency, so `Node consumer` is what those witnesses exercise and what they
+should say, and outcome 6's vectors are executed by an Elixir client and a Node
+one. No outcome, selector path, count, limit, client pin, evidence class or
+credential rule changes, no lifecycle state reopens, and neither envelope moves.
+
+Witness identities are locked at acceptance, which is why this is an amendment
+rather than an edit. Both omissions were found by writing the tests those
+identities name: the lock did its job twice, a milestone's own evidence cannot
+quietly disagree with an accepted decision, and the gate is the thing that
+noticed. The lesson is recorded here rather than left implicit — an amendment
+that renames a thing must reach the file that names the evidence for it, not
+only the documents that describe it.
+
+Binding validation, bootstrap and every inherited gate that invokes them stop at
+this proposal only on the stale binding of this gate. After exact-SHA review and
+explicit acceptance of `A`, `R` rebinds the Acceptance row and adds one
+amendment-specific disposition. This proposal records no acceptance and grants no
+waiver, closure or release.
+
+| Generation | Artifact | Rebound SHA-256 |
+| --- | --- | --- |
+| 6 | `scripts/m4-outcomes.exs` | `1126f8ca6944b6c8a1e8d67ea97ecc8f6b46987c029bf4a15bfe977a51346212` |
