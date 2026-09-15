@@ -418,7 +418,16 @@ defmodule Loopex.Runtime.SessionCoordinator do
         active_context_token_budget:
           SessionState.context_token_budget(state.durable, state.durable.active_run_id),
         pending_work_ids:
-          Enum.map(SessionState.pending_work(state.durable), &Map.fetch!(&1, :run_id))
+          Enum.map(SessionState.pending_work(state.durable), &Map.fetch!(&1, :run_id)),
+        # Concept: the question this session is waiting on, if it is waiting on
+        # one, read at the same cursor as everything else here.
+        #
+        # Technical depth: `nil` when none is open, and a terminal interaction
+        # is never presented as open. The host's private reference is not part
+        # of the view, and neither is anything a reader could mistake for
+        # authority: answering still takes a committed command naming the exact
+        # question.
+        open_interaction: SessionState.open_interaction(state.durable)
       }
 
       {:reply, {:ok, status}, state}

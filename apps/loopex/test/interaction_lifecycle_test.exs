@@ -228,6 +228,14 @@ defmodule Loopex.InteractionLifecycleTest do
 
     requested = await_event(fixture, session_id, "interaction.requested")
     assert requested["prompt"] == "May the tool write the file?"
+
+    # The same bounded view is readable from the session's own status, at the
+    # cursor that status reports, and it carries no host reference.
+    assert {:ok, status} = Loopex.session_status(fixture.runtime, session_id)
+    assert status.open_interaction["interaction_id"] == requested["interaction_id"]
+    assert status.open_interaction["status"] == "pending"
+    refute Map.has_key?(status.open_interaction, "decision_ref")
+    refute Map.has_key?(status.open_interaction, "choice_id")
     assert Enum.map(requested["choices"], & &1["id"]) == ["allow", "deny"]
     assert is_integer(requested["expires_at"])
 
