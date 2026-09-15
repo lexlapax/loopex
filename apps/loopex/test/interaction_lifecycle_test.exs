@@ -616,10 +616,15 @@ defmodule Loopex.InteractionLifecycleTest do
     {_output, 0} = System.cmd("git", ["clone", "--quiet", "--no-hardlinks", repository, root])
     {_output, 0} = System.cmd("git", ["-C", root, "checkout", "--quiet", @old_reader_revision])
 
+    # The environment is named rather than inherited. A runner that exports
+    # `MIX_ENV=test` would otherwise build this reader into `_build/test` while
+    # the replay below loads `_build/dev`, and the child would fail for a reason
+    # that has nothing to do with what the reader can read.
     {output, status} =
       System.cmd("mix", ["compile"],
         cd: Path.join([root, "apps", "loopex"]),
-        stderr_to_stdout: true
+        stderr_to_stdout: true,
+        env: [{"MIX_ENV", "dev"}]
       )
 
     assert status == 0, "the old reader did not build: #{output}"
