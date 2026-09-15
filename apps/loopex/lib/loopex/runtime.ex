@@ -562,7 +562,8 @@ defmodule Loopex.Runtime do
        session_id,
        attachment.id,
        attachment.incarnation_id,
-       attachment.snapshot
+       attachment.snapshot,
+       Map.get(attachment, :open_interaction)
      )}
   end
 

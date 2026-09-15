@@ -570,7 +570,7 @@ defmodule Loopex.AppServer.Mapping do
         "active_run_id" => optional_identity(Map.get(snapshot, :active_run_id)),
         "active_run_phase" => optional_word(Map.get(snapshot, :active_run_phase))
       },
-      "open_interaction" => Map.get(snapshot, :open_interaction)
+      "open_interaction" => Loopex.Attachment.open_interaction(attachment)
     }
   end
 

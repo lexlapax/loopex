@@ -768,7 +768,7 @@ defmodule Loopex.Runtime.EventDispatcher do
           %{
             tail: tail,
             snapshot: %{session_id: session_id, event_sequence: anchor} = snapshot
-          }}
+          } = result}
        )
        when session_id == pending.session_id and is_integer(tail) and tail >= anchor do
     if is_integer(anchor) and anchor >= 0 do
@@ -779,6 +779,7 @@ defmodule Loopex.Runtime.EventDispatcher do
       attachment = %{
         id: attachment_id,
         incarnation_id: incarnation_id,
+        open_interaction: Map.get(result, :open_interaction),
         session_id: pending.session_id,
         cursor: anchor,
         seen: anchor,
@@ -825,7 +826,8 @@ defmodule Loopex.Runtime.EventDispatcher do
       reply = %{
         id: attachment_id,
         incarnation_id: incarnation_id,
-        snapshot: snapshot
+        snapshot: snapshot,
+        open_interaction: Map.get(result, :open_interaction)
       }
 
       {{:ok, reply}, next}

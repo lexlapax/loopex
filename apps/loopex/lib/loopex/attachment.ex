@@ -31,9 +31,17 @@ defmodule Loopex.Attachment do
             session_id: binary(),
             attachment_id: binary(),
             incarnation_id: binary(),
-            snapshot: map()
+            snapshot: map(),
+            open_interaction: map() | nil
           }
-  defstruct [:runtime, :session_id, :attachment_id, :incarnation_id, :snapshot]
+  defstruct [
+    :runtime,
+    :session_id,
+    :attachment_id,
+    :incarnation_id,
+    :snapshot,
+    :open_interaction
+  ]
 
   @doc """
   ## Concept
@@ -48,15 +56,39 @@ defmodule Loopex.Attachment do
   @spec snapshot(t()) :: map()
   def snapshot(%__MODULE__{snapshot: snapshot}), do: snapshot
 
+  @doc """
+  ## Concept
+
+  Returns the question that was open at this attachment's own cursor, if any.
+
+  ## Technical depth
+
+  Accepted ADR 0023 makes this a sibling of the snapshot rather than a member of
+  it, because accepted ADR 0017 fixes the snapshot's members exactly. It is
+  projected from the same public events a client replays, so two attachments at
+  one cursor cannot disagree about whether a question was waiting there; live
+  coordinator state answers a different question, which is what is open now.
+  """
+  @spec open_interaction(t()) :: map() | nil
+  def open_interaction(%__MODULE__{open_interaction: open_interaction}), do: open_interaction
+
   @doc false
-  @spec from_runtime(Runtime.t(), binary(), binary(), binary(), map()) :: t()
-  def from_runtime(runtime, session_id, attachment_id, incarnation_id, snapshot) do
+  @spec from_runtime(Runtime.t(), binary(), binary(), binary(), map(), map() | nil) :: t()
+  def from_runtime(
+        runtime,
+        session_id,
+        attachment_id,
+        incarnation_id,
+        snapshot,
+        open_interaction \\ nil
+      ) do
     %__MODULE__{
       runtime: runtime,
       session_id: session_id,
       attachment_id: attachment_id,
       incarnation_id: incarnation_id,
-      snapshot: snapshot
+      snapshot: snapshot,
+      open_interaction: open_interaction
     }
   end
 

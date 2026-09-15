@@ -517,14 +517,16 @@ defmodule Loopex.Runtime.SessionState do
         {:ok,
          %{
            tail: tail,
-           snapshot: public_snapshot(session_id, tail, active_run, open_interaction)
+           snapshot: public_snapshot(session_id, tail, active_run),
+           open_interaction: open_interaction
          }}
 
       {anchor, {:set, {anchor_active_run, anchor_interaction}}} when anchor <= tail ->
         {:ok,
          %{
            tail: tail,
-           snapshot: public_snapshot(session_id, anchor, anchor_active_run, anchor_interaction)
+           snapshot: public_snapshot(session_id, anchor, anchor_active_run),
+           open_interaction: anchor_interaction
          }}
 
       {_anchor, _projection} ->
@@ -541,27 +543,23 @@ defmodule Loopex.Runtime.SessionState do
   # request can tell an admitted, unstaged run from a started one. The two active
   # members are nil together or non-nil together; no phase is ever inferred from
   # the identity alone.
-  defp public_snapshot(session_id, event_sequence, active_run, open_interaction \\ nil)
-
-  defp public_snapshot(session_id, event_sequence, nil, open_interaction) do
+  defp public_snapshot(session_id, event_sequence, nil) do
     %{
       snapshot_revision: 2,
       session_id: session_id,
       event_sequence: event_sequence,
       active_run_id: nil,
-      active_run_phase: nil,
-      open_interaction: open_interaction
+      active_run_phase: nil
     }
   end
 
-  defp public_snapshot(session_id, event_sequence, {run_id, phase}, open_interaction) do
+  defp public_snapshot(session_id, event_sequence, {run_id, phase}) do
     %{
       snapshot_revision: 2,
       session_id: session_id,
       event_sequence: event_sequence,
       active_run_id: run_id,
-      active_run_phase: phase,
-      open_interaction: open_interaction
+      active_run_phase: phase
     }
   end
 
