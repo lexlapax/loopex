@@ -158,6 +158,136 @@ defmodule Loopex.Store.Local.ArtifactTransferTest do
     assert ArtifactStore.supports_transfer?(Artifacts)
   end
 
+  test "corruption anywhere in the object refuses at open before any chunk exists" do
+    %{handle: handle, reference: reference, root: root, bytes: bytes} =
+      stored(:binary.copy("z", 4_096))
+
+    path = Path.join([root, binary_part(reference.locator, 0, 2), reference.locator])
+
+    # Corruption outside the requested window still refuses, because the open
+    # verifies the whole object rather than the part a caller asked for.
+    File.write!(path, binary_part(bytes, 0, byte_size(bytes) - 1) <> "!")
+
+    assert {:error, :artifact_digest_mismatch} =
+             Artifacts.open_transfer(handle, object(reference), reference.use_locator, %{
+               start: 0,
+               length: 16
+             })
+
+    # A truncated object is refused as truncation rather than read short.
+    File.write!(path, binary_part(bytes, 0, 128))
+
+    assert {:error, :artifact_digest_mismatch} =
+             Artifacts.open_transfer(handle, object(reference), reference.use_locator, %{start: 0})
+
+    assert [] = Transfers.live(handle.transfers)
+  end
+
+  test "an open that exhausts its deadline or its work budget refuses" do
+    %{handle: handle, reference: reference} = stored(:binary.copy("w", 200_000))
+
+    assert {:error, :open_work_budget_exhausted} =
+             Transfers.open(
+               handle.transfers,
+               object(reference),
+               reference.use_locator,
+               %{start: 0},
+               open_work_bytes: 1_024
+             )
+
+    assert {:error, :open_deadline_exhausted} =
+             Transfers.open(
+               handle.transfers,
+               object(reference),
+               reference.use_locator,
+               %{start: 0},
+               open_deadline_ms: -1
+             )
+
+    # Neither left a transfer behind, so neither spent a slot of the ceiling.
+    assert [] = Transfers.live(handle.transfers)
+  end
+
+  test "the runtime ceiling bounds how many transfers are live at once" do
+    %{handle: handle, reference: reference} = stored("bounded concurrency")
+    limits = ArtifactStore.transfer_limits()
+
+    opened =
+      for _index <- 1..limits.per_runtime do
+        assert {:ok, transfer} =
+                 Artifacts.open_transfer(handle, object(reference), reference.use_locator, %{
+                   start: 0
+                 })
+
+        transfer
+      end
+
+    assert length(Transfers.live(handle.transfers)) == limits.per_runtime
+
+    assert {:error, :transfer_limit_reached} =
+             Artifacts.open_transfer(handle, object(reference), reference.use_locator, %{start: 0})
+
+    # Closing one makes room for exactly one more.
+    assert :ok = Artifacts.close_transfer(handle, hd(opened))
+
+    assert {:ok, replacement} =
+             Artifacts.open_transfer(handle, object(reference), reference.use_locator, %{start: 0})
+
+    assert {:error, :transfer_limit_reached} =
+             Artifacts.open_transfer(handle, object(reference), reference.use_locator, %{start: 0})
+
+    Enum.each([replacement | tl(opened)], &Artifacts.close_transfer(handle, &1))
+    assert [] = Transfers.live(handle.transfers)
+  end
+
+  test "a transfer expires on its own lifetime and leaves nothing behind" do
+    root = Path.join(System.tmp_dir!(), "loopex-expiry-#{:erlang.unique_integer([:positive])}")
+    File.mkdir_p!(root)
+    limits = Map.put(ArtifactStore.transfer_limits(), :lifetime_ms, 150)
+    {:ok, owner} = Transfers.start_link(root: root, limits: limits)
+    on_exit(fn -> File.rm_rf(root) end)
+
+    handle = %{root: root, transfers: owner}
+    {:ok, reference} = Artifacts.put(handle, "bytes that outlive nothing", @use)
+
+    assert {:ok, transfer} =
+             Artifacts.open_transfer(handle, object(reference), reference.use_locator, %{start: 0})
+
+    assert [_live] = Transfers.live(owner)
+    Process.sleep(300)
+
+    assert [] = Transfers.live(owner)
+    assert {:error, :unknown_transfer} = Artifacts.read_transfer(handle, transfer, 8)
+
+    # The snapshot was unlinked at open, so nothing of it is left to find.
+    assert {:ok, []} = File.ls(Path.join(root, "transfers"))
+  end
+
+  test "startup scavenges only the regular files the scratch root owns" do
+    root = Path.join(System.tmp_dir!(), "loopex-scavenge-#{:erlang.unique_integer([:positive])}")
+    scratch = Path.join(root, "transfers")
+    File.mkdir_p!(scratch)
+    on_exit(fn -> File.rm_rf(root) end)
+
+    stale = Path.join(scratch, "left-behind")
+    File.write!(stale, "a snapshot a crash left behind")
+    kept_directory = Path.join(scratch, "not-a-snapshot")
+    File.mkdir_p!(kept_directory)
+    outside = Path.join(root, "outside")
+    File.write!(outside, "not the scratch root's business")
+    link = Path.join(scratch, "link-out")
+    File.ln_s!(outside, link)
+
+    {:ok, owner} = Transfers.start_link(root: root)
+    on_exit(fn -> if Process.alive?(owner), do: GenServer.stop(owner) end)
+
+    refute File.exists?(stale)
+    assert File.dir?(kept_directory)
+    # The link is not followed, and what it pointed at is untouched.
+    assert File.exists?(outside)
+    assert File.read!(outside) == "not the scratch root's business"
+  end
+
   test "a transfer belongs to the attachment that opened it and is released with it" do
     %{handle: handle, reference: reference, bytes: bytes} = stored("bytes for one attachment")
     %{runtime: runtime, session_id: session_id} = session(handle)
