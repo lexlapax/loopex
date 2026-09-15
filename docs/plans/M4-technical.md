@@ -164,7 +164,7 @@ Concept: [Scope](M4.md#concept-plan-scope).
 | `loopex_telemetry` | Edge: the single bounded forwarding handler from telemetry events to the diagnostics plane, and reference reporter wiring | Emission points, session semantics, any handler that blocks an emitting process |
 | `loopex_app_server` | Foreground lifetime, UTF-8 JSONL framing, request correlation, bounded writer and facade mapping | Store/coordinator calls, a second loop, resource parsing, policy selection |
 | `loopex_composition` | Trusted startup wiring, provider companion, explicit prepared handoff and project resource configuration | Wire-supplied implementation selection |
-| TypeScript consumer | User workflow and local output presentation | Normative session, trust or policy semantics |
+| Independent consumer | User workflow and local output presentation | Normative session, trust or policy semantics |
 
 The ordered rejoin is prerequisite transactions/contracts → observability
 (trace sessions and telemetry boundaries) → core interaction
@@ -215,7 +215,7 @@ Concept: [Outcomes](M4.md#concept-plan-outcomes).
 | 2 | Identical command corpus through facade/wire; independent variation of request and command identity; snapshot-before-live with the unchanged revision-2 map and same-cursor open-interaction view; committed admission before correlated delivery; command replay after disconnect; core commits exactly one distinct `session.settled` after `run.finished` when no follow-up is queued, none on promotion, with replay and fresh attachment showing no duplicate |
 | 3 | Durable interaction request/answer/policy/intent cuts, fixed timestamps through commit_unknown, expiry/abort/restart races, the exact successive-round bound and policy identity; catalog and selected content identity preserved; stale/missing trust withholds content; manual-only restriction; interaction answer admission separately observed from policy re-evaluation, grant/intent commit and tool receipt; every immutable launch input proved unreplaceable from the wire |
 | 4 | ADR 0028 one verification per transfer and bounded allocation proved at ArtifactStore and facade with object and chunk digests distinguished; wrong-session use, object/use swap and corruption outside the requested window refused at open; concurrent-transfer and connection-work exhaustion, lifetime expiry, cancellation and descriptor release; oversized/fragmented/multiple frames; malformed UTF-8/duplicate keys/depth; slow reader; bounded queue; late progress; stdout contamination; actual process-tree cleanup |
-| 5 | From a fresh extraction of the exact source candidate, an operator follows the documented prerequisites and commands, supplies their own workspace, provider and policy inputs, and launches the foreground app-server and TypeScript consumer; the attended real-provider selector itself runs from the extracted tree and drives skill, interaction answer, policy re-evaluation, committed grant/intent, tool and artifact with real Store and executor, embedding no identities; abrupt kill and fresh-process resume; stdin EOF performs orderly shutdown with no cancellation and a still-pending interaction; `session.abort` is the separate deliberate-cancellation case |
+| 5 | From a fresh extraction of the exact source candidate, an operator follows the documented prerequisites and commands, supplies their own workspace, provider and policy inputs, and launches the foreground app-server and Node consumer; the attended real-provider selector itself runs from the extracted tree and drives skill, interaction answer, policy re-evaluation, committed grant/intent, tool and artifact with real Store and executor, embedding no identities; abrupt kill and fresh-process resume; stdin EOF performs orderly shutdown with no cancellation and a still-pending interaction; `session.abort` is the separate deliberate-cancellation case |
 | 6 | Elixir, Python and TypeScript clients execute the same positive/negative vectors without importing the server codec; pinned interpreter versions verified before the lane, absence or mismatch reported as unavailable evidence; the retained full-gate report records the exact candidate commit and tree, archive and extracted-build SHA-256, `VERSION`, lockfile SHA-256, schema/client versions and toolchain/platform identities, and the support verifier rejects missing, reordered or malformed fields |
 | 7 | With a real runtime and Store: a session traces only allowed modules and owned processes and leaves a second VM tracer unaffected; each level reports its documented fields; the `arguments` level redacts credential references, model content, tool arguments and artifact bytes to typed placeholders; the exact entry, rate and queue limits drop with a counted entry and never block a coordinator; no session command, client content, model output, project resource or app-server request can start, change or stop a session; stopping releases every trace flag; an OTP release without trace sessions reports unavailability; every callback and transaction cut in ADR 0030's emission inventory emits start/stop or exception with duration and only documented metadata; a crashing handler is isolated; a slow or blocked forwarding sink in `loopex_telemetry` never delays a coordinator and drops with a counted entry; enabled-trace and no-handler overheads are measured and retained |
 
@@ -304,22 +304,23 @@ app-server; `loopex_telemetry` owns the only Loopex-attached handler. The floor 
 codec available; duplicate-key and all other strictness requirements remain
 independent tests.
 
-Supply a source-built foreground entrypoint and one TypeScript example, plus
-small Elixir/Python conformance clients. Pin Node/TypeScript execution and Python
+Supply a source-built foreground entrypoint and one independent example, plus
+small Elixir/Python conformance clients. Pin Node and Python
 versions in `scripts/fixtures/m4/client-toolchain.txt` and bind it in the M4
 gate before acceptance; the runner verifies the pinned executables before any
 client lane and reports absence or mismatch as UNAVAILABLE. These are isolated
-client-validation prerequisites, not a new bootstrap or production dependency. Prefer Node's
-supported native type stripping and dependency-free TypeScript; if the accepted
-runtime cannot execute it, settle the validation-toolchain decision before
-acceptance rather than download a compiler during a gate.
+client-validation prerequisites, not a new bootstrap or production dependency. The
+example runs on the pinned Node with no build step, package manifest, lockfile
+or dependency, so a client lane installs nothing and a gate downloads no
+compiler; a later example that needs one settles that decision before it lands
+rather than during a lane.
 
 At the separately approved version transition set source VERSION/application
 versions to 0.1.0. The full gate stages a tar source archive from its exact
 committed candidate with `git archive`, extracts it outside the checkout, and
 compiles that extracted source. It runs the attended real-provider selector
 from the extracted tree, using the operator guide to launch the server and
-TypeScript consumer with operator-supplied inputs. The retained full-gate
+Node consumer with operator-supplied inputs. The retained full-gate
 report records the candidate commit and tree, archive and extracted-build
 SHA-256, `VERSION`,
 `mix.lock` SHA-256, schema and client-pin digests, and toolchain/platform. The

@@ -122,7 +122,7 @@ After acceptance, during implementation:
    and the committed grant/intent, observe the tool receipt, verify actual
    artifact bytes and a settled snapshot. Require local core/port greens before
    the wire implementation rejoins.
-6. Implement the server, the TypeScript consumer workflow and the independent
+6. Implement the server, the Node consumer workflow and the independent
    Elixir/Python conformance clients against the bound vectors and pins.
 
 Before closure, every lane must pass: isolated compile and probe, inherited
@@ -130,7 +130,7 @@ gates, authoritative protected selectors, whole suite, independent clients,
 attended real-provider workflow and retained-evidence validation. Neither
 document presence nor acceptance state can satisfy the opening. The opening
 probe is proof of one missing core behavior, not of skills, interactions, the
-TypeScript workflow or artifact integrity.
+Node workflow or artifact integrity.
 
 ## Required Raw-Process Conjunction
 
@@ -238,7 +238,7 @@ the gate rejects that invocation ledger.
 | Protected outcomes | Standalone authoritative ExUnit result channel, seed 3107, exact required witness identities and runnable states |
 | Whole suite | Complete deterministic suite, format, warning-free compile, documentation and dependency checks |
 | Source archive | Stage `git archive` from the exact committed candidate, retain its SHA-256, commit, tree, `VERSION` and `mix.lock` digest, extract it outside the checkout and compile there; the attended selector executes from that extraction |
-| Real workflow | Separately selected attended real-provider task from the extracted source, following the operator guide with operator-supplied inputs through the shipped server and TypeScript consumer |
+| Real workflow | Separately selected attended real-provider task from the extracted source, following the operator guide with operator-supplied inputs through the shipped server and Node consumer |
 | Retained evidence | One final report line in the exact grammar below, validated by the bound support script before it is printed; the real selector's authoritative report binds provider/model/endpoint and version-aware adapter/executor build identities; save that output without relabelling its source |
 
 The pinned Node and Python interpreters are verified immediately before each
@@ -273,7 +273,7 @@ Real-provider tests live in the dedicated
 `apps/loopex_app_server/test/external_workflow_real_test.exs`. Full mode runs
 that tracked selector and its compiled applications from the fresh source
 archive extraction. The selector follows `docs/operator/app-server.md` to
-launch the source-built server and TypeScript consumer; a checkout-only
+launch the source-built server and Node consumer; a checkout-only
 workflow cannot satisfy its protected case. Full mode accepts
 only the bounded stdin frame `LOOPEX_M4_PROVIDER_V1\0<key>\0` (key at most
 16,384 bytes); the unexported value reaches only the real selector and the
@@ -283,7 +283,7 @@ input. The aggregate emits each predecessor's existing input format; it does
 not change that predecessor's credential contract. No mixed-file exclusion
 inventory is locked. The inherited real-provider lanes use the reference model
 `anthropic:claude-haiku-4-5`; the credential must belong to that Anthropic
-provider. Node/TypeScript and Python execution versions for the client lanes
+provider. Node and Python execution versions for the client lanes
 are pinned before acceptance, not by this opening.
 
 ## Protected Outcome Obligations
@@ -294,8 +294,8 @@ are pinned before acceptance, not by this opening.
 | 2 | `apps/loopex/test/session_settled_event_test.exs`, `apps/loopex_app_server/test/session_mapping_test.exs` | Core emits exactly one distinct `session.settled` after `run.finished` in the same no-follow-up terminal transaction, none during follow-up promotion, and replay/reattach never duplicates either fact; this repairs a missing accepted ADR 0011 event rather than claiming inherited M3 parity. Same corpus facade/wire; independent request and command identity with replay idempotency; admission vs completion; snapshot/live ordering and an open-interaction view captured at the same cursor as the unchanged revision-2 snapshot; second-attach refusal or explicit replacement at the last emitted cursor; in-flight request-ID reuse refused and post-completion reuse ordinary; pre-admission pressure refusing before any durable write and post-admission pressure dropping progress first then detaching at the last emitted cursor; snapshot, event, progress and diagnostic record families kept separate with a fresh settled attachment as the final authority |
 | 3 | `apps/loopex/test/interaction_lifecycle_test.exs`, `apps/loopex_app_server/test/foundation_mapping_test.exs` | Durable request/answer/policy/intent cuts journaled before publication and before any intent, fixed timestamps through uncertain commits, expiry/abort/restart races, the exact successive-round bound, old-reader refusal; answered-but-unresolved recovery without speculation, acknowledgement or dispatch; identical replay returns the historical admission while changed content, wrong-target, resolved, expired or absent interactions refuse with stable reasons; invalid answers, malformed policy output and failed or timed-out re-evaluation dispatch nothing and resolve as denial; policy-request, interaction-request and answer digests with their preimages preserved through commit_unknown and restart under the same policy identity and revision; exact resources, missing/stale trust, manual-only selection, answer admission separate from re-evaluation and grant/intent, immutable launch inputs unreplaceable from the wire |
 | 4 | `apps/loopex_store_local/test/artifact_transfer_test.exs`, `apps/loopex_app_server/test/delivery_bounds_test.exs` | The attachment-owned open/read/close API refusing another attachment, session or runtime and disclosing no path; complete verification at open with one verification per transfer, distinct object/chunk digests, unsupported-store refusal; whole, first, last, empty and overrun windows and every distinct refusal reason; wrong-session use, object/use swap, corruption outside the requested window, post-open same-size rewrite never reaching a chunk; open deadline or work-budget exhaustion refusing before any chunk bytes leave the store and removing any partial snapshot; per-connection and per-runtime transfer limits refusing independently; connection-work exhaustion, lifetime expiry, cancellation, descriptor and snapshot release across repeated kill/restart, streaming memory bounded well above the chunk ceiling and startup scavenging touching only owned regular files; genuine old-format artifacts readable and capability removal restoring the prior API; chunk/read-deadline budgets; at the wire, a transfer reference from another connection refused and connection loss closing every transfer it opened; malformed UTF-8, duplicate keys, nesting, fragmented/multiple/oversized frames, blocked reader, detach cursor, late progress and actual cleanup |
-| 5 | `apps/loopex_app_server/test/external_workflow_test.exs`, `apps/loopex_app_server/test/external_workflow_real_test.exs` | Fresh extraction of the exact source candidate follows the operator guide, builds the foreground server and TypeScript consumer, and runs them with operator-supplied inputs; the attended real-provider selector runs from that extraction and proves the same skill → interaction answer → policy re-evaluation → committed grant/intent → actual tool → artifact → abrupt restart workflow with no embedded identities; clean stdin EOF performs orderly shutdown with no cancellation; abrupt death records nothing; a pending interaction survives both; `session.abort` is the only cancellation and an aborted interaction never reappears |
-| 6 | `apps/loopex_protocol/test/public_schema_conformance_test.exs`, `apps/loopex/test/m4_gate_support_test.exs` | Independently executed Elixir, Python and TypeScript clients over canonical positive/negative vectors under the pinned interpreters; exact version and platform identities; retained refusal of missing, duplicated, reordered, wrong-kind, stale-version and malformed evidence fields |
+| 5 | `apps/loopex_app_server/test/external_workflow_test.exs`, `apps/loopex_app_server/test/external_workflow_real_test.exs` | Fresh extraction of the exact source candidate follows the operator guide, builds the foreground server and Node consumer, and runs them with operator-supplied inputs; the attended real-provider selector runs from that extraction and proves the same skill → interaction answer → policy re-evaluation → committed grant/intent → actual tool → artifact → abrupt restart workflow with no embedded identities; clean stdin EOF performs orderly shutdown with no cancellation; abrupt death records nothing; a pending interaction survives both; `session.abort` is the only cancellation and an aborted interaction never reappears |
+| 6 | `apps/loopex_protocol/test/public_schema_conformance_test.exs`, `apps/loopex/test/m4_gate_support_test.exs` | Independently executed Elixir, Python and Node clients over canonical positive/negative vectors under the pinned interpreters; exact version and platform identities; retained refusal of missing, duplicated, reordered, wrong-kind, stale-version and malformed evidence fields |
 | 7 | `apps/loopex/test/trace_session_test.exs`, `apps/loopex/test/telemetry_boundary_test.exs` | Session scoped to owned processes and allowed modules with a second VM tracer unaffected; documented fields per level; redaction of credential references, model content, tool arguments and artifact bytes at the `arguments` level; the exact 4,096-byte, 2,000-per-second and 8,192-entry limits drop with a counted entry without blocking; no session command, client content, model output, project resource or wire request starts, changes or stops a session; stop releases every flag; unavailability on a release without trace sessions; every callback and transaction cut in the ADR 0030 inventory emits start/stop or exception with duration and documented metadata only; crashing handler isolated; a slow or blocked `loopex_telemetry` forwarding sink never delays a coordinator and drops with a counted entry; the dispatcher's bounded diagnostics admission (one atomic owner-recording slot claim before send under racing senders, 4,096-slot ceiling on the Loopex-owned backlog, a sender killed at each crash cut, after taking a ticket, after a failed claim, after a successful claim and after the send, holding afterwards exactly its claimed-but-unsent slots released at its `DOWN` while a concurrent sender's slot stays live and admits, a release freeing only the exact claim it names, counted drops without a send, a drain summary carrying the exact count of counted drops, host sink backpressured only) observed through the asynchronous path; overheads measured |
 
 Each required clause maps to a named decisive witness in `scripts/m4-outcomes.exs`.
@@ -368,7 +368,7 @@ document is a pair:
 
 - **Operator-facing.** How to turn tracing on and off at launch or through
   the host, what each trace level shows, what is redacted and why, and how to
-  consume telemetry events; how to launch the app server and the TypeScript
+  consume telemetry events; how to launch the app server and the Node
   consumer from a source build; what the operator sees at initialize, attach,
   prompt, pending interaction, answer, tool receipt, artifact transfer and
   settlement; the exact meaning of clean EOF, abrupt death and `session.abort`;
@@ -475,3 +475,35 @@ records no acceptance and grants no waiver, closure or release.
 | --- | --- | --- |
 | 2 | `scripts/check-m4-gate.sh` | `baa80842b486abeb3f092f042d9ac64d83eb7eea4028d3b72b08bc62df398240` |
 | 2 | `scripts/m4-gate-support.exs` | `6eb691a5fd4b1b3c3896cc38f7719c21db637b12e3c17de9dd42f24a154cefdd` |
+
+<a id="amendment-3"></a>
+## Amendment 3 — Name the outcome 5 consumer Node rather than TypeScript
+
+**Acceptance: OUTSTANDING.** Accepted M4 amends its gate under
+`amendment-transaction-v1`: this proposal `A` advances the generation and
+retains the Acceptance row and lifecycle state; its immediate child `R`
+rebinds Acceptance to exact `A` after explicit acceptance.
+
+The pair and this document described outcome 5's consumer as a TypeScript one,
+and reasoned about Node's native type stripping as the way to run it without a
+build step. The maintainer settled that on 2026-09-15: the consumer is plain
+JavaScript the pinned Node runs directly, with no build step, package manifest,
+lockfile or dependency, so a client lane installs nothing and a gate downloads
+no compiler. Outcome 5 names what the consumer must do rather than the language
+it is written in, and narrowing it further was not asked for.
+
+This amendment changes wording and nothing else. Every place this document
+named that consumer now names Node: the readiness step, the opening probe's
+scope sentence, the real-workflow lane, the fresh-source paragraph, the client
+pin sentence, outcome 5's and outcome 6's obligations and the operator
+documentation row. No outcome, selector, witness, limit, client pin, bound
+artifact or evidence class changes, and no lifecycle state reopens. The Concept
+and Technical depth envelopes move in the same revision because the pair is one
+authority unit; the outcome 5 row there loses a botched replacement along with
+the old name.
+
+Binding validation, bootstrap and every inherited gate that invokes them stop
+at this proposal only on the stale binding of this gate and these envelopes.
+After exact-SHA review and explicit acceptance of `A`, `R` rebinds the
+Acceptance row and adds one amendment-specific disposition. This proposal
+records no acceptance and grants no waiver, closure or release.
