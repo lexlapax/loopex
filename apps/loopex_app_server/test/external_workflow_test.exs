@@ -340,8 +340,12 @@ defmodule Loopex.AppServer.ExternalWorkflowTest do
     assert File.exists?(Path.join([extracted, "clients", "node", "workflow.mjs"]))
 
     # Dependencies are supplied rather than fetched, because a build that
-    # reached the network would be proving something about the network.
-    File.cp_r!(Path.join(root, "deps"), Path.join(extracted, "deps"))
+    # reached the network would be proving something about the network. They
+    # come from where this suite's own build found them: a runner that supplies
+    # its dependency tree through `MIX_DEPS_PATH`, as the M1 gate does, runs from
+    # a repository copy that has no `deps` of its own.
+    deps = Path.expand(System.get_env("MIX_DEPS_PATH") || Path.join(root, "deps"), root)
+    File.cp_r!(deps, Path.join(extracted, "deps"))
 
     # The build is named into the extraction itself. A runner that exports
     # `MIX_BUILD_ROOT` to isolate its own lanes would otherwise send these beams
