@@ -4391,3 +4391,44 @@ rebind binds the Acceptance row to exact
 `2e06da13ee01391690c1731edbf6190ab4471f1c` with the amended gate digest and both
 envelope digests unchanged, since neither envelope moved. It grants no closure,
 integration, tag or release.
+<a id="disposition-m4-witness-name-length-2026-09-15"></a>
+### M4 gate amendment acceptance, an oversized witness identity — 2026-09-15
+
+One of outcome 7's locked witness identities could not be satisfied by any
+test. The identity is 300 bytes, which ExUnit registers as the atom `test `
+followed by that name: 305 bytes. Atoms are capped at 255, so the name that file
+registers is truncated in the middle and given a short hash, and the selector
+runner compares locked identities to reported names exactly. The lane refused
+with `a locked test did not appear` while all ten of that file's cases passed.
+A locked name no test can carry is an unsatisfiable lock, and it would have
+blocked this gate however the implementation went.
+
+Amendment 7 shortens the identity to 196 bytes and renames the case to match.
+The claim is unchanged: what a sender killed at each crash cut holds afterwards,
+that a concurrent sender's slot stays live and admits, and that a release frees
+only the claim it names. What leaves the name is the enumeration of the four
+cuts, which the test body drives and asserts rather than describes. The other 66
+locked identities are unaffected; the next longest is 161 bytes.
+
+The proposal is `18100cafaefd3b6f3fbb73757b590287908738c7`. Two earlier proposals of the same three-byte-identical
+change, `cb01f63` and `c5c9fc3`, were accepted and then replaced: the first to
+act on review findings, the second because the history beneath it was rewritten.
+That rewrite repaired a separate defect this amendment did not cause — M4
+Amendment 6's rebind did not directly follow its proposal, four commits having
+intervened, and a Markdown link wrapped across two lines in `AGENTS.md` had been
+crashing the document checker before it could report that. Neither SHA survives;
+this disposition names only the proposal that does.
+
+No outcome, selector path, count, limit, client pin, evidence class or credential
+rule changes, neither envelope moves, and no lifecycle state reopens. Evidence
+presented: the truncated atom the runner reports against the locked string, the
+byte counts for the oversized identity and the next longest, an independent
+exact-SHA review recording no blocking or high findings, the amended gate's own
+selector passing at the proposal, and binding validation failing there on the
+stale gate binding alone. The maintainer answered **"Accept 18100ca"**.
+
+This transcribes that answer as acceptance under `amendment-transaction-v1`. The
+rebind binds the Acceptance row to exact `18100cafaefd3b6f3fbb73757b590287908738c7` with the amended gate digest and
+both envelope digests unchanged, since neither envelope moved. It grants no
+closure, integration, tag or release.
+
