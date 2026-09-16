@@ -31,4 +31,13 @@ end
 
 System.at_exit(fn _status -> File.rm_rf(root) end)
 
-ExUnit.start()
+# Concept: the independent JavaScript client is exercised with whatever Node the
+# host already has; Node is not a dependency of this suite.
+#
+# Technical depth: cases that start the Node client carry `:node_client` and are
+# left out of an ordinary run, so `mix test` and every inherited gate need no
+# Node at all. The M4 gate runs them through its selector runner, which does not
+# read this helper, after verifying the pinned interpreter and reporting its
+# absence as unavailable; on a host with Node, `mix test --include node_client`
+# runs them directly.
+ExUnit.start(exclude: [:node_client])

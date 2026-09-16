@@ -159,6 +159,7 @@ defmodule LoopexProtocol.PublicSchemaConformanceTest do
     end
   end
 
+  @tag :node_client
   test "Elixir and Node clients execute the same positive and negative vectors without the server codec" do
     node_executable = System.find_executable("node")
 

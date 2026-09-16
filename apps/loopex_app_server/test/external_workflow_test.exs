@@ -28,6 +28,7 @@ defmodule Loopex.AppServer.ExternalWorkflowTest do
 
   @moduletag timeout: 120_000
 
+  @tag :node_client
   test "an independent client completes a session over the wire and reports what it saw" do
     node_executable = System.find_executable("node")
 
@@ -100,6 +101,7 @@ defmodule Loopex.AppServer.ExternalWorkflowTest do
     assert summary["survived_refusal"]
   end
 
+  @tag :node_client
   test "an independent client selects a skill, answers the question and reads what the tool kept" do
     node_executable = System.find_executable("node")
 
@@ -212,6 +214,7 @@ defmodule Loopex.AppServer.ExternalWorkflowTest do
            "unexpected imports: #{inspect(imports)}"
   end
 
+  @tag :node_client
   test "the Node consumer completes skill answer reevaluation grant tool artifact and abrupt restart from operator input against the shipped server" do
     node_executable = System.find_executable("node")
 
@@ -281,6 +284,7 @@ defmodule Loopex.AppServer.ExternalWorkflowTest do
     assert File.exists?(store)
   end
 
+  @tag :node_client
   @tag timeout: 600_000
   test "a fresh extraction of the exact source candidate follows the operator guide to build and run the server and Node consumer with operator supplied inputs" do
     node_executable = System.find_executable("node") || flunk("Node is unavailable")
