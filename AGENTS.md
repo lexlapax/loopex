@@ -589,6 +589,14 @@ requires it, and those workflows stay thin wrappers over repository commands.
   CI, enforce the dependency budget and direction.
 - Checkpoints are warning-free under formatting, compilation, static analysis,
   and relevant documentation/protocol checks.
+- Every gate, bootstrap aggregate, inherited-gate invocation and long-running
+  check is observable while it runs. It emits a line at each step boundary
+  naming the step and its elapsed time, any step that walks history or a large
+  corpus emits progress at a bounded cadence naming what it is on, and output
+  streams as it happens rather than being buffered and printed at the end.
+  Silence longer than the check's stated bound is a defect of the check, not a
+  property of it, and inferring progress from the process table is not
+  evidence.
 - Diagnose Loopex through the runtime's own observability rather than ad hoc
   printing. A host starts a runtime-scoped trace session through the runtime
   reference it already holds, names the modules it wants, and stops it again;
