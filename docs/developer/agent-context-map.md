@@ -4421,6 +4421,60 @@ release. The runner's stale literals at
 Before dependent work, independently review this standalone disposition at
 its exact SHA. This record is not edited after that review.
 
+<a id="disposition-m1-gate-generation-16-2026-09-15"></a>
+### M1 gate generation 16 acceptance — 2026-09-15
+
+The closed M1 gate binds `apps/loopex/test/m1_gate_evidence_test.exs`, whose
+generation-12 witness runs the environment preflight and checks the search path
+it reports. Two lines of that witness read the `PATH=` line out of the
+preflight's output by literal prefix. The Closed M0 gate's outcome 8 scans
+every tracked byte for the token `PATH` in any shape a shell could bind it and
+admits only reviewed constructor occurrences, so the first time anything ran
+M0's gate after those lines landed — the full M4 gate's inherited lane at
+`08782a0873a2438fbfedb6ab5a3ecfc73c9c7217` — it refused them as an unregistered
+search-path construction. They construct nothing; they read.
+
+The maintainer chose to rewrite the reader rather than teach M0's registry,
+which pins constructor definitions by their parsed form, about readers. The
+reader now splits each output line at its first `=` and keeps the value only
+when the key is exactly `PATH`, which selects exactly the lines the old form
+selected and yields the same value for each.
+
+Preparing the rebind found that `scripts/check-m1-gate.sh` embeds every other
+bound artifact's digest as a literal and refuses when a file differs, so the
+runner is rebound with the witness, as generation 14 recorded. Correcting that
+literal found two more: generation 15 rebound the dependency oracle and its
+test in the gate's table without touching the runner, so the runner's literals
+have disagreed with the table since that rebind. Those two literals are
+corrected in this generation as well, and the unmet condition at generation
+15's own rebind is recorded in
+[its own disposition](#override-disposition-m1-generation-15-inherited-red-2026-09-15)
+rather than absorbed here.
+
+Generation 16 is proposed at `3e1a4fdfe74e01ed057b7cf3f79ed3cddbfd4667`, in
+four files: the witness, the runner, the gate with both rows rebound and its
+amendment section, and the plan with the pending row. Evidence presented at
+that exact revision: the rewritten witness matching M0's search-path scan zero
+times where the old form matched twice; M0's own scan and checker run over the
+whole tree reporting `M0 child-environment occurrences OK: 4`; the M1 evidence
+test passing its twelve cases; and every one of the runner's eight embedded
+literals equal to its file's digest and to the gate table. An earlier proposal
+of this generation, `8e2b146`, was blocked in independent review for leaving
+the runner unbound and was replaced; the review of the replacement recorded no
+finding requiring action.
+
+The maintainer answered **"3e1a4fd accepted."**
+
+This transcribes that answer as acceptance under `amendment-transaction-v2`.
+The rebind completes generation 16's row with the accepting authority, this
+disposition and the candidate it binds, which is exact
+`3e1a4fdfe74e01ed057b7cf3f79ed3cddbfd4667`. At this rebind the M1 gate must
+pass, and that run is the evidence the generation-15 disposition names; it is
+retained on its own when it is made. The Acceptance and Closure rows of Closed
+M1 stay byte-immutable, no earlier generation stops being enforced for the
+revisions it governed, and this adds no scope, changes no outcome and reopens
+no lifecycle state. It grants no closure, integration, tag or release.
+
 <a id="disposition-m4-plan-amendment-node-consumer-2026-09-15"></a>
 ### M4 plan amendment acceptance, the Node consumer — 2026-09-15
 
