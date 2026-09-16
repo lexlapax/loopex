@@ -234,9 +234,24 @@ defmodule Loopex.Checks.Git do
     end
   end
 
+  # Concept: the walk says where it is while it runs.
+  #
+  # Technical depth: every reachable revision costs a tree listing and, for any
+  # governed file it has not seen, a blob read, so a full walk runs for minutes
+  # with nothing to show for it. A bounded number of progress lines on standard
+  # error name the revision being read and the count so far. They are not part
+  # of the check's result: standard output stays exactly what it was, and a
+  # reviewer piping it sees the same bytes.
   defp read_snapshots(root, records, artifact_paths) do
+    total = length(records)
+    announce("history walk starting: #{total} reachable revisions")
+
     result =
-      Enum.reduce_while(records, {[], %{}}, fn [sha | parents], {snapshots, cache} ->
+      records
+      |> Enum.with_index(1)
+      |> Enum.reduce_while({[], %{}}, fn {[sha | parents], index}, {snapshots, cache} ->
+        progress(index, total, sha)
+
         case read_tree(root, sha, artifact_paths, cache) do
           {:ok, files, cache} -> {:cont, {[{sha, parents, files} | snapshots], cache}}
           :error -> {:halt, :error}
@@ -253,6 +268,16 @@ defmodule Loopex.Checks.Git do
         {head, ordered}
     end
   end
+
+  @progress_every 100
+
+  defp progress(index, total, sha) when rem(index, @progress_every) == 0 or index == total do
+    announce("history walk #{index}/#{total} at #{String.slice(sha, 0, 12)}")
+  end
+
+  defp progress(_index, _total, _sha), do: :ok
+
+  defp announce(line), do: IO.puts(:stderr, "loopex.status: " <> line)
 
   defp read_tree(root, sha, artifact_paths, cache) do
     case run(
