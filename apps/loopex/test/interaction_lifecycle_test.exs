@@ -621,13 +621,17 @@ defmodule Loopex.InteractionLifecycleTest do
     # lanes, sends these beams somewhere else entirely and leaves the tree below
     # `root` with no build at all, so the replay finds nothing to load and the
     # case fails for a reason that has nothing to do with what an old reader can
-    # read. `MIX_ENV` and the dependency path are named against the same leak.
+    # read. `MIX_ENV` and the dependency path are named against the same leak,
+    # and `MIX_BUILD_PATH` is cleared: the M1 gate runs the suite with it set,
+    # and it outranks `MIX_BUILD_ROOT`, so this older build would otherwise
+    # overwrite the running suite's own beams.
     {output, status} =
       System.cmd("mix", ["compile"],
         cd: Path.join([root, "apps", "loopex"]),
         stderr_to_stdout: true,
         env: [
           {"MIX_ENV", "dev"},
+          {"MIX_BUILD_PATH", nil},
           {"MIX_BUILD_ROOT", Path.join(root, "_build")},
           {"MIX_DEPS_PATH", Path.join(root, "deps")}
         ]

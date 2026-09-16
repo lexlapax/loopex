@@ -348,13 +348,16 @@ defmodule Loopex.AppServer.ExternalWorkflowTest do
     # to that root, leaving the extracted tree with no build for the consumer
     # below to load, and the extraction would be proving something about the
     # runner. Naming the dependency path is what makes the copy above the source
-    # of what gets compiled.
+    # of what gets compiled. `MIX_BUILD_PATH` is cleared for the same reason: it
+    # outranks `MIX_BUILD_ROOT`, and a runner that sets it, as the M1 gate does,
+    # would have this build overwrite that runner's own beams.
     {build_output, build_status} =
       System.cmd(mix, ["compile"],
         cd: extracted,
         stderr_to_stdout: true,
         env: [
           {"MIX_ENV", "dev"},
+          {"MIX_BUILD_PATH", nil},
           {"MIX_BUILD_ROOT", Path.join(extracted, "_build")},
           {"MIX_DEPS_PATH", Path.join(extracted, "deps")}
         ]
