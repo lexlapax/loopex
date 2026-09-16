@@ -4367,6 +4367,60 @@ Closed M1 stay byte-immutable, no earlier generation stops being enforced for th
 revisions it governed, and this adds no scope, changes no outcome and reopens no
 lifecycle state. It grants no closure, integration, tag or release.
 
+<a id="override-disposition-m1-generation-15-inherited-red-2026-09-15"></a>
+### M1 gate red at its own generation-15 rebind, 2026-09-15
+
+Found while preparing M1 gate generation 16, by hashing rather than by a run:
+`scripts/check-m1-gate.sh` embeds each bound artifact's digest as a literal and
+refuses at `require_bound_artifact` when a file's digest differs. Generation 15
+(proposal `e5f87fda567cae616247a8e990514c145c03d452`, rebind
+`8361efb546e7f3e72fd199ad45ad2ab487604961`) rebound
+`apps/loopex/lib/mix/tasks/loopex.deps_budget.ex` and
+`apps/loopex/test/deps_budget_test.exs` in the gate's Bound Artifacts table
+and did not touch the runner, so the runner kept the generation-14 literals
+`2c62019c…` and `bc4d5544…` for files whose digests became `7f5dfc6c…` and
+`fe801bfc…`. From that rebind onward any run of the M1 gate refuses at
+`bound dependency-direction reader changed after gate acceptance`. Nothing
+observed it: the status walk validates the table side, which is consistent,
+and the M4 gate's inherited lane stopped at a Closed M0 defect before reaching
+M1. No run of the M1 gate at that rebind was made; the red is established by
+the two tracked byte sets disagreeing, and at most one of them can match the
+files.
+
+The maintainer received this with the generation-16 proposal and selected
+**"Fix all three, and disposition gen 15's red"**, whose full text was:
+
+> Amend A so the runner is rebound with all three literals corrected and the prose says plainly that two were stale since generation 15. Separately, a standalone disposition records generation 15's rebind as having carried an unmet inherited-gate condition — the M1 gate red at its own rebind, unobserved — remediated by the M1 gate green at generation 16's rebind. Same treatment the bootstrap condition got, so the record stays consistent.
+
+Under [the explicit maintainer override](../../AGENTS.md#maintainer-override),
+this names the requirement it replaces. At a generation's rebind, binding
+validation, bootstrap and every inherited required gate must pass; the M1 gate
+is one of them, and for the single rebind
+`8361efb546e7f3e72fd199ad45ad2ab487604961` it could not have. For that rebind
+only, that component of the requirement is replaced by the evidence named
+below. AGENTS.md calls a later-discovered red that went unobserved at a
+required contract moment an evidence-schedule defect, and that is what this
+is. Two things are true at once: the required run at that rebind is missing,
+which AGENTS.md treats as evidence unavailable, and the tracked bytes prove
+that any such run would have been red.
+
+**Replacement evidence.** The M1 gate green at generation 16's rebind, which
+carries the runner rebound with all three literals corrected, retained with
+the exact revision it ran at. Until such a run is retained, the replaced
+requirement stands unmet and this disposition is not satisfied; when it is
+retained it is recorded on its own, never by editing this record.
+
+Preserved: generation 15's Acceptance, Closure and generation rows, which stay
+byte-immutable and true for the revisions they name; every other requirement
+at that rebind and at every other; and the generation-16 proposal's own
+obligations, which are not lightened by this record. This grants no further
+exception, no ADR change, no closure, no integration to `main`, no tag and no
+release. The runner's stale literals at
+`8361efb546e7f3e72fd199ad45ad2ab487604961` remain true for that revision.
+
+Before dependent work, independently review this standalone disposition at
+its exact SHA. This record is not edited after that review.
+
 <a id="disposition-m4-plan-amendment-node-consumer-2026-09-15"></a>
 ### M4 plan amendment acceptance, the Node consumer — 2026-09-15
 
