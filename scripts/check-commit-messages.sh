@@ -86,8 +86,9 @@ valid_title() {
   esac
 }
 
-# The eight immutable titles listed here have a scoped maintainer exception.
-# Only title grammar and length are excepted. Every commit body is still scanned.
+# The eight immutable titles listed here have a scoped maintainer exception
+# covering title grammar and length. A separate, narrower length-only exception
+# follows below. Every commit body is still scanned under both.
 # Authority: docs/developer/agent-context-map.md
 #   #override-disposition-m3-commit-titles-2026-09-11
 has_title_exception() {
@@ -100,6 +101,27 @@ has_title_exception() {
     3c8dcc1bc4951d35f6cdee4e695e9682e8bc53db|\
     cdc086900515e1bd4d890bb7c62ab3de846ef6fa|\
     461d44dc004740110231a459c8359efe407d09e6) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# The six immutable titles listed here have a scoped maintainer exception for
+# LENGTH ONLY. Their grammar is still checked: they are deliberately absent from
+# has_title_exception above, which waives grammar as well. Each is the bound
+# Amendment 7 candidate or one of its ancestors, so rewriting any of them would
+# falsify a recorded binding. Every commit body is still scanned, every other
+# commit remains subject to the full policy, and every future commit remains
+# subject to the 72-character limit.
+# Authority: docs/developer/agent-context-map.md
+#   #override-disposition-m4-commit-titles-2026-09-15
+has_length_exception() {
+  case "$1" in
+    18100cafaefd3b6f3fbb73757b590287908738c7|\
+    7bb2a9bd2e33e159a3ed7441a1ad3d0445cda954|\
+    9905a870d7363e93b808459e89cd57865ffc72ee|\
+    2e06da13ee01391690c1731edbf6190ab4471f1c|\
+    d2a916552209408019df8acf83ef5cc5ca3bf0a9|\
+    20fcec3d0e499eacde3599b8fdb41a460c0a5c8b) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -204,8 +226,12 @@ while IFS= read -r -d '' record; do
     fi
 
     if [ "${#title}" -gt 72 ]; then
-      echo "$sha: title is ${#title} characters; keep it at 72 or fewer" >&2
-      status=1
+      if has_length_exception "$sha"; then
+        echo "$sha: title length waived by recorded M4 maintainer disposition" >&2
+      else
+        echo "$sha: title is ${#title} characters; keep it at 72 or fewer" >&2
+        status=1
+      fi
     fi
   fi
 
