@@ -14,7 +14,7 @@ exec 3>&1
 run_check() {
   local rc
   set +e
-  "$@" 2>&1 1>&3 | grep -v 'DARWIN_USER_TEMP_DIR' >&2
+  "$@" 2>&1 1>&3 | grep --line-buffered -v 'DARWIN_USER_TEMP_DIR' >&2
   rc=${PIPESTATUS[0]}
   set -e
   return "$rc"
