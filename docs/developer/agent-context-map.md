@@ -4053,6 +4053,87 @@ exception, and no ADR change, milestone closure, product integration to `main`,
 tag, or release. The red commit-title evidence retained for the revisions above
 remains true for those revisions.
 
+<a id="override-disposition-m4-bootstrap-at-rebind-2026-09-15"></a>
+### M4 bootstrap at the Amendment 7 rebind, 2026-09-15
+
+The maintainer received this question after the commit-title exception was
+recorded:
+
+> The disposition records bootstrap-at-R as an unmet v1 condition — red, not waived, not self-clearing, requiring your explicit disposition before M4 closure. I declined to waive it myself since you approved recording the state, not granting a second procedural replacement. When and how should it be dispositioned?
+
+The recommended choice was to disposition it at closure, once the remediation
+run existed. The maintainer instead selected the option labelled
+**"Disposition it now, standalone"**, whose full text was:
+
+> A separate override disposition today, reviewed at its exact SHA, closing the record before closure work begins. Cleaner if you want nothing open in the durable record, but it costs another commit plus another review round, and it would cite a remediation run that has not happened yet.
+
+This is the explicit maintainer disposition that
+[the title exception](#override-disposition-m4-commit-titles-2026-09-15)
+requires before closure for the bootstrap component; that item is no longer
+open. The inherited-gate component named below is the item that remains open.
+
+Under [the explicit maintainer override](../../AGENTS.md#maintainer-override),
+this names the requirement it replaces. `amendment-transaction-v1` requires
+that at the rebind `R`, binding validation, bootstrap and every inherited
+required gate pass. For the single rebind
+`9e08a7ad748ab9bc2acafcd4b6f09207f3a5fcf9`, which binds the Amendment 7
+proposal `18100cafaefd3b6f3fbb73757b590287908738c7`, the bootstrap component of
+that requirement is replaced by the evidence named below. Binding validation
+at that rebind was measured directly and passed and is not touched.
+
+Why the condition could not be met at those bytes, as recorded in the title
+exception: `scripts/check-bootstrap.sh` runs `scripts/check-commit-messages.sh`;
+six already-published titles over 72 characters are the proposal or its
+ancestors; the check ran at the rebind and exited non-zero; no commit may
+intervene between a proposal and its rebind, and the rebind may not change
+portable enforcement. Bootstrap at the rebind's own bytes was red on that
+pre-existing condition and no run at those bytes can ever pass. The title
+exception that removes the condition landed afterwards at
+`08782a0873a2438fbfedb6ab5a3ecfc73c9c7217`.
+
+**The inherited-gate component is unmet at the same rebind and is not replaced
+here.** The same six titles make it so: the locked lanes of the Closed M1 and
+M2 gates run the bootstrap aggregate, and M4's own inherited lane runs every
+Closed gate, so at the rebind's bytes those lanes were red for exactly the
+reason above. This record does not replace that component; it stays unmet and
+open. No replacement evidence for it exists yet: in the full M4 gate at
+`08782a0873a2438fbfedb6ab5a3ecfc73c9c7217` the inherited lane exited non-zero
+on a pre-existing defect in the Closed M0 gate — outcome 8's search-path scan
+matching two reader lines in the M1 evidence test — which is being repaired as
+M1 gate generation 16. Its green run on a descendant, when it exists, is cited
+in a later durable record and never by editing this one, and until then that
+component requires its own explicit maintainer disposition before closure.
+
+**Replacement evidence for the bootstrap component.** A complete green run of
+`scripts/check-bootstrap.sh` at a descendant of the rebind that carries the
+title exception, retained with the exact revision it ran at. That run
+completed on 2026-09-15 inside the full M4 gate at
+`08782a0873a2438fbfedb6ab5a3ecfc73c9c7217`: the aggregate exited 0 after 2342
+seconds, every check green including `status check passed`, with the six
+excepted titles reported as length-waived. The bootstrap segment of that gate
+log is retained verbatim in
+[M4 bootstrap remediation](../evidence/M4-bootstrap-remediation.md) with the
+segment's digest
+`sha256:c81e881ffc1a1067c7b6efb8e7b016795addbacc8d76354fd608cd99754c8b11` and
+the gate's own source line naming the revision and toolchain. That retained
+green run is what satisfies this disposition; recording the disposition alone
+would not have.
+
+Preserved: every other `amendment-transaction-v1` requirement, at this rebind
+and at every other; the accepted Amendment 7 bytes and the gate digest the
+Acceptance row binds; the title exception's own scope, which remains the
+72-character limit alone; and the finding that Amendment 7's accepted text
+overstates bootstrap at the proposal, which stands as recorded. This grants no
+further exception, no ADR change, no closure, no integration to `main`, no tag
+and no release. The red bootstrap evidence for the rebind's own bytes remains
+true for that revision.
+
+Before dependent work, independently review this standalone disposition at its
+exact SHA. The result it rests on is recorded above and in the evidence file;
+this record is not edited after that review. A later run of the same aggregate
+that is not green leaves the requirement unmet again and is recorded on its
+own.
+
 <a id="disposition-m1-gate-generation-11-2026-09-14"></a>
 ### M1 gate generation 11 acceptance — 2026-09-14
 
