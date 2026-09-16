@@ -148,12 +148,12 @@ and can print neither `CAPTURE` nor `M1 gate GREEN`.
 
 | SHA-256 | Path |
 | --- | --- |
-| `9f13f6e44c3baf0ced53711518f4f6493dc9b271bbb3401f13c78e561761f309` | `scripts/check-m1-gate.sh` |
+| `2434856a471cdb0d64962f613419b83b527f1cc908d3f12e0fe61c0a160f6972` | `scripts/check-m1-gate.sh` |
 | `4bba03d218eee656991444a3c22c8753bfef1ab86f688036a4440048752f48bd` | `scripts/m1-gate-launcher.escript` |
 | `53d8219bdee584a3849a85a1102e405520d5dd0dfbe21d259434bc9edfc5fcc0` | `scripts/m1-exunit-runner.exs` |
 | `572d9fac0b4be1fb792db8f5f8ff3b760e588c9e35f4cb1850c03f73c2f1f661` | `scripts/m1-evidence-verifier.exs` |
 | `7f5dfc6c701264ae0d7988e8b9599dc8f85c4a139c141c81c03a290ba77ed4f8` | `apps/loopex/lib/mix/tasks/loopex.deps_budget.ex` |
-| `61edf8d5ca5516fe4d0ec96cd82079d8736b0fdb22175b9bbe49da5bccb35786` | `apps/loopex/test/m1_gate_evidence_test.exs` |
+| `60bac4bc37381410f295371b4b9a2ee85edae31ddbd76ba0af0150cb33c2c4fa` | `apps/loopex/test/m1_gate_evidence_test.exs` |
 | `c36253cff3d74ddff1b330695edbc4bde0a4565c1412c67c1293b2fb7ca6129b` | `apps/loopex/test/m1_exunit_runner_test.exs` |
 | `fe801bfc4ed7546cf07ce726cd7a9cc8c0fbaea7e4602e17e7baca7c35c8095d` | `apps/loopex/test/deps_budget_test.exs` |
 | `fea095ecec784a4440b872ad5f53a8da2cb4e13e43b6f05add5cfd75bb352879` | `.tool-versions` |
@@ -1532,3 +1532,46 @@ records no acceptance and grants no waiver, closure or release.
 | --- | --- | --- |
 | 15 | `apps/loopex/lib/mix/tasks/loopex.deps_budget.ex` | `7f5dfc6c701264ae0d7988e8b9599dc8f85c4a139c141c81c03a290ba77ed4f8` |
 | 15 | `apps/loopex/test/deps_budget_test.exs` | `fe801bfc4ed7546cf07ce726cd7a9cc8c0fbaea7e4602e17e7baca7c35c8095d` |
+
+<a id="amendment-16"></a>
+## Amendment 16 — Read the preflight search path without spelling like a binding
+
+**Acceptance: OUTSTANDING.** Closed M1 adds gate generation 16 under
+`amendment-transaction-v2`. Its historical Acceptance, Closure and prior
+generation rows remain unchanged. The new row carries this gate's digest and
+leaves authority, evidence and candidate unset until exact-proposal acceptance.
+
+Generation 12 added a witness that runs the environment preflight and checks
+the search path it reports. Two lines of that witness read the `PATH=` line
+out of the preflight's output by matching the literal prefix. The Closed M0
+gate's outcome 8 scans every tracked byte for the token `PATH` in any shape a
+shell could bind it, and admits only reviewed constructor occurrences, so those
+two reader lines were refused as an unregistered search-path construction. They
+construct nothing; they read. Nothing ran M0's gate between generation 12 and
+the M4 gate's inherited lane, which is where the refusal first appeared.
+
+The reader now splits each output line at its first `=` and keeps the value
+only when the key is exactly `PATH`. It proves the same thing about the same
+output and no longer carries the shape the scan is for. The alternative --
+admitting two reader lines to M0's registry -- was declined because that
+registry pins constructor definitions by their parsed form, and a reader is not
+one.
+
+Two bound artifacts change and are rebound below. The runner
+`scripts/check-m1-gate.sh` embeds every other bound artifact's digest as a
+literal and refuses when a file differs, so a change to the witness is a change
+to the runner as well, as generation 14 recorded. Correcting that literal found
+two more: generation 15 rebound the dependency oracle and its test in this
+table without touching the runner, which kept their generation-14 literals. The
+runner's literals have disagreed with this table since that rebind landed, so any
+run of it refuses at `bound dependency-direction reader changed after gate
+acceptance`; no run was made, so none was observed. Those two literals are
+corrected here as well, and that unmet condition at generation 15's own rebind
+is recorded in its own disposition rather than absorbed by this amendment. No
+selector, count, limit, evidence class or credential rule changes, no
+lifecycle state reopens, and neither envelope moves.
+
+| Generation | Artifact | Rebound SHA-256 |
+| --- | --- | --- |
+| 16 | `apps/loopex/test/m1_gate_evidence_test.exs` | `60bac4bc37381410f295371b4b9a2ee85edae31ddbd76ba0af0150cb33c2c4fa` |
+| 16 | `scripts/check-m1-gate.sh` | `2434856a471cdb0d64962f613419b83b527f1cc908d3f12e0fe61c0a160f6972` |

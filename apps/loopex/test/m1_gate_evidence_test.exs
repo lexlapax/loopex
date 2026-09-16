@@ -984,8 +984,12 @@ defmodule Loopex.M1GateEvidenceTest do
     [path] =
       output
       |> String.split("\n")
-      |> Enum.filter(&String.starts_with?(&1, "PATH="))
-      |> Enum.map(&String.replace_prefix(&1, "PATH=", ""))
+      |> Enum.flat_map(fn line ->
+        case String.split(line, "=", parts: 2) do
+          ["PATH", value] -> [value]
+          _other -> []
+        end
+      end)
 
     entries = String.split(path, ":", trim: true)
     leading = Enum.take(entries, length(Enum.uniq(selected)))
