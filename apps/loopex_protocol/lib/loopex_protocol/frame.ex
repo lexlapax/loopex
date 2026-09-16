@@ -70,6 +70,12 @@ defmodule LoopexProtocol.Frame do
   ## Concept
 
   The maximum encoded size of one output record, newline included.
+
+  ## Technical depth
+
+  Exposed so a caller can size a record before encoding rather than discovering
+  the ceiling by refusal. The newline counts, because the newline is part of
+  what a frame costs on the wire.
   """
   @spec output_record_bytes() :: pos_integer()
   def output_record_bytes, do: @output_record_bytes

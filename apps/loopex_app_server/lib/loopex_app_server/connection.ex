@@ -150,6 +150,13 @@ defmodule Loopex.AppServer.Connection do
   ## Concept
 
   The request identities this connection is currently answering.
+
+  ## Technical depth
+
+  Returned sorted, so a caller and a test observe one order for a set that has
+  none of its own. This is the connection's own accounting of requests it has
+  begun and not yet finished, and it is what `max_requests_in_flight` is
+  enforced against.
   """
   @spec in_flight(t()) :: [binary()]
   def in_flight(%__MODULE__{in_flight: in_flight}),
@@ -159,6 +166,12 @@ defmodule Loopex.AppServer.Connection do
   ## Concept
 
   Whether this connection has settled on a generation.
+
+  ## Technical depth
+
+  Reads the settled state rather than the presence of a generation, so a
+  connection whose initialization was refused is not mistaken for one that
+  never attempted it.
   """
   @spec initialized?(t()) :: boolean()
   def initialized?(%__MODULE__{state: state}), do: state == :initialized
@@ -167,6 +180,12 @@ defmodule Loopex.AppServer.Connection do
   ## Concept
 
   The generation this connection speaks, once it has one.
+
+  ## Technical depth
+
+  `nil` until initialization settles, so a caller cannot read a generation the
+  connection has not actually agreed. Once set it does not change for the
+  connection's life.
   """
   @spec generation(t()) :: binary() | nil
   def generation(%__MODULE__{generation: generation}), do: generation

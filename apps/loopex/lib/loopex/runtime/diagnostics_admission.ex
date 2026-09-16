@@ -71,6 +71,12 @@ defmodule Loopex.Runtime.DiagnosticsAdmission do
   ## Concept
 
   The ceiling this contract admits by default.
+
+  ## Technical depth
+
+  Exposed as a function so a host, a test and the dispatcher all read one
+  value. It is fixed at compile time: the bound on the diagnostics backlog does
+  not depend on how many senders exist or how fast they run.
   """
   @spec default_ceiling() :: pos_integer()
   def default_ceiling, do: @ceiling
@@ -110,6 +116,12 @@ defmodule Loopex.Runtime.DiagnosticsAdmission do
   ## Concept
 
   Registers this sender for monitoring by the dispatcher, once.
+
+  ## Technical depth
+
+  Registration is idempotent per dispatcher, so a sender may call it on every
+  admission without accumulating monitors. The monitor is what lets the
+  dispatcher release a killed sender's claimed-but-unsent slots at its `DOWN`.
   """
   @spec register(t()) :: :ok
   def register(%{dispatcher: dispatcher}), do: ensure_monitor(dispatcher)
@@ -198,6 +210,12 @@ defmodule Loopex.Runtime.DiagnosticsAdmission do
   ## Concept
 
   How many slots are held right now.
+
+  ## Technical depth
+
+  Reads the slot table's size, so it counts claims that have not been released
+  yet, including those of a sender that has already died but whose `DOWN` the
+  dispatcher has not processed. It is an observation, never a reservation.
   """
   @spec held(t()) :: non_neg_integer()
   def held(%{slots: slots}), do: :ets.info(slots, :size)
@@ -247,6 +265,12 @@ defmodule Loopex.Runtime.DiagnosticsAdmission do
   ## Concept
 
   The drop count waiting to be reported, without taking it.
+
+  ## Technical depth
+
+  Reads the counter without clearing it, unlike the atomic exchange the drain
+  summary performs. A caller can therefore observe what was lost without
+  consuming it and without racing whoever reports it.
   """
   @spec pending_drops(t()) :: non_neg_integer()
   def pending_drops(%{counters: counters}), do: :atomics.get(counters, 2)

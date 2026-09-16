@@ -42,6 +42,13 @@ defmodule Loopex.AppServer.Delivery do
   ## Concept
 
   A delivery queue for one attached session, starting at a cursor.
+
+  ## Technical depth
+
+  The queue starts at the cursor the caller supplies rather than at zero, so a
+  reattaching client resumes where it stopped instead of replaying what it
+  already holds. Both arguments are guarded, because a cursor arriving from the
+  wire decides what a session is shown.
   """
   @spec new(binary(), non_neg_integer()) :: t()
   def new(session_id, cursor) when is_binary(session_id) and is_integer(cursor) do
@@ -123,6 +130,13 @@ defmodule Loopex.AppServer.Delivery do
   ## Concept
 
   Whether this writer was detached, and the cursor it reached.
+
+  ## Technical depth
+
+  Detachment is terminal: once it is true the writer emits its one uncorrelated
+  error and delivery stops, so this is the flag to consult before offering
+  anything further. The cursor it reached is read separately, through
+  `cursor/1`.
   """
   @spec detached?(t()) :: boolean()
   def detached?(%__MODULE__{detached: detached}), do: detached

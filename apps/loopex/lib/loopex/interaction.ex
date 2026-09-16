@@ -40,6 +40,14 @@ defmodule Loopex.Interaction do
   ## Concept
 
   The validated question, as the runtime retains it.
+
+  ## Technical depth
+
+  Plain bounded data, so one of these survives a journal round trip and crosses
+  the public boundary unchanged. `:choice` is the only kind this family admits
+  today, and `decision_ref` is optional because a question may exist before any
+  policy decision names it. Every bounded member is measured against
+  `bounds/0`.
   """
   @type request :: %{
           required(:kind) => :choice,
@@ -67,6 +75,13 @@ defmodule Loopex.Interaction do
   ## Concept
 
   The ceilings this question family is bounded by.
+
+  ## Technical depth
+
+  The ceilings are module attributes rather than configuration, so every
+  runtime bounds a question identically and a host cannot widen them. Returning
+  them as data lets a caller check a question before offering it, and lets a
+  client display the same limits the runtime enforces.
   """
   @spec bounds() :: map()
   def bounds do
@@ -177,6 +192,14 @@ defmodule Loopex.Interaction do
   ## Concept
 
   Whether an answer names one of the choices that were offered.
+
+  ## Technical depth
+
+  The answer is compared against the choices the question itself carried rather
+  than any list the caller supplies, so a late or replayed answer naming a
+  choice that was never offered is refused. A non-binary choice id falls to the
+  second clause and is simply false, because an answer arrives from the wire
+  and is untrusted input rather than a programming error.
   """
   @spec offered?(request(), term()) :: boolean()
   def offered?(%{choices: choices}, choice_id) when is_binary(choice_id),

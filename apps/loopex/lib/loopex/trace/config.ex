@@ -66,6 +66,12 @@ defmodule Loopex.Trace.Config do
   ## Concept
 
   The namespace wildcards a session may use.
+
+  ## Technical depth
+
+  The wildcards are fixed by this contract, so a session names a namespace the
+  runtime already knows rather than an arbitrary module pattern. A trace
+  session cannot widen its own scope by naming something outside this list.
   """
   @spec namespaces() :: [atom()]
   def namespaces, do: @namespaces
@@ -74,6 +80,12 @@ defmodule Loopex.Trace.Config do
   ## Concept
 
   The ceilings this contract fixes, which a host may lower and never raise.
+
+  ## Technical depth
+
+  Returned as data so the operator runbook, the session that applies a
+  configuration and the tests that check it all quote one set of numbers rather
+  than three copies that can drift apart.
   """
   @spec ceilings() :: %{
           entry_bytes: pos_integer(),

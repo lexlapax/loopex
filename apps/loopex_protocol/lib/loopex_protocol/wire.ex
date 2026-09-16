@@ -56,6 +56,12 @@ defmodule LoopexProtocol.Wire do
   ## Concept
 
   Encodes bytes as an opaque wire identity.
+
+  ## Technical depth
+
+  Unpadded base64url, so an identity needs no escaping in a URL or a path and
+  one value has exactly one encoding. The bytes stay opaque: nothing downstream
+  is entitled to interpret them.
   """
   @spec encode_identity(binary()) :: binary()
   def encode_identity(bytes) when is_binary(bytes),
@@ -65,6 +71,12 @@ defmodule LoopexProtocol.Wire do
   ## Concept
 
   The tighter bound a session or runtime placement identity carries.
+
+  ## Technical depth
+
+  The same decoding as any other identity against a smaller ceiling, because a
+  session or placement identity is quoted far more often than it is created. It
+  answers `:error` rather than raising, since the value arrives from the wire.
   """
   @spec session_identity(term()) :: {:ok, binary()} | :error
   def session_identity(value), do: identity(value, @max_session_identity_bytes)
@@ -98,6 +110,13 @@ defmodule LoopexProtocol.Wire do
   ## Concept
 
   Encodes a quantity in the canonical decimal form the wire carries.
+
+  ## Technical depth
+
+  Produces the one form its decoder admits -- no sign, no leading zero except
+  for zero itself, no whitespace -- so a value encoded here round-trips. The
+  guard refuses a negative or out-of-range integer at this boundary rather than
+  emitting something the other side would reject.
   """
   @spec encode_u64(non_neg_integer()) :: binary()
   def encode_u64(value) when is_integer(value) and value >= 0 and value <= @u64_max,
@@ -153,6 +172,12 @@ defmodule LoopexProtocol.Wire do
   ## Concept
 
   Encodes exact bytes for the wire.
+
+  ## Technical depth
+
+  Unpadded base64url again, so exact bytes survive a JSON string unchanged,
+  including bytes that are not valid UTF-8. Encoding is total: there is no
+  binary it cannot carry, so there is nothing to refuse.
   """
   @spec encode_bytes(binary()) :: binary()
   def encode_bytes(value) when is_binary(value), do: Base.url_encode64(value, padding: false)

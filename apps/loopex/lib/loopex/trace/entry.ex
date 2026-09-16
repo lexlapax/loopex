@@ -63,6 +63,13 @@ defmodule Loopex.Trace.Entry do
   ## Concept
 
   The entry a session emits when it drops what it could not report.
+
+  ## Technical depth
+
+  Plain string-keyed data like every other entry, so a sink handles a drop
+  report exactly as it handles what it did not lose. It carries a count and a
+  reason rather than the dropped content, which is all that can honestly be
+  said about entries that were never rendered.
   """
   @spec dropped(non_neg_integer(), binary()) :: map()
   def dropped(count, reason) when is_integer(count) and count >= 0 and is_binary(reason) do
@@ -89,6 +96,14 @@ defmodule Loopex.Trace.Entry do
   ## Concept
 
   Renders a redacted term and truncates it to the per-entry ceiling.
+
+  ## Technical depth
+
+  Redaction runs before inspection, so no credential, model body, tool argument
+  or artifact payload reaches the rendering even transiently. `structs: false`
+  stops a struct's own inspect implementation from reprinting what redaction
+  removed, and the printable limit bounds the work before truncation trims the
+  result to the exact ceiling.
   """
   @spec render(term(), pos_integer()) :: binary()
   def render(term, entry_bytes) when is_integer(entry_bytes) and entry_bytes > 0 do
@@ -102,6 +117,14 @@ defmodule Loopex.Trace.Entry do
   ## Concept
 
   Truncates a rendering to an exact byte ceiling.
+
+  ## Technical depth
+
+  A rendering already within the ceiling is returned unchanged, so the marker
+  appears only when something was genuinely cut. Otherwise the kept prefix is
+  shortened by exactly the marker's own size, so the result is never larger
+  than the ceiling, and `max/2` keeps a ceiling smaller than the marker from
+  asking for a negative length.
   """
   @spec truncate(binary(), pos_integer()) :: binary()
   def truncate(rendered, entry_bytes) when byte_size(rendered) <= entry_bytes, do: rendered

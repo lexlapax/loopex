@@ -57,6 +57,13 @@ defmodule Loopex.Telemetry do
   ## Concept
 
   Detaches this handler from one runtime's events.
+
+  ## Technical depth
+
+  The handler id is derived from that runtime's admission, so a detach names
+  one runtime's handler and can never remove another's. A runtime with no
+  admission returns that error unchanged rather than detaching something this
+  handler does not own.
   """
   @spec detach(Loopex.Runtime.t()) :: :ok | {:error, term()}
   def detach(runtime) do

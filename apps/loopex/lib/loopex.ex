@@ -266,6 +266,12 @@ defmodule Loopex do
   ## Concept
 
   Stops this runtime's trace session and releases every trace flag it set.
+
+  ## Technical depth
+
+  Releasing the flags is part of stopping rather than a second step a caller
+  can forget, so a stopped session leaves no module still traced. It is reached
+  through the runtime reference the caller already holds, never a global name.
   """
   @spec trace_stop(Runtime.t()) :: :ok | {:error, term()}
   def trace_stop(runtime), do: Runtime.trace_stop(runtime)
@@ -275,6 +281,13 @@ defmodule Loopex do
 
   Reports the running trace session's configuration and its emitted and
   dropped counts, or that there is none.
+
+  ## Technical depth
+
+  Emitted and dropped counts are reported together, because an emitted count
+  alone cannot distinguish a quiet system from one whose sink is losing
+  entries. The status is reached only through the supplied runtime, so one
+  runtime's session is never observable from another.
   """
   @spec trace_status(Runtime.t()) :: {:ok, map()} | {:error, term()}
   def trace_status(runtime), do: Runtime.trace_status(runtime)
@@ -321,6 +334,13 @@ defmodule Loopex do
   ## Concept
 
   Releases one open transfer and everything it held.
+
+  ## Technical depth
+
+  The close names the transfer rather than the artifact, so releasing one open
+  window never disturbs another the same attachment holds. It is addressed
+  through the attachment that opened it, which is what bounds a close to the
+  session entitled to perform it.
   """
   @spec close_artifact_transfer(Attachment.t(), binary()) :: :ok | {:error, term()}
   def close_artifact_transfer(attachment, transfer_ref),
