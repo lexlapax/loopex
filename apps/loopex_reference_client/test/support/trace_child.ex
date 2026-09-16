@@ -162,11 +162,16 @@ defmodule Loopex.ReferenceClientTraceChild do
     true = Map.get(dispatches, job_id, 0) == 0
     true = Enum.count(events, &(&1.kind == "tool.started")) >= 1
     true = Enum.count(events, &(&1.kind == "tool.finished")) >= 1
-    true = List.last(events).kind == "run.finished"
+    # The completed run ends and, with nothing queued behind it, settles the
+    # session in the same transaction, so the run's own ending is the last
+    # event before that settled fact.
+    true = List.last(events).kind == "session.settled"
+    finished = Enum.at(events, -2)
+    true = finished.kind == "run.finished"
 
     check!(
-      List.last(events)["outcome"] == "completed",
-      "the recovered run finished #{inspect(List.last(events))} after #{length(results)} " <>
+      finished["outcome"] == "completed",
+      "the recovered run finished #{inspect(finished)} after #{length(results)} " <>
         "results; the last request projected #{inspect(projected, limit: :infinity)}"
     )
 
@@ -187,7 +192,7 @@ defmodule Loopex.ReferenceClientTraceChild do
       usage: Enum.map(results, & &1.payload["result"]["reply"]["usage"]),
       tool_started: Enum.count(events, &(&1.kind == "tool.started")),
       tool_finished: Enum.count(events, &(&1.kind == "tool.finished")),
-      terminal_outcome: List.last(events)["outcome"],
+      terminal_outcome: finished["outcome"],
       child_environment_names: receipt.child_environment_names,
       provider_credential_present: receipt.provider_credential_present
     }

@@ -119,7 +119,12 @@ defmodule Loopex.ReferenceClient.RealModelSessionTest do
                    "loopex-real-session"
 
           events = Fixture.events(fixture, fixture.client.session_id)
-          assert List.last(events)["outcome"] == "completed"
+          # The completed run ends and, with nothing queued behind it, settles the
+          # session in the same transaction, so the run's own ending is the last
+          # event before that settled fact.
+          assert List.last(events).kind == "session.settled"
+          assert Enum.at(events, -2).kind == "run.finished"
+          assert Enum.at(events, -2)["outcome"] == "completed"
 
           identity = List.last(results).payload["result"]["reply"]["identity"]
 
@@ -157,7 +162,7 @@ defmodule Loopex.ReferenceClient.RealModelSessionTest do
                 record.payload.kind == "model_attempt_settled_v2" and
                   record.payload["conversation"] == "canonical"
               end),
-            terminal_outcome: terminal_outcome(List.last(events))
+            terminal_outcome: terminal_outcome(Enum.find(events, &(&1.kind == "run.finished")))
           }
         catch
           _, _ ->
