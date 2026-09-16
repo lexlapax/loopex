@@ -4134,6 +4134,20 @@ this record is not edited after that review. A later run of the same aggregate
 that is not green leaves the requirement unmet again and is recorded on its
 own.
 
+<a id="disposition-m4-observability-rule-2026-09-15"></a>
+### Observability rule directed by the maintainer, 2026-09-15
+
+While the full M4 gate at `08782a0873a2438fbfedb6ab5a3ecfc73c9c7217` had been
+silent for forty minutes inside a history walk, with progress inferable only
+from the process table, the maintainer directed:
+
+> All gates, bootstraps etc going forward must have logging or instrumentation. Put that as a hard rule in Agents.md. after this run finishes. Go add those, even if it requires amendments.
+
+This records that direction as the authority for the observability rule in
+`AGENTS.md` and for the retrofits that follow it: ordinary commits where the
+script is unbound, and the amendment route where it is digest-bound. It is a
+strengthening of the development contract and grants nothing.
+
 <a id="disposition-m1-gate-generation-11-2026-09-14"></a>
 ### M1 gate generation 11 acceptance — 2026-09-14
 

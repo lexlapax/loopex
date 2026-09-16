@@ -597,6 +597,12 @@ requires it, and those workflows stay thin wrappers over repository commands.
   Silence longer than the check's stated bound is a defect of the check, not a
   property of it, and inferring progress from the process table is not
   evidence.
+  A check states its own silence bound in its header. The rule binds every
+  check added or amended from 2026-09-15, under the
+  [recorded direction](docs/developer/agent-context-map.md#disposition-m4-observability-rule-2026-09-15);
+  a digest-bound runner that predates it conforms at its next gate generation
+  or amendment, and until then its silence is a recorded limitation of that
+  runner, never a pass.
 - Diagnose Loopex through the runtime's own observability rather than ad hoc
   printing. A host starts a runtime-scoped trace session through the runtime
   reference it already holds, names the modules it wants, and stops it again;
