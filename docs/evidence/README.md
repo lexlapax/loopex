@@ -28,7 +28,7 @@ Evidence is unpaired: it is a log, not a Concept and Technical depth pair.
 | [M2 real-call attestations](M2-real-call-attestations.md) | Provider-supplied response identifiers and reported usage for each of the three real-provider roles. |
 | [M2 post-closure real-call attestations](M2-post-closure-attestations.md) | Additive retakes of the three real-provider roles on post-closure source candidates with Mint 1.10.0, including the separately recorded provider-account lookup state. |
 | [M2 toolchain matrix](M2-toolchain-matrix.md) | Source-candidate metadata and the floor, current, and Linux-current M2 captures. |
-| [M4 bootstrap remediation](M4-bootstrap-remediation.md) | The first green bootstrap aggregate on the m4 branch after the commit-title exception, retained verbatim from the gate run at 08782a0 as the replacement evidence the bootstrap-at-rebind disposition names. |
+| [M4 bootstrap remediation](M4-bootstrap-remediation.md) | A green bootstrap aggregate on the m4 branch after the commit-title exception, retained verbatim from the gate run at 08782a0 as the replacement evidence the bootstrap-at-rebind disposition names. |
 
 ## Related
 
