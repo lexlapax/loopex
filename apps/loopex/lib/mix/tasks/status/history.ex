@@ -124,7 +124,13 @@ defmodule Loopex.Checks.History do
     parents_by_revision =
       Map.new(snapshots, fn {revision, parents, _governed} -> {revision, parents} end)
 
-    Enum.reduce(walk, %{}, fn {revision, parents, governed}, inherited ->
+    walk_total = length(walk)
+    announce("governance walk starting: #{walk_total} revisions")
+
+    Enum.reduce(Enum.with_index(walk, 1), %{}, fn {{revision, parents, governed}, index},
+                                                  inherited ->
+      history_progress("governance walk", index, walk_total, revision)
+
       if Map.has_key?(inherited, revision) or
            Enum.any?(parents, &(not Map.has_key?(inherited, &1))) do
         raise Invalid, "governed documents: history is duplicated or not parent-first"
@@ -1729,8 +1735,14 @@ defmodule Loopex.Checks.History do
   end
 
   def artifact_history({head, snapshots}, options) do
+    artifact_total = length(snapshots)
+    announce("artifact walk starting: #{artifact_total} revisions")
+
     states =
-      Enum.reduce(snapshots, %{}, fn {revision, parents, files}, states ->
+      Enum.reduce(Enum.with_index(snapshots, 1), %{}, fn {{revision, parents, files}, index},
+                                                         states ->
+        history_progress("artifact walk", index, artifact_total, revision)
+
         unless not Map.has_key?(states, revision) and
                  Enum.all?(parents, &Map.has_key?(states, &1)) do
           raise Invalid, "artifact history is duplicated or not parent-first"
@@ -2133,4 +2145,21 @@ defmodule Loopex.Checks.History do
       end
     end)
   end
+
+  # Concept: each walk says where it is while it runs.
+  #
+  # Technical depth: these two walks are the long part of the status task after
+  # the fetch loop, which announces itself already. They write a bounded number
+  # of lines to standard error naming the walk, the position and the revision;
+  # standard output is untouched, so a caller reading it sees the same bytes.
+  @progress_every 100
+
+  defp history_progress(walk, index, total, revision)
+       when rem(index, @progress_every) == 0 or index == total do
+    announce("#{walk} #{index}/#{total} at #{String.slice(revision, 0, 12)}")
+  end
+
+  defp history_progress(_walk, _index, _total, _revision), do: :ok
+
+  defp announce(line), do: IO.puts(:stderr, "loopex.status: " <> line)
 end
