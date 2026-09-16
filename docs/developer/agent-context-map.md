@@ -3953,6 +3953,106 @@ lifecycle state, and grants no merge to `main`, tag, publication or release.
 It is one standalone commit and receives independent exact-SHA review before
 integration relies on it.
 
+<a id="override-disposition-m4-commit-titles-2026-09-15"></a>
+### M4 published commit-title exception, 2026-09-15
+
+The maintainer received this recommendation while the Amendment 7 rebind was
+being verified:
+
+> Bootstrap fails at R on a check that has never run on this branch: six commit titles exceed the 72-character limit. All six are ancestors of proposal A, so shortening any of them changes A's hash and voids R's Acceptance binding. One of them, 2e06da1, is Amendment 6's bound candidate and cannot be rewritten at all without falsifying the durable record. The check already supports waivers — M3 recorded one covering eight commits. How do you want to proceed?
+
+The recommended choice was **"Record the exception (Recommended)"**. The
+maintainer answered by selecting it. The alternative offered was a further
+history rewrite, and it was presented as unable to reach a clean state: the
+Amendment 7 proposal is itself one of the six and the other five are its
+ancestors, so rewriting any of them changes that proposal's hash and voids the
+rebind that binds it, and
+`2e06da13ee01391690c1731edbf6190ab4471f1c` would still violate the limit
+afterwards because its hash is named as Amendment 6's bound candidate. A rewrite
+would therefore have spent a fourth proposal, review and acceptance and still
+required an exception, narrower than this one but covering that commit.
+
+Under [the explicit maintainer override](../../AGENTS.md#maintainer-override),
+this replaces only the continuing 72-character title limit in
+`scripts/check-commit-messages.sh` for these six immutable commits in the M4
+implementation lineage. Title *format* is not excepted: each of the six already
+satisfies the `area(marker): summary` grammar and fails on length alone, and the
+replacement must keep grammar enforced for them.
+
+| Commit | Existing title |
+| --- | --- |
+| `18100cafaefd3b6f3fbb73757b590287908738c7` | gate(M4): shorten an outcome 7 witness identity to a name a test can carry |
+| `7bb2a9bd2e33e159a3ed7441a1ad3d0445cda954` | fix(M4): name the old reader's build environment instead of inheriting it |
+| `9905a870d7363e93b808459e89cd57865ffc72ee` | fix(M4): anchor the repository root to the file, not the working directory |
+| `2e06da13ee01391690c1731edbf6190ab4471f1c` | plan(M4): propose Amendment 6 to finish the renames in the witness identities |
+| `d2a916552209408019df8acf83ef5cc5ca3bf0a9` | feat(M4): answer the policy's question from outside and read what the tool kept |
+| `20fcec3d0e499eacde3599b8fdb41a460c0a5c8b` | test(M4): write the conformance vectors an independent client checks itself against |
+
+Why these six are immutable rather than merely inconvenient:
+`18100cafaefd3b6f3fbb73757b590287908738c7` is itself the candidate whose exact
+bytes the Acceptance row in `docs/plans/M4.md` binds, so changing its title
+changes the bound bytes directly. The other five are its ancestors, so changing
+any of their titles changes that candidate's hash and falsifies the rebind.
+`2e06da13ee01391690c1731edbf6190ab4471f1c` carries a second, independent reason:
+it is named as Amendment 6's bound candidate in this document, and AGENTS.md
+requires a bound candidate to remain reachable from the integrated history.
+
+This condition also bears on `amendment-transaction-v1`, and the record must not
+be read as claiming more than was proved. That transaction requires bootstrap to
+fail at the proposal only for the stale binding, and to pass at the rebind.
+Bootstrap runs this checker, and these six titles are ancestors of the proposal,
+so bootstrap was red at the proposal on two independent grounds — the stale gate
+binding and this pre-existing title condition — and it could not pass at the
+rebind, because the fix may not intervene between a proposal and its rebind and
+the rebind may not change portable enforcement. Bootstrap at the rebind's own
+bytes was therefore **red**, and no run at those bytes can ever pass, so the
+`amendment-transaction-v1` requirement that bootstrap pass at the rebind is
+**unmet**. It is not unavailable evidence: the check ran there and exited
+non-zero. AGENTS.md classifies a later-discovered red that went unobserved at a
+required contract moment as an evidence-schedule defect, and that is what this
+is. Binding validation itself was measured
+directly at both revisions: red at the proposal on the stale gate binding alone,
+green at the rebind. Amendment 7's accepted text says binding validation,
+bootstrap and every inherited gate that invokes them stop at the proposal only on
+the stale binding of this gate; that sentence is accurate for binding validation
+and overstates bootstrap. This disposition records the difference rather than
+leaving it implicit, and it corrects no accepted bytes: the gate text stands as
+accepted. This disposition claims no replacement for that requirement: its
+scope remains the 72-character title limit alone, the unmet at-rebind condition is
+recorded here as a defect rather than waived -- it is not self-clearing, it stays
+open, and it requires explicit maintainer disposition before M4 closure, since a
+red required check blocks closure -- and the remediation is a
+complete green bootstrap run on the descendant that carries this exception,
+retained with the SHA it ran at. That run is remediation, not substitute
+evidence for the rebind's own bytes.
+
+Each exception must be matched by its complete SHA and reported as waived, and
+the report must name length rather than grammar, so that an over-grant is visible
+in the output. Preserve the fixed baseline, complete-history requirement, commit
+enumeration and stream accounting, prospective title controls, and unconditional
+commit-body attribution and scan-error checks. Every other commit remains subject
+to the complete policy, and every future commit remains subject to the
+72-character limit. No history rewrite is authorized or needed. Every accepted
+candidate, bound artifact, disposition and historical evidence identity remains
+unchanged. No M0–M4 gate binds this checker's bytes, so this change needs no
+replacement gate binding; several gates do lock the bootstrap aggregate as a
+command, which the required validation below covers.
+
+Before changing the checker, independently review this standalone disposition
+commit at its exact SHA. Then prove that the original check refuses exactly these
+six titles and no others; that the replacement reports all six as length-waived;
+that grammar remains enforced for these six, so a malformed title among them
+would still fail; that a seventh over-long title still fails; and that body
+attribution and scan-error checking remain effective. Run the complete bootstrap
+check on the resulting candidate and retain its result, with the SHA it ran at,
+as the remediation run named above. It is not retained as evidence that the
+at-rebind condition was met.
+
+This grants no exception to a product test or other check, no additional title
+exception, and no ADR change, milestone closure, product integration to `main`,
+tag, or release. The red commit-title evidence retained for the revisions above
+remains true for those revisions.
+
 <a id="disposition-m1-gate-generation-11-2026-09-14"></a>
 ### M1 gate generation 11 acceptance — 2026-09-14
 
