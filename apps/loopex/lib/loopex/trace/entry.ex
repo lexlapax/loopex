@@ -122,9 +122,10 @@ defmodule Loopex.Trace.Entry do
 
   A rendering already within the ceiling is returned unchanged, so the marker
   appears only when something was genuinely cut. Otherwise the kept prefix is
-  shortened by exactly the marker's own size, so the result is never larger
-  than the ceiling, and `max/2` keeps a ceiling smaller than the marker from
-  asking for a negative length.
+  shortened by exactly the marker's own size, so the result is never larger than
+  the ceiling once the ceiling is at least that size. Below it the result is the
+  marker alone: `max/2` keeps the kept length from going negative, and the
+  marker's own three bytes are the floor this function can return.
   """
   @spec truncate(binary(), pos_integer()) :: binary()
   def truncate(rendered, entry_bytes) when byte_size(rendered) <= entry_bytes, do: rendered
