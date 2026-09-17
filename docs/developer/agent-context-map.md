@@ -4795,3 +4795,73 @@ release.
 
 Before dependent work, independently review this standalone disposition at
 its exact SHA. This record is not edited after that review.
+
+<a id="override-disposition-closed-gate-repair-chain-v2-2026-09-17"></a>
+### Closed-gate repair and instrumentation chain, corrected, 2026-09-17
+
+This record supersedes
+[the first record of this chain](#override-disposition-closed-gate-repair-chain-2026-09-17),
+which its exact-SHA review rejected and which no transition may cite. That
+review found one requirement the first record kept that cannot be met: the M3
+generation rebinds `scripts/check-closed-gates.sh`, which the M4 gate also
+binds, so from that proposal until M4's own rebind of the same bytes the
+repository status check stops at `unfinished shared binding sequence`.
+Bootstrap runs that check, and so does every closed gate that runs bootstrap,
+so none of them can pass at the M3 rebind. The review also found that the
+first record waived the M0 and M1 gates at rebinds where nothing makes them
+red. The facts the first record states about the breakage were each confirmed
+by that review and are not repeated here.
+
+The maintainer's decision is unchanged: the answer
+**"Fold into instrumentation, one chain (Recommended)"**, recorded in full in
+the first record. This record carries out that decision in an order the
+repository's shared-holder rule can meet, keeping the runner repairs, the
+instrumentation, one override and the captures on repaired runners.
+
+**Order.** M0 gate generation 8; M1 gate generation 17; M2 gate generation 13;
+the M2 post-closure re-capture, taken at M2 generation 13's rebind with its
+evidence-only child after it; M3 gate generation 5; then the M4 gate's next
+amendment, which rebinds the M4 holder of `scripts/check-closed-gates.sh` and
+so completes that shared sequence. Each is its own transaction with its own
+proposal, its own exact-SHA review, the maintainer's acceptance of that exact
+proposal, and a rebind that is the proposal's immediate child.
+
+Under [the explicit maintainer override](../../AGENTS.md#maintainer-override),
+this names the requirement it replaces: at a rebind, every inherited required
+gate must pass. It is replaced only as follows.
+
+- At the rebinds of M0 generation 8, M1 generation 17 and M2 generation 13,
+  the M2 and M3 gates are not required to pass. The M2 gate is red until its
+  re-capture exists and the M3 gate until its probe is repaired. The M0 and M1
+  gates must pass at each of these three rebinds, and binding validation and
+  bootstrap must pass there.
+- At the M3 generation 5 rebind no closed gate is required to pass. Binding
+  validation there is holder-scoped: it proves the M3 holder's own bindings
+  and names the M4 gate as the pending holder of
+  `scripts/check-closed-gates.sh`. Bootstrap and global status are not
+  reported green there. That is the repository's rule for an unfinished
+  shared sequence, which the M4 gate's own ordered steps restate. Bootstrap's
+  other checks must pass there: agent bootstrap, gitignore, commit messages
+  and repository hygiene.
+- At the rebind of the M4 amendment that completes the sequence, nothing is
+  replaced.
+
+**Replacement evidence.** One run of
+`bash scripts/check-closed-gates.sh --before M4` with the provider frame on
+standard input, green for M0, M1, M2 and M3 on the instrumented runners, at the
+rebind of the M4 amendment that completes the shared sequence, retained with
+the exact revision it ran at. Until such a run is retained, the replaced
+requirement stands unmet for every rebind named above, and this disposition is
+not satisfied. When the run is retained it is recorded on its own, never by
+editing this record.
+
+Preserved: every closed milestone's Acceptance, Closure and existing generation
+rows, which stay byte-immutable and true for the revisions they name; ADR
+0024's required policy identity and ADR 0030's telemetry, which the runtime
+keeps; the shared-holder rule that no revision is a closure candidate until
+every holder is rebound; and every other requirement at every other rebind.
+This grants no further exception, no ADR change, no closure, no integration to
+`main`, no tag and no release.
+
+Before dependent work, independently review this standalone disposition at
+its exact SHA. This record is not edited after that review.
