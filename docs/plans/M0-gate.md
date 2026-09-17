@@ -42,7 +42,7 @@ against the file it names at every validation.
 
 | SHA-256 | Path |
 | --- | --- |
-| `959b450daeb310d502ed0ccf77c71efd345d7e70d6bca318ae6977543ff2b349` | `scripts/check-m0-gate.sh` |
+| `26573efd627af4ccc550d0c78f44b7c6055904e4c9c0bbd0e3852e2b21cbbff0` | `scripts/check-m0-gate.sh` |
 | `60e371867bb4e142850fca4f3642025b41d7a804ba010d00c67c0f298d5f1f43` | `scripts/m0-child-env-check.exs` |
 | `cfad881eda27049b61b0e058817143d9dcd98b6c5fc5c42f486c124a2594ef92` | `apps/loopex/test/m0_child_env_check_test.exs` |
 | `b4d2de9ee3faad7e7f8a945161b12e528bdfb1420f1b43ec61e9a2061871204e` | `apps/loopex_llm_reqllm/test/m0_child_environment_conformance_test.exs` |
@@ -898,3 +898,60 @@ this holder's binding without claiming a global status, bootstrap or inherited
 pass; those become eligible for green only after the final Open M4 refresh.
 This proposal reopens no milestone, accepts no plan or product ADR, waives no
 evidence, and authorizes no integration, tag or release.
+
+<a id="amendment-8"></a>
+## Amendment 8 — report each step and a heartbeat while the gate runs
+
+**Acceptance: OUTSTANDING.** Closed M0 adds gate generation 8 under
+`amendment-transaction-v2`. Its historical Acceptance, Closure and earlier
+generation rows remain unchanged. The new row carries this gate's digest and
+leaves authority, evidence and candidate unset until exact-proposal acceptance.
+
+### Reason and exact change
+
+The maintainer directed on 2026-09-15 that every gate, bootstrap aggregate and
+inherited-gate invocation be observable while it runs, and
+[the chain disposition](../developer/agent-context-map.md#override-disposition-closed-gate-repair-chain-v2-2026-09-17)
+orders this generation first among the closed-gate runners. A run of this gate
+took about an hour on the floor pair and printed nothing between its checks.
+
+The runner now prints, on standard error, one line when each step begins and
+one when it ends, naming the step and its own and the run's elapsed seconds, and
+names each protected selector as its own step. A background heartbeat names the
+current step every 30 seconds, so no more than 60 seconds pass without a line
+while the gate runs; the runner's header states that bound. The heartbeat reads
+the step from a file under the gate's isolated root, checks every second that
+the gate is still alive, and is stopped by the existing EXIT trap, which also
+removes that root, so it neither outlives the gate nor holds standard error
+open for more than a second after it. Standard output, every command,
+selector, minimum, fixture, hook check, retirement inventory, scan pattern and
+scan exclusion, provider lane and failure message are unchanged.
+
+### Evidence at this proposal
+
+Binding validation, bootstrap and this gate, which runs bootstrap, are red at
+this proposal only for the pending generation, which is the prescribed result.
+The M2 and M3 gates are also red here for the probe defects the chain
+disposition names. The runner parses, and a run of it at this proposal prints
+each step and heartbeat as it goes, through the real-provider lane and into
+the bootstrap step, where it stops on that pending generation; its standard
+error closes within a second of its exit, with no heartbeat after it.
+
+### Transaction and re-verification
+
+The generation's amended bound artifact is:
+
+| SHA-256 | Path |
+| --- | --- |
+| `26573efd627af4ccc550d0c78f44b7c6055904e4c9c0bbd0e3852e2b21cbbff0` | `scripts/check-m0-gate.sh` |
+
+Proposal A atomically carries this gate, the instrumented runner and the
+pending generation-8 row in M0's plan. That row names this gate's digest but no
+candidate, authority or disposition. It follows the seven earlier amendments
+without rewriting their text. Only explicit maintainer acceptance authorizes
+R, whose only changes complete generation 8 with exact A and add one new
+amendment-specific disposition to an existing durable document. At R, binding
+validation, bootstrap and the M0 and M1 gates must pass; the M2 and M3 gates are
+covered by the chain disposition. This proposal reopens no milestone, accepts
+no plan or product ADR, waives no evidence, and authorizes no integration, tag
+or release.

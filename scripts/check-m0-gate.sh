@@ -22,11 +22,57 @@
 # Every command form here was executed against a disposable umbrella scaffold
 # before the gate was proposed. An umbrella root runs no tests of its own, so
 # selectors are application-relative.
+# OBSERVABILITY
+#
+# Every step boundary prints the step's name and the run's elapsed seconds on
+# standard error, and a heartbeat names the current step every 30 seconds.
+# Silence bound: no more than 60 seconds pass without a line on standard error
+# while this gate runs. Standard output is unchanged.
 set -euo pipefail
 
 fail() {
   echo "M0 gate RED: $1" >&2
   exit 1
+}
+
+# Concept: the gate says where it is while it runs.
+#
+# Technical depth: gate_step closes the previous step with its own and the run's
+# elapsed seconds and opens the next one. The heartbeat runs in the background
+# and reads the current step from a file under the gate's isolated root, since
+# it cannot see this shell's variables. The EXIT trap stops it, and it checks
+# every second that the gate is still alive, so it neither outlives a killed
+# gate nor holds standard error open for more than a second after the gate.
+gate_clock_start="$(date +%s)"
+gate_step_name=""
+gate_step_started="$gate_clock_start"
+gate_step_file=""
+gate_heartbeat_pid=""
+gate_step() {
+  local now
+  now="$(date +%s)"
+  if [ -n "$gate_step_name" ]; then
+    echo "M0 step done: $gate_step_name step=$((now - gate_step_started))s total=$((now - gate_clock_start))s" >&2
+  fi
+  gate_step_name="$1"
+  gate_step_started="$now"
+  echo "M0 step: $gate_step_name total=$((now - gate_clock_start))s" >&2
+  if [ -n "$gate_step_file" ]; then
+    printf '%s %s\n' "$now" "$gate_step_name" > "$gate_step_file"
+  fi
+}
+gate_heartbeat() {
+  local gate_shell="$1" waited=0 started name now
+  while kill -0 "$gate_shell" 2>/dev/null; do
+    sleep 1
+    waited=$((waited + 1))
+    [ "$waited" -ge 30 ] || continue
+    waited=0
+    kill -0 "$gate_shell" 2>/dev/null || break
+    read -r started name < "$gate_step_file" 2>/dev/null || continue
+    now="$(date +%s)"
+    echo "M0 heartbeat: $name step=$((now - started))s total=$((now - gate_clock_start))s" >&2
+  done
 }
 
 # The provider credential is contained before this script starts its FIRST child
@@ -151,6 +197,7 @@ executed_tests() {
 
 run_selector() {
   local file="$1" minimum="$2" output executed skipped
+  gate_step "selector $file"
   if ! output="$(mix test "$file" 2>&1)"; then
     printf '%s\n' "$output" >&2
     fail "$file failed"
@@ -374,7 +421,7 @@ done
 isolated_root="$(mktemp -d "${TMPDIR:-/tmp}/loopex-m0-home.XXXXXX")" \
   || fail "could not create an isolated LOOPEX_HOME for the run"
 absence_root=""
-trap 'rm -rf "$isolated_root" ${absence_root:+"$absence_root"}' EXIT
+trap '[ -z "$gate_heartbeat_pid" ] || kill "$gate_heartbeat_pid" 2>/dev/null || true; rm -rf "$isolated_root" ${absence_root:+"$absence_root"}' EXIT
 
 export MIX_HOME="${MIX_HOME:-$real_home/.mix}"
 export HEX_HOME="${HEX_HOME:-$real_home/.hex}"
@@ -382,6 +429,12 @@ export HOME="$isolated_root/home"
 export LOOPEX_HOME="$isolated_root/home/$user_state_dirname"
 export LOOPEX_WORKSPACE="$isolated_root/workspace"
 mkdir -p "$HOME" "$LOOPEX_HOME" "$LOOPEX_WORKSPACE"
+gate_step_file="$isolated_root/current-step"
+gate_step "isolation and user-state fingerprint"
+gate_heartbeat "$$" &
+gate_heartbeat_pid=$!
+# A disowned job ends without a shell notice when the EXIT trap stops it.
+disown "$gate_heartbeat_pid" 2>/dev/null || true
 
 # Defense in depth only. Containment above is the safety property; this catches
 # a path that escaped it and carries no claim of its own.
@@ -394,6 +447,7 @@ real_user_state() {
 }
 user_state_before="$(real_user_state)"
 
+gate_step "formatting and warning-free compilation"
 [ -f .formatter.exs ] || fail "no .formatter.exs; formatting scope would be unbound (outcome 1)"
 # A text search over .formatter.exs passes on an unrelated binding that merely
 # contains an apps glob while the returned configuration is root-only. The task
@@ -410,6 +464,7 @@ mix format --check-formatted || fail "formatting is not clean"
 # nothing. No --force is needed, and adding one would cost a full rebuild per lane
 # for no additional guarantee.
 mix compile --warnings-as-errors || fail "compilation is not warning-free"
+gate_step "project checks"
 mix loopex.deps_budget || fail "dependency budget or direction violated (outcome 1)"
 mix loopex.version_train || fail "applications do not carry one version (outcome 1)"
 mix loopex.matrix || fail "the running toolchain is not a locked pair, or a lane is unrecorded (outcome 3)"
@@ -424,6 +479,7 @@ run_selector apps/loopex/test/journal_replay_test.exs 2
 run_selector apps/loopex/test/fencing_test.exs 2
 run_selector apps/loopex/test/vm_code_spike_test.exs 1
 
+gate_step "hook inventory"
 # A named hook that simply disappears is behaviour loss, which ADR 0002 allows
 # only through an explicit disposition. Absence therefore fails here rather than
 # skipping the check.
@@ -439,6 +495,7 @@ if grep -qE 'apps/loopex/mix\.exs|defp? deps' "$hook"; then
   fail "$hook still carries inline budget logic instead of calling the command (outcome 2)"
 fi
 
+gate_step "real-provider lane"
 # A shell assignment prefix places the value in the child's environment directly.
 # The previous form passed it to `env` as an ARGUMENT, so the credential was
 # visible in that process's argv until env replaced itself with Mix -- exactly
@@ -460,6 +517,7 @@ provider_executed="$(executed_tests "$provider_output")" \
 [ "$provider_executed" -ge 1 ] \
   || fail "real-provider lane executed ${provider_executed} tests; a skipped or empty lane is not a pass (outcome 7)"
 
+gate_step "provider default-suite exclusion"
 # The gate claims this lane runs only when invoked explicitly. Prove it: an
 # unfiltered run of the same file must execute none of its tagged tests,
 # otherwise the full suite below would reach a real provider again.
@@ -476,6 +534,7 @@ default_executed="$(executed_tests "$default_output")" \
 [ "${default_excluded:-0}" -ge 1 ] \
   || fail "the provider file declares no excluded tests; it must hold only real_provider-tagged tests (outcome 7)"
 
+gate_step "evidence records"
 provider_evidence="docs/evidence/M0-provider.md"
 [ -f "$provider_evidence" ] || fail "the real-provider lane retained no evidence at $provider_evidence (outcome 7)"
 for field in provider model endpoint recorded; do
@@ -513,6 +572,7 @@ for outcome in 4 5 6; do
   done
 done
 
+gate_step "interpreter absence stubs"
 absence_root="$(mktemp -d "${TMPDIR:-/tmp}/loopex-m0-absence.XXXXXX")" \
   || fail "could not create an isolated task root for the absence proof (outcome 8)"
 # Shadowing only python3 and jq left every alternate entrypoint usable: python,
@@ -564,9 +624,11 @@ for shadowed in $shadow_names; do
     fail "could not shadow $shadowed for the absence proof (outcome 8)"
   fi
 done
+gate_step "bootstrap under shadowed interpreters"
 PATH="$absence_root:$PATH" bash scripts/check-bootstrap.sh >/dev/null \
   || fail "the aggregate still depends on python3 or jq (outcome 8)"
 
+gate_step "retired inventory and interpreter scan"
 for retired in \
   scripts/check_status.py \
   scripts/test_check_status.py \
@@ -701,6 +763,7 @@ done
 # parse JSON once jq is retired, so this is a Mix obligation: the task asserts
 # each hook is registered under its required event and matcher.
 [ -f .claude/settings.json ] || fail "no .claude/settings.json; hook registration is unverifiable (outcome 8)"
+gate_step "hook registration fixtures"
 mix loopex.hook_registration \
   || fail "a hook is not registered under its required event and matcher (outcome 8)"
 
@@ -732,6 +795,7 @@ require_named_test apps/loopex/test/history_anchoring_test.exs "a merge parent c
 require_named_test apps/loopex/test/history_anchoring_test.exs "an artifact missing from history is rejected"
 run_selector apps/loopex/test/history_anchoring_test.exs 3
 
+gate_step "self-hosting report"
 mix loopex.self_hosting || fail "self-hosting measurement or report failed (outcome 8)"
 
 self_hosting_report="docs/evidence/M0-self-hosting.md"
@@ -742,10 +806,12 @@ require_populated "$self_hosting_report" "recorded"
 
 # The credential was removed from the environment at the top of this run, so the
 # full suite cannot reach a provider regardless of how a test is tagged.
+gate_step "full suite"
 mix test || fail "full suite failed"
 
 # Defense in depth: containment should have made this unreachable.
 [ "$(real_user_state)" = "$user_state_before" ] \
   || fail "the run reached real user state despite the relocated HOME"
 
+gate_step "finished"
 echo "M0 gate GREEN"
