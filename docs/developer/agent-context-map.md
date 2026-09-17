@@ -4905,3 +4905,51 @@ are covered by the chain disposition. The Acceptance and Closure rows of Closed
 M0 stay byte-immutable, no earlier generation stops being enforced for the
 revisions it governed, and this adds no scope, changes no outcome and reopens
 no lifecycle state. It grants no closure, integration, tag or release.
+
+<a id="disposition-m1-gate-generation-17-2026-09-17"></a>
+### M1 gate generation 17 acceptance — 2026-09-17
+
+Generation 17 is the second transaction of
+[the closed-gate repair and instrumentation chain](#override-disposition-closed-gate-repair-chain-v2-2026-09-17).
+A capture run of the M1 gate took between 92 and 139 minutes and printed
+nothing until it exited, because its outer launch proves the whole sealed
+stream free of credential and NUL bytes before printing any of it.
+
+That guarantee is kept. The sealed stream now passes through `tee`: every byte
+still reaches the same capture unchanged, and a copy reaches a reader that
+prints only this runner's own `M1 progress:` lines, and only lines free of
+credential bytes, to the operator's standard error as they arrive. The inner
+runner names each step and each protected selector with its elapsed seconds and
+adds a heartbeat every 30 seconds once its isolated task root exists; the
+heartbeat checks every second that the gate is alive and is stopped by that
+root's EXIT trap. Progress never passes through the OTP launcher's
+standard-output relay, so that relay's one-hour silence limit still bounds a
+hung gate. No command, selector, minimum, exclusion policy, embedded literal,
+credential rule, preflight output or failure message changes.
+
+Evidence at `6766209a0916cb7122e8905eb75b7ccd9c0fe0e9`: the status check red
+only on the pending generation; a gate run with the provider frame that printed
+212 progress lines as it went — steps with their elapsed seconds and 30-second
+heartbeats — and stopped at the repository status check on that same pending
+generation, with its standard error closing at its last line and no credential
+bytes in either stream; and the M1 evidence, gate isolation and M3 gate support
+suites passing together, 32 cases. Its exact-SHA review accepted it, having
+verified that every byte still reaches the capture unchanged, that the relay
+prints only gate-authored key-free lines, and that the launcher's silence limit
+is untouched. Three low findings stand unrepaired: a child line beginning with
+the progress prefix would be relayed as progress, a heartbeat line can interleave
+with a large block of output, and a stalled or closed consumer of standard error
+now blocks the gate or fails it with a malformed-status result.
+
+Presented with that proposal, its evidence and its review, the maintainer
+answered **"Accept 6766209 (Recommended)"**.
+
+This transcribes that answer as acceptance under `amendment-transaction-v2`.
+The rebind completes generation 17's row with the accepting authority, this
+disposition and the candidate it binds, which is exact
+`6766209a0916cb7122e8905eb75b7ccd9c0fe0e9`. At this rebind binding validation,
+bootstrap and the M0 and M1 gates must pass; the M2 and M3 gates are covered by
+the chain disposition. The Acceptance and Closure rows of Closed M1 stay
+byte-immutable, no earlier generation stops being enforced for the revisions it
+governed, and this adds no scope, changes no outcome and reopens no lifecycle
+state. It grants no closure, integration, tag or release.
