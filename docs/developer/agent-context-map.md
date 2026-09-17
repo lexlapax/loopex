@@ -4735,3 +4735,63 @@ rebind binds the Acceptance row to exact `18100cafaefd3b6f3fbb73757b590287908738
 both envelope digests unchanged, since neither envelope moved. It grants no
 closure, integration, tag or release.
 
+
+<a id="override-disposition-closed-gate-repair-chain-2026-09-17"></a>
+### Closed-gate repair and instrumentation chain, 2026-09-17
+
+Found while re-capturing M2's toolchain evidence at
+`afb80ec94a3062099062ff132009af1613793cce`: two accepted M4 changes broke the
+closed M2 and M3 gates. Requiring a named policy identity
+(`51a989c09d120aba095f388fea89d9aa2598a48b`, accepted ADR 0024) makes the
+opening probe of each gate fail to start a runtime, because both probes set a
+policy and name no identity. Telemetry in core (accepted ADR 0030) is missing
+from the code path the M3 runner gives its probe, so that probe also fails once
+it names an identity. With both repaired in scratch copies, the M2 probe
+reports its working loop and the M3 probe its observation. Both probes are
+digest-bound, and the maintainer had already directed that every closed-gate
+runner gain step, elapsed-time and streaming instrumentation.
+
+The maintainer received both findings as one decision and selected
+**"Fold into instrumentation, one chain (Recommended)"**, whose full text was:
+
+> Four generations, in order: M0 (instrument), M1 gen 17 (instrument), M2 gen 13 (probe identity + instrument), M3 (probe identity + telemetry path + instrument runner and check-closed-gates). Then the M2 re-capture, then closed gates, which should be green. Each rebind in the chain still has some closed gate red until the chain finishes, so one standalone override disposition up front replaces the green-at-rebind condition at those four rebinds with one closed-gates green run at the end. Cost: 1 override review + 4 acceptances. Each runner is edited once, and the captures run on instrumented runners.
+
+Under [the explicit maintainer override](../../AGENTS.md#maintainer-override),
+this names the requirement it replaces. At a generation's rebind, binding
+validation, bootstrap and every inherited required gate must pass. For the
+four rebinds of this chain only — M0 gate generation 8, M1 gate generation 17,
+M2 gate generation 13 and M3 gate generation 5, taken in that order — the
+component "every inherited required gate must pass" is replaced by the
+evidence named below. At each of those rebinds some closed gate is known to
+be red for a cause the chain itself removes: the M2 and M3 probes until their
+own generations land, and M2's retained matrix until its post-closure
+re-capture exists, which can only be taken on the repaired runner.
+Binding validation and bootstrap at each of those rebinds are not replaced
+and must pass there. Every other requirement of each generation's
+`amendment-transaction-v2` transaction stands: its own proposal, its own
+exact-SHA review, the maintainer's acceptance of that exact proposal, and a
+rebind that is the proposal's immediate child.
+
+`scripts/check-closed-gates.sh` is bound by both the M3 and the M4 gate. The
+M3 generation rebinds it first; the M4 gate's rebind of the same bytes follows
+in M4's own next amendment, in sequence, and until that amendment settles no
+M4 revision is a closure candidate.
+
+**Replacement evidence.** One run of
+`bash scripts/check-closed-gates.sh --before M4` with the provider frame on
+standard input, green for M0, M1, M2 and M3, on the instrumented runners, at the
+evidence-only commit that retains M2's post-closure re-capture after the
+chain, retained with the exact revision it ran at. Until such a run is
+retained, the replaced requirement stands unmet for all four rebinds and this
+disposition is not satisfied; when it is retained it is recorded on its own,
+never by editing this record.
+
+Preserved: every closed milestone's Acceptance, Closure and existing generation
+rows, which stay byte-immutable and true for the revisions they name; ADR 0024's
+required policy identity and ADR 0030's telemetry, which the runtime keeps; and
+every other requirement at every other rebind. This grants no further
+exception, no ADR change, no closure, no integration to `main`, no tag and no
+release.
+
+Before dependent work, independently review this standalone disposition at
+its exact SHA. This record is not edited after that review.
