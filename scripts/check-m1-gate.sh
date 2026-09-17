@@ -14,6 +14,18 @@
 # Mix. At the accepted opening checkpoint the runner therefore reaches the
 # declared product red while it is still read-only. The later writable lane owns
 # its HOME, build, dependency copy, workspace, and Rebar cache.
+#
+# OBSERVABILITY
+#
+# After the role and environment preflight, every step boundary prints one line
+# beginning `M1 progress:` with the step's and the run's elapsed seconds, each
+# protected selector is its own step, and a heartbeat prints every 30 seconds
+# once the isolated task root exists. Those lines go to the sealed standard
+# error, and the outer launch relays them to the operator as they arrive, after
+# the same credential check as every other output; they also remain in the final
+# captured output. Silence bound: no more than 60 seconds pass without a line
+# while the protected lanes run; before the task root exists the gate performs
+# only local inspection and prints a step line when it begins.
 if ! [[ -o privileged ]]; then
   builtin printf '%s\n' \
     "M1 gate RED: invoke exactly /bin/bash -p scripts/check-m1-gate.sh" >&2
@@ -116,6 +128,29 @@ capture_outer_gate_output() {
   fi
   emit_gate_output "$loopex_m1_output_destination" "$loopex_m1_output" \
     || fail "gate-owned output collides with provider credential bytes"
+}
+
+# Concept: gate-authored progress reaches the operator while the gate runs.
+#
+# Technical depth: every byte of the sealed stream still reaches
+# capture_outer_gate_output unchanged: tee copies it to standard output, which
+# the caller has pointed at the capture, and to descriptor 5, which the caller
+# has pointed at relay_gate_progress_lines. That reader prints only lines
+# beginning `M1 progress: `, and only after the same credential-bytes check every
+# other gate output passes, to the operator's private descriptor 9. Those lines
+# are written by this runner rather than its children, and they stay in the
+# captured output. No process substitution is added to this read-only prefix.
+relay_gate_progress_lines() {
+  local loopex_m1_progress_line
+  while IFS= builtin read -r loopex_m1_progress_line; do
+    [[ "$loopex_m1_progress_line" == "M1 progress: "* ]] || continue
+    if [ -n "$provider_key_value" ] &&
+      [[ "$loopex_m1_progress_line" == *"$provider_key_value"* ]]
+    then
+      continue
+    fi
+    builtin printf '%s\n' "$loopex_m1_progress_line" >&9
+  done
 }
 
 # After the clean role begins capture, these helpers derive the absolute OTP
@@ -427,13 +462,17 @@ clean_outer_launch() {
 
   capture_outer_gate_output < <(
     {
-      exec 8>&- 9>&- \
-        || builtin exit 1
-      loopex_m1_output_fds_sealed=0
-      (outer_launch_captured "${loopex_m1_original_arguments[@]}")
-      loopex_m1_status=$?
-      builtin printf '\035LOOPEX_M1_OUTER_STATUS_V1:%s' "$loopex_m1_status"
-    } 2>&1
+      {
+        {
+            exec 8>&- 9>&- \
+              || builtin exit 1
+            loopex_m1_output_fds_sealed=0
+            (outer_launch_captured "${loopex_m1_original_arguments[@]}")
+            loopex_m1_status=$?
+            builtin printf '\035LOOPEX_M1_OUTER_STATUS_V1:%s' "$loopex_m1_status"
+        } 2>&1 | command -p tee /dev/fd/5
+      } 5>&1 1>&6 | relay_gate_progress_lines
+    } 6>&1
   )
   builtin exit "$loopex_m1_status"
 }
@@ -1095,6 +1134,38 @@ if [ "$gate_role" = environment-fixture ]; then
   builtin exit 0
 fi
 
+# Concept: the gate says where it is while it runs.
+#
+# Technical depth: progress goes to the sealed standard error, never through
+# the OTP launcher's standard-output relay, so that relay's one-hour silence
+# limit still bounds a hung gate. The heartbeat checks that this shell is alive
+# before each line, and the EXIT trap stops it.
+gate_progress() {
+  emit_gate_output stderr "M1 progress: $1"$'\n' || :
+}
+gate_step_name=""
+gate_step_started=0
+gate_step() {
+  if [ -n "$gate_step_name" ]; then
+    gate_progress "done $gate_step_name step=$((SECONDS - gate_step_started))s total=${SECONDS}s"
+  fi
+  gate_step_name="$1"
+  gate_step_started="$SECONDS"
+  gate_progress "step $gate_step_name total=${SECONDS}s"
+}
+gate_heartbeat() {
+  local loopex_m1_gate_shell="$1" loopex_m1_waited=0
+  while builtin kill -0 "$loopex_m1_gate_shell" 2>/dev/null; do
+    sleep 1
+    loopex_m1_waited=$((loopex_m1_waited + 1))
+    [ "$loopex_m1_waited" -ge 30 ] || continue
+    loopex_m1_waited=0
+    builtin kill -0 "$loopex_m1_gate_shell" 2>/dev/null || break
+    gate_progress "heartbeat total=${SECONDS}s"
+  done
+}
+
+gate_step "plan, gate and protected inventory"
 plan="docs/plans/M1.md"
 gate="docs/plans/M1-gate.md"
 [ -f "$plan" ] || fail "no $plan; the gate has no plan to enforce"
@@ -1426,13 +1497,18 @@ command -v mix >/dev/null 2>&1 \
 # with no local hard links; ignored physical paths and ambient repository `deps/`
 # therefore cannot enter the build. Dependency source is reconstructed below
 # only from package archives whose SHA-256 is bound by this candidate's mix.lock.
+gate_step "isolated task root and dependency sources"
 source_repository_root="$repository_root"
 isolated_root="$(mktemp -d "$task_tmp_root/loopex-m1-task.XXXXXX")" \
   || fail "could not create an isolated task root"
 isolated_root="$(resolve_physical "$isolated_root")"
 [ -n "$isolated_root" ] \
   || fail "the isolated task root could not be resolved physically"
-trap 'rm -rf "$isolated_root"' EXIT
+gate_heartbeat_pid=""
+trap '[ -z "$gate_heartbeat_pid" ] || builtin kill "$gate_heartbeat_pid" 2>/dev/null || :; rm -rf "$isolated_root"' EXIT
+gate_heartbeat "$$" &
+gate_heartbeat_pid=$!
+builtin disown "$gate_heartbeat_pid" 2>/dev/null || :
 
 export MIX_HOME="$isolated_root/mix-home"
 export HEX_HOME="$isolated_root/hex-home"
@@ -1772,6 +1848,9 @@ last_gate_recorded=""
 # marker, and hard-halts before System.at_exit callbacks.
 run_gate_test() {
   local role="$1" file="$2" minimum="$3" exclusion_policy="$4" accumulate="$5"
+  if builtin declare -F gate_step >/dev/null 2>&1; then
+    gate_step "selector $role $file"
+  fi
   local nonce output output_rest gate_test_status report_count=0 marker=""
   local line prefix rest executed suffix context_output context_owner context_internal
   local context_allowed terminal_prefix terminal_status terminal_suffix
@@ -1959,6 +2038,7 @@ run_gate_test() {
   fi
 }
 
+gate_step "locked repository commands"
 # Locked repository commands.
 [ -f .formatter.exs ] || fail "no .formatter.exs; formatting scope is unbound"
 mix loopex.format_scope || fail "effective formatter configuration misses application sources"
@@ -2002,11 +2082,13 @@ else
     --negative docs/evidence/M1-negative-demonstrations.md \
     || fail "retained M1 mutation evidence is invalid"
 fi
+gate_step "inherited evidence and project checks"
 mix loopex.matrix || fail "the inherited M0 toolchain evidence is invalid for this pair"
 mix loopex.core_only || fail "core-only, fakes-only lane failed"
 mix loopex.docs_check || fail "compiled dual-depth documentation check failed"
 mix loopex.hook_registration || fail "a client hook is not registered under its required event and matcher"
 mix loopex.status || fail "repository status or bound-artifact validation failed"
+gate_step "bootstrap aggregate"
 bash scripts/check-bootstrap.sh || fail "bootstrap aggregate failed"
 run_gate_test default apps/loopex/test/m1_gate_evidence_test.exs 10 zero no \
   "passed=M1 pair verifier derives only the exact running locked pair" \
@@ -2147,6 +2229,7 @@ vertical_executed=$((vertical_default_executed + vertical_real_executed))
   || fail "$vertical_file executed fewer than its aggregate minimum of six tests"
 protected_executed=$((protected_executed + vertical_executed))
 
+gate_step "closure documents"
 # Presence is mechanical; freshness and completeness remain closure review.
 for closure_document in \
   CHANGELOG.md \
@@ -2171,6 +2254,7 @@ do
   require_tracked_regular "$closure_document" "closure document"
 done
 
+gate_step "full credential-free suite"
 # Credential-free ordinary suite. This direct ExUnit invocation uses the same
 # runner-wide seed; its broad total is not substituted for protected identities.
 validate_generated_tree "$test_build_path" \
@@ -2182,6 +2266,7 @@ validate_generated_tree "$MIX_BUILD_PATH" \
 validate_generated_tree "$test_build_path" \
   "the final compiled test application tree"
 
+gate_step "tree and user-state checks"
 tree_state_after="$(git status --porcelain=v1 --untracked-files=all)" \
   || fail "working-tree state is unavailable after the run"
 [ -z "$tree_state_after" ] \
@@ -2205,5 +2290,6 @@ if [ "$gate_role" = capture ]; then
 else
   final_gate_output="M1 gate GREEN seed=$gate_seed protected_executed=$protected_executed"$'\n'
 fi
+gate_step "finished"
 emit_gate_output stdout "$final_gate_output" \
   || fail "final gate output collides with provider credential bytes"

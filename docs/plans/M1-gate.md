@@ -148,7 +148,7 @@ and can print neither `CAPTURE` nor `M1 gate GREEN`.
 
 | SHA-256 | Path |
 | --- | --- |
-| `2434856a471cdb0d64962f613419b83b527f1cc908d3f12e0fe61c0a160f6972` | `scripts/check-m1-gate.sh` |
+| `e85ca89221db9cd81d61ae8be2e820d0269b2e7029c2eb5d15b4d6fa1b731879` | `scripts/check-m1-gate.sh` |
 | `4bba03d218eee656991444a3c22c8753bfef1ab86f688036a4440048752f48bd` | `scripts/m1-gate-launcher.escript` |
 | `53d8219bdee584a3849a85a1102e405520d5dd0dfbe21d259434bc9edfc5fcc0` | `scripts/m1-exunit-runner.exs` |
 | `572d9fac0b4be1fb792db8f5f8ff3b760e588c9e35f4cb1850c03f73c2f1f661` | `scripts/m1-evidence-verifier.exs` |
@@ -1575,3 +1575,66 @@ lifecycle state reopens, and neither envelope moves.
 | --- | --- | --- |
 | 16 | `apps/loopex/test/m1_gate_evidence_test.exs` | `60bac4bc37381410f295371b4b9a2ee85edae31ddbd76ba0af0150cb33c2c4fa` |
 | 16 | `scripts/check-m1-gate.sh` | `2434856a471cdb0d64962f613419b83b527f1cc908d3f12e0fe61c0a160f6972` |
+
+<a id="amendment-17"></a>
+## Amendment 17 — Let the sealed gate report where it is while it runs
+
+**Acceptance: OUTSTANDING.** Closed M1 adds gate generation 17 under
+`amendment-transaction-v2`. Its historical Acceptance, Closure and earlier
+generation rows remain unchanged. The new row carries this gate's digest and
+leaves authority, evidence and candidate unset until exact-proposal acceptance.
+
+The maintainer directed on 2026-09-15 that every gate be observable while it
+runs, and
+[the chain disposition](../developer/agent-context-map.md#override-disposition-closed-gate-repair-chain-v2-2026-09-17)
+orders this generation second. A capture run of this gate took between 92 and
+139 minutes and printed nothing until it exited: the outer launch reads the
+whole sealed stream, proves it free of credential bytes and NUL bytes, and only
+then prints it.
+
+That guarantee is kept. After the role and environment preflight, the runner
+now writes lines beginning `M1 progress:` to its sealed standard error when
+each step begins and ends, naming the step, its elapsed seconds and the run's,
+with each protected selector as its own step, and a heartbeat every 30 seconds
+once the isolated task root exists. The heartbeat checks every second that the
+gate is alive and is stopped by the task root's EXIT trap. In the outer launch
+the sealed stream now passes through `tee`, which gives every byte unchanged to
+the existing capture and a copy to a reader that prints only `M1 progress:`
+lines, and only lines free of credential bytes, to the operator's standard
+error as they arrive. No process substitution is added to the read-only
+prefix, the progress lines never pass through the OTP launcher's
+standard-output relay, so its one-hour silence limit still bounds a hung gate,
+and they also remain in the captured output printed at the end. The step call
+inside `run_gate_test` runs only where the step helper is defined. The silence
+bound is stated in the runner's header: no more than 60 seconds pass without a
+line while the protected lanes run.
+
+No command, selector, minimum, exclusion policy, embedded bound-artifact
+literal, credential rule, environment preflight output, failure message or
+final output line changes. The environment preflight role prints exactly what
+it printed before.
+
+### Evidence at this proposal
+
+Binding validation, bootstrap and every gate that runs them, this one
+included, are red at this proposal only for the pending generation, and the
+M2 and M3 gates are also red for the probe defects the chain disposition
+names. The runner parses under Bash 3.2. The M1 evidence tests, the gate
+isolation tests and the M3 gate support tests pass against this runner. A run
+of this gate at this proposal prints its progress lines as it goes and stops at
+the repository status check on the pending generation.
+
+### Transaction and re-verification
+
+Proposal A atomically carries this gate, the changed runner and the pending
+generation-17 row in M1's plan. Only explicit maintainer acceptance authorizes
+R, whose only changes complete generation 17 with exact A and add one new
+amendment-specific disposition to an existing durable document. At R, binding
+validation, bootstrap and the M0 and M1 gates must pass; the M2 and M3 gates
+are covered by the chain disposition. This proposal reopens no milestone,
+accepts no plan or product ADR, waives no evidence, and authorizes no
+integration, tag or release.
+
+| Generation | Artifact | Rebound SHA-256 |
+| --- | --- | --- |
+| 17 | `scripts/check-m1-gate.sh` | `e85ca89221db9cd81d61ae8be2e820d0269b2e7029c2eb5d15b4d6fa1b731879` |
