@@ -4865,3 +4865,43 @@ This grants no further exception, no ADR change, no closure, no integration to
 
 Before dependent work, independently review this standalone disposition at
 its exact SHA. This record is not edited after that review.
+
+<a id="disposition-m0-gate-generation-8-2026-09-17"></a>
+### M0 gate generation 8 acceptance — 2026-09-17
+
+Generation 8 is the first transaction of
+[the closed-gate repair and instrumentation chain](#override-disposition-closed-gate-repair-chain-v2-2026-09-17).
+It makes `scripts/check-m0-gate.sh` print each step and protected selector
+with its elapsed seconds on standard error, with a heartbeat every 30 seconds,
+and states a 60-second silence bound in the runner's header. Nothing the gate
+checks, prints on standard output or reports on failure changes.
+
+A first proposal, `85025dd98e74ca235c8424ebdbdbc8af5a934961`, passed its
+exact-SHA review with two medium findings: its heartbeat could outlive a
+killed gate and hold standard error open for up to 30 seconds after a normal
+exit, and one sentence of its amendment misstated the search-path scan's
+exclusions. Presented with that, the maintainer chose to replace it before
+acceptance, and it was removed from the branch unaccepted. The replacement,
+`408b8de48d468a86228348d699af81fd7438a266`, checks every second that the gate
+is alive and corrects the sentence. Evidence at that exact revision: the status
+check red only on the pending generation; a gate run with the provider
+credential that streamed its steps and 90 heartbeat lines, passed the
+real-provider lane, and stopped in the bootstrap step on the pending generation;
+its standard error closed within one second of its last line; no credential
+bytes in either stream. Its exact-SHA review accepted it with two low findings
+recorded for later work: a gate process left unreaped by a non-shell caller
+still looks alive to the heartbeat, and the evidence paragraph does not say
+that the M1 gate, which also runs bootstrap, is red at the proposal as well.
+
+Presented with that proposal, its evidence and its review, the maintainer
+answered **"Accept 408b8de (Recommended)"**.
+
+This transcribes that answer as acceptance under `amendment-transaction-v2`.
+The rebind completes generation 8's row with the accepting authority, this
+disposition and the candidate it binds, which is exact
+`408b8de48d468a86228348d699af81fd7438a266`. At this rebind binding
+validation, bootstrap and the M0 and M1 gates must pass; the M2 and M3 gates
+are covered by the chain disposition. The Acceptance and Closure rows of Closed
+M0 stay byte-immutable, no earlier generation stops being enforced for the
+revisions it governed, and this adds no scope, changes no outcome and reopens
+no lifecycle state. It grants no closure, integration, tag or release.
