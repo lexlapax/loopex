@@ -5009,3 +5009,67 @@ Acceptance and Closure rows of Closed M2 stay byte-immutable, no earlier
 generation stops being enforced for the revisions it governed, and this adds no
 scope, changes no outcome and reopens no lifecycle state. It grants no closure,
 integration, tag or release.
+
+<a id="override-disposition-m2-recapture-candidate-2026-09-18"></a>
+### M2 re-capture candidate after an order-dependent test, 2026-09-18
+
+[The corrected closed-gate chain](#override-disposition-closed-gate-repair-chain-v2-2026-09-17)
+places the M2 post-closure re-capture at M2 gate generation 13's rebind, with its
+evidence-only child after it. Under
+[the explicit maintainer override](../../AGENTS.md#maintainer-override), this
+record replaces only that placement.
+
+The re-capture was taken at that rebind,
+`4751a6dfcda8212844bc07631b607378f16ac284`. Four of its six lanes passed:
+linux-current and darwin-current captured, and the M0 floor and M1 current gates
+were green. Two were red. The darwin-floor lane failed
+`opening an absent artifact root durably publishes every new directory component`
+in `apps/loopex_store_local/test/artifact_store_conformance_test.exs`. That test
+expects exactly three directory syncs, which holds only while `LOOPEX_HOME`
+already exists; the gate's selector runner does not create it, so the result
+depended on whether an earlier test in the seed's order had. With `LOOPEX_HOME`
+absent the test fails for that lane's seed and passes for the other lanes' seeds,
+on either toolchain pair. The product then makes four syncs, one reconfirming
+the nearest existing directory and one after each of the three directories it
+creates, which is the durable behaviour the test names. The M0 current lane
+failed once in its full suite, in
+`apps/loopex_composition/test/skill_acquisition_test.exs`, with the refusal
+`{:git_identity_mismatch, "exported Git blob did not match"}`. That refusal
+comes from the blob export in `apps/loopex_composition/lib/resource_packs.ex`,
+where it reports two different checks, the name of the file Git wrote and the
+bytes read from it, with one message. It did not recur in 53 attempts under
+the same `HOME` relocation, sequential and under parallel load. Neither failure
+depends on the environment the lanes were launched from: both tests pass in
+isolation with and without it.
+
+A test known to depend on ordering cannot be carried to a green lane by drawing
+another seed. The maintainer answered
+**"Fix, split the error, retake at C (Recommended)"**. A first record of this
+decision, `4eebaeace8b6bfc58a19a21920cfeac886428a2d`, did not quote the observed
+refusal, described C without its paths and miscounted the syncs; its review
+found those faults, the maintainer answered
+**"Replace with a corrected D' (Recommended)"**, and this record replaces it.
+That first record is not part of the integrated history.
+
+**Replacement.** The M2 post-closure re-capture is taken instead at candidate C,
+the immediate child of this record. C changes exactly two paths and no other:
+`apps/loopex_store_local/test/artifact_store_conformance_test.exs`, where the
+test creates `LOOPEX_HOME` as its stated precondition under its unchanged name,
+and `apps/loopex_composition/lib/resource_packs.ex`, where the blob export's
+identity refusal names which of its two checks failed with the observed sizes,
+keeping its `git_identity_mismatch` reason. No gate binds either path's bytes,
+so C needs no gate generation. All six lanes are taken at C, and the
+evidence-only child that records them is C's immediate child. Nothing taken at
+the rebind is carried into that record. If the Git identity failure recurs at C,
+its split refusal is reported with the lanes; if it does not, that single
+unreproduced failure is dispositioned on its own before the record is accepted.
+
+Preserved: M2 gate generation 13 and its rebind, which remain accepted and
+settled; the chain's order after the re-capture, its holder-scoped rule at the
+M3 generation 5 rebind, and its replacement evidence; every closed milestone's
+Acceptance, Closure and generation rows; and every other requirement. This
+grants no further exception, no closure, no integration to `main`, no tag and
+no release.
+
+Before dependent work, independently review this standalone disposition at its
+exact SHA. This record is not edited after that review.
