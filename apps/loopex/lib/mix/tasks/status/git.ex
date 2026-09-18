@@ -145,13 +145,16 @@ defmodule Loopex.Checks.Git do
   happens, and that it happens without any command that writes: an unreachable
   candidate must stop after the type and ancestry queries.
 
-  Each resolver answers by `{revision, path}` once and remembers it, including the
-  `nil` that means unreachable or absent. The repository does not change while a
-  check reads it, so the second answer for a pair can only repeat the first; the
-  governance history asks for the same parent documents at revision after
-  revision, and every repeat otherwise costs three more child processes. The
-  memory belongs to the resolver, not the module, so two resolvers never share an
-  answer and nothing survives the process that built it.
+  Each resolver remembers what it has learned, because the repository does not
+  change while a check reads it and a second answer can only repeat the first.
+  Whether a revision is a reachable commit is learned once per revision, by the
+  same two queries in the same order, and every later path at that revision goes
+  straight to reading its content; a file's content is learned once per
+  `{revision, path}`, including the `nil` that means absent. The governance
+  history asks about the same parent revisions for path after path and revision
+  after revision, and each repeat otherwise cost up to three more child processes.
+  The memory belongs to the resolver, not the module, so two resolvers never share
+  an answer and nothing survives the process that built it.
   """
   @spec resolver(Path.t(), (Path.t(), [String.t()] -> {binary(), non_neg_integer()})) ::
           (String.t(), String.t() -> String.t() | nil)
@@ -159,24 +162,43 @@ defmodule Loopex.Checks.Git do
     memory = {__MODULE__, :resolved, make_ref()}
 
     fn sha, path ->
-      answered = Process.get(memory, %{})
+      %{reachable: reachable, content: answered} =
+        Process.get(memory, %{reachable: %{}, content: %{}})
 
       case Map.fetch(answered, {sha, path}) do
         {:ok, content} ->
           content
 
         :error ->
-          content = resolve(root, sha, path, runner)
-          Process.put(memory, Map.put(answered, {sha, path}, content))
+          {reachable?, reachable} =
+            case Map.fetch(reachable, sha) do
+              {:ok, known} ->
+                {known, reachable}
+
+              :error ->
+                known = reachable_commit?(root, sha, runner)
+                {known, Map.put(reachable, sha, known)}
+            end
+
+          content = if reachable?, do: read(root, sha, path, runner)
+
+          Process.put(memory, %{
+            reachable: reachable,
+            content: Map.put(answered, {sha, path}, content)
+          })
+
           content
       end
     end
   end
 
-  defp resolve(root, sha, path, runner) do
-    with {"commit\n", 0} <- runner.(root, ["cat-file", "-t", sha]),
-         {_output, 0} <- runner.(root, ["merge-base", "--is-ancestor", sha, "HEAD"]),
-         {content, 0} <- runner.(root, ["show", "#{sha}:#{path}"]),
+  defp reachable_commit?(root, sha, runner) do
+    match?({"commit\n", 0}, runner.(root, ["cat-file", "-t", sha])) and
+      match?({_output, 0}, runner.(root, ["merge-base", "--is-ancestor", sha, "HEAD"]))
+  end
+
+  defp read(root, sha, path, runner) do
+    with {content, 0} <- runner.(root, ["show", "#{sha}:#{path}"]),
          true <- String.valid?(content) do
       content
     else

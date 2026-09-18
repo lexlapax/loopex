@@ -45,6 +45,8 @@ defmodule Loopex.Checks.History do
 
   @index "docs/plans/README.md"
   @judged {__MODULE__, :judged_values}
+  @anchored {__MODULE__, :anchor_counts}
+  @linked {__MODULE__, :override_links}
   @override_anchor_prefix "override-disposition-"
   @markdown_link ~r/\[[^\]\n]*\]\(([^#)\s]+)#([^)\s]+)\)/u
 
@@ -185,7 +187,16 @@ defmodule Loopex.Checks.History do
   # seed rather than on a defect. After it, an absent or unparseable index is the
   # same evasion as a false one.
   defp require_prerequisite_adrs!(walk, resolve_file) do
-    Enum.reduce(walk, false, fn {revision, parents, governed}, seen ->
+    total = length(walk)
+    Process.put(@anchored, %{})
+    Process.put(@linked, %{})
+    announce("prerequisite walk starting: #{total} revisions")
+
+    walk
+    |> Enum.with_index(1)
+    |> Enum.reduce(false, fn {{revision, parents, governed}, index}, seen ->
+      history_progress("prerequisite walk", index, total, revision)
+
       case register_rows(Map.get(governed, @index), revision, seen, governed) do
         nil ->
           seen
@@ -332,23 +343,46 @@ defmodule Loopex.Checks.History do
     )
   end
 
+  # Concept: a milestone's override citations are read once per version of its
+  # documents.
+  #
+  # Technical depth: the prerequisite walk asks for the same parent's citations
+  # once for every citation it checks, and the answer depends only on the bytes of
+  # the milestone's three documents, so it is remembered by those bytes.
   defp override_disposition_links(governed, name) do
-    [
+    sources = [
       "docs/plans/#{name}.md",
       "docs/plans/#{name}-technical.md",
       "docs/plans/#{name}-gate.md"
     ]
+
+    key = {name, Enum.map(sources, &Map.get(governed, &1))}
+    linked = Process.get(@linked, %{})
+
+    case Map.fetch(linked, key) do
+      {:ok, links} ->
+        links
+
+      :error ->
+        links = read_override_disposition_links(governed, sources)
+        Process.put(@linked, Map.put(linked, key, links))
+        links
+    end
+  end
+
+  defp read_override_disposition_links(governed, sources) do
+    sources
     |> Enum.flat_map(fn source ->
       case Map.get(governed, source) do
         nil ->
           []
 
         text ->
-          lines = Markdown.lines(text, source)
+          lines = text |> Markdown.lines(source) |> List.to_tuple()
 
           text
           |> Markdown.visible_line_numbers(source)
-          |> Enum.flat_map(fn index -> Regex.scan(@markdown_link, Enum.at(lines, index)) end)
+          |> Enum.flat_map(fn index -> Regex.scan(@markdown_link, elem(lines, index)) end)
           |> Enum.flat_map(fn
             [_link, raw_target, @override_anchor_prefix <> _rest = fragment] ->
               target = Paths.normalise(Paths.join(Paths.dirname(source), raw_target))
@@ -417,17 +451,47 @@ defmodule Loopex.Checks.History do
   end
 
   defp visible_anchor_count(text, path, fragment) do
-    lines = Markdown.lines(text, path)
+    text |> anchor_counts(path) |> Map.get(fragment, 0)
+  end
 
-    text
-    |> Markdown.visible_line_numbers(path)
-    |> Enum.count(fn index ->
-      lines
-      |> Enum.at(index)
-      |> Markdown.exposed_line()
-      |> Markdown.anchors_in()
-      |> Enum.member?(fragment)
-    end)
+  # Concept: a disposition record is read once per version, not once per citation.
+  #
+  # Technical depth: the prerequisite walk asks whether one anchor is visible in a
+  # target document for every override a milestone cites, at the revision and at
+  # each parent, for every milestone at every revision. The target that holds the
+  # dispositions is one large document, it grows with every recorded decision, and
+  # a version of it is shared by long runs of revisions, so recounting its anchors
+  # for each question made the walk slower with every disposition added. The count
+  # of visible lines naming each anchor depends only on the document's bytes;
+  # `path` only names it in a raise. Counting every anchor at once and remembering
+  # the result by those bytes answers each later question with a lookup, and lines
+  # are indexed rather than walked so that one count stays linear in the document.
+  defp anchor_counts(text, path) do
+    key = {path, text}
+    counted = Process.get(@anchored, %{})
+
+    case Map.fetch(counted, key) do
+      {:ok, counts} ->
+        counts
+
+      :error ->
+        lines = text |> Markdown.lines(path) |> List.to_tuple()
+
+        counts =
+          text
+          |> Markdown.visible_line_numbers(path)
+          |> Enum.flat_map(fn index ->
+            lines
+            |> elem(index)
+            |> Markdown.exposed_line()
+            |> Markdown.anchors_in()
+            |> Enum.uniq()
+          end)
+          |> Enum.frequencies()
+
+        Process.put(@anchored, Map.put(counted, key, counts))
+        counts
+    end
   end
 
   defp require_settled_prerequisites!(name, state, adrs, revision, governed) do
@@ -2191,8 +2255,10 @@ defmodule Loopex.Checks.History do
 
   # Concept: each walk says where it is while it runs.
   #
-  # Technical depth: these two walks are the long part of the status task after
-  # the fetch loop, which announces itself already. They write a bounded number
+  # Technical depth: the governance, prerequisite and artifact walks are the long
+  # part of the status task after the fetch loop, which announces itself already;
+  # the prerequisite walk printed nothing for up to twenty minutes before it
+  # reported here. They write a bounded number
   # of lines to standard error naming the walk, the position and the revision;
   # standard output is untouched, so a caller reading it sees the same bytes.
   @progress_every 100
