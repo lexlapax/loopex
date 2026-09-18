@@ -22,7 +22,9 @@ defmodule Loopex.Checks.Git do
 
   Blob contents are cached by object id across the whole walk. A hundred revisions
   of the same document share one object, so the cache turns a per-revision read
-  into a per-version read.
+  into a per-version read. A resolver remembers its answers the same way, by
+  revision and path, because the governance history asks the same questions about
+  the same parent revisions from one revision to the next.
   """
 
   alias Loopex.Checks.Invalid
@@ -142,19 +144,43 @@ defmodule Loopex.Checks.Git do
   The command runner is injectable so a test can prove the reachability rejection
   happens, and that it happens without any command that writes: an unreachable
   candidate must stop after the type and ancestry queries.
+
+  Each resolver answers by `{revision, path}` once and remembers it, including the
+  `nil` that means unreachable or absent. The repository does not change while a
+  check reads it, so the second answer for a pair can only repeat the first; the
+  governance history asks for the same parent documents at revision after
+  revision, and every repeat otherwise costs three more child processes. The
+  memory belongs to the resolver, not the module, so two resolvers never share an
+  answer and nothing survives the process that built it.
   """
   @spec resolver(Path.t(), (Path.t(), [String.t()] -> {binary(), non_neg_integer()})) ::
           (String.t(), String.t() -> String.t() | nil)
   def resolver(root, runner \\ &__MODULE__.run/2) do
+    memory = {__MODULE__, :resolved, make_ref()}
+
     fn sha, path ->
-      with {"commit\n", 0} <- runner.(root, ["cat-file", "-t", sha]),
-           {_output, 0} <- runner.(root, ["merge-base", "--is-ancestor", sha, "HEAD"]),
-           {content, 0} <- runner.(root, ["show", "#{sha}:#{path}"]),
-           true <- String.valid?(content) do
-        content
-      else
-        _other -> nil
+      answered = Process.get(memory, %{})
+
+      case Map.fetch(answered, {sha, path}) do
+        {:ok, content} ->
+          content
+
+        :error ->
+          content = resolve(root, sha, path, runner)
+          Process.put(memory, Map.put(answered, {sha, path}, content))
+          content
       end
+    end
+  end
+
+  defp resolve(root, sha, path, runner) do
+    with {"commit\n", 0} <- runner.(root, ["cat-file", "-t", sha]),
+         {_output, 0} <- runner.(root, ["merge-base", "--is-ancestor", sha, "HEAD"]),
+         {content, 0} <- runner.(root, ["show", "#{sha}:#{path}"]),
+         true <- String.valid?(content) do
+      content
+    else
+      _other -> nil
     end
   end
 

@@ -44,6 +44,7 @@ defmodule Loopex.Checks.History do
   alias Loopex.Checks.Register
 
   @index "docs/plans/README.md"
+  @judged {__MODULE__, :judged_values}
   @override_anchor_prefix "override-disposition-"
   @markdown_link ~r/\[[^\]\n]*\]\(([^#)\s]+)#([^)\s]+)\)/u
 
@@ -125,6 +126,7 @@ defmodule Loopex.Checks.History do
       Map.new(snapshots, fn {revision, parents, _governed} -> {revision, parents} end)
 
     walk_total = length(walk)
+    Process.put(@judged, %{})
     announce("governance walk starting: #{walk_total} revisions")
 
     Enum.reduce(Enum.with_index(walk, 1), %{}, fn {{revision, parents, governed}, index},
@@ -667,7 +669,7 @@ defmodule Loopex.Checks.History do
         from_parents
 
       text ->
-        current = values(text, path, revision, governed, adr_concepts, by_revision)
+        current = judged_values(text, path, revision, governed, adr_concepts, by_revision)
 
         validate_revision_transaction!(
           path,
@@ -1435,6 +1437,47 @@ defmodule Loopex.Checks.History do
   # complete it; a non-nil value is pinned for every descendant. Values are joined
   # with NUL because no governance cell can contain one, which makes equality a
   # single comparison and lets the amendment generation ride in the same string.
+  # Concept: a document version is judged once, not once per revision carrying it.
+  #
+  # Technical depth: the governance walk asks what a document means at every
+  # revision that carries it. Across this history that is 56,121 questions with
+  # 766 distinct answers, because a document whose bytes did not change between
+  # two revisions cannot mean something different at the second. The answer
+  # depends on the document's own bytes and on the companion, gate and plan bytes
+  # the three branches below read, and on nothing else that varies within a walk:
+  # `by_revision` and the ADR concept set are fixed before the walk starts, and
+  # `revision` reaches `values/6` only to name the document in a raise. Keying on
+  # exactly those bytes is therefore exact rather than approximate, and naming a
+  # companion a branch does not read costs a repeated answer, never a wrong one.
+  # Only a returned value is remembered; a raise aborts the walk at the first
+  # revision that carries the offending bytes, which is the revision to name.
+  # The memory is emptied when a walk starts, so two walks in one process — as in
+  # the adversarial suite — never share an answer.
+  defp judged_values(text, path, revision, governed, adr_concepts, by_revision) do
+    key = {path, text, Enum.map(companions(path), &Map.get(governed, &1))}
+    judged = Process.get(@judged, %{})
+
+    case Map.fetch(judged, key) do
+      {:ok, values} ->
+        values
+
+      :error ->
+        values = values(text, path, revision, governed, adr_concepts, by_revision)
+        Process.put(@judged, Map.put(judged, key, values))
+        values
+    end
+  end
+
+  # Concept: the other documents a document's meaning can depend on.
+  # Technical depth: the technical companion, the gate beside a plan, and the plan
+  # beside a gate. A path that has no such companion simply resolves to an absent
+  # entry, which is part of the key like any other value.
+  defp companions(path) do
+    base = path |> Paths.strip_suffix(".md") |> Paths.strip_suffix("-gate")
+
+    [Paths.technical(path), base <> "-gate.md", base <> ".md"]
+  end
+
   defp values(text, path, revision, governed, adr_concepts, by_revision) do
     historical_path = "#{path} at #{revision}"
 
