@@ -1372,9 +1372,10 @@ defmodule LoopexComposition.ResourcePacks do
       with {:ok, context, output} <-
              git_job(context, config, "blob", ["-C", repo_root.path, "unpack-file", file.oid]),
            temporary = String.trim_trailing(output, "\n"),
-           true <- Regex.match?(~r/\A\.merge_file_[a-zA-Z0-9]+\z/, temporary),
+           {:name, true, _temporary} <-
+             {:name, Regex.match?(~r/\A\.merge_file_[a-zA-Z0-9]+\z/, temporary), temporary},
            {:ok, content} <- read_contained_file(repo_root, temporary),
-           true <- matching_git_blob?(content, file),
+           {:blob, true, _content} <- {:blob, matching_git_blob?(content, file), content},
            {:ok, parent} <- create_export_directory(selected_root, Path.dirname(file.label)),
            :ok <- verify_directory(repo_root),
            :ok <- verify_directory(parent),
@@ -1384,9 +1385,27 @@ defmodule LoopexComposition.ResourcePacks do
            :ok <- File.rm(Path.join(repo_root.path, temporary)) do
         {:cont, {:ok, context}}
       else
-        false -> {:halt, error(:git_identity_mismatch, "exported Git blob did not match")}
-        {:error, {_reason, _detail}} = refusal -> {:halt, refusal}
-        {:error, reason} -> {:halt, error(:installation_failed, inspect(reason))}
+        {:name, false, temporary} ->
+          {:halt,
+           error(
+             :git_identity_mismatch,
+             "Git named no expected temporary file for blob #{file.oid} " <>
+               "(#{byte_size(temporary)} bytes of output)"
+           )}
+
+        {:blob, false, content} ->
+          {:halt,
+           error(
+             :git_identity_mismatch,
+             "exported Git blob did not match #{file.oid}: expected #{file.size} bytes, " <>
+               "read #{byte_size(content)}"
+           )}
+
+        {:error, {_reason, _detail}} = refusal ->
+          {:halt, refusal}
+
+        {:error, reason} ->
+          {:halt, error(:installation_failed, inspect(reason))}
       end
     end)
     |> case do

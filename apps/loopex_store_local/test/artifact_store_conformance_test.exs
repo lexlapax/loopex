@@ -1218,6 +1218,12 @@ defmodule Loopex.Store.Local.ArtifactStoreConformanceTest do
       )
 
     artifact_root = Path.join(state_root, "artifacts")
+
+    # The state home is this case's existing boundary, so the three syncs below
+    # are exact whatever ran before it. A runner that does not create the home
+    # would otherwise make one more directory here, and the expected list would
+    # hold only when an earlier case in the seed's order had created it.
+    File.mkdir_p!(System.fetch_env!("LOOPEX_HOME"))
     refute File.exists?(state_root)
 
     {{:ok, _handle}, events} = trace_publication(fn -> Artifacts.open(artifact_root) end)
