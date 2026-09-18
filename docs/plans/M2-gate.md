@@ -158,7 +158,7 @@ print neither `capture` nor `M2 gate GREEN`.
 
 | SHA-256 | Path |
 | --- | --- |
-| `3f2d0592023099dea43ec31d600ed4b4d4013641bdcbd8eb484900800ec6e820` | `scripts/check-m2-gate.sh` |
+| `14927db7c59378c94e741f704631422a4792c0994c3a9a3e54cfb6a9214be375` | `scripts/check-m2-gate.sh` |
 | `53d8219bdee584a3849a85a1102e405520d5dd0dfbe21d259434bc9edfc5fcc0` | `scripts/m1-exunit-runner.exs` |
 | `c36253cff3d74ddff1b330695edbc4bde0a4565c1412c67c1293b2fb7ca6129b` | `apps/loopex/test/m1_exunit_runner_test.exs` |
 | `fea095ecec784a4440b872ad5f53a8da2cb4e13e43b6f05add5cfd75bb352879` | `.tool-versions` |
@@ -2081,3 +2081,65 @@ proposal records no acceptance and grants no waiver, closure or release.
 | --- | --- | --- |
 | 12 | `scripts/check-m2-gate.sh` | `3f2d0592023099dea43ec31d600ed4b4d4013641bdcbd8eb484900800ec6e820` |
 | 12 | `apps/loopex/test/gate_isolation_test.exs` | `c4ab3706117d0189f83b4807af36a86be9abe7c4eb37b7eb0c3e5b59d7a4928e` |
+
+<a id="amendment-13"></a>
+## Amendment 13 — Name the probe's policy and report progress while running
+
+**Acceptance: OUTSTANDING.** Closed M2 adds gate generation 13 under
+`amendment-transaction-v2`. Its historical Acceptance, Closure and earlier
+generation rows remain unchanged. The new row carries this gate's digest and
+leaves authority, evidence and candidate unset until exact-proposal acceptance.
+
+[The chain disposition](../developer/agent-context-map.md#override-disposition-closed-gate-repair-chain-v2-2026-09-17)
+orders this generation third and carries two changes to the runner.
+
+**The opening probe names its policy.** Accepted ADR 0024 makes policy
+selection a launch argument carrying a bounded identity, and the runtime now
+refuses a launch that sets a policy without one. The probe this runner writes
+and runs set a policy and named none, so it could no longer start a runtime in
+either shape it tries, and the gate stopped at its opening condition before
+observing anything. The probe now passes the fixed identity
+`loopex-m2-probe` at revision `1` with its launch options. The runtime ignores
+it for the attempts that set no policy. Nothing the probe observes, and nothing
+it reports, changes.
+
+**The runner reports where it is.** Each section, locked command and protected
+selector prints a line beginning `M2 progress:` on standard error when it
+begins and when it ends, with its own and the run's elapsed seconds. Once the
+provider credential has been read, a step line that would contain it is left
+out rather than printed; the heartbeat starts before the credential is read and
+prints only fixed text and elapsed seconds. A heartbeat prints every 30 seconds
+from the start of the run, checks every second that the gate
+is alive, and is stopped at exit. The silence bound is stated in the runner's
+header: no more than 60 seconds pass without a line on standard error. The four
+helpers the gate isolation tests extract are unchanged.
+
+No command, selector, minimum, exclusion policy, credential rule, evidence
+check, standard-output line or failure message changes.
+
+### Evidence at this proposal
+
+Binding validation, bootstrap and every gate that runs them, this one included,
+are red at this proposal only for the pending generation; the M2 gate is also
+red until its post-closure re-capture exists, and the M3 gate until its own
+generation repairs its probe. The runner parses. The probe program, extracted
+from this runner and run the way the runner runs it, reports its working loop
+through the public facade, where the program at the previous generation
+reported that it could not start a runtime. The gate isolation tests pass
+against this runner. A run of this gate at this proposal prints its progress
+lines and passes its opening probe.
+
+### Transaction and re-verification
+
+Proposal A atomically carries this gate, the changed runner and the pending
+generation-13 row in M2's plan. Only explicit maintainer acceptance authorizes
+R, whose only changes complete generation 13 with exact A and add one new
+amendment-specific disposition to an existing durable document. At R, binding
+validation, bootstrap and the M0 and M1 gates must pass; the M2 and M3 gates
+are covered by the chain disposition, and the M2 post-closure re-capture is
+taken at R. This proposal reopens no milestone, accepts no plan or product ADR,
+waives no evidence, and authorizes no integration, tag or release.
+
+| Generation | Artifact | Rebound SHA-256 |
+| --- | --- | --- |
+| 13 | `scripts/check-m2-gate.sh` | `14927db7c59378c94e741f704631422a4792c0994c3a9a3e54cfb6a9214be375` |

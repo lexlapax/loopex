@@ -59,6 +59,13 @@
 # The retained-evidence validation below lives here rather than in a second
 # program. Its exact scope is enumerated in the gate document so no reader
 # infers enforcement that does not exist.
+# OBSERVABILITY
+#
+# Every section, locked command and protected selector prints one line on
+# standard error when it begins and one when it ends, with its own and the
+# run's elapsed seconds, and a heartbeat prints every 30 seconds from the start
+# of the run. Silence bound: no more than 60 seconds pass without a line on
+# standard error while this gate runs. Standard output is unchanged.
 set -uo pipefail
 
 readonly GATE_DOCUMENT="docs/plans/M2-gate.md"
@@ -94,6 +101,53 @@ note() {
   fi
   printf '%s\n' "$message"
 }
+
+# Concept: the gate says where it is while it runs.
+#
+# Technical depth: once the provider credential has been read, a step line that
+# would contain it is left out rather than printed. The heartbeat starts before
+# the credential is read and prints only fixed text and the run's elapsed
+# seconds while this shell is alive; the EXIT cleanup stops it. Both go to
+# standard error.
+gate_clock_start="$(date +%s)"
+gate_step_name=""
+gate_step_started="$gate_clock_start"
+gate_heartbeat_pid=""
+gate_progress() {
+  local message="M2 progress: $1"
+  if [ -n "$provider_key_value" ]; then
+    case "$message" in
+      *"$provider_key_value"*) return 0 ;;
+    esac
+  fi
+  printf '%s\n' "$message" >&2
+}
+gate_step() {
+  local now
+  now="$(date +%s)"
+  if [ -n "$gate_step_name" ]; then
+    gate_progress "done $gate_step_name step=$((now - gate_step_started))s total=$((now - gate_clock_start))s"
+  fi
+  gate_step_name="$1"
+  gate_step_started="$now"
+  gate_progress "step $gate_step_name total=$((now - gate_clock_start))s"
+}
+gate_heartbeat() {
+  local gate_shell="$1" waited=0
+  while kill -0 "$gate_shell" 2>/dev/null; do
+    sleep 1
+    waited=$((waited + 1))
+    [ "$waited" -ge 30 ] || continue
+    waited=0
+    kill -0 "$gate_shell" 2>/dev/null || break
+    gate_progress "heartbeat total=$(( $(date +%s) - gate_clock_start ))s"
+  done
+}
+gate_heartbeat "$$" &
+gate_heartbeat_pid=$!
+disown "$gate_heartbeat_pid" 2>/dev/null || true
+# Until the owned task root exists and its cleanup takes over, exit stops it too.
+trap '[ -z "$gate_heartbeat_pid" ] || kill "$gate_heartbeat_pid" 2>/dev/null || true' EXIT
 
 # ---------------------------------------------------------------------------
 # Credential refusal, before anything else observes the environment.
@@ -148,6 +202,8 @@ lane_os() {
     linux-current) printf '%s' "linux" ;;
   esac
 }
+
+gate_step "opening behavioural probe"
 
 # ---------------------------------------------------------------------------
 # Primary opening condition: the behavioural probe.
@@ -326,7 +382,8 @@ defmodule Loopex.M2Probe do
         workspace_ref: "probe-workspace",
         workspace_lease: "probe-lease"
       },
-      progress_to: self()
+      progress_to: self(),
+      policy_identity: %{"id" => "loopex-m2-probe", "revision" => "1"}
     ]
 
     {tool_set, runtime} = start_runtime(base)
@@ -623,6 +680,8 @@ fi
 if [ -n "$probe_unavailable_reason" ]; then
   note "M2 opening probe unavailable: $probe_unavailable_reason; the declared red is reached from the locked definitions below and this run can never be green"
 fi
+
+gate_step "locked selectors and case identities"
 
 # ---------------------------------------------------------------------------
 # Additional opening condition: locked selectors and case identities.
@@ -1169,6 +1228,8 @@ require_feature \
   "a gate generation rebind cannot bind an interposed revision carrying unrelated bytes" \
   "a gate generation rebind cannot bind a merge or a revision behind one"
 
+gate_step "bound artifacts, closure documents and platform"
+
 # ---------------------------------------------------------------------------
 # Bound artifacts, closure documents, and platform, still read-only.
 # ---------------------------------------------------------------------------
@@ -1295,6 +1356,8 @@ if [ "$role" = "preflight" ]; then
   exit 0
 fi
 
+gate_step "provider credential intake"
+
 # ---------------------------------------------------------------------------
 # Provider credential intake.
 #
@@ -1324,6 +1387,8 @@ read_provider_frame() {
 
 read_provider_frame
 export -n provider_key_value 2>/dev/null || :
+
+gate_step "owned state"
 
 # ---------------------------------------------------------------------------
 # Owned state.
@@ -1357,6 +1422,7 @@ task_root="$(cd "$task_root" && pwd -P)" \
 
 cleanup() {
   local status=$?
+  [ -z "${gate_heartbeat_pid:-}" ] || kill "$gate_heartbeat_pid" 2>/dev/null || true
   if [ -n "${task_root:-}" ] && [ -d "$task_root" ]; then
     rm -rf "$task_root"
   fi
@@ -1427,6 +1493,8 @@ if [ "$role" = "capture" ]; then
     || fail "lane $capture_lane requires $(lane_os "$capture_lane")"
 fi
 
+gate_step "locked commands"
+
 # ---------------------------------------------------------------------------
 # Locked commands.
 # ---------------------------------------------------------------------------
@@ -1434,6 +1502,7 @@ fi
 run_locked() {
   local description="$1"
   shift
+  gate_step "locked $*"
   local output status
   output="$("$@" 2>&1)"
   status=$?
@@ -1482,6 +1551,8 @@ version_reported="$(cat VERSION 2>/dev/null | tr -d '\n')"
 [ "$version_reported" = "0.0.0" ] \
   || fail "the version train reports ${version_reported:-nothing}, not the accepted 0.0.0"
 
+gate_step "protected and inherited selectors"
+
 # ---------------------------------------------------------------------------
 # Protected and inherited selectors, through M1's bound authoritative channel.
 # ---------------------------------------------------------------------------
@@ -1524,6 +1595,7 @@ require_real_identity_agreement() {
 
 run_selector() {
   local outcome="$1" selector="$2" role_name="$3" minimum="$4" policy="$5"
+  gate_step "selector $outcome $selector $role_name"
   shift 5
   local context owner internal allowed nonce output status executed marker
 
@@ -2190,6 +2262,8 @@ run_selector mechanics apps/loopex/test/history_anchoring_test.exs default 25 ze
 run_locked "the credential-free suite does not pass at the gate seed" \
   env MIX_ENV=test mix test --exclude real_provider --seed "$gate_seed"
 
+gate_step "retained evidence"
+
 # ---------------------------------------------------------------------------
 # Retained evidence.
 #
@@ -2288,6 +2362,8 @@ validate_negative_demonstrations() {
     index=$(( index + 1 ))
   done
 }
+
+gate_step "real-call attestations"
 
 # ---------------------------------------------------------------------------
 # Real-call attestations.
@@ -3303,6 +3379,7 @@ checkout_build_after="$(fingerprint_tree "$checkout_build_root")"
 [ "$checkout_build_before" = "$checkout_build_after" ] \
   || fail "the checkout's own _build changed during the run; the owned build root did not contain compilation"
 
+gate_step "finished"
 if [ "$role" = "capture" ]; then
   # The retained identity fields are exactly the ones the attended
   # demonstration role sealed into its authoritative result: everything after
