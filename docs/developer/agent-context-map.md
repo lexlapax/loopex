@@ -4953,3 +4953,59 @@ the chain disposition. The Acceptance and Closure rows of Closed M1 stay
 byte-immutable, no earlier generation stops being enforced for the revisions it
 governed, and this adds no scope, changes no outcome and reopens no lifecycle
 state. It grants no closure, integration, tag or release.
+
+<a id="disposition-m2-gate-generation-13-2026-09-18"></a>
+### M2 gate generation 13 acceptance — 2026-09-18
+
+Generation 13 is the third transaction of
+[the closed-gate repair and instrumentation chain](#override-disposition-closed-gate-repair-chain-v2-2026-09-17).
+Accepted ADR 0024 makes policy selection a launch argument carrying a bounded
+identity, and the runtime refuses a launch that sets a policy without one. The
+M2 gate's opening probe set a policy and named no identity, so the gate stopped
+at its opening condition before observing anything.
+
+The probe now names the fixed identity `loopex-m2-probe` at revision `1`, which
+the runtime ignores for the launch shapes that set no policy; nothing the probe
+observes or reports changes. The runner also prints a progress line on standard
+error when each section, locked command and protected selector begins and ends,
+with its own and the run's elapsed seconds, and a heartbeat every 30 seconds
+from the start of the run that checks every second that the gate is alive and
+is stopped at exit. Once the provider credential has been read, a step line that
+would contain it is left out rather than printed; heartbeat lines carry only
+fixed text and elapsed seconds. No command, selector, minimum, exclusion policy,
+credential rule, evidence check, standard-output line or failure message
+changes.
+
+The first proposal, `367c69574a37ea2e115a46094adb833bfe0d4302`, claimed that
+every progress line passes the same credential check as other gate-owned lines.
+Its exact-SHA review found that untrue, and the maintainer answered
+**"Replace with corrected A' (Recommended)"**. It was replaced by a sibling
+proposal with the same parent whose text says what the runner does, and which
+changes no executable line of the runner; the first proposal is not part of the
+integrated history.
+
+Evidence at `f816f99b96647a67a437df946f908d4e079dd789`: the status check red
+only on the pending generation; a gate run with the provider frame whose
+opening behavioural probe passed in 34 seconds, which it could not do at the
+previous generation, and which then stopped at the locked repository status
+command on that same pending generation, printing its steps and 16 heartbeats
+with no silence longer than 31 seconds and no credential bytes in either
+stream; and the gate isolation tests passing, 8 cases. Its exact-SHA review
+accepted it with one low finding carried from M0 generation 8: after the gate
+is killed and before it is reaped, the heartbeat's liveness check still
+succeeds, so a caller that reads the gate's output to its end before reaping it
+waits on the heartbeat.
+
+Presented with that proposal, its evidence and its review, the maintainer
+answered **"Accept f816f99 (Recommended)"**.
+
+This transcribes that answer as acceptance under `amendment-transaction-v2`.
+The rebind completes generation 13's row with the accepting authority, this
+disposition and the candidate it binds, which is exact
+`f816f99b96647a67a437df946f908d4e079dd789`. At this rebind binding validation,
+bootstrap and the M0 and M1 gates must pass; the M2 and M3 gates are covered by
+the chain disposition, and the M2 post-closure re-capture is taken here. The
+Acceptance and Closure rows of Closed M2 stay byte-immutable, no earlier
+generation stops being enforced for the revisions it governed, and this adds no
+scope, changes no outcome and reopens no lifecycle state. It grants no closure,
+integration, tag or release.
