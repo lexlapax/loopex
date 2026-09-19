@@ -30,7 +30,7 @@ while the session lives; a session "brain" can coordinate local or remote
 [Canonical milestone status and plan records](docs/plans/)
 <!-- loopex:readme-status:end -->
 
-M1, M2 and M3 are closed and integrated. M1 delivered the durability kernel: an explicit
+M0 through M4 are closed and integrated; no milestone is active. M1 delivered the durability kernel: an explicit
 embedded runtime, durable local Store, canonical model boundary, trusted-local
 executor, thin reference client, durable events, and receipt reconciliation
 across a real runtime-process crash. What it deliberately did not deliver is a
@@ -79,12 +79,11 @@ for the host API. The exact M3 product source
 on the macOS floor pair and Linux; the [M3 plan](docs/plans/M3.md#concept-m3-final-qualification-f453545)
 records that evidence and the separate lifecycle decision.
 
-M4 is the active milestone. Its plan pair and gate are accepted, its five
-prerequisite ADRs (0023, 0024, 0026, 0028 and 0030) are accepted, the
-development floor is refreshed to Elixir 1.18.5 with OTP 27.3.4, and its
-implementation is complete on branch `m4`. It is not closed: closure needs the
-final qualification, an independent review of the exact candidate, and the
-maintainer's own closure decision, and a green suite is not a closure.
+M4 is closed. Its plan pair and its five prerequisite ADRs (0023, 0024, 0026,
+0028 and 0030) are accepted, the development floor is refreshed to Elixir
+1.18.5 with OTP 27.3.4, and its work is integrated on `main`. The runs that
+qualified the closure candidate are retained in
+[M4 closure runs](docs/evidence/M4-closure-runs.md).
 
 What M4 delivers is an operator-usable foreground server and an independent
 consumer over durable interactions and bounded artifact transfers, with runtime
@@ -107,17 +106,23 @@ selecting an admitted skill, answering the host policy's question, watching the
 authorization the host mints afterwards, and reading back a verified bounded
 transfer of what the tool produced.
 
-M4 also changes the source `VERSION` from `0.0.0` to `0.1.0` at its closure
-candidate. That is a source version and nothing more: accepted
+M4 also moved the source `VERSION` from `0.0.0` to `0.1.0`. That is a source
+version and nothing more: accepted
 [ADR 0023](docs/adr/0023-experimental-public-session-protocol.md#concept) keeps
 it independent of the negotiated protocol generation, and it is not a tag, a
 package, a publication or a compatibility freeze. The source-only `v0.1.0` tag
-is applied to the exact `main` integration commit only after independent closure
-review, explicit closure, and separate release and tag authority; no release has
-happened. See the [M4 plan](docs/plans/M4.md#concept) for the accepted scope and
-its workstreams, [App server operations](docs/operator/app-server.md#concept)
-for driving it, and the [canonical register](docs/plans/README.md) for its
-current status.
+is applied to the exact `main` integration commit only under separate release
+and tag authority; no release has happened. See the
+[M4 plan](docs/plans/M4.md#concept) for the accepted scope and its workstreams,
+[App server operations](docs/operator/app-server.md#concept) for driving it,
+and the [canonical register](docs/plans/README.md) for its current status.
+
+Since closure, `Loopex.AppServer.Host.serve/0` and the shipped `ask` and
+`allow-all` host policies replaced the test-tree fixture the operator guide
+used to name, `LoopexComposition` can wire bounded artifact transfers with
+`artifact_transfers: true`, and the local executor's launch guard writes each
+control frame as one line and one write. [CHANGELOG.md](CHANGELOG.md) records
+the detail.
 
 The repaired reference local executor requires `/bin/bash` for its internal
 supervision on Darwin and Linux; raw commands still use `/bin/sh`. See the
@@ -221,6 +226,39 @@ None of that is discouragement; it is the accurate shape of the project. The
 code is Apache-2.0, so the permission to use, fork, and embed it is real
 regardless of what can be promised about support.
 
+## How Work Is Checked
+
+Two commands, both run from the repository root and described in
+[DEVELOPMENT.md](DEVELOPMENT.md):
+
+```bash
+bash scripts/check.sh            # the fast check, credential-free
+LOOPEX_PROVIDER_API_KEY=... bash scripts/check-release.sh
+```
+
+`scripts/check.sh` runs warning-free compilation, formatting, the repository
+structure checks, documentation ordering, the dependency budget, one version
+across the applications, and the credential-free suite with one application per
+VM. It runs once per integration candidate. `scripts/check-release.sh` is the
+slow one: the real-provider workflows, the independent Node client, the
+fresh-source archive build and the long-duration bound proofs; it needs a
+provider credential and the pinned Node, and runs before closure and release.
+
+Hosted CI — `.github/workflows/agent-bootstrap.yml` — runs
+`bash scripts/check.sh --select` on every push to `main` and every pull
+request, on the current toolchain pair. It is a replaceable runner of the
+repository's own command, not a second definition of the check. Nothing merges
+to `main` without a green CI run on the candidate and an independent review of
+its diff.
+
+The [verification guide](docs/developer/verification.md#concept) and its
+[technical companion](docs/developer/verification-technical.md#technical-depth)
+are the rule book: three stages, how a changed boundary selects its checks, and
+what keeps them honest. The [milestone guide](docs/developer/milestones.md#concept)
+and its [technical companion](docs/developer/milestones-technical.md#technical-depth)
+are how a milestone is planned, run and closed. There are no per-milestone gate
+runners; the gate files under `docs/plans/` are historical records.
+
 ## Roadmap
 
 [The roadmap](docs/roadmap.md#concept) gives the candidate capability sequence and why
@@ -233,7 +271,13 @@ The roadmap is guidance. The commitment is an accepted plan.
 ## Start Here
 
 - [DEVELOPMENT.md](DEVELOPMENT.md) — current bootstrap prerequisites and the
-  provider-neutral local validation command.
+  two check commands.
+- [docs/developer/verification.md](docs/developer/verification.md#concept) and
+  its [technical companion](docs/developer/verification-technical.md#technical-depth)
+  — the rule book for checking work: stages, selection, and the honesty rules.
+- [docs/developer/milestones.md](docs/developer/milestones.md#concept) and its
+  [technical companion](docs/developer/milestones-technical.md#technical-depth)
+  — how a milestone is planned, run, closed and released.
 - [docs/](docs/) — documentation index, including every active Concept and
   Technical depth pair.
 - [docs/developer/development-charter.md](docs/developer/development-charter.md#concept)
@@ -249,8 +293,8 @@ The roadmap is guidance. The commitment is an accepted plan.
 - [docs/developer/agent-context-map.md](docs/developer/agent-context-map.md)
   — routing map by area.
 - `docs/adr/` — architectural decisions, as they land.
-- [docs/plans/](docs/plans/) — canonical milestone status plus accepted, active,
-  and closed paired-plan/gate records.
+- [docs/plans/](docs/plans/) — canonical milestone status plus the accepted,
+  active, and closed plan pairs, and the historical gate records beside them.
 - [CHANGELOG.md](CHANGELOG.md) — what changed, per milestone.
 
 ## License
