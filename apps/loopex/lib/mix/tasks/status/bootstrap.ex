@@ -66,7 +66,7 @@ defmodule Loopex.Checks.Bootstrap do
 
   @expected_claude_agents [".claude/agents/conformance-author.md", ".claude/agents/reviewer.md"]
 
-  @protected_skills ["gate", "close-milestone"]
+  @protected_skills ["open-milestone", "close-milestone"]
 
   @deny_path_tools ["Read", "Edit"]
   @inert_path_tools ["Grep", "Glob", "Write", "NotebookEdit"]

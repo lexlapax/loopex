@@ -8,7 +8,9 @@ disable-model-invocation: true
 
 Follow `AGENTS.md` first; read `docs/plans/README.md` for the register, then
 use `docs/developer/agent-context-map.md` for routing and version-specific
-technical guidance.
+technical guidance. The process is the
+[milestone guide](../../../docs/developer/milestones.md); the checks are the
+[verification guide](../../../docs/developer/verification.md).
 
 1. In the plan's progress section, map every purpose outcome to the tests,
    retained evidence, or demonstration that proves it. An outcome with no proof

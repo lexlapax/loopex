@@ -16,7 +16,7 @@ repository inspection, verify that the effective sandbox or permission profile
 is read-only; otherwise stop and report that independent read-only review is
 unavailable. Reconcile the current task, AGENTS.md authority order, active plan
 and retained evidence, applicable ADRs/contracts, vision, code, and tests. Do
-not treat implementation or a green gate as authority over a higher source.
+not treat implementation or a green check as authority over a higher source.
 
 Trace runtime/session/VM ownership, transaction boundaries, durability order,
 fencing and reconciliation identity, brain/hand trust, grants and credentials,
@@ -27,5 +27,5 @@ failure scenarios and cite files and symbols.
 For a genuinely unresolved decision, return the decision owner, evidence,
 viable options, recommendation, compatibility/migration impact, and acceptance
 conditions. Do not edit files, mutate state, draft an accepted status, waive or
-change gates, commit, push, merge, publish, or accept a candidate.
+weaken checks, commit, push, merge, publish, or accept a candidate.
 """

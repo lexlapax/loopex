@@ -38,7 +38,7 @@ for candidate_path in \
   .codex/agents/release-reviewer.toml \
   .claude/settings.json \
   .claude/hooks/stop-gate.sh \
-  .agents/skills/gate/SKILL.md \
+  .agents/skills/open-milestone/SKILL.md \
   .env.example \
   .env.test.example \
   .vscode/settings.json \

@@ -1,0 +1,80 @@
+# Milestones
+
+<a id="concept"></a>
+## Concept
+
+Technical depth: [Milestone mechanics](milestones-technical.md#technical-depth).
+
+A milestone is bounded work with one plan pair, one closure and, if the
+maintainer decides so, one release. This page is how to plan one, run it and
+close it under the post-M4 structure; the checks a change must pass are in the
+[verification guide](verification.md#concept). There is no gate script, no
+locked test corpus and no amendment transaction: the plan says what will be
+proved and by which tests, the suite proves it, and the maintainer decides.
+
+<a id="concept-milestones-agree"></a>
+### Agree
+
+A milestone starts with a plan pair in `docs/plans/`: `NAME.md` owns the
+purpose, the numbered outcomes, the scope and non-goals, and the design
+decisions; `NAME-technical.md` owns, for every outcome, how it will be
+verified — which tests, which real-path proof, which demonstration — plus the
+ownership and rejoin order if workstreams will run in parallel, and the
+compatibility, migration and rollback expectations. A decision about
+ownership, transactions, trust, a public or cross-application contract,
+persistent schema, a major dependency, the runtime floor, migration or
+packaging is an ADR, proposed with the plan and accepted before the outcome
+that depends on it is implemented.
+
+Size the milestone so that its outcomes can each be proved by tests that exist
+by closure. The register in `docs/plans/README.md` lists it as `Open`; the
+maintainer's acceptance moves it to `Accepted`. Use the `open-milestone`
+skill to write the pair.
+Technical depth: [Plan pair contents](milestones-technical.md#technical-milestones-agree).
+
+<a id="concept-milestones-develop"></a>
+### Develop
+
+Work lands on `main` in small reviewed changes: each one passes the fast
+check in CI and an independent read of its diff, as the verification guide
+sets out. A milestone branch is the exception, for a slice that cannot be
+merged safely in pieces; it is short-lived and rejoins `main` the same way.
+Parallel workstreams use one worktree per writer with non-overlapping paths
+and one integrator.
+
+Write the first integrated workflow early, then add boundary and failure
+cases as the implementation reaches them. Keep the plan's progress table
+current: each outcome's row names the tests that prove it so far. Changing
+an accepted plan is an ordinary reviewed change to the pair that records, in
+the progress section, what changed and why; a change that drops an outcome or
+adds scope is the maintainer's decision.
+Technical depth: [Branches, worktrees and progress](milestones-technical.md#technical-milestones-develop).
+
+<a id="concept-milestones-close"></a>
+### Close
+
+A closure candidate is one commit on `main` at which every outcome maps to
+tests, retained evidence or a demonstration, the documentation the milestone
+changed is updated, and the plan's progress table says Proved for each
+outcome. From that exact commit run the fast check under the floor toolchain
+pair and the release check once; retain the run identities on an evidence
+page; ask an independent reviewer to read the candidate; then present the
+packet to the maintainer. The maintainer closes it; the register moves to
+`Closed`, and the plan records the closing decision and the candidate. Use
+the `close-milestone` skill.
+Technical depth: [The closure packet](milestones-technical.md#technical-milestones-close).
+
+<a id="concept-milestones-release"></a>
+### Release
+
+A release is a separate maintainer decision: a tag on the exact integrated
+closure commit, reusing the closure evidence when the source is unchanged. A
+package, installer or publication is its own decision with its own evidence.
+Technical depth: [Tags](milestones-technical.md#technical-milestones-release).
+
+### The skills
+
+Four repository skills carry the procedures: `open-milestone` and
+`close-milestone` require explicit invocation because no actor may open or
+close its own milestone; `adr` prepares a decision proposal; `mutant-hunt` is
+an optional technique for judging how strong a guarantee's tests are.

@@ -151,7 +151,8 @@ indexed and tracked in [docs/plans/README.md](docs/plans/README.md), the
 canonical status register. Names are lowercase slugs or `M` followed by digits.
 A *release* is a separately authorized publication.
 
-A milestone runs in four steps:
+A milestone runs in four steps; the
+[milestone guide](docs/developer/milestones.md#concept) has the procedure:
 
 1. **Agree.** The plan pair names purpose, outcomes, scope, key design
    decisions, and how each outcome will be verified. The maintainer accepts it.

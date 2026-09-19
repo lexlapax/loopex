@@ -35,7 +35,7 @@ grep -Fq 'bash scripts/check-bootstrap.sh' DEVELOPMENT.md ||
 [ "$(readlink .claude/skills)" = "../.agents/skills" ] ||
   fail ".claude/skills must point to ../.agents/skills"
 
-for skill in adr gate close-milestone; do
+for skill in adr open-milestone close-milestone; do
   [ -s ".agents/skills/$skill/SKILL.md" ] || fail "missing $skill skill"
   [ -s ".agents/skills/$skill/agents/openai.yaml" ] ||
     fail "missing $skill OpenAI metadata"

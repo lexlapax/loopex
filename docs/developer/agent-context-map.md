@@ -239,13 +239,14 @@ transaction is needed for the approved assertion change.
   removes persisted project trust: an isolated smoke must explicitly trust
   only its exact checkout through the invocation's `projects` table, or project
   profiles and skills are unavailable evidence.
-  The `gate` and `close-milestone` skills require explicit invocation: Claude
+  The `open-milestone` and `close-milestone` skills require explicit invocation: Claude
   consumes `disable-model-invocation: true`, while Codex consumes
   `agents/openai.yaml` policy `allow_implicit_invocation: false`. Enforcement
   scripts use stock `grep -E`, never ripgrep.
 - Current invocation mapping. Opening and closing a milestone are maintainer
-  keystrokes because no actor may open or close its own gate. In Claude Code the
-  maintainer types `/gate <milestone>` and `/close-milestone <milestone>`; in
+  keystrokes because no actor may open or close its own milestone. In Claude Code
+  the maintainer types `/open-milestone <milestone>` and
+  `/close-milestone <milestone>`; in
   Codex the same skills are invoked explicitly rather than implicitly. Always
   name the milestone — an unnamed invocation cannot resolve which one is
   intended. Every other verb in

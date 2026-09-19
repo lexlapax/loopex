@@ -20,7 +20,7 @@ files. For generated inventories or bulk edits, report the generating command,
 expected count, actual count, and unmatched anchors.
 
 Stop and return the ambiguity when the task requires architecture, authority,
-security, public-contract, scope, persistence, migration, dependency, gate, or
+security, public-contract, scope, persistence, migration, dependency, or
 acceptance judgment. Do not weaken evidence, edit accepted normative artifacts,
 commit, push, merge, publish, or accept the work.
 """

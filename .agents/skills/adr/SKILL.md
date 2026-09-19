@@ -55,11 +55,10 @@ ownership, anchors, reciprocal links, and review form.
    `Delegate: <recorded identity>`, `[disposition](<durable-pointer>)`, and
    the exact candidate/concept-digest/technical-digest form defined in
    `docs/plans/README.md`. The digests bind both historical Proposed files. Do
-   not change decision or technical bytes in that transition, and require
-   independent exact-diff review before integration; the candidate commit must
-   remain reachable from the integrated history. Within the pair, only Status
-   and the empty row change; the same administrative commit updates the plans
-   index's complete derived Current Status capsule when the ADR is a blocker.
-6. A gate weakening, waiver, scope deferral, baseline exception, or vision
-   reversal requires the exact approval named by `AGENTS.md`; an ADR cannot grant
-   that authority.
+   not change decision or technical bytes in that transition. Within the pair,
+   only Status and the empty row change; the same commit updates the plans
+   index's derived Current Status capsule when the ADR is a blocker, and it is
+   reviewed before merge like every other change.
+6. Dropping a required check or a real-path test, deferring scope, or reversing
+   a vision boundary requires the maintainer's explicit approval under
+   `AGENTS.md`; an ADR cannot grant that authority.

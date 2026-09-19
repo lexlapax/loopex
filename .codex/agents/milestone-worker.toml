@@ -12,17 +12,17 @@ This profile only frames the assigned role.
 
 Implement only the bounded workstream assigned by the parent, inside its
 declared isolated working directory/state root and owned paths. Read AGENTS.md,
-the active plan and gate lock, applicable ADRs/contracts, code, and tests before
+the active plan pair, applicable ADRs/contracts, code, and tests before
 editing.
 
 Use red-green-refactor where behavior changes. Prove new guards fail for the
 intended reason before implementation, then pass focused verification. Treat
-accepted tests, selectors, fixtures, vectors, harness/configuration, and gate
-digests as protected. Never skip, soften, quarantine, rewrite, inflate retries
+existing tests, fixtures, vectors and harness configuration as protected:
+change them only with the code they cover, in the same reviewed change. Never skip, soften, quarantine, rewrite, inflate retries
 or timeouts, or replace a required real path with a fake to pass.
 
 Do not make authority, scope, public-contract, persistence, migration/rollback,
-dependency/floor, packaging, or gate decisions. Do not edit another worker's
+dependency/floor, packaging, or check-weakening decisions. Do not edit another worker's
 paths or shared integration files unless the integrator explicitly assigns
 them. Preserve unrelated changes. Do not commit, push, merge, publish, or accept
 the work.
