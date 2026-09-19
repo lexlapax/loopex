@@ -104,18 +104,24 @@ defmodule Loopex.Checks.Documents do
   ## Concept
 
   Classifies every active Markdown path, validates every pair it discovers, and
-  returns the ADR concept paths and milestone plan names it found.
+  returns the ADR concept paths, the milestone plan names it found, and the plan
+  names that still carry a gate file.
 
   ## Technical depth
 
   Runs before any semantic status validation so a new document cannot silently
   fall outside the documentation model. Required pairs, discovered pairs, ADR
-  pairs, and plan triples are enumerated; operational, index, adapter, skill,
+  pairs, and plan pairs are enumerated; operational, index, adapter, skill,
   gate, and archived paths are explicit exceptions rather than a catch-all. A
   path that matches nothing fails: an unknown class is unvalidated content, and
   unvalidated content is exactly where an ungoverned claim survives.
+
+  A gate file is history rather than a required member of a plan: milestones run
+  under the retired gate machinery keep theirs, and a new milestone has none. The
+  gate names are returned so the register can be held to what the checkout
+  actually contains.
   """
-  @spec document_topology(map()) :: {[String.t()], [String.t()]}
+  @spec document_topology(map()) :: {[String.t()], [String.t()], MapSet.t(String.t())}
   def document_topology(documents) do
     reject_colliding_paths!(documents)
 
@@ -125,7 +131,7 @@ defmodule Loopex.Checks.Documents do
 
     Enum.each(Enum.sort(pairs), &validate_pair(documents, &1))
 
-    plan_names = plan_names!(documents)
+    {plan_names, gate_names} = plan_names!(documents)
 
     Enum.each(plan_names, fn name ->
       Names.milestone!("`#{name}`", "docs/plans/#{name}.md")
@@ -138,7 +144,7 @@ defmodule Loopex.Checks.Documents do
     require_indexed!(documents, pair_paths)
     reject_unknown_classes!(documents, pair_paths, plan_names)
 
-    {adr_concepts, plan_names}
+    {adr_concepts, plan_names, gate_names}
   end
 
   defp reject_colliding_paths!(documents) do
@@ -194,12 +200,16 @@ defmodule Loopex.Checks.Documents do
         classify_plan_path(path, acc)
       end)
 
-    if concepts != technical or concepts != gates do
+    if concepts != technical do
       raise Invalid,
-            "docs/plans: concept, technical depth, and gate files must form exact triples"
+            "docs/plans: concept and technical depth files must form exact pairs"
     end
 
-    Enum.sort(concepts)
+    unless MapSet.subset?(gates, concepts) do
+      raise Invalid, "docs/plans: a gate file must belong to a plan pair"
+    end
+
+    {Enum.sort(concepts), gates}
   end
 
   defp classify_plan_path(path, {concepts, technical, gates} = acc) do

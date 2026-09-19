@@ -996,10 +996,11 @@ diagnostics are transient, are not fenced, and are never durable truth.
 - `mix loopex.docs_check` — compiled public documentation orders Concept before
   Technical depth.
 - `mix loopex.status` — governance rows, indexes, links, and bound artifacts.
-- `bash scripts/check-m2-gate.sh` — locked milestone gate. Real-provider
-  roles receive their credential through the gate's bounded stdin protocol; do
-  not export it to the gate's initial environment or put it in argv.
+- `bash scripts/check.sh` — the fast check, which runs the credential-free
+  suite with the structural and documentation checks above.
+- `bash scripts/check-release.sh` — the slow check, including the
+  real-provider workflows. It reads the provider credential from
+  `LOOPEX_PROVIDER_API_KEY`; never put it in argv or in retained evidence.
 
-The exact selectors, minima, and evidence grammar are locked in
-[the M2 gate](../plans/M2-gate.md). Retained evidence is indexed in
-[docs/evidence](../evidence/README.md).
+Retained evidence from the milestones that proved these guarantees is indexed
+in [docs/evidence](../evidence/README.md).

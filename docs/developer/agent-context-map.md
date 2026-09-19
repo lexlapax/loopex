@@ -15,8 +15,8 @@ and add code and test evidence pointers without changing the authority order in
 3. Read the [development charter](development-charter.md#concept), following its
    [Technical depth](development-charter-technical.md#technical-depth) when the
    task changes documentation, review form, or public code documentation.
-4. Read the accepted active Concept plan, its Technical depth, and gate contract
-   when they exist, plus constraining accepted ADR pairs.
+4. Read the accepted active Concept plan and its Technical depth when they
+   exist, plus constraining accepted ADR pairs.
 5. Use the table below to read the relevant Concept anchor first and then the
    exact Technical depth anchor. Follow the authority order in `AGENTS.md`;
    treat code and tests as evidence, and flag stale or conflicting prose.
@@ -64,15 +64,11 @@ are Mix tasks: `mix loopex.deps_budget`, `loopex.core_only`, `loopex.matrix`,
 `loopex.format_scope`, `loopex.version_train`, `loopex.docs_check`,
 `loopex.hook_registration`, and `loopex.self_hosting`.
 `bash scripts/check-bootstrap.sh` runs the bootstrap aggregate.
-`bash scripts/check-m0-gate.sh`, `/bin/bash -p scripts/check-m1-gate.sh`,
-`bash scripts/check-m2-gate.sh`, and `bash scripts/check-m3-gate.sh` run the
-Closed gates. The M3 gate includes its M0–M2 predecessor aggregate.
-`bash scripts/check-m4-gate.sh` runs the Open M4 gate, which must be red for
-its declared missing behavior while every Closed gate stays green.
-After ADR 0026's floor-holder sequence and before M4 acceptance,
-`elixir -r scripts/check-m4-fixtures.exs -e 'Loopex.M4FixtureCheck.run!()'`
-and `elixir scripts/check_m4_fixtures_test.exs` check the bound schema and
-vectors. They do not prove client or server conformance.
+`bash scripts/check.sh` is the fast check run before every push, and
+`bash scripts/check-release.sh` is the slow check run before closure and
+release; [DEVELOPMENT.md](../../DEVELOPMENT.md) describes both. The milestone
+gate runners they replaced are gone, and the gate files under `docs/plans/`
+are historical records of what those runs proved.
 
 Product tests run against a temporary `LOOPEX_HOME`; the
 affected conformance suites (`conformance/`) run for any adapter or behaviour

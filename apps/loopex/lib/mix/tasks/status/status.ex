@@ -66,14 +66,14 @@ defmodule Loopex.Checks.Status do
   """
   @spec validate(map()) :: [String.t()]
   def validate(documents) do
-    {adr_paths, plan_names} = Documents.document_topology(documents)
+    {adr_paths, plan_names, gate_names} = Documents.document_topology(documents)
     Documents.validate_local_links(documents)
     Documents.validate_directory_indexes(documents)
     require_present!(documents)
 
     plans_text = Map.fetch!(documents, @index)
     {values, summary_line} = Register.current_status(plans_text)
-    rows = Register.register(plans_text)
+    rows = Register.register(plans_text, gate_names)
 
     Register.closed_product_checkpoint(
       Map.fetch!(values, "Last closed product checkpoint"),
@@ -203,7 +203,7 @@ defmodule Loopex.Checks.Status do
 
     if MapSet.new(plan_names) != represented do
       raise Invalid,
-            "docs/plans: paired plan triples and non-Blocked register rows must match exactly"
+            "docs/plans: plan pairs and non-Blocked register rows must match exactly"
     end
 
     :ok

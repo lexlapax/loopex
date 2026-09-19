@@ -676,6 +676,6 @@ same commands and never redefines or waives one.
 `mix loopex.docs_check` proves ordering and presence only; whether a section
 explains anything stays a review obligation.
 
-The locked milestone gate runners under `scripts/` compose these entrypoints with
-the milestone's own selectors; the exact selectors and evidence grammar live with
-[the plans](../plans/README.md).
+`scripts/check.sh` and `scripts/check-release.sh` compose these entrypoints into
+the two checks the repository runs; [DEVELOPMENT.md](../../DEVELOPMENT.md)
+describes what each one covers.

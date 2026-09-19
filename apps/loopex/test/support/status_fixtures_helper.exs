@@ -461,11 +461,11 @@ defmodule Loopex.StatusFixtures do
     )
     |> String.replace(
       "| Next maintainer decision | Disposition ADR 0001 and ADR 0002 |",
-      "| Next maintainer decision | Open the next milestone gate-first, or defer it |"
+      "| Next maintainer decision | Open the next milestone, or defer it |"
     )
     |> String.replace(
       "| Next transition | After the prerequisites are accepted, the maintainer explicitly opens `M0` gate-first |",
-      "| Next transition | Create the next milestone's plan pair and red gate, and move it to Open |"
+      "| Next transition | Write the next milestone's plan pair and move it to Open |"
     )
   end
 
@@ -483,12 +483,12 @@ defmodule Loopex.StatusFixtures do
     text
     |> String.replace(
       @blockers_cell,
-      "| Blockers | `M0` is open and not accepted; the recorded acceptance " <>
-        "authority must accept both normative envelopes and the gate |"
+      "| Blockers | `M0` is open and not accepted; the maintainer must accept " <>
+        "its plan pair |"
     )
     |> String.replace(
       "| Next maintainer decision | Disposition ADR 0001 and ADR 0002 |",
-      "| Next maintainer decision | Accept or reject the `M0` plan pair and gate |"
+      "| Next maintainer decision | Accept or reject the `M0` plan pair |"
     )
     |> String.replace(
       "| Next transition | After the prerequisites are accepted, the maintainer explicitly opens `M0` gate-first |",

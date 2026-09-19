@@ -14,7 +14,7 @@ New to the repository, in this order:
    committed to, what is authorized right now, and the next decision. Its
    Directing the Work section covers how development is requested.
 4. [AGENTS.md](../../AGENTS.md) — the canonical development contract: authority,
-   autonomy tiers, milestones and gates.
+   autonomy tiers, milestones and checks.
 5. [Development charter](development-charter.md#concept) — why documentation is
    shaped the way it is, before adding or restructuring any of it.
 

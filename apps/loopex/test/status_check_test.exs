@@ -539,12 +539,11 @@ defmodule Loopex.StatusCheckTest do
              Register.expected_capsule("Open", "unconstrained", all_accepted)
              |> Map.put(
                "Blockers",
-               "`M2` is open and not accepted; the recorded acceptance authority must " <>
-                 "accept both normative envelopes and the gate"
+               "`M2` is open and not accepted; the maintainer must accept its plan pair"
              )
              |> Map.put(
                "Next maintainer decision",
-               "Accept or reject the `M2` plan pair and gate"
+               "Accept or reject the `M2` plan pair"
              )
              |> Map.put(
                "Next transition",
@@ -842,7 +841,7 @@ defmodule Loopex.StatusCheckTest do
           {"docs/vision-technical-technical.md", "doubled technical suffix"},
           {"Docs/VISION.md", "collides by case"},
           {"docs/adr/0003-new-decision.md", "paired technical document is missing"},
-          {"docs/plans/sample-technical.md", "exact triples"},
+          {"docs/plans/sample-technical.md", "exact pairs"},
           {"docs/plans/sample-technical-technical.md", "doubled technical suffix"}
         ] do
       Fixture.documents()
@@ -985,7 +984,7 @@ defmodule Loopex.StatusCheckTest do
           opened
           |> replace(
             "docs/plans/README.md",
-            "| Next maintainer decision | Accept or reject the `M0` plan pair and gate |",
+            "| Next maintainer decision | Accept or reject the `M0` plan pair |",
             "| Next maintainer decision | Disposition ADR 0001 and ADR 0002 |"
           )
           |> assert_invalid("exact derived status capsule")
@@ -1002,7 +1001,7 @@ defmodule Loopex.StatusCheckTest do
           closed
           |> replace(
             "docs/plans/README.md",
-            "| Next maintainer decision | Open the next milestone gate-first, or defer it |",
+            "| Next maintainer decision | Open the next milestone, or defer it |",
             "| Next maintainer decision | Disposition ADR 0001 and ADR 0002 |"
           )
           |> assert_invalid("exact derived status capsule")
@@ -1180,6 +1179,39 @@ defmodule Loopex.StatusCheckTest do
       |> Map.put(path, "# orphan\n")
       |> assert_invalid()
     end
+
+    # A gate file is history, so a new milestone has none and its row carries the
+    # em dash. The column still cannot lie in either direction: a retained gate
+    # must be linked, and a link without the file names a document that is not
+    # there.
+    gateless =
+      Fixture.documents()
+      |> Map.new(fn {path, text} ->
+        {path,
+         text
+         |> String.replace(
+           Fixture.blocked_row(),
+           "| `M0` | Open | [concept](M0.md) | [technical depth](M0-technical.md) | — |"
+         )
+         |> String.replace(Fixture.summary(), Fixture.open_summary())}
+      end)
+      |> Map.put("docs/plans/M0.md", Fixture.plan())
+      |> Map.put("docs/plans/M0-technical.md", Fixture.technical_plan())
+      |> Map.update!("docs/plans/README.md", &Fixture.open_capsule/1)
+
+    assert [] == Fixture.checked(gateless)
+
+    gateless
+    |> Map.put("docs/plans/M0-gate.md", Fixture.gate())
+    |> assert_invalid("incorrect plan links")
+
+    gateless
+    |> replace(
+      "docs/plans/README.md",
+      "[technical depth](M0-technical.md) | — |",
+      "[technical depth](M0-technical.md) | [gate](M0-gate.md) |"
+    )
+    |> assert_invalid("does not resolve")
   end
 
   test "barrier mutations fail and a matching change passes" do
@@ -1336,7 +1368,7 @@ defmodule Loopex.StatusCheckTest do
       |> Map.fetch!("Authorized work")
 
     assert authorized =~ "accepted `M0`"
-    assert authorized =~ "planning, gate construction, and review for Open `M9`"
+    assert authorized =~ "planning and review for Open `M9`"
     assert authorized =~ "no `M9` product implementation"
   end
 
@@ -1427,17 +1459,17 @@ defmodule Loopex.StatusCheckTest do
                  "implementation wait until `current` closes and the Open candidate is " <>
                  "refreshed and independently reviewed on that closed base",
              "Authorized work" =>
-               "Implementation inside the accepted `current` envelopes and locked gate on " <>
-                 "its designated milestone branch; planning, gate construction, and review " <>
-                 "for Open `next`; no milestone product bytes integrate before closure and " <>
-                 "no `next` product implementation",
+               "Implementation inside the accepted `current` plan pair on its designated " <>
+                 "milestone branch; planning and review for Open `next`; no milestone " <>
+                 "product bytes integrate before closure and no `next` product " <>
+                 "implementation",
              "Next maintainer decision" =>
                "None until `current` is ready for independent review; `next` cannot be " <>
                  "accepted before `current` closes",
              "Next transition" =>
-               "Turn the locked `current` gate green, move `current` to In progress and " <>
-                 "then In review with cleared independent review, and close it; then " <>
-                 "refresh and independently review `next` on that closed base"
+               "Complete `current` with its closure checks green, move `current` to In " <>
+                 "progress and then In review with cleared independent review, and close " <>
+                 "it; then refresh and independently review `next` on that closed base"
            }
   end
 

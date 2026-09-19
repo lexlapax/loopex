@@ -742,13 +742,13 @@ start at all rather than repairing itself.
 - `mix loopex.docs_check` — compiled public documentation orders Concept before
   Technical depth.
 - `mix loopex.status` — governance rows, indexes, links, and bound artifacts.
-- `bash scripts/check-m2-gate.sh` — the M2 locked milestone gate,
-  which also re-runs M1's selectors as inherited roles.
-  `scripts/check-m1-gate.sh` remains the closed M1 gate. Real-provider roles
-  receive their credential through the gate's bounded stdin protocol; do not
-  export it to the gate's initial environment or put it in argv.
+- `bash scripts/check.sh` — the fast check, which runs the credential-free
+  suite together with the structural, formatting, compilation, dependency, and
+  documentation checks above.
+- `bash scripts/check-release.sh` — the slow check: the real-provider
+  workflows, the independent Node client, and the fresh-source build. It reads
+  the provider credential from `LOOPEX_PROVIDER_API_KEY`; never put it in argv
+  or in retained evidence.
 
-The exact selectors and evidence grammar are locked in
-[the M2 gate](../plans/M2-gate.md) and, for the closed milestone,
-[the M1 gate](../plans/M1-gate.md). Retained matrix and negative evidence are
-indexed in [docs/evidence](../evidence/README.md).
+Retained matrix and negative evidence from the milestones that proved these
+guarantees are indexed in [docs/evidence](../evidence/README.md).

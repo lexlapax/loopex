@@ -177,5 +177,5 @@ states can be admitted.
   establish the prior tree is gone, reopen, and re-present the exact
   transaction. Do not restore a partial copy of a state root.
 
-The exact developer and gate commands live in [DEVELOPMENT.md](../../DEVELOPMENT.md).
+The exact developer commands live in [DEVELOPMENT.md](../../DEVELOPMENT.md).
 The M1 evidence records are indexed under [docs/evidence](../evidence/README.md).

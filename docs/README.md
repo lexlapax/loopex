@@ -90,8 +90,8 @@ whose path or explicit fragment does not resolve.
 - [Development contract](../AGENTS.md) — canonical tool-neutral authority,
   autonomy, documentation, milestone, and enforcement rules.
 - [Plans and current status](plans/README.md) — canonical milestone register,
-  lifecycle, and plan templates. A future milestone has a Concept plan,
-  Technical depth plan, and executable gate.
+  lifecycle, and plan templates. A milestone has a Concept plan and a Technical
+  depth plan.
 - [Development setup](../DEVELOPMENT.md) — local prerequisites and validation
   commands.
 - [How a run works](operator/how-a-run-works.md#concept) — the flow of one run

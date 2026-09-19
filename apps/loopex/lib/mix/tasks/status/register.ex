@@ -14,15 +14,17 @@ defmodule Loopex.Checks.Register do
 
   ## Technical depth
 
-  The register is an exact table whose link cells are determined by state: a
-  Blocked milestone has no plan files yet and therefore no links, and every other
-  state must link all three. Two fields are derived from the register's `Closed`
-  rows by their own rule rather than by the lifecycle capsule — the integrated
-  phase and the last closed product checkpoint — because the capsule derives from
-  one milestone's state and those two describe the history behind it. The
-  revision-status sentence is recomputed from that derived phase and the register
-  rows and compared byte for byte, in both the plans index and the README, so a
-  stale summary cannot survive a transition.
+  The register is an exact table whose link cells are determined by state and by
+  the files the checkout carries: a Blocked milestone has no plan files yet and
+  therefore no links, every other state must link its plan pair, and the
+  historical gate column links a gate file exactly when one exists. Two fields
+  are derived from the register's `Closed` rows by their own rule rather than by
+  the lifecycle capsule — the integrated phase and the last closed product
+  checkpoint — because the capsule derives from one milestone's state and those
+  two describe the history behind it. The revision-status sentence is recomputed
+  from that derived phase and the register rows and compared byte for byte, in
+  both the plans index and the README, so a stale summary cannot survive a
+  transition.
 
   Authorised work widens only at acceptance. The blocked, open, accepted, and
   in-progress capsules inherit that boundary explicitly rather than each
@@ -181,9 +183,9 @@ defmodule Loopex.Checks.Register do
 
   ## Technical depth
 
-  `Open` is deliberately absent. An Open milestone is a plan-and-gate candidate;
-  when an earlier milestone is still delivering, it is the sole planning
-  lookahead and cannot become a second implementation authority.
+  `Open` is deliberately absent. An Open milestone is a plan candidate; when an
+  earlier milestone is still delivering, it is the sole planning lookahead and
+  cannot become a second implementation authority.
   """
   @spec delivery_states() :: [String.t()]
   def delivery_states, do: @delivery_states
@@ -234,13 +236,19 @@ defmodule Loopex.Checks.Register do
 
   ## Technical depth
 
-  Names are validated and checked for case collisions, and the three link cells
-  must match exactly what the state implies. A Blocked milestone has no plan files
-  yet, so links would resolve to nothing; every other state must link all three,
-  so a reader always reaches the plan pair and gate from the register.
+  Names are validated and checked for case collisions, and the link cells must
+  match exactly what the state and the checkout imply. A Blocked milestone has no
+  plan files yet, so links would resolve to nothing; every other state must link
+  its pair, so a reader always reaches the plan from the register.
+
+  The gate column is history. Milestones run under the retired gate machinery
+  keep their gate file, and a milestone that has one must link it; a milestone
+  without one carries `—`. `gated` is the set of names whose `-gate.md` file the
+  checkout actually contains, so the column can neither hide a retained gate nor
+  advertise a file that is not there.
   """
-  @spec register(String.t()) :: [{String.t(), String.t()}]
-  def register(text) do
+  @spec register(String.t(), MapSet.t(String.t())) :: [{String.t(), String.t()}]
+  def register(text, gated) do
     block = Markdown.block(text, @index, :register)
 
     if length(block) < 4 or Enum.at(block, 0) != "## Milestone Register" or
@@ -267,6 +275,12 @@ defmodule Loopex.Checks.Register do
         raise Invalid, "#{@index}: unknown milestone state #{inspect(state)}"
       end
 
+      expected_gate =
+        case MapSet.member?(gated, name) do
+          true -> "[gate](#{name}-gate.md)"
+          false -> "—"
+        end
+
       expected =
         case state do
           "Blocked" ->
@@ -276,13 +290,13 @@ defmodule Loopex.Checks.Register do
             [
               "[concept](#{name}.md)",
               "[technical depth](#{name}-technical.md)",
-              "[gate](#{name}-gate.md)"
+              expected_gate
             ]
         end
 
       if [concept, technical, gate] != expected do
         raise Invalid,
-              "#{@index}: #{name} has incorrect paired plan/gate links for #{state}"
+              "#{@index}: #{name} has incorrect plan links for #{state}"
       end
 
       {[{name, state} | rows], MapSet.put(seen, folded)}
@@ -555,10 +569,9 @@ defmodule Loopex.Checks.Register do
       @seed_blocked
       |> Map.put(
         "Blockers",
-        "`#{name}` is open and not accepted; the recorded acceptance authority must " <>
-          "accept both normative envelopes and the gate"
+        "`#{name}` is open and not accepted; the maintainer must accept its plan pair"
       )
-      |> Map.put("Next maintainer decision", "Accept or reject the `#{name}` plan pair and gate")
+      |> Map.put("Next maintainer decision", "Accept or reject the `#{name}` plan pair")
       |> Map.put(
         "Next transition",
         "Record the acceptance governance row and move `#{name}` to Accepted"
@@ -573,7 +586,7 @@ defmodule Loopex.Checks.Register do
         |> Map.put(
           "Blockers",
           "#{join_and(prerequisite_links(unresolved))} must be accepted before the " <>
-            "`#{name}` plan pair and gate can be accepted"
+            "`#{name}` plan pair can be accepted"
         )
         |> Map.put(
           "Next maintainer decision",
@@ -582,7 +595,7 @@ defmodule Loopex.Checks.Register do
         |> Map.put(
           "Next transition",
           "After #{prerequisite_subject(unresolved)} accepted, accept or reject the " <>
-            "`#{name}` plan pair and gate"
+            "`#{name}` plan pair"
         )
     end
   end
@@ -602,8 +615,8 @@ defmodule Loopex.Checks.Register do
         |> Map.put("Next maintainer decision", "Accept or reject ADR 0008")
         |> Map.put(
           "Next transition",
-          "After ADR 0008 is accepted, revise Workstream A, rejoin Workstream B, and turn " <>
-            "the locked gate green"
+          "After ADR 0008 is accepted, revise Workstream A, rejoin Workstream B, and " <>
+            "complete `M1` with its closure checks green"
         )
     end
   end
@@ -623,10 +636,10 @@ defmodule Loopex.Checks.Register do
     delivery
     |> Map.put(
       "Authorized work",
-      "Implementation inside the accepted `#{delivery_name}` envelopes and locked gate on " <>
-        "its designated milestone branch; planning, gate construction, and review for Open " <>
-        "`#{lookahead_name}`; no milestone product bytes integrate before closure and no " <>
-        "`#{lookahead_name}` product implementation"
+      "Implementation inside the accepted `#{delivery_name}` plan pair on its designated " <>
+        "milestone branch; planning and review for Open `#{lookahead_name}`; no milestone " <>
+        "product bytes integrate before closure and no `#{lookahead_name}` product " <>
+        "implementation"
     )
     |> lookahead_values(delivery_name, lookahead_name, adr_statuses)
     |> successor_prerequisites(lookahead_name, adr_statuses)
@@ -652,12 +665,12 @@ defmodule Loopex.Checks.Register do
   #
   # Technical depth: authorized work does not widen here — acceptance remains the
   # only transition that widens it. What changes is that the next decision returns
-  # to the maintainer, because a reviewer produces findings and only an acceptance
-  # authority closes. This capsule used to assert that the milestone "has a green
+  # to the maintainer, because a reviewer produces findings and only the
+  # maintainer closes. This capsule used to assert that the milestone "has a green
   # gate on every locked lane", and the comment above it asserted "the gate is
   # green": a claim about a run, in a derivation that cannot observe one, true by
   # construction for any milestone in review whether green or red. The status check
-  # then enforced that a canonical record keep asserting it. A gate verdict belongs
+  # then enforced that a canonical record keep asserting it. A check verdict belongs
   # to retained evidence at a named candidate. The first correction removed the
   # claim from the record and left it in the comment directly above -- which is the
   # same defect, in the place the next reader looks first.
@@ -676,10 +689,10 @@ defmodule Loopex.Checks.Register do
   # Technical depth: this clause is written by the transition that first records
   # `Closed`, which is what the catch-all below demands rather than permitting the
   # check to be relaxed. Authorized work narrows back to planning and review: a
-  # closed envelope grants no further implementation, and the next milestone opens
-  # gate-first with its own plan pair and locked gate. The blocker field states the
-  # closure rather than a gate verdict, because a canonical record should not
-  # assert a run it cannot observe.
+  # closed plan grants no further implementation, and the next milestone starts
+  # from its own accepted plan pair. The blocker field states the closure rather
+  # than a check verdict, because a canonical record should not assert a run it
+  # cannot observe.
   def expected_capsule("Closed", name, adr_statuses) do
     require_prerequisites_accepted!(name, "Closed", adr_statuses)
 
@@ -690,10 +703,10 @@ defmodule Loopex.Checks.Register do
       "Explicitly authorized planning, ADR, and review work only; no product " <>
         "implementation until the next milestone is accepted"
     )
-    |> Map.put("Next maintainer decision", "Open the next milestone gate-first, or defer it")
+    |> Map.put("Next maintainer decision", "Open the next milestone, or defer it")
     |> Map.put(
       "Next transition",
-      "Create the next milestone's plan pair and red gate, and move it to Open"
+      "Write the next milestone's plan pair and move it to Open"
     )
   end
 
@@ -707,8 +720,12 @@ defmodule Loopex.Checks.Register do
   defp in_progress_values(name) do
     name
     |> accepted_values()
-    |> Map.put("Blockers", "None; `#{name}` is in progress against its locked gate")
-    |> Map.put("Next transition", "Turn the locked gate green, then move `#{name}` to In review")
+    |> Map.put("Blockers", "None; `#{name}` is in progress against its accepted plan pair")
+    |> Map.put(
+      "Next transition",
+      "Map every outcome to evidence, run `bash scripts/check.sh` on each supported " <>
+        "platform and `bash scripts/check-release.sh` once, then move `#{name}` to In review"
+    )
   end
 
   defp in_review_values(name) do
@@ -746,9 +763,9 @@ defmodule Loopex.Checks.Register do
       )
       |> Map.put(
         "Next transition",
-        "After ADR 0008 is accepted, revise Workstream A, rejoin Workstream B, turn the " <>
-          "locked `M1` gate green, and close it; then refresh and independently review " <>
-          "`#{lookahead_name}` on that closed base"
+        "After ADR 0008 is accepted, revise Workstream A, rejoin Workstream B, complete " <>
+          "`M1` with its closure checks green, and close it; then refresh and " <>
+          "independently review `#{lookahead_name}` on that closed base"
       )
     end
   end
@@ -803,8 +820,8 @@ defmodule Loopex.Checks.Register do
     )
     |> Map.put(
       "Next transition",
-      "Turn the locked `#{delivery_name}` gate green, move `#{delivery_name}` to In " <>
-        "progress and then In review with cleared independent review, and close it; " <>
+      "Complete `#{delivery_name}` with its closure checks green, move `#{delivery_name}` " <>
+        "to In progress and then In review with cleared independent review, and close it; " <>
         "then refresh and independently review `#{lookahead_name}` on that closed base"
     )
   end
@@ -876,14 +893,14 @@ defmodule Loopex.Checks.Register do
   end
 
   # Concept: acceptance is the only transition that widens authorized work, and it
-  # widens it to the accepted envelopes and locked gate, no further.
+  # widens it to the accepted plan pair, no further.
   defp accepted_values(name) do
     @seed_blocked
     |> Map.put("Blockers", "None; `#{name}` is accepted and implementation may proceed")
     |> Map.put(
       "Authorized work",
-      "Implementation inside the accepted `#{name}` envelopes and its locked gate on the " <>
-        "designated milestone branch; no milestone product bytes integrate before closure"
+      "Implementation inside the accepted `#{name}` plan pair on the designated milestone " <>
+        "branch; no milestone product bytes integrate before closure"
     )
     |> Map.put(
       "Next maintainer decision",
@@ -891,7 +908,8 @@ defmodule Loopex.Checks.Register do
     )
     |> Map.put(
       "Next transition",
-      "Turn the locked gate green, then move `#{name}` to In progress and In review"
+      "Implement the accepted outcomes with `bash scripts/check.sh` green, then move " <>
+        "`#{name}` to In progress and In review"
     )
   end
 
@@ -908,10 +926,10 @@ defmodule Loopex.Checks.Register do
       case unresolved do
         [] ->
           {
-            "`M1` remains open and unaccepted; its revised plan-pair and gate candidate " <>
-              "awaits independent review",
+            "`M1` remains open and unaccepted; its revised plan-pair candidate awaits " <>
+              "independent review",
             "Independently review the exact revised `M1` candidate",
-            "After a clear review, accept or reject the `M1` plan pair and gate"
+            "After a clear review, accept or reject the `M1` plan pair"
           }
 
         [path] ->
@@ -919,21 +937,21 @@ defmodule Loopex.Checks.Register do
           link = adr_link(path, name)
 
           {
-            "#{link} must be accepted before the `M1` plan pair and gate can be accepted",
+            "#{link} must be accepted before the `M1` plan pair can be accepted",
             "Disposition #{name}",
             "After the prerequisite is accepted, revise and independently review the " <>
-              "`M1` plan pair and gate"
+              "`M1` plan pair"
           }
 
         paths ->
           [first, second] = Enum.map(paths, &adr_link(&1, Map.fetch!(@m1_adr_names, &1)))
 
           {
-            "#{first} and #{second} must be accepted before the `M1` plan pair and gate " <>
-              "can be accepted",
+            "#{first} and #{second} must be accepted before the `M1` plan pair can be " <>
+              "accepted",
             "Disposition ADR 0006 and ADR 0007",
             "After both prerequisites are accepted, revise and independently review the " <>
-              "`M1` plan pair and gate"
+              "`M1` plan pair"
           }
       end
 

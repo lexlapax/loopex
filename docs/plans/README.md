@@ -2,7 +2,7 @@
 
 Part of the [documentation index](../README.md).
 
-An accepted Concept plan, Technical depth plan, and gate form one commitment.
+An accepted Concept plan and Technical depth plan form one commitment.
 Future capability rungs in
 [docs/roadmap.md](../roadmap.md#concept) are candidates, not commitments.
 
@@ -24,8 +24,8 @@ integrated product baseline.
 | Last closed product checkpoint | `M4` — 2026-09-19 |
 | Blockers | None; `M4` is closed and its governance row is recorded |
 | Authorized work | Explicitly authorized planning, ADR, and review work only; no product implementation until the next milestone is accepted |
-| Next maintainer decision | Open the next milestone gate-first, or defer it |
-| Next transition | Create the next milestone's plan pair and red gate, and move it to Open |
+| Next maintainer decision | Open the next milestone, or defer it |
+| Next transition | Write the next milestone's plan pair and move it to Open |
 | Validation | `bash scripts/check-bootstrap.sh` |
 <!-- loopex:current-status:end -->
 
@@ -39,9 +39,9 @@ register's final `Closed` row in this form:
 
 The status checker deliberately does not claim that accepted governance was
 merged: identical bytes on a topic branch and on `main` are indistinguishable.
-The gate-opening procedure verifies the exact base, and the mandatory
-base-to-transition review verifies integration eligibility. This field states
-only the product fact the register can derive.
+The integrator verifies the exact base, and the pre-integration review verifies
+integration eligibility. This field states only the product fact the register
+can derive.
 
 `Integrated phase` is derived from the same rows by the same standard, and has
 exactly two values. It reads `Pre-implementation planning` while the register
@@ -120,7 +120,7 @@ may be followed by at most one delivery row (`Accepted`, `In progress`, or
 successor: the lookahead branches from integrated governance, never from the
 product branch. Without a delivery row, one `Open` candidate may follow the
 Closed history. The founding `Blocked` form is a single next candidate with no
-plan triple. No second delivery authority or second planning lookahead is
+plan files. No second delivery authority or second planning lookahead is
 representable.
 
 <!-- loopex:milestone-register:start -->
@@ -135,10 +135,12 @@ representable.
 | `M4` | Closed | [concept](M4.md) | [technical depth](M4-technical.md) | [gate](M4-gate.md) |
 <!-- loopex:milestone-register:end -->
 
-When a plan exists, the Concept, Technical depth, and Gate columns link their
-exact files and the register is its only lifecycle-state record. Valid states
-are `Blocked`, `Open`, `Accepted`, `In progress`, `In review`, and `Closed`.
-`Blocked` has no plan pair or gate. Every other state has all three. Every state
+When a plan exists, the Concept and Technical depth columns link their exact
+files and the register is its only lifecycle-state record. Valid states are
+`Blocked`, `Open`, `Accepted`, `In progress`, `In review`, and `Closed`.
+`Blocked` has no plan files; every other state has both. The Gate column is
+history: a milestone run under the retired gate machinery keeps its gate file
+and links it, and a milestone without one carries an em dash. Every state
 transition atomically updates the register, the complete marked Current Status
 capsule above, and README's marked derived summary.
 
@@ -147,15 +149,15 @@ capsule above, and README's marked derived summary.
 - A **capability rung** is one of the non-normative questions in the
   [vision's delivery strategy](../vision.md#concept-vision-delivery-strategy). It
   guides decomposition but does not dictate milestone or release boundaries.
-- A **milestone** is bounded work governed by one accepted plan pair, one gate, and
-  one closure. It may prove part or all of one or more capability rungs while
+- A **milestone** is bounded work described by one accepted plan pair and ended
+  by one closure. It may prove part or all of one or more capability rungs while
   respecting the vision's
   [delivery strategy](../vision.md#concept-vision-delivery-strategy),
   [serial barriers](../vision-technical.md#technical-vision-serial-barriers),
   and, for compatibility claims,
   [freeze rules](../vision-technical.md#technical-vision-compatibility).
 - A **workstream** is a parallel slice inside a milestone. It has no independent
-  plan or gate.
+  plan.
 - A **release** is a separately authorized publication. A milestone may or may
   not produce one; only its accepted plan pair may couple the two.
 
@@ -174,7 +176,6 @@ prohibit a future `M1`, `v0.1`, `kernel-a`, or another accepted name.
 ```text
 docs/plans/<name>.md              Concept plan and visible outcome progress
 docs/plans/<name>-technical.md    technical constraints and evidence obligations
-docs/plans/<name>-gate.md         locked executable acceptance contract
 ```
 
 The Concept plan owns purpose, observable outcomes, scope, non-goals, and
@@ -185,13 +186,14 @@ failure cases, migration, rollback, packaging, and exact minimalism constraints.
 The companion may prove or refine the Concept plan but cannot add scope or a
 decision.
 
-The gate is separate because its canonical UTF-8/LF text and SHA-256 digest are
-locked at acceptance and remain immutable for the milestone. The filename and
-canonical register own plan identity and lifecycle state; neither plan repeats
-them. Conforming progress and evidence links may change without changing either
-accepted normative envelope. Empty governance slots may be filled only from an
-explicit disposition; a completed governance row is an immutable authority
-record. A conflict between the pair blocks acceptance and closure.
+A milestone run under the retired gate machinery also carries
+`docs/plans/<name>-gate.md`. Those files are historical records of what was
+locked and proved at the revisions they name; a new milestone has none. The
+filename and canonical register own plan identity and lifecycle state; neither
+plan repeats them. Progress and evidence links change as the work proceeds.
+Empty governance slots may be filled only from an explicit disposition; a
+completed governance row is a record of a decision that was made. A conflict
+between the pair blocks acceptance and closure.
 
 Every Concept plan contains a `## Governance Records` table outside its
 envelope:
@@ -202,41 +204,18 @@ envelope:
 | Closure | — | — | — |
 
 A complete row uses `Maintainer` or `Delegate: <recorded identity>` for
-Authority and `[disposition](<durable-pointer>)` for Authority evidence. Bound
-bytes uses exact lowercase digests in this form:
-
-```text
-candidate `<40-hex>`; concept `sha256:<64-hex>`; technical `sha256:<64-hex>`; gate `sha256:<64-hex>`
-```
-
-The structural check proves the record is complete, anchors each completed row
-to its first form across the repository history reachable from `HEAD`, requires
-the candidate SHA to remain reachable there, and verifies all three digests
-against the historical candidate's Concept envelope, Technical depth envelope,
-and gate plus the current canonical bytes. Once Acceptance completes, it anchors
-both accepted envelopes and exact gate bytes through every reachable descendant
-and merge. Independent review proves pair consistency, candidate compliance,
-and that the pointer identifies the named authority's actual disposition. A
-separate read-only review compares the exact administrative transition SHA with
-the bound candidate and reports to the current integrator that only the
-governance row, the single durable authority-disposition record named by that
-row, and any lifecycle-derived status blocks changed; no envelope, gate,
-portable-enforcement, or product byte may change in that transition. Before a
-governance-only Acceptance checkpoint integrates, the review also compares it
-with `main` and confirms the
-complete integration surface contains planning, governance, documentation, and
-portable-enforcement bytes but no milestone product implementation. It is a
-mandatory pre-integration procedure, not another durable record or
-structural-check claim.
+Authority, `[disposition](<durable-pointer>)` for Authority evidence, and the
+accepted or reviewed candidate SHA for Bound bytes. Closed milestones bind
+envelope and gate digests there as well, because that is what their acceptance
+and closure covered; those rows are read as written and are not rewritten.
 
 Moving the register to `Accepted` requires a complete acceptance row naming the
-accepting maintainer or recorded delegate, durable evidence of that authority's
-explicit disposition, the accepted plan-candidate SHA, both envelope digests,
-and gate digest. Moving it to `Closed` requires the same three digests plus the
-reviewed candidate SHA. An explicit decision may be recorded; it may not be
-supplied or inferred. These administrative transitions change only that bounded
-governance and derived status surface; they do not alter the bound candidate,
-normative envelopes, locked gate, portable enforcement, or product bytes.
+maintainer or a recorded delegate, durable evidence of that authority's explicit
+disposition, and the accepted candidate SHA. Moving it to `Closed` requires the
+same for the reviewed closure candidate. An explicit decision may be recorded;
+it may not be supplied or inferred. An independent reviewer reads the exact
+candidate before either transition, and the transition itself changes only the
+governance row, the disposition it names, and the derived status blocks.
 
 The exact skeletons are below. Neither file has an H1 because the filename and
 register own identity. Replace `<name>` with the registered milestone name.
@@ -260,9 +239,9 @@ Technical depth: [Milestone mechanics](<name>-technical.md#technical-depth).
 <a id="concept-plan-outcomes"></a>
 ### Outcomes
 
-| # | Outcome | Evidence class | Gate selector |
+| # | Outcome | Evidence class | Verification |
 | --- | --- | --- | --- |
-| 1 | <observable outcome> | <required evidence> | <exact selector> |
+| 1 | <observable outcome> | <required evidence> | <exact test or command> |
 
 Technical depth: [Evidence obligations and mapping](<name>-technical.md#technical-plan-evidence).
 
@@ -373,185 +352,69 @@ Concept: [Milestone scope](<name>.md#concept-plan-scope).
 <!-- loopex:plan-technical-envelope:end -->
 ```
 
-Both marked normative envelopes are bound to the accepted candidate SHA.
-Change either meaning only through an accepted amendment. Workstreams,
-progress, resolved outcome state, and evidence links stay outside them and may
-be updated only when they conform to both envelopes and the locked gate.
-Structural validation checks presence and byte identity; independent review
-decides whether the pair is clear, consistent, and adequate. A plan amendment is
-declared by the next consecutively numbered visible Amendment section in
-physical document order. Its candidate may change the accepted gate and either
-envelope while retaining the prior Acceptance row and lifecycle state; this
-intentionally fails current binding
-until an independent exact-SHA review and explicit maintainer acceptance. A
-separate administrative transition then rebinds Acceptance to that candidate
-and its new digests.
+Both marked normative envelopes record what the maintainer accepted: purpose,
+outcomes, scope, and the constraints the work runs under. Workstreams, progress,
+resolved outcome state, and evidence links stay outside them and are updated as
+the work proceeds. Changing an accepted purpose, outcome, or scope is a new
+maintainer decision, recorded in the plan where the change lands; independent
+review decides whether the pair is clear, consistent, and adequate.
 
-That amendment is one generic two-revision, direct one-parent transaction. `A`
-is the first revision to advance the generation. The strict transaction is
-versioned by one visible `<a id="amendment-transaction-v1"></a>` gate marker:
-closed pre-v1 amendment history remains valid, and every active or future
-amended gate must carry the marker and obey v1 from its first marked proposal.
-At proposal `A`, exact binding
-validation, bootstrap, and any inherited gate that invokes them fail only
-because the retained Acceptance row still names the prior bytes. Run every
-binding-independent check and run the amended milestone gate directly at `A`,
-where it must report the truthful product state the amendment declares. After
-an exact-SHA review and explicit acceptance of `A`, its immediate-child
-administrative transition `R` rebinds Acceptance to exact `A`, preserves the
-lifecycle state, adds one new amendment-specific authority-disposition anchor to
-an existing durable document where that anchor was absent at `A`, and updates
-only conforming derived status blocks.
-It may not reuse, complete, or edit an earlier disposition. No commit may
-intervene, overlap `R` with another proposal, or begin a later amendment before
-`R` settles this one. At `R`, binding validation, bootstrap, and all inherited
-required gates must pass, and the amended milestone gate must reproduce the same
-product state as at `A`. The exact `A` to `R` review proves that no envelope, gate, portable
-enforcement, or product byte changed. Evidence always names the SHA where it
-ran; green results from `R` are neither claims about `A` nor substitutes for
-later same-source product-candidate evidence. Only `R` may integrate.
+Evidence links live in the Concept plan's Progress and Evidence table, and the
+Outcomes rows name how each outcome is verified. Do not add an evidence sidecar
+beside plans: every flat `docs/plans/*.md` file is interpreted as a Concept
+plan, a Technical depth plan, a historical gate, or this index. Architecture
+decisions live flat and numbered in [docs/adr/](../adr/); the living
+implementation design belongs in the paired `docs/developer/architecture.md`
+and `docs/developer/architecture-technical.md`.
 
-Reachable history admits only a strictly later amendment
-generation whose candidate lineage contains the exact prior accepted chain;
-same-generation edits, higher-numbered sibling forks, interposed or overlapping
-transactions, lifecycle changes during A-to-R, rollback, divergent merges, and
-any Closure rewrite fail closed.
-
-That transaction cannot amend a `Closed` plan. A Closed plan's Closure row binds
-the same gate digest its Acceptance row binds, so rebinding Acceptance alone
-leaves Closure naming bytes that no longer exist, and the plan never returns to a
-valid state. Amending a Closed milestone's gate uses the additive transaction
-marked `<a id="amendment-transaction-v2"></a>`. The two markers are not
-successive versions of one rule and do not exclude each other: v1 governs
-amending a gate while its plan is Accepted, v2 governs adding a generation
-after it is Closed, and a gate that lawfully used both carries both, at most
-one marker of each kind. Both authority rows stay
-byte-immutable — they record what was accepted, and what was reviewed and closed
-— and the plan gains one append-only table outside both envelopes:
-
-```markdown
-## Gate Generations
-
-| Generation | Authority | Authority evidence | Bound bytes |
-| --- | --- | --- | --- |
-| 7 | — | — | gate `sha256:<64-hex>` |
-```
-
-At `R` that row becomes:
-
-```markdown
-| 7 | Maintainer | [disposition](../developer/agent-context-map.md#disposition-m1-generation-7) | candidate `<40-hex>`; gate `sha256:<64-hex>` |
-```
-
-Proposal `A` is one atomic revision carrying the amended gate, that gate's next
-consecutively numbered amendment section, its new row with an empty authority,
-evidence, and candidate, and every bound artifact the amendment rebinds.
-Splitting the artifact change from the generation row across two revisions
-invalidates history permanently, because each reachable revision is judged
-against the generation current at that revision. The row carries its gate digest
-at `A` but not its candidate, for the same reason v1 needs two revisions: a
-commit cannot name its own hash. A pending row means the current gate binds bytes
-no authority has accepted, so binding validation, bootstrap, and every inherited
-gate that invokes them are red at `A`, exactly as they are at a v1 proposal.
-After exact-SHA review and explicit acceptance,
-`R` completes that row's authority, evidence, and the candidate it binds, which
-is exact `A`. The evidence cell is one new amendment-specific anchor in an
-existing durable document, written as a local link carrying that fragment; it did
-not exist at `A`, appears exactly once at `R`, and never reuses or edits an
-earlier disposition. A fragmentless pointer is refused. The table's highest
-generation always equals the gate's amendment count, and only a `Closed` plan may
-carry one.
-Current artifacts are validated against the latest accepted generation and
-historical revisions against the generation current there, so no Closed milestone
-is exempt and no earlier generation stops governing the revisions it covered. A
-generation adds no scope, changes no outcome, and reopens no lifecycle state;
-anything needing those is a new milestone.
-
-Evidence links live in the Concept plan's Progress and Evidence table or in
-gate-defined artifacts; the locked Outcomes rows name their evidence class and
-selector. Do not add an evidence sidecar beside plans: every flat
-`docs/plans/*.md` file is interpreted as a Concept plan, Technical depth plan,
-gate, or this index. Architecture decisions
-live flat and numbered in [docs/adr/](../adr/); the living implementation design
-belongs in the paired `docs/developer/architecture.md` and
-`docs/developer/architecture-technical.md`.
-
-Every active and future gate includes this exact ordered documentation table.
-The disposition cell names one or more exact canonical repository-relative
-POSIX Markdown paths separated by comma and space; absolute, dotted, traversing,
-empty-component, backslash, control-byte, case-colliding, and
-file/ancestor-conflicting spellings are invalid. The table is one visibly
-governed contiguous structure; fenced, commented, fragmented, or malformed-list
-content does not count. The first four rows may use `N/A — <reason>` only when
-the accepted gate makes that absence an explicit maintainer-approved limitation.
-The final three rows never use `N/A`. Closed M0 predates this rule and is the
-sole migration exception.
-
-```markdown
-## Documentation Obligations
-
-| Category | Required closure disposition |
-| --- | --- |
-| Operator-facing documentation | <exact `docs/operator/` paths, excluding its README, or explicit N/A> |
-| Operator README | `docs/operator/README.md` or explicit N/A |
-| Developer-facing documentation | <exact `docs/developer/` paths, excluding its README, or explicit N/A> |
-| Developer README | `docs/developer/README.md` or explicit N/A |
-| Documentation README | `docs/README.md` |
-| Root README | `README.md` |
-| Changelog | `CHANGELOG.md` |
-```
+A closure candidate also updates the documentation its milestone changed:
+`CHANGELOG.md`, the root `README.md`, this register, the affected `docs/`
+indexes, and any operator or developer guidance the work made wrong.
+Documentation drift blocks closure like any other unmet outcome.
 
 ## How a Milestone Runs
 
-A gate is the executable definition of done, written before implementation and
-proved to fail for the declared missing behavior.
+Four steps, defined in [AGENTS.md](../../AGENTS.md#milestones-and-gates).
 
-1. **Open** — write the Concept plan, Technical depth plan, and red gate together
-   on a branch. The unaccepted red tree does not merge to `main`. Normally every
-   inherited gate is green. Once the current delivery milestone's accepted
-   governance checkpoint is integrated, one generic successor may instead Open
-   as a planning-only lookahead: Closed gates stay green, the current gate's
-   exact accepted red and the successor's distinct red are proved separately,
-   the predecessor remains `Accepted` in that branch, and no second lookahead is
-   allowed.
-2. **Accepted** — the recorded acceptance authority accepts both normative
-   envelopes and the gate's canonical UTF-8/LF text; the Concept plan's
-   acceptance record binds authority evidence, candidate SHA, both envelope
-   digests, and gate digest before the register moves to `Accepted`. After an
-   exact transition review and explicit protected-branch approval, this
-   governance checkpoint may integrate to `main` with no milestone product
-   implementation bytes, even though its exact accepted opening gate is red.
-3. **In progress** — implementation turns the locked gate green.
-4. **In review** — an independent reviewer examines the exact candidate SHA;
-   unresolved blocking findings block closure.
-5. **Closed** — every outcome is resolved, the locked gate is green, review is
-   clear, required demonstrations are complete, and the recorded closing
-   authority closes it; the closure record binds that disposition, reviewed
-   candidate SHA, both envelope digests, and gate digest before the register
-   moves to `Closed`. Product bytes integrate only through this separately
-   approved closure transition.
+1. **Agree** — write the Concept plan and Technical depth plan together on a
+   branch. They name purpose, outcomes, scope, the key design decisions, and how
+   each outcome will be verified. The maintainer accepts them and the register
+   moves to `Accepted`.
+2. **Develop** — implement on the milestone branch, running focused tests while
+   editing and `bash scripts/check.sh` before every push. Build the first
+   integrated workflow early, then add boundary and failure cases as
+   implementation reaches them. The register moves to `In progress`.
+3. **Close** — every outcome maps to tests, retained evidence, or a
+   demonstration. Run `bash scripts/check.sh` on each supported platform and
+   `bash scripts/check-release.sh` once, from the exact candidate. An
+   independent reviewer reads that candidate while the register is `In review`;
+   unresolved blocking findings block closure. The maintainer closes it, the
+   closure record names that disposition and the reviewed candidate, and the
+   register moves to `Closed`.
+4. **Release** — publication, tags, and packages are separate maintainer
+   decisions that reuse the closure evidence when the source is unchanged.
 
-The one Open successor cannot be accepted, integrated, or implemented before
-the current delivery milestone is Closed and integrated. It then absorbs that
-exact product base, re-proves all inherited gates green and its own distinct red,
-and receives a fresh exact-SHA review before acceptance. The current milestone
-remains the sole product implementation authority throughout the overlap.
+Product bytes integrate only through the approved closure merge. One `Open`
+planning candidate may be written while a delivery milestone is still running:
+it is planning only, it cannot be accepted, integrated, or implemented before
+that milestone is Closed, and the delivery milestone stays the sole
+implementation authority throughout the overlap.
 
-A retry is diagnostic, not a pass. A failure that disappears is a blocking
-flake until fixed or explicitly dispositioned.
+A retry is diagnostic, not a pass. A same-revision failure that disappears on
+retry is a flake to fix, not a pass.
 
 ## What a Plan Contains
 
-A candidate may expose unresolved ADR prerequisites so the maintainer can
-review the whole decision boundary. Every implementation-blocking prerequisite
-must be accepted before the plan pair and gate are accepted or implementation
-begins. The skeletons above are complete; do not add a third normative plan
-surface. Progress and Evidence has exactly one uniquely numbered row for every
-normative Outcome and no other rows. Its states are `Open`, `Proved`, `Accepted
-limitation`, or `Accepted deferral`; the latter two require disposition evidence.
-Every row remains `Open` while the register state is Open, so a planning
-lookahead cannot claim product progress. Nothing closes while any row remains
-`Open`, either companion is missing, or the pair conflicts.
+A plan may expose unresolved ADR prerequisites so the maintainer can review the
+whole decision boundary. Every implementation-blocking prerequisite must be
+accepted before the plan pair is accepted or implementation begins. The
+skeletons above are complete: do not add a third normative plan surface, and do
+not add a gate file. Progress and Evidence has exactly one uniquely numbered row
+for every normative Outcome and no other rows. Its states are `Open`, `Proved`,
+`Accepted limitation`, or `Accepted deferral`; the latter two require
+disposition evidence. Every row remains `Open` while the register state is Open,
+so a planning candidate cannot claim product progress. Nothing closes while any
+row remains `Open`, either companion is missing, or the pair conflicts.
 
 ## Directing the Work
 
@@ -572,23 +435,24 @@ changes nothing about how the work is directed.
 | An explanation, diagnosis, or review | Findings and a recommendation | Before any edit |
 | A proposal for an unsettled decision | Options, evidence, and a recommendation | Before dependent work begins |
 | Dispositioning a named ADR or plan | Your explicit decision is recorded against the exact candidate bytes | A disposition is recorded, never inferred |
-| Opening a named milestone | Concept plan, Technical depth plan, and red gate written together on a branch | Acceptance by the recorded authority |
-| Completing an accepted milestone | Implementation inside the accepted envelopes until the locked gate is green | Independent review |
-| Closing a reviewed milestone | A closure candidate is assembled from evidence, review, and demonstrations | Closure by the recorded authority |
+| Opening a named milestone | Concept plan and Technical depth plan written together on a branch | Acceptance by the maintainer |
+| Completing an accepted milestone | Implementation inside the accepted plan pair until every outcome is proved and the checks are green | Independent review |
+| Closing a reviewed milestone | A closure candidate is assembled from evidence, review, and demonstrations | Closure by the maintainer |
 | Integrating accepted governance | Merge the reviewed governance checkpoint without milestone product bytes; retain the delivery branch | Your explicit protected-branch approval |
 | Integrating closed product work | Merge, push, and branch cleanup | Your explicit protected-branch approval |
 
 Opening and closing a milestone are the two rows the maintainer invokes
-directly, because no actor may open or close its own gate. Both clients require
-that invocation to be explicit; the current per-client keystrokes are recorded
-in the
+directly, because no actor may accept or close its own work. Both clients
+require that invocation to be explicit; the current per-client keystrokes are
+recorded in the
 [context map](../developer/agent-context-map.md). Every other row is ordinary
 language.
 
-Some things stop regardless of how a request is phrased: self-acceptance, gate
-weakening, evidence waiver, scope deferral, a protected-branch merge, release
-publication, and any unrecorded ADR-class decision. So does a new decision about
-ownership, transactions, trust, public contracts, persistent schema, a major
+Some things stop regardless of how a request is phrased: self-acceptance,
+dropping a required check, evidence waiver, scope deferral, a protected-branch
+merge, release publication, and any unrecorded ADR-class decision. So does a new
+decision about ownership, transactions, trust, public contracts, persistent
+schema, a major
 dependency, the runtime floor, migration, or packaging — asking to complete a
 milestone does not pre-authorize choosing a database.
 
@@ -601,9 +465,8 @@ The Current Status capsule at the top of this file names the exact next
 decision; it is not repeated here, because a second copy would drift.
 
 **After a milestone opens.** The last four rows become live and the lifecycle
-repeats: open, accept, complete, review, close. After its governance checkpoint
-is integrated, one anticipated successor may be opened for planning without
-widening product authority.
+repeats: agree, develop, review, close. One anticipated successor may be opened
+for planning alongside it without widening product authority.
 
 **After M0 closes.** None of this changes. The verbs, their authority, and their
 stopping points are independent of the toolchain underneath. M0 replaces the
