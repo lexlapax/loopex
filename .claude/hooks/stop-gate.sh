@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Stop hook: fast feedback only. Repository commands own full gates; hosted CI
+# Stop hook: fast feedback only. Repository commands own the full checks; hosted CI
 # may mirror them and retain evidence. Stop must never take minutes.
 set -euo pipefail
 cd "${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel)}"
@@ -12,7 +12,7 @@ if [ -f mix.exs ] && command -v mix >/dev/null 2>&1; then
   fi
 fi
 .claude/hooks/deps-budget.sh || fail=2
-# Repository-owned seed check; subsecond today. Keep slow gates in repository
+# Repository-owned seed check; subsecond today. Keep slow checks in repository
 # commands rather than letting Stop grow slow.
 if ! bootstrap_err="$(scripts/check-agent-bootstrap.sh 2>&1 >/dev/null)"; then
   echo "Stop blocked: ${bootstrap_err:-scripts/check-agent-bootstrap.sh failed}" >&2

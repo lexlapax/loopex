@@ -217,7 +217,7 @@ repository's checks are two commands, described in
   formatting, the structure checks and the documentation check for a
   prose-only change and skips the suite, and `--select` — what CI runs —
   chooses that mode on its own when every changed path is Markdown outside
-  `apps/`.
+  `apps/`, and the full check otherwise, an empty diff as on `main` included.
 - `bash scripts/check-release.sh` — the slow check: the real-provider
   workflows, the independent Node client, the fresh-source archive build, and
   the long-duration bound proofs the fast check excludes. It needs a provider

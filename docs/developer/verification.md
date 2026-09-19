@@ -15,9 +15,11 @@ The design goal set by the maintainer is that verification takes a small share
 of development time, on the order of one fifth, while every real product
 guarantee still has a check that would fail if it were broken. The measured
 baseline at M4 closure is in the technical companion; the short version is
-that the credential-free suite takes fourteen minutes, five minutes of which
-is two tests waiting out a sixty-second ceiling, and that the whole suite can
-run in about five minutes of wall-clock time with no test changed at all.
+that the credential-free suite took fourteen minutes, two minutes of which
+were two tests waiting out a sixty-second ceiling and about three more were
+forty tests waiting on shorter real-time ceilings, and that the whole suite
+could run in about five minutes of wall-clock time with no test changed at
+all.
 
 <a id="concept-verification-stages"></a>
 ### Three stages, one question each

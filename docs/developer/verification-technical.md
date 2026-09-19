@@ -5,8 +5,9 @@
 
 Concept: [Verification](verification.md#concept).
 
-Measurements below were taken at `main` after M4 closure (`d609b98` for the
-check runs, `dabca37` for the slowest-test run), on the Mac (Darwin arm64,
+The closure measurements below were taken at `main` after M4 closure
+(`d609b98` for the check runs, `dabca37` for the slowest-test run); the later
+sections name the revision each of their numbers was measured at. Hosts: the Mac (Darwin arm64,
 Elixir 1.20.3 / OTP 29.0.5, Homebrew) and on the Linux host serenity (x86_64,
 same pair via mise). Logs are retained by the maintainer.
 
@@ -18,7 +19,7 @@ Concept: [Three stages](verification.md#concept-verification-stages).
 | Stage | Command | Measured |
 | --- | --- | --- |
 | Change, while editing | `mix test <path>`, `mix format`, `mix compile --warnings-as-errors`; the client Stop hook runs format, the dependency budget and the adapter check | Seconds |
-| Change, before merge | `bash scripts/check.sh --select` in hosted CI on the branch; a read-only review of `git diff main..<candidate>` | 12 min 54 s and 12 min 38 s on the hosted runner at the final M4 candidates; on the Mac 346 s cold and 224 s warm with ten applications at once, against 870 s Mac and 809 s Linux in the sequential shape it replaced; 18 s before the suite starts |
+| Change, before merge | `bash scripts/check.sh --select` in hosted CI on the branch; a read-only review of `git diff main..<candidate>` | 12 min 54 s and 12 min 38 s on the hosted runner at the final M4 candidates; on the Mac 287 s at the final candidate `d738ec7` with a warm build and ten applications at once (346 s at `031554c`, before the bound and concurrency work), against 870 s Mac and 809 s Linux in the sequential shape it replaced; 18 s before the suite starts |
 | Close | `bash scripts/check.sh` under the floor pair (`mise exec erlang@27.3.4 elixir@1.18.5-otp-27 -- bash scripts/check.sh`), `bash scripts/check-release.sh` once on the current pair | Release check: 149–163 s on Linux, 12 tests |
 | Release | None new; the tag names the integrated closure commit | — |
 

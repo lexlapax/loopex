@@ -114,8 +114,8 @@ were released, is:
 | --- | --- | --- | --- |
 | Efficient | `gpt-5.6-luna`, low or medium effort | `haiku` (Claude Haiku 4.5); the model accepts no effort setting, so the class alone routes it | Objective, repeatable work |
 | Balanced | `gpt-5.6-terra`, medium or high effort | `sonnet` (Claude Sonnet 5), medium or high effort | Bounded implementation and integration |
-| Deep | `gpt-5.6-sol`, high effort | `opus` (Claude Opus 5), high effort | Architecture, durability, security, gates, rejoin decisions, and independent review |
-| Deepest, separately verified | `gpt-6-astra`, high effort | `fable` (Claude Fable 5.1), high effort | Exact-SHA acceptance or closure review, gate design, and decisions with conflicting evidence |
+| Deep | `gpt-5.6-sol`, high effort | `opus` (Claude Opus 5), high effort | Architecture, durability, security, required checks, rejoin decisions, and independent review |
+| Deepest, separately verified | `gpt-6-astra`, high effort | `fable` (Claude Fable 5.1), high effort | Exact-SHA acceptance or closure review, verification design, and decisions with conflicting evidence |
 
 The caller selects a supported mapping before invocation and verifies the
 effective model and effort during or after invocation when the client exposes

@@ -9,7 +9,7 @@
 set -euo pipefail
 cd "${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel)}"
 
-# No toolchain means no feedback, not a block: enforcement lives in the gate.
+# No toolchain means no feedback, not a block: enforcement lives in the repository checks.
 command -v mix >/dev/null 2>&1 || exit 0
 [ -f mix.exs ] || exit 0
 

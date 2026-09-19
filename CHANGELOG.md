@@ -115,10 +115,10 @@ pull request, checks a pull request out at its own head with full history, sets
 up OTP 29.0.5 with Elixir 1.20.3, runs `mix deps.get` and then
 `bash scripts/check.sh --select` with `LOOPEX_CHECK_ALONE=loopex_llm_reqllm`,
 and cancels a superseded run through a concurrency group per workflow and ref.
-The adapter check admits only those three run steps. Measured, the whole check
-took about thirteen minutes on the four-core hosted runner — roughly twice the
-Mac's pace — against 346 s cold and 224 s warm on the Mac with ten applications
-at once. Nothing merges to `main` without a green
+The adapter check admits the dependency fetch and the two forms of the check
+as the only run steps. Measured, the whole check took about thirteen minutes
+on the four-core hosted runner — roughly twice the Mac's pace — against 287 s
+on the Mac with ten applications at once at the final candidate. Nothing merges to `main` without a green
 CI run on the candidate and an independent review; feature branches live only
 while their pull request is open, and `main`, `m4` and `m5` are the durable
 branches.

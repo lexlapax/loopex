@@ -187,7 +187,7 @@ transaction is needed for the approved assertion change.
   | Efficient | `gpt-5.6-luna` | `haiku` (Claude Haiku 4.5) | Codex: low for scans, extraction and log triage; medium when completeness needs judgment. Claude Haiku 4.5 accepts no effort setting, so the class alone routes it |
   | Balanced | `gpt-5.6-terra` | `sonnet` (Claude Sonnet 5) | medium by default; high for multi-boundary integration or debugging |
   | Deep | `gpt-5.6-sol` | `opus` (Claude Opus 5) | high; xhigh for long-running agentic implementation or a rejoin audit |
-  | Deepest, separately verified | `gpt-6-astra` | `fable` (Claude Fable 5.1) | high; max only where correctness outweighs cost, such as exact-SHA acceptance or closure review, gate design, or an ADR decision with conflicting evidence |
+  | Deepest, separately verified | `gpt-6-astra` | `fable` (Claude Fable 5.1) | high; max only where correctness outweighs cost, such as exact-SHA acceptance or closure review, verification design, or an ADR decision with conflicting evidence |
 
   The adaptive rules that go with the table: effort is the first lever and
   model the second, so raise effort within the current class before
