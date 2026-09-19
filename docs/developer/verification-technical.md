@@ -27,11 +27,15 @@ Concept: [Three stages](verification.md#concept-verification-stages).
 messages, hygiene, `mix loopex.status` at 3 s), dependency budget 2–3 s, one
 version 0–1 s, documentation ordering 1 s, then `mix test`.
 
-Hosted CI: `.github/workflows/agent-bootstrap.yml` runs `bash scripts/check.sh`
-after an Elixir/OTP setup step with the current pair and `mix deps.get`, on
-every push to `main` and every pull request, checking a pull request out at
-its own head. It is a thin wrapper over the repository command, and the
-adapter check pins its shape. It sets `LOOPEX_CHECK_ALONE=loopex_llm_reqllm`:
+Hosted CI: `.github/workflows/agent-bootstrap.yml` runs
+`bash scripts/check.sh --select` after an Elixir/OTP setup step with the
+current pair and `mix deps.get`, on every push to `main` and every pull
+request, checking a pull request out at its own head. `--select` reads the
+diff against the integration base: a pull request whose every changed path is
+Markdown runs the documentation mode, anything else — and a push to `main`,
+whose diff against itself is empty — runs the full check. It is a thin
+wrapper over the repository command, and the adapter check asserts only that
+it runs that command. It sets `LOOPEX_CHECK_ALONE=loopex_llm_reqllm`:
 the runner has four cores and two applications share them, and the provider
 suite's child VMs, booting under the product's 10 s deadline, starved behind
 the other application's compiles (`core_only`, `foundation_workflow`) until a
