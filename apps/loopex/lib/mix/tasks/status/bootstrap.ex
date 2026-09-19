@@ -91,7 +91,9 @@ defmodule Loopex.Checks.Bootstrap do
     "          otp-version: \"29.0.5\"",
     "          elixir-version: \"1.20.3\"",
     "      - run: mix deps.get",
-    "      - run: bash scripts/check.sh"
+    "      - run: bash scripts/check.sh",
+    "        env:",
+    "          LOOPEX_CHECK_ALONE: loopex_llm_reqllm"
   ]
 
   @noncanonical [

@@ -61,7 +61,7 @@ kill_tree() {
 }
 
 suite() {
-  local cores jobs logs pid status=0 app remaining
+  local cores jobs logs status=0 app
   cores=$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2)
   jobs=${LOOPEX_CHECK_JOBS:-$((cores / 2))}
   [ "$jobs" -ge 1 ] || jobs=1
@@ -75,30 +75,57 @@ suite() {
     [ -d "$app/test" ] || continue
     case " ${ordered[*]} " in *" $app "*) ;; *) ordered+=("$app") ;; esac
   done
-  printf 'check: suite %s applications, %s at a time\n' "${#ordered[@]}" "$jobs"
+  # An application named in LOOPEX_CHECK_ALONE runs with the box to itself
+  # before the rest share it. The provider suite boots a real child VM per
+  # case under the product's ten-second deadline; on a four-core hosted runner
+  # that boot starved behind another application's compile and crossed the
+  # deadline, which is the runner measuring itself, not the product. The knob
+  # is empty by default so a developer box keeps the fully parallel run.
+  local alone=() shared=()
+  for app in "${ordered[@]}"; do
+    case " ${LOOPEX_CHECK_ALONE:-} " in
+      *" ${app#apps/} "*) alone+=("$app") ;;
+      *) shared+=("$app") ;;
+    esac
+  done
+  printf 'check: suite %s applications, %s alone, then %s at a time\n' \
+    "${#ordered[@]}" "${#alone[@]}" "$jobs"
 
-  # An interruption must reach every VM beneath the runner, not only xargs, so
-  # the trap walks the whole process tree under it. The heartbeat sleeps in the
-  # background and waits on it, because Bash runs a trap only once the
-  # foreground command returns, and thirty seconds is too long to keep VMs
-  # running after a Ctrl-C.
-  printf '%s\n' "${ordered[@]}" | xargs -P "$jobs" -I{} bash -c 'run_app "$1"' _ {} &
+  if [ "${#alone[@]}" -gt 0 ]; then
+    phase 1 "${alone[@]}" || status=$?
+  fi
+  if [ "${#shared[@]}" -gt 0 ]; then
+    phase "$jobs" "${shared[@]}" || status=$?
+  fi
+  rm -rf "$logs"
+  return "$status"
+}
+
+# One scheduling phase: the named applications, at most $1 at a time. An
+# interruption must reach every VM beneath the runner, not only xargs, so the
+# trap walks the whole process tree under it. The heartbeat sleeps in the
+# background and waits on it, because Bash runs a trap only once the
+# foreground command returns, and thirty seconds is too long to keep VMs
+# running after a Ctrl-C.
+phase() {
+  local jobs=$1 pid status=0 remaining app
+  shift
+  printf '%s\n' "$@" | xargs -P "$jobs" -I{} bash -c 'run_app "$1"' _ {} &
   pid=$!
-  trap 'trap - INT TERM; kill_tree "$pid"; wait "$pid" 2>/dev/null; rm -rf "$logs"; printf "check: interrupted\n"; exit 130' INT TERM
+  trap 'trap - INT TERM; kill_tree "$pid"; wait "$pid" 2>/dev/null; rm -rf "$LOOPEX_CHECK_LOGS"; printf "check: interrupted\n"; exit 130' INT TERM
   while kill -0 "$pid" 2>/dev/null; do
     sleep 30 &
     wait $! 2>/dev/null || true
     if kill -0 "$pid" 2>/dev/null; then
       remaining=""
-      for app in "${ordered[@]}"; do
-        [ -e "$logs/${app#apps/}.done" ] || remaining="$remaining ${app#apps/}"
+      for app in "$@"; do
+        [ -e "$LOOPEX_CHECK_LOGS/${app#apps/}.done" ] || remaining="$remaining ${app#apps/}"
       done
       printf 'check: suite running total=%ss, still running:%s\n' "$((SECONDS - started))" "$remaining"
     fi
   done
   wait "$pid" || status=$?
   trap - INT TERM
-  rm -rf "$logs"
   return "$status"
 }
 

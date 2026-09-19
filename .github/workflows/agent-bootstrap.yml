@@ -22,4 +22,9 @@ jobs:
           otp-version: "29.0.5"
           elixir-version: "1.20.3"
       - run: mix deps.get
+      # The provider suite runs with the runner to itself: its child VMs boot
+      # under the product's deadline, and on this four-core runner that boot
+      # starved behind another application's compile.
       - run: bash scripts/check.sh
+        env:
+          LOOPEX_CHECK_ALONE: loopex_llm_reqllm

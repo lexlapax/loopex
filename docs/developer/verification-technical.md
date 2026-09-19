@@ -31,7 +31,14 @@ Hosted CI: `.github/workflows/agent-bootstrap.yml` runs `bash scripts/check.sh`
 after an Elixir/OTP setup step with the current pair and `mix deps.get`, on
 every push to `main` and every pull request, checking a pull request out at
 its own head. It is a thin wrapper over the repository command, and the
-adapter check pins its shape.
+adapter check pins its shape. It sets `LOOPEX_CHECK_ALONE=loopex_llm_reqllm`:
+the runner has four cores and two applications share them, and the provider
+suite's child VMs, booting under the product's 10 s deadline, starved behind
+the other application's compiles (`core_only`, `foundation_workflow`) until a
+boot crossed the deadline (run at c38fd18). With the box to itself the boot is
+seconds. The runner is also slow and uneven: compilation there took 38–59 s
+against 1 s warm on the Mac, and the same `loopex_cli` suite took 118 s at
+noon and 155 s in the evening.
 
 Evidence retention: a closure keeps one page under `docs/evidence/` naming the
 candidate, each run's platform, toolchain, result and measured duration, as

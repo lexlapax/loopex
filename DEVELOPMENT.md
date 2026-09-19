@@ -57,7 +57,11 @@ tree: paired documents, directory indexes, local links, and the status
 register), `mix loopex.docs_check`, `mix loopex.deps_budget`,
 `mix loopex.version_train`, the test build, and the credential-free suite, one
 application per VM with several at once (`LOOPEX_CHECK_JOBS` bounds how many;
-the default is half the cores). `bash scripts/check.sh --docs` stops after the
+the default is half the cores; `LOOPEX_CHECK_ALONE` names applications that
+run one at a time before the rest share the box, which hosted CI sets to
+`loopex_llm_reqllm` because its child VMs boot under the product's deadline
+and a four-core runner starved that boot behind another application's
+compile). `bash scripts/check.sh --docs` stops after the
 documentation step, for a change that touches only prose. It needs no
 credential, network access, or coding-agent client. It runs once per
 integration candidate: hosted CI runs the same command on every push and pull
