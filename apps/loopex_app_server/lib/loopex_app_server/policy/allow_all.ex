@@ -79,4 +79,15 @@ defmodule Loopex.AppServer.Policy.AllowAll do
         table
     end
   end
+
+  @doc false
+  @spec reset_notice_for_test() :: :ok
+  def reset_notice_for_test do
+    case :ets.whereis(@notice_table) do
+      :undefined -> :ok
+      table -> :ets.delete(table, :announced)
+    end
+
+    :ok
+  end
 end
