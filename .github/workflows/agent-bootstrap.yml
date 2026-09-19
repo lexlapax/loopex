@@ -1,18 +1,25 @@
 name: agent-bootstrap
-# Optional hosted mirror only: the repository-owned aggregate command defines
-# bootstrap green. Future product gates remain repository commands that any
-# hosted provider may invoke; this wrapper must not admit a red seed.
+# Hosted mirror of the repository fast check. The command defines the check;
+# this wrapper only supplies a runner, the current toolchain pair and the
+# dependencies, and runs it.
 on:
   push:
     branches: [main]
   pull_request:
-
 jobs:
-  seed-checks:
+  check:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
-          # The commit-message check needs history back to its policy baseline.
+          # A pull request is checked at its own head, not at the synthetic merge
+          # commit GitHub would otherwise check out, whose generated title the
+          # commit-message check rejects. Full history reaches the check's baseline.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
-      - run: bash scripts/check-bootstrap.sh
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: "29.0.5"
+          elixir-version: "1.20.3"
+      - run: mix deps.get
+      - run: bash scripts/check.sh

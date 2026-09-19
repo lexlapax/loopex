@@ -79,13 +79,19 @@ defmodule Loopex.Checks.Bootstrap do
     "    branches: [main]",
     "  pull_request:",
     "jobs:",
-    "  seed-checks:",
+    "  check:",
     "    runs-on: ubuntu-latest",
     "    steps:",
     "      - uses: actions/checkout@v4",
     "        with:",
+    "          ref: \${{ github.event.pull_request.head.sha || github.sha }}",
     "          fetch-depth: 0",
-    "      - run: bash scripts/check-bootstrap.sh"
+    "      - uses: erlef/setup-beam@v1",
+    "        with:",
+    "          otp-version: \"29.0.5\"",
+    "          elixir-version: \"1.20.3\"",
+    "      - run: mix deps.get",
+    "      - run: bash scripts/check.sh"
   ]
 
   @noncanonical [

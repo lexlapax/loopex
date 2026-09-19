@@ -20,12 +20,36 @@ started=$SECONDS
 printf 'check-release: candidate %s on %s %s\n' "$(git rev-parse HEAD)" "$(uname -s)" "$(uname -m)"
 # Each application runs in its own VM: a test that alters the environment or
 # global state then cannot reach the applications that run after it.
-for app in apps/*/; do
-  app=${app%/}
-  # An application with no tagged test is skipped: `mix test --only` treats
-  # running nothing as a failure, and here it is simply nothing to run.
-  grep -rqE '@(module)?tag :(real_provider|node_client)' "$app/test" || continue
-  printf 'check-release: %s\n' "${app#apps/}"
-  (cd "$app" && mix test --only real_provider --only node_client)
+# The applications that carry release tests, named rather than discovered so
+# that a tag refactor cannot drop one silently; each must execute at least one
+# test, because a run that executed nothing is not a pass. Each runs in its own
+# VM so no test can reach the applications after it.
+release_apps="loopex_app_server loopex_cli loopex_llm_reqllm loopex_protocol loopex_reference_client"
+logs=$(mktemp -d "${TMPDIR:-/tmp}/loopex-release.XXXXXX")
+trap 'rm -rf "$logs"' EXIT
+for app in $release_apps; do
+  printf 'check-release: %s\n' "$app"
+  set +e
+  (cd "apps/$app" && mix test --only real_provider --only node_client --include long_bound) 2>&1 | tee "$logs/$app.log"
+  status=${PIPESTATUS[0]}
+  set -e
+  [ "$status" -eq 0 ] || { printf 'check-release: %s RED\n' "$app" >&2; exit "$status"; }
+  grep -qE '^Result: [1-9][0-9]* passed|^[1-9][0-9]* tests?, 0 failures' "$logs/$app.log" ||
+    { printf 'check-release: %s executed no test\n' "$app" >&2; exit 1; }
+done
+
+# The long-duration bound proofs: cases whose claim is a real wait, tagged
+# long_bound and excluded from the fast check. They live in applications with
+# no other release test, so they get their own pass with the same guard.
+long_bound_apps="loopex loopex_executor_local"
+for app in $long_bound_apps; do
+  printf 'check-release: %s long-duration bounds\n' "$app"
+  set +e
+  (cd "apps/$app" && mix test --only long_bound) 2>&1 | tee "$logs/$app-long.log"
+  status=${PIPESTATUS[0]}
+  set -e
+  [ "$status" -eq 0 ] || { printf 'check-release: %s long-duration bounds RED\n' "$app" >&2; exit "$status"; }
+  grep -qE '^Result: [1-9][0-9]* passed|^[1-9][0-9]* tests?, 0 failures' "$logs/$app-long.log" ||
+    { printf 'check-release: %s executed no long-duration bound test\n' "$app" >&2; exit 1; }
 done
 printf 'check-release: PASS total=%ss\n' "$((SECONDS - started))"

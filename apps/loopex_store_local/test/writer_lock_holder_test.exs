@@ -212,7 +212,9 @@ defmodule Loopex.Store.Local.WriterLockHolderTest do
     do: "case \"$4\" in #{System.pid()}) exec /bin/ps \"$@\" ;; *) #{body} ;; esac"
 
   defp probe_script(body) do
-    file = Path.join(System.tmp_dir!(), "loopex-probe-#{System.unique_integer([:positive])}.sh")
+    file =
+      Path.join(System.tmp_dir!(), "loopex-writer-probe-#{System.unique_integer([:positive])}.sh")
+
     File.write!(file, "#!/bin/sh\n#{body}\n")
     File.chmod!(file, 0o755)
     on_exit(fn -> File.rm(file) end)
