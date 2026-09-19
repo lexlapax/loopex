@@ -539,10 +539,31 @@ exhaustive and every path that is not a well-formed allow ends in a denial:
 | callback raises, exits, or times out | `{:deny, :policy_unavailable}` |
 | any other return shape | `{:deny, :policy_unavailable}` |
 
-`defer` is declared and refused in M2: the interactive round trip it implies
-needs a durable interaction record, exact-response matching, expiry, and
-resume-after-restart evidence, none of which this milestone builds. Declaring it
-now means the shape a host returns will not change when that milestone arrives.
+That table is the one-shot projection, and it is still exact for `decide/2`: a
+caller that asks for a single verdict and has nowhere to put a question reads a
+`defer` as `{:deny, :interaction_unsupported}`.
+
+The round trip that a `defer` implies now exists beside it. M4 adds durable
+interactions under
+[ADR 0024](../adr/0024-durable-interaction-lifecycle-and-host-policy-authority.md#concept):
+a separately named interaction-aware evaluator, `Loopex.Policy.evaluate/2`,
+admits a validated deferred question, and the session coordinator commits it as
+durable session state, suspends the tool call without minting a grant or
+committing an effect intent, and re-enters the same host callback once an answer
+commits. The callback itself did not change — there is no second callback and no
+new arity, so a host that already returned `{:defer, request}` needs no edit —
+and a defer outside the admitted question family is `policy_unavailable` rather
+than a malformed interaction. The app server uses that path, which is what lets
+an operator answer a policy question from outside the runtime and after a
+restart.
+
+The lifecycle, the admitted question family and its bounds, the answer command,
+the resolution rules and the restart behavior are in
+[Runtime and embedding](runtime-and-embedding.md#technical-embedding-interactions);
+what a client sees over the wire is in
+[the app server protocol](app-server-protocol-technical.md#technical-protocol-methods),
+and what an operator does about a pending question is in
+[App server operations](../operator/app-server.md#concept).
 
 A decision context is bounded in every direction: an opaque `decision_ref` of at
 most 256 bytes that Loopex never parses, at most sixteen attributes with binary,
@@ -968,8 +989,8 @@ diagnostics are transient, are not fenced, and are never durable truth.
 ### Verification Entry Points
 
 - `mix test --exclude real_provider` — complete credential-free suite.
-- `mix loopex.deps_budget` — eight-application inventory, roles including
-  `:composition`, dependency budget, and direction.
+- `mix loopex.deps_budget` — ten-application inventory, roles including
+  `:composition`, the admitted external dependencies, and direction.
 - `mix loopex.core_only` — core has no adapter resolution or environment-held
   runtime state.
 - `mix loopex.docs_check` — compiled public documentation orders Concept before

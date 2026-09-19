@@ -79,36 +79,44 @@ for the host API. The exact M3 product source
 on the macOS floor pair and Linux; the [M3 plan](docs/plans/M3.md#concept-m3-final-qualification-f453545)
 records that evidence and the separate lifecycle decision.
 
-M4 is the active milestone. The maintainer accepted its plan pair and locked
-gate on 2026-09-14, and that governance-only checkpoint is integrated here
-with no M4 product bytes: the five prerequisite ADRs (0023, 0024, 0026,
-0028 and 0030) are accepted, the development floor is refreshed to Elixir
-1.18.5 with OTP 27.3.4 through gate generations of the closed milestones,
-the repository status checker learned to accept a first acceptance that
-completes such a shared-binding refresh, and the client model-use rules were
-rebuilt for the current Claude and OpenAI models. M4's outcome is an
-operator-usable foreground server and Node consumer over durable
-interactions and bounded artifact transfers, with runtime tracing and
-telemetry.
+M4 is the active milestone. Its plan pair and gate are accepted, its five
+prerequisite ADRs (0023, 0024, 0026, 0028 and 0030) are accepted, the
+development floor is refreshed to Elixir 1.18.5 with OTP 27.3.4, and its
+implementation is complete on branch `m4`. It is not closed: closure needs the
+final qualification, an independent review of the exact candidate, and the
+maintainer's own closure decision, and a green suite is not a closure.
 
-Implementation proceeds on branch `m4`. Two applications join the eight:
-`loopex_telemetry` at the edge, owning the only Loopex-attached telemetry
-handler, and `loopex_app_server` as a client, serving the experimental session
-protocol over one foreground process on standard input and output. Core admits
-one external dependency, the telemetry event dispatcher the dependency doctrine
-names. The independent consumer lives in [`clients/node`](clients/node/README.md)
+What M4 delivers is an operator-usable foreground server and an independent
+consumer over durable interactions and bounded artifact transfers, with runtime
+tracing and telemetry. Two applications join the eight: `loopex_telemetry` at
+the edge, owning the only Loopex-attached telemetry handler, and
+`loopex_app_server` as a client, serving the experimental session protocol over
+one foreground process on standard input and output. Core admits one external
+dependency, the telemetry event dispatcher the dependency doctrine names. A
+host policy can now answer a tool decision with a bounded question instead of a
+verdict; the runtime keeps that question as durable session state, so an
+operator can still answer it after the server process is gone, and the answer is
+evidence for a new host decision rather than an authorization. A caller holding
+an artifact reference can read it back in verified bounded chunks instead of
+fetching all of it.
+
+The independent consumer lives in [`clients/node`](clients/node/README.md)
 as plain JavaScript the pinned Node runs directly, with no build step, package
 manifest, lockfile or dependency; it drives a session end to end over the wire,
 selecting an admitted skill, answering the host policy's question, watching the
 authorization the host mints afterwards, and reading back a verified bounded
-transfer of what the tool produced. None of this is closed: the gate's own
-witnesses are still being written, and a green suite is not a closure. The
-planned `0.1.0` release is
-source-only and would receive an annotated `v0.1.0` tag on the exact `main`
-integration commit only after M4 implementation, independent closure review,
-explicit closure and separate release/tag authority. See
-the [M4 plan](docs/plans/M4.md#concept) for the accepted scope and its
-workstreams, and the [canonical register](docs/plans/README.md) for its
+transfer of what the tool produced.
+
+M4 also changes the source `VERSION` from `0.0.0` to `0.1.0` at its closure
+candidate. That is a source version and nothing more: accepted
+[ADR 0023](docs/adr/0023-experimental-public-session-protocol.md#concept) keeps
+it independent of the negotiated protocol generation, and it is not a tag, a
+package, a publication or a compatibility freeze. The source-only `v0.1.0` tag
+is applied to the exact `main` integration commit only after independent closure
+review, explicit closure, and separate release and tag authority; no release has
+happened. See the [M4 plan](docs/plans/M4.md#concept) for the accepted scope and
+its workstreams, [App server operations](docs/operator/app-server.md#concept)
+for driving it, and the [canonical register](docs/plans/README.md) for its
 current status.
 
 The repaired reference local executor requires `/bin/bash` for its internal

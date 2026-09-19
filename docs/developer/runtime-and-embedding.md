@@ -41,6 +41,34 @@ pack set. A skill changes model input and never grants a tool permission.
 
 Technical depth: [Resource snapshot and commands](#technical-embedding-resources).
 
+M4 adds two embedding contracts to the same facade and one more surface beside
+it. A host policy may now answer a tool decision with a question instead of a
+verdict: the runtime commits that question as durable session state, suspends
+the tool call, and asks the same policy again once an answer commits. An
+embedder that wants this supplies a policy identity at launch and handles one
+more command and one more family of events; an embedder that does not defer sees
+nothing change. Separately, a host holding an artifact reference can read the
+object back in bounded verified chunks instead of fetching all of it, where the
+composed artifact store offers that capability.
+
+The surface beside the facade is `loopex_app_server`, a foreground process that
+speaks the experimental session protocol over standard input and output. It is a
+peer client of the runtime, not a second runtime, and an embedder chooses
+between calling the facade in process and driving that server from another
+language. Its wire contract is documented in
+[the app server protocol pair](app-server-protocol.md#concept).
+
+Technical depth: [Durable interactions](#technical-embedding-interactions) and
+[bounded artifact transfers](#technical-embedding-transfers).
+
+The runtime also became observable from outside without editing it: a host
+starts a runtime-scoped trace session over named Loopex modules and consumes
+`:telemetry` spans at every port callback and coordinator transaction cut. Both
+are bounded, both redact content, and neither is authority or durable truth. The
+contract is the [observability pair](observability.md#concept), and the levels
+and events an operator turns on are in the
+[operator runbook](../operator/observability.md#concept).
+
 Operator workflow and failure handling: [Runtime operations](../operator/runtime.md#concept).
 Running a coding session: [Coding sessions](../operator/coding-sessions.md#concept).
 
@@ -50,26 +78,34 @@ Running a coding session: [Coding sessions](../operator/coding-sessions.md#conce
 ### Application and Dependency Shape
 
 M1 had six applications; M2 has eight, adding one `:composition` and one
-`:client`:
+`:client`; M4 has ten, adding one `:edge` and one more `:client`:
 
 | Application | Role | Production dependency direction |
 | --- | --- | --- |
 | `loopex_protocol` | contract | none |
-| `loopex` | core | protocol only |
+| `loopex` | core | protocol, plus the one admitted external package `:telemetry` |
 | `loopex_store_local` | Store edge | inward to core |
 | `loopex_llm_reqllm` | model edge | inward to core; the one locked ReqLLM dependency |
 | `loopex_executor_local` | executor edge | inward to core |
+| `loopex_telemetry` | telemetry edge | inward to core; `:telemetry` only |
 | `loopex_composition` | composition | core, protocol, and the three edges it composes; no external dependency |
 | `loopex_reference_client` | client | inward to core; concrete edges only in tests |
 | `loopex_cli` | client | core plus exactly one composition |
+| `loopex_app_server` | client | core, one composition, and the contract application whose schema it speaks |
 
 `:composition` exists because a wiring application needs exactly the direction
 an `:edge` may not have and a `:client` may not be depended on for. It is the
 one production role permitted to declare a dependency on the concrete edges it
 composes, it declares no external dependency in any environment, and it depends
 on no client and on no other composition. A `:client` may depend on at most one
-composition and never on another client. `mix loopex.deps_budget` enforces the
-inventory and every direction above.
+composition, at most one contract application, and never on another client; the
+contract edge exists so that the app server can name the schema it speaks in its
+own project file rather than reaching it through core. Core declares exactly one
+external package, `:telemetry`, pinned to `~> 1.3` and admitted by
+[ADR 0030](../adr/0030-observability-tracing-and-telemetry.md#concept); it
+attaches no handler of its own, and the only Loopex-attached handler lives in
+`loopex_telemetry`. `mix loopex.deps_budget` enforces the inventory, the pinned
+requirement, and every direction above.
 
 Core defines five boundary behaviours. M1's three — `Loopex.Store`,
 `Loopex.Model`, and `Loopex.Executor` — are joined by `Loopex.Policy`, the host
@@ -272,6 +308,171 @@ refetches or uses an edited workspace as the prior admission. See
 [ADR 0025](../adr/0025-resource-packs-and-skill-admission.md#concept) for the
 accepted format and [compatibility](compatibility-surfaces.md#concept) for the
 old-reader refusal and rollback boundary.
+
+<a id="technical-embedding-interactions"></a>
+### Durable Interactions
+
+Concept: [Runtime and embedding](#concept).
+
+A host that wants to be asked supplies two launch options together: `:policy`,
+the authority module it always supplied, and `:policy_identity`, a bounded
+`%{"id" => binary, "revision" => binary}` pair. The identity is required
+whenever a policy is named, because a retained question must be resumed by the
+policy that asked it; a launch that omits it returns
+`{:error, :policy_identity_required}` and a malformed one
+`{:error, :invalid_policy_identity}`. `LoopexComposition` supplies a default of
+the module's inspected name paired with `Loopex.version/0`, and defers to an
+explicit value, so an embedder whose build can change what a policy module does
+names its own revision.
+
+The callback is unchanged. `Loopex.Policy` still declares one `decide/1`, and
+ADR 0009 always declared `{:defer, request}` on it. What M4 adds is a second
+caller: `Loopex.Policy.evaluate/2`, which the session coordinator uses, admits a
+validated defer, while the inherited one-shot `Loopex.Policy.decide/2` still
+resolves one to `{:deny, :interaction_unsupported}`. A host cannot tell which
+caller it is answering, and a defer outside the admitted question family
+resolves as `policy_unavailable` rather than creating a malformed question.
+
+The admitted question family is exact, and `Loopex.Interaction.bounds/0` returns
+it as data so a host can check a question before offering it: `kind: :choice`;
+a non-empty UTF-8 `prompt` of at most 2,048 bytes; one to eight `choices`, each
+with a unique identifier of 1 to 64 bytes and a non-empty label of at most 256
+bytes; `expires_in_ms` between 1 and 600,000; and an optional bounded
+`decision_ref` of at most 256 bytes which is retained privately and never
+projected.
+
+The lifecycle is four transitions, each one journaled before anything observable
+follows from it:
+
+1. **Request.** A defer commits `interaction_requested_v1` and publishes
+   `interaction.requested` in the same transaction. The tool decision and the
+   run suspend: no grant is minted, no effect intent is committed, and no
+   executor process starts. The record binds the original bounded policy
+   request and its digest, the validated question and its digest, the policy
+   identity and revision, the creation instant, the effective expiry, and the
+   round.
+2. **Answer.** `Loopex.command/2` admits
+   `%{type: :interaction_answer, command_id:, interaction_id:, choice_id:}`.
+   It is an ordinary durable session command keyed by `(session_id,
+   command_id)`, so an identical replay returns its historical admission and
+   changed content under the same command ID conflicts. Admission means the
+   answer committed, never that the effect is allowed. An answer naming a
+   question that is not open, a different question than the open one, or a
+   choice that was never offered is refused with a stable reason —
+   `interaction_absent`, `interaction_resolved`, `invalid_interaction_answer` —
+   and none of them reopens anything.
+3. **Resolution.** The coordinator calls the same host policy again with the
+   original request's exact fields plus one core-created `interaction_response`
+   member carrying the interaction identity, the validated question, the
+   admitted answer and its digest. Only a committed `allow` may supply the
+   bounded grant reference, and grant binding and effect intent still commit
+   before dispatch. The resolution commits `interaction_resolved_v1` and
+   publishes `interaction.resolved` with `allowed` or `denied`. Denial,
+   malformed policy output, timeout and failure each dispatch nothing.
+4. **Expiry, abort and deadline.** The effective expiry is the earlier of the
+   requested duration from the committed creation instant and the run's own
+   absolute deadline, chosen once before the creating transaction so two owners
+   recovering the same creation cannot give the question two lifetimes. Expiry
+   publishes `interaction.expired` and resolves the tool decision as a denial;
+   it adds no new run-terminal outcome. An abort publishes
+   `interaction.cancelled`, and a later answer finds the question resolved.
+   Expiry, answer, abort and deadline are ordinary competing transitions
+   ordered at the journal, and the first committed one wins; a timer that fires
+   for a question this owner no longer holds open changes nothing.
+
+Another defer resolves the current question and creates a fresh interaction
+identity with the next round number. At most one interaction is open per
+session at a time, and a tool decision admits at most two successive
+answer-then-defer rounds after the first question — three questions in total.
+The next defer fails closed as a denial.
+
+Restart is the point of all of this. A recovered coordinator re-arms the
+expiry timer only for a question still `pending`; an `answered` question is
+owed a resumed evaluation instead, and arming a timer against it would race the
+host's own answer. A crash between answer admission and resolution leaves the
+run suspended: no recovery branch speculates, acknowledges permission, or
+dispatches first, and re-running the evaluation is safe precisely because it
+authorizes nothing until its result commits. If the current `:policy_identity`
+does not equal the one retained with the question, the session stays suspended
+and dispatches nothing rather than letting a different implementation, or a
+different revision of the same one, decide what a committed answer meant.
+
+A caller reads the open question from two places, both bounded and both carrying
+the public view only: `Loopex.attach/2` and `attach/3` return an
+`open_interaction` beside the unchanged revision-2 snapshot, captured at that
+same cursor, and `Loopex.session_status/2` reports it at the cursor it names.
+The view carries the identity, prompt, offered choices, expiry and status; it
+never carries the host's `decision_ref`, and it carries the selected choice only
+after an answer was admitted. Transport loss by itself changes no interaction
+state, which is what lets a new app-server process present the same question.
+The accepted contract is
+[ADR 0024](../adr/0024-durable-interaction-lifecycle-and-host-policy-authority.md#concept),
+and the witnesses are in `apps/loopex/test/interaction_lifecycle_test.exs`.
+
+<a id="technical-embedding-transfers"></a>
+### Bounded Artifact Transfers
+
+Concept: [Runtime and embedding](#concept).
+
+A caller that holds an artifact reference can read the object back through an
+attachment in three calls:
+
+```elixir
+request = %{object: object, use_locator: reference.use_locator, start: 0}
+{:ok, transfer} = Loopex.open_artifact_transfer(attachment, request)
+{:ok, chunk} = Loopex.read_artifact_chunk(attachment, transfer.transfer_ref, 8_192)
+:ok = Loopex.close_artifact_transfer(attachment, transfer.transfer_ref)
+```
+
+The request names the artifact a caller already holds, a non-negative `start`
+and an optional `length`. The store verifies the complete immutable object
+exactly once at open, before any chunk exists, and the response carries
+`total_size`, `window_start`, `window_length`, the `object_digest` and an opaque
+`transfer_ref` — and no placement: a caller learns the window and the digests,
+never where the bytes live. Each chunk then carries its own `offset`, `bytes`
+and `chunk_digest` covering exactly those bytes, which is deliberately a
+different digest from the one covering the object, so a reader can check what it
+just received without being told a chunk hash proves the whole. Chunks are
+contiguous from the window's start, never cross it, and are bounded by the chunk
+ceiling however much a caller asks for. `{:ok, :complete}` means the window is
+exhausted; the transfer stays open until it is closed or its lifetime ends.
+
+Saving an N-byte object therefore reads at most 2N bytes: one verification and
+one emit, not one verification per chunk. The ceilings are returned as data by
+`Loopex.ArtifactStore.transfer_limits/0` and are safety ceilings rather than
+measured throughput promises:
+
+| Ceiling | Value |
+| --- | --- |
+| `object_bytes` | 67,108,864 |
+| `open_deadline_ms` | 60,000 |
+| `open_work_bytes` | 134,217,728 |
+| `chunk_bytes` | 32,768 |
+| `read_deadline_ms` | 5,000 |
+| `lifetime_ms` | 600,000 |
+| `per_attachment` | 2 |
+| `per_runtime` | 4 |
+
+Ownership is the other half of the contract. A transfer belongs to the
+attachment that opened it: another attachment reading its reference gets
+`unknown_transfer`, the superseded attachment gets `stale_attachment`, and
+replacement, detach or caller loss releases every transfer that attachment held.
+Refusals are distinct and stable — `invalid_window`, `artifact_use_mismatch`,
+`unknown_artifact_use`, `artifact_digest_mismatch` for corruption anywhere in
+the object, `open_deadline_exhausted` and `open_work_budget_exhausted` for an
+open that exceeds its budget before retaining any bytes, `transfer_limit_reached`
+for the per-attachment and per-runtime ceilings, and `unknown_transfer` for one
+that expired or was closed.
+
+The capability is optional on the port. `Loopex.ArtifactStore.transfer_capable?/1`
+asks the composed module rather than assuming, and a runtime composed without an
+artifact store, or with an adapter that predates the decision, answers
+`artifact_transfer_unsupported` rather than falling back to an unbounded
+`fetch/2`. The four inherited callbacks answer exactly as before, genuine old
+artifacts stay readable, and removing the capability restores the prior API
+without rewriting data. The accepted contract is
+[ADR 0028](../adr/0028-bounded-artifact-retrieval.md#concept), and the witnesses
+are in `apps/loopex_store_local/test/artifact_transfer_test.exs`.
 
 ### Embedded API
 
@@ -534,8 +735,8 @@ start at all rather than repairing itself.
 ### Verification Entry Points
 
 - `mix test --exclude real_provider` — complete credential-free suite.
-- `mix loopex.deps_budget` — eight-application inventory, roles including
-  `:composition`, dependency budget, and direction.
+- `mix loopex.deps_budget` — ten-application inventory, roles including
+  `:composition`, the admitted external dependencies, and direction.
 - `mix loopex.core_only` — core has no adapter resolution or environment-held
   runtime state.
 - `mix loopex.docs_check` — compiled public documentation orders Concept before

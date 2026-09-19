@@ -22,48 +22,113 @@ the exact document set its milestone must update.
 
 No package or compatibility-labelled surface is pending.
 
-Implement M4 on branch `m4`. Two applications join the eight:
-`loopex_telemetry` at the edge, owning the only Loopex-attached telemetry
-handler, and `loopex_app_server` as a client, serving the experimental session
-protocol `loopex.session.v1-experimental` over one foreground process on
-standard input and output. Core admits one external dependency, the telemetry
-event dispatcher the vision's dependency doctrine names; the dependency oracle
-that decides this is rebound through M1 gate generation 15.
+Implement the accepted [M4 plan](docs/plans/M4.md#concept) on branch `m4`: an
+independent program now drives a durable coding session from outside the
+runtime, answers a host-policy question, and reads back a large artifact.
+Implementation is complete; closure is pending and is a separate decision.
+
+Two applications join the eight. `loopex_telemetry` at the edge owns the only
+Loopex-attached telemetry handler, and `loopex_app_server` as a client serves
+the experimental session protocol `loopex.session.v1-experimental` over one
+foreground process on standard input and output. Core admits one external
+dependency, the telemetry event dispatcher the vision's dependency doctrine
+names.
+
+Negotiate the contract before anything mutates. `loopex_protocol` owns the
+generation-one contract as data under one digest, and the server negotiates
+exactly once per connection: nothing is answered before a generation is settled,
+a second attempt is refused whether the first succeeded or failed, and neither
+refusal reaches a runtime. Framing refuses where a lenient parser would repair —
+CRLF, trailing bytes, duplicate members, oversized frames and input ending
+mid-frame — and every line of standard output is exactly one protocol record.
+
+Map session commands, admissions, snapshots and durable events onto the same
+identities the embedded facade uses, so the two surfaces mean the same thing
+rather than merely answering alike: the command identity a client sends is the
+one that commits, content crosses as exact bytes, and the public projection
+carries no owner epoch, journal version or attachment state. Core also emits the
+distinct `session.settled` public fact that accepted ADR 0011 requires, which
+Closed M3 had as state but never published.
+
+Add durable policy interactions under accepted
+[ADR 0024](docs/adr/0024-durable-interaction-lifecycle-and-host-policy-authority.md#concept).
+A host policy may answer a tool decision with one bounded question instead of a
+verdict: the coordinator commits that question before publishing it, suspends
+the run without minting a grant or committing an effect intent, and re-enters
+the same host callback with the committed answer attached. Only the resulting
+allow can mint a grant. An answer is an ordinary durable session command, so a
+replay returns its historical admission; expiry, abort, deadline and answer are
+ordered at the journal and the first committed one wins; and a recovered owner
+re-arms a pending question's clock, resumes an answered one, and stays suspended
+rather than deciding under a policy identity that changed. The inherited
+one-shot `Loopex.Policy.decide/2` still projects a `defer` to
+`interaction_unsupported`; the interaction-aware evaluator is a separate caller
+of the same unchanged callback.
+
+Add bounded artifact transfers under accepted
+[ADR 0028](docs/adr/0028-bounded-artifact-retrieval.md#concept): the optional
+ArtifactStore triple `open_transfer/4`, `read_transfer/3` and
+`close_transfer/2`, and the facade family that opens, reads and closes one.
+A transfer verifies the complete object once at open and then emits digested
+chunks inside a fixed window, so saving an N-byte object reads at most 2N bytes
+instead of re-verifying per chunk. Object and chunk digests stay distinct, a
+transfer belongs to the attachment that opened it and is released with it, and
+an adapter without the capability keeps the prior API and refuses only the
+transfer family.
 
 Add the independent consumer in [`clients/node`](clients/node/README.md): plain
 JavaScript the pinned Node runs directly, with no build step, package manifest,
 lockfile or dependency. It drives a session end to end over the wire, selecting
 an admitted skill, answering the host policy's question, watching the
 authorization the host mints only after that answer commits, and reading back a
-verified bounded transfer of what the tool produced.
+verified bounded transfer of what the tool produced. Before any trust decision
+the catalog names the launched manifest and withholds the workspace reference
+and every entry, so the client relays an operator decision it could not have
+constructed from anything the server told it.
+
+Publish the conformance vectors as literal bytes with literal verdicts rather
+than values generated from the implementation they check, and assert the
+refusals' reasons distinctly, so an implementation that collapsed a duplicate
+member, an unrepresentable integer, a trailing byte and a lone surrogate into
+one error fails. A second implementation in another language executes against
+the same server and checks the schema digest before it mutates anything.
+
+Add runtime-scoped trace sessions and the telemetry inventory accepted
+[ADR 0030](docs/adr/0030-observability-tracing-and-telemetry.md#concept) fixes:
+a host names Loopex modules and traces every call in them without changing a
+line of source, and core emits one span at each of five port callbacks and six
+coordinator transaction cuts, with identities, outcomes, durations and counts
+and never content or credentials. Capture is bounded and redacted, drops are
+counted rather than hidden, a sink that never drains neither blocks an emitting
+boundary nor lets the backlog exceed its ceiling, and core attaches no handler
+of its own.
 
 Enforce two rules the protocol advertised and nothing applied: a `request_id` is
 unique among the in-flight requests on a connection and no more than
 `max_requests_in_flight` are in flight at once, and a connection holds one
-attachment at a time, replaced only when a request says so. Both were found by
-running the M4 gate, which had never been run.
+attachment at a time, replaced only when a request says so.
 
-Add four documents the M4 gate's obligations name:
-[app server operations](docs/operator/app-server.md#concept),
-[observability](docs/operator/observability.md#concept) for operators, and the
+Document what M4 changed for its readers:
+[app server operations](docs/operator/app-server.md#concept) and
+[observability](docs/operator/observability.md#concept) for operators; the
 [app server protocol](docs/developer/app-server-protocol.md#concept) and
-[observability](docs/developer/observability.md#concept) pairs for developers.
+[observability](docs/developer/observability.md#concept) pairs as the normative
+developer references; the ten applications, the changed dependency rules and the
+one admitted core dependency in
+[architecture](docs/developer/architecture.md#concept); the durable interaction
+lifecycle and the transfer capability as embedding contracts in
+[runtime and embedding](docs/developer/runtime-and-embedding.md#concept); and
+M4's experimental labels with the exact-generation rule in
+[compatibility surfaces](docs/developer/compatibility-surfaces.md#concept).
+
+The source `VERSION` moves from `0.0.0` to `0.1.0` with M4's closure candidate.
+That is a source version and nothing else: accepted
+[ADR 0023](docs/adr/0023-experimental-public-session-protocol.md#concept) keeps
+it independent of the negotiated protocol generation.
 
 None of this is a release, a package, a binary, an installer, a service image or
 a compatibility label, and none of it is closed. The generation is experimental
 in its own name and may change in any later milestone without a migration path.
-
-Open the [M4 plan](docs/plans/M4.md#concept) as the one permitted planning
-lookahead on the integrated M3 acceptance checkpoint: move the draft triple
-into `docs/plans/`, bind a runner whose opening probe observes a policy
-`defer` denied as `interaction_unsupported`, and register `M4` as Open. No
-plan, ADR or product behavior is accepted by the opening.
-
-Add M4 outcome 7 and Proposed [ADR 0030](docs/adr/0030-observability-tracing-and-telemetry.md#concept):
-runtime-owned OTP trace sessions with identity-only capture by default and
-`:telemetry` boundary events, with `:telemetry` admitted as core's sole
-external dependency by an explicit maintainer vision change and a new
-`loopex_telemetry` edge application owning the only Loopex-attached handler.
 
 Narrow the Open [M3 plan](docs/plans/M3.md#concept) to project skills, three core
 repairs and reliable verification. Move durable interactions, artifact ranges
@@ -110,7 +175,7 @@ qualification is recorded in its plan progress; closure is recorded at
 release or full inherited-gate result.
 
 Keep durable interactions, artifact transfers and the floor refresh in the
-[Open M4 plan](docs/plans/M4.md#concept). The reviewed M3 cadence uses focused
+[M4 plan](docs/plans/M4.md#concept). The reviewed M3 cadence uses focused
 implementation checks. The later [final validation override](docs/developer/agent-context-map.md#override-disposition-m3-final-inherited-gates-waiver-2026-09-13)
 required M3-only qualification on macOS and Linux, which passed at exact source
 `f45354572840636b473ad7e40e42355fdff4fc17`; M0–M2 gate reruns are waived,

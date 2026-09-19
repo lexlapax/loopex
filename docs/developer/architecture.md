@@ -23,27 +23,40 @@ describes the system as it stands and cites the accepted decision behind each
 boundary; where the two differ, the vision and the accepted decisions lead.
 
 <a id="concept-arch-applications"></a>
-## The Eight Applications and One Direction
+## The Ten Applications and One Direction
 
-Loopex is a single Elixir umbrella. Eight applications carry five roles today,
+Loopex is a single Elixir umbrella. Ten applications carry five roles today,
 and the role is what fixes which dependencies an application may declare.
 
 | Application | Role | What it holds |
 | --- | --- | --- |
-| `loopex_protocol` | contract | Canonical encoding and tool-definition types, with no dependencies at all. |
-| `loopex` | core | The kernel: ports, the runtime supervision tree, the session reducer, and the coordinator. |
-| `loopex_store_local` | edge | The durable single-machine Store and artifact store. |
+| `loopex_protocol` | contract | Canonical encoding, tool-definition types, and the experimental public session schema and vectors, with no dependencies at all. |
+| `loopex` | core | The kernel: ports, the runtime supervision tree, the session reducer, the coordinator, durable interactions, and the telemetry emission points. |
+| `loopex_store_local` | edge | The durable single-machine Store and artifact store, including bounded artifact transfers. |
 | `loopex_llm_reqllm` | edge | The reference model adapter over the ReqLLM library. |
 | `loopex_executor_local` | edge | The trusted-local executor, workspace lease, and the bootstrap coding tools. |
+| `loopex_telemetry` | edge | The one Loopex-attached telemetry handler, which hands core's spans to a runtime's diagnostics plane. |
 | `loopex_composition` | composition | One page that wires the reference stack and returns a started runtime. |
 | `loopex_reference_client` | client | A thin embedded client over the public facade. |
 | `loopex_cli` | client | `loopex`, the command an operator runs. |
+| `loopex_app_server` | client | The foreground server that speaks the experimental session protocol over standard input and output. |
 
 Every arrow points inward. `loopex_protocol` depends on nothing, so a contributor
 can compile against the contract without acquiring the runtime. `loopex` depends
-on `loopex_protocol` and on no external package, so the kernel builds and runs
-with no adapter present. Every edge and client depends on `loopex`; nothing
-depends outward from it. `loopex_composition` is the one production application
+on `loopex_protocol` and on exactly one external package, `:telemetry`, the
+dependency-free event dispatcher the vision's dependency doctrine admits by
+name; [ADR 0030](../adr/0030-observability-tracing-and-telemetry.md#concept)
+records that admission and supersedes only the ADR 0001 clauses that required
+an empty core dependency list. The kernel still builds and runs with no adapter
+present, and it attaches no telemetry handler of its own. Every edge and client
+depends on `loopex`; nothing depends outward from it.
+
+`loopex_app_server` is the one client that also names the contract application
+directly, because the schema it speaks lives there under
+[ADR 0023](../adr/0023-experimental-public-session-protocol.md#concept);
+declaring that edge makes what a client speaks visible in its own project file
+rather than hiding it behind core. It reaches a session only through the public
+facade, so it is a peer of the CLI rather than a second runtime. `loopex_composition` is the one production application
 that names concrete Store, Model, Executor, and ArtifactStore implementations,
 which is exactly what makes the direction checkable — a second place that named
 a Store would be a second place to audit. The one boundary it deliberately does
@@ -57,6 +70,7 @@ flowchart TB
     subgraph Clients["Client applications"]
       CLI["loopex_cli"]
       REF["loopex_reference_client"]
+      APPS["loopex_app_server"]
     end
 
     COMP["loopex_composition (composition role)"]
@@ -67,16 +81,21 @@ flowchart TB
     end
 
     PROTO["loopex_protocol (contract role, no dependencies)"]
+    TEL[":telemetry (the one external package core declares)"]
 
     subgraph Edges["Edge applications"]
       STORE["loopex_store_local"]
       LLM["loopex_llm_reqllm"]
       EXEC["loopex_executor_local"]
+      TELE["loopex_telemetry"]
     end
 
     CLI --> COMP
     CLI --> RUNTIME
     REF --> RUNTIME
+    APPS --> COMP
+    APPS --> RUNTIME
+    APPS --> PROTO
     COMP --> RUNTIME
     COMP --> STORE
     COMP --> LLM
@@ -84,8 +103,11 @@ flowchart TB
     STORE --> RUNTIME
     LLM --> RUNTIME
     EXEC --> RUNTIME
+    TELE --> RUNTIME
+    TELE --> TEL
     LLM --> PROTO
     RUNTIME --> PROTO
+    RUNTIME --> TEL
     STORE -. implements .-> PORTS
     LLM -. implements .-> PORTS
     EXEC -. implements .-> PORTS
@@ -164,6 +186,14 @@ retained them. Fixed by
 [ADR 0009](../adr/0009-tool-executor-and-grant-contracts.md#concept) and
 [ADR 0015](../adr/0015-artifact-object-and-use-identity.md#concept).
 
+An artifact store may also offer a bounded transfer: a caller holding an
+artifact reference opens a window, the store verifies the complete object once,
+and the caller then reads it back in digested chunks and closes it. The
+capability is optional, so an adapter written before it stays conformant and
+the facade refuses the transfer family rather than falling back to an
+unbounded fetch. Fixed by
+[ADR 0028](../adr/0028-bounded-artifact-retrieval.md#concept).
+
 **Policy** is the seam where a host says yes or no to an effect. Every
 executor-backed tool call consults it; there is no tool, effect class, or
 argument shape that skips it, because an exemption predicate would itself be a
@@ -171,6 +201,14 @@ dispatch branch nothing policed. Resolution is exhaustive and fails closed: a
 policy that is broken, slow, or malformed denies, and a denial is a truthful
 committed outcome that is never retried. Fixed by
 [ADR 0009](../adr/0009-tool-executor-and-grant-contracts.md#concept).
+
+A policy may also defer: instead of deciding, it asks the operator one bounded
+question. The session coordinator commits that question as a durable
+interaction and suspends the tool call; when an answer commits, the same host
+policy is asked again with the answer attached, and only its allow can lead to
+a grant. The answer is evidence for that new decision, never a grant itself.
+Fixed by
+[ADR 0024](../adr/0024-durable-interaction-lifecycle-and-host-policy-authority.md#concept).
 
 Technical depth: [Callbacks, adding an adapter, and the conformance suites](architecture-technical.md#technical-arch-ports).
 
@@ -187,7 +225,7 @@ by design.
 | Committed public events | Durable, immutable, ordered within one session; delivered at least once. | The same Store transaction that committed the record they project. |
 | Authoritative snapshots | A replaceable projection anchored to a public event sequence. | The runtime, derived from committed outbox rows. |
 | Transient progress | Best-effort deltas within one attempt's stream domain; may be coalesced or dropped. | A model adapter or executor through its progress callback, relayed by the owner. |
-| Administrative diagnostics | Operational observation; not session history and not an input to behavior. | The runtime, and nothing durable. |
+| Administrative diagnostics | Operational observation; not session history and not an input to behavior. | The runtime, and nothing durable; since M4 also the telemetry edge's handler and a host-started trace session, both bounded and redacted. |
 
 Two rules connect them. A fact is committed before it is published, and an
 effect's intent is committed before the effect is dispatched — so a published
@@ -307,10 +345,13 @@ block, or a piece of metadata grants nothing; a grant is minted only from an
 explicit host allow, and the executor revalidates audience, operation, attempt,
 digest, lease, expiry, and fence before any effect starts.
 
-Surfaces are peers. The CLI, the reference client, and any embedder reach the
-same semantic contract through the public facade, and none of them owns a loop, a
-cursor, or durable session truth. If a surface disappeared, everything it does
-would still be reachable.
+Surfaces are peers. The CLI, the reference client, the app server, and any
+embedder reach the same semantic contract through the public facade, and none
+of them owns a loop, a cursor, or durable session truth. The app server adds a
+wire and a process boundary, not a second semantics: an independent program in
+another language drives a session over it, as the Node consumer in
+[`clients/node`](../../clients/node/README.md) does. If a surface disappeared,
+everything it does would still be reachable.
 
 Project skills use that same division. The host discovers or imports bounded
 resource packs and retains their provenance. Core holds an immutable snapshot,
@@ -329,4 +370,8 @@ Technical depth: [The policy, grant, and lease path](architecture-technical.md#t
   tool contract, bounds, streaming, and artifacts.
 - [Compatibility surfaces](compatibility-surfaces.md#concept) — what is exposed
   today and why nothing is frozen yet.
+- [App server protocol](app-server-protocol.md#concept) — the experimental wire
+  contract the app server speaks.
+- [Observability](observability.md#concept) — trace sessions and the telemetry
+  event catalog.
 - [Decisions](../adr/README.md) — the accepted decisions cited above.

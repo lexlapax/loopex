@@ -3,9 +3,14 @@
 <a id="concept"></a>
 ## Concept
 
-Every surface M2 and M3 touch is unstable. None is labelled, frozen, versioned for
+Every surface M2, M3 and M4 touch is unstable. None is labelled, frozen, versioned for
 consumers, or given a compatibility promise, and none is owed a deprecation
-window or a migration note. `VERSION` remains `0.0.0`; `v0.0.0-m2` identifies
+window or a migration note. M4 changes the source `VERSION` from `0.0.0` to
+`0.1.0` at its closure candidate, which accepted
+[ADR 0023](../adr/0023-experimental-public-session-protocol.md#concept) keeps
+deliberately separate from every claim on this page: a source version is not a
+package, a tag, a publication or a compatibility freeze, and the protocol
+generation is negotiated independently of it. `v0.0.0-m2` identifies
 the exact integrated M2 source snapshot and labels no consumer surface.
 Nothing is packaged or published, so the vision's package
 surface — released names, their contents, and the constraints they declare —
@@ -42,6 +47,23 @@ old-format state-root backup; removing skill files does not downgrade history.
 Provider-permit retirement changes only Control's in-memory retention. It adds
 no record or retry permission; rollback to longer retention requires no journal
 migration for this repair.
+
+M4 adds the first surface that is not an Elixir API, and labels it in its own
+name. The app-server wire protocol is one exact generation,
+`loopex.session.v1-experimental`: a client offers an ordered list of
+generations and the server selects one it knows, with no partial match, no
+nearest neighbour and no version comparison that could round the word
+`experimental` up to a released contract. A generation has schemas, vectors and
+an independent consumer; it has no migration path and no freeze, and a later
+milestone may change it. M4 also adds versioned durable interaction records, so
+once a session contains one, an M3-era reader must refuse it before any effect
+rather than replaying it, while a current reader still replays genuine M3 and
+M2 histories; rollback returns to a retained old root/binary pair, and removing
+the server cannot downgrade an interaction-bearing root. The optional artifact
+transfer capability and the telemetry events add no durable format at all.
+The scoped statement for the milestone is
+[M4's compatibility section](../plans/M4-technical.md#technical-plan-compatibility).
+
 Operator-facing consequences:
 [Coding sessions](../operator/coding-sessions.md#concept) and
 [Tools and policy](../operator/tools-and-policy.md#concept).
@@ -49,7 +71,7 @@ Operator-facing consequences:
 <a id="technical-depth"></a>
 ## Technical depth
 
-### The Surfaces M2 and M3 Touch
+### The Surfaces M2, M3 and M4 Touch
 
 Each row names what an embedder or operator can reach, and the vision surface it
 belongs to under
@@ -63,6 +85,12 @@ belongs to under
 | Executor port | `Loopex.Executor` behaviour, job, grant, receipt, `cancel/2`, optional `retained_receipt/2` | 3, executor protocol | Unstable |
 | Policy port | `Loopex.Policy` behaviour, request, context, refusal categories | 2, public protocol semantics | Unstable |
 | Artifact-store port | `Loopex.ArtifactStore` object/use behaviour and eight-member `artifact_reference` | 6, artifact formats | Unstable |
+| Artifact transfer capability | optional `open_transfer/4`, `read_transfer/3`, `close_transfer/2` on `Loopex.ArtifactStore`, and `Loopex.open_artifact_transfer/2`, `read_artifact_chunk/3`, `close_artifact_transfer/2` on the facade | 6, artifact formats, and 5, embedded Elixir API | Experimental, new in M4 |
+| App-server wire protocol | the `loopex.session.v1-experimental` generation: methods, records, error codes, identities and limits | 2, public protocol semantics | Experimental, new in M4; exact generation agreement only |
+| Public protocol schema and vectors | `apps/loopex_protocol/priv/schema/loopex-experimental-1.json` and `priv/vectors/loopex-experimental-1.json`, reported as a schema digest at initialization | 2, public protocol semantics | Experimental, new in M4 |
+| Durable interaction records | `interaction_requested_v1`, `interaction_answer_admitted_v1`, `interaction_resolved_v1`, and the `interaction_answer` command | 1, private journal and store schema | Experimental, new in M4; refused by older readers |
+| Telemetry events | the bound `[:loopex, …]` span inventory, and `Loopex.Telemetry.attach/1` and `detach/1` | not yet a listed surface; transient diagnostics | Experimental, new in M4 |
+| Trace sessions | `Loopex.trace/1` and `trace/2`, `trace_status/1`, `trace_stop/1` | 5, embedded Elixir API; transient diagnostics | Experimental, new in M4 |
 | Durable record shapes | committed record kinds, replayed by `Loopex.Runtime.SessionState` | 1, private journal and store schema | Unstable, changed in M2 and M3 |
 | Public event shapes | `Loopex.attach/3`, `Loopex.next_event/1` | 2, public protocol | Unstable |
 | Tool definition contract | `LoopexProtocol.ToolDefinition`, `LoopexProtocol.Canonical` | 2 and 3 | Unstable, new in M2 |
@@ -88,6 +116,15 @@ launch option, and settled-state `:admit_resources` / `:activate_skill` commands
 These experimental resource operations use the existing facade and Store;
 they create no new behaviour or wire protocol. Resource admission never changes
 the tool registry, policy or grant contract.
+
+M4 adds `open_artifact_transfer/2`, `read_artifact_chunk/3` and
+`close_artifact_transfer/2` for bounded artifact retrieval, `trace/1`,
+`trace/2`, `trace_status/1` and `trace_stop/1` for a runtime-scoped trace
+session, the `:interaction_answer` command, the `:policy_identity` launch
+option required whenever `:policy` is supplied, and an `open_interaction` view
+on the attachment returned by `attach/2` and `attach/3`, captured at the same
+cursor as the unchanged revision-2 snapshot rather than hidden inside it. None
+of these introduces a sixth port or a second loop.
 
 Prepared resume entries return an opaque one-use activation capability; neither
 preparation nor handler installation schedules recovered work. `activate_resume/1`
@@ -175,7 +212,9 @@ dispatched effect, ending the run `outcome_unknown` on absence, an unresolved
 entry, or a settling one; `Loopex.Executor.retained_receipt/3` bounds
 the call and reports an absent callback, a raise, a malformed answer, or the
 bound elapsing as distinct errors that leave reconciliation host-driven. Omitting
-it is conformant. An implementation of any port is written against bytes that
+it is conformant. M4 adds three more optional callbacks, on
+`Loopex.ArtifactStore`, and no sixth behaviour; the count of ports is still
+five. An implementation of any port is written against bytes that
 may change in the next milestone.
 
 The shipped local executor now requires executable `/bin/bash` for its internal
@@ -568,6 +607,74 @@ naming the local one. `--policy` accepts `allow-all` and `shell-allowlist`;
 the set of accepted names is part of the surface, so adding one is observable
 and removing one is breaking.
 
+**App-server wire protocol.** One generation string,
+`loopex.session.v1-experimental`, sixteen methods, seven record families,
+fifteen error codes, and the exact framing and limits in
+[the protocol technical reference](app-server-protocol-technical.md#technical-depth).
+Agreement is by exact generation: a client offers an ordered list, the server
+selects one it knows, and an unknown offer is refused with
+`unsupported_generation` rather than served the nearest thing. Initialization
+happens exactly once per connection and before any mutation; the `initialized`
+record reports the selected generation, the exact schema digest, the supported
+methods and the limits, so a client verifies the contract instead of assuming
+it. A method this build does not implement is refused with
+`unsupported_method`, and that check precedes every other one. Because the
+digest covers the whole schema, any change to a method, record or limit changes
+what a client sees at initialization; there is no partial compatibility within a
+generation and no promise across generations. Strictness is itself part of the
+surface: one JSON object per line with LF only, no duplicate members, no float
+where an integer belongs, no trailing bytes. A lenient client that relied on
+repair was never conformant. Fixed by
+[ADR 0023](../adr/0023-experimental-public-session-protocol.md#concept).
+
+**Durable interaction records.** `interaction_requested_v1`,
+`interaction_answer_admitted_v1`, and `interaction_resolved_v1`, plus the
+`interaction_answer` command record and the `interaction.requested`,
+`interaction.resolved`, `interaction.expired` and `interaction.cancelled`
+public events. This is the M3 boundary again, one milestone on: a reader that
+predates these kinds must refuse a session containing one before any effect,
+rather than replaying around it, while a current reader still replays genuine
+M3 and M2 histories including settlement-v2. There is no migration and none is
+owed. Rollback uses a retained old root/binary pair; removing the app server or
+the new reader does not downgrade an interaction-bearing root. The answer inside
+those records is bounded evidence for a host-policy decision and never an
+authorization, and the host's own opaque `decision_ref` stays private and is
+never projected. Fixed by
+[ADR 0024](../adr/0024-durable-interaction-lifecycle-and-host-policy-authority.md#concept).
+
+**Artifact transfer capability.** Three optional ArtifactStore callbacks —
+`open_transfer/4`, `read_transfer/3`, `close_transfer/2` — and the facade family
+`Loopex.open_artifact_transfer/2`, `read_artifact_chunk/3` and
+`close_artifact_transfer/2`. `put/3`, `fetch/2`, `stat/2` and `describe/2` are
+unchanged, the object and use identities and the opaque `use:<sha256>` locator
+are unchanged, and no artifact format migrates. An adapter that does not
+implement the triple is still conformant: the facade answers that the capability
+is unsupported rather than falling back to an unbounded fetch, and removing the
+capability restores the prior API without rewriting data. The ceilings a
+transfer runs under are part of the surface and are returned as data by
+`Loopex.ArtifactStore.transfer_limits/0`: a 64 MiB maximum object, a 60-second
+opening deadline over 128 MiB of counted storage work, 32 KiB chunks with a
+five-second read deadline, a ten-minute lifetime, and at most two live transfers
+per attachment and four per runtime. They are safety ceilings, not measured
+throughput promises. Fixed by
+[ADR 0028](../adr/0028-bounded-artifact-retrieval.md#concept).
+
+**Telemetry events and trace sessions.** The `[:loopex, …]` span inventory is
+bound exactly by
+[ADR 0030](../adr/0030-observability-tracing-and-telemetry.md#concept): five
+port callbacks and six coordinator transaction cuts, each emitting `start`,
+`stop` and `exception` with identities, kinds, outcome categories, durations and
+counts, and never content or credentials. Adding a name, removing one, or
+emitting a second span from one boundary is an ADR amendment rather than an
+implementation choice, which is what makes the inventory something a consumer
+can read against. Core attaches no handler; `loopex_telemetry` owns the only
+Loopex-attached one, and a host handler runs in the emitting process and is the
+host's own responsibility. Trace sessions are runtime-scoped, need the refreshed
+OTP floor, and are administrative diagnostics: neither plane is durable truth,
+neither is authority, and no session command, wire request, model output or
+project resource can start, change or stop either. No durable format changes,
+and removing the facility needs no migration.
+
 ### What an Embedder Should Do About It
 
 - Pin an exact revision of this repository. There is no version constraint that
@@ -581,10 +688,25 @@ and removing one is breaking.
 - Expect the absence of a stream closure. It is an emission obligation, never a
   delivery guarantee, so a consumer falls back to the durable record rather than
   inferring abandonment.
-- Handle `{:defer, _}` never being honoured. A host policy may return it; M2
-  resolves it to `{:deny, :interaction_unsupported}`, and the shape exists so
-  that hosts need not change when interaction lands.
-- Start on a fresh state root when moving from an M1-era revision.
+- Know which policy caller you are answering. The one-shot
+  `Loopex.Policy.decide/2` still resolves `{:defer, _}` to
+  `{:deny, :interaction_unsupported}`; the interaction-aware
+  `Loopex.Policy.evaluate/2`, which the session owner uses, admits a validated
+  defer and suspends the tool call on a durable question. The callback shape a
+  host implements did not change.
+- Supply a `:policy_identity` alongside `:policy` from M4 on. A pending
+  interaction is resumed only by the same policy identity and revision that
+  asked it; a launch that names a policy without an identity is refused, and a
+  session whose binding changed stays suspended rather than deciding under a
+  binding it did not have.
+- Treat a transfer reference as opaque and attachment-owned. Another attachment,
+  session or runtime does not know it, and detaching or being replaced releases
+  every transfer that attachment opened.
+- Expect an app-server client to renegotiate. The generation and schema digest
+  are checked at initialization, and an exact mismatch is the intended outcome
+  rather than a fault to work around.
+- Start on a fresh state root when moving from an M1-era revision, and again for
+  M4 interaction evidence.
 
 ### What Would Have To Exist Before Any Freeze
 

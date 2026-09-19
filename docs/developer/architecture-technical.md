@@ -12,7 +12,7 @@ adapter joins a port, and the repository commands that hold the shape.
 <a id="technical-arch-applications"></a>
 ## Exact Inventory and the Checks That Hold It
 
-Concept: [The eight applications and one direction](architecture.md#concept-arch-applications).
+Concept: [The ten applications and one direction](architecture.md#concept-arch-applications).
 
 `LoopexComposition.with_runtime/2` brackets a caller operation with startup and
 confirmed cleanup of the reference runtime, Store, workspace lease and executor.
@@ -41,22 +41,48 @@ The umbrella's declared dependencies are the whole of the direction claim:
 | Application | Role | Declared dependencies |
 | --- | --- | --- |
 | `loopex_protocol` | `:contract` | none |
-| `loopex` | `:core` | `loopex_protocol` |
+| `loopex` | `:core` | `loopex_protocol`, `telemetry ~> 1.3` |
 | `loopex_store_local` | `:edge` | `loopex` |
 | `loopex_executor_local` | `:edge` | `loopex` |
 | `loopex_llm_reqllm` | `:edge` | `req_llm ~> 1.17.1`, `loopex`, `loopex_protocol` |
+| `loopex_telemetry` | `:edge` | `loopex`, `telemetry ~> 1.3` |
 | `loopex_composition` | `:composition` | `loopex`, `loopex_store_local`, `loopex_llm_reqllm`, `loopex_executor_local` |
 | `loopex_reference_client` | `:client` | `loopex`; the three edges `only: :test` |
 | `loopex_cli` | `:client` | `loopex`, `loopex_composition` |
+| `loopex_app_server` | `:client` | `loopex`, `loopex_protocol`, `loopex_composition` |
 
 `Loopex.Checks.DepsBudget` is the one parser authority for both the pre-Mix gate
 check and `mix loopex.deps_budget`. It requires the physical project set to equal
 the ordinary stage-zero Git entries, parses each `mix.exs` as AST without
 evaluating it, and derives only the fields carrying dependency authority: the
 application identity, the role, the exact dependency records, and the owned
-literal compile roots. The planned identities and the single permitted external
-requirement are an overlay; an unknown, alternate-source, or redirected
-application fails closed rather than being classified generously. The role
+literal compile roots. The planned identities and the admitted external
+requirements are an overlay; an unknown, alternate-source, or redirected
+application fails closed rather than being classified generously.
+
+The rules it applies per role, as the module states them:
+
+| Role | Rule |
+| --- | --- |
+| `:contract` | Carries no dependency at all. |
+| `:core` | Depends on exactly the production in-umbrella `loopex_protocol`, plus at most one external dependency, which must be `:telemetry` pinned to exactly `~> 1.3` as a production dependency. Anything else is refused as "core admits exactly one external dependency". |
+| `:edge` | Exactly one production in-umbrella dependency on `loopex`, at most one on `loopex_protocol`, and no other internal application. |
+| `:composition` | One production `loopex` dependency, otherwise only contract and edge applications, all production and in-umbrella; no external dependency, no client, no other composition. |
+| `:client` | One production `loopex` dependency, at most one composition and at most one contract application, each production and in-umbrella; any other internal dependency must be an edge declared `only: :test`; no external dependency. |
+| `:extension` | Depends inward only on the production contract application. |
+
+External dependencies are compared as an exact set rather than counted. The
+admitted set is `{:req_llm, "~> 1.17.1"}` in `loopex_llm_reqllm` and
+`{:telemetry, "~> 1.3"}` in `loopex` and in `loopex_telemetry`; a different
+application declaring one of those names, a widened requirement, or any third
+name refuses. `:telemetry` is a pure-Erlang library with no dependencies of its
+own, admitted by [ADR 0030](../adr/0030-observability-tracing-and-telemetry.md#concept)
+and the recorded vision change, and it is resolved through the canonical
+`mix.lock` like ReqLLM. The client-to-contract production edge is what lets
+`loopex_app_server` declare the schema application it speaks, under
+[ADR 0023](../adr/0023-experimental-public-session-protocol.md#concept); the
+app server itself adds no external production dependency, and its only route
+to a session remains the `Loopex` facade. The role
 enumeration also declares `:extension`, which no application in the repository
 carries today; a standalone extension retains the protocol-only shape
 [ADR 0003](../adr/0003-extension-contract-boundary.md#concept) fixed for it.
@@ -287,6 +313,9 @@ kinds its replay filter accepts:
 | `tool_result_committed` | A terminal tool outcome, including a denial or an unresolvable name. |
 | `outcome_unknown_committed` | An effect whose outcome can no longer be expected, and whose domain is fenced. |
 | `run_terminal_committed` | The run's terminal disposition. |
+| `interaction_requested_v1` | One durable question a policy `defer` created: its bounded request, the three distinct digests, the policy identity and revision that asked it, its creation instant and effective expiry. |
+| `interaction_answer_admitted_v1` | One bounded answer committed against exactly one open question, with its answer digest. |
+| `interaction_resolved_v1` | How that question ended: answered and resolved, denied, expired, or cancelled. |
 
 `executor_receipt_candidate` is not committed. It is the kind a projected receipt
 is validated under so an oversized or non-plain receipt becomes a truthful
@@ -457,8 +486,26 @@ Concept: [Five replaceable boundaries](architecture.md#concept-arch-ports).
 | `Loopex.Store` | `transact/2`, `transaction_status/4`, `runtime_command/2`, `ownership_head/3`, `load_records/4`, `load_events/4` |
 | `Loopex.Model` | `complete/3` |
 | `Loopex.Executor` | `execute/5`, `cancel/2`, optional `retained_receipt/2` |
-| `Loopex.ArtifactStore` | `put/3`, `fetch/2`, `stat/2`, `describe/2` |
+| `Loopex.ArtifactStore` | `put/3`, `fetch/2`, `stat/2`, `describe/2`, optional `open_transfer/4`, `read_transfer/3`, `close_transfer/2` |
 | `Loopex.Policy` | `decide/1` |
+
+The ArtifactStore transfer triple is one optional capability, declared through
+`@optional_callbacks` and detected with `ArtifactStore.transfer_capable?/1`, so
+an adapter that predates
+[ADR 0028](../adr/0028-bounded-artifact-retrieval.md#concept) stays conformant
+and the facade refuses the family rather than crashing on a missing function or
+falling back to an unbounded `fetch/2`.
+
+`Loopex.Policy` keeps exactly one callback. ADR 0009 always declared
+`{:defer, request}` on it, and
+[ADR 0024](../adr/0024-durable-interaction-lifecycle-and-host-policy-authority.md#concept)
+activates that branch without widening the callback: `Loopex.Policy.decide/2`
+retains the one-shot projection of a defer to
+`{:deny, :interaction_unsupported}`, while the separately named
+`Loopex.Policy.evaluate/2` admits a validated defer for the session-owned
+interaction lifecycle. A host cannot tell which caller it is answering, and a
+defer outside the admitted question family is `policy_unavailable` rather than
+a malformed interaction.
 
 `transact/2` is the one Store mutation callback. The closed transaction maps bind
 their exact deterministic canonical bytes and raw SHA-256 digest before the
@@ -492,7 +539,8 @@ crashing policy must produce a decision rather than take the session down.
 
 1. Create an umbrella application whose `mix.exs` declares the `:edge` role and
    depends inward on `loopex`, plus `loopex_protocol` when it needs the canonical
-   encoding. Any external package is declared here, never in `loopex`.
+   encoding. Any external package is declared here; the only external package
+   core itself declares is the `:telemetry` event dispatcher ADR 0030 admits.
 2. Implement the behaviour. Return bounded plain data across the boundary: no
    pids, ports, monitors, functions, task handles, arbitrary terms, atoms derived
    from untrusted input, or implementation structs.
@@ -593,9 +641,12 @@ by [ADR 0019](../adr/0019-host-owned-provider-protection.md#concept).
 | Run bounds and stream identity | `apps/loopex/lib/loopex/bounds.ex`, `stream_domain.ex` |
 | Conversation projection and tools | `apps/loopex/lib/loopex/conversation.ex`, `tool_registry.ex` |
 | Project resources and session directory | `apps/loopex/lib/loopex/project_resource.ex`, `session_directory.ex` |
-| Canonical encoding and tool definitions | `apps/loopex_protocol/lib/loopex_protocol/` |
-| Edge implementations | `apps/loopex_store_local/lib/`, `apps/loopex_llm_reqllm/lib/`, `apps/loopex_executor_local/lib/` |
-| Reference stack and surfaces | `apps/loopex_composition/lib/`, `apps/loopex_cli/lib/`, `apps/loopex_reference_client/lib/` |
+| Durable interactions | `apps/loopex/lib/loopex/interaction.ex` |
+| Telemetry spans, trace sessions, and bounded diagnostics admission | `apps/loopex/lib/loopex/instrumentation.ex`, `apps/loopex/lib/loopex/trace.ex`, `apps/loopex/lib/loopex/trace/`, `apps/loopex/lib/loopex/runtime/diagnostics_admission.ex` |
+| Canonical encoding, tool definitions, and the public session schema | `apps/loopex_protocol/lib/loopex_protocol/`, `apps/loopex_protocol/priv/` |
+| Edge implementations | `apps/loopex_store_local/lib/`, `apps/loopex_llm_reqllm/lib/`, `apps/loopex_executor_local/lib/`, `apps/loopex_telemetry/lib/` |
+| Reference stack and surfaces | `apps/loopex_composition/lib/`, `apps/loopex_cli/lib/`, `apps/loopex_reference_client/lib/`, `apps/loopex_app_server/lib/` |
+| Independent wire consumer | `clients/node/` |
 | Repository checks | `apps/loopex/lib/mix/tasks/` |
 
 `Loopex.Journal`, `Loopex.Session`, `Loopex.Coordinator`, and
@@ -613,7 +664,7 @@ same commands and never redefines or waives one.
 | Command | What it holds |
 | --- | --- |
 | `mix test --exclude real_provider` | The complete credential-free suite. |
-| `mix loopex.deps_budget` | The eight-application inventory, roles, and inward direction. |
+| `mix loopex.deps_budget` | The ten-application inventory, roles, the admitted external dependencies, and inward direction. |
 | `mix loopex.core_only` | Core in a separate virtual machine, no adapter resolvable, no per-runtime state in application environment. |
 | `mix loopex.docs_check` | Compiled documentation read through `Code.fetch_docs/1` orders the depth sections on covered public code. |
 | `mix loopex.status` | Governance rows, index chains, link grammar, paired documents, and bound artifacts at every reachable revision. |
