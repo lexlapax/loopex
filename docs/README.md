@@ -84,6 +84,8 @@ whose path or explicit fragment does not resolve.
 
 ## Planning and Development
 
+- [Post-M4 validation redesign proposal](developer/post-m4-validation-redesign.md#concept) and [technical detail](developer/post-m4-validation-redesign-technical.md#technical-depth) — discussion proposal and retained audit for the post-M4 test/gate redesign; not an accepted plan or waiver.
+
 - [M3 foundations](plans/M3.md#concept) and [technical plan](plans/M3-technical.md#technical-depth) — project skills and core repairs; Closed with retained evidence in the plan.
 - [M4 headless external consumption](plans/M4.md#concept) and [technical plan](plans/M4-technical.md#technical-depth) — durable interactions, artifact transfers, floor refresh and protocol/TypeScript workflow over M3; Open planning lookahead with a red gate.
 

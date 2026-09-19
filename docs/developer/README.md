@@ -27,6 +27,7 @@ load only the sections a task needs rather than reading it end to end.
 | Document | Purpose |
 | --- | --- |
 | [Development charter](development-charter.md#concept) · [technical](development-charter-technical.md#technical-depth) | Clarity before mechanism, traceable depth, proportional documentation, capability routing. |
+| [Post-M4 validation redesign proposal](post-m4-validation-redesign.md#concept) · [technical](post-m4-validation-redesign-technical.md#technical-depth) | Discussion proposal for one evolving regression suite, simpler gate progression, proportionate approvals, and a 15–20% verification-cost target; changes no active M4 requirement. |
 | [Architecture](architecture.md#concept) · [technical](architecture-technical.md#technical-depth) | The eight applications and their inward dependency direction, the five replaceable ports, the truth planes and who may publish to each, the serial session owner, with an architecture diagram, a truth-plane diagram, the invariants and the module enforcing each, the record shapes, and a sequence diagram of one turn. |
 | [Runtime and embedding](runtime-and-embedding.md#concept) | Application shape, explicit composition, immutable skill snapshots, resource commands and queries, commit ordering, recovery and verification entrypoints. |
 | [Agent loop and tools](agent-loop-and-tools.md#concept) | Turn ordering, tool registry, canonical requests, attempts and settlement, bounds, streaming, policy, artifacts, required-first admission, progressive skill context and replay. |
