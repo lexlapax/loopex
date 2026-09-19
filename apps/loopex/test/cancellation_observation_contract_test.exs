@@ -382,9 +382,9 @@ defmodule Loopex.CancellationObservationContractTest do
     #
     # The duration is the claim, so it is kept and the case is tagged
     # `:long_bound` instead of being shortened: the ordinary suite excludes that
-    # tag, and the closure and release checks run it with
-    # `--include long_bound`. A case that waited a fraction of the old cutoff
-    # would pass against exactly the reuse of that cutoff it exists to catch.
+    # tag, and the release check runs it in a pass of its own with
+    # `--only long_bound`. A case that waited a fraction of the old cutoff would
+    # pass against exactly the reuse of that cutoff it exists to catch.
     delay_ms = 60_500
     grace_ms = 65_000
     started_at = System.monotonic_time(:millisecond)

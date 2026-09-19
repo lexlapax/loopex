@@ -61,6 +61,6 @@ end
 # production ceiling -- the sixty-second cancellation cutoff -- rather than one
 # that merely waits for one. Shortening such a case would make it pass against
 # the mistake it exists to catch, so it keeps its duration and the ordinary
-# suite skips it; the closure and release checks run it with
-# `--include long_bound`.
+# suite skips it; the release check runs it in a pass of its own with
+# `--only long_bound`.
 ExUnit.start(exclude: [:long_bound])

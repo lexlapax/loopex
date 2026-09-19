@@ -22,8 +22,8 @@ defmodule Loopex.Executor.Local.AdmissionObservationWaitTest do
   # The ten seconds are the claim: this case proves the former observation
   # timeout is absent, and a hold shorter than it would pass against exactly the
   # timeout being reintroduced. It is therefore kept whole and tagged
-  # `:long_bound`, which the ordinary suite skips and the closure and release
-  # checks run with `--include long_bound`.
+  # `:long_bound`, which the ordinary suite skips and the release check runs in
+  # a pass of its own with `--only long_bound`.
   @tag :long_bound
   test "a queued public execute waits for its actual reservation result" do
     fixture = fixture()
