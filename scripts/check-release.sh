@@ -18,6 +18,11 @@ observed_node=$(node --version 2>/dev/null </dev/null || true)
 
 started=$SECONDS
 printf 'check-release: candidate %s on %s %s\n' "$(git rev-parse HEAD)" "$(uname -s)" "$(uname -m)"
-printf 'check-release: real-provider and client tests\n'
-mix test --only real_provider --only node_client
+# Each application runs in its own VM: a test that alters the environment or
+# global state then cannot reach the applications that run after it.
+for app in apps/*/; do
+  app=${app%/}
+  printf 'check-release: %s\n' "${app#apps/}"
+  (cd "$app" && mix test --only real_provider --only node_client)
+done
 printf 'check-release: PASS total=%ss\n' "$((SECONDS - started))"

@@ -164,6 +164,9 @@ defmodule Loopex.ReferenceClient.EndToEndRecoveryTest do
   test "one real-provider trace forces a credential-free tool survives an untrappable runtime-tree kill after receipt before fact reconciles one effect without redispatch preserves its fact and completes a second real call" do
     credential = System.fetch_env!("LOOPEX_PROVIDER_API_KEY")
     System.delete_env("LOOPEX_PROVIDER_API_KEY")
+    # The umbrella runs every application's tests in one VM, so a credential
+    # removed here must come back for whoever runs next.
+    on_exit(fn -> System.put_env("LOOPEX_PROVIDER_API_KEY", credential) end)
 
     root =
       Path.join(
