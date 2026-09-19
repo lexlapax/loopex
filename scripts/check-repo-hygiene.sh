@@ -29,8 +29,13 @@ milestone="$(awk -F'|' '
     exit
   }' docs/plans/README.md 2>/dev/null || true)"
 
+# A branch the remote still carries is shared state the maintainer keeps -- a
+# milestone branch retained after closure, for one -- not residue. Residue is a
+# local branch whose landed work is on the integration ref while the remote no
+# longer has it, or never did.
 exempt() {
   [ "$1" = "main" ] && return 0
+  git rev-parse --verify --quiet "refs/remotes/origin/$1" >/dev/null && return 0
   [ -n "$milestone" ] && [ "$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')" = "$milestone" ]
 }
 
