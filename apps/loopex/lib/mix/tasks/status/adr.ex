@@ -2,20 +2,18 @@ defmodule Loopex.Checks.Adr do
   @moduledoc """
   ## Concept
 
-  Validates architecture decision records. An accepted ADR is an immutable
-  record: its decision, status, and consequences may change only through a
-  versioned amendment accepted by the same authority class. This module proves
-  that an accepted ADR is byte-identical to the candidate it binds, apart from
-  the two cells the disposition itself writes.
+  Validates architecture decision records in the current tree. An ADR's declared
+  status and its governance record must say the same thing: a `Proposed` record
+  carries an empty acceptance row, an `Accepted` one carries a complete row
+  naming the authority, the evidence, and the bytes it bound.
 
   ## Technical depth
 
   The status field and the governance row must agree — `Proposed` with an empty
   row, `Accepted` with a complete one — so neither can be moved without the
-  other. Acceptance is verified by reconstructing the proposal: the accepted text
-  with its status and governance row reset must equal the historical candidate
-  exactly. Anything else changed between proposal and acceptance therefore fails,
-  including a rewritten decision that keeps the same digest fields filled in.
+  other. The check reads the checked-out bytes only; it does not resolve the
+  bound candidate revision, because that costs a Git read per accepted ADR and
+  the byte-level immutability claim it supported is no longer enforced here.
   """
 
   alias Loopex.Checks.Invalid
@@ -25,26 +23,23 @@ defmodule Loopex.Checks.Adr do
 
   @status_prefix "- **Status:** "
   @statuses ["Proposed", "Accepted"]
-  @empty_row "| Acceptance | — | — | — |"
 
   @doc """
   ## Concept
 
-  Reads an ADR's status and governance row, or returns `nil` for a historical
-  revision that predates the governance convention.
+  Reads an ADR's status and governance row.
 
   ## Technical depth
 
-  `legacy_ok` exists only for the history walk, where an early revision of a
-  document legitimately has no governance section. In the current tree the
-  section is required, because a missing one there would mean the convention was
-  removed rather than not yet introduced.
+  Returns the status, the acceptance row, whether that row is structurally
+  complete, and the line indices of the status field and the row, so a caller can
+  report exactly where a mismatch is. A document with no governance heading at
+  all fails: the section is required in the current tree, because a missing one
+  means the convention was removed rather than not yet introduced.
   """
-  @spec record(String.t(), String.t(), keyword()) ::
-          {String.t(), [String.t()], boolean(), non_neg_integer(), non_neg_integer()} | nil
-  def record(text, path, options \\ []) do
-    legacy_ok = Keyword.get(options, :legacy_ok, false)
-
+  @spec record(String.t(), String.t()) ::
+          {String.t(), [String.t()], boolean(), non_neg_integer(), non_neg_integer()}
+  def record(text, path) do
     if String.contains?(text, "\r") do
       raise Invalid, "#{path}: ADR text must use canonical UTF-8/LF bytes"
     end
@@ -60,13 +55,7 @@ defmodule Loopex.Checks.Adr do
       end)
       |> Enum.map(fn {_line, index} -> index end)
 
-    heading_present =
-      Markdown.matching_indices(lines, visible, "## Governance Record") != []
-
-    case legacy_ok and not heading_present do
-      true -> nil
-      false -> read_record!(lines, statuses, text, path)
-    end
+    read_record!(lines, statuses, text, path)
   end
 
   defp read_record!(lines, statuses, text, path) do
@@ -107,94 +96,18 @@ defmodule Loopex.Checks.Adr do
   @doc """
   ## Concept
 
-  Validates one ADR pair against the candidate its acceptance row binds, and
-  returns its status.
+  Validates one ADR and returns its declared status.
 
   ## Technical depth
 
-  A `Proposed` ADR needs no candidate. An accepted one must resolve its candidate
-  and its candidate's technical companion, must find the candidate still carrying
-  the `Proposed` status with an empty row, and must match both bound digests. The
-  final comparison rebuilds the proposal from the accepted bytes, which is what
-  catches a decision edited in the same change that accepted it.
+  Reading the record is the validation: `record/2` raises unless the status is
+  one of the two admitted values and the governance row agrees with it. The
+  status is returned because the plans index derives its blocker capsule from
+  which bootstrap ADRs are accepted.
   """
-  @spec validate(
-          String.t(),
-          String.t(),
-          String.t(),
-          (String.t(), String.t() -> String.t() | nil) | nil
-        ) ::
-          String.t()
-  def validate(text, technical_text, path, resolve_file) do
-    case record(text, path) do
-      nil ->
-        raise Invalid, "#{path}: ADR governance record is unavailable"
-
-      {status, _row, false, _status_index, _row_index} ->
-        status
-
-      {status, row, true, status_index, row_index} ->
-        verify_accepted!(text, technical_text, path, resolve_file, row, status_index, row_index)
-        status
-    end
-  end
-
-  defp verify_accepted!(text, technical_text, path, resolve_file, row, status_index, row_index) do
-    bound = Records.adr_bound(Enum.at(row, 3))
-
-    if bound == nil do
-      raise Invalid, "#{path}: accepted ADR bound bytes are malformed"
-    end
-
-    {revision, concept_digest, technical_digest} = bound
-    technical_path = Paths.technical(path)
-    candidate = resolve_file && resolve_file.(revision, path)
-    technical_candidate = resolve_file && resolve_file.(revision, technical_path)
-
-    if candidate == nil do
-      raise Invalid, "#{path}: accepted ADR candidate is unavailable"
-    end
-
-    if technical_candidate == nil do
-      raise Invalid, "#{technical_path}: accepted ADR candidate is unavailable"
-    end
-
-    candidate_record = record(candidate, "#{path} at historical candidate #{revision}")
-
-    if candidate_record == nil do
-      raise Invalid, "#{path}: historical candidate ADR governance record is unavailable"
-    end
-
-    {candidate_status, _candidate_row, candidate_complete, _index, _row} = candidate_record
-
-    if candidate_status != "Proposed" or candidate_complete do
-      raise Invalid, "#{path}: historical candidate must be the Proposed ADR with an empty record"
-    end
-
-    if Markdown.digest(candidate) != concept_digest do
-      raise Invalid, "#{path}: ADR concept digest does not match its historical candidate"
-    end
-
-    if Markdown.digest(technical_candidate) != technical_digest do
-      raise Invalid, "#{path}: ADR technical digest does not match its historical candidate"
-    end
-
-    if technical_text != technical_candidate do
-      raise Invalid, "#{technical_path}: accepted ADR technical depth differs from its candidate"
-    end
-
-    reconstructed =
-      text
-      |> Markdown.lines(path)
-      |> List.replace_at(status_index, @status_prefix <> "Proposed")
-      |> List.replace_at(row_index, @empty_row)
-      |> Enum.join("\n")
-
-    if reconstructed != candidate do
-      raise Invalid,
-            "#{path}: accepted ADR differs from its historical candidate outside the disposition record"
-    end
-
-    :ok
+  @spec validate(String.t(), String.t()) :: String.t()
+  def validate(text, path) do
+    {status, _row, _complete, _status_index, _row_index} = record(text, path)
+    status
   end
 end

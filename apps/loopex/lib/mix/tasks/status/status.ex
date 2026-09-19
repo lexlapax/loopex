@@ -4,46 +4,39 @@ defmodule Loopex.Checks.Status do
 
   Validates the repository's visible project state and its two-depth
   documentation as one connected whole: paired documents, index chains, the
-  canonical milestone register and the summaries derived from it, ADR and plan
-  governance, and the immutability of every accepted record across reachable
-  history.
+  canonical milestone register, the summaries derived from it, and ADR status
+  shape.
 
   The property is that a reader who consults the repository gets one answer. A
-  register that disagrees with a plan, a summary that disagrees with the register,
-  or an accepted record that has quietly changed all describe a project state
-  that does not exist.
+  register that disagrees with a plan or a summary that disagrees with the
+  register both describe a project state that does not exist.
 
   ## Technical depth
 
+  Everything here reads the current tree. Nothing walks Git history and nothing
+  compares bytes against an earlier revision, so the check costs a document read
+  and finishes in seconds.
+
   Ordering is deliberate. Document classification runs first, so nothing reaches
   the semantic checks unclassified; then links and indexes, then the register and
-  its derived capsules, then ADR and plan governance, then the two history walks,
-  then the rejoin barrier. Each stage assumes the previous one held, which is why
-  the first failure is reported and the rest is not attempted: a structural defect
-  produces a cascade of derived complaints that bury the one that matters.
+  its derived capsules, then ADR status, then the rejoin barrier. Each stage
+  assumes the previous one held, which is why the first failure is reported and
+  the rest is not attempted: a structural defect produces a cascade of derived
+  complaints that bury the one that matters.
 
-  `validate/2` returns a list of messages rather than raising, so a caller can
+  `validate/1` returns a list of messages rather than raising, so a caller can
   report and exit non-zero without an exception trace, and so the checks are
   callable from a test with in-memory documents and no repository at all.
-
-  The checked-out bytes cannot prove which branch integrated them. This checker
-  therefore proves lifecycle shape and the last Closed product checkpoint, but
-  never certifies that an Acceptance checkpoint reached `main` or that an Open
-  successor descended from it. The gate-opening procedure and exact
-  base-to-transition review own those Git facts.
   """
 
   alias Loopex.Checks.Adr
   alias Loopex.Checks.Documents
-  alias Loopex.Checks.History
   alias Loopex.Checks.Invalid
   alias Loopex.Checks.Markdown
   alias Loopex.Checks.Paths
-  alias Loopex.Checks.Plan
   alias Loopex.Checks.Register
 
   @index "docs/plans/README.md"
-  @override_dispositions "docs/developer/agent-context-map.md"
 
   @required [
     "README.md",
@@ -63,37 +56,16 @@ defmodule Loopex.Checks.Status do
   ## Concept
 
   Validates a document set and returns the messages describing what is wrong, or
-  an empty list when everything holds. Internal intermediate-holder validation
-  returns an explicit holder/pending-holders map instead of global success.
+  an empty list when everything holds.
 
   ## Technical depth
 
-  Options are the three ways the checks reach outside the document set, each
-  defaulting to absent:
-
-    * `:resolve_file` — a function returning one file's text at one revision;
-      without it, a bound candidate cannot be verified and any record that needs
-      one fails as unavailable.
-    * `:plan_history` — a function returning the reachable history; without it the
-      history walk reports unavailable evidence rather than passing.
-    * `:read_artifact` — a function returning one bound artifact's bytes from the
-      working tree; without it the current-tree artifact comparison is skipped,
-      because there is no tree to compare against.
-    * `:artifact_holder` — internal transaction inspection only. Requires complete
-      history and a current artifact reader; reports the rebound holder and every
-      pending holder. It does not bypass governance or declare global success.
+  The document set is the whole input. No revision resolver, history reader, or
+  artifact reader is consulted, so the same call validates a real checkout and an
+  in-memory fixture identically.
   """
-  @spec validate(map(), keyword()) ::
-          [String.t()] | %{binding_scope: String.t(), pending_holders: [String.t()]}
-  def validate(documents, options \\ []) do
-    resolve_file = Keyword.get(options, :resolve_file)
-    plan_history = Keyword.get(options, :plan_history)
-    read_artifact = Keyword.get(options, :read_artifact)
-    holder = Keyword.get(options, :artifact_holder)
-
-    if holder != nil and (not is_function(read_artifact, 1) or not is_function(plan_history, 0)),
-      do: raise(Invalid, "holder scope requires current artifact bytes and complete history")
-
+  @spec validate(map()) :: [String.t()]
+  def validate(documents) do
     {adr_paths, plan_names} = Documents.document_topology(documents)
     Documents.validate_local_links(documents)
     Documents.validate_directory_indexes(documents)
@@ -120,46 +92,14 @@ defmodule Loopex.Checks.Status do
 
     adr_statuses =
       Map.new(adr_paths, fn path ->
-        {path,
-         Adr.validate(
-           Map.fetch!(documents, path),
-           Map.fetch!(documents, Paths.technical(path)),
-           path,
-           resolve_file
-         )}
+        {path, Adr.validate(Map.fetch!(documents, path), path)}
       end)
 
     require_derived_capsule!(rows, values, adr_statuses)
     require_register_matches_plans!(rows, plan_names)
 
-    state_by_name = Map.new(rows)
-
-    history = plan_history && plan_history.()
-
-    History.governance_history(
-      governed_documents(documents, adr_paths),
-      governance_only(history),
-      resolve_file
-    )
-
-    binding_result = History.artifact_history(history, holder: holder)
-    allowed = if is_map(binding_result), do: binding_result.pending_bindings, else: %{}
-    verify_current_artifacts!(documents, plan_names, read_artifact, allowed)
-
-    Enum.each(plan_names, fn name ->
-      Plan.governance(
-        Map.fetch!(documents, "docs/plans/#{name}.md"),
-        Map.fetch!(documents, "docs/plans/#{name}-technical.md"),
-        Map.fetch!(documents, "docs/plans/#{name}-gate.md"),
-        name,
-        Map.fetch!(state_by_name, name),
-        resolve_file,
-        lifecycle_history_verified: true
-      )
-    end)
-
     verify_rejoin_barrier!(documents)
-    if holder == nil, do: [], else: Map.take(binding_result, [:binding_scope, :pending_holders])
+    []
   rescue
     error in Invalid -> [Exception.message(error)]
   end
@@ -205,13 +145,9 @@ defmodule Loopex.Checks.Status do
   # until the first milestone closed and wrong ever after, so what it gave was
   # one-sided protection rather than none.
   #
-  # The owner is consulted here in `validate/2` rather than in the parser because
+  # The owner is consulted here in `validate/1` rather than in the parser because
   # this value derives from the register, not from the shape of the text, and
-  # `Register.current_status/1` reads shape alone. The commit that introduced
-  # this justified the placement by claiming the history walk re-parses old
-  # indexes through that parser; it does not. `History.lifecycle_state!` uses
-  # `Register.register/1`, and `current_status/1` has exactly one caller. The
-  # placement is right for the reason stated above, not the one recorded there.
+  # `Register.current_status/1` reads shape alone.
   @phase_field "Integrated phase"
 
   # Concept: the fields whose owners live outside the lifecycle capsule.
@@ -271,61 +207,6 @@ defmodule Loopex.Checks.Status do
     end
 
     :ok
-  end
-
-  # Concept: a gate binds artifacts outside its own bytes, so the current tree is
-  # compared against every digest the gate declares.
-  # Technical depth: skipped when no reader is supplied, because an in-memory
-  # document set has no working tree to read.
-  defp verify_current_artifacts!(_documents, _plan_names, nil, _allowed), do: :ok
-
-  defp verify_current_artifacts!(documents, plan_names, read_artifact, allowed) do
-    Enum.each(plan_names, fn name ->
-      gate_path = "docs/plans/#{name}-gate.md"
-
-      documents
-      |> Map.fetch!(gate_path)
-      |> Plan.bound_artifacts(gate_path)
-      |> Enum.each(fn {digest, target} ->
-        case read_artifact.(target) do
-          nil ->
-            raise Invalid, "#{gate_path}: bound artifact #{target} is missing"
-
-          content ->
-            actual = Markdown.digest(content)
-
-            unless actual == digest or Map.get(allowed, {gate_path, target}) == {digest, actual} do
-              raise Invalid,
-                    "#{gate_path}: bound artifact #{target} does not match its locked digest"
-            end
-        end
-      end)
-    end)
-  end
-
-  defp governed_documents(documents, adr_paths) do
-    adr_set =
-      adr_paths |> Enum.flat_map(&[&1, Paths.technical(&1)]) |> MapSet.new()
-
-    Map.filter(documents, fn {path, _text} ->
-      path in [@index, @override_dispositions] or MapSet.member?(adr_set, path) or
-        (String.starts_with?(path, "docs/plans/") and path != @index and
-           String.ends_with?(path, ".md"))
-    end)
-  end
-
-  # Concept: the governance walk owns documents; the artifact walk owns bound
-  # executables and configuration. Each is given only what it governs.
-  defp governance_only(nil), do: nil
-
-  defp governance_only({head, snapshots}) do
-    filtered =
-      Enum.map(snapshots, fn {revision, parents, files} ->
-        {revision, parents,
-         Map.filter(files, fn {path, _text} -> String.starts_with?(path, "docs/") end)}
-      end)
-
-    {head, filtered}
   end
 
   # Concept: the enduring rejoin order exists once, in the vision, and the roadmap

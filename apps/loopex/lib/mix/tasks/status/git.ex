@@ -2,29 +2,21 @@ defmodule Loopex.Checks.Git do
   @moduledoc """
   ## Concept
 
-  Reads the repository and its reachable history without modifying either. Every
-  check that anchors a record to history needs Git, and a read-only reviewer must
-  be able to run the same check, so nothing here writes to the checkout, creates
-  a temporary file, or fetches.
-
-  Unavailable evidence is reported as unavailable. A shallow clone, a grafted
-  history, or a rewritten object store cannot support a reachability claim, so the
-  history reader returns nothing rather than a partial walk that would silently
-  pass.
+  Reads the repository's current documents without modifying it. The status check
+  needs to know which Markdown files the repository actually carries, and a
+  read-only reviewer must be able to run the same check, so nothing here writes to
+  the checkout, creates a temporary file, or fetches.
 
   ## Technical depth
 
   Every invocation goes through one helper that pins the environment: lazy
-  fetching and object replacement are disabled so a resolved revision is a real
-  object in this repository, optional locks are disabled so a concurrent Git
-  process cannot make a read fail, and the locale is fixed so parsing does not
-  depend on the operator's settings.
+  fetching and object replacement are disabled so nothing reaches the network,
+  optional locks are disabled so a concurrent Git process cannot make a read fail,
+  and the locale is fixed so parsing does not depend on the operator's settings.
 
-  Blob contents are cached by object id across the whole walk. A hundred revisions
-  of the same document share one object, so the cache turns a per-revision read
-  into a per-version read. A resolver remembers its answers the same way, by
-  revision and path, because the governance history asks the same questions about
-  the same parent revisions from one revision to the next.
+  Only the working tree is read. Reachable history is not walked: the checks this
+  module serves validate the tree in front of them, which is what keeps the status
+  check a seconds-long command rather than a per-revision walk.
   """
 
   alias Loopex.Checks.Invalid
@@ -36,8 +28,6 @@ defmodule Loopex.Checks.Git do
     {"LC_ALL", "C"}
   ]
 
-  @sha ~r/\A[0-9a-f]{40}\z/u
-
   @doc """
   ## Concept
 
@@ -46,8 +36,8 @@ defmodule Loopex.Checks.Git do
   ## Technical depth
 
   Returns `{output, status}` rather than raising, because a non-zero status is
-  ordinary information here — a revision that does not exist, a path absent from a
-  tree — and the caller decides whether that means "not found" or "evidence
+  ordinary information here — a directory that is not a repository, for instance —
+  and the caller decides whether that means "not found" or "evidence
   unavailable".
   """
   @spec run(Path.t(), [String.t()]) :: {binary(), non_neg_integer()}
@@ -104,324 +94,5 @@ defmodule Loopex.Checks.Git do
           acc
       end
     end)
-  end
-
-  @doc """
-  ## Concept
-
-  Whether one commit is an ancestor of another.
-
-  ## Technical depth
-
-  The acceptance chain needs this and reachability from `HEAD` is not enough. Two
-  unrelated branches both become reachable once anything merges them, so a
-  candidate could name a prior candidate it does not descend from and the edge
-  would still resolve. A chain is only a lineage if every edge runs backwards along
-  actual history.
-  """
-  @spec ancestor?(Path.t(), String.t(), String.t(), (Path.t(), [String.t()] ->
-                                                       {binary(), non_neg_integer()})) ::
-          boolean()
-  def ancestor?(root, ancestor, descendant, runner \\ &__MODULE__.run/2) do
-    match?({_output, 0}, runner.(root, ["merge-base", "--is-ancestor", ancestor, descendant]))
-  end
-
-  @doc """
-  ## Concept
-
-  A resolver that returns one file's text at one revision, or `nil` when the
-  revision is not a reachable commit or the path is absent from it.
-
-  ## Technical depth
-
-  Three conditions must hold before the content is read: the object is a commit,
-  it is an ancestor of `HEAD`, and the path exists in its tree. Reachability is
-  the one that matters most — a bound candidate that is not an ancestor of the
-  integrated history is not part of the project's record, however valid its bytes
-  are, and admitting it would let a governance row bind a revision nobody can
-  reach.
-
-  The command runner is injectable so a test can prove the reachability rejection
-  happens, and that it happens without any command that writes: an unreachable
-  candidate must stop after the type and ancestry queries.
-
-  Each resolver remembers what it has learned, because the repository does not
-  change while a check reads it and a second answer can only repeat the first.
-  Whether a revision is a reachable commit is learned once per revision, by the
-  same two queries in the same order, and every later path at that revision goes
-  straight to reading its content; a file's content is learned once per
-  `{revision, path}`, including the `nil` that means absent. The governance
-  history asks about the same parent revisions for path after path and revision
-  after revision, and each repeat otherwise cost up to three more child processes.
-  The memory belongs to the resolver, not the module, so two resolvers never share
-  an answer and nothing survives the process that built it.
-  """
-  @spec resolver(Path.t(), (Path.t(), [String.t()] -> {binary(), non_neg_integer()})) ::
-          (String.t(), String.t() -> String.t() | nil)
-  def resolver(root, runner \\ &__MODULE__.run/2) do
-    memory = {__MODULE__, :resolved, make_ref()}
-
-    fn sha, path ->
-      %{reachable: reachable, content: answered} =
-        Process.get(memory, %{reachable: %{}, content: %{}})
-
-      case Map.fetch(answered, {sha, path}) do
-        {:ok, content} ->
-          content
-
-        :error ->
-          {reachable?, reachable} =
-            case Map.fetch(reachable, sha) do
-              {:ok, known} ->
-                {known, reachable}
-
-              :error ->
-                known = reachable_commit?(root, sha, runner)
-                {known, Map.put(reachable, sha, known)}
-            end
-
-          content = if reachable?, do: read(root, sha, path, runner)
-
-          Process.put(memory, %{
-            reachable: reachable,
-            content: Map.put(answered, {sha, path}, content)
-          })
-
-          content
-      end
-    end
-  end
-
-  defp reachable_commit?(root, sha, runner) do
-    match?({"commit\n", 0}, runner.(root, ["cat-file", "-t", sha])) and
-      match?({_output, 0}, runner.(root, ["merge-base", "--is-ancestor", sha, "HEAD"]))
-  end
-
-  defp read(root, sha, path, runner) do
-    with {content, 0} <- runner.(root, ["show", "#{sha}:#{path}"]),
-         true <- String.valid?(content) do
-      content
-    else
-      _other -> nil
-    end
-  end
-
-  @doc """
-  ## Concept
-
-  A reader for the complete reachable history of governed documents and bound
-  artifacts: one snapshot per commit, with its parents and the file contents that
-  commit carried.
-
-  ## Technical depth
-
-  Returns `nil` — meaning evidence unavailable — for a shallow repository, a
-  non-empty graft file, an unparsable revision list, an unexpected tree entry
-  mode, or any Git failure. Each of those breaks the reachability the walk depends
-  on, and a partial walk would pass while leaving exactly the gap the walk exists
-  to close.
-
-  Snapshots are emitted in reverse topological order so every parent precedes its
-  children, which is what lets the walks propagate state in one pass. Bound
-  artifacts may be mode 100755, since a bound runner is executable; governed
-  documents must be regular non-executable blobs.
-  """
-  @spec history_reader(Path.t(), [String.t()]) ::
-          (-> {String.t(), [{String.t(), [String.t()], map()}]} | nil)
-  def history_reader(root, artifact_paths \\ []) do
-    fn ->
-      with :ok <- require_complete_history(root),
-           {:ok, records} <- revision_records(root) do
-        read_snapshots(root, records, artifact_paths)
-      else
-        _other -> nil
-      end
-    end
-  end
-
-  defp require_complete_history(root) do
-    with {"false\n", 0} <- run(root, ["rev-parse", "--is-shallow-repository"]),
-         {graft, 0} <- run(root, ["rev-parse", "--git-path", "info/grafts"]),
-         :ok <- require_empty_graft(root, String.trim(graft)) do
-      :ok
-    else
-      _other -> :error
-    end
-  end
-
-  defp require_empty_graft(root, relative) do
-    path =
-      case Path.type(relative) do
-        :absolute -> relative
-        _other -> Path.join(root, relative)
-      end
-
-    case File.stat(path) do
-      {:error, _posix} -> :ok
-      {:ok, %File.Stat{type: :regular, size: 0}} -> :ok
-      {:ok, _stat} -> :error
-    end
-  end
-
-  defp revision_records(root) do
-    case run(root, ["rev-list", "--parents", "--topo-order", "--reverse", "HEAD"]) do
-      {output, 0} ->
-        records =
-          output |> String.split("\n", trim: true) |> Enum.map(&String.split(&1, " ", trim: true))
-
-        valid =
-          records != [] and
-            Enum.all?(records, fn record ->
-              record != [] and Enum.all?(record, &Regex.match?(@sha, &1))
-            end)
-
-        if valid, do: {:ok, records}, else: :error
-
-      _other ->
-        :error
-    end
-  end
-
-  # Concept: the walk says where it is while it runs.
-  #
-  # Technical depth: every reachable revision costs a tree listing and, for any
-  # governed file it has not seen, a blob read, so a full walk runs for minutes
-  # with nothing to show for it. A bounded number of progress lines on standard
-  # error name the revision being read and the count so far. They are not part
-  # of the check's result: standard output stays exactly what it was, and a
-  # reviewer piping it sees the same bytes.
-  defp read_snapshots(root, records, artifact_paths) do
-    total = length(records)
-    announce("history walk starting: #{total} reachable revisions")
-
-    result =
-      records
-      |> Enum.with_index(1)
-      |> Enum.reduce_while({[], %{}}, fn {[sha | parents], index}, {snapshots, cache} ->
-        progress(index, total, sha)
-
-        case read_tree(root, sha, artifact_paths, cache) do
-          {:ok, files, cache} -> {:cont, {[{sha, parents, files} | snapshots], cache}}
-          :error -> {:halt, :error}
-        end
-      end)
-
-    case result do
-      :error ->
-        nil
-
-      {snapshots, _cache} ->
-        ordered = Enum.reverse(snapshots)
-        {head, _parents, _files} = List.last(ordered)
-        {head, ordered}
-    end
-  end
-
-  @progress_every 100
-
-  defp progress(index, total, sha) when rem(index, @progress_every) == 0 or index == total do
-    announce("history walk #{index}/#{total} at #{String.slice(sha, 0, 12)}")
-  end
-
-  defp progress(_index, _total, _sha), do: :ok
-
-  defp announce(line), do: IO.puts(:stderr, "loopex.status: " <> line)
-
-  defp read_tree(root, sha, artifact_paths, cache) do
-    case run(
-           root,
-           ["ls-tree", "-rz", "-r", "--full-tree", sha, "--", "docs/plans", "docs/adr"] ++
-             artifact_paths
-         ) do
-      {output, 0} -> collect_entries(root, output, artifact_paths, cache)
-      _other -> :error
-    end
-  end
-
-  defp collect_entries(root, output, artifact_paths, cache) do
-    entries = String.split(output, <<0>>)
-
-    case List.last(entries) do
-      "" ->
-        entries
-        |> Enum.drop(-1)
-        |> Enum.reduce_while({:ok, %{}, cache}, fn entry, {:ok, files, cache} ->
-          case entry_content(root, entry, artifact_paths, cache) do
-            :skip -> {:cont, {:ok, files, cache}}
-            :error -> {:halt, :error}
-            {:ok, path, content, cache} -> {:cont, {:ok, Map.put(files, path, content), cache}}
-          end
-        end)
-
-      _other ->
-        :error
-    end
-  end
-
-  defp entry_content(root, entry, artifact_paths, cache) do
-    with [metadata, path] <- String.split(entry, "\t", parts: 2),
-         [mode, type, object_id] <- String.split(metadata, " ", trim: true),
-         true <- String.valid?(path) do
-      cond do
-        not governed?(path, artifact_paths) ->
-          :skip
-
-        type != "blob" or mode not in allowed_modes(path, artifact_paths) ->
-          :error
-
-        true ->
-          blob(root, object_id, path, cache)
-      end
-    else
-      _other -> :error
-    end
-  end
-
-  defp allowed_modes(path, artifact_paths) do
-    case path in artifact_paths do
-      true -> ["100644", "100755"]
-      false -> ["100644"]
-    end
-  end
-
-  defp blob(root, object_id, path, cache) do
-    case Map.fetch(cache, object_id) do
-      {:ok, content} ->
-        {:ok, path, content, cache}
-
-      :error ->
-        case run(root, ["cat-file", "blob", object_id]) do
-          {content, 0} ->
-            case String.valid?(content) do
-              true -> {:ok, path, content, Map.put(cache, object_id, content)}
-              false -> :error
-            end
-
-          _other ->
-            :error
-        end
-    end
-  end
-
-  # Concept: only governed documents and declared artifacts are read.
-  # Technical depth: plan and ADR Markdown is governed by path shape; an artifact
-  # is governed because a gate names it, which is why the caller passes the list.
-  # The plans index is read too. It is not a plan pair, but it is the canonical
-  # register, and the history walk needs the lifecycle state and the milestone
-  # rows as they stood at each revision; excluding it made every historical
-  # snapshot indexless, so a check written against the register silently passed
-  # over the whole of real history.
-  defp governed?(path, artifact_paths) do
-    relative = Loopex.Checks.Paths.strip_prefix(path, "docs/plans/")
-
-    plan? =
-      String.starts_with?(path, "docs/plans/") and String.ends_with?(relative, ".md")
-
-    adr? =
-      Loopex.Checks.Documents.adr_concept?(path) or
-        (String.ends_with?(path, "-technical.md") and
-           Loopex.Checks.Documents.adr_concept?(Loopex.Checks.Paths.concept(path)))
-
-    plan? or adr? or path in artifact_paths
   end
 end

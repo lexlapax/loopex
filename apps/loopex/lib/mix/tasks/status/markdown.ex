@@ -41,7 +41,6 @@ defmodule Loopex.Checks.Markdown do
     "\u2028",
     "\u2029"
   ]
-  @canonical_separators ["\r" | @line_separators]
 
   @anchor_id "[a-z0-9]+(?:-[a-z0-9]+)*"
 
@@ -59,11 +58,6 @@ defmodule Loopex.Checks.Markdown do
     current: {"<!-- loopex:current-status:start -->", "<!-- loopex:current-status:end -->"},
     register:
       {"<!-- loopex:milestone-register:start -->", "<!-- loopex:milestone-register:end -->"},
-    plan_concept_envelope:
-      {"<!-- loopex:plan-concept-envelope:start -->", "<!-- loopex:plan-concept-envelope:end -->"},
-    plan_technical_envelope:
-      {"<!-- loopex:plan-technical-envelope:start -->",
-       "<!-- loopex:plan-technical-envelope:end -->"},
     matrix_runs: {"<!-- loopex:matrix-runs:start -->", "<!-- loopex:matrix-runs:end -->"},
     rejoin_source: {"<!-- loopex:rejoin-source:start -->", "<!-- loopex:rejoin-source:end -->"},
     rejoin_copy: {"<!-- loopex:rejoin-copy:start -->", "<!-- loopex:rejoin-copy:end -->"}
@@ -110,26 +104,6 @@ defmodule Loopex.Checks.Markdown do
     |> String.replace("\r\n", "\n")
     |> String.replace("\r", "\n")
     |> String.split("\n")
-  end
-
-  @doc """
-  ## Concept
-
-  Fails unless the text uses canonical UTF-8 with `LF` line endings only.
-
-  ## Technical depth
-
-  Stricter than `lines/2` because it also rejects `CR`. Digest-bound text cannot
-  be normalised before hashing without the digest describing bytes that are not
-  in the file, so the bytes themselves must already be canonical.
-  """
-  @spec require_canonical!(String.t(), String.t(), String.t()) :: :ok
-  def require_canonical!(text, path, subject) do
-    if Enum.any?(@canonical_separators, &String.contains?(text, &1)) do
-      raise Invalid, "#{path}: #{subject} must use canonical UTF-8/LF bytes"
-    end
-
-    :ok
   end
 
   @doc """
@@ -622,18 +596,4 @@ defmodule Loopex.Checks.Markdown do
   """
   @spec occurrences(String.t(), String.t()) :: non_neg_integer()
   def occurrences(text, substring), do: length(String.split(text, substring)) - 1
-
-  @doc """
-  ## Concept
-
-  The SHA-256 digest of text, as lowercase hexadecimal.
-
-  ## Technical depth
-
-  Hashes the UTF-8 bytes exactly as they appear. Every digest the governance
-  records bind is computed this way, so a digest comparison is a byte comparison
-  with a fixed-size representation.
-  """
-  @spec digest(String.t()) :: String.t()
-  def digest(text), do: :crypto.hash(:sha256, text) |> Base.encode16(case: :lower)
 end

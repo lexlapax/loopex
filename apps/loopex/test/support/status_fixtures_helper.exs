@@ -7,25 +7,17 @@ defmodule Loopex.StatusFixtures do
   mutation and asserts it fails — which keeps each case about one property rather
   than about assembling a valid repository.
 
-  Nothing here touches the checkout. The checks take documents, a revision
-  resolver, and a history reader as data, so the adversarial cases can build
-  histories, merges, and candidate revisions that no real repository would
-  contain.
+  Nothing here touches the checkout. The checks take the documents as data, so a
+  case can build a repository state that no real checkout would contain.
 
   ## Technical depth
 
-  Every fixture is exact text, because the checks compare bytes. Digests are
-  computed from the fixtures themselves rather than pasted, so a fixture edit does
-  not silently turn a governance test into a digest-mismatch test.
-
-  The resolver recognises a small set of synthetic revision names: `a`, `b`, and
-  `c` repeated forty times stand for the acceptance candidate, an alternate
-  candidate, and the closure candidate; `d` and `e` stand for the two ADR
-  candidates. Those are the shapes the bound-bytes grammar accepts, so the
-  fixtures exercise the real parser rather than a relaxed one.
+  Every fixture is exact text, because the checks compare bytes. A governance row
+  carries digest-shaped and revision-shaped constants rather than real hashes:
+  the checks read those cells for shape only, so a computed digest would suggest
+  a comparison that no longer happens.
   """
 
-  alias Loopex.Checks.Markdown
   alias Loopex.Checks.Status
 
   @summary "**Revision status:** Pre-implementation planning; no milestone is active; next candidate `M0` is blocked."
@@ -44,31 +36,10 @@ defmodule Loopex.StatusFixtures do
   @gate """
   # Gate
 
-  ## Documentation Obligations
+  ## Acceptance Command
 
-  | Category | Required closure disposition |
-  | --- | --- |
-  | Operator-facing documentation | N/A — no operator behavior changes |
-  | Operator README | N/A — no operator documentation set |
-  | Developer-facing documentation | N/A — no developer behavior changes |
-  | Developer README | N/A — no developer documentation set |
-  | Documentation README | `docs/README.md` |
-  | Root README | `README.md` |
-  | Changelog | `CHANGELOG.md` |
+  `mix test test/example_test.exs`
   """
-
-  @gate_separators [
-    "\r\n",
-    "\r",
-    "\v",
-    "\f",
-    "\x1C",
-    "\x1D",
-    "\x1E",
-    "\u0085",
-    "\u2028",
-    "\u2029"
-  ]
 
   @adr_paths [
     "docs/adr/0001-repository-and-application-layout.md",
@@ -103,75 +74,9 @@ defmodule Loopex.StatusFixtures do
   end
 
   def gate, do: @gate
-  def gate_separators, do: @gate_separators
-
-  @doc """
-  ## Concept
-
-  A gate that declares the additive amendment transaction and carries numbered
-  amendments up to one generation.
-
-  ## Technical depth
-
-  The marker and the amendment sections are both required before a gate
-  generation is admissible, so the fixture builds them together rather than
-  letting a case pass with only one of them present.
-  """
-  def amended_gate(generation, base \\ @gate) do
-    header = String.trim_trailing(base, "\n") <> "\n\n<a id=\"amendment-transaction-v2\"></a>\n"
-
-    Enum.reduce(1..generation//1, header, fn number, text ->
-      text <> "\n<a id=\"amendment-#{number}\"></a>\n## Amendment #{number}\n"
-    end)
-  end
-
-  @doc """
-  ## Concept
-
-  One `## Gate Generations` table, or nothing when a plan records no generation.
-
-  ## Technical depth
-
-  Rows are supplied as their exact inner cells, so a case can state a malformed
-  numbering, a second proposal, or a rewritten record directly rather than
-  rebuilding the table around it.
-  """
-  def generations_section([]), do: ""
-
-  def generations_section(rows) do
-    "\n## Gate Generations\n\n" <>
-      "| Generation | Authority | Authority evidence | Bound bytes |\n" <>
-      "| --- | --- | --- | --- |\n" <> Enum.map_join(rows, "", &("| " <> &1 <> " |\n"))
-  end
-
-  @doc """
-  ## Concept
-
-  The inner cells of one accepted, or one proposed, gate generation row.
-
-  ## Technical depth
-
-  A proposal names the gate bytes it introduces and nothing else, because the
-  revision carrying it cannot name its own hash; the rebind adds the authority,
-  its disposition, and the exact candidate that was reviewed.
-  """
-  def accepted_generation(number, candidate, gate_text, disposition) do
-    "#{number} | Maintainer | [disposition](#{disposition}) | " <>
-      "candidate `#{candidate}`; gate `sha256:#{Markdown.digest(gate_text)}`"
-  end
-
-  def proposed_generation(number, gate_text) do
-    "#{number} | — | — | gate `sha256:#{Markdown.digest(gate_text)}`"
-  end
 
   def adr_paths, do: @adr_paths
   def blocked_row, do: @blocked_row
-  def blockers_text, do: @blockers_text
-
-  def concept_marker_start, do: "<!-- loopex:plan-concept-envelope:start -->"
-  def concept_marker_end, do: "<!-- loopex:plan-concept-envelope:end -->"
-  def technical_marker_start, do: "<!-- loopex:plan-technical-envelope:start -->"
-  def technical_marker_end, do: "<!-- loopex:plan-technical-envelope:end -->"
 
   def rejoin do
     """
@@ -401,8 +306,8 @@ defmodule Loopex.StatusFixtures do
 
       true ->
         candidate = String.duplicate(if(number == 1, do: "d", else: "e"), 40)
-        concept_digest = Markdown.digest(proposal)
-        technical_digest = Markdown.digest(adr_technical(number))
+        concept_digest = String.duplicate(if(number == 1, do: "1d", else: "1e"), 32)
+        technical_digest = String.duplicate(if(number == 1, do: "2d", else: "2e"), 32)
 
         proposal
         |> String.replace("- **Status:** Proposed", "- **Status:** Accepted")
@@ -413,6 +318,43 @@ defmodule Loopex.StatusFixtures do
             "technical `sha256:#{technical_digest}` |"
         )
     end
+  end
+
+  @doc """
+  ## Concept
+
+  The fixture milestone plan's Concept document.
+
+  ## Technical depth
+
+  Carries the sections a plan document has -- the envelope, the workstreams, the
+  progress table, and the governance rows -- because the documentation checks
+  read its links and anchors. The governance rows are left empty: nothing
+  validates their contents any more, and filling them in would suggest something
+  does.
+  """
+  def plan do
+    """
+    #{plan_preamble()}
+    #{envelope()}
+
+    ## Workstreams
+
+    One direct workstream.
+
+    ## Progress and Evidence
+
+    | # | State | Evidence |
+    | --- | --- | --- |
+    | 1 | Open | — |
+
+    ## Governance Records
+
+    | Decision | Authority | Authority evidence | Bound bytes |
+    | --- | --- | --- | --- |
+    | Acceptance | — | — | — |
+    | Closure | — | — | — |
+    """
   end
 
   def documents do
@@ -478,146 +420,6 @@ defmodule Loopex.StatusFixtures do
     end)
   end
 
-  def envelope_digest(text, start, stop) do
-    lines = String.split(text, "\n")
-    from = Enum.find_index(lines, &(&1 == start))
-    to = Enum.find_index(lines, &(&1 == stop))
-    Markdown.digest(Enum.join(Enum.slice(lines, (from + 1)..(to - 1)//1), "\n"))
-  end
-
-  def plan(options \\ []) do
-    governed = Keyword.get(options, :governed, false)
-    closed = Keyword.get(options, :closed, false)
-    gate_text = Keyword.get(options, :gate, @gate)
-    generations = Keyword.get(options, :generations, [])
-    progress = Keyword.get(options, :progress) || if(closed, do: "Proved", else: "Open")
-
-    empty = "— | — | —"
-    concept_digest = envelope_digest(envelope(), concept_marker_start(), concept_marker_end())
-
-    technical_digest =
-      envelope_digest(technical_plan(), technical_marker_start(), technical_marker_end())
-
-    gate_digest = Markdown.digest(gate_text)
-
-    bound = fn candidate ->
-      "candidate `#{String.duplicate(candidate, 40)}`; " <>
-        "concept `sha256:#{concept_digest}`; " <>
-        "technical `sha256:#{technical_digest}`; gate `sha256:#{gate_digest}`"
-    end
-
-    acceptance =
-      case governed do
-        true -> "Maintainer | [disposition](../vision.md#concept) | #{bound.("a")}"
-        false -> empty
-      end
-
-    closure =
-      case closed do
-        true -> "Maintainer | [disposition](../roadmap.md#concept) | #{bound.("c")}"
-        false -> empty
-      end
-
-    plan_text(acceptance, closure, progress) <> generations_section(generations)
-  end
-
-  defp plan_text(acceptance, closure, progress_state) do
-    """
-    #{plan_preamble()}
-    #{envelope()}
-
-    ## Workstreams
-
-    One direct workstream.
-
-    ## Progress and Evidence
-
-    | # | State | Evidence |
-    | --- | --- | --- |
-    | 1 | #{progress_state} | — |
-
-    ## Governance Records
-
-    | Decision | Authority | Authority evidence | Bound bytes |
-    | --- | --- | --- | --- |
-    | Acceptance | #{acceptance} |
-    | Closure | #{closure} |
-    """
-  end
-
-  def plan_snapshot(concept, gate_text \\ nil, technical \\ nil) do
-    base = %{
-      "docs/plans/M0.md" => concept,
-      "docs/plans/M0-technical.md" => technical || technical_plan()
-    }
-
-    case gate_text do
-      nil -> base
-      found -> Map.put(base, "docs/plans/M0-gate.md", found)
-    end
-  end
-
-  def adr_snapshot(number, concept) do
-    path = Enum.at(@adr_paths, number - 1)
-
-    %{
-      path => concept,
-      String.replace_suffix(path, ".md", "-technical.md") => adr_technical(number)
-    }
-  end
-
-  @doc """
-  ## Concept
-
-  The fixture resolver: what a synthetic revision contains.
-
-  ## Technical depth
-
-  Only the revision names the fixtures use resolve; everything else is
-  unavailable, which is how a test asserts that an unresolvable candidate fails
-  rather than passing silently.
-  """
-  def resolve(historical_gate \\ @gate) do
-    fn sha, path ->
-      candidates = [
-        String.duplicate("a", 40),
-        String.duplicate("b", 40),
-        String.duplicate("c", 40)
-      ]
-
-      cond do
-        String.ends_with?(path, "M0-gate.md") and sha in candidates ->
-          historical_gate
-
-        String.ends_with?(path, "M0-technical.md") and sha in candidates ->
-          technical_plan()
-
-        String.ends_with?(path, "M0.md") and sha in Enum.take(candidates, 2) ->
-          plan()
-
-        String.ends_with?(path, "M0.md") and sha == String.duplicate("c", 40) ->
-          plan(governed: true, progress: "Proved")
-
-        path == Enum.at(@adr_paths, 0) and sha == String.duplicate("d", 40) ->
-          adr(1)
-
-        path == String.replace_suffix(Enum.at(@adr_paths, 0), ".md", "-technical.md") and
-            sha == String.duplicate("d", 40) ->
-          adr_technical(1)
-
-        path == Enum.at(@adr_paths, 1) and sha == String.duplicate("e", 40) ->
-          adr(2)
-
-        path == String.replace_suffix(Enum.at(@adr_paths, 1), ".md", "-technical.md") and
-            sha == String.duplicate("e", 40) ->
-          adr_technical(2)
-
-        true ->
-          nil
-      end
-    end
-  end
-
   @doc """
   ## Concept
 
@@ -625,29 +427,10 @@ defmodule Loopex.StatusFixtures do
 
   ## Technical depth
 
-  A single-parent history is synthesised from the supplied revisions, rooted at a
-  synthetic empty commit, so every case exercises the real history walk rather
-  than the unavailable-history path.
+  The checks read the document set and nothing else, so this is one call. It
+  exists so a case names what it is doing rather than reaching for the module.
   """
-  def checked(documents, options \\ []) do
-    historical_gate = Keyword.get(options, :historical_gate, @gate)
-    plan_history = Keyword.get(options, :plan_history, [])
-    read_artifact = Keyword.get(options, :read_artifact)
-    resolve_file = Keyword.get(options, :resolve_file) || resolve(historical_gate)
-
-    {snapshots, head} =
-      Enum.reduce(plan_history, {[{"fixture-root", [], %{}}], "fixture-root"}, fn {revision,
-                                                                                   plans},
-                                                                                  {acc, parent} ->
-        {acc ++ [{revision, [parent], plans}], revision}
-      end)
-
-    Status.validate(documents,
-      resolve_file: resolve_file,
-      plan_history: fn -> {head, snapshots} end,
-      read_artifact: read_artifact
-    )
-  end
+  def checked(documents), do: Status.validate(documents)
 
   @doc """
   ## Concept
@@ -766,34 +549,5 @@ defmodule Loopex.StatusFixtures do
       end
 
     Map.put(documents, "docs/plans/README.md", updated)
-  end
-
-  @doc """
-  ## Concept
-
-  A fixture document set with `M0` registered as Open and its plan triple present.
-
-  ## Technical depth
-
-  Used by every bound-artifact case, because a gate is only reachable once the
-  milestone is registered with links, and the derived summary and capsule must
-  move with it.
-  """
-  def open_milestone_documents(gate_text) do
-    documents()
-    |> Map.update!("docs/plans/README.md", fn text ->
-      text
-      |> String.replace(
-        @blocked_row,
-        "| `M0` | Open | [concept](M0.md) | " <>
-          "[technical depth](M0-technical.md) | [gate](M0-gate.md) |"
-      )
-      |> String.replace(@summary, @open_summary)
-      |> open_capsule()
-    end)
-    |> Map.update!("README.md", &String.replace(&1, @summary, @open_summary))
-    |> Map.put("docs/plans/M0.md", plan())
-    |> Map.put("docs/plans/M0-technical.md", technical_plan())
-    |> Map.put("docs/plans/M0-gate.md", gate_text)
   end
 end

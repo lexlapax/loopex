@@ -950,36 +950,72 @@ defmodule Loopex.Checks.Documents do
   would destroy the record. A destination naming a directory must have at least
   one document under it, so a link to a directory index cannot outlive the
   directory.
+
+  Every document is scanned for its lines and its visible line numbers once, and
+  the answer is remembered for the rest of this call. A fragment link has to look
+  inside the document it points at, popular targets are pointed at hundreds of
+  times, and the visibility scan is a character-level pass over the whole file;
+  repeating it per link was the single slowest thing the status check did. The
+  memory belongs to this call, not to the module, so nothing survives it and two
+  callers never share a scan of different bytes.
   """
   @spec validate_local_links(map()) :: :ok
   def validate_local_links(documents) do
-    documents
-    |> Map.keys()
-    |> Enum.sort()
-    |> Enum.reject(&String.starts_with?(&1, "docs/archive/"))
-    |> Enum.each(fn source ->
-      text = Map.fetch!(documents, source)
-      lines = Markdown.lines(text, source)
-      visible = Markdown.visible_line_numbers(text, source)
+    memory = {__MODULE__, :scanned, make_ref()}
 
-      visible
+    try do
+      documents
+      |> Map.keys()
       |> Enum.sort()
-      |> Enum.each(fn index ->
-        raw = Enum.at(lines, index)
+      |> Enum.reject(&String.starts_with?(&1, "docs/archive/"))
+      |> Enum.each(fn source ->
+        {lines, visible} = scan(documents, source, memory)
 
-        raw
-        |> Markdown.exposed_line()
-        |> markdown_links(source, raw)
-        |> Enum.each(fn {_start, _all, _label, destination} ->
-          resolve_link!(documents, source, destination)
+        Enum.each(visible, fn index ->
+          raw = elem(lines, index)
+
+          raw
+          |> Markdown.exposed_line()
+          |> markdown_links(source, raw)
+          |> Enum.each(fn {_start, _all, _label, destination} ->
+            resolve_link!(documents, source, destination, memory)
+          end)
         end)
       end)
-    end)
 
-    :ok
+      :ok
+    after
+      Process.delete(memory)
+    end
   end
 
-  defp resolve_link!(documents, source, destination) do
+  # Concept: one scan of a document, remembered for the rest of the call.
+  #
+  # Technical depth: the lines are handed back as a tuple rather than a list.
+  # Every caller here reaches lines by index, and indexing a list is linear, so a
+  # pass over one long document's visible lines cost a quadratic number of list
+  # steps. The visible set is returned already sorted, because the callers want
+  # document order.
+  defp scan(documents, path, memory) do
+    scanned = Process.get(memory, %{})
+
+    case Map.fetch(scanned, path) do
+      {:ok, result} ->
+        result
+
+      :error ->
+        text = Map.fetch!(documents, path)
+
+        result =
+          {text |> Markdown.lines(path) |> List.to_tuple(),
+           text |> Markdown.visible_line_numbers(path) |> Enum.sort()}
+
+        Process.put(memory, Map.put(scanned, path, result))
+        result
+    end
+  end
+
+  defp resolve_link!(documents, source, destination, memory) do
     cond do
       String.starts_with?(destination, ["http://", "https://", "mailto:", "//"]) ->
         :ok
@@ -990,11 +1026,11 @@ defmodule Loopex.Checks.Documents do
       true ->
         [raw_target | rest] = String.split(destination, "#", parts: 2)
         fragment = List.first(rest)
-        resolve_local!(documents, source, destination, raw_target, fragment)
+        resolve_local!(documents, source, destination, raw_target, fragment, memory)
     end
   end
 
-  defp resolve_local!(documents, source, destination, raw_target, fragment) do
+  defp resolve_local!(documents, source, destination, raw_target, fragment, memory) do
     if String.starts_with?(raw_target, "/") do
       raise Invalid, "#{source}: local Markdown link escapes the repository"
     end
@@ -1024,22 +1060,20 @@ defmodule Loopex.Checks.Documents do
         end
 
       fragment != nil ->
-        require_single_anchor!(documents, source, destination, target, fragment)
+        require_single_anchor!(documents, source, destination, target, fragment, memory)
 
       true ->
         :ok
     end
   end
 
-  defp require_single_anchor!(documents, source, destination, target, fragment) do
+  defp require_single_anchor!(documents, source, destination, target, fragment, memory) do
     anchor = ~s(<a id="#{fragment}"></a>)
-    text = Map.fetch!(documents, target)
-    lines = Markdown.lines(text, target)
-    visible = Markdown.visible_line_numbers(text, target)
+    {lines, visible} = scan(documents, target, memory)
 
     count =
       visible
-      |> Enum.map(&Markdown.occurrences(Enum.at(lines, &1), anchor))
+      |> Enum.map(&Markdown.occurrences(elem(lines, &1), anchor))
       |> Enum.sum()
 
     unless count == 1 do

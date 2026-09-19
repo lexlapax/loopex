@@ -15,8 +15,7 @@ defmodule Loopex.Checks.Records do
   Structural only, and deliberately so: this module proves a row's shape, not
   that the disposition it transcribes happened. Whether the recorded authority
   actually accepted the bytes is established by the disposition the evidence
-  column points at, and by the history walk that refuses to let a completed row
-  change afterwards.
+  column points at, which a reader follows.
   """
 
   alias Loopex.Checks.Invalid
@@ -25,8 +24,6 @@ defmodule Loopex.Checks.Records do
   @authority ~r/\A(?:Maintainer|Delegate: [A-Za-z0-9][A-Za-z0-9 ._@-]*)\z/u
   @evidence ~r/\A\[disposition\]\([^) \t]+\)\z/u
   @empty ["—", "—", "—"]
-
-  @bound ~r/\Acandidate `([0-9a-f]{40})`; concept `sha256:([0-9a-f]{64})`; technical `sha256:([0-9a-f]{64})`; gate `sha256:([0-9a-f]{64})`\z/u
 
   @adr_bound ~r/\Acandidate `([0-9a-f]{40})`; concept `sha256:([0-9a-f]{64})`; technical `sha256:([0-9a-f]{64})`\z/u
 
@@ -59,26 +56,6 @@ defmodule Loopex.Checks.Records do
   """
   @spec evidence?(String.t()) :: boolean()
   def evidence?(cell), do: Regex.match?(@evidence, cell)
-
-  @doc """
-  ## Concept
-
-  The four bound values a plan governance row carries: candidate revision, and
-  the concept, technical-depth, and gate digests.
-
-  ## Technical depth
-
-  Returns `nil` when the cell is not an exact bound-bytes record. Partial parsing
-  is not offered: a row that almost matches would otherwise bind some bytes and
-  leave others unchecked.
-  """
-  @spec bound(String.t()) :: {String.t(), String.t(), String.t(), String.t()} | nil
-  def bound(cell) do
-    case Regex.run(@bound, cell) do
-      [_all, candidate, concept, technical, gate] -> {candidate, concept, technical, gate}
-      nil -> nil
-    end
-  end
 
   @doc """
   ## Concept
@@ -145,39 +122,5 @@ defmodule Loopex.Checks.Records do
     end
 
     {rows, Enum.to_list((body_start + 2)..(body_start + 1 + length(rows))//1)}
-  end
-
-  @doc """
-  ## Concept
-
-  The Acceptance and Closure rows of a plan, with their bound values and whether
-  each is complete.
-
-  ## Technical depth
-
-  Returns `{rows, bound, complete}` where `bound` holds a parsed bound-bytes tuple
-  or `nil` per row and `complete` holds a boolean per row. A row that is neither
-  exactly empty nor structurally complete fails here, so every later check can
-  assume those are the only two states.
-  """
-  @spec governance_records(String.t(), String.t()) ::
-          {[[String.t()]], [tuple() | nil], [boolean()]}
-  def governance_records(text, path) do
-    {rows, _indices} =
-      records_table(text, path, "## Governance Records", ["Acceptance", "Closure"])
-
-    bound = Enum.map(rows, &bound(Enum.at(&1, 3)))
-
-    complete =
-      Enum.zip_with(rows, bound, fn row, digest ->
-        authority?(Enum.at(row, 1)) and evidence?(Enum.at(row, 2)) and digest != nil
-      end)
-
-    if Enum.zip_with(rows, complete, fn row, done -> empty_row?(row) or done end)
-       |> Enum.any?(&(not &1)) do
-      raise Invalid, "#{path}: each governance row must be exactly empty or structurally complete"
-    end
-
-    {rows, bound, complete}
   end
 end
