@@ -57,7 +57,23 @@ defmodule Loopex.ReferenceClient.EndToEndRecoveryTest do
     on_exit(fn -> Fixture.stop(fixture) end)
 
     assert first_dispatches[retained.job_id] == 1
-    assert :absent = Local.receipt(fixture.executor, retained.job_id)
+
+    # The receipt file is gone either way; what the resumed executor answers
+    # depends on the open ledger entry, which the first executor removed only
+    # after confirming its cleanup within the budget. Under load it can fail to
+    # confirm, keep the entry open as the quarantine warning, and still hand
+    # the coordinator the receipt; a reader then finds the entry with no
+    # receipt and answers unresolved. Both answers end the run outcome_unknown
+    # below and neither admits a second dispatch, so the assertion names the
+    # answer this run earned instead of assuming an idle machine, which a
+    # loaded hosted runner is not.
+    expected_lookup =
+      case retained.cleanup_confirmation do
+        :confirmed -> :absent
+        :unconfirmed -> {:error, :effect_unresolved}
+      end
+
+    assert Local.receipt(fixture.executor, retained.job_id) == expected_lookup
     assert {:ok, query} = ReferenceClient.reconciliation_query(fixture.client)
 
     response = Recovery.outcome_unknown(query)
