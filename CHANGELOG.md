@@ -15,20 +15,31 @@ repository, planning, and milestone implementation work, and carry no consumer
 compatibility meaning.
 
 Updating this file is part of a milestone closure candidate, not an optional
-courtesy — see [AGENTS.md](AGENTS.md) § Milestones and Gates. Each gate locks
-the exact document set its milestone must update.
+courtesy — see [AGENTS.md](AGENTS.md) § Milestones and Checks and the
+[milestone guide](docs/developer/milestones.md#concept-milestones-close).
 
 ## [Unreleased]
 
-Ship a local host for the app server. `Loopex.AppServer.Host` reads an
-operator's launch inputs from the environment — the state root, the workspace,
-the provider companion's launch configuration and the host policy — composes the
-reference stack through `LoopexComposition`, and serves one connection until
-standard input ends. The operator guide's launch and consumer commands now name
-it, so following them runs shipped code rather than a fixture that lives in the
-test tree. Two host policies ship with it: `ask`, which defers every executor
-tool call to the client as a durable question and decides on the answer once it
-has committed, and `allow-all`, which allows every call and says so once.
+Nothing since the `0.1.0` source version.
+
+## [0.1.0] — 2026-09-19
+
+M4's closed product baseline: the first numbered source version. It is a source
+version only, not a package, a publication or a compatibility freeze; the
+`v0.1.0` tag follows under its own release decision.
+
+No package or compatibility-labelled surface is pending.
+
+Ship a local host for the app server. `Loopex.AppServer.Host.serve/0` reads an
+operator's launch inputs from the environment — `LOOPEX_HOME`,
+`LOOPEX_WORKSPACE`, `LOOPEX_PROVIDER_LAUNCH` and `LOOPEX_POLICY`, with the
+credential in `LOOPEX_PROVIDER_API_KEY` — composes the reference stack through
+`LoopexComposition`, and serves one connection until standard input ends. The
+operator guide's launch and consumer commands now name it, so following them
+runs shipped code rather than a fixture that lives in the test tree. Two host
+policies ship with it: `ask`, which defers every executor tool call to the
+client as a durable question and decides on the answer once it has committed,
+and `allow-all`, which allows every call and says so once.
 
 The reference composition can wire artifact transfers. Passing
 `artifact_transfers: true` starts its transfer owner and hands the same artifact
@@ -37,7 +48,9 @@ transfer against what a tool retained. Left absent, nothing changes.
 
 The real-provider workflow now runs from an extracted archive of the exact
 committed source, built and launched by the commands the operator guide prints,
-which is what makes those commands evidence rather than prose.
+which is what makes those commands evidence rather than prose. The archive proof
+prints the committed revision and the archive's SHA-256 so a run names the bytes
+it built.
 
 Three test-tree pieces are replaced rather than deleted, and what replaced them
 proves more than they did. The scripted fresh-extraction case built an
@@ -50,19 +63,86 @@ artifact transfers, and the shipped host now composes what it used to hand-wire.
 tests; both lanes now observe the shipped `ask` policy, so the question a client
 renders is the product's.
 
-## [0.1.0] — 2026-09-19
+Fix the local executor's launch guard: each control frame is now written as one
+line and one write, so a loaded four-core runner cannot split a frame across two
+writes and leave the parser reading half of one. A parser-probe regression and a
+frame-atomicity test hold it. `claim_wait_ms` became a trusted-local start
+option of the local executor, default 5 000 ms, so a test can arm the bound it
+asserts instead of waiting out the constant.
 
-The M4 closure candidate: the first numbered source version. It is a source
-version only, not a package, a publication or a compatibility freeze; the
-`v0.1.0` tag follows the reviewed integrated closure under its own release
-decision.
+Replace the milestone gates with the
+[verification guide](docs/developer/verification.md#concept) and its technical
+companion: three stages — Change, Close, Release — with one question each, a
+table routing a changed boundary to the checks it selects in addition to the
+fast check, and the rules that keep those checks honest. There is no
+per-milestone gate runner, no locked digest table and no amendment transaction;
+the gate files under `docs/plans/` are records of what was proved at the
+revisions they name. The [milestone guide](docs/developer/milestones.md#concept)
+pair is now the one procedure for planning, running and closing a milestone, and
+`docs/plans/README.md` keeps the lifecycle and the register alone. A plan's
+prerequisites are read from the links in its companion's
+`### Prerequisites and Acceptance Points` section rather than from a table in
+code. The repository skills are `open-milestone`, `close-milestone`, `adr` and
+the optional `mutant-hunt` technique; `/gate` is gone.
 
-No package or compatibility-labelled surface is pending.
+The two check commands are the enforcement. `bash scripts/check.sh` is the fast
+check: warning-free compilation, formatting, the repository structure aggregate
+(client adapters, ignore policy, commit messages, branch and worktree hygiene,
+OTP application declarations, the suite-summary judge and the current-tree
+status check), documentation ordering, the dependency budget and direction, one
+version across the applications, the test build, and the credential-free suite.
+The suite runs one application per VM, several at once and heaviest first, with
+`LOOPEX_CHECK_JOBS` bounding the concurrency, `LOOPEX_CHECK_ALONE` naming
+applications that get the box to themselves first, a per-application log printed
+only on failure, a heartbeat line every thirty seconds naming what is still
+running, and an interruption that kills the whole process tree. A suite that
+executed nothing is red: `scripts/suite-summary.sh` judges each application's
+result line on both supported toolchains, and `scripts/check-suite-summary.sh`
+proves the judge. `--docs` stops after the documentation step, and `--select`
+chooses that mode on its own when every path changed against the integration
+base is Markdown outside `apps/`.
 
-Implement the accepted [M4 plan](docs/plans/M4.md#concept) on branch `m4`: an
-independent program now drives a durable coding session from outside the
-runtime, answers a host-policy question, and reads back a large artifact.
-Implementation is complete; closure is pending and is a separate decision.
+`bash scripts/check-release.sh` is the slow check: an explicit list of release
+applications, each running `--only real_provider --only node_client --include
+long_bound` in its own VM, then a `--only long_bound` pass over `loopex` and
+`loopex_executor_local`. It requires `LOOPEX_PROVIDER_API_KEY`, the pinned Node
+and a clean tree, judges every pass with the same summary judge, and two of its
+real-provider tests are attended and prompt on the controlling terminal.
+
+Hosted CI is a replaceable runner of the same command.
+`.github/workflows/agent-bootstrap.yml` runs on every push to `main` and every
+pull request, checks a pull request out at its own head with full history, sets
+up OTP 29.0.5 with Elixir 1.20.3, runs `mix deps.get` and then
+`bash scripts/check.sh --select` with `LOOPEX_CHECK_ALONE=loopex_llm_reqllm`,
+and cancels a superseded run through a concurrency group per workflow and ref.
+The adapter check admits only those three run steps. Measured, the whole check
+takes about thirteen minutes on the four-core hosted runner and about five on
+the Mac with ten applications at once. Nothing merges to `main` without a green
+CI run on the candidate and an independent review; feature branches live only
+while their pull request is open, and `main`, `m4` and `m5` are the durable
+branches.
+
+Make the suite prove the same guarantees in a fraction of the time. Three cases
+whose claim is a real duration — a callback delayed past the legacy sixty-second
+cancel bound, and the two admission waits that prove removed cutoffs are absent
+— are tagged `:long_bound`, excluded by the two `test_helper.exs` files and run
+by the release check in a pass of their own. Every other real-time bound is
+injected where it is armed, with the production default asserted once: provider
+cases keep the port's committed ten-second deadline and derive any wait for a
+result that follows it from the deadline itself, the executor's cleanup graces
+commit two seconds, and the authority contract's ledger-write allowance is one
+second. Twenty-one test modules with no VM-global state became asynchronous, one
+application at a time and each kept only after its suite stayed green across
+several seeds; the modules still serial each name their reason. Seven
+applications now declare `extra_applications: [:crypto]`, which
+`scripts/check-otp-applications.sh` enforces, because Mix prunes undeclared OTP
+applications under the floor pair. `scripts/fixtures/pinned-load.sh` reproduces
+the executor's OS boundary under pinned cores and load on Linux; it is a
+developer tool, not a repository check.
+
+Implement the accepted [M4 plan](docs/plans/M4.md#concept): an independent
+program now drives a durable coding session from outside the runtime, answers a
+host-policy question, and reads back a large artifact.
 
 Two applications join the eight. `loopex_telemetry` at the edge owns the only
 Loopex-attached telemetry handler, and `loopex_app_server` as a client serves
@@ -164,8 +244,8 @@ That is a source version and nothing else: accepted
 it independent of the negotiated protocol generation.
 
 None of this is a release, a package, a binary, an installer, a service image or
-a compatibility label, and none of it is closed. The generation is experimental
-in its own name and may change in any later milestone without a migration path.
+a compatibility label. The generation is experimental in its own name and may
+change in any later milestone without a migration path.
 
 Narrow the Open [M3 plan](docs/plans/M3.md#concept) to project skills, three core
 repairs and reliable verification. Move durable interactions, artifact ranges
