@@ -293,19 +293,32 @@ defmodule Loopex.ReferenceClient.ConfiguredRecoveryContractTest do
   # `outcome_unknown` at activation, and is never run again to find out.
   #
   # Technical depth: with the receipt removed, the executor answers `:absent`
-  # and the coordinator commits the same `outcome_unknown` a host's
-  # `Recovery.outcome_unknown/1` would. The effect's bytes are still on disk
-  # and the dispatch count stays zero: absence settled the run, it did not
-  # retry it.
+  # when the first executor confirmed its cleanup and so removed the open
+  # entry, and `effect_unresolved` when it could not confirm within the budget
+  # and kept the entry open as the quarantine warning, which a loaded hosted
+  # runner produces. The coordinator commits the same `outcome_unknown` a
+  # host's `Recovery.outcome_unknown/1` would on either answer. The effect's
+  # bytes are still on disk and the dispatch count stays zero: the missing
+  # receipt settled the run, it did not retry it.
   @tag timeout: @fault_test_timeout
   test "prepared activation without a retained receipt ends outcome_unknown without redispatch" do
     {restarted, attachment, retained} =
       restart_prepared("activation-without-receipt", remove_receipt: true)
 
-    assert :absent = Local.receipt(restarted.executor, retained.job_id)
+    expected_lookup =
+      case retained.cleanup_confirmation do
+        :confirmed -> :absent
+        :unconfirmed -> {:error, :effect_unresolved}
+      end
+
+    assert Local.receipt(restarted.executor, retained.job_id) == expected_lookup
 
     terminal = await_run_finished(attachment, 10_000)
     assert terminal["outcome"] == "outcome_unknown"
+
+    if retained.cleanup_confirmation == :unconfirmed,
+      do: assert_quarantine_refuses_unrelated_effect(restarted, "activation-without-receipt")
+
     assert Local.stats(restarted.executor).dispatches == %{}
 
     host = %{restarted.client | attachment: attachment}
@@ -332,7 +345,10 @@ defmodule Loopex.ReferenceClient.ConfiguredRecoveryContractTest do
       )
 
     assert retained.outcome == :completed
-    assert retained.cleanup_confirmation == :confirmed
+
+    assert retained.cleanup_confirmation == :confirmed,
+           "cleanup was not confirmed within its budget, so the injected close seam was never reached and this case proved nothing about it"
+
     assert {:error, :effect_settling} = Local.receipt(restarted.executor, retained.job_id)
 
     terminal = await_run_finished(attachment, 10_000)
