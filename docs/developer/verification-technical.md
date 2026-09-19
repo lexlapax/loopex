@@ -135,13 +135,16 @@ source, a fixed grace derived from the ledger's fsync allowance). Result:
 also been committed at 2–4 s. The first two hosted runs of the fast check
 (e8a1ac3, 257cbdc) were red on exactly those cases: the deadline is absolute
 from the request and the child provider process boots inside the call, so
-the boot had to fit under the deadline, and on the hosted runner — about
-twice as slow as the Mac, and running two applications at once — it did not.
-Every provider case keeps the port default of 10 s again; a case that needs
-the child at a witness ends when the witness lands, and the five that wait
-the deadline out cost about 40 s more in `loopex_llm_reqllm` than the 198 s
-above. A committed deadline is a bound on the product, not on the fixture's
-boot; a test that wants the deadline short must first make the child ready.
+the boot had to fit under the deadline, and on the hosted runner — whose
+whole check took 9–10 minutes against 4–6 on the Mac, running two
+applications at a time on its four cores — it did not. Every provider case
+keeps the port default of 10 s again; a case that needs the child at a
+witness ends when the witness lands, and the eight that wait the deadline out
+cost about 60 s more in `loopex_llm_reqllm` than the 198 s above. Waits for a
+result that follows the deadline are derived from the deadline, never a
+number sized against a short one. A committed deadline is a bound on the
+product, not on the fixture's boot; a test that wants the deadline short must
+first make the child ready.
 
 **Step 3, in progress.** Modules with none of the serial markers above can be
 tried asynchronous one at a time, keeping each only if the application's suite

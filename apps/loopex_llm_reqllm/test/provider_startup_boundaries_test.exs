@@ -47,7 +47,8 @@ defmodule Loopex.LLM.ReqLLM.ProviderStartupBoundariesTest do
                 # booted child before it halts, and a shorter deadline had the
                 # boot stopped early on a loaded hosted runner. The replying
                 # child ends when it answers.
-                call = Fixture.managed(fixture, Fixture.request(), :unmanaged)
+                request = Fixture.request()
+                call = Fixture.managed(fixture, request, :unmanaged)
 
                 caller = call.caller
                 guardian = call.guardian
@@ -61,7 +62,11 @@ defmodule Loopex.LLM.ReqLLM.ProviderStartupBoundariesTest do
                        ]) == 1
 
                 send(caller, :continue)
-                assert_receive {:completed, ^caller, result}, 12_100
+                # The crashing child's result arrives after the deadline and the
+                # unmanaged cleanup grace that follows it, so the wait is derived
+                # from the deadline rather than a number sized against it.
+                remaining = max(request.deadline - System.system_time(:millisecond), 0)
+                assert_receive {:completed, ^caller, result}, remaining + 5_000
                 assert_receive {:DOWN, ^guardian_monitor, :process, ^guardian, :normal}, 500
                 barrier = :erlang.trace_delivered(:all)
                 assert_receive {:trace_delivered, :all, ^barrier}, 1_000
