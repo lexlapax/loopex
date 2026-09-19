@@ -5,9 +5,26 @@
 set -euo pipefail
 set +a
 set +x
+# Observability: every step prints a line when it begins and a LOOPEX_M3_LANE
+# line with its elapsed seconds when it ends, the inherited lane streams as it
+# runs, and a heartbeat prints every 30 seconds once the task root exists.
+# Silence bound: no more than 60 seconds pass without a line while this gate
+# runs past its read-only inspection.
 
 die() { printf 'M3 gate UNAVAILABLE: %s\n' "$*" >&2; exit 2; }
 lane_finished() { printf 'LOOPEX_M3_LANE name=%s elapsed_seconds=%s exit=%s\n' "$1" "$((SECONDS - $2))" "$3"; }
+gate_progress() { printf 'M3 progress: %s\n' "$*" >&2; }
+gate_heartbeat() {
+  local gate_shell=$1 waited=0
+  while kill -0 "$gate_shell" 2>/dev/null; do
+    sleep 1
+    waited=$((waited + 1))
+    [ "$waited" -ge 30 ] || continue
+    waited=0
+    kill -0 "$gate_shell" 2>/dev/null || break
+    gate_progress "heartbeat total=${SECONDS}s"
+  done
+}
 role=full
 comparison=
 case "${1:-}" in
@@ -132,14 +149,31 @@ for task_protected_root in "${LOOPEX_HOME:-$operator_home/.loopex}" "${LOOPEX_WO
   fi
 done
 task_root=$(mktemp -d "$task_parent/loopex-m3-gate.XXXXXXXX") || die 'cannot allocate isolated task root'
-cleanup() { rm -rf "$task_root"; }
+gate_heartbeat_pid=
+cleanup() {
+  [ -z "$gate_heartbeat_pid" ] || kill "$gate_heartbeat_pid" 2>/dev/null || true
+  rm -rf "$task_root"
+}
 trap cleanup EXIT
+gate_heartbeat "$$" &
+gate_heartbeat_pid=$!
+disown "$gate_heartbeat_pid" 2>/dev/null || true
 trap 'exit 2' INT TERM
 mkdir -p "$task_root/home" "$task_root/state" || die 'cannot create isolated directories'
+
+# Concept: the sealed builds can resolve the one Hex package core depends on.
+# Technical depth: accepted ADR 0030 puts the telemetry dispatcher, a Hex package,
+# in core, and Mix cannot resolve a Hex dependency without the Hex archive. The
+# validated preparation copies the operator's installed Hex archives and Rebar
+# tree into the sealed Mix home, refusing links, special files and aliases of
+# protected state, and reports a missing tool as unavailable evidence. It runs
+# here, before the opening build, so both builds use the same sealed tools.
+support prepare-build "$task_root" "$operator_mix_home" "${LOOPEX_HOME:-$operator_home/.loopex}" "${LOOPEX_WORKSPACE:-$root}" || exit $?
 
 # Concept: only protocol, core and the real local Store are compiled, offline.
 # Technical depth: clear the higher-precedence build-path override and isolate
 # Mix, Hex, build and temporary state. Print failed compiler output before cleanup.
+gate_progress "step opening probe build total=${SECONDS}s"
 task_compile_started=$SECONDS
 if (
   cd apps/loopex_store_local &&
@@ -156,7 +190,7 @@ else
   die 'isolated core/local-Store compilation failed'
 fi
 beam_args=()
-for app in loopex_protocol loopex loopex_store_local; do
+for app in telemetry loopex_protocol loopex loopex_store_local; do
   ebin="$task_root/build/prod/lib/$app/ebin"
   [ -f "$ebin/$app.app" ] || die "isolated build lacks $app"
   beam_args+=(-pa "$ebin")
@@ -204,7 +238,6 @@ if [ "$role" = checkpoint ] && [ -z "$selected_ids" ]; then
   exit "$opening_result"
 fi
 
-support prepare-build "$task_root" "$operator_mix_home" "${LOOPEX_HOME:-$operator_home/.loopex}" "${LOOPEX_WORKSPACE:-$root}" || exit $?
 if ! env LANG=C.UTF-8 LC_ALL=C.UTF-8 elixir -r apps/loopex/lib/mix/tasks/loopex.deps_budget.ex \
   -e 'Loopex.Checks.DepsBudget.main(System.argv())' -- \
   --materialize "$operator_hex_home/packages" "$task_root/deps" "$task_root/protected-file-ids" </dev/null; then
@@ -229,6 +262,7 @@ run_step() {
 }
 # Every selector sees an isolated test build, and all ordinary commands inherit
 # the same isolated homes and no provider environment variables.
+gate_progress "step isolated test build total=${SECONDS}s"
 task_compile_started=$SECONDS
 task_compile_result=0
 isolated mix compile --warnings-as-errors </dev/null || task_compile_result=$?
@@ -286,15 +320,15 @@ exec 9>&-
 # their own runners establish their locked isolation and credential boundaries.
 result=0
 task_inherited_started=$SECONDS
+gate_progress "step inherited closed gates total=${SECONDS}s"
 if [ -n "$m3_provider_key" ]; then
-  builtin printf 'LOOPEX_M3_PROVIDER_V1\0%s\0' "$m3_provider_key" |
+  { builtin printf 'LOOPEX_M3_PROVIDER_V1\0%s\0' "$m3_provider_key" |
     env -u MIX_BUILD_ROOT -u MIX_ENV HOME="$operator_home" HEX_HOME="$operator_hex_home" MIX_HOME="$operator_mix_home" TMPDIR="$task_parent" \
-      bash scripts/check-closed-gates.sh --before M3 > "$task_root/inherited.log" 2>&1 || result=$?
+      bash scripts/check-closed-gates.sh --before M3 2>&1; } | tee "$task_root/inherited.log" || result=$?
 else
-  env -u MIX_BUILD_ROOT -u MIX_ENV HOME="$operator_home" HEX_HOME="$operator_hex_home" MIX_HOME="$operator_mix_home" TMPDIR="$task_parent" \
-    bash scripts/check-closed-gates.sh --before M3 </dev/null > "$task_root/inherited.log" 2>&1 || result=$?
+  { env -u MIX_BUILD_ROOT -u MIX_ENV HOME="$operator_home" HEX_HOME="$operator_hex_home" MIX_HOME="$operator_mix_home" TMPDIR="$task_parent" \
+    bash scripts/check-closed-gates.sh --before M3 </dev/null 2>&1; } | tee "$task_root/inherited.log" || result=$?
 fi
-cat "$task_root/inherited.log"
 lane_finished inherited "$task_inherited_started" "$result"
 [ "$result" = 0 ] || exit "$result"
 [ "$(tail -n 1 "$task_root/inherited.log")" = 'LOOPEX_CLOSED_GATES_REPORT caller=M3 complete=true' ] || die 'inherited gate invocation report missing'

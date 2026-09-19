@@ -277,6 +277,7 @@ defmodule Loopex.M3Opening do
           workspace_lease: "workspace-lease"
         },
         policy: Loopex.M3Opening.Policy,
+        policy_identity: %{"id" => "loopex-m3-probe", "revision" => "1"},
         bounds: %{max_turns: 1, token_budget: 100_000, deadline_ms: 60_000},
         context_token_budget: 100_000,
         tools: [],

@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Concept: execute each required Closed predecessor once, in register order.
 # Technical depth: M3 calls --before M3, so even a Closed M3 never calls itself.
+# Observability: each gate's start and end are printed with its elapsed seconds,
+# and every invoked Closed gate states and keeps its own silence bound.
 set -euo pipefail
 set +x
 set +a
@@ -57,6 +59,7 @@ fi
 while IFS=$'\t' read -r name interpreter first second; do
   [ -n "$name" ] || continue
   printf 'Closed gate invoking: %s\n' "$name"
+  gate_started=$SECONDS
   args=("$interpreter" "$first")
   [ -z "$second" ] || args+=("$second")
   result=0
@@ -77,6 +80,7 @@ while IFS=$'\t' read -r name interpreter first second; do
     *) "${args[@]}" </dev/null || result=$? ;;
   esac
   printf '%s\t%s\n' "$name" "$result" >> "$task_root/ledger"
+  printf 'Closed gate finished: %s exit=%s elapsed=%ss total=%ss\n' "$name" "$result" "$((SECONDS - gate_started))" "$SECONDS"
   [ "$result" = 0 ] || { printf 'Closed gate failed: %s exit=%s\n' "$name" "$result" >&2; exit "$result"; }
 done < "$task_root/plan"
 env LANG=C.UTF-8 LC_ALL=C.UTF-8 elixir scripts/m3-gate-support.exs --m3-gate-support account "$task_root/plan" "$task_root/ledger"

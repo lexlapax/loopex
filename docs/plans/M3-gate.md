@@ -100,10 +100,10 @@ its Amendment 2 replacement below.
 
 | SHA-256 | Path |
 | --- | --- |
-| `d54c66098d971a9bdc0b26addb95d415db02c44e4b82ba55e325b5863cf4629b` | `scripts/check-m3-gate.sh` |
-| `9bf18c61bdcd9292c1ad382ef373fe11acb4764b5535de744f75342c9f85a84a` | `scripts/m3-opening-probe.exs` |
+| `add75f814bfb0bdd2eb6ba8ed757497bf2146b7665c1b95f463a7b30398bddad` | `scripts/check-m3-gate.sh` |
+| `ea089b8242dbe0dd77e7d6d519ab0062ffe7776a35286d38737350e3dd50c013` | `scripts/m3-opening-probe.exs` |
 | `65d0de9dcd1218af542f00e32c2177d2612a2f1232f22db37b9942200c84cf66` | `scripts/m3-gate-support.exs` |
-| `c4d485ca3229441c678abe1e8733f90216e89e0dfb9e81786f58f525619aec29` | `scripts/check-closed-gates.sh` |
+| `446e3efebbee603d5b706827b7603f594c99f107b5cc67f680bf2c4ed18a8f05` | `scripts/check-closed-gates.sh` |
 | `bae4d114023091f9162fc0981c28e75db031ba3216adf1b1255d888f2dd3b5e8` | `scripts/m3-outcomes.exs` |
 | `53d8219bdee584a3849a85a1102e405520d5dd0dfbe21d259434bc9edfc5fcc0` | `scripts/m1-exunit-runner.exs` |
 | `c36253cff3d74ddff1b330695edbc4bde0a4565c1412c67c1293b2fb7ca6129b` | `apps/loopex/test/m1_exunit_runner_test.exs` |
@@ -414,3 +414,86 @@ grants no waiver, closure or release.
 | Generation | Artifact | Rebound SHA-256 |
 | --- | --- | --- |
 | 4 | `.tool-versions` | `fea095ecec784a4440b872ad5f53a8da2cb4e13e43b6f05add5cfd75bb352879` |
+
+<a id="amendment-5"></a>
+## Amendment 5 — Repair the opening probe and report progress while running
+
+**Acceptance: OUTSTANDING.** Closed M3 adds gate generation 5 under
+`amendment-transaction-v2`. Its historical Acceptance, Closure, Amendments 1–4
+and generation-4 row remain unchanged. The new row carries this gate's digest
+and leaves authority, evidence and candidate unset until exact-proposal
+acceptance.
+
+[The chain disposition](../developer/agent-context-map.md#override-disposition-closed-gate-repair-chain-v2-2026-09-17)
+orders this generation fourth. It changes three bound artifacts and repairs
+three defects that each stopped the gate before it observed anything.
+
+**The opening probe starts a runtime again.** `scripts/m3-opening-probe.exs`
+set a policy and named no identity, which accepted ADR 0024 requires and the
+runtime now enforces, so its launch was refused before it observed anything.
+It now names the fixed identity `loopex-m3-probe` at revision `1`. With that
+fixed, the probe stopped again where core calls the telemetry dispatcher that
+accepted ADR 0030 admits: the runner put only the protocol, core and local
+Store applications on the probe's code path. The runner now puts `telemetry`
+there too; it is already compiled into the same isolated production build,
+and the runner still refuses a build that lacks any application it names.
+Nothing the probe observes, and nothing it reports, changes.
+
+**The runner's sealed builds compile core again.** Before the probe runs, the
+runner compiles the protocol, core and local Store applications with a sealed
+home, so that no operator state reaches the build. That home held no Hex
+archive, and since accepted ADR 0030 made core depend on the telemetry
+dispatcher, which is a Hex package, Mix could not resolve that dependency and
+the gate stopped there, before either defect above was reached. The runner
+already had a validated preparation that copies the operator's installed Hex
+archives and Rebar tree into the sealed home, refusing links, special files and
+aliases of protected state, and reports a missing tool as unavailable evidence;
+it ran only before the later test build. It now runs once, before the opening
+build, so both builds use the same sealed tools. The builds still read nothing
+from the operator's home and still run offline. Because the preparation now
+runs before the opening build, the preflight role and a checkpoint that selects
+no outcomes also require the installed Hex archive and Rebar tree.
+
+**The runner reports where it is.** `scripts/check-m3-gate.sh` prints a line
+beginning `M3 progress:` on standard error before the stretches that printed
+nothing until they ended, keeps its `LOOPEX_M3_LANE` lines, and runs a
+heartbeat every 30 seconds once its task root exists; the heartbeat checks
+every second that the gate is alive and is stopped by the task root's cleanup.
+The inherited lane now passes the closed-gate output through `tee`, so it
+reaches the operator as it runs and is still retained whole for the final
+report check, where before it was printed only after the lane ended.
+`scripts/check-closed-gates.sh` prints each gate's elapsed seconds when it
+ends. The silence bound is stated in the runner's header: no more than 60
+seconds pass without a line once the task root exists.
+
+No command, selector, minimum, witness identity, exclusion, provider path,
+credential contract, exit predicate or report line changes.
+
+### Evidence at this proposal
+
+`scripts/check-closed-gates.sh` is also bound by the M4 gate, so this proposal
+opens a shared binding sequence that the M4 gate's next amendment completes.
+Binding validation is holder-scoped here, naming the M4 gate as pending, and
+bootstrap and the gates that run it are not reported green until that
+amendment settles. Binding-independent checks are proved directly: the probe
+reports its observation when run the way the runner runs it, where the probe
+at the previous generation could not start a runtime; the runner and the
+aggregate parse; and the M3 gate support tests pass against these bytes.
+
+### Transaction and re-verification
+
+Proposal A atomically carries this gate, the three changed artifacts and the
+pending generation-5 row in M3's plan. Only explicit maintainer acceptance
+authorizes R, whose only changes complete generation 5 with exact A and add one
+new amendment-specific disposition to an existing durable document. At R the
+chain disposition applies: binding validation is holder-scoped with the M4 gate
+pending, bootstrap's other checks must pass, and no closed gate is required to
+pass until the M4 amendment settles the sequence. This proposal reopens no
+milestone, accepts no plan or product ADR, waives no evidence, and authorizes
+no integration, tag or release.
+
+| Generation | Artifact | Rebound SHA-256 |
+| --- | --- | --- |
+| 5 | `scripts/check-closed-gates.sh` | `446e3efebbee603d5b706827b7603f594c99f107b5cc67f680bf2c4ed18a8f05` |
+| 5 | `scripts/check-m3-gate.sh` | `add75f814bfb0bdd2eb6ba8ed757497bf2146b7665c1b95f463a7b30398bddad` |
+| 5 | `scripts/m3-opening-probe.exs` | `ea089b8242dbe0dd77e7d6d519ab0062ffe7776a35286d38737350e3dd50c013` |
