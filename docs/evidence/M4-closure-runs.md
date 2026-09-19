@@ -8,7 +8,10 @@ results. Back to the [evidence index](README.md).
 ## Candidate
 
 `d609b98c` — `build(M4): recompile the version readers when VERSION changes`,
-source `VERSION` `0.1.0`. Every run below used this exact committed tree.
+source `VERSION` `0.1.0`. The closure runs in the next two sections used this
+exact committed tree; the sections after them name the later revisions they
+ran at, because the release check, the floor pair and the fast check each
+changed after closure and were run again on the bytes that changed them.
 
 ## The fast check, `bash scripts/check.sh`
 

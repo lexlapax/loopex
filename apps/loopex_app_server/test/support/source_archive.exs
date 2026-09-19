@@ -68,7 +68,12 @@ defmodule Loopex.AppServer.SourceArchive do
     assert File.exists?(Path.join([extracted, "clients", "node", "workflow.mjs"]))
     assert File.exists?(Path.join([extracted, "clients", "node", "interaction-workflow.mjs"]))
 
-    IO.puts(:stderr, "extracted candidate: #{committed}")
+    # The archive's own digest is retained beside the revision: a release names
+    # bytes, and the revision alone does not say which bytes were staged.
+    digest =
+      archive |> File.read!() |> then(&:crypto.hash(:sha256, &1)) |> Base.encode16(case: :lower)
+
+    IO.puts(:stderr, "extracted candidate: #{committed} archive sha256: #{digest}")
     extracted
   end
 

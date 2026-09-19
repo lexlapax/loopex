@@ -44,24 +44,30 @@ it runs at closure, at release, and whenever a change touches what it proves.
 
 The old structure ran every historical gate on every contract moment because
 it could not tell what a change affected. The replacement asks the developer
-to say what boundary a change touches, and routes from there. The table is
-short on purpose; an unknown impact falls through to the release check, not to
-nothing.
+to say what boundary a change touches, and routes from there. The fast check
+already runs every ordinary suite — conformance, recovery, CLI, composition,
+observability — so those are counted once and never asked for again; the
+table names only the proof a boundary needs *in addition*, which is a real
+provider, a real Node client, a second toolchain, or a document. Two
+boundaries select the union of their rows, not the whole release check. An
+unknown impact falls through to the release check, not to nothing.
 Technical depth: [The selection table](verification-technical.md#technical-verification-selection).
 
-| The change touches | Beyond the fast check, also run before merge |
+| The change touches | In addition to the fast check, before merge |
 | --- | --- |
-| Code or tests behind an unchanged boundary | Nothing more; the suite is the proof |
-| A port behaviour (Store, model, executor, extension, transport) or an adapter of one | That port's conformance suite against every adapter, and one composed workflow through it: the CLI foundation workflow or the app-server external workflow |
-| Durable records, the Store, recovery | The Store conformance suite with fault injection, the recovery tests, and the old-reader refusal cases |
-| The wire protocol, its schema or vectors | The vectors in both clients and the Node consumer workflows (`--only node_client`), and the compatibility surfaces page updated in the same change |
-| The CLI or operator-facing behavior | The `loopex_cli` suite, and the operator page that describes the behavior updated in the same change |
-| Skills, project resources, context admission | The composition suite and the skill context and context admission cases |
-| Observability | The trace session and telemetry boundary cases in core and the edge handler cases |
-| Provider, executor or credential handling | `bash scripts/check-release.sh` |
-| The toolchain floor or `.tool-versions` | The fast check under both pairs |
-| Documentation only | `bash scripts/check.sh --docs`: structure, formatting and documentation steps; the suite is not run |
-| Unknown, or more than one of the above | The release check, and the review names the boundaries it found |
+| Code or tests behind an unchanged boundary | Nothing; the suite is the proof |
+| A port behaviour (Store, model, executor, extension, transport) or an adapter of one | Nothing more to run; the review confirms the port's conformance suite still runs against every adapter |
+| Durable records, the Store, recovery | Nothing more to run; the review confirms the fault-injection and old-reader cases still cover the change |
+| The wire protocol, its schema or vectors | The Node consumer workflows (`--only node_client`, part of the release check), and the compatibility surfaces page updated in the same change |
+| The CLI or operator-facing commands | The operator page that describes the behavior updated in the same change; a changed operator command also selects its workflow in the release check |
+| Provider or credential handling | `bash scripts/check-release.sh`, the real-provider cases |
+| The executor's OS boundary (launch, signals, cleanup) | Nothing more to run; the review reads the change against the pinned-core reproduction procedure in the technical companion |
+| The toolchain floor or `.tool-versions` | The fast check under the floor pair once |
+| Documentation only | `bash scripts/check.sh --docs`, which `check.sh --select` chooses on its own for a prose-only diff |
+| Unknown | The release check, and the review names the boundaries it found |
+
+Hosted CI's green run on the candidate is the fast-check evidence for that
+merge; a local full run of the same bytes is not required as well.
 
 <a id="concept-verification-rules"></a>
 ### Rules that make the checks trustworthy

@@ -12,11 +12,26 @@ cd "$(git rev-parse --show-toplevel)"
 
 # --docs: a documentation-only change runs compilation, formatting, the
 # structure checks and the documentation check, and skips the test build and
-# the suite.
+# the suite. --select chooses between the two from the diff against the
+# integration base: a change that touches only Markdown runs the documentation
+# mode, anything else -- or no diff at all, as on the integration branch itself
+# -- runs the full check. Hosted CI calls --select so a prose change does not
+# spend the suite; a changed operator command lives in a script or a test and
+# therefore still runs it.
 mode=${1:-full}
 case "$mode" in
   full | --docs) ;;
-  *) echo 'check: usage: check.sh [--docs]' >&2; exit 2 ;;
+  --select)
+    base=$(git merge-base origin/main HEAD 2>/dev/null || true)
+    changed=$([ -n "$base" ] && git diff --name-only "$base" HEAD || true)
+    if [ -n "$changed" ] && ! printf '%s\n' "$changed" | grep -qvE '\.md$'; then
+      mode=--docs
+    else
+      mode=full
+    fi
+    printf 'check: selected %s from %s changed paths\n' "$mode" "$(printf '%s\n' "$changed" | grep -c . || true)"
+    ;;
+  *) echo 'check: usage: check.sh [--docs|--select]' >&2; exit 2 ;;
 esac
 
 started=$SECONDS

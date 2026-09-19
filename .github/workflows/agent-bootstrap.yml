@@ -25,6 +25,6 @@ jobs:
       # The provider suite runs with the runner to itself: its child VMs boot
       # under the product's deadline, and on this four-core runner that boot
       # starved behind another application's compile.
-      - run: bash scripts/check.sh
+      - run: bash scripts/check.sh --select
         env:
           LOOPEX_CHECK_ALONE: loopex_llm_reqllm
