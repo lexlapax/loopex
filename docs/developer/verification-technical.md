@@ -216,7 +216,7 @@ can prove. One wall-clock bound in `provider_attempt_protocol` widened from
 2 s to 10 s because it now shares the scheduler; the allocation assertion
 beside it is the proof. Measured with all twenty-four converted, suite alone
 on the Mac: `loopex` 191 → 125 s, the others within a few seconds of before;
-the whole fast check, warm build, 254 → 224 s. The three returned modules
+the whole fast check, warm build, 254 → 224 s at `69dd710`. The three returned modules
 run about 1 s, 0.1 s and 22 s. The limit on the critical path is structural: the
 applications run in parallel VMs, `loopex_llm_reqllm` is the longest, and 96%
 of its 209 s sits in the twelve modules that share the process-wide
