@@ -343,16 +343,14 @@ defmodule Loopex.CancellationTest do
 
   # The observation bound is an argument of the private boundary that arms it, so
   # a local call trace reads the exact number a facade entry was given without
-  # waiting for it to elapse. The tracer is a separate process because a process
-  # is never told about its own calls, and it forwards what it sees so the case
-  # reads one mailbox. The pattern and the trace on new processes are removed
-  # when the case ends, because a live call trace belongs to no other case.
+  # waiting for it to elapse. Only processes started after this runs are traced,
+  # which is why both facade calls below are made from a task: a process is never
+  # told about its own calls, so tracing the case itself would report nothing.
+  # The pattern and the trace on new processes are removed when the case ends,
+  # because a live call trace belongs to no other case.
   defp trace_bounded_cancel do
-    owner = self()
-    collector = spawn_link(fn -> forward_traces(owner) end)
     assert :erlang.trace_pattern({Loopex.Executor, :bounded_cancel, 4}, true, [:local]) == 1
-    _ = :erlang.trace(self(), true, [:call, {:tracer, collector}])
-    _ = :erlang.trace(:new, true, [:call, {:tracer, collector}])
+    _ = :erlang.trace(:new, true, [:call, {:tracer, self()}])
 
     on_exit(fn ->
       _ = :erlang.trace(:new, false, [:call])
@@ -360,14 +358,6 @@ defmodule Loopex.CancellationTest do
     end)
 
     :ok
-  end
-
-  defp forward_traces(owner) do
-    receive do
-      message ->
-        send(owner, message)
-        forward_traces(owner)
-    end
   end
 
   defp await_dispatch(fixture, attempts \\ 300) do
@@ -1092,8 +1082,12 @@ defmodule Loopex.CancellationTest do
     # rather than waited out.
     answering = Loopex.CancellationTestExecutor.start(:never_answers)
 
-    assert Loopex.Executor.cancel(Loopex.CancellationTestExecutor, answering, "job-answers") ==
-             {:ok, :cleaned}
+    defensive =
+      Task.async(fn ->
+        Loopex.Executor.cancel(Loopex.CancellationTestExecutor, answering, "job-answers")
+      end)
+
+    assert Task.await(defensive, 5_000) == {:ok, :cleaned}
 
     assert_receive {:trace, _defensive, :call,
                     {Loopex.Executor, :bounded_cancel,
