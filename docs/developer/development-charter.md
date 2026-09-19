@@ -41,8 +41,9 @@ Technical depth: [Anchors, reciprocal links, and placement](development-charter-
 
 Loopex is maintainer-directed. Coding tools are a normal part of implementation,
 testing, review, and documentation, while project roles and repository records
-make authority explicit. Purpose, irreversible choices, accepted gates,
-demonstrations, promotion, and publication remain governed decisions.
+make authority explicit. Purpose, irreversible choices, accepted plans and
+decisions, demonstrations, promotion, and publication remain governed
+decisions.
 
 Development reports state outcomes and decisions before mechanics. Questions
 lead with the consequence of each option and then provide the technical facts
@@ -56,13 +57,14 @@ Technical depth: [Development reports and decision packets](development-charter-
 Use the quickest, least costly development profile that can still satisfy the
 task's constraints and evidence burden. Objective, repeatable work belongs to
 an efficient profile; bounded implementation belongs to a balanced profile;
-architecture, durability, concurrency, security, public contracts, gate design,
-rejoin judgment, and independent review require deep reasoning.
+architecture, durability, concurrency, security, public contracts,
+verification design, rejoin judgment, and independent review require deep
+reasoning.
 
 Escalate when evidence conflicts, a boundary becomes ambiguous, or focused
 attempts fail. Return settled mechanical follow-through to an efficient
 profile. Model choice never grants authority, broadens scope or permissions, or
-substitutes for tests, gates, and independent review.
+substitutes for tests, required checks, and independent review.
 
 Technical depth: [Capability routing and escalation](development-charter-technical.md#technical-capability-follows-consequence).
 

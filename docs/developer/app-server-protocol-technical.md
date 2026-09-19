@@ -26,7 +26,8 @@ The `initialized` record reports the selected generation, the exact schema
 digest, the supported methods and the limits below, so a client can verify the
 contract it is about to speak rather than assume it.
 
-Schema and vectors are bound artifacts of the M4 gate:
+Schema and vectors are the contract's data files, bound at M4 closure and
+changed only with the generation they describe:
 
 | File | Role |
 | --- | --- |

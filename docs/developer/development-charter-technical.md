@@ -44,10 +44,11 @@ omission. A mismatch is a blocking finding until the pair agrees.
 
 An ADR pair records one status and governance table in its Concept file. Its
 acceptance binds the reachable historical Proposed candidate plus the SHA-256
-digest of both files. A milestone uses a Concept plan, Technical depth plan,
-and gate; acceptance and closure bind the candidate plus all three digests. The
-exact formats and lifecycle transitions live in
-[the plans index](../plans/README.md).
+digest of both files. A milestone uses a Concept plan and a Technical depth
+plan; acceptance and closure bind the accepted or reviewed candidate. A
+milestone run under the retired gate machinery also carries a gate file and
+bound its digests, and those rows are read as written. The exact formats and
+lifecycle transitions live in [the plans index](../plans/README.md).
 
 Pairing applies to substantive concept documents, including the vision,
 roadmap, development charters, architecture and protocol documents, ADRs, and
@@ -59,7 +60,8 @@ operate, record, or execute rather than explain a concept:
 - setup guides and operator runbooks such as `DEVELOPMENT.md`;
 - changelogs, status registers, evidence logs, and generated references;
 - licenses, executable skills, client role prompts, configuration, and source;
-- gates, schemas, fixtures, and other directly executable contracts; and
+- schemas, fixtures, historical gate records, and other directly executable
+  contracts; and
 - immutable, non-normative archive material.
 
 An exception may link both depths. It may not become a hidden source of a
@@ -171,10 +173,10 @@ barrier or rejoin decision.
 | --- | --- | --- |
 | Inventories, extraction, deterministic transformations, cross-reference checks, and log triage with an objective completion check | Efficient | Low or medium |
 | Bounded implementation, integration, conformance work, and debugging inside accepted contracts | Balanced | Medium or high, proportional to ambiguity and boundary count |
-| Architecture, ownership, durability, concurrency, trust, security, public contracts, compatibility, gate design, rejoin decisions, and exact-SHA independent review | Deep | The required supported reasoning depth; use a deeper setting only when task evidence warrants it |
+| Architecture, ownership, durability, concurrency, trust, security, public contracts, compatibility, verification design, rejoin decisions, and exact-SHA independent review | Deep | The required supported reasoning depth; use a deeper setting only when task evidence warrants it |
 
 An efficient profile stops when work requires judgment about scope, authority,
-security, persistence, public contracts, gates, or acceptance. A balanced
+security, persistence, public contracts, required checks, or acceptance. A balanced
 profile escalates when accepted direction no longer determines the answer,
 evidence conflicts, or repeated focused attempts fail. A stronger available
 profile may perform a lower class of work; a weaker profile does not silently
@@ -183,7 +185,7 @@ read-only review environment is unavailable, the evidence is unavailable.
 
 Capability class, tool permissions, and project authority are independent.
 Selecting a model never changes the task's authorized scope, grants an effect,
-appoints an acceptance authority, or replaces exact gates and review. Named
+appoints an acceptance authority, or replaces the required checks and review. Named
 client roles are conveniences: a separate direct invocation may satisfy the
 same class only when it demonstrably reproduces the project contract, role
 instructions, effective permissions, and required read-only boundary.
@@ -244,14 +246,13 @@ bootstrap checks cover:
 - unique explicit anchors, exact targets, reciprocal links, and repository-safe
   relative paths;
 - paired ADR and plan governance records and exact digests;
-- the plan/technical-plan/gate triple for active milestones; and
+- the plan and technical-depth plan pair for active milestones; and
 - the absence of policy that exists only in a client directory.
 
-M0 must add an Elixir/Mix documentation check before product code can close its
-first milestone. It reads compiled documentation through `Code.fetch_docs/1`
-and requires `## Concept` before `## Technical depth` for modules, behaviours,
-callbacks, public APIs, and public types. The accepted M0 plan identifies any
-additional important boundaries. Review remains responsible for whether those
+M0 added the Elixir/Mix documentation check, `mix loopex.docs_check`. It reads
+compiled documentation through `Code.fetch_docs/1` and requires `## Concept`
+before `## Technical depth` for modules, behaviours, callbacks, public APIs,
+and public types, and `scripts/check.sh` runs it on every invocation. Review remains responsible for whether those
 sections are useful and for the proportional private-comment rule, which cannot
 be inferred safely from syntax alone.
 
@@ -260,10 +261,10 @@ clarity, constraint-first ordering, adequate nearby technical links, locally
 defined vocabulary, companion readability, consistency, and absence of hidden
 decisions. Structural success never substitutes for that review.
 
-Bootstrap enforcement may use Python 3.11 and `jq` only through M0. Before M0
-closes, the accepted Elixir/OTP implementation must preserve the behavioral and
-mutation-test corpus while removing both prerequisites. The enduring local
-baseline is Git, shell/POSIX tools, and the accepted Elixir/OTP toolchain.
+Bootstrap enforcement used Python 3.11 and `jq` only through M0, whose closure
+replaced both with Elixir and Mix entrypoints while preserving the behavioral
+and mutation-test corpus. The enduring local baseline is Git, shell/POSIX
+tools, and the accepted Elixir/OTP toolchain.
 
 Client files remain adapters. They import or route to `AGENTS.md`, this charter,
 and the context map; they may add discovery, invocation, permissions, hooks, and

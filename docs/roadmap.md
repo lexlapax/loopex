@@ -84,22 +84,21 @@ records the exact Closed state and evidence.
 Technical depth: [Foundation candidate proof](roadmap-technical.md#technical-roadmap-kernel-consolidation)
 
 <a id="concept-roadmap-session-protocol"></a>
-##### Headless external consumption — M4 open candidate
+##### Headless external consumption — M4 closed
 
 Can an independent program use those foundations without a second session or
-policy engine? M4 first makes the runtime observable: a host can trace every
-call in Loopex modules through a runtime-owned session without changing any
-source, and consume telemetry at every port and transaction boundary, with
-identities only and no authority. It then adds core durable interactions and
-bounded ArtifactStore transfers, and settles the floor refresh with its
-complete holder inventory.
-It maps the shared facade through strict foreground stdio JSONL and demonstrates
-a TypeScript client selecting
-a skill, answering an interaction, observing a real tool result, retrieving an
-artifact and recovering after process loss. The daemon remains a later host.
-After closure review and separate release authority, M4 targets a source-only
-`0.1.0` release with an annotated `v0.1.0` tag on its exact integration commit
-on `main`; this is not a package, installer, service or public-surface freeze.
+policy engine? M4 answered it. It first made the runtime observable: a host can
+trace every call in Loopex modules through a runtime-owned session without
+changing any source, and consume telemetry at every port and transaction
+boundary, with identities only and no authority. It then added core durable
+interactions and bounded ArtifactStore transfers, and settled the floor refresh
+with its complete holder inventory. It maps the shared facade through strict
+foreground stdio JSONL, and an independent consumer written in plain JavaScript
+selects a skill, answers an interaction, observes a real tool result, retrieves
+an artifact and recovers after process loss. The daemon remains a later host.
+The source `VERSION` is `0.1.0`; the annotated `v0.1.0` tag on M4's exact
+integration commit on `main` awaits separate release authority. Neither is a
+package, installer, service or public-surface freeze.
 The [plans register](plans/README.md) remains the authority for its current state.
 
 Technical depth: [External-consumer candidate proof](roadmap-technical.md#technical-roadmap-session-protocol)
