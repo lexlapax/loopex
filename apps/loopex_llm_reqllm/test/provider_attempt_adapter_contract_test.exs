@@ -137,7 +137,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderAttemptAdapterContractTest do
 
         assert_receive {:completed, ^caller,
                         {:error, {:dispatched_or_unknown, "model_call_failed"}}},
-                       5_000
+                       Fixture.until_settled(call)
 
         assert Jason.decode!(File.read!(Fixture.marker(fixture, "io-results"))) ==
                  %{"direct" => "refused", "supervised" => "refused"}
@@ -334,7 +334,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderAttemptAdapterContractTest do
     caller = call.caller
 
     assert_receive {:completed, ^caller, {:error, {:dispatched_or_unknown, "model_call_failed"}}},
-                   5_000
+                   Fixture.until_settled(call)
 
     assert Fixture.methods(fixture) == ["POST"]
     assert Process.alive?(call.guardian)
@@ -458,7 +458,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderAttemptAdapterContractTest do
 
       assert_receive {:trace, ^guardian, :receive,
                       {:provider_frame, _receiver, {:ok, :dispatch_started, _binding}}},
-                     5_000
+                     Fixture.until_settled(call)
     end
 
     # Concept: interrupt bootstrap only after its cleanup observations exist.
@@ -487,7 +487,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderAttemptAdapterContractTest do
     if phase == :after_result do
       assert_receive {:completed, ^caller,
                       {:error, {:dispatched_or_unknown, "model_call_failed"}}},
-                     5_000
+                     Fixture.until_settled(call)
 
       caller_monitor = call.caller_monitor
       assert_receive {:DOWN, ^caller_monitor, :process, ^caller, :normal}, 1_000
@@ -548,7 +548,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderAttemptAdapterContractTest do
 
     assert_receive {:trace, ^guardian, :receive,
                     {:provider_frame, _receiver, {:ok, :dispatch_started, _binding}}},
-                   5_000
+                   Fixture.until_settled(call)
 
     assert :erlang.suspend_process(guardian)
     Fixture.release(fixture)
@@ -611,7 +611,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderAttemptAdapterContractTest do
     caller = call.caller
 
     assert_receive {:completed, ^caller, {:error, {:dispatched_or_unknown, "model_call_failed"}}},
-                   5_000
+                   Fixture.until_settled(call)
 
     Fixture.stop(call)
     Fixture.assert_gone(fixture)

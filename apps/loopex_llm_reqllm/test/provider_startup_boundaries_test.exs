@@ -65,8 +65,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderStartupBoundariesTest do
                 # The crashing child's result arrives after the deadline and the
                 # unmanaged cleanup grace that follows it, so the wait is derived
                 # from the deadline rather than a number sized against it.
-                remaining = max(request.deadline - System.system_time(:millisecond), 0)
-                assert_receive {:completed, ^caller, result}, remaining + 5_000
+                assert_receive {:completed, ^caller, result}, Fixture.until_settled(call)
                 assert_receive {:DOWN, ^guardian_monitor, :process, ^guardian, :normal}, 500
                 barrier = :erlang.trace_delivered(:all)
                 assert_receive {:trace_delivered, :all, ^barrier}, 1_000

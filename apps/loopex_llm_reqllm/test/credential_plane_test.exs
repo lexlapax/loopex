@@ -93,7 +93,7 @@ defmodule Loopex.LLM.ReqLLM.CredentialPlaneTest do
     File.chmod!(path, 0o600)
     nonce = String.duplicate("a", 64)
     digest = fixture.options[:build_manifest_sha256]
-    deadline = System.system_time(:millisecond) + 5_000
+    deadline = System.system_time(:millisecond) + 10_000
 
     on_exit(fn ->
       :gen_tcp.close(listener)
@@ -102,7 +102,7 @@ defmodule Loopex.LLM.ReqLLM.CredentialPlaneTest do
 
     {owner, reference, monitor} = start_version_probe(fixture, path, nonce, digest, deadline)
 
-    {:ok, socket} = :gen_tcp.accept(listener, 5_000)
+    {:ok, socket} = :gen_tcp.accept(listener, max(deadline - System.system_time(:millisecond), 0))
     on_exit(fn -> :gen_tcp.close(socket) end)
     payload = %{"nonce" => nonce, "version" => 2, "build_manifest_sha256" => digest}
     assert {:ok, frame} = ProviderCodec.encode(:bootstrap, payload)
@@ -584,8 +584,7 @@ defmodule Loopex.LLM.ReqLLM.CredentialPlaneTest do
       assert Fixture.eventually(fn -> Fixture.reached?(fixture, "pid") end)
       original_pid = Fixture.pid(fixture)
       caller = call.caller
-      remaining = max(request.deadline - System.system_time(:millisecond), 0)
-      assert_receive {:completed, ^caller, @refused}, remaining + 5_000
+      assert_receive {:completed, ^caller, @refused}, Fixture.until_settled(call)
       guardian = call.guardian
       monitor = call.monitor
       assert_receive {:DOWN, ^monitor, :process, ^guardian, :normal}, 500

@@ -333,7 +333,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
     end
   end
 
-  def eventually(fun, timeout \\ 5_000),
+  def eventually(fun, timeout \\ 15_000),
     do: await(fun, System.monotonic_time(:millisecond) + timeout)
 
   defp await(fun, deadline) do

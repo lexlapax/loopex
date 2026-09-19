@@ -180,7 +180,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderEntryTest do
 
                  assert_receive {:completed, ^caller,
                                  {:error, {:dispatched_or_unknown, "model_call_failed"}}},
-                                5_000
+                                Fixture.until_settled(call)
 
                  assert Jason.decode!(File.read!(Fixture.marker(fixture, "io-results"))) ==
                           %{"direct" => "refused", "supervised" => "refused"}
@@ -299,7 +299,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderEntryTest do
 
       assert_receive {:trace, ^guardian, :receive,
                       {:provider_frame, _receiver, {:ok, :dispatch_started, binding}}},
-                     5_000
+                     Fixture.until_settled(call)
 
       assert Fixture.eventually(fn -> Fixture.count(fixture) == 1 end)
       {:links, links} = Process.info(guardian, :links)
@@ -322,7 +322,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderEntryTest do
 
       assert_receive {:completed, ^caller,
                       {:error, {:dispatched_or_unknown, "model_call_failed"}}},
-                     5_000
+                     Fixture.until_settled(call)
 
       Fixture.stop(call)
       Fixture.assert_gone(fixture)
@@ -350,7 +350,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderEntryTest do
 
     assert_receive {:trace, ^guardian, :receive,
                     {:provider_frame, _, {:ok, :dispatch_started, _}}},
-                   5_000
+                   Fixture.until_settled(call)
 
     assert :erlang.suspend_process(guardian)
     Fixture.release(fixture)
@@ -381,7 +381,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderEntryTest do
 
     assert_receive {:trace, ^guardian, :receive,
                     {:provider_frame, _, {:ok, :dispatch_started, _}}},
-                   5_000
+                   Fixture.until_settled(call)
 
     assert :erlang.suspend_process(guardian)
     Fixture.release(fixture)
@@ -427,7 +427,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderEntryTest do
 
     assert_receive {:trace, ^guardian, :receive,
                     {:provider_frame, _, {:ok, :dispatch_started, _}}},
-                   5_000
+                   Fixture.until_settled(call)
 
     assert :erlang.suspend_process(guardian)
     pid = Fixture.pid(fixture)
