@@ -8,10 +8,10 @@ Future capability rungs in
 
 This file is the canonical current-status register and plan index for the
 checked-out revision. The root README carries only the derived summary below.
-An accepted governance checkpoint may be integrated to `main`; its product work
-remains on the designated milestone branch until closure. `main` therefore
-describes integrated governance while its last Closed row identifies the
-integrated product baseline.
+A milestone's work lands on `main` in small reviewed changes as the
+[milestone guide](../developer/milestones.md#concept-milestones-develop)
+describes, so the register states one product fact the checked-out bytes carry:
+its last `Closed` row identifies the last closed product baseline.
 
 <!-- loopex:current-status:start -->
 ## Current Status
@@ -117,8 +117,8 @@ belong in the register. A roadmap projection does not earn a row. The register
 is the sole lifecycle-state owner. Zero or more `Closed` rows come first. They
 may be followed by at most one delivery row (`Accepted`, `In progress`, or
 `In review`). Only an `Accepted` delivery row may be followed by one `Open`
-successor: the lookahead branches from integrated governance, never from the
-product branch. Without a delivery row, one `Open` candidate may follow the
+successor, which is a planning candidate and not a second implementation
+authority. Without a delivery row, one `Open` candidate may follow the
 Closed history. The founding `Blocked` form is a single next candidate with no
 plan files. No second delivery authority or second planning lookahead is
 representable.
@@ -374,31 +374,27 @@ Documentation drift blocks closure like any other unmet outcome.
 
 ## How a Milestone Runs
 
-Four steps, defined in [AGENTS.md](../../AGENTS.md#milestones-and-gates).
+The four steps are named in [AGENTS.md](../../AGENTS.md#milestones-and-gates)
+and carried out by the [milestone guide](../developer/milestones.md#concept)
+and its
+[technical companion](../developer/milestones-technical.md#technical-depth);
+which checks a change must pass is the
+[verification guide](../developer/verification.md#concept). That procedure is
+written once, there. This register owns the lifecycle alone, and each
+transition records exactly this:
 
-1. **Agree** — write the Concept plan and Technical depth plan together on a
-   branch. They name purpose, outcomes, scope, the key design decisions, and how
-   each outcome will be verified. The maintainer accepts them and the register
-   moves to `Accepted`.
-2. **Develop** — implement on the milestone branch, running focused tests while
-   editing and `bash scripts/check.sh` before every push. Build the first
-   integrated workflow early, then add boundary and failure cases as
-   implementation reaches them. The register moves to `In progress`.
-3. **Close** — every outcome maps to tests, retained evidence, or a
-   demonstration. Run `bash scripts/check.sh` on each supported platform and
-   `bash scripts/check-release.sh` once, from the exact candidate. An
-   independent reviewer reads that candidate while the register is `In review`;
-   unresolved blocking findings block closure. The maintainer closes it, the
-   closure record names that disposition and the reviewed candidate, and the
-   register moves to `Closed`.
-4. **Release** — publication, tags, and packages are separate maintainer
-   decisions that reuse the closure evidence when the source is unchanged.
+| Transition | What the transition records |
+| --- | --- |
+| → `Open` | The plan pair exists, is indexed below, and every Progress and Evidence row reads `Open` |
+| `Open` → `Accepted` | The maintainer's disposition in the plan's Acceptance row: authority, durable authority evidence, and the accepted candidate |
+| `Accepted` → `In progress` | Implementation has begun against the accepted pair; evidence rows change as outcomes are proved |
+| `In progress` → `In review` | A closure candidate exists and an independent reviewer is reading that exact candidate |
+| `In review` → `Closed` | The maintainer's closure disposition in the plan's Closure row, naming the reviewed candidate, with every Progress row resolved |
 
-Product bytes integrate only through the approved closure merge. One `Open`
-planning candidate may be written while a delivery milestone is still running:
-it is planning only, it cannot be accepted, integrated, or implemented before
-that milestone is Closed, and the delivery milestone stays the sole
-implementation authority throughout the overlap.
+Every transition updates the register row, the complete Current Status capsule
+above, and README's derived summary in one change. `mix loopex.status` derives
+the capsule and the summary from the register and prints the exact values it
+expects, for any milestone name; nothing about a new name is written in code.
 
 A retry is diagnostic, not a pass. A same-revision failure that disappears on
 retry is a flake to fix, not a pass.
@@ -406,8 +402,11 @@ retry is a flake to fix, not a pass.
 ## What a Plan Contains
 
 A plan may expose unresolved ADR prerequisites so the maintainer can review the
-whole decision boundary. Every implementation-blocking prerequisite must be
-accepted before the plan pair is accepted or implementation begins. The
+whole decision boundary. Each one is accepted before the implementation that
+depends on it, not before unrelated work; by closure none is outstanding. The
+plan companion's `Prerequisites and Acceptance Points` section is where they are
+declared, and the status check reads the ADRs that section links, so the
+declaration and the derived status cannot disagree. The
 skeletons above are complete: do not add a third normative plan surface, and do
 not add a gate file. Progress and Evidence has exactly one uniquely numbered row
 for every normative Outcome and no other rows. Its states are `Open`, `Proved`,
@@ -435,11 +434,10 @@ changes nothing about how the work is directed.
 | An explanation, diagnosis, or review | Findings and a recommendation | Before any edit |
 | A proposal for an unsettled decision | Options, evidence, and a recommendation | Before dependent work begins |
 | Dispositioning a named ADR or plan | Your explicit decision is recorded against the exact candidate bytes | A disposition is recorded, never inferred |
-| Opening a named milestone | Concept plan and Technical depth plan written together on a branch | Acceptance by the maintainer |
+| Opening a named milestone | Concept plan and Technical depth plan written together and registered as `Open` | Acceptance by the maintainer |
 | Completing an accepted milestone | Implementation inside the accepted plan pair until every outcome is proved and the checks are green | Independent review |
 | Closing a reviewed milestone | A closure candidate is assembled from evidence, review, and demonstrations | Closure by the maintainer |
-| Integrating accepted governance | Merge the reviewed governance checkpoint without milestone product bytes; retain the delivery branch | Your explicit protected-branch approval |
-| Integrating closed product work | Merge, push, and branch cleanup | Your explicit protected-branch approval |
+| Integrating a reviewed change | Merge, push, and branch cleanup | Your explicit protected-branch approval |
 
 Opening and closing a milestone are the two rows the maintainer invokes
 directly, because no actor may accept or close its own work. Both clients
@@ -464,7 +462,7 @@ afterward.
 The Current Status capsule at the top of this file names the exact next
 decision; it is not repeated here, because a second copy would drift.
 
-**After a milestone opens.** The last four rows become live and the lifecycle
+**After a milestone opens.** The last three rows become live and the lifecycle
 repeats: agree, develop, review, close. One anticipated successor may be opened
 for planning alongside it without widening product authority.
 

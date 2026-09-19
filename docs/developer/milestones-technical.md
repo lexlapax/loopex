@@ -19,7 +19,11 @@ Governance Records (Acceptance and Closure rows, `—` until decided).
 
 `docs/plans/NAME-technical.md` starts with its `technical-depth` anchor
 and `## Technical depth`, links back to `#concept`, and carries: Prerequisites
-(ADRs and what must be accepted before which outcome); Verification (for each
+(one `### Prerequisites and Acceptance Points` section naming, as links, the
+ADRs the milestone waits on and which outcome each blocks — the status check
+reads that section's ADR links, so a decision named only in prose declares
+nothing, and each one is accepted before the implementation that depends on it
+rather than before unrelated work); Verification (for each
 outcome, the test files or real-path proof, and whether the release check is
 needed); Ownership and Rejoin (only if workstreams run in parallel);
 Compatibility, Migration and Rollback; Packaging if any.
