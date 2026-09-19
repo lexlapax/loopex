@@ -461,7 +461,7 @@ defmodule Loopex.Executor.Local.CodingToolsTest.CleanupTrace do
 
   defp ack(c) do
     bytes = IO.iodata_to_binary(Enum.reverse(c.chunks)) <> c.control_buffer
-    needle = "\nloopex-signal-accepted:" <> c.guard.token <> ":KILL\n"
+    needle = "loopex-signal-accepted:" <> c.guard.token <> ":KILL\n"
 
     case length(:binary.matches(bytes, needle)) do
       0 -> 0

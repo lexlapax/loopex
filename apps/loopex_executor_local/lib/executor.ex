@@ -5103,11 +5103,11 @@ defmodule Loopex.Executor.Local do
       trap '' TERM
       wait "$command_pid" 2>/dev/null
       command_status=$?
-      printf '\\n#{@guard_status}:%s:status:%s\\n' "$token" "$command_status" >&3
+      printf '#{@guard_status}:%s:status:%s\\n' "$token" "$command_status" >&3
       exit "$command_status"
     ) &
     status_pid=$!
-    printf '\\n#{@guard_status}:%s:wrapper:%s\\n' "$token" "$status_pid" >&3
+    printf '#{@guard_status}:%s:wrapper:%s\\n' "$token" "$status_pid" >&3
     while IFS= read -r control; do
       case "$control" in
         '#{@guard_signal}:'"$token"':TERM')
@@ -5117,7 +5117,7 @@ defmodule Loopex.Executor.Local do
           ;;
         '#{@guard_signal}:'"$token"':KILL')
           if [ "$mode" = helper ]; then
-            printf '\n#{@guard_signal_ack}:%s:KILL\n' "$token" >&3
+            printf '#{@guard_signal_ack}:%s:KILL\\n' "$token" >&3
           fi
           kill -s KILL -- -"$group_id" >/dev/null 2>&1
           ;;
@@ -5438,8 +5438,18 @@ defmodule Loopex.Executor.Local do
   # This keeps
   # progress and terminal output byte-identical without assuming one write maps
   # to one Port message.
+  #
+  # A frame is one line and one write. The guard once began each frame with a
+  # newline of its own, so a frame never shared a line with tool output; but
+  # bash flushes that newline as a write of its own, and on a contended host the
+  # tool's bytes landed between it and the body, so the marker below never
+  # matched and the frame's bytes became output. The collector then waited on a
+  # fact that had already arrived until the run deadline. A frame that starts
+  # with its marker and ends with its newline is one buffered line, flushed as
+  # one write, which a pipe delivers whole; tool bytes before it are output,
+  # exactly as they were.
   defp collect_guard_chunk(collector, chunk, limit) do
-    marker = "\n#{@guard_status}:#{collector.guard.token}:"
+    marker = "#{@guard_status}:#{collector.guard.token}:"
     combined = collector.control_buffer <> chunk
 
     case :binary.match(combined, marker) do
@@ -6205,7 +6215,7 @@ defmodule Loopex.Executor.Local do
     end
   end
 
-  defp helper_kill_ack(token), do: "\n#{@guard_signal_ack}:#{token}:KILL\n"
+  defp helper_kill_ack(token), do: "#{@guard_signal_ack}:#{token}:KILL\n"
 
   defp await_helper_guard_exit(port, collector, stop, limit, overflow) do
     remaining = stop - System.monotonic_time(:millisecond)

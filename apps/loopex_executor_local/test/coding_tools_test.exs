@@ -4324,15 +4324,19 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     # jitter.
     root = workspace()
 
-    {small_executor, small_lease} = executor_with_grace(root, 600)
-    {large_executor, large_lease} = executor_with_grace(root, 3_000)
+    # Two seconds and six, not 600 ms and three: ADR 0016 derives every settlement
+    # allowance from the grace, so 600 ms gave receipt retention 150 ms of
+    # filesystem time, which a loaded hosted runner's disk did not meet. The
+    # claim is the shape of the bound, and it holds at any pair.
+    {small_executor, small_lease} = executor_with_grace(root, 2_000)
+    {large_executor, large_lease} = executor_with_grace(root, 6_000)
 
     {small_ms, small} =
       elapsed(fn ->
         run(root, "loopex.bash", %{"command" => stubborn_group_command()}, %{
           executor: small_executor,
           lease_id: small_lease,
-          cleanup_grace_ms: 600
+          cleanup_grace_ms: 2_000
         })
       end)
 
@@ -4341,7 +4345,7 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
         run(root, "loopex.bash", %{"command" => stubborn_group_command()}, %{
           executor: large_executor,
           lease_id: large_lease,
-          cleanup_grace_ms: 3_000
+          cleanup_grace_ms: 6_000
         })
       end)
 
@@ -4355,13 +4359,13 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     # longer on the same group.
     assert large_ms > small_ms,
            "the configured period did not change how long cleanup took: " <>
-             "#{small_ms}ms at 600ms and #{large_ms}ms at 3000ms"
+             "#{small_ms}ms at 2000ms and #{large_ms}ms at 6000ms"
 
     # And it is a bound, not a per-step allowance. Under separate allowances the
     # same group cost `ps` plus `TERM` plus a pause plus `KILL` plus `ps`, which
     # no single declared period described.
-    assert small_ms < 600 + 2_000, "cleanup at a 600ms budget took #{small_ms}ms"
-    assert large_ms < 3_000 + 2_000, "cleanup at a 3000ms budget took #{large_ms}ms"
+    assert small_ms < 2_000 + 2_000, "cleanup at a 2000ms budget took #{small_ms}ms"
+    assert large_ms < 6_000 + 2_000, "cleanup at a 6000ms budget took #{large_ms}ms"
 
     # Concept: a period is a length of time, and a length of time is not measured
     # with a clock somebody can set.
@@ -5455,7 +5459,7 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     assert failed.cleanup_confirmation == :confirmed
     assert failed.output =~ "status 1"
 
-    frame = "\nloopex-command-status:loopex-protocol-probe:"
+    frame = "loopex-command-status:loopex-protocol-probe:"
 
     assert Local.guard_protocol_probe([
              frame <> "wrap",
@@ -5478,6 +5482,24 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
              frame <> "status:not-an-integer\n",
              frame <> "wrapper:23\n"
            ]) == :invalid
+
+    # Concept: tool bytes immediately before a frame are output; the frame is
+    # still a frame.
+    #
+    # Technical depth: this is the byte order captured on a loaded four-core
+    # host when the guard's frames began with a newline of their own: the
+    # newline flushed alone, the tool's "started" landed after it, and the body
+    # followed with no newline before it. The old marker required that newline
+    # and never matched, so the wrapper fact was lost and the job waited until
+    # its run deadline. A frame that starts with its marker is recognised
+    # wherever it begins.
+    assert Local.guard_protocol_probe([
+             "\n",
+             "started",
+             "loopex-command-status:loopex-protocol-probe:wrapper:102",
+             "\n",
+             "loopex-command-status:loopex-protocol-probe:status:0\n"
+           ]) == :valid
 
     # Concept: the Port's operating-system child is an authority object, not a
     # sampled number. It stays alive until this runtime has either released an
@@ -5627,6 +5649,69 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
            "normal release is not status-bound, or an unowned guard exit is treated as proof"
   end
 
+  # Concept: a control frame reaches the collector whole or not at all.
+  #
+  # Technical depth: the guard's frames share one pipe with the tool's stdout
+  # and stderr. A frame the shell flushes as two writes can have the tool's
+  # bytes between them; a frame that begins with its marker and ends with its
+  # newline is one buffered line, flushed as one write, which a pipe delivers
+  # whole below PIPE_BUF. The structural half asserts the script's formats have
+  # that shape; the behavioral half writes the guard's exact frame format from
+  # a shell beside a competing writer on the same pipe, two hundred times, and
+  # requires every frame to have landed contiguous.
+  test "a guard frame is one write that a competing writer cannot split" do
+    {"/usr/bin/env", vector} = Local.launcher_vector(%{argv: ["/usr/bin/true"]})
+    script = Enum.at(vector, Enum.find_index(vector, &(&1 == "loopex-port-carrier")) + 1)
+
+    refute script =~ ~r/printf '\\n/,
+           "a guard frame format begins with a newline the shell would flush on its own"
+
+    assert script =~
+             ~r/printf 'loopex-command-status:%s:wrapper:%s\\n' "\$token" "\$status_pid" >&3/
+
+    assert script =~
+             ~r/printf 'loopex-command-status:%s:status:%s\\n' "\$token" "\$command_status" >&3/
+
+    command = """
+    exec 3>&2
+    ( while :; do printf x; done ) &
+    hog=$!
+    i=0
+    while [ "$i" -lt 200 ]; do
+      printf 'loopex-command-status:probe-token:wrapper:%s\\n' "$i" >&3
+      i=$((i + 1))
+    done
+    kill "$hog"
+    wait "$hog" 2>/dev/null
+    exit 0
+    """
+
+    port =
+      Port.open({:spawn_executable, "/bin/bash"}, [
+        :binary,
+        :exit_status,
+        :stderr_to_stdout,
+        args: ["-c", command]
+      ])
+
+    output = drain_port(port, [])
+    frames = Regex.scan(~r/loopex-command-status:probe-token:wrapper:\d+\n/, output)
+    assert length(frames) == 200, "#{length(frames)} of 200 frames landed whole"
+
+    refute output =~ ~r/loopex-command-status:(?!probe-token:wrapper:\d+\n)/,
+           "a frame was split by the competing writer"
+  end
+
+  defp drain_port(port, acc) do
+    receive do
+      {^port, {:data, bytes}} -> drain_port(port, [acc, bytes])
+      {^port, {:exit_status, 0}} -> IO.iodata_to_binary(acc)
+      {^port, {:exit_status, status}} -> flunk("the frame writer exited #{status}")
+    after
+      10_000 -> flunk("the frame writer did not finish")
+    end
+  end
+
   test "release wait diagnostics never become completed command output" do
     # Concept: internal reaping diagnostics are not command stdout or stderr.
     # Technical depth: use the emitted production program, pausing its wrapper
@@ -5707,7 +5792,7 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
         complete
         |> String.replace(~r/\Aloopex-guard:release-wait-case:\d+:\d+\n/, "", global: false)
         |> String.replace(
-          ~r/\nloopex-command-status:release-wait-case:(?:wrapper:\d+|status:0)\n/,
+          ~r/loopex-command-status:release-wait-case:(?:wrapper:\d+|status:0)\n/,
           ""
         )
 
@@ -5770,7 +5855,7 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
       complete
       |> String.replace(~r/\Aloopex-guard:command-wait-case:\d+:\d+\n/, "", global: false)
       |> String.replace(
-        ~r/\nloopex-command-status:command-wait-case:(?:wrapper:\d+|status:137)\n/,
+        ~r/loopex-command-status:command-wait-case:(?:wrapper:\d+|status:137)\n/,
         ""
       )
 
@@ -5881,7 +5966,9 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
 
   test "final KILL proves captured-group cleanup but an unsolicited guard exit proves nothing" do
     root = workspace()
-    {executor, lease_id} = executor_with_grace(root, 600)
+    # A two-second grace rather than 600 ms: the derived retention allowance has
+    # to survive a loaded hosted runner's disk, and the claim does not depend on it.
+    {executor, lease_id} = executor_with_grace(root, 2_000)
     ready = Path.join(root, "term-resistant-ready")
     job_id = "term-resistant-#{System.unique_integer([:positive])}"
 
@@ -5894,7 +5981,7 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
             "command" =>
               "printf 'hello\\n'; trap '' TERM; printf ready > #{shell_path(ready)}; while :; do sleep 1; done"
           },
-          %{executor: executor, lease_id: lease_id, job_id: job_id, cleanup_grace_ms: 600}
+          %{executor: executor, lease_id: lease_id, job_id: job_id, cleanup_grace_ms: 2_000}
         )
       end)
 
