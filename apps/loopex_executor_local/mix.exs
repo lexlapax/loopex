@@ -13,6 +13,9 @@ defmodule Loopex.Executor.Local.MixProject do
       deps_path: "../../deps",
       lockfile: "../../mix.lock",
       elixir: "~> 1.17",
+      # Required by tests, not a test selector; current Mix warns on an
+      # unclassified .exs file, and the fast check treats a warning as red.
+      test_ignore_filters: ["test/support/cleanup_trace.exs"],
       start_permanent: Mix.env() == :prod,
       deps: deps()
     ]

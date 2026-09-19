@@ -17,7 +17,8 @@ defmodule Loopex.LLM.ReqLLM.MixProject do
       # Current Mix warns on unclassified .exs files; no *_test.exs is ignored.
       test_ignore_filters: [
         "test/support/provider_build_fixture.exs",
-        "test/support/provider_isolation_fixture.exs"
+        "test/support/provider_isolation_fixture.exs",
+        "test/support/provider_phase_diagnostic.exs"
       ],
       start_permanent: Mix.env() == :prod,
       escript: [

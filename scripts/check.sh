@@ -50,6 +50,16 @@ run_app() {
 }
 export -f run_app
 
+# Terminates a process and everything it started, deepest first, so a mix
+# process cannot be left running under a dead runner.
+kill_tree() {
+  local child
+  for child in $(pgrep -P "$1" 2>/dev/null); do
+    kill_tree "$child"
+  done
+  kill -TERM "$1" 2>/dev/null || true
+}
+
 suite() {
   local cores jobs logs pid status=0 app remaining
   cores=$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2)
@@ -67,15 +77,17 @@ suite() {
   done
   printf 'check: suite %s applications, %s at a time\n' "${#ordered[@]}" "$jobs"
 
-  # The runner starts in its own process group, so an interruption reaches
-  # every VM beneath it, not only xargs.
-  set -m
+  # An interruption must reach every VM beneath the runner, not only xargs, so
+  # the trap walks the whole process tree under it. The heartbeat sleeps in the
+  # background and waits on it, because Bash runs a trap only once the
+  # foreground command returns, and thirty seconds is too long to keep VMs
+  # running after a Ctrl-C.
   printf '%s\n' "${ordered[@]}" | xargs -P "$jobs" -I{} bash -c 'run_app "$1"' _ {} &
   pid=$!
-  set +m
-  trap 'trap - INT TERM; kill -TERM -- -"$pid" 2>/dev/null; wait "$pid" 2>/dev/null; rm -rf "$logs"; exit 130' INT TERM
+  trap 'trap - INT TERM; kill_tree "$pid"; wait "$pid" 2>/dev/null; rm -rf "$logs"; printf "check: interrupted\n"; exit 130' INT TERM
   while kill -0 "$pid" 2>/dev/null; do
-    sleep 30
+    sleep 30 &
+    wait $! 2>/dev/null || true
     if kill -0 "$pid" 2>/dev/null; then
       remaining=""
       for app in "${ordered[@]}"; do
