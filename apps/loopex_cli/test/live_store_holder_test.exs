@@ -1,7 +1,7 @@
 defmodule LoopexCli.LiveStoreHolderTest do
   @moduledoc false
 
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
   # Concept: a command asked to work on a state root another live runtime is
   # writing is refused, and told so in words.

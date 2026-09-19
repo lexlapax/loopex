@@ -12,7 +12,7 @@ Code.require_file("support/demonstration.ex", __DIR__)
 defmodule LoopexCli.ReceiptRoundTripTest do
   @moduledoc false
 
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
   alias Loopex.Executor.Local.CodingTools
   alias LoopexCli.Demonstration
