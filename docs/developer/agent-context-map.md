@@ -39,7 +39,7 @@ separate decision duty when a founding boundary or invariant would change.
 | Runtime instances, supervision, reducer | [Runtime ownership](../vision.md#concept-vision-runtime-supervision) | [Supervision and reducer mechanics](../vision-technical.md#technical-vision-runtime-supervision) | Multi-instance supervision, pure reducer, bounded journal transaction; use the [M1 runtime and embedding guide](runtime-and-embedding.md#concept) for the implemented single-machine surface. |
 | Transactions, operations, recovery, cancellation | [Recovery truth](../vision.md#concept-vision-recovery-truth) | [Transaction and recovery mechanics](../vision-technical.md#technical-vision-recovery-truth) | `commit_unknown`, operation lifecycle, reconciliation, outcome algebra. |
 | Agent loop, queues, tool ordering | [Loop semantics](../vision.md#concept-vision-loop-semantics) | [Loop mechanics](../vision-technical.md#technical-vision-loop-semantics) | One run per session, input classes, ordering, and split payloads. |
-| Public protocol, events, attachments | [Public protocol](../vision.md#concept-vision-public-protocol) | [Protocol mechanics](../vision-technical.md#technical-vision-public-protocol) | Stream planes, envelopes, attach behavior, and authority boundaries. Accepted [ADR 0023](../adr/0023-experimental-public-session-protocol.md#concept) fixes the headless protocol and accepted [ADR 0024](../adr/0024-durable-interaction-lifecycle-and-host-policy-authority.md#concept) puts durable interactions in core before any wire mapping; both are prerequisites of the Accepted [`M4` plan](../plans/M4.md#concept), whose implementation is complete with closure pending. Read the wire reference in the [protocol pair](app-server-protocol.md#concept), the embedding contract in [durable interactions](runtime-and-embedding.md#technical-embedding-interactions), and the [M4 pre-acceptance choices](#disposition-m4-preacceptance-contract-choices-2026-09-13) for the exclusions the maintainer approved. |
+| Public protocol, events, attachments | [Public protocol](../vision.md#concept-vision-public-protocol) | [Protocol mechanics](../vision-technical.md#technical-vision-public-protocol) | Stream planes, envelopes, attach behavior, and authority boundaries. Accepted [ADR 0023](../adr/0023-experimental-public-session-protocol.md#concept) fixes the headless protocol and accepted [ADR 0024](../adr/0024-durable-interaction-lifecycle-and-host-policy-authority.md#concept) puts durable interactions in core before any wire mapping; both are prerequisites of the Closed [`M4` plan](../plans/M4.md#concept). Read the wire reference in the [protocol pair](app-server-protocol.md#concept), the embedding contract in [durable interactions](runtime-and-embedding.md#technical-embedding-interactions), and the [M4 pre-acceptance choices](#disposition-m4-preacceptance-contract-choices-2026-09-13) for the exclusions the maintainer approved. |
 | Journal, stores, branches, compaction, artifacts | [Sessions and storage](../vision.md#concept-vision-sessions-storage) | [Storage mechanics](../vision-technical.md#technical-vision-sessions-storage) | Recovery surfaces, private adapters, store decision, protection. Accepted [ADR 0028](../adr/0028-bounded-artifact-retrieval.md#concept) adds the optional bounded transfer triple on the ArtifactStore port and its exact ceilings; use the [embedding contract](runtime-and-embedding.md#technical-embedding-transfers) for the facade family, ownership and refusals, and the [selected profile](#disposition-m4-preacceptance-contract-choices-2026-09-13) for how those limits were chosen. |
 | Model boundary and continuation | [Model boundary](../vision.md#concept-vision-model-boundary) | [Model mechanics](../vision-technical.md#technical-vision-model-boundary) | Canonical types, `Loopex.LLM`, reference adapter and native sidecar. Accepted [ADR 0027](../adr/0027-provider-permit-retirement.md#concept) and its [retirement mechanics](../adr/0027-provider-permit-retirement-technical.md#technical-adr-0027-decision) govern M3 provider-attempt retention. |
 | Context pipeline | [Model boundary](../vision.md#concept-vision-model-boundary) | [Context-pipeline mechanics](../vision-technical.md#technical-vision-model-boundary) | The sole seam for memory, retrieval, prompts, provenance, and receipts. |
@@ -50,10 +50,10 @@ separate decision duty when a founding boundary or invariant would change.
 | Embedded API, transports, clients, ACP | [API and transports](../vision.md#concept-vision-api-transports) | [Transport mechanics](../vision-technical.md#technical-vision-api-transports) | One semantic contract, JSONL RPC first, reference surfaces. The first non-Elixir surface is the foreground app server: read the [protocol pair](app-server-protocol.md#concept), the [operator runbook](../operator/app-server.md#concept), and the independent consumers in [`clients/`](../../clients/README.md). |
 | Hosts and wrappers | [Hosts](../vision.md#concept-vision-hosts) | [Host mechanics](../vision-technical.md#technical-vision-hosts) | Expected consumers, secured sample host, independent implementation. |
 | Repository layout and ADR agenda | [Repository seed](../vision.md#concept-vision-repository-seed) | [Exact seed](../vision-technical.md#technical-vision-repository-seed) | Pair with the [ADR 0001 decision](../adr/0001-repository-and-application-layout.md#concept-adr-0001-decision) and its [technical mechanics](../adr/0001-repository-and-application-layout-technical.md#technical-adr-0001-decision). |
-| Delivery shape and milestones | [Delivery strategy](../vision.md#concept-vision-delivery-strategy) and [roadmap](../roadmap.md#concept-roadmap-ladder) | [Delivery mechanics](../vision-technical.md#technical-vision-delivery-strategy) and [roadmap evidence](../roadmap-technical.md#technical-roadmap-ladder) | The [plans index](../plans/README.md) owns current status; an accepted plan pair is the commitment. The current milestone is the Accepted [M4 plan pair](../plans/M4.md#concept) with its [gate](../plans/M4-gate.md); its implementation is complete and its closure is pending, so no M4 claim is a closure claim. |
+| Delivery shape and milestones | [Delivery strategy](../vision.md#concept-vision-delivery-strategy) and [roadmap](../roadmap.md#concept-roadmap-ladder) | [Delivery mechanics](../vision-technical.md#technical-vision-delivery-strategy) and [roadmap evidence](../roadmap-technical.md#technical-roadmap-ladder) | The [plans index](../plans/README.md) owns current status; an accepted plan pair is the commitment. [M4](../plans/M4.md#concept) is Closed and no milestone is active; how one is planned, run and closed is the [milestone guide](milestones.md#concept), and which checks a change must pass is the [verification guide](verification.md#concept). |
 | Serial barriers | [Ordering constraint](../vision.md#concept-vision-serial-barriers) | [Exact rejoin order](../vision-technical.md#technical-vision-serial-barriers) | A milestone may add barriers but cannot weaken the founding sequence. |
 | Verification, invariants, budgets | [Verification](../vision.md#concept-vision-verification) | [Exact evidence](../vision-technical.md#technical-vision-verification) | Claim-proportional tests and scope-specific minimalism budgets. |
-| Compatibility and release governance | [Compatibility](../vision.md#concept-vision-compatibility) | [Compatibility mechanics](../vision-technical.md#technical-vision-compatibility) | Versioned surfaces, 0.x labels, migrations, rollback, freezes. What is exposed today, with M4's experimental labels and the app server's exact-generation rule, is in [compatibility surfaces](compatibility-surfaces.md#concept); M4 changes the source `VERSION` to `0.1.0` at closure, which ADR 0023 keeps separate from any package, tag, publication or freeze. |
+| Compatibility and release governance | [Compatibility](../vision.md#concept-vision-compatibility) | [Compatibility mechanics](../vision-technical.md#technical-vision-compatibility) | Versioned surfaces, 0.x labels, migrations, rollback, freezes. What is exposed today, with M4's experimental labels and the app server's exact-generation rule, is in [compatibility surfaces](compatibility-surfaces.md#concept); M4 moved the source `VERSION` to `0.1.0`, which ADR 0023 keeps separate from any package, tag, publication or freeze. |
 | Prior-system evidence | [Sources](../vision.md#concept-vision-sources) | [Source record](../vision-technical.md#technical-vision-sources) | Consulted sources are linked; independent implementation remains mandatory. |
 | Development method and portable clients | [Development charter](development-charter.md#concept-portable-development) | [Portable enforcement](development-charter-technical.md#technical-portable-development) | Also read `AGENTS.md`, [DEVELOPMENT.md](../../DEVELOPMENT.md), retained [smoke evidence](agent-adapter-smoke.md), and repository commands. |
 
@@ -69,13 +69,23 @@ once, in CI on the branch or locally before the merge, and
 `bash scripts/check-release.sh` is the slow check run before closure and
 release; [DEVELOPMENT.md](../../DEVELOPMENT.md) describes both. The milestone
 gate runners they replaced are gone, and the gate files under `docs/plans/`
-are historical records of what those runs proved.
+are historical records of what those runs proved. The four repository skills
+are `open-milestone`, `close-milestone`, `adr`, and `mutant-hunt` as an
+optional technique; there is no `/gate`.
+
+Hosted CI — `.github/workflows/agent-bootstrap.yml` — runs
+`bash scripts/check.sh --select` on every push to `main` and every pull
+request, on the current toolchain pair, with
+`LOOPEX_CHECK_ALONE=loopex_llm_reqllm`. Nothing merges to `main` without that
+run green on the candidate and an independent review of its diff.
 
 Product tests run against a temporary `LOOPEX_HOME`; the
 affected conformance suites (`conformance/`) run for any adapter or behaviour
 change; property tests own reducer/replay claims; fault injection owns
 durable-transition claims. Real-provider runs are a tagged, explicitly invoked
-lane — never part of the default suite.
+lane — never part of the default suite, and so are the three `long_bound`
+cases whose claim is a real duration: the two `test_helper.exs` files exclude
+them and `scripts/check-release.sh` runs them in a pass of its own.
 
 M3's implementation used focused checks under the reviewed
 [end-only full-gate cadence](#override-disposition-m3-implementation-gate-cadence-2026-09-10),
@@ -107,11 +117,14 @@ transaction is needed for the approved assertion change.
 ## Development Client Guidance
 
 - `scripts/check-agent-bootstrap.sh`, `scripts/check-gitignore.sh`,
-  `scripts/check-commit-messages.sh`, `scripts/check-repo-hygiene.sh`, and
+  `scripts/check-commit-messages.sh`, `scripts/check-repo-hygiene.sh`,
+  `scripts/check-otp-applications.sh`, `scripts/check-suite-summary.sh`, and
   `scripts/check-status.sh` define "bootstrap green" behind the provider-neutral aggregate
-  `scripts/check-bootstrap.sh`. They run from a clean checkout with the
-  toolchain in [DEVELOPMENT.md](../../DEVELOPMENT.md); hosted CI may invoke only
-  the aggregate as a replaceable thin wrapper.
+  `scripts/check-bootstrap.sh`, which `scripts/check.sh` runs as its structure
+  step. They run from a clean checkout with the toolchain in
+  [DEVELOPMENT.md](../../DEVELOPMENT.md); hosted CI may invoke only
+  `mix deps.get`, `bash scripts/check.sh` and `bash scripts/check.sh --select`,
+  which the adapter check enforces, as a replaceable thin wrapper.
 - Maintainer decision (explicit bootstrap task, 2026-08-15): the exact-SHA,
   repository-owned local aggregate is mandatory evidence; hosted CI is
   supplementary for every development milestone. Only separately authorized
@@ -149,8 +162,8 @@ transaction is needed for the approved assertion change.
   Required inspection checks must also execute in that environment. The
   bridge-period rule that kept Python assertions in tracked scripts is retired
   with the bridge: assertions now live in Mix tasks and their tests, which need a
-  writable build directory, so a read-only reviewer runs the gate runner's
-  inspection prefix or directs the build into an explicit isolated task root.
+  writable build directory, so a read-only reviewer directs the build into an
+  explicit isolated task root.
 - For development-client ecosystem changes, check current primary vendor docs
   or release notes plus installed behavior, derive shared consequences first,
   and retain version-specific facts here. Material changes
@@ -258,9 +271,10 @@ transaction is needed for the approved assertion change.
   and its [technical companion](../adr/0001-repository-and-application-layout-technical.md#technical-adr-0001-decision)
   make the first accepted scaffold create
   a repository-owned dependency-budget/direction command and turn
-  `.claude/hooks/deps-budget.sh` into a thin caller. Until the M0 gate creates
-  and proves that command, the current Claude-only hook is early feedback and
-  must not be described as repository enforcement.
+  `.claude/hooks/deps-budget.sh` into a thin caller. M0 created that command:
+  `mix loopex.deps_budget` is the enforcement, `scripts/check.sh` runs it, and
+  the Claude hook is early feedback that calls it and must not be described as
+  repository enforcement in its own right.
 
 ## Version-Specific Technical Guidance
 
