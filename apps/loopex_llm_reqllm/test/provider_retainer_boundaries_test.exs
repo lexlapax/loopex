@@ -180,7 +180,13 @@ defmodule Loopex.LLM.ReqLLM.ProviderRetainerBoundariesTest do
                       {:error, {:dispatched_or_unknown, "model_call_failed"}}},
                      until(cooperative)
 
-      assert System.system_time(:millisecond) >= request.deadline
+      # The guardian honours the deadline as a monotonic instant converted once
+      # from the wall-clock deadline the request carries; both clocks are read
+      # in whole milliseconds and the offset between them can move by a few
+      # during the wait, so the wall clock at the completion may read a few
+      # milliseconds before the deadline it honoured -- two, once, on the Mac.
+      # Five milliseconds is the tolerance; the deadline is ten thousand.
+      assert System.system_time(:millisecond) >= request.deadline - 5
 
       # Concept: this is the cleanup interval, not a queued provider result.
       # Technical depth: the unchanged OS guard removes its namespace only in
