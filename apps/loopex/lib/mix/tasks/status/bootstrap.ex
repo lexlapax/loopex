@@ -72,6 +72,10 @@ defmodule Loopex.Checks.Bootstrap do
   @inert_path_tools ["Grep", "Glob", "Write", "NotebookEdit"]
 
   @workflow ".github/workflows/agent-bootstrap.yml"
+  # The only commands the hosted wrapper may run: fetch the dependencies, then
+  # the repository check in either of its modes. Anything else is a policy the
+  # command does not define.
+  @workflow_commands ["mix deps.get", "bash scripts/check.sh", "bash scripts/check.sh --select"]
   @noncanonical [
     "\r",
     "\v",
@@ -406,10 +410,25 @@ defmodule Loopex.Checks.Bootstrap do
               )
               |> Enum.map(&String.trim_trailing/1)
 
-            if Enum.any?(structure, &String.contains?(&1, "bash scripts/check.sh")) do
-              []
-            else
-              ["#{@workflow}: must run bash scripts/check.sh; the command defines the check"]
+            runs =
+              structure
+              |> Enum.map(&String.trim/1)
+              |> Enum.filter(&String.starts_with?(&1, "- run:"))
+              |> Enum.map(&(&1 |> String.replace_prefix("- run:", "") |> String.trim()))
+
+            foreign = Enum.reject(runs, &(&1 in @workflow_commands))
+
+            cond do
+              not Enum.any?(runs, &String.starts_with?(&1, "bash scripts/check.sh")) ->
+                ["#{@workflow}: must run bash scripts/check.sh; the command defines the check"]
+
+              foreign != [] ->
+                [
+                  "#{@workflow}: runs a command outside the repository entrypoints: #{inspect(foreign)}"
+                ]
+
+              true ->
+                []
             end
         end
     end

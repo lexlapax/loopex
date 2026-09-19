@@ -24,7 +24,10 @@ case "$mode" in
   --select)
     base=$(git merge-base origin/main HEAD 2>/dev/null || true)
     changed=$([ -n "$base" ] && git diff --name-only "$base" HEAD || true)
-    if [ -n "$changed" ] && ! printf '%s\n' "$changed" | grep -qvE '\.md$'; then
+    # Markdown under apps/ would be a test fixture, not prose, so it keeps the
+    # full check.
+    if [ -n "$changed" ] && ! printf '%s\n' "$changed" | grep -qvE '\.md$' &&
+       ! printf '%s\n' "$changed" | grep -qE '^apps/'; then
       mode=--docs
     else
       mode=full
@@ -142,10 +145,12 @@ phase() {
   pid=$!
   heartbeat "$pid" "$@" &
   pulse=$!
-  trap 'trap - INT TERM; kill "$pulse" 2>/dev/null; kill_tree "$pid"; wait "$pid" 2>/dev/null || true; rm -rf "$LOOPEX_CHECK_LOGS"; printf "check: interrupted\n"; exit 130' INT TERM
+  trap 'trap - INT TERM; kill_tree "$pulse"; kill_tree "$pid"; wait "$pid" 2>/dev/null || true; rm -rf "$LOOPEX_CHECK_LOGS"; printf "check: interrupted\n"; exit 130' INT TERM
   wait "$pid" || status=$?
   trap - INT TERM
-  kill "$pulse" 2>/dev/null || true
+  # The heartbeat and the sleep it is blocked in both go, or the sleep would
+  # hold the inherited output open for up to thirty seconds after PASS.
+  kill_tree "$pulse"
   wait "$pulse" 2>/dev/null || true
   return "$status"
 }

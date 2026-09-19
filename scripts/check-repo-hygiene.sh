@@ -29,14 +29,25 @@ milestone="$(awk -F'|' '
     exit
   }' docs/plans/README.md 2>/dev/null || true)"
 
-# A branch the remote still carries is shared state the maintainer keeps -- a
-# milestone branch retained after closure, for one -- not residue. Residue is a
-# local branch whose landed work is on the integration ref while the remote no
-# longer has it, or never did.
+# Every milestone the register names keeps its branch, closed or not: the
+# maintainer retains milestone branches as durable state, and the register is
+# where a milestone's name is declared. That is the intent the exemption keys
+# on; "the remote has one too" is not, because a merged feature branch keeps
+# its remote-tracking ref until the next prune and is exactly the residue this
+# check exists to report.
+milestones="$(awk -F'|' '
+  $2 ~ /^ `[A-Za-z0-9.-]+` $/ && $3 ~ /^ (Open|Accepted|In progress|In review|Closed) $/ {
+    name = $2
+    gsub(/[ `]/, "", name)
+    print tolower(name)
+  }' docs/plans/README.md 2>/dev/null || true)"
+
 exempt() {
+  local folded
   [ "$1" = "main" ] && return 0
-  git rev-parse --verify --quiet "refs/remotes/origin/$1" >/dev/null && return 0
-  [ -n "$milestone" ] && [ "$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')" = "$milestone" ]
+  folded="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
+  [ -n "$milestone" ] && [ "$folded" = "$milestone" ] && return 0
+  printf '%s\n' "$milestones" | grep -qx "$folded"
 }
 
 # Worktrees whose path no longer exists are always residue, remote or not.
