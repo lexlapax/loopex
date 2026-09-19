@@ -95,8 +95,9 @@ absence was exploited or nearly exploited during M0–M4.
 ### Making it fast
 
 Three steps, in order of value per effort, each measured in the technical
-companion. The maintainer approved all three; the first two are done, and the
-fast check went from fourteen minutes to about four and a half on the Mac.
+companion. The maintainer approved all three and all three are done; the fast
+check went from fourteen minutes to under four on the Mac, and what remains
+is structural, not a matter of more test changes.
 Technical depth: [Measurements and plan](verification-technical.md#technical-verification-speed).
 
 1. **Run applications in parallel VMs.** The suite is ten independent
@@ -114,7 +115,8 @@ Technical depth: [Measurements and plan](verification-technical.md#technical-ver
    modules are serial, most for a reason (VM-global tracing, environment
    variables, registered names). The ones with no shared state can become
    asynchronous one at a time, each proved by the suite staying green over
-   several seeds.
+   several seeds. Twenty-four modules were; the provider suite cannot be,
+   because its cases share the one credential variable the child inherits.
 
 What is deliberately not on the list: cutting durability, security or
 recovery tests to meet a number, or shortening a fault window in production
