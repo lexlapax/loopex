@@ -26,6 +26,12 @@ import { Connection, wire } from "./loopex-client.mjs";
 
 const [elixir, ...paths] = process.argv.slice(2);
 
+// The entry point the server process is started with is an operator input, read
+// the way the chain client reads it. Which host a client drives is not the
+// client's decision, and a default that could only name one of them would make
+// this client part of that host's configuration.
+const serverEntry = process.env.LOOPEX_WORKFLOW_ENTRY || "Loopex.AppServer.Fixture.serve()";
+
 if (!elixir || paths.length === 0) {
   console.error("usage: node workflow.mjs <elixir-executable> <path>...");
   process.exit(2);
@@ -36,7 +42,7 @@ for (const path of paths) {
   if (path.endsWith(".exs")) serverArgs.push("-r", path);
   else serverArgs.push("-pa", path);
 }
-serverArgs.push("-e", "Loopex.AppServer.Fixture.serve()");
+serverArgs.push("-e", serverEntry);
 
 const connection = new Connection(elixir, serverArgs);
 

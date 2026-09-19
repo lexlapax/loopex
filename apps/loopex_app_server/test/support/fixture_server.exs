@@ -153,47 +153,6 @@ defmodule Loopex.AppServer.WorkflowArtifacts do
   end
 end
 
-defmodule Loopex.AppServer.WorkflowPolicy do
-  @moduledoc """
-  ## Concept
-
-  A host policy that asks before it allows. The first time a tool call reaches
-  it there is no answer to read, so it defers with a bounded question; once an
-  operator's answer has committed, the same policy is asked again and decides on
-  what that answer says.
-
-  ## Technical depth
-
-  This is the shape accepted ADR 0024 exists for, and the workflow needs a
-  policy that genuinely has two outcomes rather than one that always allows. An
-  answer is an input to this decision and never the decision itself: the allow
-  is minted here, by the host, after the answer committed, which is what the
-  chain outcome 5 names is meant to demonstrate end to end.
-  """
-
-  @behaviour Loopex.Policy
-
-  @impl Loopex.Policy
-  def decide(request) do
-    case Map.get(request, :interaction_response) do
-      nil ->
-        {:defer,
-         %{
-           kind: :choice,
-           prompt: "May the tool write the file?",
-           choices: [%{id: "allow", label: "Allow once"}, %{id: "deny", label: "Deny"}],
-           expires_in_ms: 60_000
-         }}
-
-      %{answer: %{choice_id: "allow"}} ->
-        {:allow, nil}
-
-      %{answer: %{choice_id: _refused}} ->
-        {:deny, :policy_denied}
-    end
-  end
-end
-
 defmodule Loopex.AppServer.Fixture do
   @moduledoc """
   ## Concept
@@ -283,8 +242,12 @@ defmodule Loopex.AppServer.Fixture do
         },
         %{text: "the task is done", calls: []}
       ],
-      policy: Loopex.AppServer.WorkflowPolicy,
-      policy_identity: %{"id" => "loopex.app_server.workflow_policy", "revision" => "1"}
+      # The shipped asking policy, not a second one written for the tests: the
+      # question a client renders and the identities it answers with are product
+      # behaviour, so the scripted lane and the real lane must observe the same
+      # ones or they are not comparable evidence about one protocol.
+      policy: Loopex.AppServer.Policy.Ask,
+      policy_identity: %{"id" => "loopex.app_server.policy.ask", "revision" => "1"}
     ]
   end
 

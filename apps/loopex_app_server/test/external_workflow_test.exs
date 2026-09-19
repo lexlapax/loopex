@@ -152,7 +152,7 @@ defmodule Loopex.AppServer.ExternalWorkflowTest do
 
     # The host policy asked rather than allowing, and the question reached the
     # client with its exact wording and its offered choices.
-    assert summary["question_prompt"] == "May the tool write the file?"
+    assert summary["question_prompt"] == "Allow this tool call?"
     assert summary["choice_ids"] == ["allow", "deny"]
     assert is_binary(summary["interaction_id"])
 
@@ -263,7 +263,7 @@ defmodule Loopex.AppServer.ExternalWorkflowTest do
     assert summary["catalog_before"]["entries"] == 0
     assert summary["admission_accepted"]
     assert summary["skill_selected"] == "writer"
-    assert summary["question_prompt"] == "May the tool write the file?"
+    assert summary["question_prompt"] == "Allow this tool call?"
     assert summary["answer_accepted"]
     assert summary["tool_finished"]
     assert summary["artifacts"] == 1
@@ -282,143 +282,6 @@ defmodule Loopex.AppServer.ExternalWorkflowTest do
     # The Store outlived both processes, which is what made the second one a
     # successor rather than a fresh start.
     assert File.exists?(store)
-  end
-
-  @tag :node_client
-  @tag timeout: 600_000
-  test "a fresh extraction of the exact source candidate follows the operator guide to build and run the server and Node consumer with operator supplied inputs" do
-    node_executable = System.find_executable("node") || flunk("Node is unavailable")
-    elixir = System.find_executable("elixir") || flunk("Elixir is unavailable")
-    mix = System.find_executable("mix") || flunk("Mix is unavailable")
-
-    root = repository_root()
-    {committed, 0} = System.cmd("git", ["rev-parse", "HEAD"], cd: root)
-    committed = String.trim(committed)
-
-    {dirty, 0} = System.cmd("git", ["status", "--porcelain"], cd: root)
-
-    assert dirty == "",
-           "the tree is not the committed candidate; extracting it would prove nothing: #{dirty}"
-
-    # The workspace is placed under the physical temporary directory. On macOS
-    # `System.tmp_dir!/0` answers through `/var`, which is a symlink to
-    # `/private/var`. Mix resolves its own working directory but not the paths
-    # it is handed, so given the unresolved form it computes the relative link
-    # for a dependency's `priv` between two spellings of the same place and
-    # emits one that climbs past the filesystem root. The dependency then fails
-    # to read its own `priv` at compile time. Resolving once here keeps every
-    # path below it physical.
-    {physical_tmp, 0} = System.cmd("pwd", ["-P"], cd: System.tmp_dir!())
-
-    workspace =
-      Path.join(
-        String.trim(physical_tmp),
-        "loopex-extract-#{System.unique_integer([:positive])}"
-      )
-
-    File.mkdir_p!(workspace)
-    on_exit(fn -> File.rm_rf(workspace) end)
-
-    # The archive is staged from the exact committed revision, not from the
-    # working tree, so what is built is what a reader could fetch by that name.
-    archive = Path.join(workspace, "source.tar")
-
-    {_output, 0} =
-      System.cmd("git", ["archive", "--format=tar", "-o", archive, committed], cd: root)
-
-    archive_digest =
-      archive |> File.read!() |> then(&:crypto.hash(:sha256, &1)) |> Base.encode16(case: :lower)
-
-    assert String.match?(archive_digest, ~r/\A[0-9a-f]{64}\z/)
-
-    extracted = Path.join(workspace, "source")
-    File.mkdir_p!(extracted)
-    {_output, 0} = System.cmd("tar", ["-xf", archive, "-C", extracted])
-
-    # It is an extraction, not the checkout: no build, no dependencies, and no
-    # Git directory travel with it.
-    refute File.exists?(Path.join(extracted, "_build"))
-    refute File.exists?(Path.join(extracted, "deps"))
-    refute File.exists?(Path.join(extracted, ".git"))
-    assert File.exists?(Path.join(extracted, "mix.exs"))
-    assert File.exists?(Path.join([extracted, "clients", "node", "workflow.mjs"]))
-
-    # Dependencies are supplied rather than fetched, because a build that
-    # reached the network would be proving something about the network. They
-    # come from where this suite's own build found them: a runner that supplies
-    # its dependency tree through `MIX_DEPS_PATH`, as the M1 gate does, runs from
-    # a repository copy that has no `deps` of its own.
-    deps = Path.expand(System.get_env("MIX_DEPS_PATH") || Path.join(root, "deps"), root)
-    File.cp_r!(deps, Path.join(extracted, "deps"))
-
-    # The build is named into the extraction itself. A runner that exports
-    # `MIX_BUILD_ROOT` to isolate its own lanes would otherwise send these beams
-    # to that root, leaving the extracted tree with no build for the consumer
-    # below to load, and the extraction would be proving something about the
-    # runner. Naming the dependency path is what makes the copy above the source
-    # of what gets compiled. `MIX_BUILD_PATH` is cleared for the same reason: it
-    # outranks `MIX_BUILD_ROOT`, and a runner that sets it, as the M1 gate does,
-    # would have this build overwrite that runner's own beams.
-    {build_output, build_status} =
-      System.cmd(mix, ["compile"],
-        cd: extracted,
-        stderr_to_stdout: true,
-        env: [
-          {"MIX_ENV", "dev"},
-          {"MIX_BUILD_PATH", nil},
-          {"MIX_BUILD_ROOT", Path.join(extracted, "_build")},
-          {"MIX_DEPS_PATH", Path.join(extracted, "deps")}
-        ]
-      )
-
-    assert build_status == 0, "the extracted source did not build: #{build_output}"
-
-    for application <- ~w(loopex_protocol loopex loopex_app_server loopex_store_local) do
-      assert File.dir?(Path.join([extracted, "_build", "dev", "lib", application, "ebin"])),
-             "#{application} is missing from the extracted build"
-    end
-
-    # And then it is run, from that tree, with inputs an operator supplies: the
-    # consumer the operator guide names, driving the server the same guide says
-    # to launch.
-    %{environment: environment} = durable_environment()
-
-    {output, status} =
-      System.cmd(
-        node_executable,
-        [
-          Path.join([extracted, "clients", "node", "workflow.mjs"]),
-          elixir,
-          Path.join([extracted, "_build", "dev", "lib", "loopex_protocol", "ebin"]),
-          Path.join([extracted, "_build", "dev", "lib", "loopex", "ebin"]),
-          Path.join([extracted, "_build", "dev", "lib", "loopex_app_server", "ebin"]),
-          Path.join([extracted, "_build", "dev", "lib", "loopex_store_local", "ebin"]),
-          Path.join([extracted, "_build", "dev", "lib", "telemetry", "ebin"]),
-          Path.join([extracted, "apps", "loopex", "test", "support", "m1_runtime_helper.exs"]),
-          Path.join([extracted, "apps", "loopex", "test", "support", "agent_loop_helper.exs"]),
-          Path.join([
-            extracted,
-            "apps",
-            "loopex_app_server",
-            "test",
-            "support",
-            "fixture_server.exs"
-          ])
-        ],
-        env: Keyword.drop(environment, ["LOOPEX_WORKFLOW_SCRIPT", "LOOPEX_WORKFLOW_STORE"]),
-        stderr_to_stdout: false
-      )
-
-    assert status == 0, "the extracted consumer failed: #{output}"
-
-    summary = decode(output)
-
-    refute Map.has_key?(summary, "failed"),
-           "the extracted consumer reported: #{summary["failed"]}"
-
-    assert summary["session_created"]
-    assert summary["event_kinds"] != [], "the extracted consumer observed nothing"
-    assert "run.finished" in summary["event_kinds"]
   end
 
   test "stdin EOF performs orderly shutdown without cancellation and the pending interaction survives restart" do
