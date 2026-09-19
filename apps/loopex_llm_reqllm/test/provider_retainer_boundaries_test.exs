@@ -146,10 +146,11 @@ defmodule Loopex.LLM.ReqLLM.ProviderRetainerBoundariesTest do
   test "retainer death after actual OS cleanup begins ends the lifetime without a later Core stop" do
     fixture = Fixture.new(:blocked, paused: true)
     # Every wait below is taken from this request's own deadline, and the case
-    # waits the whole of it out on a deliberately stopped child. Three seconds is
-    # long enough for the real child to dispatch and be stopped, and the facts
-    # the case asserts are the same at any committed value.
-    request = Fixture.request(deadline_ms: 3_000)
+    # waits the whole of it out on a deliberately stopped child. The deadline is
+    # absolute from here and the real child has to boot, dispatch and be stopped
+    # inside it; a shorter one priced that boot on a loaded hosted runner, so
+    # the port default stays and the case costs the whole of it.
+    request = Fixture.request()
     {retainer, retainer_monitor} = spawn_monitor(fn -> receive do: (:stop -> :ok) end)
     call = Fixture.managed(fixture, request, retainer)
     guardian = call.guardian

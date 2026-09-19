@@ -96,10 +96,12 @@ defmodule Loopex.LLM.ReqLLM.ProviderBackpressureTest do
 
     # Every wait below is derived from this request's own committed deadline, and
     # the case waits the whole of it out with the writer deliberately blocked, so
-    # the deadline is this case's entire cost. Three seconds is several times the
-    # fixture's own setup and proves the same independent cleanup.
-    {fixture, request, call, receiver, _socket} =
-      start_blocked(Fixture.request(deadline_ms: 3_000), true)
+    # the deadline is this case's entire cost. It is not shortened: the deadline
+    # is absolute from here and the child boots inside the call, so the ready,
+    # buffered and blocked witnesses all have to land inside it, and three
+    # seconds left no room for the boot on a loaded hosted runner. The port
+    # default is what the child reliably reaches its witnesses under.
+    {fixture, request, call, receiver, _socket} = start_blocked(Fixture.request(), true)
 
     guardian = call.guardian
     delivered = :erlang.trace_delivered(guardian)

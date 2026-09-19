@@ -708,7 +708,14 @@ defmodule Loopex.LLM.ReqLLM.CredentialPlaneTest do
     fixture = Fixture.new(mode)
 
     assert_private(fn ->
-      request = Fixture.request(deadline_ms: 2_000)
+      # The deadline is absolute from here, and the child is spawned inside the
+      # call, so it prices the child's boot as well as the fault this case
+      # releases. Every witness below must land before it. Committing two
+      # seconds put the boot alone past it on a loaded hosted runner, where
+      # the case then observed the deadline instead of the fault; the port
+      # default stays, and the case ends when the witnesses land, not at the
+      # deadline.
+      request = Fixture.request()
       call = Fixture.managed(fixture, request)
 
       if observe_termination,

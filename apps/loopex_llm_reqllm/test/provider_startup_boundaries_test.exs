@@ -40,13 +40,20 @@ defmodule Loopex.LLM.ReqLLM.ProviderStartupBoundariesTest do
               for mode <- [:reply, :pre_entry_crash] do
                 fixture = Fixture.new(mode, paused: true)
 
-                # The failing child never becomes ready, so its refusal is
+                # The crashing child never becomes ready, so its refusal is
                 # reached by the committed deadline expiring: that deadline, not
                 # the entry failure, is what this case used to spend ten seconds
-                # on. Three seconds is still several times what the real
-                # successful child in the first mode needs to answer.
+                # on, and nothing has to happen before it. The replying child
+                # keeps the port default because it has to boot and answer
+                # before its deadline, and it ends when it answers.
+                deadline_ms = if mode == :reply, do: 10_000, else: 3_000
+
                 call =
-                  Fixture.managed(fixture, Fixture.request(deadline_ms: 3_000), :unmanaged)
+                  Fixture.managed(
+                    fixture,
+                    Fixture.request(deadline_ms: deadline_ms),
+                    :unmanaged
+                  )
 
                 caller = call.caller
                 guardian = call.guardian

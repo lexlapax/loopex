@@ -297,11 +297,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderBridgeTest do
     report =
       failure_diagnostic(fn ->
         assert {:error, {:dispatched_or_unknown, "model_call_failed"}} =
-                 ProviderBridge.complete(
-                   fresh_request(3_000),
-                   configuration,
-                   Model.discard_progress()
-                 )
+                 ProviderBridge.complete(fresh_request(), configuration, Model.discard_progress())
 
         refute process_alive?(child_pid(root))
         refute File.exists?(File.read!(Path.join(root, "namespace")))
@@ -355,7 +351,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderBridgeTest do
 
   test "queued EOF after the original deadline cannot publish a failure category", %{root: root} do
     configuration = worker(root, {:failure, :release_eof})
-    request = fresh_request(3_000)
+    request = fresh_request()
     observation = make_ref()
     deadline_function = {ProviderBridge, :invocation_deadline, 2}
     assert {:module, ProviderBridge} = Code.ensure_loaded(ProviderBridge)
@@ -454,14 +450,15 @@ defmodule Loopex.LLM.ReqLLM.ProviderBridgeTest do
     |> Jason.decode!()
   end
 
-  # The committed deadline is a member of the request, so a case that waits it
-  # out states its own instead of paying the ten seconds a case that never
-  # reaches it can afford.
-  defp fresh_request(deadline_ms \\ 10_000) do
+  # The deadline is absolute from here and the child boots inside the call, so
+  # the two cases that wait it out still need the child at its withheld or
+  # queued EOF before it expires. A three-second deadline priced that boot on a
+  # loaded hosted runner; the port default stays for every case.
+  defp fresh_request do
     {:ok, request} =
       Model.request("fixture:model", [%{"role" => "user", "content" => "hello"}],
         sampling: %{"max_tokens" => 4},
-        deadline: System.system_time(:millisecond) + deadline_ms
+        deadline: System.system_time(:millisecond) + 10_000
       )
 
     request

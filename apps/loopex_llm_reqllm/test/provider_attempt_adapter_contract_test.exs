@@ -304,7 +304,11 @@ defmodule Loopex.LLM.ReqLLM.ProviderAttemptAdapterContractTest do
           :tagged_not_dispatched
         ] do
       fixture = Fixture.new(mode, diagnostic_case: case_name)
-      result = Fixture.complete(fixture, Fixture.request(deadline_ms: 2_000))
+      # The child has to boot and enter the transport before the deadline, which
+      # is absolute from the request; two seconds was not enough for the boot on
+      # a loaded hosted runner, so the port default stays. Only the :timeout
+      # mode waits it out.
+      result = Fixture.complete(fixture)
       assert Fixture.canaries(fixture) == 1, "transport latch not entered for #{mode}"
       assert Fixture.methods(fixture) == ["POST"], "wrong transport method for #{mode}"
       assert result == {:error, {:dispatched_or_unknown, "model_call_failed"}}, inspect(mode)
@@ -323,7 +327,10 @@ defmodule Loopex.LLM.ReqLLM.ProviderAttemptAdapterContractTest do
     test: case_name
   } do
     fixture = Fixture.new(:http_error, diagnostic_case: case_name)
-    call = Fixture.managed(fixture, Fixture.request(deadline_ms: 2_000))
+    # The child answers with its error as soon as it has booted and dispatched;
+    # the port-default deadline is not waited out, and a shorter one priced the
+    # boot on a loaded hosted runner.
+    call = Fixture.managed(fixture)
     caller = call.caller
 
     assert_receive {:completed, ^caller, {:error, {:dispatched_or_unknown, "model_call_failed"}}},
@@ -533,7 +540,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderAttemptAdapterContractTest do
 
   test "an unmanaged adapter result follows guardian credential cleanup", %{test: case_name} do
     fixture = Fixture.new(:hold_before_error, paused: true, diagnostic_case: case_name)
-    call = Fixture.managed(fixture, Fixture.request(deadline_ms: 5_000), :unmanaged)
+    call = Fixture.managed(fixture, Fixture.request(), :unmanaged)
     guardian = call.guardian
     caller = call.caller
     :erlang.trace(guardian, true, [:receive, {:tracer, self()}])
