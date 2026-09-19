@@ -4843,7 +4843,12 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     # deadline once, before the permit is released and with the coordinator
     # frozen, so a stalled setup fails here by name rather than being read as
     # the pre-send branch. The deadline is crossed deliberately below.
-    deadline_ms = if phase == :before_send, do: 200, else: 10_000
+    #
+    # The post-send budget is four seconds rather than ten: the whole of it is
+    # waited out below, and four is already four times the budget that raced the
+    # setup, with the check above turning any remaining race into a named
+    # failure instead of a silently wrong branch.
+    deadline_ms = if phase == :before_send, do: 200, else: 4_000
 
     fixture =
       start(
