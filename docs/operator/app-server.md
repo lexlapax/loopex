@@ -135,6 +135,10 @@ export LOOPEX_WORKFLOW_ENTRY="Loopex.AppServer.Host.serve()"
 node clients/node/workflow.mjs "$(command -v elixir)" _build/prod/lib/*/ebin
 ```
 
+`workflow.mjs` never answers a question, so pair it with `LOOPEX_POLICY=allow-all`.
+Under `ask` the first tool call waits for an answer this client will not send,
+and the run stops there with nothing wrong.
+
 The chain consumer, `interaction-workflow.mjs`, takes the same arguments and
 one more operator input: `LOOPEX_WORKSPACE_REF`, the workspace reference a
 trust decision must carry. It is an input rather than something the client asks
@@ -148,8 +152,9 @@ export LOOPEX_WORKFLOW_ENTRY="Loopex.AppServer.Host.serve()"
 node clients/node/interaction-workflow.mjs "$(command -v elixir)" _build/prod/lib/*/ebin
 ```
 
-The server also writes that reference to standard error as it starts, for an
-operator watching a server someone else launched.
+This is the client that answers, so it is the one to run under
+`LOOPEX_POLICY=ask`. The server also writes the workspace reference to standard
+error as it starts, for an operator watching a server someone else launched.
 
 Two further inputs are the client's own patience and task, not the server's:
 `LOOPEX_WORKFLOW_PROMPT` is what the session is asked to do, and

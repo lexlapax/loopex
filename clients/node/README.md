@@ -36,7 +36,9 @@ node clients/node/workflow.mjs "$(command -v elixir)" _build/prod/lib/*/ebin
 
 The server must be started with `-noinput`, because the virtual machine
 otherwise keeps standard input for its own shell, and the workflow sets that for
-the process it launches.
+the process it launches. This client never answers a question, so pair it with
+`LOOPEX_POLICY=allow-all`; under `ask` the first tool call waits for an answer it
+will not send.
 
 `apps/loopex_app_server/test/external_workflow_test.exs` runs this against a
 scripted launch configuration and asserts what the client reported.
@@ -46,8 +48,9 @@ scripted launch configuration and asserts what the client reported.
 is an input rather than something the client asks for, because the catalog
 withholds the reference along with every entry until a trust decision naming it
 is active. The client relays that decision; it does not judge it, and it could
-not construct one from anything the server told it. The shipped host computes
-the same value from the workspace it was launched with:
+not construct one from anything the server told it. This is the client that
+answers, so it is the one to run under `LOOPEX_POLICY=ask`. The shipped host
+computes the workspace reference from the workspace it was launched with:
 
 ```bash
 export LOOPEX_WORKSPACE_REF="$(ERL_LIBS=_build/prod/lib elixir -e 'IO.write(Loopex.AppServer.Host.workspace_reference!())')"
