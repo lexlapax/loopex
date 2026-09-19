@@ -20,6 +20,9 @@ for required_command in bash git awk cat grep readlink sed tr mix; do
   command -v "$required_command" >/dev/null 2>&1 || fail "missing $required_command"
 done
 
+# A project-defined Mix task runs whatever beams _build holds; compile first so
+# a stale checker cannot judge a fresh checkout.
+mix compile --no-deps-check >/dev/null
 mix loopex.agent_bootstrap
 
 [ "$(tr -d '\r\n' < CLAUDE.md)" = "@AGENTS.md" ] ||
