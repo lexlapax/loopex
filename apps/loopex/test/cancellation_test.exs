@@ -341,6 +341,35 @@ defmodule Loopex.CancellationTest do
     {fixture, session_id, events(attachment)}
   end
 
+  # The observation bound is an argument of the private boundary that arms it, so
+  # a local call trace reads the exact number a facade entry was given without
+  # waiting for it to elapse. The tracer is a separate process because a process
+  # is never told about its own calls, and it forwards what it sees so the case
+  # reads one mailbox. The pattern and the trace on new processes are removed
+  # when the case ends, because a live call trace belongs to no other case.
+  defp trace_bounded_cancel do
+    owner = self()
+    collector = spawn_link(fn -> forward_traces(owner) end)
+    assert :erlang.trace_pattern({Loopex.Executor, :bounded_cancel, 4}, true, [:local]) == 1
+    _ = :erlang.trace(self(), true, [:call, {:tracer, collector}])
+    _ = :erlang.trace(:new, true, [:call, {:tracer, collector}])
+
+    on_exit(fn ->
+      _ = :erlang.trace(:new, false, [:call])
+      _ = :erlang.trace_pattern({Loopex.Executor, :bounded_cancel, 4}, false, [:local])
+    end)
+
+    :ok
+  end
+
+  defp forward_traces(owner) do
+    receive do
+      message ->
+        send(owner, message)
+        forward_traces(owner)
+    end
+  end
+
   defp await_dispatch(fixture, attempts \\ 300) do
     if Agent.get(fixture.executor, & &1.jobs) != [] do
       :dispatched
@@ -1009,41 +1038,70 @@ defmodule Loopex.CancellationTest do
   @tag timeout: 90_000
   test "a host cancellation that never answers is bounded and settles unconfirmed" do
     # Concept: host-supplied cancellation cannot hold a caller open forever. The
-    # retained defensive facade turns silence into an unconfirmed cleanup rather
-    # than inventing a clean stop.
+    # facade turns silence into an unconfirmed cleanup rather than inventing a
+    # clean stop.
     #
     # Technical depth: ADR 0016 makes `Executor.cancel/4` the production abort
     # entry, bounded by the session's configured period, and keeps `cancel/3`'s
-    # fixed sixty-second bound for direct callers. This case therefore drives the
-    # facade directly, which is the only path that still reaches that bound; the
-    # configured production path is proved by the cancellation observation
-    # contract. The callback publishes its own pid and then waits only for this
-    # test owner to die, so a mutant that removes the bound cannot leak it.
+    # fixed sixty-second bound for a direct caller with no committed value. Both
+    # arm that wait in one private boundary, `bounded_cancel/4`, which takes the
+    # bound as an argument -- so the two facts this case owns can be proved
+    # separately instead of being paid for together in a minute of wall time.
+    # The silence is observed end to end at the shortest period the configured
+    # entry can arm: the callback never answers, its worker is killed at the
+    # bound, and the answer is `unconfirmed`. The defensive constant is then read
+    # where it is applied, by tracing one `cancel/3` call that answers at once.
+    # A mutant that removes the bound still leaks here, because the callback
+    # publishes its own pid and then waits only for this test owner to die.
     executor = Loopex.CancellationTestExecutor.start({:cancel_never_returns, self()})
+    assert {:ok, %{executor_observe_ms: observe_ms}} = Loopex.Executor.cancellation_bounds(1)
+    assert observe_ms == 10_000
+    trace_bounded_cancel()
     cancellation_started_at = System.monotonic_time(:millisecond)
 
     cancellation =
       Task.async(fn ->
-        Loopex.Executor.cancel(Loopex.CancellationTestExecutor, executor, "job-never-answers")
+        Loopex.Executor.cancel(Loopex.CancellationTestExecutor, executor, "job-never-answers", 1)
       end)
 
     assert_receive {:cancellation_worker_waiting, cancellation_worker}, 5_000
     cancellation_reference = Process.monitor(cancellation_worker)
 
     assert_receive {:DOWN, ^cancellation_reference, :process, ^cancellation_worker, :killed},
-                   70_000
+                   observe_ms + 20_000
 
     cancellation_elapsed_ms =
       System.monotonic_time(:millisecond) - cancellation_started_at
 
-    assert cancellation_elapsed_ms >= 59_000,
-           "the retained sixty-second defensive facade killed a silent callback after " <>
-             "#{cancellation_elapsed_ms}ms"
+    assert cancellation_elapsed_ms >= observe_ms - 1_000,
+           "the facade killed a silent callback after #{cancellation_elapsed_ms}ms rather than " <>
+             "spending the #{observe_ms}ms it was given"
 
     refute Process.alive?(cancellation_worker),
            "the facade stopped waiting but left the host cancellation worker alive"
 
     assert {:ok, :unconfirmed} = Task.await(cancellation, 5_000)
+
+    assert_receive {:trace, _configured, :call,
+                    {Loopex.Executor, :bounded_cancel,
+                     [_module, _reference, "job-never-answers", ^observe_ms]}},
+                   1_000
+
+    # The direct caller still gets ADR 0012's fixed minute. This executor answers
+    # immediately, so the constant is read from the boundary that applies it
+    # rather than waited out.
+    answering = Loopex.CancellationTestExecutor.start(:never_answers)
+
+    assert Loopex.Executor.cancel(Loopex.CancellationTestExecutor, answering, "job-answers") ==
+             {:ok, :cleaned}
+
+    assert_receive {:trace, _defensive, :call,
+                    {Loopex.Executor, :bounded_cancel,
+                     [_module, _reference, "job-answers", defensive_bound]}},
+                   1_000
+
+    assert defensive_bound == 60_000,
+           "the defensive facade armed #{defensive_bound} ms instead of its documented minute"
   end
 
   test "a cancellation executor without cancel/2 is unconfirmed" do
