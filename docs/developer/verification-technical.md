@@ -13,7 +13,7 @@ same pair via mise). Logs are retained by the maintainer.
 <a id="technical-verification-stages"></a>
 ### What each stage runs
 
-Concept: [Five stages](verification.md#concept-verification-stages).
+Concept: [Three stages](verification.md#concept-verification-stages).
 
 | Stage | Command | Measured |
 | --- | --- | --- |
