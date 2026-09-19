@@ -34,7 +34,7 @@ defmodule LoopexComposition do
 
   alias Loopex.{Executor.Local, LLM.ReqLLM, Store}
   alias Loopex.Executor.Local.{CodingTools, WorkspaceLease}
-  alias Loopex.Store.Local.Artifacts
+  alias Loopex.Store.Local.{Artifacts, Transfers}
   alias LoopexComposition.{RuntimeOwner, WorkspaceIdentity}
 
   # Concept: what the host decides stays the host's to supply; an option the
@@ -61,6 +61,15 @@ defmodule LoopexComposition do
   refuses a live one whoever asked, so the option cannot evict another live
   runtime on the same state root. Leaving it absent is refused by any marker,
   live holder or not, which is the pre-existing behaviour and stays the default.
+
+  `:artifact_transfers` defaults to `false`. Passing `true` starts this
+  composition's transfer owner and hands the same artifact store to the runtime,
+  so a caller may open, read and close a bounded transfer against an artifact a
+  tool retained. Left absent, the runtime is handed no artifact store at all and
+  refuses the whole transfer family under one name, which is what an embedder
+  that only spills and later retrieves through `artifacts/1` wants: a runtime
+  that named a store but held no transfer owner would refuse every transfer
+  under a second, less obvious name instead.
   """
   @spec start(keyword()) :: {:ok, Loopex.Runtime.t()} | {:error, term()}
   def start(options) when is_list(options) do
@@ -116,6 +125,7 @@ defmodule LoopexComposition do
     with {:ok, policy} <- policy(Keyword.get(options, :policy)),
          {:ok, [root, workspace, id]} <- required(options, @required_options),
          :ok <- boolean(options, :recover_stale_writer),
+         :ok <- boolean(options, :artifact_transfers),
          :ok <- LoopexComposition.ResourcePacks.validate_launch_option(options),
          :ok <- WorkspaceIdentity.validate_manifest(options, workspace),
          do: {:ok, {options, root, workspace, id, policy}}
@@ -160,7 +170,8 @@ defmodule LoopexComposition do
          {:ok, options} <- LoopexComposition.ResourcePacks.retain_launch_option(options, root),
          {:ok, adapter} <- start_edge(Store.Local, store_options(root, options)),
          {:ok, store} <- Store.new(Store.Local, adapter),
-         {:ok, executor} <- open_executor(root, workspace, options) do
+         {:ok, spill} <- artifact_placement(root, options),
+         {:ok, executor} <- open_executor(root, workspace, options, spill) do
       tools = CodingTools.definitions()
 
       start_edge(
@@ -182,6 +193,7 @@ defmodule LoopexComposition do
           ] ++
           [active_tools: Enum.map(tools, & &1["tool_id"])] ++
           context_token_budget(options) ++
+          served_artifacts(options, spill) ++
           Keyword.take(options, @host_supplied)
       )
     end
@@ -234,15 +246,41 @@ defmodule LoopexComposition do
     end)
   end
 
+  # Concept: one artifact store, spilled into by the hands and, when the host
+  # asked for transfers, read from by the runtime as well.
+  #
+  # Technical depth: the transfer owner is a process the handle carries rather
+  # than a named global, so the descriptors of this placement belong to this
+  # composition and stop with it. It is started through the same owned seam as
+  # every other process here, which is what makes its cleanup part of the
+  # composition's confirmed stop rather than a leak the caller must chase.
+  defp artifact_placement(root, options) do
+    with {:ok, spill} <- artifacts(root) do
+      if Keyword.get(options, :artifact_transfers, false) do
+        with {:ok, owner} <- start_edge(Transfers, root: Path.join(root, "artifacts")),
+             do: {:ok, %{spill | handle: Map.put(spill.handle, :transfers, owner)}}
+      else
+        {:ok, spill}
+      end
+    end
+  end
+
+  # Concept: the runtime is handed an artifact store exactly when the host asked
+  # it to serve transfers, and never as a silent extra.
+  defp served_artifacts(options, spill) do
+    if Keyword.get(options, :artifact_transfers, false),
+      do: [artifact_store: spill],
+      else: []
+  end
+
   # The executor's declared period and probe are forwarded, never defaulted here.
-  defp open_executor(root, workspace, options) do
+  defp open_executor(root, workspace, options, spill) do
     placement = [identity: "executor-local", epoch: 1, fencing_token: 1]
     forwarded = Keyword.take(options, [:cleanup_grace_ms, :process_probe])
 
     with {:ok, workspace_ref} <- WorkspaceIdentity.reference(workspace),
          {:ok, lease} <-
            start_edge(WorkspaceLease, id: "workspace", path: workspace, fencing_token: 1),
-         {:ok, spill} <- artifacts(root),
          owned = [
            workspace_leases: %{"workspace" => lease},
            ledger_root: Path.join(root, "receipts")
