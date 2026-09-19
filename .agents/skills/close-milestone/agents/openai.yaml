@@ -1,6 +1,6 @@
 interface:
   display_name: "Close Milestone"
-  short_description: "Assemble exact-SHA closure evidence safely"
+  short_description: "Assemble closure evidence from the two checks"
   default_prompt: "Use $close-milestone to assemble a milestone closure candidate without accepting it."
 policy:
   allow_implicit_invocation: false

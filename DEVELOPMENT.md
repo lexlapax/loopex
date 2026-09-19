@@ -1,51 +1,130 @@
 # Development
 
-Loopex development is milestone-governed. This document describes how to
-validate and work on the repository, and it owns the commands, not the milestone
-state. A milestone remains unclosed until its retained evidence, exact gate,
-independent review, and maintainer closure disposition are complete. There is no
-installable package and no public product surface.
+This document describes how to validate and work on the repository, and it
+owns the commands, not the milestone state. The canonical status for the
+checked-out revision, including currently authorized work and the next
+maintainer decision, is in [docs/plans/README.md](docs/plans/README.md). The
+[development charter](docs/developer/development-charter.md#concept) explains
+the project's clarity and traceability commitments; its
+[technical companion](docs/developer/development-charter-technical.md#technical-depth)
+defines the exact documentation, review, and code-comment conventions.
 
-The canonical status for the checked-out revision, including currently
-authorized work and the next maintainer decision, is in
-[docs/plans/README.md](docs/plans/README.md). Its Directing the Work section
-owns how development is requested — the verbs and where each one stops. This
-file owns the commands those verbs run, and milestone state lives in neither.
-The split is deliberate: the verbs outlive the toolchain, so replacing the seed
-bridges with Mix entrypoints changed the commands here and nothing there. The
-[development charter](docs/developer/development-charter.md#concept) explains the
-project's clarity and traceability commitments; its
-[technical companion](docs/developer/development-charter-technical.md#technical-depth) defines
-the exact documentation, review, and code-comment conventions.
+## Prerequisites
 
-## Bootstrap Prerequisites
-
-The provider-neutral bootstrap check requires:
+The repository checks require:
 
 - Git;
 - Bash;
-- a POSIX userland providing `awk`, `cat`, `grep`, `readlink`, `sed`, and `tr`; and
+- a POSIX userland providing `awk`, `cat`, `grep`, `readlink`, `sed`, and `tr`;
 - the accepted Elixir/OTP toolchain, which supplies `mix`.
 
-That is the whole list, and it is the enduring development baseline: Git,
-shell/POSIX tools, and the accepted Elixir/OTP toolchain. The seed's two bridge
-prerequisites are gone — repository checks now run as repository-owned Mix
-commands, and the client hooks read a tool call through
-`scripts/json-field.sh`, which uses `awk` from the baseline rather than an
-added dependency. Shell is not retired: a check may remain a shell entrypoint
-that calls Mix, and several do.
+That is the whole development baseline. The client hooks read a tool call
+through `scripts/json-field.sh`, which uses `awk` from the baseline rather than
+an added dependency. Adding another development dependency requires the
+ordinary dependency decision.
 
-Adding another development dependency requires the ordinary dependency
-decision.
+The release check adds one prerequisite that is not part of the baseline: the
+independent consumer in `clients/node` runs under the Node version pinned in
+`scripts/fixtures/m4/client-toolchain.txt`. Nothing in the product uses Node,
+and the consumer is plain JavaScript with no build step, package manifest,
+lockfile or dependency, so there is nothing to install beyond Node itself.
 
-M4 adds one that is not a bootstrap prerequisite: the client lanes run the
-independent consumer in `clients/node` under the Node version pinned in
-`scripts/fixtures/m4/client-toolchain.txt`. It is an isolated client-validation
-prerequisite rather than a bootstrap or production dependency — the bootstrap
-check above does not need it, nothing in the product uses it, and a gate lane
-that cannot find the pinned version reports unavailable evidence rather than
-failing the product. The consumer is plain JavaScript with no build step,
-package manifest, lockfile or dependency, so there is nothing to install.
+The reference local executor has a separate **runtime** prerequisite:
+executable `/bin/bash` for its internal supervision scripts on Darwin and Linux.
+Model-supplied raw commands still use `/bin/sh`, and argv commands remain literal.
+Core and custom executors do not acquire this requirement; see
+[Accepted ADR 0022](docs/adr/0022-local-executor-supervision-shell.md#concept)
+and the [operator prerequisite](docs/operator/tools-and-policy.md#operator-local-supervision-shell).
+
+The checkout must preserve the tracked relative `.claude/skills` symlink. On
+Windows, WSL is the straightforward path; Git Bash also requires Windows
+Developer Mode or equivalent symlink permission and Git symlink support.
+
+## The Two Checks
+
+Before every push, from the repository root:
+
+```bash
+bash scripts/check.sh
+```
+
+It runs, in order, and stops at the first failure: `bash scripts/check-bootstrap.sh`
+(client-adapter structure, ignore policy, commit messages, branch and worktree
+hygiene, and `mix loopex.status` over the current tree: paired documents,
+directory indexes, local links, and the status register), `mix format
+--check-formatted`, `mix compile --warnings-as-errors`, `mix loopex.deps_budget`,
+`mix loopex.version_train`, `mix loopex.docs_check`, and `mix test`. It needs no
+credential, network access, or coding-agent client. Hosted CI runs the same
+command and does not define it.
+
+Before closing a milestone or releasing, once from the exact committed
+candidate, on a machine with the pinned Node and a provider credential:
+
+```bash
+LOOPEX_PROVIDER_API_KEY=... bash scripts/check-release.sh
+```
+
+It runs every test tagged `real_provider` or `node_client`: the real-provider
+coding workflows, the independent Node client against the shipped app server,
+and the fresh-source archive build. The credential reaches only the test
+processes; never put it in a command argument, log, fixture, or retained
+evidence. Two of the real-provider tests are attended: they prompt on the
+controlling terminal for the operator's trust decisions, so run the command
+from a terminal.
+
+The individual commands can also be run directly:
+
+```bash
+mix loopex.status              # paired documents, indexes, links, register
+mix loopex.agent_bootstrap     # client adapter structure
+mix loopex.hook_registration   # each hook's required event and matcher
+mix loopex.docs_check          # compiled Concept-before-Technical-depth ordering
+mix loopex.deps_budget         # dependency budget and direction
+mix loopex.version_train       # one version across every application
+mix loopex.matrix              # the running toolchain is one of the two pairs
+```
+
+Every check reads the checkout and writes nothing to it except the Mix build
+directory. Tests use a temporary `LOOPEX_HOME` and temporary workspaces, and
+the helpers fail before touching real user state; never point development or
+test commands at a real `~/.loopex`.
+
+## Toolchain Pairs
+
+The floor is OTP 27 and Elixir 1.18. Accepted ADR 0026 fixes two validated
+pairs, recorded in `.tool-versions`: floor Elixir 1.18.5 with OTP 27.3.4 and
+current Elixir 1.20.3 with OTP 29.0.5. Homebrew carries only the current one,
+so the floor pair needs a version manager. `mise` provides both, and the floor
+toolchain needs Hex and rebar3 installed once before Mix can build under it:
+
+```text
+mise install erlang@27.3.4
+mise install elixir@1.18.5-otp-27
+mise exec erlang@27.3.4 elixir@1.18.5-otp-27 -- mix local.hex --force
+mise exec erlang@27.3.4 elixir@1.18.5-otp-27 -- mix local.rebar --force
+mise exec erlang@27.3.4 elixir@1.18.5-otp-27 -- bash scripts/check.sh
+```
+
+Do not activate a version manager inside the checkout; invoke the pair
+explicitly. OTP 27 cannot read a beam written by OTP 29, so clear `_build`
+when switching between the pairs, or give each pair its own `MIX_BUILD_PATH`.
+Milestone closure runs `scripts/check.sh` under both pairs on Darwin and under
+the current pair on Linux; a Linux host needs `LANG=C.UTF-8` and
+`LC_ALL=C.UTF-8` exported.
+
+## Dependency Rules
+
+Every child project declares one literal `loopex_role`: `:contract`, `:core`,
+`:edge`, or `:client`. Contract carries no dependency; core depends on protocol
+and on exactly one external package, the `telemetry` event dispatcher the
+vision's dependency doctrine admits by name; store, model, executor and
+telemetry edges depend in production on core and may also depend on protocol;
+a client depends in production on core and the contract and composes concrete
+edges only in tests. `mix loopex.deps_budget` reads the literal dependency
+declarations of all ten applications and rejects any other edge, alternate
+path or source-control dependency, or added external package.
+
+## Debugging
 
 Debugging Loopex during development means turning on what the runtime already
 offers rather than adding printing to the code under test. A trace session is
@@ -55,157 +134,10 @@ telemetry spans arrive at every port callback and transaction cut. The
 what redaction removes, the ceilings and the event inventory; the
 [developer pair](docs/developer/observability.md#concept) has the contract.
 
-Core also declares one external dependency now, the telemetry event dispatcher
-the vision's dependency doctrine admits by name. `mix loopex.deps_budget`
-enforces that this stays at one, and that the two applications M4 adds,
-`loopex_telemetry` at the edge and `loopex_app_server` as a client, keep their
-roles and their direction.
-
-The reference local executor has a separate **runtime** prerequisite:
-executable `/bin/bash` for its internal supervision scripts on Darwin and Linux.
-Model-supplied raw commands still use `/bin/sh`, and argv commands remain literal.
-Core and custom executors do not acquire this requirement. This is the
-[maintainer-approved repair choice](docs/developer/agent-context-map.md#disposition-local-executor-bash-2026-09-07),
-documented in [Accepted ADR 0022](docs/adr/0022-local-executor-supervision-shell.md#concept),
-not an inference from the bootstrap's Bash dependency. An incompatible shell is
-not a fallback. See the [operator prerequisite](docs/operator/tools-and-policy.md#operator-local-supervision-shell)
-before running the reference stack.
-
-The M1 gate's stronger filesystem and containment lane additionally requires
-`stat`, `find`, `sort`, `comm`, `od`, `mktemp`, `cp`, `uname`, `/usr/bin/env`,
-`/usr/bin/id`, `/usr/bin/locale`, and either `shasum` or `sha256sum`. The runner probes and validates
-the BSD/GNU `stat` and SHA-256 dialects before trusting their output. Its closed
-child environment fixes `LANG=C.UTF-8` and `LC_ALL=C.UTF-8`; a platform without
-that locale is unavailable M1 evidence rather than an implicit encoding change.
-
-The checkout must preserve the tracked relative `.claude/skills` symlink. On
-Windows, WSL is the straightforward path; Git Bash also requires Windows
-Developer Mode or equivalent symlink permission and Git symlink support. Native
-PowerShell bootstrap commands are not provided yet.
-
-Verify a checkout from the repository root:
-
-```bash
-git status --short --branch
-bash scripts/check-bootstrap.sh
-```
-
-The aggregate runs five checks: agent/client bootstrap, ignore policy, commit
-messages, branch/worktree hygiene, and status/document drift. It requires
-no GitHub account, `gh` CLI, hosted CI service, credentials, network access,
-coding-agent client, or product dependency download. Hosted CI may mirror this
-command but does not define it.
-
-Every check reads the checkout and writes nothing to it. The aggregate does need
-a writable build directory, because it now runs on Mix and Mix compiles: that is
-the direct consequence of moving repository validation onto the accepted
-toolchain. A reviewer who must not write to an ambient temporary directory
-directs the build into an explicit isolated task root through the
-`MIX_BUILD_PATH` variable. The read-only inspection lane is the milestone gate
-runner's prefix, which reaches its declared condition before it allocates any
-storage.
-
-The individual repository commands can also be run directly:
-
-```bash
-mix loopex.status              # paired documents, register, governance, history
-mix loopex.agent_bootstrap     # client adapter structure and hook registration
-mix loopex.hook_registration   # each hook's required event and matcher
-mix loopex.docs_check          # compiled Concept-before-Technical-depth ordering
-mix loopex.self_hosting        # replacement measurement and dropped behaviors
-```
-
-## Optional Development Clients
-
-Development clients are optional tools, not project dependencies. The currently
-tested adapters are Claude Code and Codex; their retained versions and loading
-evidence live in
-[docs/developer/agent-adapter-smoke.md](docs/developer/agent-adapter-smoke.md).
-Canonical behavior lives in [AGENTS.md](AGENTS.md) and routes through
-[the agent context map](docs/developer/agent-context-map.md). Candidate clients,
-including OpenCode, Pi, and a future Loopex coding surface, are unsupported until
-their adapters and parity smokes exist.
-
-## Product Toolchain
-
-The bootstrap floor is OTP 27+ and Elixir 1.18+, and accepted ADR 0026 fixes
-two exact pairs, recorded in `.tool-versions`. The product scaffold exists, so installing
-the toolchain lets you build and test today: `mix test` from the repository root,
-`bash scripts/check-bootstrap.sh` for the aggregate,
-`bash scripts/check-m0-gate.sh` for the closed M0 gate,
-`/bin/bash -p scripts/check-m1-gate.sh` for the closed M1 gate,
-`bash scripts/check-m2-gate.sh` for the closed M2 gate,
-`bash scripts/check-m3-gate.sh` for the accepted M3 gate, and
-`bash scripts/check-m4-gate.sh` for the Open M4 lookahead scaffold. For both,
-`--inspect` checks artifact identities; `--preflight` and `--checkpoint` run the
-isolated real-session opening probe, currently RED for a missing repair (M3:
-required-only admission ordering; M4: durable policy interactions). Checkpoint
-is not full-gate evidence. The M4 full lane stays unavailable until M3 is Closed
-and integrated, because its inherited aggregate is register-derived. The
-privileged-Bash flag is part of the command: the runner refuses an ordinary Bash
-because inherited functions and `BASH_ENV` would otherwise precede its
-environment boundary.
-
-The accepted opening M1 gate was deliberately red before implementation and its
-historical absence proof remains locked. The current candidate must instead run
-the complete selectors, both real-provider roles, closure documents, and full
-credential-free suite. A green run is required evidence, not closure authority;
-the exact candidate still needs retained toolchain records, independent review,
-and the maintainer's explicit closure disposition.
-
-After the protected product selectors exist, M1's two explicitly tagged
-real-provider selectors require `LOOPEX_PROVIDER_API_KEY`. The runner removes
-the entire ambient exported environment before its first external child,
-establishes an exact non-secret allowlist, and passes the credential over standard
-input only to the two direct real-provider VMs. Each runner consumes it before
-candidate startup, starts the application without the credential, and installs
-it only for the explicitly tagged real-provider selector; do not put the value
-in a command argument, log, fixture, or retained evidence. The ordinary full
-suite and repository checks remain credential-free.
-
-The M0 gate locks the self-hosting transition, and that transition has landed:
-the local aggregate, its structural and mutation checks, and the tested
-client-hook paths all run through the accepted Elixir/OTP toolchain, with the
-seed's two bridge prerequisites removed. `mix loopex.self_hosting` reports the
-replacement's measured size and names every behavior it dropped with the reason,
-which is the material an independent reviewer weighs; no run passes or fails on
-the figure.
-
-The same gate installs `mix loopex.docs_check`, a repository-owned check over
-**compiled** documentation. It reads the doc chunk of every compiled module, so it
-answers what a reader of the published documentation would see rather than what
-characters appear in a source file. Covered public code must carry `## Concept`
-before `## Technical depth`; a module with no documentation at all fails, and one
-marked `@moduledoc false` is excluded and counted in the report. Semantic
-usefulness and proportional private comments remain review obligations.
-
-Core will use only the Elixir/Erlang standard runtime. Every child project
-declares one literal `loopex_role`: `:contract`, `:core`, `:edge`, `:client`, or
-`:extension`. The reusable parser recognises the extension role, but the M1
-repository overlay permits only its exact six planned application identities
-and admits no extension. Contract carries no dependency; core depends only on
-protocol; store/model/executor edges depend in production on core and may also
-depend on protocol; a client depends in production on core and composes concrete
-edges only in tests. The only M1 direct external dependency is exactly
-`{:req_llm, "~> 1.17.1"}` in the ReqLLM edge. At the accepted red opening, that
-existing edge may retain
-its M0 protocol-only inward shape while the six-app inventory is incomplete;
-every complete inventory, and therefore every green gate, requires its core
-edge too. The M1 gate requires physical child projects to equal the candidate
-index and reads the literal dependency authority before Mix. It rejects locked-command aliases,
-redirected umbrella paths, identity mismatches, duplicates, alternate
-path/source-control dependencies, and statically visible unknown or reverse
-edges. The offline materializer derives the exact required non-optional lock
-closure, refuses missing, unsatisfied, and unreachable records, and admits an
-archive only after its checksums and literal `metadata.config` package,
-build-tool, dependency, and Elixir-floor authority match the lock. Cached
-archives remain ordinary and physically disjoint from protected user state, and
-all are validated before the gate-owned dependency tree is written. The
-materializer derives Hex SCM's `.hex` marker from that verified lock authority;
-package payloads cannot supply the marker themselves. No ambient `deps/` tree
-is consulted.
-Later project callbacks and task definitions remain trusted candidate code
-reviewed independently; they are not claimed as mechanically absent.
+`mix loopex.docs_check` reads the doc chunk of every compiled module, so it
+answers what a reader of the published documentation would see. Covered public
+code must carry `## Concept` before `## Technical depth`; a module with no
+documentation fails, and one marked `@moduledoc false` is excluded and counted.
 
 ## Provider Companion and Rollback Probes
 
@@ -232,20 +164,12 @@ MIX_ENV=test mix run --no-start <absolute-script> read-v2-refused <same-v2-root>
 Run the first two modes with the genuine pre-version-2 source binary. Run the
 third with the new writer and the fourth with that old binary. Unset
 `LOOPEX_PROVIDER_API_KEY`, `ANTHROPIC_API_KEY`, and `OPENAI_API_KEY`; the model is
-scripted and no tool effect is requested. Preserve each exact source SHA and
-toolchain in the evidence. The probe does not rewrite a settlement kind to
-manufacture an old journal: each writer must emit the version its mode names.
-It keeps one stable runtime placement across writer and reader, copies the whole
-store log before recovery, checks the existing history remains byte-equivalent,
-and allows only fenced ownership-administration records afterward. No model or
-executor dispatch, public event, or semantic record may follow the incompatible
-reader's refusal. The version-1 positive control must pass before counting a
-version-2 refusal as compatibility evidence.
-
-`--no-start` avoids starting an old provider application merely to inspect
-accounting recovery. The script starts the real local Store and runtime itself.
-This is rollback evidence, not an in-place journal migration or permission to
-use an older reader on an operator's live state.
+scripted and no tool effect is requested. The probe does not rewrite a
+settlement kind to manufacture an old journal: each writer must emit the
+version its mode names. The version-1 positive control must pass before
+counting a version-2 refusal as compatibility evidence. This is rollback
+evidence, not an in-place journal migration or permission to use an older
+reader on an operator's live state.
 
 ## Implementation Posture
 
@@ -253,212 +177,28 @@ Start with direct OTP and the smallest clear implementation. Production code,
 tests, fixtures, helpers, public surface, and abstractions all count as system
 cost. A new abstraction must name the concrete examples or current
 implementations it unifies and why direct code is insufficient; do not add a
-layer for a hypothetical future consumer.
-
-Each accepted plan carries a proportional minimalism budget and locks any useful
-ceilings or negative constraints in its gate. Raw line count is a review signal,
-not a universal gate: it must not reward compressed code, hidden complexity, or
-missing evidence. Keep tests focused and reusable, but never delete required
-coverage merely to make the repository smaller.
+layer for a hypothetical future consumer. Keep tests focused and reusable, but
+never delete required coverage merely to make the repository smaller.
 
 Elixir modules, behaviours, callbacks, public APIs, public types, and important
 boundaries explain both `## Concept` and `## Technical depth` in their standard
 documentation. A private function uses adjacent `# Concept:` and
 `# Technical depth:` comments only for a non-obvious invariant, effect, failure
-mode, or design decision. Obvious helpers rely on clear names and direct code;
-documentation should clarify rather than paraphrase syntax.
+mode, or design decision.
+
+## Optional Development Clients
+
+Development clients are optional tools, not project dependencies. The currently
+tested adapters are Claude Code and Codex; their retained versions and loading
+evidence live in
+[docs/developer/agent-adapter-smoke.md](docs/developer/agent-adapter-smoke.md).
+Canonical behavior lives in [AGENTS.md](AGENTS.md) and routes through
+[the agent context map](docs/developer/agent-context-map.md).
 
 ## Before Working
 
 Read [AGENTS.md](AGENTS.md), then the
 [plans status register](docs/plans/README.md), and use the
 [agent context map](docs/developer/agent-context-map.md) only to load relevant
-Concept sections and their exact Technical depth. Consult the marked register
-capsule for the exact lifecycle state and currently authorized work. An accepted
-governance checkpoint may be present on `main`, but product work stays on its
-designated milestone branch until closure. If the register also names one Open
-successor, that branch is planning/gate-only: it cannot be accepted or
-implemented until its predecessor closes and the candidate is refreshed and
-reviewed on the integrated closed base.
-
-Tests use a temporary `LOOPEX_HOME` and temporary workspaces, and the helpers fail
-before touching real user state. Never point development or test commands at a
-real `~/.loopex`.
-
-### Accepted-plan amendments
-
-By default, an accepted plan or gate amendment uses the repository's two direct,
-one-parent revisions. A maintainer-approved procedural override follows the
-standalone disposition, exact-SHA review and per-holder validation rules in
-[AGENTS.md](AGENTS.md#maintainer-override) before dependent work; it cannot alter
-a released public surface or an accepted ADR decision. Number Amendment sections
-consecutively in physical document order. Every active or future gate containing
-a v1 amendment section carries exactly one visible
-`<a id="amendment-transaction-v1"></a>` marker, including when a later approved
-procedure retains that historical section; closed pre-v1 amendment history
-remains valid. Proposal `A` is the first revision to
-advance the generation; it carries the amended bytes and retains the prior
-Acceptance row and lifecycle state. Confirm that `mix loopex.status`, bootstrap,
-and any
-inherited gate that invokes them stop only on the stale binding; run the amended
-milestone gate directly and run all binding-independent checks. After independent
-review and explicit maintainer acceptance, create immediate-child rebind `R` that
-binds exact `A`, preserves lifecycle state, changes only the Acceptance row, adds
-one new amendment-specific disposition anchor to an existing durable document
-where that anchor was absent at `A`, and makes
-only conforming derived status changes. Do not reuse, complete, or edit an earlier
-disposition; do not interpose a commit, overlap the next proposal, or start
-another amendment before `R`.
-At exact `R`, run status and bootstrap to green, every inherited required gate to
-green on its locked lanes, and the amended milestone gate directly to the same
-truthful product state seen at `A`. Keep `A` and `R` distinct in reports and
-retained evidence; only `R` can be proposed for integration.
-
-## Toolchain pairs
-
-Accepted ADR 0026 chooses two validated pairs, recorded in `.tool-versions`:
-floor Elixir 1.18.5 with OTP 27.3.4 and current Elixir 1.20.3 with OTP 29.0.5.
-Homebrew carries only the current one, and it pairs Elixir against whatever OTP
-it ships, so the floor pair needs a version manager. `mise` provides both, and
-the floor toolchain needs Hex and rebar3 installed once before Mix can build
-dependencies under it:
-
-```text
-mise install erlang@27.3.4
-mise install elixir@1.18.5-otp-27
-mise exec erlang@27.3.4 elixir@1.18.5-otp-27 -- mix local.hex --force
-mise exec erlang@27.3.4 elixir@1.18.5-otp-27 -- mix local.rebar --force
-mise exec erlang@27.3.4 elixir@1.18.5-otp-27 -- bash scripts/check-m0-gate.sh
-mise exec erlang@27.3.4 elixir@1.18.5-otp-27 -- /bin/bash -p scripts/check-m1-gate.sh
-```
-
-### M1 retained toolchain evidence
-
-M1 capture is deliberately not an ordinary gate pass. Start from one clean,
-committed source candidate `C` and run the three bound non-gate roles, retaining
-each final `capture ... verdict=CAPTURE exit=0` record:
-
-```text
-Darwin floor     mise exec erlang@27.3.4 elixir@1.18.5-otp-27 -- /bin/bash -p scripts/check-m1-gate.sh --capture floor
-Darwin current   /bin/bash -p scripts/check-m1-gate.sh --capture current
-Linux current    /bin/bash -p scripts/check-m1-gate.sh --capture linux-current
-```
-
-### The M2 gate and its retained evidence
-
-`M2`'s gate validates in one command and captures in three lanes. The credential
-reaches it only through a bounded stdin frame, and the gate refuses to start if
-`LOOPEX_PROVIDER_API_KEY` is set in the environment it inherits:
-
-```text
-printf 'LOOPEX_M2_PROVIDER_V1\0%s\0' "$KEY" | bash scripts/check-m2-gate.sh
-```
-
-The three capture lanes vary one variable at a time from `darwin-current`:
-`darwin-floor` isolates the toolchain, `linux-current` isolates the operating
-system.
-
-```text
-darwin-floor     mise exec erlang@27.3.4 elixir@1.18.5-otp-27 -- bash scripts/check-m2-gate.sh --capture darwin-floor
-darwin-current   bash scripts/check-m2-gate.sh --capture darwin-current
-linux-current    bash scripts/check-m2-gate.sh --capture linux-current
-```
-
-Two `m0` re-proofs accompany them, the closed `M0` gate run once under each
-toolchain pair at the same candidate. `check-m0-gate.sh` sets no build root and
-compiles in the checkout's own `_build`, and OTP 27 cannot read a beam written by
-OTP 29, so clear `_build` when switching between the pairs. A stale tree makes
-that gate report a formatter-coverage failure whose real cause is
-`Protocol.extract_from_beam/2`.
-
-`M1`'s gate takes its credential on a `LOOPEX_M1_PROVIDER_V1` frame and the
-closed `M0` gate reads `LOOPEX_PROVIDER_API_KEY` from the environment directly;
-running either without its credential produces a red that means nothing.
-
-Each capture uses a fresh, disjoint task root, runs every M1 command except
-validation of the matrix it will populate, prints `CAPTURE` rather than GREEN,
-and is not merge evidence. Physical order and adjacency carry no meaning because
-the three processes share no mutable run state. Do not edit or amend `C` between
-captures. The Linux lane requires the exact current pair; it is not satisfied by
-a nearby distribution package and makes no floor-on-Linux claim.
-
-On the `serenity` Linux evidence host, the distribution VM is not a locked pair.
-The reproducible current-pair environment performs no toolchain or dependency
-download at gate runtime and is made from these exact linux/amd64 manifests:
-
-```dockerfile
-FROM hexpm/elixir@sha256:ae4e58c68e37ef304ed2438ff098fb08da6d087e99c478a28d14cc2a0240e0b8 AS toolchain
-FROM buildpack-deps@sha256:0a1caa1cbfad810ca0d10eec9fc5924ea1033eeecb13cdab9fb00bfb47f196bd
-RUN apt-get update \
- && apt-get install -y --no-install-recommends 'libsctp1=1.0.19+dfsg-2build1' \
- && rm -rf /var/lib/apt/lists/*
-COPY --from=toolchain /usr/local/ /usr/local/
-ENV LANG=C.UTF-8 LC_ALL=C.UTF-8
-```
-
-The first image supplies Elixir 1.20.3 / OTP 29.0.5; the second supplies Git and
-the baseline userland. The pinned `libsctp1` runtime package preserves the OTP
-build's enabled SCTP support after `/usr/local` is copied into the second stage;
-the prepared image is built before the gate and the gate performs no package
-download. Run with an account represented in the container's
-passwd database and owning the checkout: either copy the exact candidate into a
-root-owned read-only tree for the image's root account, or provision the host
-UID/GID, passwd entry, and matching home explicitly. Mount the prepared Mix/Hex
-inputs read-only and give the account an owned writable `/tmp`. The two tagged
-real-provider roles still require provider network access. Pass their credential
-through a wrapper's standard input rather than an image argument or environment
-flag. Docker is an evidence-host provisioner here, not a Loopex product or
-development dependency, and another Linux environment is valid if it supplies
-the same exact pair and gate prerequisites.
-
-Against that same source candidate, separately run
-`bash scripts/check-m0-gate.sh` under the floor pair and then the current pair.
-Capture each process's combined stdout and stderr before displaying any
-diagnostic, replace literal provider-key bytes in-process, and retain only the
-non-secret provider, model, and endpoint identity beside the exact candidate,
-M0 gate digest, toolchain, verdict, and exit. Bootstrap does not replace either
-M0 run, and the M1 runner never invokes M0 recursively.
-
-Write one canonical metadata record, the Darwin floor/current and Linux-current
-capture records, and the two M0 records to
-`docs/evidence/M1-toolchain-matrix.md`. The metadata binds `C`, the M1 gate,
-shell runner, standalone ExUnit runner, dependency authority, self-contained
-evidence verifier, `.tool-versions`, and canonical command. Each capture binds
-its OS, architecture, open-file/process limits, and nonce-bound observed
-provider/model/endpoint, adapter build, executor build and runtime identity,
-tool identity, and observation time.
-The model-only and combined real roles must agree on their shared fields before
-the capture row is emitted. Candidate `C` plus each fixed application/version
-identifies the exact source build. Commit the matrix alone as direct evidence
-commit `E` of `C`. The
-ordinary M1 gate runs on `E` and validates that the complete trees differ only at
-that path before it may print GREEN. An open descendant of `E` is invalid.
-
-At closure, the unique first-closing transition `T` must be `E`'s direct
-one-parent child and change exactly `docs/plans/M1.md`, `docs/plans/README.md`,
-and `README.md`: only the empty Closure row and canonical marked status blocks
-may change, and Closure must bind `E`. Later descendants retain the evidence only
-while `E` and `T` stay reachable, the Closure binding stays byte-identical, and
-the matrix bytes remain those committed at `E`. Any interposed commit or earlier
-product, selector, harness, toolchain, or gate change requires a new `C`, three
-new M1 captures, two new M0 re-proofs, and a new direct `E`.
-
-Alternating pairs also shares mutable dependency state. `MIX_BUILD_PATH` alone
-leaves `deps/` and the Rebar cache common to both, which produces cache
-restore/discard diagnostics and, once observed, a self-healing corrupt-beam
-warning. Neither changed an exit status. The M1 runner instead reconstructs
-`MIX_DEPS_PATH` offline from the exact package archives checksum-bound by the
-candidate's literal `mix.lock`; it never copies the ambient repository `deps/`
-tree. A missing cached package is unavailable evidence and fails. Outside the
-gate, prime the ordinary Hex cache with the accepted toolchain before capture.
-A manual isolated command must likewise set both paths:
-
-```text
-env MIX_BUILD_PATH=<root>/build MIX_DEPS_PATH=<root>/deps mix <task>
-```
-
-Do not activate a version manager inside the checkout. `.tool-versions` is a
-digest-bound gate artifact listing both pairs, so a tool that reads it would pick
-one arbitrarily; invoke the pair explicitly instead. The floor pair also needs its
-own Hex and rebar archives (`mix local.hex --force`, `mix local.rebar --force`),
-which are per-Elixir-version and live outside the checkout.
+Concept sections and their exact Technical depth. Product work happens on the
+milestone branch and integrates to `main` at closure.
