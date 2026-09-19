@@ -1319,7 +1319,7 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
             executor: executor,
             lease_id: lease_id,
             job_id: job_id,
-            cleanup_grace_ms: 400
+            cleanup_grace_ms: 2_000
           }
         )
       end)
@@ -4144,8 +4144,8 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     assert Loopex.Executor.default_cleanup_grace_ms() == 5_000,
            "the port's declared default and this executor's are no longer one number"
 
-    {executor, lease_id} = executor_with_grace(root, 750)
-    assert Local.cleanup_grace_ms(executor) == 750
+    {executor, lease_id} = executor_with_grace(root, 2_000)
+    assert Local.cleanup_grace_ms(executor) == 2_000
 
     File.write!(Path.join(root, "read.txt"), "read me")
     File.write!(Path.join(root, "edit.txt"), "before")
@@ -4161,20 +4161,20 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
                  run(root, tool_id, arguments, %{
                    executor: executor,
                    lease_id: lease_id,
-                   cleanup_grace_ms: 750
+                   cleanup_grace_ms: 2_000
                  })
 
-        assert receipt.cleanup_grace_ms == 750,
+        assert receipt.cleanup_grace_ms == 2_000,
                "#{tool_id} reported #{inspect(receipt.cleanup_grace_ms)} rather than the " <>
-                 "configured 750ms cleanup period"
+                 "configured 2000ms cleanup period"
 
         # The durable record carries it too, so a coordinator recovering this
         # job reads the period it was bounded by rather than the one running now.
         assert {:ok, retained} = Local.receipt(executor, receipt.job_id)
 
-        assert retained.cleanup_grace_ms == 750,
+        assert retained.cleanup_grace_ms == 2_000,
                "#{tool_id}'s retained receipt reported " <>
-                 "#{inspect(retained.cleanup_grace_ms)} rather than 750ms"
+                 "#{inspect(retained.cleanup_grace_ms)} rather than 2000ms"
 
         receipt
       end
@@ -4215,7 +4215,7 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     # nothing. Every receipt records the bound its own write ran under, so this is
     # a fact on the durable record rather than an argument about a line.
     root = workspace()
-    grace = 800
+    grace = 2_000
     reserve = div(grace, 4)
 
     {executor, lease_id, _lease, ledger} =
@@ -4760,7 +4760,7 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
             "command" =>
               "(printf ready > #{shell_path(ready)}; while :; do :; done) & while :; do :; done"
           },
-          %{executor: executor, lease_id: lease_id, job_id: job_id, cleanup_grace_ms: 600}
+          %{executor: executor, lease_id: lease_id, job_id: job_id, cleanup_grace_ms: 2_000}
         )
       end)
 
@@ -4775,7 +4775,7 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
              await_path(
                fn ->
                  case :ets.lookup(table, authority_key) do
-                   [{^authority_key, worker, 600}] when is_pid(worker) -> {:ok, worker}
+                   [{^authority_key, worker, 2_000}] when is_pid(worker) -> {:ok, worker}
                    _not_published -> :error
                  end
                end,
@@ -6199,13 +6199,13 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
              run(root, "loopex.bash", %{"command" => "printf outer"}, %{
                executor: executor,
                lease_id: lease_id,
-               cleanup_grace_ms: 800,
+               cleanup_grace_ms: 2_000,
                progress: progress
              })
 
     assert {before, after_nested, {:ok, nested}, event} = Process.delete(result_key)
     assert before == after_nested
-    assert before.loopex_cleanup_grace_ms == {:present, 800}
+    assert before.loopex_cleanup_grace_ms == {:present, 2_000}
     assert before.loopex_process_probe == {:present, "/bin/ps"}
     assert match?({:present, table} when is_reference(table), before.loopex_inflight_table)
     assert before.loopex_effect_owner == {:present, executor}
@@ -6219,8 +6219,8 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
 
     assert outer.outcome == :completed
     assert outer.output == "outer"
-    assert outer.cleanup_grace_ms == 800
-    assert outer.receipt_retention_bound_ms == 200
+    assert outer.cleanup_grace_ms == 2_000
+    assert outer.receipt_retention_bound_ms == 500
     assert outer.observed_at_ms == observed_at_ms
     assert event.chunk == "outer"
 

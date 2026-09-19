@@ -161,15 +161,15 @@ defmodule Loopex.Executor.Local.PostClosureHotfixTest do
         run(root, "loopex.bash", %{"command" => stubborn_group_command()}, %{
           executor: executor,
           lease_id: lease_id,
-          cleanup_grace_ms: 400
+          cleanup_grace_ms: 2_000
         })
       end)
 
     assert {:ok, receipt} = result
-    assert receipt.cleanup_grace_ms == 400
+    assert receipt.cleanup_grace_ms == 2_000
 
-    assert ms < 3_000,
-           "a job committing a 400ms period spent #{ms}ms, which is the executor's 20000ms " <>
+    assert ms < 10_000,
+           "a job committing a 2000ms period spent #{ms}ms, which is the executor's 20000ms " <>
              "start default rather than the period the job committed"
   end
 
@@ -197,7 +197,7 @@ defmodule Loopex.Executor.Local.PostClosureHotfixTest do
             executor: executor,
             lease_id: lease_id,
             job_id: job_id,
-            cleanup_grace_ms: 400
+            cleanup_grace_ms: 2_000
           }
         )
       end)

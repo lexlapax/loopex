@@ -6,6 +6,12 @@ on:
   push:
     branches: [main]
   pull_request:
+# A newer push to the same branch supersedes the run in progress: the older
+# bytes are no longer a candidate, and two runs of one pull request at once
+# only share the runner's four cores between them.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   check:
     runs-on: ubuntu-latest

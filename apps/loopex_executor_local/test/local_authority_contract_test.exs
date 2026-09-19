@@ -103,8 +103,10 @@ defmodule Loopex.Executor.LocalAuthorityContractTest do
   # cases asserting that a receipt reports the committed period rather than the
   # composed one still discriminate, and it stays indivisible by four, so a
   # second derivation by `div/2` in place of ADR 0016's ceiling would still
-  # disagree with it.
-  @ledger_write_allowance_ms 500
+  # disagree with it. One second rather than 500 ms since the hosted runner: its
+  # disk under load took longer than that for the unlink and parent sync the
+  # settlement performs, and the allowance names what a write needs there too.
+  @ledger_write_allowance_ms 1_000
   @grace Enum.find(1..(4 * @ledger_write_allowance_ms), fn candidate ->
            {:ok, bounds} = Executor.cancellation_bounds(candidate)
            bounds.receipt_retention_ms >= @ledger_write_allowance_ms
