@@ -197,7 +197,7 @@ independent review; an efficient profile for repeatable mechanical work.
 Landed work leaves no residue: once a branch is merged, delete it and remove
 its worktree.
 
-The rule book for checking work — the five stages, which checks a changed
+The rule book for checking work — the three stages, which checks a changed
 boundary selects, and what makes them trustworthy — is the
 [verification guide](docs/developer/verification.md#concept). The
 repository's checks are two commands, described in

@@ -20,26 +20,24 @@ is two tests waiting out a sixty-second ceiling, and that the whole suite can
 run in about five minutes of wall-clock time with no test changed at all.
 
 <a id="concept-verification-stages"></a>
-### Five stages, one question each
+### Three stages, one question each
 
-Every piece of work passes through the same five stages. Each stage answers
+Every piece of work passes through the same three stages. Each stage answers
 one question, runs one set of checks, and has one person or command that can
 stop it. Nothing runs twice for the same bytes.
 Technical depth: [What each stage runs](verification-technical.md#technical-verification-stages).
 
 | Stage | Question | What runs | Who or what can stop it |
 | --- | --- | --- | --- |
-| Edit | Does the guarantee I touched still hold? | The focused tests for the changed boundary, `mix format`, warning-free compile, the client hook's fast checks | The developer or agent doing the work |
-| Push | Is the tree whole? | `bash scripts/check.sh`: repository structure, formatting, warning-free compilation, dependency budget and direction, one version, documentation ordering, the credential-free suite | A red step; hosted CI runs the same command on every push |
-| Integrate | Is this change what it claims to be? | The push check on the exact candidate, plus a review of the diff against its stated purpose | A blocking review finding; the integrator merges only a green, reviewed candidate |
-| Close | Did the milestone deliver its outcomes? | `check.sh` on each supported platform, `bash scripts/check-release.sh` once, the outcome-to-evidence map in the plan, an independent review of the candidate | The maintainer, who closes it or does not |
+| Change | Is this change whole, and is it what it claims to be? | While editing: the focused tests for the changed boundary, `mix format`, a warning-free compile. Before merge to `main`: `bash scripts/check.sh` green in hosted CI on the branch, plus an independent review of the diff against its stated purpose. Every merge, not only milestone closures. | A red check or a blocking review finding; the integrator merges only a green, reviewed candidate |
+| Close | Did the milestone deliver its outcomes? | `check.sh` once under the floor toolchain pair (the current pair is already proved by CI on every change), `bash scripts/check-release.sh` once, the outcome-to-evidence map in the plan, an independent review of the candidate | The maintainer, who closes it or does not |
 | Release | Is the published source the closed source? | The closure evidence, reused when the source is unchanged; the tag on the exact integrated commit | The maintainer's separate release decision |
 
-The push check is the everyday gate. It is credential-free, needs no network,
-and is the same command locally and in CI. The release check is the expensive
-one: it spends a provider credential, needs the pinned Node, and runs the
-attended operator workflow, so it runs at closure, at release, and whenever a
-change touches what it proves.
+The fast check is the everyday gate. It is credential-free, needs no network,
+and is the same command locally and in CI, where it runs on every push and
+pull request. The release check is the expensive one: it spends a provider
+credential, needs the pinned Node, and runs the attended operator workflow, so
+it runs at closure, at release, and whenever a change touches what it proves.
 
 <a id="concept-verification-selection"></a>
 ### A changed guarantee selects its checks
@@ -51,15 +49,19 @@ short on purpose; an unknown impact falls through to the release check, not to
 nothing.
 Technical depth: [The selection table](verification-technical.md#technical-verification-selection).
 
-| The change touches | Beyond the push check, also run |
+| The change touches | Beyond the fast check, also run before merge |
 | --- | --- |
-| Internal code or tests behind an unchanged boundary | Nothing more; the suite is the proof |
-| A port behaviour, its conformance suite, or an adapter | That port's conformance suite against every adapter, and one composed workflow through it |
-| Durable records, the Store, recovery | The Store conformance suite with fault injection, the recovery tests, and a read of committed history by the previous reader |
-| The wire protocol, schema or vectors | The vectors in both clients, the Node consumer workflows, and the compatibility surfaces page |
-| Provider, executor or credential handling | The release check |
-| The toolchain floor or `.tool-versions` | The push check under both pairs |
-| Documentation only | The push check; nothing else |
+| Code or tests behind an unchanged boundary | Nothing more; the suite is the proof |
+| A port behaviour (Store, model, executor, extension, transport) or an adapter of one | That port's conformance suite against every adapter, and one composed workflow through it: the CLI foundation workflow or the app-server external workflow |
+| Durable records, the Store, recovery | The Store conformance suite with fault injection, the recovery tests, and the old-reader refusal cases |
+| The wire protocol, its schema or vectors | The vectors in both clients and the Node consumer workflows (`--only node_client`), and the compatibility surfaces page updated in the same change |
+| The CLI or operator-facing behavior | The `loopex_cli` suite, and the operator page that describes the behavior updated in the same change |
+| Skills, project resources, context admission | The composition suite and the skill context and context admission cases |
+| Observability | The trace session and telemetry boundary cases in core and the edge handler cases |
+| Provider, executor or credential handling | `bash scripts/check-release.sh` |
+| The toolchain floor or `.tool-versions` | The fast check under both pairs |
+| Documentation only | The fast check; nothing else |
+| Unknown, or more than one of the above | The release check, and the review names the boundaries it found |
 
 <a id="concept-verification-rules"></a>
 ### Rules that make the checks trustworthy

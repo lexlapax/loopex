@@ -17,10 +17,9 @@ Concept: [Five stages](verification.md#concept-verification-stages).
 
 | Stage | Command | Measured |
 | --- | --- | --- |
-| Edit | `mix test <path>`, `mix format`, `mix compile --warnings-as-errors`; the client Stop hook runs format, the dependency budget and the adapter check | Seconds |
-| Push | `bash scripts/check.sh` | 870 s Mac, 809 s Linux; 18 s before the suite starts |
-| Integrate | The push check at the exact candidate; a read-only review of `git diff <base>..<candidate>` | Review time |
-| Close | `bash scripts/check.sh` per platform, `bash scripts/check-release.sh` once | Release check: 149–163 s on Linux, 12 tests |
+| Change, while editing | `mix test <path>`, `mix format`, `mix compile --warnings-as-errors`; the client Stop hook runs format, the dependency budget and the adapter check | Seconds |
+| Change, before merge | `bash scripts/check.sh` in hosted CI on the branch; a read-only review of `git diff main..<candidate>` | 870 s Mac and 809 s Linux in sequence; 18 s before the suite starts; see the plan below for the parallel runner |
+| Close | `bash scripts/check.sh` under the floor pair (`mise exec erlang@27.3.4 elixir@1.18.5-otp-27 -- bash scripts/check.sh`), `bash scripts/check-release.sh` once on the current pair | Release check: 149–163 s on Linux, 12 tests |
 | Release | None new; the tag names the integrated closure commit | — |
 
 `check.sh` step order and cost: warning-free compilation 1 s (warm), formatting
