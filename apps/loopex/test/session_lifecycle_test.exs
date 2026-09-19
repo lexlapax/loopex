@@ -26,7 +26,7 @@ defmodule Loopex.SlowControl do
 end
 
 defmodule Loopex.SessionLifecycleTest do
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
   alias Loopex.SlowControl
 

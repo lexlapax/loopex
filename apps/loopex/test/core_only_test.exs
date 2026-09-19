@@ -1,5 +1,5 @@
 defmodule Mix.Tasks.Loopex.CoreOnlyTest do
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
   alias Mix.Tasks.Loopex.CoreOnly
 

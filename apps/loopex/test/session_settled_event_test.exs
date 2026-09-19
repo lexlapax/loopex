@@ -20,7 +20,7 @@ defmodule Loopex.SessionSettledEventTest do
   a second copy of either.
   """
 
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
   alias Loopex.AgentLoopFixture, as: Fixture
   alias Loopex.Runtime.SessionState

@@ -3,7 +3,7 @@ Code.require_file("support/agent_loop_helper.exs", __DIR__)
 
 defmodule Loopex.ProviderAccountingProvenanceTest do
   @moduledoc false
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
   alias Loopex.AgentLoopFixture, as: Fixture
   alias Loopex.AgentLoopTestModel

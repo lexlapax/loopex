@@ -1,7 +1,7 @@
 Code.require_file("support/m1_runtime_helper.exs", __DIR__)
 
 defmodule Loopex.EmbeddedApiTest do
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
   alias Loopex.Attachment
   alias Loopex.M1RuntimeTestStore

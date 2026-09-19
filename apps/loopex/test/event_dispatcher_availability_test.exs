@@ -1,7 +1,7 @@
 Code.require_file("support/m1_runtime_helper.exs", __DIR__)
 
 defmodule Loopex.EventDispatcherAvailabilityTest do
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
   alias Loopex.M1RuntimeTestStore, as: TestStore
   alias Loopex.Runtime

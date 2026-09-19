@@ -2,7 +2,7 @@ Code.require_file("support/m1_runtime_helper.exs", __DIR__)
 Code.require_file("support/agent_loop_helper.exs", __DIR__)
 
 defmodule Loopex.ArtifactRuntimeTest do
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
   alias Loopex.AgentLoopFixture, as: Fixture
   alias Loopex.ArtifactStore

@@ -7,7 +7,7 @@ defmodule Loopex.AuditRepairsTest do
   would fail without.
   """
 
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
   alias Loopex.M1RuntimeTestStore
   alias Loopex.Runtime.SessionState

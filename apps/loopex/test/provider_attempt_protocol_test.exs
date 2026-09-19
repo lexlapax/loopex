@@ -374,7 +374,7 @@ end
 defmodule Loopex.ProviderAttemptProtocolTest do
   @moduledoc false
 
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
   alias Loopex.AgentLoopFixture, as: Fixture
   alias Loopex.AgentLoopTestModel
