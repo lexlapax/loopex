@@ -197,6 +197,7 @@ async function run(connection) {
   const question = requested.data;
 
   summary.session_created = true;
+  summary.session_id = sessionId;
   summary.question_prompt = question.prompt;
   summary.choice_ids = (question.choices ?? []).map((choice) => choice.id);
   summary.interaction_id = question.interaction_id;

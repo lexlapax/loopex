@@ -38,6 +38,7 @@ defmodule Loopex.AppServer.ExternalWorkflowRealTest do
   alias Loopex.LLM.ReqLLM
   alias Loopex.LLM.ReqLLM.ProviderBuildFixture
   alias Loopex.Store
+  alias LoopexProtocol.Wire
 
   # The provider companion is built from clean source before the first call, and
   # a real model then takes seconds per turn. The ceiling is the build plus the
@@ -68,7 +69,9 @@ defmodule Loopex.AppServer.ExternalWorkflowRealTest do
     elixir = System.find_executable("elixir") || flunk("Elixir is unavailable")
 
     root = owned_root()
-    on_exit(fn -> File.rm_rf(root) end)
+    # Set LOOPEX_KEEP_ROOT to inspect the retained store after a failure.
+    if System.get_env("LOOPEX_KEEP_ROOT") in [nil, ""], do: on_exit(fn -> File.rm_rf(root) end)
+    IO.puts(:stderr, "real workflow root: #{root}")
 
     home = Path.join(root, "home")
     workspace = Path.join(root, "workspace")
@@ -171,13 +174,22 @@ defmodule Loopex.AppServer.ExternalWorkflowRealTest do
     # a leak could have reached this process.
     refute String.contains?(output, System.fetch_env!("LOOPEX_PROVIDER_API_KEY"))
 
-    records = retained_records(state_root)
-    events = retained_events(state_root)
+    # The client reports the wire form of the session identity; the Store keys
+    # the session by the identity the runtime assigned, which the wire encodes.
+    assert {:ok, session_id} = Wire.identity(summary["session_id"] || "")
+    records = retained_records(state_root, session_id)
+    events = retained_events(state_root, session_id)
 
     # The durable events say the same thing the client observed, and name the
     # tool that actually ran.
     finished = Enum.find(events, &(&1.kind == "tool.finished"))
-    assert finished, "no tool finished durably"
+
+    assert finished,
+           "no tool finished durably: #{length(records)} records, " <>
+             "#{length(events)} events, kinds=#{inspect(Enum.map(events, & &1.kind))}, " <>
+             "files=#{inspect(File.ls!(state_root))}, store_bytes=#{byte_size(File.read!(store))}, " <>
+             "id_in_log=#{String.contains?(File.read!(store), session_id)}, session_id=#{session_id}"
+
     assert finished["tool_id"] == "loopex.read"
     assert finished["outcome"] == "completed"
     assert length(finished["artifacts"]) == 1
@@ -264,22 +276,21 @@ defmodule Loopex.AppServer.ExternalWorkflowRealTest do
     root
   end
 
-  defp retained_records(state_root) do
-    read_store(state_root, &Store.load_records(&1, &2, 0, 4_096))
+  defp retained_records(state_root, session_id) do
+    read_store(state_root, session_id, &Store.load_records(&1, &2, 0, 1_000))
   end
 
-  defp retained_events(state_root) do
-    read_store(state_root, &Store.load_events(&1, &2, 0, 4_096))
+  defp retained_events(state_root, session_id) do
+    read_store(state_root, session_id, &Store.load_events(&1, &2, 0, 1_000))
   end
 
   # Concept: the session's durable truth, read the way an operator reads it.
   #
   # Technical depth: a copy is opened rather than the live log, because opening
   # the original would claim its writer marker and the copy answers the same
-  # question. The session is the one this run created, named by the state root
-  # rather than by anything the client reported.
-  defp read_store(state_root, load) do
-    assert {:ok, [%{session_id: session_id}]} = Loopex.list_sessions(state_root)
+  # question. The session is the one the client created and reported; the app
+  # server registers no session directory, so the state root alone cannot name it.
+  defp read_store(state_root, session_id, load) do
     copy = Path.join(state_root, "reader-#{System.unique_integer([:positive])}.log")
     File.cp!(Path.join(state_root, "store.log"), copy)
     {:ok, pid} = Loopex.Store.Local.start_link(path: copy)
