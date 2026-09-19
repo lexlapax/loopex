@@ -80,7 +80,7 @@ lane — never part of the default suite.
 M3's implementation used focused checks under the reviewed
 [end-only full-gate cadence](#override-disposition-m3-implementation-gate-cadence-2026-09-10),
 with complete M0–M3 evidence at its final candidate. Other milestones follow
-[AGENTS.md](../../AGENTS.md#milestones-and-gates) and their accepted plan.
+[AGENTS.md](../../AGENTS.md#milestones-and-checks) and their accepted plan.
 Under the
 [reviewed M3 preparation-rule ratification](#override-disposition-m3-incremental-witness-ratification-2026-09-10),
 acceptance binds clauses, witness identities, runnable commands and a real

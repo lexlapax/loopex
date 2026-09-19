@@ -374,7 +374,7 @@ Documentation drift blocks closure like any other unmet outcome.
 
 ## How a Milestone Runs
 
-The four steps are named in [AGENTS.md](../../AGENTS.md#milestones-and-gates)
+The four steps are named in [AGENTS.md](../../AGENTS.md#milestones-and-checks)
 and carried out by the [milestone guide](../developer/milestones.md#concept)
 and its
 [technical companion](../developer/milestones-technical.md#technical-depth);

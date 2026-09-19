@@ -143,7 +143,7 @@ Report decisions, not discoveries. Maintain a concise task checklist for
 multi-step work and show what is done, running, and remaining whenever a task
 completes. Give measured durations, not projections.
 
-<a id="milestones-and-gates"></a>
+<a id="milestones-and-checks"></a>
 ## Milestones and Checks
 
 A *milestone* is bounded work described by one plan pair in `docs/plans/`,
@@ -215,11 +215,14 @@ repository's checks are two commands, described in
   status, and the credential-free test suite, one application per VM. It runs
   once per integration candidate, in CI; `--docs` runs compilation,
   formatting, the structure checks and the documentation check for a
-  prose-only change and skips the suite.
+  prose-only change and skips the suite, and `--select` — what CI runs —
+  chooses that mode on its own when every changed path is Markdown outside
+  `apps/`.
 - `bash scripts/check-release.sh` — the slow check: the real-provider
-  workflows, the independent Node client, and the fresh-source build. It needs
-  a provider credential in `LOOPEX_PROVIDER_API_KEY` and pinned Node, and it
-  runs before closure and release.
+  workflows, the independent Node client, the fresh-source archive build, and
+  the long-duration bound proofs the fast check excludes. It needs a provider
+  credential in `LOOPEX_PROVIDER_API_KEY`, pinned Node and a clean tree, two of
+  its tests are attended, and it runs before closure and release.
 
 Both run locally from a clean checkout with the toolchain in
 [DEVELOPMENT.md](DEVELOPMENT.md): Git, shell and POSIX tools, and the accepted

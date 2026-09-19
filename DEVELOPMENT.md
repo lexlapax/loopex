@@ -52,8 +52,9 @@ bash scripts/check.sh
 It runs, in order, and stops at the first failure: `mix compile
 --warnings-as-errors`, `mix format --check-formatted`,
 `bash scripts/check-bootstrap.sh` (client-adapter structure, ignore policy,
-commit messages, branch and worktree hygiene, and `mix loopex.status` over the current
-tree: paired documents, directory indexes, local links, and the status
+commit messages, branch and worktree hygiene, OTP application declarations, the
+suite-summary judge, and `mix loopex.status` over the current tree: paired
+documents, directory indexes, local links, and the status
 register), `mix loopex.docs_check`, `mix loopex.deps_budget`,
 `mix loopex.version_train`, the test build, and the credential-free suite, one
 application per VM with several at once (`LOOPEX_CHECK_JOBS` bounds how many;
@@ -61,11 +62,19 @@ the default is half the cores; `LOOPEX_CHECK_ALONE` names applications that
 run one at a time before the rest share the box, which hosted CI sets to
 `loopex_llm_reqllm` because its child VMs boot under the product's deadline
 and a four-core runner starved that boot behind another application's
-compile). `bash scripts/check.sh --docs` stops after the
-documentation step, for a change that touches only prose. It needs no
-credential, network access, or coding-agent client. It runs once per
-integration candidate: hosted CI runs the same command on every push and pull
-request and does not define it.
+compile). Each application's output is kept in a log and printed only if it
+fails; a line every thirty seconds names what is still running, and an
+interruption kills the whole process tree. An application whose suite executed
+no test is red, not green: `scripts/suite-summary.sh` judges the result line.
+
+`bash scripts/check.sh --docs` stops after the documentation step, for a change
+that touches only prose, and `bash scripts/check.sh --select` picks between the
+two from the diff against `merge-base(origin/main, HEAD)` — documentation mode
+when every changed path is Markdown outside `apps/`, the full check otherwise
+or when the diff is empty. The check needs no credential, network access, or
+coding-agent client, and runs once per integration candidate: hosted CI runs
+`bash scripts/check.sh --select` on every push to `main` and every pull request
+and does not define it.
 
 Before closing a milestone or releasing, once from the exact committed
 candidate, on a machine with the pinned Node and a provider credential:
@@ -74,13 +83,18 @@ candidate, on a machine with the pinned Node and a provider credential:
 LOOPEX_PROVIDER_API_KEY=... bash scripts/check-release.sh
 ```
 
-It runs every test tagged `real_provider` or `node_client`: the real-provider
-coding workflows, the independent Node client against the shipped app server,
-and the fresh-source archive build. The credential reaches only the test
-processes; never put it in a command argument, log, fixture, or retained
-evidence. Two of the real-provider tests are attended: they prompt on the
-controlling terminal for the operator's trust decisions, so run the command
-from a terminal.
+It refuses without the credential, without the pinned Node, or on a dirty tree,
+and then runs a named list of release applications, each in its own VM with
+`--only real_provider --only node_client --include long_bound`: the
+real-provider coding workflows, the independent Node client against the shipped
+app server, and the fresh-source archive build, which prints the extracted
+revision and the archive's SHA-256. A final `--only long_bound` pass over
+`loopex` and `loopex_executor_local` runs the three real-duration proofs the
+fast check excludes. Every pass must execute at least one test. The credential
+reaches only the test processes; never put it in a command argument, log,
+fixture, or retained evidence. Two of the real-provider tests are attended:
+they prompt on the controlling terminal for the operator's trust decisions
+(`Type yes and press Enter.`), so run the command from a terminal.
 
 The individual commands can also be run directly:
 

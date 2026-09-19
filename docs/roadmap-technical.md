@@ -109,7 +109,7 @@ can be accepted or product implementation can begin.
 Concept: [Evidence expectations](roadmap.md#concept-roadmap-evidence)
 
 Exact requirements: [Vision verification](vision-technical.md#technical-vision-verification)
-and [AGENTS.md](../AGENTS.md) § Milestones and Gates. Each accepted plan selects
+and [AGENTS.md](../AGENTS.md) § Milestones and Checks. Each accepted plan selects
 and locks its evidence classes and commands.
 
 <a id="technical-roadmap-open-questions"></a>
@@ -137,5 +137,5 @@ Concept: [Boundary](roadmap.md#concept-roadmap-boundary)
 
 Canonical milestone status and records live in
 [docs/plans/README.md](plans/README.md); lifecycle authority lives in
-[AGENTS.md](../AGENTS.md) § Milestones and Gates. This companion creates no
+[AGENTS.md](../AGENTS.md) § Milestones and Checks. This companion creates no
 scope or authority.
