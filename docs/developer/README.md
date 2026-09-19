@@ -8,8 +8,9 @@ Method, routing, and retained evidence for working on Loopex. Part of the
 New to the repository, in this order:
 
 1. [Root README](../../README.md) — what Loopex is and where things stand.
-2. [DEVELOPMENT.md](../../DEVELOPMENT.md) — prerequisites, and the one command
-   that validates a checkout: `bash scripts/check-bootstrap.sh`.
+2. [DEVELOPMENT.md](../../DEVELOPMENT.md) — prerequisites and the two check
+   commands: `bash scripts/check.sh` before a merge and
+   `bash scripts/check-release.sh` before closure or release.
 3. [Plans and current status](../plans/README.md) — what the project is
    committed to, what is authorized right now, and the next decision. Its
    Directing the Work section covers how development is requested.

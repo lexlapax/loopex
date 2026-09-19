@@ -48,14 +48,19 @@ Before every push, from the repository root:
 bash scripts/check.sh
 ```
 
-It runs, in order, and stops at the first failure: `bash scripts/check-bootstrap.sh`
-(client-adapter structure, ignore policy, commit messages, branch and worktree
-hygiene, and `mix loopex.status` over the current tree: paired documents,
-directory indexes, local links, and the status register), `mix format
---check-formatted`, `mix compile --warnings-as-errors`, `mix loopex.deps_budget`,
-`mix loopex.version_train`, `mix loopex.docs_check`, and `mix test`. It needs no
-credential, network access, or coding-agent client. Hosted CI runs the same
-command and does not define it.
+It runs, in order, and stops at the first failure: `mix compile
+--warnings-as-errors`, `mix format --check-formatted`,
+`bash scripts/check-bootstrap.sh` (client-adapter structure, ignore policy,
+commit messages, branch and worktree hygiene, and `mix loopex.status` over the current
+tree: paired documents, directory indexes, local links, and the status
+register), `mix loopex.docs_check`, `mix loopex.deps_budget`,
+`mix loopex.version_train`, the test build, and the credential-free suite, one
+application per VM with several at once (`LOOPEX_CHECK_JOBS` bounds how many;
+the default is half the cores). `bash scripts/check.sh --docs` stops after the
+documentation step, for a change that touches only prose. It needs no
+credential, network access, or coding-agent client. It runs once per
+integration candidate: hosted CI runs the same command on every push and pull
+request and does not define it.
 
 Before closing a milestone or releasing, once from the exact committed
 candidate, on a machine with the pinned Node and a provider credential:
@@ -108,9 +113,10 @@ mise exec erlang@27.3.4 elixir@1.18.5-otp-27 -- bash scripts/check.sh
 Do not activate a version manager inside the checkout; invoke the pair
 explicitly. OTP 27 cannot read a beam written by OTP 29, so clear `_build`
 when switching between the pairs, or give each pair its own `MIX_BUILD_PATH`.
-Milestone closure runs `scripts/check.sh` under both pairs on Darwin and under
-the current pair on Linux; a Linux host needs `LANG=C.UTF-8` and
-`LC_ALL=C.UTF-8` exported.
+Hosted CI proves the current pair on every change; milestone closure runs
+`scripts/check.sh` once under the floor pair as well, which is the only run
+that proves the floor still builds and passes. A Linux host needs
+`LANG=C.UTF-8` and `LC_ALL=C.UTF-8` exported.
 
 ## Dependency Rules
 

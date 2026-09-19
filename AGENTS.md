@@ -155,9 +155,11 @@ A milestone runs in four steps:
 
 1. **Agree.** The plan pair names purpose, outcomes, scope, key design
    decisions, and how each outcome will be verified. The maintainer accepts it.
-2. **Develop.** Run focused tests while editing; run `bash scripts/check.sh`
-   before every push. Build the first integrated workflow early, then add
-   boundary and failure cases as implementation reaches them.
+2. **Develop.** Run the focused tests for what you touched while editing.
+   `bash scripts/check.sh` runs once per integration candidate, in CI on the
+   branch or locally before the merge, never again for the same bytes. Build
+   the first integrated workflow early, then add boundary and failure cases as
+   implementation reaches them.
 3. **Close.** Every outcome maps to tests, retained evidence, or a
    demonstration. Run `bash scripts/check.sh` on each supported platform and
    `bash scripts/check-release.sh` once, from the exact candidate; an
@@ -205,7 +207,9 @@ repository's checks are two commands, described in
 
 - `bash scripts/check.sh` — the fast check: structure, formatting, warning-free
   compilation, dependency direction, documentation ordering, current-tree
-  status, and the credential-free test suite. It runs on every push and in CI.
+  status, and the credential-free test suite, one application per VM. It runs
+  once per integration candidate, in CI; `--docs` runs only the structure and
+  documentation steps for a prose-only change.
 - `bash scripts/check-release.sh` — the slow check: the real-provider
   workflows, the independent Node client, and the fresh-source build. It needs
   a provider credential in `LOOPEX_PROVIDER_API_KEY` and pinned Node, and it

@@ -60,7 +60,7 @@ Technical depth: [The selection table](verification-technical.md#technical-verif
 | Observability | The trace session and telemetry boundary cases in core and the edge handler cases |
 | Provider, executor or credential handling | `bash scripts/check-release.sh` |
 | The toolchain floor or `.tool-versions` | The fast check under both pairs |
-| Documentation only | The fast check; nothing else |
+| Documentation only | `bash scripts/check.sh --docs`: structure, formatting and documentation steps; the suite is not run |
 | Unknown, or more than one of the above | The release check, and the review names the boundaries it found |
 
 <a id="concept-verification-rules"></a>
