@@ -56,3 +56,17 @@ the defect the follow-ups fixed.
 The maintainer then ran the same command themselves on serenity at
 `dabca373`, answering both prompts on the terminal: PASS, the same 12 tests,
 163 s, with the public-skill workflow observing two real provider replies.
+
+## The floor toolchain pair, after closure
+
+The closure runs above were all on the current pair; the floor pair (Elixir
+1.18.5 / OTP 27.3.4) had not been run on M4's product. Its first run, on
+serenity at `23402ec4`, failed 640 tests across four applications with
+`module :crypto is not available`: Mix on that pair prunes OTP applications no
+application declares, and seven applications called `:crypto` without
+declaring it, which the current pair never showed. With the declarations
+added (`478fe1e`) and the contract's runtime-closure test updated
+(`11c41bb`), the floor run passed: PASS, 0 failures in every application,
+888 s on serenity. The same commit passed the current pair on the Mac in
+963 s. `scripts/check-otp-applications.sh` now enforces the declaration on
+every run of the fast check.
