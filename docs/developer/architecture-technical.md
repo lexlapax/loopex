@@ -51,8 +51,8 @@ The umbrella's declared dependencies are the whole of the direction claim:
 | `loopex_cli` | `:client` | `loopex`, `loopex_composition` |
 | `loopex_app_server` | `:client` | `loopex`, `loopex_protocol`, `loopex_composition` |
 
-`Loopex.Checks.DepsBudget` is the one parser authority for both the pre-Mix gate
-check and `mix loopex.deps_budget`. It requires the physical project set to equal
+`Loopex.Checks.DepsBudget` is the one parser authority for both the direct
+pre-Mix entrypoint and `mix loopex.deps_budget`. It requires the physical project set to equal
 the ordinary stage-zero Git entries, parses each `mix.exs` as AST without
 evaluating it, and derives only the fields carrying dependency authority: the
 application identity, the role, the exact dependency records, and the owned

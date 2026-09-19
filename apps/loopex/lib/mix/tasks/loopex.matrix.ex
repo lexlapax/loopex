@@ -11,11 +11,10 @@ defmodule Mix.Tasks.Loopex.Matrix do
   ## Technical depth
 
   One Mix run has one Erlang runtime, so a single invocation cannot prove both
-  pairs. It proves the pair it is running under; the gate runner invokes it once
-  per pair and records both runs. That division is deliberate — a task that
+  pairs. It proves the pair it is running under; a closure invokes it once per
+  pair and records both runs. That division is deliberate — a task that
   claimed to have verified a pair it never ran on would be reporting a wish.
 
-  `.tool-versions` is the bound artifact, so its bytes are digested by the gate.
   Comparison is exact for both Elixir and OTP: the full OTP version comes from
   the installation's `OTP_VERSION`, because `System.otp_release/0` reports only
   the major. If that file is unavailable, the major cannot satisfy either exact

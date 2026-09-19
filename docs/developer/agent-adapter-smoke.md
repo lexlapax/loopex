@@ -122,7 +122,7 @@ effective model and effort during or after invocation when the client exposes
 them. A stronger profile may perform lower-class work. A role name,
 description, or static check is routing metadata, not capability proof. Model
 selection never changes authority, scope, permissions, acceptance, or the
-evidence required by a gate. The adaptive rules and the full reference list
+evidence a check requires. The adaptive rules and the full reference list
 live with the mapping in the
 [context map](agent-context-map.md); the 2026-08-15 mapping it supersedes is
 retained there.

@@ -10,7 +10,7 @@ defmodule Loopex.Checks.DepsBudget do
 
   ## Technical depth
 
-  This module is the one parser authority for both the direct pre-Mix gate
+  This module is the one parser authority for both the direct pre-Mix
   check and `mix loopex.deps_budget`. It requires the physical root/child
   project set to equal ordinary stage-zero Git entries, parses those projects
   as AST without evaluating code, and derives only the fields that carry

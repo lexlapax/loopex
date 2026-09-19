@@ -1,15 +1,14 @@
-# Locked toolchain matrix. These exact bytes are digested in the Closed M0, M1,
-# M2 and M3 gates and the Open M4 gate, and verified against this file by the
-# status check. Two pairs are validated individually; no cross-product is
-# constructed. Changing any version requires an accepted ADR and every
-# holder's governed transaction, not a gate edit.
+# The two supported toolchain pairs. `mix loopex.matrix` proves the running
+# toolchain is one of them and that both are still recorded here. They are
+# validated individually; no cross-product is constructed. Changing a version
+# requires an accepted ADR.
 #
 # Pins are the explicit pairs accepted ADR 0026 chose on 2026-09-13 in place of
 # ADR 0002's derived rule. The floor is Elixir 1.18.5 with OTP 27.3.4, the pair
 # that carries the standard-library JSON codec the M4 protocol needs; the
 # current pair is the newest supported release, which is also Homebrew stable
-# today. The floor lane runs through a version manager or CI; the gate requires
-# both lanes recorded, not both run locally on every invocation.
+# today. Hosted CI proves the current pair on every change; a milestone closure
+# runs the fast check once under the floor pair through a version manager.
 #
 # floor pair
 elixir 1.18.5-otp-27

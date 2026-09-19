@@ -734,7 +734,8 @@ start at all rather than repairing itself.
 
 ### Verification Entry Points
 
-- `mix test --exclude real_provider` — complete credential-free suite.
+- `mix test` — one application's credential-free suite; the test helpers
+  exclude the `real_provider` and `long_bound` tags.
 - `mix loopex.deps_budget` — ten-application inventory, roles including
   `:composition`, the admitted external dependencies, and direction.
 - `mix loopex.core_only` — core has no adapter resolution or environment-held
@@ -743,12 +744,13 @@ start at all rather than repairing itself.
   Technical depth.
 - `mix loopex.status` — governance rows, indexes, links, and bound artifacts.
 - `bash scripts/check.sh` — the fast check, which runs the credential-free
-  suite together with the structural, formatting, compilation, dependency, and
-  documentation checks above.
+  suite one application per VM together with the structural, formatting,
+  compilation, dependency, and documentation checks above.
 - `bash scripts/check-release.sh` — the slow check: the real-provider
-  workflows, the independent Node client, and the fresh-source build. It reads
-  the provider credential from `LOOPEX_PROVIDER_API_KEY`; never put it in argv
-  or in retained evidence.
+  workflows, the independent Node client, the fresh-source archive build, and
+  the `long_bound` proofs in a pass of their own. It reads the provider
+  credential from `LOOPEX_PROVIDER_API_KEY`; never put it in argv or in
+  retained evidence.
 
 Retained matrix and negative evidence from the milestones that proved these
 guarantees are indexed in [docs/evidence](../evidence/README.md).

@@ -988,7 +988,8 @@ diagnostics are transient, are not fenced, and are never durable truth.
 
 ### Verification Entry Points
 
-- `mix test --exclude real_provider` — complete credential-free suite.
+- `mix test` — one application's credential-free suite; the test helpers
+  exclude the `real_provider` and `long_bound` tags.
 - `mix loopex.deps_budget` — ten-application inventory, roles including
   `:composition`, the admitted external dependencies, and direction.
 - `mix loopex.core_only` — core has no adapter resolution or environment-held
@@ -997,9 +998,11 @@ diagnostics are transient, are not fenced, and are never durable truth.
   Technical depth.
 - `mix loopex.status` — governance rows, indexes, links, and bound artifacts.
 - `bash scripts/check.sh` — the fast check, which runs the credential-free
-  suite with the structural and documentation checks above.
-- `bash scripts/check-release.sh` — the slow check, including the
-  real-provider workflows. It reads the provider credential from
+  suite one application per VM with the structural and documentation checks
+  above.
+- `bash scripts/check-release.sh` — the slow check: the real-provider
+  workflows, the independent Node client, the fresh-source archive build, and
+  the `long_bound` proofs. It reads the provider credential from
   `LOOPEX_PROVIDER_API_KEY`; never put it in argv or in retained evidence.
 
 Retained evidence from the milestones that proved these guarantees is indexed
