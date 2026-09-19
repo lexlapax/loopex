@@ -19,7 +19,7 @@ defmodule LoopexProtocol.MixProject do
   end
 
   def application do
-    [extra_applications: []]
+    [extra_applications: [:crypto]]
   end
 
   # Concept: the contract application carries no dependency at all, so an

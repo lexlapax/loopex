@@ -18,7 +18,7 @@ defmodule Loopex.Executor.Local.MixProject do
     ]
   end
 
-  def application, do: [extra_applications: []]
+  def application, do: [extra_applications: [:crypto]]
 
   # Concept: the trusted-local hand depends inward on the executor contract and
   # owns every OS and workspace detail at this edge.

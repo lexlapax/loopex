@@ -27,7 +27,7 @@ defmodule LoopexCli.MixProject do
     ]
   end
 
-  def application, do: [extra_applications: []]
+  def application, do: [extra_applications: [:crypto]]
 
   defp build_pair(args) do
     root = Path.expand("../..", __DIR__)

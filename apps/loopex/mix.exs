@@ -19,7 +19,7 @@ defmodule Loopex.MixProject do
   end
 
   def application do
-    [extra_applications: []]
+    [extra_applications: [:crypto]]
   end
 
   # Concept: the contract application, and the one external dependency the

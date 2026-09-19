@@ -18,7 +18,7 @@ defmodule LoopexComposition.MixProject do
     ]
   end
 
-  def application, do: [extra_applications: []]
+  def application, do: [extra_applications: [:crypto]]
 
   # Concept: the one application permitted to name concrete adapters.
   #

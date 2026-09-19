@@ -33,7 +33,7 @@ defmodule Loopex.LLM.ReqLLM.MixProject do
   end
 
   def application do
-    [extra_applications: []]
+    [extra_applications: [:crypto]]
   end
 
   # Concept: companion artifacts stay inside the caller's isolated build root.

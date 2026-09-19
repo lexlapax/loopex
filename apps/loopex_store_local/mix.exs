@@ -19,7 +19,7 @@ defmodule Loopex.Store.Local.MixProject do
   end
 
   def application do
-    [extra_applications: []]
+    [extra_applications: [:crypto]]
   end
 
   # Concept: the local Store is an outward implementation of the core port.
