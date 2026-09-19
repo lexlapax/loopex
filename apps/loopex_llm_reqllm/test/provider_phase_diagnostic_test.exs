@@ -111,7 +111,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderPhaseDiagnosticTest do
                          Control.cleanup_proved(%{})
                        end)
 
-                     assert_receive {:DOWN, ^reference, :process, ^child, :normal}
+                     assert_receive {:DOWN, ^reference, :process, ^child, :normal}, 5_000
                      throw(:original_failure)
                    end,
                    Control
@@ -247,9 +247,9 @@ defmodule Loopex.LLM.ReqLLM.ProviderPhaseDiagnosticTest do
 
     assert output =~ "cleanup_proved"
     refute output =~ "hidden"
-    assert_receive {:diagnostic_tracer, tracer}
+    assert_receive {:diagnostic_tracer, tracer}, 5_000
     reference = Process.monitor(tracer)
-    assert_receive {:DOWN, ^reference, :process, ^tracer, _}
+    assert_receive {:DOWN, ^reference, :process, ^tracer, _}, 5_000
   end
 
   test "successful original callback cannot hide unavailable or incomplete diagnostics" do
@@ -308,8 +308,10 @@ defmodule Loopex.LLM.ReqLLM.ProviderPhaseDiagnosticTest do
     assert_receive {:ready_to_kill, ^owner, tracer}, 5_000
     tracer_monitor = Process.monitor(tracer)
     Process.exit(owner, :kill)
-    assert_receive {:DOWN, ^owner_monitor, :process, ^owner, :killed}
-    assert_receive {:DOWN, ^tracer_monitor, :process, ^tracer, :normal}
+    # Liveness waits too: the collector's exit after the owner's death took
+    # longer than the 100 ms default once, on a Mac running ten suites at once.
+    assert_receive {:DOWN, ^owner_monitor, :process, ^owner, :killed}, 5_000
+    assert_receive {:DOWN, ^tracer_monitor, :process, ^tracer, :normal}, 5_000
 
     for {function, arity, _spec} <- Diagnostic.specifications() do
       assert {:traced, false} = :erlang.trace_info({Control, function, arity}, :traced)
@@ -336,19 +338,19 @@ defmodule Loopex.LLM.ReqLLM.ProviderPhaseDiagnosticTest do
       end)
 
     on_exit(fn -> cleanup_owner(owner) end)
-    assert_receive {:snapshot_owner, ^owner, tracer}
+    assert_receive {:snapshot_owner, ^owner, tracer}, 5_000
     tracer_monitor = Process.monitor(tracer)
     true = :erlang.suspend_process(tracer)
 
     try do
       send(tracer, {:snapshot, owner, make_ref()})
       Process.exit(owner, :kill)
-      assert_receive {:DOWN, ^owner_monitor, :process, ^owner, :killed}
+      assert_receive {:DOWN, ^owner_monitor, :process, ^owner, :killed}, 5_000
     after
       :erlang.resume_process(tracer)
     end
 
-    assert_receive {:DOWN, ^tracer_monitor, :process, ^tracer, :normal}
+    assert_receive {:DOWN, ^tracer_monitor, :process, ^tracer, :normal}, 5_000
 
     for {function, arity, _spec} <- Diagnostic.specifications() do
       assert {:traced, false} = :erlang.trace_info({Control, function, arity}, :traced)
