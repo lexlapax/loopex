@@ -5238,3 +5238,91 @@ and one run of `bash scripts/check-closed-gates.sh --before M4` with the
 provider frame, green for M0, M1, M2 and M3 on their instrumented runners, is
 retained with the exact revision it ran at as the chain disposition's
 replacement evidence. It grants no closure, integration, tag or release.
+
+<a id="override-disposition-m4-closure-schedule-2026-09-19"></a>
+### M4 closure schedule, efficiency first — 2026-09-19
+
+The maintainer directed that M4 be finished for efficiency first. A post-M4
+redesign proposal, kept off this branch on `codex/post-m4-validation-proposal`,
+reports the maintainer's instruction as "too many agents.md rules.. forgo the
+rules, because we're changing it anyway. efficiency first", and the maintainer
+relayed its immediate schedule for adoption:
+
+> 1. Inspect completed and running evidence before scheduling anything else. Coordinate before stopping another agent's work.
+> 2. Omit an outstanding rebind-only inherited aggregate whose sole purpose is qualifying the intermediate governance revision. Record it as not run under the revised schedule, not green. Final-candidate evidence must retain its actual SHA.
+> 3. Finish remaining product fixes, closure documentation, and the 0.1.0 source-version changes before expensive final qualification. Use focused checks while making those changes.
+> 4. Qualify the finished candidate once per genuinely distinct required environment. The full M4 runner already runs bootstrap and the Closed M0–M3 aggregate. Retain those nested results; don't schedule separate copies.
+> 5. Capture the complete output from the first needed run. M4 has no separate capture mode. Preserve valid historical M1/M2 captures rather than repeating them merely because HEAD advanced.
+> 6. Diagnose failures and repeat affected checks after repairs. This scheduling change does not waive product correctness, recovery, compatibility, live workflows, or fresh-source installation.
+> 7. Keep the redesign proposal off the qualification branch. Leave structural runner and history-checker replacement until after closure unless an actual defect prevents qualification.
+
+Asked how to make it durable, the maintainer answered **"One override
+disposition (Recommended)"**. Asked about the gate run then in progress at the
+Amendment 8 rebind, once its Closed M3 gate had begun re-running M0–M2 inside
+itself, the maintainer answered **"Stop it now (Recommended)"**. Asked how M4
+should treat `0.1.0`, whose version change would turn red the Closed M1, M2 and
+M3 runners and the shared selector runner, each of which fixes `0.0.0`, the
+maintainer answered **"C: close at 0.0.0, 0.1.0 after redesign
+(Recommended)"**.
+
+Under [the explicit maintainer override](../../AGENTS.md#maintainer-override),
+this names the requirements it replaces.
+
+- **The chain's replacement evidence and the Amendment 8 rebind's inherited
+  gates.** [The chain disposition](#override-disposition-closed-gate-repair-chain-v2-2026-09-17)
+  and `amendment-transaction-v1` require one run of
+  `bash scripts/check-closed-gates.sh --before M4`, green for M0–M3, at the
+  Amendment 8 rebind `e39d12a21537046ba807f8a9736774e83249955c`. It ran there
+  inside the full M4 gate with the provider frame and was stopped under this
+  schedule: status passed, bootstrap passed, the M4 gate's opening, twelve
+  protected selectors and four locked Mix commands passed, and the inherited
+  lane recorded `M0 gate GREEN`, `M1 gate GREEN seed=953 protected_executed=69`
+  and `M2 gate GREEN seed=114671 protected_executed=690`. The M3 gate, the
+  source-archive lane and the real-workflow lane at that revision are **not
+  run under the revised schedule, not green**. The replacement is the M4 gate's
+  own inherited lane at the final closure candidate, below.
+- **The inherited aggregate at every M4 rebind child.** The M4 gate's schedule
+  of inherited runs at every rebind child is replaced, for the rest of M4, by
+  the runs at the final closure candidate below, and at a rejoin only when
+  changed bytes invalidate earlier evidence.
+- **Generation 15's replacement evidence.** [That record](#override-disposition-m1-generation-15-inherited-red-2026-09-15)
+  requires the M1 gate green at generation 16's rebind, which was never run.
+  It is replaced by the M1 gate green at `e39d12a` above, a descendant
+  carrying generation 17, whose runner is the corrected successor of
+  generation 16's. That record is satisfied.
+- **Amendment 7's inherited-gate component.** [That record](#override-disposition-m4-bootstrap-at-rebind-2026-09-15)
+  leaves open a green inherited run on a descendant of its rebind. M0, M1 and
+  M2 are green on such a descendant at `e39d12a` above; the complete run is the
+  final closure candidate's, below, after which that component is satisfied.
+- **Repeated captures.** The M1 and M2 post-closure re-captures retained at
+  `afb80ec` (source `16f6502`) and `38984d8` (source `d4d6699`) stand and are
+  not repeated because the branch advanced; a change to the runtime, platform,
+  dependencies or a relevant test input that invalidates one requires the
+  affected capture again.
+- **The version transition.** Phase C of the M4 technical plan, applying
+  `0.1.0` and settling every version holder at the closure candidate, is not
+  performed in M4. M4 closes at source `VERSION` `0.0.0`; the `0.1.0` version
+  and the `v0.1.0` tag named in the plan's purpose are deferred, with the
+  maintainer's approval above, until after the post-M4 redesign retires the
+  holders that fix `0.0.0`, when the version change is ordinary work qualified
+  by the replacement suite and tagged under its own release disposition. The
+  operator-usable source delivery is not deferred: the fresh-source archive
+  lane and the attended operator demonstration from the exact candidate remain
+  closure evidence.
+
+**Replacement evidence.** The complete full M4 gate, `bash
+scripts/check-m4-gate.sh` with the provider frame, green at the final closure
+candidate once on each environment the gate requires, Darwin floor, Darwin
+current and Linux current, each retained with the exact revision it ran at and
+its complete output, including its nested bootstrap and its inherited
+`check-closed-gates.sh --before M4` lane. A failure is diagnosed, repaired and
+its affected qualification repeated; no run is relabelled.
+
+Preserved: every product guarantee and outcome other than the deferred version
+number and tag; recovery, compatibility, live provider workflows and
+fresh-source installation evidence; independent review of the closure
+candidate; every Acceptance, Closure and generation row, and every earlier
+result, which remain true for the revisions they name; and the post-M4
+redesign, which stays off this branch and changes no runner or checker before
+closure unless a defect prevents qualification. This grants no closure, no
+integration to `main`, no tag and no release.
