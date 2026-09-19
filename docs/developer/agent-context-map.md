@@ -5073,3 +5073,39 @@ no release.
 
 Before dependent work, independently review this standalone disposition at its
 exact SHA. This record is not edited after that review.
+
+<a id="disposition-m2-recapture-git-identity-2026-09-18"></a>
+### One unreproduced Git identity refusal at the M2 re-capture, 2026-09-18
+
+[The M2 re-capture disposition](#override-disposition-m2-recapture-candidate-2026-09-18)
+requires this failure to be dispositioned on its own before the re-capture is
+relied on. This records that disposition; it replaces no requirement.
+
+At `4751a6dfcda8212844bc07631b607378f16ac284` the M0 gate's full suite, run on the
+current pair on the macOS lane host, failed once in
+`apps/loopex_composition/test/skill_acquisition_test.exs` with
+`{:git_identity_mismatch, "exported Git blob did not match"}`. The M0 gate on the
+floor pair at that revision, on the same host, passed. The failure did not recur:
+
+- in 53 targeted attempts: 38 under the M0 gate's relocation of `HOME`, 20 of
+  them sequential and 18 as six concurrent runs, and 15 without it, 10 of the
+  test alone and 5 of its application's whole suite;
+- in the M0 floor and M0 current lanes at candidate
+  `d4d6699c327d866a115b6895c3ccb5413fe5c017`, both green.
+
+Ruled out: the environment and resource limits of the process that launched the
+lanes, since the test passes in isolation with and without them; the Git binary
+and its configuration, which were the same `/usr/bin/git` in both lanes; the
+name of the temporary file Git writes, which matched the expected pattern in
+3,000 attempts on the same host; and the killed-process lines printed near the
+failure, which come from a different test that kills process groups on purpose.
+
+The refusal covered two checks with one message. Candidate
+`d4d6699c327d866a115b6895c3ccb5413fe5c017` makes each check name itself with the
+sizes it observed, so a recurrence reports its cause.
+
+The maintainer answered **"Record as unreproduced, now diagnosable
+(Recommended)"**. This is recorded as one unreproduced failure. It waives
+nothing: any recurrence of this refusal, on any lane, is a new finding that
+blocks the run it occurs in until its reported cause is fixed or dispositioned.
+It grants no exception, no closure, no integration, tag or release.
