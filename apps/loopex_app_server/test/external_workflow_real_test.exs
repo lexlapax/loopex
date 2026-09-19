@@ -27,10 +27,11 @@ defmodule Loopex.AppServer.ExternalWorkflowRealTest do
   carries. What the protocol does is asserted exactly, because none of it is the
   model's to vary.
 
-  The credential is never read into a frame, an argument or a file. It reaches
-  the adapter through the environment of the server process alone: this case
-  never passes it onward, the Node consumer only inherits its own environment,
-  and the adapter's companion receives it on a private channel after readiness.
+  The credential is never read into a frame, an argument or a file. It sits in
+  this process's environment, which the Node consumer inherits and passes to
+  the server it launches; the consumer never reads it, the adapter's companion
+  receives it on a private channel after readiness, and the case asserts that
+  nothing the consumer printed carries it.
   """
 
   use ExUnit.Case, async: false
@@ -88,8 +89,9 @@ defmodule Loopex.AppServer.ExternalWorkflowRealTest do
     assert File.regular?(launch_configuration)
 
     # Every input the server and the client need is named here. The credential is
-    # not among them: it is already in this process's environment and is
-    # inherited, so it never appears in an argument list, a file or a record.
+    # not among them: it is already in this process's environment, which the
+    # client and its server child inherit, so it never appears in an argument
+    # list, a file or a record.
     environment = [
       {"LOOPEX_HOME", home},
       {"LOOPEX_WORKSPACE", workspace},
