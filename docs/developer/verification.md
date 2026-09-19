@@ -34,8 +34,8 @@ Technical depth: [What each stage runs](verification-technical.md#technical-veri
 | Release | Is the published source the closed source? | The closure evidence, reused when the source is unchanged; the tag on the exact integrated commit | The maintainer's separate release decision |
 
 The fast check is the everyday gate. It is credential-free, needs no network,
-and is the same command locally and in CI, where it runs on every push and
-pull request. The release check is the expensive one: it spends a provider
+and is the same command locally and in CI, where it runs as
+`check.sh --select` on every push to `main` and every pull request. The release check is the expensive one: it spends a provider
 credential, needs the pinned Node, and runs the attended operator workflow, so
 it runs at closure, at release, and whenever a change touches what it proves.
 
