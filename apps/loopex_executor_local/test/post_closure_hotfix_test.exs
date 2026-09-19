@@ -3,6 +3,10 @@ defmodule Loopex.Executor.Local.PostClosureHotfixTest do
 
   use ExUnit.Case, async: false
 
+  # A job that runs its whole 60 s run deadline out must still present as a
+  # receipt this module can assert on, not as ExUnit's own 60 s timeout.
+  @moduletag timeout: 90_000
+
   alias Loopex.Executor.Local
   alias Loopex.Executor.Local.Ledger
   alias Loopex.Executor.Local.WorkspaceLease
