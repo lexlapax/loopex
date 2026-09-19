@@ -14,9 +14,9 @@ step() {
   printf 'check: done %s step=%ss total=%ss\n' "$name" "$((SECONDS - step_started))" "$((SECONDS - started))"
 }
 
-step "repository structure" bash scripts/check-bootstrap.sh
-step "formatting" mix format --check-formatted
 step "warning-free compilation" mix compile --warnings-as-errors
+step "formatting" mix format --check-formatted
+step "repository structure" bash scripts/check-bootstrap.sh
 step "dependency budget and direction" mix loopex.deps_budget
 step "one version across applications" mix loopex.version_train
 step "documentation ordering" mix loopex.docs_check

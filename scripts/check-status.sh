@@ -16,5 +16,8 @@ set -euo pipefail
 
 cd "$(git rev-parse --show-toplevel)"
 
+# A project-defined Mix task runs whatever beams _build holds; compile first so
+# a stale beam of a removed module can never answer for the current source.
+mix compile
 mix test apps/loopex/test/status_check_test.exs
 exec mix loopex.status
