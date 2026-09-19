@@ -37,8 +37,7 @@ run_app() {
   local app=$1 name=${1#apps/} app_started=$SECONDS log summary
   log="$LOOPEX_CHECK_LOGS/$name.log"
   if (cd "$app" && mix test --no-compile --warnings-as-errors </dev/null) > "$log" 2>&1 &&
-     summary=$(grep -aE '^Result: [1-9][0-9]* passed|^[1-9][0-9]* tests?, 0 failures' "$log" | tail -n 1) &&
-     [ -n "$summary" ]; then
+     summary=$(bash scripts/suite-summary.sh "$log"); then
     : > "$LOOPEX_CHECK_LOGS/$name.done"
     printf 'check: suite %s green %s in %ss\n' "$name" "${summary#Result: }" "$((SECONDS - app_started))"
   else
@@ -101,31 +100,38 @@ suite() {
   return "$status"
 }
 
+# Names what is still running, every thirty seconds, while the runner lives.
+# It is its own process so the phase can wait on the workers directly and end
+# the instant they do; the earlier shape slept inside the phase and held a
+# finished phase for up to thirty seconds.
+heartbeat() {
+  local pid=$1 remaining app
+  shift
+  while sleep 30 && kill -0 "$pid" 2>/dev/null; do
+    remaining=""
+    for app in "$@"; do
+      [ -e "$LOOPEX_CHECK_LOGS/${app#apps/}.done" ] || remaining="$remaining ${app#apps/}"
+    done
+    printf 'check: suite running total=%ss, still running:%s\n' "$((SECONDS - started))" "$remaining"
+  done
+}
+
 # One scheduling phase: the named applications, at most $1 at a time. An
 # interruption must reach every VM beneath the runner, not only xargs, so the
-# trap walks the whole process tree under it. The heartbeat sleeps in the
-# background and waits on it, because Bash runs a trap only once the
-# foreground command returns, and thirty seconds is too long to keep VMs
-# running after a Ctrl-C.
+# trap walks the whole process tree under it; Bash returns from the builtin
+# wait as soon as a trapped signal arrives, so nothing holds the VMs.
 phase() {
-  local jobs=$1 pid status=0 remaining app
+  local jobs=$1 pid pulse status=0
   shift
   printf '%s\n' "$@" | xargs -P "$jobs" -I{} bash -c 'run_app "$1"' _ {} &
   pid=$!
-  trap 'trap - INT TERM; kill_tree "$pid"; wait "$pid" 2>/dev/null || true; rm -rf "$LOOPEX_CHECK_LOGS"; printf "check: interrupted\n"; exit 130' INT TERM
-  while kill -0 "$pid" 2>/dev/null; do
-    sleep 30 &
-    wait $! 2>/dev/null || true
-    if kill -0 "$pid" 2>/dev/null; then
-      remaining=""
-      for app in "$@"; do
-        [ -e "$LOOPEX_CHECK_LOGS/${app#apps/}.done" ] || remaining="$remaining ${app#apps/}"
-      done
-      printf 'check: suite running total=%ss, still running:%s\n' "$((SECONDS - started))" "$remaining"
-    fi
-  done
+  heartbeat "$pid" "$@" &
+  pulse=$!
+  trap 'trap - INT TERM; kill "$pulse" 2>/dev/null; kill_tree "$pid"; wait "$pid" 2>/dev/null || true; rm -rf "$LOOPEX_CHECK_LOGS"; printf "check: interrupted\n"; exit 130' INT TERM
   wait "$pid" || status=$?
   trap - INT TERM
+  kill "$pulse" 2>/dev/null || true
+  wait "$pulse" 2>/dev/null || true
   return "$status"
 }
 

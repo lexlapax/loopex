@@ -34,7 +34,7 @@ for app in $release_apps; do
   status=${PIPESTATUS[0]}
   set -e
   [ "$status" -eq 0 ] || { printf 'check-release: %s RED\n' "$app" >&2; exit "$status"; }
-  grep -qE '^Result: [1-9][0-9]* passed|^[1-9][0-9]* tests?, 0 failures' "$logs/$app.log" ||
+  bash scripts/suite-summary.sh "$logs/$app.log" >/dev/null ||
     { printf 'check-release: %s executed no test\n' "$app" >&2; exit 1; }
 done
 
@@ -49,7 +49,7 @@ for app in $long_bound_apps; do
   status=${PIPESTATUS[0]}
   set -e
   [ "$status" -eq 0 ] || { printf 'check-release: %s long-duration bounds RED\n' "$app" >&2; exit "$status"; }
-  grep -qE '^Result: [1-9][0-9]* passed|^[1-9][0-9]* tests?, 0 failures' "$logs/$app-long.log" ||
+  bash scripts/suite-summary.sh "$logs/$app-long.log" >/dev/null ||
     { printf 'check-release: %s executed no long-duration bound test\n' "$app" >&2; exit 1; }
 done
 printf 'check-release: PASS total=%ss\n' "$((SECONDS - started))"
