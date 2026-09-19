@@ -79,9 +79,10 @@ hogs to four cores with `taskset -c 0-3`, add one process writing 8 MiB with
 run past its 60 s run deadline as a hang. The frame split reproduced 2 in 34
 before the fix and 0 in 30 after; the same load at a 600 ms cleanup grace
 fails the settlement budget about 40% of the time, which is why the budget
-cases commit two seconds. The script is
-`scripts/fixtures/pinned-load.sh` in spirit only: it is a shell loop any
-Linux host can run, not a repository check.
+cases commit two seconds. The procedure is `scripts/fixtures/pinned-load.sh`,
+which takes an application directory and the test specs and prints one line
+per run and a final count; it needs `taskset`, so it runs on a Linux host
+such as serenity, and it is a developer tool rather than a repository check.
 
 <a id="technical-verification-speed"></a>
 ### Measurements and plan
