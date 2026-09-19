@@ -5109,3 +5109,65 @@ The maintainer answered **"Record as unreproduced, now diagnosable
 nothing: any recurrence of this refusal, on any lane, is a new finding that
 blocks the run it occurs in until its reported cause is fixed or dispositioned.
 It grants no exception, no closure, no integration, tag or release.
+
+<a id="disposition-m3-gate-generation-5-2026-09-18"></a>
+### M3 gate generation 5 acceptance — 2026-09-18
+
+Generation 5 is the fourth transaction of
+[the closed-gate repair and instrumentation chain](#override-disposition-closed-gate-repair-chain-v2-2026-09-17).
+Three defects each stopped the M3 gate before it observed anything. The opening
+probe set a policy and named no identity, which accepted ADR 0024 requires. The
+runner left the telemetry dispatcher, which accepted ADR 0030 admits into core,
+off the probe's code path. And the sealed opening build had no Hex archive, so
+Mix could not resolve that dispatcher at all.
+
+The probe now names the fixed identity `loopex-m3-probe` at revision `1`, the
+runner puts `telemetry` on the probe's code path, and the runner's existing
+validated preparation of the sealed home now runs once, before the opening
+build, instead of only before the later test build. The runner also prints a
+progress line at each step and a heartbeat every 30 seconds, passes the
+inherited lane's output through as it runs, and states its silence bound of 60
+seconds in its header; `scripts/check-closed-gates.sh` prints each gate's
+elapsed seconds when it ends. No command, selector, minimum, witness identity,
+exclusion, provider path, credential contract, exit predicate or report line
+changes.
+
+The first proposal, `357c36be93c4705415d62c899592367ec879bbb2`, repaired the
+missing Hex archive with a copy of its own. Its exact-SHA review found that the
+copy could report a successful copy as red and bypassed the checks the existing
+preparation applies to what it copies, and the maintainer answered
+**"Replace with corrected A' (Recommended)"**. It was replaced by a sibling
+proposal with the same parent that moves the existing preparation instead of
+adding a copy; the first proposal is not part of the integrated history.
+
+Evidence at `e79ba2c5bb1bfe691dcb81e5cff53fc49df3ff76`, on macOS: the status
+check red only with `unfinished shared binding sequence`, because the M4 gate
+also binds `scripts/check-closed-gates.sh` and has not yet taken its own
+transaction. A gate run with the provider frame in which the opening build,
+the opening probe, the isolated test build, all eight protected selectors and
+the four locked Mix commands exited 0, the probe reporting its observation
+where at the previous generation it could not start a runtime; the gate then
+stopped at bootstrap, whose four structural checks and 88-case adversarial
+status suite passed, on that same shared binding sequence. The run printed 57
+heartbeats, no silence exceeded 31 seconds, and neither stream carried
+credential bytes. The same runner bytes passed every M3 lane on Linux. Its
+exact-SHA review accepted it, finding every issue raised against the first
+proposal resolved.
+
+Presented with that proposal, its evidence and its review, the maintainer
+answered **"Accept e79ba2c (Recommended)"**.
+
+This transcribes that answer as acceptance under `amendment-transaction-v2`.
+The rebind completes generation 5's row with the accepting authority, this
+disposition and the candidate it binds, which is exact
+`e79ba2c5bb1bfe691dcb81e5cff53fc49df3ff76`. Binding validation at this rebind
+is judged over M3's own bindings: the M4 gate's binding of
+`scripts/check-closed-gates.sh` is stale until its own next amendment rebinds
+it, and until then bootstrap, the repository status check and the gates that
+run them are not reported green and no such rebind is a closure candidate. As
+the chain disposition orders, no closed gate is required to pass at this
+rebind, and bootstrap's agent bootstrap, gitignore, commit message and
+repository hygiene checks must pass here. The Acceptance and Closure rows of
+Closed M3 stay byte-immutable, no earlier generation stops being enforced for
+the revisions it governed, and this adds no scope, changes no outcome and
+reopens no lifecycle state. It grants no closure, integration, tag or release.
