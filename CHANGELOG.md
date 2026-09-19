@@ -20,6 +20,15 @@ the exact document set its milestone must update.
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [0.1.0] — 2026-09-19
+
+The M4 closure candidate: the first numbered source version. It is a source
+version only, not a package, a publication or a compatibility freeze; the
+`v0.1.0` tag follows the reviewed integrated closure under its own release
+decision.
+
 No package or compatibility-labelled surface is pending.
 
 Implement the accepted [M4 plan](docs/plans/M4.md#concept) on branch `m4`: an
