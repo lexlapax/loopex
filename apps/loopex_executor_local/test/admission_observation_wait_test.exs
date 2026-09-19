@@ -18,6 +18,13 @@ defmodule Loopex.Executor.Local.AdmissionObservationWaitTest do
   # ten-second observation timeout, release it, and require the actual effect
   # and durable receipt. The hold schedules the old timeout boundary; elapsed
   # time or silence is not the result. This does not simulate slow filesystem IO.
+  #
+  # The ten seconds are the claim: this case proves the former observation
+  # timeout is absent, and a hold shorter than it would pass against exactly the
+  # timeout being reintroduced. It is therefore kept whole and tagged
+  # `:long_bound`, which the ordinary suite skips and the closure and release
+  # checks run with `--include long_bound`.
+  @tag :long_bound
   test "a queued public execute waits for its actual reservation result" do
     fixture = fixture()
     {request, grant} = request(fixture, "queued-reservation")
@@ -50,6 +57,10 @@ defmodule Loopex.Executor.Local.AdmissionObservationWaitTest do
   # caller, request, and grant first. Both samples return actual current clocks
   # when released; no deadline or owner fence is replaced. This is a controlled
   # handler delay, not a reproduction of a slow disk or a timing-only verdict.
+  #
+  # The fifteen seconds are the claim, for the reason the case above gives, so
+  # this one is kept whole and tagged `:long_bound` as well.
+  @tag :long_bound
   test "a public execute waits for a held permit handler and its real publication" do
     observer = self()
     correlation = make_ref()

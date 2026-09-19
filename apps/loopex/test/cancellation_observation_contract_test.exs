@@ -374,10 +374,17 @@ defmodule Loopex.CancellationObservationContractTest do
   end
 
   @tag timeout: 70_000
+  @tag :long_bound
   test "configured cancellation observes a delayed callback beyond the legacy sixty second bound" do
     # This is deliberately a real duration rather than a source or call-shape
     # assertion. A configured facade that delegates to cancel/3 stays green for
     # every short callback and is false only after the old defensive bound.
+    #
+    # The duration is the claim, so it is kept and the case is tagged
+    # `:long_bound` instead of being shortened: the ordinary suite excludes that
+    # tag, and the closure and release checks run it with
+    # `--include long_bound`. A case that waited a fraction of the old cutoff
+    # would pass against exactly the reuse of that cutoff it exists to catch.
     delay_ms = 60_500
     grace_ms = 65_000
     started_at = System.monotonic_time(:millisecond)

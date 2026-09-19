@@ -54,4 +54,13 @@ defmodule LoopexTest.Repo do
   end
 end
 
-ExUnit.start()
+# Concept: a case whose claim is a real duration is kept whole and run where
+# waiting minutes is the point.
+#
+# Technical depth: `:long_bound` marks a case that has to outlast a real
+# production ceiling -- the sixty-second cancellation cutoff -- rather than one
+# that merely waits for one. Shortening such a case would make it pass against
+# the mistake it exists to catch, so it keeps its duration and the ordinary
+# suite skips it; the closure and release checks run it with
+# `--include long_bound`.
+ExUnit.start(exclude: [:long_bound])
