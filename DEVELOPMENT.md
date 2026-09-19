@@ -42,7 +42,8 @@ Developer Mode or equivalent symlink permission and Git symlink support.
 
 ## The Two Checks
 
-Before every push, from the repository root:
+Once per integration candidate, from the repository root (hosted CI runs the
+same command on every push and pull request):
 
 ```bash
 bash scripts/check.sh
