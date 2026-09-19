@@ -1,7 +1,7 @@
 Code.require_file("support/provider_phase_diagnostic.exs", __DIR__)
 
 defmodule Loopex.LLM.ReqLLM.ProviderPhaseDiagnosticTest do
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
   import ExUnit.CaptureIO
   alias Loopex.LLM.ReqLLM.ProviderPhaseDiagnostic, as: Diagnostic
 

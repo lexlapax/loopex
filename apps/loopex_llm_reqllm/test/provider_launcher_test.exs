@@ -1,5 +1,5 @@
 defmodule Loopex.LLM.ReqLLM.ProviderLauncherTest do
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
   alias Loopex.LLM.ReqLLM.ProviderLauncher
 

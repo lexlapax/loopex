@@ -1,7 +1,7 @@
 defmodule Loopex.LLM.ReqLLM.StreamingConformanceTest do
   @moduledoc false
 
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
   alias Loopex.Model
   alias Loopex.StreamDomain
