@@ -4060,10 +4060,16 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     # Reaching the deadline while the lease still holds therefore produces a
     # proved cancellation with confirmed cleanup rather than an unknown effect.
     root = workspace()
+    # The delay stays at five seconds. It is not a bound this case waits for but
+    # the window the whole stop has to land inside -- the advanced deadline being
+    # noticed, the group being signalled, and the cooperative share of the
+    # committed period elapsing -- and a two-second window failed exactly that
+    # way under a loaded suite while passing on its own.
     delay = 5_000
 
     {clock, wall, advance} = controlled_deadline_clock()
     {executor, lease_id} = executor_with_options(root, clock_provider: clock)
+
     observer = self()
 
     running =

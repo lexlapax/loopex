@@ -188,7 +188,16 @@ defmodule Loopex.Executor.LocalTest do
   test "the workspace lease is held for the job lifetime and loss kills owned work with retained evidence" do
     fixture = fixture("lease-loss")
     on_exit(fn -> stop_fixture(fixture) end)
-    {default_job, default_grant} = job_and_grant(fixture, "lease-loss", "loopex.demo.wait_write")
+    # The demonstration's delay is declared per job. Two seconds is the whole
+    # horizon this case waits out below, and it still starts well before the
+    # lease is stopped, so shortening it changes how long the case takes and
+    # nothing about what it observes.
+    {default_job, default_grant} =
+      job_and_grant(fixture, "lease-loss", "loopex.demo.wait_write", %{
+        "relative_path" => "lease-loss.txt",
+        "content" => "bytes-lease-loss",
+        "delay_ms" => 2_000
+      })
 
     # Concept: lease loss ends this real job under its own committed period.
     # Technical depth: the unchanged five-second observation must cover both
@@ -243,10 +252,10 @@ defmodule Loopex.Executor.LocalTest do
     assert :erlang.binary_to_term(retained_bytes, [:safe]) == receipt
     assert {:ok, ^receipt} = Local.receipt(fixture.executor, job.job_id)
 
-    # The demo waits five seconds before writing. Waiting beyond that declared
+    # The demo waits two seconds before writing. Waiting beyond that declared
     # horizon proves the owned effect was actually stopped rather than merely
     # checking before a surviving child had time to act.
-    Process.sleep(5_500)
+    Process.sleep(2_500)
 
     refute File.exists?(Path.join(fixture.workspace, "lease-loss.txt"))
   end
@@ -676,7 +685,15 @@ defmodule Loopex.Executor.LocalTest do
   test "a receipt lookup for a job this executor still holds answers effect_in_flight" do
     fixture = fixture("in-flight-receipt")
     on_exit(fn -> stop_fixture(fixture) end)
-    {job, grant} = job_and_grant(fixture, "in-flight", "loopex.demo.wait_write")
+    # Two seconds of declared delay: the lookup below polls from the moment the
+    # job is dispatched, so the window only has to be longer than one poll, and
+    # the case waits out the rest of it before it can read the retained receipt.
+    {job, grant} =
+      job_and_grant(fixture, "in-flight", "loopex.demo.wait_write", %{
+        "relative_path" => "in-flight.txt",
+        "content" => "bytes-in-flight",
+        "delay_ms" => 2_000
+      })
 
     running = Task.async(fn -> Local.execute(fixture.executor, job, grant) end)
 
