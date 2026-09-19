@@ -39,7 +39,15 @@ defmodule Loopex.LLM.ReqLLM.ProviderStartupBoundariesTest do
             capture_io(fn ->
               for mode <- [:reply, :pre_entry_crash] do
                 fixture = Fixture.new(mode, paused: true)
-                call = Fixture.managed(fixture, Fixture.request(), :unmanaged)
+
+                # The failing child never becomes ready, so its refusal is
+                # reached by the committed deadline expiring: that deadline, not
+                # the entry failure, is what this case used to spend ten seconds
+                # on. Three seconds is still several times what the real
+                # successful child in the first mode needs to answer.
+                call =
+                  Fixture.managed(fixture, Fixture.request(deadline_ms: 3_000), :unmanaged)
+
                 caller = call.caller
                 guardian = call.guardian
                 guardian_monitor = call.monitor

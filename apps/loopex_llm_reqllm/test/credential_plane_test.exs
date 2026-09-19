@@ -552,8 +552,16 @@ defmodule Loopex.LLM.ReqLLM.CredentialPlaneTest do
       fixture = Fixture.new()
       options = Keyword.put(fixture.options, :build_manifest_sha256, String.duplicate("9", 64))
 
+      # The refusal is reached by the committed transfer deadline expiring on a
+      # child that never becomes ready, so the deadline is the whole cost of this
+      # case. Two seconds is the same finite deadline C15 below commits, and the
+      # refusal it proves is the same one at any value.
       assert_private(fn ->
-        assert Adapter.complete(Fixture.request(), options, Model.discard_progress()) == @refused
+        assert Adapter.complete(
+                 Fixture.request(deadline_ms: 2_000),
+                 options,
+                 Model.discard_progress()
+               ) == @refused
       end)
 
       assert Fixture.canaries(fixture) == 0

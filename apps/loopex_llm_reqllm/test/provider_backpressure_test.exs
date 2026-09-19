@@ -94,7 +94,13 @@ defmodule Loopex.LLM.ReqLLM.ProviderBackpressureTest do
       :erlang.trace_pattern({:erlang, :time_offset, 1}, false, [])
     end)
 
-    {fixture, request, call, receiver, _socket} = start_blocked(Fixture.request(), true)
+    # Every wait below is derived from this request's own committed deadline, and
+    # the case waits the whole of it out with the writer deliberately blocked, so
+    # the deadline is this case's entire cost. Three seconds is several times the
+    # fixture's own setup and proves the same independent cleanup.
+    {fixture, request, call, receiver, _socket} =
+      start_blocked(Fixture.request(deadline_ms: 3_000), true)
+
     guardian = call.guardian
     delivered = :erlang.trace_delivered(guardian)
     assert_receive {:trace_delivered, ^guardian, ^delivered}, remaining(request)
