@@ -148,7 +148,8 @@ completes. Give measured durations, not projections.
 
 A *milestone* is bounded work described by one plan pair in `docs/plans/`,
 indexed and tracked in [docs/plans/README.md](docs/plans/README.md), the
-canonical status register. Names are lowercase slugs or `M` followed by digits.
+canonical status register. Names are lowercase slugs, `M` followed by digits,
+or a version-shaped slug such as `v0.1`.
 A *release* is a separately authorized publication.
 
 A milestone runs in four steps; the

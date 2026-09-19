@@ -30,8 +30,8 @@ technical guidance. The process is the
    status until it is, and none may be outstanding at closure. Each is accepted
    before the implementation that depends on it, not before unrelated work.
 4. Add the row to the register in `docs/plans/README.md` as `Open`, with the
-   pair's links and `—` in the Gate column, and index the pair in that file's
-   Files section. Every Progress and Evidence row reads `Open`.
+   pair's links and `—` in the Gate column. That row is the pair's index;
+   nothing else lists it. Every Progress and Evidence row reads `Open`.
 5. Run `mix loopex.status`: it derives the Current Status capsule and the root
    `README.md` summary sentence from the register and prints the exact values
    it expects. Update both in the same change.

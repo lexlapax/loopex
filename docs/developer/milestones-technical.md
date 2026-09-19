@@ -29,13 +29,16 @@ needed); Ownership and Rejoin (only if workstreams run in parallel);
 Compatibility, Migration and Rollback; Packaging if any.
 
 Register: add `| \`NAME\` | Open | [concept](NAME.md) | [technical depth](NAME-technical.md) | — |`
-to the Milestone Register table in `docs/plans/README.md` and index the pair
-in its Files section; a gate column entry is `—` for a new milestone. Then run
+to the Milestone Register table in `docs/plans/README.md`; a gate column entry
+is `—` for a new milestone. That row is the pair's index — the index's Files
+section states the naming convention and indexes nothing. Then run
 `mix loopex.status`; it refuses until the Current Status capsule holds the
 values it derives for an `Open` milestone and prints what it expects.
 
-Names: lowercase ASCII letters and digits separated by single hyphens, or `M`
-followed by digits; at most 64 bytes; unique under case folding.
+Names: lowercase ASCII letters and digits separated by single hyphens, `M`
+followed by digits, or a version-shaped numeric slug such as `1.0` or `v0.1`;
+at most 64 ASCII bytes; unique under case folding; none of the reserved names
+the index lists.
 
 <a id="technical-milestones-develop"></a>
 ### Branches, worktrees and progress

@@ -466,8 +466,8 @@ decision; it is not repeated here, because a second copy would drift.
 repeats: agree, develop, review, close. One anticipated successor may be opened
 for planning alongside it without widening product authority.
 
-**After M0 closes.** None of this changes. The verbs, their authority, and their
-stopping points are independent of the toolchain underneath. M0 replaces the
+**M0's closure changed none of this.** The verbs, their authority, and their
+stopping points are independent of the toolchain underneath. M0 replaced the
 temporary Python and `jq` bridges with the accepted Elixir/Mix entrypoints, and
 the commands those verbs run are recorded in
-[DEVELOPMENT.md](../../DEVELOPMENT.md), which is where that migration lands.
+[DEVELOPMENT.md](../../DEVELOPMENT.md).
