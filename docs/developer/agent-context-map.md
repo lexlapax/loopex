@@ -5171,3 +5171,70 @@ repository hygiene checks must pass here. The Acceptance and Closure rows of
 Closed M3 stay byte-immutable, no earlier generation stops being enforced for
 the revisions it governed, and this adds no scope, changes no outcome and
 reopens no lifecycle state. It grants no closure, integration, tag or release.
+
+<a id="disposition-m4-amendment-8-2026-09-18"></a>
+### M4 gate amendment acceptance, the shared binding and a running gate — 2026-09-18
+
+Amendment 8 is the last transaction of
+[the closed-gate repair and instrumentation chain](#override-disposition-closed-gate-repair-chain-v2-2026-09-17).
+[M3 gate generation 5](#disposition-m3-gate-generation-5-2026-09-18) changed
+`scripts/check-closed-gates.sh`, which this gate also binds, and left this gate
+as the pending holder. The amendment rebinds this holder to the bytes
+generation 5 accepted, which completes that shared sequence. It also has the
+manifest validator refuse any locked witness name whose registered form would
+exceed the 255-byte atom limit, with a locked witness of its own, which closes
+the class Amendment 7 repaired one instance of; and it brings the runner under
+the observability rule in `AGENTS.md`: a progress line when a silent step
+begins, a heartbeat every 30 seconds with a stated 60-second silence bound, and
+the builds, the opening probe, every protected selector and the inherited lane
+streaming as they run where they were printed only when they ended or failed.
+The new witness raises that selector's minimum from two executed cases to
+three. No other outcome, lane, command, seed, selector path, limit, fixture,
+client pin, evidence class, credential rule or report line changes, neither
+envelope moves, and no lifecycle state reopens.
+
+The first proposal, `369cda704f0c4190e83dd87d21c2db81265d55e9`, was accepted by
+its exact-SHA review with six low findings, four of them in the bound bytes: its
+text said no limit changed, it left out of its rebind requirements that this
+gate must reproduce at the rebind the product state proved at the proposal, it
+left both builds buffered while saying the runner conformed, and the runner's
+header overstated which steps print. The maintainer answered **"Replace with
+corrected A' (Recommended)"**. It was replaced by a sibling proposal with the
+same parent that corrects all four and states the fifth, that `tee` waits for
+every process holding its input, so a descendant that outlives its lane holds
+that lane, observably, until it exits. The first proposal is not part of the
+integrated history. After the replacement, an unrelated documentation commit,
+`225440139193553a3e505c0f412ad5c17f56eb7c`, was pushed on top of it; it was
+moved, with the maintainer's authorization, to a branch of its own before this
+rebind so that nothing intervenes, and it is not part of this transaction.
+
+Evidence at `8865f03e9221772e8daa1075d4880d00e6b6904f`, on macOS: the status
+check red only with `unfinished shared binding sequence`; a gate run with the
+provider frame in which the opening build, the opening probe, which passed, the
+isolated test build, all twelve protected selectors and the four locked Mix
+commands exited 0, and which stopped at bootstrap on that same line after its
+structural checks passed; 60 heartbeats, no silence longer than 31 seconds, and
+no credential bytes in either stream. Run directly, the status check's
+post-history checks found every bound artifact of every gate matching and every
+plan's governance holding except this plan's Acceptance row, which named the
+previous gate digest. Its exact-SHA review accepted it with every earlier
+finding resolved. Carried as recorded limitations: after cleanup stops the
+heartbeat, a `sleep` it started can hold the gate's output open for up to a
+second, as recorded for M0 generation 8 and M2 generation 13; the runner still
+requires `cat` among its tools though it no longer uses it; and the runner's
+header states the silence bound from the end of its read-only inspection where
+the amendment states it from the task root's creation.
+
+Presented with that proposal, its evidence and its review, the maintainer
+answered **"Accept 8865f03 (Recommended)"**.
+
+This transcribes that answer as acceptance under `amendment-transaction-v1`. The
+rebind binds the Acceptance row to exact
+`8865f03e9221772e8daa1075d4880d00e6b6904f` with the amended gate digest and both
+envelope digests unchanged, since neither envelope moved. At this rebind no
+holder of a shared artifact is pending, so binding validation and bootstrap
+must pass; this gate must reproduce the product state proved at the proposal;
+and one run of `bash scripts/check-closed-gates.sh --before M4` with the
+provider frame, green for M0, M1, M2 and M3 on their instrumented runners, is
+retained with the exact revision it ran at as the chain disposition's
+replacement evidence. It grants no closure, integration, tag or release.
