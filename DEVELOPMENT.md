@@ -218,5 +218,7 @@ Canonical behavior lives in [AGENTS.md](AGENTS.md) and routes through
 Read [AGENTS.md](AGENTS.md), then the
 [plans status register](docs/plans/README.md), and use the
 [agent context map](docs/developer/agent-context-map.md) only to load relevant
-Concept sections and their exact Technical depth. Product work happens on the
-milestone branch and integrates to `main` at closure.
+Concept sections and their exact Technical depth. Work lands on `main` in small
+reviewed changes, as the
+[milestone guide](docs/developer/milestones.md#concept-milestones-develop)
+describes.

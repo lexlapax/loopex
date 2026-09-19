@@ -17,9 +17,13 @@ technical guidance. The process is the
    is open; say so.
 2. Update the documentation the milestone changed: `CHANGELOG.md`, `README.md`,
    the affected `docs/` pages and indexes.
-3. From the exact committed candidate, run `bash scripts/check.sh` on each
-   supported platform and `bash scripts/check-release.sh` once. Retain each
-   run's complete output with the candidate SHA, platform, and toolchain.
+3. From the exact committed candidate, run the closure matrix in the
+   [verification guide](../../../docs/developer/verification.md#concept-verification-stages):
+   `bash scripts/check.sh` under the floor toolchain pair and
+   `bash scripts/check-release.sh` once. The current pair's fast check is the
+   CI run the candidate already produced; count it rather than repeating it.
+   Retain each run's complete output with the candidate SHA, platform, and
+   toolchain.
 4. Ask an independent reviewer to read the candidate for outcome compliance,
    correctness, test honesty, public impact, security, and rollback.
 5. Present the packet to the maintainer: outcomes and their proof, check

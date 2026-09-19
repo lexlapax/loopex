@@ -162,10 +162,13 @@ A milestone runs in four steps; the
    the first integrated workflow early, then add boundary and failure cases as
    implementation reaches them.
 3. **Close.** Every outcome maps to tests, retained evidence, or a
-   demonstration. Run `bash scripts/check.sh` on each supported platform and
-   `bash scripts/check-release.sh` once, from the exact candidate; an
-   independent reviewer reads the candidate; the maintainer closes it and the
-   register moves to `Closed`.
+   demonstration. From the exact candidate run the closure matrix the
+   [verification guide](docs/developer/verification.md#concept-verification-stages)
+   states once: `bash scripts/check.sh` under the floor toolchain pair and
+   `bash scripts/check-release.sh` once, counting the current-pair CI run the
+   candidate already produced rather than repeating it. An independent reviewer
+   reads the candidate; the maintainer closes it and the register moves to
+   `Closed`.
 4. **Release.** Publication, tags, and packages are separate maintainer
    decisions that reuse the closure evidence when the source is unchanged.
 

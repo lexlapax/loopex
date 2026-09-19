@@ -14,13 +14,14 @@ cd "$(git rev-parse --show-toplevel)"
 integration="${LOOPEX_INTEGRATION_REF:-origin/main}"
 status=0
 
-# The designated current-milestone branch is the documented exception. Once a
-# governance-only Acceptance checkpoint integrates, that branch is contained in
-# the integration ref while still owning the milestone's unintegrated
-# implementation until closure, so reporting it as landed work tells an
-# integrator to delete the one branch the contract says stays live. The name is
-# read from the canonical register rather than hardcoded, and compared under
-# case folding because milestone slugs are unique that way.
+# A branch named after the delivering milestone is the one exception. Work
+# normally lands on `main` in small reviewed changes and such a branch usually
+# does not exist; when a milestone does use one for a slice that cannot be
+# merged safely in pieces, its earlier reviewed changes are already contained in
+# the integration ref while the branch still owns the rest, so reporting it as
+# landed work would tell an integrator to delete live work. The name is read
+# from the canonical register rather than hardcoded, and compared under case
+# folding because milestone slugs are unique that way.
 milestone="$(awk -F'|' '
   $2 ~ /^ `[A-Za-z0-9.-]+` $/ && $3 ~ /^ (Accepted|In progress|In review) $/ {
     name = $2
