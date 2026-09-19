@@ -1825,10 +1825,19 @@ defmodule Loopex.ProviderAttemptProtocolTest do
              end)
 
       if phase == :after_send do
-        assert Enum.any?(result.progress, fn item ->
-                 item.kind == :text_delta and
-                   item.stream_domain_id == result.predecessor_domain
-               end)
+        # Progress reaches this process through the dispatcher, asynchronously
+        # to the store the terminal was read from, so the predecessor's delta
+        # may still be in flight when the sweep above ran; a loaded host showed
+        # exactly that. It is waited for, not swept for.
+        predecessor_domain = result.predecessor_domain
+
+        unless Enum.any?(result.progress, fn item ->
+                 item.kind == :text_delta and item.stream_domain_id == predecessor_domain
+               end) do
+          assert_receive {:loopex_progress,
+                          %{kind: :text_delta, stream_domain_id: ^predecessor_domain}},
+                         5_000
+        end
       else
         refute Enum.any?(result.progress, fn item ->
                  item.stream_domain_id == result.predecessor_domain
