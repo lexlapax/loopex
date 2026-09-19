@@ -92,6 +92,12 @@ input to the decision and never the decision itself. `LOOPEX_POLICY=allow-all`
 allows every call and says so once on standard error; it is permissive local
 authority, not a permission model.
 
+**A question has five minutes, counted from when it committed and capped by the
+run's deadline.** The instant is fixed once and never extended — not by a
+restart, not by attaching a second time. Unanswered by then, the question ends
+as an expiry and the tool call it suspended is denied; that denial is a
+truthful outcome, not an error, and it is never retried.
+
 ### Launch it
 
 ```bash
@@ -238,6 +244,19 @@ then asked again, exactly as it would have been in the original process.
 
 This is why EOF cancels nothing. A client that crashed mid-question can come
 back and finish.
+
+**The clock does not stop while the process is gone.** A recovered question is
+re-armed against what is left of the instant it was given, not against a fresh
+five minutes. Kill a server four minutes into a question and restart it three
+minutes later, and the recovered question is already past its expiry: it
+resolves as expired immediately and the tool call it suspended is denied. There
+is nothing to answer by then, and nothing was lost — the denial is durable and
+the session is intact. If you expect a gap that long, abort the run and prompt
+again rather than restarting into a question that cannot be answered.
+
+An answer that committed before the loss is different: it is not re-armed at
+all, because the run owes it a resumed evaluation rather than a timer. An
+expiry can never overtake an answer that was already durable.
 
 <a id="operator-app-server-artifacts"></a>
 ## Artifact Transfers and What They Cost

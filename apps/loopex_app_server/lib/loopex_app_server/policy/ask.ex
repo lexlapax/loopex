@@ -25,9 +25,18 @@ defmodule Loopex.AppServer.Policy.Ask do
   real authorization rather than a relayed one.
 
   `expires_in_ms` is five minutes, because the answering party here is a person
-  at a client rather than a program. An expired question is re-armed rather than
-  answered, and a run that loses its serving process finds the same question
-  pending when it comes back.
+  at a client rather than a program. It is a request, not the lifetime: the
+  runtime fixes an absolute instant once, at the committed creation, as the
+  earlier of five minutes from that instant and the run's own deadline, and
+  every later owner reuses it.
+
+  That instant survives a restart and is not extended by one. A recovered owner
+  re-arms a still-pending question against the time remaining, so a server
+  killed four minutes into a question and restarted three minutes later
+  recovers a question whose instant has already passed: it expires at once, and
+  the tool call it suspended is denied. A question that was already answered is
+  not re-armed at all — it is owed a resumed evaluation instead, which is why an
+  answer that committed before the loss is never overtaken by an expiry.
 
   A deferral reaching a caller that cannot hold a question open resolves to
   `interaction_unsupported` at the port, so selecting this policy for such a
