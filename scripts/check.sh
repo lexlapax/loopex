@@ -112,7 +112,7 @@ phase() {
   shift
   printf '%s\n' "$@" | xargs -P "$jobs" -I{} bash -c 'run_app "$1"' _ {} &
   pid=$!
-  trap 'trap - INT TERM; kill_tree "$pid"; wait "$pid" 2>/dev/null; rm -rf "$LOOPEX_CHECK_LOGS"; printf "check: interrupted\n"; exit 130' INT TERM
+  trap 'trap - INT TERM; kill_tree "$pid"; wait "$pid" 2>/dev/null || true; rm -rf "$LOOPEX_CHECK_LOGS"; printf "check: interrupted\n"; exit 130' INT TERM
   while kill -0 "$pid" 2>/dev/null; do
     sleep 30 &
     wait $! 2>/dev/null || true

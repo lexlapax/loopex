@@ -36,9 +36,11 @@ the runner has four cores and two applications share them, and the provider
 suite's child VMs, booting under the product's 10 s deadline, starved behind
 the other application's compiles (`core_only`, `foundation_workflow`) until a
 boot crossed the deadline (run at c38fd18). With the box to itself the boot is
-seconds. The runner is also slow and uneven: compilation there took 38–59 s
-against 1 s warm on the Mac, and the same `loopex_cli` suite took 118 s at
-noon and 155 s in the evening.
+seconds: the run at 4bb7b94 passed with the provider suite alone in 349 s and
+the whole check in 754 s. The runner is also slow and uneven: compilation
+there took 38–59 s against 1 s warm on the Mac, and the same `loopex_cli`
+suite took 118 s at noon and 155 s in the evening. On the Mac the same knob
+costs about 210 s, which is why it is off by default.
 
 Evidence retention: a closure keeps one page under `docs/evidence/` naming the
 candidate, each run's platform, toolchain, result and measured duration, as
