@@ -5660,11 +5660,25 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
   # a shell beside a competing writer on the same pipe, two hundred times, and
   # requires every frame to have landed contiguous.
   test "a guard frame is one write that a competing writer cannot split" do
+    token = String.duplicate("t", 24)
     {"/usr/bin/env", vector} = Local.launcher_vector(%{argv: ["/usr/bin/true"]})
     script = Enum.at(vector, Enum.find_index(vector, &(&1 == "loopex-port-carrier")) + 1)
 
-    refute script =~ ~r/printf '\\n/,
-           "a guard frame format begins with a newline the shell would flush on its own"
+    # The invariant is exactly one newline per frame format, and it is the
+    # last thing in the format: a leading one flushes alone, and a second one
+    # anywhere would split the frame the same way. Every frame the guard
+    # writes to the control descriptor is held to it, the preamble and the
+    # KILL acknowledgement included.
+    formats = Regex.scan(~r/printf '([^']*)'[^\n]*>&3/, script, capture: :all_but_first)
+    assert length(formats) >= 4, "the guard script writes fewer frames than it did"
+
+    for [format] <- formats do
+      assert String.ends_with?(format, "\\n"),
+             "frame format #{inspect(format)} does not end its line"
+
+      assert length(String.split(format, "\\n")) == 2,
+             "frame format #{inspect(format)} holds more than one newline"
+    end
 
     assert script =~
              ~r/printf 'loopex-command-status:%s:wrapper:%s\\n' "\$token" "\$status_pid" >&3/
@@ -5672,17 +5686,30 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     assert script =~
              ~r/printf 'loopex-command-status:%s:status:%s\\n' "\$token" "\$command_status" >&3/
 
+    # Half the frames come from the shell itself, as the wrapper frame does,
+    # and half from a forked subshell, as the status frame does; the competitor
+    # writes a fixed twenty thousand bytes one at a time so the volume and the
+    # runtime do not depend on how starved the host is. The token is the
+    # production length.
     command = """
     exec 3>&2
-    ( while :; do printf x; done ) &
+    ( i=0; while [ "$i" -lt 20000 ]; do printf .; i=$((i + 1)); done ) &
     hog=$!
+    (
+      i=100
+      while [ "$i" -lt 200 ]; do
+        printf 'loopex-command-status:#{token}:wrapper:%s\\n' "$i" >&3
+        i=$((i + 1))
+      done
+    ) &
+    forked=$!
     i=0
-    while [ "$i" -lt 200 ]; do
-      printf 'loopex-command-status:probe-token:wrapper:%s\\n' "$i" >&3
+    while [ "$i" -lt 100 ]; do
+      printf 'loopex-command-status:#{token}:wrapper:%s\\n' "$i" >&3
       i=$((i + 1))
     done
-    kill "$hog"
-    wait "$hog" 2>/dev/null
+    wait "$forked"
+    wait "$hog"
     exit 0
     """
 
@@ -5695,11 +5722,14 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
       ])
 
     output = drain_port(port, [])
-    frames = Regex.scan(~r/loopex-command-status:probe-token:wrapper:\d+\n/, output)
+    frames = Regex.scan(~r/loopex-command-status:#{token}:wrapper:\d+\n/, output)
     assert length(frames) == 200, "#{length(frames)} of 200 frames landed whole"
 
-    refute output =~ ~r/loopex-command-status:(?!probe-token:wrapper:\d+\n)/,
+    refute output =~ ~r/loopex-command-status:(?!#{token}:wrapper:\d+\n)/,
            "a frame was split by the competing writer"
+
+    assert length(Regex.scan(~r/\./, output)) == 20_000,
+           "the competitor's bytes were not all delivered"
   end
 
   defp drain_port(port, acc) do
