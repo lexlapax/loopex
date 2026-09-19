@@ -22,6 +22,9 @@ printf 'check-release: candidate %s on %s %s\n' "$(git rev-parse HEAD)" "$(uname
 # global state then cannot reach the applications that run after it.
 for app in apps/*/; do
   app=${app%/}
+  # An application with no tagged test is skipped: `mix test --only` treats
+  # running nothing as a failure, and here it is simply nothing to run.
+  grep -rqE '@(module)?tag :(real_provider|node_client)' "$app/test" || continue
   printf 'check-release: %s\n' "${app#apps/}"
   (cd "$app" && mix test --only real_provider --only node_client)
 done
