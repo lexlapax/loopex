@@ -1,4 +1,5 @@
 Code.require_file("../../loopex_llm_reqllm/test/support/provider_build_fixture.exs", __DIR__)
+Code.require_file("support/source_archive.exs", __DIR__)
 
 defmodule Loopex.AppServer.ExternalWorkflowRealTest do
   @moduledoc """
@@ -55,6 +56,7 @@ defmodule Loopex.AppServer.ExternalWorkflowRealTest do
   use ExUnit.Case, async: false
 
   alias Loopex.LLM.ReqLLM
+  alias Loopex.AppServer.SourceArchive
   alias Loopex.LLM.ReqLLM.ProviderBuildFixture
   alias Loopex.Store
   alias LoopexProtocol.Wire
@@ -87,13 +89,13 @@ defmodule Loopex.AppServer.ExternalWorkflowRealTest do
     elixir = System.find_executable("elixir") || flunk("Elixir is unavailable")
     mix = System.find_executable("mix") || flunk("Mix is unavailable")
 
-    root = owned_root()
+    root = SourceArchive.owned_root("real-workflow")
     # Set LOOPEX_KEEP_ROOT to inspect the retained store after a failure.
     if System.get_env("LOOPEX_KEEP_ROOT") in [nil, ""], do: on_exit(fn -> File.rm_rf(root) end)
     IO.puts(:stderr, "real workflow root: #{root}")
 
-    extracted = extract_committed_candidate!(root)
-    build_extraction!(extracted, mix)
+    extracted = SourceArchive.extract!(root)
+    SourceArchive.build!(extracted, mix)
 
     home = Path.join(root, "home")
     workspace = Path.join(root, "workspace")
@@ -252,79 +254,6 @@ defmodule Loopex.AppServer.ExternalWorkflowRealTest do
     """
   end
 
-  # Concept: the exact committed revision, as a reader could fetch it by name.
-  #
-  # Technical depth: the archive is staged from `HEAD` rather than from the
-  # working tree, and a dirty tree refuses, because extracting a tree that has
-  # uncommitted bytes in it would prove something about nothing anyone can name.
-  # What comes out carries no build, no dependencies and no Git directory.
-  defp extract_committed_candidate!(root) do
-    repository = repository_root()
-    {committed, 0} = System.cmd("git", ["rev-parse", "HEAD"], cd: repository)
-    committed = String.trim(committed)
-    {dirty, 0} = System.cmd("git", ["status", "--porcelain"], cd: repository)
-
-    assert dirty == "",
-           "the tree is not the committed candidate; extracting it would prove nothing: #{dirty}"
-
-    archive = Path.join(root, "source.tar")
-
-    {_output, 0} =
-      System.cmd("git", ["archive", "--format=tar", "-o", archive, committed], cd: repository)
-
-    extracted = Path.join(root, "source")
-    File.mkdir_p!(extracted)
-    {_output, 0} = System.cmd("tar", ["-xf", archive, "-C", extracted])
-
-    refute File.exists?(Path.join(extracted, "_build"))
-    refute File.exists?(Path.join(extracted, "deps"))
-    refute File.exists?(Path.join(extracted, ".git"))
-    assert File.exists?(Path.join(extracted, "mix.exs"))
-    assert File.exists?(Path.join([extracted, "clients", "node", "interaction-workflow.mjs"]))
-
-    IO.puts(:stderr, "extracted candidate: #{committed}")
-    extracted
-  end
-
-  # Concept: the build the operator guide names, run in the extraction.
-  #
-  # Technical depth: the guide says `mix deps.get` and then `MIX_ENV=prod mix
-  # compile`. The fetch is replaced by a copy of the tree this suite's own build
-  # resolved, so the compile is offline. The build is named into the extraction
-  # itself: a runner that exports `MIX_BUILD_ROOT` to isolate its own lanes would
-  # otherwise send these beams to that root and leave the extraction with nothing
-  # for the consumer to load, and `MIX_BUILD_PATH` is cleared because it outranks
-  # `MIX_BUILD_ROOT` and a runner that sets it would have this build overwrite
-  # that runner's own beams.
-  defp build_extraction!(extracted, mix) do
-    repository = repository_root()
-
-    deps =
-      Path.expand(System.get_env("MIX_DEPS_PATH") || Path.join(repository, "deps"), repository)
-
-    File.cp_r!(deps, Path.join(extracted, "deps"))
-
-    {output, status} =
-      System.cmd(mix, ["compile"],
-        cd: extracted,
-        stderr_to_stdout: true,
-        env: [
-          {"MIX_ENV", "prod"},
-          {"MIX_BUILD_PATH", nil},
-          {"MIX_BUILD_ROOT", Path.join(extracted, "_build")},
-          {"MIX_DEPS_PATH", Path.join(extracted, "deps")}
-        ]
-      )
-
-    assert status == 0, "the extracted source did not build: #{output}"
-
-    for application <- ~w(loopex_protocol loopex loopex_app_server loopex_composition
-                          loopex_store_local loopex_executor_local loopex_llm_reqllm) do
-      assert File.dir?(Path.join([extracted, "_build", "prod", "lib", application, "ebin"])),
-             "#{application} is missing from the extracted build"
-    end
-  end
-
   # Concept: an ordinary operator workspace: the file to read, and one project
   # skill the host discovers for itself.
   #
@@ -394,20 +323,6 @@ defmodule Loopex.AppServer.ExternalWorkflowRealTest do
     header <> String.duplicate(line, div(3 * 16_384, byte_size(line)))
   end
 
-  # Concept: an owned temporary root nothing else writes to.
-  #
-  # Technical depth: resolved to its physical path. On this platform the
-  # temporary directory is reached through a symlink, and Mix computes a
-  # dependency's `priv` link between two spellings of the same place, which
-  # breaks both the provider build and the extraction build this root holds.
-  defp owned_root do
-    {physical, 0} = System.cmd("pwd", ["-P"], cd: System.tmp_dir!())
-    nonce = Base.encode16(:crypto.strong_rand_bytes(8), case: :lower)
-    root = Path.join(String.trim(physical), "loopex-m4-real-workflow-#{nonce}")
-    File.mkdir!(root)
-    root
-  end
-
   defp path, do: System.get_env("PATH") || "/usr/bin:/bin"
 
   defp retained_records(state_root, session_id) do
@@ -454,8 +369,6 @@ defmodule Loopex.AppServer.ExternalWorkflowRealTest do
   end
 
   defp index_of(list, value), do: Enum.find_index(list, &(&1 == value))
-
-  defp repository_root, do: Path.expand(Path.join([__DIR__, "..", "..", ".."]))
 
   defp decode(output) do
     {:ok, decoded} =

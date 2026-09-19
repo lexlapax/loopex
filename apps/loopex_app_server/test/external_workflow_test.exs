@@ -1,3 +1,5 @@
+Code.require_file("support/source_archive.exs", __DIR__)
+
 defmodule Loopex.AppServer.ExternalWorkflowTest do
   @moduledoc """
   ## Concept
@@ -23,6 +25,7 @@ defmodule Loopex.AppServer.ExternalWorkflowTest do
 
   use ExUnit.Case, async: false
 
+  alias Loopex.AppServer.SourceArchive
   alias LoopexProtocol.Frame
   alias LoopexProtocol.Session
 
@@ -282,6 +285,118 @@ defmodule Loopex.AppServer.ExternalWorkflowTest do
     # The Store outlived both processes, which is what made the second one a
     # successor rather than a fresh start.
     assert File.exists?(store)
+  end
+
+  # Concept: an operator extracts the source they were given, builds it the way
+  # the guide says, and runs the guide's first consumer command against the
+  # shipped host.
+  #
+  # Technical depth: this is the buildability half of the archive claim and it
+  # costs no credential, so an ordinary client lane can run it. The command is
+  # the guide's own text, glob and all, because the argument shape is part of
+  # the instruction: the client turns every argument that is not an `.exs` file
+  # into a code directory, so `_build/prod/lib/*/ebin` either expands to a
+  # working code path or the documented command does not work.
+  #
+  # No model answers. The launch configuration names a companion that is not on
+  # disk, so the run ends at its first dispatch, and the case says so by
+  # asserting that no tool finished. What it proves is that the extracted source
+  # builds, that the shipped host composes from operator inputs alone, and that
+  # a session runs end to end over the wire under `allow-all`. A model answering
+  # is the neighbouring real-provider case's business, and this one does not
+  # pretend to it.
+  @tag :node_client
+  @tag timeout: 600_000
+  test "a fresh extraction of the exact source candidate builds and serves the shipped host through the documented consumer command" do
+    node_executable = System.find_executable("node") || flunk("Node is unavailable")
+    elixir = System.find_executable("elixir") || flunk("Elixir is unavailable")
+    mix = System.find_executable("mix") || flunk("Mix is unavailable")
+
+    root = SourceArchive.owned_root("extraction")
+    on_exit(fn -> File.rm_rf(root) end)
+
+    extracted = SourceArchive.extract!(root)
+    SourceArchive.build!(extracted, mix)
+
+    home = Path.join(root, "home")
+    workspace = Path.join(root, "workspace")
+    Enum.each([home, workspace], &File.mkdir_p!/1)
+
+    placeholder = "not-a-real-credential"
+
+    environment = [
+      {"PATH",
+       Enum.join(
+         [
+           Path.dirname(elixir),
+           Path.dirname(node_executable),
+           System.get_env("PATH") || "/usr/bin:/bin"
+         ],
+         ":"
+       )},
+      {"LOOPEX_HOME", home},
+      {"LOOPEX_WORKSPACE", workspace},
+      {"LOOPEX_PROVIDER_LAUNCH", SourceArchive.absent_companion_launch!(root)},
+      {"LOOPEX_POLICY", "allow-all"},
+      {"LOOPEX_PROVIDER_API_KEY", placeholder},
+      {"ELIXIR_ERL_OPTIONS", "-noinput"}
+    ]
+
+    {output, status} =
+      System.cmd("/bin/sh", ["-c", documented_consumer_command(extracted)],
+        env: environment,
+        stderr_to_stdout: false
+      )
+
+    assert status == 0, "the documented consumer command failed: #{output}"
+
+    summary = decode(output)
+
+    refute Map.has_key?(summary, "failed"),
+           "the extracted consumer reported: #{summary["failed"]}"
+
+    # The client negotiated the generation this build speaks and read the exact
+    # schema digest off the wire before it changed anything.
+    assert summary["generation"] == Session.generation()
+    assert String.match?(summary["schema_digest"], ~r/\A[0-9a-f]{64}\z/)
+
+    # A whole session, from a host composed out of nothing but those inputs.
+    assert summary["session_created"]
+    assert summary["command_id_returned"] == "client-create"
+    assert summary["prompt_accepted"]
+    assert "run.finished" in summary["event_kinds"]
+    assert summary["sequences_ordered"]
+
+    # Nothing ran, and the case says so rather than leaving it to be inferred:
+    # there is no companion behind this host, so the run ends at its first
+    # dispatch.
+    refute "tool.finished" in summary["event_kinds"]
+
+    # The connection is still the connection after a method this generation does
+    # not name.
+    assert summary["unknown_method_code"] == "unsupported_method"
+    assert summary["survived_refusal"]
+
+    # The session landed on the state root the operator named, which is the one
+    # thing a summary printed by a client could not tell us.
+    assert File.exists?(Path.join(home, "store.log"))
+
+    refute String.contains?(output, placeholder)
+  end
+
+  # Concept: the first consumer command the operator guide prints, run the way
+  # an operator runs it.
+  #
+  # Technical depth: the text is the guide's. `workflow.mjs` never answers a
+  # question, which is why the guide pairs it with `allow-all` and why this case
+  # does too.
+  defp documented_consumer_command(extracted) do
+    """
+    set -eu
+    cd #{extracted}
+    export LOOPEX_WORKFLOW_ENTRY="Loopex.AppServer.Host.serve()"
+    node clients/node/workflow.mjs "$(command -v elixir)" _build/prod/lib/*/ebin
+    """
   end
 
   test "stdin EOF performs orderly shutdown without cancellation and the pending interaction survives restart" do

@@ -99,7 +99,7 @@ tests that wait for a real-time bound:
 | `provider_attempt_protocol_test.exs:1862` | permit deadline | 13.5 s |
 | `provider_startup_boundaries_test.exs:25`, `credential_plane_test.exs:551`, `provider_retainer_boundaries_test.exs:146`, `provider_bridge_test.exs:294,352`, `provider_backpressure_test.exs:79` | 10 s provider deadlines | 10–12 s each |
 | `deps_budget_test.exs:913` | the offline lock materializer | 10.2 s |
-| `skill_acquisition_test.exs:149`, `external_workflow_test.exs:474` | a real Git import; a real server abort and restart | 11.6 s each |
+| `skill_acquisition_test.exs:149`, `external_workflow_test.exs:452` | a real Git import; a real server abort and restart | 11.6 s each |
 | `foundation_workflow_test.exs:89,167,198,238` | the CLI built from clean source and run as a process | 7–10 s each |
 | `prepared_recovery_contract_test.exs:547,931`, `executor_test.exs:1520`, `local_authority_contract_test.exs:1508`, `coding_tools_test.exs:4792` | 5–7 s bounds and quiescence windows | 6–8 s each |
 
