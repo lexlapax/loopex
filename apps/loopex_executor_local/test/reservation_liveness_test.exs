@@ -1,7 +1,7 @@
 defmodule Loopex.Executor.Local.ReservationLivenessTest do
   @moduledoc false
 
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
   alias Loopex.Executor
   alias Loopex.Executor.Local

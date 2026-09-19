@@ -1,7 +1,7 @@
 defmodule Loopex.Executor.Local.ArtifactRetentionContractTest do
   @moduledoc false
 
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
   alias Loopex.ArtifactStore
   alias Loopex.Executor.Local
