@@ -131,6 +131,13 @@ edges only in tests. `mix loopex.deps_budget` reads the literal dependency
 declarations of all ten applications and rejects any other edge, alternate
 path or source-control dependency, or added external package.
 
+An OTP application is not a dependency in that sense, but it must still be
+declared: any application whose code calls `:crypto`, `:ssl` or `:public_key`
+names it in `extra_applications`, because Mix prunes undeclared OTP
+applications from the code path under the floor toolchain pair.
+`scripts/check-otp-applications.sh` enforces the declaration on every run of
+the fast check.
+
 ## Debugging
 
 Debugging Loopex during development means turning on what the runtime already

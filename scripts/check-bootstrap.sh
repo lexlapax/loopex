@@ -29,4 +29,5 @@ run_check bash scripts/check-agent-bootstrap.sh
 run_check bash scripts/check-gitignore.sh
 run_check bash scripts/check-commit-messages.sh
 run_check bash scripts/check-repo-hygiene.sh
+run_check bash scripts/check-otp-applications.sh
 run_check bash scripts/check-status.sh
