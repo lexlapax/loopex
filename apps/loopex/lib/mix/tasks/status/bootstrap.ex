@@ -413,8 +413,8 @@ defmodule Loopex.Checks.Bootstrap do
             runs =
               structure
               |> Enum.map(&String.trim/1)
-              |> Enum.filter(&String.starts_with?(&1, "- run:"))
-              |> Enum.map(&(&1 |> String.replace_prefix("- run:", "") |> String.trim()))
+              |> Enum.filter(&String.starts_with?(&1, ["- run:", "run:"]))
+              |> Enum.map(&(&1 |> String.replace(~r/^(- )?run:/, "") |> String.trim()))
 
             foreign = Enum.reject(runs, &(&1 in @workflow_commands))
 

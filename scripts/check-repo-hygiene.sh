@@ -47,7 +47,7 @@ exempt() {
   [ "$1" = "main" ] && return 0
   folded="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
   [ -n "$milestone" ] && [ "$folded" = "$milestone" ] && return 0
-  printf '%s\n' "$milestones" | grep -qx "$folded"
+  printf '%s\n' "$milestones" | grep -qxF "$folded"
 }
 
 # Worktrees whose path no longer exists are always residue, remote or not.
