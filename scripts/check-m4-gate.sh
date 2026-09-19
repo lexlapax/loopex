@@ -7,9 +7,29 @@
 set -euo pipefail
 set +a
 set +x
+# Observability: a step that used to print nothing until it ended prints an
+# `M4 progress:` line on standard error when it begins; commands and selectors
+# keep their `M4 gate step:` and `M4 selector:` lines, and lanes their
+# LOOPEX_M4_LANE lines with elapsed seconds when they end. The two builds, the
+# opening probe, every selector and the inherited lane stream their output as
+# they run, and a heartbeat prints every 30 seconds once the task root exists.
+# Silence bound: no more than 60 seconds pass without a line while this gate
+# runs past its read-only inspection.
 
 die() { printf 'M4 gate UNAVAILABLE: %s\n' "$*" >&2; exit 2; }
 lane_finished() { printf 'LOOPEX_M4_LANE name=%s elapsed_seconds=%s exit=%s\n' "$1" "$((SECONDS - $2))" "$3"; }
+gate_progress() { printf 'M4 progress: %s\n' "$*" >&2; }
+gate_heartbeat() {
+  local gate_shell=$1 waited=0
+  while kill -0 "$gate_shell" 2>/dev/null; do
+    sleep 1
+    waited=$((waited + 1))
+    [ "$waited" -ge 30 ] || continue
+    waited=0
+    kill -0 "$gate_shell" 2>/dev/null || break
+    gate_progress "heartbeat total=${SECONDS}s"
+  done
+}
 role=full
 comparison=
 case "${1:-}" in
@@ -108,8 +128,15 @@ for task_protected_root in "${LOOPEX_HOME:-$operator_home/.loopex}" "${LOOPEX_WO
   fi
 done
 task_root=$(mktemp -d "$task_parent/loopex-m4-gate.XXXXXXXX") || die 'cannot allocate isolated task root'
-cleanup() { rm -rf "$task_root"; }
+gate_heartbeat_pid=
+cleanup() {
+  [ -z "$gate_heartbeat_pid" ] || kill "$gate_heartbeat_pid" 2>/dev/null || true
+  rm -rf "$task_root"
+}
 trap cleanup EXIT
+gate_heartbeat "$$" &
+gate_heartbeat_pid=$!
+disown "$gate_heartbeat_pid" 2>/dev/null || true
 trap 'exit 2' INT TERM
 mkdir -p "$task_root/home" "$task_root/state" || die 'cannot create isolated directories'
 
@@ -127,7 +154,8 @@ support prepare-build "$task_root" "$operator_mix_home" "${LOOPEX_HOME:-$operato
 
 # Concept: only protocol, core and the real local Store are compiled, offline.
 # Technical depth: clear the higher-precedence build-path override and isolate
-# Mix, Hex, build and temporary state. Print failed compiler output before cleanup.
+# Mix, Hex, build and temporary state. Compiler output streams to standard error.
+gate_progress "step opening build total=${SECONDS}s"
 task_compile_started=$SECONDS
 if (
   cd apps/loopex_store_local &&
@@ -135,12 +163,11 @@ if (
     MIX_BUILD_ROOT="$task_root/build" HOME="$task_root/home" \
     HEX_HOME="$task_root/home/.hex" MIX_HOME="$task_root/home/.mix" \
     HEX_OFFLINE=1 TMPDIR="$task_root" mix compile </dev/null
-) >"$task_root/compile.log" 2>&1; then
+) >&2; then
   lane_finished opening_compile "$task_compile_started" 0
 else
   task_compile_result=$?
   lane_finished opening_compile "$task_compile_started" "$task_compile_result"
-  cat "$task_root/compile.log" >&2
   die 'isolated core/local-Store compilation failed'
 fi
 beam_args=()
@@ -156,12 +183,13 @@ printf 'M4 %s: running the durable-interaction opening witness only\n' "$role"
 result=0
 opening_result=0
 task_opening_started=$SECONDS
-env -u MIX_BUILD_PATH -u MIX_DEPS_PATH LANG=C.UTF-8 LC_ALL=C.UTF-8 MIX_ENV=prod \
+gate_progress "step opening probe total=${SECONDS}s"
+{ env -u MIX_BUILD_PATH -u MIX_DEPS_PATH LANG=C.UTF-8 LC_ALL=C.UTF-8 MIX_ENV=prod \
   MIX_BUILD_ROOT="$task_root/build" HOME="$task_root/home" \
   HEX_HOME="$task_root/home/.hex" MIX_HOME="$task_root/home/.mix" \
   HEX_OFFLINE=1 TMPDIR="$task_root" \
-  elixir "${beam_args[@]}" scripts/m4-opening-probe.exs "$task_root/state" </dev/null >"$task_root/probe.log" 2>&1 || result=$?
-cat "$task_root/probe.log"
+  elixir "${beam_args[@]}" scripts/m4-opening-probe.exs "$task_root/state" </dev/null 2>&1; } |
+  tee "$task_root/probe.log" || result=$?
 lane_finished opening "$task_opening_started" "$result"
 case "$result" in
   0)
@@ -213,6 +241,7 @@ require_client_pins() {
   [ "$observed_node" = "v$pinned_node" ] || die "Node version differs from the pin: $observed_node"
 }
 
+gate_progress "step dependency sources total=${SECONDS}s"
 if ! env LANG=C.UTF-8 LC_ALL=C.UTF-8 elixir -r apps/loopex/lib/mix/tasks/loopex.deps_budget.ex \
   -e 'Loopex.Checks.DepsBudget.main(System.argv())' -- \
   --materialize "$operator_hex_home/packages" "$task_root/deps" "$task_root/protected-file-ids" </dev/null; then
@@ -237,6 +266,7 @@ run_step() {
 }
 # Every selector sees an isolated test build, and all ordinary commands inherit
 # the same isolated homes and no provider environment variables.
+gate_progress "step isolated test build total=${SECONDS}s"
 task_compile_started=$SECONDS
 task_compile_result=0
 isolated mix compile --warnings-as-errors </dev/null || task_compile_result=$?
@@ -264,14 +294,13 @@ run_selector() {
     # archive, not from the checkout that supplied the deterministic lanes.
     argv[0]=$source_root
     argv[1]=$source_build/test
-    builtin printf 'LOOPEX_M1_SELECTOR_V1\0%s\0%s\0' "$nonce" "$m4_provider_key" |
+    { builtin printf 'LOOPEX_M1_SELECTOR_V1\0%s\0%s\0' "$nonce" "$m4_provider_key" |
       isolated env MIX_BUILD_ROOT="$source_build" GIT_DIR="$source_git_dir" GIT_WORK_TREE="$source_root" LOOPEX_M4_SOURCE_ROOT="$source_root" \
-        elixir "$source_root/scripts/m1-exunit-runner.exs" --loopex-m1-selector --only-real-provider --real-path combined "${argv[@]}" > "$task_root/selector.log" 2>&1 || result=$?
+        elixir "$source_root/scripts/m1-exunit-runner.exs" --loopex-m1-selector --only-real-provider --real-path combined "${argv[@]}" 2>&1; } | tee "$task_root/selector.log" || result=$?
   else
-    builtin printf 'LOOPEX_M1_SELECTOR_V1\0%s\0\0' "$nonce" |
-      isolated elixir scripts/m1-exunit-runner.exs --loopex-m1-selector "${argv[@]}" > "$task_root/selector.log" 2>&1 || result=$?
+    { builtin printf 'LOOPEX_M1_SELECTOR_V1\0%s\0\0' "$nonce" |
+      isolated elixir scripts/m1-exunit-runner.exs --loopex-m1-selector "${argv[@]}" 2>&1; } | tee "$task_root/selector.log" || result=$?
   fi
-  cat "$task_root/selector.log"
   lane_finished "$selector" "$task_selector_started" "$result"
   [ "$result" = 0 ] || { printf 'M4 gate RED: selector failed: %s\n' "$selector" >&2; exit "$result"; }
   support report "$root" "$task_root/selector.log" "$nonce" "$selector" "${argv[7]}" "$kind" </dev/null || exit $?
@@ -305,15 +334,15 @@ exec 9>&-
 # M4 forwards the same unexported value through that existing contract.
 result=0
 task_inherited_started=$SECONDS
+gate_progress "step inherited closed gates total=${SECONDS}s"
 if [ -n "$m4_provider_key" ]; then
-  builtin printf 'LOOPEX_M3_PROVIDER_V1\0%s\0' "$m4_provider_key" |
+  { builtin printf 'LOOPEX_M3_PROVIDER_V1\0%s\0' "$m4_provider_key" |
     env -u MIX_BUILD_ROOT -u MIX_ENV HOME="$operator_home" HEX_HOME="$operator_hex_home" MIX_HOME="$operator_mix_home" TMPDIR="$task_parent" \
-      bash scripts/check-closed-gates.sh --before M4 > "$task_root/inherited.log" 2>&1 || result=$?
+      bash scripts/check-closed-gates.sh --before M4 2>&1; } | tee "$task_root/inherited.log" || result=$?
 else
-  env -u MIX_BUILD_ROOT -u MIX_ENV HOME="$operator_home" HEX_HOME="$operator_hex_home" MIX_HOME="$operator_mix_home" TMPDIR="$task_parent" \
-    bash scripts/check-closed-gates.sh --before M4 </dev/null > "$task_root/inherited.log" 2>&1 || result=$?
+  { env -u MIX_BUILD_ROOT -u MIX_ENV HOME="$operator_home" HEX_HOME="$operator_hex_home" MIX_HOME="$operator_mix_home" TMPDIR="$task_parent" \
+    bash scripts/check-closed-gates.sh --before M4 </dev/null 2>&1; } | tee "$task_root/inherited.log" || result=$?
 fi
-cat "$task_root/inherited.log"
 lane_finished inherited "$task_inherited_started" "$result"
 [ "$result" = 0 ] || exit "$result"
 [ "$(tail -n 1 "$task_root/inherited.log")" = 'LOOPEX_CLOSED_GATES_REPORT caller=M4 complete=true' ] || die 'inherited gate invocation report missing'
@@ -329,6 +358,7 @@ source_git_dir=$(git rev-parse --absolute-git-dir) || die 'Git index is unavaila
 source_archive=$task_root/m4-candidate.tar
 source_root=$task_root/source-extract
 source_build=$task_root/source-build
+gate_progress "step source archive build total=${SECONDS}s"
 source_started=$SECONDS
 mkdir -p "$source_root" || die 'cannot allocate source extraction'
 git archive --format=tar --output="$source_archive" "$source_commit" || die 'cannot stage the source archive'
@@ -342,10 +372,7 @@ source_lock_digest=$(shasum -a 256 "$source_root/mix.lock" | cut -d' ' -f1) || d
 (
   cd "$source_root" &&
   isolated env MIX_BUILD_ROOT="$source_build" mix compile --warnings-as-errors </dev/null
-) > "$task_root/source-compile.log" 2>&1 || {
-  cat "$task_root/source-compile.log" >&2
-  die 'fresh-source isolated compilation failed'
-}
+) >&2 || die 'fresh-source isolated compilation failed'
 lane_finished source_archive_build "$source_started" 0
 source_build_identity=$(support build "$source_build/test") || exit $?
 source_build_digest=${source_build_identity#LOOPEX_M4_BUILD digest=sha256:}

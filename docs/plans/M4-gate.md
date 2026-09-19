@@ -172,12 +172,12 @@ binding.
 
 | SHA-256 | Path |
 | --- | --- |
-| `0fa05a036dd7e7c6ec36238cac34f03cc99552de3b1e02765fb3cc8e66ac40f4` | `scripts/check-m4-gate.sh` |
+| `23dfee34608da17d902ef9a5e3ca6332908dbc8320cb701cf3d52bf59fb03605` | `scripts/check-m4-gate.sh` |
 | `b1ef94ba0ae25ac845396206ba5bbe4d7cd7355d505f6f127123bc3106329d86` | `scripts/m4-opening-probe.exs` |
-| `d9b8ac57a57ef39d50b581db78ac896fa12908ae9feae89b29b5d43564523d22` | `scripts/m4-gate-support.exs` |
+| `a9da89daa68f92cd6327d36c8ebe34f385e66b0ab45821ea93c63c3aae3c41fb` | `scripts/m4-gate-support.exs` |
 | `65d0de9dcd1218af542f00e32c2177d2612a2f1232f22db37b9942200c84cf66` | `scripts/m3-gate-support.exs` |
-| `c4d485ca3229441c678abe1e8733f90216e89e0dfb9e81786f58f525619aec29` | `scripts/check-closed-gates.sh` |
-| `d0e63814c760bec681161275c36666421a709e6cd321e7f7b67ef098c48ea45a` | `scripts/m4-outcomes.exs` |
+| `446e3efebbee603d5b706827b7603f594c99f107b5cc67f680bf2c4ed18a8f05` | `scripts/check-closed-gates.sh` |
+| `72fea18cf8772b3835a902f7ad0f6a4cc719892d5ddb84fc07c404f7cc528c39` | `scripts/m4-outcomes.exs` |
 | `f04f17db1f5f26e558366cf8c9c73c439647ad3da6a2eee255f59123cc1ccc4e` | `scripts/check-m4-fixtures.exs` |
 | `b237fb3c5dbd4d903255317f4ab0c521f8458a3cd64c49266582221690b6435e` | `scripts/check_m4_fixtures_test.exs` |
 | `53d8219bdee584a3849a85a1102e405520d5dd0dfbe21d259434bc9edfc5fcc0` | `scripts/m1-exunit-runner.exs` |
@@ -712,3 +712,93 @@ waiver, closure or release.
 | Generation | Artifact | Rebound SHA-256 |
 | --- | --- | --- |
 | 7 | `scripts/m4-outcomes.exs` | `d0e63814c760bec681161275c36666421a709e6cd321e7f7b67ef098c48ea45a` |
+
+<a id="amendment-8"></a>
+## Amendment 8 — Complete the shared binding, refuse an oversized locked identity, and report progress while running
+
+**Acceptance: OUTSTANDING.** Accepted M4 amends its gate under
+`amendment-transaction-v1`: this proposal `A` advances the generation and
+retains the Acceptance row and lifecycle state; its immediate child `R`
+rebinds Acceptance to exact `A` after explicit acceptance.
+
+Three changes to bound artifacts travel in one transaction, because each one
+would otherwise need its own proposal, rebind and evidence run.
+
+**The shared binding.** `scripts/check-closed-gates.sh` is bound by this gate
+and by the M3 gate. [The chain disposition](../developer/agent-context-map.md#override-disposition-closed-gate-repair-chain-v2-2026-09-17)
+ordered M3 gate generation 5 to change it, so that it prints each gate's
+elapsed seconds when that gate ends, and ordered this gate's next amendment
+last, to rebind this holder and complete the shared sequence. Generation 5 has
+been accepted and rebound, and until this rebind binding validation named this
+gate as the pending holder. The row below binds the bytes generation 5
+accepted; this amendment does not change them.
+
+**The guard.** Amendment 7 repaired one locked identity that no test could
+carry: ExUnit registers a test name as an atom, atoms cap at 255 bytes, and a
+longer name is truncated and hashed, so the selector runner could never match
+it. It repaired the instance and left the class open. The manifest validator in
+`scripts/m4-gate-support.exs` now refuses any locked name whose registered form
+would exceed 255 bytes, with its own reason, before any lane runs. One new case
+in `apps/loopex/test/m4_gate_support_test.exs` witnesses the rule: it copies the
+real manifest into a temporary root, proves the copy is accepted, pads one
+locked name past the limit and proves the manifest is then refused. That case's
+identity is added to the manifest, so the witness that proves the guard is
+itself locked; outcome 6's selector for that file gains its third locked name.
+Every existing identity fits: the longest registered form is 201 bytes.
+
+**The runner reports where it is.** `AGENTS.md` requires every gate to be
+observable while it runs, and this runner predates that rule, so it conforms at
+this amendment. `scripts/check-m4-gate.sh` prints a line beginning
+`M4 progress:` on standard error when a step that printed nothing until it
+ended begins, keeps its `LOOPEX_M4_LANE` lines, and runs a heartbeat every 30
+seconds once its task root exists; the heartbeat checks every second that the
+gate is alive and is stopped by the task root's cleanup. The opening probe,
+every protected selector and the inherited lane used to write to a file that
+was printed only after the lane ended, which left the inherited lane silent for
+hours. Each now passes its output through `tee` into the same file, so it
+reaches the operator as it runs and the probe witness, selector report and
+inherited report checks still read the complete log. The opening build and the
+fresh-source build, whose output was printed only when they failed, now write it
+to standard error as they run. Each lane's status is
+unchanged: under `pipefail` a pipeline reports its rightmost failing stage, so
+a lane's own exit still reaches the same check, and `tee` fails only when the
+gate's output is gone, which the `cat` it replaces also failed on. The silence
+bound is stated in the runner's header: no more than 60 seconds pass without a
+line once the task root exists. Because `tee` ends only when every process
+holding its input has closed it, a descendant that outlives its lane and keeps
+that output open holds the lane until it exits; the heartbeat keeps reporting
+while it waits, and no verdict changes.
+
+The new witness adds one locked identity to outcome 6, so the selector for
+`apps/loopex/test/m4_gate_support_test.exs` now requires three executed cases
+where it required two. Otherwise no outcome, lane, command, seed, selector path,
+limit, fixture, client pin, evidence class, credential rule or report line
+changes, no lifecycle state reopens, and neither envelope moves.
+
+### Evidence at this proposal
+
+Binding validation, bootstrap and every inherited gate that invokes them stop at
+this proposal only on the stale binding of this gate. Binding-independent checks
+are proved directly: the runner parses; the gate support tests pass, including
+the new witness; every locked name fits the limit; and this gate's own truthful
+product state is proved by running it with the provider frame, printing its
+steps and heartbeat, up to the lane where the stale binding stops it.
+
+### Transaction and re-verification
+
+After exact-SHA review and explicit acceptance of `A`, `R` rebinds the
+Acceptance row to exact `A` and adds one amendment-specific disposition. At `R`
+binding validation and bootstrap must pass, with no holder of any shared
+artifact pending; this gate must reproduce the same truthful product state
+proved at `A`; and one run of `bash scripts/check-closed-gates.sh --before
+M4` with the provider frame, green for M0, M1, M2 and M3 on their instrumented
+runners, is retained with the exact revision it ran at as the chain
+disposition's replacement evidence. This proposal records no acceptance and
+grants no waiver, closure or release.
+
+| Generation | Artifact | Rebound SHA-256 |
+| --- | --- | --- |
+| 8 | `scripts/check-closed-gates.sh` | `446e3efebbee603d5b706827b7603f594c99f107b5cc67f680bf2c4ed18a8f05` |
+| 8 | `scripts/m4-gate-support.exs` | `a9da89daa68f92cd6327d36c8ebe34f385e66b0ab45821ea93c63c3aae3c41fb` |
+| 8 | `scripts/m4-outcomes.exs` | `72fea18cf8772b3835a902f7ad0f6a4cc719892d5ddb84fc07c404f7cc528c39` |
+| 8 | `scripts/check-m4-gate.sh` | `23dfee34608da17d902ef9a5e3ca6332908dbc8320cb701cf3d52bf59fb03605` |

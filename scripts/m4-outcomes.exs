@@ -132,7 +132,8 @@
           path: "apps/loopex/test/m4_gate_support_test.exs",
           names: [
             "authoritative reports reject missing duplicate reordered wrong kind and stale version fields",
-            "the final report grammar rejects missing duplicated reordered and malformed fields"
+            "the final report grammar rejects missing duplicated reordered and malformed fields",
+            "a locked witness name longer than a test name can carry is refused before any lane runs"
           ]
         }
       ]

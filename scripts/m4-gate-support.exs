@@ -89,6 +89,16 @@ defmodule Loopex.M4Gate.Support do
           ),
         "selector requires unique exact case names"
       )
+
+      # Concept: an identity is a name before it is a description.
+      # Technical depth: ExUnit registers a test name as an atom, atoms cap at
+      # 255 bytes, and a longer name is truncated and hashed, so a locked
+      # identity past that limit could never match a reported name. Refused
+      # here, before any lane runs, rather than discovered as a missing test.
+      ensure(
+        Enum.all?(selector.names, &(byte_size("test " <> &1) <= 255)),
+        "locked witness name is longer than a test name can carry"
+      )
     end
 
     ensure(

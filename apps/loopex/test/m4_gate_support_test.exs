@@ -180,4 +180,34 @@ defmodule Loopex.M4GateSupportTest do
       assert_raise ArgumentError, fn -> Support.verify_final_report(mutant) end
     end
   end
+
+  # Concept: a locked identity that no test can carry is refused before any
+  # lane runs.
+  #
+  # Technical depth: `manifest/1` reads `scripts/m4-outcomes.exs` under the root
+  # it is given, so the witness copies the real manifest into a temporary root,
+  # proves the copy is accepted, pads one locked name past the 255-byte atom
+  # limit and proves the manifest is then refused with the guard's own reason.
+  # The positive control is what makes the refusal meaningful.
+  test "a locked witness name longer than a test name can carry is refused before any lane runs" do
+    root = Path.join(System.tmp_dir!(), "m4-manifest-#{System.unique_integer([:positive])}")
+    File.mkdir_p!(Path.join(root, "scripts"))
+    on_exit(fn -> File.rm_rf(root) end)
+
+    source = File.read!(Path.join(@root, "scripts/m4-outcomes.exs"))
+    File.write!(Path.join(root, "scripts/m4-outcomes.exs"), source)
+    assert %{outcomes: _, real: _} = Support.manifest(root)
+
+    target =
+      "\"the final report grammar rejects missing duplicated reordered and malformed fields\""
+
+    padded = "\"" <> String.duplicate("a", 251) <> "\""
+    modified = String.replace(source, target, padded, global: false)
+    assert modified != source
+    File.write!(Path.join(root, "scripts/m4-outcomes.exs"), modified)
+
+    assert_raise ArgumentError, ~r/longer than a test name can carry/, fn ->
+      Support.manifest(root)
+    end
+  end
 end
