@@ -78,8 +78,8 @@ Linux is 5–10% faster per application and has the same shape.
 
 **Why the modules are serial.** At M4 closure 28 of 115 test modules were
 asynchronous; after step 3, 49 of 119 are. Step 3 examined the four heavy
-applications only; the six light ones (62 s in sequence, 25 modules, all
-serial) were not read and are not claimed here. In the four examined, each
+applications only; the six light ones (62 s in sequence, 25 serial modules)
+were not read and are not claimed here. In the four examined, each
 module still serial carries one of: the one provider credential variable
 written into this VM's environment so the child inherits it (the twelve heavy
 `loopex_llm_reqllm` modules, `cli`, `session_directory`, `coding_tools`,
@@ -173,7 +173,7 @@ can prove. One wall-clock bound in `provider_attempt_protocol` widened from
 beside it is the proof. Measured with all twenty-four converted, suite alone
 on the Mac: `loopex` 191 → 125 s, the others within a few seconds of before;
 the whole fast check, warm build, 254 → 224 s. The three returned modules
-run 1 s, 1 s and 22 s. The limit on the critical path is structural: the
+run about 1 s, 0.1 s and 22 s. The limit on the critical path is structural: the
 applications run in parallel VMs, `loopex_llm_reqllm` is the longest, and 96%
 of its 209 s sits in the twelve modules that share the process-wide
 credential variable, so two of them running at once would hand each other's
