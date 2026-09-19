@@ -52,3 +52,7 @@ two operator prompts were answered on the terminal. Result: PASS, 12 tests
 at `3e6ee5d` found that the recovery test deleted the credential from the
 shared test VM, which left every later real-provider test without one; that is
 the defect the follow-ups fixed.
+
+The maintainer then ran the same command themselves on serenity at
+`dabca373`, answering both prompts on the terminal: PASS, the same 12 tests,
+163 s, with the public-skill workflow observing two real provider replies.
