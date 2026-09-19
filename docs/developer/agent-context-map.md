@@ -64,7 +64,8 @@ are Mix tasks: `mix loopex.deps_budget`, `loopex.core_only`, `loopex.matrix`,
 `loopex.format_scope`, `loopex.version_train`, `loopex.docs_check`,
 `loopex.hook_registration`, and `loopex.self_hosting`.
 `bash scripts/check-bootstrap.sh` runs the bootstrap aggregate.
-`bash scripts/check.sh` is the fast check run before every push, and
+`bash scripts/check.sh` is the fast check each integration candidate runs
+once, in CI on the branch or locally before the merge, and
 `bash scripts/check-release.sh` is the slow check run before closure and
 release; [DEVELOPMENT.md](../../DEVELOPMENT.md) describes both. The milestone
 gate runners they replaced are gone, and the gate files under `docs/plans/`
