@@ -26,7 +26,7 @@ defmodule Mix.Tasks.Loopex.DocsCheckTest do
   # toggle and its restore is shared with any other test that compiles, and the
   # restore writes back a value that could have changed meanwhile. The file runs in
   # well under a second, so serialising it costs nothing worth a race.
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
 
   alias Mix.Tasks.Loopex.DocsCheck
 

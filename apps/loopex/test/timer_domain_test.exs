@@ -85,7 +85,12 @@ end
 defmodule Loopex.TimerDomainTest do
   @moduledoc false
 
-  use ExUnit.Case, async: true
+  # Not async: the reserve case below asserts that a session status read never
+  # waits 100 ms behind the execute-result reserve, sampled over a 900 ms
+  # window. That is a latency proof, and it holds only with the scheduler to
+  # itself; beside forty concurrent cases one delayed round trip would fail it
+  # without the product having changed.
+  use ExUnit.Case, async: false
 
   alias Loopex.AgentLoopFixture, as: Fixture
   alias Loopex.AgentLoopTestModel

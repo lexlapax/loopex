@@ -77,20 +77,28 @@ Concept: [Making it fast](verification.md#concept-verification-speed).
 Linux is 5–10% faster per application and has the same shape.
 
 **Why the modules are serial.** At M4 closure 28 of 115 test modules were
-asynchronous; after step 3, 52 are. The ones still serial each carry one of:
-the one provider credential variable written into this VM's environment so
-the child inherits it (the twelve heavy `loopex_llm_reqllm` modules, `cli`,
-`session_directory`, `coding_tools`, `executor`, `host_policy`); a global
-`:erlang.trace_pattern` (`cancellation`, `context_admission`, `skill_context`,
-`local_authority_contract`, `post_closure_hotfix`); a fixed `:persistent_term`
-key (`agent_loop`, `project_resource_trust`); a VM-wide tracer or a telemetry
-handler by name (`trace_session`, `telemetry_boundary`); a registered process
-name (`runtime`, `tool_registry`, `interaction_lifecycle`,
-`prepared_recovery_contract`); `capture_io(:stderr)`, a named device that a
-concurrent capture would share (`cli`, `coding_task`,
-`context_budget_commands`); or an operating-system build from clean source
-(`foundation_workflow`). Capturing the caller's own group leader or the log
-is safe concurrently and was not a reason to stay serial.
+asynchronous; after step 3, 49 of 119 are. Step 3 examined the four heavy
+applications only; the six light ones (62 s in sequence, 25 modules, all
+serial) were not read and are not claimed here. In the four examined, each
+module still serial carries one of: the one provider credential variable
+written into this VM's environment so the child inherits it (the twelve heavy
+`loopex_llm_reqllm` modules, `cli`, `session_directory`, `coding_tools`,
+`executor`, `host_policy`); a global `:erlang.trace_pattern` (`cancellation`,
+`cancellation_observation_contract`, `context_admission`, `skill_context`,
+`local_authority_contract`, `post_closure_hotfix`, `ledger_record_conformance`,
+`receipt_publication_observation`); a fixed `:persistent_term` key
+(`agent_loop`, `project_resource_trust`, `receipt_round_trip`); a global
+compiler option (`docs_check`); a latency assertion that needs the scheduler
+to itself (`timer_domain`); a VM-wide tracer or a telemetry handler by name
+(`trace_session`, `telemetry_boundary`); a registered process name (`runtime`,
+`tool_registry`, `interaction_lifecycle`, `prepared_recovery_contract`);
+`capture_io(:stderr)`, a named device that a concurrent capture would share
+(`cli`, `coding_task`, `context_budget_commands`); or an operating-system
+build from clean source (`foundation_workflow`). `capture_io/1` on the
+caller's own group leader is process-local and safe concurrently.
+`capture_log` is VM-wide — a concurrent module's lines land in the capture —
+so it is safe only where the assertion is a refutation or a type check, which
+is the case at every converted site.
 
 **Where the serial time goes (Linux, `--slowest 25`).** The 25 slowest tests
 are 80% of `loopex`, 83% of `loopex_executor_local`, 64% of
@@ -152,20 +160,27 @@ number sized against a short one. A committed deadline is a bound on the
 product, not on the fixture's boot; a test that wants the deadline short must
 first make the child ready.
 
-**Step 3, done and measured.** Twenty-four modules with none of the markers
+**Step 3, done and measured.** Twenty-one modules with none of the markers
 above became asynchronous, one application at a time, each application kept
-only after its suite stayed green across three seeds: sixteen in `loopex`
+only after its suite stayed green across three seeds: fourteen in `loopex`
 (among them `provider_attempt_protocol` at 22 s and `session_lifecycle` at
-21 s), three in `loopex_llm_reqllm`, three in `loopex_cli`, two in
-`loopex_executor_local`. Suite alone on the Mac: `loopex` 191 → 125 s, the
-others within a few seconds of before. The whole fast check, warm build:
-254 → 224 s. The limit is now structural: 96% of `loopex_llm_reqllm`'s 209 s
-sits in the twelve modules that share the process-wide credential variable,
-so two of them running at once would hand each other's canary to each
-other's child. Making those concurrent means passing the credential to the
-child per invocation instead of through the environment, which is a change to
-the credential plane and a maintainer decision, not a suite change; until
-then `loopex_llm_reqllm` pins the check near 210 s.
+21 s), three in `loopex_llm_reqllm`, two in `loopex_cli`, two in
+`loopex_executor_local`. Three more were converted and returned to serial by
+the review: `docs_check` and `receipt_round_trip` touch VM-global state after
+all, and `timer_domain` asserts a 100 ms latency that only an idle scheduler
+can prove. One wall-clock bound in `provider_attempt_protocol` widened from
+2 s to 10 s because it now shares the scheduler; the allocation assertion
+beside it is the proof. Measured with all twenty-four converted, suite alone
+on the Mac: `loopex` 191 → 125 s, the others within a few seconds of before;
+the whole fast check, warm build, 254 → 224 s. The three returned modules
+run 1 s, 1 s and 22 s. The limit on the critical path is structural: the
+applications run in parallel VMs, `loopex_llm_reqllm` is the longest, and 96%
+of its 209 s sits in the twelve modules that share the process-wide
+credential variable, so two of them running at once would hand each other's
+canary to each other's child. Making those concurrent means passing the
+credential to the child per invocation instead of through the environment,
+which is a change to the credential plane and a maintainer decision, not a
+suite change; until then `loopex_llm_reqllm` pins the check near 210 s.
 
 **Test hygiene noted by the earlier audit, still open.** A transfer-memory
 witness in `artifact_transfer_test.exs` measures chunk size rather than

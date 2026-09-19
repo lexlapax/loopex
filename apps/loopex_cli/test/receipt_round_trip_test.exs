@@ -12,7 +12,11 @@ Code.require_file("support/demonstration.ex", __DIR__)
 defmodule LoopexCli.ReceiptRoundTripTest do
   @moduledoc false
 
-  use ExUnit.Case, async: true
+  # Not async: the setup erases the fixed `{AllowAll, :announced}` key in
+  # `:persistent_term`, VM-global state that `cli_test` and the context budget
+  # cases erase too; a concurrent erase would make their announced-once
+  # assertions order-dependent.
+  use ExUnit.Case, async: false
 
   alias Loopex.Executor.Local.CodingTools
   alias LoopexCli.Demonstration

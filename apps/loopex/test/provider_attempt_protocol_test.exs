@@ -5451,7 +5451,12 @@ defmodule Loopex.ProviderAttemptProtocolTest do
       assert result == {:error, :unreadable_model_answer},
              "the #{name} ceiling did not refuse the raw reply"
 
-      assert elapsed < 2_000_000, "the #{name} refusal took #{elapsed} microseconds"
+      # The allocation assertion below is the proof that the refusal never
+      # projected the reply; the time bound only has to exclude a projection,
+      # which is orders of magnitude slower than the ceiling check. Ten seconds
+      # rather than two because this module runs beside other cases and a
+      # tighter bound would measure the scheduler, not the refusal.
+      assert elapsed < 10_000_000, "the #{name} refusal took #{elapsed} microseconds"
 
       assert after_admission - before < 4 * 1024 * 1024,
              "the #{name} refusal allocated as if it had projected the reply"
