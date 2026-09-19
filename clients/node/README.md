@@ -41,10 +41,20 @@ catalog withholds the reference along with every entry until a trust decision
 naming it is active. The client relays that decision; it does not judge it, and
 it could not construct one from anything the server told it.
 
+It also reads three optional launch inputs from the environment, so the same
+client can drive a differently launched server without being changed:
+`LOOPEX_WORKFLOW_ENTRY`, the entry point the server process is started with;
+`LOOPEX_WORKFLOW_PROMPT`, the task the session is given; and
+`LOOPEX_WORKFLOW_PATIENCE_MS`, how long this client waits for an event before it
+stops waiting. Each defaults to what the scripted workflow uses.
+
 ## What it does not do
 
-It drives a scripted model. The attended real-provider demonstration is the
-maintainer's to perform, because it spends a provider key and needs a person
-watching.
+It decides nothing. Which model answers behind the server is the launch
+configuration's business, not the client's: with the default entry point a
+scripted model answers, and
+`apps/loopex_app_server/test/external_workflow_real_test.exs` drives this same
+client against a server launched with the real provider adapter. That case is
+excluded from ordinary runs, because it spends a provider key.
 
 Back to [clients](../README.md).

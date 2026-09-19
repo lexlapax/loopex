@@ -35,6 +35,24 @@ const workspaceRef = process.env.LOOPEX_WORKSPACE_REF;
 // drives one process and stops; with one it also proves what survives losing it.
 const storePath = process.env.LOOPEX_WORKFLOW_STORE;
 
+// The launch configuration the server runs under, the task it is asked to
+// perform, and how long this client is willing to wait are all operator inputs.
+// They are read from the environment for the same reason the workspace
+// reference is: a client that chose them for itself would be deciding what the
+// operator launched. The defaults are the scripted workflow's own.
+const serverEntry = process.env.LOOPEX_WORKFLOW_ENTRY || "Loopex.AppServer.Fixture.serve()";
+const task = process.env.LOOPEX_WORKFLOW_PROMPT || "write the output file";
+
+// Patience is this client's alone and is never read as a verdict about the
+// session: a scripted model answers in milliseconds, a real one takes seconds,
+// and neither fact belongs in the protocol.
+const patienceMs = Number(process.env.LOOPEX_WORKFLOW_PATIENCE_MS || 20_000);
+
+if (!Number.isFinite(patienceMs) || patienceMs <= 0) {
+  console.error("LOOPEX_WORKFLOW_PATIENCE_MS must be a positive number of milliseconds");
+  process.exit(2);
+}
+
 if (!elixir || paths.length === 0) {
   console.error("usage: node interaction-workflow.mjs <elixir-executable> <path>...");
   process.exit(2);
@@ -50,7 +68,7 @@ for (const path of paths) {
   if (path.endsWith(".exs")) serverArgs.push("-r", path);
   else serverArgs.push("-pa", path);
 }
-serverArgs.push("-e", "Loopex.AppServer.Fixture.serve()");
+serverArgs.push("-e", serverEntry);
 
 const childEnvironment = { ...process.env, LOOPEX_WORKFLOW_SCRIPT: "tool" };
 const connection = new Connection(elixir, serverArgs, { env: childEnvironment });
@@ -165,14 +183,17 @@ async function run(connection) {
 
   const prompted = await connection.request("session.prompt", {
     command_id: wire.identity("chain-prompt"),
-    content_b64: wire.bytes("write the output file"),
+    content_b64: wire.bytes(task),
   });
 
   assert(prompted.status === "accepted", `the prompt was ${prompted.status}: ${prompted.reason}`);
 
   // The policy asks rather than allowing, and the question arrives as a durable
   // event like any other.
-  const requested = await connection.waitForEvent((event) => event.kind === "interaction.requested");
+  const requested = await connection.waitForEvent(
+    (event) => event.kind === "interaction.requested",
+    patienceMs,
+  );
   const question = requested.data;
 
   summary.session_created = true;
@@ -195,12 +216,18 @@ async function run(connection) {
 
   summary.answer_accepted = true;
 
-  const resolved = await connection.waitForEvent((event) => event.kind === "interaction.resolved");
+  const resolved = await connection.waitForEvent(
+    (event) => event.kind === "interaction.resolved",
+    patienceMs,
+  );
   summary.resolution = resolved.data.status ?? resolved.data.resolution ?? null;
 
   // The policy was asked again after the answer committed, and only then did
   // the tool run.
-  const finished = await connection.waitForEvent((event) => event.kind === "tool.finished", 20_000);
+  const finished = await connection.waitForEvent(
+    (event) => event.kind === "tool.finished",
+    patienceMs,
+  );
   summary.tool_finished = true;
   summary.artifacts = (finished.data.artifacts ?? []).length;
 
@@ -236,7 +263,7 @@ async function run(connection) {
     }
   }
 
-  await connection.waitForEvent((event) => event.kind === "run.finished", 20_000);
+  await connection.waitForEvent((event) => event.kind === "run.finished", patienceMs);
   summary.event_kinds = connection.events().map((event) => event.kind);
 
   if (storePath) {

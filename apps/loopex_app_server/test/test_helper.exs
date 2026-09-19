@@ -40,4 +40,8 @@ System.at_exit(fn _status -> File.rm_rf(root) end)
 # read this helper, after verifying the pinned interpreter and reporting its
 # absence as unavailable; on a host with Node, `mix test --include node_client`
 # runs them directly.
-ExUnit.start(exclude: [:node_client])
+#
+# The real-provider case carries `:real_provider` and is excluded for a second
+# reason: it spends a provider credential. An ordinary run must never do that
+# by accident, so it runs only when an operator asks for it by name.
+ExUnit.start(exclude: [:node_client, :real_provider])
