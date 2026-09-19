@@ -29,9 +29,11 @@ needed); Ownership and Rejoin (only if workstreams run in parallel);
 Compatibility, Migration and Rollback; Packaging if any.
 
 Register: add `| \`NAME\` | Open | [concept](NAME.md) | [technical depth](NAME-technical.md) | — |`
-to the Milestone Register table in `docs/plans/README.md`; a gate column entry
-is `—` for a new milestone. That row is the pair's index — the index's Files
-section states the naming convention and indexes nothing. Then run
+to the Milestone Register table in `docs/plans/README.md`. The register's Gate
+column is history: a milestone run under the retired gate machinery links its
+gate file, and a new milestone's entry is `—`. That row is the pair's index —
+the index's Files section states the naming convention and indexes nothing.
+Then run
 `mix loopex.status`; it refuses until the Current Status capsule holds the
 values it derives for an `Open` milestone and prints what it expects.
 
@@ -47,7 +49,13 @@ Concept: [Develop](milestones.md#concept-milestones-develop).
 
 - Branch per change, off `main`; commit titles `area(NAME): summary`, at
   most 72 characters, no attribution trailers (`scripts/check-commit-messages.sh`
-  enforces both).
+  enforces both over `merge-base(origin/main, HEAD)..HEAD`).
+- A feature branch lives only while its pull request is open: nothing reaches
+  `main` without a green CI run on the candidate and an independent review, and
+  the branch and its worktree go once the merge lands.
+  `scripts/check-repo-hygiene.sh` reports every merged branch and stale
+  worktree except `main` and the branches the register's milestone names claim,
+  which are kept as durable state.
 - Before opening the merge: `bash scripts/check.sh` locally or in CI on the
   branch, plus the extra checks the verification guide's selection table names
   for the boundary touched; an independent read of `git diff main..BRANCH`.
@@ -86,8 +94,8 @@ At the candidate commit:
    findings are fixed first.
 5. The packet to the maintainer: outcomes and their proof, the runs, the
    review, what remains. On their decision, the closure commit moves the
-   register row to `Closed`, fills the plan's Closure row with the candidate
-   SHA and the digests of the pair, and records the maintainer's words in
+   register row to `Closed`, fills the plan's Closure row with the reviewed
+   candidate SHA, and records the maintainer's words in
    `docs/developer/agent-context-map.md`. `mix loopex.status` derives the
    `Closed` capsule; run it and copy what it expects.
 

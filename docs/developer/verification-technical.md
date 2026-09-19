@@ -18,24 +18,32 @@ Concept: [Three stages](verification.md#concept-verification-stages).
 | Stage | Command | Measured |
 | --- | --- | --- |
 | Change, while editing | `mix test <path>`, `mix format`, `mix compile --warnings-as-errors`; the client Stop hook runs format, the dependency budget and the adapter check | Seconds |
-| Change, before merge | `bash scripts/check.sh` in hosted CI on the branch; a read-only review of `git diff main..<candidate>` | 870 s Mac and 809 s Linux in sequence; 18 s before the suite starts; see the plan below for the parallel runner |
+| Change, before merge | `bash scripts/check.sh --select` in hosted CI on the branch; a read-only review of `git diff main..<candidate>` | About 13 min on the hosted runner and about 5 min on the Mac with ten applications at once; 870 s Mac and 809 s Linux in the sequential shape it replaced; 18 s before the suite starts |
 | Close | `bash scripts/check.sh` under the floor pair (`mise exec erlang@27.3.4 elixir@1.18.5-otp-27 -- bash scripts/check.sh`), `bash scripts/check-release.sh` once on the current pair | Release check: 149–163 s on Linux, 12 tests |
 | Release | None new; the tag names the integrated closure commit | — |
 
 `check.sh` step order and cost: warning-free compilation 1 s (warm), formatting
-1 s, repository structure 11–14 s (client adapters, ignore policy, commit
-messages, hygiene, `mix loopex.status` at 3 s), dependency budget 2–3 s, one
-version 0–1 s, documentation ordering 1 s, then `mix test`.
+1 s, repository structure 11–14 s (`scripts/check-bootstrap.sh`: client
+adapters, ignore policy, commit messages over
+`merge-base(origin/main, HEAD)..HEAD`, branch and worktree hygiene, OTP
+application declarations, the suite-summary judge, and `mix loopex.status` over
+the current tree at 3 s), documentation ordering 1 s — where `--docs` stops —
+then dependency budget 2–3 s, one version 0–1 s, the test build, and the suite.
 
 Hosted CI: `.github/workflows/agent-bootstrap.yml` runs
 `bash scripts/check.sh --select` after an Elixir/OTP setup step with the
 current pair and `mix deps.get`, on every push to `main` and every pull
-request, checking a pull request out at its own head. `--select` reads the
+request, checking a pull request out at its own head with full history — the
+synthetic merge commit's generated title fails the commit-message check, and
+the check's baseline needs the whole history. A concurrency group per workflow
+and ref cancels a run a newer push supersedes. `--select` reads the
 diff against the integration base: a pull request whose every changed path is
 Markdown runs the documentation mode, anything else — and a push to `main`,
 whose diff against itself is empty — runs the full check. It is a thin
-wrapper over the repository command, and the adapter check asserts only that
-it runs that command. It sets `LOOPEX_CHECK_ALONE=loopex_llm_reqllm`:
+wrapper over the repository command: the adapter check in
+`Mix.Tasks.Loopex.Status.Bootstrap` admits only `mix deps.get`,
+`bash scripts/check.sh` and `bash scripts/check.sh --select` as run steps, and
+requires one of the `check.sh` forms to be present. It sets `LOOPEX_CHECK_ALONE=loopex_llm_reqllm`:
 the runner has four cores and two applications share them, and the provider
 suite's child VMs, booting under the product's 10 s deadline, starved behind
 the other application's compiles (`core_only`, `foundation_workflow`) until a
