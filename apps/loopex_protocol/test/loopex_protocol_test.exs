@@ -16,10 +16,13 @@ defmodule LoopexProtocolTest do
     # application spec rather than the mix.exs text. An out-of-repository
     # extension author acquires exactly this closure, so what the built
     # application declares is the property that matters, not what the source said.
+    # OTP's crypto is part of the runtime the contract already requires, not a
+    # package: the canonical digest needs it, and declaring it is what keeps it
+    # on the code path under a Mix that prunes undeclared OTP applications.
     Application.load(:loopex_protocol)
     declared = Application.spec(:loopex_protocol, :applications) || []
 
-    assert Enum.sort(declared) == [:elixir, :kernel, :stdlib]
+    assert Enum.sort(declared) == [:crypto, :elixir, :kernel, :stdlib]
     refute :loopex in declared
   end
 end
