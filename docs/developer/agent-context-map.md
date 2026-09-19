@@ -5326,3 +5326,40 @@ result, which remain true for the revisions they name; and the post-M4
 redesign, which stays off this branch and changes no runner or checker before
 closure unless a defect prevents qualification. This grants no closure, no
 integration to `main`, no tag and no release.
+
+<a id="disposition-m4-closure-2026-09-19"></a>
+### M4 closure — 2026-09-19
+
+After the fast check passed on macOS and Linux and the nine unattended
+release tests passed at the candidate `d609b98c1bc8c5972e4918a9f726ed5794c89f5d`,
+the maintainer was asked whether to close M4 at that candidate, told that the
+attended part of the release check, the `loopex_cli` real-provider tests that
+prompt on a terminal, had not been reported, and answered:
+
+> Close M4 (Recommended)
+
+The attended tests remain the maintainer's to run from a terminal; their
+result, when made, is added to the closure runs page and never to this record.
+
+This closes M4 at that candidate. Its plan marks all seven outcomes Proved
+with the tests that prove them; the retained run identities are in
+[M4 closure runs](../evidence/M4-closure-runs.md). Closure binds the plan
+pair and gate as committed at the candidate:
+
+| Artifact | Digest |
+| --- | --- |
+| Concept | `sha256:f60a460f415fce5837966c6cd448a8a3ab39eec4192e9d90e8bdd3afa70101a1` |
+| Technical depth | `sha256:a96126ae5aaaf8be8dea19d3cd5c640126cf34ab13c85343a9f12bf5610b5707` |
+| Gate | `sha256:769f550b731602ccd41dea0513a7a17b76ba0cea401fcf6a53c1caffb5697f16` |
+
+M4 also closed the milestone-gate era. On the maintainer's direction of the
+same day — "close m4 for functionality, remove all gates, rules etc and speed
+up gates and tests so development can go warp speed, while still preserving
+actual code and feature checks" — the per-milestone gate runners, the
+closed-gate aggregate, the history-walking status check and the amendment,
+rebind and holder rules were removed and replaced by the two check commands
+in `DEVELOPMENT.md`. The historical gate files, evidence logs and dispositions
+above remain records of what was proved at the revisions they name. The
+source version is `0.1.0` as accepted ADR 0023 decides; the `v0.1.0` tag is a
+separate maintainer decision on the integrated closure. This record grants no
+tag, release or publication.

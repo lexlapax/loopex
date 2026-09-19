@@ -16,16 +16,16 @@ integrated product baseline.
 <!-- loopex:current-status:start -->
 ## Current Status
 
-**Revision status:** Closed milestone product baseline; active milestone `M4` is accepted; no next candidate is recorded.
+**Revision status:** Closed milestone product baseline; no milestone is active; no next candidate is recorded.
 
 | Field | Value |
 | --- | --- |
 | Integrated phase | Closed milestone product baseline |
-| Last closed product checkpoint | `M3` — 2026-09-13 |
-| Blockers | None; `M4` is accepted and implementation may proceed |
-| Authorized work | Implementation inside the accepted `M4` envelopes and its locked gate on the designated milestone branch; no milestone product bytes integrate before closure |
-| Next maintainer decision | None until `M4` is ready for independent review |
-| Next transition | Turn the locked gate green, then move `M4` to In progress and In review |
+| Last closed product checkpoint | `M4` — 2026-09-19 |
+| Blockers | None; `M4` is closed and its governance row is recorded |
+| Authorized work | Explicitly authorized planning, ADR, and review work only; no product implementation until the next milestone is accepted |
+| Next maintainer decision | Open the next milestone gate-first, or defer it |
+| Next transition | Create the next milestone's plan pair and red gate, and move it to Open |
 | Validation | `bash scripts/check-bootstrap.sh` |
 <!-- loopex:current-status:end -->
 
@@ -132,7 +132,7 @@ representable.
 | `M1` | Closed | [concept](M1.md) | [technical depth](M1-technical.md) | [gate](M1-gate.md) |
 | `M2` | Closed | [concept](M2.md) | [technical depth](M2-technical.md) | [gate](M2-gate.md) |
 | `M3` | Closed | [concept](M3.md) | [technical depth](M3-technical.md) | [gate](M3-gate.md) |
-| `M4` | Accepted | [concept](M4.md) | [technical depth](M4-technical.md) | [gate](M4-gate.md) |
+| `M4` | Closed | [concept](M4.md) | [technical depth](M4-technical.md) | [gate](M4-gate.md) |
 <!-- loopex:milestone-register:end -->
 
 When a plan exists, the Concept, Technical depth, and Gate columns link their
