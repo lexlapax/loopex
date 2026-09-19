@@ -209,8 +209,9 @@ repository's checks are two commands, described in
 - `bash scripts/check.sh` — the fast check: structure, formatting, warning-free
   compilation, dependency direction, documentation ordering, current-tree
   status, and the credential-free test suite, one application per VM. It runs
-  once per integration candidate, in CI; `--docs` runs only the structure and
-  documentation steps for a prose-only change.
+  once per integration candidate, in CI; `--docs` runs compilation,
+  formatting, the structure checks and the documentation check for a
+  prose-only change and skips the suite.
 - `bash scripts/check-release.sh` — the slow check: the real-provider
   workflows, the independent Node client, and the fresh-source build. It needs
   a provider credential in `LOOPEX_PROVIDER_API_KEY` and pinned Node, and it

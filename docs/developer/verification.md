@@ -94,9 +94,9 @@ absence was exploited or nearly exploited during M0–M4.
 <a id="concept-verification-speed"></a>
 ### Making it fast
 
-Three steps, in order of value per effort, each measured or estimated in the
-technical companion. Only the first is approved by this page; the second and
-third change tests and need the maintainer's go.
+Three steps, in order of value per effort, each measured in the technical
+companion. The maintainer approved all three; the first two are done, and the
+fast check went from fourteen minutes to about four and a half on the Mac.
 Technical depth: [Measurements and plan](verification-technical.md#technical-verification-speed).
 
 1. **Run applications in parallel VMs.** The suite is ten independent
@@ -107,8 +107,9 @@ Technical depth: [Measurements and plan](verification-technical.md#technical-ver
    real-time ceilings: two wait a full minute for the cancellation bound, ten
    wait ten to sixteen seconds for provider deadlines, two sleep ten and
    fifteen seconds for admission. Making each bound an option the test sets
-   keeps the proof (the bound is applied) and removes the wait. Estimated,
-   not yet measured: the critical path drops from about 5 minutes to about 3.
+   keeps the proof (the bound is applied) and removes the wait. Three tests
+   whose claim is the real duration keep it and moved to the release check.
+   Measured: the fast check on the Mac went from 346 s to 256 s.
 3. **Let independent modules run concurrently.** Two thirds of the test
    modules are serial, most for a reason (VM-global tracing, environment
    variables, registered names). The ones with no shared state can become

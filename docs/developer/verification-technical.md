@@ -27,10 +27,11 @@ Concept: [Three stages](verification.md#concept-verification-stages).
 messages, hygiene, `mix loopex.status` at 3 s), dependency budget 2–3 s, one
 version 0–1 s, documentation ordering 1 s, then `mix test`.
 
-Hosted CI: `.github/workflows/agent-bootstrap.yml` currently runs only
-`scripts/check-bootstrap.sh`. Running `scripts/check.sh` there needs an
-Elixir/OTP setup step and a dependency cache; that is the one CI change this
-guide asks for, and it stays a thin wrapper over the repository command.
+Hosted CI: `.github/workflows/agent-bootstrap.yml` runs `bash scripts/check.sh`
+after an Elixir/OTP setup step with the current pair and `mix deps.get`, on
+every push to `main` and every pull request, checking a pull request out at
+its own head. It is a thin wrapper over the repository command, and the
+adapter check pins its shape.
 
 Evidence retention: a closure keeps one page under `docs/evidence/` naming the
 candidate, each run's platform, toolchain, result and measured duration, as
@@ -108,35 +109,33 @@ The 60 s sleeps found by grep are almost all fixtures that never answer
 test expects, not the sleep. The two that do cost a minute are the two rows at
 the top.
 
-**Step 1, measured.** Running the four heavy applications as four `mix test
---no-compile` processes at once on the Mac: `loopex` 312 s, `loopex_llm_reqllm`
-252 s, `loopex_executor_local` 150 s, `loopex_cli` 119 s, wall 312 s; the six
-light applications 62 s in sequence afterwards; every result green with the
-same counts. Sequential total was 852 s. Implementation: `check.sh` compiles the
-test build once, then runs each application's suite in its own VM with a bound
-on concurrency, streams each log, and fails if any fails. Expected push check:
-about 330 s on the Mac.
+**Step 1, done and measured.** `check.sh` compiles the test build once, then
+runs each application's suite in its own VM, a bounded number at a time,
+heaviest first, keeping each log and printing it only on failure. The trial
+that justified it ran the four heavy applications at once on the Mac in 312 s
+wall against 795 s in sequence. The finished runner: 315 s on Linux and 346 s
+on the Mac for the whole check, every application green with the counts
+unchanged, against 809 s and 870 s in sequence.
 
-**Step 2, estimated.** Make the bounds injectable at the boundary that
-enforces them and set them small in the tests that wait for them:
-`Executor.@cancel_bound_ms` (60 s, two tests), the provider deadlines in
-`loopex_llm_reqllm` (10 s, about ten tests), the admission observation waits
-(literal 10 s and 15 s), the 5–7 s bounds in the executor and CLI. The tests
-keep asserting that the bound is applied and what settles when it expires;
-only the number changes. Expected: `loopex` from 305 s to about 185 s,
-`loopex_llm_reqllm` from 237 s to about 140 s, `loopex_executor_local` from
-146 s to about 120 s; critical path about 185 s, push check about 3.5 minutes.
-The two 60 s tests were written as "deliberately a real duration"; making the
-bound an option keeps the proof honest only if a second test still shows the
-production default is 60 s, which is a one-line assertion.
+**Step 2, done and measured.** Each slow test was classified rather than
+shortened blindly. Three whose claim is the real duration — the callback past
+the legacy 60 s cancel bound, and the two admission waits that prove removed
+cutoffs are absent — keep it, tagged `long_bound`, excluded from the fast
+check and run by the release check in a pass of their own. The rest had their
+bound injected where it is armed, with the production default asserted once:
+the cancel case now observes the 10 s floor bound and reads the 60 s default
+by tracing the call that arms it; the provider deadlines are committed at 2–4 s
+in the request each case builds; `claim_wait_ms` became a trusted-local start
+option of the local executor, default 5 000 ms asserted. Eight tests were left
+slow with the reason recorded beside them (a real Git import, a CLI built from
+source, a fixed grace derived from the ledger's fsync allowance). Result:
+`loopex` 305 → 194 s, `loopex_llm_reqllm` 237 → 198 s, `loopex_executor_local`
+146 → 111 s, `loopex_cli` 107 → 109 s; the whole fast check on the Mac 256 s.
 
-**Step 3, unmeasured.** Modules with none of the serial markers above (in
-`loopex`: `artifact_runtime`, `audit_repairs`, `embedded_api`,
-`input_algebra`, `provider_accounting_*`, `resource_command`,
-`session_lifecycle`, `session_settled_event` and others) can be tried
-asynchronous one at a time, keeping each only if the application's suite stays
-green across several seeds. The gain is bounded by step 2's critical path and
-is not worth taking before it.
+**Step 3, in progress.** Modules with none of the serial markers above can be
+tried asynchronous one at a time, keeping each only if the application's suite
+stays green across several seeds. `loopex_llm_reqllm` (212 s, 178 tests,
+almost all serial) is now the long pole, so it is where the gain is.
 
 **Test hygiene noted by the earlier audit, still open.** A transfer-memory
 witness in `artifact_transfer_test.exs` measures chunk size rather than

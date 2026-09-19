@@ -70,3 +70,11 @@ added (`478fe1e`) and the contract's runtime-closure test updated
 888 s on serenity. The same commit passed the current pair on the Mac in
 963 s. `scripts/check-otp-applications.sh` now enforces the declaration on
 every run of the fast check.
+
+## The fast check after the speed work
+
+At `031554c` (the parallel runner merged) and `e8a1ac3` (the time-bound
+work merged), `bash scripts/check.sh` on the current pair: Linux 315 s
+(runner alone, all ten applications green), Mac 346 s (runner alone), Mac
+256 s (runner and bounds), against 809 s and 870 s in sequence at closure.
+The three long-duration bound proofs run in the release check's own pass.
