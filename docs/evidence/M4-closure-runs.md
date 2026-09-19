@@ -103,5 +103,8 @@ shows.
 
 Hosted runner, `bash scripts/check.sh --select` with the provider suite
 alone: `843fbdc` on `main` PASS in 12 min 54 s; `7c75d59` on its pull request
-PASS in 12 min 38 s. The Mac, ten applications at once: recorded below once
-measured at `7c75d59`.
+PASS in 12 min 38 s. The Mac, ten applications at once, from a clean tree at
+`d738ec7` (the documentation sweep on top of `7c75d59`, whose only product
+byte after `843fbdc` is a test tolerance): PASS in 287 s with a warm build,
+the suite step 271 s and equal to the longest application, every application
+green. The commit that records this number is the only one after `d738ec7`.
