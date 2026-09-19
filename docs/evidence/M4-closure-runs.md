@@ -30,7 +30,7 @@ credential in the environment and Node 22.14.0 on the path.
 | Scope | Result |
 | --- | --- |
 | Unattended: `loopex_protocol` Node vectors (1), `loopex_app_server` (5: the independent client's session, skill and interaction workflows, the fresh-source extraction, and the real-provider end-to-end workflow), `loopex_reference_client` real sessions (2), `loopex_llm_reqllm` real provider (1) | 9 passed |
-| Attended, run by the maintainer from a terminal: the `loopex_cli` real-provider tests including the public-skill workflow with its two operator trust decisions | not reported at closure; the maintainer closed on the unattended evidence and adds the result here when the run is made |
+| Attended: the `loopex_cli` real-provider tests including the public-skill workflow with its two operator trust decisions | passed on Linux after closure, see below |
 
 The real-provider end-to-end workflow observed provider `anthropic`, model
 `claude-haiku-4-5-20251001`, endpoint `https://api.anthropic.com`, with two
@@ -39,3 +39,16 @@ selection under an operator trust decision, a deferred policy question and its
 answer, policy re-evaluation and the tool run after the answer committed, a
 verified bounded artifact transfer, and an abrupt server loss followed by a
 fresh-process resume, all through the Node consumer.
+
+## The release check after closure, on Linux
+
+Run on serenity (Linux x86_64, Elixir 1.20.3 / OTP 29.0.5, Node 22.14.0) at
+`23402ec4`, the closure commit plus three follow-ups: the credential restored
+after the reference client's recovery test, and the release check running each
+application in its own VM and skipping applications with no release test. The
+two operator prompts were answered on the terminal. Result: PASS, 12 tests
+(`loopex_app_server` 5, `loopex_cli` 3, `loopex_llm_reqllm` 1,
+`loopex_protocol` 1, `loopex_reference_client` 2), 149 s. The first attempts
+at `3e6ee5d` found that the recovery test deleted the credential from the
+shared test VM, which left every later real-provider test without one; that is
+the defect the follow-ups fixed.
