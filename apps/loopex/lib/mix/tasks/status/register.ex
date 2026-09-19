@@ -80,51 +80,19 @@ defmodule Loopex.Checks.Register do
     "docs/adr/0002-bootstrap-runtime-floor.md" => "ADR 0002"
   }
 
-  @m1_adrs [
-    "docs/adr/0006-store-transaction-and-owner-epoch.md",
-    "docs/adr/0007-local-executor-grant-job-receipt.md"
-  ]
-
-  @m1_adr_names %{
-    "docs/adr/0006-store-transaction-and-owner-epoch.md" => "ADR 0006",
-    "docs/adr/0007-local-executor-grant-job-receipt.md" => "ADR 0007"
-  }
-
-  @m1_implementation_adr "docs/adr/0008-owner-succession-recovery-and-runtime-placement.md"
-
-  # Concept: a milestone whose plan pair names prerequisite decisions cannot be
-  # accepted, implemented, or reviewed while any of them is still Proposed.
+  # Concept: a milestone's prerequisite decisions are declared by its own plan
+  # pair, so adding a milestone never edits this module.
   #
-  # Technical depth: the generic Open, Accepted, In progress, and In review
-  # derivations discarded `adr_statuses` entirely, so a milestone with three
-  # outstanding prerequisites derived "None; it is accepted and implementation
-  # may proceed" the moment its own row moved. The set is declared here per
-  # milestone because this is the capsule's own wording table: it decides which
-  # outstanding decisions the displayed status names as the next thing to do.
-  # Enforcement does not live here. The history walk reads each plan companion's
-  # own `### Prerequisites and Acceptance Points` declaration at the revision it
-  # is judging, so a milestone missing from this table is a capsule that says
-  # less, never a milestone that goes unchecked. Each entry names the Concept
-  # file and its display name; the technical companion follows by path
-  # convention.
-  @prerequisite_adrs %{
-    "M2" => [
-      {"docs/adr/0009-tool-executor-and-grant-contracts.md", "ADR 0009"},
-      {"docs/adr/0010-provider-continuation-and-context-staging.md", "ADR 0010"},
-      {"docs/adr/0011-session-input-algebra-and-streaming.md", "ADR 0011"}
-    ],
-    "M3" => [
-      {"docs/adr/0025-resource-packs-and-skill-admission.md", "ADR 0025"},
-      {"docs/adr/0027-provider-permit-retirement.md", "ADR 0027"}
-    ],
-    "M4" => [
-      {"docs/adr/0023-experimental-public-session-protocol.md", "ADR 0023"},
-      {"docs/adr/0024-durable-interaction-lifecycle-and-host-policy-authority.md", "ADR 0024"},
-      {"docs/adr/0026-development-floor-refresh.md", "ADR 0026"},
-      {"docs/adr/0028-bounded-artifact-retrieval.md", "ADR 0028"},
-      {"docs/adr/0030-observability-tracing-and-telemetry.md", "ADR 0030"}
-    ]
-  }
+  # Technical depth: this used to be a per-milestone table keyed by name, which
+  # made every new milestone a code change and let the table drift from the plan
+  # it claimed to summarise. The declaration is read from
+  # `docs/plans/<name>-technical.md` § Prerequisites and Acceptance Points: every
+  # ADR the section links is a declared prerequisite. Links are the machine-
+  # readable form the plan skeleton already requires, so a plan that names a
+  # decision in prose without linking it declares nothing here — the same
+  # property the plan's own reciprocal-link rules depend on.
+  @prerequisites_heading "### Prerequisites and Acceptance Points"
+  @adr_destination ~r"\A\.\./adr/((\d{4})-[a-z0-9-]+\.md)(?:#\S*)?\z"
 
   # Concept: the base every derived capsule starts from.
   #
@@ -189,6 +157,82 @@ defmodule Loopex.Checks.Register do
   """
   @spec delivery_states() :: [String.t()]
   def delivery_states, do: @delivery_states
+
+  @doc """
+  ## Concept
+
+  The ADR prerequisites one milestone's plan pair declares, as
+  `{path, display name}` in decision-number order.
+
+  ## Technical depth
+
+  Read from the Technical depth plan's one
+  `### Prerequisites and Acceptance Points` section: every governed link in that
+  section whose destination is an ADR Concept file is a declared prerequisite.
+  A link a reader cannot see is not a declaration: fenced and commented regions
+  are excluded by the document's own visibility rule, and an inline comment or
+  code span is stripped from the line before its links are read. A companion
+  with no such section, or with two, fails closed rather than silently declaring
+  nothing: a plan that cannot say what it waits on is a plan nobody can check.
+  """
+  @spec plan_prerequisites(String.t(), String.t()) :: [{String.t(), String.t()}]
+  def plan_prerequisites(text, path) do
+    lines = Markdown.lines(text, path)
+    visible = Markdown.visible_line_numbers(text, path)
+
+    case Markdown.matching_indices(lines, visible, @prerequisites_heading) do
+      [index] ->
+        declared_adrs(lines, visible, index)
+
+      _other ->
+        raise Invalid, "#{path}: expected one #{@prerequisites_heading} section"
+    end
+  end
+
+  defp declared_adrs(lines, visible, index) do
+    stop = section_stop(lines, visible, index)
+
+    lines
+    |> Enum.slice((index + 1)..(stop - 1)//1)
+    |> Enum.with_index(index + 1)
+    |> Enum.filter(fn {_line, number} -> MapSet.member?(visible, number) end)
+    |> Enum.flat_map(fn {line, _number} -> Markdown.links_in(Markdown.exposed_line(line)) end)
+    |> Enum.flat_map(fn {_start, _all, _label, destination} ->
+      adr_prerequisite(destination)
+    end)
+    |> Enum.uniq()
+    |> Enum.sort()
+  end
+
+  # Concept: the section ends where the next section of the same or higher level
+  # begins.
+  defp section_stop(lines, visible, index) do
+    visible
+    |> Enum.sort()
+    |> Enum.drop_while(&(&1 <= index))
+    |> Enum.find_value(length(lines), fn number ->
+      case Markdown.atx(Enum.at(lines, number)) do
+        {level, _text} when level <= 3 -> number
+        _other -> nil
+      end
+    end)
+  end
+
+  # Technical depth: a link to a Technical depth companion is not a second
+  # prerequisite, so the pair is named once by its Concept file, which is the
+  # path ADR statuses are keyed by.
+  defp adr_prerequisite(destination) do
+    case Regex.run(@adr_destination, destination) do
+      [_all, filename, number] ->
+        case String.ends_with?(filename, "-technical.md") do
+          true -> []
+          false -> [{"docs/adr/" <> filename, "ADR " <> number}]
+        end
+
+      nil ->
+        []
+    end
+  end
 
   @doc """
   ## Concept
@@ -545,119 +589,87 @@ defmodule Loopex.Checks.Register do
   A single role derives from its lifecycle state. The one composite form is an
   Accepted predecessor plus an Open successor. Every other composite fails
   closed rather than letting two roles silently share one authority surface.
+
+  `prerequisites` maps a milestone name to the ADR prerequisites its own plan
+  pair declares, as `plan_prerequisites/2` reads them. It defaults to none so a
+  caller asking what a state derives, rather than what a checkout says, does not
+  have to supply a plan.
   """
   @spec expected_capsule(
           String.t() | {String.t(), String.t()},
           String.t() | {String.t(), String.t()},
-          %{String.t() => String.t()}
+          %{String.t() => String.t()},
+          %{String.t() => [{String.t(), String.t()}]}
         ) ::
           %{String.t() => String.t()}
-  def expected_capsule("Blocked", name, adr_statuses) do
+  def expected_capsule(state, name, adr_statuses, prerequisites \\ %{})
+
+  # Concept: the founding Blocked form: a next candidate with no plan files,
+  # recorded before the first milestone opened.
+  #
+  # Technical depth: this derivation is the seed era's own record. It reads the
+  # two bootstrap ADRs by name because those are the decisions that gated the
+  # first opening, and no later milestone can reuse it: a new milestone is
+  # registered as `Open` with its plan pair, which is what the milestone guide
+  # and the `open-milestone` skill do.
+  def expected_capsule("Blocked", name, adr_statuses, _prerequisites) do
     if name != "M0" do
       raise Invalid,
             "#{@index}: the blocked-candidate capsule is derived from the founding ADR records " <>
-              "and applies only to M0"
+              "and applies only to M0; a new milestone is registered as Open with its plan pair"
     end
 
     blocked_values(adr_statuses)
   end
 
-  def expected_capsule("Open", "M1", adr_statuses), do: m1_open_values(adr_statuses)
-
-  def expected_capsule("Open", name, adr_statuses) do
-    base =
-      @seed_blocked
-      |> Map.put(
-        "Blockers",
-        "`#{name}` is open and not accepted; the maintainer must accept its plan pair"
-      )
-      |> Map.put("Next maintainer decision", "Accept or reject the `#{name}` plan pair")
-      |> Map.put(
-        "Next transition",
-        "Record the acceptance governance row and move `#{name}` to Accepted"
-      )
-
-    case unresolved_prerequisites(name, adr_statuses) do
-      [] ->
-        base
-
-      unresolved ->
-        base
-        |> Map.put(
-          "Blockers",
-          "#{join_and(prerequisite_links(unresolved))} must be accepted before the " <>
-            "`#{name}` plan pair can be accepted"
-        )
-        |> Map.put(
-          "Next maintainer decision",
-          "Disposition #{join_and(prerequisite_names(unresolved))}"
-        )
-        |> Map.put(
-          "Next transition",
-          "After #{prerequisite_subject(unresolved)} accepted, accept or reject the " <>
-            "`#{name}` plan pair"
-        )
-    end
+  def expected_capsule("Open", name, adr_statuses, prerequisites) do
+    @seed_blocked
+    |> Map.put(
+      "Blockers",
+      "`#{name}` is open and not accepted; the maintainer must accept its plan pair"
+    )
+    |> Map.put("Next maintainer decision", "Accept or reject the `#{name}` plan pair")
+    |> Map.put(
+      "Next transition",
+      "Record the acceptance governance row and move `#{name}` to Accepted"
+    )
+    |> note_prerequisites(name, adr_statuses, prerequisites)
   end
 
-  def expected_capsule("Accepted", "M1", adr_statuses) do
-    case m1_implementation_accepted?(adr_statuses) do
-      true ->
-        accepted_values("M1")
-
-      false ->
-        accepted_values("M1")
-        |> Map.put(
-          "Blockers",
-          "[ADR 0008](../adr/0008-owner-succession-recovery-and-runtime-placement.md#concept) " <>
-            "must be accepted before Workstream A is revised and Workstream B is completed"
-        )
-        |> Map.put("Next maintainer decision", "Accept or reject ADR 0008")
-        |> Map.put(
-          "Next transition",
-          "After ADR 0008 is accepted, revise Workstream A, rejoin Workstream B, and " <>
-            "complete `M1` with its closure checks green"
-        )
-    end
-  end
-
-  def expected_capsule("Accepted", name, adr_statuses) do
-    require_prerequisites_accepted!(name, "Accepted", adr_statuses)
-    accepted_values(name)
+  def expected_capsule("Accepted", name, adr_statuses, prerequisites) do
+    name
+    |> accepted_values()
+    |> note_prerequisites(name, adr_statuses, prerequisites)
   end
 
   def expected_capsule(
         {delivery_name, "Accepted"},
         {lookahead_name, "Open"},
-        adr_statuses
+        adr_statuses,
+        prerequisites
       ) do
-    delivery = expected_capsule("Accepted", delivery_name, adr_statuses)
-
-    delivery
+    delivery_name
+    |> accepted_values()
     |> Map.put(
       "Authorized work",
-      "Implementation inside the accepted `#{delivery_name}` plan pair on its designated " <>
-        "milestone branch; planning and review for Open `#{lookahead_name}`; no milestone " <>
-        "product bytes integrate before closure and no `#{lookahead_name}` product " <>
-        "implementation"
+      "Implementation inside the accepted `#{delivery_name}` plan pair, landing on `main` in " <>
+        "small reviewed changes; planning and review for Open `#{lookahead_name}`, with no " <>
+        "`#{lookahead_name}` product implementation"
     )
-    |> lookahead_values(delivery_name, lookahead_name, adr_statuses)
-    |> successor_prerequisites(lookahead_name, adr_statuses)
+    |> lookahead_values(delivery_name, lookahead_name)
+    |> note_prerequisites(delivery_name, adr_statuses, prerequisites)
+    |> note_prerequisites(lookahead_name, adr_statuses, prerequisites)
   end
 
-  def expected_capsule({_delivery_name, state}, {_lookahead_name, "Open"}, _adr_statuses) do
+  def expected_capsule({_delivery_name, state}, {_lookahead_name, "Open"}, _statuses, _prereqs) do
     raise Invalid,
           "#{@index}: an Open successor requires an Accepted predecessor, not #{state}"
   end
 
-  def expected_capsule("In progress", "M1", adr_statuses) do
-    require_m1_implementation_accepted!("In progress", adr_statuses)
-    in_progress_values("M1")
-  end
-
-  def expected_capsule("In progress", name, adr_statuses) do
-    require_prerequisites_accepted!(name, "In progress", adr_statuses)
-    in_progress_values(name)
+  def expected_capsule("In progress", name, adr_statuses, prerequisites) do
+    name
+    |> in_progress_values()
+    |> note_prerequisites(name, adr_statuses, prerequisites)
   end
 
   # Concept: the milestone awaits an independent verdict, and the register states
@@ -674,14 +686,10 @@ defmodule Loopex.Checks.Register do
   # to retained evidence at a named candidate. The first correction removed the
   # claim from the record and left it in the comment directly above -- which is the
   # same defect, in the place the next reader looks first.
-  def expected_capsule("In review", "M1", adr_statuses) do
-    require_m1_implementation_accepted!("In review", adr_statuses)
-    in_review_values("M1")
-  end
-
-  def expected_capsule("In review", name, adr_statuses) do
-    require_prerequisites_accepted!(name, "In review", adr_statuses)
-    in_review_values(name)
+  def expected_capsule("In review", name, adr_statuses, prerequisites) do
+    name
+    |> in_review_values()
+    |> note_prerequisites(name, adr_statuses, prerequisites)
   end
 
   # Concept: a closed milestone authorises nothing until the next one opens.
@@ -693,8 +701,8 @@ defmodule Loopex.Checks.Register do
   # from its own accepted plan pair. The blocker field states the closure rather
   # than a check verdict, because a canonical record should not assert a run it
   # cannot observe.
-  def expected_capsule("Closed", name, adr_statuses) do
-    require_prerequisites_accepted!(name, "Closed", adr_statuses)
+  def expected_capsule("Closed", name, adr_statuses, prerequisites) do
+    require_prerequisites_accepted!(name, adr_statuses, prerequisites)
 
     @seed_blocked
     |> Map.put("Blockers", "None; `#{name}` is closed and its governance row is recorded")
@@ -710,7 +718,7 @@ defmodule Loopex.Checks.Register do
     )
   end
 
-  def expected_capsule(state, _name, _adr_statuses) do
+  def expected_capsule(state, _name, _adr_statuses, _prerequisites) do
     raise Invalid,
           "#{@index}: milestone state #{inspect(state)} has no derived status capsule; " <>
             "the transition that first records it must add lifecycle enforcement rather " <>
@@ -723,8 +731,9 @@ defmodule Loopex.Checks.Register do
     |> Map.put("Blockers", "None; `#{name}` is in progress against its accepted plan pair")
     |> Map.put(
       "Next transition",
-      "Map every outcome to evidence, run `bash scripts/check.sh` on each supported " <>
-        "platform and `bash scripts/check-release.sh` once, then move `#{name}` to In review"
+      "Map every outcome to evidence, run `bash scripts/check.sh` under the floor toolchain " <>
+        "pair and `bash scripts/check-release.sh` once from the candidate, then move " <>
+        "`#{name}` to In review"
     )
   end
 
@@ -745,73 +754,12 @@ defmodule Loopex.Checks.Register do
     )
   end
 
-  defp lookahead_values(capsule, "M1", lookahead_name, adr_statuses) do
-    if m1_implementation_accepted?(adr_statuses) do
-      generic_lookahead_values(capsule, "M1", lookahead_name)
-    else
-      capsule
-      |> Map.put(
-        "Blockers",
-        capsule["Blockers"] <>
-          "; `#{lookahead_name}` acceptance, integration, and product implementation also " <>
-          "wait until `M1` closes and the Open candidate is refreshed and independently " <>
-          "reviewed on that closed base"
-      )
-      |> Map.put(
-        "Next maintainer decision",
-        "Accept or reject ADR 0008; `#{lookahead_name}` cannot be accepted before `M1` closes"
-      )
-      |> Map.put(
-        "Next transition",
-        "After ADR 0008 is accepted, revise Workstream A, rejoin Workstream B, complete " <>
-          "`M1` with its closure checks green, and close it; then refresh and " <>
-          "independently review `#{lookahead_name}` on that closed base"
-      )
-    end
-  end
-
-  defp lookahead_values(capsule, delivery_name, lookahead_name, _adr_statuses) do
-    generic_lookahead_values(capsule, delivery_name, lookahead_name)
-  end
-
-  # Concept: the successor's own outstanding decisions are the successor's
-  # blocker, and the composite capsule is the only place they can be read.
-  #
-  # Technical depth: every `lookahead_values/4` clause discarded the successor's
-  # ADR statuses, so the one shape that carries an Open milestone without running
-  # the Open derivation stated nothing about that milestone's prerequisites. The
-  # delivery half already refuses to derive Accepted with one outstanding, so the
-  # gap was confined to what the successor's own row reports. This runs after
-  # whichever clause built the capsule, so a delivery-specific branch cannot
-  # bypass it the way calling `generic_lookahead_values/3` directly would.
-  defp successor_prerequisites(capsule, lookahead_name, adr_statuses) do
-    case unresolved_prerequisites(lookahead_name, adr_statuses) do
-      [] ->
-        capsule
-
-      unresolved ->
-        Map.put(
-          capsule,
-          "Next maintainer decision",
-          "#{capsule["Next maintainer decision"]}; `#{lookahead_name}` also waits on " <>
-            "#{join_and(prerequisite_links(unresolved))}, which " <>
-            "#{prerequisite_verb(unresolved)} not accepted"
-        )
-        |> Map.put(
-          "Blockers",
-          "#{capsule["Blockers"]}; `#{lookahead_name}` additionally waits on " <>
-            "#{join_and(prerequisite_names(unresolved))}"
-        )
-    end
-  end
-
-  defp generic_lookahead_values(capsule, delivery_name, lookahead_name) do
+  defp lookahead_values(capsule, delivery_name, lookahead_name) do
     capsule
     |> Map.put(
       "Blockers",
-      "None for `#{delivery_name}` delivery; `#{lookahead_name}` acceptance, integration, " <>
-        "and product implementation wait until `#{delivery_name}` closes and the Open " <>
-        "candidate is refreshed and independently reviewed on that closed base"
+      "None for `#{delivery_name}` delivery; `#{lookahead_name}` cannot be accepted or " <>
+        "implemented until `#{delivery_name}` closes"
     )
     |> Map.put(
       "Next maintainer decision",
@@ -820,21 +768,10 @@ defmodule Loopex.Checks.Register do
     )
     |> Map.put(
       "Next transition",
-      "Complete `#{delivery_name}` with its closure checks green, move `#{delivery_name}` " <>
-        "to In progress and then In review with cleared independent review, and close it; " <>
-        "then refresh and independently review `#{lookahead_name}` on that closed base"
+      "Complete `#{delivery_name}` with its closure checks green, move it to In progress and " <>
+        "then In review with cleared independent review, and close it; then accept or reject " <>
+        "`#{lookahead_name}`"
     )
-  end
-
-  defp require_m1_implementation_accepted!(state, adr_statuses) do
-    unless m1_implementation_accepted?(adr_statuses) do
-      raise Invalid,
-            "#{@index}: M1 cannot move to #{state} before ADR 0008 is accepted"
-    end
-  end
-
-  defp m1_implementation_accepted?(adr_statuses) do
-    Map.fetch!(adr_statuses, @m1_implementation_adr) == "Accepted"
   end
 
   # Concept: an outstanding prerequisite is one the register can still see is not
@@ -843,8 +780,8 @@ defmodule Loopex.Checks.Register do
   # Technical depth: a declared prerequisite that is not a registered ADR is a
   # governed failure rather than a missing key, because silently treating it as
   # resolved is the one outcome this guard exists to prevent.
-  defp unresolved_prerequisites(name, adr_statuses) do
-    @prerequisite_adrs
+  defp unresolved_prerequisites(name, adr_statuses, prerequisites) do
+    prerequisites
     |> Map.get(name, [])
     |> Enum.filter(fn {path, adr_name} ->
       case Map.fetch(adr_statuses, path) do
@@ -859,14 +796,44 @@ defmodule Loopex.Checks.Register do
     end)
   end
 
-  defp require_prerequisites_accepted!(name, state, adr_statuses) do
-    case unresolved_prerequisites(name, adr_statuses) do
+  # Concept: an outstanding decision is the next thing to do, not a reason the
+  # milestone cannot move.
+  #
+  # Technical depth: a prerequisite is accepted before the implementation that
+  # depends on it, not before unrelated work, so this names what is outstanding
+  # in every live state rather than refusing the transition. Closure is the one
+  # boundary that refuses, because by then every outcome is implemented and
+  # proved, so nothing it depends on can still be Proposed. This runs after
+  # whichever clause built the capsule, so no state-specific branch can bypass it.
+  defp note_prerequisites(capsule, name, adr_statuses, prerequisites) do
+    case unresolved_prerequisites(name, adr_statuses, prerequisites) do
+      [] ->
+        capsule
+
+      unresolved ->
+        capsule
+        |> Map.put(
+          "Blockers",
+          "#{capsule["Blockers"]}; `#{name}` waits on " <>
+            "#{join_and(prerequisite_names(unresolved))} before the outcomes that depend on " <>
+            "#{prerequisite_pronoun(unresolved)}"
+        )
+        |> Map.put(
+          "Next maintainer decision",
+          "#{capsule["Next maintainer decision"]}; disposition " <>
+            "#{join_and(prerequisite_links(unresolved))}"
+        )
+    end
+  end
+
+  defp require_prerequisites_accepted!(name, adr_statuses, prerequisites) do
+    case unresolved_prerequisites(name, adr_statuses, prerequisites) do
       [] ->
         :ok
 
       unresolved ->
         raise Invalid,
-              "#{@index}: `#{name}` cannot move to #{state} before " <>
+              "#{@index}: `#{name}` cannot move to Closed before " <>
                 "#{join_and(prerequisite_names(unresolved))} #{prerequisite_verb(unresolved)} " <>
                 "accepted"
     end
@@ -881,8 +848,8 @@ defmodule Loopex.Checks.Register do
   defp prerequisite_verb([_one]), do: "is"
   defp prerequisite_verb(_many), do: "are"
 
-  defp prerequisite_subject([_one]), do: "the prerequisite is"
-  defp prerequisite_subject(_many), do: "the prerequisites are"
+  defp prerequisite_pronoun([_one]), do: "it"
+  defp prerequisite_pronoun(_many), do: "them"
 
   defp join_and([one]), do: one
   defp join_and([first, second]), do: "#{first} and #{second}"
@@ -894,13 +861,20 @@ defmodule Loopex.Checks.Register do
 
   # Concept: acceptance is the only transition that widens authorized work, and it
   # widens it to the accepted plan pair, no further.
+  #
+  # Technical depth: this used to authorize work "on the designated milestone
+  # branch" and forbid any product byte integrating before closure, which is the
+  # retired structure. Work now lands on `main` in small reviewed changes, as the
+  # milestone guide's Develop step sets out; a milestone branch is an exception
+  # for a slice that cannot be merged safely in pieces, not a requirement the
+  # canonical record imposes on every milestone.
   defp accepted_values(name) do
     @seed_blocked
     |> Map.put("Blockers", "None; `#{name}` is accepted and implementation may proceed")
     |> Map.put(
       "Authorized work",
-      "Implementation inside the accepted `#{name}` plan pair on the designated milestone " <>
-        "branch; no milestone product bytes integrate before closure"
+      "Implementation inside the accepted `#{name}` plan pair, landing on `main` in small " <>
+        "reviewed changes"
     )
     |> Map.put(
       "Next maintainer decision",
@@ -911,54 +885,6 @@ defmodule Loopex.Checks.Register do
       "Implement the accepted outcomes with `bash scripts/check.sh` green, then move " <>
         "`#{name}` to In progress and In review"
     )
-  end
-
-  # Concept: M1 cannot reach plan acceptance while either architecture decision
-  # that shapes its store or executor outcome remains Proposed.
-  #
-  # Technical depth: derive the blocker, decision, and transition from the two
-  # ADR records independently. This makes accepting either one remove exactly
-  # that prerequisite while preserving the planning-only authority boundary.
-  defp m1_open_values(adr_statuses) do
-    unresolved = Enum.filter(@m1_adrs, &(Map.fetch!(adr_statuses, &1) != "Accepted"))
-
-    {blockers, decision, transition} =
-      case unresolved do
-        [] ->
-          {
-            "`M1` remains open and unaccepted; its revised plan-pair candidate awaits " <>
-              "independent review",
-            "Independently review the exact revised `M1` candidate",
-            "After a clear review, accept or reject the `M1` plan pair"
-          }
-
-        [path] ->
-          name = Map.fetch!(@m1_adr_names, path)
-          link = adr_link(path, name)
-
-          {
-            "#{link} must be accepted before the `M1` plan pair can be accepted",
-            "Disposition #{name}",
-            "After the prerequisite is accepted, revise and independently review the " <>
-              "`M1` plan pair"
-          }
-
-        paths ->
-          [first, second] = Enum.map(paths, &adr_link(&1, Map.fetch!(@m1_adr_names, &1)))
-
-          {
-            "#{first} and #{second} must be accepted before the `M1` plan pair can be " <>
-              "accepted",
-            "Disposition ADR 0006 and ADR 0007",
-            "After both prerequisites are accepted, revise and independently review the " <>
-              "`M1` plan pair"
-          }
-      end
-
-    @seed_blocked
-    |> Map.put("Blockers", blockers)
-    |> Map.put("Next maintainer decision", decision)
-    |> Map.put("Next transition", transition)
   end
 
   defp adr_link(path, name) do

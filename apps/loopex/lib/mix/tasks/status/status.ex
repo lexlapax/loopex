@@ -95,7 +95,13 @@ defmodule Loopex.Checks.Status do
         {path, Adr.validate(Map.fetch!(documents, path), path)}
       end)
 
-    require_derived_capsule!(rows, values, adr_statuses)
+    require_derived_capsule!(
+      rows,
+      values,
+      adr_statuses,
+      plan_prerequisites(documents, plan_names)
+    )
+
     require_register_matches_plans!(rows, plan_names)
 
     verify_rejoin_barrier!(documents)
@@ -153,6 +159,20 @@ defmodule Loopex.Checks.Status do
   # Concept: the fields whose owners live outside the lifecycle capsule.
   @derived_fields [@checkpoint_field, @phase_field]
 
+  # Concept: what a milestone waits on is declared by its own plan pair.
+  #
+  # Technical depth: read here, for every registered plan, so the capsule
+  # derivation stays a pure function of the register row, the ADR records, and
+  # the plan's own declaration. A per-milestone table in the deriving module made
+  # registering a milestone a code change; nothing about a new name reaches code
+  # now.
+  defp plan_prerequisites(documents, plan_names) do
+    Map.new(plan_names, fn name ->
+      path = "docs/plans/#{name}-technical.md"
+      {name, Register.plan_prerequisites(Map.fetch!(documents, path), path)}
+    end)
+  end
+
   # Concept: the capsule describes the current delivery milestone and its one
   # permitted Open successor.
   #
@@ -161,7 +181,7 @@ defmodule Loopex.Checks.Status do
   # delivery milestone may be followed by one Open planning lookahead. With no
   # delivery milestone, an Open or founding Blocked candidate describes the
   # state; between milestones the last Closed row does.
-  defp require_derived_capsule!(rows, values, adr_statuses) do
+  defp require_derived_capsule!(rows, values, adr_statuses, prerequisites) do
     roles = Register.milestone_roles(rows)
     closed = Enum.filter(rows, fn {_name, state} -> state == "Closed" end)
 
@@ -171,21 +191,22 @@ defmodule Loopex.Checks.Status do
           Register.expected_capsule(
             {delivery_name, delivery_state},
             {open_name, "Open"},
-            adr_statuses
+            adr_statuses,
+            prerequisites
           )
 
         {{name, state}, nil, nil, _closed} ->
-          Register.expected_capsule(state, name, adr_statuses)
+          Register.expected_capsule(state, name, adr_statuses, prerequisites)
 
         {nil, {name, "Open"}, nil, _closed} ->
-          Register.expected_capsule("Open", name, adr_statuses)
+          Register.expected_capsule("Open", name, adr_statuses, prerequisites)
 
         {nil, nil, {name, "Blocked"}, _closed} ->
-          Register.expected_capsule("Blocked", name, adr_statuses)
+          Register.expected_capsule("Blocked", name, adr_statuses, prerequisites)
 
         {nil, nil, nil, [_ | _] = done} ->
           {name, "Closed"} = List.last(done)
-          Register.expected_capsule("Closed", name, adr_statuses)
+          Register.expected_capsule("Closed", name, adr_statuses, prerequisites)
 
         {nil, nil, nil, []} ->
           raise Invalid, "#{@index}: milestone register is empty"

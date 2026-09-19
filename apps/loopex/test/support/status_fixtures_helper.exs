@@ -145,6 +145,50 @@ defmodule Loopex.StatusFixtures do
     """
   end
 
+  @doc """
+  ## Concept
+
+  The fixture plan pair rewritten for another milestone name.
+
+  ## Technical depth
+
+  The fixture text names `M0` throughout — filenames, reciprocal links, anchors.
+  Renaming is a substitution because nothing else in it is milestone-specific,
+  which is the property the generic lifecycle cases exist to prove: a plan pair
+  for a new name is the same document with a different name in it, and no check
+  learns the name from code.
+  """
+  def named(text, name), do: String.replace(text, "M0", name)
+
+  @doc """
+  ## Concept
+
+  A Technical depth plan that declares ADR prerequisites by link, the way the
+  plan skeleton requires and the status check reads them.
+
+  ## Technical depth
+
+  Takes ADR concept paths, emits one linked bullet each inside the one
+  `### Prerequisites and Acceptance Points` section, and leaves the rest of the
+  companion alone. A plan declaring none keeps the plain sentence, so the
+  no-prerequisite case is the same document minus the bullets.
+  """
+  def technical_plan_with_prerequisites(name, adr_paths) do
+    declarations =
+      Enum.map_join(adr_paths, "\n", fn path ->
+        filename = String.replace_prefix(path, "docs/adr/", "")
+        number = String.slice(filename, 0, 4)
+        "- [ADR #{number}](../adr/#{filename}#concept) gates one outcome."
+      end)
+
+    name
+    |> then(&named(technical_plan(), &1))
+    |> String.replace(
+      "Prerequisites are accepted before plan acceptance.",
+      declarations
+    )
+  end
+
   def envelope do
     """
     <!-- loopex:plan-concept-envelope:start -->

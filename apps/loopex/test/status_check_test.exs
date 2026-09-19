@@ -416,255 +416,162 @@ defmodule Loopex.StatusCheckTest do
     assert in_progress["Next transition"] =~ "In review"
   end
 
-  test "accepted M1 truthfully derives its implementation-time ADR blocker" do
-    path = "docs/adr/0008-owner-succession-recovery-and-runtime-placement.md"
+  test "a milestone's prerequisites are read from its own plan pair" do
+    path = "docs/plans/M99-technical.md"
 
-    m2_prerequisites = %{
-      "docs/adr/0009-tool-executor-and-grant-contracts.md" => "Accepted",
-      "docs/adr/0010-provider-continuation-and-context-staging.md" => "Accepted",
-      "docs/adr/0011-session-input-algebra-and-streaming.md" => "Accepted"
-    }
+    technical =
+      Fixture.technical_plan_with_prerequisites("M99", [
+        "docs/adr/0009-tool-executor-and-grant-contracts.md",
+        "docs/adr/0011-session-input-algebra-and-streaming.md"
+      ])
 
-    proposed = Register.expected_capsule("Accepted", "M1", %{path => "Proposed"})
-    accepted = Register.expected_capsule("Accepted", "M1", %{path => "Accepted"})
+    assert Register.plan_prerequisites(technical, path) == [
+             {"docs/adr/0009-tool-executor-and-grant-contracts.md", "ADR 0009"},
+             {"docs/adr/0011-session-input-algebra-and-streaming.md", "ADR 0011"}
+           ]
 
-    assert proposed["Blockers"] =~ "ADR 0008"
-    assert proposed["Blockers"] =~ "Workstream A"
-    assert proposed["Next maintainer decision"] == "Accept or reject ADR 0008"
-    assert proposed["Authorized work"] == accepted["Authorized work"]
-    assert accepted["Blockers"] == "None; `M1` is accepted and implementation may proceed"
+    # A plan with no linked decision declares none, which is a plan that waits on
+    # nothing rather than a milestone nothing checks.
+    assert Register.plan_prerequisites(Fixture.named(Fixture.technical_plan(), "M99"), path) == []
 
-    lookahead_proposed =
-      Register.expected_capsule(
-        {"M1", "Accepted"},
-        {"M2", "Open"},
-        Map.put(m2_prerequisites, path, "Proposed")
+    link = "[ADR 0009](../adr/0009-tool-executor-and-grant-contracts.md#concept)"
+
+    ignored = [
+      # Prose is not a declaration. The link is the machine-readable form, and a
+      # per-milestone table in the checker is exactly what it replaces.
+      {"a bold mention", String.replace(technical, link, "**ADR 0009**")},
+      # The companion is the same decision, named once by its Concept file.
+      {"a technical companion link",
+       String.replace(
+         technical,
+         link,
+         "[ADR 0009](../adr/0009-tool-executor-and-grant-contracts-technical.md#technical-depth)"
+       )},
+      # A commented-out link says nothing to a reader, so it says nothing here.
+      {"a commented link", String.replace(technical, link, "<!-- #{link} -->")}
+    ]
+
+    for {label, text} <- ignored do
+      refute {"docs/adr/0009-tool-executor-and-grant-contracts.md", "ADR 0009"} in Register.plan_prerequisites(
+               text,
+               path
+             ),
+             "#{label} must not declare a prerequisite"
+    end
+
+    # The section ends where the next one starts: a decision cited under
+    # ownership or evidence is a citation, not a prerequisite.
+    elsewhere =
+      "M99"
+      |> Fixture.technical_plan_with_prerequisites([
+        "docs/adr/0011-session-input-algebra-and-streaming.md"
+      ])
+      |> String.replace(
+        "The maintainer owns decisions; there is one serial rejoin.",
+        "The maintainer owns decisions; see #{link}."
       )
 
-    lookahead_accepted =
-      Register.expected_capsule(
-        {"M1", "Accepted"},
-        {"M2", "Open"},
-        Map.put(m2_prerequisites, path, "Accepted")
-      )
+    assert Register.plan_prerequisites(elsewhere, path) == [
+             {"docs/adr/0011-session-input-algebra-and-streaming.md", "ADR 0011"}
+           ]
 
-    assert lookahead_proposed["Blockers"] =~ "ADR 0008"
-    assert lookahead_proposed["Blockers"] =~ "`M2` acceptance"
-    assert lookahead_proposed["Next maintainer decision"] =~ "Accept or reject ADR 0008"
-    assert lookahead_accepted["Blockers"] =~ "None for `M1` delivery"
-
-    for state <- ["In progress", "In review"] do
-      assert_raise Invalid, ~r/ADR 0008/, fn ->
-        Register.expected_capsule(state, "M1", %{path => "Proposed"})
+    # A companion that cannot say what it waits on fails closed rather than
+    # declaring nothing.
+    # No section at all, and two of them: a reader could not tell what either
+    # document waits on, so neither derives a status.
+    for text <- [
+          String.replace(technical, "### Prerequisites and Acceptance Points", "### Notes"),
+          String.replace(
+            technical,
+            "### Prerequisites and Acceptance Points",
+            "### Prerequisites and Acceptance Points\n\nFirst.\n\n" <>
+              "### Prerequisites and Acceptance Points"
+          )
+        ] do
+      assert_raise Invalid, ~r/expected one ### Prerequisites and Acceptance Points/, fn ->
+        Register.plan_prerequisites(text, path)
       end
-
-      assert is_map(Register.expected_capsule(state, "M1", %{path => "Accepted"}))
     end
   end
 
-  test "a milestone cannot outrun the ADR dispositions its plan pair declares" do
+  test "any milestone name derives the same prerequisite wording" do
+    # The defect this replaces: the derivation carried a table keyed by `M2`,
+    # `M3` and `M4`, so a milestone with outstanding decisions derived "accepted
+    # and implementation may proceed" unless somebody had edited the checker for
+    # its name. These assertions are written once and run for two names that
+    # appear nowhere in the source.
     adrs = [
       {"docs/adr/0009-tool-executor-and-grant-contracts.md", "ADR 0009"},
-      {"docs/adr/0010-provider-continuation-and-context-staging.md", "ADR 0010"},
-      {"docs/adr/0011-session-input-algebra-and-streaming.md", "ADR 0011"}
+      {"docs/adr/0010-provider-continuation-and-context-staging.md", "ADR 0010"}
     ]
 
-    all_accepted = Map.new(adrs, fn {path, _name} -> {path, "Accepted"} end)
-    m1_adr = "docs/adr/0008-owner-succession-recovery-and-runtime-placement.md"
+    accepted = Map.new(adrs, fn {path, _name} -> {path, "Accepted"} end)
+    live_states = ["Open", "Accepted", "In progress", "In review"]
 
-    # The defect this protects against: the generic Open and Accepted
-    # derivations discarded ADR statuses, so `M2` derived "implementation may
-    # proceed" while all three prerequisites were still Proposed.
-    for {path, name} <- adrs do
-      statuses = Map.put(all_accepted, path, "Proposed")
-      open = Register.expected_capsule("Open", "M2", statuses)
+    for name <- ["M99", "daemon-sockets"] do
+      prerequisites = %{name => adrs}
 
-      assert open["Blockers"] =~ name
-      assert open["Next maintainer decision"] == "Disposition #{name}"
-      assert open["Next transition"] =~ "the prerequisite is accepted"
+      for {path, adr_name} <- adrs do
+        statuses = Map.put(accepted, path, "Proposed")
+        others = for {_p, other} <- adrs, other != adr_name, do: other
 
-      for other <- Enum.reject(adrs, &(elem(&1, 1) == name)) do
-        refute open["Blockers"] =~ elem(other, 1)
-      end
+        for state <- live_states do
+          capsule = Register.expected_capsule(state, name, statuses, prerequisites)
 
-      for state <- ["Accepted", "In progress", "In review", "Closed"] do
-        assert_raise Invalid, ~r/`M2` cannot move to #{state} before #{name} is accepted/, fn ->
-          Register.expected_capsule(state, "M2", statuses)
+          # An outstanding decision is the next thing to do, not a reason the
+          # milestone cannot move: it is accepted before the implementation that
+          # depends on it, not before unrelated work.
+          assert capsule["Blockers"] =~
+                   "`#{name}` waits on #{adr_name} before the outcomes that depend on it"
+
+          assert capsule["Next maintainer decision"] =~ "disposition [#{adr_name}]"
+
+          for other <- others do
+            refute capsule["Blockers"] =~ other
+          end
         end
+
+        # Closure is the one boundary that refuses, because by then every outcome
+        # is implemented and proved.
+        assert_raise Invalid,
+                     ~r/`#{name}` cannot move to Closed before #{adr_name} is accepted/,
+                     fn -> Register.expected_capsule("Closed", name, statuses, prerequisites) end
       end
 
-      # The composite capsule is the only shape carrying an Open milestone that
-      # does not run the Open derivation, so it must still name what that
-      # milestone waits on.
-      composite =
+      both_outstanding = Map.new(adrs, fn {path, _name} -> {path, "Proposed"} end)
+
+      for state <- live_states do
+        capsule = Register.expected_capsule(state, name, both_outstanding, prerequisites)
+        assert capsule["Blockers"] =~ "waits on ADR 0009 and ADR 0010 before the outcomes"
+        assert capsule["Next maintainer decision"] =~ "disposition [ADR 0009]"
+        assert capsule["Next maintainer decision"] =~ "and [ADR 0010]"
+      end
+
+      assert_raise Invalid,
+                   ~r/ADR 0009 and ADR 0010 are accepted/,
+                   fn ->
+                     Register.expected_capsule("Closed", name, both_outstanding, prerequisites)
+                   end
+
+      # Everything accepted derives the ordinary capsule for every state, with no
+      # decision named anywhere.
+      for state <- Register.states() -- ["Blocked"] do
+        capsule = Register.expected_capsule(state, name, accepted, prerequisites)
+        refute capsule["Blockers"] =~ "ADR"
+        refute capsule["Next maintainer decision"] =~ "ADR"
+      end
+
+      # A declared prerequisite that is not a registered ADR is a governed
+      # failure, never a silently resolved one.
+      assert_raise Invalid, ~r/names ADR 0009 as a prerequisite/, fn ->
         Register.expected_capsule(
-          {"M1", "Accepted"},
-          {"M2", "Open"},
-          Map.put(statuses, m1_adr, "Accepted")
+          "Open",
+          name,
+          Map.delete(accepted, elem(hd(adrs), 0)),
+          prerequisites
         )
-
-      assert composite["Blockers"] =~ name
-      assert composite["Next maintainer decision"] =~ name
-    end
-
-    two_outstanding =
-      all_accepted
-      |> Map.put("docs/adr/0009-tool-executor-and-grant-contracts.md", "Proposed")
-      |> Map.put("docs/adr/0011-session-input-algebra-and-streaming.md", "Proposed")
-
-    open_two = Register.expected_capsule("Open", "M2", two_outstanding)
-    assert open_two["Next maintainer decision"] == "Disposition ADR 0009 and ADR 0011"
-    assert open_two["Next transition"] =~ "the prerequisites are accepted"
-    refute open_two["Blockers"] =~ "ADR 0010"
-
-    none_accepted = Map.new(adrs, fn {path, _name} -> {path, "Proposed"} end)
-    open_none = Register.expected_capsule("Open", "M2", none_accepted)
-
-    assert open_none["Next maintainer decision"] ==
-             "Disposition ADR 0009, ADR 0010, and ADR 0011"
-
-    for {_path, name} <- adrs do
-      assert open_none["Blockers"] =~ name
-    end
-
-    assert_raise Invalid, ~r/ADR 0009, ADR 0010, and ADR 0011 are accepted/, fn ->
-      Register.expected_capsule("Accepted", "M2", none_accepted)
-    end
-
-    # All three accepted returns the ordinary derivation for each state, and the
-    # Open capsule goes back to naming acceptance itself as the open decision.
-    open_clear = Register.expected_capsule("Open", "M2", all_accepted)
-
-    assert open_clear ==
-             Register.expected_capsule("Open", "unconstrained", all_accepted)
-             |> Map.put(
-               "Blockers",
-               "`M2` is open and not accepted; the maintainer must accept its plan pair"
-             )
-             |> Map.put(
-               "Next maintainer decision",
-               "Accept or reject the `M2` plan pair"
-             )
-             |> Map.put(
-               "Next transition",
-               "Record the acceptance governance row and move `M2` to Accepted"
-             )
-
-    for state <- ["Accepted", "In progress", "In review", "Closed"] do
-      assert is_map(Register.expected_capsule(state, "M2", all_accepted))
-    end
-
-    composite_clear =
-      Register.expected_capsule(
-        {"M1", "Accepted"},
-        {"M2", "Open"},
-        Map.put(all_accepted, m1_adr, "Accepted")
-      )
-
-    refute composite_clear["Blockers"] =~ "ADR 00"
-    refute composite_clear["Next maintainer decision"] =~ "ADR 00"
-
-    # A declared prerequisite that is not a registered ADR is a governed failure,
-    # never a silently resolved one.
-    assert_raise Invalid, ~r/names ADR 0009 as a prerequisite/, fn ->
-      Register.expected_capsule("Open", "M2", Map.delete(all_accepted, elem(hd(adrs), 0)))
-    end
-  end
-
-  test "M3 names its skill and permit decisions and cannot outrun either" do
-    adrs = [
-      {"docs/adr/0025-resource-packs-and-skill-admission.md", "ADR 0025"},
-      {"docs/adr/0027-provider-permit-retirement.md", "ADR 0027"}
-    ]
-
-    accepted = Map.new(adrs, fn {path, _name} -> {path, "Accepted"} end)
-    proposed = Map.new(adrs, fn {path, _name} -> {path, "Proposed"} end)
-    open = Register.expected_capsule("Open", "M3", proposed)
-    assert open["Next maintainer decision"] == "Disposition ADR 0025 and ADR 0027"
-    assert open["Next transition"] =~ "After the prerequisites are accepted"
-
-    for {path, name} <- adrs do
-      outstanding = Map.put(accepted, path, "Proposed")
-      open = Register.expected_capsule("Open", "M3", outstanding)
-      assert open["Blockers"] =~ name
-      assert open["Next maintainer decision"] == "Disposition #{name}"
-
-      for state <- ["Accepted", "In progress", "In review", "Closed"] do
-        assert_raise Invalid, ~r/`M3` cannot move to #{state} before #{name} is accepted/, fn ->
-          Register.expected_capsule(state, "M3", outstanding)
-        end
-
-        assert is_map(Register.expected_capsule(state, "M3", accepted))
-      end
-
-      assert_raise Invalid, ~r/M3` names #{name} as a prerequisite but/, fn ->
-        Register.expected_capsule("Open", "M3", Map.delete(accepted, path))
       end
     end
-
-    clear = Register.expected_capsule("Open", "M3", accepted)
-    refute clear["Blockers"] =~ "ADR"
-    refute clear["Next maintainer decision"] =~ "ADR"
-  end
-
-  test "M4 names its protocol interaction floor and range decisions and cannot outrun any" do
-    adrs = [
-      {"docs/adr/0023-experimental-public-session-protocol.md", "ADR 0023"},
-      {"docs/adr/0024-durable-interaction-lifecycle-and-host-policy-authority.md", "ADR 0024"},
-      {"docs/adr/0026-development-floor-refresh.md", "ADR 0026"},
-      {"docs/adr/0028-bounded-artifact-retrieval.md", "ADR 0028"},
-      {"docs/adr/0030-observability-tracing-and-telemetry.md", "ADR 0030"}
-    ]
-
-    accepted = Map.new(adrs, fn {path, _name} -> {path, "Accepted"} end)
-    proposed = Map.new(adrs, fn {path, _name} -> {path, "Proposed"} end)
-    open = Register.expected_capsule("Open", "M4", proposed)
-
-    assert open["Next maintainer decision"] ==
-             "Disposition ADR 0023, ADR 0024, ADR 0026, ADR 0028, and ADR 0030"
-
-    assert open["Next transition"] =~ "After the prerequisites are accepted"
-
-    lookahead = Register.expected_capsule({"M3", "Accepted"}, {"M4", "Open"}, m3_and_m4(proposed))
-
-    assert lookahead["Blockers"] =~
-             "`M4` additionally waits on ADR 0023, ADR 0024, ADR 0026, ADR 0028, and ADR 0030"
-
-    assert lookahead["Next maintainer decision"] =~
-             "cannot be accepted before `M3` closes; `M4` also waits on"
-
-    for {path, name} <- adrs do
-      outstanding = Map.put(accepted, path, "Proposed")
-      open = Register.expected_capsule("Open", "M4", outstanding)
-      assert open["Blockers"] =~ name
-      assert open["Next maintainer decision"] == "Disposition #{name}"
-
-      for state <- ["Accepted", "In progress", "In review", "Closed"] do
-        assert_raise Invalid, ~r/`M4` cannot move to #{state} before #{name} is accepted/, fn ->
-          Register.expected_capsule(state, "M4", outstanding)
-        end
-
-        assert is_map(Register.expected_capsule(state, "M4", accepted))
-      end
-
-      assert_raise Invalid, ~r/M4` names #{name} as a prerequisite but/, fn ->
-        Register.expected_capsule("Open", "M4", Map.delete(accepted, path))
-      end
-    end
-
-    clear = Register.expected_capsule({"M3", "Accepted"}, {"M4", "Open"}, m3_and_m4(accepted))
-    refute clear["Blockers"] =~ "ADR"
-    refute clear["Next maintainer decision"] =~ "ADR"
-  end
-
-  defp m3_and_m4(m4_statuses) do
-    Map.merge(
-      %{
-        "docs/adr/0025-resource-packs-and-skill-admission.md" => "Accepted",
-        "docs/adr/0027-provider-permit-retirement.md" => "Accepted"
-      },
-      m4_statuses
-    )
   end
 
   test "a milestone state with no derived capsule fails closed" do
@@ -1455,22 +1362,226 @@ defmodule Loopex.StatusCheckTest do
              "Next transition"
            ]) == %{
              "Blockers" =>
-               "None for `current` delivery; `next` acceptance, integration, and product " <>
-                 "implementation wait until `current` closes and the Open candidate is " <>
-                 "refreshed and independently reviewed on that closed base",
+               "None for `current` delivery; `next` cannot be accepted or implemented " <>
+                 "until `current` closes",
              "Authorized work" =>
-               "Implementation inside the accepted `current` plan pair on its designated " <>
-                 "milestone branch; planning and review for Open `next`; no milestone " <>
-                 "product bytes integrate before closure and no `next` product " <>
-                 "implementation",
+               "Implementation inside the accepted `current` plan pair, landing on `main` " <>
+                 "in small reviewed changes; planning and review for Open `next`, with no " <>
+                 "`next` product implementation",
              "Next maintainer decision" =>
                "None until `current` is ready for independent review; `next` cannot be " <>
                  "accepted before `current` closes",
              "Next transition" =>
-               "Complete `current` with its closure checks green, move `current` to In " <>
-                 "progress and then In review with cleared independent review, and close " <>
-                 "it; then refresh and independently review `next` on that closed base"
+               "Complete `current` with its closure checks green, move it to In progress " <>
+                 "and then In review with cleared independent review, and close it; then " <>
+                 "accept or reject `next`"
            }
+
+    # The retired structure is not describable from here any more: no capsule
+    # field may require a milestone branch, forbid integration before closure, or
+    # demand a run on every supported platform.
+    for {_field, value} <- capsule do
+      refute value =~ "milestone branch"
+      refute value =~ "integrate before closure"
+      refute value =~ "supported platform"
+    end
+  end
+
+  # Concept: a milestone the checker has never heard of runs its whole lifecycle
+  # with no code edit.
+  #
+  # Technical depth: this walks two synthetic names -- an `M` form and a
+  # lowercase slug, neither of which appears anywhere in the source -- through
+  # Accepted, In progress, In review and Closed in a real temporary Git tree,
+  # through the same `mix loopex.status` entrypoint the repository runs. The
+  # expected capsule values are written here as literals rather than taken from
+  # the deriving module, so a case cannot pass by agreeing with the code it is
+  # checking, and each state also asserts that the retired rules -- a mandatory
+  # milestone branch, integration only at closure, a run on every supported
+  # platform -- appear nowhere in what the milestone derives.
+  test "a milestone the checker has never seen runs its whole lifecycle" do
+    for name <- ["M99", "daemon-sockets"] do
+      for state <- ["Accepted", "In progress", "In review", "Closed"] do
+        expected = expected_lifecycle_values(name, state)
+        documents = lifecycle_documents(name, state, expected)
+
+        assert :ok == checked_tree(documents),
+               "`#{name}` must pass the real status entrypoint in #{state}"
+
+        for {field, value} <- expected do
+          for retired <- [
+                "milestone branch",
+                "integrate before closure",
+                "product bytes",
+                "supported platform"
+              ] do
+            refute value =~ retired,
+                   "#{state} #{field} must not carry the retired rule #{inspect(retired)}"
+          end
+        end
+
+        # And the derivation is enforced, not merely satisfied: restoring the old
+        # authorized-work sentence must fail for a name no code mentions.
+        if state != "Closed" do
+          documents
+          |> replace(
+            "docs/plans/README.md",
+            expected["Authorized work"],
+            "Implementation inside the accepted `#{name}` plan pair on the designated " <>
+              "milestone branch; no milestone product bytes integrate before closure"
+          )
+          |> then(fn mutated ->
+            assert {:error, [message]} = checked_tree(mutated)
+            assert message =~ "derived status capsule"
+          end)
+        end
+      end
+
+      # A prerequisite the plan pair itself declares reaches the capsule, with no
+      # per-milestone table anywhere: the fixture's ADR 0001 is Proposed here.
+      declaring =
+        lifecycle_documents(name, "Accepted", expected_lifecycle_values(name, "Accepted"))
+
+      assert {:error, [message]} =
+               declaring
+               |> Map.put(
+                 "docs/plans/#{name}-technical.md",
+                 Fixture.technical_plan_with_prerequisites(name, [
+                   "docs/adr/0001-repository-and-application-layout.md"
+                 ])
+               )
+               |> checked_tree()
+
+      assert message =~ "derived status capsule"
+    end
+  end
+
+  # Concept: the capsule a name and a state derive, written out rather than
+  # computed.
+  defp expected_lifecycle_values(name, state) do
+    accepted = %{
+      "Blockers" => "None; `#{name}` is accepted and implementation may proceed",
+      "Authorized work" =>
+        "Implementation inside the accepted `#{name}` plan pair, landing on `main` in " <>
+          "small reviewed changes",
+      "Next maintainer decision" => "None until `#{name}` is ready for independent review",
+      "Next transition" =>
+        "Implement the accepted outcomes with `bash scripts/check.sh` green, then move " <>
+          "`#{name}` to In progress and In review"
+    }
+
+    case state do
+      "Accepted" ->
+        accepted
+
+      "In progress" ->
+        %{
+          accepted
+          | "Blockers" => "None; `#{name}` is in progress against its accepted plan pair",
+            "Next transition" =>
+              "Map every outcome to evidence, run `bash scripts/check.sh` under the floor " <>
+                "toolchain pair and `bash scripts/check-release.sh` once from the candidate, " <>
+                "then move `#{name}` to In review"
+        }
+
+      "In review" ->
+        %{
+          accepted
+          | "Blockers" => "None; `#{name}` awaits independent review of its closure candidate",
+            "Next maintainer decision" =>
+              "Close `#{name}` or reject its closure candidate on the review findings",
+            "Next transition" => "Record the closure governance row and move `#{name}` to Closed"
+        }
+
+      "Closed" ->
+        %{
+          "Blockers" => "None; `#{name}` is closed and its governance row is recorded",
+          "Authorized work" =>
+            "Explicitly authorized planning, ADR, and review work only; no product " <>
+              "implementation until the next milestone is accepted",
+          "Next maintainer decision" => "Open the next milestone, or defer it",
+          "Next transition" => "Write the next milestone's plan pair and move it to Open"
+        }
+    end
+  end
+
+  # Concept: a complete document set carrying one milestone in one state.
+  defp lifecycle_documents(name, state, expected) do
+    phase =
+      case state do
+        "Closed" -> "Closed milestone product baseline"
+        _other -> "Pre-implementation planning"
+      end
+
+    checkpoint =
+      case state do
+        "Closed" -> "`#{name}` — 2026-08-15"
+        _other -> "Seed bootstrap — 2026-08-15"
+      end
+
+    summary =
+      case state do
+        "Closed" ->
+          "**Revision status:** #{phase}; no milestone is active; no next candidate is recorded."
+
+        _other ->
+          "**Revision status:** #{phase}; active milestone `#{name}` is " <>
+            "#{String.downcase(state)}; no next candidate is recorded."
+      end
+
+    row =
+      "| `#{name}` | #{state} | [concept](#{name}.md) | " <>
+        "[technical depth](#{name}-technical.md) | — |"
+
+    Fixture.documents()
+    |> Map.new(fn {path, text} ->
+      {path,
+       text
+       |> String.replace(Fixture.blocked_row(), row)
+       |> String.replace(Fixture.summary(), summary)}
+    end)
+    |> Map.put("docs/plans/#{name}.md", Fixture.named(Fixture.plan(), name))
+    |> Map.put(
+      "docs/plans/#{name}-technical.md",
+      Fixture.named(Fixture.technical_plan(), name)
+    )
+    |> Map.update!("docs/plans/README.md", fn text ->
+      text
+      |> String.replace(
+        "| Integrated phase | Pre-implementation planning |",
+        "| Integrated phase | #{phase} |"
+      )
+      |> String.replace(
+        "| Last closed product checkpoint | Seed bootstrap — 2026-08-15 |",
+        "| Last closed product checkpoint | #{checkpoint} |"
+      )
+      |> rewrite_capsule(expected)
+    end)
+  end
+
+  # Concept: run the real `mix loopex.status` entrypoint over a throwaway tree.
+  #
+  # Technical depth: the task lists the repository's Markdown through Git, so the
+  # documents are written into a fresh repository rather than handed to
+  # `validate/1`. Nothing outside the temporary directory is read or written.
+  defp checked_tree(documents) do
+    root =
+      Path.join(
+        System.tmp_dir!(),
+        "status-lifecycle-#{System.unique_integer([:positive])}"
+      )
+
+    File.mkdir_p!(root)
+    on_exit(fn -> File.rm_rf(root) end)
+    {_output, 0} = System.cmd("git", ["init", "--quiet", root], stderr_to_stdout: true)
+
+    Enum.each(documents, fn {path, text} ->
+      full = Path.join(root, path)
+      File.mkdir_p!(Path.dirname(full))
+      File.write!(full, text)
+    end)
+
+    Mix.Tasks.Loopex.Status.check(root)
   end
 
   # Concept: rewrite the fixture's status capsule to the values a given register
