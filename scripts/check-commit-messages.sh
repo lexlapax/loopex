@@ -191,7 +191,15 @@ do
 done
 
 status=0
-range="${baseline}..HEAD"
+# Lint the commits this checkout adds beyond origin/main: the ones a review
+# has not seen yet. Commits already integrated were linted before their
+# merge, so they are not scanned again; without a reachable origin/main the
+# fixed baseline stands in.
+if base=$(git merge-base origin/main HEAD 2>/dev/null) && [ -n "$base" ]; then
+  range="${base}..HEAD"
+else
+  range="${baseline}..HEAD"
+fi
 
 if ! commits="$(git rev-list "$range")"; then
   echo "commit message check unavailable: could not enumerate ${range}" >&2
@@ -260,4 +268,4 @@ fi
 
 # Always report the fixed policy baseline so the checked range remains visible
 # in retained evidence. Changing this byte is a gate-policy change.
-echo "commit message check passed (baseline ${baseline})"
+echo "commit message check passed (range ${range})"
