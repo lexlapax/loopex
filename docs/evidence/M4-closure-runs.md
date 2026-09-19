@@ -81,3 +81,27 @@ work merged), `bash scripts/check.sh` on the current pair: Linux 315 s
 (runner alone, all ten applications green), Mac 346 s (runner alone), Mac
 256 s (runner and bounds), against 809 s and 870 s in sequence at closure.
 The three long-duration bound proofs run in the release check's own pass.
+
+## The release check after the audit follow-up
+
+`843fbdcc` — `docs(M4): correct the register index, naming rule and tense`,
+the tree after the executor launch-guard fix and every audit follow-up. On
+serenity (Linux, current pair, pinned Node), `bash scripts/check-release.sh`:
+PASS in 273 s, twelve real tests across the seven release applications
+(five in the app server, three in the CLI, one each in the provider adapter
+and the protocol, two in the reference client) and then the two
+long-duration executor proofs and the one in core, the two attended prompts
+answered. The staged archive it proved is named by its own digest for the
+first time: source `843fbdcc73f2daa9a439043d2cb1829219bcfc6c`, archive
+SHA-256 `5485c6d9807b4c2351bd221aa9e4aa288d7ddc4e465780cccfab9292a2abbe5d`.
+The one commit after it, `7c75d59`, changes a test in the provider phase
+diagnostic module, which the release check never runs; the product bytes of
+the two revisions are identical, which `git diff 843fbdc 7c75d59 --stat`
+shows.
+
+## The fast check on the final candidate
+
+Hosted runner, `bash scripts/check.sh --select` with the provider suite
+alone: `843fbdc` on `main` PASS in 12 min 54 s; `7c75d59` on its pull request
+PASS in 12 min 38 s. The Mac, ten applications at once: recorded below once
+measured at `7c75d59`.

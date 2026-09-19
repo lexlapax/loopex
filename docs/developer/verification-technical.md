@@ -79,7 +79,13 @@ hogs to four cores with `taskset -c 0-3`, add one process writing 8 MiB with
 run past its 60 s run deadline as a hang. The frame split reproduced 2 in 34
 before the fix and 0 in 30 after; the same load at a 600 ms cleanup grace
 fails the settlement budget about 40% of the time, which is why the budget
-cases commit two seconds. The procedure is `scripts/fixtures/pinned-load.sh`,
+cases commit two seconds. The harness is about twice as harsh as the hosted
+runner: the `loopex` suite takes 500 s under it against 150 s there, and at
+`77c1e23` four runs of that whole suite under it failed the `deps_budget`
+offline-materializer bound every time and two provider-protocol cases that
+commit 3 s deadlines once each, all of which the hosted runner passes in
+every run. Those three are the margin: what would break on a runner twice
+as slow as today's. The procedure is `scripts/fixtures/pinned-load.sh`,
 which takes an application directory and the test specs and prints one line
 per run and a final count; it needs `taskset`, so it runs on a Linux host
 such as serenity, and it is a developer tool rather than a repository check.
