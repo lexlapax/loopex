@@ -35,6 +35,7 @@ defmodule Loopex.Checks.Register do
   alias Loopex.Checks.Invalid
   alias Loopex.Checks.Markdown
   alias Loopex.Checks.Names
+  alias Loopex.Checks.Paths
 
   @index "docs/plans/README.md"
 
@@ -92,7 +93,9 @@ defmodule Loopex.Checks.Register do
   # decision in prose without linking it declares nothing here — the same
   # property the plan's own reciprocal-link rules depend on.
   @prerequisites_heading "### Prerequisites and Acceptance Points"
+  @adr_directory "docs/adr/"
   @adr_destination ~r"\A\.\./adr/((\d{4})-[a-z0-9-]+\.md)(?:#\S*)?\z"
+  @technical_envelope_end "<!-- loopex:plan-technical-envelope:end -->"
 
   # Concept: the base every derived capsule starts from.
   #
@@ -174,6 +177,9 @@ defmodule Loopex.Checks.Register do
   code span is stripped from the line before its links are read. A companion
   with no such section, or with two, fails closed rather than silently declaring
   nothing: a plan that cannot say what it waits on is a plan nobody can check.
+  So does a link that lands in `docs/adr/` without being spelled
+  `../adr/NNNN-slug.md`: a mistyped decision is the one case where reading
+  nothing looks exactly like waiting on nothing.
   """
   @spec plan_prerequisites(String.t(), String.t()) :: [{String.t(), String.t()}]
   def plan_prerequisites(text, path) do
@@ -182,14 +188,14 @@ defmodule Loopex.Checks.Register do
 
     case Markdown.matching_indices(lines, visible, @prerequisites_heading) do
       [index] ->
-        declared_adrs(lines, visible, index)
+        declared_adrs(lines, visible, index, path)
 
       _other ->
         raise Invalid, "#{path}: expected one #{@prerequisites_heading} section"
     end
   end
 
-  defp declared_adrs(lines, visible, index) do
+  defp declared_adrs(lines, visible, index, path) do
     stop = section_stop(lines, visible, index)
 
     lines
@@ -198,40 +204,78 @@ defmodule Loopex.Checks.Register do
     |> Enum.filter(fn {_line, number} -> MapSet.member?(visible, number) end)
     |> Enum.flat_map(fn {line, _number} -> Markdown.links_in(Markdown.exposed_line(line)) end)
     |> Enum.flat_map(fn {_start, _all, _label, destination} ->
-      adr_prerequisite(destination)
+      adr_prerequisite(destination, path)
     end)
     |> Enum.uniq()
     |> Enum.sort()
   end
 
-  # Concept: the section ends where the next section of the same or higher level
-  # begins.
+  # Concept: the section ends where the next section, or the envelope itself,
+  # ends it.
+  #
+  # Technical depth: the envelope's last section has no following heading, so a
+  # heading-only rule let it run to the end of the file and read every link in
+  # the document as a prerequisite. The envelope's own end marker bounds it, and
+  # a setext heading ends it like an ATX one, because a section the author
+  # underlined is still a new section.
   defp section_stop(lines, visible, index) do
+    marker =
+      lines
+      |> Enum.with_index()
+      |> Enum.find_value(length(lines), fn {line, number} ->
+        if number > index and String.trim(line) == @technical_envelope_end, do: number
+      end)
+
+    min(heading_stop(lines, visible, index), marker)
+  end
+
+  defp heading_stop(lines, visible, index) do
     visible
     |> Enum.sort()
     |> Enum.drop_while(&(&1 <= index))
     |> Enum.find_value(length(lines), fn number ->
-      case Markdown.atx(Enum.at(lines, number)) do
-        {level, _text} when level <= 3 -> number
-        _other -> nil
+      cond do
+        match?({level, _text} when level <= 3, Markdown.atx(Enum.at(lines, number))) -> number
+        number - 1 > index and Markdown.setext_heading?(lines, visible, number) -> number - 1
+        true -> nil
       end
     end)
   end
 
   # Technical depth: a link to a Technical depth companion is not a second
   # prerequisite, so the pair is named once by its Concept file, which is the
-  # path ADR statuses are keyed by.
-  defp adr_prerequisite(destination) do
+  # path ADR statuses are keyed by. Anything else that resolves into the decision
+  # directory is a mis-spelling, and it raises rather than reading as a plan that
+  # waits on nothing.
+  defp adr_prerequisite(destination, path) do
     case Regex.run(@adr_destination, destination) do
       [_all, filename, number] ->
         case String.ends_with?(filename, "-technical.md") do
           true -> []
-          false -> [{"docs/adr/" <> filename, "ADR " <> number}]
+          false -> [{@adr_directory <> filename, "ADR " <> number}]
         end
 
       nil ->
+        refuse_stray_decision_link!(destination, path)
         []
     end
+  end
+
+  defp refuse_stray_decision_link!(destination, path) do
+    target =
+      destination
+      |> String.split("#")
+      |> hd()
+      |> then(&Paths.join(Paths.dirname(path), &1))
+      |> Paths.normalise()
+
+    if String.starts_with?(target, @adr_directory) do
+      raise Invalid,
+            "#{path}: prerequisite link #{inspect(destination)} resolves to #{target}, which " <>
+              "is not a decision named as `../adr/NNNN-slug.md`"
+    end
+
+    :ok
   end
 
   @doc """
@@ -687,9 +731,8 @@ defmodule Loopex.Checks.Register do
   # claim from the record and left it in the comment directly above -- which is the
   # same defect, in the place the next reader looks first.
   def expected_capsule("In review", name, adr_statuses, prerequisites) do
-    name
-    |> in_review_values()
-    |> note_prerequisites(name, adr_statuses, prerequisites)
+    require_prerequisites_accepted!(name, "In review", adr_statuses, prerequisites)
+    in_review_values(name)
   end
 
   # Concept: a closed milestone authorises nothing until the next one opens.
@@ -702,7 +745,7 @@ defmodule Loopex.Checks.Register do
   # than a check verdict, because a canonical record should not assert a run it
   # cannot observe.
   def expected_capsule("Closed", name, adr_statuses, prerequisites) do
-    require_prerequisites_accepted!(name, adr_statuses, prerequisites)
+    require_prerequisites_accepted!(name, "Closed", adr_statuses, prerequisites)
 
     @seed_blocked
     |> Map.put("Blockers", "None; `#{name}` is closed and its governance row is recorded")
@@ -801,10 +844,10 @@ defmodule Loopex.Checks.Register do
   #
   # Technical depth: a prerequisite is accepted before the implementation that
   # depends on it, not before unrelated work, so this names what is outstanding
-  # in every live state rather than refusing the transition. Closure is the one
-  # boundary that refuses, because by then every outcome is implemented and
-  # proved, so nothing it depends on can still be Proposed. This runs after
-  # whichever clause built the capsule, so no state-specific branch can bypass it.
+  # in every state before review rather than refusing the transition. Review and
+  # closure refuse, because by then every outcome is implemented and proved, so
+  # nothing it depends on can still be Proposed. This runs after whichever clause
+  # built the capsule, so no state-specific branch can bypass it.
   defp note_prerequisites(capsule, name, adr_statuses, prerequisites) do
     case unresolved_prerequisites(name, adr_statuses, prerequisites) do
       [] ->
@@ -826,14 +869,22 @@ defmodule Loopex.Checks.Register do
     end
   end
 
-  defp require_prerequisites_accepted!(name, adr_statuses, prerequisites) do
+  # Concept: a candidate whose outcomes are all proved cannot still be waiting on
+  # a decision one of them depends on.
+  #
+  # Technical depth: In review and Closed both describe a complete closure
+  # candidate -- the first the one an independent reviewer is reading, the second
+  # the one the maintainer closed -- so an outstanding prerequisite is a
+  # contradiction at either. The earlier states name it instead, because a
+  # decision is accepted before the implementation that depends on it.
+  defp require_prerequisites_accepted!(name, state, adr_statuses, prerequisites) do
     case unresolved_prerequisites(name, adr_statuses, prerequisites) do
       [] ->
         :ok
 
       unresolved ->
         raise Invalid,
-              "#{@index}: `#{name}` cannot move to Closed before " <>
+              "#{@index}: `#{name}` cannot move to #{state} before " <>
                 "#{join_and(prerequisite_names(unresolved))} #{prerequisite_verb(unresolved)} " <>
                 "accepted"
     end
@@ -888,7 +939,7 @@ defmodule Loopex.Checks.Register do
   end
 
   defp adr_link(path, name) do
-    filename = Loopex.Checks.Paths.strip_prefix(path, "docs/adr/")
+    filename = Paths.strip_prefix(path, "docs/adr/")
     "[#{name}](../adr/#{filename}#concept)"
   end
 
@@ -898,7 +949,7 @@ defmodule Loopex.Checks.Register do
     case unresolved do
       [path] ->
         name = Map.fetch!(@adr_names, path)
-        filename = Loopex.Checks.Paths.strip_prefix(path, "docs/adr/")
+        filename = Paths.strip_prefix(path, "docs/adr/")
 
         @seed_blocked
         |> Map.put(

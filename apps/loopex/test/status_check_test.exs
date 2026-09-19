@@ -477,6 +477,66 @@ defmodule Loopex.StatusCheckTest do
 
     # A companion that cannot say what it waits on fails closed rather than
     # declaring nothing.
+    # A decision that lands in the decision directory but is not spelled
+    # `../adr/NNNN-slug.md` is a typo, and reading nothing there looks exactly
+    # like waiting on nothing.
+    for mistyped <- [
+          "../adr/9-tool-executor-and-grant-contracts.md#concept",
+          "../adr/0009_tool_executor.md#concept",
+          "../../docs/adr/0009-tool-executor-and-grant-contracts.md#concept",
+          "../adr/README.md"
+        ] do
+      assert_raise Invalid, ~r/prerequisite link .* resolves to docs\/adr\//, fn ->
+        Register.plan_prerequisites(String.replace(technical, link, "[d](#{mistyped})"), path)
+      end
+    end
+
+    # A link that lands anywhere else is somebody citing something, not a
+    # mistyped decision.
+    assert Register.plan_prerequisites(
+             String.replace(technical, link, "[scope](M99.md#concept-plan-scope)"),
+             path
+           ) == [{"docs/adr/0011-session-input-algebra-and-streaming.md", "ADR 0011"}]
+
+    # The envelope's last section has no following heading. A prerequisites
+    # section placed there must stop at the envelope's end marker rather than
+    # reading the rest of the file, so the trailing paragraph below carries no
+    # heading of its own: only the marker can end the section.
+    other_link = "[ADR 0011](../adr/0011-session-input-algebra-and-streaming.md#concept)"
+
+    trailing =
+      Fixture.technical_plan()
+      |> Fixture.named("M99")
+      |> String.replace("### Prerequisites and Acceptance Points", "### Earlier Notes")
+      |> String.replace(
+        "Use direct code; add no abstraction without two concrete examples.",
+        "### Prerequisites and Acceptance Points\n\nThis milestone waits on #{link}."
+      )
+      |> Kernel.<>("\nA closing remark that also mentions #{other_link} in passing.\n")
+
+    assert Register.plan_prerequisites(trailing, path) == [
+             {"docs/adr/0009-tool-executor-and-grant-contracts.md", "ADR 0009"}
+           ]
+
+    # A setext heading closes the section the same way an ATX one does.
+    underlined =
+      "M99"
+      |> Fixture.technical_plan_with_prerequisites([
+        "docs/adr/0011-session-input-algebra-and-streaming.md"
+      ])
+      |> String.replace(
+        "<a id=\"technical-plan-ownership\"></a>\n### Ownership, Decision Owners, and Rejoin Barriers",
+        "Ownership\n---------"
+      )
+      |> String.replace(
+        "The maintainer owns decisions; there is one serial rejoin.",
+        "The maintainer owns decisions; see #{link}."
+      )
+
+    assert Register.plan_prerequisites(underlined, path) == [
+             {"docs/adr/0011-session-input-algebra-and-streaming.md", "ADR 0011"}
+           ]
+
     # No section at all, and two of them: a reader could not tell what either
     # document waits on, so neither derives a status.
     for text <- [
@@ -506,7 +566,8 @@ defmodule Loopex.StatusCheckTest do
     ]
 
     accepted = Map.new(adrs, fn {path, _name} -> {path, "Accepted"} end)
-    live_states = ["Open", "Accepted", "In progress", "In review"]
+    naming_states = ["Open", "Accepted", "In progress"]
+    refusing_states = ["In review", "Closed"]
 
     for name <- ["M99", "daemon-sockets"] do
       prerequisites = %{name => adrs}
@@ -515,7 +576,7 @@ defmodule Loopex.StatusCheckTest do
         statuses = Map.put(accepted, path, "Proposed")
         others = for {_p, other} <- adrs, other != adr_name, do: other
 
-        for state <- live_states do
+        for state <- naming_states do
           capsule = Register.expected_capsule(state, name, statuses, prerequisites)
 
           # An outstanding decision is the next thing to do, not a reason the
@@ -531,27 +592,32 @@ defmodule Loopex.StatusCheckTest do
           end
         end
 
-        # Closure is the one boundary that refuses, because by then every outcome
-        # is implemented and proved.
-        assert_raise Invalid,
-                     ~r/`#{name}` cannot move to Closed before #{adr_name} is accepted/,
-                     fn -> Register.expected_capsule("Closed", name, statuses, prerequisites) end
+        # Review and closure refuse, because both describe a complete closure
+        # candidate: every outcome is implemented and proved, so nothing one of
+        # them depends on can still be Proposed.
+        for state <- refusing_states do
+          assert_raise Invalid,
+                       ~r/`#{name}` cannot move to #{state} before #{adr_name} is accepted/,
+                       fn -> Register.expected_capsule(state, name, statuses, prerequisites) end
+        end
       end
 
       both_outstanding = Map.new(adrs, fn {path, _name} -> {path, "Proposed"} end)
 
-      for state <- live_states do
+      for state <- naming_states do
         capsule = Register.expected_capsule(state, name, both_outstanding, prerequisites)
         assert capsule["Blockers"] =~ "waits on ADR 0009 and ADR 0010 before the outcomes"
         assert capsule["Next maintainer decision"] =~ "disposition [ADR 0009]"
         assert capsule["Next maintainer decision"] =~ "and [ADR 0010]"
       end
 
-      assert_raise Invalid,
-                   ~r/ADR 0009 and ADR 0010 are accepted/,
-                   fn ->
-                     Register.expected_capsule("Closed", name, both_outstanding, prerequisites)
-                   end
+      for state <- refusing_states do
+        assert_raise Invalid,
+                     ~r/cannot move to #{state} before ADR 0009 and ADR 0010 are accepted/,
+                     fn ->
+                       Register.expected_capsule(state, name, both_outstanding, prerequisites)
+                     end
+      end
 
       # Everything accepted derives the ordinary capsule for every state, with no
       # decision named anywhere.
@@ -1439,20 +1505,27 @@ defmodule Loopex.StatusCheckTest do
 
       # A prerequisite the plan pair itself declares reaches the capsule, with no
       # per-milestone table anywhere: the fixture's ADR 0001 is Proposed here.
-      declaring =
-        lifecycle_documents(name, "Accepted", expected_lifecycle_values(name, "Accepted"))
+      # Accepted names it; a closure candidate at In review, and Closed, refuse
+      # it.
+      declaring = fn state ->
+        state
+        |> then(&lifecycle_documents(name, &1, expected_lifecycle_values(name, &1)))
+        |> Map.put(
+          "docs/plans/#{name}-technical.md",
+          Fixture.technical_plan_with_prerequisites(name, [
+            "docs/adr/0001-repository-and-application-layout.md"
+          ])
+        )
+        |> checked_tree()
+      end
 
-      assert {:error, [message]} =
-               declaring
-               |> Map.put(
-                 "docs/plans/#{name}-technical.md",
-                 Fixture.technical_plan_with_prerequisites(name, [
-                   "docs/adr/0001-repository-and-application-layout.md"
-                 ])
-               )
-               |> checked_tree()
+      assert {:error, [accepted_message]} = declaring.("Accepted")
+      assert accepted_message =~ "derived status capsule"
 
-      assert message =~ "derived status capsule"
+      for state <- ["In review", "Closed"] do
+        assert {:error, [message]} = declaring.(state)
+        assert message =~ "`#{name}` cannot move to #{state} before ADR 0001 is accepted"
+      end
     end
   end
 
