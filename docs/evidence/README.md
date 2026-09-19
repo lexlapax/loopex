@@ -1,12 +1,14 @@
 # Evidence
 
-Retained run evidence produced by milestone gates. Part of the
-[documentation index](../README.md).
+Retained run and demonstration evidence, each named by the exact revision it
+was taken at. Part of the [documentation index](../README.md).
 
-These files are records, not decisions. A gate names the evidence it requires
-and its runner verifies the record exists and carries the fields it needs; an
-independent reviewer judges whether the record is truthful and adequate. Nothing
-here authorises work or changes a commitment.
+These files are records, not decisions. A closure retains the runs its plan
+required, on one page per milestone, with revision, platform, toolchain, result
+and measured duration; an independent reviewer judges whether the record is
+truthful and adequate. Complete logs stay with the maintainer outside the
+repository. Nothing here authorises work or changes a commitment. Pages written
+under the retired gate machinery are read as written and are not rewritten.
 
 Evidence is unpaired: it is a log, not a Concept and Technical depth pair.
 
@@ -23,7 +25,7 @@ Evidence is unpaired: it is a log, not a Concept and Technical depth pair.
 | [M2 source-baseline review follow-up](M2-ff17990-review-followup.md) | Complete ff17990 finding reconciliation, accepted repair decisions, scoped implementation evidence, and the remaining final-source review sequence. |
 | [M2 corpus classification](M2-corpus-classification.md) | Retained classification of the post-integration reds into regression, supersession, and test-support defect, behind the tenth recorded override. |
 | [M1 toolchain matrix](M1-toolchain-matrix.md) | Source-candidate metadata, Darwin floor/current and Linux-current M1 captures, and inherited M0 floor/current proofs. |
-| [M2 negative demonstrations](M2-negative-demonstrations.md) | The ordered safeguards required by the active M2 gate, disabled one at a time with each locked selector failure and exact restored artifact digest. |
+| [M2 negative demonstrations](M2-negative-demonstrations.md) | The ordered safeguards the M2 gate required, disabled one at a time with each locked selector failure and exact restored artifact digest. |
 | [M4 closure runs](M4-closure-runs.md) | The fast check on macOS and Linux and the release check at the M4 closure candidate, each with its exact revision, toolchain, result and measured duration. |
 | [M2 coding demonstration](M2-coding-demonstration.md) | The attended real-provider coding task through the shipped command, and what its capture can and cannot establish. |
 | [M2 real-call attestations](M2-real-call-attestations.md) | Provider-supplied response identifiers and reported usage for each of the three real-provider roles. |

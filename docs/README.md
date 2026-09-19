@@ -16,7 +16,7 @@ order. This file is the index of what exists.
 | [developer/](developer/README.md) | Architecture, embedded resource snapshots and commands, progressive context and replay, development method and retained evidence. |
 | [adr/](adr/README.md) | Numbered architecture decisions and their governance records. |
 | [plans/](plans/README.md) | Milestone register, lifecycle, plan templates, and current status. |
-| [evidence/](evidence/README.md) | Retained gate run evidence. |
+| [evidence/](evidence/README.md) | Retained check-run and demonstration evidence, named by the revision it was taken at. |
 | [archive/](archive/README.md) | Non-normative historical inputs, retained for provenance. |
 
 Every directory under `docs/` carries a `README.md` describing its contents and
@@ -39,7 +39,7 @@ pairing, link, review, code-documentation, and enforcement contracts.
 | Development method | [Development charter](developer/development-charter.md#concept) | [Charter technical depth](developer/development-charter-technical.md#technical-depth) | Shared development form and review expectations. |
 | Public session protocol | [App server protocol](developer/app-server-protocol.md#concept) | [Protocol technical depth](developer/app-server-protocol-technical.md#technical-depth) | The experimental wire generation; accepted ADR 0023 remains the deciding authority. |
 | Observability | [Observability](developer/observability.md#concept) | [Observability technical depth](developer/observability-technical.md#technical-depth) | Trace sessions and the telemetry inventory as the diagnostics plane; accepted ADR 0030 fixes the inventory. |
-| Verification | [Verification](developer/verification.md#concept) | [Verification technical depth](developer/verification-technical.md#technical-depth) | The rule book for checking work after the milestone gates: three stages, check selection by changed boundary, the honesty rules, and the measured speed plan. |
+| Verification | [Verification](developer/verification.md#concept) | [Verification technical depth](developer/verification-technical.md#technical-depth) | The rule book for checking work now that the milestone gates are retired: three stages, check selection by changed boundary, the honesty rules, and the measured speed plan. |
 | Milestones | [Milestones](developer/milestones.md#concept) | [Milestones technical depth](developer/milestones-technical.md#technical-depth) | How to plan, run and close a milestone under the post-M4 structure, and the skills that carry the procedures. |
 
 ## Decisions
@@ -87,7 +87,7 @@ whose path or explicit fragment does not resolve.
 ## Planning and Development
 
 - [M3 foundations](plans/M3.md#concept) and [technical plan](plans/M3-technical.md#technical-depth) — project skills and core repairs; Closed with retained evidence in the plan.
-- [M4 headless external consumption](plans/M4.md#concept) and [technical plan](plans/M4-technical.md#technical-depth) — durable interactions, artifact transfers, the floor refresh, observability, and the experimental session protocol driven by an independent Node consumer in plain JavaScript; Accepted, implementation complete, closure pending.
+- [M4 headless external consumption](plans/M4.md#concept) and [technical plan](plans/M4-technical.md#technical-depth) — durable interactions, artifact transfers, the floor refresh, observability, and the experimental session protocol driven by an independent Node consumer in plain JavaScript; Closed, with its runs in [M4 closure runs](evidence/M4-closure-runs.md).
 
 - [Development contract](../AGENTS.md) — canonical tool-neutral authority,
   autonomy, documentation, milestone, and enforcement rules.
