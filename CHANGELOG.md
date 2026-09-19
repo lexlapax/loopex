@@ -39,6 +39,17 @@ The real-provider workflow now runs from an extracted archive of the exact
 committed source, built and launched by the commands the operator guide prints,
 which is what makes those commands evidence rather than prose.
 
+Three test-tree pieces are replaced rather than deleted, and what replaced them
+proves more than they did. The scripted fresh-extraction case built an
+extraction and ran a scripted fixture from it; two cases now build that same
+extraction and run the shipped host from it, one with a real provider and one
+with no credential at all, both through the commands the guide prints.
+`Loopex.AppServer.RealFixture` existed only because the composition wired no
+artifact transfers, and the shipped host now composes what it used to hand-wire.
+`Loopex.AppServer.WorkflowPolicy` was a second asking policy written for the
+tests; both lanes now observe the shipped `ask` policy, so the question a client
+renders is the product's.
+
 ## [0.1.0] — 2026-09-19
 
 The M4 closure candidate: the first numbered source version. It is a source
