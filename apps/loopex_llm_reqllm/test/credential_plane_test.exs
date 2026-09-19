@@ -554,14 +554,12 @@ defmodule Loopex.LLM.ReqLLM.CredentialPlaneTest do
 
       # The refusal is reached by the committed transfer deadline expiring on a
       # child that never becomes ready, so the deadline is the whole cost of this
-      # case. Two seconds is the same finite deadline C15 below commits, and the
-      # refusal it proves is the same one at any value.
+      # case. It still keeps the port default: the entry markers asserted below
+      # are written by the booted child, and a two-second deadline had the
+      # child stopped mid-boot on a loaded hosted runner. The refusal it proves
+      # is the same one at any value.
       assert_private(fn ->
-        assert Adapter.complete(
-                 Fixture.request(deadline_ms: 2_000),
-                 options,
-                 Model.discard_progress()
-               ) == @refused
+        assert Adapter.complete(Fixture.request(), options, Model.discard_progress()) == @refused
       end)
 
       assert Fixture.canaries(fixture) == 0
@@ -576,11 +574,18 @@ defmodule Loopex.LLM.ReqLLM.CredentialPlaneTest do
     # release. This is an actual releasable child entry, not a fake handshake.
     test "expired bootstrap cannot deliver a credential later or relaunch" do
       fixture = Fixture.new(:delayed_entry)
-      call = Fixture.managed(fixture, Fixture.request(deadline_ms: 2_000), :unmanaged)
+      # The child holds at its entry until the case releases it after the
+      # refusal, so the deadline expires at any value; the port default keeps
+      # the boot, which writes the pid marker read below, inside it. The wait
+      # for the refusal is the rest of that deadline plus the cleanup that
+      # follows it, not a fixed number that only covered a short deadline.
+      request = Fixture.request()
+      call = Fixture.managed(fixture, request, :unmanaged)
       assert Fixture.eventually(fn -> Fixture.reached?(fixture, "pid") end)
       original_pid = Fixture.pid(fixture)
       caller = call.caller
-      assert_receive {:completed, ^caller, @refused}, 5_000
+      remaining = max(request.deadline - System.system_time(:millisecond), 0)
+      assert_receive {:completed, ^caller, @refused}, remaining + 5_000
       guardian = call.guardian
       monitor = call.monitor
       assert_receive {:DOWN, ^monitor, :process, ^guardian, :normal}, 500
@@ -643,7 +648,7 @@ defmodule Loopex.LLM.ReqLLM.CredentialPlaneTest do
       ])
     end
 
-    # C20/C21 are separate executed scenarios, preserving the original2s budget.
+    # C20/C21 are separate executed scenarios under the port-default deadline.
     for {ending, mode} <- [{:throw, :credential_throw}, {:exit, :credential_exit}] do
       @ending ending
       @mode mode
