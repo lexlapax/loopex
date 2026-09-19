@@ -1,5 +1,6 @@
-# Verification mechanics
+# Verification — Technical Depth
 
+<a id="technical-depth"></a>
 ## Technical depth
 
 Concept: [Verification](verification.md#concept).

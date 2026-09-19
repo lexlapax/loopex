@@ -39,6 +39,7 @@ pairing, link, review, code-documentation, and enforcement contracts.
 | Development method | [Development charter](developer/development-charter.md#concept) | [Charter technical depth](developer/development-charter-technical.md#technical-depth) | Shared development form and review expectations. |
 | Public session protocol | [App server protocol](developer/app-server-protocol.md#concept) | [Protocol technical depth](developer/app-server-protocol-technical.md#technical-depth) | The experimental wire generation; accepted ADR 0023 remains the deciding authority. |
 | Observability | [Observability](developer/observability.md#concept) | [Observability technical depth](developer/observability-technical.md#technical-depth) | Trace sessions and the telemetry inventory as the diagnostics plane; accepted ADR 0030 fixes the inventory. |
+| Verification | [Verification](developer/verification.md#concept) | [Verification technical depth](developer/verification-technical.md#technical-depth) | The rule book for checking work after the milestone gates: five stages, check selection by changed boundary, the honesty rules, and the measured speed plan. |
 
 ## Decisions
 
