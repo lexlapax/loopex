@@ -1,0 +1,117 @@
+# Verification
+
+## Concept
+
+Technical depth: [Verification mechanics](verification-technical.md#technical-depth).
+
+This is the rule book for checking work after M4. It replaces the milestone
+gates: there is no per-milestone runner, no locked digest table, and no
+amendment transaction. What remains is one current test suite, two commands,
+an independent review, and the maintainer's decisions, arranged so that the
+cost of proving a change is proportional to what the change could break.
+
+The design goal set by the maintainer is that verification takes a small share
+of development time, on the order of one fifth, while every real product
+guarantee still has a check that would fail if it were broken. The measured
+baseline at M4 closure is in the technical companion; the short version is
+that the credential-free suite takes fourteen minutes, five minutes of which
+is two tests waiting out a sixty-second ceiling, and that the whole suite can
+run in about five minutes of wall-clock time with no test changed at all.
+
+<a id="concept-verification-stages"></a>
+### Five stages, one question each
+
+Every piece of work passes through the same five stages. Each stage answers
+one question, runs one set of checks, and has one person or command that can
+stop it. Nothing runs twice for the same bytes.
+Technical depth: [What each stage runs](verification-technical.md#technical-verification-stages).
+
+| Stage | Question | What runs | Who or what can stop it |
+| --- | --- | --- | --- |
+| Edit | Does the guarantee I touched still hold? | The focused tests for the changed boundary, `mix format`, warning-free compile, the client hook's fast checks | The developer or agent doing the work |
+| Push | Is the tree whole? | `bash scripts/check.sh`: repository structure, formatting, warning-free compilation, dependency budget and direction, one version, documentation ordering, the credential-free suite | A red step; hosted CI runs the same command on every push |
+| Integrate | Is this change what it claims to be? | The push check on the exact candidate, plus a review of the diff against its stated purpose | A blocking review finding; the integrator merges only a green, reviewed candidate |
+| Close | Did the milestone deliver its outcomes? | `check.sh` on each supported platform, `bash scripts/check-release.sh` once, the outcome-to-evidence map in the plan, an independent review of the candidate | The maintainer, who closes it or does not |
+| Release | Is the published source the closed source? | The closure evidence, reused when the source is unchanged; the tag on the exact integrated commit | The maintainer's separate release decision |
+
+The push check is the everyday gate. It is credential-free, needs no network,
+and is the same command locally and in CI. The release check is the expensive
+one: it spends a provider credential, needs the pinned Node, and runs the
+attended operator workflow, so it runs at closure, at release, and whenever a
+change touches what it proves.
+
+<a id="concept-verification-selection"></a>
+### A changed guarantee selects its checks
+
+The old structure ran every historical gate on every contract moment because
+it could not tell what a change affected. The replacement asks the developer
+to say what boundary a change touches, and routes from there. The table is
+short on purpose; an unknown impact falls through to the release check, not to
+nothing.
+Technical depth: [The selection table](verification-technical.md#technical-verification-selection).
+
+| The change touches | Beyond the push check, also run |
+| --- | --- |
+| Internal code or tests behind an unchanged boundary | Nothing more; the suite is the proof |
+| A port behaviour, its conformance suite, or an adapter | That port's conformance suite against every adapter, and one composed workflow through it |
+| Durable records, the Store, recovery | The Store conformance suite with fault injection, the recovery tests, and a read of committed history by the previous reader |
+| The wire protocol, schema or vectors | The vectors in both clients, the Node consumer workflows, and the compatibility surfaces page |
+| Provider, executor or credential handling | The release check |
+| The toolchain floor or `.tool-versions` | The push check under both pairs |
+| Documentation only | The push check; nothing else |
+
+<a id="concept-verification-rules"></a>
+### Rules that make the checks trustworthy
+
+Checks are only as good as the rules around them. These are the ones the
+repository enforces or the contract binds, and each exists because its
+absence was exploited or nearly exploited during M0–M4.
+
+- A required check is never skipped, filtered, softened, retried into green,
+  or satisfied with a fake where the real path is what is claimed. A failure
+  that disappears on retry is a flake to fix.
+- The real-provider tests assert facts only a real provider can produce: its
+  own response identifiers and the observed model identity. A scripted model
+  cannot pass them.
+- Tests fail before touching real user state; a leaked credential or a shared
+  environment variable is a defect, and the release check runs each
+  application in its own VM so one test cannot reach the next.
+- Compile before validating: a project-defined Mix task runs whatever beams
+  the build directory holds, so every check compiles first.
+- The dependency direction, the documentation chain and the ban on
+  content-origin attribution are enforced mechanically, not by review.
+- Historical milestones keep their plans, evidence logs and dispositions as
+  records of what was proved at the revisions they name; current tests belong
+  to the current product. A refactor changes code and tests together and needs
+  no historical bookkeeping.
+- An architecture decision is made once, as an ADR, with the compatibility
+  evidence its class requires; it is not re-approved through every place it
+  touches.
+
+<a id="concept-verification-speed"></a>
+### Making it fast
+
+Three steps, in order of value per effort, each measured or estimated in the
+technical companion. Only the first is approved by this page; the second and
+third change tests and need the maintainer's go.
+Technical depth: [Measurements and plan](verification-technical.md#technical-verification-speed).
+
+1. **Run applications in parallel VMs.** The suite is ten independent
+   applications. Run concurrently on the Mac, the four heavy ones finished in
+   312 s wall against 795 s in sequence, all green, with no contention. This
+   takes the push check from about 14 minutes to about 5 and changes no test.
+2. **Inject the time bounds the slow tests wait for.** Forty tests wait on
+   real-time ceilings: two wait a full minute for the cancellation bound, ten
+   wait ten to sixteen seconds for provider deadlines, two sleep ten and
+   fifteen seconds for admission. Making each bound an option the test sets
+   keeps the proof (the bound is applied) and removes the wait. Estimated,
+   not yet measured: the critical path drops from about 5 minutes to about 3.
+3. **Let independent modules run concurrently.** Two thirds of the test
+   modules are serial, most for a reason (VM-global tracing, environment
+   variables, registered names). The ones with no shared state can become
+   asynchronous one at a time, each proved by the suite staying green over
+   several seeds.
+
+What is deliberately not on the list: cutting durability, security or
+recovery tests to meet a number, or shortening a fault window in production
+code to make a test faster.
