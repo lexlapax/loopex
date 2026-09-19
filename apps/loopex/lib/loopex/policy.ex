@@ -22,10 +22,13 @@ defmodule Loopex.Policy do
   ## Technical depth
 
   One callback, not one per decision class. `{:defer, request}` is declared here
-  and refused in M2: the interactive round trip it implies needs a durable
-  interaction record, exact-response matching, expiry, and resume-after-restart
-  evidence, none of which this milestone builds. Declaring it now means the shape
-  a host returns does not change when that milestone arrives.
+  and admitted in two ways. The one-shot evaluation the CLI uses refuses it as
+  `interaction_unsupported`, because that caller has no way to hold a question
+  open. The `:admit_defer` evaluation the app server drives commits a durable
+  interaction record, matches the exact answer, expires and re-arms after a
+  restart, then asks the policy again once the answer has committed, as
+  [ADR 0024](../../../../docs/adr/0024-durable-interaction-lifecycle-and-host-policy-authority.md#concept)
+  decides. The shape a host returns is the same in both.
 
   Resolution is exhaustive and fails closed:
 
@@ -173,8 +176,8 @@ defmodule Loopex.Policy do
   block the session owner, and so a policy that raises or exits — including an
   untrappable `:kill` — produces a decision instead of a crash. The timeout is
   fixed rather than configurable: a host that wants longer to decide is a host
-  that wants an interactive `defer`, which is a different decision this
-  milestone declares and refuses.
+  that wants an interactive `defer`, which is a different decision that
+  `evaluate/2` admits and this one-shot form refuses.
   """
   @spec decide(module(), request()) :: {:allow, context()} | {:deny, reason_category()}
   def decide(module, request) when is_atom(module) and is_map(request) do
