@@ -20,7 +20,24 @@ the exact document set its milestone must update.
 
 ## [Unreleased]
 
-Nothing yet.
+Ship a local host for the app server. `Loopex.AppServer.Host` reads an
+operator's launch inputs from the environment — the state root, the workspace,
+the provider companion's launch configuration and the host policy — composes the
+reference stack through `LoopexComposition`, and serves one connection until
+standard input ends. The operator guide's launch and consumer commands now name
+it, so following them runs shipped code rather than a fixture that lives in the
+test tree. Two host policies ship with it: `ask`, which defers every executor
+tool call to the client as a durable question and decides on the answer once it
+has committed, and `allow-all`, which allows every call and says so once.
+
+The reference composition can wire artifact transfers. Passing
+`artifact_transfers: true` starts its transfer owner and hands the same artifact
+store to the runtime, so a caller can open, read and close a bounded verified
+transfer against what a tool retained. Left absent, nothing changes.
+
+The real-provider workflow now runs from an extracted archive of the exact
+committed source, built and launched by the commands the operator guide prints,
+which is what makes those commands evidence rather than prose.
 
 ## [0.1.0] — 2026-09-19
 

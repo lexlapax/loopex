@@ -32,10 +32,70 @@ the skill manifest — is made at launch and cannot be changed by anything a
 client sends. That is the point of the split: a client drives a session, it
 does not configure one.
 
-Launch it from a source build with the compiled code directories on the path:
+`Loopex.AppServer.Host` is the local host this repository ships. It reads the
+launch inputs below from the environment, composes the reference stack, and
+serves one connection until standard input ends. An embedder that wants a
+different stack composes its own runtime and calls `Loopex.AppServer.Stdio.serve/1`
+with it; everything below this line is about the shipped one.
+
+### Build it
+
+From a source checkout or an extracted source archive:
 
 ```bash
-elixir -pa _build/dev/lib/loopex_protocol/ebin -pa _build/dev/lib/loopex/ebin -pa _build/dev/lib/loopex_app_server/ebin -pa _build/dev/lib/telemetry/ebin -e "Loopex.AppServer.Stdio.serve(runtime)"
+mix deps.get
+MIX_ENV=prod mix compile
+```
+
+That leaves one directory per application under `_build/prod/lib`, which is the
+shape `ERL_LIBS` expects and the shape the Node consumer's arguments expand to.
+
+The provider companion is built once, and from a Git checkout rather than from
+an archive, because the build refuses a source tree it cannot establish the
+revision of:
+
+```bash
+(cd apps/loopex_llm_reqllm && MIX_ENV=prod mix loopex.provider.build)
+```
+
+It writes the companion and a non-secret `_build/prod/loopex_provider.launch`
+beside it. That file is an operator input to every server below, and a server
+built from an archive is pointed at the one a checkout produced.
+
+### Name the inputs
+
+| Variable | What it names |
+| --- | --- |
+| `LOOPEX_HOME` | The state root. The session log, the artifact store and the receipt ledger live beneath it. |
+| `LOOPEX_WORKSPACE` | The workspace root the executor leases, and the tree project skills are discovered under. |
+| `LOOPEX_PROVIDER_LAUNCH` | The `.launch` file naming the provider companion this host may start. It carries no credential. |
+| `LOOPEX_POLICY` | `ask` or `allow-all`. There is no default: naming authority is the operator's job. |
+| `LOOPEX_PROVIDER_API_KEY` | The provider credential. The model adapter reads it from the environment itself; it never reaches an argument, a record, a log or a file. |
+
+```bash
+export LOOPEX_HOME="$HOME/.loopex"
+export LOOPEX_WORKSPACE="$PWD"
+export LOOPEX_PROVIDER_LAUNCH=/path/to/checkout/_build/prod/loopex_provider.launch
+export LOOPEX_POLICY=ask
+export LOOPEX_PROVIDER_API_KEY=...
+export ELIXIR_ERL_OPTIONS=-noinput
+```
+
+A missing or unusable input is refused on standard error with the name of the
+variable and what it is for, and the process exits with status 3. It never
+starts half-composed.
+
+`LOOPEX_POLICY=ask` defers every executor tool call to the client as a durable
+question — `Allow this tool call?`, with the two choice identities `allow` and
+`deny` — and decides on the answer once it has committed. The answer is an
+input to the decision and never the decision itself. `LOOPEX_POLICY=allow-all`
+allows every call and says so once on standard error; it is permissive local
+authority, not a permission model.
+
+### Launch it
+
+```bash
+ERL_LIBS=_build/prod/lib elixir -e "Loopex.AppServer.Host.serve()"
 ```
 
 **The virtual machine must be started with `-noinput`.** Without it the VM
@@ -66,17 +126,36 @@ runs; an absent or mismatched Node is reported as unavailable evidence rather
 than as a failure of the product.
 
 The consumer launches its own server process, so it needs the Elixir
-executable and the same code directories:
+executable, the entry point to start, and the compiled code directories. Every
+argument that is not a `.exs` file becomes a code directory, so the shell glob
+over the prod build expands to exactly what the server needs:
 
 ```bash
-node clients/node/workflow.mjs "$(which elixir)" _build/dev/lib/loopex_protocol/ebin _build/dev/lib/loopex/ebin _build/dev/lib/loopex_app_server/ebin _build/dev/lib/telemetry/ebin
+export LOOPEX_WORKFLOW_ENTRY="Loopex.AppServer.Host.serve()"
+node clients/node/workflow.mjs "$(command -v elixir)" _build/prod/lib/*/ebin
 ```
 
 The chain consumer, `interaction-workflow.mjs`, takes the same arguments and
-one operator input: `LOOPEX_WORKSPACE_REF`, the workspace reference the skill
-manifest was launched with. It is an input rather than something the client
-asks the server for, and that is deliberate — see
-[skills and trust](#operator-app-server-skills) below.
+one more operator input: `LOOPEX_WORKSPACE_REF`, the workspace reference a
+trust decision must carry. It is an input rather than something the client asks
+the server for, and that is deliberate — see
+[skills and trust](#operator-app-server-skills) below. The host computes the
+same value from `LOOPEX_WORKSPACE`, so ask it rather than inventing one:
+
+```bash
+export LOOPEX_WORKSPACE_REF="$(ERL_LIBS=_build/prod/lib elixir -e 'IO.write(Loopex.AppServer.Host.workspace_reference!())')"
+export LOOPEX_WORKFLOW_ENTRY="Loopex.AppServer.Host.serve()"
+node clients/node/interaction-workflow.mjs "$(command -v elixir)" _build/prod/lib/*/ebin
+```
+
+The server also writes that reference to standard error as it starts, for an
+operator watching a server someone else launched.
+
+Two further inputs are the client's own patience and task, not the server's:
+`LOOPEX_WORKFLOW_PROMPT` is what the session is asked to do, and
+`LOOPEX_WORKFLOW_PATIENCE_MS` is how long the client waits for an event before
+it gives up. A real model takes seconds per turn, so raise the second one well
+above its default when a real provider is behind the server.
 
 <a id="operator-app-server-watching"></a>
 ## What an Operator Sees
