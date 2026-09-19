@@ -162,11 +162,14 @@ defmodule Loopex.Executor.Local do
   @claim_wait_ms 5_000
 
   # The longest a receipt lookup waits for another instance's root claim. It is a
-  # fraction of the admission ceiling because `receipt/2` is a `GenServer.call`
-  # answered by this server: a wait as long as the ceiling would expire the call
-  # it is serving and block every other caller behind it, and a lookup that cannot
-  # be ordered against a live settlement is bounded unavailability rather than a
-  # verdict about the effect.
+  # second, shorter, fixed wait rather than the admission ceiling because
+  # `receipt/2` is a `GenServer.call` answered by this server: a wait as long as
+  # the default admission ceiling would expire the call it is serving and block
+  # every other caller behind it, and a lookup that cannot be ordered against a
+  # live settlement is bounded unavailability rather than a verdict about the
+  # effect. It is deliberately not derived from `claim_wait_ms`, which a host may
+  # set either side of this value: the reason a lookup waits briefly is the call
+  # it is answering, not how patient this executor's admissions are.
   @receipt_claim_wait_ms 1_000
 
   # The three answers a join treats as "not yet", plus the claim it could not take
@@ -1348,8 +1351,13 @@ defmodule Loopex.Executor.Local do
   # past it, and never past the ceiling one contended root is worth. A request
   # that has not yet been validated may not carry a deadline at all, and its
   # missing member is not an argument for waiting longer than the ceiling.
+  #
+  # The ceiling is fetched rather than defaulted: both callers hand this either
+  # the server's own state or the placement derived from it, and both carry the
+  # configured value. A silent fallback to the constant would turn a member this
+  # executor failed to carry into five seconds of patience nobody asked for.
   defp claim_wait(state, job) do
-    ceiling = Map.get(state, :claim_wait_ms, @claim_wait_ms)
+    ceiling = Map.fetch!(state, :claim_wait_ms)
 
     case Map.get(job, :effective_job_deadline) do
       deadline when is_integer(deadline) ->

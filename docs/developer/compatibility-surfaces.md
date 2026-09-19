@@ -274,12 +274,16 @@ prescribed host reboot, before using a fresh root. No new migration, callback,
 persistent record version or public compatibility guarantee is introduced.
 
 The concrete Local start options also include `clock_provider` (a zero-argument
-function returning paired wall and monotonic millisecond instants) and
-`open_authority_close` (a two-argument function replacing `Ledger.close_open/2`).
-The latter receives the prepared ledger and job ID and must answer `:ok` or
-`{:error, reason}`; an invalid answer, failed call, or unfinished bounded removal
-does not prove authority was removed. These are trusted executable host
-configuration, not portable job fields or model-supplied tools.
+function returning paired wall and monotonic millisecond instants),
+`open_authority_close` (a two-argument function replacing `Ledger.close_open/2`)
+and `claim_wait_ms` (a non-negative millisecond ceiling, defaulting to `5_000`,
+on how long one admission waits for another instance's root claim).
+`open_authority_close` receives the prepared ledger and job ID and must answer
+`:ok` or `{:error, reason}`; an invalid answer, failed call, or unfinished
+bounded removal does not prove authority was removed. `claim_wait_ms` is still
+capped by the job's own remaining allowance and never becomes permission: only
+the holder releases the claim. These are trusted host configuration, executable
+in the first two cases, not portable job fields or model-supplied tools.
 
 The private reservation/permit exchange copies Local placement values to the
 trusted executing process. That native map includes the public ETS table ID,
