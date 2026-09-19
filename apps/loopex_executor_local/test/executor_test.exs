@@ -1539,8 +1539,13 @@ defmodule Loopex.Executor.LocalTest do
     # default is the shipped five seconds, so the ceiling can be named here and
     # the whole of it spent and answered in a fraction of a second. Nothing about
     # the claim is simulated -- a real peer holds a real claim on the same root
-    # for longer than the wait -- and the default the host gets when it names
-    # nothing is asserted once, below, against the executor that enforces it.
+    # until this case has its answer -- and the default the host gets when it
+    # names nothing is asserted once, below, against the executor that enforces
+    # it. The peer is released by a message rather than after a sleep, so no
+    # slack has to be guessed on the lower side, and the upper assertion is made
+    # against the shipped default rather than against the named ceiling: waiting
+    # five seconds here is what a server that ignored the option would do, and
+    # that is the only wait this case has to exclude.
     default_fixture = fixture("reservation-claim-default")
     on_exit(fn -> stop_fixture(default_fixture) end)
 
@@ -1558,7 +1563,10 @@ defmodule Loopex.Executor.LocalTest do
       Task.async(fn ->
         Ledger.with_claim(prepared, fn ->
           send(parent, :reservation_claim_held)
-          Process.sleep(claim_wait_ms * 3)
+
+          receive do
+            :release_reservation_claim -> :ok
+          end
         end)
       end)
 
@@ -1566,14 +1574,16 @@ defmodule Loopex.Executor.LocalTest do
     started = System.monotonic_time(:millisecond)
     result = Local.execute(fixture.executor, job, grant)
     elapsed = System.monotonic_time(:millisecond) - started
+    send(holder.pid, :release_reservation_claim)
 
     assert {:error, {:ledger_unavailable, :root_claim_held}} = result
 
-    assert elapsed < claim_wait_ms * 3,
-           "the caller waited #{elapsed} ms instead of being answered"
-
     assert elapsed >= div(claim_wait_ms * 9, 10),
            "the server answered after #{elapsed} ms without spending its claim wait"
+
+    assert elapsed < 4_500,
+           "the caller waited #{elapsed} ms, which is the shipped five-second " <>
+             "default rather than the ceiling this executor was given"
 
     Task.await(holder, 10_000)
     assert :absent = Local.receipt(fixture.executor, job.job_id)
