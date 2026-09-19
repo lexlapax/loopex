@@ -493,7 +493,7 @@ defmodule Loopex.LLM.ReqLLM.CredentialPlaneTest do
         call = Fixture.managed(fixture, request, :unmanaged)
         release_fault_and_observe(fixture, call, request, "credential-probe")
         caller = call.caller
-        assert_receive {:completed, ^caller, @failed}, 5_000
+        assert_receive {:completed, ^caller, @failed}, Fixture.until_settled(call)
         guardian = call.guardian
         monitor = call.monitor
         assert_receive {:DOWN, ^monitor, :process, ^guardian, :normal}, 500
@@ -526,7 +526,7 @@ defmodule Loopex.LLM.ReqLLM.CredentialPlaneTest do
       assert_private(fn ->
         assert {_, 0} = System.cmd("/bin/kill", ["-KILL", Integer.to_string(failed_pid)])
         caller = failed_call.caller
-        assert_receive {:completed, ^caller, @failed}, 5_000
+        assert_receive {:completed, ^caller, @failed}, Fixture.until_settled(failed_call)
         Fixture.stop(failed_call)
         assert Fixture.pid(failed) == failed_pid
         assert Fixture.canaries(failed) == 1
@@ -727,7 +727,7 @@ defmodule Loopex.LLM.ReqLLM.CredentialPlaneTest do
         do: release_fault_and_observe(fixture, call, request, "termination-proof")
 
       caller = call.caller
-      assert_receive {:completed, ^caller, @failed}, 5_000
+      assert_receive {:completed, ^caller, @failed}, Fixture.until_settled(call)
 
       assert probe(fixture, "credential-probe") == %{
                "actions" => [Atom.to_string(mode)],
@@ -786,7 +786,7 @@ defmodule Loopex.LLM.ReqLLM.CredentialPlaneTest do
 
   defp await_reply(call) do
     caller = call.caller
-    assert_receive {:completed, ^caller, {:ok, reply}}, 5_000
+    assert_receive {:completed, ^caller, {:ok, reply}}, Fixture.until_settled(call)
     assert reply.text == "loopex"
     refute inspect(reply) =~ @sentinel
     reply

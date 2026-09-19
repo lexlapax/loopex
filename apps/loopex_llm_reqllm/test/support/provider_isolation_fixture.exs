@@ -251,9 +251,19 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
       caller_monitor: caller_monitor,
       guardian: guardian,
       monitor: Process.monitor(guardian),
-      stop_reference: stop_reference
+      stop_reference: stop_reference,
+      deadline: request.deadline
     }
   end
+
+  # A reply or refusal that has not arrived by the request's deadline still
+  # arrives within the cleanup that follows it, so a wait for either is the rest
+  # of the deadline plus that grace. It is derived from the call because the
+  # deadline is absolute from the request and the child boots inside the call;
+  # a fixed five seconds covered the boot on one machine and not on a loaded
+  # hosted runner.
+  def until_settled(call),
+    do: max(call.deadline - System.system_time(:millisecond), 0) + 5_000
 
   def stop(call) do
     stop = make_ref()

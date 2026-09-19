@@ -303,7 +303,9 @@ defmodule Loopex.LLM.ReqLLM.ProviderPhaseDiagnosticTest do
       end)
 
     on_exit(fn -> cleanup_owner(owner) end)
-    assert_receive {:ready_to_kill, ^owner, tracer}
+    # A liveness wait for the owner's handshake: the default 100 ms was
+    # sized against an idle machine and failed once on a loaded hosted runner.
+    assert_receive {:ready_to_kill, ^owner, tracer}, 5_000
     tracer_monitor = Process.monitor(tracer)
     Process.exit(owner, :kill)
     assert_receive {:DOWN, ^owner_monitor, :process, ^owner, :killed}

@@ -34,7 +34,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderEntryTest do
     guardian_monitor = call.monitor
 
     try do
-      assert_receive {:completed, ^caller, {:ok, reply}}, 5_000
+      assert_receive {:completed, ^caller, {:ok, reply}}, Fixture.until_settled(call)
       assert reply.text == "loopex"
       assert_receive {:DOWN, ^caller_monitor, :process, ^caller, :normal}, 1_000
       assert Process.alive?(guardian)
@@ -117,7 +117,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderEntryTest do
           capture_io(fn ->
             call = Fixture.managed(fixture)
             caller = call.caller
-            assert_receive {:completed, ^caller, {:ok, _reply}}, 5_000
+            assert_receive {:completed, ^caller, {:ok, _reply}}, Fixture.until_settled(call)
 
             assert Jason.decode!(File.read!(Fixture.marker(fixture, "io-results"))) ==
                      %{"direct" => "refused", "supervised" => "refused"}
@@ -157,7 +157,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderEntryTest do
     fixture = Fixture.new(:detached_descendant)
     call = Fixture.managed(fixture)
     caller = call.caller
-    assert_receive {:completed, ^caller, {:ok, _reply}}, 5_000
+    assert_receive {:completed, ^caller, {:ok, _reply}}, Fixture.until_settled(call)
 
     assert Jason.decode!(File.read!(Fixture.marker(fixture, "detached-proof"))) ==
              %{"session_dead" => true, "task_dead" => true, "socket_alive" => true}
