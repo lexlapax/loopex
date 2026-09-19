@@ -22,6 +22,10 @@ defmodule Loopex do
   alias Loopex.Runtime
   alias Loopex.SessionDirectory
 
+  # The version is read at compile time, so the file it comes from is declared
+  # as a resource: a version change then recompiles this module rather than
+  # leaving a stale beam reporting the previous number.
+  @external_resource Path.expand("../../../VERSION", __DIR__)
   @version Mix.Project.config()[:version]
 
   @doc """
