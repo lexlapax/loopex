@@ -1518,7 +1518,20 @@ defmodule Loopex.Executor.LocalTest do
   end
 
   test "a reserve blocked by a held claim is answered inside its own bound" do
-    fixture = fixture("reservation-claim")
+    # The bound is this executor's, not this case's: it is a start option whose
+    # default is the shipped five seconds, so the ceiling can be named here and
+    # the whole of it spent and answered in a fraction of a second. Nothing about
+    # the claim is simulated -- a real peer holds a real claim on the same root
+    # for longer than the wait -- and the default the host gets when it names
+    # nothing is asserted once, below, against the executor that enforces it.
+    default_fixture = fixture("reservation-claim-default")
+    on_exit(fn -> stop_fixture(default_fixture) end)
+
+    assert :sys.get_state(default_fixture.executor).claim_wait_ms == 5_000,
+           "the shipped admission claim ceiling is no longer five seconds"
+
+    claim_wait_ms = 300
+    fixture = fixture("reservation-claim", claim_wait_ms: claim_wait_ms)
     on_exit(fn -> stop_fixture(fixture) end)
     {job, grant} = job_and_grant(fixture, "claim", "loopex.demo.write")
     {:ok, prepared} = Ledger.prepare(fixture.ledger, "executor-local", 5_000)
@@ -1528,7 +1541,7 @@ defmodule Loopex.Executor.LocalTest do
       Task.async(fn ->
         Ledger.with_claim(prepared, fn ->
           send(parent, :reservation_claim_held)
-          Process.sleep(6_500)
+          Process.sleep(claim_wait_ms * 3)
         end)
       end)
 
@@ -1538,9 +1551,11 @@ defmodule Loopex.Executor.LocalTest do
     elapsed = System.monotonic_time(:millisecond) - started
 
     assert {:error, {:ledger_unavailable, :root_claim_held}} = result
-    assert elapsed < 9_000, "the caller waited #{elapsed} ms instead of being answered"
 
-    assert elapsed >= 4_500,
+    assert elapsed < claim_wait_ms * 3,
+           "the caller waited #{elapsed} ms instead of being answered"
+
+    assert elapsed >= div(claim_wait_ms * 9, 10),
            "the server answered after #{elapsed} ms without spending its claim wait"
 
     Task.await(holder, 10_000)

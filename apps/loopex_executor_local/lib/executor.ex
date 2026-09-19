@@ -153,7 +153,12 @@ defmodule Loopex.Executor.Local do
   # The longest an admission waits for another instance's root claim before
   # reporting the ledger unavailable. It bounds contention between executors
   # sharing one root, is capped by the job's own deadline, and never becomes
-  # permission: only the holder releases the claim.
+  # permission: only the holder releases the claim. It is the default of the
+  # `claim_wait_ms` start option rather than a constant the code reads directly,
+  # so a host composing an executor for a root it knows to be quiet, and a case
+  # proving what the wait does when it expires, can both name their own ceiling
+  # instead of being held to this one. It is a trusted-local start option: it
+  # enters no job, ledger record, receipt, event, or portable Executor field.
   @claim_wait_ms 5_000
 
   # The longest a receipt lookup waits for another instance's root claim. It is a
@@ -859,6 +864,7 @@ defmodule Loopex.Executor.Local do
       Keyword.get(options, :cleanup_grace_ms, Executor.default_cleanup_grace_ms())
 
     process_probe = Keyword.get(options, :process_probe, @default_process_probe)
+    claim_wait_ms = Keyword.get(options, :claim_wait_ms, @claim_wait_ms)
 
     # Concept: one paired sample of both clocks, from one place a case can
     # substitute.
@@ -886,6 +892,7 @@ defmodule Loopex.Executor.Local do
       is_binary(identity) and byte_size(identity) > 0 and is_integer(epoch) and epoch >= 0 and
         is_integer(fencing_token) and fencing_token >= 0 and is_map(leases) and
         is_integer(cleanup_grace_ms) and cleanup_grace_ms >= 0 and
+        is_integer(claim_wait_ms) and claim_wait_ms >= 0 and
         is_binary(process_probe) and String.starts_with?(process_probe, "/") and
         not String.contains?(process_probe, <<0>>) and is_function(clock_provider, 0) and
         is_function(open_authority_close, 2) and
@@ -927,6 +934,7 @@ defmodule Loopex.Executor.Local do
          open_authority_close: open_authority_close,
          artifacts: artifacts,
          cleanup_grace_ms: cleanup_grace_ms,
+         claim_wait_ms: claim_wait_ms,
          process_probe: process_probe,
          inflight_table: table,
          reserved: %{},
@@ -1113,7 +1121,7 @@ defmodule Loopex.Executor.Local do
           quarantine -> {:error, quarantine}
         end
       end,
-      claim_wait(job)
+      claim_wait(state, job)
     )
   end
 
@@ -1143,7 +1151,7 @@ defmodule Loopex.Executor.Local do
           refused_before_effect(:effect_start_authority_unavailable)
         end
       end,
-      claim_wait(job)
+      claim_wait(state, job)
     )
   end
 
@@ -1340,13 +1348,15 @@ defmodule Loopex.Executor.Local do
   # past it, and never past the ceiling one contended root is worth. A request
   # that has not yet been validated may not carry a deadline at all, and its
   # missing member is not an argument for waiting longer than the ceiling.
-  defp claim_wait(job) do
+  defp claim_wait(state, job) do
+    ceiling = Map.get(state, :claim_wait_ms, @claim_wait_ms)
+
     case Map.get(job, :effective_job_deadline) do
       deadline when is_integer(deadline) ->
-        min(max(deadline - System.system_time(:millisecond), 0), @claim_wait_ms)
+        min(max(deadline - System.system_time(:millisecond), 0), ceiling)
 
       _absent ->
-        @claim_wait_ms
+        ceiling
     end
   end
 
