@@ -477,17 +477,29 @@ boundary, not an absolute:
   the token is routed, and a session started concurrently with it is asserted
   to produce no message from the sender either way round.
 
-  Three more cover what the capability is for. **A tracer restart keeps the
-  exclusion**: the tracer is killed, the supervisor restarts it, a new session
-  starts, and a sender that excluded itself before the restart is asserted to
-  produce no message under the new session — which a design holding a tracer
-  pid in options would fail. **The set returns to baseline**: after a run of
-  invocations, the excluded-pid set `Control` holds is asserted empty again,
-  proving the monitors remove what the senders left. And **it fails closed**:
-  with the tracer made unavailable at the instant `exclude_self/2` is called,
-  the invocation is asserted to refuse `:unavailable` and **no credential is
-  resolved**, while a composition with no tracing capability at all is
-  asserted to resolve normally.
+  Three more cover what the capability is for, and each names the surface it
+  reads and the two answers that must differ on it.
+
+  **A tracer restart keeps the exclusion.** Surface: the tracer's own message
+  stream. The tracer is killed, the supervisor restarts it, a new session
+  starts, and a long-lived sender that excluded itself before the restart is
+  asserted to produce **no** message under the new session while a
+  non-excluded control process in the same session produces one. A design
+  holding a tracer pid in options fails the first half; a case without the
+  control process could pass by tracing nothing.
+
+  **The set returns to baseline.** Surface: `Control`'s excluded-pid set, read
+  **in-VM** — no wire method reports it and none is added. Asserted non-empty
+  while a sender is alive and empty after it exits, which is what separates
+  "the monitors work" from "the set was never populated".
+
+  **It fails closed.** Surface: the invocation's own result, plus the child's
+  record of what it received. With the tracer made unavailable at the instant
+  `exclude_self/2` is called, the invocation is asserted to refuse
+  `:unavailable` and the child is asserted to have received **no** credential
+  frame; with the capability explicitly absent, the same invocation is
+  asserted to succeed and the child to receive one. Two configurations, two
+  different answers on the same two surfaces.
 - Everywhere else the earlier absolutes stand unchanged: not in guardian
   state, not in an exit reason, not in a crash report, not in an IO request,
   not in a file, not in the environment, not in argv, and in no durable or

@@ -2317,8 +2317,17 @@ exceed what the caller has left.
    correct for residency and misleading for a drain. Such a session is
    **`absent`**: quiesce admits no abort for it, runs no cancellation, and
    fences it exactly as it fences an unsettled one, because an old transaction
-   from that dead coordinator is precisely the case the fence exists for. The
-   daemon reports it as not drained rather than counting it settled.
+   from that dead coordinator is precisely the case the fence exists for.
+
+   **Where "reports" lands, since a list in a return value is not a surface.**
+   The daemon has two places to put what quiesce answers, and it uses both:
+   the counts — settled, unsettled, absent — go in the **stop line on
+   `stderr`** beside `budget_ms` and `drain_id`, which is what an operator
+   reading a stopped service's log sees; and nothing goes on the wire, because
+   by the time quiesce returns the clients have not yet been told anything and
+   what they are told is `operator_stop`, not a census. A session in `absent`
+   is therefore distinguishable from one in `settled` exactly where the
+   difference is actionable, and nowhere it would be noise.
 
 **Quiesce is not called through the facade's default timeout.** `control_call/3`
 and `dispatcher_call/3` both default to `5_000` (`runtime.ex:470`, `:478`), and
@@ -2733,8 +2742,9 @@ next daemon removes before binding.
   *It does not.* A daemon with an effect held past the drain budget and an
   unresolved mutation receives `SIGTERM`. The case asserts the session is in
   the `unsettled` list; that its coordinator is **gone before `quiesce/2`
-  returned**, proved by the pid being dead at the instant the daemon reports
-  it; and then the negative
+  returned**, read **in-VM** as that coordinator's pid being dead at the
+  instant the daemon reports it — `Process.alive?` on a pid the case holds,
+  not a wire field; and then the negative
   that matters: **no terminal is claimed for the work that did not settle** —
   no `cancelled`, no `outcome_unknown` for it. The ambiguous mutation stays
   `commit_unknown`, each client is sent the stop reason on a transport that
@@ -2955,11 +2965,13 @@ next daemon removes before binding.
   no coordinator and no new journal record — which a post-call count would
   have failed by starting a sixty-fifth.
 - **Two concurrent attaches at the attachment ceiling.** A daemon at 511
-  attachments receives two `session.attach` calls at once. The case asserts
-  exactly one succeeds and the other is refused, and that core holds **512**
-  attachments afterwards rather than 513 — the same reserve-before-the-call
-  rule as the activation ceiling, proved where it would otherwise have been
-  assumed.
+  attachments receives two `session.attach` calls at once. On the wire the
+  case asserts exactly one result and one refusal — two answers that plainly
+  differ. The count is **in-VM**: core exposes no attachment count, so the
+  case reads core's own attachment registry in the same VM and asserts
+  **512**, not 513. Saying "proved by core holding 512" without saying where
+  that number is read would have been the same unobservable claim this round
+  removed elsewhere.
 - **Every branch releases or converts its reservation, and the no-answer
   cases are written so the two outcomes can differ.** One case per row: a
   fresh create, a replayed create against an active and a dormant session, a
@@ -2974,15 +2986,19 @@ next daemon removes before binding.
   result's `disposition` and `control_entry`. A resolution by existence query
   would give the same answer to both and is thereby excluded.
 
-  *Create, no answer.* The replay is asserted to start no coordinator and
-  charge no second slot, and the slot count afterwards distinguishes a fresh
+  *Create, no answer.* The replay is asserted **in-VM** to start no
+  coordinator — no new pid under core's session supervisor — and to charge no
+  second slot, and the slot count afterwards distinguishes a fresh
   original from a replayed one.
 
-  *Attach, no answer.* The daemon is asserted to **close that connection**,
-  and core is asserted to hold one fewer attachment afterwards — the
-  connection's teardown having detached it — with the reservation released.
-  No attachment count is read from core at any point, because none exists to
-  read.
+  *Attach, no answer.* Two surfaces, and they differ in the two cases. On the
+  wire, the client's connection is asserted **closed** — an EOF a test can
+  observe — where a connection whose attach answered stays open. In-VM, core's
+  attachment registry is asserted to hold one fewer entry afterwards, the
+  connection's teardown having detached it, and the daemon's reservation count
+  to be back where it started. Nothing reads an attachment count *from core's
+  public surface*, because none exists there; the case reads core's own state
+  in the same VM and says so.
 
   Each case asserts the daemon's remaining slot count **in-VM**, reading the
   reservation state directly rather than through any wire method — no DTO
