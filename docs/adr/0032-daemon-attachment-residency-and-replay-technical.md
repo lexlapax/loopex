@@ -156,7 +156,7 @@ which no client requests and every client may receive:
 
 | Field | Value |
 | --- | --- |
-| `reason` | One of `operator_stop`, `store_lost`, `store_capacity_exceeded`, or `fatal:<class>` for the remaining classes the plan's fatal-class map names, one per linked component: `fatal:runtime_lost`, `fatal:transfers_lost`, `fatal:workspace_lease_lost`, `fatal:executor_lost`, `fatal:registry_lost`, `fatal:custody_lost`, `fatal:supervision_fault`, `fatal:listener_lost`. The startup classes carry no reason, because no socket exists when they occur, and neither does `owner_lost`, where the process that would write it is the one that is gone |
+| `reason` | One of `operator_stop`, `store_lost`, `store_capacity_exceeded`, or `fatal:<class>` for the remaining classes the plan's fatal-class map names, one per linked component: `fatal:runtime_lost`, `fatal:transfers_lost`, `fatal:workspace_lease_lost`, `fatal:executor_lost`, `fatal:registry_lost`, `fatal:custody_lost`, `fatal:listener_lost`. A lease owner's death is not among them: it closes one session's controller attachment with `control_owner_lost` and ends no daemon. The startup classes carry no reason, because no socket exists when they occur, and neither does `owner_lost`, where the process that would write it is the one that is gone |
 | `message` | A bounded non-secret sentence for an operator to read |
 | `retry_after_ms` | Present only for `operator_stop`, where a restart is expected; absent for every fatal reason, because the daemon does not know when the cause will be fixed |
 
@@ -186,8 +186,17 @@ limits — five inputs, and generation 2 changes four of them:
 | Generation | New string |
 | Methods | Adds `session.list`, `daemon.status`, `session.acquire_control`, `session.release_control` |
 | Record families | Adds `daemon.stopping` |
-| **Error codes** | Adds every refusal generation 2 can return and generation 1 cannot: `control_held`, `control_pending`, `session_dormant`, the four existence-query refusals the daemon maps to the wire (`session_unknown`, `session_id_invalid`, `store_unavailable`, `existence_indeterminate`), and the activation and residency refusals (`activation_ceiling_reached`, `session_index_too_large`, `composition_mismatch`) |
+| **Error codes** | Adds every refusal generation 2 can return and generation 1 cannot: `control_held`, `control_pending`, `control_owner_lost`, `session_dormant`, the four existence-query refusals the daemon maps to the wire (`session_unknown`, `session_id_invalid`, `store_unavailable`, `existence_indeterminate`), and the activation and residency refusals (`activation_ceiling_reached`, `session_index_too_large`, `composition_mismatch`) |
 | Limits | Unchanged from ADR 0023's ceilings |
+
+**`control_owner_lost` closes a controller whose lease owner died.** ADR 0033
+makes a lease owner's failure session-scoped: the daemon closes that session's
+controller attachment, leaves its observers attached, and lets the next
+acquisition start a fresh owner with a fresh epoch. The closing client is owed
+a reason for a close it did not ask for, and this is it — distinct from
+`control_held`, which refuses an acquisition, and from `control_pending`,
+which times one out. It enters the ordered error list, the digest and the
+generation-2 vectors with the others.
 
 **`control_pending` is the acquisition timeout, and it was missing.** ADR 0033
 refuses an acquisition whose own deadline elapses while it waits behind an

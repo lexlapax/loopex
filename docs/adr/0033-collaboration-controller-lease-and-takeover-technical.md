@@ -37,63 +37,80 @@ idempotency. Those remain the commit-authority fence, and they answer a
 different question — which coordinator owner may commit — than the writer
 epoch does, which is which client may drive.
 
-**One lease-owner process per daemon**, holding **one lease record per
-session**, serializes every lease read, grant, renewal, release and expiry
-transition with that session's mutation-admission handoff, so a takeover
-cannot pass a mutation whose holder check has already started but whose core
-admission is unresolved; that admission first resolves, or the daemon's own
-holder-and-epoch check refuses it before it ever reaches core.
+One owner process per session serializes every lease read, grant, renewal,
+release and expiry transition with that session's mutation-admission handoff,
+so a takeover cannot pass a mutation whose holder check has already started
+but whose core admission is unresolved; that admission first resolves, or the
+daemon's own holder-and-epoch check refuses it before it ever reaches core.
 
-The serialization a session needs is against **its own** lease transitions,
-and one process serializes each session's independently by holding each
-session's record and in-flight set separately; sessions do not contend for
-anything but that process's mailbox. An earlier revision required a process
-per session. That is withdrawn on the maintainer's decision: it made the
-daemon's process population dynamic, needing a retirement rule, a per-session
-fatal semantics and a place for the population to be bounded, none of which
-the lease itself asks for. **The lease is data; the process count is
-topology.**
+A revision of 2026-09-20 proposed collapsing these into one process for the
+daemon holding a record per session. The maintainer rejected that on
+2026-09-20 and kept the process per session: the process *is* the
+serialization boundary and the holder of that session's in-flight admission
+set, and collapsing it would put every session's lease transitions behind one
+mailbox. The plan's companion states the population and its bound.
 
-**A lease owner's failure is fatal to that daemon instance, deliberately.**
-The owner holds the session's in-flight admission set in its own memory, and
-that set is the whole basis of the expiry rule below: a takeover is granted
-only when it is empty. An owner that dies takes the set with it, so a
-restarted owner cannot know whether an admission is still on its way into
-core. An earlier draft had the daemon restart the owner and carry on with its
-sockets intact; that was withdrawn on 2026-09-20, on an independent review's
-finding, because a successor acquire
-could then be granted while a forgotten admission was still able to settle.
+**A lease owner's failure ends that session's collaboration state, not the
+daemon**, on the maintainer's decision of 2026-09-20. The owner holds the
+session's in-flight admission set in its own memory, and that set is the basis
+of the expiry rule below: a takeover is granted only when it is empty. An
+owner that dies takes the set with it, so no successor owner can inherit it —
+and none tries to. What happens instead is exactly what happens when a lease
+is gone by any other route:
 
-So the lease owner's failure is fatal to the daemon instance, and the daemon's
-own structure supplies that without special-case code: the lease owner is one
-of the fixed set of processes the daemon's owner process `start_link`s, the
-owner traps exits, and its `{:EXIT, pid, reason}` clause classifies an exit it
-did not ask for — which is every exit outside its own stop sequence — as
-fatal, mapping this pid to `supervision_fault`. There are no restarts to configure and no strategy to get wrong. The
-owner classifies the exit as `fatal:supervision_fault`, has the listener tell
-every client, closes them, unlinks the socket and exits non-zero; the daemon
-comes back with no lease anywhere, no connection and no session activated. No
-successor acquire exists to be granted wrongly, because no connection
-survives to make one.
+- the daemon closes that session's **controller** attachment with
+  `control_owner_lost`, the wire reason ADR 0032's generation-2 inventory
+  carries for it, and leaves every observer attached, because an observer
+  holds no lease and loses nothing;
+- the lease itself is gone, held by nobody;
+- the next `session.acquire_control` for that session starts a **fresh**
+  owner, holding no lease and no admission set, and mints a **fresh epoch** —
+  the same takeover mechanics this ADR already defines for a lease that has
+  been released.
 
-That rule stands on its own, and this pair does not lean on core to help it.
-An earlier draft said core would fence the forgotten admission by epoch
-regardless, making the daemon-fatal rule defence in depth. The maintainer
-withdrew that on 2026-09-20 because it was not true: core never sees the
-writer epoch, as the lease record above sets out, and the fences core does
-have protect against a stale *coordinator owner* rather than a stale
-*controller* — which is the gap this ADR exists to fill. So the daemon rule
-is the only thing preventing a successor's grant from racing a forgotten
-admission, and it has to be absolute for that reason.
+The fresh epoch is what makes the lost set harmless: a command admitted under
+the dead owner's epoch cannot be accepted after the new grant, and a mutation
+already inside core settles or refuses exactly once under the serial ownership
+core enforces, which no lease transition can affect. What is *not* claimed is
+that the daemon knows whether such a mutation is still settling; it does not,
+and a successor's work is ordered after it by core rather than by the daemon.
+
+An earlier draft had the daemon restart the owner and carry on with its
+sockets intact, and a 2026-09-20 revision made the failure fatal to the whole
+daemon instance. Both are superseded by the decision above: the restart was
+wrong because a restarted owner would claim an admission set it cannot know,
+and daemon-fatal was more than the fault requires — one session's
+collaboration state is not grounds to end every other session's.
+
+So a lease owner's failure is **session-scoped**, and the daemon's own
+structure supplies that without special-case code: each lease owner is
+`start_link`ed by the daemon's owner process, which traps exits, and its
+`{:EXIT, pid, reason}` clause maps the pid to the session it belonged to
+rather than to a daemon-wide class. Every other linked process the daemon
+holds is still daemon-fatal; the lease owners are the one class with a
+session-scoped rule, and the reason is the one above. There are no restarts to
+configure and no strategy to get wrong: nothing is restarted, and the next
+acquisition starts a new owner from nothing.
+
+**What this does not claim, stated because an earlier draft claimed it.**
+Core never sees the writer epoch, as the lease record above sets out, and the
+fences core does have protect against a stale *coordinator owner* rather than
+a stale *controller* — which is the gap this ADR exists to fill. So the daemon
+is the only thing keeping a successor's grant from racing an admission the
+dead owner had already passed into core. What the session-scoped rule gives is
+not that the race cannot exist; it is that the successor is granted a **fresh
+epoch** and the dead controller's connection is closed, so no command from the
+old tenure can be admitted afterwards, and the one admission already inside
+core settles or refuses exactly once under core's own serial ownership. The
+cost is the honest one: the daemon cannot tell a new controller whether an
+earlier mutation is still settling, and does not pretend to.
 
 Retaining the in-flight set in a survivor was the alternative and was
 rejected: whichever process held it would then be the process whose failure
 loses it, so the window moves up one level rather than closing, and a daemon
 that cannot lose the set is a daemon that has made the set durable — a durable
-lease record by another name, which this decision rejects for its own reasons.
-The cost is real and is stated: one supervision fault takes the daemon down
-and every client reconnects. That is the honest price of not inventing a
-recovery for state whose whole purpose is to be exact.
+lease record by another name, which this decision rejects for its own
+reasons.
 
 Expiry and
 admission use the daemon's monotonic clock: a deadline is set only by a
