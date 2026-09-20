@@ -270,6 +270,7 @@ errors answering one request: each carries that request's `request_id`, no
 | `control_pending` | `session.acquire_control` that waited out its deadline | nothing |
 | `control_capacity_reached` | any lease operation beyond the 512 concurrent-owner cap | nothing |
 | `session_dormant` | `session.attach` | nothing |
+| `daemon_stopping` | any method arriving after the daemon's admission cut | nothing |
 | `session_unknown`, `session_id_invalid`, `store_unavailable`, `existence_indeterminate` | any method that validates existence first | nothing |
 | `activation_ceiling_reached` | `session.create`, `session.resume` | nothing |
 | `composition_mismatch` | `session.resume` on a session this composition cannot serve | nothing |
@@ -332,7 +333,7 @@ limits — five inputs, and generation 2 changes **all five**:
 | Generation | New string |
 | Methods | Adds `session.list`, `daemon.status`, `session.acquire_control`, `session.release_control` |
 | Record families | Adds `daemon.stopping` and `daemon.notice` |
-| **Error codes** | Adds every refusal generation 2 can return and generation 1 cannot: `control_held`, `control_not_held`, `control_pending`, `control_capacity_reached`, `control_owner_lost`, `session_dormant`, the four existence-query refusals the daemon maps to the wire (`session_unknown`, `session_id_invalid`, `store_unavailable`, `existence_indeterminate`), and the activation and residency refusals (`activation_ceiling_reached`, `composition_mismatch`). **Not** `session_index_too_large`, which is a startup exit class and can reach no client |
+| **Error codes** | Adds every refusal generation 2 can return and generation 1 cannot: `control_held`, `control_not_held`, `control_pending`, `control_capacity_reached`, `control_owner_lost`, `session_dormant`, `daemon_stopping`, the four existence-query refusals the daemon maps to the wire (`session_unknown`, `session_id_invalid`, `store_unavailable`, `existence_indeterminate`), and the activation and residency refusals (`activation_ceiling_reached`, `composition_mismatch`). **Not** `session_index_too_large`, which is a startup exit class and can reach no client, and **not** `capacity_exceeded`, which generation 1 already carries and generation 2 reuses for the connection ceiling |
 | **Limits** | ADR 0023's framing and input ceilings are unchanged, and generation 2 **adds** the residency keys a client can read: `attachments_per_session`, `attachments_per_daemon`, `session_list_page_max`, `session_index_entries`, `lease_term_ms` |
 
 **`control_owner_lost` closes a controller whose lease owner died.** ADR 0033
@@ -428,6 +429,24 @@ on any other connection are untouched, because an observer holds no lease and
 loses nothing. A client that sees it may acquire again; the next acquisition
 starts a fresh owner and mints a fresh epoch.
 
+**`daemon_stopping`, the refusal after the admission cut.** An orderly stop
+begins with a synchronous, acknowledged cut: the daemon's owner calls the
+admission relay, the relay closes admissions and answers only once every
+ticket it holds has settled or been recorded, and nothing enters core through
+the daemon after that answer. A connection that is still open — and every
+connection is, because the cut precedes the closes — may still send a frame.
+It is answered with a **correlated** `daemon_stopping` carrying that request's
+`request_id` and nothing else: no `event_cursor`, no session state, and it
+closes nothing on its own. The connection is closed a moment later by step 3
+of the stop sequence, which is where a client is told the reason it is going
+away; `daemon_stopping` answers the one request that arrived in between.
+
+The instant it names is the relay's acknowledgement, not the signal: a command
+whose relay ticket was recorded **before** the acknowledgement settles or is
+fenced under the drain, and one that arrives after it is refused. Those are
+the two witnesses, and they must give different answers on the same surface —
+the connection's own reply stream.
+
 **`session_index_too_large` is not a wire code**, and an earlier revision
 listed it as one. It is a **startup** refusal: the daemon exits non-zero with
 that class before any socket exists, so no client can be holding a connection
@@ -453,14 +472,17 @@ enters the digest's record-families input beside `daemon.stopping`.
 
 **Correlation, for the refusals above.** `control_not_held`,
 `control_pending`, `control_capacity_reached`, `control_held`,
-`session_dormant` and the four existence-query refusals are ordinary
-**correlated** errors: each answers one request and carries that request's
-`request_id`, no `event_cursor` and no session state, and none closes
-anything — the connection and every attachment on it are untouched. The two
-uncorrelated cases in generation 2 are the ones named above,
-`control_owner_lost` and the `daemon.stopping` and `daemon.notice` records,
-and each states its own close behaviour where it is defined. Stating this once
-is what lets the vectors be written without guessing.
+`session_dormant`, `daemon_stopping` and the four existence-query refusals are
+ordinary **correlated** errors: each answers one request and carries that
+request's `request_id`, no `event_cursor` and no session state, and none
+closes anything **by itself** — the connection and every attachment on it are
+untouched by the refusal, and where the connection is nonetheless closed a
+moment later it is the stop sequence or the detach rule below doing it, not
+the error. The uncorrelated cases in generation 2 are the ones named above,
+`control_owner_lost`, ADR 0023's `detached` as this pair's detach rule reuses
+it, and the `daemon.stopping` and `daemon.notice` records, and each states its
+own close behaviour where it is defined. Stating this once is what lets the
+vectors be written without guessing.
 
 **The existence query's `unexpected` maps to `existence_indeterminate`.** Core
 answers one of five results; the daemon maps `store_unavailable` to the wire's
