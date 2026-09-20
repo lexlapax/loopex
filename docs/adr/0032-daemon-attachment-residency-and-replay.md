@@ -7,7 +7,9 @@ Technical depth: [Attachment residency mechanics](0032-daemon-attachment-residen
 - **Date:** 2026-09-14
 - **Decision owner:** Maintainer
 - **Supersedes:** nothing; ADR 0023's one-attachment-per-foreground-process rule and generation-1 wire remain in force on the foreground server
-- **Prerequisite for:** M5 acceptance
+- **Prerequisite for:** M5 outcomes 1, 2 and 4, accepted before the socket is
+  bound or the core attachment change lands — that is, before M5's workstreams
+  2 and 4
 
 <a id="concept-adr-0032-decision"></a>
 ### Context and Decision

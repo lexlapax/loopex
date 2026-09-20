@@ -78,9 +78,14 @@ the local store's writer marker, unchanged.
   before core admission and before a session write; an observer who copied
   the visible current epoch still refuses. Queries and attach carry no epoch.
 - `session.create` has no `writer_epoch` because the session lease does not
-  exist. It creates an uncontrolled session. The caller must attach, acquire
-  control explicitly, and use the returned epoch for its first session
-  command. Creation never implicitly grants control.
+  exist. It creates an uncontrolled session, and creation never implicitly
+  grants control. The caller must acquire control explicitly and use the
+  returned epoch for its first session command. Acquire and attach may be
+  sent in either order, because acquire is keyed by session ID and validates
+  only durable session existence; the constraint is on the first mutation,
+  not on the two calls that precede it, and that mutation refuses unless the
+  sending connection is the holder, the epoch matches and the connection
+  holds a controller-capable attachment.
 - An orderly connection close by the holder releases the lease; an abrupt
   loss leaves it to expire.
 
@@ -131,8 +136,9 @@ through content, metadata, answers or order; after a daemon restart every
 session uncontrolled, an epoch from before the restart refused, and the
 first acquire granting a fresh epoch; forward and backward wall-clock jumps
 not changing live admission or takeover timing; creation yielding an
-uncontrolled session and requiring attach plus explicit acquire before
-prompt; a dormant session acquired by ID, then resumed with epoch and
+uncontrolled session and requiring both attach and explicit acquire before
+prompt, proved in both orders, with the prompt refused while either is
+missing; a dormant session acquired by ID, then resumed with epoch and
 attached.
 
 ### Alternatives

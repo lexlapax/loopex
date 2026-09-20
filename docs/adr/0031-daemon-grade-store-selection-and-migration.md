@@ -7,9 +7,10 @@ Technical depth: [Daemon-grade store mechanics](0031-daemon-grade-store-selectio
 - **Date:** 2026-09-14
 - **Decision owner:** Maintainer
 - **Supersedes:** nothing; refines the store posture in vision §12.2
-- **Prerequisite for:** M5 acceptance, for the local-adapter selection and
-  its documented limits; the successor milestone that adopts the daemon-grade
-  adapter, for the selection experiment and migration
+- **Prerequisite for:** M5 outcomes 1 and 5, accepted before the daemon opens
+  a state root — that is, before M5's workstream 1 lands — for the
+  local-adapter selection and its documented limits. Its successor half binds
+  nothing in M5; see the note on supersession below.
 
 <a id="concept-adr-0031-decision"></a>
 ### Context and Decision
@@ -35,10 +36,12 @@ with a hard 256 MiB capacity, a 4 MiB frame ceiling, full-history retention
 with no compaction, full replay at open, and one writer per root. Reaching
 capacity is a truthful refusal, never a silent loss: the adapter answers
 `store_capacity_exceeded`, the daemon refuses further mutation with that
-reason while observers stay attached and an orderly stop still succeeds, and
-the operator retires the root by stopping the daemon, moving the root aside
-and starting a fresh root. Sessions in a retired root are resumable only by
-reopening that root. This is a bounded, experimental selection made on
+reason while observers stay attached and an orderly stop still succeeds, and a
+log already past the bound is refused at open as `store_log_too_large` rather
+than opened and truncated. The operator retires the root by stopping the
+daemon, moving the root aside and starting a fresh root. Sessions in a retired
+root are resumable only by reopening that root.
+This is a bounded, experimental selection made on
 evidence the local adapter already carries; it is not a daemon-grade store,
 and the 0.2.0 daemon's operator documentation states these limits and the
 retirement procedure. The maintainer chose this on 2026-09-14 over deferring
@@ -53,13 +56,23 @@ unchanged private session Store ports. After M5 closes, isolated, disposable
 contract experiments in their own worktrees compare a BEAM-native segmented
 log and a SQLite-backed NIF adapter against the same conformance and
 fault-injection suites. Neither experiment becomes product implementation or
-merges to `main`. This pair is then revised to name the selected engine, both
-exact experiment revisions and their measured evidence, before independent
-review and acceptance of those exact bytes. The current recommendation is the
-BEAM-native adapter because it avoids a compiled dependency and VM-level NIF
-risk while reusing proven local framing and repair; these are hypotheses to
-test, not a categorical veto of SQLite. Any candidate that fails a required
-fault case is ineligible.
+merges to `main`. The current recommendation is the BEAM-native adapter
+because it avoids a compiled dependency and VM-level NIF risk while reusing
+proven local framing and repair; these are hypotheses to test, not a
+categorical veto of SQLite. Any candidate that fails a required fault case is
+ineligible.
+
+**Where the selection is recorded.** Not here. Once this pair is accepted as
+an M5 prerequisite its bytes are anchored: a decision is replaced additively,
+by a successor that declares `Supersedes: 0031`, and the predecessor stays
+exactly as accepted. This pair's single Acceptance row binds one disposition,
+and that disposition is the M5 local-adapter selection. So the successor
+milestone's engine, the two exact experiment revisions, their measured
+evidence and the migration are recorded in a **new ADR superseding this one's
+successor half**, proposed when the experiments have run and accepted on its
+own review. What this pair decides now, and all it decides now, is the M5
+selection and the procedure the successor's experiments must follow; nothing
+in the successor half binds M5.
 
 **Alternatives rejected.** Deferring this decision out of M5 entirely was
 rejected on 2026-09-14: the reference daemon still needs a recorded store

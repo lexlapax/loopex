@@ -7,7 +7,8 @@ Technical depth: [Collaboration mechanics](0033-collaboration-controller-lease-a
 - **Date:** 2026-09-14
 - **Decision owner:** Maintainer
 - **Supersedes:** nothing; the core keeps the vision §11.6 rule that it mandates no controller lease
-- **Prerequisite for:** M5 acceptance
+- **Prerequisite for:** M5 Outcome 3, accepted before any admission check is
+  written — that is, before M5's workstream 3
 
 <a id="concept-adr-0033-decision"></a>
 ### Context and Decision
@@ -32,10 +33,18 @@ attachment has command capability. The daemon checks those facts together
 before core admission and serializes that handoff with lease changes; an
 observer cannot reuse an epoch it learned from a result or status.
 `session.create` is the one exception because no session lease exists yet:
-it creates an uncontrolled session, after which the client attaches and
-explicitly acquires control before its first session command. For a known
-dormant session, a client may acquire control by session ID before
-`session.resume`, then resume with the granted epoch and attach. A
+it creates an uncontrolled session, and control over it is never implicit.
+
+Attach and acquire are independent of each other and their order is not
+fixed. A connection may acquire control of any session that durably exists,
+by session ID, before or after it attaches to that session; what is fixed is
+that no existing-session mutation is admitted until the lease is held by the
+sending connection, its epoch matches, and — with the single exception of
+`session.resume` on a verified dormant session — that connection holds a
+controller-capable attachment. So a newly created session is driven by
+attaching and acquiring in either order and then sending the first command
+with the granted epoch, and a known dormant session is driven by acquiring
+by ID, resuming with the granted epoch and attaching. A
 controller renews its lease while it lives and releases it on an orderly
 disconnect; a lease that is not renewed expires. Takeover is explicit: an
 observer asks for control and receives it only when the lease is released or

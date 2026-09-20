@@ -120,12 +120,14 @@ accepted product bytes. Both run:
   public sequence intact and the integrity check clean.
 
 Record each experiment's exact candidate SHA, commands, platform and measured
-results in the decision packet. Revise this still-Proposed pair to name the
-winner, both experiment SHAs, its evidence and any packaging cost;
-independently review that candidate before the maintainer accepts it.
-Selection does not itself accept the successor milestone. Product
-implementation of the adapter starts only after this revised pair and that
-milestone's plan are accepted.
+results in the decision packet. The winner, both experiment SHAs, its
+evidence and any packaging cost are then written into a new ADR that declares
+`Supersedes: 0031` for this successor half, not into these bytes: once this
+pair is accepted as an M5 prerequisite it is anchored, and its one Acceptance
+row already binds the M5 local-adapter selection. That successor ADR is
+independently reviewed and accepted on its own. Selection does not itself
+accept the successor milestone. Product implementation of the adapter starts
+only after that successor ADR and that milestone's plan are accepted.
 
 ### Migration
 
@@ -180,6 +182,7 @@ restore reopens the copy under the same placement identity and refuses a
 placement mismatch exactly as resume does today.
 
 Acceptance of the M5 selection binds this pair at the exact candidate the
-maintainer names in the governance record. The successor selection is a second
-disposition on the revised pair, recorded the same way once its experiment
-evidence exists.
+maintainer names in the governance record, and that is the only disposition
+this pair carries. The successor selection is a separate disposition on a
+separate ADR that supersedes this one's successor half, recorded the same way
+once its experiment evidence exists; this pair is not edited again.

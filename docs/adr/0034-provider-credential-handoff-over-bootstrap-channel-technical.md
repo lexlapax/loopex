@@ -101,15 +101,30 @@ credential — and each must hold with its assertion unchanged in meaning:
 | Child Logger forms and metadata | `ordinary and split actual child Logger messages cannot expose the credential`, `all actual child Logger message forms and metadata stay private`, `repeated credential bytes in actual child metadata cannot reach host channels`, `credential-bearing child metadata keys cannot reach host channels` |
 | Crash reports | `a provider request adapter that throws cannot put the credential in a stream-server crash report`, `a provider request adapter that exits cannot put the credential in a stream-server crash report`, `an actual child report containing its own request credential stays private`, `an actual child StreamServer termination cannot forward its credential` |
 
-Two cases carry over unchanged from elsewhere and are not re-pointed: the
-child-environment conformance case in
-`apps/loopex_llm_reqllm/test/m0_child_environment_conformance_test.exs`, which
-reads the child's recorded entry environment and refutes the credential name,
-and the size-bound case in
-`apps/loopex_llm_reqllm/test/provider_retainer_boundaries_test.exs`, which
-drives the 65,536-byte ceiling.
+Two of those cases also carry the child-environment witness, and it survives
+the re-pointing unchanged: the version-refusal case at
+`credential_plane_test.exs:117` and the bootstrap-refusal case at `:567` each
+read the child's recorded `entry-env` marker and refute
+`Adapter.credential_variable()` in it. Both assertions stay exactly as they
+are and mean more afterwards, because the name they refute in the child is by
+then absent from the parent as well. The child-environment conformance case in
+`apps/loopex_llm_reqllm/test/m0_child_environment_conformance_test.exs` is a
+different proof and is untouched by this decision: its sentinel
+`LOOPEX_M0_CHILDENV_PARENT_ONLY` is synthetic, so what it proves is that no
+parent environment name at all reaches the child, not anything about the
+credential name.
 
-Two proofs are new:
+One case outside `credential_plane_test.exs` must be re-pointed too, and
+cannot carry over unchanged. The size-bound case in
+`apps/loopex_llm_reqllm/test/provider_retainer_boundaries_test.exs`, which
+drives the 65,536-byte ceiling, delivers its credential through
+`System.put_env(Adapter.credential_variable(), …)` in that module's `setup`
+and again in the case body. Both writes go: the module's fixtures carry their
+own credential reference, and the case supplies the 65,536-byte value as that
+invocation's reference rather than writing it into the VM. The ceiling it
+proves, and the refusal above the ceiling, are unchanged.
+
+Three proofs are new:
 
 - **Parent environment.** Before, during and after a call, the parent VM's
   environment holds no credential under the adapter's name or any value equal
@@ -118,8 +133,31 @@ Two proofs are new:
 - **Concurrent independence.** Two invocations with distinct credentials run
   at once and each child records only its own; neither child, nor either
   child's diagnostics, ever sees the other's.
+- **No credential environment read in the adapter's lib tree.** The existing
+  drift-protection case in `apps/loopex_llm_reqllm/test/adapter_test.exs` —
+  `the adapter reads exactly one credential environment variable` — pins the
+  exact `System.get_env` arguments per library file, including
+  `"provider_bridge.ex" -> ["\"LOOPEX_PROVIDER_API_KEY\""]`. That case must
+  survive, strengthened rather than deleted: the expected list for
+  `provider_bridge.ex` becomes `[]`, so the case then proves that no file in
+  the adapter's library tree reads any environment variable for a credential
+  at all, which is a stronger claim than the one it makes today.
 
-Both belong in `credential_plane_test.exs` beside the cases they generalise.
+The first two belong in `credential_plane_test.exs` beside the cases they
+generalise; the third stays where it is.
+
+Two details of that case matter to whoever writes the change. The literal
+`"LOOPEX_PROVIDER_API_KEY"` it pins today lives in
+`provider_bridge.ex:401`, inside the credential sender, while
+`credential_variable/0` and its module attribute live in `req_llm.ex:49` and
+`:149-150`; only the first disappears. So `adapter_test.exs:50`'s
+`assert variable == "LOOPEX_PROVIDER_API_KEY"` is, afterwards, a pin on the
+host-facing accessor — the one name an operator configures — and that is what
+it should say it is. The neighbouring case `a missing credential is reported
+before any provider is called` proves the refusal today by deleting the
+variable from the VM; under this decision it proves the same refusal by
+supplying no credential reference with the call, which is the path that
+replaces it.
 
 ### Security review
 
