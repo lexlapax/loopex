@@ -1056,7 +1056,7 @@ releases on that.
 **Attach: end the connection process and the attachment goes with it.** Core
 exposes no attachment count, so there is nothing to observe — and nothing
 needs to be. ADR 0032 binds a connection to **at most one attachment at a
-time** (`0032-…-technical.md:126-129`), the daemon attaches from its
+time** (`0032-…-technical.md:127-129`, with the release rule at `:131-155`), the daemon attaches from its
 **per-connection process**, and core change 1 makes the dispatcher monitor
 that process and drop its attachment on `DOWN`. So the reservation is keyed by
 the connection, and a connection whose `session.attach` never answered is
@@ -2671,6 +2671,18 @@ state no surface exposes and run **in-VM**, in the same VM as the daemon or
 the runtime they are about. Each is labelled, because a case that says
 "asserts core holds N" without saying where N is read is the defect class this
 plan spent a round removing.
+**A note on how these are written, added after a review found three that
+could not be checked.** Every witness here names the **surface** it reads, the
+**two answers** that must differ on it, and — where the surface is new — the
+**change that creates it**. A case asserting "core holds N" without saying
+where N is read is not a case anybody can write; nor is one whose difference
+depends on a code path that does not exist. Three of this plan's surfaces are
+new work rather than existing behaviour, and each is named where it is used:
+the **dispatcher's release on `DOWN`** (core change 1), **`Control`'s
+excluded-pid set** (core change 3), and **`quiesce/1`'s three lists and
+`budget_ms`** (core change 4). Everything else is read from something that
+exists today — the journal, a supervisor's children, a pid's liveness, a
+socket's EOF, or the daemon's own `stderr`.
 
 - **Idle shutdown.** A daemon with sessions activated and no work in flight
   receives `SIGTERM`, writes nothing further to `stdout`, closes every
