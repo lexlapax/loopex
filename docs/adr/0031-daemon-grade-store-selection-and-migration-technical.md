@@ -57,9 +57,12 @@ reason to any callback. It does not compose through
 process `RuntimeOwner` spawns and which returns no adapter pid — a daemon on
 that bracket could not observe this failure at all. On the reported exit it
 refuses service, closes every connection with `store_lost`, or
-`store_capacity_exceeded` where that was the store's own reason, unlinks the
-socket and exits non-zero. The next daemon finds no marker to recover, because
-the dying store already gave it back.
+`store_capacity_exceeded` where that was the store's own reason, and exits
+non-zero. It does **not** unlink the socket: the marker is already released,
+so this daemon's claim on that pathname has ended, and ADR 0032 makes removing
+it the next verified marker holder's job. The next daemon finds no marker to
+recover, because the dying store already gave it back, and removes the stale
+pathname before it binds.
 
 An abrupt kill of the daemon runs no `terminate/2` at all, which is why *that*
 leaves a marker behind and why the next daemon's verified stale-writer

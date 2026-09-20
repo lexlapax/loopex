@@ -39,7 +39,7 @@ Concept: [Scope](M5.md#concept-plan-scope).
 | --- | --- | --- |
 | `loopex` | Durable session truth, the race-free attach barrier and cursor, independent concurrent attachments to one session, the read-only session-existence query, **`Loopex.Trace`'s excluded-MFA list, which keeps a named function out of a trace session before any message is delivered**, **the bounded `quiesce/2` that settles every active coordinator or names what it could not**, the per-attachment event-count dispatcher queues, cancellation and recovery | A lease, a transport, a byte limit, residency policy or any daemon fact |
 | `loopex_protocol` | Generation-2 records, validators, schema and vectors | Daemon behaviour or lease semantics |
-| `loopex_store_local` | The unchanged local adapter, its 256 MiB log and 4 MiB frame ceilings, its `store_capacity_exceeded` and `store_log_too_large` refusals and its writer marker, which it takes at start and releases in its own `terminate/2` — so the daemon owns the Store *process* and stops it last in an orderly shutdown, and a store loss releases the marker before the daemon can act | Any daemon fact, lease, index or residency state |
+| `loopex_store_local` | The local adapter, unchanged in behaviour and gaining exactly one read-only call — whether the marker file still holds this daemon's marker, which the socket-unlink precondition needs and `WriterLock` does not expose (`writer_lock.ex:92-105`) — its 256 MiB log and 4 MiB frame ceilings, its `store_capacity_exceeded` and `store_log_too_large` refusals and its writer marker, which it takes at start and releases in its own `terminate/2` — so the daemon owns the Store *process* and stops it last in an orderly shutdown, and a store loss releases the marker before the daemon can act | Any daemon fact, lease, index or residency state |
 | `loopex_daemon` | Marker-first process and socket lifetime, existence validation by calling core's query rather than by attaching or resuming, the peer-credential check, generation-2 negotiation, per-connection socket output buffers, the resident window and aggregate byte ceiling, attachment residency and eviction, the in-memory controller lease and writer-epoch check, the session index with its recorded-entry bound and its bounded pages, attachment residency and the one-way activation ceiling, and diagnostics | Store or coordinator internals, a second loop, policy selection, host identity, a durable record or a durable method |
 | `loopex_composition` | The edge-assembly sequence, and the one new public function that runs it in the caller's process and returns the edges — used by `RuntimeOwner` and by the daemon's owner | Daemon lifetime, ownership of what it assembles, or any knowledge of a daemon |
 | `loopex_app_server` | The foreground stdio server unchanged, sharing the protocol mapping the daemon reuses, and its use of `with_runtime/2`, which M5 does not change | Daemon lifetime or residency |
@@ -742,9 +742,12 @@ runtime — rather than against a staged one the plan would have to invent:
    never reads, unlinks or binds the socket path.
 5. **Read the session directory and build the index**, refusing at the
    recorded-entry bound.
-6. **Create the `0700` subdirectory and bind the `0600` socket**, read back
-   and verify ownership and mode, and **capture the bound path's device and
-   inode** — the identity the fail-stop unlink rule below compares against.
+6. **Create the `0700` subdirectory, remove any stale socket pathname, and
+   bind the `0600` socket**, then read back and verify ownership and mode.
+   Removing the stale pathname is this daemon's right and only this daemon's:
+   it holds the verified marker, which is the only moment at which removing a
+   socket file is unambiguously correct. A predecessor that left one — every
+   fail-stop leaves one — is cleaned up here rather than by itself.
 7. **Begin accepting**, then **print the readiness line**.
 
 No lease owner exists at this point, and none is started here: one is started
@@ -1088,54 +1091,75 @@ than in taste: `Loopex.Store.Local` answers an append error with
 observes it, the store is gone and the marker is already released. A sequence
 that ends "then stop the Store" cannot run when the Store is what died.
 
-**Who may unlink the socket, and when that stops being this daemon.** The
-socket path is not the daemon's by possession; it is the daemon's *because it
-holds the writer marker*, which is what ADR 0032 already says — only the
-marker holder may unlink or bind. The consequence an earlier revision missed
-is that the permission **ends when the marker does**, and the marker is
-released by the Store's `terminate/2` (`local.ex:166`), which can happen
-before the daemon is finished.
+**Who may unlink the socket: only a daemon that still demonstrably holds the
+marker, and nobody else ever.** The socket path is not the daemon's by
+possession; it is the daemon's *because it holds the writer marker*, which is
+what ADR 0032 already says. The consequence an earlier revision missed is that
+the permission **ends when the marker does**, and the marker is released by
+the Store's `terminate/2` (`local.ex:166`) — which can happen before the
+daemon is finished, and without the daemon being asked.
 
-Two paths, two rules:
+The rule is therefore one rule, not two, and it is a **precondition rather
+than a comparison**:
 
-- **Orderly stop: unlink while still holding the marker.** Step 1 does it,
-  immediately after the listener stops and long before the Store. No successor
-  can have acquired the marker yet, so the path being unlinked is certainly
-  this daemon's. Leaving the unlink to the end — where earlier revisions had
-  it — meant unlinking after the marker was already released, and a successor
-  that acquired it in that window would have had *its* socket removed by a
-  daemon on its way out.
-- **Fail-stop where the marker is already gone.** On `store_lost` and
-  `store_capacity_exceeded` the Store released the marker before the daemon
-  could act, so the daemon can no longer assume the path is its own. It
-  therefore compares identity rather than presence: at bind it captured the
-  path's `File.stat` device and inode, and at unlink it stats the path again.
-  **Equal device and inode: unlink. Anything else — a different inode, or
-  `{:error, :enoent}` — leave the path alone.** A successor's socket is a
-  different inode, which is what makes this decidable; verified by probe: a
-  bound path stats as `type: :other` with an inode, and a rebind of the same
-  path yields a different inode.
+- **A daemon unlinks the path only while it can show it still holds the
+  marker.** Immediately before the unlink, and nowhere else, the owner checks
+  two things: that the Store **process is alive**, and that the Store still
+  **owns the marker it took**. Both must hold; either failing means this
+  daemon may no longer touch the path, and it does not.
+- **The unlink precedes any Store stop**, so on the orderly path the check is
+  being made while the Store is still running normally and the answer is
+  ordinarily yes.
+- **The fail-stop path never unlinks at all.** On `store_lost` and
+  `store_capacity_exceeded` the marker is already gone, so the precondition
+  can never hold. On the other classes the daemon *could* unlink, and still
+  does not: a fail-stop is a path where something the daemon depended on has
+  failed, and the pathname is not worth a check it might get wrong. It leaves
+  the file.
+- **The successor removes what a predecessor left.** A daemon that has
+  acquired and verified the marker removes the stale pathname before binding —
+  that is its right, because it *is* the marker holder, and it is the only
+  moment at which removing a socket file is unambiguously correct. This is
+  the rule that makes the fail-stop path's litter harmless, and it is stated
+  as a startup step rather than as a hope.
 
-**The residual is the window between the stat and the unlink**, and it is
-stated rather than papered over: a successor that acquires the marker, removes
-the stale path and binds entirely between our two syscalls would still lose
-its socket file. Nothing narrows that further without a second lock, and a
-second daemon-owned lock file is rejected — it would duplicate the marker's
-stale-writer recovery machinery, including its own staleness question, to
-guard a window one syscall pair wide. What is at stake is also bounded: the
-socket is a path, never durable truth. A successor that loses its file serves
-no client and is restarted; the marker it holds, which is the real exclusion,
-is untouched, so nothing can write to the root behind it.
+**The ownership check needs a narrow addition to the local adapter, and the
+plan names it rather than assuming it.** `Loopex.Store.Local.WriterLock`
+exposes `acquire/3` and `release/1` and nothing else (`writer_lock.ex:92-105`);
+there is no way to ask "do I still hold this". M5 adds one read-only call on
+the adapter — answered from the state it already carries, the `writer_lock`
+term it was given at open — that reports whether the marker file still holds
+this daemon's marker. It writes nothing, changes no behaviour, and exists so
+that the unlink has a precondition it can actually evaluate. This is
+`loopex_store_local` work, small and named, and the ownership table says so
+rather than continuing to call that application unchanged.
+
+**What this deletes.** The inode guard is gone: comparing a `File.stat` device
+and inode against a pair captured at bind was an attempt to make unlinking
+safe *after* ownership had lapsed, and the honest answer is that it is never
+safe then. Gone with it is the admitted stat-then-unlink race — a window this
+design does not have, because it never unlinks without ownership — and the
+assumption that a successor whose socket file was removed would simply be
+restarted, which was a claim about an operator's behaviour rather than about
+this system.
+
+**One ordering consequence, and the reason the check is a liveness check and
+not a flag.** During an orderly stop the owner defers the exits it is not
+currently waiting for, so a Store that dies *during* the sequence is not
+classified until its own step. The unlink must not rely on the owner's belief
+about the Store; it asks the Store, at the moment of asking. A Store that has
+died leaves the check failing, the path untouched, and the successor's startup
+to remove it.
 
 **`--socket` is constrained to the selected root.** An override must resolve
 inside that root's `daemon/` directory — the same directory the default path
 sits in, under the same owner and symbolic-link rules — and a path outside it
 is refused at startup with `invalid_socket_path`, before the marker is
 acquired. Without that constraint two daemons on *different* roots could be
-pointed at one path, and neither's marker would say anything about the other's
-socket: the identity rule above would be comparing inodes between daemons that
-have no exclusion between them at all. Inside one root, the marker is the
-exclusion and there is exactly one holder.
+pointed at one path, and neither's marker would say anything about the
+other's: the precondition above would be satisfied by a daemon that holds a
+marker for a different root entirely, which says nothing about this path.
+Inside one root, the marker is the exclusion and there is exactly one holder.
 
 **How a signal reaches the owner, and when the handler is installed.** The
 daemon does not inherit a usable signal disposition; it installs one, and the
@@ -1278,12 +1302,14 @@ the owner fixes.
    time it answers, every session it could not settle has already been fenced
    and terminated inside core. This is the drain; what it does, and what it
    cannot do, is set out below.
-3. **Clients are told, and the socket path is unlinked.** Each open connection
-   gets one `daemon.stopping` naming `operator_stop`, bounded best-effort as
-   ADR 0032 fixes — one write attempt into the existing 4 MiB output buffer —
-   and is closed. **Then the owner unlinks the socket path, here and not at
-   the end**, because this is the last moment at which the daemon is certainly
-   still the marker holder.
+3. **Clients are told, and the socket path is unlinked — if it is still
+   ours.** Each open connection gets one `daemon.stopping` naming
+   `operator_stop`, bounded best-effort as ADR 0032 fixes — one write attempt
+   into the existing 4 MiB output buffer — and is closed. **Then the owner
+   checks that the Store process is alive and still owns its marker, and
+   unlinks only if both hold.** This is before any Store stop, so on an
+   ordinary stop both hold and the path goes. Where they do not, the path is
+   left for the next verified marker holder to remove at its own startup.
 4. **Every lease owner stops, then the admission relay**, in sequence,
    against the shared `teardown_ms` deadline. Every lease vanishes with the
    owners; the relay goes after them because it is what holds their admission
@@ -1632,11 +1658,11 @@ to write.
    and found dead, refuses with `store_writer_unverifiable` where it cannot be
    decided, and refuses with `store_writer_active` where it is alive. A
    surviving marker is a case with a defined answer, not a corruption.
-5. Unlink the socket **only if it is still ours**. On the six classes where
-   the daemon still holds the marker this is unconditional. On the two store
-   classes the marker is already gone, so the owner applies the identity rule
-   above: stat the path, unlink on an equal device and inode, leave it alone
-   on anything else. **The runtime root, the lease owners, the registry, the
+5. **The socket path is left alone.** The fail-stop never unlinks: on the two
+   store classes the marker is already gone and the precondition can never
+   hold, and on the rest the daemon declines to spend a check it might get
+   wrong on a path whose litter the next verified marker holder removes before
+   binding anyway. **The runtime root, the lease owners, the registry, the
    custody process and the transfers owner are not stopped on this path**, and
    that is deliberate rather than an omission. A fail-stop is not a drain, and
    none of them owns anything that outlives the VM: the executor does, which
@@ -1777,9 +1803,12 @@ start order** — runtime, executor, workspace lease, transfers where it exists
 releases the marker.
 
 Each of those stops is the same call and the same discipline as a shutdown
-stop: a monitored helper running `GenServer.stop(pid, :normal, grace)` with
-the composed cleanup grace, the owner waiting on its own link with `after
-grace`, and a kill on expiry. Startup introduces no second teardown
+stop: a monitored helper running `GenServer.stop(pid, :normal, …)`, the owner
+waiting on its own link against **one shared teardown deadline** and killing
+on expiry, and — for the Store — **the same fixed 30 s phase** the orderly
+path gives it, for the same reason: this is the stop that releases the marker,
+and a failed start that killed the Store mid-release would leave exactly the
+stale marker it is trying not to leave. Startup introduces no second teardown
 mechanism; it reuses the one the shutdown sequence defines, against the pid
 map it already holds.
 
@@ -1878,15 +1907,19 @@ the cause and try again without a recovery step.
   than a silent `:shutdown`. A lease owner is deliberately not in this case:
   its own witness is below, and it asserts the daemon **keeps running**.
 - **A successor's socket survives its predecessor's exit.** Two daemons on
-  one root. The first is paused between the Store's marker release and its
-  unlink — the fail-stop window, reached by making the Store terminate and
-  holding the owner at that point. The second acquires the marker, removes the
-  stale path, binds its own socket, and prints readiness. The first is then
-  released. The case asserts that it **does not unlink** the path, because the
-  inode it stats is not the one it captured at bind, and that the second
-  daemon's socket is still bound and still serving a client afterwards. The
-  orderly variant asserts the other half: the unlink happens in step 1, while
-  the marker is still held, so a successor cannot even reach that window.
+  one root. The first loses its Store, so the marker is released before it can
+  act, and it is held at the point where an earlier design would have
+  unlinked. The second acquires the marker, removes the stale path as the
+  verified holder, binds its own socket and prints readiness. The first is
+  then released. The case asserts it **unlinks nothing** — a fail-stop never
+  does — and that the second daemon's socket is still bound and still serving
+  a client afterwards.
+
+  The orderly variant asserts the precondition rather than a comparison: the
+  unlink happens only after the owner has confirmed the Store process alive
+  and still holding its marker, and a variant that kills the Store immediately
+  before that check asserts the path is **left alone** and that the next
+  daemon removes it at startup and serves normally.
 - **A `--socket` path outside the root is refused.** A path in a directory
   that is otherwise perfectly valid — right owner, right mode — but outside
   the selected root's `daemon/` directory exits `invalid_socket_path` with no

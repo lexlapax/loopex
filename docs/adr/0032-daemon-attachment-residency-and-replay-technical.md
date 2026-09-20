@@ -99,7 +99,17 @@ with `store_writer_active` where the holder is alive. All three are proved
 before the socket path is read, unlinked or bound. Only the marker holder may remove a stale `daemon.sock` left by
 a dead daemon and bind a new one, so two simultaneous starts on one root
 resolve at the marker, exactly one listener exists, and the loser exits
-without touching the socket. If the daemon loses store ownership while
+without touching the socket.
+
+**Removing the pathname is the successor's job, not the predecessor's**, and
+that follows from the same rule read in the other direction. A daemon's claim
+on the path is its marker, so the claim ends when the marker does — which can
+happen without the daemon being asked, since the Store releases the marker in
+its own `terminate/2`. A daemon therefore unlinks only while it can still show
+it holds the marker, and one that has lost it, or cannot show it, leaves the
+file. Nothing is lost by that: the next daemon to acquire and verify the
+marker removes the stale pathname before binding, which is the one moment at
+which removing a socket file is unambiguously correct. If the daemon loses store ownership while
 running, because its Store child exits or the marker can no longer be
 proved held, it closes the listener and every connection before anything
 else and then exits; no connection outlives the daemon's ownership of the
