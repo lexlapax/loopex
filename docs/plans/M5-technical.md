@@ -1641,8 +1641,10 @@ step 1 as `listener_lost`, every lease owner's stop as a lost controller,
 step 3's clean return as `runtime_lost` — a daemon that could never exit `0`, and an
 idle-shutdown witness that could never pass.
 
-So the owner carries a `stopping` field naming **the one component it is
-currently stopping**, set immediately before each stop call. The EXIT clause
+So the owner carries a `stopping` field naming **the component it is
+currently stopping** — one pid at every step but phase 6's lease-owner sweep,
+where it names that step's set of pids — set immediately before each stop
+call. The EXIT clause
 reads:
 
 - an exit from the pid named in `stopping`, **whose reason is `:normal`,
@@ -1761,7 +1763,9 @@ process is unconditional, and on one already dead the exit the owner is
 waiting for is the one that made it dead, already queued. It is a wait for a
 signal that exists, not a second bound.
 
-**Other messages wait their turn.** Both receives are selective on one pid, so
+**Other messages wait their turn.** Both receives are selective on the pid
+this step is stopping — on the set of them, in phase 6's lease-owner sweep, by
+the same discipline read over a set — so
 an exit from another component, a client's frame, or anything else stays in
 the mailbox and is read when the owner returns to its loop. Nothing is
 skipped, only ordered — and nothing is lost even so, because of one invariant:
@@ -2055,13 +2059,30 @@ session is reported `fence: :not_needed` if the head already moved and
 
 **Phase 6 stops the lease owners as a collective sweep, not one at a time.**
 Up to 512 of them exist, and stopping them in sequence inside five seconds was
-arithmetic nobody did: the owner sends every lease owner its stop
-**concurrently**, waits **once** for all of their `DOWN`s, and at the phase's
-end kills whatever is left with `Process.exit(pid, :kill)`. The disposition is
-stated: a lease owner killed this way loses nothing durable — it holds a lease
+arithmetic nobody did: the owner spawns one stop helper **per lease owner, all
+at once**, then waits in **one** loop until every one of those pids has
+produced an exit on the owner's own link — the same link it already holds, so
+the exits are `{:EXIT, pid, reason}` and not monitor `DOWN`s — and at the
+phase's end kills whatever is left with `Process.exit(pid, :kill)` and reads
+the exits that follow.
+
+**Two rules bend exactly here, and only here.** The `stopping` field names one
+component elsewhere; for this step it names the **set** of lease-owner pids,
+and the EXIT clause's rule is otherwise unchanged — an exit from a pid in that
+set whose reason is `:normal`, `:shutdown` or the owner's own `:killed` is
+consumed, and any other reason is classified, exactly as for a single
+component. And the two selective receives elsewhere match one pid; here the
+loop matches **any** pid in the set and removes it, which is the same
+discipline over a set rather than a singleton. Nothing else in the sequence
+sweeps, so nothing else needs either form.
+
+The disposition of a killed lease owner is
+stated: it loses nothing durable — it holds a lease
 record, an epoch and an in-flight admission set, none of which outlives the
 daemon — and the relay's tickets, which do matter, are held by the relay and
-stopped after them.
+stopped after them. Its session's controller connection is already gone, step
+3 having closed every connection, so a lease owner ended here produces no
+`control_owner_lost` and there is nothing left to send one to.
 
 **`budget_ms` is still core's to derive and report**, for the reason below;
 what changed is that it is one phase among seven rather than the whole drain.
@@ -3522,7 +3543,7 @@ links rather than one of them, and an earlier revision headed eleven rows
 | --- | --- | --- | --- |
 | **Lease owners**, one per session under lease or acquisition | Daemon owner, on the first lease operation after existence validation | At most 512 at once, ADR 0032's per-daemon ceiling reused | **Session-scoped**: that session's controller closes with `control_owner_lost`, observers stay, the replacement's first grant waits on the relay's tickets |
 | **Connections**, one per accepted client | The listener | **512 concurrent**, ADR 0032's connection ceiling — the attachment number reused, and not the attachment ceiling itself, which bounds nothing about a client that never attaches | That client's connection closes |
-| **Stop helpers**, one per stop | Daemon owner, `spawn_monitor` | One at a time | Nothing: monitored, never linked |
+| **Stop helpers**, one per stop | Daemon owner, `spawn_monitor` | One at a time, except phase 6's lease-owner sweep, which spawns one per lease owner at once and so is bounded by the 512 above | Nothing: monitored, never linked |
 | **Relay tasks**, one per ticketed mutation | The relay, after the ticket is acknowledged | One per outstanding ticket | Keeps its ticket; the relay exits `relay_lost` |
 
 **Core's processes, as groups with their owner.** The runtime root supervises
