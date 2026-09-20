@@ -1038,8 +1038,8 @@ at the dispatcher and again at the install (`:538`, `:547`) — **precisely so a
 caller timeout cannot revoke a mutation it cannot see**, which is what the
 code says there in as many words: the dispatcher has already created the
 attachment and the install is registering its routing, so a caller that gave
-up would be neither revoking either mutation nor able to report truthfully
-that the attach failed. The attach row below is written against that reality
+up would be revoking neither mutation, and could not report truthfully that
+the attach failed. The attach row above is written against that reality
 rather than against a timeout the call does not have.
 
 **A call that gives the daemon no answer may still have started a coordinator
@@ -1078,12 +1078,12 @@ attachment is released by the monitor. **"Gave up" here is the owner ending
 that connection process from outside**, since the process itself is inside an
 `:infinity` wait and cannot give up on its own; the `DOWN` is the release
 either way, which is the point of keying the reservation to the process rather
-than to the call.
+than to the call. The reservation is released with the connection.
 
 **And the attach must be made from that process**, not from a task the daemon
 could bound: the attaching process *is* the release handle, so a bounded
 attach and a monitor on the attacher are mutually exclusive. Choosing the
-monitor is what makes an unanswered attach releasable at all. The reservation is released with it.
+monitor is what makes an unanswered attach releasable at all.
 Nothing new is called and nothing is observed; the release path is the one
 core change 1 adds, and it is named in the inventory rather than assumed.
 
@@ -2689,9 +2689,8 @@ next daemon removes before binding.
 
 **Witnesses.** Most run a real daemon operating-system process; a few read
 state no surface exposes and run **in-VM**, in the same VM as the daemon or
-the runtime they are about. Each is labelled, because a case that says
-"asserts core holds N" without saying where N is read is the defect class this
-plan spent a round removing.
+the runtime they are about. Each is labelled.
+
 **A note on how these are written, added after a review found three that
 could not be checked.** Every witness here names the **surface** it reads, the
 **two answers** that must differ on it, and — where the surface is new — the
