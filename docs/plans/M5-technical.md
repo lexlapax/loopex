@@ -783,58 +783,92 @@ reads:
   the operator is owed the real reason rather than `operator_stop`.
 
 **The field is cleared by that exit, not by the call returning**, and the
-distinction is not pedantry. A stop can end three ways, and the owner catches
-two of them:
+distinction is not pedantry. **A stop can end four ways**, and the owner
+catches three of them. Each branch returns a tag, so the wait that follows
+reads mechanically rather than by re-deriving what happened:
 
-| How the stop ends | What the owner sees | What it does |
-| --- | --- | --- |
-| The component stopped | `:ok` | Wait for its exit |
-| It did not stop in time | `exit {:timeout, {GenServer, :stop, [pid, :normal, grace]}}` | `Process.exit(pid, :kill)`, then wait for its exit |
-| **It was already dead** | `exit {:noproc, {GenServer, :stop, [pid, :normal, grace]}}` | Nothing to kill; read the exit already queued and **classify** it |
+| How the stop ends | What the owner sees | What it does | Tag |
+| --- | --- | --- | --- |
+| The component stopped | `:ok` | Wait for its exit | `:ok` |
+| It did not stop in time | `exit {:timeout, {GenServer, :stop, [pid, :normal, grace]}}` | `Process.exit(pid, :kill)`, then wait | `{:killed, pid}` |
+| **It was already dead** | `exit {:noproc, {GenServer, :stop, [pid, :normal, grace]}}` | Nothing to kill; wait for the exit already queued | `:already_gone` |
+| **It died of its own reason while stopping** | `exit {reason, {GenServer, :stop, [pid, :normal, grace]}}` for any other `reason` | Nothing to kill; wait for the exit its own death queued | `:already_gone` |
 
-The third row is the one an earlier draft got wrong, and it is not
-hypothetical: it is exactly what a component that died *during* the sequence
-produces. The owner does not read its mailbox while stopping, so that
-component's `{:EXIT, …}` is still queued and unread when the sequence reaches
-its step; the pid is dead; and `GenServer.stop/3` on a dead pid raises rather
-than returning. `sys:terminate/3`'s `gen:call` fails with `noproc` and is
-wrapped to `{noproc, {sys, terminate, _}}` (sys.erl:757-763), which
-`:proc_lib.stop/3` catches and re-raises as the bare `exit(noproc)`
-(proc_lib.erl:1586-1589), which `GenServer.stop/3` wraps exactly as it wraps
-the timeout (gen_server.ex:1085-1090). A `catch :exit, {:timeout, _}` alone
-does **not** match it, so the owner would die of `noproc` in the middle of its
-own shutdown: no class on `stderr`, no status, the socket never unlinked. The
-clause is therefore two, not one:
+The wait then has one rule with no case analysis left in it: **`:ok` and
+`{:killed, pid}` are the owner's own doing, so the exit is consumed;
+`:already_gone` is not, so the exit is classified** — first class wins — and
+either way `stopping` is cleared before the next component is named.
+
+The last two rows are the ones earlier drafts got wrong, and neither is
+hypothetical. The owner does not read its mailbox while stopping, so a
+component that dies during the sequence has its `{:EXIT, …}` queued and unread
+when the sequence reaches its step, and `GenServer.stop/3` raises rather than
+returning:
+
+- **Already dead.** `sys:terminate/3`'s `gen:call` fails with `noproc` and is
+  wrapped to `{noproc, {sys, terminate, _}}` (sys.erl:757-763), which
+  `:proc_lib.stop/3` catches and re-raises as the bare `exit(noproc)`
+  (proc_lib.erl:1586-1589).
+- **Dying of its own reason during its own stop.** `sys:terminate/3` succeeds,
+  and `:proc_lib.stop/3` then waits on its monitor with `Reason` **bound from
+  the function head** to the reason it was asked for. A `DOWN` carrying
+  anything else falls to the second clause, `exit(Reason2)`
+  (proc_lib.erl:1597-1600 at the floor pair, :1612-1615 at the current pair).
+  So a component whose `terminate/2` fails, or that was already terminating
+  for its own reason, ends the stop with *its* reason rather than `:normal`.
+  Verified by execution at the current pair: a trapping `GenServer` whose
+  `terminate/2` exits `{:badthing, :during_cleanup}`, stopped under the
+  two-clause catch, killed the caller —
+  `** (exit) exited in: GenServer.stop(…) ** (EXIT) {:badthing,
+  :during_cleanup}` — and under the three-clause catch returned
+  `:already_gone` with `{:EXIT, pid, {:badthing, :during_cleanup}}` waiting in
+  the mailbox, which is exactly the exit the wait then classifies.
+
+`GenServer.stop/3` wraps all three the same way (gen_server.ex:1076-1092 at
+the floor pair, :1131-1147 at the current pair), and a catch matching only
+`{:timeout, _}` matches none of them: the owner would die mid-shutdown with no
+class on `stderr`, no status and the socket never unlinked. The clause is
+therefore three, and the third is deliberately a catch-all, because the
+component's own reason is whatever the component had. The breadth costs
+nothing it should keep: the only other shape `GenServer.stop/3` raises is
+`{:calling_self, _}`, and the owner passes a child's pid, never its own.
 
 ```elixir
 try do
   GenServer.stop(pid, :normal, grace)
+  :ok
 catch
-  :exit, {:timeout, _} -> Process.exit(pid, :kill)
-  :exit, {:noproc, _} -> :already_gone
+  :exit, {:timeout, _} ->
+    Process.exit(pid, :kill)
+    {:killed, pid}
+
+  :exit, {:noproc, _} ->
+    :already_gone
+
+  :exit, _other ->
+    :already_gone
 end
 ```
 
-After each of the three the owner waits for that exact pid's exit, in a
-selective receive. That wait terminates in every row: on `:ok` and on the kill
-the signal is already on its way — whether it or the monitor's `DOWN` arrived
-first is not ordered for us, which is why the wait exists — and on
-`:already_gone` it is already in the mailbox, which is how it got there.
-
-**What the wait does with that exit differs by row, and this is where the
-class is saved.** On `:ok` and on the kill the exit is the owner's own doing,
-so it is consumed. On `:already_gone` it is not: the component died before the
-owner asked it to, which is the whole meaning of `noproc`, so the wait
-**classifies** that exit exactly as the loop's clause would — first class
-wins — and only then clears `stopping` and moves on.
+After each of the four the owner waits for that exact pid's exit, in a
+selective receive. **That receive carries no `after`**, so it sits outside the
+composed cleanup grace and adds no second bound to reason about; it terminates
+in every row because the exit it waits for is guaranteed to exist — on `:ok`
+the component has terminated and the signal is in flight, on the timeout the
+owner's own kill guarantees one, and on both `:already_gone` rows it is
+already in the mailbox, which is how the owner found out. Whether the exit or
+the monitor's `DOWN` reached the owner first is not ordered for us, which is
+why the wait exists at all.
 
 That is enough to lose nothing, without draining the mailbox before the halt,
 because of one invariant: **a component that dies during the sequence always
 has its own step still ahead of it.** A component whose step has passed is
-already stopped and cannot die a second time; so every unexpected death meets
-its own step, and meets it as `noproc`. Other messages sit unread meanwhile
-and are read when the owner returns to its loop; nothing is skipped, only
-ordered.
+already stopped and cannot die a second time. So every unexpected death meets
+its own step, and meets it in one of three ways: classified before the
+sequence began, as `noproc` where it died earlier in the sequence, or as its
+own reason where it died during its own step. Other messages sit unread
+meanwhile and are read when the owner returns to its loop; nothing is skipped,
+only ordered.
 
 Two consequences the sequences below depend on, stated here once:
 
@@ -1040,14 +1074,14 @@ chooses.
    **What bounds the wait after each stop: nothing, and that is the safe
    answer.** The selective receive that follows a stop carries no `after`, so
    it is outside the composed grace and adds no second bound to reason about.
-   It terminates in all three endings because the exit it waits for is
-   guaranteed to exist: on `:ok` the component has terminated and the signal
-   is in flight, on the timeout the owner's own `Process.exit(pid, :kill)`
-   guarantees one, and on `:noproc` it is already in the mailbox — the owner
-   only attempts a stop for a component whose exit it has not already
-   consumed, so a dead pid means an unread exit. An `after` here would be a
-   number with no failure to catch, and it would turn a guaranteed signal into
-   a second thing that can go wrong.
+   It terminates in all four endings, for the reason the stop-ending table
+   above gives: the exit it waits for is guaranteed to exist, in flight on
+   `:ok`, guaranteed by the owner's own kill on the timeout, and already in
+   the mailbox on both `:already_gone` rows — the owner only attempts a stop
+   for a component whose exit it has not already consumed, so a stop that
+   raises means an unread exit. An `after` here would be a number with no
+   failure to catch, and it would turn a guaranteed signal into a second thing
+   that can go wrong.
 
    **A killed executor is the residual, and the plan states it rather than
    explaining it away.** The kill by itself is not the leak. The executor
@@ -1286,6 +1320,13 @@ what lets an operator fix the cause and try again without a recovery step.
   rather than the owner dying of `noproc` with no status, no message and a
   socket file left behind. A second daemon opens the same root immediately
   afterwards, which is what proves the path completed.
+- **A component that fails while it is being stopped.** The transfers owner
+  is made to raise in its own `terminate/2` during an orderly stop, so its
+  stop returns that reason rather than `:normal` and the two-clause catch
+  would have killed the owner. The case asserts the sequence completes — the
+  Store still stopped, the socket still unlinked — and that the exit class is
+  `transfers_lost` rather than `operator_stop`, because the component died of
+  its own reason and not because the owner asked.
 - **In-flight shutdown.** A daemon with a dispatched tool effect and an
   unresolved mutation receives `SIGTERM`. What has not settled within the
   cleanup grace is ended crash-equivalently, and the case asserts the negative
