@@ -299,9 +299,9 @@ reviewer can check against this sentence at closure.
   admission, `budget_ms` for cancellation, 5 s for coordinator termination,
   90 s for the fence, 5 s for daemon teardown and 30 s for the Store —
   together with the sentence that keeps the number from being read as a
-  duration: **four** of the seven fixed terms — 1b, 2, 4 and 7 — count the
-  Store's thirty-second ceiling for a wedged filesystem, **one** is the
-  coordinator's own shutdown value, and the remaining **two**, the five
+  duration: **four** of the seven fixed terms — 1b, 2, 5 and 7 — count the
+  Store's thirty-second ceiling for a wedged filesystem, **one** — phase 4 —
+  is the coordinator's own shutdown value, and the remaining **two**, the five
   seconds for closing admissions and the five for the teardown, are this
   plan's own chosen numbers, which the page says rather than implying every
   term is derived — and an ordinary stop finishes in milliseconds —
@@ -2726,9 +2726,10 @@ the owner fixes.
    consumed like any other the owner asks for — a lease owner stopped here
    closes no controller attachment and produces no `control_owner_lost`,
    because there is no attachment left to close.
-5. **The runtime stops.** After the drain there is little left to end — every
-   coordinator quiesce could not settle was fenced and terminated inside core
-   before `quiesce/1` returned — so this step ends the tree rather than the
+5. **The runtime stops.** After the drain there is little left to end —
+   **every** coordinator quiesce enumerated was terminated and then fenced
+   inside core before `quiesce/1` returned, the settled ones included — so
+   this step ends the tree rather than the
    work. The helper calls
    `Supervisor.stop(runtime_supervisor, :normal, remaining)` on the pid the
    composition function handed it, where `remaining` is what is left of the
