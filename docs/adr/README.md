@@ -44,6 +44,7 @@ a decision adds a new record rather than rewriting the old one.
 | 0032 | Daemon attachment residency and replay | Proposed | [Decision](0032-daemon-attachment-residency-and-replay.md#concept) | [Technical depth](0032-daemon-attachment-residency-and-replay-technical.md#technical-depth) |
 | 0033 | Collaboration: controller lease and takeover | Proposed | [Decision](0033-collaboration-controller-lease-and-takeover.md#concept) | [Technical depth](0033-collaboration-controller-lease-and-takeover-technical.md#technical-depth) |
 | 0034 | Provider credential handoff over the bootstrap channel | Proposed | [Decision](0034-provider-credential-handoff-over-bootstrap-channel.md#concept) | [Technical depth](0034-provider-credential-handoff-over-bootstrap-channel-technical.md#technical-depth) |
+| 0035 | Typed decision models as policy inputs | Proposed | [Decision](0035-typed-decision-models-as-policy-inputs.md#concept) | [Technical depth](0035-typed-decision-models-as-policy-inputs-technical.md#technical-depth) |
 
 0001 and 0002 were the prerequisites that unblocked the first milestone
 candidate; the [plans register](../plans/README.md) records current status.
@@ -175,3 +176,11 @@ the launcher already opens. The first three were proposed with the Open M5
 plan on 2026-09-14 and revised twice that day on independent review; 0034
 follows the maintainer's outcome of 2026-09-19. They accept nothing, and each
 must be accepted before the outcome that depends on it is implemented.
+
+0035 is Proposed for the milestone after M5 and is not an M5 prerequisite: it
+decides that a typed decision model — one that returns probabilities and
+confidences rather than text — may be an input to a host's policy decision and
+a journaled plain-data fact, and may never be the decision. It depends on 0034,
+because a second provider makes the per-invocation credential reference per
+provider. M5 may run one bounded offline experiment against the real endpoint
+inside its provider workstream; nothing else waits on it.

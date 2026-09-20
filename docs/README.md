@@ -76,10 +76,11 @@ pairing, link, review, code-documentation, and enforcement contracts.
 | 0028 — bounded artifact retrieval | [Decision](adr/0028-bounded-artifact-retrieval.md#concept) | [Technical depth](adr/0028-bounded-artifact-retrieval-technical.md#technical-depth) |
 | 0029 — bounded provider failure diagnostics | [Decision](adr/0029-bounded-provider-failure-diagnostics.md#concept) | [Technical depth](adr/0029-bounded-provider-failure-diagnostics-technical.md#technical-depth) |
 | 0030 — observability: tracing and telemetry | [Decision](adr/0030-observability-tracing-and-telemetry.md#concept) | [Technical depth](adr/0030-observability-tracing-and-telemetry-technical.md#technical-depth) |
-| 0031 — daemon-grade store selection and migration | [Decision](adr/0031-daemon-grade-store-selection-and-migration.md#concept) | [Technical depth](adr/0031-daemon-grade-store-selection-and-migration-technical.md#technical-depth) |
+| 0031 — daemon store selection for `0.2.0` | [Decision](adr/0031-daemon-grade-store-selection-and-migration.md#concept) | [Technical depth](adr/0031-daemon-grade-store-selection-and-migration-technical.md#technical-depth) |
 | 0032 — daemon attachment residency and replay | [Decision](adr/0032-daemon-attachment-residency-and-replay.md#concept) | [Technical depth](adr/0032-daemon-attachment-residency-and-replay-technical.md#technical-depth) |
 | 0033 — collaboration: controller lease and takeover | [Decision](adr/0033-collaboration-controller-lease-and-takeover.md#concept) | [Technical depth](adr/0033-collaboration-controller-lease-and-takeover-technical.md#technical-depth) |
 | 0034 — provider credential handoff over the bootstrap channel | [Decision](adr/0034-provider-credential-handoff-over-bootstrap-channel.md#concept) | [Technical depth](adr/0034-provider-credential-handoff-over-bootstrap-channel-technical.md#technical-depth) |
+| 0035 — typed decision models as policy inputs | [Decision](adr/0035-typed-decision-models-as-policy-inputs.md#concept) | [Technical depth](adr/0035-typed-decision-models-as-policy-inputs-technical.md#technical-depth) |
 
 An ADR pair is one decision. Its status and governance record live in the
 Concept file and bind both files when accepted.
