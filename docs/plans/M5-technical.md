@@ -711,8 +711,9 @@ two different roots hold two different markers and have no exclusion between
 them at all. An override that let them name one path would put two daemons
 with equal claim on one file, which no rule in this plan can adjudicate.
 Inside one root there is exactly one marker holder, so there is exactly one
-daemon entitled to bind or unlink. An override therefore moves where the rule
-applies, never which root it applies within.
+daemon entitled to bind, and exactly one entitled to remove a pathname a
+predecessor left. An override therefore moves where the rule applies, never
+which root it applies within.
 
 **Readiness.** Exactly one line on `stdout`, and nothing else on that stream.
 It is **one JSON object on one line**, not a space-separated phrase, because a
@@ -1195,7 +1196,7 @@ shutdown, and three facts in the code force it.
   the owner's linked edges, so its exit arrives at the owner as
   `{:EXIT, _owned_pid, reason}` and the owner runs `cleanup/1` **immediately**
   — stopping every owned edge including the Store, and releasing the marker —
-  before the daemon has told a single client or unlinked the socket.
+  before the daemon has told a single client or closed its listener.
 - And an OTP `Supervisor` cannot serve here either, which an earlier draft of
   this section got wrong. `Loopex.Runtime.start_link/1` returns
   `{:ok, %Loopex.Runtime{}}` — a **struct**, not `{:ok, pid}` — so the runtime
@@ -1357,8 +1358,9 @@ same result. The
 Store is moved to the end because its `terminate/2` releases the writer
 marker, and the marker must outlive every operation the owner can end;
 custody and registry hold nothing durable, so stopping them before it costs
-nothing and keeps the one exception to one line. The socket is unlinked
-earlier still, for the reason the socket-ownership rule below gives.
+nothing and keeps the one exception to one line. The socket **pathname is
+left where it is**, on this path and every other, for the reason the
+socket-ownership rule below gives.
 
 The composition function therefore returns **every pid it linked**, not only
 the ones the daemon names in prose: a map carrying `store`, `runtime` (the
@@ -1572,7 +1574,7 @@ accounting runs before the strategy clause and the supervisor terminates with
 reason `:shutdown`, so the child's real reason is logged and discarded —
 exactly the information the daemon exists to report. It cannot host the
 runtime at all, because of the struct return above. And its own termination
-would leave the socket unlinked and no client told, so a fifth component
+would leave the listener open and no client told, so a fifth component
 would have been needed to do the work steps 3 and 4 describe — which is the
 owner, arrived at by a longer road.
 
@@ -2912,7 +2914,7 @@ survive arrives as `runtime_lost`.
 | **Listener ↔ connections** | `loopex_daemon` | Foreign peer, malformed frame, over-long path, backpressure | Filesystem permission verified after bind, then the per-platform peer-credential read (`LOCAL_PEERCRED` / `SO_PEERCRED`), then ADR 0023's framing refusals; backpressure at the 4 MiB output buffer | Closed before initialize for a peer refusal; a stable framing reason otherwise; detachment at the last emitted cursor under backpressure | **Not durable:** connections, buffers, windows |
 | **Registry ↔ sender ↔ custody** | The **host** owns the registry, custody and the tracing capability; the adapter owns the sender. The token is bound at composition, resolved per invocation | No registry row, registry dead, custody dead, refusal, malformed reply, deadline, or a trace exclusion that cannot be confirmed | `route(handle, token)` answers `:unavailable`; resolution fails as one of the six atoms produced below the guardian (`:no_token`, `:invalid_token`, `:missing`, `:expired`, `:oversized`, `:unavailable`); the **guardian** enforces the deadline, kills the sender and reports the seventh, `:timeout` | The adapter's existing `Loopex.Model` refusal shape, with the atom in the bounded diagnostic | **Not durable:** nothing about credentials is ever journaled, and no span or record carries model `options` — the model span is a fixed identity map. The invocation's failure is durable |
 | **CLI ↔ socket** | `loopex_cli` | Socket unreachable, refusal, transport loss, renewal failure | The client's own reconnect loop and its renewal timer | Reconnect at the retained cursor, deduplicating; a failed renewal drops to observer with the loss on `stderr`; a reconnecting controller must acquire again for a fresh epoch | **Durable:** nothing the client holds. The cursor is a client-side position |
-| **Daemon ↔ OS: signals** | The operator | `SIGTERM`, delivered to the handler the daemon installs before it takes the marker; a terminal `SIGINT` reaches it only as the `SIGTERM` the launcher forwards, since `:os.set_signal/2` refuses `:sigint` | The owner drains through core's `quiesce/2` within the derived drain budget, tells clients, unlinks the socket only while it can still show it holds the marker, and then stops its linked processes in reverse order — lease owners, the relay, runtime, edges, and the Store last in its own fixed 30 s phase — each stop driven by a monitored helper calling `GenServer.stop/3` while the owner waits on its own link until the shared teardown deadline and kills on expiry. Classification is from the observed exit reason alone: `:normal`, `:shutdown` and the owner's own `:killed` are consumed, everything else is classified | `daemon.stopping` with `operator_stop`, then close | **Durable:** whatever committed. **Not:** work ended crash-equivalently — a claim about the journal, not about every process being gone |
+| **Daemon ↔ OS: signals** | The operator | `SIGTERM`, delivered to the handler the daemon installs before it takes the marker; a terminal `SIGINT` reaches it only as the `SIGTERM` the launcher forwards, since `:os.set_signal/2` refuses `:sigint` | The owner drains through core's `quiesce/2` within the derived drain budget, tells clients, closes the listener while **leaving the socket pathname for the next verified marker holder**, and then stops its linked processes in reverse order — lease owners, the relay, runtime, edges, and the Store last in its own fixed 30 s phase — each stop driven by a monitored helper calling `GenServer.stop/3` while the owner waits on its own link until the shared teardown deadline and kills on expiry. Classification is from the observed exit reason alone: `:normal`, `:shutdown` and the owner's own `:killed` are consumed, everything else is classified | `daemon.stopping` with `operator_stop`, then close | **Durable:** whatever committed. **Not:** work ended crash-equivalently — a claim about the journal, not about every process being gone |
 | **Daemon ↔ OS: kill** | The operator | `SIGKILL`, power loss | Nothing runs — no handler, no `terminate/2` | The socket closes with no record at all | **Durable:** the journal. The marker is left for the next daemon's verified stale-writer recovery |
 | **Daemon ↔ OS: socket file** | `loopex_daemon` | A stale `daemon.sock` left by any exit path | Only a daemon that has acquired and verified the marker removes it, at startup, before binding; no daemon removes one on its way out, so no predecessor can delete a successor's socket | The loser of two simultaneous starts exits without touching the socket; a client meeting a stale path is refused rather than hung | **Not durable:** the socket file is a path, never state |
 | **Daemon ↔ OS: marker** | `loopex_store_local` | Released in order, released early, or left behind | Four dispositions, and the plan states all four: `terminate/2` in an orderly stop; `terminate/2` early, before the daemon can act, on store loss; `terminate/2` on a **fatal class where the Store is still alive**, because the fail-stop path stops it before halting; and **nothing** on a `SIGKILL`, a power loss, or a Store stop that timed out and was killed | The client sees only the `daemon.stopping` reason; the marker is invisible to it | **Not durable in the journal sense:** the marker is exclusion, not truth. A surviving marker is the case ADR 0031's recovery rule answers |
