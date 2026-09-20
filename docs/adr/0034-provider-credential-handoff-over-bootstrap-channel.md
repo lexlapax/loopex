@@ -45,17 +45,25 @@ naming a host-owned resolver, never the bytes themselves. The adapter resolves
 that reference exactly once per invocation, inside the minimal sender process
 that writes the credential frame, and only after the child has proved its
 nonce, codec version and build manifest digest. The adapter reads no
-environment variable for the credential, and no resolved value exists anywhere
-but that one process's own stack for the duration of one send. A call that
-carries no reference is refused before any child is spawned, which is the
-refusal a missing environment variable produces today.
+environment variable for the credential. A call that carries no reference is
+refused before any child is spawned, which is the refusal a missing environment
+variable produces today.
 
-**The resolution boundary is where the adapter's claims stop.** Inside it — the
-reference, the sender, the frame, the child — the adapter proves what it says:
-the value is never in the child's environment, in argv, in the journal, in a
-public event, a snapshot, a progress item or a diagnostic, in adapter process
-state, a message, an exit reason, a crash report or an IO request, and never
-written to a file. Outside it, custody belongs to the host and the adapter
+**Exactly one credential-bearing transfer exists in the parent, and this pair
+names it.** A host that keeps the bytes and answers a resolver call has to send
+them to the process that asked; a contract saying the value is never in a
+message could never be implemented alongside one. So the rule is a permission
+with a boundary: the custody process's reply to the sender is the one
+transfer — bounded, unlogged, never forwarded, never retained after the frame
+is written — and it is the same class of act as writing the credential frame,
+protected the same way ADR 0019 already protects that sender.
+
+**Everywhere else the boundary is where the adapter's claims stop.** Inside it
+— the reference, the sender, the frame, the child — the adapter proves what it
+says: the value is never in the child's environment, in argv, in the journal,
+in a public event, a snapshot, a progress item or a diagnostic, in adapter
+process state, in any message but that one, in an exit reason, a crash report
+or an IO request, and never written to a file. Outside it, custody belongs to the host and the adapter
 proves nothing about it. This pair therefore states the reference
 implementations' custody as their own obligation rather than claiming a
 property of every host that might supply a resolver.
@@ -111,11 +119,14 @@ unchanged in meaning; the parent VM's environment is proved empty of the
 credential from the completion of composition onward — before, during and
 after a call; two invocations running at once are proved unable to observe
 each other's credential; every resolution failure the contract names — absent
-reference, refusing resolver, a resolver that does not answer within the
-invocation's deadline, a value outside the size bound, and two resolutions in
-flight at once — is proved to refuse with a bounded non-secret reason and to
-leave no retained copy; the adapter's library tree is proved to read no
-environment variable for a credential by any route; and a named reviewer reads
+reference, refusing resolver, a resolver that does not answer before the
+deadline instant, and a value outside the size bound — is proved to refuse
+with one of the five closed reason atoms and to leave no retained copy, with
+the timeout proved distinguishable from every refusal; two resolutions in
+flight at once are proved to be independent successes rather than a refusal;
+the one permitted credential-bearing reply is proved redacted under a trace
+session at the `arguments` level; the adapter's library tree is proved to read
+no environment variable by any route; and a named reviewer reads
 the handoff — resolution point, frame ordering, failure paths, the host
 reference implementations' custody, and every place a value could be retained
 — and records the reading with the milestone.
@@ -129,8 +140,11 @@ Technical depth: [Contract and evidence](0034-provider-credential-handoff-over-b
 ### Consequences, Compatibility and Rollback
 
 The credential plane gets the property the rest of ADR 0019's design already
-has: the secret exists in the parent only inside one short-lived process that
-does nothing but send it, and in the child that needs it. Two invocations in
+has. In the parent the secret exists in exactly two places — the host's custody
+process, which holds it and answers for it, and the short-lived sender, which
+receives it once, writes it and dies — and in the child that needs it. Nowhere
+else: not in adapter state, not in the environment, not in a durable or public
+plane, and in no message but the one reply this pair permits. Two invocations in
 one VM become independent, so the twelve provider test modules can run
 concurrently and the fast check stops being pinned by that application. Host
 composition gains one explicit input and one explicit obligation: a host that

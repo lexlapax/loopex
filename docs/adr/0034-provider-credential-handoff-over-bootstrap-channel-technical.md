@@ -60,7 +60,11 @@ configuration map the host already supplies to `complete/3`. Its value is
 
 - `resolver_module` is an atom naming a module that implements
   `Loopex.LLM.ReqLLM.CredentialResolver`, one callback,
-  `resolve(reference_term) :: {:ok, binary()} | {:error, term()}`;
+  `resolve(reference_term, deadline) :: {:ok, binary()} | {:error, reason}`,
+  where `deadline` is an **absolute monotonic instant** in native units, not a
+  remaining duration — a duration is stale the moment it is computed, and the
+  sender and the resolver are different processes. `reason` comes from the
+  closed set below and never from the resolver's own vocabulary;
 - `reference_term` is bounded plain boundary data — at most 256 bytes when
   encoded by the repository's canonical encoding, and never a PID, port,
   function, monitor or reference. It names which credential is wanted; it is
@@ -78,11 +82,43 @@ reference implementation states its own custody and proves it for itself:
 the reference CLI, the app-server host and the M5 daemon read
 `Loopex.LLM.ReqLLM.credential_variable/0` exactly once, where they compose the
 runtime, delete that name from the VM's environment in the same step, and hold
-the bytes in one host-owned process, registered under the runtime reference
-rather than a global name, whose `format_status/1` redacts its state and which
-answers `resolve/1` only for its own reference term. The real-provider lane
-composes the same way. Nothing in the adapter depends on that arrangement, and
-a different host may keep the bytes anywhere it can defend.
+the bytes in one host-owned custody process, registered under the runtime
+reference rather than a global name, whose `format_status/1` redacts its state
+and which answers `resolve/2` only for its own reference term. The
+real-provider lane composes the same way. Nothing in the adapter depends on
+that arrangement, and a different host may keep the bytes anywhere it can
+defend.
+
+**Exactly one credential-bearing transfer exists in the parent, and it is
+named.** An earlier draft said the value never appears in a message while also
+putting custody in a long-lived process the sender asks — which cannot both be
+true, because answering is a message. The contract is a permission with a
+boundary, not an absolute:
+
+- The **only** permitted credential-bearing transfer in the parent is the
+  custody process's reply to `resolve/2`, carrying `{:ok, bytes}` to the one
+  sender process that asked. It is bounded by the same 1..65,536-byte rule as
+  the frame, it is never logged, never forwarded, and never held after the
+  frame is written.
+- It is deliberately the same class of act as the credential frame write: one
+  short-lived process receives the bytes, uses them once, and dies. ADR 0019
+  already protects that process — the sender installs its own group-leader
+  sink so no IO request can carry anything out of it, it is unregistered, and
+  it reports only an atom or a `{:error, atom}` pair to the guardian.
+- Observation of the sender is governed by the tracing rules rather than left
+  to hope. ADR 0030's `arguments` level redacts "a credential reference, model
+  content, tool arguments and artifact bytes to placeholders" and replaces
+  "any value reachable through a credential reference". The sender is a
+  `Loopex.*` module and, spawned beneath runtime-owned processes, is reachable
+  by `set_on_spawn`, so M5 must **prove** that the reply and the resolved value
+  fall inside that redaction class: a trace session at the `arguments` level
+  over a real invocation shows placeholders and no credential bytes. That is a
+  proof obligation on M5, not a change to ADR 0030, whose redaction class
+  already names this category.
+- Everywhere else the earlier absolutes stand unchanged: not in guardian
+  state, not in an exit reason, not in a crash report, not in an IO request,
+  not in a file, not in the environment, not in argv, and in no durable or
+  public plane.
 
 **When it is resolved.** Exactly once per invocation, inside the sender
 process, between the child's `ready` frame and the credential frame — step 5
@@ -96,9 +132,24 @@ is in flight does not reach that invocation, which has already resolved; it
 reaches the next one. Nothing is invalidated and no invocation is restarted.
 
 **Timeout.** Resolution is bounded by the invocation's existing deadline and by
-nothing else; this decision adds no second clock. The sender calls the
-resolver with the remaining time to that deadline, and a resolver that has not
-answered when it elapses is a failed resolution.
+nothing else; this decision adds no second clock. The sender passes that
+deadline as an absolute monotonic instant, and a resolver that has not answered
+when it is reached is a failed resolution reported as `:timeout`.
+
+**The closed reason set.** A resolver answers `{:error, reason}` only with
+`:missing`, `:expired`, `:oversized` or `:unavailable`; the sender itself
+produces `:timeout`. Nothing else is admitted — a resolver returning anything
+outside the set is treated as `:unavailable`, because a host-authored term is
+exactly where a secret could be smuggled into a reason. The five atoms carry no
+content, so they are safe in a message, an exit reason and a bounded
+diagnostic.
+
+**What the sender reports.** `:ok` or `{:error, reason}` from that same closed
+set, never a bare `:error`. The guardian has to distinguish a resolver that
+refused from one that never answered: they are different operational faults and
+ADR 0029's bounded status has to say which happened. The reported reason is one
+of the five atoms and never the resolved value, the reference, or a
+resolver-authored string.
 
 **Failures.** Each is a refusal with a bounded non-secret reason, and each
 leaves no retained copy of anything the resolver may have produced:
@@ -107,10 +158,11 @@ leaves no retained copy of anything the resolver may have produced:
 | --- | --- |
 | No `:credential_reference` in the configuration | Refused before the namespace is created and before any child is spawned, with the adapter's existing missing-credential reason |
 | Malformed reference, or a `resolver_module` that does not export the callback | The same refusal, before any child is spawned |
-| Resolver answers `{:error, reason}` | The sender reports `:error`; the invocation fails through ADR 0019's existing credential-send failure path, the guard tears the child down, and `reason` is reduced to the bounded non-secret status ADR 0029 fixes |
-| Resolver does not answer before the invocation deadline | The same failure path, distinguished by its own stable reason; the sender is killed and its stack goes with it |
-| Resolved value outside 1 to 65,536 bytes | Refused in the sender before the frame is written, exactly as the size check refuses today |
-| Two resolutions in flight at once | Independent. Each invocation has its own sender and resolves for itself; the adapter serializes nothing and shares nothing between them, and two answers for the same reference may differ |
+| Resolver answers `{:error, :missing}` or `{:error, :expired}` | The sender reports `{:error, that_atom}`; the invocation fails through ADR 0019's existing credential-send failure path, the guard tears the child down, and the atom becomes the bounded non-secret status ADR 0029 fixes |
+| Resolver answers `{:error, :unavailable}`, or anything outside the closed set | The same path, reported as `:unavailable` |
+| Resolver has not answered when the deadline instant is reached | The sender reports `{:error, :timeout}`, distinct from every refusal, and is killed so its stack goes with it |
+| Resolved value outside 1 to 65,536 bytes | Refused in the sender before the frame is written, exactly as the size check refuses today, reported as `{:error, :oversized}` |
+| Two resolutions in flight at once | Independent **successes**. Each invocation has its own sender and resolves for itself; the adapter serialises nothing and shares nothing between them, and two answers for the same reference may differ. Concurrency is not a refusal condition, and a custody process that refused concurrent callers would reintroduce exactly the serialisation this decision exists to remove |
 
 No failure is retried inside the adapter. Whether to attempt again is the
 coordinator's durable decision under ADR 0018, unchanged.
@@ -119,12 +171,14 @@ coordinator's durable decision under ADR 0018, unchanged.
 
 - **In the sender.** The minimal credential sender keeps the shape it has
   today: it is spawned for this one send, it installs its own group leader
-  sink so no IO request can carry anything out of it, it resolves the
-  reference, validates the size bound, writes the frame itself and reports a
-  bare `:ok` or `:error` atom to the guardian. Its closure holds the
-  reference, never the resolved value; the value exists only in that
-  process's own stack for the duration of one send, so no guardian state, no
-  message, no exit reason and no crash report can hold it.
+  sink so no IO request can carry anything out of it, it calls `resolve/2`,
+  receives the one permitted credential-bearing reply, validates the size
+  bound, writes the frame itself and reports `:ok` or `{:error, reason}` from
+  the closed set to the guardian. Its closure holds the reference, never the
+  resolved value; in the parent the value exists in the custody process and,
+  for the duration of one send, in this process's own mailbox and stack, and
+  nowhere else — no guardian state, no exit reason and no crash report can
+  hold it.
 - **In the parent's environment.** The adapter performs no environment read
   for the credential by any route. `Loopex.LLM.ReqLLM.credential_variable/0`
   remains as the one name the *host* reads when it composes a runtime — the
@@ -219,12 +273,20 @@ Three proofs are new:
   narrower scan is what lets an environment read return by a name the current
   expression does not match, which is the drift the case exists to catch.
 - **Resolution failures.** One case per row of the failure table above: absent
-  reference, malformed reference, a resolver module without the callback, a
-  refusing resolver, a resolver that does not answer before the invocation
-  deadline, a value outside the size bound, and two resolutions in flight at
-  once. Each asserts the refusal, its stable reason, that no child was spawned
-  where the contract says none is, and that no message, exit reason or crash
-  report from the invocation carries the resolver's value.
+  reference, malformed reference, a resolver module without the callback, each
+  of the four refusal atoms, a resolver returning a term outside the closed set
+  (reported `:unavailable`), a resolver silent past the deadline instant
+  (reported `:timeout`, and asserted **distinct** from every refusal so the
+  guardian can tell them apart), and a value outside the size bound. Each
+  asserts the outcome, its closed-set atom, that no child was spawned where
+  the contract says none is, and that no message but the permitted reply, no
+  exit reason and no crash report carries the resolved value. The
+  two-resolutions-at-once case is a **success** case, not a refusal: both
+  invocations complete with their own credentials.
+- **The permitted reply is redacted.** A trace session at the `arguments`
+  level over a real invocation shows placeholders where the reply and the
+  resolved value would be, and no credential bytes anywhere in the captured
+  entries.
 - **Host custody.** For each reference host — the CLI, the app-server host and
   the daemon — composition reads the variable exactly once, deletes it, and
   the holding process's `format_status/1` redacts its state under a forced
