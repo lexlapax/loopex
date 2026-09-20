@@ -33,9 +33,13 @@ only mean something against a transport. The daemon carries the ADR 0023
 JSONL protocol over a Unix-domain socket, reusing its framing, initialize
 handshake, request, admission, snapshot, event and progress records and
 limits unchanged, and serves exactly one generation,
-`loopex.experimental/2`, which adds `session.list`, `session.stop`,
-`daemon.status`, the two control methods and the writer-epoch field ADR 0033
-names. A client that offers only generation 1 is refused at initialize under
+`loopex.experimental/2`, which adds `session.list`, `daemon.status`, the two
+control methods and the writer-epoch field ADR 0033 names. It adds no durable
+method. An earlier draft of this decision also added `session.stop` and called
+it durable; that is withdrawn, because core owns durable session truth, core
+has no durable stop command, and M5's only core change is concurrent
+attachment. Ending work is releasing control and disconnecting, after which
+the session goes dormant and `session.resume` brings it back. A client that offers only generation 1 is refused at initialize under
 ADR 0023's existing no-common-generation rule and nothing durable is
 created; generation-1 clients keep the M4 foreground server, whose wire,
 one-attachment rule and behavior do not change. A narrow core change lets
@@ -63,14 +67,27 @@ output buffer; a slow attachment is detached at its last completely emitted
 cursor while every other attachment continues. Idle attachments are evicted
 at the residency limit and reconnect at their retained cursor with no
 missing durable event. Transient progress is coalesced or dropped first and
-never delays a journal transaction. `session.list` returns bounded pages
-with an exact continuation cursor from a daemon-owned index. The proposed
+never delays a journal transaction.
+
+A session is *active* when the daemon holds a live coordinator for it and
+*dormant* when the root records it and the daemon does not. Recovery is lazy:
+a restarted daemon activates nothing, reads its index, and activates a session
+when a client reaches for it. That is what a daemon can honestly promise on a
+store whose session directory is not Store truth and whose every open replays
+a full log. `session.list` returns bounded pages, with an exact continuation
+cursor, over a daemon-owned index of what the root *records* — identity,
+recorded placement identity, active or dormant, controlled or not — and never
+over what the Store contains, because no index built from the session
+directory can claim that. Lineage, lifecycle state and committed sequence are
+not list fields: a client that needs them attaches and reads the snapshot.
+The proposed
 limits are exact and are bound at acceptance: 64 attachments per session,
 512 per daemon, a 1,024-event core queue per attachment, a 4,096-event
 resident window per session, 4 MiB of encoded output buffered per
 connection, 16 MiB of encoded resident-window events per session, 512 MiB
 of aggregate retained encoded events per daemon, ten minutes of idle time
-before eviction, 256 sessions per list page, and the ADR 0023 frame ceiling
+before eviction, 64 active sessions per daemon, 4,096 index entries per root,
+256 sessions per list page, and the ADR 0023 frame ceiling
 unchanged. Count and byte ceilings apply together; an event that would
 exceed either triggers the stated detachment, eviction or refusal behavior
 before the ceiling is crossed.
@@ -87,8 +104,16 @@ to preserve the subscribe/snapshot race. Promising exactly-once replay was
 rejected on 2026-09-14 because at-least-once with client deduplication is the
 founding contract and no other surface honors more. Removing `session.list`
 was rejected the same day because an observer without filesystem access to the
-root would have no way to discover sessions. The companion records each in
-full.
+root would have no way to discover sessions. Rebuilding an authoritative
+inventory by enumerating the Store, and writing the inventory entry inside the
+session-creating transaction so it is crash-atomic with the commit, were both
+rejected on 2026-09-19: each is a change to the Store port or to the local
+adapter's transaction shape, and both are exactly what M5's selection of the
+unchanged adapter declines to buy. Activating every recorded session at
+daemon start was rejected the same day: the local adapter replays a full log
+at every open, so startup cost would grow with the product of session count
+and history, and a root with one unservable session would fail a start that
+need never have read it. The companion records each in full.
 
 **Evidence its acceptance requires.** Two classes together. The transport and
 its generation are a protocol claim, so they need vectors and a compatibility

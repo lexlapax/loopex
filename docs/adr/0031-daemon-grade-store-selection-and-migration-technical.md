@@ -19,15 +19,40 @@ daemon's limits, and every one is an existing constant or refusal of
 - one append-only, length-prefixed, digest-checked log per state root, held
   by one operating-system process through the writer marker with the
   `store_writer_active` and `store_writer_unverifiable` refusals;
-- a hard log capacity of 256 MiB (`@max_log_bytes`): an append that would
-  exceed it refuses with `store_capacity_exceeded`, and a log already larger
-  than the bound refuses at open with `store_log_too_large`;
+- a hard log capacity of 256 MiB (`@max_log_bytes`): the size admission at
+  `Loopex.Store.Local.Log.append/3` refuses with `store_capacity_exceeded`
+  before the log is opened for writing, and a log already larger than the
+  bound refuses at open with `store_log_too_large`;
+- one consequence of that refusal, which the daemon inherits and must state:
+  `Loopex.Store.Local` treats every `append` error alike. The refusal falls
+  through the `commit_new` clause to `{:stop, reason, commit_unknown, state}`,
+  so the Store process terminates and the caller is told `commit_unknown`.
+  Physically nothing was written; contractually the transaction is ambiguous
+  and the store is gone. The daemon therefore cannot keep observers attached
+  past a capacity refusal, and does not claim to: it closes the listener and
+  every connection and exits, naming the capacity. Changing that would be a
+  change to the adapter's own contract, which this ADR does not make;
 - a 4 MiB frame ceiling (`@max_frame_bytes`) on any single record;
 - full-history retention: no compaction, no retention cutoff, and full replay
   at every open, so replay time and memory grow with the root's history until
   the root is retired;
-- session discovery through the existing session directory beside the log,
-  which lists every session the root knows.
+- stale-writer recovery off by default. `:recover_stale_writer` defaults to
+  `false` in `Loopex.Store.Local` and in `LoopexComposition`, so a marker left
+  by a daemon that was killed refuses every later open with
+  `store_writer_active` until something asks for recovery. The daemon asks for
+  it explicitly, which is what makes kill-and-restart work, and inherits the
+  adapter's discipline unchanged: the marker is reclaimed only where its own
+  recorded holder is probed and found dead, an unverifiable holder leaves the
+  marker in place with `store_writer_unverifiable`, and a live holder refuses
+  with `store_writer_active`;
+- session discovery through the existing session directory beside the log.
+  That directory is plain files, not Store truth: `Loopex.SessionDirectory`
+  says so itself, and a host writes an entry after `create_session/3` commits,
+  so a process that dies in between leaves a session the Store holds and the
+  directory does not. Nothing is lost — the Store remains the authority and
+  the session is reached by its ID — but no enumeration built on the directory
+  may claim to list every session the root contains, and the daemon's index
+  does not.
 
 Root retirement is an operator procedure, not a store operation: stop the
 daemon so the marker is released; move the root directory aside under a name
@@ -38,11 +63,13 @@ foreground server. The daemon's operator documentation states the capacity,
 the refusal reason, the frame ceiling, full retention and this procedure.
 
 Evidence for the M5 selection is the M5 plan's Outcome 1 obligation, not a
-second copy here: a root driven to the capacity ceiling refuses further
-mutation with the store's own reason while observers stay attached and an
-orderly stop still succeeds, and after that stop the foreground server reopens
-the same root. No new conformance evidence is required, because the adapter
-and its suites are unchanged.
+second copy here: a root driven to the capacity ceiling refuses the append
+with the store's own reason and takes the daemon's listener and connections
+down with it, a root already past the bound refuses at open, a stale marker is
+recovered where its holder is proved dead and refused where it is not, and
+after an orderly stop the foreground server reopens the same root. No new
+conformance evidence is required, because the adapter and its suites are
+unchanged.
 
 ### Boundary
 

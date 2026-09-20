@@ -65,7 +65,7 @@ the local store's writer marker, unchanged.
   `session.acquire_control` from the holder, which extends the deadline
   without changing the epoch.
 - Every existing-session mutation in generation 2, including
-  `session.resume`, `session.stop`, `session.prompt`, `session.steer`,
+  `session.resume`, `session.prompt`, `session.steer`,
   `session.follow_up`, `session.abort`, `session.respond_interaction`,
   `session.admit_resources` and `session.activate_skill`, carries
   `writer_epoch`. The daemon admits it only if the sending connection is the

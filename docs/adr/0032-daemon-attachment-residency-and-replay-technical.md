@@ -22,7 +22,15 @@ Startup order is fixed. The daemon first opens the state root through the
 local adapter and acquires its writer marker; a daemon that does not hold the
 marker refuses with the adapter's `store_writer_active` or
 `store_writer_unverifiable` reason and never reads, unlinks or binds the
-socket path. Only the marker holder may remove a stale `daemon.sock` left by
+socket path. The daemon opens the root with `recover_stale_writer: true`,
+explicitly, because that option defaults to `false` in both
+`Loopex.Store.Local` and `LoopexComposition` and a daemon that did not ask for
+it could never restart after being killed. Asking for it is not asking to
+ignore a holder: the adapter reclaims the marker only where it probes the
+recorded holder and finds it dead, leaves it in place with
+`store_writer_unverifiable` where the holder cannot be decided, and refuses
+with `store_writer_active` where the holder is alive. All three are proved
+before the socket path is read, unlinked or bound. Only the marker holder may remove a stale `daemon.sock` left by
 a dead daemon and bind a new one, so two simultaneous starts on one root
 resolve at the marker, exactly one listener exists, and the loser exits
 without touching the socket. If the daemon loses store ownership while
@@ -66,21 +74,87 @@ enforced inside core.
 
 | Method | Required fields | Result |
 | --- | --- | --- |
-| `session.list` | `limit` (1 to 256), optional `after_session_id` | A page of at most `limit` session entries ordered by session ID bytes ascending and starting strictly after `after_session_id`; each entry carries session identity, lineage, lifecycle state, last committed sequence and controller presence, never content; `next_after_session_id` is present exactly when more entries exist |
-| `session.stop` | `session_id`, `command_id`, `writer_epoch` | Admission of a durable stop under the current controller; observers refuse |
-| `daemon.status` | none | Placement identity, daemon incarnation, socket path, attachment and session counts against their limits, uptime |
+| `session.list` | `limit` (1 to 256), optional `after_session_id` | A page of at most `limit` index entries ordered by session ID bytes ascending and starting strictly after `after_session_id`; each entry carries the session identity, the placement identity recorded for it, `residency` of `active` or `dormant`, and `controlled` as a boolean, never content and never durable session state; `next_after_session_id` is present exactly when more entries exist |
+| `daemon.status` | none | Placement identity, daemon incarnation, socket path, attachment, active-session and index counts against their limits, uptime |
 | `session.acquire_control`, `session.release_control` | `session_id`, `request_id` and the lease fields ADR 0033 fixes | Lease result naming the writer epoch and the remaining lease term |
 
+### The session index, and what it may claim
+
 `session.list` reads a daemon-owned index, never the session directory or the
-store on the request path. The index is built once at daemon start from the
-session directory and updated when the daemon creates, resumes or stops a
-session; it is rebuilt only by a daemon restart. A page is consistent with
-the index at the moment it is read; no consistency is promised across pages,
-so a session created or stopped between pages may appear in neither or both,
-and a client that needs a stable view deduplicates by session ID. A `limit`
-outside 1 to 256 or an `after_session_id` that is not a well-formed session
-ID refuses with the existing invalid-argument reason; an `after_session_id`
-naming an unknown session is admitted and pages from its byte position.
+store on the request path. What the index *is* follows from what it is built
+from. `Loopex.SessionDirectory` holds plain files beside the log and states
+that neither is Store durable truth; a host records an entry after
+`create_session/3` commits, and that write can fail on its own — the reference
+CLI reports exactly that failure to the operator. So there is a real crash cut
+between a committed session and its directory entry, and a daemon rebuilt from
+the directory can be missing a session the Store holds.
+
+The index therefore claims only what it can keep true, and each field is one
+the daemon itself owns or reads once:
+
+- `session_id` and the recorded placement identity, read from the directory
+  entry at daemon start, or written when the daemon first activates a session
+  the directory does not hold;
+- `residency`, a daemon fact, updated on every activation and every transition
+  to dormant;
+- `controlled`, a daemon fact, updated on every lease grant, release and
+  expiry by the same per-session owner ADR 0033 gives those transitions.
+
+Lineage, lifecycle state and last committed sequence are deliberately absent.
+A daemon index cannot keep them current without reading the Store on the
+request path or subscribing to every session it is not holding, and a field
+that is silently stale is worse than an absent one; a client that needs them
+attaches, and the snapshot carries them at a committed sequence.
+
+The recovery procedure for the crash cut is explicit and needs no new durable
+record. A session absent from the index is still reachable by its ID: a client
+that knows the ID acquires control and resumes it, the Store answers because
+the Store is the authority, and the daemon records the directory entry as part
+of that activation, so the session appears in every later listing. The
+operator documentation states this, because an operator who lost a terminal
+mid-creation is exactly who meets it. `session.list` is documented as *the
+sessions this root records*, not *the sessions this root contains*.
+
+A page is consistent with the index at the moment it is read; no consistency
+is promised across pages, so a session created or dropped between pages may
+appear in neither or both, and a client that needs a stable view deduplicates
+by session ID. A `limit` outside 1 to 256 or an `after_session_id` that is not
+a well-formed session ID refuses with the existing invalid-argument reason; an
+`after_session_id` naming an unknown session is admitted and pages from its
+byte position.
+
+### Session residency: active, dormant, and their bounds
+
+A session is **active** when the daemon holds a live coordinator for it and
+**dormant** when the index records it and the daemon does not. Nothing durable
+distinguishes the two; dormancy is a daemon fact and costs a dormant session
+nothing.
+
+- **Lazy recovery.** A restarted daemon activates no session. It acquires the
+  writer marker, reads the index, binds the socket, and activates a session
+  the first time a client attaches to, acquires control of or resumes it.
+- **Active-session ceiling.** At most 64 sessions are active at once per
+  daemon. A session that has had no attachment and no admitted command for the
+  idle interval goes dormant, releasing its slot. An activation that would
+  exceed the ceiling while every active session is still in use refuses with a
+  stable reason naming the ceiling; it never evicts a session that a client is
+  driving or watching.
+- **Index bound.** The index holds at most 4,096 entries. A root whose session
+  directory holds more refuses at daemon start with a stable reason naming the
+  bound and pointing at root retirement, in the same posture as
+  `store_log_too_large`: refuse rather than serve a truncated view of what the
+  root records.
+- **Homogeneity.** One state root is one host composition for the daemon's
+  process lifetime. The daemon is composed once, with one workspace, policy,
+  provider configuration and set of project resources, and serves every
+  session in the root under it. A recorded session the current composition
+  cannot serve — a placement identity it does not hold, or retained
+  configuration it cannot satisfy — is reported at *activation*, naming the
+  session and the mismatch, with the existing refusal reasons; it is never a
+  reason a start fails, because recovery is lazy and start never reads it. The
+  operator documentation says that mixing compositions in one root means some
+  sessions will refuse to activate, and that the remedy is one root per
+  composition.
 
 The client supplies its ordered supported generations in `initialize`. The
 daemon supports exactly `loopex.experimental/2`: it selects that generation
@@ -149,7 +223,16 @@ initialize refused with `unsupported_generation` and nothing created;
 simultaneous daemon starts on one root leaving exactly one listener with the
 loser never touching the socket; Store-child failure closing the listener and
 every connection before exit; `session.list` pages of at most 256 entries in
-session-ID order with an exact continuation cursor; progress coalescing under
+session-ID order with an exact continuation cursor, carrying only the four
+fields above; a session committed to the Store whose directory entry was never
+written — injected at exactly that cut — absent from the listing, still
+reachable by ID, and present in every listing after the activation that
+records it; a restarted daemon activating nothing until a client reaches for a
+session; the active-session ceiling refusing an activation while every slot is
+in use, and admitting one after a session goes dormant; a root whose directory
+holds more than the index bound refusing at start with its stable reason; a
+recorded session the current composition cannot serve refused at activation by
+name while every other session in the root activates; progress coalescing under
 pressure with counted drops and no journal delay; peer-credential refusal; a
 socket path beyond the bound refused at start; frame, fragment and
 malformed-input refusals identical to the foreground server's.

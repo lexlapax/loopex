@@ -34,13 +34,18 @@ daemon holds the local writer marker for its process's lifetime and inherits
 the adapter's exact, documented limits: one append-only log per state root
 with a hard 256 MiB capacity, a 4 MiB frame ceiling, full-history retention
 with no compaction, full replay at open, and one writer per root. Reaching
-capacity is a truthful refusal, never a silent loss: the adapter answers
-`store_capacity_exceeded`, the daemon refuses further mutation with that
-reason while observers stay attached and an orderly stop still succeeds, and a
-log already past the bound is refused at open as `store_log_too_large` rather
-than opened and truncated. The operator retires the root by stopping the
-daemon, moving the root aside and starting a fresh root. Sessions in a retired
-root are resumable only by reopening that root.
+capacity is a truthful stop, never a silent loss, and it is not survivable on
+this adapter. The append is refused before a byte is written, with
+`store_capacity_exceeded`; the adapter then terminates its Store process and
+the caller receives `commit_unknown` for that transaction, because that is
+what this adapter does with every append error. So the daemon meets capacity
+as a loss of the store, not as a recoverable refusal: it closes the listener
+and every connection and exits, naming the capacity in the close, and the
+operator retires the root. A log already past the bound is refused at open as
+`store_log_too_large` rather than opened and truncated. Nothing committed is
+lost and nothing false is recorded, which is what the truthfulness claim
+means here. Sessions in a retired root are resumable only by reopening that
+root.
 This is a bounded, experimental selection made on
 evidence the local adapter already carries; it is not a daemon-grade store,
 and the 0.2.0 daemon's operator documentation states these limits and the
@@ -83,16 +88,29 @@ engine, its fault matrix, its migration and its rollback — without adding a
 proved capability to the durable-service question M5 exists to answer.
 Raising or removing the local log's 256 MiB capacity to postpone retirement
 was rejected because a silently growing log trades a truthful refusal for an
-unbounded replay at open. Mnesia and DETS were rejected as successor
+unbounded replay at open. Changing the local adapter so that a capacity
+refusal is definite and survivable — answered as a plain refusal without
+terminating the Store, so a daemon could keep its observers attached and stop
+in an orderly way — was rejected for M5 on 2026-09-19. It is a change to the
+Store's own behaviour at the one point where that behaviour is most
+load-bearing: today every append error is commit-ambiguous, and separating one
+error class from the rest means proving, through the shared conformance suite
+and the fault matrix on every adapter, that the separated class is definite in
+every injection and that no other class quietly joins it. That is the
+successor adapter's evidence, and buying it here would double M5's store
+evidence to make one operator message nicer. Until then the daemon's capacity
+behaviour is the adapter's, stated plainly rather than promised away. Mnesia and DETS were rejected as successor
 candidates for the reasons the companion records.
 
 **Evidence its acceptance requires.** The M5 half is a durability claim, so
 its class is process and store fault injection on the real adapter plus a
-rollback proof: a root driven to capacity refuses further mutation with the
-store's own reason while observers stay attached, an orderly stop still
-succeeds, and the foreground server and reference CLI then reopen the same
-root. No new conformance evidence is required, because the adapter and its
-suites are unchanged. The successor half claims a new engine and a migration,
+rollback proof: a root driven to capacity refuses the append with the store's
+own reason, terminates the store, and the daemon closes the listener and every
+connection and exits naming the capacity, with nothing committed lost; a root
+already past the bound refuses at open; and after an orderly stop on a root
+below the bound the foreground server and reference CLI reopen it. No new
+conformance evidence is required, because the adapter and its suites are
+unchanged — which is the point of selecting it. The successor half claims a new engine and a migration,
 so its class is the full store conformance suite, the fault matrix, bounded
 replay measurement, backup and restore, forward migration with interrupted-
 import recovery, and safe refusal by the exact previous binary; none of it is
@@ -116,8 +134,10 @@ The daemon and its clients see the same durable session truth the embedded
 API and the foreground server see; the store adapter is a host choice, not a
 semantic one. In M5 the foreground server, the reference CLI and the daemon
 all run on the local adapter and can reopen one another's roots. A root that
-reaches the local log's capacity stops accepting mutation and is retired by
-the operator; nothing already committed is lost. The private journal format
+reaches the local log's capacity takes its daemon down with it and is retired
+by the operator; nothing already committed is lost, and the operator
+documentation says plainly that capacity is an outage rather than a
+degradation, so that the ceiling is planned for rather than discovered. The private journal format
 is a separate compatibility surface: adding an adapter later freezes no wire,
 artifact or embedded contract, and the exact private format stays
 experimental in 0.x.
