@@ -95,7 +95,10 @@ match-specification exclusion the tracer does not have: the adapter is in no
 default trace namespace, so the credential work is untraced under every
 default configuration, and a host that explicitly names the adapter module
 gets entries whose credential values the implemented redaction pass replaces
-with placeholders. The companion names the three functions that touch
+with placeholders — which holds because the companion binds the *shape*, so
+those bytes always travel under a credential-named key and are placeholdered
+at any size. It would not hold by size alone: the pass leaves a short binary
+verbatim, and a credential may be one byte. The companion names the three functions that touch
 credential bytes — they are the whole of the parent-side surface — and M5
 proves both tiers. The drift between ADR 0030's prose and its implementation
 is flagged for the maintainer, not patched here.

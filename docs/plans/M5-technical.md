@@ -41,7 +41,8 @@ Concept: [Scope](M5.md#concept-plan-scope).
 | `loopex_protocol` | Generation-2 records, validators, schema and vectors | Daemon behaviour or lease semantics |
 | `loopex_store_local` | The unchanged local adapter, its 256 MiB log and 4 MiB frame ceilings, its `store_capacity_exceeded` and `store_log_too_large` refusals and its writer marker, which it takes at start and releases in its own `terminate/2` — so the daemon owns the Store *process* and stops it last in an orderly shutdown, and a store loss releases the marker before the daemon can act | Any daemon fact, lease, index or residency state |
 | `loopex_daemon` | Marker-first process and socket lifetime, existence validation by calling core's query rather than by attaching or resuming, the peer-credential check, generation-2 negotiation, per-connection socket output buffers, the resident window and aggregate byte ceiling, attachment residency and eviction, the in-memory controller lease and writer-epoch check, the session index with its recorded-entry bound and its bounded pages, attachment residency and the one-way activation ceiling, and diagnostics | Store or coordinator internals, a second loop, policy selection, host identity, a durable record or a durable method |
-| `loopex_app_server` | The foreground stdio server unchanged, sharing the protocol mapping the daemon reuses | Daemon lifetime or residency |
+| `loopex_composition` | The edge-assembly sequence, and the one new public function that runs it in the caller's process and returns the edges — used by `RuntimeOwner` and by the daemon's owner | Daemon lifetime, ownership of what it assembles, or any knowledge of a daemon |
+| `loopex_app_server` | The foreground stdio server unchanged, sharing the protocol mapping the daemon reuses, and its use of `with_runtime/2`, which M5 does not change | Daemon lifetime or residency |
 | `loopex_cli` | `loopex daemon` with its readiness line, signal handling and exit classes, `loopex attach` with its roles, takeover presentation and cursor reconnect, the live `loopex sessions --daemon` form beside the unchanged offline one, and the host-side credential custody and registry it composes | Normative lease or session semantics, and any change to the released offline `loopex sessions` |
 | `loopex_llm_reqllm` | The credential handoff, its sender, the token it accepts, the launcher's unchanged ADR 0019 scrubbing enumeration, the `req_llm` version floor, the re-pointed credential-plane proofs and the provider suite's concurrency | Any host credential policy, any new credential scope, where a host keeps the bytes behind a reference, or anything outside the adapter |
 | `clients/node` | Socket connection, observer following and takeover presentation for the independent client | Normative semantics |
@@ -133,8 +134,8 @@ Concept: [Verification stages](M5.md#concept-plan-verification).
 | 2 | `apps/loopex_daemon/test/socket_transport_test.exs`, `apps/loopex_protocol/test/public_schema_conformance_test.exs` | A raw-byte client over the socket negotiates generation 2 and receives generation 2's **own** exact schema digest, written out as a literal in the conformance module beside generation 1's and different from it by construction: `LoopexProtocol.Session.schema_digest/0` is taken over the generation, the ordered methods, the ordered record families, the ordered error codes and the limits, and generation 2 changes the first two, so a generation 2 that negotiated generation 1's digest would be reporting a contract it does not serve. Generation 1's bytes, digest, method inventory and limits are proved unchanged in the same module and at their own literals — the `3a17…08f4` schema digest, the schema file digest and the vectors file digest the conformance module already pins — so the generation-2 work is proved additive rather than asserted to be. A generation-1-only initialize is refused with nothing created. Generation 2's record families include `daemon.stopping`, with literal vectors for each reason a **client can actually receive** — `operator_stop`, `store_lost`, `store_capacity_exceeded` and `fatal:supervision_fault` — and explicitly none for the startup-phase classes, which carry no vector because no socket exists when they occur and no client can be holding one, and its presence in the digest is what a generation 2 omitting it would fail on. Its delivery bound is proved both ways: a reading client receives the record before the close, and a client that has stopped reading until its 4 MiB output buffer is full receives nothing and is closed anyway, with the daemon making exactly one attempt and never blocking on it. Identical durable identities for the same command corpus through facade, foreground server and socket. Owner-only peer access proved in both layers: the socket's `0700` daemon-owned subdirectory and `0600` socket mode read back after bind, a permissive subdirectory or socket mode refused at start, a subdirectory the daemon does not own refused, a path component below the root that it did not create refused — and a state root at the ordinary `0755` the foreground server creates it with accepted, not refused, because the daemon owns the subdirectory and never re-permissions the root — and an unreadable or undecodable peer credential closing the connection before initialize — all in the fast check, which needs no second user — with the real cross-uid refusal and the same-uid success carried by two `@tag :cross_uid` cases the release check runs as `mix test --only cross_uid` on its single run, which closure requires to be on Linux, and where the script asserts exactly two executed tests so neither a zero nor a lone survivor can pass. Frame, fragment, malformed-input and over-long socket path refusals with distinct stable reasons, the path cases binding at the derived bound and at one byte past it on each platform the release check runs. A client disconnect recorded as transport loss with no cancellation and no interaction change. The generation-2 vectors are literal bytes with literal verdicts, held beside generation 1's in `apps/loopex_protocol/test/public_schema_conformance_test.exs`, never values generated from the implementation they check |
 | 3 | `apps/loopex_daemon/test/collaboration_test.exs` | One lease per session in daemon memory with observers attached. Connection identity, epoch, held state and unexpired term checked together before core admission or any durable write, including a known current epoch sent by an observer. Takeover only after release or expiry, with a fresh epoch minted before the successor's first command. A killed controller fenced and its late commands refused. The three ways a controller stops holding, proved separately because the transport cannot tell two of them apart: an explicit `session.release_control` frees the lease at once, while an EOF from a politely closed client and a killed client both wait for expiry, with a takeover refused before the deadline and granted after. A per-session lease owner killed while a mutation is in flight taking the listener, every connection and the daemon down with it, after which the restarted daemon holds no lease and the previous holder's delayed command is refused on both the holder and the epoch check. A daemon restart leaving every session uncontrolled with every earlier epoch refused. A controller abort cancelling work dispatched under an earlier process with a truthful cleanup outcome. The expiry linearization: a mutation blocked inside core across the deadline settles under its own lease while the eligible takeover waits and is granted only after it resolves; the holder's next mutation refused at the deadline; the acquiring request refusing with its stable reason when its own deadline elapses first; and the holder disconnecting while a mutation is in flight — in every case exactly one of settle or refuse, never both. No control from content, metadata, answers or attachment order. Forward and backward wall-clock jumps changing neither live admission nor takeover timing |
 | 4 | `apps/loopex/test/concurrent_attachments_test.exs`, `apps/loopex/test/session_existence_query_test.exs`, `apps/loopex_daemon/test/replay_residency_test.exs` | Core's read-only session-existence query answers exactly one of the closed set `present`, `absent`, `invalid_id`, `store_unavailable` and `unexpected`, from a fresh process against a real root, with one case per result. `store_unavailable` is injected through the controllable fault store the suite already has, `Loopex.M1RuntimeTestStore`, whose `fail_reads/2` hook makes its reads refuse — not by making the root unreadable, which cannot produce that answer on the real adapter: `Loopex.Store.Local` answers `ownership_head` from `state.store`, in memory, so a root that has become unreadable on disk still answers. `unexpected` is injected by a stub answering outside the set. It is proved to create no attachment, no incarnation, no durable record and no Store write: the root's journal and session directory are byte-identical before and after a run of queries, including for unknown and malformed IDs. Control acquisition proceeds only on `present`; the other four fail closed with no attachment, no lease and no activation, and name four distinct reasons, so an unreadable store is never reported as an unknown session. Several core attachments to one session remain independent when one detaches or backpressures. A snapshot anchored at the committed sequence, then contiguous at-least-once buffered and live delivery across the window boundary with no gap. Core is the only replay owner: every delivery case runs a second time with the daemon's resident window disabled and a third with it dropped mid-stream, all three byte for byte identical, so the window is proved to establish no snapshot and no cursor. Aggregate reclamation follows the fixed order ADR 0032 sets — zero-attachment windows by ascending last delivery, then the furthest-behind session's window, then detachment — including the case where zero-attachment windows alone consume the ceiling. A slow observer detached at its last emitted cursor while the controller and the other attachments continue. Per-session and per-daemon limits refusing independently. Idle eviction and reconnect with no missing durable event, any duplicate deduplicated by session ID, sequence and event ID. Retained encoded bytes at or below the 4 MiB output buffer, 16 MiB window and 512 MiB aggregate ceilings, enforced in the daemon-owned stages, exercising 512 attachments and maximum-sized output records separately, with observed process RSS recorded beside the ceilings. Progress coalesced or dropped with counted drops and no journal delay |
-| 5 | `apps/loopex_daemon/test/multi_client_workflow_test.exs`, `apps/loopex_daemon/test/external_socket_workflow_test.exs`, `docs/evidence/M5-closure-runs.md` | The operator workflow end to end, each step a command an operator types: `loopex daemon` refusing once per missing or invalid composition input with its own class and leaving no marker or socket behind, then starting and printing the one-line JSON readiness record; `loopex run --daemon` creating and driving a session; `loopex resume --daemon` activating a dormant one through acquire, resume with a fresh command ID, attach; `loopex attach` refused with `session_dormant` against a session this daemon has not activated — in both roles, and for `--take-over` asserted to refuse **before any lease is granted**, so the `loopex resume --daemon` the refusal recommends is not blocked by a lease the refusal itself created — and succeeding against a session it has activated; a CLI holding a lease releasing it explicitly on every exit path, proved by a second client acquiring immediately rather than waiting out the term; `--after` starting strictly after a sequence and its absence replaying from `0`; a controller whose renewal fails continuing as an observer and sending no further mutation; a reconnecting controller acquiring again and receiving a fresh epoch before any mutation. From a fresh extraction of the exact candidate — staged with `git archive`, extracted and built outside the checkout — an operator follows the documented prerequisites and commands, supplies workspace, provider and policy inputs, starts the daemon, and drives one session from the reference CLI as controller and the Node client as observer, kills the controller, takes over from the observer and aborts cross-process work. The documented CLI build and the provider companion build both run inside that extraction, on the archive-carried source identity rather than on `.git`, with the missing, unsubstituted-or-malformed, changed-during-build and mismatched-commit refusals each proved and the identity the build reports asserted equal to the commit the archive was staged from. The attended real-provider cases run from that extraction, against the escript it built there. The workflow drives ADR 0030's existing core spans end to end — command admission, commit, effect intent, publication, interaction, and the model, store, policy and executor port callbacks — with the same bounded identity metadata an embedded caller produces, and no event outside that closed inventory is emitted by anything M5 adds. Daemon-internal functions are proved by the daemon's own tests and logs: `Loopex.Trace` traces only processes the runtime owns, flagged with `set_on_spawn` from the runtime's supervisor, and the daemon's listener, connections and lease owners are host processes above the runtime, so no trace-session witness is claimed for them. `VERSION` in the extracted tree is exactly `0.2.0`. Every tracked file under `docs/operator/` and `docs/developer/` has been read against the candidate, including the ones M5 leaves unchanged, recorded as a checklist derived at that commit — `git ls-files -- docs/operator docs/developer`, sorted, one row per path, each row marked *updated* or *reviewed unchanged* — retained with the closure runs. The derivation is over **every tracked file** in those two trees, not only Markdown, and that is deliberate: the gate promises that every file under them was read, so a diagram, a fixture or a data file added later must appear rather than slip through a `*.md` filter that was true when it was written and silently false afterwards. It also avoids a pathspec trap, checked rather than assumed: `git ls-files 'docs/operator/**/*.md'` without `:(glob)` matches nothing at all and would have made the gate pass vacuously. The directory form returns 26 tracked files as of this revision — 18 under `docs/developer/` and 8 under `docs/operator/`, all Markdown today — and the closure checklist states the count it derived so a reviewer can see the list was not empty, with every path in the tree present, no row unmarked, and each finding named and resolved before the closure packet |
-| 6 | `apps/loopex_llm_reqllm/test/credential_plane_test.exs`, `apps/loopex_llm_reqllm/test/adapter_test.exs`, `apps/loopex_llm_reqllm/test/provider_retainer_boundaries_test.exs`, `docs/evidence/M5-closure-runs.md` | From the completion of a reference host's composition onward, the parent VM's environment holds no credential under the adapter's name and no value equal to the credential in use, before, during or after a call — "during" observed from inside the call at child readiness; composition is proved to read the operator's variable once and delete it. Every row of ADR 0034's failure table resolves to its closed-set atom and retains no copy: `:no_token` for an absent token, `:invalid_token` for a malformed one, `:unavailable` for a token with no registry row, a gone registry, a dead custody process and a malformed successful reply, and each of `:missing`, `:expired` and `:oversized`, a term outside the closed set reported as `:unavailable`, and a custody process blocking past the invocation deadline, where the **guardian** kills the sender and reports `:timeout`, asserted distinct from every refusal so the guardian can tell a refusal from a silence and asserted to bound the invocation whatever the custody process does. Two resolutions in flight at once is a success case, not a refusal: both invocations complete with their own credentials. Tracing is proved in two tiers, against `Loopex.Trace` as implemented rather than against ADR 0030's prose: under the **default** configuration no trace entry names `ProviderBridge.route_credential/2`, `receive_custody_reply/2` or `write_credential_frame/2`, the tracer receives no raw trace message for them and no credential bytes or token appear in any entry — because `modules/1` expands a namespace through the application's own module list and the adapter is not a `:loopex` module; under a configuration that **explicitly names** the adapter module, entries for the three may exist and each is asserted to carry placeholders and no credential bytes and no token, which is what the implemented redaction pass gives. A third case asserts the three functions exist with exactly those identities, so neither tier can pass vacuously and an inlining or rename breaks the proof loudly. The registry lookup is proved to carry no credential. Two invocations with distinct credentials run at once and neither child, nor either child's diagnostics, observes the other's. Two runtimes composed in one VM, each with its own registry and custody, are proved isolated: a token minted for one answers `:unavailable` in the other, so tokens do not cross runtimes. A registry killed under a composed runtime makes every later resolution through that handle answer `:unavailable`, and the adapter is proved not to retry, wait or rebuild — recomposition is the only repair. Every re-pointed case of `apps/loopex_llm_reqllm/test/credential_plane_test.exs` passes with its assertion unchanged in meaning: version refusal and bootstrap refusal before any credential, late delivery after expiry impossible, rotation between invocations, two live credentials in one VM, sink loss, one child's loss not poisoning another, ordinary host messages and returned reasons, every child Logger form and metadata, and the four crash-report cases. The child-environment witness inside the version-refusal and bootstrap-refusal cases — the child's recorded `entry-env` marker refuting `Adapter.credential_variable()` — holds unchanged. The 65,536-byte ceiling case in `provider_retainer_boundaries_test.exs` is re-pointed too, because that module delivers its credential through `System.put_env` in its `setup` and again in the case body; that invocation's own custody process holds the oversized value instead. The drift-protection case in `adapter_test.exs` survives strengthened, with an exact allowlist: `[]` for `provider_bridge.ex`, the arity-zero enumeration and only that for `provider_launcher.ex` because it is ADR 0019's first-image scrubbing rather than a credential read, `provider_worker.ex`'s two non-secret crash-dump names, and `[]` everywhere else. Because the launcher's read survives, the case also asserts its *use*: the enumeration's result flows only into the Port's removal list, every name is mapped to `false`, none is compared against `credential_variable/0`, and no value reaches the sender, the frame or any caller. Its scan is widened from one `System.get_env(...)` expression to every route an environment read can be written — `System.get_env/0`, `/1` and `/2`, `System.fetch_env/1` and `fetch_env!/1`, `:os.getenv/0`, `/1` and `/2`, `:os.env/0`, and indirect application through `apply/3` or a captured function — each unpinned route refuted outright. The `req_llm` move to `~> 1.24.0` — pinned to that minor, not to `~> 1.24`, so the reviewed diff is the version actually built against — lands as its own reviewed change before the credential change, with the reviewed changelog diff across the intervening releases named in the commit, the adapter and streaming-conformance suites green, and the *existing* real-provider case at closure run against it. It adds no call path: nothing in M5 calls anything `1.24.0` makes newly reachable, and no second provider, second credential or new release-check case enters this milestone. It is explicit M5 scope, separate from ADR 0035 and not conditional on it. A security review by someone other than the implementer is recorded. The twelve modules are then converted to run concurrently one at a time, each kept only while its application's suite stays green, any module that stays serial keeping its reason beside it, and the measured duration is recorded beside the M4-closure baseline as evidence about the change rather than a threshold |
+| 5 | `apps/loopex_daemon/test/multi_client_workflow_test.exs`, `apps/loopex_daemon/test/external_socket_workflow_test.exs`, `docs/evidence/M5-closure-runs.md` | The operator workflow end to end, each step a command an operator types: `loopex daemon` refusing once per missing or invalid composition input with its own class and leaving no marker or socket behind, then starting and printing the one-line JSON readiness record; `loopex run --daemon` creating and driving a session; `loopex resume --daemon` activating a dormant one through acquire, resume with a fresh command ID, attach; `loopex attach` refused with `session_dormant` at the **attach** step against a session this daemon has not activated, in both roles, while `loopex resume --daemon` acquires that same dormant session and succeeds — the two asserted together, since refusing dormancy at acquisition would break the resume path; `--take-over` on a dormant session asserted to release its lease before exiting, proved by `loopex resume --daemon` succeeding immediately afterwards rather than refusing `control_held`; a CLI holding a lease releasing it explicitly on every exit path; `--after` starting strictly after a sequence and its absence replaying from `0`; a controller whose renewal fails continuing as an observer and sending no further mutation; a reconnecting controller acquiring again and receiving a fresh epoch before any mutation. From a fresh extraction of the exact candidate — staged with `git archive`, extracted and built outside the checkout — an operator follows the documented prerequisites and commands, supplies workspace, provider and policy inputs, starts the daemon, and drives one session from the reference CLI as controller and the Node client as observer, kills the controller, takes over from the observer and aborts cross-process work. The documented CLI build and the provider companion build both run inside that extraction, on the archive-carried source identity rather than on `.git`, with the missing, unsubstituted-or-malformed, changed-during-build and mismatched-commit refusals each proved and the identity the build reports asserted equal to the commit the archive was staged from. The attended real-provider cases run from that extraction, against the escript it built there. The workflow drives ADR 0030's existing core spans end to end — command admission, commit, effect intent, publication, interaction, and the model, store, policy and executor port callbacks — with the same bounded identity metadata an embedded caller produces, and no event outside that closed inventory is emitted by anything M5 adds. Daemon-internal functions are proved by the daemon's own tests and logs: `Loopex.Trace` traces only processes the runtime owns, flagged with `set_on_spawn` from the runtime's supervisor, and the daemon's listener, connections and lease owners are host processes above the runtime, so no trace-session witness is claimed for them. `VERSION` in the extracted tree is exactly `0.2.0`. Every tracked file under `docs/operator/` and `docs/developer/` has been read against the candidate, including the ones M5 leaves unchanged, recorded as a checklist derived at that commit — `git ls-files -- docs/operator docs/developer`, sorted, one row per path, each row marked *updated* or *reviewed unchanged* — retained with the closure runs. The derivation is over **every tracked file** in those two trees, not only Markdown, and that is deliberate: the gate promises that every file under them was read, so a diagram, a fixture or a data file added later must appear rather than slip through a `*.md` filter that was true when it was written and silently false afterwards. It also avoids a pathspec trap, checked rather than assumed: `git ls-files 'docs/operator/**/*.md'` without `:(glob)` matches nothing at all and would have made the gate pass vacuously. The directory form returns 26 tracked files as of this revision — 18 under `docs/developer/` and 8 under `docs/operator/`, all Markdown today — and the closure checklist states the count it derived so a reviewer can see the list was not empty, with every path in the tree present, no row unmarked, and each finding named and resolved before the closure packet |
+| 6 | `apps/loopex_llm_reqllm/test/credential_plane_test.exs`, `apps/loopex_llm_reqllm/test/adapter_test.exs`, `apps/loopex_llm_reqllm/test/provider_retainer_boundaries_test.exs`, `docs/evidence/M5-closure-runs.md` | From the completion of a reference host's composition onward, the parent VM's environment holds no credential under the adapter's name and no value equal to the credential in use, before, during or after a call — "during" observed from inside the call at child readiness; composition is proved to read the operator's variable once and delete it. Every row of ADR 0034's failure table resolves to its closed-set atom and retains no copy: `:no_token` for an absent token, `:invalid_token` for a malformed one, `:unavailable` for a token with no registry row, a gone registry, a dead custody process and a malformed successful reply, and each of `:missing`, `:expired` and `:oversized`, a term outside the closed set reported as `:unavailable`, and a custody process blocking past the invocation deadline, where the **guardian** kills the sender and reports `:timeout`, asserted distinct from every refusal so the guardian can tell a refusal from a silence and asserted to bound the invocation whatever the custody process does. Two resolutions in flight at once is a success case, not a refusal: both invocations complete with their own credentials. Tracing is proved in two tiers, against `Loopex.Trace` as implemented rather than against ADR 0030's prose: under the **default** configuration no trace entry names `ProviderBridge.route_credential/2`, `receive_custody_reply/2` or `write_credential_frame/2`, the tracer receives no raw trace message for them and no credential bytes or token appear in any entry — because `modules/1` expands a namespace through the application's own module list and the adapter is not a `:loopex` module; under a configuration that **explicitly names** the adapter module, entries for the three may exist and each is asserted to carry placeholders and no credential bytes and no token. That second tier holds because ADR 0034 binds the **shape**: the three carry credential bytes only under a credential-named key, which `@credential_pattern` placeholders at any size. It does not hold by size — running `Entry.render/2` shows a bare or tuple-wrapped credential of 1, 40, 51 or 64 bytes rendered verbatim, and only a credential-keyed value placeholdered at every size — so the witness calls each of the three with a **one-byte** credential under a session naming the module, and asserts no entry contains that byte. A third case asserts the three identities, so neither tier can pass vacuously. The registry lookup is proved to carry no credential. Two runtimes composed in one VM, each with its own registry, custody and token, are proved isolated: a token minted for one answers `:unavailable` in the other, so tokens do not cross runtimes, and neither runtime's child — nor either child's diagnostics — ever observes the other's credential. That case subsumes the old within-one-runtime concurrency witness, which a composition-bound token makes meaningless: two invocations of one runtime necessarily carry the same token, so what has to be proved independent is two *runtimes*. A registry killed under a composed runtime makes every later resolution through that handle answer `:unavailable`, and the adapter is proved not to retry, wait or rebuild — recomposition is the only repair. Every re-pointed case of `apps/loopex_llm_reqllm/test/credential_plane_test.exs` passes with its assertion unchanged in meaning: version refusal and bootstrap refusal before any credential, late delivery after expiry impossible, rotation between invocations, two live credentials in one VM, sink loss, one child's loss not poisoning another, ordinary host messages and returned reasons, every child Logger form and metadata, and the four crash-report cases. The child-environment witness inside the version-refusal and bootstrap-refusal cases — the child's recorded `entry-env` marker refuting `Adapter.credential_variable()` — holds unchanged. The 65,536-byte ceiling case in `provider_retainer_boundaries_test.exs` is re-pointed too, because that module delivers its credential through `System.put_env` in its `setup` and again in the case body; that invocation's own custody process holds the oversized value instead. The drift-protection case in `adapter_test.exs` survives strengthened, with an exact allowlist: `[]` for `provider_bridge.ex`, the arity-zero enumeration and only that for `provider_launcher.ex` because it is ADR 0019's first-image scrubbing rather than a credential read, `provider_worker.ex`'s two non-secret crash-dump names, and `[]` everywhere else. Because the launcher's read survives, the case also asserts its *use*: the enumeration's result flows only into the Port's removal list, every name is mapped to `false`, none is compared against `credential_variable/0`, and no value reaches the sender, the frame or any caller. Its scan is widened from one `System.get_env(...)` expression to every route an environment read can be written — `System.get_env/0`, `/1` and `/2`, `System.fetch_env/1` and `fetch_env!/1`, `:os.getenv/0`, `/1` and `/2`, `:os.env/0`, and indirect application through `apply/3` or a captured function — each unpinned route refuted outright. The `req_llm` move to `~> 1.24.0` — pinned to that minor, not to `~> 1.24`, so the reviewed diff is the version actually built against — lands as its own reviewed change before the credential change, with the reviewed changelog diff across the intervening releases named in the commit, the adapter and streaming-conformance suites green, and the *existing* real-provider case at closure run against it. It adds no call path: nothing in M5 calls anything `1.24.0` makes newly reachable, and no second provider, second credential or new release-check case enters this milestone. It is explicit M5 scope, separate from ADR 0035 and not conditional on it. A security review by someone other than the implementer is recorded. The twelve modules are then converted to run concurrently one at a time, each kept only while its application's suite stays green, any module that stays serial keeping its reason beside it, and the measured duration is recorded beside the M4-closure baseline as evidence about the change rather than a threshold |
 
 **Checks a boundary selects.** Beyond `bash scripts/check.sh`, which every
 merge needs green in hosted CI, M5 selects exactly these, from the
@@ -559,7 +560,7 @@ restriction.** Its forms are:
 | Form | What it does |
 | --- | --- |
 | `--observe` (default when neither role flag is given) | Attaches without acquiring, streams events, sends nothing. Refused by the daemon, not the client, if it ever tries |
-| `--take-over` | Validates existence first, refusing `session_dormant` before any lease is taken if the session is dormant; otherwise acquires a released or expired lease, waiting while an in-flight admission settles as ADR 0033's linearization requires and never forcing a live holder off. Then attaches, streams, and releases the lease explicitly on exit |
+| `--take-over` | Acquires a released or expired lease, waiting while an in-flight admission settles as ADR 0033's linearization requires and never forcing a live holder off, then attaches. Against a session this daemon has not activated the attach refuses `session_dormant`, and the client **releases the lease explicitly** before exiting non-zero with `loopex resume --daemon` as the remedy. On every other exit path it also releases explicitly |
 | `--take-over --prompt "<text>"`, or `--take-over` with the prompt on stdin | The same — acquire, then attach — plus **one** command under the granted epoch, sent only after the attachment exists because ADR 0033 admits a mutation only from a controller-capable attachment, then streams to a terminal outcome |
 
 There is no interactive multi-turn controller in M5. A controller that could
@@ -585,36 +586,44 @@ ends or the operator re-runs with `--take-over`. It does not race the
 deadline, because a mutation sent after the term elapsed will be refused
 anyway and a client that keeps trying only obscures when control was lost.
 
-**A dormant session refuses `attach` in either role, and refuses it before any
-lease is taken.** `loopex attach` against a session this daemon has not
-activated is refused with `session_dormant`, naming the remedy:
-`loopex resume --daemon`. Attaching does not activate. Activation is a
+**A dormant session refuses `attach` in either role.** `loopex attach` against
+a session this daemon has not activated is refused with `session_dormant`,
+naming the remedy: `loopex resume --daemon`. Attaching does not activate. Activation is a
 controller's act — acquire, then resume with a fresh command ID — because it
 starts a coordinator and counts against the activation ceiling, and letting a
 read-only observer trigger it would let a watcher consume a resource a
 controller needs and start durable recovery nobody asked for.
 
-**Where the refusal happens matters as much as that it happens.** ADR 0033's
-acquisition already validates durable existence through core's read-only
-existence query, and that query's answer carries residency, so the daemon
-knows the session is dormant *before* it has anything to grant. The refusal is
-therefore issued at that point: `attach --take-over` against a dormant session
-refuses `session_dormant` **with no lease taken**.
+**The refusal sits at attach, not at acquisition, and that placement took
+correcting.** An earlier draft refused inside `session.acquire_control` — "no
+lease taken" — which reads well and is wrong twice over. ADR 0033's own
+concept says a known dormant session is driven by *acquiring by ID, resuming
+with the granted epoch and attaching*, and ADR 0032's recovery sequence
+acquires a dormant session at step 7 before resuming at step 8. Refusing
+acquisition for dormancy would break the one path that is supposed to bring a
+dormant session back. And acquisition could not tell the two intentions apart
+anyway: `session.acquire_control` carries `session_id` and `request_id` and
+nothing about what the caller means to do next, so distinguishing "acquiring
+to resume" from "acquiring to attach" would need a new field — a new input to
+the generation-2 schema digest, added to make a client-side convenience
+expressible.
 
-The alternative would strand the operator, which is how this was found. If
-acquisition succeeded and only the attach refused, the client would exit
-holding a thirty-second lease on the very session whose remedy —
-`loopex resume --daemon` — begins by acquiring that same lease, so the command
-the refusal recommends would itself refuse `control_held` until the term
-elapsed. The refusal would be advising a step it had just blocked.
+So the daemon's **attach** handler is where it belongs. That handler consults
+the daemon's own residency index — a daemon fact the daemon owns, needing
+nothing from core — and refuses `session_dormant` for a session this lifetime
+has not activated. `loopex resume --daemon` is unaffected: it acquires,
+resumes, and only then attaches, by which time the session is active.
 
-Two rules close it together. The first is above: refuse before granting. The
-second is general and applies to every exit path, not only this one — **a CLI
-that holds a lease releases it explicitly before exiting**, by sending
-`session.release_control`, because ADR 0033 binds early release to that call
-alone and treats every transport loss, including a clean client exit, as a
-wait for expiry. A client that simply closed its socket would leave the lease
-held for its full term whatever the reason it stopped.
+`loopex attach --take-over` against a dormant session therefore acquires
+successfully and is refused at attach, holding a lease it no longer wants.
+That is exactly why the general rule matters: **a CLI that holds a lease
+releases it explicitly before exiting**, by sending `session.release_control`,
+because ADR 0033 binds early release to that call alone and treats every
+transport loss — including a clean client exit — as a wait for expiry. On this
+path the client releases, exits non-zero, and names `loopex resume --daemon`
+as the remedy. Without that release it would strand the operator: the command
+the refusal recommends begins by acquiring the same lease, and would refuse
+`control_held` for the rest of the term.
 
 **Cursor, reconnection and re-acquisition.** The client remembers the last
 event cursor it emitted and, on transport loss, reconnects at it,
@@ -642,7 +651,7 @@ repair, with the reason class on `stderr`.
 | `loopex run --daemon`, `loopex resume --daemon` and the create-and-drive sequence | `docs/operator/daemon.md`, driving section |
 | `loopex sessions --daemon`, `--limit`, `--after`, `--status`, `index_full` | `docs/operator/daemon.md`, listing section |
 | `loopex daemon` composition inputs, readiness record, signals, exit classes | `docs/operator/daemon.md`, running section |
-| `loopex attach` roles, one-shot control, `--after`, renewal loss, `session_dormant` before any lease, explicit release on exit, reconnect and re-acquisition | `docs/operator/daemon.md`, attaching section |
+| `loopex attach` roles, one-shot control, `--after`, renewal loss, `session_dormant` at attach, explicit release on every exit path, reconnect and re-acquisition | `docs/operator/daemon.md`, attaching section |
 
 <a id="technical-plan-lifecycle"></a>
 ### Daemon Lifecycle and Orderly Shutdown
@@ -663,10 +672,9 @@ non-zero with that step's reason class and touches nothing after it — in
 particular, a daemon that does not hold the marker never reads, unlinks or
 binds the socket path.
 
-**The daemon composes its own supervision tree, and does not use
-`LoopexComposition`'s bracket.** That is a decision this section has to make
-before it can describe any shutdown, because the bracket makes the shutdown
-this plan wants impossible. Two facts in the code say so:
+**The daemon's top-level component is an owner process, not a supervisor.**
+That is a decision this section has to make before it can describe any
+shutdown, and three facts in the code force it.
 
 - `LoopexComposition.start_edge/2` runs inside a process `RuntimeOwner`
   **spawns** — `own_started/5` and `own_bracketed/6` are `spawn_monitor` bodies
@@ -676,99 +684,74 @@ this plan wants impossible. Two facts in the code say so:
   `[:supervisor, :token]`: no composition function hands back the adapter pid.
   **A daemon using the bracket has no way to observe the Store's death and no
   pid to monitor.**
-- Worse, it inverts the ordering. `Runtime.stop/1` is
+- The bracket also inverts the ordering. `Runtime.stop/1` is
   `Supervisor.stop(supervisor, :normal)`, and the runtime supervisor is one of
   the owner's linked edges, so its exit arrives at the owner as
   `{:EXIT, _owned_pid, reason}` and the owner runs `cleanup/1` **immediately**
   — stopping every owned edge including the Store, and releasing the marker —
-  before the daemon has told a single client, unlinked the socket, or reached
-  told a single client or unlinked the socket.
+  before the daemon has told a single client or unlinked the socket.
+- And an OTP `Supervisor` cannot serve here either, which an earlier draft of
+  this section got wrong. `Loopex.Runtime.start_link/1` returns
+  `{:ok, %Loopex.Runtime{}}` — a **struct**, not `{:ok, pid}` — so the runtime
+  is not a startable child at all; a supervisor rejects that return. Beyond
+  that, a supervisor offers no callback that can read a terminating child's
+  exit reason, so `store_lost`, `store_capacity_exceeded` and
+  `supervision_fault` would be indistinguishable at exactly the moment the
+  daemon must name one.
 
-So `apps/loopex_daemon` supervises its own children directly, in start order:
+So `apps/loopex_daemon` has one top-level process, `Loopex.Daemon.Owner`, a
+`GenServer` that traps exits and holds the links itself — the same pattern
+`RuntimeOwner` already uses, for the same reason. It starts and links four
+things, in this order:
 
-| # | Child | Started how |
-| --- | --- | --- |
-| 1 | The Store adapter | `Loopex.Store.Local.start_link/1` with the root and `recover_stale_writer: true` — the same call `LoopexComposition` makes through `start_edge/2` |
-| 2 | The runtime | `Loopex.Runtime.start_link/1` with the store, model, executor, policy and tool configuration the daemon composed |
-| 3 | The lease owner supervisor | The daemon's own, under ADR 0033 |
-| 4 | The listener | Bound and permission-checked last, so nothing accepts before the rest exists |
+| # | Child | Started how | What the owner keeps |
+| --- | --- | --- | --- |
+| 1 | The Store adapter | `Loopex.Store.Local.start_link/1` with the root and `recover_stale_writer: true` — the same call composition makes | The **pid**, so `{:EXIT, store_pid, reason}` identifies it and carries the store's own reason |
+| 2 | The runtime | `Loopex.Runtime.start_link/1` | The `%Loopex.Runtime{}` **struct** — which is why this cannot be a supervisor child, and is fine for a process that simply holds it |
+| 3 | The lease owner | The daemon's own, under ADR 0033 | Its pid |
+| 4 | The listener | Bound and permission-checked last, so nothing accepts before the rest exists | Its pid |
 
-**The strategy is `rest_for_one` with `max_restarts: 0`**, and the second half
-is what makes the failure rules in ADR 0032 and ADR 0033 true rather than
-aspirational.
+**There is no restart strategy, because there are no restarts.** Every child is
+`start_link`ed by the owner, and the owner's `handle_info({:EXIT, pid, reason}, state)`
+clause is the whole failure rule: any linked exit, whatever the reason, is
+fatal to the daemon instance. That clause is also the **reader** the
+fatal-class map needs — it matches the pid against the four it holds,
+classifies `reason`, and has the class in hand before anything else happens.
+Nothing here is `rest_for_one`, `one_for_all` or `max_restarts`; those words
+belonged to the withdrawn design and are gone.
 
-`rest_for_one` expresses the dependency direction that is actually there: each
-child depends on those started before it and on none started after. But by
-itself it would *restart* — and every restart here is wrong. A Store that
-terminated on an append error has a durable cause a restart cannot fix, and
-restarting it would reacquire the marker only to fail again. A lease owner
-that died lost the in-flight admission set, which is precisely what ADR 0033
-says must not be silently reconstructed. So the daemon supervisor carries
-`max_restarts: 0`: **any child's failure exceeds the intensity immediately**,
-the supervisor terminates its remaining children in reverse start order and
-exits, and the daemon is fail-stop for every child uniformly.
+The rejected option is recorded with its reasons, because it was tried in an
+earlier draft of this pair and looked plausible: **a `Supervisor` with
+`max_restarts: 0`**. It fails three ways. With intensity zero the restart
+accounting runs before the strategy clause and the supervisor terminates with
+reason `:shutdown`, so the child's real reason is logged and discarded —
+exactly the information the daemon exists to report. It cannot host the
+runtime at all, because of the struct return above. And its own termination
+would leave the socket unlinked and no client told, so a fifth component
+would have been needed to do the work steps 3 and 4 describe — which is the
+owner, arrived at by a longer road.
 
-That one setting is what gives this section its shape. The Store's fail-stop
-and the lease owner's daemon-fatal rule are the same mechanism seen twice,
-not two special cases anyone has to implement separately. And reverse-start-
-order termination — a property of every strategy, not only this one — is what
-stops the Store last without a written sequence.
+The second rejected option is the one this section opened with: changing
+`LoopexComposition` to surface store death and return the adapter pid. It is
+a host convenience application the app server uses and the daemon does not
+need for *lifetime*; widening it for daemon concerns would put them into an
+application whose other caller has none. **The two hosts compose differently,
+deliberately**: `LoopexAppServer.Host` keeps `with_runtime/2`, whose bracket
+suits a process that lives and dies with one client's stdin, and the daemon
+owns its own because it does not.
 
-`one_for_all` would also have been safe but says less: it would claim the
-listener's failure must destroy the Store, which is not the dependency that
-exists, and would make the tree harder to reason about when something is
-added to it later.
-
-This buys exactly the two properties the bracket could not give:
-
-- **The daemon supervisor holds the Store's link**, so the adapter's exit
-  reason — the `{:stop, reason, …}` `Loopex.Store.Local` answers an append
-  error with — arrives at a process the daemon controls, carrying
-  `store_capacity_exceeded` or whatever the store's own reason was.
-- **Reverse-start-order termination stops the Store last by construction.** A
-  supervisor terminates children in the reverse of their start order, so
-  listener, lease owner, runtime, Store — which is the ordered shutdown below,
-  obtained from the supervision strategy rather than from a sequence someone
-  has to remember to write. The runtime is terminated before it, as a sibling
-  in that order, so nothing the daemon does to end work can reach the Store
-  early.
-
-**What the daemon still takes from `loopex_composition`, and one seam that
-needs a decision.** Owning the tree is about *lifetime*, not about wiring.
-The daemon still needs everything that application assembles — the executor
-with its workspace lease and coding tools, the artifact store, the resolved
-policy, the runtime identity, the tool definitions — and duplicating that
-would be a second copy of a wiring layer, which the minimalism budget forbids
-on its face.
-
-The difficulty is that both public entry points, `start/1` and
-`with_runtime/2`, bundle the wiring with the ownership: each goes through
-`RuntimeOwner`, which is the bracket the daemon must not use. So one of two
-things happens, and the maintainer should choose rather than have it decided
-by whoever writes the code first:
-
-- **`loopex_composition` gains a narrow compose-without-owning entry point**
-  — the wiring it already performs, returning the started pieces to a caller
-  that supervises them — and the daemon calls that. This is a small addition
-  to a shared application, and it is a *different* change from the one
-  rejected below: it exposes wiring, not store death or adapter identity.
-- **Or the daemon assembles those pieces itself** from the same public
-  building blocks the composition uses, accepting a second assembly site.
-
-This pair states the first as the preferred shape, because it keeps one
-wiring layer, and marks it as the open implementation decision the daemon
-workstream opens with.
-
-The rejected option is recorded: changing `LoopexComposition` to surface store
-death and return the adapter pid. It is a host convenience application that
-the app server uses and the daemon does not need — the daemon is a different
-kind of host, one that must outlive its clients and own its own shutdown
-ordering, and widening a shared helper to serve it would put daemon concerns
-into an application whose other caller has none. **The two hosts therefore
-compose differently, deliberately:** `LoopexAppServer.Host` keeps using
-`with_runtime/2`, whose bracket is exactly right for a process that lives and
-dies with one client's stdin, and the daemon supervises its own tree because
-it does not.
+**Wiring is a separate question from lifetime, and M5 answers it.** The daemon
+still needs everything `loopex_composition` assembles — the executor with its
+workspace lease and coding tools, the artifact store, the resolved policy, the
+runtime identity, the tool definitions. Duplicating that is not an option the
+minimalism budget leaves open. So `loopex_composition` gains **one narrow
+public function** that runs its existing edge-assembly sequence **in the
+caller's process** and returns the started edges — the adapter pid, the
+`%Loopex.Runtime{}` struct and the rest — instead of owning them. The daemon
+owner calls it from inside its own trap-exit process, so every link lands on
+the owner; `RuntimeOwner` calls the same function from its spawned process, so
+`start/1` and `with_runtime/2` behave exactly as they do today. The Concept
+file records this as a design decision; this file explains it.
 
 There are **two** ways a daemon ends, and conflating them was a defect. A
 daemon-initiated shutdown is the ordered sequence below. A **store loss is a
@@ -779,68 +762,53 @@ than in taste: `Loopex.Store.Local` answers an append error with
 observes it, the store is gone and the marker is already released. A sequence
 that ends "then stop the Store" cannot run when the Store is what died.
 
-**Daemon-initiated shutdown is the tree terminating, in reverse start order.**
-`SIGTERM` or `SIGINT` asks the daemon supervisor to terminate. It is not a
-sequence anyone writes: a supervisor terminates children in the reverse of
-their start order, so listener, lease owner, runtime, Store falls out of the
-tree above, and each child's own `shutdown` value bounds its part. An ordered
-termination is also not a child failure, so it does not trip `max_restarts:
-0` — that setting governs a child dying on its own, which is the fail-stop
-path below.
+**Daemon-initiated shutdown is the owner stopping its children, in reverse
+order.** `SIGTERM` or `SIGINT` reaches the owner, which performs these four
+steps itself. They are the owner's code, not a supervisor's behaviour, which
+is what lets each one carry a reason and lets step 3 use a bound the owner
+chooses.
 
-1. **The listener terminates first.** It stops accepting, so a new connection
-   is refused rather than queued; it sends each open connection one
+1. **The listener stops first.** It stops accepting, so a new connection is
+   refused rather than queued; it writes each open connection one
    `daemon.stopping` naming `operator_stop`, bounded best-effort as ADR 0032
    fixes — one write attempt into the existing 4 MiB output buffer — and
    closes it. Clients therefore learn *first*, before anything else is torn
    down, which is the right order for the one party that cannot see inside the
    daemon.
-2. **The lease owner terminates.** Every lease vanishes with it. Nothing
-   durable is involved, and no client is left holding one, because no
-   connection survived step 1.
-3. **The runtime terminates, and this is where admitted work ends.** The
-   daemon gives the runtime child a `shutdown` value of the **composed cleanup
-   grace** — the same value the sessions were composed with, so no number is
-   introduced. Work that settles within it settles normally. Work that does
-   not is ended when the supervisor's shutdown timeout elapses and it kills
-   the child, which is **crash-equivalent by definition**: no terminal
-   mutation is claimed, no `cancelled`, no `outcome_unknown`, no abort record.
-   A mutation whose commit was ambiguous stays `commit_unknown` and fenced,
-   and the reconciliation ADR 0006 and ADR 0018 already define settles it at
-   the next activation — exactly as after an abrupt death.
+2. **The lease owner stops.** Every lease vanishes with it. Nothing durable is
+   involved, and no client is left holding one, because no connection survived
+   step 1.
+3. **The runtime stops, and this is where admitted work ends.** The owner
+   calls `Loopex.Runtime.stop/1` on the struct it kept, under its own bound:
+   the **composed cleanup grace**, the same value the sessions were composed
+   with, so no number is introduced. Work that settles within it settles
+   normally. If the call has not returned when the grace elapses, the owner
+   kills the runtime supervisor outright — `Process.exit(runtime.supervisor,
+   :kill)`, the pid the struct exposes — which is **crash-equivalent by
+   definition**: no terminal mutation is claimed, no `cancelled`, no
+   `outcome_unknown`, no abort record. A mutation whose commit was ambiguous
+   stays `commit_unknown` and fenced, and the reconciliation ADR 0006 and
+   ADR 0018 already define settles it at the next activation — exactly as
+   after an abrupt death.
 
-   **This is why the daemon sets that value rather than trusting the
-   runtime's own.** The runtime's internal teardown is bounded only
-   transitively: core declares `shutdown: 5_000` for a session coordinator but
-   `shutdown: :infinity` for an owner group — whose `terminate/2` itself calls
-   `Supervisor.stop(workers, :shutdown, :infinity)` — and three of the runtime
-   supervisor's children are supervisors, which default to `:infinity`. "5,000
-   ms for a coordinator" is not the bound of anything. A `shutdown` value on
-   the daemon's own child spec is a bound the daemon owns, and it ends in a
-   kill, which is the property this step wants rather than a compromise of it.
+   The owner can do this precisely *because* it is not a supervisor: there is
+   no restart intensity for a deliberate kill to trip, and the exit it causes
+   arrives at its own `{:EXIT, …}` clause, which knows this teardown is in
+   progress and does not re-enter the fail-stop path.
 
-   An earlier draft had the daemon call `Runtime.stop/1` explicitly and then
-   kill the supervisor pid on a timer. That is withdrawn: with
-   `max_restarts: 0` an explicit kill of a supervised child would itself
-   exceed the intensity and tear the tree down from under the remaining
-   steps. Expressing the same bound as the child's `shutdown` value obtains
-   it without that contradiction.
-
-   Also withdrawn, from an earlier draft: that running effects enter the
-   configured cancellation sequence. Cancellation is the coordinator's to run
-   as part of a session's own durable command, not something a daemon may
-   drive from outside, and a daemon-side cancellation path is precisely the
-   second loop this milestone forbids. Two alternatives were rejected with it.
-   Host-authorized durable aborts — the daemon admitting an abort per session
-   on the way down — would have the daemon issuing mutations on nobody's
-   authority, at the moment it is least able to see them through. An unbounded
-   natural drain would make `SIGTERM` unbounded, which is not a stop.
-4. **The Store terminates last**, and its `terminate/2` releases the writer
-   marker — see the marker invariant in ADR 0031. Stopping it last is what
-   makes the marker outlive every session operation that might still have
-   needed it, and it is obtained from the start order rather than from a step
-   someone has to remember.
-5. **The socket path is unlinked** and the daemon **exits `0`**.
+   **The daemon supplies that bound rather than trusting the runtime's own,
+   which is not one.** Core declares `shutdown: 5_000` for a session
+   coordinator but `shutdown: :infinity` for an owner group — whose
+   `terminate/2` itself calls `Supervisor.stop(workers, :shutdown,
+   :infinity)` — and three of the runtime supervisor's children are
+   supervisors, which default to `:infinity`. `Supervisor.stop/3` takes an
+   `:infinity` call timeout by default. "5,000 ms for a coordinator" is not
+   the bound of anything, and an earlier draft that claimed it was is
+   withdrawn.
+4. **The Store stops last**, and its `terminate/2` releases the writer marker
+   — see the marker invariant in ADR 0031. Stopping it last is what makes the
+   marker outlive every session operation that might still have needed it.
+   Then the socket path is unlinked and the owner **exits `0`**.
 
 One ordering consequence is worth stating because it reverses an earlier
 draft: clients are told *before* work is drained, not after. That is
@@ -848,14 +816,23 @@ deliberate. The drain does not need connections to exist, and a client that
 must reconnect elsewhere is better served by learning immediately than by
 waiting out a cleanup grace it cannot see.
 
-**Store loss, a fail-stop path.** The daemon supervisor is the Store adapter's
-parent, so the adapter's termination is reported to it with the adapter's own
-exit reason — that is the whole observation mechanism, and it needs no link
-the daemon does not already hold and no monitor it has to remember to set.
-Under `rest_for_one` the Store is child 1, so its failure takes the runtime,
-the lease owner and the listener with it, which is the refusal-of-service this
-path wants. The daemon reads the reason to classify the exit and then, without
-the ordered sequence:
+**Cancellation is not the daemon's to run**, which an earlier draft claimed.
+It is the coordinator's, as part of a session's own durable command, and a
+daemon-side cancellation path is precisely the second loop this milestone
+forbids. Two alternatives were rejected with it. Host-authorized durable
+aborts — the daemon admitting an abort per session on the way down — would
+have the daemon issuing mutations on nobody's authority, at the moment it is
+least able to see them through. An unbounded natural drain would make
+`SIGTERM` unbounded, which is not a stop.
+
+**Store loss, a fail-stop path.** The owner holds the Store's link and its
+pid, so the adapter's termination arrives as `{:EXIT, store_pid, reason}` at
+the owner's own clause, carrying the store's real reason. That clause is the
+fatal-class map's reader: it matches the pid, classifies `reason` as
+`store_capacity_exceeded` where that was the store's own refusal and
+`store_lost` otherwise, and has the class in hand before it does anything
+else. No link the owner does not already hold, no monitor to remember, and no
+information lost on the way. Then, without the ordered sequence:
 
 1. Refuse service immediately — no further admission, no further attach, and
    the listener closed.
@@ -866,9 +843,9 @@ the ordered sequence:
 4. Exit non-zero with that class on `stderr`. **There is no "stop the Store"
    step**, because the Store already stopped and the marker is already
    released; the next daemon finds no marker to recover rather than a stale
-   one. Nothing restarts the Store: the daemon supervisor's `max_restarts: 0`
-   makes this failure fatal to the tree rather than a restart, which is why
-   this path exists at all.
+   one. Nothing restarts the Store: the owner start_links its children and
+   restarts none of them, so any linked exit is fatal by its own clause —
+   which is why this path exists at all rather than being a restart.
 
 Nothing durable is at risk in that ordering: whatever was ambiguous is
 `commit_unknown` in the journal and is reconciled at the next activation, and
@@ -959,18 +936,18 @@ plan names as new. It is the thing to check a change against.
 
 | Boundary | Owner | What fails | Who observes it, and how | What the client sees | Durable / not durable |
 | --- | --- | --- | --- | --- | --- |
-| **Store ↔ daemon** | `loopex_store_local` owns the marker and the log; the **daemon supervisor** owns the Store process as child 1 | Append error, including the capacity refusal | The Store stops **itself** (`local.ex:251-270` answers `{:stop, reason, commit_unknown, state}`) and releases the marker in `terminate/2` (`local.ex:166`). Its parent is the daemon supervisor, so the exit reason is reported there — no link the daemon must arrange and no monitor it must remember. Under `rest_for_one` the failure also takes children 2 to 4 | `daemon.stopping` with `store_lost` or `store_capacity_exceeded`, one bounded attempt, then the socket closes | **Durable:** whatever committed. **Not:** the failed append; the in-flight transaction is `commit_unknown` and reconciles later |
+| **Store ↔ daemon** | `loopex_store_local` owns the marker and the log; the **daemon owner process** holds the Store's link and pid | Append error, including the capacity refusal | The Store stops **itself** (`local.ex:251-270` answers `{:stop, reason, commit_unknown, state}`) and releases the marker in `terminate/2` (`local.ex:166`). The owner's `{:EXIT, store_pid, reason}` clause receives it **with the store's real reason**, which is what distinguishes `store_capacity_exceeded` from `store_lost` | `daemon.stopping` with `store_lost` or `store_capacity_exceeded`, one bounded attempt, then the socket closes | **Durable:** whatever committed. **Not:** the failed append; the in-flight transaction is `commit_unknown` and reconciles later |
 | **Store ↔ daemon (startup)** | The adapter | Marker held, unverifiable, log too large | `WriterLock.acquire` refuses with `store_writer_active` / `store_writer_unverifiable`; `Log.open` refuses `store_log_too_large` (`log.ex:80-84`) | Nothing — no socket exists yet | **Not durable:** nothing was written. Reverse cleanup leaves no marker |
 | **Core ↔ daemon: existence query** | `loopex` answers; the daemon asks | Root unreadable, malformed ID, unrecognised answer | The query's own closed result set — `present`, `absent`, `invalid_id`, `store_unavailable`, `unexpected` (this plan's new core operation) | The matching refusal, four of them distinct; nothing created, nothing attached, no lease | **Not durable:** the query writes nothing, proved by a byte-identical root |
 | **Core ↔ daemon: attach** | `loopex` owns the cursor barrier, snapshot and queues | Barrier race, stale handle, queue overflow | Core's existing attach transaction and stale-handle checks; the daemon reads no coordinator state to repair a race | Snapshot then contiguous at-least-once events, or detachment at the last emitted cursor with a stable reason | **Durable:** the events. **Not:** the attachment, the window, the buffer |
 | **Core ↔ daemon: resume** | `loopex` | Placement mismatch, unknown session, already-resolved command | Core's existing resume path and command idempotency (`control.ex:901-907` returns the historical result without starting an owner) | Core's refusal, forwarded unchanged | **Durable:** the resume command and its result |
 | **Core ↔ daemon: commands** | `loopex` admits; the daemon forwards | **Coordinator death** | Core's `DynamicSupervisor` (`restart: :temporary`, `session_coordinator.ex:134-142`); `Control` consumes the `DOWN`, releases the fence and leaves the entry (`control.ex:821`). **No signal reaches the daemon, and none is owed** — the daemon supervises the runtime, not the coordinators beneath it | Core's existing refusal on the next command for that session, forwarded unchanged. `residency` still reads `active`, which remains true: this daemon did activate it | **Durable:** whatever committed before. **Not:** any claim about liveness |
-| **Lease owner ↔ connections** | `loopex_daemon` | The per-session lease owner dies, taking the in-flight admission set with it | The daemon supervisor, where the lease owner is child 3: `max_restarts: 0` makes the failure exceed intensity at once, so the supervisor terminates the tree in reverse start order and exits — ADR 0033's daemon-fatal rule, obtained from the supervision setting rather than from special-case code | `daemon.stopping` with `fatal:supervision_fault`, then every connection closes; the daemon restarts uncontrolled | **Not durable:** the lease, the epoch, the in-flight set. The journal is untouched |
+| **Lease owner ↔ connections** | `loopex_daemon` | The per-session lease owner dies, taking the in-flight admission set with it | The owner's `{:EXIT, pid, reason}` clause, which treats any linked exit as fatal — ADR 0033's daemon-fatal rule, obtained from one clause rather than from a strategy | `daemon.stopping` with `fatal:supervision_fault`, then every connection closes; the daemon restarts uncontrolled | **Not durable:** the lease, the epoch, the in-flight set. The journal is untouched |
 | **Lease owner ↔ connections (expiry)** | `loopex_daemon` | A holder stops renewing, or a mutation is unresolved at the deadline | The lease owner's own monotonic deadline; the in-flight set decides when a takeover is granted | The holder's next mutation refuses; a takeover is eligible at the deadline and granted when the in-flight set empties | **Not durable:** the lease. The mutation that was in flight settles or refuses exactly once |
 | **Listener ↔ connections** | `loopex_daemon` | Foreign peer, malformed frame, over-long path, backpressure | Filesystem permission verified after bind, then the per-platform peer-credential read (`LOCAL_PEERCRED` / `SO_PEERCRED`), then ADR 0023's framing refusals; backpressure at the 4 MiB output buffer | Closed before initialize for a peer refusal; a stable framing reason otherwise; detachment at the last emitted cursor under backpressure | **Not durable:** connections, buffers, windows |
 | **Registry ↔ sender ↔ custody** | The **host** owns the registry and custody; the adapter owns the sender. The token is bound at composition, resolved per invocation | No registry row, registry dead, custody dead, refusal, malformed reply, deadline | `route(handle, token)` answers `:unavailable`; custody answers one of the four atoms; the **guardian** enforces the deadline and kills the sender | The adapter's existing `Loopex.Model` refusal shape, with the atom in the bounded diagnostic | **Not durable:** nothing about credentials is ever journaled, and no span or record carries model `options` — the model span is a fixed identity map. The invocation's failure is durable |
 | **CLI ↔ socket** | `loopex_cli` | Socket unreachable, refusal, transport loss, renewal failure | The client's own reconnect loop and its renewal timer | Reconnect at the retained cursor, deduplicating; a failed renewal drops to observer with the loss on `stderr`; a reconnecting controller must acquire again for a fresh epoch | **Durable:** nothing the client holds. The cursor is a client-side position |
-| **Daemon ↔ OS: signals** | The operator | `SIGTERM` / `SIGINT` | The daemon supervisor terminates; reverse start order gives listener, lease owner, runtime, Store, and the runtime child's `shutdown` value — the composed cleanup grace — bounds the drain and ends in a kill | `daemon.stopping` with `operator_stop`, then close | **Durable:** whatever committed. **Not:** work ended crash-equivalently, for which no terminal is claimed |
+| **Daemon ↔ OS: signals** | The operator | `SIGTERM` / `SIGINT` | The owner stops its children in reverse order itself — listener, lease owner, runtime, Store — calling `Runtime.stop/1` under the composed cleanup grace and killing `runtime.supervisor` on expiry | `daemon.stopping` with `operator_stop`, then close | **Durable:** whatever committed. **Not:** work ended crash-equivalently, for which no terminal is claimed |
 | **Daemon ↔ OS: kill** | The operator | `SIGKILL`, power loss | Nothing runs — no handler, no `terminate/2` | The socket closes with no record at all | **Durable:** the journal. The marker is left for the next daemon's verified stale-writer recovery |
 | **Daemon ↔ OS: socket file** | `loopex_daemon` | A stale `daemon.sock` from a dead daemon | Only the marker holder may unlink and rebind, so two starts resolve at the marker and never at the socket | The loser exits without touching the socket | **Not durable:** the socket file is a path, never state |
 | **Daemon ↔ OS: marker** | `loopex_store_local` | Released in order, released early, or left behind | `terminate/2` in an orderly stop; `terminate/2` early on store loss; nothing on a kill | Nothing directly; the next daemon's start succeeds, succeeds, or recovers | **Not durable in the journal sense:** the marker is exclusion, not truth |
@@ -995,7 +972,10 @@ Concept: [Scope](M5.md#concept-plan-scope).
 
 The smallest sufficient system wins, and each addition below names what it
 unifies and why direct code is insufficient. One application, because a
-daemon is a host and a host is an application. One socket listener, one narrow
+daemon is a host and a host is an application. One daemon owner process, one new public composition function — which unifies
+the two callers that need the edges assembled, `RuntimeOwner` and the daemon's
+owner, and which direct code cannot replace because the alternative is a
+second copy of the whole wiring layer. One socket listener, one narrow
 core concurrent-attachment change, one read-only core existence query — which
 unifies the three daemon paths that must know whether an ID exists before
 doing anything with it (acquire, activation of a session the index does not

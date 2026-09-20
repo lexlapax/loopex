@@ -54,13 +54,15 @@ finding, because a successor acquire
 could then be granted while a forgotten admission was still able to settle.
 
 So a lease owner's failure is fatal to the daemon instance, and the daemon's
-supervision supplies that without special-case code: the lease owner is a
-child of the daemon's own supervisor, which carries `max_restarts: 0`, so the
-failure exceeds the restart intensity at once, the supervisor terminates its
-remaining children in reverse start order and exits. Every connection closes
-with it, and the daemon restarts with no lease anywhere, no connection and no
-session activated. No successor acquire exists to be granted wrongly, because
-no connection survives to make one.
+own structure supplies that without special-case code: the lease owner is one
+of four processes the daemon's owner process `start_link`s, the owner traps
+exits, and its `{:EXIT, pid, reason}` clause treats **any** linked exit as
+fatal. There are no restarts to configure and no strategy to get wrong. The
+owner classifies the exit as `fatal:supervision_fault`, has the listener tell
+every client, closes them, unlinks the socket and exits non-zero; the daemon
+comes back with no lease anywhere, no connection and no session activated. No
+successor acquire exists to be granted wrongly, because no connection
+survives to make one.
 
 That rule stands on its own, and this pair does not lean on core to help it.
 An earlier draft said core would fence the forgotten admission by epoch
@@ -101,11 +103,12 @@ the local store's writer marker, unchanged.
   session ID before attach. The daemon validates durable session existence
   first, and it does so with core's read-only session-existence query — the
   one that asks only whether the root holds that ID, with no attach, no
-  resume and no side effect. That answer also carries residency, so a daemon
-  whose client is asking to drive a session it has not activated refuses
-  `session_dormant` **here, before any lease is granted** — granting first and
-  refusing later would leave the client holding a lease that blocks the resume
-  it is being told to perform. That matters here more than anywhere: acquire
+  resume and no side effect. Its answer is one of the five in
+  ADR 0032's closed set and nothing more — it says whether the root holds the
+  session, not whether this daemon has activated it, which is a daemon fact
+  core does not carry. Acquisition therefore does **not** refuse a dormant
+  session: a dormant session is acquired here precisely so it can be resumed,
+  which is the sequence this ADR's concept sets out. That matters here more than anywhere: acquire
   must be safe to call on an ID that turns out to be unknown, and an earlier
   draft that learned existence by calling `attach` or `resume` would have
   taken a durable or attaching side effect to answer a question. The

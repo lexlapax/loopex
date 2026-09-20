@@ -242,17 +242,49 @@ boundary, not an absolute:
      every default configuration the credential-bearing work is untraced,
      which is the strong property and the one M5 proves first.
   2. **If a host explicitly names the adapter module**, its functions become
-     traceable — the sender inherits the trace flag, since `process_flags/2`
+     traceable — a host may name any module through the explicit-module route,
+     `supervised/1` recurses so the sender is in scope, and `process_flags/2`
      sets `:set_on_spawn` on every non-root traced process — and what protects
-     the bytes then is the redaction pass, which *is* implemented:
-     `Entry.render/2` calls `redact/3`, which replaces a credential-keyed
-     value with a `credential` placeholder and **any binary longer than the
-     identity bound with a `bytes` placeholder**. A credential is 1 to 65,536
-     bytes, so it is redacted by size even as a bare positional argument.
+     the bytes then is the redaction pass, which *is* implemented. But it
+     protects them **only in one shape**, and that shape is therefore part of
+     this contract rather than an implementation detail.
+
+     `Entry.render/2` calls `redact/3`, which placeholders a value whose
+     **key** matches `@credential_pattern` — `credential|secret|token|api[_-]?
+     key|password|authorization` — at any size, and otherwise placeholders a
+     binary only when it is **longer than `@identity_bytes`, which is 64**.
+     Bare list and tuple elements are walked with `key = nil` and a short
+     binary falls through to `redact(term, _, _) -> term`, returned verbatim.
+
+     An earlier draft of this pair concluded from that code that a credential
+     is "redacted by size even as a bare positional argument". **That is
+     false**, and running `Entry.render/2` says so:
+
+     | Credential size | Bare arg `[cred]` | Tuple `{:ok, cred}` | Keyed `%{credential: cred}` |
+     | --- | --- | --- | --- |
+     | 1 byte | **leaks** | **leaks** | placeholdered |
+     | 40 bytes | **leaks** | **leaks** | placeholdered |
+     | 51 bytes | **leaks** | **leaks** | placeholdered |
+     | 64 bytes | **leaks** | **leaks** | placeholdered |
+     | 65 bytes | placeholdered | placeholdered | placeholdered |
+
+     ADR 0019 admits a credential of 1 to 65,536 bytes, so the leaking range
+     is real, not hypothetical. The size reading is withdrawn with those
+     numbers recorded.
+
+  **So the shape is bound, and that is what makes the second tier true.** The
+  three functions below carry credential bytes **only as a value under a
+  credential-named key**, in every argument and every return value:
+  `receive_custody_reply/2` returns `{:ok, %{credential: bytes}}` and never
+  `{:ok, bytes}`; `write_credential_frame/2` takes that keyed map, not a bare
+  binary. Under `@credential_pattern` the key `credential` matches, so the
+  value is placeholdered at **any** size, including one byte. Nothing relies
+  on how long a credential happens to be.
 
   **The three functions stay, and their role is now precise.** They are not
   match-specification targets, because those do not exist; they are **the only
-  functions that touch credential bytes, all executed in the sender process**:
+  functions that touch credential bytes, all executed in the sender process,
+  and all carrying them keyed**:
 
   | Function | What it touches |
   | --- | --- |
@@ -262,9 +294,13 @@ boundary, not an absolute:
 
   Naming them is what makes the witness precise and the redaction obligation
   checkable: any credential byte in the parent passes through one of these
-  three and nowhere else. The names and arities are the contract, and a test
-  asserts they exist with these identities so an inlining or a rename breaks
-  the proof loudly rather than quietly moving bytes into an unnamed function.
+  three and nowhere else. The names, the arities **and the keyed shape** are
+  the contract, and one case asserts all three: that the functions exist with
+  these identities, and that calling each with a **one-byte** credential under
+  a trace session naming the module explicitly produces no entry containing
+  that byte. One byte is the point — it is the size at which a size-based
+  redaction would fail and a shape-based one does not — so an inlining, a
+  rename, or a change that passes bytes bare breaks the proof loudly.
 
   **The proof is two cases, matching the two tiers.** Under the **default**
   configuration, a real trace session at the `arguments` level over a real
