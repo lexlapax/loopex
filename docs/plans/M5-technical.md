@@ -806,6 +806,42 @@ when a session is activated, which cannot happen before a client connects.
 A failure at any step exits non-zero with that step's reason class, after the
 reverse cleanup below, and touches nothing after it.
 
+
+**Startup is interruptible, and the owner is monitored — both because a
+synchronous sequence inside one process is not, by itself, process-safe.**
+The steps above run in the owner, and while they run the owner is not reading
+its mailbox: a `SIGTERM` handled by `:erl_signal_server` becomes a message
+that waits, and a linked component's `{:EXIT, …}` waits beside it. Left
+alone, that means a daemon can take the marker, bind the socket and print
+readiness *after* a stop it has already been told about, or after a component
+it depends on has already died — and then read both and shut down, having
+announced itself ready in between.
+
+Two rules, both narrow:
+
+- **Before every acquisition, the owner drains and checks.** Before taking the
+  marker, before calling the composition function, before each edge the
+  function returns to it, before binding the socket and before printing the
+  readiness line, the owner reads whatever is in its mailbox for a stop
+  message or an `{:EXIT, …}`, and checks that every component it has already
+  started is alive. Any of those aborts the start into the reverse cleanup
+  above, which unwinds exactly what exists. Nothing is acquired after a stop
+  is known, and nothing is announced on top of a component that is gone.
+- **The process that started the owner monitors it.** The escript command
+  process — the one that called `start_link` — holds a monitor and, on `DOWN`,
+  halts non-zero with `owner_lost` on `stderr` immediately. That is where
+  `owner_lost` is actually observed: an earlier revision had it arriving only
+  when a *later signal* found no owner, which leaves a daemon whose owner has
+  crashed sitting with a bound socket, a held marker and nobody running it
+  until somebody happens to send `SIGTERM`. The signal handler's own backstop
+  stays as the second route, for the case where the owner dies in the instant
+  between the signal and the handler's send.
+
+Neither rule needs a new process or a supervisor: the drain is a receive with
+a zero timeout and a liveness check, and the monitor is the command process
+doing what it is already there to do — wait for the daemon to end and give the
+operating system an exit status.
+
 **One cost of matching the seam is stated rather than hidden.** The directory
 and index read is step 5, after the composition function has already taken the
 workspace lease and started the executor, so a root whose directory exceeds
@@ -1302,13 +1338,14 @@ a signal arriving before startup completes ends a daemon that holds nothing.
 state and makes no decision; the owner's own code runs the sequence, from its
 own process, exactly as it does for every other path.
 
-**The owner-loss backstop.** If the owner is not alive when the signal
-arrives — it crashed, or the signal raced its own start — there is nobody to
-run the sequence and nothing to wait for. The handler halts with
-`fatal:owner_lost` on `stderr` rather than returning and leaving the process
-running with a handler and no owner. That class is in the exit list above and
-in the fatal-class map's note, and it is the one class no linked component
-produces.
+**The owner-loss backstop is the second route, not the first.** `owner_lost`
+is normally observed by the **command process that started the owner and
+monitors it**, which halts non-zero the moment its `DOWN` arrives — see the
+startup rules above. The signal handler keeps its own version of the check for
+the one case that monitor cannot cover: a signal arriving in the instant
+between the owner's death and the monitor's `DOWN` being handled. In both
+routes the class is `owner_lost` on `stderr`, and it is the one class no
+linked component produces.
 
 **Three clocks, and no component invents a fourth.** An earlier revision gave
 every component "the composed cleanup grace" and gave the Store a floor over
@@ -2038,9 +2075,21 @@ the cause and try again without a recovery step.
   delivered before startup completes ends a daemon that holds no marker and
   has bound no socket, proved by a following daemon starting with nothing to
   recover.
-- **`owner_lost`.** The owner is killed while the daemon is otherwise healthy,
-  then `SIGTERM` is delivered. The process halts with `fatal:owner_lost` on
-  `stderr` rather than sitting with a handler and no owner.
+- **`owner_lost`, by the monitor and not by a later signal.** The owner is
+  killed while the daemon is otherwise healthy and **nothing else happens**:
+  no signal is sent. The case asserts the process halts non-zero with
+  `fatal:owner_lost` on `stderr` within a bounded time of the kill, which is
+  the command process's monitor doing it. A second case kills the owner and
+  *then* sends `SIGTERM`, asserting the same class by whichever route wins, so
+  the two cannot both fail silently.
+- **Startup is interruptible.** A `SIGTERM` is delivered mid-startup, at the
+  step before the marker is taken and again at the step before the socket is
+  bound. Each case asserts **no readiness line is printed**, that no marker is
+  held and no socket file exists afterwards, and that a following daemon
+  starts cleanly with nothing to recover. A third kills the Store immediately
+  after the composition call returns and asserts the start aborts into reverse
+  cleanup rather than binding a socket and announcing readiness on top of a
+  dead component.
 - **A lease owner's death is session-scoped, and the relay is what makes it
   safe.** A session is activated, a controller acquires it and an observer
   attaches; that session's lease owner is killed **while one of its admissions
