@@ -143,7 +143,7 @@ Concept: [Verification stages](M5.md#concept-plan-verification).
 | Outcome | Witness | What must be proved, beyond ordinary unit tests |
 | --- | --- | --- |
 | 1 | `apps/loopex_daemon/test/session_lifetime_test.exs` | A real daemon operating-system process per state root. The startup ordering and its readiness line: the line appears on `stdout` only after the marker is held and the socket is bound, permission-checked and accepting, a client connecting the instant it appears is served, and each of a held marker elsewhere, a failed socket permission check and an exceeded index bound prints no readiness line and exits non-zero with its own class. Orderly shutdown on `SIGTERM` sent to the daemon, and on `SIGINT` sent to the launcher that forwards it as `SIGTERM`: new connections refused and new admissions refused from that instant, then core's `quiesce/2` running two phases — every active session's abort durably admitted and paused **before any** cancellation begins, asserted from journal order across two sessions, then every cancellation released together — each abort being the command a client's own `session.abort` writes, under a `command_id` core mints fresh per session per drain and asserted to be one no client sent, and each unsettled or coordinator-less session fenced by a committed `advance_owner` so an older in-flight transaction is refused `:stale_owner_epoch` — no shutdown-specific field on the record, the cause reaching the operator through `daemon.stopping` and `stderr` instead — driving each session's in-flight work to settle under that session's own grace within a drain budget derived from `cancellation_bounds/1`, and at the deadline fencing and terminating every coordinator that did not settle before it answers — **both halves asserted**: a dispatched tool effect that settles carries its ordinary terminal fact in the journal, and one held past the budget leaves its coordinator dead at the instant it is reported with **no terminal claimed for that work** — no `cancelled`, no `outcome_unknown` — its ambiguous mutation left as `commit_unknown` and resolved to exactly one outcome when that session is next activated, one bounded best-effort `daemon.stopping` naming `operator_stop` attempted per open connection — asserted received where the transport accepts it and an EOF alone accepted where it does not — the socket pathname **left in place** — no exit path unlinks, and the next daemon removes it before binding, asserted by a following daemon starting cleanly on that root — the Store stopped last, and exit `0` — with the foreground server opening the same root immediately afterwards, which is what proves the marker was released, and the journal differing from what an abrupt death at the same instant would have left by exactly the admitted-abort records the drain wrote, with the unresolved transaction and its fence identical. **Store loss is a separate fail-stop, not that sequence**: the Store terminates itself and releases the marker before the daemon can act, so the daemon observes the death, refuses service, closes every connection with `store_lost` (or `store_capacity_exceeded` where that was the reason), unlinks and exits non-zero with that class on `stderr`, attempting no Store stop because there is none to attempt — proved by a second daemon starting on that root with no stale marker to recover. An active session progresses with zero attachments. An orderly stop releases the writer marker and records nothing false; an abrupt kill followed by restart activates nothing, then activates each session the root records when a client reaches for it, under the same placement identity and with no duplicate effect. The restart proves the marker path explicitly: the daemon opens with `recover_stale_writer: true`, a marker whose holder is proved dead is reclaimed, a marker whose holder is alive refuses with `store_writer_active`, and a marker whose holder cannot be decided refuses with `store_writer_unverifiable` — all three before the socket path is read, unlinked or bound. Simultaneous starts on one root resolve at the writer marker with exactly one listener and the loser never touching the socket. A root driven to the 256 MiB log capacity refuses the append with `store_capacity_exceeded`, the store terminates, the caller sees `commit_unknown`, and the daemon closes the listener and every connection and exits naming the capacity with nothing committed lost; a root whose log is already past that bound is refused at open with `store_log_too_large` rather than opened and truncated. `session.list` returns pages of at most 256 entries in session-ID order with an exact continuation cursor from the daemon index, carrying only session identity, recorded placement identity, `residency` and `controlled`. A session committed to the Store whose directory entry was never written — injected at that exact cut — is absent from the listing, still reachable by ID, and present in every listing after the activation that records it. A detached long-running command and a pending admission each cross the idle deadline with every client gone and run to completion, proving dormancy releases attachments and never a coordinator. The activation ceiling refuses the 65th activation of a daemon lifetime with `activation_ceiling_reached` and the restart remedy, and the count starts again after a restart because it counts per lifetime; a fresh `session.create` raises the count by one, and at the ceiling a create is refused with that same reason, so creation is proved to spend an activation rather than being exempt from the bound; attach consults the activation set rather than the listing index, proved at the 4,096-entry ceiling where a session activated but deliberately unrecorded still attaches; killing an activated session's coordinator leaves the daemon serving: the listing still reports `residency: active`, which remains true because this daemon did activate that session, and the next command for it returns core's own refusal forwarded unchanged, with the daemon adding and interpreting nothing; a root whose directory exceeds the recorded-entry bound refuses at start; at that bound a session reached by ID is activated and not recorded and the listing carries `index_full`; a session committed to the Store whose directory entry was never written is recovered both by its ID — validated through core's read-only existence query, with the case asserting the validation itself created no attachment and no durable record — and, by a client that never saw the ID, through ADR 0032's full command-identity sequence run to the end — replay `session.create` with the original `command_id`, core returns the historical result and so the session ID **without starting a coordinator**, the existence query answers `present`, the daemon repairs the directory entry and index row, control is acquired, and `session.resume` with a fresh resume command ID under the granted writer epoch is what activates the session — with the case asserting exactly one session in the root, the returned ID equal to the committed one, the replay itself starting no coordinator, the directory entry and index row present afterwards, the session listed, a live coordinator existing after the resume with the activation count risen by one, and a later prompt landing on that session and producing its events rather than on a second session or on nothing; an unknown ID answers negative from that query with nothing created, nothing attached and no lease granted; a directory write that fails during activation is reported to that client, leaves the session usable and reachable by ID while absent from `session.list`, and is written by the retry the next time the live daemon holds that ID — right after activation, on a later command for the session, or when a client reaches it by ID; a recorded session the daemon's composition cannot serve refuses at activation by name while every other session in the root activates. After an orderly stop the foreground server and the reference CLI reopen the same root and resume a daemon-created session under the same placement identity with identical replay. No durable method reaches the socket |
-| 2 | `apps/loopex_daemon/test/socket_transport_test.exs`, `apps/loopex_protocol/test/public_schema_conformance_test.exs` | A raw-byte client over the socket negotiates generation 2 and receives generation 2's **own** exact schema digest, written out as a literal in the conformance module beside generation 1's and different from it by construction: `LoopexProtocol.Session.schema_digest/0` is taken over the generation, the ordered methods, the ordered record families, the ordered error codes and the limits, and generation 2 changes **all five**, so a generation 2 that negotiated generation 1's digest would be reporting a contract it does not serve. Generation 1's **method inventory, record families, error codes and limits** are proved unchanged in the same module — the four inputs it keeps —, so the generation-2 work is proved additive rather than asserted to be — but **exactly one pinned literal moves, and the case asserts the move rather than the old equality**: the `3a17…08f4` **schema digest** at `public_schema_conformance_test.exs:291-292`, because `@generation` is one of the five inputs `schema_digest/0` hashes (`session.ex:192-199`). The **two file digests at `:297-298` do not move**, because the manifests they pin already carry `loopex.experimental/1` and contain no occurrence of the retired name. The generation assertion at `:282` changes with the code it checks. The case asserts the new schema digest against a freshly computed value and asserts the other four inputs are byte-identical to what generation 1 served in `0.1.0`, which is what separates a rename from drift. **And it adds the assertion whose absence let a released discrepancy survive**: `Session.generation()` equals each served generation's manifest `/generation`, for generation 1 and generation 2 alike, so generation 2's new manifest and pin cannot drift from its code the way generation 1's did. A `0.1.0` client's generations list is refused `unsupported_generation` with nothing created, and the repository's Node client is proved against the new string. A generation-1-only initialize is refused with nothing created. Generation 2's record families include `daemon.stopping` and `daemon.notice`, the second carrying `index_write_failed` for an activation whose directory write failed, with literal vectors for each `daemon.stopping` reason a **client can actually receive** — `operator_stop`, `store_lost`, `store_capacity_exceeded`, and one `fatal:<class>` per linked component of the fixed set (`runtime_lost`, `transfers_lost`, `workspace_lease_lost`, `executor_lost`, `registry_lost`, `custody_lost`, `relay_lost`, `listener_lost`), plus an uncorrelated `error` vector for `control_owner_lost`, carrying `session_id` and `event_cursor` and closing one session's controller attachment without ending the daemon, and vectors for `control_not_held`, `control_pending` and `control_capacity_reached` — and explicitly none for the startup-phase classes, which carry no vector because no socket exists when they occur and no client can be holding one, and its presence in the digest is what a generation 2 omitting it would fail on. Its delivery bound is proved both ways: a reading client receives the record before the close, and a client that has stopped reading until its 4 MiB output buffer is full receives nothing and is closed anyway, with the daemon making exactly one attempt and never blocking on it. Identical durable identities for the same command corpus through facade, foreground server and socket. Owner-only peer access proved in both layers: the socket's `0700` daemon-owned subdirectory and `0600` socket mode read back after bind, a permissive subdirectory or socket mode refused at start, a subdirectory the daemon does not own refused, a path component below the root that it did not create refused — and a state root at the ordinary `0755` the foreground server creates it with accepted, not refused, because the daemon owns the subdirectory and never re-permissions the root — and an unreadable or undecodable peer credential closing the connection before initialize — all in the fast check, which needs no second user — with the real cross-uid refusal and the same-uid success carried by two `@tag :cross_uid` cases the release check runs as `mix test --only cross_uid` on its single run, which closure requires to be on Linux, and where the script asserts exactly two executed tests so neither a zero nor a lone survivor can pass. Frame, fragment, malformed-input and over-long socket path refusals with distinct stable reasons, the path cases binding at the derived bound and at one byte past it on each platform the release check runs. A client disconnect recorded as transport loss with no cancellation and no interaction change. The generation-2 vectors are literal bytes with literal verdicts, held beside generation 1's in `apps/loopex_protocol/test/public_schema_conformance_test.exs`, never values generated from the implementation they check |
+| 2 | `apps/loopex_daemon/test/socket_transport_test.exs`, `apps/loopex_protocol/test/public_schema_conformance_test.exs` | A raw-byte client over the socket negotiates generation 2 and receives generation 2's **own** exact schema digest, written out as a literal in the conformance module beside generation 1's and different from it by construction: `LoopexProtocol.Session.schema_digest/0` is taken over the generation, the ordered methods, the ordered record families, the ordered error codes and the limits, and generation 2 changes **all five**, so a generation 2 that negotiated generation 1's digest would be reporting a contract it does not serve. Generation 1's **method inventory, record families, error codes and limits** are proved unchanged in the same module — the four inputs it keeps —, so the generation-2 work is proved additive rather than asserted to be — but **exactly one pinned literal moves, and the case asserts the move rather than the old equality**: the `3a17…08f4` **schema digest** at `public_schema_conformance_test.exs:291-292`, because `@generation` is one of the five inputs `schema_digest/0` hashes (`session.ex:192-199`). The **two file digests at `:297-298` do not move**, because the manifests they pin already carry `loopex.experimental/1` and contain no occurrence of the retired name. The generation assertion at `:282` changes with the code it checks. The case asserts the new schema digest against a freshly computed value and asserts the other four inputs are byte-identical to what generation 1 served in `0.1.0`, which is what separates a rename from drift. **And it adds the assertion whose absence let a released discrepancy survive**: `Session.generation()` equals each served generation's manifest `/generation`, for generation 1 and generation 2 alike, so generation 2's new manifest and pin cannot drift from its code the way generation 1's did. A `0.1.0` client's generations list is refused `unsupported_generation` with nothing created, and the repository's Node client is proved against the new string. A generation-1-only initialize is refused with nothing created. Generation 2's record families include `daemon.stopping` and `daemon.notice`, the second carrying `index_write_failed` for an activation whose directory write failed, with literal vectors for each `daemon.stopping` reason a **client can actually receive** — `operator_stop`, `store_lost`, `store_capacity_exceeded`, and one `fatal:<class>` per linked component of the fixed set (`runtime_lost`, `transfers_lost`, `workspace_lease_lost`, `executor_lost`, `registry_lost`, `custody_lost`, `capability_lost`, `relay_lost`, `listener_lost`), plus an uncorrelated `error` vector for `control_owner_lost`, carrying `session_id` and `event_cursor` and closing one session's controller attachment without ending the daemon, and vectors for `control_not_held`, `control_pending` and `control_capacity_reached` — and explicitly none for the startup-phase classes, which carry no vector because no socket exists when they occur and no client can be holding one, and its presence in the digest is what a generation 2 omitting it would fail on. Its delivery bound is proved both ways: a reading client receives the record before the close, and a client that has stopped reading until its 4 MiB output buffer is full receives nothing and is closed anyway, with the daemon making exactly one attempt and never blocking on it. Identical durable identities for the same command corpus through facade, foreground server and socket. Owner-only peer access proved in both layers: the socket's `0700` daemon-owned subdirectory and `0600` socket mode read back after bind, a permissive subdirectory or socket mode refused at start, a subdirectory the daemon does not own refused, a path component below the root that it did not create refused — and a state root at the ordinary `0755` the foreground server creates it with accepted, not refused, because the daemon owns the subdirectory and never re-permissions the root — and an unreadable or undecodable peer credential closing the connection before initialize — all in the fast check, which needs no second user — with the real cross-uid refusal and the same-uid success carried by two `@tag :cross_uid` cases the release check runs as `mix test --only cross_uid` on its single run, which closure requires to be on Linux, and where the script asserts exactly two executed tests so neither a zero nor a lone survivor can pass. Frame, fragment, malformed-input and over-long socket path refusals with distinct stable reasons, the path cases binding at the derived bound and at one byte past it on each platform the release check runs. A client disconnect recorded as transport loss with no cancellation and no interaction change. The generation-2 vectors are literal bytes with literal verdicts, held beside generation 1's in `apps/loopex_protocol/test/public_schema_conformance_test.exs`, never values generated from the implementation they check |
 | 3 | `apps/loopex_daemon/test/collaboration_test.exs` | One lease per session in daemon memory with observers attached. Connection identity, epoch, held state and unexpired term checked together before core admission or any durable write, including a known current epoch sent by an observer. Takeover only after release or expiry, with a fresh epoch minted before the successor's first command. A killed controller fenced and its late commands refused. The three ways a controller stops holding, proved separately because the transport cannot tell two of them apart: an explicit `session.release_control` frees the lease at once, while an EOF from a politely closed client and a killed client both wait for expiry, with a takeover refused before the deadline and granted after. A lease owner killed while a mutation is in flight taking neither the daemon nor any other session down: that session's controller attachment closed with `control_owner_lost`, its observers still attached and still receiving, the relay's ticket for the in-flight mutation retained, the replacement owner's first grant held until that ticket settles, and the previous holder's delayed command refused on both the holder and the epoch check. A daemon restart leaving every session uncontrolled with every earlier epoch refused. A controller abort cancelling work dispatched under an earlier process with a truthful cleanup outcome. The expiry linearization: a mutation blocked inside core across the deadline settles under its own lease while the eligible takeover waits and is granted only after it resolves; the holder's next mutation refused at the deadline; the acquiring request refusing with `control_pending` when its own deadline elapses first; and the holder disconnecting while a mutation is in flight — in every case exactly one of settle or refuse, never both. No control from content, metadata, answers or attachment order. Forward and backward wall-clock jumps changing neither live admission nor takeover timing |
 | 4 | `apps/loopex/test/concurrent_attachments_test.exs`, `apps/loopex/test/session_existence_query_test.exs`, `apps/loopex_daemon/test/replay_residency_test.exs` | Core's read-only session-existence query answers exactly one of the closed set `present`, `absent`, `invalid_id`, `store_unavailable` and `unexpected`, from a fresh process against a real root, with one case per result. `store_unavailable` is injected through the controllable fault store the suite already has, `Loopex.M1RuntimeTestStore`, whose `fail_reads/2` hook makes its reads refuse — not by making the root unreadable, which cannot produce that answer on the real adapter: `Loopex.Store.Local` answers `ownership_head` from `state.store`, in memory, so a root that has become unreadable on disk still answers. `unexpected` is injected by a stub answering outside the set. It is proved to create no attachment, no incarnation, no durable record and no Store write: the root's journal and session directory are byte-identical before and after a run of queries, including for unknown and malformed IDs. Control acquisition proceeds only on `present`; the other four fail closed with no attachment, no lease and no activation, and name four distinct reasons, so an unreadable store is never reported as an unknown session. Several core attachments to one session remain independent when one detaches or backpressures. A snapshot anchored at the committed sequence, then contiguous at-least-once buffered and live delivery across the window boundary with no gap. Core is the only replay owner: every delivery case runs a second time with the daemon's resident window disabled and a third with it dropped mid-stream, all three byte for byte identical, so the window is proved to establish no snapshot and no cursor. Aggregate reclamation follows the fixed order ADR 0032 sets — zero-attachment windows by ascending last delivery, then the furthest-behind session's window, then detachment — including the case where zero-attachment windows alone consume the ceiling. A slow observer detached at its last emitted cursor while the controller and the other attachments continue. Per-session and per-daemon limits refusing independently. Idle eviction and reconnect with no missing durable event, any duplicate deduplicated by session ID, sequence and event ID. Retained encoded bytes at or below the 4 MiB output buffer, 16 MiB window and 512 MiB aggregate ceilings, enforced in the daemon-owned stages, exercising 512 attachments and maximum-sized output records separately, with observed process RSS recorded beside the ceilings. Progress coalesced or dropped with counted drops and no journal delay |
 | 5 | `apps/loopex_daemon/test/multi_client_workflow_test.exs`, `apps/loopex_daemon/test/external_socket_workflow_test.exs`, `docs/evidence/M5-closure-runs.md` | The operator workflow end to end, each step a command an operator types: `loopex daemon` refusing once per missing or invalid composition input with its own class and leaving no marker or socket behind, then starting and printing the one-line JSON readiness record; `loopex run --daemon` creating and driving a session; `loopex resume --daemon` activating a dormant one through acquire, resume with a fresh command ID, attach; `loopex attach` refused with `session_dormant` at the **attach** step against a session this daemon has not activated, in both roles, while `loopex resume --daemon` acquires that same dormant session and succeeds — the two asserted together, since refusing dormancy at acquisition would break the resume path; `--take-over` on a dormant session asserted to release its lease before exiting, proved by `loopex resume --daemon` succeeding immediately afterwards rather than refusing `control_held`; a CLI holding a lease attempting an explicit release on every exit path where its transport is still writable, and the killed-client case asserted to differ — no release, the lease waiting out its term, which is what ADR 0033 already fixes; `--after` starting strictly after a sequence and its absence replaying from `0`; a controller whose renewal fails continuing as an observer and sending no further mutation; a reconnecting controller retrying acquisition with backoff until its own lease can have expired and then holding a fresh lease with a fresh epoch before any mutation, and the variant where another client took over meanwhile exiting `control_held` rather than retrying against a live holder. From a fresh extraction of the exact candidate — staged with `git archive`, extracted and built outside the checkout — an operator follows the documented prerequisites and commands, supplies workspace, provider and policy inputs, starts the daemon, and drives one session from the reference CLI as controller and the Node client as observer, kills the controller, takes over from the observer and aborts cross-process work. The documented CLI build and the provider companion build both run inside that extraction, on the archive-carried source identity rather than on `.git`, with the missing, unsubstituted-or-malformed, changed-during-build and mismatched-commit refusals each proved and the identity the build reports asserted equal to the commit the archive was staged from. The attended real-provider cases run from that extraction, against the escript it built there. The workflow drives ADR 0030's existing core spans end to end — command admission, commit, effect intent, publication, interaction, and the model, store, policy and executor port callbacks — with the same bounded identity metadata an embedded caller produces, and no event outside that closed inventory is emitted by anything M5 adds. Daemon-internal functions are proved by the daemon's own tests and logs: `Loopex.Trace` traces only processes the runtime owns, flagged with `set_on_spawn` from the runtime's supervisor, and the daemon's listener, connections and lease owners are host processes above the runtime, so no trace-session witness is claimed for them. `VERSION` in the extracted tree is exactly `0.2.0`. Every tracked file under `docs/operator/` and `docs/developer/` has been read against the candidate, including the ones M5 leaves unchanged, recorded as a checklist derived at that commit — `git ls-files -- docs/operator docs/developer`, sorted, one row per path, each row marked *updated* or *reviewed unchanged* — retained with the closure runs. The derivation is over **every tracked file** in those two trees, not only Markdown, and that is deliberate: the gate promises that every file under them was read, so a diagram, a fixture or a data file added later must appear rather than slip through a `*.md` filter that was true when it was written and silently false afterwards. It also avoids a pathspec trap, checked rather than assumed: `git ls-files 'docs/operator/**/*.md'` without `:(glob)` matches nothing at all and would have made the gate pass vacuously. The directory form returns 26 tracked files as of this revision — 18 under `docs/developer/` and 8 under `docs/operator/`, all Markdown today — and the closure checklist states the count it derived so a reviewer can see the list was not empty, with every path in the tree present, no row unmarked, and each finding named and resolved before the closure packet |
@@ -719,7 +719,7 @@ in full, and this list is derived from it rather than summarising it:
 - **while running**, one per linked component in the fixed set: `store_lost`,
   `store_capacity_exceeded`, `runtime_lost`, `transfers_lost`,
   `workspace_lease_lost`, `executor_lost`, `registry_lost`, `custody_lost`,
-  `relay_lost` and `listener_lost`. A lease owner's death is **not** in this
+  `capability_lost`, `relay_lost` and `listener_lost`. A lease owner's death is **not** in this
   list: it is
   session-scoped, closes that session's controller with `control_owner_lost`,
   and the daemon keeps running;
@@ -954,10 +954,19 @@ exotic one. Every daemon call that consumes a ceiling therefore carries an
 explicit timeout rather than inheriting that default, and resolves its
 reservation by observation when the timeout is what it gets.
 
-A call that gives the daemon no answer may still have started a coordinator, so releasing the
-reservation would let the ceiling be exceeded and converting it would spend a
-slot that may not exist; asking is the only honest resolution, and the daemon
-already has a read-only query for exactly this class of question.
+A call that gives the daemon no answer may still have started a coordinator, so
+releasing the reservation would let the ceiling be exceeded and converting it
+would spend a slot that may not exist; asking is the only honest resolution.
+
+**For a resume the daemon can ask directly; for a create it cannot**, and an
+earlier revision of this table missed the difference. A create's reservation
+is keyed by the create `command_id`, because no session ID exists when it is
+taken, and core's existence query takes a **session ID**. So the create's
+resolution is one step longer: replay the create under its original
+`command_id`, which returns the historical result without starting a
+coordinator (`control.ex:901-907`), take the session ID from it, and then ask
+about that ID. The replay is idempotent by construction and carries the same
+reservation key, so it charges no second slot.
 
 `loopex attach --take-over` against a dormant session therefore acquires
 successfully and is refused at attach, holding a lease it no longer wants.
@@ -1163,23 +1172,29 @@ So `apps/loopex_daemon` has one top-level process, `Loopex.Daemon.Owner`, a
 `GenServer` that traps exits and holds the links itself — the same pattern
 `RuntimeOwner` already uses, for the same reason.
 
-**It links a fixed set of nine processes — eight without artifact
+**It links a fixed set of ten processes — nine without artifact
 transfers — and a bounded, dynamic population of lease owners beside them.**
-Earlier drafts said four, then seven, each time having counted the components
-the daemon *thinks* about rather than the processes that actually exist. The
-fixed set is this:
+Earlier drafts said four, then seven, then nine, each time having counted the
+components the daemon *thinks* about rather than the processes that actually
+exist. The fixed set is this:
 
 | Start order | Linked process | Where it comes from | Optional? |
 | --- | --- | --- | --- |
 | 1 | The credential **routing registry** | The daemon's own, as the host ADR 0034 names | no |
 | 2 | The credential **custody process** | The daemon's own, as the host ADR 0034 names | no |
-| 3 | The Store adapter | `start_edge(Store.Local, …)` | no |
-| 4 | The artifact transfers owner | `start_edge(Transfers, …)` | **yes** — only when transfers are enabled |
-| 5 | The workspace lease | `start_edge(WorkspaceLease, …)` | no |
-| 6 | The local executor | `start_edge(Local, …)` | no |
-| 7 | The runtime root | `start_edge(Loopex, …)` | no |
-| 8 | The **admission relay** | The daemon's own; every core call the daemon makes is routed through it | no |
-| 9 | The listener | Bound and permission-checked last, so nothing accepts before the rest exists | no |
+| 3 | The **tracing capability** | The daemon's own, as the host ADR 0034 names; it holds the runtime reference and resolves the current tracer for `exclude_self/1` | no |
+| 4 | The Store adapter | `start_edge(Store.Local, …)` | no |
+| 5 | The artifact transfers owner | `start_edge(Transfers, …)` | **yes** — only when transfers are enabled |
+| 6 | The workspace lease | `start_edge(WorkspaceLease, …)` | no |
+| 7 | The local executor | `start_edge(Local, …)` | no |
+| 8 | The runtime root | `start_edge(Loopex, …)` | no |
+| 9 | The **admission relay** | The daemon's own; every ticketed mutation is routed through it | no |
+| 10 | The listener | Bound and permission-checked last, so nothing accepts before the rest exists | no |
+
+The tracing capability starts with the other two host-owned processes and
+before composition, for the reason all three share: model options carry their
+references, and options are built before the runtime exists. It is handed the
+runtime reference as soon as the composition function returns one.
 
 **The admission relay is new in this revision, and it exists because of a
 window nothing else closes.** Core has no writer epoch — the lease is the
@@ -1277,8 +1292,8 @@ have settled has no owner at all. The two populations are not the same set,
 and tying one to the other's number would have made the bound wrong the first
 time an operator took control of a dormant session.
 
-**The registry and the custody process are first, and that is forced rather
-than chosen.** ADR 0034 makes the *host* own both, and for a daemon the host
+**The registry, the custody process and the tracing capability are first, and
+that is forced rather than chosen.** ADR 0034 makes the *host* own both, and for a daemon the host
 is the daemon. The runtime's model configuration carries the registry handle
 and the token in `options`, so both processes must exist before the
 composition function builds that configuration — which means before the
@@ -1291,7 +1306,8 @@ runtime last within that chain, because it depends on all of them.
 
 **The stop order is the reverse, with one deliberate exception.** Reversed:
 listener, then **every lease owner**, then the **relay**, then runtime,
-executor, workspace lease, transfers, custody, registry — and then **the
+executor, workspace lease, transfers, then the tracing capability, custody and
+the registry — and then **the
 Store, last of all**, out of reverse order. The lease owners go before the
 relay because the relay is what holds their tickets, and stopping it first
 would discard a ticket an owner could still be waiting on. They are stopped
@@ -1322,7 +1338,7 @@ runs no dialyzer, and `RuntimeOwner` itself already destructures the field, at
 not, and the real argument is the simpler one above.
 
 **There is no restart strategy, because there are no restarts.** Every one of
-the fixed nine — eight without transfers — is `start_link`ed by the owner,
+the fixed ten — nine without transfers — is `start_link`ed by the owner,
 as is each lease owner beside them, and the owner's
 `handle_info({:EXIT, pid, reason}, state)` clause is the failure rule. That
 clause is also the **reader** the fatal-class map needs — it matches the pid
@@ -1837,8 +1853,8 @@ the owner fixes.
    order puts the executor, the workspace lease and the transfers owner
    between the runtime and the Store, and each is stopped in turn — the
    executor first, since stopping it is what sets its Port-owning workers
-   terminating the captured process groups. Then custody and the registry,
-   which hold nothing durable. Then the Store, whose `terminate/2` releases the writer marker —
+   terminating the captured process groups. Then the tracing capability,
+   custody and the registry, which hold nothing durable. Then the Store, whose `terminate/2` releases the writer marker —
    see the marker invariant in ADR 0031. The socket path is already gone,
    left in place by step 3 for the next marker holder to remove, so the last
    act is the halt: **`0`**, or the class,
@@ -1863,7 +1879,7 @@ the owner fixes.
    | The executor | What remains of **`teardown_ms`** | Nothing, in the executor itself: it neither traps exits nor defines `terminate/2`, so this stop returns quickly. What takes the time is the Port-owning workers it sets going, which the owner does not hold and cannot wait for |
    | The workspace lease | What remains of `teardown_ms` | Nothing: it has no `terminate/2` and holds no file — the lease *is* the live process, so stopping it revokes it |
    | The transfers owner | What remains of `teardown_ms` | Closing the open transfer descriptors its `terminate/2` holds (`transfers.ex:146-149`) |
-   | Custody, then the registry | What remains of `teardown_ms` | Nothing durable |
+   | The tracing capability, then custody, then the registry | What remains of `teardown_ms` | Nothing durable |
    | **The Store** | A **fixed 30 s**, its own phase | Its `terminate/2`, which releases the writer marker (`local.ex:166`) |
 
    **"What remains" is one deadline, not one budget each.** The owner computes
@@ -2080,14 +2096,33 @@ Loopex.Runtime.quiesce(runtime, drain_deadline_ms) ::
 
    So quiesce installs a fence the **Store** enforces, using machinery that
    already exists. After terminating an unsettled coordinator it commits an
-   **`advance_owner` transaction** for that session — the type the Store
-   already defines, binding `expected_owner_epoch` and
-   `expected_journal_version` and proposing a new incarnation
-   (`store.ex:168-178`, linearized at `state/local/state.ex:241-254`). Once it
-   commits, the session's `owner_epoch` has moved, and any older
-   `session_commit` the Store linearizes afterwards is refused
-   **`:stale_owner_epoch`** by the rule that already governs every commit
-   (`state.ex:548-551`).
+   **`advance_owner` transaction** for that session (`store.ex:168-178`,
+   built by `Store.advance_owner/6` at `store.ex:820-827`, linearized at
+   `state/local/state.ex:241-254`). Once it commits, the session's
+   `owner_epoch` has moved, and any older `session_commit` the Store
+   linearizes afterwards is refused **`:stale_owner_epoch`** by the rule that
+   already governs every commit (`state.ex:548-551`).
+
+   **That transaction has six arguments and the plan names where each comes
+   from**, because a fence built from guesses is a fence that refuses the
+   wrong thing:
+
+   | Argument | Where quiesce gets it |
+   | --- | --- |
+   | `session_id` | The session being fenced |
+   | `mutation_domain` | The ownership domain, as every owner transaction uses |
+   | `tx_id` | **Derived, not random**, by the discipline the coordinator already uses: `owner_identity/3` hashes a namespace, a succession identity and an attempt into a stable ID (`session_coordinator.ex:1346`, `:1490-1498`). Quiesce derives its own from the drain's identity — the session and the `command_id` it minted for that session's abort — so the fence has a preallocated, recoverable ID rather than a fresh guess, which is what the durability rule requires of any effect identity |
+   | `expected_owner_epoch`, `expected_journal_version` | Read **fresh** from `Store.ownership_head/3`, exactly as the coordinator reads them (`session_coordinator.ex:1337-1343`), so the fence binds the state it is actually fencing |
+   | `proposed_owner_incarnation_id` | A fresh incarnation, in the same form the coordinator mints (`fresh_incarnation/2`, `:1500`) |
+
+   **The proposed incarnation is a fence marker, not an owner**, and nothing
+   inherits it. The next activation of that session builds its own candidate
+   from the head it reads at that moment —
+   `discover_and_advance_owner/1` reads `ownership_head/1` and then
+   `build_owner_candidate/2` (`session_coordinator.ex:1186-1196`,
+   `:1345-1359`) — so the fence's incarnation is simply the head that the next
+   activation supersedes. Fencing therefore costs the next activation one
+   ordinary epoch step and nothing else.
 
    That turns an unanswerable question into a decided one. An old transaction
    either wins the race to linearization — in which case it commits, is
@@ -2306,7 +2341,8 @@ is fine — the Store was already stopped in step 6, and its `terminate/2` ran
 then. On the **fatal** path it was not fine, and an earlier draft left a real
 hole: for the classes where the Store is still alive (`runtime_lost`,
 `transfers_lost`, `workspace_lease_lost`, `executor_lost`, `registry_lost`,
-`custody_lost`, `relay_lost`, `listener_lost`), nothing stopped the Store, so the halt
+`custody_lost`, `capability_lost`, `relay_lost`, `listener_lost`), nothing
+stopped the Store, so the halt
 left the marker file behind on a daemon that had shut down deliberately. The
 fail-stop path above therefore stops the Store on every fatal class
 **except** the two store classes, where it is already gone.
@@ -2340,6 +2376,7 @@ die without a name for it.
 | `executor_lost` | The local executor exited | `fatal:executor_lost` |
 | `registry_lost` | The credential routing registry exited | `fatal:registry_lost` |
 | `custody_lost` | The credential custody process exited | `fatal:custody_lost` |
+| `capability_lost` | The tracing capability exited | `fatal:capability_lost` |
 | `runtime_lost` | The runtime root exited | `fatal:runtime_lost` |
 | `relay_lost` | The admission relay exited, taking every outstanding admission ticket with it | `fatal:relay_lost` |
 | `listener_lost` | The listener exited | `fatal:listener_lost` |
@@ -2362,10 +2399,12 @@ apart in an earlier revision and the numbers are gone for that reason. There
 is one row per linked process, and the transfers row exists only in a daemon
 that has one.
 
-**`registry_lost` and `custody_lost` are fail-stop like every other row, and
-that follows from ADR 0034 rather than adding to it.** That ADR makes a dead
-registry answer `:unavailable` for every later resolution *until the host
-recomposes*; in a daemon, recomposing is restarting the process. A daemon that
+**`registry_lost`, `custody_lost` and `capability_lost` are fail-stop like
+every other row, and that follows from ADR 0034 rather than adding to it.**
+That ADR makes a dead registry answer `:unavailable` for every later
+resolution *until the host recomposes*, and makes a sender that cannot
+confirm its trace exclusion refuse rather than resolve; in a daemon,
+recomposing is restarting the process. A daemon that
 kept running would serve a runtime whose every model invocation refuses for a
 reason no client can fix, which is exactly the shape the fail-stop rule
 exists for.
@@ -2403,7 +2442,7 @@ path does — a `daemon/` subdirectory the owner created is removed — no lease
 yet, since none is started before a session is activated — and **every pid the
 composition function returned is stopped in reverse
 start order** — runtime, executor, workspace lease, transfers where it exists
-— then custody and the registry, and the Store last, so its `terminate/2`
+— then the tracing capability, custody and the registry, and the Store last, so its `terminate/2`
 releases the marker.
 
 Each of those stops is the same call and the same discipline as a shutdown
@@ -2552,7 +2591,8 @@ next daemon removes before binding.
   opening that root with nothing to recover; eight of them in a daemon with
   transfers enabled and seven without — `runtime_lost`, `transfers_lost`,
   `workspace_lease_lost`, `executor_lost`, `registry_lost`, `custody_lost`,
-  `relay_lost`, `listener_lost`, beside the two store classes. The set is closed for the
+  `capability_lost`, `relay_lost`, `listener_lost`, beside the two store
+  classes. The set is closed for the
   fixed set, so one of those dying without a class is a failing case rather
   than a silent `:shutdown`. A lease owner is deliberately not in this case:
   its own witness is below, and it asserts the daemon **keeps running**.
@@ -2656,8 +2696,9 @@ next daemon removes before binding.
   five-hundred-and-thirteenth owner was started and that releasing one lease
   lets the next acquisition through.
 - **The credential processes are fatal like every other component.** The
-  registry and the custody process are each killed in their own case; the
-  daemon exits `registry_lost` and `custody_lost` respectively, sends that
+  registry, the custody process and the tracing capability are each killed in
+  their own case; the daemon exits `registry_lost`, `custody_lost` and
+  `capability_lost` respectively, sends that
   `fatal:<class>` on the wire, and leaves no stale marker.
 - **The stop timeout is exercised, not assumed.** A session is made to hold
   the runtime's teardown past the shared teardown deadline. The case asserts the
@@ -2728,8 +2769,12 @@ next daemon removes before binding.
 - **Every branch releases or converts its reservation.** One case per row of
   the resolution table: a fresh create, a replayed create against an active
   and a dormant session, a fresh resume, a replayed resume, a refusal, and a
-  call that never answers. Each asserts the daemon's remaining slot count
-  afterwards, so a branch that leaked a reservation shows up as a daemon that
+  call that never answers — the last one twice, once for a resume, resolved by
+  asking about the session ID the daemon holds, and once for a **create**,
+  resolved by replaying under the original `command_id`, reading the session
+  ID from the historical result and asking about that; the create case asserts
+  the replay started no coordinator and charged no second slot. Each asserts
+  the daemon's remaining slot count afterwards, so a branch that leaked a reservation shows up as a daemon that
   refuses early rather than as a silent drift.
 - **Reverse cleanup.** A startup made to fail after the marker is acquired —
   at the socket permission check and at the index bound, separately — leaves
@@ -2762,14 +2807,14 @@ owned by core, the adapter or the executor appears as a **group with its
 owner**, because their counts are those components' business and naming them
 individually would make this table a copy that rots.
 
-**The daemon's fixed processes — nine, eight without transfers:**
+**The daemon's fixed processes — ten, nine without transfers:**
 
 | Process | Started by | Linked to | Stopped by | Its death |
 | --- | --- | --- | --- | --- |
 | **Daemon owner** | The `loopex daemon` command process, `GenServer.start/3` — **unlinked**, monitored immediately | Nothing; the command process holds a monitor | Itself; it halts the VM | The command process halts non-zero with `owner_lost`; the signal handler's backstop is the second route |
 | Credential routing **registry** (ADR 0034) | Daemon owner, first | Daemon owner | Orderly step 6 | `registry_lost`, daemon-fatal |
 | Credential **custody process** (ADR 0034), one for the one composed model configuration | Daemon owner, second | Daemon owner | Orderly step 6 | `custody_lost`, daemon-fatal |
-| **Tracing capability** (ADR 0034) | Daemon owner, beside the other two | Daemon owner | Orderly step 6 | Treated as the registry is: daemon-fatal, since a sender that cannot exclude itself must not resolve |
+| **Tracing capability** (ADR 0034) | Daemon owner, third, before composition | Daemon owner | Orderly step 6 | `capability_lost`, daemon-fatal: a sender that cannot confirm its trace exclusion refuses rather than resolves, so every model invocation would fail for a reason no client can fix |
 | **Store adapter** (ADR 0031) | The composition function, in the owner's process | Daemon owner | Orderly step 6, **last**, in its own fixed 30 s phase | `store_lost`, or `store_capacity_exceeded` on its own capacity refusal |
 | **Artifact transfers owner** | The composition function | Daemon owner | Orderly step 6 | `transfers_lost`. **Absent** where transfers are disabled |
 | **Workspace lease** | The composition function | Daemon owner | Orderly step 6 | `workspace_lease_lost` |
@@ -2822,7 +2867,7 @@ survive arrives as `runtime_lost`.
 | **Lease owner ↔ connections** | `loopex_daemon` | A session's lease owner dies; its in-flight admission set goes with it, and the relay's ticket for any mutation it had authorized does not | The owner's `{:EXIT, pid, reason}` clause maps the pid to **its session** rather than to a daemon class — the one session-scoped row in this table, on the maintainer's decision of 2026-09-20 | That session's controller attachment closes with `control_owner_lost`; observers stay attached; the next `session.acquire_control` starts a fresh owner and mints a fresh epoch, its first grant waiting until the relay's outstanding tickets for that session settle | **Not durable:** the lease, the epoch, the in-flight set. The journal is untouched, and a mutation already inside core settles or refuses exactly once under core's serial ownership |
 | **Lease owner ↔ connections (expiry)** | `loopex_daemon` | A holder stops renewing, or a mutation is unresolved at the deadline | The lease owner's own monotonic deadline; the in-flight set decides when a takeover is granted | The holder's next mutation refuses; a takeover is eligible at the deadline and granted when the in-flight set empties | **Not durable:** the lease. The mutation that was in flight settles or refuses exactly once |
 | **Listener ↔ connections** | `loopex_daemon` | Foreign peer, malformed frame, over-long path, backpressure | Filesystem permission verified after bind, then the per-platform peer-credential read (`LOCAL_PEERCRED` / `SO_PEERCRED`), then ADR 0023's framing refusals; backpressure at the 4 MiB output buffer | Closed before initialize for a peer refusal; a stable framing reason otherwise; detachment at the last emitted cursor under backpressure | **Not durable:** connections, buffers, windows |
-| **Registry ↔ sender ↔ custody** | The **host** owns the registry and custody; the adapter owns the sender. The token is bound at composition, resolved per invocation | No registry row, registry dead, custody dead, refusal, malformed reply, deadline | `route(handle, token)` answers `:unavailable`; resolution fails as one of the six atoms produced below the guardian (`:no_token`, `:invalid_token`, `:missing`, `:expired`, `:oversized`, `:unavailable`); the **guardian** enforces the deadline, kills the sender and reports the seventh, `:timeout` | The adapter's existing `Loopex.Model` refusal shape, with the atom in the bounded diagnostic | **Not durable:** nothing about credentials is ever journaled, and no span or record carries model `options` — the model span is a fixed identity map. The invocation's failure is durable |
+| **Registry ↔ sender ↔ custody** | The **host** owns the registry, custody and the tracing capability; the adapter owns the sender. The token is bound at composition, resolved per invocation | No registry row, registry dead, custody dead, refusal, malformed reply, deadline, or a trace exclusion that cannot be confirmed | `route(handle, token)` answers `:unavailable`; resolution fails as one of the six atoms produced below the guardian (`:no_token`, `:invalid_token`, `:missing`, `:expired`, `:oversized`, `:unavailable`); the **guardian** enforces the deadline, kills the sender and reports the seventh, `:timeout` | The adapter's existing `Loopex.Model` refusal shape, with the atom in the bounded diagnostic | **Not durable:** nothing about credentials is ever journaled, and no span or record carries model `options` — the model span is a fixed identity map. The invocation's failure is durable |
 | **CLI ↔ socket** | `loopex_cli` | Socket unreachable, refusal, transport loss, renewal failure | The client's own reconnect loop and its renewal timer | Reconnect at the retained cursor, deduplicating; a failed renewal drops to observer with the loss on `stderr`; a reconnecting controller must acquire again for a fresh epoch | **Durable:** nothing the client holds. The cursor is a client-side position |
 | **Daemon ↔ OS: signals** | The operator | `SIGTERM`, delivered to the handler the daemon installs before it takes the marker; a terminal `SIGINT` reaches it only as the `SIGTERM` the launcher forwards, since `:os.set_signal/2` refuses `:sigint` | The owner drains through core's `quiesce/2` within the derived drain budget, tells clients, unlinks the socket only while it can still show it holds the marker, and then stops its linked processes in reverse order — lease owners, the relay, runtime, edges, and the Store last in its own fixed 30 s phase — each stop driven by a monitored helper calling `GenServer.stop/3` while the owner waits on its own link until the shared teardown deadline and kills on expiry. Classification is from the observed exit reason alone: `:normal`, `:shutdown` and the owner's own `:killed` are consumed, everything else is classified | `daemon.stopping` with `operator_stop`, then close | **Durable:** whatever committed. **Not:** work ended crash-equivalently — a claim about the journal, not about every process being gone |
 | **Daemon ↔ OS: kill** | The operator | `SIGKILL`, power loss | Nothing runs — no handler, no `terminate/2` | The socket closes with no record at all | **Durable:** the journal. The marker is left for the next daemon's verified stale-writer recovery |

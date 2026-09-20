@@ -191,9 +191,14 @@ no content, no durable session state.
 | result | `placement_identity` | binary identity | required |
 | result | `daemon_incarnation` | binary identity | required |
 | result | `socket_path` | string | required |
-| result | `attachments` | integer, and `attachment_limit` beside it | required |
-| result | `active_sessions` | integer, and `activation_limit` beside it | required |
-| result | `index_entries` | integer, and `index_limit` beside it | required |
+| result | `attachments` | integer | required |
+| result | `attachment_limit` | integer, 512 | required |
+| result | `active_sessions` | integer | required |
+| result | `activation_limit` | integer, 64 | required |
+| result | `activations_used` | integer, activations spent in this daemon lifetime | required |
+| result | `index_entries` | integer | required |
+| result | `index_limit` | integer, 4,096 | required |
+| result | `index_full` | bool | required |
 | result | `uptime_ms` | `u64` | required |
 
 **`session.acquire_control`**
@@ -258,18 +263,17 @@ added keys are enumerated so the digest covers them:
 ADR 0023's own framing and input ceilings are unchanged; these are additions
 beside them, and **all five** digest inputs therefore change in generation 2.
 
-| Method | Required fields | Result |
-| --- | --- | --- |
-| `session.list` | `limit` (1 to 256), optional `after_session_id` | A page of at most `limit` index entries ordered by session ID bytes ascending and starting strictly after `after_session_id`; each entry carries the session identity, the placement identity recorded for it, `residency` of `active` or `dormant`, and `controlled` as a boolean, never content and never durable session state; `next_after_session_id` is present exactly when more entries exist, and `index_full` is present and true exactly when the index is at its 4,096-entry ceiling, so a client is told the listing may be incomplete rather than reading an omission as an absence |
-| `daemon.status` | none | Placement identity, daemon incarnation, socket path, attachment, active-session and index counts against their limits, uptime |
-| `session.acquire_control`, `session.release_control` | `session_id`, `request_id` and the lease fields ADR 0033 fixes | Lease result naming the writer epoch and the remaining lease term |
+The tables above are the contract for both directions; an earlier revision
+kept a second, prose summary of the same four methods beside them, which is
+exactly how two descriptions of one wire drift apart. It is gone, and the
+per-method tables are the only statement of what a request and a result
+carry.
 
-Generation 2 also adds **one notification record family**, `daemon.stopping`,
-which no client requests and every client may receive:
+**The `daemon.stopping` record, field by field:**
 
 | Field | Value |
 | --- | --- |
-| `reason` | One of `operator_stop`, `store_lost`, `store_capacity_exceeded`, or `fatal:<class>` for the remaining classes the plan's fatal-class map names, one per linked component: `fatal:runtime_lost`, `fatal:transfers_lost`, `fatal:workspace_lease_lost`, `fatal:executor_lost`, `fatal:registry_lost`, `fatal:custody_lost`, `fatal:relay_lost`, `fatal:listener_lost`. A lease owner's death is not among them: it closes one session's controller attachment with `control_owner_lost` and ends no daemon. The startup classes carry no reason, because no socket exists when they occur, and neither does `owner_lost`, where the process that would write it is the one that is gone |
+| `reason` | One of `operator_stop`, `store_lost`, `store_capacity_exceeded`, or `fatal:<class>` for the remaining classes the plan's fatal-class map names, one per linked component: `fatal:runtime_lost`, `fatal:transfers_lost`, `fatal:workspace_lease_lost`, `fatal:executor_lost`, `fatal:registry_lost`, `fatal:custody_lost`, `fatal:capability_lost`, `fatal:relay_lost`, `fatal:listener_lost` — nine in a daemon with artifact transfers and eight without, one per linked component of the fixed set. A lease owner's death is not among them: it closes one session's controller attachment with `control_owner_lost` and ends no daemon. The startup classes carry no reason, because no socket exists when they occur, and neither does `owner_lost`, where the process that would write it is the one that is gone |
 | `message` | A bounded non-secret sentence for an operator to read |
 | `retry_after_ms` | Present only for `operator_stop`, where a restart is expected; absent for every fatal reason, because the daemon does not know when the cause will be fixed |
 
@@ -496,11 +500,11 @@ counts activations per daemon lifetime, for the same reason — it counts what
 the daemon did.
 
 Two alternatives were rejected, and both would be **a further core change**
-beyond the four this milestone makes. A lifecycle notification from core to the daemon
+beyond the five this milestone makes. A lifecycle notification from core to the daemon
 would be a new core-to-host signal, with its own delivery and ordering
 questions, added for a listing field. A monitorable coordinator handle handed
 out to the daemon would export core's supervision topology across the boundary
-and invite the daemon to reason about it. M5's core changes stay at four, and
+and invite the daemon to reason about it. M5's core changes stay at five, and
 neither of these is among them.
 
 The lease-owner fatal rule in ADR 0033 is untouched by this and stays. The
