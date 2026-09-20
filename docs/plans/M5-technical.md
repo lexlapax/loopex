@@ -1805,19 +1805,49 @@ between the owner's death and the monitor's `DOWN` being handled. In both
 routes the class is `owner_lost` on `stderr`, and it is the one class no
 linked component produces.
 
-**Three clocks, and no component invents a fourth.** An earlier revision gave
-every component "the composed cleanup grace" and gave the Store a floor over
-it. That was wrong twice: a session's `cleanup_grace_ms` is an input to
-*cancellation*, not a shutdown deadline, and a per-component budget makes the
-worst-case stop the sum of the components rather than a bound anyone can
-state. The contract is three clocks:
+**Seven phases, each with a named bound, and the stop is their sum.** Earlier
+revisions called this "three clocks" and then let two of them overlap: the
+drain budget was the largest cancellation backstop — at the smallest admitted
+grace that is already **22,001 ms** (`cancellation_bounds/1`,
+`apps/loopex/lib/loopex/executor.ex:456-474`) — fencing began *after* it, and
+the five-second teardown was expected to absorb a sequential stop of up to 512
+lease owners and a Store call that can itself block 30 s
+(`apps/loopex_store_local/lib/loopex/store/local.ex:65`, `:111`). None of that
+adds up. The contract is now one phase at a time, each bounded by a number
+that already exists somewhere, and the operator maximum is the sum:
 
-| Clock | What it bounds | Where the number comes from |
-| --- | --- | --- |
-| **`g`**, each session's committed `cleanup_grace_ms` | The cancellation of that session's effects, and nothing else | The session's own composition; already used by `Loopex.Executor.cancellation_bounds/1` |
-| **`budget_ms`**, the drain budget | The whole drain, across every session | Derived **by core, inside `quiesce/1`**, and **returned** in its result: `max` over the drained sessions of `cancellation_bounds(g_i).cli_backstop_ms` (`apps/loopex/lib/loopex/executor.ex:456-474`, where `cli_backstop_ms` is `observe + reserve + terminal`, documented as "the sum a process-liveness backstop must cover"). The daemon does not compute it, because it does not hold the `g_i` |
-| **`teardown_ms`, fixed at `5_000`** | **One absolute deadline covering every non-Store action after the drain** — the `daemon.stopping` writes, closing the connections, closing the listener, the lease owners, the relay, the runtime, the executor, the workspace lease, transfers, custody and the registry | A plan decision, and the rationale is that each of those is a bounded write or a stop of a process with no `terminate/2` to run: milliseconds apiece, so five seconds is a ceiling none of them should approach and an upper bound an operator can add up |
-| **The Store phase** | The Store's stop alone | A **fixed 30 s**, the Store's own `@call_timeout` (`apps/loopex_store_local/lib/loopex/store/local.ex:65`), independent of `g` and of `teardown_ms` |
+| # | Phase | Bound | Where the number comes from |
+| --- | --- | --- | --- |
+| 1 | **Admission cut** | The relay's own call, bounded by the teardown budget below | A synchronous acknowledgement, not a wait for work |
+| 2 | **Abort admission** | **30 s**, the Store's `@call_timeout` (`local.ex:65`) — **per phase, not per session**, because the sessions are admitted **concurrently** | One Store call each; running them at once makes the phase one call long rather than *N* |
+| 3 | **Cancellation** | The derived backstop: `max` over drained sessions of `cancellation_bounds(g_i).cli_backstop_ms` | Core's own number for how long a cancellation may take |
+| 4 | **Fence** | **30 s**, the same Store call timeout, again **concurrent** across sessions | Each fence is one `advance_owner` transaction |
+| 5 | **Coordinator termination** | **5 s**, the coordinator's own `shutdown` (`session_coordinator.ex:134-142`) | The value core already gives a coordinator to stop in |
+| 6 | **Daemon teardown** | **5 s** | This plan's one chosen number, covering the notice, the closes, the lease owners, the relay and the edges |
+| 7 | **Store** | **30 s**, its own `@call_timeout` | The stop that releases the marker |
+
+> **Maximum graceful stop = 30 s + `budget_ms` + 30 s + 5 s + 5 s + 30 s**, plus
+> the admission cut, which is an acknowledgement rather than a wait.
+
+**One rule keeps a phase from starting work it cannot finish.** *No Store
+operation begins without at least its own timeout remaining in its phase.* A
+fence with four seconds left on a thirty-second phase is not attempted; the
+session is reported `fence: :not_needed` if the head already moved and
+`:unknown` otherwise, and the daemon proceeds. Starting a 30 s call inside a
+4 s remainder is how a bounded sequence becomes an unbounded one.
+
+**Phase 6 stops the lease owners as a collective sweep, not one at a time.**
+Up to 512 of them exist, and stopping them in sequence inside five seconds was
+arithmetic nobody did: the owner sends every lease owner its stop
+**concurrently**, waits **once** for all of their `DOWN`s, and at the phase's
+end kills whatever is left with `Process.exit(pid, :kill)`. The disposition is
+stated: a lease owner killed this way loses nothing durable — it holds a lease
+record, an epoch and an in-flight admission set, none of which outlives the
+daemon — and the relay's tickets, which do matter, are held by the relay and
+stopped after them.
+
+**`budget_ms` is still core's to derive and report**, for the reason below;
+what changed is that it is one phase among seven rather than the whole drain.
 
 The budget is derived rather than chosen because the cancellation it waits on
 is already bounded by core: `cli_backstop_ms` is the number core itself says a
@@ -1857,17 +1887,12 @@ stopped here only the transfers owner runs a `terminate/2` at all — so the
 budget is a ceiling for a set of actions that are each milliseconds. It is
 recorded in the limits table with that rationale.
 
-**The deadline starts the instant `quiesce/1` returns**, and it covers
-**every** non-Store action from that point: the stop records, the connection
-closes, the listener close, and every stop from the lease owners through the
-registry. An earlier revision's formula covered only the stops, which left the
-notification and closure steps outside any bound at all. Every helper under it
-is given `remaining(teardown_deadline)` and nothing else — no component has a
-budget of its own to spend.
-
-**So the operator-facing bound is stated, once, and it adds up:**
-
-> **Maximum graceful stop = `budget_ms` + 5 s + 30 s.**
+**Phase 6's deadline starts when phase 5 ends**, and it covers every
+remaining non-Store action: the stop records, the connection closes, the
+listener close, and every stop from the lease owners through the registry.
+Every helper under it is given `remaining(teardown_deadline)` and nothing
+else — no component has a budget of its own to spend — and the collective
+sweep above is what makes 512 lease owners fit inside it.
 
 **`budget_ms` is not knowable from the daemon's flags alone**, and the
 operator page says so rather than implying a constant. The composed
@@ -1929,12 +1954,25 @@ steps itself. They are the owner's code, not a supervisor's behaviour, which
 is what lets each one carry a reason and lets the teardown use one deadline
 the owner fixes.
 
-1. **The listener stops accepting, and the daemon refuses new admissions.**
-   A new connection is refused rather than queued, and a command arriving on
-   an open connection is refused from that instant. Nothing is written to
-   clients yet and nothing is closed: the connections stay open across the
-   drain, because a client that is about to be told something true is better
-   served by being told it than by an early close.
+1. **The listener stops accepting, and the relay closes admissions — a
+   synchronous cut, not a policy.** An earlier revision said "the daemon
+   refuses new admissions from that instant" and left the instant undefined:
+   stopping the listener stops *new connections*, while every existing
+   connection process is still free to submit, and `session.create` did not
+   even pass through the relay. Quiesce would then have been snapshotting a
+   set of sessions that could still grow underneath it.
+
+   So the cut is a call. The owner calls the **relay** — whose scope this
+   extends to cover `session.create` as well as every ticketed mutation — and
+   the relay **acknowledges only when admissions are closed and every ticket
+   it holds has settled or been recorded**. Until that acknowledgement returns
+   the owner does nothing else; after it, no work can enter core through the
+   daemon at all. A command arriving on an open connection after the cut is
+   refused **`daemon_stopping`**, a generation-2 error code added for it.
+
+   Nothing is written to clients yet and nothing is closed: the connections
+   stay open across the drain, because a client that is about to be told
+   something true is better served by being told it than by an early close.
 2. **The runtime is quiesced within the budget core derives.** The owner
    calls core's `quiesce/1` — which takes no deadline, core owning the drain
    clock entirely — and waits for its answer, which names the sessions that
