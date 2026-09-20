@@ -164,8 +164,16 @@ daemon supports exactly `loopex.experimental/2`: it selects that generation
 when the client lists it, at any position, and otherwise refuses with
 `unsupported_generation`, leaving the connection uninitialized with no second
 attempt, exactly as ADR 0023 fixes for a foreground process. The successful
-reply carries `selected_generation`, the exact generation-2 schema digest,
-the generation-2 method inventory and limits. The generation-2 schema and its
+reply carries `selected_generation`, generation 2's own exact schema digest,
+the generation-2 method inventory and limits. That digest is necessarily a new
+value: the digest is taken over the generation, the ordered methods, the
+ordered record families, the ordered error codes and the limits, and
+generation 2 changes the generation and the method list, so it cannot and must
+not equal generation 1's. It is written out as a literal beside generation
+1's, and generation 1's literal digest, schema-file digest and vectors-file
+digest are asserted unchanged in the same place, so an accidental edit to
+generation 1's contract fails there rather than silently renaming what
+existing clients agreed to. The generation-2 schema and its
 vectors are new files beside generation 1's, as
 `apps/loopex_protocol/priv/schema/loopex-experimental-2.json` and
 `apps/loopex_protocol/priv/vectors/loopex-experimental-2.json`, reviewed with
