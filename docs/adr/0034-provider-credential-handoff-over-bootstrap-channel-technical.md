@@ -376,7 +376,12 @@ boundary, not an absolute:
     tracer that has just restarted asks Control rather than starting empty.
 
   **It fails closed.** `exclude_self/1` returns only once the exclusion is
-  installed. If the capability is present but the exclusion cannot be
+  installed, and it carries an **explicit** bound rather than inheriting a
+  `GenServer.call` default — a hidden five seconds here would be a silent
+  deadline inside the invocation's, exactly the fault the registry and custody
+  calls avoid by waiting deadline-free. Here a bound is correct where there it
+  was not, because the safe answer to "I cannot confirm the exclusion" is to
+  refuse rather than to wait. If the capability is present but the exclusion cannot be
   installed — a tracer restarting in that instant — the sender **does not
   resolve the credential**: the invocation refuses with `:unavailable`, the
   atom the closed set already carries for "the arrangement needed to resolve

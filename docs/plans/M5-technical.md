@@ -892,8 +892,18 @@ has no such gap, because a session cannot be activated without entering it. `loo
 resumes, and only then attaches, by which time the session is active.
 
 
-**The ceiling is enforced by reservation, because counting after the call is
-a race.** Core starts a coordinator *inside* the call that would tell the
+**Every ceiling consumed by a core call is reserved before that call**, and
+the activation ceiling is the one where getting it wrong is most visible. The
+rule is general: `attachments_per_session` (64) and `attachments_per_daemon`
+(512) are consumed by `session.attach`, which creates the attachment inside
+core, so the daemon reserves an attachment slot before calling and releases it
+on any refusal — two concurrent attaches at 511 would otherwise both see 511
+and both succeed. The index's 4,096 entries and the 512 concurrent lease
+owners need no reservation, because the daemon creates those itself, serially,
+in its own process.
+
+**The activation ceiling is enforced by reservation, because counting after
+the call is a race.** Core starts a coordinator *inside* the call that would tell the
 daemon it did — `start_owner` for a fresh create (`control.ex:908`),
 `start_resume_owner` for a resume that is not a replay (`control.ex:318`,
 `:321`) — so a daemon that counts when the call returns has already let it
@@ -934,8 +944,17 @@ leaked until the daemon restarts:
 | Either call refusing — `runtime_command_conflict`, `store_unavailable`, an invalid identifier, a placement mismatch, any other `{:error, _}` | Released |
 | Either call **crashing or timing out**, so the daemon has no result at all | **Held, then resolved by observation**: the daemon asks core whether that session is active and converts or releases accordingly. It does not guess, and it does not leak the slot |
 
-The last row is the one that would otherwise be missed. A call that gives the
-daemon no answer may still have started a coordinator, so releasing the
+**That last row is not hypothetical, and the reason is a default nobody
+chose.** The daemon reaches core through `Loopex.Runtime`, whose
+`control_call/3` and `dispatcher_call/3` default to a **five-second** reply
+timeout (`runtime.ex:470`, `:478`). A create or resume that takes longer
+returns the daemon an error while core is still starting a coordinator — so
+"the call gave no answer" is an ordinary outcome of a slow root, not an
+exotic one. Every daemon call that consumes a ceiling therefore carries an
+explicit timeout rather than inheriting that default, and resolves its
+reservation by observation when the timeout is what it gets.
+
+A call that gives the daemon no answer may still have started a coordinator, so releasing the
 reservation would let the ceiling be exceeded and converting it would spend a
 slot that may not exist; asking is the only honest resolution, and the daemon
 already has a read-only query for exactly this class of question.
@@ -1380,6 +1399,13 @@ only from the exit the owner observes on its own link.** For each component:
    linked, so whatever that call raises, exits or returns dies with the helper
    and never reaches the owner. The owner needs nothing from it — not its
    return value, not its `DOWN` — and ignores both.
+
+   **Killing the helper would not cancel the stop it has already delivered**,
+   which is the same property that makes a dead coordinator's transaction
+   commit and a dead relay task's mutation reach core. That is precisely why
+   classification comes from the **exit reason on the owner's own link** and
+   never from what became of the helper: the helper is a way to make a call
+   without risking the caller, not a handle on the call.
 3. The owner then waits on the link it already holds:
 
 ```elixir
@@ -2693,6 +2719,12 @@ next daemon removes before binding.
   refusal, and asserts core was **not called** — proved by that session having
   no coordinator and no new journal record — which a post-call count would
   have failed by starting a sixty-fifth.
+- **Two concurrent attaches at the attachment ceiling.** A daemon at 511
+  attachments receives two `session.attach` calls at once. The case asserts
+  exactly one succeeds and the other is refused, and that core holds **512**
+  attachments afterwards rather than 513 — the same reserve-before-the-call
+  rule as the activation ceiling, proved where it would otherwise have been
+  assumed.
 - **Every branch releases or converts its reservation.** One case per row of
   the resolution table: a fresh create, a replayed create against an active
   and a dormant session, a fresh resume, a replayed resume, a refusal, and a
