@@ -97,26 +97,45 @@ separate:
   runtime, that every invocation needs. Composition puts the registry
   reference there, under its own key, beside the token the caller supplies per
   invocation.
-- **It is plain data, and a name rather than a pid.** The reference is a
-  runtime-scoped registered name — bounded, serializable, meaningless in
-  another VM and in another runtime — never a pid, port or function. The
-  boundary rule that keeps PIDs out of durable and public data is not
-  negotiated here; a registered name satisfies it and a pid would not, and a
-  name also survives the registry process being restarted by its own
-  supervisor, which a pid does not.
-- **No global state.** The name is scoped to the runtime, so two runtimes in
-  one VM have two registries and neither can reach the other's. Nothing is
-  read from application environment and nothing is looked up by a fixed
-  global name, which is the rule core already holds itself to.
+- **It is a runtime-local capability handle, exactly the class the runtime
+  already takes.** The precedent is the executor: `Loopex.Runtime`'s executor
+  configuration carries `reference:`, and `LoopexComposition` fills it with
+  the live pid `start_edge/2` returned. That reference is composition data,
+  never durable and never public, and it is what the runtime hands the
+  adapter at dispatch. The credential registry handle is the same class and
+  is written the same way — `%Loopex.LLM.ReqLLM.CredentialRegistry.Handle{}`
+  wrapping that live reference, so the value is self-describing at a glance
+  and cannot be mistaken for anything else in an options list.
+
+  An earlier draft made it a *runtime-scoped registered name*. That is
+  withdrawn: a registered name on the BEAM is VM-global whatever it is called,
+  so two runtimes in one VM would be one namespace with a convention holding
+  them apart, and a convention is not isolation. A handle carrying a live
+  reference is scoped by who holds it, which is the property actually wanted.
+- **The boundary rule is respected because of where it lives, not because of
+  what it is.** The rule keeps PIDs out of durable and public data; a handle
+  in composition data is neither, exactly as the executor's `reference:` is
+  neither. It is never journaled, never in a public event or snapshot, never
+  on the wire, and never in a token.
+- **Two runtimes are isolated by construction.** Each host composes its own
+  registry and holds its own handle; a token from one runtime presented in
+  the other reaches a registry that has no row for it and answers
+  `:unavailable`. That is a required proof, not an assertion: two hosts, two
+  registries, two tokens, and neither token resolves in the other's runtime.
 - **The lookup is one operation, and it is the host's.**
-  `route(registry_ref, token) -> {:ok, custody_ref} | {:error, :unavailable}`.
-  It returns *where to ask*, never bytes; `:unavailable` covers a registry
-  that is gone and a token with no row, because from the sender's side those
-  are the same fact and neither is recoverable by asking again.
-- **Its lifetime is the host's.** The host starts the registry when it
-  composes the runtime and it dies with recomposition. The adapter neither
-  starts it, supervises it nor restarts it, and a sender that finds it absent
-  refuses rather than waiting for it to come back.
+  `route(handle, token) -> {:ok, custody_ref} | {:error, :unavailable}`, a
+  call to the registry process. It returns *where to ask*, never bytes;
+  `:unavailable` covers a token with no row, a registry that is gone, and a
+  registry that does not answer — from the sender's side those are one fact
+  and none is recoverable by asking again.
+- **Its lifetime is the host supervisor's, and a restart invalidates the
+  handle.** The host starts the registry under its own supervisor when it
+  composes the runtime. If the registry dies, the handle a composed runtime
+  holds is invalid and every resolution through it answers `:unavailable`
+  **until the host recomposes** — the adapter does not re-look-up, does not
+  wait and does not rebuild, because it has nothing to rebuild from. That is
+  the same shape as losing custody, and it is deliberate: recomposition is the
+  one repair, and it is the host's to perform.
 
 **Custody is a separate process, and is where the bytes live.** Each reference
 implementation states and proves its own: the reference CLI, the app-server
@@ -164,11 +183,21 @@ boundary, not an absolute:
   this pair does not invent one, it names which calls that covers. They are
   three, all in the sender:
 
-  | Excluded call | Why |
+  A match specification needs a target, so the three are **named private
+  functions that must exist**, and their identities are part of this contract
+  rather than an implementation detail:
+
+  | Excluded function | Why |
   | --- | --- |
-  | The registry route call | Its arguments carry the token, and the token is the credential reference |
-  | The custody reply handling | Its argument is the resolved credential |
-  | The credential frame write | Its argument is the resolved credential |
+  | `Loopex.LLM.ReqLLM.ProviderBridge.route_credential/2` | Its arguments carry the registry handle and the token, and the token is the credential reference |
+  | `Loopex.LLM.ReqLLM.ProviderBridge.receive_custody_reply/2` | Its argument is the resolved credential |
+  | `Loopex.LLM.ReqLLM.ProviderBridge.write_credential_frame/2` | Its argument is the resolved credential |
+
+  The names are the contract; the arities are as written here. Inlining any of
+  the three into its caller, or renaming one, removes the match
+  specification's target and silently widens what a trace session can capture
+  — so a test asserts the three exist with exactly these identities, and a
+  rename breaks the proof loudly instead of quietly.
 
   Exclusion by match specification means the trace session never matches
   those functions, so the VM emits **no raw trace message** for them and the
@@ -187,8 +216,10 @@ boundary, not an absolute:
   received no raw trace message for them, and that no credential bytes and no
   token appear anywhere in the captured entries. An entry bearing a
   placeholder for one of them fails the case exactly as an entry bearing the
-  bytes would, because it would prove the match specification did not
-  exclude what it was supposed to.
+  bytes would, because it would prove the match specification did not exclude
+  what it was supposed to. A second, smaller case asserts the three functions
+  exist with the identities above, so the first case cannot pass vacuously
+  against a build where they no longer do.
 - Everywhere else the earlier absolutes stand unchanged: not in guardian
   state, not in an exit reason, not in a crash report, not in an IO request,
   not in a file, not in the environment, not in argv, and in no durable or

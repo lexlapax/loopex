@@ -84,9 +84,12 @@ transfer — bounded, unlogged, never forwarded, never retained after the frame
 is written — and it is the same class of act as writing the credential frame,
 protected the same way ADR 0019 already protects that sender. The registry
 lookup before it carries no credential, so routing adds no second place a
-secret can be seen, and the credential-bearing call is excluded from tracing
-by ADR 0030's existing redaction class, which the companion names and M5
-proves.
+secret can be seen, and the three credential-bearing calls are **excluded by
+match specification**, the mechanism accepted ADR 0030 already fixes for a
+key-bearing call. Exclusion, not redaction: an excluded call produces no trace
+entry at all, where a redacted one would produce an entry with a placeholder.
+The companion names the three functions exactly, because a match specification
+needs a target, and M5 proves the absence.
 
 **Everywhere else the boundary is where the adapter's claims stop.** Inside it
 — the token, the sender, the frame, the child — the adapter proves what it
