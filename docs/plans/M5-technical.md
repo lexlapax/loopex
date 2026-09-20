@@ -3535,7 +3535,7 @@ carried: it described three outcomes and returned none of them.
    | `:active` whose coordinator is already dead | Its `DOWN` handler releases the dispatcher fence and **leaves the entry** (`control.ex:805-826`), which is right for residency and misleading for a drain | `absent` | **Yes** — an old transaction from that dead coordinator is precisely the case the fence exists for |
    | `:unavailable` | The status `Control` writes when an acquisition it was waiting on failed or its coordinator went down mid-acquisition (`control.ex:620`, `:818`, `:862`, `:1150`) | `absent` | **Yes, always.** An earlier revision let this be the `:not_needed` case on the reading that such an entry never had a coordinator. It can have had one: `unavailable_owner/3` (`:1149-1158`) writes `%{status: :unavailable, durable: nil}` with **no coordinator key**, and one of its callers reaches it at `:1134` *after* terminating a coordinator that had already been started (`:1132`). The absent key proves nothing about the past, so every `:unavailable` entry is fenced |
    | `:acquiring` | The status while an owner is being started (`control.ex:569`, `:1030`, `:1189`) | `unsettled` | **Yes** |
-   | `:awaiting_owner_barrier` | A coordinator has died with its **owner group still alive** and a caller still waiting (`control.ex:835`, `:1040`, `:1046-1053`, consumed at `:833-857`) — reachable exactly when phase 1b proceeds with a resume in flight | `unsettled`; no abort is admitted, there being no ready coordinator to admit one | **Yes, and the fence is what makes it safe.** Its coordinator is already gone, so phase 4 has nothing to terminate; what could still write is the **owner group that outlived it**, and phase 6's kill does not answer that — `Process.exit(sup, :kill)` ends the root only, and a trapping `OwnerGroup` unwinds on its own clock afterwards, into a Store phase 7 keeps open. Phase 5's moved epoch is what refuses those commits `:stale_owner_epoch`. An earlier revision credited the kill |
+   | `:awaiting_owner_barrier` | A coordinator has died with its **owner group still alive** and a caller still waiting (`control.ex:835`, `:1040`, `:1046-1053`, consumed at `:833-857`) — reachable exactly when phase 1b proceeds with a resume in flight | `unsettled`; no abort is admitted, there being no ready coordinator to admit one | **Yes, and the fence is what makes it safe.** Its coordinator is already gone, so phase 4 has nothing to terminate; what could still write is **the dead coordinator's at-most-one already-delivered transaction** — the same case every other fenced row rests on — and nothing else, because no owner group or worker can commit: `Store.transact` has one caller in core (`store/owner_lane.ex:121`), and `OwnerLane.transact` is called only from the coordinator (`session_coordinator.ex:1242`, `:1363`, `:1761-1762`) and `Control` (`control.ex:1680-1681`). The owner group that outlived the coordinator unwinds on its own clock past phase 6's kill, which ends the root only, but it writes nothing. Phase 5's moved epoch is what refuses that one transaction `:stale_owner_epoch`. An earlier revision credited the kill, and the one before it named the owner group as a writer |
    | No entry | The session is dormant in this daemon, or belongs to no daemon at all | In no list; quiesce enumerates `Control` and nothing else | No — the **only** `:not_needed` case, and it is read from the fresh enumeration phase 4 takes, never from the phase-2 snapshot |
    | **A phase-2 admission that did not answer** inside the phase, its task shut down | The session's abort is neither known-committed nor known-refused **to the drain** — see below for what the coordinator does | `unsettled`, with no cleanup released | **Yes** |
    | **A phase-5 fence that did not answer** inside the phase, its task shut down **after** the head was read | The fence's outcome cannot be read | `unsettled`, `{:unknown, head}` | The attempt was made; the domain stays fenced |
@@ -3565,7 +3565,18 @@ carried: it described three outcomes and returned none of them.
    answers that must differ are therefore the aborted run present and the
    aborted run absent**, and the owner the call requires is the one quiesce
    read from `Control`'s enumeration, which is why that enumeration carries
-   it.
+   it. That read carries the coordinator's own bound, not the drain's:
+   `session_status/2` is `safe_call(coordinator, …, @session_status_timeout_ms)`
+   at 5,000 ms (`session_coordinator.ex:164`, `:181-182`), and quiesce reads
+   it at budget expiry, when a coordinator that has just cancelled may be
+   inside the cleanup callback whose commits are each bounded at 30 s. Any
+   answer that is not `{:ok, …}` — a `:session_unavailable` refusal or the
+   timeout — is read as **not settled**, which fails closed: the session is
+   `unsettled`, terminated and fenced, and nothing false is journaled. The "it
+   settles" witness therefore holds the Store fast enough for the read to
+   answer, and a witness beside it holds one commit past 5 s and asserts the
+   session lands in `unsettled` with its terminal still committed by the
+   coordinator before phase 4 ends it.
 
    No core change is needed for this, which is worth saying plainly after
    several rounds of adding things: the read exists, quiesce is outside
@@ -3984,9 +3995,13 @@ one line and no class: a census naming `drain_id`, `budget_ms`, the three
 counts quiesce returned and, for every session it left `{:unknown, head}`,
 that session's id with the `owner_epoch` and `journal_version` its fence read
 — the values a successor compares against, and the only part of the census
-that is recovery data rather than a count. That line is the only thing an ordinary stop writes
-to `stderr`, and it names no fatal class, which is what a reader checks it
-for.
+that is recovery data rather than a count. That line is the only thing an
+idle stop writes to `stderr`, and it names no fatal class, which is what a
+reader checks it for. A stop with work in flight may add one more thing: a
+drain task that crashes is an `async_nolink` child of the runtime's worker
+supervisor, and its termination report goes through Logger to `stderr`. That
+report accompanies the census line, names no fatal class, and changes no exit
+status; the daemon's log rule bounds it as it bounds every other line.
 
 **Reverse cleanup.** Startup happens inside the owner, so a failure at any
 step unwinds what that step and its predecessors did, in reverse — and
