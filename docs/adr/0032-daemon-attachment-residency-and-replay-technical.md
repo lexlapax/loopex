@@ -605,7 +605,11 @@ ticket it holds has **settled** — not merely been recorded, a recorded ticket
 being a call still running — and nothing enters core through
 the daemon after that answer. A connection that is still open — and every
 connection is, because the cut precedes the closes — may still send a frame.
-It is answered with a **correlated** `daemon_stopping` carrying that request's
+**Every** method is refused after it, whatever it would have done — the eight
+lease-authorized mutations, `session.create`, `session.attach`, the queries,
+and ADR 0023's three artifact-transfer methods alike — because the refusal is
+about the daemon's state rather than about the request's effect. It is
+answered with a **correlated** `daemon_stopping` carrying that request's
 `request_id` and nothing else: no `event_cursor`, no session state, and it
 closes nothing on its own. The connection is closed a moment later by step 3
 of the stop sequence, which is where a client is told the reason it is going

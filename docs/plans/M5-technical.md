@@ -1516,8 +1516,35 @@ So one fixed, daemon-owned process holds what the lease owners cannot — and
 three details of it are the difference between closing the window and looking
 as though it does:
 
-- **Tickets cover every core call the daemon makes that mutates core state,
-  and nothing else — ten of them.** Eight are the lease-authorized
+- **Tickets cover every core call that mutates `Control` or the journal, plus
+  `session.attach` because the daemon counts attachments — ten of them.** The
+  claim is that narrow on purpose, and an earlier revision's wider one —
+  "every core call that mutates core state, and nothing else" — was false.
+  Generation 2 inherits ADR 0023's three **artifact transfer** methods
+  (`artifact.open_transfer`, `artifact.read_chunk`, `artifact.close_transfer`,
+  `0023-…-technical.md:175-177`), which M5 reuses unchanged; they reach core
+  through `Runtime.open_artifact_transfer/2`, `read_artifact_chunk/3` and
+  `close_artifact_transfer/2` (`runtime.ex:279-288`, `:295-306`, `:312-321`)
+  and they **do write** dispatcher state — the transfer map on the attachment,
+  at `event_dispatcher.ex:323`, `:351` and `:386`. They carry no ticket, and
+  that is correct rather than an omission: what the cut protects is quiesce's
+  enumeration of `Control` and the journal it drains, and a transfer touches
+  **neither** — only per-attachment state that belongs to the attachment and
+  dies with it. Ticketing all thirteen was the alternative and is rejected: it
+  would put a read of an artifact chunk in the way of a stop for no property
+  the stop needs.
+
+  What holds for them is the rule stated once and for every kind: **after the
+  cut, every request on an open connection is refused `daemon_stopping`
+  whatever its method** — transfers included, and reads included, the refusal
+  being about the daemon's state and not about what the request would have
+  done. A transfer already in flight when the cut answers either completes on
+  its own or ends in phase 6 with its connection: the connection process ends,
+  core change 1's monitor drops its attachment, and the transfer state goes
+  with the attachment it was hanging from. Nothing about it is durable and
+  nothing about it can disturb the drain.
+
+  Of the ten, eight are the lease-authorized
   existing-session mutations ADR 0033
   lists: `session.resume`, `session.prompt`,
   `session.steer`, `session.follow_up`, `session.abort`,
@@ -1637,8 +1664,10 @@ as though it does:
   ticketed call is bounded by core's own work rather than by a client, and a
   ticket that cannot settle is the `relay_lost` case this section already
   defines. That answer is what makes "after this instant nothing enters core
-  through the daemon" a fact rather than a policy, and it is why every call
-  that changes core state goes through this one process.
+  through the daemon **that could change what quiesce is about to read**" a
+  fact rather than a policy, and it is why every call that mutates `Control`
+  or the journal goes through this one process. The narrower claim is the true
+  one; the transfer methods above are the reason it has to be narrow.
 
 That is the ordering claim ADR 0033's owner-loss section now rests on: a
 successor's first call cannot be issued while an older call for the same
@@ -3859,7 +3888,7 @@ links rather than one of them, and an earlier revision headed eleven rows
 | **Lease owners**, one per session under lease or acquisition | Daemon owner, on the first lease operation after existence validation | At most 512 at once, ADR 0032's per-daemon ceiling reused | **Session-scoped**: that session's controller closes with `control_owner_lost`, observers stay, the replacement's first grant waits on the relay's tickets |
 | **Connections**, one per accepted client | The listener | **512 concurrent**, ADR 0032's connection ceiling — the attachment number reused, and not the attachment ceiling itself, which bounds nothing about a client that never attaches | That client's connection closes |
 | **Stop helpers**, one per stop | Daemon owner, `spawn_monitor` | One at a time, except phase 6's lease-owner sweep, which spawns one per lease owner at once and so is bounded by the 512 above | Nothing: monitored, never linked |
-| **Relay tasks**, one per ticketed call — the eight lease-authorized mutations, `session.create` and `session.attach` | The relay, after the ticket is acknowledged | One per outstanding ticket | Keeps its ticket; the relay exits `relay_lost` |
+| **Relay tasks**, one per ticketed call — the eight lease-authorized mutations, `session.create` and `session.attach`; **not** the three artifact-transfer methods, which mutate neither `Control` nor the journal | The relay, after the ticket is acknowledged | One per outstanding ticket | Keeps its ticket; the relay exits `relay_lost` |
 
 **Core's processes, as groups with their owner.** The runtime root supervises
 seven children under `:rest_for_one` (`runtime/supervisor.ex:64-90`, strategy

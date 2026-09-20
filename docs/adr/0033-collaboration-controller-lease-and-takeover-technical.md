@@ -85,9 +85,13 @@ it, and so are two calls that carry no epoch: `session.create`, whose ticket
 the connection process takes because no lease owner exists for a session that
 does not exist yet, and `session.attach`, whose second leg mutates the
 runtime's dispatcher. Ten in all. Nothing else is: reads are not ticketed,
-since a read changes no core state, grants nothing, orders nothing, and a
+since a read grants nothing, orders nothing, and a
 blocking read would otherwise hold a takeover
-for as long as an observer sat on it. Neither the create ticket nor the attach
+for as long as an observer sat on it — and neither are ADR 0023's three
+artifact-transfer methods, which do write per-attachment dispatcher state but
+touch neither `Control` nor the journal, so they cannot disturb what a drain
+enumerates. The plan's companion states that boundary and what becomes of a
+transfer in flight at the cut. Neither the create ticket nor the attach
 ticket blocks a grant — the first names no session yet, the second grants
 nothing a successor could overtake — and both exist so that the
 daemon's orderly stop can close admissions with an acknowledgement covering
