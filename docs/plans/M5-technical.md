@@ -783,15 +783,58 @@ reads:
   the operator is owed the real reason rather than `operator_stop`.
 
 **The field is cleared by that exit, not by the call returning**, and the
-distinction is not pedantry. A stop can end three ways — `:ok`, a caught
-timeout followed by `Process.exit(pid, :kill)`, or the component having died
-already — and in the first two the exit signal is still on its way when the
-call returns; whether it or the monitor's `DOWN` arrives first is not ordered
-for us. So after each stop the owner waits for that exact pid's exit, in a
-selective receive it can only reach because the process is dead either way,
-and only then names the next component. Messages that arrive meanwhile stay
-in the mailbox and are classified when the owner returns to its loop; nothing
-is skipped, only ordered.
+distinction is not pedantry. A stop can end three ways, and the owner catches
+two of them:
+
+| How the stop ends | What the owner sees | What it does |
+| --- | --- | --- |
+| The component stopped | `:ok` | Wait for its exit |
+| It did not stop in time | `exit {:timeout, {GenServer, :stop, [pid, :normal, grace]}}` | `Process.exit(pid, :kill)`, then wait for its exit |
+| **It was already dead** | `exit {:noproc, {GenServer, :stop, [pid, :normal, grace]}}` | Nothing to kill; read the exit already queued and **classify** it |
+
+The third row is the one an earlier draft got wrong, and it is not
+hypothetical: it is exactly what a component that died *during* the sequence
+produces. The owner does not read its mailbox while stopping, so that
+component's `{:EXIT, …}` is still queued and unread when the sequence reaches
+its step; the pid is dead; and `GenServer.stop/3` on a dead pid raises rather
+than returning. `sys:terminate/3`'s `gen:call` fails with `noproc` and is
+wrapped to `{noproc, {sys, terminate, _}}` (sys.erl:757-763), which
+`:proc_lib.stop/3` catches and re-raises as the bare `exit(noproc)`
+(proc_lib.erl:1586-1589), which `GenServer.stop/3` wraps exactly as it wraps
+the timeout (gen_server.ex:1085-1090). A `catch :exit, {:timeout, _}` alone
+does **not** match it, so the owner would die of `noproc` in the middle of its
+own shutdown: no class on `stderr`, no status, the socket never unlinked. The
+clause is therefore two, not one:
+
+```elixir
+try do
+  GenServer.stop(pid, :normal, grace)
+catch
+  :exit, {:timeout, _} -> Process.exit(pid, :kill)
+  :exit, {:noproc, _} -> :already_gone
+end
+```
+
+After each of the three the owner waits for that exact pid's exit, in a
+selective receive. That wait terminates in every row: on `:ok` and on the kill
+the signal is already on its way — whether it or the monitor's `DOWN` arrived
+first is not ordered for us, which is why the wait exists — and on
+`:already_gone` it is already in the mailbox, which is how it got there.
+
+**What the wait does with that exit differs by row, and this is where the
+class is saved.** On `:ok` and on the kill the exit is the owner's own doing,
+so it is consumed. On `:already_gone` it is not: the component died before the
+owner asked it to, which is the whole meaning of `noproc`, so the wait
+**classifies** that exit exactly as the loop's clause would — first class
+wins — and only then clears `stopping` and moves on.
+
+That is enough to lose nothing, without draining the mailbox before the halt,
+because of one invariant: **a component that dies during the sequence always
+has its own step still ahead of it.** A component whose step has passed is
+already stopped and cannot die a second time; so every unexpected death meets
+its own step, and meets it as `noproc`. Other messages sit unread meanwhile
+and are read when the owner returns to its loop; nothing is skipped, only
+ordered.
 
 Two consequences the sequences below depend on, stated here once:
 
@@ -801,9 +844,13 @@ Two consequences the sequences below depend on, stated here once:
   first class recorded wins; a later one does not overwrite it, so the
   operator gets the reason the daemon went down for rather than the last thing
   that happened on the way out.
-- **A component already known dead is not stopped again.** Its exit was
-  classified, so the owner holds that fact; the step for it is a no-op rather
-  than a call on a dead pid.
+- **"Already dead" is something the owner learns, not something it knows.**
+  A component is known dead when its exit has been consumed — classified
+  before the sequence began, or read by the wait after `:already_gone`. It is
+  never assumed from a class recorded earlier in the same sequence, because
+  the unread `{:EXIT, …}` and the `noproc` are how the owner finds out, and
+  both are handled rather than avoided. A component that died before the
+  sequence started and was classified then is simply skipped.
 
 One field, one place, and it is what makes the two paths distinguishable at
 all. Both sequences below rely on it, and the idle-shutdown witness asserts
@@ -885,12 +932,13 @@ chooses.
 
    **What a timeout does, read from the installed stdlib rather than
    assumed — and the chain is not the obvious one.** `Supervisor.stop/3` is
-   `GenServer.stop(supervisor, reason, timeout)` (supervisor.ex:1152-1154),
+   `GenServer.stop(supervisor, reason, timeout)` (supervisor.ex:1152-1154 at
+   the floor pair, :1197-1199 at the current pair),
    and `GenServer.stop/3` calls **`:proc_lib.stop/3` directly**, not
    `:gen.stop/3`, wrapping any exit it catches:
    `catch :exit, err -> exit({err, {__MODULE__, :stop, [server, reason,
-   timeout]}})` (gen_server.ex:1076-1092, identical in both floor pairs,
-   1.18.5-otp-27 and 1.20.3-otp-29). Beneath that wrapper,
+   timeout]}})` (gen_server.ex:1076-1092, identical at the floor pair and the
+   current pair, 1.18.5-otp-27 and 1.20.3-otp-29). Beneath that wrapper,
    `:proc_lib.stop/3` monitors the target, calls `sys:terminate/3`, and on
    expiry — from `sys:terminate` raising `exit:{timeout, {sys, terminate,
    _}}` or from its own `after RemainingTimeout` — demonitors and calls the
@@ -953,7 +1001,8 @@ chooses.
    executor first, since it is the one with OS effects to clean up and it
    traps exits to do so. Then the Store, whose `terminate/2` releases the
    writer marker — see the marker invariant in ADR 0031. Finally the socket
-   path is unlinked and the owner **halts with `0`**.
+   path is unlinked and the owner **halts with `0`** — or with the class, in
+   the case above where something failed on the way out.
 
    **The executor is stopped before the lease, and that order is load-bearing**
    rather than alphabetical. The executor privately monitors the lease holder
@@ -982,7 +1031,23 @@ chooses.
    fractions would mean inventing ratios, and the minimalism budget takes
    every number from an accepted or proposed decision. Three of the four are
    ceilings rather than expected waits; only the executor is expected to spend
-   real time here.
+   real time here. **The transfers owner exists only when artifact transfers
+   were enabled**, as the composed set above says (`transfers` is listed there
+   as absent when disabled); where it is absent its row is not a stop the
+   owner skips at runtime so much as a pid it never held, and the step for it
+   does not exist in that daemon's sequence at all.
+
+   **What bounds the wait after each stop: nothing, and that is the safe
+   answer.** The selective receive that follows a stop carries no `after`, so
+   it is outside the composed grace and adds no second bound to reason about.
+   It terminates in all three endings because the exit it waits for is
+   guaranteed to exist: on `:ok` the component has terminated and the signal
+   is in flight, on the timeout the owner's own `Process.exit(pid, :kill)`
+   guarantees one, and on `:noproc` it is already in the mailbox — the owner
+   only attempts a stop for a component whose exit it has not already
+   consumed, so a dead pid means an unread exit. An `after` here would be a
+   number with no failure to catch, and it would turn a guaranteed signal into
+   a second thing that can go wrong.
 
    **A killed executor is the residual, and the plan states it rather than
    explaining it away.** The kill by itself is not the leak. The executor
@@ -1096,7 +1161,16 @@ to write.
    and found dead, refuses with `store_writer_unverifiable` where it cannot be
    decided, and refuses with `store_writer_active` where it is alive. A
    surviving marker is a case with a defined answer, not a corruption.
-5. Unlink the socket.
+5. Unlink the socket. **The runtime root, the lease owner and the transfers
+   owner are not stopped on this path**, and that is deliberate rather than an
+   omission. A fail-stop is not a drain, and none of the three owns anything
+   that outlives the VM: the executor does, which is why step 3 exists, and
+   the Store holds the marker, which is why step 4 does, while the transfers
+   owner's open descriptors are closed by the operating system when the VM
+   goes. Stopping the lease owner would buy less here than on the ordered
+   path, where the point was to stop the executor before it — on
+   `executor_lost` there is no executor left to read the lease holder's `DOWN`
+   at all.
 6. Write the class on `stderr`, then **halt with the non-zero status** for
    that class. Nothing restarts anything: the owner `start_link`s its seven
    and restarts none, so an exit it did not cause is fatal by its own clause —
@@ -1200,11 +1274,18 @@ what lets an operator fix the cause and try again without a recovery step.
   at any point during the stop**, and nothing appears on `stderr` — stopping
   seven linked processes deliberately produces seven exits, and every one of
   them must be consumed rather than classified.
-- **A real failure during an orderly stop is still classified.** The Store is
-  made to fail while the listener is being stopped. The daemon exits with
-  `store_lost`, not `operator_stop`, because the Store is not the component
-  named in `stopping` — the operator is owed the reason the daemon actually
-  went down for.
+- **A real failure during an orderly stop is still classified, and the
+  sequence still finishes.** The Store is made to fail while the listener is
+  being stopped. The case asserts three things, because the second and third
+  are what an earlier draft would have failed: the daemon exits with
+  `store_lost` rather than `operator_stop`, since the Store is not the
+  component named in `stopping` and the operator is owed the reason it
+  actually went down for; **the sequence runs to its end**, reaching the
+  Store's own step — where the stop raises `noproc` and is caught — then
+  unlinking the socket; and the class reaches `stderr` with a non-zero exit
+  rather than the owner dying of `noproc` with no status, no message and a
+  socket file left behind. A second daemon opens the same root immediately
+  afterwards, which is what proves the path completed.
 - **In-flight shutdown.** A daemon with a dispatched tool effect and an
   unresolved mutation receives `SIGTERM`. What has not settled within the
   cleanup grace is ended crash-equivalently, and the case asserts the negative
