@@ -87,16 +87,22 @@ restart every connection is gone with its socket and admission already
 requires the holder connection, so durability could only preserve a counter
 nothing needs. A counter-based epoch scoped to the daemon incarnation was
 rejected on 2026-09-14 because a lease-owner restart under the same
-incarnation would mint values already issued.
+incarnation would mint values already issued. Restarting a failed lease owner
+beneath live sockets was rejected on 2026-09-20: the owner holds the session's
+in-flight admission set, a takeover waits on that set being empty, and a
+restarted owner cannot know what it has forgotten. Retaining the set in a
+survivor moves the same window one process up; making it survivable at all
+would mean making it durable, which is the durable lease record this decision
+already rejects.
 
 **Evidence its acceptance requires.** This is a trust claim, so its class is
 negative tests on real processes plus a security reading of the admission
 path: every refusal — stale epoch, copied current epoch, non-holder
 connection, released lease, expired lease, observer abort — proved before core
 admission and before any session write, a controller killed mid-run fenced
-after takeover, a lease-owner process restarted while the daemon and its
-sockets survive, and a daemon restart leaving every session uncontrolled with
-every earlier epoch refused. No durable record changes, so no migration or
+after takeover, a lease owner killed while a mutation is in flight taking the
+daemon down rather than being restarted beneath live sockets, and a daemon
+restart leaving every session uncontrolled with every earlier epoch refused. No durable record changes, so no migration or
 rollback evidence is owed.
 
 Technical depth: [Contract and evidence](0033-collaboration-controller-lease-and-takeover-technical.md#technical-adr-0033-decision).

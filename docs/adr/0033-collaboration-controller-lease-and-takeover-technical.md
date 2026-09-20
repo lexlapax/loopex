@@ -20,9 +20,9 @@ deadline (monotonic), state ∈ {held, released, expired}
 
 `writer_epoch` is an opaque string from ADR 0023's identifier alphabet, at
 most 64 bytes, carrying at least 128 bits of fresh randomness. It is minted
-at every grant and never reused: not across grants to the same connection,
-not across a restart of the per-session lease owner process, and not across
-a restart of the daemon. Clients treat the epoch as opaque and compare it
+at every grant and never reused: not across grants to the same connection and
+not across a restart of the daemon, which is the only restart that exists
+because a lease owner's failure takes the daemon with it. Clients treat the epoch as opaque and compare it
 only for equality. The daemon incarnation is a fresh opaque identifier
 generated at each daemon start and reported by `daemon.status` as a
 diagnostic; it confers nothing and is not part of the epoch. It is a daemon
@@ -33,11 +33,37 @@ One owner process per session serializes every lease read, grant, renewal,
 release and expiry transition with that session's mutation-admission handoff,
 so a takeover cannot pass a mutation whose holder check has already started
 but whose core admission is unresolved; that admission first resolves or
-remains fenced. If that owner process crashes and is restarted by the daemon
-while the daemon and its client sockets survive, the restarted owner holds no
-lease: the session is uncontrolled, the previous holder's epoch can never be
-minted again, and its delayed commands refuse on both the holder and the
-epoch check until it acquires again and receives a new epoch. Expiry and
+remains fenced.
+
+**A lease owner's failure is fatal to that daemon instance, deliberately.**
+The owner holds the session's in-flight admission set in its own memory, and
+that set is the whole basis of the expiry rule below: a takeover is granted
+only when it is empty. An owner that dies takes the set with it, so a
+restarted owner cannot know whether an admission is still on its way into
+core. An earlier draft had the daemon restart the owner and carry on with its
+sockets intact; that is withdrawn on 2026-09-20, because a successor acquire
+could then be granted while a forgotten admission was still able to settle.
+
+So the session-owner tree is supervised `one_for_all` up to the listener: an
+owner's failure closes the listener and every connection, the daemon exits,
+and the daemon restarts with no lease anywhere, no connection, and no
+session activated. No successor acquire exists to be granted wrongly, because
+no connection survives to make one. Core fences the forgotten admission by
+epoch regardless of any of this — a fresh epoch is minted at the next grant
+and nothing from before can match — so the daemon-side rule is defence in
+depth over a fence that already holds, not the only thing standing between a
+crash and interleaving.
+
+Retaining the in-flight set in a survivor was the alternative and was
+rejected: whichever process held it would then be the process whose failure
+loses it, so the window moves up one level rather than closing, and a daemon
+that cannot lose the set is a daemon that has made the set durable — a durable
+lease record by another name, which this decision rejects for its own reasons.
+The cost is real and is stated: one supervision fault takes the daemon down
+and every client reconnects. That is the honest price of not inventing a
+recovery for state whose whole purpose is to be exact.
+
+Expiry and
 admission use the daemon's monotonic clock: a deadline is set only by a
 successful grant or renewal, and a wall-clock jump cannot shorten or extend
 a live holder's authority. Nothing about a lease is persisted or recovered.
@@ -163,11 +189,13 @@ stable reason when its own deadline elapses first, the holder's connection
 disconnecting while its mutation is in flight, and the per-session lease owner
 failing while a mutation is in flight — in every case exactly one of settle or
 refuse, never both, and no epoch reused; takeover only after release or expiry
-with a fresh epoch minted before the successor's first command; a controller killed mid-run fenced
-after takeover, its late commands refused; the per-session lease owner
-process crashing and restarting while the daemon and client sockets survive,
-after which the previous holder's delayed command is refused, no epoch is
-ever reused, and a new acquire carries a new epoch; an abort from the new
+with a fresh epoch minted before the successor's first command; a controller
+killed mid-run fenced after takeover, its late commands refused; a
+per-session lease owner killed while a mutation is in flight taking the
+listener, every connection and the daemon down with it, after which the
+restarted daemon holds no lease, has activated nothing, and the previous
+holder's delayed command is refused on both the holder and the epoch check;
+an abort from the new
 controller cancelling work dispatched under the old controller's command
 with a truthful cleanup outcome; an observer never acquiring authority
 through content, metadata, answers or order; after a daemon restart every
