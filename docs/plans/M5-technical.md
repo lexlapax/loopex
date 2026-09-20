@@ -1989,7 +1989,8 @@ Implement lifetime, transport and collaboration once, against the local
 adapter.
 
 **The numbers M5 commits to.** Every one comes from an accepted or proposed
-decision named above; M5 introduces none of its own.
+decision named above, or from a constant in the code it bounds, named with its
+line; M5 introduces none of its own.
 
 | Ceiling | Value | Source |
 | --- | --- | --- |

@@ -274,8 +274,8 @@ beyond the four this milestone makes. A lifecycle notification from core to the 
 would be a new core-to-host signal, with its own delivery and ordering
 questions, added for a listing field. A monitorable coordinator handle handed
 out to the daemon would export core's supervision topology across the boundary
-and invite the daemon to reason about it. M5's core changes stay at two:
-concurrent attachment, and the read-only existence query.
+and invite the daemon to reason about it. M5's core changes stay at four, and
+neither of these is among them.
 
 The lease-owner fatal rule in ADR 0033 is untouched by this and stays. The
 difference is ownership: a lease owner is a **daemon** process holding
@@ -470,9 +470,10 @@ awaiting an answer, a recovery in progress, an unresolved `commit_unknown`, or
 an admission executing inside core. Stopping it would destroy exactly what
 Outcome 1 exists to prove, that work progresses with zero attachments. And
 there is no operation to stop one with: core owns coordinator lifetime, and
-M5's core changes are concurrent attachment and a read-only existence query,
-neither of which stops anything, so a deactivation call would
-be a second core change this milestone does not make.
+none of M5's four core changes (concurrent attachment, the read-only existence
+query, the excluded-function trace list, and `quiesce/2`) stops a coordinator,
+so a deactivation call would be a further core change this milestone does not
+make.
 
 - **What dormancy applies to.** Attachments, resident windows and socket
   output buffers, and nothing else. An idle attachment is evicted, its window
