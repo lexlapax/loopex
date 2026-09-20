@@ -208,13 +208,35 @@ durable record and no Store read by the daemon:
    about the index is consulted to decide existence, which is why an index
    that is incomplete is not a correctness problem, and the daemon still reads
    no Store internals.
-2. **A client that never saw the session ID recovers by command identity.**
-   At the cut where the Store committed the creation and the process died
-   before the reply, the client may hold no ID at all. It is not lost: the
-   create command's `command_id` is durable and re-presenting it returns the
-   historical result rather than creating a second session — the idempotency
-   the session directory and the resume path already rely on. That is the
-   named route, and the operator page states it.
+2. **A client that never saw the session ID recovers by command identity, and
+   the sequence is written out here rather than left as a gesture.** At the
+   cut where the Store committed the creation and the process died before the
+   reply, the client holds no session ID at all — only the `command_id` it
+   chose for its own `session.create`. Every step below uses something the
+   client already has or something already durable:
+
+   | Step | Who acts | What happens |
+   | --- | --- | --- |
+   | 1 | Client | Reconnects to the daemon and re-presents `session.create` with **the same `command_id`** it used before. It knows no session ID, so it cannot ask for one |
+   | 2 | Daemon | Forwards it as an ordinary create. It does not consult the index, which by construction may not hold this session |
+   | 3 | Core | Recognises the command identity as already resolved and returns the **historical result** — the same session ID it committed before — rather than creating a second session. This is the command idempotency the resume path already relies on, not a new mechanism |
+   | 4 | Client | Now holds the session ID for the first time |
+   | 5 | Daemon | Validates durable existence with the read-only existence query on that ID, which answers yes because the Store committed it in the first place |
+   | 6 | Daemon | Records the directory entry it is missing, so every later `session.list` shows the session. If that write fails, step 3 of this procedure applies: the client is told, the session stays usable, and the record is retried next time |
+   | 7 | Client | Acquires control and attaches in either order, and drives the session normally |
+
+   Steps 5 and 6 are what turn a recovery into a repair: the session is not
+   merely reachable once, it stops being missing. A client that *does* still
+   hold the session ID skips steps 1 to 4 and enters at step 5.
+
+   **Its witness.** One case injects the exact cut — Store commit of the
+   create followed by process death before the directory write and before the
+   reply — then, from a client that never received the session ID, replays
+   `session.create` with the original `command_id` and asserts: exactly one
+   session exists in the root, the returned ID equals the committed one, the
+   existence query answers yes for it, the directory entry is present
+   afterwards, the session appears in `session.list`, and a prompt sent after
+   acquiring control lands on the same session rather than a second one.
 3. **Recording can fail, and says so.** If writing the directory entry fails
    during activation, the failure is reported to the client that triggered it,
    as an explicit warning that this session will not appear in `session.list`

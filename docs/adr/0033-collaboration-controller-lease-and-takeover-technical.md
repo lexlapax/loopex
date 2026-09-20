@@ -25,9 +25,17 @@ not across a restart of the daemon, which is the only restart that exists
 because a lease owner's failure takes the daemon with it. Clients treat the epoch as opaque and compare it
 only for equality. The daemon incarnation is a fresh opaque identifier
 generated at each daemon start and reported by `daemon.status` as a
-diagnostic; it confers nothing and is not part of the epoch. It is a daemon
-fact: core session epochs, owner incarnations and receipts are unchanged and
-remain the commit-authority fence.
+diagnostic; it confers nothing and is not part of the epoch.
+
+The writer epoch is a **daemon** fact and stays one. Core never receives it,
+never stores it and never checks it; the daemon checks it before forwarding a
+mutation and core is handed an ordinary command afterwards. Core's own
+fences are untouched and unrelated: the Store's `{owner_epoch,
+owner_incarnation_id}` pair under ADR 0006, runtime control's post-commit
+fence admitting the exact generation and owner pair, and command identity for
+idempotency. Those remain the commit-authority fence, and they answer a
+different question — which coordinator owner may commit — than the writer
+epoch does, which is which client may drive.
 
 One owner process per session serializes every lease read, grant, renewal,
 release and expiry transition with that session's mutation-admission handoff,
@@ -48,11 +56,21 @@ So the session-owner tree is supervised `one_for_all` up to the listener: an
 owner's failure closes the listener and every connection, the daemon exits,
 and the daemon restarts with no lease anywhere, no connection, and no
 session activated. No successor acquire exists to be granted wrongly, because
-no connection survives to make one. Core fences the forgotten admission by
-epoch regardless of any of this — a fresh epoch is minted at the next grant
-and nothing from before can match — so the daemon-side rule is defence in
-depth over a fence that already holds, not the only thing standing between a
-crash and interleaving.
+no connection survives to make one.
+
+That rule stands on its own, and this pair does not lean on core to help it.
+An earlier draft said core would fence the forgotten admission by epoch
+regardless, making the daemon-fatal rule defence in depth. That is wrong and
+is withdrawn on the maintainer's decision of 2026-09-20: **core knows nothing
+of the writer epoch.** The epoch is a daemon-owned value on a daemon-owned
+wire, checked by the daemon before it forwards anything, and core never sees
+it. What core does fence is its own: the Store's `{owner_epoch,
+owner_incarnation_id}` pair under ADR 0006, runtime control's post-commit
+fence admitting the exact generation and owner pair, and command identity for
+idempotency. Those protect against a stale *coordinator owner*, not against a
+stale *controller*, which is exactly the gap this ADR exists to fill. So the
+only thing preventing a successor's grant from racing a forgotten admission
+is the daemon rule above, and it has to be absolute for that reason.
 
 Retaining the in-flight set in a survivor was the alternative and was
 rejected: whichever process held it would then be the process whose failure

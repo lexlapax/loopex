@@ -103,8 +103,8 @@ claiming a property of every host that might compose a registry.
 The operator still names the credential once, through the same environment
 variable, and the reference implementations — the CLI, the app-server host and
 the M5 daemon — read it exactly once where they compose the runtime and delete
-it from the VM's environment in the same step, holding the bytes behind the
-resolver from then on. The variable is a configuration input consumed at
+it from the VM's environment in the same step, holding the bytes in their
+custody process and registering its token from then on. The variable is a configuration input consumed at
 composition, not a live transport for every call, and from the moment
 composition completes the parent VM's environment carries no credential. M5
 Outcome 6's claim is stated at that boundary: a claim that the variable is
