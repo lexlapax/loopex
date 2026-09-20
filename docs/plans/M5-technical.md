@@ -1131,10 +1131,11 @@ revision, its `{:timeout, _}` / `{:noproc, _}` / catch-all clauses, its
 component's fate from what a library function did to the caller, and row 1
 shows that is not derivable.
 
-**What bounds each step.** The outer `receive` carries `after grace`, the
-composed cleanup grace — one bound per component, the same number everywhere,
-and the same number the helper passed to `GenServer.stop/3`, so a component
-gets the grace once rather than twice. The inner `receive` after the kill
+**What bounds each step.** The outer `receive` waits until the phase's
+**absolute deadline** — the shared teardown deadline for every non-Store stop,
+the Store's own fixed phase for the Store — and the helper is given what
+remains of it, so a component is bounded once rather than twice and the phase
+is bounded whatever the component does. The inner `receive` after the kill
 carries no `after`, and needs none: `Process.exit(pid, :kill)` on a live
 process is unconditional, and on one already dead the exit the owner is
 waiting for is the one that made it dead, already queued. It is a wait for a
@@ -1802,8 +1803,8 @@ to write.
 3. **Stop the executor** — on every class but `executor_lost`, where it is
    the component that already died — under the same discipline as every other
    stop: a monitored helper calling `GenServer.stop(pid, :normal, grace)`, the
-   owner waiting on its own link with `after grace` and killing on expiry, and
-   the composed cleanup grace the ordered path's step 6 uses. This is not tidiness: the executor is
+   owner waiting on its own link until the shared teardown deadline and
+   killing on expiry — the same deadline the ordered path's step 6 uses. This is not tidiness: the executor is
    the one linked process whose work reaches outside the VM, and stopping it
    is what tells its Port-owning workers to terminate the captured process
    groups. Halting without stopping it would never start that cleanup at
@@ -2275,7 +2276,7 @@ the adapter or the executor.
 | **Listener ↔ connections** | `loopex_daemon` | Foreign peer, malformed frame, over-long path, backpressure | Filesystem permission verified after bind, then the per-platform peer-credential read (`LOCAL_PEERCRED` / `SO_PEERCRED`), then ADR 0023's framing refusals; backpressure at the 4 MiB output buffer | Closed before initialize for a peer refusal; a stable framing reason otherwise; detachment at the last emitted cursor under backpressure | **Not durable:** connections, buffers, windows |
 | **Registry ↔ sender ↔ custody** | The **host** owns the registry and custody; the adapter owns the sender. The token is bound at composition, resolved per invocation | No registry row, registry dead, custody dead, refusal, malformed reply, deadline | `route(handle, token)` answers `:unavailable`; resolution fails as one of the six atoms produced below the guardian (`:no_token`, `:invalid_token`, `:missing`, `:expired`, `:oversized`, `:unavailable`); the **guardian** enforces the deadline, kills the sender and reports the seventh, `:timeout` | The adapter's existing `Loopex.Model` refusal shape, with the atom in the bounded diagnostic | **Not durable:** nothing about credentials is ever journaled, and no span or record carries model `options` — the model span is a fixed identity map. The invocation's failure is durable |
 | **CLI ↔ socket** | `loopex_cli` | Socket unreachable, refusal, transport loss, renewal failure | The client's own reconnect loop and its renewal timer | Reconnect at the retained cursor, deduplicating; a failed renewal drops to observer with the loss on `stderr`; a reconnecting controller must acquire again for a fresh epoch | **Durable:** nothing the client holds. The cursor is a client-side position |
-| **Daemon ↔ OS: signals** | The operator | `SIGTERM`, delivered to the handler the daemon installs before it takes the marker; a terminal `SIGINT` reaches it only as the `SIGTERM` the launcher forwards, since `:os.set_signal/2` refuses `:sigint` | The owner drains through core's `quiesce/2` within the composed cleanup grace, tells clients, unlinks the socket while it still holds the marker, and then stops its linked processes in reverse order — lease owners, runtime, edges, Store last — each stop driven by a monitored helper calling `GenServer.stop(pid, :normal, grace)` while the owner waits on its own link with `after grace` and kills on expiry. Classification is from the observed exit reason alone: `:normal`, `:shutdown` and the owner's own `:killed` are consumed, everything else is classified | `daemon.stopping` with `operator_stop`, then close | **Durable:** whatever committed. **Not:** work ended crash-equivalently — a claim about the journal, not about every process being gone |
+| **Daemon ↔ OS: signals** | The operator | `SIGTERM`, delivered to the handler the daemon installs before it takes the marker; a terminal `SIGINT` reaches it only as the `SIGTERM` the launcher forwards, since `:os.set_signal/2` refuses `:sigint` | The owner drains through core's `quiesce/2` within the derived drain budget, tells clients, unlinks the socket only while it can still show it holds the marker, and then stops its linked processes in reverse order — lease owners, the relay, runtime, edges, and the Store last in its own fixed 30 s phase — each stop driven by a monitored helper calling `GenServer.stop/3` while the owner waits on its own link until the shared teardown deadline and kills on expiry. Classification is from the observed exit reason alone: `:normal`, `:shutdown` and the owner's own `:killed` are consumed, everything else is classified | `daemon.stopping` with `operator_stop`, then close | **Durable:** whatever committed. **Not:** work ended crash-equivalently — a claim about the journal, not about every process being gone |
 | **Daemon ↔ OS: kill** | The operator | `SIGKILL`, power loss | Nothing runs — no handler, no `terminate/2` | The socket closes with no record at all | **Durable:** the journal. The marker is left for the next daemon's verified stale-writer recovery |
 | **Daemon ↔ OS: socket file** | `loopex_daemon` | A stale `daemon.sock` from a dead daemon | Only the marker holder may unlink and rebind, so two starts resolve at the marker and never at the socket | The loser exits without touching the socket | **Not durable:** the socket file is a path, never state |
 | **Daemon ↔ OS: marker** | `loopex_store_local` | Released in order, released early, or left behind | Four dispositions, and the plan states all four: `terminate/2` in an orderly stop; `terminate/2` early, before the daemon can act, on store loss; `terminate/2` on a **fatal class where the Store is still alive**, because the fail-stop path stops it before halting; and **nothing** on a `SIGKILL`, a power loss, or a Store stop that timed out and was killed | The client sees only the `daemon.stopping` reason; the marker is invisible to it | **Not durable in the journal sense:** the marker is exclusion, not truth. A surviving marker is the case ADR 0031's recovery rule answers |
