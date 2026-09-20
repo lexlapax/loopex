@@ -109,9 +109,13 @@ Technical depth: [External-consumer candidate proof](roadmap-technical.md#techni
 Can independent clients attach, recover, and agree on one protocol candidate
 without owning session lifetime? M5 carries this rung: daemon-owned session
 lifetime, a local socket transport, concurrent independent clients,
-collaboration with crash takeover, snapshot and cursor replay, residency limits,
-a daemon-grade store, and cancellation that crosses processes. The protocol
-still remains experimental.
+collaboration with crash takeover, snapshot and cursor replay, residency
+limits, and cancellation that crosses processes, all on an ADR-selected store.
+For `0.2` that store is the existing local adapter with its limits and its
+root-retirement procedure documented; the daemon-grade adapter and its
+migration are the successor milestone's. M5 also moves the provider
+credential off the parent VM's environment onto the private per-invocation
+channel. The protocol still remains experimental.
 
 Technical depth: [Durable-service candidate proof](roadmap-technical.md#technical-roadmap-durable-service)
 
