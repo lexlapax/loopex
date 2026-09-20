@@ -152,10 +152,17 @@ answered — ends that process, and the `DOWN` releases the attachment. That is
 what makes a connection a sufficient handle on an attachment, and it is why a
 daemon needs no attachment count from core to release what it reserved.
 
-An explicit `detach/1` on the public API was the alternative and is rejected:
+An explicit `detach/1` on **core's** public API was the alternative and is
+rejected:
 it would add a call every caller must remember on every exit path, including
 the paths where the caller is already gone, which is exactly the case a
-monitor handles for free.
+monitor handles for free. That rejection is about the core API and about a
+*caller* detaching itself. It is not a rule against the daemon ending an
+attachment — the daemon does that four ways, listed with `control_owner_lost`
+below, and every one of them is a record written to that connection and then
+the close of that connection, which is the same monitor-driven release read
+from the other side: the connection process ends, and its `DOWN` releases the
+attachment with no call at all.
 
 The core EventDispatcher and Control retain multiple live attachment IDs and
 incarnations for one session. A new distinct attachment does not implicitly
@@ -181,7 +188,9 @@ owed, and both daemon stages hold only bytes for events core has already
 named.
 When the next event would exceed the core count or a daemon byte bound, the
 daemon detaches the attachment at its last completely emitted cursor with a
-stable reason rather than letting either stage grow. No byte limit is
+stable reason rather than letting either stage grow — which, under the
+daemon-initiated detach rule above, means one best-effort `detached` record
+and then the close of that connection. No byte limit is
 enforced inside core.
 
 ### Generation 2 additions
@@ -303,7 +312,7 @@ carry.
 
 | Field | Value |
 | --- | --- |
-| `reason` | One of `operator_stop`, `store_lost`, `store_capacity_exceeded`, or `fatal:<class>` for the remaining classes the plan's fatal-class map names, one per linked component: `fatal:runtime_lost`, `fatal:transfers_lost`, `fatal:workspace_lease_lost`, `fatal:executor_lost`, `fatal:registry_lost`, `fatal:custody_lost`, `fatal:capability_lost`, `fatal:relay_lost`, `fatal:listener_lost` — nine in a daemon with artifact transfers and eight without, one per linked component of the fixed set. A lease owner's death is not among them: it closes one session's controller attachment with `control_owner_lost` and ends no daemon. The startup classes carry no reason, because no socket exists when they occur, and neither does `owner_lost`, where the process that would write it is the one that is gone |
+| `reason` | One of `operator_stop`, `store_lost`, `store_capacity_exceeded`, or `fatal:<class>` for the remaining classes the plan's fatal-class map names, one per linked component: `fatal:runtime_lost`, `fatal:transfers_lost`, `fatal:workspace_lease_lost`, `fatal:executor_lost`, `fatal:registry_lost`, `fatal:custody_lost`, `fatal:capability_lost`, `fatal:relay_lost`, `fatal:listener_lost` — nine in a daemon with artifact transfers and eight without, one per linked component of the fixed set. A lease owner's death is not among them: it closes one session's controller connection with `control_owner_lost` and ends no daemon. The startup classes carry no reason, because no socket exists when they occur, and neither does `owner_lost`, where the process that would write it is the one that is gone |
 | `message` | A bounded non-secret sentence for an operator to read |
 | `retry_after_ms` | Present only for `operator_stop`, where a restart is expected; absent for every fatal reason, because the daemon does not know when the cause will be fixed |
 
@@ -338,7 +347,7 @@ limits — five inputs, and generation 2 changes **all five**:
 
 **`control_owner_lost` closes a controller whose lease owner died.** ADR 0033
 makes a lease owner's failure session-scoped: the daemon closes that session's
-controller attachment, leaves its observers attached, and lets the next
+controller connection, leaves its observers attached on their own, and lets the next
 acquisition start a fresh owner with a fresh epoch. The closing client is owed
 a reason for a close it did not ask for, and this is it — distinct from
 `control_held`, which refuses an acquisition, and from `control_pending`,
@@ -422,12 +431,56 @@ uncorrelated `error`**, with
 | `session_id` | the session whose lease owner died |
 | `event_cursor` | the last completely emitted durable cursor for that attachment, exactly as `detached` carries it |
 
-It is uncorrelated because no request caused it. **Close behaviour:** the
-daemon emits it to the **controller's** attachment and then closes that
-attachment only — the connection stays open, and observer attachments on it or
-on any other connection are untouched, because an observer holds no lease and
-loses nothing. A client that sees it may acquire again; the next acquisition
-starts a fresh owner and mints a fresh epoch.
+It is uncorrelated because no request caused it. **Close behaviour:** it is one
+instance of the daemon-initiated detach rule below — the daemon writes the
+record best-effort into that connection's output buffer and then **closes that
+connection**. Every other connection is untouched, so every observer keeps its
+attachment and keeps receiving, which is what "the observers stay" means: an
+observer is on a connection of its own, because generation 2 binds a
+connection to at most one attachment. A client that sees it may reconnect and
+acquire again; the next acquisition starts a fresh owner and mints a fresh
+epoch.
+
+**Every daemon-initiated detach is a record and a close, and the rule is one
+rule.** A connection holds at most one attachment, so a daemon that "detaches"
+a connection has left it holding nothing — no cursor position it can act on,
+no way to be told what it may resume from except the record it is being sent,
+and no mechanism to re-establish an attachment except a fresh `session.attach`
+it could equally send on a fresh connection. An earlier revision left such a
+connection open and declined a detach API in the same breath, which left the
+client in a state neither side had defined. So:
+
+| Occasion | Record written first | Then |
+| --- | --- | --- |
+| The controller's lease owner died | `error`, `control_owner_lost`, with `session_id` and `event_cursor` | close that connection |
+| Output-buffer or core-queue overflow | `error`, ADR 0023's `detached`, with `session_id` and `event_cursor` | close that connection |
+| Aggregate byte pressure chose this attachment | the same `detached` | close that connection |
+| Idle eviction at ten minutes | the same `detached` | close that connection |
+
+**`event_cursor` is the same quantity in all four**: the **last completely
+emitted durable cursor** for that attachment — the highest event sequence the
+daemon finished writing to that socket, never one it had only encoded or
+buffered. That is the position the client reconnects at, and delivery from it
+is contiguous and at least once, so a duplicate at the seam is expected and a
+gap is a defect.
+
+**"Best-effort" is the bound `daemon.stopping` already has**, reused rather
+than restated: exactly **one** non-blocking write attempt of the record into
+the connection's existing 4 MiB output buffer, and the close happens whatever
+that attempt did. A backpressured client — which is precisely the client an
+overflow detach is about — will usually not receive it and learns by EOF
+instead. No new timer and no new number.
+
+**No other connection is affected by any of the four**, and that is the
+property the witnesses assert: a case per occasion, each with a second
+connection attached to the same session, asserting the first connection sees
+the record where its buffer admits one and sees EOF either way, and the second
+keeps receiving durable events across the whole of it. Each of the four is a
+generation-2 vector: `control_owner_lost` under its own code, and three
+`detached` vectors distinguished by nothing on the wire — the code and fields
+are identical, which is deliberate, because why the daemon detached is an
+operator fact in its logs and not authority-shaped information a client acts
+on differently.
 
 **`daemon_stopping`, the refusal after the admission cut.** An orderly stop
 begins with a synchronous, acknowledged cut: the daemon's owner calls the
@@ -879,8 +932,11 @@ delivered contiguously after the snapshot. The daemon adds:
   aggregate is below the ceiling**, not applied once: releasing one window may
   not be enough, so zero-attachment windows are released in that order until
   either the aggregate fits or none is left. Only when none is left does the
-  daemon detach the slowest attachment at its last emitted cursor, and that
-  too repeats until the aggregate fits. Independently of pressure, a window whose session has had zero
+  daemon detach the slowest attachment at its last emitted cursor — sending
+  that connection a `detached` record and closing it, under the detach rule
+  above, so the bytes the attachment was holding are released with the
+  connection rather than lingering behind an open socket nothing is reading —
+  and that too repeats until the aggregate fits. Independently of pressure, a window whose session has had zero
   attachments for the idle interval is dropped. No reclamation stalls a
   journal transaction and none changes what any client is owed.
 
@@ -891,16 +947,18 @@ delivered contiguously after the snapshot. The daemon adds:
   none claims to;
 - the core event-count queue and the daemon socket output buffer above; when
   the next event would exceed either, the attachment is detached at its last
-  completely emitted cursor with a stable reason and the client reconnects
-  at that cursor;
+  completely emitted cursor with a stable reason — a `detached` record and the
+  close of that connection, under the detach rule above — and the client
+  reconnects at that cursor on a new connection;
 - at most 512 MiB of retained encoded events across the daemon's output
   buffers and resident windows; on aggregate pressure, evict or detach the
   slowest eligible attachment before admitting more bytes, without stalling
-  a journal transaction;
+  a journal transaction, and by the same record-then-close;
 - 64 attachments per session and 512 per daemon, refused at attach with a
   stable reason when exhausted;
 - eviction of an attachment that has consumed nothing for ten minutes; the
-  eviction record names the cursor the client may resume from;
+  `detached` record names the cursor the client may resume from and the
+  connection is closed with it;
 - transient progress coalesced per attachment and dropped first under
   pressure, with a counted drop; no progress item ever waits on a journal
   transaction.
@@ -921,10 +979,12 @@ window dropped mid-stream, proving the cache establishes nothing; deterministic
 reclamation in the fixed order above, including the case where zero-attachment
 windows alone consume the aggregate ceiling and are released before any
 attachment is detached; a slow observer detached at
-its last emitted cursor while the controller and other attachments continue;
-the per-session and per-daemon limits refusing independently; idle eviction
-and reconnect with no missing durable event and any duplicate deduplicated by
-session ID, sequence and event ID; the three encoded-byte ceilings at maximum
+its last emitted cursor — its `detached` record written best-effort and its
+connection closed — while the controller and other attachments on their own
+connections continue;
+the per-session and per-daemon limits refusing independently; idle eviction, its close, and reconnect on a
+fresh connection with no missing durable event and any duplicate deduplicated
+by session ID, sequence and event ID; the three encoded-byte ceilings at maximum
 attachment count and payload pressure enforced in the daemon-owned stages,
 with process RSS observed and reported separately; a generation-1-only
 initialize refused with `unsupported_generation` and nothing created;

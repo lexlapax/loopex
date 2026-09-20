@@ -58,10 +58,11 @@ owner that dies takes the set with it, so no successor owner can inherit it —
 and none tries to. What happens instead is exactly what happens when a lease
 is gone by any other route:
 
-- the daemon closes that session's **controller** attachment with
-  `control_owner_lost`, the wire reason ADR 0032's generation-2 inventory
-  carries for it, and leaves every observer attached, because an observer
-  holds no lease and loses nothing;
+- the daemon writes `control_owner_lost` to that session's **controller**
+  connection and closes it with its attachment, under the daemon-initiated
+  detach rule ADR 0032's generation-2 inventory fixes for exactly this, and
+  leaves every observer attached, because an observer
+  holds no lease, is on a connection of its own and loses nothing;
 - the lease itself is gone, held by nobody;
 - the next `session.acquire_control` for that session starts a **fresh**
   owner, holding no lease and no admission set, and mints a **fresh epoch** —
@@ -314,8 +315,9 @@ closed client and a killed client both wait for expiry, with a takeover
 refused before the deadline and granted after it in both cases; a controller
 killed mid-run fenced after takeover, its late commands refused; a
 lease owner killed while a mutation is in flight taking neither the daemon nor
-any other session down: that session's controller attachment closes with
-`control_owner_lost`, its observers stay attached, the relay retains the
+any other session down: that session's controller connection is sent
+`control_owner_lost` and closed with its attachment, its observers stay
+attached on their own connections, the relay retains the
 outstanding ticket, the replacement owner's first grant waits until it
 settles, and the previous holder's delayed command is refused on both the
 holder and the epoch check;

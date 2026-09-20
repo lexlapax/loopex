@@ -109,7 +109,8 @@ path: every refusal — stale epoch, copied current epoch, non-holder
 connection, released lease, expired lease, observer abort — proved before core
 admission and before any session write, a controller killed mid-run fenced
 after takeover, a lease owner killed while a mutation is in flight taking neither the daemon
-nor any other session down — its controller closed with `control_owner_lost`,
+nor any other session down — its controller's connection sent
+`control_owner_lost` and closed,
 its observers kept, and the replacement's grant held until the relay's
 outstanding ticket settles — and a daemon
 restart leaving every session uncontrolled with every earlier epoch refused. No durable record changes, so no migration or
