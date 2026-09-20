@@ -101,9 +101,12 @@ because the raw call reaches the tracer first; it stays as defence in depth,
 resting on a bound *shape* — those bytes always travel under a
 credential-named key and are placeholdered at any size, which size alone would
 not give, since the pass leaves a short binary verbatim and a credential may
-be one byte. The companion names every excluded function and module — together
-the whole of the parent-side surface — and M5 proves the exclusion at the
-tracer rather than at the sink. ADR 0030 is not edited: its prose is honoured
+be one byte. The exclusion is by **process**, not by function: the sender excludes itself
+from every trace session before it resolves anything, because a function that
+carries the credential calls functions it does not own — a traced
+`:gen_tcp.send/2` shows the frame whatever this adapter's modules are
+patterned. M5 proves it at the tracer rather than at the sink, in a case that
+names `:gen_tcp` on purpose. ADR 0030 is not edited: its prose is honoured
 once this lands.
 
 **Everywhere else the boundary is where the adapter's claims stop.** Inside it

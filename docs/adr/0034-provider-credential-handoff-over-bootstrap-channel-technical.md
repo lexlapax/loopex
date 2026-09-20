@@ -655,14 +655,15 @@ Three proofs are new:
   `receive_custody_reply/2` or `write_credential_frame/2`, no raw trace
   message for them, and no credential bytes or token anywhere — because the
   adapter is in no namespace wildcard. Under a configuration that
-  **explicitly names** `Loopex.LLM.ReqLLM.ProviderBridge` and
+  **explicitly names `:gen_tcp`**, `Loopex.LLM.ReqLLM.ProviderBridge` and
   `Loopex.LLM.ReqLLM.ProviderCodec`, the tracer is asserted to receive **no
-  raw trace message** for any excluded MFA, while a non-excluded function of
-  the same module is asserted to produce one — the pre-delivery property read
-  where it holds, and a case that cannot pass by tracing nothing. A third case
-  asserts the three functions exist with their exact identities and that a
-  one-byte credential appears in no captured entry, so neither of the first
-  two can pass vacuously.
+  raw trace message from the sender process at all**, while a non-excluded
+  control process making the same `:gen_tcp.send/2` call in the same session
+  is asserted to produce one — the pre-delivery property read where it holds,
+  and a case that cannot pass by tracing nothing. A third case asserts the
+  three functions exist with their exact identities and that a one-byte
+  canary credential appears in no captured message or entry, so neither of the
+  first two can pass vacuously.
 - **Host custody, proved at each host rather than in the adapter.** The
   adapter's test tree cannot prove a claim about the CLI's or the daemon's
   composition, and an earlier draft filed all three there. Each case lives
