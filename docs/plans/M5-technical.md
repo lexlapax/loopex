@@ -767,6 +767,44 @@ what lets an operator fix the cause and try again without a recovery step.
   held elsewhere, the socket permission check fails, or the index bound is
   exceeded, and each of those exits non-zero with its own class.
 
+<a id="technical-plan-boundaries"></a>
+### Ownership and Failure at Every Boundary
+
+Concept: [Scope](M5.md#concept-plan-scope).
+
+Most of what went wrong in this plan's reviews was not missing prose. It was a
+boundary where two documents each assumed the other side handled a failure, or
+where the daemon was given a job the code on the other side does not let it
+do. This table is the answer to both: one row per boundary M5 touches, and
+every cell resting on a code line that exists today or on a component this
+plan names as new. It is the thing to check a change against.
+
+| Boundary | Owner | What fails | Who observes it, and how | What the client sees | Durable / not durable |
+| --- | --- | --- | --- | --- | --- |
+| **Store ↔ daemon** | `loopex_store_local` owns the marker and the log; the daemon owns the Store *process* | Append error, including the capacity refusal | The Store stops **itself** (`local.ex:251-270` answers `{:stop, reason, commit_unknown, state}`) and releases the marker in `terminate/2` (`local.ex:166`). The daemon observes the death two ways, because `LoopexComposition.start_edge/2` uses `start_link` (`loopex_composition.ex:302-307`): it traps the exit and also monitors the adapter | `daemon.stopping` with `store_lost` or `store_capacity_exceeded`, one bounded attempt, then the socket closes | **Durable:** whatever committed. **Not:** the failed append; the in-flight transaction is `commit_unknown` and reconciles later |
+| **Store ↔ daemon (startup)** | The adapter | Marker held, unverifiable, log too large | `WriterLock.acquire` refuses with `store_writer_active` / `store_writer_unverifiable`; `Log.open` refuses `store_log_too_large` (`log.ex:80-84`) | Nothing — no socket exists yet | **Not durable:** nothing was written. Reverse cleanup leaves no marker |
+| **Core ↔ daemon: existence query** | `loopex` answers; the daemon asks | Root unreadable, malformed ID, unrecognised answer | The query's own closed result set — `present`, `absent`, `invalid_id`, `store_unavailable`, `unexpected` (this plan's new core operation) | The matching refusal, four of them distinct; nothing created, nothing attached, no lease | **Not durable:** the query writes nothing, proved by a byte-identical root |
+| **Core ↔ daemon: attach** | `loopex` owns the cursor barrier, snapshot and queues | Barrier race, stale handle, queue overflow | Core's existing attach transaction and stale-handle checks; the daemon reads no coordinator state to repair a race | Snapshot then contiguous at-least-once events, or detachment at the last emitted cursor with a stable reason | **Durable:** the events. **Not:** the attachment, the window, the buffer |
+| **Core ↔ daemon: resume** | `loopex` | Placement mismatch, unknown session, already-resolved command | Core's existing resume path and command idempotency (`control.ex:901-907` returns the historical result without starting an owner) | Core's refusal, forwarded unchanged | **Durable:** the resume command and its result |
+| **Core ↔ daemon: commands** | `loopex` admits; the daemon forwards | **Coordinator death** | Core's `DynamicSupervisor` (`restart: :temporary`, `session_coordinator.ex:134-142`); `Control` consumes the `DOWN`, releases the fence and leaves the entry (`control.ex:821`). **No signal reaches the daemon, and none is owed** | Core's existing refusal on the next command for that session, forwarded unchanged. `residency` still reads `active`, which remains true: this daemon did activate it | **Durable:** whatever committed before. **Not:** any claim about liveness |
+| **Lease owner ↔ connections** | `loopex_daemon` | The per-session lease owner dies, taking the in-flight admission set with it | The daemon's own supervisor: `one_for_all` up to the listener | `daemon.stopping` with `supervision_fault`, then every connection closes; the daemon restarts uncontrolled | **Not durable:** the lease, the epoch, the in-flight set. The journal is untouched |
+| **Lease owner ↔ connections (expiry)** | `loopex_daemon` | A holder stops renewing, or a mutation is unresolved at the deadline | The lease owner's own monotonic deadline; the in-flight set decides when a takeover is granted | The holder's next mutation refuses; a takeover is eligible at the deadline and granted when the in-flight set empties | **Not durable:** the lease. The mutation that was in flight settles or refuses exactly once |
+| **Listener ↔ connections** | `loopex_daemon` | Foreign peer, malformed frame, over-long path, backpressure | Filesystem permission verified after bind, then the per-platform peer-credential read (`LOCAL_PEERCRED` / `SO_PEERCRED`), then ADR 0023's framing refusals; backpressure at the 4 MiB output buffer | Closed before initialize for a peer refusal; a stable framing reason otherwise; detachment at the last emitted cursor under backpressure | **Not durable:** connections, buffers, windows |
+| **Registry ↔ sender ↔ custody** | The **host** owns the registry and custody; the adapter owns the sender | No registry row, registry dead, custody dead, refusal, malformed reply, deadline | `route(handle, token)` answers `:unavailable`; custody answers one of the four atoms; the **guardian** enforces the deadline and kills the sender | The adapter's existing `Loopex.Model` refusal shape, with the atom in the bounded diagnostic | **Not durable:** nothing about credentials is ever journaled. The invocation's failure is |
+| **CLI ↔ socket** | `loopex_cli` | Socket unreachable, refusal, transport loss, renewal failure | The client's own reconnect loop and its renewal timer | Reconnect at the retained cursor, deduplicating; a failed renewal drops to observer with the loss on `stderr`; a reconnecting controller must acquire again for a fresh epoch | **Durable:** nothing the client holds. The cursor is a client-side position |
+| **Daemon ↔ OS: signals** | The operator | `SIGTERM` / `SIGINT` | The daemon's signal handler begins the ordered shutdown | `daemon.stopping` with `operator_stop`, then close | **Durable:** whatever committed. **Not:** work ended crash-equivalently, for which no terminal is claimed |
+| **Daemon ↔ OS: kill** | The operator | `SIGKILL`, power loss | Nothing runs — no handler, no `terminate/2` | The socket closes with no record at all | **Durable:** the journal. The marker is left for the next daemon's verified stale-writer recovery |
+| **Daemon ↔ OS: socket file** | `loopex_daemon` | A stale `daemon.sock` from a dead daemon | Only the marker holder may unlink and rebind, so two starts resolve at the marker and never at the socket | The loser exits without touching the socket | **Not durable:** the socket file is a path, never state |
+| **Daemon ↔ OS: marker** | `loopex_store_local` | Released in order, released early, or left behind | `terminate/2` in an orderly stop; `terminate/2` early on store loss; nothing on a kill | Nothing directly; the next daemon's start succeeds, succeeds, or recovers | **Not durable in the journal sense:** the marker is exclusion, not truth |
+
+Two rows deserve their reading stated, because they are where earlier drafts
+went wrong. The **coordinator death** row is the one that forced `residency`
+to mean a daemon fact: there is no observer column entry available, so any
+design that needed one was unimplementable. The **Store ↔ daemon** row is the
+one that forced the fail-stop split: the marker is already released by the
+time the daemon can act, so an ordered shutdown ending "stop the Store" had
+nothing to stop.
+
 <a id="technical-plan-minimalism"></a>
 ### Proportional Minimalism Budget
 
