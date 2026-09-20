@@ -176,14 +176,27 @@ number to come from an accepted or proposed decision. One non-blocking attempt
 into a bound that already exists is the same guarantee with nothing new to
 justify.
 
-**This changes the generation-2 digest, and that is the point of saying it
-here.** `Loopex.Protocol.Session.schema_digest/0` is taken over the
-generation, the ordered methods, the ordered record families, the ordered
-error codes and the limits. `daemon.stopping` is a new **record family**, so
-generation 2's digest reflects it; the literal the conformance module pins for
-generation 2 is the digest of the contract *including* this record, and a
-generation 2 that omitted it would compute a different value and fail there.
-Generation 1's digest is untouched, since generation 1 has no such record.
+**This changes the generation-2 digest, and so do the error codes.**
+`Loopex.Protocol.Session.schema_digest/0` is taken over the generation, the
+ordered methods, the ordered record families, the ordered error codes and the
+limits — five inputs, and generation 2 changes four of them:
+
+| Digest input | Generation 2 |
+| --- | --- |
+| Generation | New string |
+| Methods | Adds `session.list`, `daemon.status`, `session.acquire_control`, `session.release_control` |
+| Record families | Adds `daemon.stopping` |
+| **Error codes** | Adds every refusal generation 2 can return and generation 1 cannot: `control_held`, `session_dormant`, `index_full` where it is returned as a refusal rather than a field, the four existence-query refusals the daemon maps to the wire (`session_unknown`, `session_id_invalid`, `store_unavailable`, `existence_indeterminate`), and the activation and residency refusals (`activation_ceiling_reached`, `session_index_too_large`, `composition_mismatch`) |
+| Limits | Unchanged from ADR 0023's ceilings |
+
+Listing the error codes matters because it is the input most easily forgotten:
+a refusal reason invented at implementation time and not entered in the
+ordered list would make the served contract differ from the digest the server
+advertises, which is exactly the drift the digest exists to catch. The
+generation-2 literal the conformance module pins is the digest of the contract
+*including* all four changes, and a build missing any of them computes a
+different value and fails there. Generation 1's digest is untouched, since
+generation 1 gains no method, no record family and no error code.
 
 ### The session index, and what it may claim
 
