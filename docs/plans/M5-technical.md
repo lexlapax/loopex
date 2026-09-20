@@ -1104,21 +1104,54 @@ epoch nor core's serial ownership prevents that reordering: the fresh epoch
 stops a *later* command from the old tenure, and core orders what it receives,
 not what is still on the way.
 
-So one fixed, daemon-owned process holds what the lease owners cannot:
+So one fixed, daemon-owned process holds what the lease owners cannot — and
+three details of it are the difference between closing the window and looking
+as though it does:
 
-- **Every admitted core call goes through the relay**, which performs it in a
-  monitored task it owns and issues a **ticket** naming the session, the
-  admission and the connection it came from.
-- **A ticket settles when the relay has observed that call's outcome**, and
-  that is defined precisely because "the call is finished" is exactly the
-  ambiguity this closes: either the task returns core's result — any result,
-  including a refusal — or the task dies and the relay observes its `DOWN`
-  and treats the call as settled-unknown, which is the same fact
-  `commit_unknown` already carries in the journal. A connection disappearing
-  does **not** settle a ticket, because the call it made is still running
-  inside core; the ticket outlives the connection exactly as the call does.
-- **The relay survives lease-owner death**, being fixed rather than
-  per-session, so the tickets survive with it.
+- **Tickets cover exactly the lease-authorized existing-session mutations, and
+  nothing else.** ADR 0033 lists them: `session.resume`, `session.prompt`,
+  `session.steer`, `session.follow_up`, `session.abort`,
+  `session.respond_interaction`, `session.admit_resources` and
+  `session.activate_skill` — every generation-2 call that carries
+  `writer_epoch` and is admitted only from the recorded holder
+  (`0033-…-technical.md:170-178`). **Reads are not ticketed.** An earlier
+  revision said "every core call the daemon makes", which would have included
+  `Loopex.Runtime.next_event/1` — an `:infinity` dispatcher call by
+  construction (`runtime.ex:236-244`) — so a quiet observer sitting on a read
+  would have blocked every takeover for that session for as long as it sat
+  there. A read grants nothing, orders nothing and cannot overtake a mutation.
+- **The ticket is recorded synchronously, before the call exists.** The lease
+  owner **calls** the relay and waits for the acknowledgement, and only then
+  does the relay spawn the monitored task that performs the core call. A cast
+  would have left the window open at the other end: an owner could pass its
+  holder check, send its ticket and die before the message arrived, and a
+  replacement would see no ticket for a call that was about to be made.
+- **The relay monitors every lease owner**, so an owner's death is ordered
+  *after* the tickets it sent. Message ordering between one sender and one
+  receiver is guaranteed by the BEAM — signals from a process to a process are
+  delivered in send order, and a monitor's `DOWN` is a signal from the same
+  pair — so every ticket an owner sent before dying is in the relay's mailbox
+  ahead of that owner's `DOWN`. The relay therefore knows, at the instant it
+  learns an owner is gone, exactly which of that owner's calls it is holding.
+- **A ticket settles only on a real core result**, and this is the part an
+  earlier revision got backwards. The task returning core's answer — any
+  answer, including a refusal — settles the ticket. The task **dying without
+  one does not**: the relay does not know whether the call reached a
+  coordinator, and a delivered `GenServer.call` completes whether or not its
+  caller is alive, so "the task died" says nothing about the call. Treating
+  that as `commit_unknown` would have admitted a successor while an older
+  mutation was still on its way into core, which is the exact hole the relay
+  exists to close.
+
+  So a task that dies without a result **retains its ticket**, and the relay
+  **exits `relay_lost`** — daemon-fatal, the class it already has. That is the
+  honest answer: the daemon has lost track of a mutation it authorized and
+  cannot say whether a successor would overtake it, and a daemon that cannot
+  answer that question must not keep granting leases. It is rare by
+  construction, the task's only job being one call.
+- **A connection disappearing settles nothing**, because the call it made is
+  still running inside core; the ticket outlives the connection exactly as the
+  call does.
 - **A replacement owner's first grant for a session blocks until that
   session's outstanding tickets have settled.** Not the daemon's admissions
   generally — just that session's, which is why the ticket names one.
@@ -1127,7 +1160,7 @@ That is the ordering claim ADR 0033's owner-loss section now rests on: a
 successor's first call cannot be issued while an older call for the same
 session is unaccounted for, so it cannot overtake one. The relay grants no
 authority, holds no lease and makes no decision about who may control what; it
-is a bookkeeping process on the path core calls already take.
+is a bookkeeping process on the path lease-authorized mutations already take.
 
 Its own failure is **daemon-fatal**, class `relay_lost`, and for the plainest
 reason in the fatal map: a daemon whose relay is gone has lost the record of
@@ -2493,8 +2526,25 @@ next daemon removes before binding.
   blocking unconditionally. A late command from the dead controller's tenure
   is refused on the epoch check, as it would be for any released lease.
 - **The relay's own death is daemon-fatal.** Killing it exits `relay_lost`
-  with that `fatal:<class>` on the wire and leaves no stale marker, like every
-  other fixed component.
+  with that `fatal:<class>` on the wire, like every other fixed component.
+- **A relay task that dies without a result keeps its ticket and takes the
+  daemon down.** The task performing a ticketed mutation is killed while the
+  call is in flight. The case asserts the ticket is **still outstanding**,
+  that no replacement owner is granted the session in the meantime, and that
+  the daemon exits `relay_lost` — **not** that the mutation is treated as
+  settled. It is the case that separates this design from the one that
+  admitted a successor over a call it had lost track of.
+- **A read never holds a takeover.** An observer sits on
+  `Loopex.Runtime.next_event/1`, which blocks indefinitely by construction,
+  while a controller dies and a new client takes over. The case asserts the
+  takeover is **granted** — the read is not ticketed — and that the observer's
+  own read still completes when an event arrives.
+- **A ticket exists before its call does.** A lease owner is killed in the
+  window between its holder check and its core call, injected at the
+  acknowledgement boundary. Because the ticket is recorded by a synchronous
+  call, the case asserts the relay holds a ticket for a mutation whose core
+  call was never made, and that a replacement grant waits on it rather than
+  proceeding into a gap.
 - **Owners exist for dormant sessions, and the population is not the
   activation count.** A dormant session is acquired for recovery without being
   resumed: the case asserts an owner exists for it, that the **activation
@@ -2605,7 +2655,7 @@ the adapter or the executor.
 | **Lease owner, one per session under lease or acquisition** (ADR 0033) | Daemon owner, on the first lease operation after existence validation | Daemon owner | Retires when the lease is free, no acquisition waits and the relay holds no ticket; stopped unconditionally in step 4 | **Session-scoped**: that session's controller closes with `control_owner_lost`, observers stay, the next acquisition starts a fresh owner with a fresh epoch. At most 512 at once |
 | **Connection**, one per accepted client | The listener | The listener | Step 3, or the client | That client's connection closes. Nothing else |
 | **Stop helper**, one per stop | Daemon owner, `spawn_monitor` | Monitored, never linked | Its own call returning or raising | Nothing: it is monitored so that whatever `GenServer.stop/3` does to it cannot reach the owner |
-| **Relay task**, one per core call | The relay, `spawn_monitor` | Monitored by the relay | The call returning | Settles that call's ticket as unknown, the same fact `commit_unknown` carries |
+| **Relay task**, one per ticketed mutation | The relay, `spawn_monitor`, after the ticket is acknowledged | Monitored by the relay | The call returning | **Does not settle its ticket**: the relay cannot tell whether core received the call, so it keeps the ticket and exits `relay_lost` |
 | **Session coordinator** | Core, under a `DynamicSupervisor` (`restart: :temporary`) | Core | Core; **and `quiesce/2` fences and terminates it** at the drain deadline | Core's own refusal on the next command for that session; **no signal reaches the daemon and none is owed** |
 | **Owner group and workers** | Core, beneath a coordinator | Core | Core | Core's; a trapping owner group unwinds on its own clock and the daemon does not wait for it |
 | **Attachment dispatcher** | Core, per attachment | Core | Core | That attachment's, and core's existing detachment rules |

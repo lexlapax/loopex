@@ -76,15 +76,29 @@ on its way, because core orders what it receives rather than what is in
 flight, and core never sees the writer epoch at all.
 
 **The daemon closes that window with one fixed process, the admission relay**,
-added on the maintainer's decision of 2026-09-20. Every core call the daemon
-makes is routed through it; it issues a ticket per call, naming the session;
-it survives lease-owner death, being fixed rather than per-session; and **a
+added on the maintainer's decision of 2026-09-20. Every **lease-authorized
+existing-session mutation** — the set this pair lists below, each carrying
+`writer_epoch` and admitted only from the recorded holder — is routed through
+it, and nothing else is: reads are not ticketed, since a read grants nothing,
+orders nothing, and a blocking read would otherwise hold a takeover for as
+long as an observer sat on it.
+
+The lease owner **calls** the relay and waits for the acknowledgement before
+the core call is made, so no mutation exists that the relay has not recorded;
+the relay **monitors** every lease owner, so the BEAM's per-sender message
+ordering puts every ticket an owner sent ahead of that owner's `DOWN`; it
+survives lease-owner death, being fixed rather than per-session; and **a
 replacement owner's first grant for a session blocks until that session's
-outstanding tickets have settled**. A ticket settles when the relay has
-observed the call's outcome — its own task returning core's result, or that
-task dying and the relay treating the call as settled-unknown, the fact
-`commit_unknown` already carries. A connection disappearing settles nothing,
-because the call it made is still running.
+outstanding tickets have settled**.
+
+A ticket settles **only** when the relay has the call's real outcome — its
+task returning core's answer, refusal included. A task that dies **without**
+one settles nothing and keeps its ticket: a delivered call completes whether
+or not its caller lives, so a dead task says nothing about whether core
+received the mutation, and the relay exits `relay_lost` rather than admit a
+successor over a mutation it can no longer account for. A connection
+disappearing settles nothing either, because the call it made is still
+running.
 
 So the ordering claim rests on the relay, and the session-scoped rule gives
 the rest: the successor is granted a fresh epoch, the dead controller's
