@@ -11,12 +11,63 @@ Concept: [Context and decision](0032-daemon-attachment-residency-and-replay.md#c
 ### Transport
 
 The daemon listens on one Unix-domain socket. Its path is
-`<state root>/daemon.sock` by default and may be set explicitly; a path
-longer than the platform's socket-address bound (104 bytes on Darwin, 108 on
-Linux) is refused at start with `socket_path_too_long` naming the bound, never
-truncated. The socket file is created with owner-only permissions and the
-daemon reads the connecting peer's credentials; a peer whose user identity
-differs from the daemon's is closed before any frame is read.
+`<state root>/daemon.sock` by default and may be set explicitly.
+
+**The path bound is derived, not assumed.** `sun_path` is 104 bytes on Darwin
+and 108 on Linux *including* the NUL terminator, so the usable path is one
+byte shorter than the structure: at most 103 bytes on Darwin and 107 on Linux.
+That is measured, not inferred — on the supported OTP 29 Darwin toolchain a
+bind at 103 bytes succeeds and at 104 bytes is refused with
+`{:invalid, {:sockaddr, …}}`. Each supported platform derives its own bound
+the same way rather than carrying a constant, and a path beyond it is refused
+at start with `socket_path_too_long` naming the derived bound, never
+truncated. The tests bind at the bound and at one byte past it on every
+platform the release check runs.
+
+**Peer authorization has two layers, and the load-bearing one is the
+filesystem.** The socket lives in a directory the daemon owns with mode
+`0700`, and the socket itself is created mode `0600`; both are verified after
+bind by reading back their owner and mode and comparing them with the daemon's
+own effective user, and the daemon refuses to serve if either is wrong, if the
+parent is not owned by that user, or if any component of the path is a
+symbolic link it did not create. That is what actually keeps another user out:
+connecting to a Unix-domain socket requires write permission on the socket and
+traversal of its directory, so a foreign peer never reaches `accept`. It is
+the same arrangement ADR 0019 already uses for the provider child's private
+channel, proved there, and reused rather than reinvented.
+
+**Peer-credential inspection is the second layer, and its mechanism is named
+per platform** because the portable one does not exist. On the supported
+OTP 29 Darwin toolchain `:socket.supports(:options, :socket)` reports
+`peercred: false` and `passcred: false`, and `:socket.getopt(sock, :socket,
+:peercred)` answers `{:error, {:invalid, {:socket_option, …}}}`; the named
+option is simply not available there. What is available is the raw option:
+`:socket.getopt_native(sock, {0, 1}, 128)` — Darwin's `SOL_LOCAL`,
+`LOCAL_PEERCRED` — returns a `struct xucred` from which the peer's effective
+uid is decoded, and it was confirmed to return the connecting process's uid on
+that toolchain. On Linux the mechanism is `SO_PEERCRED` at `SOL_SOCKET`,
+yielding `struct ucred`. Both are socket options, and the classic `inet`
+backend exposes neither, so the listener uses OTP's own `:socket` API (or
+`gen_tcp` over the socket backend, whose handle it can reach) rather than the
+classic backend. A peer whose decoded uid differs from the daemon's is closed
+before any frame is read.
+
+**Fail closed.** Where a platform has a named mechanism, a credential read
+that errors, returns a short or unrecognised structure, or reports a uid the
+daemon cannot decode closes the connection before initialize; it is never
+treated as permission. Where a platform has no mechanism at all, the daemon
+says so in its diagnostics and the boundary is the verified filesystem layer
+alone — which the daemon proves it has, because it refuses to serve when
+ownership and mode cannot be verified.
+
+The evidence follows the same split. The fast check proves the filesystem
+layer and the fail-closed paths without needing a second user: a permissive
+directory or socket mode, a parent the daemon does not own, and a path
+component the daemon did not create are each refused at start; an unreadable
+or undecodable peer credential closes the connection. The real cross-uid
+refusal is a release-check case on the Linux lane, where a second unprivileged
+user exists: a connection from another uid is refused before initialize and a
+connection from the daemon's own uid succeeds, both recorded with the run.
 
 Startup order is fixed. The daemon first opens the state root through the
 local adapter and acquires its writer marker; a daemon that does not hold the

@@ -52,8 +52,16 @@ beyond the platform bound is refused at start rather than truncated. A daemon
 acquires the root's store writer marker before it touches the socket path,
 so two simultaneous starts resolve at the marker and never at the socket,
 and a daemon that loses its store closes the listener and every connection
-before it exits. Only the daemon's own operating-system user may connect; a
-foreign peer is refused before initialize.
+before it exits. Only the daemon's own operating-system user may connect, and
+the boundary that enforces it is the filesystem: an owner-only directory and
+socket whose ownership and mode the daemon verifies after bind and refuses to
+serve without, which is what stops a foreign peer reaching `accept` at all.
+Peer-credential inspection is a second, fail-closed layer whose mechanism is
+named per platform, because there is no portable one: the supported OTP 29
+Darwin toolchain reports no `peercred` or `passcred` socket option, so Darwin
+reads `LOCAL_PEERCRED` and Linux reads `SO_PEERCRED`, and a credential that
+cannot be obtained or decoded closes the connection rather than admitting it.
+A foreign peer is refused before initialize.
 
 Every attachment starts from a snapshot anchored at the committed sequence
 and then receives the buffered and live stream contiguously, at least once.
