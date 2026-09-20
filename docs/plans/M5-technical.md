@@ -744,20 +744,71 @@ The composition function therefore returns **every pid it linked**, not only
 the ones the daemon names in prose: a map carrying `store`, `runtime` (the
 `%Loopex.Runtime{}` struct), `runtime_supervisor`, `transfers` (absent when
 disabled), `workspace_lease` and `executor`. Returning the runtime supervisor
-pid separately matters: `%Loopex.Runtime{}`'s type is declared `@opaque`, so
-the daemon reaching into its `supervisor` field would be an opacity violation
-across applications. Composition already holds that pid, so handing it over
-costs nothing and keeps the daemon out of another application's internals.
+pid separately is a convenience rather than a necessity, and the plan says so
+plainly: the owner needs that pid to bound its stop, composition already holds
+it, so handing it over costs nothing. `%Loopex.Runtime{}`'s type is declared
+`@opaque` at `runtime.ex:45`, but that is unenforced here — the repository
+runs no dialyzer, and `RuntimeOwner` itself already destructures the field, at
+`runtime_owner.ex:200`. An earlier draft called reading it a violation; it is
+not, and the real argument is the simpler one above.
 
 **There is no restart strategy, because there are no restarts.** Every one of
 the seven is `start_link`ed by the owner, and the owner's
-`handle_info({:EXIT, pid, reason}, state)` clause is the whole failure rule:
-any linked exit, whatever the reason, is fatal to the daemon instance. That
+`handle_info({:EXIT, pid, reason}, state)` clause is the failure rule. That
 clause is also the **reader** the fatal-class map needs — it matches the pid
 against the seven it holds, maps it to a component, classifies `reason`, and
 has the class in hand before anything else happens. Nothing here is
 `rest_for_one`, `one_for_all` or `max_restarts`; those words belonged to the
 withdrawn design and are gone.
+
+**One field keeps that clause from firing on the owner's own work.** An
+earlier draft said "any linked exit, whatever the reason, is fatal", which is
+right for an exit the owner did not cause and wrong for every exit it does:
+an orderly stop terminates all seven deliberately, so that rule would classify
+step 1 as `listener_lost`, step 2 as `supervision_fault`, step 3's clean
+return as `runtime_lost` — a daemon that could never exit `0`, and an
+idle-shutdown witness that could never pass.
+
+So the owner carries a `stopping` field naming **the one component it is
+currently stopping**, set immediately before each stop call. The EXIT clause
+reads:
+
+- an exit from the pid named in `stopping`, while it is named, is **consumed**
+  and clears the field — it is the stop the owner asked for, arriving as a
+  signal;
+- **every other exit is classified exactly as before**, including one from a
+  component not yet stopped that dies of its own accord *during* another
+  component's stop. A store that fails while the listener is being stopped is
+  still `store_lost`, and must be: the daemon is going down either way, but
+  the operator is owed the real reason rather than `operator_stop`.
+
+**The field is cleared by that exit, not by the call returning**, and the
+distinction is not pedantry. A stop can end three ways — `:ok`, a caught
+timeout followed by `Process.exit(pid, :kill)`, or the component having died
+already — and in the first two the exit signal is still on its way when the
+call returns; whether it or the monitor's `DOWN` arrives first is not ordered
+for us. So after each stop the owner waits for that exact pid's exit, in a
+selective receive it can only reach because the process is dead either way,
+and only then names the next component. Messages that arrive meanwhile stay
+in the mailbox and are classified when the owner returns to its loop; nothing
+is skipped, only ordered.
+
+Two consequences the sequences below depend on, stated here once:
+
+- **A class recorded during a stop does not abort the sequence.** The owner
+  finishes stopping what remains — the components it has not reached still own
+  things worth ending — and then halts with that class instead of `0`. The
+  first class recorded wins; a later one does not overwrite it, so the
+  operator gets the reason the daemon went down for rather than the last thing
+  that happened on the way out.
+- **A component already known dead is not stopped again.** Its exit was
+  classified, so the owner holds that fact; the step for it is a no-op rather
+  than a call on a dead pid.
+
+One field, one place, and it is what makes the two paths distinguishable at
+all. Both sequences below rely on it, and the idle-shutdown witness asserts
+the consequence directly: **no fatal class is recorded during an orderly
+stop**.
 
 Two of the seven trap exits, and the plan states that as contract rather than
 relying on it as luck: the **Store adapter** traps, so an owner that crashes
@@ -833,13 +884,24 @@ chooses.
    step exists to supply.
 
    **What a timeout does, read from the installed stdlib rather than
-   assumed.** `Supervisor.stop/3` reaches `gen:stop/3`, which is
-   `proc_lib:stop/3` (gen.erl:560-563). That function monitors the target,
-   calls `sys:terminate/3`, and on expiry — either from `sys:terminate`
-   raising `exit:{timeout, {sys, terminate, _}}` or from its own
-   `after RemainingTimeout` — demonitors and calls **`exit(timeout)`**
-   (proc_lib.erl:1575-1604). Two consequences follow, and both shape this
-   step:
+   assumed — and the chain is not the obvious one.** `Supervisor.stop/3` is
+   `GenServer.stop(supervisor, reason, timeout)` (supervisor.ex:1152-1154),
+   and `GenServer.stop/3` calls **`:proc_lib.stop/3` directly**, not
+   `:gen.stop/3`, wrapping any exit it catches:
+   `catch :exit, err -> exit({err, {__MODULE__, :stop, [server, reason,
+   timeout]}})` (gen_server.ex:1076-1092, identical in both floor pairs,
+   1.18.5-otp-27 and 1.20.3-otp-29). Beneath that wrapper,
+   `:proc_lib.stop/3` monitors the target, calls `sys:terminate/3`, and on
+   expiry — from `sys:terminate` raising `exit:{timeout, {sys, terminate,
+   _}}` or from its own `after RemainingTimeout` — demonitors and calls the
+   bare **`exit(timeout)`** (proc_lib.erl:1575-1604).
+
+   So the shape the owner actually sees is
+   **`{:timeout, {GenServer, :stop, [pid, :normal, grace]}}`**, not a bare
+   `:timeout`. `catch :exit, {:timeout, _}` matches it — but only because of
+   that wrapper, and the plan names the wrapper so nobody later "simplifies"
+   the clause to match what `proc_lib` raises. Two consequences follow, and
+   both shape this step:
 
    - **The target is not killed.** A timeout abandons the wait; the runtime
      supervisor is still running afterwards. So the owner's kill is not a
@@ -854,7 +916,9 @@ chooses.
    On that catch the owner kills the runtime supervisor —
    `Process.exit(runtime_supervisor, :kill)`. While the owner is blocked in
    the stop call it cannot *act* on incoming exits, but it traps them, so they
-   queue as messages and are handled when the call returns; nothing is lost,
+   queue as messages and are handled when the call returns — against the
+   `stopping` field, so the runtime's own exit is consumed and any other
+   component's is still classified; nothing is lost,
    only deferred, which during a shutdown the owner is already performing is
    what should happen.
 
@@ -889,11 +953,61 @@ chooses.
    executor first, since it is the one with OS effects to clean up and it
    traps exits to do so. Then the Store, whose `terminate/2` releases the
    writer marker — see the marker invariant in ADR 0031. Finally the socket
-   path is unlinked and the owner **exits `0`**.
+   path is unlinked and the owner **halts with `0`**.
 
-   An earlier draft of this list had four steps for what are seven linked
-   processes, which would have left the executor, the lease and the transfers
-   owner running while the Store went out from under them. They are stopped
+   **The executor is stopped before the lease, and that order is load-bearing**
+   rather than alphabetical. The executor privately monitors the lease holder
+   for a job's full life and reads its `DOWN` as cancellation evidence
+   (`workspace_lease.ex:1-13`). Stopping the lease first would hand the
+   executor a cancellation in the middle of its own cleanup; stopping the
+   executor first means the lease's death is observed by nobody, which is
+   what an orderly stop wants.
+
+   **Each of these four is `GenServer.stop(pid, :normal, bound)` under the
+   same treatment as step 3** — `try/catch :exit` on the wrapped timeout, then
+   `Process.exit(pid, :kill)` — because all four are `GenServer`s
+   (`executor.ex:22`, `workspace_lease.ex:15`, `transfers.ex:26`,
+   `local.ex:55`) and the same OTP semantics apply: a timeout does not kill
+   the target, and the exit lands on the owner. The bounds:
+
+   | Process | Bound | What it is waiting for |
+   | --- | --- | --- |
+   | The executor | The **composed cleanup grace** | Its own cleanup of operating-system effects — the one stop here that can actually use the time, given the value the sessions were composed with, for the purpose that value names |
+   | The workspace lease | The same grace | Nothing: it has no `terminate/2` and holds no file — the lease *is* the live process, so stopping it revokes it. The bound is a ceiling it will not reach |
+   | The transfers owner | The same grace | Closing the open transfer descriptors its `terminate/2` holds (`transfers.ex:146-149`) |
+   | The Store | The same grace | Its `terminate/2`, which releases the writer marker (`local.ex:166`) |
+
+   No new number enters: every bound here is the composed cleanup grace,
+   which is what step 3 uses and what the sessions carry. Splitting it into
+   fractions would mean inventing ratios, and the minimalism budget takes
+   every number from an accepted or proposed decision. Three of the four are
+   ceilings rather than expected waits; only the executor is expected to spend
+   real time here.
+
+   **A killed executor is the residual, and the plan states it rather than
+   explaining it away.** The kill by itself is not the leak. The executor
+   `GenServer` does not own the Port: a monitored worker owns it, watches the
+   executor, and *performs the same bounded group termination if that
+   authority disappears* (`executor.ex:3703-3724`, and `effect_owner/0` at
+   `executor.ex:4166-4173`) — the executor's own contract for exactly this
+   case, written after a kill once left a descendant running.
+
+   But that worker is a process **in this VM**, and the halt a few steps later
+   ends it too. Whatever bounded termination it has not finished when the VM
+   goes does not finish. So the residual of an unresponsive executor is
+   honest and stated: **operating-system children may survive the daemon**, as
+   an orphaned process group an operator can see and reap. The plan does not
+   add a wait for that worker — an unbounded wait at the end of a sequence
+   whose purpose is to be bounded is the thing being avoided.
+
+   What is *not* at risk is durable truth. The effect that was in flight is
+   `commit_unknown` in the journal and resolves to exactly one outcome at the
+   next activation, exactly as an abrupt death leaves it; nothing false is
+   recorded about it, and no terminal is claimed.
+
+   An earlier draft ended at the runtime and the Store, naming neither the
+   executor, the lease nor the transfers owner — which would have left all
+   three running while the Store went out from under them. They are stopped
    here, in this order, for that reason.
 
    Stopping it last makes the marker outlive **every operation the owner can
@@ -935,40 +1049,89 @@ fatal-class map's reader: it matches the pid, classifies `reason` as
 `store_capacity_exceeded` where that was the store's own refusal and
 `store_lost` otherwise, and has the class in hand before it does anything
 else. No link the owner does not already hold, no monitor to remember, and no
-information lost on the way. Then, without the ordered sequence:
+information lost on the way.
+
+**The steps below are the fail-stop path for every fatal class, not only the
+two store ones.** Store loss is the instance worth reading first because it is
+the one where the thing the daemon would otherwise stop is already gone; the
+other six differ only in which component is missing by the time the owner
+runs them. In all eight the owner has a class in hand, runs no ordered
+sequence, and does not return to serving. A step whose component is already
+gone is a no-op, by the rule the `stopping` field states above: under
+`listener_lost` steps 1 and 2 are already true and the clients of that
+listener learn by the close rather than by a `daemon.stopping` nothing is left
+to write.
 
 1. Refuse service immediately — no further admission, no further attach, and
    the listener closed.
 2. Close every connection, after one bounded best-effort `daemon.stopping`
-   carrying `store_lost`, or `store_capacity_exceeded` when the store's own
-   reason was the capacity refusal.
-3. **Stop the executor**, even though the Store is already gone. This is not
-   tidiness: the executor is the one linked process that owns effects outside
-   the VM, and it traps exits precisely so it can clean them up. Halting
-   without stopping it would leave OS effects behind that no later daemon
-   knows about. The other linked processes need no such step — they own
-   nothing that outlives the VM.
-4. Unlink the socket.
-5. Exit non-zero with that class on `stderr`. **There is no "stop the Store"
-   step**, because the Store already stopped and the marker is already
-   released; the next daemon finds no marker to recover rather than a stale
-   one. Nothing restarts the Store: the owner start_links its children and
-   restarts none of them, so any linked exit is fatal by its own clause —
+   carrying that class: `store_lost`, or `store_capacity_exceeded` when the
+   store's own reason was the capacity refusal, and the failed component's own
+   class on the other six.
+3. **Stop the executor** — on every class but `executor_lost`, where it is
+   the component that already died — as `GenServer.stop(pid, :normal, grace)`
+   under the same try/catch-and-kill treatment and the same composed cleanup
+   grace the ordered path's step 4 uses. This is not tidiness: the executor is
+   the one linked process that owns effects outside the VM, and it traps exits
+   precisely so it can clean them up. Halting without stopping it would end
+   that cleanup where it stood. The residual is the one stated there and is
+   the same here: if the stop times out and the executor is killed, the halt
+   that follows also ends the Port-owning worker that would have terminated
+   the captured process group, so operating-system children may survive the
+   daemon. The journal does not: the effect is `commit_unknown` and reconciles
+   at the next activation.
+4. **Stop the Store — on every class except the two store classes.** Where the
+   Store terminated itself, `store_lost` or `store_capacity_exceeded`, it is
+   already gone and its `terminate/2` has already released the marker; there
+   is nothing to stop. On the other six, the Store is **still alive**, and
+   because `System.halt/1` runs no `terminate/2`, halting past it would leave
+   the marker file behind on a daemon that shut down deliberately. So the
+   owner stops it here, under the same bounded treatment as every other stop.
+
+   **If that stop times out and the Store is killed, the marker survives.**
+   That is the one residual on this path and the plan states it rather than
+   implying otherwise. It is bounded in consequence, not open-ended: the next
+   daemon meets exactly the stale marker ADR 0031's recovery rule already
+   covers, and reclaims it where the marker's own recorded holder is probed
+   and found dead, refuses with `store_writer_unverifiable` where it cannot be
+   decided, and refuses with `store_writer_active` where it is alive. A
+   surviving marker is a case with a defined answer, not a corruption.
+5. Unlink the socket.
+6. Write the class on `stderr`, then **halt with the non-zero status** for
+   that class. Nothing restarts anything: the owner `start_link`s its seven
+   and restarts none, so an exit it did not cause is fatal by its own clause —
    which is why this path exists at all rather than being a restart.
 
 Nothing durable is at risk in that ordering: whatever was ambiguous is
 `commit_unknown` in the journal and is reconciled at the next activation, and
 whatever was not committed was never promised.
 
-**How the daemon actually ends, on either path.** The owner's last act is to
-halt the VM with the status — `0` for an operator stop, non-zero with the
-class for a fatal one. That matters to state because BEAM exit semantics
-alone would not do it: a `:normal` exit from the owner is ignored by every
-linked process that does not trap, so "the owner exits" is not by itself a
-shutdown. On the ordered path the halt finds a VM whose processes have
-already been stopped in sequence; on the fail-stop path it ends whatever
-remains, after step 3 has given the one process with external effects its
-chance to clean up.
+**How the daemon actually ends, on either path.** The owner's last act is
+`System.halt(status)` — `:erlang.halt/1` — with `0` for an operator stop and
+the non-zero status for a fatal one. That matters to state because BEAM exit
+semantics alone would not do it: a `:normal` exit from the owner is ignored by
+every linked process that does not trap, so "the owner exits" is not by itself
+a shutdown.
+
+**And `halt` runs no callbacks**, which is the whole reason the sequences
+above stop things explicitly rather than trusting the exit. `:erlang.halt/1`
+terminates the VM immediately: no `terminate/2` anywhere, no `Application`
+stop callbacks. The alternative, `:init.stop/0`, does run them — and is
+rejected here precisely for that, because it would walk the application tree
+and wait on whatever the orphaned owner-group subtree is doing, which is the
+unbounded wait the grace exists to avoid. The daemon takes a bounded stop it
+performs itself, then a halt that cannot hang.
+
+**One consequence this had to fix.** `terminate/2` not running means the
+Store's marker release does not happen at the halt. On the ordered path that
+is fine — the Store was already stopped in step 4, and its `terminate/2` ran
+then. On the **fatal** path it was not fine, and an earlier draft left a real
+hole: for the six classes where the Store is still alive (`runtime_lost`,
+`transfers_lost`, `workspace_lease_lost`, `executor_lost`,
+`supervision_fault`, `listener_lost`), nothing stopped the Store, so the halt
+left the marker file behind on a daemon that had shut down deliberately. The
+fail-stop path above therefore stops the Store on every fatal class
+**except** the two store classes, where it is already gone.
 
 **An abrupt death** — `SIGKILL`, power loss — runs neither path, and is safe
 for the reasons the durability rules already give: nothing the journal does
@@ -1032,7 +1195,16 @@ what lets an operator fix the cause and try again without a recovery step.
   receives `SIGTERM`, writes nothing further to `stdout`, closes every
   connection with the stop reason, unlinks the socket, releases the marker and
   exits `0`; the foreground server then opens the same root immediately, which
-  is what proves the marker was actually released.
+  is what proves the marker was actually released. The case also asserts the
+  negative that the `stopping` field exists for: **no fatal class is recorded
+  at any point during the stop**, and nothing appears on `stderr` — stopping
+  seven linked processes deliberately produces seven exits, and every one of
+  them must be consumed rather than classified.
+- **A real failure during an orderly stop is still classified.** The Store is
+  made to fail while the listener is being stopped. The daemon exits with
+  `store_lost`, not `operator_stop`, because the Store is not the component
+  named in `stopping` — the operator is owed the reason the daemon actually
+  went down for.
 - **In-flight shutdown.** A daemon with a dispatched tool effect and an
   unresolved mutation receives `SIGTERM`. What has not settled within the
   cleanup grace is ended crash-equivalently, and the case asserts the negative
@@ -1051,11 +1223,15 @@ what lets an operator fix the cause and try again without a recovery step.
   `terminate/2` before the daemon could act. A second daemon starts on that
   root immediately with no stale marker to recover. The capacity variant
   reports `store_capacity_exceeded` instead, and the case asserts the executor
-  was stopped before the halt, so no OS effect is left behind.
+  was stopped — and that the stop *returned* rather than timing out into a
+  kill — before the halt, so its cleanup ran and no operating-system child is
+  left behind.
 - **One class per linked component.** Each of the seven linked processes is
   killed in turn, in its own case, and the daemon is asserted to exit with
-  that component's class and to send that component's `fatal:<class>` on the
-  wire where a socket still exists — `runtime_lost`, `transfers_lost`,
+  that component's class, to send that component's `fatal:<class>` on the wire
+  where a socket still exists, and — for the six classes where the Store is
+  still alive — **to leave no stale marker**, proved by the next daemon
+  opening that root with nothing to recover — `runtime_lost`, `transfers_lost`,
   `workspace_lease_lost`, `executor_lost`, `supervision_fault`,
   `listener_lost`, beside the two store classes. The set is closed, so a
   linked process dying without a class is a failing case rather than a silent
@@ -1095,15 +1271,15 @@ plan names as new. It is the thing to check a change against.
 | **Core ↔ daemon: attach** | `loopex` owns the cursor barrier, snapshot and queues | Barrier race, stale handle, queue overflow | Core's existing attach transaction and stale-handle checks; the daemon reads no coordinator state to repair a race | Snapshot then contiguous at-least-once events, or detachment at the last emitted cursor with a stable reason | **Durable:** the events. **Not:** the attachment, the window, the buffer |
 | **Core ↔ daemon: resume** | `loopex` | Placement mismatch, unknown session, already-resolved command | Core's existing resume path and command idempotency (`control.ex:901-907` returns the historical result without starting an owner) | Core's refusal, forwarded unchanged | **Durable:** the resume command and its result |
 | **Core ↔ daemon: commands** | `loopex` admits; the daemon forwards | **Coordinator death** | Core's `DynamicSupervisor` (`restart: :temporary`, `session_coordinator.ex:134-142`); `Control` consumes the `DOWN`, releases the fence and leaves the entry (`control.ex:821`). **No signal reaches the daemon, and none is owed** — the daemon supervises the runtime, not the coordinators beneath it | Core's existing refusal on the next command for that session, forwarded unchanged. `residency` still reads `active`, which remains true: this daemon did activate it | **Durable:** whatever committed before. **Not:** any claim about liveness |
-| **Lease owner ↔ connections** | `loopex_daemon` | The per-session lease owner dies, taking the in-flight admission set with it | The owner's `{:EXIT, pid, reason}` clause, which treats any of its seven linked processes' exits as fatal and maps the pid to a class — here `supervision_fault`. ADR 0033's daemon-fatal rule, obtained from one clause rather than from a strategy | `daemon.stopping` with `fatal:supervision_fault`, then every connection closes; the daemon restarts uncontrolled | **Not durable:** the lease, the epoch, the in-flight set. The journal is untouched |
+| **Lease owner ↔ connections** | `loopex_daemon` | The per-session lease owner dies, taking the in-flight admission set with it | The owner's `{:EXIT, pid, reason}` clause. The lease owner is not the component named in `stopping`, so the exit is classified rather than consumed, and the pid maps to `supervision_fault` — ADR 0033's daemon-fatal rule, obtained from one clause rather than from a strategy | `daemon.stopping` with `fatal:supervision_fault`, then every connection closes; the daemon restarts uncontrolled | **Not durable:** the lease, the epoch, the in-flight set. The journal is untouched |
 | **Lease owner ↔ connections (expiry)** | `loopex_daemon` | A holder stops renewing, or a mutation is unresolved at the deadline | The lease owner's own monotonic deadline; the in-flight set decides when a takeover is granted | The holder's next mutation refuses; a takeover is eligible at the deadline and granted when the in-flight set empties | **Not durable:** the lease. The mutation that was in flight settles or refuses exactly once |
 | **Listener ↔ connections** | `loopex_daemon` | Foreign peer, malformed frame, over-long path, backpressure | Filesystem permission verified after bind, then the per-platform peer-credential read (`LOCAL_PEERCRED` / `SO_PEERCRED`), then ADR 0023's framing refusals; backpressure at the 4 MiB output buffer | Closed before initialize for a peer refusal; a stable framing reason otherwise; detachment at the last emitted cursor under backpressure | **Not durable:** connections, buffers, windows |
 | **Registry ↔ sender ↔ custody** | The **host** owns the registry and custody; the adapter owns the sender. The token is bound at composition, resolved per invocation | No registry row, registry dead, custody dead, refusal, malformed reply, deadline | `route(handle, token)` answers `:unavailable`; custody answers one of the four atoms; the **guardian** enforces the deadline and kills the sender | The adapter's existing `Loopex.Model` refusal shape, with the atom in the bounded diagnostic | **Not durable:** nothing about credentials is ever journaled, and no span or record carries model `options` — the model span is a fixed identity map. The invocation's failure is durable |
 | **CLI ↔ socket** | `loopex_cli` | Socket unreachable, refusal, transport loss, renewal failure | The client's own reconnect loop and its renewal timer | Reconnect at the retained cursor, deduplicating; a failed renewal drops to observer with the loss on `stderr`; a reconnecting controller must acquire again for a fresh epoch | **Durable:** nothing the client holds. The cursor is a client-side position |
-| **Daemon ↔ OS: signals** | The operator | `SIGTERM` / `SIGINT` | The owner stops its linked processes in reverse order itself — listener, lease owner, runtime, then the composed edges, Store last — calling `Supervisor.stop(runtime_supervisor, :normal, grace)` under `try/catch :exit`, since `proc_lib:stop/3` exits the caller on timeout without killing the target, and killing the supervisor on that catch | `daemon.stopping` with `operator_stop`, then close | **Durable:** whatever committed. **Not:** work ended crash-equivalently — a claim about the journal, not about every process being gone |
+| **Daemon ↔ OS: signals** | The operator | `SIGTERM` / `SIGINT` | The owner stops its linked processes in reverse order itself — listener, lease owner, runtime, then the composed edges, Store last — each bounded by the composed cleanup grace and each under `try/catch :exit` on the wrapped `{:timeout, {GenServer, :stop, _}}` (`Supervisor.stop/3` → `GenServer.stop/3` → `:proc_lib.stop/3`), since a timeout exits the caller without killing the target, then killing that target on the catch. Every exit these stops cause is consumed by the owner's `stopping` field rather than classified | `daemon.stopping` with `operator_stop`, then close | **Durable:** whatever committed. **Not:** work ended crash-equivalently — a claim about the journal, not about every process being gone |
 | **Daemon ↔ OS: kill** | The operator | `SIGKILL`, power loss | Nothing runs — no handler, no `terminate/2` | The socket closes with no record at all | **Durable:** the journal. The marker is left for the next daemon's verified stale-writer recovery |
 | **Daemon ↔ OS: socket file** | `loopex_daemon` | A stale `daemon.sock` from a dead daemon | Only the marker holder may unlink and rebind, so two starts resolve at the marker and never at the socket | The loser exits without touching the socket | **Not durable:** the socket file is a path, never state |
-| **Daemon ↔ OS: marker** | `loopex_store_local` | Released in order, released early, or left behind | `terminate/2` in an orderly stop; `terminate/2` early on store loss; nothing on a kill | Nothing directly; the next daemon's start succeeds, succeeds, or recovers | **Not durable in the journal sense:** the marker is exclusion, not truth |
+| **Daemon ↔ OS: marker** | `loopex_store_local` | Released in order, released early, or left behind | Four dispositions, and the plan states all four: `terminate/2` in an orderly stop; `terminate/2` early, before the daemon can act, on store loss; `terminate/2` on a **fatal class where the Store is still alive**, because the fail-stop path stops it before halting; and **nothing** on a `SIGKILL`, a power loss, or a Store stop that timed out and was killed | The client sees only the `daemon.stopping` reason; the marker is invisible to it | **Not durable in the journal sense:** the marker is exclusion, not truth. A surviving marker is the case ADR 0031's recovery rule answers |
 
 Three rows deserve their reading stated, because they are where earlier drafts
 went wrong. The **coordinator death** row is the one that forced `residency`
