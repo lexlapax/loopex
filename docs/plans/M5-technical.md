@@ -871,6 +871,55 @@ never a bound on reachability — would become exactly that. The activation set
 has no such gap, because a session cannot be activated without entering it. `loopex resume --daemon` is unaffected: it acquires,
 resumes, and only then attaches, by which time the session is active.
 
+
+**The ceiling is enforced by reservation, because counting after the call is
+a race.** Core starts a coordinator *inside* the call that would tell the
+daemon it did — `start_owner` for a fresh create (`control.ex:908`),
+`start_resume_owner` for a resume that is not a replay (`control.ex:318`,
+`:321`) — so a daemon that counts when the call returns has already let it
+happen. Two consequences, both real: at 63 activations two concurrent calls
+each see 63, both proceed, and both coordinators start; and at 64 a dormant
+resume that the daemon has not yet counted starts a sixty-fifth.
+
+So the daemon takes an **atomic slot reservation before any
+activation-capable call**, and the invariant it maintains is
+
+> **|activation set| + |reservations| ≤ 64.**
+
+A call that cannot reserve is refused `activation_ceiling_reached` **before
+core is called at all**, which is the only place a refusal can be both
+truthful and early. The reservation is taken in the daemon's own serial
+owner, so "atomic" needs no new mechanism: it is one process deciding.
+
+**A reservation is keyed by the identity the daemon has when it takes one** —
+the session ID for a resume, the create `command_id` for a create, whose
+session ID does not exist yet — and it is **converted or released
+idempotently**: converting records the session ID in the activation set and
+drops the reservation; releasing drops it. Repeating either for the same key
+is a no-op, so a retry, a crash-recovered handler or a duplicated reply
+cannot double-count or double-free.
+
+**Every branch of both results resolves the reservation, and the table is
+complete rather than illustrative**, because a branch nobody listed is a slot
+leaked until the daemon restarts:
+
+| Result of the call | Slot |
+| --- | --- |
+| Create, `disposition: :fresh` | **Converted** — a coordinator started |
+| Create, `:historical` with `residency: :active` | Released — that session was counted when it was activated |
+| Create, `:historical` with `residency: :dormant` | Released — a replay starts nothing |
+| Resume, `disposition: :fresh` | **Converted** — a coordinator started |
+| Resume, `:historical` | Released — the replayed result is returned without starting an owner (`control.ex:311-312`) |
+| Resume answering a **prepared** capability, where the activation is begun but not finished | **Held**: the reservation stays until that activation resolves, then converts on success and releases on abandonment. It is the one branch that is neither yet |
+| Either call refusing — `runtime_command_conflict`, `store_unavailable`, an invalid identifier, a placement mismatch, any other `{:error, _}` | Released |
+| Either call **crashing or timing out**, so the daemon has no result at all | **Held, then resolved by observation**: the daemon asks core whether that session is active and converts or releases accordingly. It does not guess, and it does not leak the slot |
+
+The last row is the one that would otherwise be missed. A call that gives the
+daemon no answer may still have started a coordinator, so releasing the
+reservation would let the ceiling be exceeded and converting it would spend a
+slot that may not exist; asking is the only honest resolution, and the daemon
+already has a read-only query for exactly this class of question.
+
 `loopex attach --take-over` against a dormant session therefore acquires
 successfully and is refused at attach, holding a lease it no longer wants.
 That is exactly why the general rule matters: **a CLI that holds a lease
@@ -2612,6 +2661,24 @@ next daemon removes before binding.
   refuses `session.create` with `activation_ceiling_reached` **whether the
   create is fresh or a replay**, and the case asserts the replay is refused
   too — the stated cost — and that no coordinator was started by the attempt.
+- **The ceiling holds under concurrency, which counting afterwards would not.**
+  A daemon at **63** activations receives two activation-capable calls at
+  once — one create and one resume, on two connections. The case asserts
+  **exactly one** succeeds, the other is refused `activation_ceiling_reached`,
+  and that core started **one** coordinator, not two: the refusal happens
+  before the second call is made, so there is no second coordinator to
+  discover afterwards.
+- **A dormant resume at the ceiling is refused before the call.** A daemon at
+  **64** receives `session.resume` for a dormant session. The case asserts the
+  refusal, and asserts core was **not called** — proved by that session having
+  no coordinator and no new journal record — which a post-call count would
+  have failed by starting a sixty-fifth.
+- **Every branch releases or converts its reservation.** One case per row of
+  the resolution table: a fresh create, a replayed create against an active
+  and a dormant session, a fresh resume, a replayed resume, a refusal, and a
+  call that never answers. Each asserts the daemon's remaining slot count
+  afterwards, so a branch that leaked a reservation shows up as a daemon that
+  refuses early rather than as a silent drift.
 - **Reverse cleanup.** A startup made to fail after the marker is acquired —
   at the socket permission check and at the index bound, separately — leaves
   no marker held and no socket file behind, proved by a second daemon starting
