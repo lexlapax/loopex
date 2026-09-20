@@ -132,7 +132,7 @@ Concept: [Verification stages](M5.md#concept-plan-verification).
 
 | Outcome | Witness | What must be proved, beyond ordinary unit tests |
 | --- | --- | --- |
-| 1 | `apps/loopex_daemon/test/session_lifetime_test.exs` | A real daemon operating-system process per state root. The startup ordering and its readiness line: the line appears on `stdout` only after the marker is held and the socket is bound, permission-checked and accepting, a client connecting the instant it appears is served, and each of a held marker elsewhere, a failed socket permission check and an exceeded index bound prints no readiness line and exits non-zero with its own class. Orderly shutdown on `SIGTERM` sent to the daemon, and on `SIGINT` sent to the launcher that forwards it as `SIGTERM`: new connections refused and new admissions refused from that instant, then core's `quiesce/2` durably admitting, for every active session **before** cancelling anything, the same abort command a client's own `session.abort` writes, under a `command_id` core mints fresh per session per drain and asserted to be one no client sent — no shutdown-specific field on the record, the cause reaching the operator through `daemon.stopping` and `stderr` instead — driving each session's in-flight work to settle under that session's own grace within a drain budget derived from `cancellation_bounds/1`, and at the deadline fencing and terminating every coordinator that did not settle before it answers — **both halves asserted**: a dispatched tool effect that settles carries its ordinary terminal fact in the journal, and one held past the budget leaves its coordinator dead at the instant it is reported with **no terminal claimed for that work** — no `cancelled`, no `outcome_unknown` — its ambiguous mutation left as `commit_unknown` and resolved to exactly one outcome when that session is next activated, one bounded best-effort `daemon.stopping` naming `operator_stop` attempted per open connection — asserted received where the transport accepts it and an EOF alone accepted where it does not — the socket pathname **left in place** — no exit path unlinks, and the next daemon removes it before binding, asserted by a following daemon starting cleanly on that root — the Store stopped last, and exit `0` — with the foreground server opening the same root immediately afterwards, which is what proves the marker was released, and the journal differing from what an abrupt death at the same instant would have left by exactly the admitted-abort records the drain wrote, with the unresolved transaction and its fence identical. **Store loss is a separate fail-stop, not that sequence**: the Store terminates itself and releases the marker before the daemon can act, so the daemon observes the death, refuses service, closes every connection with `store_lost` (or `store_capacity_exceeded` where that was the reason), unlinks and exits non-zero with that class on `stderr`, attempting no Store stop because there is none to attempt — proved by a second daemon starting on that root with no stale marker to recover. An active session progresses with zero attachments. An orderly stop releases the writer marker and records nothing false; an abrupt kill followed by restart activates nothing, then activates each session the root records when a client reaches for it, under the same placement identity and with no duplicate effect. The restart proves the marker path explicitly: the daemon opens with `recover_stale_writer: true`, a marker whose holder is proved dead is reclaimed, a marker whose holder is alive refuses with `store_writer_active`, and a marker whose holder cannot be decided refuses with `store_writer_unverifiable` — all three before the socket path is read, unlinked or bound. Simultaneous starts on one root resolve at the writer marker with exactly one listener and the loser never touching the socket. A root driven to the 256 MiB log capacity refuses the append with `store_capacity_exceeded`, the store terminates, the caller sees `commit_unknown`, and the daemon closes the listener and every connection and exits naming the capacity with nothing committed lost; a root whose log is already past that bound is refused at open with `store_log_too_large` rather than opened and truncated. `session.list` returns pages of at most 256 entries in session-ID order with an exact continuation cursor from the daemon index, carrying only session identity, recorded placement identity, `residency` and `controlled`. A session committed to the Store whose directory entry was never written — injected at that exact cut — is absent from the listing, still reachable by ID, and present in every listing after the activation that records it. A detached long-running command and a pending admission each cross the idle deadline with every client gone and run to completion, proving dormancy releases attachments and never a coordinator. The activation ceiling refuses the 65th activation of a daemon lifetime with `activation_ceiling_reached` and the restart remedy, and the count starts again after a restart because it counts per lifetime; a fresh `session.create` raises the count by one, and at the ceiling a create is refused with that same reason, so creation is proved to spend an activation rather than being exempt from the bound; attach consults the activation set rather than the listing index, proved at the 4,096-entry ceiling where a session activated but deliberately unrecorded still attaches; killing an activated session's coordinator leaves the daemon serving: the listing still reports `residency: active`, which remains true because this daemon did activate that session, and the next command for it returns core's own refusal forwarded unchanged, with the daemon adding and interpreting nothing; a root whose directory exceeds the recorded-entry bound refuses at start; at that bound a session reached by ID is activated and not recorded and the listing carries `index_full`; a session committed to the Store whose directory entry was never written is recovered both by its ID — validated through core's read-only existence query, with the case asserting the validation itself created no attachment and no durable record — and, by a client that never saw the ID, through ADR 0032's full command-identity sequence run to the end — replay `session.create` with the original `command_id`, core returns the historical result and so the session ID **without starting a coordinator**, the existence query answers `present`, the daemon repairs the directory entry and index row, control is acquired, and `session.resume` with a fresh resume command ID under the granted writer epoch is what activates the session — with the case asserting exactly one session in the root, the returned ID equal to the committed one, the replay itself starting no coordinator, the directory entry and index row present afterwards, the session listed, a live coordinator existing after the resume with the activation count risen by one, and a later prompt landing on that session and producing its events rather than on a second session or on nothing; an unknown ID answers negative from that query with nothing created, nothing attached and no lease granted; a directory write that fails during activation is reported to that client, leaves the session usable and reachable by ID while absent from `session.list`, and is written by the retry the next time the live daemon holds that ID — right after activation, on a later command for the session, or when a client reaches it by ID; a recorded session the daemon's composition cannot serve refuses at activation by name while every other session in the root activates. After an orderly stop the foreground server and the reference CLI reopen the same root and resume a daemon-created session under the same placement identity with identical replay. No durable method reaches the socket |
+| 1 | `apps/loopex_daemon/test/session_lifetime_test.exs` | A real daemon operating-system process per state root. The startup ordering and its readiness line: the line appears on `stdout` only after the marker is held and the socket is bound, permission-checked and accepting, a client connecting the instant it appears is served, and each of a held marker elsewhere, a failed socket permission check and an exceeded index bound prints no readiness line and exits non-zero with its own class. Orderly shutdown on `SIGTERM` sent to the daemon, and on `SIGINT` sent to the launcher that forwards it as `SIGTERM`: new connections refused and new admissions refused from that instant, then core's `quiesce/2` running two phases — every active session's abort durably admitted and paused **before any** cancellation begins, asserted from journal order across two sessions, then every cancellation released together — each abort being the command a client's own `session.abort` writes, under a `command_id` core mints fresh per session per drain and asserted to be one no client sent, and each unsettled or coordinator-less session fenced by a committed `advance_owner` so an older in-flight transaction is refused `:stale_owner_epoch` — no shutdown-specific field on the record, the cause reaching the operator through `daemon.stopping` and `stderr` instead — driving each session's in-flight work to settle under that session's own grace within a drain budget derived from `cancellation_bounds/1`, and at the deadline fencing and terminating every coordinator that did not settle before it answers — **both halves asserted**: a dispatched tool effect that settles carries its ordinary terminal fact in the journal, and one held past the budget leaves its coordinator dead at the instant it is reported with **no terminal claimed for that work** — no `cancelled`, no `outcome_unknown` — its ambiguous mutation left as `commit_unknown` and resolved to exactly one outcome when that session is next activated, one bounded best-effort `daemon.stopping` naming `operator_stop` attempted per open connection — asserted received where the transport accepts it and an EOF alone accepted where it does not — the socket pathname **left in place** — no exit path unlinks, and the next daemon removes it before binding, asserted by a following daemon starting cleanly on that root — the Store stopped last, and exit `0` — with the foreground server opening the same root immediately afterwards, which is what proves the marker was released, and the journal differing from what an abrupt death at the same instant would have left by exactly the admitted-abort records the drain wrote, with the unresolved transaction and its fence identical. **Store loss is a separate fail-stop, not that sequence**: the Store terminates itself and releases the marker before the daemon can act, so the daemon observes the death, refuses service, closes every connection with `store_lost` (or `store_capacity_exceeded` where that was the reason), unlinks and exits non-zero with that class on `stderr`, attempting no Store stop because there is none to attempt — proved by a second daemon starting on that root with no stale marker to recover. An active session progresses with zero attachments. An orderly stop releases the writer marker and records nothing false; an abrupt kill followed by restart activates nothing, then activates each session the root records when a client reaches for it, under the same placement identity and with no duplicate effect. The restart proves the marker path explicitly: the daemon opens with `recover_stale_writer: true`, a marker whose holder is proved dead is reclaimed, a marker whose holder is alive refuses with `store_writer_active`, and a marker whose holder cannot be decided refuses with `store_writer_unverifiable` — all three before the socket path is read, unlinked or bound. Simultaneous starts on one root resolve at the writer marker with exactly one listener and the loser never touching the socket. A root driven to the 256 MiB log capacity refuses the append with `store_capacity_exceeded`, the store terminates, the caller sees `commit_unknown`, and the daemon closes the listener and every connection and exits naming the capacity with nothing committed lost; a root whose log is already past that bound is refused at open with `store_log_too_large` rather than opened and truncated. `session.list` returns pages of at most 256 entries in session-ID order with an exact continuation cursor from the daemon index, carrying only session identity, recorded placement identity, `residency` and `controlled`. A session committed to the Store whose directory entry was never written — injected at that exact cut — is absent from the listing, still reachable by ID, and present in every listing after the activation that records it. A detached long-running command and a pending admission each cross the idle deadline with every client gone and run to completion, proving dormancy releases attachments and never a coordinator. The activation ceiling refuses the 65th activation of a daemon lifetime with `activation_ceiling_reached` and the restart remedy, and the count starts again after a restart because it counts per lifetime; a fresh `session.create` raises the count by one, and at the ceiling a create is refused with that same reason, so creation is proved to spend an activation rather than being exempt from the bound; attach consults the activation set rather than the listing index, proved at the 4,096-entry ceiling where a session activated but deliberately unrecorded still attaches; killing an activated session's coordinator leaves the daemon serving: the listing still reports `residency: active`, which remains true because this daemon did activate that session, and the next command for it returns core's own refusal forwarded unchanged, with the daemon adding and interpreting nothing; a root whose directory exceeds the recorded-entry bound refuses at start; at that bound a session reached by ID is activated and not recorded and the listing carries `index_full`; a session committed to the Store whose directory entry was never written is recovered both by its ID — validated through core's read-only existence query, with the case asserting the validation itself created no attachment and no durable record — and, by a client that never saw the ID, through ADR 0032's full command-identity sequence run to the end — replay `session.create` with the original `command_id`, core returns the historical result and so the session ID **without starting a coordinator**, the existence query answers `present`, the daemon repairs the directory entry and index row, control is acquired, and `session.resume` with a fresh resume command ID under the granted writer epoch is what activates the session — with the case asserting exactly one session in the root, the returned ID equal to the committed one, the replay itself starting no coordinator, the directory entry and index row present afterwards, the session listed, a live coordinator existing after the resume with the activation count risen by one, and a later prompt landing on that session and producing its events rather than on a second session or on nothing; an unknown ID answers negative from that query with nothing created, nothing attached and no lease granted; a directory write that fails during activation is reported to that client, leaves the session usable and reachable by ID while absent from `session.list`, and is written by the retry the next time the live daemon holds that ID — right after activation, on a later command for the session, or when a client reaches it by ID; a recorded session the daemon's composition cannot serve refuses at activation by name while every other session in the root activates. After an orderly stop the foreground server and the reference CLI reopen the same root and resume a daemon-created session under the same placement identity with identical replay. No durable method reaches the socket |
 | 2 | `apps/loopex_daemon/test/socket_transport_test.exs`, `apps/loopex_protocol/test/public_schema_conformance_test.exs` | A raw-byte client over the socket negotiates generation 2 and receives generation 2's **own** exact schema digest, written out as a literal in the conformance module beside generation 1's and different from it by construction: `LoopexProtocol.Session.schema_digest/0` is taken over the generation, the ordered methods, the ordered record families, the ordered error codes and the limits, and generation 2 changes the first two, so a generation 2 that negotiated generation 1's digest would be reporting a contract it does not serve. Generation 1's **method inventory, record families, error codes and limits** are proved unchanged in the same module, so the generation-2 work is proved additive rather than asserted to be — but **exactly one pinned literal moves, and the case asserts the move rather than the old equality**: the `3a17…08f4` **schema digest** at `public_schema_conformance_test.exs:291-292`, because `@generation` is one of the five inputs `schema_digest/0` hashes (`session.ex:192-199`). The **two file digests at `:297-298` do not move**, because the manifests they pin already carry `loopex.experimental/1` and contain no occurrence of the retired name. The generation assertion at `:282` changes with the code it checks. The case asserts the new schema digest against a freshly computed value and asserts the other four inputs are byte-identical to what generation 1 served in `0.1.0`, which is what separates a rename from drift. **And it adds the assertion whose absence let a released discrepancy survive**: `Session.generation()` equals each served generation's manifest `/generation`, for generation 1 and generation 2 alike, so generation 2's new manifest and pin cannot drift from its code the way generation 1's did. A `0.1.0` client's generations list is refused `unsupported_generation` with nothing created, and the repository's Node client is proved against the new string. A generation-1-only initialize is refused with nothing created. Generation 2's record families include `daemon.stopping` and `daemon.notice`, the second carrying `index_write_failed` for an activation whose directory write failed, with literal vectors for each `daemon.stopping` reason a **client can actually receive** — `operator_stop`, `store_lost`, `store_capacity_exceeded`, and one `fatal:<class>` per linked component of the fixed set (`runtime_lost`, `transfers_lost`, `workspace_lease_lost`, `executor_lost`, `registry_lost`, `custody_lost`, `relay_lost`, `listener_lost`), plus an uncorrelated `error` vector for `control_owner_lost`, carrying `session_id` and `event_cursor` and closing one session's controller attachment without ending the daemon, and vectors for `control_not_held`, `control_pending` and `control_capacity_reached` — and explicitly none for the startup-phase classes, which carry no vector because no socket exists when they occur and no client can be holding one, and its presence in the digest is what a generation 2 omitting it would fail on. Its delivery bound is proved both ways: a reading client receives the record before the close, and a client that has stopped reading until its 4 MiB output buffer is full receives nothing and is closed anyway, with the daemon making exactly one attempt and never blocking on it. Identical durable identities for the same command corpus through facade, foreground server and socket. Owner-only peer access proved in both layers: the socket's `0700` daemon-owned subdirectory and `0600` socket mode read back after bind, a permissive subdirectory or socket mode refused at start, a subdirectory the daemon does not own refused, a path component below the root that it did not create refused — and a state root at the ordinary `0755` the foreground server creates it with accepted, not refused, because the daemon owns the subdirectory and never re-permissions the root — and an unreadable or undecodable peer credential closing the connection before initialize — all in the fast check, which needs no second user — with the real cross-uid refusal and the same-uid success carried by two `@tag :cross_uid` cases the release check runs as `mix test --only cross_uid` on its single run, which closure requires to be on Linux, and where the script asserts exactly two executed tests so neither a zero nor a lone survivor can pass. Frame, fragment, malformed-input and over-long socket path refusals with distinct stable reasons, the path cases binding at the derived bound and at one byte past it on each platform the release check runs. A client disconnect recorded as transport loss with no cancellation and no interaction change. The generation-2 vectors are literal bytes with literal verdicts, held beside generation 1's in `apps/loopex_protocol/test/public_schema_conformance_test.exs`, never values generated from the implementation they check |
 | 3 | `apps/loopex_daemon/test/collaboration_test.exs` | One lease per session in daemon memory with observers attached. Connection identity, epoch, held state and unexpired term checked together before core admission or any durable write, including a known current epoch sent by an observer. Takeover only after release or expiry, with a fresh epoch minted before the successor's first command. A killed controller fenced and its late commands refused. The three ways a controller stops holding, proved separately because the transport cannot tell two of them apart: an explicit `session.release_control` frees the lease at once, while an EOF from a politely closed client and a killed client both wait for expiry, with a takeover refused before the deadline and granted after. A lease owner killed while a mutation is in flight taking the listener, every connection and the daemon down with it, after which the restarted daemon holds no lease and the previous holder's delayed command is refused on both the holder and the epoch check. A daemon restart leaving every session uncontrolled with every earlier epoch refused. A controller abort cancelling work dispatched under an earlier process with a truthful cleanup outcome. The expiry linearization: a mutation blocked inside core across the deadline settles under its own lease while the eligible takeover waits and is granted only after it resolves; the holder's next mutation refused at the deadline; the acquiring request refusing with `control_pending` when its own deadline elapses first; and the holder disconnecting while a mutation is in flight — in every case exactly one of settle or refuse, never both. No control from content, metadata, answers or attachment order. Forward and backward wall-clock jumps changing neither live admission nor takeover timing |
 | 4 | `apps/loopex/test/concurrent_attachments_test.exs`, `apps/loopex/test/session_existence_query_test.exs`, `apps/loopex_daemon/test/replay_residency_test.exs` | Core's read-only session-existence query answers exactly one of the closed set `present`, `absent`, `invalid_id`, `store_unavailable` and `unexpected`, from a fresh process against a real root, with one case per result. `store_unavailable` is injected through the controllable fault store the suite already has, `Loopex.M1RuntimeTestStore`, whose `fail_reads/2` hook makes its reads refuse — not by making the root unreadable, which cannot produce that answer on the real adapter: `Loopex.Store.Local` answers `ownership_head` from `state.store`, in memory, so a root that has become unreadable on disk still answers. `unexpected` is injected by a stub answering outside the set. It is proved to create no attachment, no incarnation, no durable record and no Store write: the root's journal and session directory are byte-identical before and after a run of queries, including for unknown and malformed IDs. Control acquisition proceeds only on `present`; the other four fail closed with no attachment, no lease and no activation, and name four distinct reasons, so an unreadable store is never reported as an unknown session. Several core attachments to one session remain independent when one detaches or backpressures. A snapshot anchored at the committed sequence, then contiguous at-least-once buffered and live delivery across the window boundary with no gap. Core is the only replay owner: every delivery case runs a second time with the daemon's resident window disabled and a third with it dropped mid-stream, all three byte for byte identical, so the window is proved to establish no snapshot and no cursor. Aggregate reclamation follows the fixed order ADR 0032 sets — zero-attachment windows by ascending last delivery, then the furthest-behind session's window, then detachment — including the case where zero-attachment windows alone consume the ceiling. A slow observer detached at its last emitted cursor while the controller and the other attachments continue. Per-session and per-daemon limits refusing independently. Idle eviction and reconnect with no missing durable event, any duplicate deduplicated by session ID, sequence and event ID. Retained encoded bytes at or below the 4 MiB output buffer, 16 MiB window and 512 MiB aggregate ceilings, enforced in the daemon-owned stages, exercising 512 attachments and maximum-sized output records separately, with observed process RSS recorded beside the ceilings. Progress coalesced or dropped with counted drops and no journal delay |
@@ -1769,23 +1769,58 @@ Loopex.Runtime.quiesce(runtime, drain_deadline_ms) ::
   {:ok, %{settled: [session_id], unsettled: [session_id]}}
 ```
 
-**Three parts, and the first is the part an earlier revision got wrong.**
+**Three parts, in order, and the first two are one thing split in half.**
 
-1. **A durable admission, before any cancellation.** ADR 0023 fixes that
-   *only* the durable `session.abort` command cancels, and that cancellation
-   is "never inferred from EOF or death"
+1. **Phase one: every live coordinator admits the abort, and then stops.**
+   ADR 0023 fixes that *only* the durable `session.abort` command cancels, and
+   that cancellation is "never inferred from EOF or death"
    (`0023-…-technical.md:365`, with the method table at `:169`). Quiesce
-   cancels, so quiesce must admit. For every active session it therefore
-   **admits the existing abort command**, unchanged, and only then runs that
-   session's cancellation. The
-   path is the one that exists: `propose_new/3` for `%{type: :abort}` writes a
-   `command_admitted` record with `"command_type" => "abort"` and
-   `"admission" => "accepted"` (`session_state.ex:1684-1700`), resolving the
-   queued steer and follow-up as it goes, and answers with
-   `"admission" => "rejected_no_active_run"` where nothing is running
-   (`:1750-1761`) — the right answer for an idle session, needing no special
-   case.
+   cancels, so quiesce must admit — and the Concept promises **every** abort
+   is durable before **any** cancellation begins, which a per-session
+   admit-then-cancel loop cannot deliver.
 
+   It cannot because cleanup starts on the commit reply path:
+   `begin_admitted_cleanup/1` runs "from the reply path of a committed
+   command" and starts cleanup the moment the reducer marks a run aborting
+   (`session_coordinator.ex:4806-4815`). Admitting session A's abort therefore
+   begins A's cleanup while session B's abort is still unwritten.
+
+   So quiesce **splits admission from cleanup**, and the split is the change
+   to that path: under a drain, a coordinator admits the abort and **pauses at
+   exactly the point `begin_admitted_cleanup/1` would have begun** — the
+   record is committed, the queued steer and follow-up are resolved as they
+   already are, and no cancellation runs. The admission path is otherwise
+   untouched: `propose_new/3` for `%{type: :abort}` writes the same
+   `command_admitted` record with `"command_type" => "abort"` and
+   `"admission" => "accepted"` (`session_state.ex:1684-1700`), and answers
+   `"admission" => "rejected_no_active_run"` where nothing is running
+   (`:1750-1761`), which is the right answer for an idle session and needs no
+   special case.
+
+2. **Phase two: cancellation is released, concurrently, only once every
+   admission has resolved.** Core waits for phase one to finish for every
+   session — committed, refused as having no active run, or failed — and then
+   releases the paused cleanups together. That is what makes the Concept's
+   ordering true globally rather than per session, and it is also why the two
+   phases are inside core: a host that ran them would need two round trips per
+   session and a way to hold a coordinator between them.
+
+   **Concurrently, not in sequence**, because each session's cleanup is
+   bounded by its own committed grace and running them one after another would
+   add those bounds together.
+
+   **Core derives each session's `cleanup_grace_ms` itself** from the durable
+   state it already holds (`session_coordinator.ex:422`, `:5366`); the daemon
+   passes no per-session number and does not know them. The drain budget is
+   the maximum over the drained sessions of
+   `cancellation_bounds(g_i).cli_backstop_ms`
+   (`apps/loopex/lib/loopex/executor.ex:456-474`), and over an **empty** set
+   of drained sessions that maximum is **`0`**: a daemon with nothing active
+   drains instantly rather than waiting out a number derived from nothing.
+
+   Inside the budget each session's cancellation runs under its own `g`,
+   through `Loopex.Executor.cancel/4` (core), exactly as the coordinator
+   already drives it at `session_coordinator.ex:3614` and `:5366`.
 
    **Whose `command_id` that abort carries, which the set did not say.**
    `propose_new/3` writes `"command_id" => command.command_id`
@@ -1850,21 +1885,58 @@ Loopex.Runtime.quiesce(runtime, drain_deadline_ms) ::
    was available and was declined, because it would buy a journal annotation
    at the price of a one-way root.
 
-2. **A derived budget.** `drain_deadline_ms` is `drain_ms`: the maximum over
-   the drained sessions of `cancellation_bounds(g_i).cli_backstop_ms`
-   (`apps/loopex/lib/loopex/executor.ex:456-474`). Inside it each session's
-   cancellation runs under its own `g`, through `Loopex.Executor.cancel/4`
-   (core) exactly as the coordinator already drives it at
-   `session_coordinator.ex:3614` and `:5366`.
+3. **A Store-linearized fence at the deadline, because terminating a
+   coordinator is not one.** When the budget is spent, core fences and
+   terminates every unsettled coordinator and waits for its `DOWN` before
+   returning. An earlier revision stopped there and claimed nothing could be
+   appended for that session afterwards. **That claim was false**, and the
+   reason is worth stating because it is the general shape of this whole
+   class of bug: a coordinator commits through a *synchronous* call —
+   `OwnerLane.call/4` runs `Store.transact/2` (`store/owner_lane.ex:120-121`)
+   — and a `GenServer.call` that has already been delivered runs to
+   completion whether or not its caller is still alive. Probed at both
+   toolchain pairs: a handler that sleeps, with its caller killed mid-call,
+   **still ran and still produced its effect**. So an in-flight transaction
+   can be linearized by the Store (`local.ex:250-256`) after its coordinator
+   is gone, and `Control`'s `DOWN` handler does not prevent it — all that
+   handler does is `EventDispatcher.release_fence/2` and leave the entry
+   (`control.ex:805-826`), which fences *delivery*, not the journal.
 
-3. **A synchronous fence at the deadline.** When the budget is spent, core
-   does not merely report what did not settle: for each unsettled session it
-   **fences the coordinator, terminates it, and waits for its `DOWN` before
-   returning**. Without that, "unsettled" would name a coordinator still
-   running and free to commit a terminal fact after the daemon had reported it
-   unfinished and moved on to tell clients — a report false by the time it was
-   read. After `quiesce/2` returns, every session in `unsettled` has no live
-   coordinator, and nothing can be appended for it until the next activation.
+   So quiesce installs a fence the **Store** enforces, using machinery that
+   already exists. After terminating an unsettled coordinator it commits an
+   **`advance_owner` transaction** for that session — the type the Store
+   already defines, binding `expected_owner_epoch` and
+   `expected_journal_version` and proposing a new incarnation
+   (`store.ex:168-178`, linearized at `state/local/state.ex:241-254`). Once it
+   commits, the session's `owner_epoch` has moved, and any older
+   `session_commit` the Store linearizes afterwards is refused
+   **`:stale_owner_epoch`** by the rule that already governs every commit
+   (`state.ex:548-551`).
+
+   That turns an unanswerable question into a decided one. An old transaction
+   either wins the race to linearization — in which case it commits, is
+   observed, and the session's durable state includes it — or it loses, and is
+   refused as stale. Either way, when `quiesce/2` returns, **no transaction
+   for an unsettled session can still commit**, and the daemon's report is
+   true when it is read rather than true when it was written.
+
+   **The classification quiesce returns has three lists, not two**, because
+   `Control` can hold an entry whose coordinator is already dead: its `DOWN`
+   handler leaves an `:active` entry in place (`control.ex:821-823`), which is
+   correct for residency and misleading for a drain. Such a session is
+   **`absent`**: quiesce admits no abort for it, runs no cancellation, and
+   fences it exactly as it fences an unsettled one, because an old transaction
+   from that dead coordinator is precisely the case the fence exists for. The
+   daemon reports it as not drained rather than counting it settled.
+
+**Quiesce is not called through the facade's default timeout.** `control_call/3`
+and `dispatcher_call/3` both default to `5_000` (`runtime.ex:470`, `:478`), and
+a drain whose budget is derived from a session's cleanup grace will routinely
+exceed that — a five-second reply timeout would abandon a drain that was
+working and leave the daemon tearing down underneath it. `quiesce/2` therefore
+calls with an explicit `:infinity` reply timeout and carries its **own**
+deadline as data: the budget is enforced inside core, where the work is, and
+the caller waits for the answer rather than racing it.
 
 `Loopex.Runtime.Control` already holds every active session and its
 coordinator pid, so there is nowhere else this could live and nothing to
@@ -2197,6 +2269,38 @@ next daemon removes before binding.
   rather than the owner dying of `noproc` with no status, no message and a
   socket file left behind. A second daemon opens the same root immediately
   afterwards, which is what proves the path completed.
+- **The fence is a Store fence, proved against a transaction in flight.**
+  This is the case a terminated coordinator alone would fail. A session's
+  terminal transaction is **paused inside the Store, before linearization**,
+  using the adapter's existing fault probe — `checkpoint(state.fault_probe,
+  transition, :before_linearization)` at `local.ex:252` is exactly that
+  injection point. With it paused, the coordinator is killed, so the caller of
+  that transaction is dead while the transaction itself is still pending.
+  Quiesce then runs its deadline path: it terminates the coordinator, waits
+  for the `DOWN`, and commits the `advance_owner` fence for that session. The
+  paused transaction is released. The case asserts it is **refused
+  `:stale_owner_epoch`**, that the journal contains no terminal for it, and
+  that the daemon's `unsettled` report was therefore true when it was read.
+
+  A variant releases the paused transaction **before** the fence commits and
+  asserts the other half: it commits, it is observed, and the session's
+  durable state includes it. Both outcomes are decided; neither is a race the
+  plan has to argue about.
+- **The drain is globally durable-first, not per session.** Two sessions are
+  active, each with a cancellable effect. The case asserts that **both**
+  aborts are committed to the journal **before either** cleanup begins —
+  read from the journal's order, not from timing — which a per-session
+  admit-then-cancel loop would fail, since `begin_admitted_cleanup/1` starts
+  cleanup on the commit reply path. A second assertion covers the empty case:
+  a daemon with no active session drains with a budget of `0` and does not
+  wait.
+- **An `:active` entry whose coordinator is already dead is reported, not
+  drained.** A session's coordinator is killed and the daemon is stopped
+  before `Control`'s entry is replaced. The case asserts the session appears
+  in quiesce's **`absent`** list rather than in `settled` or `unsettled`, that
+  no abort was admitted for it, and that it was **fenced** all the same — the
+  `advance_owner` commits — because a dead coordinator's in-flight
+  transaction is exactly what the fence is for.
 - **A component that fails while it is being stopped.** The transfers owner
   is made to raise in its own `terminate/2` during an orderly stop, so its
   stop returns that reason rather than `:normal` and the two-clause catch
@@ -2229,7 +2333,7 @@ next daemon removes before binding.
   unresolved mutation receives `SIGTERM`. The case asserts the session is in
   the `unsettled` list; that its coordinator is **gone before `quiesce/2`
   returned**, proved by the pid being dead at the instant the daemon reports
-  it, which is what the synchronous fence exists for; and then the negative
+  it; and then the negative
   that matters: **no terminal is claimed for the work that did not settle** —
   no `cancelled`, no `outcome_unknown` for it. The ambiguous mutation stays
   `commit_unknown`, each client is sent the stop reason on a transport that
