@@ -556,7 +556,8 @@ on differently.
 **`daemon_stopping`, the refusal after the admission cut.** An orderly stop
 begins with a synchronous, acknowledged cut: the daemon's owner calls the
 admission relay, the relay closes admissions and answers only once every
-ticket it holds has settled or been recorded, and nothing enters core through
+ticket it holds has **settled** — not merely been recorded, a recorded ticket
+being a call still running — and nothing enters core through
 the daemon after that answer. A connection that is still open — and every
 connection is, because the cut precedes the closes — may still send a frame.
 It is answered with a **correlated** `daemon_stopping` carrying that request's
@@ -566,8 +567,8 @@ of the stop sequence, which is where a client is told the reason it is going
 away; `daemon_stopping` answers the one request that arrived in between.
 
 The instant it names is the relay's acknowledgement, not the signal: a command
-whose relay ticket was recorded **before** the acknowledgement settles or is
-fenced under the drain, and one that arrives after it is refused. Those are
+whose relay ticket was recorded **before** the acknowledgement has settled by
+the time it returns, and one that arrives after it is refused. Those are
 the two witnesses, and they must give different answers on the same surface —
 the connection's own reply stream.
 

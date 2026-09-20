@@ -81,14 +81,17 @@ flight, and core never sees the writer epoch at all.
 added on the maintainer's decision of 2026-09-20. Every **lease-authorized
 existing-session mutation** — the set this pair lists below, each carrying
 `writer_epoch` and admitted only from the recorded holder — is routed through
-it, and so is `session.create`, which carries no epoch and whose ticket the
-connection process takes because no lease owner exists for a session that does
-not exist yet. Nothing else is: reads are not ticketed, since a read grants
-nothing, orders nothing, and a blocking read would otherwise hold a takeover
-for as long as an observer sat on it. A create's ticket blocks no grant — there
-is no earlier tenure for a successor to overtake — and it exists so that the
+it, and so are two calls that carry no epoch: `session.create`, whose ticket
+the connection process takes because no lease owner exists for a session that
+does not exist yet, and `session.attach`, whose second leg mutates the
+runtime's dispatcher. Ten in all. Nothing else is: reads are not ticketed,
+since a read changes no core state, grants nothing, orders nothing, and a
+blocking read would otherwise hold a takeover
+for as long as an observer sat on it. Neither the create ticket nor the attach
+ticket blocks a grant — the first names no session yet, the second grants
+nothing a successor could overtake — and both exist so that the
 daemon's orderly stop can close admissions with an acknowledgement covering
-**every** mutation in flight, which a relay that creates bypassed could not
+**every** call that changes core state, which a relay they bypassed could not
 give. The plan's companion owns that cut.
 
 The lease owner — or, for a create, the connection process — **calls** the
