@@ -241,6 +241,26 @@ no content, no durable session state.
 | result | `index_full` | bool | required |
 | result | `uptime_ms` | `u64` | required |
 
+**What the counts mean while a reservation is in flight**, which an earlier
+revision left to the implementation and which two clients calling
+`daemon.status` during a burst of creates would otherwise disagree about.
+The rule is that **a reservation counts**:
+
+- `activations_used` is `|activation set| + |reservations|` — the same
+  quantity the ceiling invariant bounds, so `activations_used` and
+  `activation_limit` are directly comparable and a client can never read
+  `activations_used < activation_limit` on a daemon that would refuse its next
+  create;
+- `active_sessions` is `|activation set|` alone — sessions with a coordinator
+  now, which is a different question and is why the two fields both exist;
+- `attachments` counts installed attachments plus reserved attachment slots,
+  for the same reason `activations_used` does;
+- `connections` counts accepted connections, reservation-free by nature.
+
+So `activations_used` may exceed `active_sessions` for as long as a call is in
+flight, and settles to it. Reporting the set alone would advertise headroom
+the very next call would refuse.
+
 **`session.acquire_control`**
 
 | Direction | Key | Type | Optionality |
@@ -248,6 +268,13 @@ no content, no durable session state.
 | request | `session_id` | binary identity | required |
 | result | `writer_epoch` | binary identity, ≤ 64 bytes | required |
 | result | `expires_in_ms` | `u64`, the remaining term on the daemon's clock | required |
+| result | `renewed` | bool | present **exactly when** the caller was already the holder of a held, unexpired lease |
+
+A holder's own `session.acquire_control` is a **renewal**, not a refusal: the
+deadline moves, the epoch stays, `writer_epoch` is the same value it held and
+`renewed` is `true`. ADR 0033 owns the branch; the field is here so a client
+can tell a renewal from a fresh grant without comparing epochs it treats as
+opaque.
 
 **`session.release_control`**
 
@@ -277,7 +304,7 @@ errors answering one request: each carries that request's `request_id`, no
 | Code | Answers | Carries beyond the envelope |
 | --- | --- | --- |
 | `control_held` | `session.acquire_control` | **Nothing.** It does *not* carry the current epoch: an epoch is authority-shaped, and handing one to a client that was just refused is exactly the value it must not have. An earlier revision of ADR 0033 said it named the current epoch; that is withdrawn |
-| `control_not_held` | `session.release_control` from a non-holder | nothing |
+| `control_not_held` | `session.release_control` from a non-holder, **and every lease-authorized existing-session mutation whose combined admission gate fails** — wrong connection, wrong epoch, released lease, expired lease, or an attachment without controller capability | **Nothing**, deliberately: the five conditions are indistinguishable on the wire, because saying which one failed would make the refusal an epoch and lease oracle. ADR 0033 fixes the gate; this is the one answer it has |
 | `control_pending` | `session.acquire_control` that waited out its deadline | nothing |
 | `control_capacity_reached` | any lease operation beyond the 512 concurrent-owner cap | nothing |
 | `session_dormant` | `session.attach` | nothing |
@@ -425,9 +452,16 @@ module can pin a digest, so each is fixed here rather than left to the
 implementation. Seven were underspecified in an earlier revision, and this is
 the whole of what was missing.
 
-**`control_not_held`, the non-holder release.** `session.release_control` from
-a connection that is not the current holder refuses with `control_not_held`.
-It is distinct from `control_held`, which refuses an *acquisition* because
+**`control_not_held`, the one answer the admission gate has.** It refuses
+`session.release_control` from a connection that is not the current holder or
+whose `writer_epoch` does not match, **and** every lease-authorized
+existing-session mutation that fails ADR 0033's combined check on holder
+connection, epoch, `held` state, unexpired deadline or controller-capable
+attachment. One code for all of them, carrying nothing beyond the envelope:
+the refusals a client can provoke must not tell it whether a lease exists,
+whether its epoch was right or whether it was merely late, because that is an
+oracle for the value the gate protects. It is distinct from `control_held`,
+which refuses an *acquisition* because
 somebody else holds the lease, and from `control_owner_lost` below. The
 refusal changes nothing: the current holder's lease, epoch and deadline are
 untouched, which is the point — a release that could be issued by a non-holder

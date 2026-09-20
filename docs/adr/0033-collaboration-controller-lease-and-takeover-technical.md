@@ -163,7 +163,9 @@ the local store's writer marker, unchanged.
 ### Methods and fields
 
 - `session.acquire_control` (`session_id`, `request_id`): grants control when
-  no lease is held, or when the held lease is released or expired; refuses
+  no lease is held, or when the held lease is released or expired; **renews**
+  it when the caller is the recorded holder of a held, unexpired lease — see
+  the renewal branch below; and refuses
   with `control_held` otherwise, **carrying no epoch** — an epoch is
   authority-shaped, and a client that was just refused control is the last one
   that should be handed the current one. An earlier revision of this sentence
@@ -188,11 +190,27 @@ the local store's writer marker, unchanged.
   held lease lets that connection call `session.resume` and then attach. Daemon startup recovery of sessions is a root-owner operation under
   the store's writer marker, never a client mutation and never a grant of
   controller authority.
-- `session.release_control` (`session_id`, `request_id`): releases the
-  caller's own lease; a non-holder refuses.
-- Renewal is implicit on any admitted command and explicit through
-  `session.acquire_control` from the holder, which extends the deadline
-  without changing the epoch.
+- `session.release_control` (`session_id`, `request_id`, **`writer_epoch`**):
+  releases the caller's own lease. It carries `writer_epoch` like every other
+  lease-authorized call, and ADR 0032's DTO table is the contract for it; an
+  earlier revision of this line omitted the field the table already required,
+  which would have left two documents describing one request. A caller that is
+  not the recorded holder, or whose epoch does not match, refuses
+  `control_not_held` and changes nothing.
+- **Renewal is a branch of `session.acquire_control`, and it has to be stated
+  because the refusal rule would otherwise swallow it.** Acquire from the
+  connection that **is** the recorded holder of a lease that is `held` and
+  unexpired is a **renewal**: the deadline moves to the full term from the
+  admission instant, the **epoch does not change**, and the result carries
+  that same `writer_epoch` with the new `expires_in_ms`. Acquire from any
+  other connection while such a lease exists refuses `control_held`. The two
+  branches are told apart by the connection identity alone — acquire carries
+  no epoch on the wire, and needs none, because the holder is recorded against
+  the connection. An earlier revision said both "refuses with `control_held`
+  otherwise" and "renewal is explicit through `session.acquire_control` from
+  the holder" without saying which clause a holder's own acquire took.
+  Renewal is also implicit on any admitted mutation, which extends the
+  deadline the same way and likewise never changes the epoch.
 - Every existing-session mutation in generation 2, including
   `session.resume`, `session.prompt`, `session.steer`,
   `session.follow_up`, `session.abort`, `session.respond_interaction`,
@@ -203,9 +221,29 @@ the local store's writer marker, unchanged.
   connection holds a controller-capable attachment, except that a verified
   dormant session's `session.resume` may precede attach under that
   connection's held lease. The check and core handoff are serialized against
-  lease transitions for the session. A mismatch or failed condition refuses
-  before core admission and before a session write; an observer who copied
-  the visible current epoch still refuses. Queries and attach carry no epoch.
+  lease transitions for the session.
+
+  **Every way that gate can fail answers one code, `control_not_held`, and it
+  says nothing about which condition failed.** The gate has five conditions —
+  holder connection, epoch equality, `held` state, unexpired deadline,
+  controller-capable attachment — and an earlier revision required each of
+  them without naming the result any of them produces, which left the one
+  refusal a client actually meets undefined and ADR 0032's error table
+  incomplete. It is deliberately **non-oracular**: a stale epoch, a copied
+  current epoch, a non-holder connection, a released lease, an expired lease
+  and an observer's mutation are **indistinguishable on the wire**, because
+  telling a caller *which* condition it failed tells it something about the
+  lease it does not hold — whether one exists, whether its epoch was right,
+  whether it was merely late — and an epoch oracle is exactly what a refusal
+  must not be. It refuses before core admission and before any session write,
+  carries the request's `request_id` and nothing else, and changes nothing
+  about the current holder's lease, epoch or deadline. Queries and attach
+  carry no epoch and pass no gate.
+
+  The witnesses assert the six refusals separately in the daemon's own state —
+  which condition each case constructed — and assert that all six are the
+  **same** code and the same fields on the wire, which is what stops a later
+  revision from helpfully differentiating them.
 - `session.create` has no `writer_epoch` because the session lease does not
   exist. It creates an uncontrolled session, and creation never implicitly
   grants control. The caller must acquire control explicitly and use the
