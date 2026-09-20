@@ -178,8 +178,11 @@ admitted at expiry with no grace. The linearization rule is:
 3. A takeover becomes **eligible** at the deadline and is **granted** only
    once every in-flight mutation for that session has resolved. Until then the
    acquire waits, bounded by the acquiring request's own deadline; a wait that
-   exceeds it refuses with a stable reason naming the in-flight admission, and
-   the client may acquire again.
+   exceeds it refuses with **`control_pending`**, the stable reason ADR 0032's
+   generation-2 error inventory carries for exactly this case, and the client
+   may acquire again. It is distinct from `control_held`, which says another
+   client holds the lease; `control_pending` says only that this acquisition
+   ran out of time behind an admission that had not resolved.
 4. The grant then mints a fresh epoch, so nothing admitted under the previous
    lease can be confused with anything after it.
 
@@ -228,8 +231,8 @@ controller unaffected; a lease transition racing command admission preserves
 this order; the expiry linearization above, with a mutation blocked inside
 core across the deadline settling under its own lease while the eligible
 takeover waits and is granted only after it resolves, the holder's next
-mutation refused at the deadline, the acquiring request refusing with its
-stable reason when its own deadline elapses first, the holder's connection
+mutation refused at the deadline, the acquiring request refusing with
+`control_pending` when its own deadline elapses first, the holder's connection
 disconnecting while its mutation is in flight, and the per-session lease owner
 failing while a mutation is in flight — in every case exactly one of settle or
 refuse, never both, and no epoch reused; takeover only after release or expiry
