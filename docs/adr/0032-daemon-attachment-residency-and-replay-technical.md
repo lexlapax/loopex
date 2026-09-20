@@ -151,6 +151,40 @@ enforced inside core.
 | `daemon.status` | none | Placement identity, daemon incarnation, socket path, attachment, active-session and index counts against their limits, uptime |
 | `session.acquire_control`, `session.release_control` | `session_id`, `request_id` and the lease fields ADR 0033 fixes | Lease result naming the writer epoch and the remaining lease term |
 
+Generation 2 also adds **one notification record family**, `daemon.stopping`,
+which no client requests and every client may receive:
+
+| Field | Value |
+| --- | --- |
+| `reason` | One of `operator_stop`, `store_lost`, `store_capacity_exceeded`, or `fatal:<class>` for the remaining fatal classes the plan's map names |
+| `message` | A bounded non-secret sentence for an operator to read |
+| `retry_after_ms` | Present only for `operator_stop`, where a restart is expected; absent for every fatal reason, because the daemon does not know when the cause will be fixed |
+
+**Its delivery is bounded best-effort, and the bound is one the daemon already
+has.** The daemon makes exactly **one** write attempt of the record into the
+connection's existing 4 MiB output buffer and then closes the connection
+regardless of what happened. If the buffer cannot accept it — a backpressured
+client that has not been reading — the record is dropped and the connection is
+closed anyway. A dead client receives nothing at all. **So a client may learn
+of a shutdown only by its socket closing**, and this pair says so rather than
+implying the record always arrives; a client that treats an unexplained close
+as a defect would be wrong.
+
+The bound is the buffer's, not a new timer: a millisecond deadline would be a
+number this milestone introduces, and the minimalism budget requires every
+number to come from an accepted or proposed decision. One non-blocking attempt
+into a bound that already exists is the same guarantee with nothing new to
+justify.
+
+**This changes the generation-2 digest, and that is the point of saying it
+here.** `Loopex.Protocol.Session.schema_digest/0` is taken over the
+generation, the ordered methods, the ordered record families, the ordered
+error codes and the limits. `daemon.stopping` is a new **record family**, so
+generation 2's digest reflects it; the literal the conformance module pins for
+generation 2 is the digest of the contract *including* this record, and a
+generation 2 that omitted it would compute a different value and fail there.
+Generation 1's digest is untouched, since generation 1 has no such record.
+
 ### The session index, and what it may claim
 
 `session.list` reads a daemon-owned index, never the session directory or the
@@ -324,13 +358,26 @@ durable record and no Store read by the daemon:
    as an explicit warning that this session will not appear in `session.list`
    — the reference CLI already reports exactly that failure today. The
    activation itself succeeds, the session is fully usable, and the daemon
-   retries the record at the next **daemon start**, when the index is rebuilt
-   from the directory and the missing entry is written then. It cannot be
-   "the next activation of that session", which an earlier draft said:
-   activation is one-way, so within a daemon's lifetime there is no next
-   activation to retry at. Until the restart, the session is reachable by ID
-   and absent from `session.list`, which is exactly what the client was
-   told.
+   **retries while it still holds the ID**, which is the only time it can:
+
+   - immediately after activation, once;
+   - on each later command for that session, since the daemon has the ID in
+     hand at that moment anyway and the retry costs one file write it already
+     knows how to make;
+   - and when any later client reaches the session by ID, or replays its
+     create command, since both paths put the ID back in the daemon's hands.
+
+   The retry stops as soon as it succeeds. Two earlier answers were wrong and
+   both are withdrawn. "At the next activation of that session" cannot happen:
+   activation is one-way, so within a lifetime there is no second one. "At the
+   next daemon start" cannot happen either, and for a sharper reason — a
+   restarted daemon builds its index *from the directory*, so a session the
+   directory does not hold is a session the new daemon has never heard of. It
+   has no ID to retry with. Only a live daemon that still holds the ID can
+   repair the gap, which is why the retry is bound to the moments it does.
+
+   Until it succeeds, the session is reachable by ID and absent from
+   `session.list`, which is exactly what the client was told.
 4. **A full index still activates.** If the index already holds 4,096 entries
    and a client reaches an unrecorded session by ID, the session is activated
    and is **not** recorded. Reachability never depends on the ceiling. What

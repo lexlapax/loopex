@@ -37,7 +37,13 @@ unchanged — and its request records with exactly one addition, the
 generation 2 a new schema digest rather than a rename. It serves exactly one
 generation,
 `loopex.experimental/2`, which adds `session.list`, `daemon.status`, the two
-control methods and the writer-epoch field ADR 0033 names. It adds no durable
+control methods, the writer-epoch field ADR 0033 names, and one notification
+record family, `daemon.stopping`, carrying the reason a daemon is going away.
+That record is a new record family, so it is part of what generation 2's
+schema digest is taken over; its delivery is one bounded best-effort write
+attempt into the connection's existing output buffer, after which the
+connection closes whatever happened, so a client may learn of a shutdown only
+by its socket closing. It adds no durable
 method. An earlier draft of this decision also added `session.stop` and called
 it durable; that is withdrawn, because core owns durable session truth, core
 has no durable stop command, and M5's core changes are concurrent attachment
