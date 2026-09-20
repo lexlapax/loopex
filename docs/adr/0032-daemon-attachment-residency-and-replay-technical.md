@@ -302,7 +302,10 @@ durable record and no Store read by the daemon:
    reads no Store internals.
 
    Each of the five results is a witness: `present` granting, `absent`,
-   `invalid_id`, `store_unavailable` injected by making the root unreadable,
+   `invalid_id`, `store_unavailable` injected through the suite's controllable
+   fault store rather than by making the root unreadable — `Loopex.Store.Local`
+   answers `ownership_head` from memory, so an unreadable root does not produce
+   that result —
    and `unexpected` injected by a stub that answers outside the set. All five
    assert the same absence afterwards — no attachment, no lease, no activation
    — and assert that the four refusals name distinct reasons.
