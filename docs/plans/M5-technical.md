@@ -725,12 +725,20 @@ own:
 | # | Linked process | Where it comes from | Optional? |
 | --- | --- | --- | --- |
 | 1 | The Store adapter | `start_edge(Store.Local, …)` | no |
-| 2 | The runtime root | `start_edge(Loopex, …)` | no |
-| 3 | The artifact transfers owner | `start_edge(Transfers, …)` | **yes** — only when transfers are enabled |
-| 4 | The workspace lease | `start_edge(WorkspaceLease, …)` | no |
-| 5 | The local executor | `start_edge(Local, …)` | no |
+| 2 | The artifact transfers owner | `start_edge(Transfers, …)` | **yes** — only when transfers are enabled |
+| 3 | The workspace lease | `start_edge(WorkspaceLease, …)` | no |
+| 4 | The local executor | `start_edge(Local, …)` | no |
+| 5 | The runtime root | `start_edge(Loopex, …)` | no |
 | 6 | The lease owner | The daemon's own, under ADR 0033 | no |
 | 7 | The listener | Bound and permission-checked last, so nothing accepts before the rest exists | no |
+
+The numbering is the composition's actual start order, not a tidied one: the
+Store first, then the artifact placement and the executor's own edges, and the
+runtime **last**, because it is the thing that depends on all of them. Reverse
+that and the shutdown order falls out — listener, lease owner, runtime,
+executor, workspace lease, transfers, Store — with the runtime stopping before
+the executor it drives and the Store stopping after everything that could
+still have written to it.
 
 The composition function therefore returns **every pid it linked**, not only
 the ones the daemon names in prose: a map carrying `store`, `runtime` (the
@@ -875,9 +883,18 @@ chooses.
    supervision subtree without racing its own teardown, and a loop that walked
    `which_children` would be reading a tree that is already dissolving.
 
-4. **The Store stops last**, and its `terminate/2` releases the writer marker
-   — see the marker invariant in ADR 0031. Then the socket path is unlinked
-   and the owner **exits `0`**.
+4. **The remaining composed edges stop, then the Store last.** Reverse start
+   order puts the executor, the workspace lease and the transfers owner
+   between the runtime and the Store, and each is stopped in turn — the
+   executor first, since it is the one with OS effects to clean up and it
+   traps exits to do so. Then the Store, whose `terminate/2` releases the
+   writer marker — see the marker invariant in ADR 0031. Finally the socket
+   path is unlinked and the owner **exits `0`**.
+
+   An earlier draft of this list had four steps for what are seven linked
+   processes, which would have left the executor, the lease and the transfers
+   owner running while the Store went out from under them. They are stopped
+   here, in this order, for that reason.
 
    Stopping it last makes the marker outlive **every operation the owner can
    end**, which is the honest form of a claim an earlier draft overstated. On
@@ -925,8 +942,14 @@ information lost on the way. Then, without the ordered sequence:
 2. Close every connection, after one bounded best-effort `daemon.stopping`
    carrying `store_lost`, or `store_capacity_exceeded` when the store's own
    reason was the capacity refusal.
-3. Unlink the socket.
-4. Exit non-zero with that class on `stderr`. **There is no "stop the Store"
+3. **Stop the executor**, even though the Store is already gone. This is not
+   tidiness: the executor is the one linked process that owns effects outside
+   the VM, and it traps exits precisely so it can clean them up. Halting
+   without stopping it would leave OS effects behind that no later daemon
+   knows about. The other linked processes need no such step — they own
+   nothing that outlives the VM.
+4. Unlink the socket.
+5. Exit non-zero with that class on `stderr`. **There is no "stop the Store"
    step**, because the Store already stopped and the marker is already
    released; the next daemon finds no marker to recover rather than a stale
    one. Nothing restarts the Store: the owner start_links its children and
@@ -936,6 +959,16 @@ information lost on the way. Then, without the ordered sequence:
 Nothing durable is at risk in that ordering: whatever was ambiguous is
 `commit_unknown` in the journal and is reconciled at the next activation, and
 whatever was not committed was never promised.
+
+**How the daemon actually ends, on either path.** The owner's last act is to
+halt the VM with the status — `0` for an operator stop, non-zero with the
+class for a fatal one. That matters to state because BEAM exit semantics
+alone would not do it: a `:normal` exit from the owner is ignored by every
+linked process that does not trap, so "the owner exits" is not by itself a
+shutdown. On the ordered path the halt finds a VM whose processes have
+already been stopped in sequence; on the fail-stop path it ends whatever
+remains, after step 3 has given the one process with external effects its
+chance to clean up.
 
 **An abrupt death** — `SIGKILL`, power loss — runs neither path, and is safe
 for the reasons the durability rules already give: nothing the journal does
@@ -958,14 +991,14 @@ die without a name for it.
 | `session_index_too_large` | Startup: the directory holds more than the index bound | — |
 | `socket_path_too_long` | Startup: the path exceeds the derived `sun_path` bound | — |
 | `socket_permission_unverified` | Startup: subdirectory or socket ownership/mode could not be verified | — |
-| `store_capacity_exceeded` | Linked process 1 exited **on the capacity refusal**, distinguished by the store's own reason | `store_capacity_exceeded` |
-| `store_lost` | Linked process 1 exited for any other reason | `store_lost` |
-| `runtime_lost` | Linked process 2, the runtime root, exited | `fatal:runtime_lost` |
-| `transfers_lost` | Linked process 3, the artifact transfers owner, exited | `fatal:transfers_lost` |
-| `workspace_lease_lost` | Linked process 4 exited | `fatal:workspace_lease_lost` |
-| `executor_lost` | Linked process 5 exited | `fatal:executor_lost` |
+| `store_capacity_exceeded` | Linked process 1, the Store, exited **on the capacity refusal**, distinguished by its own reason | `store_capacity_exceeded` |
+| `store_lost` | Linked process 1, the Store, exited for any other reason | `store_lost` |
+| `runtime_lost` | Linked process 5, the runtime root, exited | `fatal:runtime_lost` |
+| `transfers_lost` | Linked process 2, the artifact transfers owner, exited | `fatal:transfers_lost` |
+| `workspace_lease_lost` | Linked process 3, the workspace lease, exited | `fatal:workspace_lease_lost` |
+| `executor_lost` | Linked process 4, the local executor, exited | `fatal:executor_lost` |
 | `supervision_fault` | Linked process 6, a lease owner, exited — ADR 0033's daemon-fatal rule | `fatal:supervision_fault` |
-| `listener_lost` | Linked process 7 exited | `fatal:listener_lost` |
+| `listener_lost` | Linked process 7, the listener, exited | `fatal:listener_lost` |
 
 The wire column matters because ADR 0032's `daemon.stopping` `reason` admits
 `operator_stop`, `store_lost`, `store_capacity_exceeded` and `fatal:<class>`,
@@ -1017,7 +1050,22 @@ what lets an operator fix the cause and try again without a recovery step.
   sequence, because the marker was already released by the Store's own
   `terminate/2` before the daemon could act. A second daemon starts on that
   root immediately with no stale marker to recover. The capacity variant
-  reports `store_capacity_exceeded` instead.
+  reports `store_capacity_exceeded` instead, and the case asserts the executor
+  was stopped before the halt, so no OS effect is left behind.
+- **One class per linked component.** Each of the seven linked processes is
+  killed in turn, in its own case, and the daemon is asserted to exit with
+  that component's class and to send that component's `fatal:<class>` on the
+  wire where a socket still exists — `runtime_lost`, `transfers_lost`,
+  `workspace_lease_lost`, `executor_lost`, `supervision_fault`,
+  `listener_lost`, beside the two store classes. The set is closed, so a
+  linked process dying without a class is a failing case rather than a silent
+  `:shutdown`.
+- **The stop timeout is exercised, not assumed.** A session is made to hold
+  the runtime's teardown past the composed cleanup grace. The case asserts the
+  owner **survives** the resulting `exit(timeout)` from `proc_lib:stop/3`
+  rather than dying of it, that it then kills the runtime supervisor, and that
+  it still reaches the Store stop and the socket unlink — the whole point of
+  wrapping the call, and the step an unwrapped call would skip.
 - **Reverse cleanup.** A startup made to fail after the marker is acquired —
   at the socket permission check and at the index bound, separately — leaves
   no marker held and no socket file behind, proved by a second daemon starting
@@ -1052,7 +1100,7 @@ plan names as new. It is the thing to check a change against.
 | **Listener ↔ connections** | `loopex_daemon` | Foreign peer, malformed frame, over-long path, backpressure | Filesystem permission verified after bind, then the per-platform peer-credential read (`LOCAL_PEERCRED` / `SO_PEERCRED`), then ADR 0023's framing refusals; backpressure at the 4 MiB output buffer | Closed before initialize for a peer refusal; a stable framing reason otherwise; detachment at the last emitted cursor under backpressure | **Not durable:** connections, buffers, windows |
 | **Registry ↔ sender ↔ custody** | The **host** owns the registry and custody; the adapter owns the sender. The token is bound at composition, resolved per invocation | No registry row, registry dead, custody dead, refusal, malformed reply, deadline | `route(handle, token)` answers `:unavailable`; custody answers one of the four atoms; the **guardian** enforces the deadline and kills the sender | The adapter's existing `Loopex.Model` refusal shape, with the atom in the bounded diagnostic | **Not durable:** nothing about credentials is ever journaled, and no span or record carries model `options` — the model span is a fixed identity map. The invocation's failure is durable |
 | **CLI ↔ socket** | `loopex_cli` | Socket unreachable, refusal, transport loss, renewal failure | The client's own reconnect loop and its renewal timer | Reconnect at the retained cursor, deduplicating; a failed renewal drops to observer with the loss on `stderr`; a reconnecting controller must acquire again for a fresh epoch | **Durable:** nothing the client holds. The cursor is a client-side position |
-| **Daemon ↔ OS: signals** | The operator | `SIGTERM` / `SIGINT` | The owner stops its children in reverse order itself — listener, lease owner, runtime, Store — calling `Runtime.stop/1` under the composed cleanup grace and killing `runtime.supervisor` on expiry | `daemon.stopping` with `operator_stop`, then close | **Durable:** whatever committed. **Not:** work ended crash-equivalently, for which no terminal is claimed |
+| **Daemon ↔ OS: signals** | The operator | `SIGTERM` / `SIGINT` | The owner stops its linked processes in reverse order itself — listener, lease owner, runtime, then the composed edges, Store last — calling `Supervisor.stop(runtime_supervisor, :normal, grace)` under `try/catch :exit`, since `proc_lib:stop/3` exits the caller on timeout without killing the target, and killing the supervisor on that catch | `daemon.stopping` with `operator_stop`, then close | **Durable:** whatever committed. **Not:** work ended crash-equivalently — a claim about the journal, not about every process being gone |
 | **Daemon ↔ OS: kill** | The operator | `SIGKILL`, power loss | Nothing runs — no handler, no `terminate/2` | The socket closes with no record at all | **Durable:** the journal. The marker is left for the next daemon's verified stale-writer recovery |
 | **Daemon ↔ OS: socket file** | `loopex_daemon` | A stale `daemon.sock` from a dead daemon | Only the marker holder may unlink and rebind, so two starts resolve at the marker and never at the socket | The loser exits without touching the socket | **Not durable:** the socket file is a path, never state |
 | **Daemon ↔ OS: marker** | `loopex_store_local` | Released in order, released early, or left behind | `terminate/2` in an orderly stop; `terminate/2` early on store loss; nothing on a kill | Nothing directly; the next daemon's start succeeds, succeeds, or recovers | **Not durable in the journal sense:** the marker is exclusion, not truth |
