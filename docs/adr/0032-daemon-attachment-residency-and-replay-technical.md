@@ -235,7 +235,7 @@ no content, no durable session state.
 | result | `attachment_limit` | integer, 512 | required |
 | result | `active_sessions` | integer | required |
 | result | `activation_limit` | integer, 64 | required |
-| result | `activations_used` | integer, activations spent in this daemon lifetime | required |
+| result | `activations_used` | integer, activations spent in this daemon lifetime **plus reservations in flight** — see below | required |
 | result | `index_entries` | integer | required |
 | result | `index_limit` | integer, 4,096 | required |
 | result | `index_full` | bool | required |
@@ -518,6 +518,15 @@ client in a state neither side had defined. So:
 | Output-buffer or core-queue overflow | `error`, ADR 0023's `detached`, with `session_id` and `event_cursor` | close that connection |
 | Aggregate byte pressure chose this attachment | the same `detached` | close that connection |
 | Idle eviction at ten minutes | the same `detached` | close that connection |
+
+Reusing `detached` for the three eviction rows is a **widening inside
+generation 2**, stated rather than slipped in: ADR 0023 defines that code for
+post-admission writer loss, and its own pressure rule already says to detach
+at the last completely emitted cursor and say so
+(`0023-…-technical.md:362`). Generation 2 extends the occasions, not the
+record — same code, same fields, same uncorrelated shape — and generation 1's
+use of it is untouched, so the foreground server's behaviour does not move and
+the ordered error list gains nothing for it.
 
 **`event_cursor` is the same quantity in all four**: the **last completely
 emitted durable cursor** for that attachment — the highest event sequence the

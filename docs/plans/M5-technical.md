@@ -1497,6 +1497,15 @@ as though it does:
   would have left the window open at the other end: an owner could pass its
   holder check, send its ticket and die before the message arrived, and a
   replacement would see no ticket for a call that was about to be made.
+
+  **That call carries an explicit bound and does not inherit
+  `GenServer.call/2`'s hidden five seconds**, which is the same discipline the
+  rest of this plan applies to every call that matters: the bound is the
+  teardown number, 5 s, because the relay's whole job here is to write a row
+  and answer, and a relay that cannot do that in five seconds is a relay the
+  daemon has lost. An unanswered ticket call is therefore not a silent
+  five-second stall inside a client's mutation; it is `relay_lost`, the class
+  that already exists for a relay the daemon can no longer account through.
 - **The relay monitors every lease owner**, so an owner's death is ordered
   *after* the tickets it sent. Message ordering between one sender and one
   receiver is guaranteed by the BEAM — signals from a process to a process are
@@ -2572,6 +2581,23 @@ carried: it described three outcomes and returned none of them.
    ordinary owner advance supersedes the state anyway. `:unavailable` leaves
    the domain fenced, which is what the founding rule already requires of any
    unresolved unknown.
+
+   **Reading the head and then asking about a transaction is not
+   check-then-act here, and the reason is that the identity is a function of
+   the head.** The obvious objection is that the head can move between the
+   successor's read and its query, so the successor would be asking about a
+   transaction nobody proposed. It would be — and that is the correct answer
+   rather than a race. The fence binds `expected_owner_epoch` and
+   `expected_journal_version` to the head it read, so **a head that has moved
+   is a fence that is already decided**: either that fence was the mover and
+   committed, or it can no longer linearize at all, since the adapter refuses a
+   transaction whose expected version no longer matches
+   (`succession_refusal/3`, `state.ex:450-463`). So the successor's question is
+   always the right one: `transaction_status/4` on the id derived from the
+   **current** head answers `:absent` when the head has moved past the fence —
+   there is nothing unresolved at this version — and answers the fence's real
+   status when it has not. There is no window in which the successor is fenced
+   by an unknown it cannot name.
 
    **`drain_id` survives as a report label and nothing more.** Core still mints
    one per call, with the generator it already uses for identifiers of its own
