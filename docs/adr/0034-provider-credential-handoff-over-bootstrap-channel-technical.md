@@ -20,7 +20,13 @@ The credential frame on that socket keeps the shape it has today. The codec
 carries an eight-byte header — `LP`, version 2, a closed kind byte and a
 length — and the `credential` kind admits exactly the two members `nonce` and
 `credential`, with the credential a non-empty binary of at most 65,536 bytes
-and the frame capped at 69,632. Nothing about the frame changes; what changes
+and the frame's **payload** capped at 69,632 — `cap(:credential)` is
+`@semantic_bytes + @envelope_bytes`, 65,536 + 4,096
+(`provider_codec.ex:53-54`, `:80`) — with the frame on the wire eight bytes
+longer than that, `encode/2` prefixing `<<"LP", version, code, length::32>>`
+before the payload (`:92`). An earlier revision called 69,632 the frame cap,
+which is the one number a reader sizing a buffer would get wrong. Nothing
+about the frame changes; what changes
 is where its second member comes from.
 
 ### Ordering
@@ -435,11 +441,18 @@ boundary, not an absolute:
     it skips every pid Control holds, the same place `excluded?/3` already
     excludes the tracer and the dispatcher by role (`trace.ex:411`), and a
     tracer that has just restarted asks Control rather than starting empty.
-  - **A `Control` restart is the one gap, and the claim is qualified rather
-    than repeated.** `Control` is a `:permanent` child under `:rest_for_one`
-    (`runtime/supervisor.ex:69-72`, `:92`), so its restart clears the set —
-    and also restarts every child after it, the tracer included, which ends
-    every live session. What that means precisely: the **process flags already
+  - **A `Control` restart is the one gap, and it is a runtime-wide event
+    rather than a tracing one.** `Control` is a `:permanent` child under
+    `:rest_for_one` and is the **second** of the root's seven children
+    (`runtime/supervisor.ex:64-90`, strategy at `:92`), so its restart clears
+    the set — and also restarts **every child after it**: the worker task
+    supervisor, the owner-group and session dynamic supervisors, the event
+    dispatcher and, last, the tracer (`:73`, `:74-77`, `:78-81`, `:82-85`,
+    `:86-89`). That ends every live trace session, and it also ends every
+    live **session coordinator**, which is the larger fact and the one an
+    earlier revision left out by naming only the tracer. A daemon meets it as
+    `runtime_lost` if the root does not survive, and otherwise as core's own
+    refusal on the next command for every session. What that means precisely: the **process flags already
     installed on live sessions persist**, being state in the VM's trace
     sessions rather than in `Control`; only sessions started **after** the
     restart consult the set, and those find it empty. A sender that resolved

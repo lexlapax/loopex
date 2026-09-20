@@ -114,7 +114,9 @@ missing durable event. Transient progress is coalesced or dropped first and
 never delays a journal transaction.
 
 A session is *active* when **this daemon activated it in this lifetime** and
-*dormant* when the root records it and this daemon has not. Both are daemon
+*dormant* when the root holds it durably and this daemon has not — whether or
+not the daemon's index records it, indexing deciding only what `session.list`
+shows. Both are daemon
 facts, true by construction; neither is a claim about a live coordinator,
 which the daemon has no way to know. Recovery is lazy: a restarted daemon activates nothing,
 reads its index, and activates a session when a client creates or resumes it.

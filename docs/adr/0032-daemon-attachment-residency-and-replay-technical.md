@@ -840,9 +840,17 @@ byte position.
 ### Session residency: active, dormant, and their bounds
 
 A session is **active** when this daemon activated it in this lifetime and
-**dormant** when the index records it and this daemon has not. Nothing durable
-distinguishes the two, and neither is a claim about a live coordinator: both
-are daemon facts, recorded when the daemon acted.
+**dormant** when the root holds it durably and this daemon has not. Dormancy
+is about activation and **not** about the index: a session the index does not
+record — one past the 4,096-entry ceiling, or one whose directory entry was
+never written — is dormant in exactly the same sense, and is reached by ID and
+activated in exactly the same way. What the index controls is whether
+`session.list` shows it, and nothing else. An earlier revision defined dormant
+as "the index records it and this daemon has not", which made an unrecorded
+session neither active nor dormant and made the listing bound look like a
+bound on reachability, which this pair says twice that it is not. Nothing
+durable distinguishes active from dormant, and neither is a claim about a live
+coordinator: both are daemon facts, recorded when the daemon acted.
 
 A dormant session costs less than an active one, but not nothing, and the
 plan should not pretend otherwise. It holds one index row against the
@@ -867,8 +875,9 @@ an admission executing inside core. Stopping it would destroy exactly what
 Outcome 1 exists to prove, that work progresses with zero attachments. And
 there is no operation to stop one with: core owns coordinator lifetime, and
 none of M5's five core changes (concurrent attachment, the read-only existence
-query, the trace exclusion, `quiesce/1`, and the create and resume results'
-`disposition` and `residency` fields) stops a coordinator,
+query, the trace exclusion, `quiesce/1`, and the `disposition` and
+`control_entry` fields on the detailed create and resume functions) stops a
+coordinator,
 so a deactivation call would be a further core change this milestone does not
 make.
 

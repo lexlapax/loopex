@@ -20,9 +20,10 @@ deadline (monotonic), state ∈ {held, released, expired}
 
 `writer_epoch` is an opaque string from ADR 0023's identifier alphabet, at
 most 64 bytes, carrying at least 128 bits of fresh randomness. It is minted
-at every grant and never reused: not across grants to the same connection and
-not across a restart of the daemon, which is the only restart that exists
-because a lease owner's failure takes the daemon with it. Clients treat the epoch as opaque and compare it
+at every grant and never reused: not across grants to the same connection,
+not across the fresh owner a lease owner's death leaves behind — that failure
+is **session-scoped**, as this pair sets out below — and not across a restart
+of the daemon. Clients treat the epoch as opaque and compare it
 only for equality. The daemon incarnation is a fresh opaque identifier
 generated at each daemon start and reported by `daemon.status` as a
 diagnostic; it confers nothing and is not part of the epoch.

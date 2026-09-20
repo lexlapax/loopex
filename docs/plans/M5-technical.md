@@ -333,7 +333,7 @@ Three of the five were witnessed only downstream — in the daemon's lifetime
 suite and the adapter's credential suite — and three of their properties
 cannot be reached from there at all: quiesce's `absent` branch needs a
 `Control` entry whose coordinator has already died (`control.ex:821-823`),
-`exclude_self/2`'s fail-closed path needs the tracer mid-restart, and
+`exclude_self/2`'s two fail-closed paths need the tracer mid-restart and `Control` mid-restart, and
 `Control` pruning an excluded sender needs that sender's `DOWN`. All three are
 core-internal states a daemon cannot construct through the socket.
 
@@ -343,7 +343,7 @@ core-internal states a daemon cannot construct through the socket.
 | Read-only existence query | `apps/loopex/test/session_existence_query_test.exs` | one per result of the closed set | fast |
 | **`quiesce/1`** | **`apps/loopex/test/runtime_quiesce_test.exs`** (new) | `admits every abort before any cleanup begins`; `releases cancellation concurrently once every admission resolves`; `an empty active set drains with a zero budget`; `reports a Control entry whose coordinator has died as absent`; `fences an unsettled session and refuses its paused transaction as stale`; `fences an absent session too`; `a fence refused stale_owner_epoch rereads the head and attempts once more`; `a fence refused stale_journal_version is superseded, not an error`; `a fence answering commit_unknown is resolved through transaction_status under the same derived tx_id and reported unsettled with fences[id] == :unknown`; `a fence id recomputed from the head alone matches the one the drain used`; `a session whose abort admission is ambiguous has no cleanup released and is fenced` | fast |
 | **The two-phase abort-path split** | **`apps/loopex/test/cancellation_test.exs`** (existing; the file that already drives an abort against a receipt arriving mid-reduction) | `a drained abort commits without beginning cleanup`; `a client abort still begins cleanup on its commit reply path` — the pair that proves the split changed the drain and nothing else | fast |
-| **`Loopex.Trace.exclude_self/2`, `Control`'s excluded-pid set and `Entry`'s keyword-key redaction** | **`apps/loopex/test/trace_session_test.exs`** (existing; extended) | `the named MFAs produce no raw message under an explicitly named module, before any process flag is set`; `an excluded process produces no trace message`; `the exclusion survives a tracer restart`; `a new session skips an already-excluded pid`; `fails closed while the tracer is absent`; `the excluded set returns to baseline after the sender exits`; `a keyword list's value is redacted under its own key`; `the same value under a key naming nothing is rendered, so the case cannot pass vacuously` | fast |
+| **`Loopex.Trace.exclude_self/2`, `Control`'s excluded-pid set and `Entry`'s keyword-key redaction** | **`apps/loopex/test/trace_session_test.exs`** (existing; extended) | `the named MFAs produce no raw message under an explicitly named module, before any process flag is set`; `an excluded process produces no trace message`; `the exclusion survives a tracer restart`; `a new session skips an already-excluded pid`; `fails closed while the tracer is absent`; `fails closed while Control is unavailable` — the case that constructs a `Control` restart, and which therefore asserts what that costs: every child after `Control` restarts with it, so every session coordinator in that runtime is gone and the case starts a fresh session rather than reusing one;  `the excluded set returns to baseline after the sender exits`; `a keyword list's value is redacted under its own key`; `the same value under a key naming nothing is rendered, so the case cannot pass vacuously` | fast |
 
 The paused-transaction case in `runtime_quiesce_test.exs` pauses the
 transaction through core's own controllable store, not the shipped adapter:
@@ -1248,9 +1248,15 @@ runtime — rather than against a staged one the plan would have to invent:
 2. **Install the signal handlers**, for the reason the signal section gives:
    before this, the default handler would stop the VM outright and strand
    whatever the next steps take.
-3. **Start the credential routing registry and the custody process.** They are
-   the daemon's own, as ADR 0034's host, and they must exist before the model
-   configuration that carries the registry handle and the token is built.
+3. **Start the credential routing registry, the custody process and the
+   tracing capability**, in that order. All three are
+   the daemon's own, as ADR 0034's host, and all three must exist before the
+   model configuration that carries the registry handle, the token and the
+   capability reference is built. The capability is listed here rather than
+   left to the process table: it is one of the ten links, ADR 0034 now makes
+   it mandatory wherever a token is configured, and a startup sequence that
+   named two of the three would have left the third's position to inference.
+   It is handed the runtime reference as soon as step 4 returns one.
 4. **Call the composition function**, which opens the Store and acquires the
    writer marker with `recover_stale_writer: true` and the three holder
    outcomes ADR 0032 fixes, then assembles the artifact transfers owner where
@@ -1630,14 +1636,26 @@ So the owner carries a `stopping` field naming **the one component it is
 currently stopping**, set immediately before each stop call. The EXIT clause
 reads:
 
-- an exit from the pid named in `stopping`, while it is named, is **consumed**
-  and clears the field — it is the stop the owner asked for, arriving as a
-  signal;
-- **every other exit is classified exactly as before**, including one from a
+- an exit from the pid named in `stopping`, **whose reason is `:normal`,
+  `:shutdown` or the owner's own `:killed`**, is **consumed** and clears the
+  field — it is the stop the owner asked for, arriving as a signal;
+- **every other exit is classified**, including one from the pid named in
+  `stopping` whose reason is none of those three, and one from a
   component not yet stopped that dies of its own accord *during* another
   component's stop. A store that fails while the listener is being stopped is
   still `store_lost`, and must be: the daemon is going down either way, but
   the operator is owed the real reason rather than `operator_stop`.
+
+**The field narrows *which* exits can be consumed; the reason decides
+*whether* one is**, and an earlier revision had the field deciding on its own.
+That version consumed **any** exit from the named pid, which contradicts the
+reason-sensitive rule four steps below and contradicts this file's own
+witness: the transfers owner is made to raise inside its `terminate/2` during
+a stop the owner asked for, and the case asserts `transfers_lost` rather than
+`operator_stop`. Under "any exit from the named pid is consumed" that case
+fails. The two rules are one rule now, stated here and applied at step 4 of
+the stop driver: **reason first, and the field only says whose `:killed` was
+the owner's doing.**
 
 **The owner never calls `GenServer.stop/3` itself**, and the reason is a
 result an earlier draft did not have. Every previous version of this section
@@ -3452,7 +3470,11 @@ owned by core, the adapter or the executor appears as a **group with its
 owner**, because their counts are those components' business and naming them
 individually would make this table a copy that rots.
 
-**The daemon's fixed processes — ten, nine without transfers:**
+**The daemon's fixed processes — eleven rows, ten without transfers: the owner
+and the ten it links.** The count is stated that way because the table has one
+more row than the link set does, the owner being the process that holds the
+links rather than one of them, and an earlier revision headed eleven rows
+"ten".
 
 | Process | Started by | Linked to | Stopped by | Its death |
 | --- | --- | --- | --- | --- |
@@ -3478,9 +3500,13 @@ individually would make this table a copy that rots.
 | **Relay tasks**, one per ticketed mutation | The relay, after the ticket is acknowledged | One per outstanding ticket | Keeps its ticket; the relay exits `relay_lost` |
 
 **Core's processes, as groups with their owner.** The runtime root supervises
-seven children under `:rest_for_one` (`runtime/supervisor.ex:66-92`): the tool
+seven children under `:rest_for_one` (`runtime/supervisor.ex:64-90`, strategy
+at `:92`), in this order: the tool
 registry, `Control`, a worker task supervisor, an owner-group dynamic
 supervisor, a session dynamic supervisor, the event dispatcher and the tracer.
+The order is load-bearing under that strategy: a restart of the *n*th child
+restarts every child after it, so `Control`'s restart takes the five beneath
+it including every session coordinator, and the tracer's takes nothing.
 The daemon holds none of them and names none of them in its fatal map — it
 links the **root**, and a death anywhere beneath it that the root does not
 survive arrives as `runtime_lost`.
@@ -3490,7 +3516,7 @@ survive arrives as `runtime_lost`.
 | **Session coordinators** | Core's session supervisor, `restart: :temporary` | One per active session | Core's own refusal on the next command; **no signal reaches the daemon and none is owed**. `quiesce/1` terminates and fences them at the drain deadline |
 | **Owner groups and their workers** | Core, beneath a coordinator | Per coordinator | Core's; a trapping owner group unwinds on its own clock and the daemon does not wait |
 | **Event dispatcher** | The runtime root | **One per runtime**, holding the per-attachment queues — not one per attachment, which an earlier revision of this table said | Restarted by the root under `:rest_for_one`, which restarts the tracer with it |
-| **`Control`** | The runtime root | One per runtime | Holds the trace exclusion set and the session entries; its restart is the root's business, and it carries the tracer with it |
+| **`Control`** | The runtime root | One per runtime | Holds the trace exclusion set and the session entries; it is the root's **second** child, so under `:rest_for_one` its restart carries the workers, the owner groups, the sessions, the dispatcher and the tracer with it — every live coordinator, not merely every trace session |
 | **Tracer** | The runtime root, **last** child | One per runtime | Restarts alone, changing pid, which is why nothing holds a tracer pid |
 
 **The adapter's and executor's processes, likewise:**
@@ -3658,7 +3684,7 @@ line; M5 introduces none of its own.
 | Takeover grace beyond expiry | none; takeover is eligible at expiry and granted once the session's in-flight admission set is empty | ADR 0033 |
 | Writer epoch | opaque, at most 64 bytes, at least 128 bits of fresh randomness, minted per grant | ADR 0033 |
 | Credential size | 1 to 65,536 bytes | ADR 0019, unchanged by ADR 0034 |
-| Credential frame cap | 69,632 bytes | ADR 0034, which is where the frame's shape is written; no ADR 0019 file states it |
+| Credential frame **payload** cap | 69,632 bytes, the wire frame being eight bytes longer for its header | ADR 0034, which is where the frame's shape is written; no ADR 0019 file states it |
 | `req_llm` version pin | `~> 1.24.0` | Maintainer decision 4B of 2026-09-20, a **plan** decision. A dependency pin is not a contract number: it binds what this milestone builds against and is changed by an ordinary reviewed dependency change, not by an ADR amendment |
 
 **Four rows say 512 and they are four different bounds**, which is worth one
