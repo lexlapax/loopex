@@ -57,8 +57,10 @@ connection closes whatever happened, so a client may learn of a shutdown only
 by its socket closing. It adds no durable
 method. An earlier draft of this decision also added `session.stop` and called
 it durable; that is withdrawn, because core owns durable session truth, core
-has no durable stop command, and M5's core changes are concurrent attachment
-and a read-only existence query, neither of which is a durable command. Ending a client's involvement is releasing control and
+has no durable stop command, and M5's five core changes — concurrent
+attachment, a read-only existence query, the trace exclusion, the bounded
+`quiesce/2`, and the create and resume results' two new fields — are none of
+them durable commands. Ending a client's involvement is releasing control and
 disconnecting; the session itself keeps running, which is the point of a
 daemon, and another client reaches it again by acquiring control and
 attaching.
