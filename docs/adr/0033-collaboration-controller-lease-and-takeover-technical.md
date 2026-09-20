@@ -306,10 +306,12 @@ early and the transport cannot tell the other two apart — an explicit
 closed client and a killed client both wait for expiry, with a takeover
 refused before the deadline and granted after it in both cases; a controller
 killed mid-run fenced after takeover, its late commands refused; a
-lease owner killed while a mutation is in flight taking the
-listener, every connection and the daemon down with it, after which the
-restarted daemon holds no lease, has activated nothing, and the previous
-holder's delayed command is refused on both the holder and the epoch check;
+lease owner killed while a mutation is in flight taking neither the daemon nor
+any other session down: that session's controller attachment closes with
+`control_owner_lost`, its observers stay attached, the relay retains the
+outstanding ticket, the replacement owner's first grant waits until it
+settles, and the previous holder's delayed command is refused on both the
+holder and the epoch check;
 an abort from the new
 controller cancelling work dispatched under the old controller's command
 with a truthful cleanup outcome; an observer never acquiring authority
