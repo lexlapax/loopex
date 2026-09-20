@@ -2806,6 +2806,7 @@ Loopex.Runtime.quiesce(runtime) ::
      budget_ms: non_neg_integer(),
      drain_id: binary(),
      fences: %{session_id => :committed | :superseded | :not_needed
+                             | {:unknown, :no_head}
                              | {:unknown, %{owner_epoch: non_neg_integer(),
                                            journal_version: non_neg_integer()}}}
    }}
@@ -3185,7 +3186,8 @@ carried: it described three outcomes and returned none of them.
    | `:acquiring` | The status while an owner is being started (`control.ex:569`, `:1030`, `:1189`) | `unsettled` | **Yes** |
    | No entry | The session is dormant in this daemon, or belongs to no daemon at all | In no list; quiesce enumerates `Control` and nothing else | No |
    | **A phase-2 admission that did not answer** inside the phase, its task shut down | The session's abort is neither known-committed nor known-refused | `unsettled`, with no cleanup released | **Yes** |
-   | **A phase-4 fence that did not answer** inside the phase, its task shut down | The fence's outcome cannot be read | `unsettled`, `{:unknown, head}` | The attempt was made; the domain stays fenced |
+   | **A phase-4 fence that did not answer** inside the phase, its task shut down **after** the head was read | The fence's outcome cannot be read | `unsettled`, `{:unknown, head}` | The attempt was made; the domain stays fenced |
+   | **A phase-4 task shut down before its head read answered** | There is no head, so there is no identity a successor could recompute and nothing was proposed | `unsettled`, `{:unknown, :no_head}` | No fence was attempted. A successor reads the head itself and proceeds; nothing is outstanding at any version |
 
    **`:acquiring` is reachable, and an earlier revision called it unreachable.**
    That revision's argument was the cut: only `session.create` and

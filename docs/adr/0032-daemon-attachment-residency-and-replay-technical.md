@@ -219,6 +219,13 @@ is set.
   attachment exists to stop. Without the narrowed scope, a `replace: true`
   from one connection would detach *every other connection's* attachment to
   that session, which is worse.
+- **ADR 0023 stays unamended.** Its `replace` field is unchanged, its rule
+  that a second attachment refuses unless replacement is named is unchanged,
+  and what the foreground server does is unchanged. What changes is on which
+  side of the boundary the flag is honoured: the app server keeps its
+  connection-level check and now also passes the flag through, and core stops
+  superseding without being told to. No wire field moves, so no digest input
+  moves either.
 - **"The named prior incarnation" is corrected.** An earlier revision of this
   pair said explicit replacement "invalidates only the named prior
   incarnation at its last emitted cursor". There is no name on the wire —

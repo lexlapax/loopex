@@ -70,7 +70,15 @@ ADR 0023's existing no-common-generation rule and nothing durable is
 created; generation-1 clients keep the M4 foreground server, whose wire,
 one-attachment rule and behavior do not change. A narrow core change lets
 distinct attachments to the same session coexist without replacing one
-another; the core continues to own their independent cursor barriers and
+another: the same-session supersession that replaces them today becomes
+**conditional on ADR 0023's existing `replace` flag** and narrows to the
+attaching process's own prior attachment, and the dispatcher's release on that
+process's exit takes over releasing the attachment's open transfers, which
+accepted ADR 0028 requires of every detach and which that supersession is the
+only caller of today. **ADR 0023 is unamended by this**: its `replace` field,
+its refusal of an unnamed second attachment and the foreground server's
+behaviour are all exactly what they were, one connection there holding one
+attachment; the core continues to own their independent cursor barriers and
 event-count queues, while the daemon owns per-connection socket output
 buffers, the resident window and the residency ceilings. The socket path is
 `daemon.sock` inside a `0700` daemon-owned subdirectory of the state root
