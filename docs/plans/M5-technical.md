@@ -909,6 +909,20 @@ carries two plain fields beside the session ID:**
 | `disposition` | `:fresh` \| `:historical` | Charge an activation for `:fresh`; charge nothing for `:historical` |
 | `control_entry` | `:active` \| `:dormant` | Repair the directory entry and index row without activating when `:dormant`; leave both alone when `:active`, since an activated session already recorded them |
 
+**`control_entry` is two values over three statuses, and the mapping is
+stated rather than left to be guessed.** `Control` holds `:active`,
+`:acquiring` and `:unavailable`, and a session may have no entry at all
+(`control.ex:569`, `:620`, `:818`, `:862`, `:1030`, `:1150`, `:1189`).
+`control_entry` answers the only question the daemon has — *is there a live
+coordinator for this session right now?* — so `:active` maps to `:active`,
+and **`:unavailable` and no-entry both map to `:dormant`**, there being no
+coordinator either way. `:acquiring` is never observed by the caller of a
+**completed** create or resume: it is the status while that very call is
+starting an owner, and the call does not answer until the owner is ready or
+the attempt has failed, at which point the entry is `:active` or
+`:unavailable`. A caller therefore cannot see it, and the field does not need
+a third value to be total.
+
 **It is `control_entry`, not `residency`, and the rename is the point.**
 `residency` is a **daemon** fact on the wire — what `session.list` reports
 about a session in *this daemon's* lifetime — while this field says what
@@ -1085,7 +1099,7 @@ leaked until the daemon restarts:
 | --- | --- |
 | Create, `disposition: :fresh` | **Converted** — a coordinator started |
 | Create, `:historical` with `control_entry: :active` | Released — that session was counted when it was activated |
-| Create, `:historical` with `control_entry: :dormant` | Released — a replay starts nothing |
+| Create, `:historical` with `control_entry: :dormant` | Released — a replay starts nothing. `:dormant` here covers both a `Control` entry that is `:unavailable` and no entry at all: neither is a live coordinator, and neither was charged |
 | Resume, `disposition: :fresh` | **Converted** — a coordinator started |
 | Resume, `:historical` | Released — the replayed result is returned without starting an owner (`control.ex:311-312`) |
 | Resume answering a **prepared** capability, where the activation is begun but not finished | **Held**: the reservation stays until that activation resolves, then converts on success and releases on abandonment. It is the one branch that is neither yet |
@@ -1104,19 +1118,37 @@ time out. There is no deadline on those calls to give the daemon "no answer".
 What actually ends the wait is the **per-connection process dying** while the
 call is still running in core, which is why the rows now name that.
 
-**`Runtime.attach/3` is the same shape for its own reason.** Its signature
-takes a runtime, a session ID and options and no
-timeout at all (`runtime.ex:198-210`), and inside it waits `:infinity` twice —
-at the dispatcher and again at the install (`:538`, `:547`) — **precisely so a
-caller timeout cannot revoke a mutation it cannot see**, which is what the
-code says there in as many words: the dispatcher has already created the
-attachment and the install is registering its routing, so a caller that gave
-up would be revoking neither mutation, and could not report truthfully that
-the attach failed. All three activation-capable calls therefore wait
-`:infinity`, and the daemon's rule is the simpler one an earlier revision
-obscured: **it adds no timeout to a core call that consumes a ceiling**,
-because a timeout it could not act on truthfully would be worse than the
-wait.
+**`Runtime.attach/3` is two legs with two different bounds, which an earlier
+revision flattened into one.** Its signature takes a runtime, a session ID and
+options and no timeout at all (`runtime.ex:198-210`), and it was written here
+as waiting `:infinity` throughout. It does not.
+
+- **The first leg carries the default five seconds.**
+  `control_call(runtime, {:begin_attach, …})` is called with **no timeout
+  argument** (`runtime.ex:200`), so it takes `control_call/3`'s default of
+  `5_000` (`:470`), and `safe_call/3` turns the resulting exit into
+  `{:error, :runtime_unavailable}` rather than letting it reach the caller
+  (`:529-535`). That is **safe**, and it is why the leg can afford a deadline:
+  `begin_attach/3` reads the session entry, validates the options and detects
+  repetition, and **mutates nothing** (`control.ex:1235-1251`). A refusal
+  there — including a timeout refusal — leaves no attachment, no incarnation
+  and no pending scan, so the daemon releases its reserved slot on the
+  ordinary refusal row and there is nothing to observe.
+- **The second leg waits `:infinity`, twice** — at the dispatcher and again at
+  the install (`:538`, `:547`) — **precisely so a
+  caller timeout cannot revoke a mutation it cannot see**, which is what the
+  code says there in as many words: the dispatcher has already created the
+  attachment and the install is registering its routing, so a caller that gave
+  up would be revoking neither mutation, and could not report truthfully that
+  the attach failed.
+
+The daemon's rule follows the split rather than the call: **it adds no timeout
+to a core call that has already changed something**, because a timeout it
+could not act on truthfully would be worse than the wait, and it leaves the
+first leg's existing five seconds alone because that leg changes nothing.
+`create_session/3` and `resume_session/3` have no such split — they are
+`:infinity` from the first line — so the two of them and attach's second leg
+are what the reservation rows are written against.
 
 **Who resolves a reservation when the asking process is gone: the relay.** The
 relay's task performs the core call and returns core's answer whether or not
@@ -1525,6 +1557,13 @@ as though it does:
   daemon has lost. An unanswered ticket call is therefore not a silent
   five-second stall inside a client's mutation; it is `relay_lost`, the class
   that already exists for a relay the daemon can no longer account through.
+- **The relay installs that monitor inside the owner's first ticket call,
+  before it acknowledges**, which is what makes the ordering argument below
+  true rather than nearly true. A relay that monitored on some other occasion
+  — at the owner's start, say — would have a window in which an owner had sent
+  a ticket the relay had not yet begun watching for. Monitoring inside the
+  synchronous call means the monitor exists before the first acknowledgement
+  does, and every ticket that owner will ever send comes after it.
 - **The relay monitors every lease owner**, so an owner's death is ordered
   *after* the tickets it sent. Message ordering between one sender and one
   receiver is guaranteed by the BEAM — signals from a process to a process are
@@ -1551,6 +1590,17 @@ as though it does:
 - **A connection disappearing settles nothing**, because the call it made is
   still running inside core; the ticket outlives the connection exactly as the
   call does.
+- **The relay never blocks its own loop, and that is why one session's stall
+  is one session's.** A grant that must wait on an outstanding ticket is
+  **deferred, not waited on**: the relay answers `{:noreply, …}` and replies
+  later with `GenServer.reply/2` when the last of that session's tickets
+  settles. A relay that ran the wait inside its callback would stop answering
+  every other session's ticket calls for as long as one session's mutation
+  took, and the five-second bound on a ticket call would then be measuring
+  somebody else's core work rather than the relay's own responsiveness —
+  turning an unrelated slow mutation into `relay_lost`. With deferral that
+  bound measures exactly what it claims to: whether the relay is alive and
+  reading its mailbox.
 - **A replacement owner's first grant for a session blocks until that
   session's outstanding tickets have settled.** Not the daemon's admissions
   generally — just that session's, which is why the ticket names one. A create
@@ -2129,11 +2179,16 @@ phase's end kills whatever is left with `Process.exit(pid, :kill)` and reads
 the exits that follow.
 
 **Two rules bend exactly here, and only here.** The `stopping` field names one
-component elsewhere; for this step it names the **set** of lease-owner pids,
-and the EXIT clause's rule is otherwise unchanged — an exit from a pid in that
-set whose reason is `:normal`, `:shutdown` or the owner's own `:killed` is
-consumed, and any other reason is classified, exactly as for a single
-component. And the two selective receives elsewhere match one pid; here the
+component elsewhere; for this step it names the **set** of lease-owner pids.
+And the reason rule bends with it: for a pid in that set **every** reason is
+consumed, not only the three. That is not an exception to classification but
+a consequence of the fatal map — **a lease owner has no daemon exit class at
+all**, its death being session-scoped, so there is nothing for a non-`:normal`
+reason to be classified *as*. Its session-scoped handling is a no-op here
+because step 3 has already closed every connection, so there is no controller
+attachment to close and no `control_owner_lost` to send. An earlier revision
+left the general rule in place over this step, which would have classified a
+lease owner's crash during the sweep into a class the map does not contain. And the two selective receives elsewhere match one pid; here the
 loop matches **any** pid in the set and removes it, which is the same
 discipline over a set rather than a singleton. Nothing else in the sequence
 sweeps, so nothing else needs either form.
@@ -2651,7 +2706,7 @@ carried: it described three outcomes and returned none of them.
    | `mutation_domain` | The ownership domain, as every owner transaction uses |
    | `tx_id` | **Derived from durable state, not from anything in memory**, by the discipline the coordinator already uses: `owner_identity/3` hashes a namespace, a succession identity and an attempt into a stable ID (`session_coordinator.ex:1346`, `:1490-1498`). Quiesce derives its own from **`("drain_fence", session_id, expected_owner_epoch, expected_journal_version)`** — every input read from the head it just read |
    | `expected_owner_epoch`, `expected_journal_version` | Read **fresh** from `Store.ownership_head/3`, exactly as the coordinator reads them (`session_coordinator.ex:1337-1343`), so the fence binds the state it is actually fencing |
-   | `proposed_owner_incarnation_id` | A fresh incarnation, in the same form the coordinator mints (`fresh_incarnation/2`, `:1500`) |
+   | `proposed_owner_incarnation_id` | **Derived from the same head inputs**, in the coordinator's `owner_identity/3` form rather than its `fresh_incarnation/2` form — see below |
 
    **The `tx_id` derives from durable state, and an earlier revision derived it
    from a random number held only in memory.** That revision minted one
@@ -2704,6 +2759,30 @@ carried: it described three outcomes and returned none of them.
    That ordering also disposes of the check-then-act objection without an
    argument about windows: step 1's answer is the decision, and step 2 runs
    only in the world where step 1 said nothing has moved.
+
+   **The incarnation is derived too, and it has to be.** The coordinator's
+   `fresh_incarnation/2` hashes `make_ref()`
+   (`session_coordinator.ex:1500-1509`), so two fences built from one unmoved
+   head would carry the same `tx_id` and **different** incarnations — and the
+   adapter refuses that: `resolve_known/2` compares the re-presented
+   transaction's immutable binding with the retained one and answers
+   `{:not_committed, :tx_id_conflict}` when they differ
+   (`state.ex:137-144`). A successor resolving an unknown fence, or a second
+   drain on a root whose head never moved, would meet that conflict rather
+   than the resolution it asked for. The founding rule wants the preallocated
+   ID bound to the canonical mutation digest
+   (`vision-technical.md:710-716`), and a random incarnation is what breaks
+   that binding. So the fence's incarnation derives from the same three inputs
+   the `tx_id` does, through the same `owner_identity/3` discipline, and a
+   re-presentation is **byte-identical**.
+
+   A `:tx_id_conflict` is nonetheless given a row, because a rule with no
+   answer for a result the adapter can return is not total: it is handled
+   **exactly as `commit_unknown` is** — the head is reread, and it decides. A
+   moved head means the fence is done; an unmoved head with a conflict means
+   something re-presented a different binding at this version, which is a
+   defect, and the session is left `unsettled` with `{:unknown, head}` rather
+   than reported as fenced.
 
    **`drain_id` survives as a report label and nothing more.** Core still mints
    one per call, with the generator it already uses for identifiers of its own
@@ -2927,8 +3006,14 @@ information lost on the way.
 **The steps below are the fail-stop path for every fatal class, not only the
 two store ones.** Store loss is the instance worth reading first because it is
 the one where the thing the daemon would otherwise stop is already gone; the
-other six differ only in which component is missing by the time the owner
-runs them. In all eight the owner has a class in hand, runs no ordered
+other **nine** differ only in which component is missing by the time the owner
+runs them. **Eleven classes reach this path**, one per linked component of the
+fixed set: the two store classes, and `transfers_lost`,
+`workspace_lease_lost`, `executor_lost`, `registry_lost`, `custody_lost`,
+`capability_lost`, `runtime_lost`, `relay_lost` and `listener_lost` — ten in a
+daemon without artifact transfers. Earlier revisions said six and eight here,
+which was the count from a design with fewer linked processes. In every one of
+them the owner has a class in hand, runs no ordered
 sequence, and does not return to serving. A step whose component is already
 gone is a no-op, by the rule the `stopping` field states above: under
 `listener_lost` steps 1 and 2 are already true and the clients of that
@@ -2940,7 +3025,7 @@ to write.
 2. Close every connection, after one bounded best-effort `daemon.stopping`
    carrying that class: `store_lost`, or `store_capacity_exceeded` when the
    store's own reason was the capacity refusal, and the failed component's own
-   class on the other six.
+   class on the other nine.
 3. **Stop the executor** — on every class but `executor_lost`, where it is
    the component that already died — under the same discipline as every other
    stop: a monitored helper calling
@@ -2960,7 +3045,7 @@ to write.
 4. **Stop the Store — on every class except the two store classes.** Where the
    Store terminated itself, `store_lost` or `store_capacity_exceeded`, it is
    already gone and its `terminate/2` has already released the marker; there
-   is nothing to stop. On the other six, the Store is **still alive**, and
+   is nothing to stop. On the other nine, the Store is **still alive**, and
    because `System.halt/1` runs no `terminate/2`, halting past it would leave
    the marker file behind on a daemon that shut down deliberately. So the
    owner stops it here, in **its own fixed 30-second phase**, exactly as the
