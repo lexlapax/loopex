@@ -299,8 +299,9 @@ reviewer can check against this sentence at closure.
   admission, `budget_ms` for cancellation, 90 s for the fence, 5 s for
   coordinator termination, 5 s for daemon teardown and 30 s for the Store —
   together with the sentence that keeps the number from being read as a
-  duration: **five** of the seven fixed terms count the Store's
-  thirty-second ceiling for a wedged filesystem — and the other two, the five
+  duration: **four** of the seven fixed terms — 1b, 2, 4 and 7 — count the
+  Store's thirty-second ceiling for a wedged filesystem, **one** is the
+  coordinator's own shutdown value, and the remaining **two**, the five
   seconds for closing admissions and the five for the teardown, are this
   plan's own chosen numbers, which the page says rather than implying every
   term is derived — and an ordinary stop finishes in milliseconds —
@@ -2433,10 +2434,12 @@ circular.** That revision said a fence with four seconds left is not attempted
 and "the session is reported `fence: :not_needed` if the head already moved
 and `:unknown` otherwise" — but deciding whether the head moved *is* a Store
 read, which is the very thing the rule has just refused. There is no way to
-take that branch. `:not_needed` now means one thing only, decided without
-reading anything: **quiesce does not fence a session it reports `settled`**,
-its own work having already ended. Unsettled and absent sessions are fenced,
-and their entry is `:committed`, `:superseded` or `:unknown`.
+take that branch. `:not_needed` now means one thing only, decided from the
+`Control` entry without reading the Store: **a session for which no
+coordinator ever existed in this runtime**, where there is nothing that could
+write. Every other enumerated session is fenced — settled, unsettled and
+absent alike, for the reason phase 4 gives — and its entry is `:committed`,
+`:superseded` or `{:unknown, …}`.
 
 **Phase 6 stops the lease owners as a collective sweep, not one at a time.**
 Up to 512 of them exist, and stopping them in sequence inside five seconds was
@@ -2883,7 +2886,7 @@ can hold. `budget_ms` is the drain budget core derived and used. `drain_id` is
 the label this drain reports, and `fences` is what the fence below actually
 did for each session it touched — `:committed` where the epoch moved,
 `:superseded` where the one transaction that could still linearize won the
-race first, `:not_needed` where the session settled and needed no fence, and
+race first, `:not_needed` where no coordinator ever existed for the session so nothing could write for it, and
 `{:unknown, head}` where the Store could not say, **carrying the head the
 fence was built from**, because that head is the only thing a successor can
 discriminate on. **Without `fences` a fence's failure is
@@ -3025,9 +3028,12 @@ carried: it described three outcomes and returned none of them.
    at the price of a one-way root.
 
 3. **A Store-linearized fence at the deadline, because terminating a
-   coordinator is not one.** When the budget is spent, core fences and
-   terminates every unsettled coordinator and waits for its `DOWN` before
-   returning. An earlier revision stopped there and claimed nothing could be
+   coordinator is not one.** When the budget is spent, core terminates every
+   **unsettled** coordinator and waits for its `DOWN`, and then fences **every
+   session it enumerated** — settled, unsettled and absent alike — before
+   returning. Terminating and fencing are two different sets on purpose: only
+   an unsettled coordinator needs ending, and every session needs its epoch
+   moved, for the reason the fence table gives. An earlier revision stopped there and claimed nothing could be
    appended for that session afterwards. **That claim was false**, and the
    reason is worth stating because it is the general shape of this whole
    class of bug: a coordinator commits through a *synchronous* call —

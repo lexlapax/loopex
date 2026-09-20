@@ -231,6 +231,14 @@ attachment to drop. Holding both on the attachment makes the `DOWN` lookup a
 map lookup rather than a scan, and makes the replacement scope a filter on a
 field that exists. One addition, two uses.
 
+**A pid on an attachment crosses no boundary the vision fences.** The rule is
+about durable and public or executor contracts; the dispatcher's
+`state.attachments` is neither — it is runtime-local process state, exactly as
+the `caller_monitor` it already holds on a pending scan is
+(`event_dispatcher.ex:186-192`). Nothing about the attachment's pid is
+journaled, sent on the wire, put in a snapshot or handed to an executor, and
+the snapshot and `attached` records a client receives are unchanged.
+
 - **Generation 1 is behaviour-identical**, which is what ADR 0023 requires and
   what this milestone promises for the foreground server: that host maps one
   connection to one attachment, so its supersession only ever fired behind a
