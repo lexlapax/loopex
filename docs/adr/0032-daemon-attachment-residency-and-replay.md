@@ -31,8 +31,11 @@ durable events and terminal outcomes, not every dropped progress fragment.
 Decide the transport and the residency rules together, because the numbers
 only mean something against a transport. The daemon carries the ADR 0023
 JSONL protocol over a Unix-domain socket, reusing its framing, initialize
-handshake, request, admission, snapshot, event and progress records and
-limits unchanged, and serves exactly one generation,
+handshake, admission, snapshot, event and progress records and limits
+unchanged — and its request records with exactly one addition, the
+`writer_epoch` every existing-session mutation carries, which is what makes
+generation 2 a new schema digest rather than a rename. It serves exactly one
+generation,
 `loopex.experimental/2`, which adds `session.list`, `daemon.status`, the two
 control methods and the writer-epoch field ADR 0033 names. It adds no durable
 method. An earlier draft of this decision also added `session.stop` and called

@@ -167,7 +167,12 @@ the floor pair, `mise exec erlang@27.3.4 elixir@1.18.5-otp-27 -- bash
 scripts/check.sh` with its own `MIX_BUILD_ROOT`; and
 `bash scripts/check-release.sh` runs once on the current pair with the
 provider credential and the pinned Node version in
-`scripts/fixtures/m4/client-toolchain.txt`. `loopex_daemon` joins that
+`scripts/fixtures/m4/client-toolchain.txt`. That release check is where
+Outcome 2's cross-UID witness lives, and closure is bound to it: the Linux
+lane must record a connection from a foreign uid refused before initialize and
+one from the daemon's own uid accepted. The fast check cannot supply it,
+because it has no second user, so an absent Linux-lane result is missing
+evidence rather than a pass. `loopex_daemon` joins that
 script's `release_apps` list in the change that adds its first release case,
 and only that list: every `release_apps` lane already runs
 `--include long_bound`, so the daemon's long-duration bound tests are carried
@@ -225,7 +230,12 @@ Concept: [Rollout and compatibility](M5.md#concept-plan-rollout).
 
 The `v0.2.0` source tag identifies a numbered release, not a compatibility
 freeze; all surfaces remain experimental. The socket reuses ADR 0023's
-framing, handshake, records and limits unchanged. Generation 2 is additive
+framing, handshake, limits, and its admission, snapshot, event and progress
+records unchanged. Its **request** records are reused with one addition, not
+unchanged: every existing-session mutation in generation 2 carries
+`writer_epoch`. Saying "records reused unchanged" without that exception would
+be wrong in the one place a reader checks it, at the schema digest, which is
+precisely why generation 2 needs its own. Generation 2 is additive
 over generation 1's method set under the exact-generation rule: a generation-1
 client sees no daemon method and no lease field, the daemon refuses a
 generation-1-only initialize, and the foreground server keeps serving

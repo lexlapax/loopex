@@ -336,7 +336,13 @@ delivered contiguously after the snapshot. The daemon adds:
   attachments, in ascending order of the monotonic time of their last
   delivery, ties broken by session ID bytes ascending; then, if the ceiling is
   still exceeded, the window of the session whose slowest attachment is
-  furthest behind, by the same tie-break. Only after every window has been
+  furthest behind **by encoded bytes owed** — the sum of encoded bytes for
+  events core has named for that attachment and the daemon has not yet
+  written, which is a daemon-owned quantity comparable across sessions because
+  it is measured in bytes rather than in each session's own sequence numbers.
+  A sequence-distance metric would not be comparable: sequence numbers are
+  per-session and say nothing about how much memory an attachment is costing.
+  Ties break by session ID bytes ascending. Only after every window has been
   released does the daemon detach the slowest attachment at its last emitted
   cursor. Independently of pressure, a window whose session has had zero
   attachments for the idle interval is dropped. No reclamation stalls a

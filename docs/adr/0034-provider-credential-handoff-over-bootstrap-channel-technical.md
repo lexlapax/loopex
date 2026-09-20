@@ -319,10 +319,17 @@ Three proofs are new:
   level over a real invocation shows placeholders where the reply and the
   resolved value would be, and no credential bytes anywhere in the captured
   entries.
-- **Host custody.** For each reference host — the CLI, the app-server host and
-  the daemon — composition reads the variable exactly once, deletes it, and
-  the holding process's `format_status/1` redacts its state under a forced
-  crash report.
+- **Host custody, proved at each host rather than in the adapter.** The
+  adapter's test tree cannot prove a claim about the CLI's or the daemon's
+  composition, and an earlier draft filed all three there. Each case lives
+  where its subject lives: `apps/loopex_cli/test/` for the reference CLI,
+  `apps/loopex_app_server/test/` for the app-server host, and
+  `apps/loopex_daemon/test/` for the daemon. Each proves that composition
+  reads the variable exactly once, deletes it from the VM's environment, and
+  that the holding process's `format_status/1` redacts its state under a
+  forced crash report. The adapter's own tree keeps only what is the adapter's
+  to prove: that it reads no environment variable and that the resolver
+  contract behaves.
 
 The first two, the failure cases and the custody cases belong in
 `credential_plane_test.exs` beside the cases they generalise; the drift case
