@@ -93,15 +93,18 @@ secret can be seen. What keeps those bytes out of a trace is stated against
 the implementation rather than against ADR 0030's prose, which claims a
 match-specification exclusion the tracer does not have: the adapter is in no
 default trace namespace, so the credential work is untraced under every
-default configuration, and a host that explicitly names the adapter module
-gets entries whose credential values the implemented redaction pass replaces
-with placeholders — which holds because the companion binds the *shape*, so
-those bytes always travel under a credential-named key and are placeholdered
-at any size. It would not hold by size alone: the pass leaves a short binary
-verbatim, and a credential may be one byte. The companion names the three functions that touch
-credential bytes — they are the whole of the parent-side surface — and M5
-proves both tiers. The drift between ADR 0030's prose and its implementation
-is flagged for the maintainer, not patched here.
+default configuration; and where a host explicitly names the adapter module,
+the credential-bearing functions are **excluded before a trace message is
+delivered at all**, which is what ADR 0030 already requires and what M5 adds
+to `Loopex.Trace` to honour. Redaction at the sink cannot serve that purpose,
+because the raw call reaches the tracer first; it stays as defence in depth,
+resting on a bound *shape* — those bytes always travel under a
+credential-named key and are placeholdered at any size, which size alone would
+not give, since the pass leaves a short binary verbatim and a credential may
+be one byte. The companion names every excluded function and module — together
+the whole of the parent-side surface — and M5 proves the exclusion at the
+tracer rather than at the sink. ADR 0030 is not edited: its prose is honoured
+once this lands.
 
 **Everywhere else the boundary is where the adapter's claims stop.** Inside it
 — the token, the sender, the frame, the child — the adapter proves what it

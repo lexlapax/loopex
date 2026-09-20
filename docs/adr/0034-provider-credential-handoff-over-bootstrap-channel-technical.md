@@ -219,100 +219,104 @@ boundary, not an absolute:
   already protects that process — the sender installs its own group-leader
   sink so no IO request can carry anything out of it, it is unregistered, and
   it reports only an atom or a `{:error, atom}` pair to the guardian.
-- **What actually keeps credential bytes out of a trace, verified against
-  `Loopex.Trace` rather than against prose.** ADR 0030's companion says "the
-  key-bearing call is excluded by match specification". No such mechanism
-  exists in the implementation, and this pair says so rather than promising
-  it: `Loopex.Trace` installs one pattern per **module**,
-  `:trace.function(session, {module, :_, :_}, match_spec(level), [:local])`,
-  with no function or arity selectivity, and its only exclusion is by **pid**,
-  decided inside core by role — the tracer itself and, on the diagnostics
-  sink, the dispatcher. There is no adapter-side API to exclude a pid and no
-  way to exclude one function of a traced module. **That prose-implementation
-  drift is a finding for the maintainer about an accepted ADR; M5 does not
-  edit ADR 0030 and its progress entry flags it.**
+- **What keeps credential bytes out of a trace: exclusion before delivery,
+  which M5 implements because ADR 0030 already requires it.** That accepted
+  companion says the key-bearing call "is excluded by match specification"
+  (`0030-…-technical.md:27`). An earlier revision of this pair found no such
+  mechanism in `Loopex.Trace` and substituted namespace omission plus
+  sink-time redaction. That substitution is withdrawn: redaction happens in
+  `Entry.render/2`, at the sink, while tracing delivers the **raw** call tuple
+  to the tracer process first (`trace.ex:331`, `:152`, `:219`). A host that
+  names the adapter module would therefore create another message carrying the
+  credential — one more place the bytes exist — which is precisely what the
+  "only permitted transfer" contract forbids. Redaction cannot satisfy a
+  pre-delivery requirement.
 
-  What does hold is a two-tier property, and both tiers are real:
+  **So M5 implements the requirement.** `Loopex.Trace` gains an excluded-MFA
+  list applied when a session's patterns are installed: the module pattern
+  first, then each excluded `{module, function, arity}` cleared. The mechanism
+  is the one `:trace.function/4` already supports, and it was verified by
+  probe at **both** toolchain pairs before being written here:
 
-  1. **The adapter is not in the default traced set.** A session's modules come
-     from `modules/1`, which expands the `:loopex` and `:loopex_protocol`
-     namespaces through `:application.get_key(application, :modules)` — the
-     application's own module list, and the code says why it is not a name
-     prefix: "reading the application's module list rather than matching a
-     name prefix keeps a module that merely starts with `Loopex` in some other
-     application out of the session." `Loopex.LLM.ReqLLM.ProviderBridge` lives
-     in `loopex_llm_reqllm`, so **no namespace wildcard reaches it**. Under
-     every default configuration the credential-bearing work is untraced,
-     which is the strong property and the one M5 proves first.
-  2. **If a host explicitly names the adapter module**, its functions become
-     traceable — a host may name any module through the explicit-module route,
-     `supervised/1` recurses so the sender is in scope, and `process_flags/2`
-     sets `:set_on_spawn` on every non-root traced process — and what protects
-     the bytes then is the redaction pass, which *is* implemented. But it
-     protects them **only in one shape**, and that shape is therefore part of
-     this contract rather than an implementation detail.
+  ```
+  :trace.function(session, {Probe, :_, :_}, true, [:local])     # => 6
+  :trace.function(session, {Probe, :secret, 1}, false, [:local]) # => 1
+  # tracer then receives, for a process calling both:
+  #   {:trace, #PID<…>, :call, {Probe, :visible, ~c"\n"}}
+  # and nothing at all for Probe.secret/1
+  ```
 
-     `Entry.render/2` calls `redact/3`, which placeholders a value whose
-     **key** matches `@credential_pattern` — `credential|secret|token|api[_-]?
-     key|password|authorization` — at any size, and otherwise placeholders a
-     binary only when it is **longer than `@identity_bytes`, which is 64**.
-     Bare list and tuple elements are walked with `key = nil` and a short
-     binary falls through to `redact(term, _, _) -> term`, returned verbatim.
+  A later, more specific pattern replaces the module-wide one for that MFA, so
+  the excluded function is not traced at all — no raw message, nothing for the
+  tracer to hold, nothing for the sink to redact. This is core's **third** M5
+  change, recorded as such in the plan's ownership table and minimalism
+  budget.
 
-     An earlier draft of this pair concluded from that code that a credential
-     is "redacted by size even as a bare positional argument". **That is
-     false**, and running `Entry.render/2` says so:
+  **The excluded inventory is complete, and completeness is why it is drawn
+  this way.** Credential bytes and the token reach exactly two places in the
+  parent:
 
-     | Credential size | Bare arg `[cred]` | Tuple `{:ok, cred}` | Keyed `%{credential: cred}` |
-     | --- | --- | --- | --- |
-     | 1 byte | **leaks** | **leaks** | placeholdered |
-     | 40 bytes | **leaks** | **leaks** | placeholdered |
-     | 51 bytes | **leaks** | **leaks** | placeholdered |
-     | 64 bytes | **leaks** | **leaks** | placeholdered |
-     | 65 bytes | placeholdered | placeholdered | placeholdered |
-
-     ADR 0019 admits a credential of 1 to 65,536 bytes, so the leaking range
-     is real, not hypothetical. The size reading is withdrawn with those
-     numbers recorded.
-
-  **So the shape is bound, and that is what makes the second tier true.** The
-  three functions below carry credential bytes **only as a value under a
-  credential-named key**, in every argument and every return value:
-  `receive_custody_reply/2` returns `{:ok, %{credential: bytes}}` and never
-  `{:ok, bytes}`; `write_credential_frame/2` takes that keyed map, not a bare
-  binary. Under `@credential_pattern` the key `credential` matches, so the
-  value is placeholdered at **any** size, including one byte. Nothing relies
-  on how long a credential happens to be.
-
-  **The three functions stay, and their role is now precise.** They are not
-  match-specification targets, because those do not exist; they are **the only
-  functions that touch credential bytes, all executed in the sender process,
-  and all carrying them keyed**:
-
-  | Function | What it touches |
+  | Excluded | Why |
   | --- | --- |
   | `Loopex.LLM.ReqLLM.ProviderBridge.route_credential/2` | The registry handle and the token |
   | `Loopex.LLM.ReqLLM.ProviderBridge.receive_custody_reply/2` | The resolved credential |
   | `Loopex.LLM.ReqLLM.ProviderBridge.write_credential_frame/2` | The resolved credential |
+  | **`Loopex.LLM.ReqLLM.ProviderCodec`, every function** | The credential frame is encoded by the same generic encoder as every other frame: `send/3` calls `encode/2` (`provider_codec.ex:127-131`, `:87-92`), which calls `valid_payload?/2` and `encode_value/4`, which recurse through `encode_members/5`, `encode_pairs/4` and `encode_key/2,3`. `[:local]` tracing covers private calls, so every one of those frames carries the bytes |
 
-  Naming them is what makes the witness precise and the redaction obligation
-  checkable: any credential byte in the parent passes through one of these
-  three and nowhere else. The names, the arities **and the keyed shape** are
-  the contract, and one case asserts all three: that the functions exist with
-  these identities, and that calling each with a **one-byte** credential under
-  a trace session naming the module explicitly produces no entry containing
-  that byte. One byte is the point — it is the size at which a size-based
-  redaction would fail and a shape-based one does not — so an inlining, a
-  rename, or a change that passes bytes bare breaks the proof loudly.
+  The codec is excluded as a **module** rather than as a list of private
+  MFAs, and the rejected option is recorded: an MFA list of private helpers
+  would be a list that rots silently, since a refactor inside the codec could
+  add a private function carrying the payload and no test would notice. The
+  cost is stated too — codec calls are not traceable for any frame — and it is
+  small, because the encode path is shared, so excluding only the
+  credential-carrying calls was never possible: the same functions encode
+  every frame.
 
-  **The proof is two cases, matching the two tiers.** Under the **default**
-  configuration, a real trace session at the `arguments` level over a real
-  invocation produces no entry naming any of the three, no raw trace message
-  for them, and no credential bytes or token anywhere in the captured entries.
-  Under a configuration that **explicitly names** `ProviderBridge`, entries for
-  the three may exist and every one of them is asserted to carry placeholders
-  and no credential bytes and no token. Proving only the first would leave the
-  case a host can actually create unproved.
+  **The keyed shape stays, as defence in depth rather than as the mechanism.**
+  The three bridge functions carry credential bytes only as a value under a
+  credential-named key — `receive_custody_reply/2` returns
+  `{:ok, %{credential: bytes}}` and never `{:ok, bytes}`;
+  `write_credential_frame/2` takes that keyed map, not a bare binary — so if
+  an exclusion were ever lost, `@credential_pattern` still placeholders the
+  value at any size. That matters because the size rule alone does not: an
+  earlier draft of this pair concluded a credential is "redacted by size even
+  as a bare positional argument", and running `Entry.render/2` says otherwise.
+
+  | Credential size | Bare arg `[cred]` | Tuple `{:ok, cred}` | Keyed `%{credential: cred}` |
+  | --- | --- | --- | --- |
+  | 1 byte | **leaks** | **leaks** | placeholdered |
+  | 40 bytes | **leaks** | **leaks** | placeholdered |
+  | 51 bytes | **leaks** | **leaks** | placeholdered |
+  | 64 bytes | **leaks** | **leaks** | placeholdered |
+  | 65 bytes | placeholdered | placeholdered | placeholdered |
+
+  ADR 0019 admits a credential of 1 to 65,536 bytes, so the leaking range is
+  real. The size reading is withdrawn with those numbers recorded, and the
+  shape is contract.
+
+  **ADR 0030 is not edited.** Its prose is honoured once this change lands,
+  and not before; until then the requirement is real and the implementation is
+  missing, which is the finding an earlier revision recorded and this one
+  closes rather than reinterprets. The alternative — amending ADR 0030 down to
+  what the code did — is rejected: it would weaken an accepted security
+  contract to match an omission.
+
+  **The proof is three cases.** Under the **default** configuration, a real
+  trace session at the `arguments` level over a real invocation produces no
+  entry naming any excluded function, no raw trace message for them, and no
+  credential bytes or token anywhere in the captured entries — the adapter is
+  not in the default traced set, because `modules/1` expands the `:loopex` and
+  `:loopex_protocol` namespaces through `:application.get_key(application,
+  :modules)` and `Loopex.LLM.ReqLLM.ProviderBridge` is in
+  `loopex_llm_reqllm`. Under a configuration that **explicitly names**
+  `ProviderBridge` and `ProviderCodec`, the tracer is asserted to receive **no
+  raw trace message** for any excluded MFA — the pre-delivery property itself,
+  read from the tracer rather than from the sink — while a non-excluded
+  function of the same module is asserted to produce one, so the case cannot
+  pass by tracing nothing. A third case calls each of the three bridge
+  functions with a **one-byte** credential and asserts no captured entry
+  contains that byte, which is the keyed-shape tier and would fail under a
+  size-based rule.
 - Everywhere else the earlier absolutes stand unchanged: not in guardian
   state, not in an exit reason, not in a crash report, not in an IO request,
   not in a file, not in the environment, not in argv, and in no durable or
@@ -585,11 +589,14 @@ Three proofs are new:
   `receive_custody_reply/2` or `write_credential_frame/2`, no raw trace
   message for them, and no credential bytes or token anywhere — because the
   adapter is in no namespace wildcard. Under a configuration that
-  **explicitly names** `Loopex.LLM.ReqLLM.ProviderBridge`, entries for those
-  three may exist, and every one is asserted to carry placeholders and no
-  credential bytes and no token, which is what the redaction pass promises. A
-  third case asserts the three functions exist with their exact identities, so
-  neither of the first two can pass vacuously.
+  **explicitly names** `Loopex.LLM.ReqLLM.ProviderBridge` and
+  `Loopex.LLM.ReqLLM.ProviderCodec`, the tracer is asserted to receive **no
+  raw trace message** for any excluded MFA, while a non-excluded function of
+  the same module is asserted to produce one — the pre-delivery property read
+  where it holds, and a case that cannot pass by tracing nothing. A third case
+  asserts the three functions exist with their exact identities and that a
+  one-byte credential appears in no captured entry, so neither of the first
+  two can pass vacuously.
 - **Host custody, proved at each host rather than in the adapter.** The
   adapter's test tree cannot prove a claim about the CLI's or the daemon's
   composition, and an earlier draft filed all three there. Each case lives
