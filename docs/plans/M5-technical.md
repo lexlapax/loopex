@@ -41,7 +41,7 @@ Concept: [Scope](M5.md#concept-plan-scope).
 | `loopex_protocol` | Generation-2 records, validators, schema and vectors | Daemon behaviour or lease semantics |
 | `loopex_store_local` | The unchanged local adapter, its 256 MiB log and 4 MiB frame ceilings, its `store_capacity_exceeded` and `store_log_too_large` refusals and its writer marker, which it takes at start and releases in its own `terminate/2` — so the daemon owns the Store *process* and stops it last in an orderly shutdown, and a store loss releases the marker before the daemon can act | Any daemon fact, lease, index or residency state |
 | `loopex_daemon` | Marker-first process and socket lifetime, existence validation by calling core's query rather than by attaching or resuming, the peer-credential check, generation-2 negotiation, per-connection socket output buffers, the resident window and aggregate byte ceiling, attachment residency and eviction, the in-memory controller lease and writer-epoch check, the session index with its recorded-entry bound and its bounded pages, attachment residency and the one-way activation ceiling, and diagnostics | Store or coordinator internals, a second loop, policy selection, host identity, a durable record or a durable method |
-| `loopex_composition` | The edge-assembly sequence, and the one new public function that runs it in the caller's process and returns the edges — used by `RuntimeOwner` and by the daemon's owner | Daemon lifetime, ownership of what it assembles, or any knowledge of a daemon |
+| `loopex_composition` | The edge-assembly sequence, and the one new public function that runs it in the caller's process, calls the caller's `interrupt` checkpoint before each edge, and returns the edges — or, on an interrupt or a failure, returns the ones it has already started so the caller can unwind them — used by `RuntimeOwner` and by the daemon's owner | Daemon lifetime, ownership of what it assembles, or any knowledge of a daemon |
 | `loopex_app_server` | The foreground stdio server unchanged, sharing the protocol mapping the daemon reuses, and its use of `with_runtime/2`, which M5 does not change | Daemon lifetime or residency |
 | `loopex_cli` | `loopex daemon` with its readiness line, signal handling and exit classes, `loopex attach` with its roles, takeover presentation and cursor reconnect, the live `loopex sessions --daemon` form beside the unchanged offline one, and the host-side credential custody and registry it composes | Normative lease or session semantics, and any change to the released offline `loopex sessions` |
 | `loopex_llm_reqllm` | The credential handoff, its sender, the token it accepts, the launcher's unchanged ADR 0019 scrubbing enumeration, the `req_llm` version floor, the re-pointed credential-plane proofs and the provider suite's concurrency | Any host credential policy, any new credential scope, where a host keeps the bytes behind a reference, or anything outside the adapter |
@@ -971,38 +971,66 @@ A failure at any step exits non-zero with that step's reason class, after the
 reverse cleanup below, and touches nothing after it.
 
 
-**Startup is interruptible, and the owner is monitored — both because a
-synchronous sequence inside one process is not, by itself, process-safe.**
-The steps above run in the owner, and while they run the owner is not reading
-its mailbox: a `SIGTERM` handled by `:erl_signal_server` becomes a message
-that waits, and a linked component's `{:EXIT, …}` waits beside it. Left
-alone, that means a daemon can take the marker, bind the socket and print
+**Startup is interruptible, and the owner is monitored rather than linked —
+both because a synchronous sequence inside one process is not, by itself,
+process-safe.** The steps above run in the owner, and while they run the owner
+is not reading its mailbox: a `SIGTERM` handled by `:erl_signal_server` becomes
+a message that waits, and a linked component's `{:EXIT, …}` waits beside it.
+Left alone, that means a daemon can take the marker, bind the socket and print
 readiness *after* a stop it has already been told about, or after a component
 it depends on has already died — and then read both and shut down, having
 announced itself ready in between.
 
-Two rules, both narrow:
+Three rules, each narrow:
 
-- **Before every acquisition, the owner drains and checks.** Before taking the
-  marker, before calling the composition function, before each edge the
-  function returns to it, before binding the socket and before printing the
-  readiness line, the owner reads whatever is in its mailbox for a stop
-  message or an `{:EXIT, …}`, and checks that every component it has already
-  started is alive. Any of those aborts the start into the reverse cleanup
-  above, which unwinds exactly what exists. Nothing is acquired after a stop
-  is known, and nothing is announced on top of a component that is gone.
-- **The process that started the owner monitors it.** The escript command
-  process — the one that called `start_link` — holds a monitor and, on `DOWN`,
-  halts non-zero with `owner_lost` on `stderr` immediately. That is where
-  `owner_lost` is actually observed: an earlier revision had it arriving only
-  when a *later signal* found no owner, which leaves a daemon whose owner has
-  crashed sitting with a bound socket, a held marker and nobody running it
-  until somebody happens to send `SIGTERM`. The signal handler's own backstop
-  stays as the second route, for the case where the owner dies in the instant
-  between the signal and the handler's send.
+- **The owner is started unlinked and monitored.** The escript command process
+  calls **`GenServer.start/3`, not `start_link/3`**, and monitors the owner
+  immediately. An earlier revision had it both link *and* monitor, which
+  defeats the monitor: an abnormal exit travels the link first and kills the
+  command process, so the `DOWN` that was supposed to produce `owner_lost` is
+  never handled by anybody. Unlinked, the command process survives every way
+  the owner can die, halts non-zero with `owner_lost` on `stderr` on the
+  `DOWN`, and gives the operating system an exit status — which is the whole
+  of its job. The inventory row says unlinked-and-monitored, and now the
+  design does too.
+- **The owner drains and checks before every acquisition it performs itself.**
+  Before taking the marker, before calling the composition function, before
+  binding the socket and before printing the readiness line, the owner reads
+  whatever is in its mailbox for a stop message or an `{:EXIT, …}` and checks
+  that every component it has already started is alive. Any of those aborts
+  the start into the reverse cleanup above.
+- **The composition function checks between its own edges, because the owner
+  cannot.** Its chain is one synchronous `with` (`loopex_composition.ex:166-178`):
+  the owner is inside that call for the whole of it and can read nothing
+  between the Store and the runtime. An earlier revision claimed a mailbox
+  check "before each edge the function returns to it", which is not a thing
+  the owner can do. So the function takes an **interrupt checkpoint** as an
+  option and calls it **before starting each edge**:
 
-Neither rule needs a new process or a supervisor: the drain is a receive with
-a zero timeout and a liveness check, and the monitor is the command process
+  ```elixir
+  interrupt: (-> :continue | {:stop, term()})
+  ```
+
+  A zero-arity function, supplied by the caller, evaluated in the caller's own
+  process, which the daemon implements as exactly the drain-and-check above.
+  Where it answers `{:stop, reason}` the composition starts nothing further.
+
+  **And on any early exit it returns what it has already started**, which the
+  interrupt makes necessary and an edge failure needed anyway:
+
+  ```elixir
+  {:error, reason, %{store: pid, transfers: pid | nil, workspace_lease: pid, executor: pid, runtime_supervisor: pid}}
+  ```
+
+  — the same map shape a success returns, holding only the keys that exist
+  yet. Without it, an interrupted or failed composition would leave the owner
+  linked to edges it cannot name, and reverse cleanup would unwind less than
+  exists. A caller that passes no `interrupt` sees the behaviour it sees
+  today, so `RuntimeOwner` and the app-server host are unaffected.
+
+Neither the monitor nor the checkpoint needs a new process or a supervisor:
+the drain is a receive with a zero timeout and a liveness check, the interrupt
+is a function the caller already has, and the monitor is the command process
 doing what it is already there to do — wait for the daemon to end and give the
 operating system an exit status.
 
@@ -2435,9 +2463,13 @@ next daemon removes before binding.
   the command process's monitor doing it. A second case kills the owner and
   *then* sends `SIGTERM`, asserting the same class by whichever route wins, so
   the two cannot both fail silently.
-- **Startup is interruptible.** A `SIGTERM` is delivered mid-startup, at the
-  step before the marker is taken and again at the step before the socket is
-  bound. Each case asserts **no readiness line is printed**, that no marker is
+- **Startup is interruptible, including inside the composition call.** A
+  `SIGTERM` is delivered mid-startup at the step before the marker is taken,
+  again at the step before the socket is bound, and again **between two edges
+  inside the composition function** — which the interrupt checkpoint is what
+  makes observable. That third case asserts the function returns
+  `{:error, reason, started}` naming every edge it had started, and that
+  reverse cleanup stops exactly those. Each case asserts **no readiness line is printed**, that no marker is
   held and no socket file exists afterwards, and that a following daemon
   starts cleanly with nothing to recover. A third kills the Store immediately
   after the composition call returns and asserts the start aborts into reverse
@@ -2560,7 +2592,7 @@ the adapter or the executor.
 
 | Process | Started by | Linked to | Stopped by | Its death |
 | --- | --- | --- | --- | --- |
-| **Daemon owner** | The `loopex daemon` command process | — (monitored by that command process) | Itself; it halts the VM | The command process's monitor halts non-zero with `owner_lost`; the signal handler's backstop is the second route |
+| **Daemon owner** | The `loopex daemon` command process, with `GenServer.start/3` — **unlinked**, and monitored immediately | Nothing; the command process holds a monitor, not a link | Itself; it halts the VM | The command process's monitor halts non-zero with `owner_lost`; the signal handler's backstop is the second route |
 | Credential routing **registry** (ADR 0034) | Daemon owner, first | Daemon owner | Orderly step 6 | `registry_lost`, daemon-fatal |
 | Credential **custody process** (ADR 0034), **one, for the one composed model configuration** | Daemon owner, second | Daemon owner | Orderly step 6 | `custody_lost`, daemon-fatal. A second provider needs ADR 0034's stated amendment before a second exists |
 | **Store adapter** (ADR 0031) | The composition function, in the owner's process | Daemon owner | Orderly step 6, **last of all**, in its own fixed 30 s phase | `store_lost`, or `store_capacity_exceeded` on its own capacity refusal — both fail-stop |
