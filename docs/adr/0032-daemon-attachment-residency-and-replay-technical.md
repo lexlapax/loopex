@@ -269,8 +269,8 @@ daemon activated the session, which remains true. The activation ceiling still
 counts activations per daemon lifetime, for the same reason — it counts what
 the daemon did.
 
-Two alternatives were rejected, and both are **third core changes** this
-milestone does not make. A lifecycle notification from core to the daemon
+Two alternatives were rejected, and both would be **a further core change**
+beyond the four this milestone makes. A lifecycle notification from core to the daemon
 would be a new core-to-host signal, with its own delivery and ordering
 questions, added for a listing field. A monitorable coordinator handle handed
 out to the daemon would export core's supervision topology across the boundary
