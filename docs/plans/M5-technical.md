@@ -47,7 +47,7 @@ Concept: [Scope](M5.md#concept-plan-scope).
 
 | Component | Owns | Cannot own |
 | --- | --- | --- |
-| `loopex` | Durable session truth, the race-free attach barrier and cursor, independent concurrent attachments to one session, the read-only session-existence query, **`Loopex.Trace.exclude_self/2`, which installs both the match-specification exclusion ADR 0030 names and the process-level exclusion its callees need, before any message is delivered**, **the bounded `quiesce/2` that settles every active coordinator or names what it could not**, **the runtime-side create result's `disposition` and `residency` fields**, the per-attachment event-count dispatcher queues, cancellation and recovery | A lease, a transport, a byte limit, residency policy or any daemon fact |
+| `loopex` | Durable session truth, the race-free attach barrier and cursor, independent concurrent attachments to one session, the read-only session-existence query, **`Loopex.Trace.exclude_self/2`, which installs both the match-specification exclusion ADR 0030 names and the process-level exclusion its callees need, before any message is delivered**, **the bounded `quiesce/2` that settles every active coordinator or names what it could not**, **the runtime-side create and resume results' `disposition` and `control_entry` fields**, the per-attachment event-count dispatcher queues, cancellation and recovery | A lease, a transport, a byte limit, residency policy or any daemon fact |
 | `loopex_protocol` | Generation-2 records, validators, schema and vectors | Daemon behaviour or lease semantics |
 | `loopex_store_local` | The unchanged local adapter, its 256 MiB log and 4 MiB frame ceilings, its `store_capacity_exceeded` and `store_log_too_large` refusals and its writer marker, which it takes at start and releases in its own `terminate/2` — so the daemon owns the Store *process* and stops it last in an orderly shutdown, and a store loss releases the marker before the daemon can act | Any daemon fact, lease, index or residency state |
 | `loopex_daemon` | Marker-first process and socket lifetime, existence validation by calling core's query rather than by attaching or resuming, the peer-credential check, generation-2 negotiation, per-connection socket output buffers, the resident window and aggregate byte ceiling, attachment residency and eviction, the in-memory controller lease and writer-epoch check, the session index with its recorded-entry bound and its bounded pages, attachment residency and the one-way activation ceiling, and diagnostics | Store or coordinator internals, a second loop, policy selection, host identity, a durable record or a durable method |
@@ -235,7 +235,12 @@ appears only in its opening banner — and it pipes each lane's suite summary to
 M5 changes the script in two ways:
 
 - it reads `scripts/suite-summary.sh`'s result line instead of discarding it,
-  which is what lets any lane assert a count at all; and
+  which is what lets any lane assert a count at all — and it **re-derives the
+  count on the shape that lane's toolchain prints**, because the summary
+  line's format is the current pair's, and the release check runs the older
+  pair too; a script that parsed one shape would silently read zero on the
+  other, which is exactly the false negative an executed-count assertion
+  exists to prevent; and
 - it branches on platform for this one lane. On Linux it runs
   `mix test --only cross_uid` and asserts **exactly two** executed. On any
   other platform it runs nothing for that lane, prints
@@ -866,7 +871,17 @@ carries two plain fields beside the session ID:**
 | Field | Values | What the daemon does with it |
 | --- | --- | --- |
 | `disposition` | `:fresh` \| `:historical` | Charge an activation for `:fresh`; charge nothing for `:historical` |
-| `residency` | `:active` \| `:dormant` | Repair the directory entry and index row without activating when `:dormant`; leave both alone when `:active`, since an activated session already recorded them |
+| `control_entry` | `:active` \| `:dormant` | Repair the directory entry and index row without activating when `:dormant`; leave both alone when `:active`, since an activated session already recorded them |
+
+**It is `control_entry`, not `residency`, and the rename is the point.**
+`residency` is a **daemon** fact on the wire — what `session.list` reports
+about a session in *this daemon's* lifetime — while this field says what
+`Loopex.Runtime.Control` holds for that session at the instant of the call.
+The two coincide today and would not always: a session `Control` still lists
+as active may have no live coordinator, which is precisely the `absent` case
+`quiesce/2` reports. Giving both the same name would have invited a daemon to
+forward one as the other. `residency` stays daemon-only; `control_entry` is
+core's.
 
 **The same two fields belong on the runtime-side `resume` result**, which my
 own pass over this section found and the finding did not name. `resume` has
@@ -880,7 +895,7 @@ answers `{:ok, {:replayed, session_id}}` for the **prepared** mode
 (`control.ex:526`) and a bare `{:ok, session_id}` for the plain one (`:527`),
 and `owner_ready_reply/4` does the same for a started owner (`:529-532`).
 Rather than make the daemon use a mode it does not otherwise want, the plain
-resume result carries the same `disposition` and `residency` the create result
+resume result carries the same `disposition` and `control_entry` the create result
 does. That is one shape for both, not two.
 
 **The public protocol result is unchanged.** Generation 1 and generation 2
@@ -995,13 +1010,13 @@ leaked until the daemon restarts:
 | Result of the call | Slot |
 | --- | --- |
 | Create, `disposition: :fresh` | **Converted** — a coordinator started |
-| Create, `:historical` with `residency: :active` | Released — that session was counted when it was activated |
-| Create, `:historical` with `residency: :dormant` | Released — a replay starts nothing |
+| Create, `:historical` with `control_entry: :active` | Released — that session was counted when it was activated |
+| Create, `:historical` with `control_entry: :dormant` | Released — a replay starts nothing |
 | Resume, `disposition: :fresh` | **Converted** — a coordinator started |
 | Resume, `:historical` | Released — the replayed result is returned without starting an owner (`control.ex:311-312`) |
 | Resume answering a **prepared** capability, where the activation is begun but not finished | **Held**: the reservation stays until that activation resolves, then converts on success and releases on abandonment. It is the one branch that is neither yet |
 | Either call refusing — `runtime_command_conflict`, `store_unavailable`, an invalid identifier, a placement mismatch, any other `{:error, _}` | Released |
-| A **resume** crashing or timing out | **Held, then resolved by replay**: replayed under its original `command_id`, whose `disposition`/`residency` say whether the original call activated the session. The existence query cannot answer this — it says `present` either way |
+| A **resume** crashing or timing out | **Held, then resolved by replay**: replayed under its original `command_id`, whose `disposition`/`control_entry` say whether the original call activated the session. The existence query cannot answer this — it says `present` either way |
 | A **create** crashing or timing out | **Held, then resolved by replay**: replayed under the same `command_id`, which returns the historical result and starts no coordinator (`control.ex:901-907`), carrying the same two fields. Same reservation key, so no second slot |
 | An **attach** crashing or timing out | **Released with the connection**: the reservation is keyed by the connection, ADR 0032 binding a connection to at most one attachment (`0032-…-technical.md:126-129`), so the daemon closes that connection and its ordinary teardown detaches whatever core attachment it held. Nothing is observed, because nothing needs to be |
 
@@ -1025,7 +1040,7 @@ them.
 **Create: replay under the original `command_id`.** No session ID exists when
 the reservation is taken, so the existence query cannot even be asked. The
 replay returns the historical result without starting a coordinator
-(`control.ex:901-907`) and now carries `disposition` and `residency`, which
+(`control.ex:901-907`) and now carries `disposition` and `control_entry`, which
 say directly whether the original call started anything. The replay is
 idempotent and carries the same reservation key, so it charges no second slot.
 
@@ -1034,8 +1049,8 @@ query.** The existence query answers `present` for *any* session a resume
 could target, whether or not this resume activated it, so it cannot tell the
 two apart: the two answers that must differ are identical. The replay can,
 because core's resume result carries the same two fields: `:historical` with
-`residency: :active` means the original call did activate it, `:historical`
-with `residency: :dormant` means it did not, and the daemon converts or
+`control_entry: :active` means the original call did activate it, `:historical`
+with `control_entry: :dormant` means it did not, and the daemon converts or
 releases on that.
 
 **Attach: close the connection and release with it.** Core exposes no
@@ -2916,12 +2931,12 @@ next daemon removes before binding.
   create disposition. A session whose directory entry was never written is
   recovered by replaying `session.create` with the original `command_id`: the
   case asserts core answers `disposition: :historical` with
-  `residency: :dormant`, that **no activation is charged**, that no
+  `control_entry: :dormant`, that **no activation is charged**, that no
   coordinator starts, and that the daemon repairs the directory entry and
   index row from that answer alone. A genuinely fresh create asserts
   `disposition: :fresh`, one activation charged, and a live coordinator. A
   third asserts the pair for a session that is already active —
-  `:historical` with `residency: :active` — and that the daemon repairs
+  `:historical` with `control_entry: :active` — and that the daemon repairs
   nothing, because an activated session already recorded both.
 - **At the ceiling, every create is refused.** A daemon at its 64th activation
   refuses `session.create` with `activation_ceiling_reached` **whether the
@@ -2956,7 +2971,7 @@ next daemon removes before binding.
   activate the session and one where it **did not** — the same session ID, the
   same query answer `present` in both. The case asserts the daemon converts in
   the first and releases in the second, which it can only do from the replayed
-  result's `disposition` and `residency`. A resolution by existence query
+  result's `disposition` and `control_entry`. A resolution by existence query
   would give the same answer to both and is thereby excluded.
 
   *Create, no answer.* The replay is asserted to start no coordinator and

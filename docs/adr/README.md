@@ -182,5 +182,6 @@ decides that a typed decision model — one that returns probabilities and
 confidences rather than text — may be an input to a host's policy decision and
 a journaled plain-data fact, and may never be the decision. It depends on 0034
 and on a prerequisite amendment to it, because a second provider needs one
-credential token per provider where 0034 fixes one per call. No part of it
+credential token per provider where 0034 fixes one per **composed model
+configuration** — bound at composition, resolved per call. No part of it
 runs inside M5.

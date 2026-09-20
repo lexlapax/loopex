@@ -384,6 +384,23 @@ boundary, not an absolute:
     it skips every pid Control holds, the same place `excluded?/3` already
     excludes the tracer and the dispatcher by role (`trace.ex:411`), and a
     tracer that has just restarted asks Control rather than starting empty.
+  - **A `Control` restart is the one gap, and the claim is qualified rather
+    than repeated.** `Control` is a `:permanent` child under `:rest_for_one`
+    (`runtime/supervisor.ex:69-72`, `:92`), so its restart clears the set —
+    and also restarts every child after it, the tracer included, which ends
+    every live session. What that means precisely: the **process flags already
+    installed on live sessions persist**, being state in the VM's trace
+    sessions rather than in `Control`; only sessions started **after** the
+    restart consult the set, and those find it empty. A sender that resolved
+    before the restart is therefore still excluded for the session it was
+    excluded from, and a sender that starts after it excludes itself again, as
+    every sender does. The remaining case is a sender whose `exclude_self/2`
+    call **finds `Control` unavailable** — mid-restart — and that one fails
+    closed like any other unconfirmed exclusion: it refuses the invocation
+    rather than resolving. So the absolute form — "no trace configuration can
+    name it back in" — holds for configuration, which is what it is about, and
+    the plan does not extend it to a supervision event that ends the sessions
+    anyway.
 
   **It fails closed.** `exclude_self/2` returns only once both exclusions are
   installed, and it carries an **explicit** bound rather than inheriting a
