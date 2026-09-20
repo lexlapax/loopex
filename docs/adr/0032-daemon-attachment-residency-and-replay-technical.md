@@ -730,7 +730,7 @@ an admission executing inside core. Stopping it would destroy exactly what
 Outcome 1 exists to prove, that work progresses with zero attachments. And
 there is no operation to stop one with: core owns coordinator lifetime, and
 none of M5's five core changes (concurrent attachment, the read-only existence
-query, the trace exclusion, `quiesce/2`, and the create and resume results'
+query, the trace exclusion, `quiesce/1`, and the create and resume results'
 `disposition` and `residency` fields) stops a coordinator,
 so a deactivation call would be a further core change this milestone does not
 make.

@@ -96,8 +96,9 @@ is written — and it is the same class of act as writing the credential frame,
 protected the same way ADR 0019 already protects that sender. The registry
 lookup before it carries no credential, so routing adds no second place a
 secret can be seen. What keeps those bytes out of a trace is stated against
-the implementation rather than against ADR 0030's prose, which claims a
-match-specification exclusion the tracer does not have: the adapter is in no
+the implementation rather than against an assumption about it, and ADR 0030's
+match-specification exclusion is **implemented by M5 rather than assumed
+present**: the adapter is in no
 default trace namespace, so the credential work is untraced under every
 default configuration; and where a host explicitly names the adapter module,
 the credential-bearing functions are **excluded before a trace message is
@@ -107,12 +108,13 @@ because the raw call reaches the tracer first; it stays as defence in depth,
 resting on a bound *shape* — those bytes always travel under a
 credential-named key and are placeholdered at any size, which size alone would
 not give, since the pass leaves a short binary verbatim and a credential may
-be one byte. The exclusion is by **process**, not by function: the sender excludes itself
-from every trace session before it resolves anything, because a function that
-carries the credential calls functions it does not own — a traced
-`:gen_tcp.send/2` shows the frame whatever this adapter's modules are
-patterned. M5 proves it at the tracer rather than at the sink, in a case that
-names `:gen_tcp` on purpose. ADR 0030 is not edited: its prose is honoured
+be one byte. The exclusion is **by function and by process together**, in one call: the
+match specification ADR 0030 names, for the functions that hold the bytes, and
+a process-level exclusion the sender installs on itself before it resolves
+anything — because a function that carries the credential calls functions it
+does not own, and a traced `:gen_tcp.send/2` shows the frame whatever this
+adapter's own functions are patterned. M5 proves both at the tracer rather
+than at the sink, in a case that names `:gen_tcp` on purpose. ADR 0030 is not edited: its prose is honoured
 once this lands.
 
 **Everywhere else the boundary is where the adapter's claims stop.** Inside it

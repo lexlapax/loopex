@@ -59,7 +59,7 @@ method. An earlier draft of this decision also added `session.stop` and called
 it durable; that is withdrawn, because core owns durable session truth, core
 has no durable stop command, and M5's five core changes — concurrent
 attachment, a read-only existence query, the trace exclusion, the bounded
-`quiesce/2`, and the create and resume results' two new fields — are none of
+`quiesce/1`, and the create and resume results' two new fields — are none of
 them durable commands. Ending a client's involvement is releasing control and
 disconnecting; the session itself keeps running, which is the point of a
 daemon, and another client reaches it again by acquiring control and
