@@ -942,7 +942,8 @@ leaked until the daemon restarts:
 | Resume, `:historical` | Released — the replayed result is returned without starting an owner (`control.ex:311-312`) |
 | Resume answering a **prepared** capability, where the activation is begun but not finished | **Held**: the reservation stays until that activation resolves, then converts on success and releases on abandonment. It is the one branch that is neither yet |
 | Either call refusing — `runtime_command_conflict`, `store_unavailable`, an invalid identifier, a placement mismatch, any other `{:error, _}` | Released |
-| Either call **crashing or timing out**, so the daemon has no result at all | **Held, then resolved by observation**: the daemon asks core whether that session is active and converts or releases accordingly. It does not guess, and it does not leak the slot |
+| A **resume** crashing or timing out, so the daemon has no result | **Held, then resolved by observation**: the daemon holds the session ID, so it asks core about that session and converts or releases accordingly |
+| A **create** crashing or timing out | **Held, then resolved by replay**: no session ID exists yet, so the daemon replays `session.create` under the same `command_id` — which returns the historical result and starts no coordinator (`control.ex:901-907`) — reads the session ID from it, and then resolves as a resume does. The replay carries the same reservation key, so it charges no second slot |
 
 **That last row is not hypothetical, and the reason is a default nobody
 chose.** The daemon reaches core through `Loopex.Runtime`, whose
