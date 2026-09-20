@@ -36,8 +36,9 @@ exits.
 
 The adapter also **traps exits**, which this arrangement relies on: an owner
 that crashes rather than stopping still runs the Store's `terminate/2`, so the
-marker comes back. Only a kill or a power loss leaves it, which is what the
-next daemon's verified stale-writer recovery is for.
+marker comes back. What leaves it is a kill, a power loss, or a bounded stop
+of the Store that expired and had to be ended with `Process.exit(pid, :kill)`
+— the three cases the next daemon's verified stale-writer recovery is for.
 
 **Store loss inverts it, and the daemon cannot order what it does not
 control.** This adapter answers an append error with
@@ -62,9 +63,12 @@ the dying store already gave it back.
 
 An abrupt kill of the daemon runs no `terminate/2` at all, which is why *that*
 leaves a marker behind and why the next daemon's verified stale-writer
-recovery exists. The three cases are distinct and the operator documentation
-keeps them so: an orderly stop releases the marker in order, a store loss
-releases it early and unexpectedly, and a kill leaves it for recovery. The adapter's limits are the
+recovery exists. The cases are distinct and the operator documentation keeps
+them so: a daemon that stops the Store releases the marker in order — whether
+that is an orderly shutdown or a fatal class where the Store is still alive
+and the daemon stops it before halting; a store loss releases it early and
+unexpectedly; and a kill, a power loss or an expired stop leaves it for
+recovery. The adapter's limits are the
 daemon's limits, and every one is an existing constant or refusal of
 `Loopex.Store.Local.Log`:
 
