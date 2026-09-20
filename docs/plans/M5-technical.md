@@ -543,8 +543,12 @@ retired root is reached only by reopening that root.
 sends `loopex.session.v1-experimental` in its `initialize` generations list.
 Against a `0.2.0` server that list has no common generation, so the server
 refuses with `unsupported_generation` — the refusal ADR 0023 already defines
-for exactly this — and the client's remedy is to send `loopex.experimental/1`
-instead. Nothing else about that client changes: same framing, same methods,
+for exactly this — and the client's remedy is to **reconnect** and send
+`loopex.experimental/1` on the new connection. Reconnecting is part of the
+remedy rather than a detail: ADR 0023 gives a refused connection no second
+negotiation attempt and leaves it uninitialized
+(`0023-…-technical.md:357-358`), so a client that retried `initialize` on the
+same socket would be refused again for a different reason. Nothing else about that client changes: same framing, same methods,
 same limits, same records. **The repository's own Node client is updated in
 the same change**, so the independent-client evidence is written against the
 new string rather than against a shim.
@@ -997,7 +1001,7 @@ detailed functions behaves exactly as it does now.
 neat one.** The brief for this change asked whether a fresh create can be
 refused *before* core starts the coordinator. It cannot, from the daemon: the
 coordinator is started inside the same call that would tell the daemon the
-create was fresh (`start_owner` in the `true` branch at `:908`), so by the
+create was fresh (`start_owner` in the `true` branch at `:909-918`), so by the
 time the daemon could act, the coordinator exists and the daemon has no API to
 stop it. So the rule at the ceiling is the blunt one: **at the activation
 ceiling the daemon refuses every `session.create`, replayed or fresh**, with
@@ -1122,11 +1126,20 @@ leaked until the daemon restarts:
 | Create, `:historical` with `control_entry: :dormant` | Released — a replay starts nothing. `:dormant` here covers both a `Control` entry that is `:unavailable` and no entry at all: neither is a live coordinator, and neither was charged |
 | Resume, `disposition: :fresh` | **Converted** — a coordinator started |
 | Resume, `:historical` | Released — the replayed result is returned without starting an owner (`control.ex:311-312`) |
-| Resume answering a **prepared** capability, where the activation is begun but not finished | **Held**: the reservation stays until that activation resolves, then converts on success and releases on abandonment. It is the one branch that is neither yet |
 | Any of the three refusing — `runtime_command_conflict`, `store_unavailable`, an invalid identifier, a placement mismatch, an attach whose first leg answers `{:error, :runtime_unavailable}` on its 5 s default, any other `{:error, _}` | Released. An attach refused at its first leg is the same case as any other refusal, because that leg mutates nothing (`control.ex:1235-1251`) |
 | A **resume** whose connection is lost while the call is in flight | **Held, then resolved by the relay**, which holds the call's real answer whether or not the process that asked is still there; where the daemon must re-establish it later, the client's replay under its original `command_id` carries the same `disposition`/`control_entry`. The existence query cannot answer this — it says `present` either way |
 | A **create** whose connection is lost while the call is in flight | **Held, then resolved by the relay** the same way; a later replay under the same `command_id` returns the historical result and starts no coordinator (`control.ex:901-907`), carrying the same two fields. Same reservation key, so no second slot |
 | An **attach whose connection process ends before it answers** | **Released with the connection**: the reservation is keyed by the connection, ADR 0032 binding a connection to at most one attachment, and core change 1 monitoring the attaching process. The daemon closes that connection, its process ends, and the dispatcher's `DOWN` handler drops the attachment. Nothing is observed, because nothing needs to be |
+
+**The daemon never calls `Runtime.prepare_resume_session/3`**, which is why
+the prepared-capability row an earlier revision carried is gone. That function
+exists (`runtime.ex:186-192`) and answers `{:ok, {:prepared, …}}` for a caller
+that wants to hold an activation open — and a daemon that used it would have
+an **unticketed** entry into core, an activation begun outside the relay's
+account and therefore outside the admission cut, which is a hole no
+reservation row could have covered. The daemon uses
+`resume_session_detailed/3` and nothing else, so there is no "held until the
+activation resolves" branch to describe.
 
 **Those rows used to say "crashing or timing out", and the timing-out half was
 false.** An earlier revision rested it on a default: `Loopex.Runtime`'s
@@ -2155,7 +2168,7 @@ that already exists somewhere, and the operator maximum is the sum:
 | 2 | **Abort admission** | **90 s** — **three** Store calls deep, at 30 s each; **per phase, not per session**, because the sessions are admitted **concurrently** | The admission may wait behind the transaction the coordinator already has in flight, which is itself two calls because core's ordinary path retries a `commit_unknown` once; then the drain's own admission, which is one call because it does **not** retry |
 | 3 | **Cancellation** | The derived backstop: `max` over drained sessions of `cancellation_bounds(g_i).cli_backstop_ms` | Core's own number for how long a cancellation may take |
 | 4 | **Fence** | **90 s** — **three** Store calls deep at worst, again **concurrent** across sessions | A head read, then the `advance_owner`, and on `commit_unknown` one `transaction_status` query. Three sequential calls, no retries |
-| 5 | **Coordinator termination** | **5 s**, the coordinator's own `shutdown` (`session_coordinator.ex:134-142`) | The value core already gives a coordinator to stop in |
+| 5 | **Coordinator termination** | **5 s**, the coordinator's own `shutdown` (`session_coordinator.ex:134-142`); **per phase, concurrent** across the unsettled coordinators | The value core already gives a coordinator to stop in — and a ceiling nothing approaches, because a coordinator does **not** trap exits (`init/1` sets no flag, `session_coordinator.ex:260-292`, and the module's only `Process.flag(:trap_exit, true)` is at `:3108-3109`, inside the per-invocation provider guard it spawns), so it has no `terminate/2` to run and dies at once |
 | 6 | **Daemon teardown** | **5 s** | This plan's one chosen number, covering the notice, the closes, the lease owners, the relay and the edges |
 | 7 | **Store** | **30 s**, its own `@call_timeout` | The stop that releases the marker |
 
@@ -2456,7 +2469,21 @@ the owner fixes.
    where it is.** Each open connection gets one `daemon.stopping` naming
    `operator_stop`, bounded best-effort as ADR 0032 fixes — one write attempt
    into the existing 4 MiB output buffer — and is closed, and the listening
-   socket is closed with them. **Nothing unlinks the pathname**, on this path
+   socket is closed with them.
+
+   **This is a collective sweep too, for the same arithmetic as the lease
+   owners.** Up to 512 connections exist, and the write and the close are each
+   microseconds — one non-blocking `send` into a buffer the daemon already
+   holds, and one `close` — so the work is trivial; what is not trivial is
+   doing 512 of them in sequence and then waiting for 512 process exits one
+   after another inside phase 6. So the owner writes and closes **all of
+   them at once**, then waits **once** for every connection process to exit,
+   killing whatever is left at the phase's end. The processes must actually
+   end, not merely stop being written to: core change 1's monitor is what
+   releases each connection's attachment, and it fires on that process's
+   `DOWN`. A connection killed here loses a buffered record it had not
+   finished writing, which is the case ADR 0032 already admits when it says a
+   client may learn of a shutdown only by its socket closing. **Nothing unlinks the pathname**, on this path
    or any other: the next daemon to prove it holds the marker removes it
    before binding, which is the only safe moment there is.
 4. **Every lease owner stops as one sweep, then the admission relay**, inside
@@ -4050,7 +4077,7 @@ line; M5 introduces none of its own.
 | Frame ceiling on any single store record | 4 MiB | ADR 0031 |
 | Retention and replay | Full history, no compaction, full replay at open | ADR 0031 |
 | Concurrent connections per daemon | 512, the attachment number reused; the 513th is refused `capacity_exceeded` at `initialize` and closed | ADR 0032 |
-| Time an accepted connection may take to complete `initialize` | 30 s, the lease term reused, after which it is closed with no record; without it the connection ceiling would bound nothing | ADR 0032, against ADR 0033's `lease_term_ms` |
+| Time an accepted connection may take to complete `initialize` | 30 s, advertised under its own limits key `initialize_deadline_ms`, after which the connection is closed with no record; without it the connection ceiling would bound nothing | ADR 0032, its value derived from ADR 0033's lease term rather than chosen, and carried as a separate key so neither contract moves the other |
 | Attachments per session | 64 | ADR 0032 |
 | Attachments per daemon | 512 | ADR 0032, its attachment-lifecycle list, with the limit key in its limits table |
 | Core event-count queue per attachment | 1,024 events | ADR 0032 |

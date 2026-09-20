@@ -345,6 +345,7 @@ added keys are enumerated so the digest covers them:
 | Limit key | Value |
 | --- | --- |
 | `connections_per_daemon` | 512 |
+| `initialize_deadline_ms` | 30,000 |
 | `attachments_per_session` | 64 |
 | `attachments_per_daemon` | 512 |
 | `session_list_page_max` | 256 |
@@ -387,11 +388,20 @@ Nothing else releases such a connection — there is no attachment to evict, no
 lease to expire, and ADR 0023's connection-state rules govern what a
 connection may *do* before `initialize`, not how long it may take. So an
 accepted connection that has not completed `initialize` within the **lease
-term, 30 seconds**, is closed. That number is reused rather than chosen: it is
-already this milestone's one connection-lifetime bound, fixed by ADR 0033 and
-listed in this pair's limits as `lease_term_ms`, and a `initialize` handshake
-is one frame each way on a local socket, so thirty seconds is a ceiling no
-honest client approaches. The close carries no record — the connection has
+term, 30 seconds**, is closed, under its **own** advertised limit key,
+`initialize_deadline_ms`. It is a separate key carrying the same value as
+`lease_term_ms`, and the separation is the point: one key meaning two
+contracts would let a later change to the lease term silently move the
+handshake deadline, or the reverse, and a client reading `lease_term_ms` to
+decide when to renew would be reading a number that also governs something it
+has nothing to do with. **The value is derived rather than chosen**: thirty
+seconds because that is the one connection-lifetime bound this milestone
+already fixes, so the daemon introduces no number — and if the two ever need
+to differ, they can, which is what having two keys buys. An `initialize`
+handshake is one frame each way on a local socket, so thirty seconds is a
+ceiling no honest client approaches. Adding the key changes generation 2's
+limits input and therefore its digest, which is stated here so the pinned
+literal is computed over it. The close carries no record — the connection has
 negotiated nothing, so there is no generation whose error shape it could be
 sent in — exactly as the peer-credential refusal closes before initialize.
 
@@ -443,7 +453,7 @@ limits — five inputs, and generation 2 changes **all five**:
 | Methods | Adds `session.list`, `daemon.status`, `session.acquire_control`, `session.release_control` |
 | Record families | Adds `daemon.stopping` and `daemon.notice` |
 | **Error codes** | Adds every refusal generation 2 can return and generation 1 cannot: `control_held`, `control_not_held`, `control_pending`, `control_capacity_reached`, `control_owner_lost`, `session_dormant`, `daemon_stopping`, the four existence-query refusals the daemon maps to the wire (`session_unknown`, `session_id_invalid`, `store_unavailable`, `existence_indeterminate`), and the activation and residency refusals (`activation_ceiling_reached`, `composition_mismatch`). **Not** `session_index_too_large`, which is a startup exit class and can reach no client, and **not** `capacity_exceeded`, which generation 1 already carries and generation 2 reuses for the connection ceiling |
-| **Limits** | ADR 0023's framing and input ceilings are unchanged, and generation 2 **adds** the residency keys a client can read: `connections_per_daemon`, `attachments_per_session`, `attachments_per_daemon`, `session_list_page_max`, `session_index_entries`, `lease_term_ms` |
+| **Limits** | ADR 0023's framing and input ceilings are unchanged, and generation 2 **adds** the residency keys a client can read: `connections_per_daemon`, `initialize_deadline_ms`, `attachments_per_session`, `attachments_per_daemon`, `session_list_page_max`, `session_index_entries`, `lease_term_ms` |
 
 **`control_owner_lost` closes a controller whose lease owner died.** ADR 0033
 makes a lease owner's failure session-scoped: the daemon closes that session's
