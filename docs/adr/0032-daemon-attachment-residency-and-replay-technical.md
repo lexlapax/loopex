@@ -1102,6 +1102,14 @@ delivered contiguously after the snapshot. The daemon adds:
   renewing loses its lease on its own clock and becomes an ordinary observer,
   at which point the idle interval applies to it like any other.
 
+  Its witness is the pair that must differ: a controller of a session with a
+  long-running model call, consuming nothing for longer than the interval, is
+  asserted **still attached and still holding its lease**, while an observer
+  on the same session across the same interval is asserted evicted and closed.
+  A second case stops the controller's renewals and asserts that once the term
+  elapses it is evicted like any observer, so the exemption is proved to be
+  the lease's and not the connection's.
+
   **What resets the interval**, stated because "consumed nothing" is not a
   mechanism: any **durable record the daemon completely emits to that
   connection**, and any **request that connection sends**. Either is evidence
