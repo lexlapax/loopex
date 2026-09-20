@@ -73,6 +73,32 @@ unchanged. Count and byte ceilings apply together; an event that would
 exceed either triggers the stated detachment, eviction or refusal behavior
 before the ceiling is crossed.
 
+**Alternatives rejected.** TCP on loopback has no peer-credential check and
+invites remote exposure by misconfiguration. Serving generation 1 from the
+daemon would need a second fencing path with no wire epoch, and its one
+exclusive connection per session is what the foreground server already
+provides. Keeping M4's one-attachment-per-process rule contradicts what a
+daemon is for. An unbounded per-attachment queue lets one slow client grow
+coordinator-adjacent memory without bound. A daemon-owned proxy fan-out would
+duplicate core's cursor and queue ownership and need a second replay boundary
+to preserve the subscribe/snapshot race. Promising exactly-once replay was
+rejected on 2026-09-14 because at-least-once with client deduplication is the
+founding contract and no other surface honors more. Removing `session.list`
+was rejected the same day because an observer without filesystem access to the
+root would have no way to discover sessions. The companion records each in
+full.
+
+**Evidence its acceptance requires.** Two classes together. The transport and
+its generation are a protocol claim, so they need vectors and a compatibility
+proof: a generation-2 negotiation vector, refusal of a generation-1-only
+initialize, and an independent client over the socket. The residency rules are
+a durability and resource claim, so they need process fault injection and
+bounded-resource negatives on real processes: simultaneous daemon starts, loss
+of the store under a live listener, a slow observer detached at its last
+emitted cursor, idle eviction and reconnect with no missing durable event, and
+each count and byte ceiling refusing independently with observed process RSS
+recorded beside it.
+
 Technical depth: [Contract and evidence](0032-daemon-attachment-residency-and-replay-technical.md#technical-adr-0032-decision).
 
 <a id="concept-adr-0032-consequences"></a>
@@ -89,8 +115,9 @@ still does. The public protocol remains experimental with exact-generation
 agreement and no mixed-generation stream promise.
 
 Rollback is the M4 foreground server on the same local store: the daemon
-carries no residency state, so removing it loses nothing durable. Numbers are
-safety ceilings to prove under the M5 gate, not measured service promises.
+carries no residency state, so removing it loses nothing durable. The numbers
+are safety ceilings the M5 tests must show are enforced, not measured service
+promises.
 
 Technical depth: [Compatibility mechanics](0032-daemon-attachment-residency-and-replay-technical.md#technical-adr-0032-compatibility).
 

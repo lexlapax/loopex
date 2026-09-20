@@ -49,18 +49,41 @@ makes the durable-service claim truthful without adding an engine.
 **For the successor milestone, decide the selection procedure now and let its
 evidence fix the engine before that milestone's acceptance.** The
 daemon-grade store is a new adapter, `loopex_store_daemon`, behind the
-unchanged private session Store ports. After M5 closes and the successor's
-opening gate is refreshed red on that closed base, isolated, disposable
-contract experiments on separate task roots compare a BEAM-native segmented
+unchanged private session Store ports. After M5 closes, isolated, disposable
+contract experiments in their own worktrees compare a BEAM-native segmented
 log and a SQLite-backed NIF adapter against the same conformance and
-fault-injection suites. Neither experiment becomes product implementation,
-enters that milestone's Open candidate, or integrates to `main`. This pair is
-then revised to name the selected engine, both exact experiment revisions and
-their measured evidence before independent review and acceptance of those
-exact bytes. The current recommendation is the BEAM-native adapter because it
-avoids a compiled dependency and VM-level NIF risk while reusing proven local
-framing and repair; these are hypotheses to test, not a categorical veto of
-SQLite. Any candidate that fails a required fault case is ineligible.
+fault-injection suites. Neither experiment becomes product implementation or
+merges to `main`. This pair is then revised to name the selected engine, both
+exact experiment revisions and their measured evidence, before independent
+review and acceptance of those exact bytes. The current recommendation is the
+BEAM-native adapter because it avoids a compiled dependency and VM-level NIF
+risk while reusing proven local framing and repair; these are hypotheses to
+test, not a categorical veto of SQLite. Any candidate that fails a required
+fault case is ineligible.
+
+**Alternatives rejected.** Deferring this decision out of M5 entirely was
+rejected on 2026-09-14: the reference daemon still needs a recorded store
+selection, and the local adapter's ceilings are a fact the operator must be
+told rather than an absence of decision. Building the daemon-grade adapter
+inside M5 was rejected because it doubles the milestone's evidence — a new
+engine, its fault matrix, its migration and its rollback — without adding a
+proved capability to the durable-service question M5 exists to answer.
+Raising or removing the local log's 256 MiB capacity to postpone retirement
+was rejected because a silently growing log trades a truthful refusal for an
+unbounded replay at open. Mnesia and DETS were rejected as successor
+candidates for the reasons the companion records.
+
+**Evidence its acceptance requires.** The M5 half is a durability claim, so
+its class is process and store fault injection on the real adapter plus a
+rollback proof: a root driven to capacity refuses further mutation with the
+store's own reason while observers stay attached, an orderly stop still
+succeeds, and the foreground server and reference CLI then reopen the same
+root. No new conformance evidence is required, because the adapter and its
+suites are unchanged. The successor half claims a new engine and a migration,
+so its class is the full store conformance suite, the fault matrix, bounded
+replay measurement, backup and restore, forward migration with interrupted-
+import recovery, and safe refusal by the exact previous binary; none of it is
+owed before the successor milestone's acceptance.
 
 Migration is one-way and explicit: the successor's daemon imports a local log
 written by the M4 foreground server, the reference CLI or the M5 daemon into

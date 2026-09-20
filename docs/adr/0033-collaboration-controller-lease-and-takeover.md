@@ -61,6 +61,28 @@ takeover admitted at the live daemon's steady-clock expiry, and immediate
 release on orderly disconnect. Writer exclusion between two daemons on one
 state root stays the local store's writer marker, unchanged.
 
+**Alternatives rejected.** Putting the lease in core was rejected because the
+vision keeps collaboration policy above core and another host may choose a
+different rule. Last-writer-wins without an epoch was rejected because a
+killed controller's late command would interleave with its successor's. A
+lease with no expiry was rejected because a crashed controller would hold the
+session forever. A durable lease record was rejected because after a daemon
+restart every connection is gone with its socket and admission already
+requires the holder connection, so durability could only preserve a counter
+nothing needs. A counter-based epoch scoped to the daemon incarnation was
+rejected on 2026-09-14 because a lease-owner restart under the same
+incarnation would mint values already issued.
+
+**Evidence its acceptance requires.** This is a trust claim, so its class is
+negative tests on real processes plus a security reading of the admission
+path: every refusal — stale epoch, copied current epoch, non-holder
+connection, released lease, expired lease, observer abort — proved before core
+admission and before any session write, a controller killed mid-run fenced
+after takeover, a lease-owner process restarted while the daemon and its
+sockets survive, and a daemon restart leaving every session uncontrolled with
+every earlier epoch refused. No durable record changes, so no migration or
+rollback evidence is owed.
+
 Technical depth: [Contract and evidence](0033-collaboration-controller-lease-and-takeover-technical.md#technical-adr-0033-decision).
 
 <a id="concept-adr-0033-consequences"></a>

@@ -162,5 +162,6 @@ The M4 foreground server still has its own single connection and no daemon
 lease. Core session records, events and snapshots are unchanged. Removing the
 daemon removes the lease with it; no journal or file depends on it.
 
-Acceptance binds this complete pair at an exact candidate. Its evidence and
-compatibility claims remain unproved until the M5 gate's required paths execute.
+Acceptance binds this complete pair at the exact candidate the maintainer
+names in the governance record. Its evidence and compatibility claims remain
+unproved until the tests the M5 plan maps to Outcome 3 exist and pass.

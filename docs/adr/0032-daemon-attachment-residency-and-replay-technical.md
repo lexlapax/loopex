@@ -88,8 +88,11 @@ when the client lists it, at any position, and otherwise refuses with
 `unsupported_generation`, leaving the connection uninitialized with no second
 attempt, exactly as ADR 0023 fixes for a foreground process. The successful
 reply carries `selected_generation`, the exact generation-2 schema digest,
-the generation-2 method inventory and limits. The generation-2 schema and
-vectors are canonical bytes bound by the M5 gate before acceptance; a
+the generation-2 method inventory and limits. The generation-2 schema and its
+vectors are new files beside generation 1's, as
+`apps/loopex_protocol/priv/schema/loopex-experimental-2.json` and
+`apps/loopex_protocol/priv/vectors/loopex-experimental-2.json`, reviewed with
+the change that adds them; generation 1's bytes are untouched. A
 negotiation vector proves selection from a list that also names generation 1
 and refusal of a generation-1-only list. The M4 foreground server keeps
 serving generation 1 only, with its one-attachment-per-process rule.
@@ -187,5 +190,6 @@ unchanged; existing embedded callers retain their behavior, and the core
 supports independent same-session attachments. No durable record depends on
 residency state or on the session index.
 
-Acceptance binds this complete pair at an exact candidate. Its evidence and
-compatibility claims remain unproved until the M5 gate's required paths execute.
+Acceptance binds this complete pair at the exact candidate the maintainer
+names in the governance record. Its evidence and compatibility claims remain
+unproved until the tests the M5 plan maps to outcomes 2 and 4 exist and pass.

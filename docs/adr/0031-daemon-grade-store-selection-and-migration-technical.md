@@ -37,11 +37,12 @@ stopping the daemon and reopening that root, with the daemon or the
 foreground server. The daemon's operator documentation states the capacity,
 the refusal reason, the frame ceiling, full retention and this procedure.
 
-Evidence for the M5 selection lives in the M5 gate, not here: a root driven
-to the capacity ceiling refuses further mutation with the store's own reason
-while observers stay attached and an orderly stop still succeeds, and after
-that stop the foreground server reopens the same root. No new conformance
-evidence is required, because the adapter and its suites are unchanged.
+Evidence for the M5 selection is the M5 plan's Outcome 1 obligation, not a
+second copy here: a root driven to the capacity ceiling refuses further
+mutation with the store's own reason while observers stay attached and an
+orderly stop still succeeds, and after that stop the foreground server reopens
+the same root. No new conformance evidence is required, because the adapter
+and its suites are unchanged.
 
 ### Boundary
 
@@ -93,15 +94,10 @@ and database file format.
 
 ### Selection experiment and evidence
 
-After M5 closes and the successor milestone's refreshed opening gate is
-established red on that closed base, both candidates run in separate
-isolated, disposable contract branches and task roots. The experiments may
-build only the adapter slices and fixtures necessary to measure this
-decision; they do not enter that milestone's Open candidate, integrate to
-`main`, become accepted product bytes, or claim an inherited-gate result for
-the milestone branch. The gate-first checkpoint permits bounded contract
-experiments only after the one-lookahead planning restriction ends with M5
-closure. Both run:
+After M5 closes, both candidates run in separate disposable branches and
+worktrees. The experiments may build only the adapter slices and fixtures
+necessary to measure this decision; they do not merge to `main` or become
+accepted product bytes. Both run:
 
 - the shared store conformance suite that the local and in-memory adapters
   already pass, unchanged;
@@ -183,6 +179,7 @@ Backup is a quiescent copy of the root plus the adapter's integrity check;
 restore reopens the copy under the same placement identity and refuses a
 placement mismatch exactly as resume does today.
 
-Acceptance of the M5 selection binds this pair at an exact candidate under
-the M5 gate; the successor selection is bound again, with its experiment
-evidence, by the adopting milestone's gate.
+Acceptance of the M5 selection binds this pair at the exact candidate the
+maintainer names in the governance record. The successor selection is a second
+disposition on the revised pair, recorded the same way once its experiment
+evidence exists.
