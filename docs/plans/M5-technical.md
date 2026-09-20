@@ -37,7 +37,7 @@ Concept: [Scope](M5.md#concept-plan-scope).
 
 | Component | Owns | Cannot own |
 | --- | --- | --- |
-| `loopex` | Durable session truth, the race-free attach barrier and cursor, independent concurrent attachments to one session, the read-only session-existence query, **`Loopex.Trace`'s excluded-MFA list, which keeps a named function out of a trace session before any message is delivered**, **the bounded `quiesce/2` that settles every active coordinator or names what it could not**, the per-attachment event-count dispatcher queues, cancellation and recovery | A lease, a transport, a byte limit, residency policy or any daemon fact |
+| `loopex` | Durable session truth, the race-free attach barrier and cursor, independent concurrent attachments to one session, the read-only session-existence query, **`Loopex.Trace`'s excluded-MFA list, which keeps a named function out of a trace session before any message is delivered**, **the bounded `quiesce/2` that settles every active coordinator or names what it could not**, **the runtime-side create result's `disposition` and `residency` fields**, the per-attachment event-count dispatcher queues, cancellation and recovery | A lease, a transport, a byte limit, residency policy or any daemon fact |
 | `loopex_protocol` | Generation-2 records, validators, schema and vectors | Daemon behaviour or lease semantics |
 | `loopex_store_local` | The local adapter, unchanged in behaviour and gaining exactly one read-only call — whether the marker file still holds this daemon's marker, which the socket-unlink precondition needs and `WriterLock` does not expose (`writer_lock.ex:92-105`) — its 256 MiB log and 4 MiB frame ceilings, its `store_capacity_exceeded` and `store_log_too_large` refusals and its writer marker, which it takes at start and releases in its own `terminate/2` — so the daemon owns the Store *process* and stops it last in an orderly shutdown, and a store loss releases the marker before the daemon can act | Any daemon fact, lease, index or residency state |
 | `loopex_daemon` | Marker-first process and socket lifetime, existence validation by calling core's query rather than by attaching or resuming, the peer-credential check, generation-2 negotiation, per-connection socket output buffers, the resident window and aggregate byte ceiling, attachment residency and eviction, the in-memory controller lease and writer-epoch check, the session index with its recorded-entry bound and its bounded pages, attachment residency and the one-way activation ceiling, and diagnostics | Store or coordinator internals, a second loop, policy selection, host identity, a durable record or a durable method |
@@ -617,6 +617,55 @@ and continues **as an observer** on the same attachment until the process
 ends or the operator re-runs with `--take-over`. It does not race the
 deadline, because a mutation sent after the term elapsed will be refused
 anyway and a client that keeps trying only obscures when control was lost.
+
+
+**Core's create result tells the daemon which create it was, and that is core's
+fifth M5 change.** The daemon has two duties that pull against each other:
+charge a *fresh* create against the activation ceiling, because a fresh create
+starts a coordinator; and repair a directory entry for a session whose create
+is *replayed*, without activating anything. Today it cannot do either
+reliably, because core answers both the same way. All three branches at
+`control.ex:901-907` reply `{:ok, session_id}` — the session is already
+active; the command was seen before, so no owner is started; or it is fresh
+and an owner starts — and the value carries no trace of which.
+
+Core already computes what is missing: `create_command_absent?/2` binds
+`fresh?` at `:895`, four lines above the branch that discards it. So the fifth
+change is to stop discarding it. **Core's runtime-side create result — the
+Elixir function the daemon calls, not the released public protocol result —
+carries two plain fields beside the session ID:**
+
+| Field | Values | What the daemon does with it |
+| --- | --- | --- |
+| `disposition` | `:fresh` \| `:historical` | Charge an activation for `:fresh`; charge nothing for `:historical` |
+| `residency` | `:active` \| `:dormant` | Repair the directory entry and index row without activating when `:dormant`; leave both alone when `:active`, since an activated session already recorded them |
+
+**The public protocol result is unchanged.** Generation 1 and generation 2
+return what they return today; this is an in-VM API detail between core and
+any host, and no wire schema, digest or vector moves. A host that ignores the
+fields behaves exactly as it does now.
+
+**What happens at the ceiling, stated because the honest answer is not the
+neat one.** The brief for this change asked whether a fresh create can be
+refused *before* core starts the coordinator. It cannot, from the daemon: the
+coordinator is started inside the same call that would tell the daemon the
+create was fresh (`start_owner` in the `true` branch at `:908`), so by the
+time the daemon could act, the coordinator exists and the daemon has no API to
+stop it. So the rule at the ceiling is the blunt one: **at the activation
+ceiling the daemon refuses every `session.create`, replayed or fresh**, with
+`activation_ceiling_reached` and the restart remedy the ceiling already names.
+
+That costs something and the plan says what: recovery by `command_id` is
+unavailable at the ceiling until the daemon is restarted. It is the right
+trade because the alternative permits a sixty-fifth coordinator — breaking the
+one-way activation bound this milestone proves — to save a recovery path whose
+remedy is the restart the ceiling already prescribes. Below the ceiling, which
+is where recovery is actually performed, `disposition` does its work.
+
+Guessing the disposition from side effects — comparing activation counts
+before and after, or watching for a coordinator to appear — was the rejected
+alternative: it is a race by construction, since another connection may create
+a session between the two observations.
 
 **A dormant session refuses `attach` in either role.** `loopex attach` against
 a session this daemon has not activated is refused with `session_dormant`,
@@ -2065,6 +2114,21 @@ the cause and try again without a recovery step.
   would have turned into an immediate `:timeout_value` exit. All of them run
   at both toolchain pairs, because both timeout results were observed at
   both.
+- **A replayed create repairs, a fresh create charges.** Two cases on the
+  create disposition. A session whose directory entry was never written is
+  recovered by replaying `session.create` with the original `command_id`: the
+  case asserts core answers `disposition: :historical` with
+  `residency: :dormant`, that **no activation is charged**, that no
+  coordinator starts, and that the daemon repairs the directory entry and
+  index row from that answer alone. A genuinely fresh create asserts
+  `disposition: :fresh`, one activation charged, and a live coordinator. A
+  third asserts the pair for a session that is already active —
+  `:historical` with `residency: :active` — and that the daemon repairs
+  nothing, because an activated session already recorded both.
+- **At the ceiling, every create is refused.** A daemon at its 64th activation
+  refuses `session.create` with `activation_ceiling_reached` **whether the
+  create is fresh or a replay**, and the case asserts the replay is refused
+  too — the stated cost — and that no coordinator was started by the attempt.
 - **Reverse cleanup.** A startup made to fail after the marker is acquired —
   at the socket permission check and at the index bound, separately — leaves
   no marker held and no socket file behind, proved by a second daemon starting
@@ -2170,7 +2234,12 @@ has to happen where the patterns are installed; redaction at the sink is too
 late, the raw call having already reached the tracer. It is the smallest form
 of the requirement: a list of `{module, function, arity}` identities cleared
 after the module pattern, using `:trace.function/4` exactly as it already
-does. **One bounded `quiesce/2`** — which unifies nothing today and says so:
+does. **Two plain fields on the runtime-side create result** — which unify
+nothing and add no wire surface: they exist because core computes `fresh?` at
+`control.ex:895` and then throws it away four lines later, leaving every
+caller unable to tell a fresh create from a replay. Direct code cannot supply
+them, because the only alternative is inferring the answer from side effects,
+which is a race. **One bounded `quiesce/2`** — which unifies nothing today and says so:
 its only caller is the daemon's orderly stop, and the app-server host does not
 drain by hand, because `LoopexComposition.with_runtime/2` brackets a runtime
 that lives and dies with one client's stdin and has nothing to drain
