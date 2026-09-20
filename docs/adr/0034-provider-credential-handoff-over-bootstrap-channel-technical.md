@@ -333,6 +333,57 @@ boundary, not an absolute:
   functions a host names — including `:gen_tcp`, including modules nobody has
   thought of.
 
+  **That promise is about credential bytes, and it begins at the exclusion
+  point**, which an earlier revision stated absolutely and therefore stated
+  too widely. The **token** reaches the sender by travelling somewhere the
+  exclusion cannot cover: it sits in the model configuration's `options`, and
+  the coordinator hands those options to the adapter as the second argument of
+  `module.complete(request, options, progress)`
+  (`session_coordinator.ex:3231`) — inside a **coordinator**, a process the
+  runtime owns and `:set_on_spawn` therefore traces, and **before the sender
+  process exists at all**. A session that names the adapter module sees that
+  call. There is no ordering that fixes it: the token has to arrive before the
+  sender can exclude itself on its behalf.
+
+  So the token is covered by **redaction**, not by exclusion, and this pair
+  says which rather than letting the absolute claim imply otherwise:
+
+  - the **credential bytes** never appear in any trace message, because the
+    sender excludes itself before it holds them — that is the claim above, and
+    it is unqualified;
+  - the **token** may appear in a raw trace message for `complete/3`, and what
+    keeps it out of an **entry** is `Loopex.Trace.Entry`'s credential
+    redaction — which today does not reach it.
+
+  **The gap is exact, and closing it is part of core change 3.** `Entry` keys
+  its redaction off a map key: `redact/3` placeholders any value whose key
+  matches `@credential_pattern` — which does match `token`
+  (`entry.ex:25`, `:140-146`, `:220`). But `options` is a **keyword list**,
+  and a keyword list reaches `redact_list/4`, which walks every element with
+  the key argument `nil` (`entry.ex:206-218`) and then redacts each
+  `{key, value}` pair through the tuple clause, again with `nil`
+  (`entry.ex:153-158`). The key never reaches `credential_key?/1`. A
+  `%Loopex.LLM.ReqLLM.CredentialToken{id: <<16 bytes>>}` under
+  `credential_token:` is therefore rendered **verbatim** today: the struct's
+  own field is `id`, which matches nothing, and sixteen bytes is under the
+  64-byte binary threshold at `entry.ex:148`.
+
+  So core change 3 carries one further clause in `Entry`, and it is generic
+  rather than about this adapter: **a `{key, value}` pair inside a list is
+  redacted with `key` as its key** when `key` is an atom or a binary, exactly
+  as the same pair inside a map already is. That is the missing half of a rule
+  `Entry` already has, it closes every keyword list — `api_key:`,
+  `authorization:`, anything under 64 bytes — and it names no module core is
+  not allowed to know about. With it, the token renders as a `credential`
+  placeholder, and this pair's option key is `:credential_token` precisely so
+  that it does.
+
+  Its witness is the pair that must differ: `Entry.render/2` over a keyword
+  list carrying a `%CredentialToken{}` under `:credential_token` produces no
+  occurrence of the token's bytes, while the same token under a key naming
+  nothing does — so a case cannot pass because the value was short, absent or
+  never rendered.
+
   **The process half, probed at both toolchain pairs before it was written
   down.** A process flagged by inheritance (`:set_on_spawn` from a traced
   parent) calls `:trace.process(session, self(), false, [:all])`; the call
@@ -417,11 +468,32 @@ boundary, not an absolute:
   be the one case where a credential is resolved in a process a session may be
   tracing.
 
-  **Only an explicitly absent capability proceeds.** Where the host composed
-  no tracing capability at all, there is no tracer and no session, so nothing
-  can trace and the sender resolves normally. Absent is not the same as
-  unreachable, and the two are distinguished at composition rather than at
-  the call.
+  **The capability is mandatory wherever a credential token is configured,
+  and an absent one refuses.** An earlier revision of this pair let an
+  explicitly absent capability proceed, on the reasoning that a host which
+  composed no tracing capability has no tracer and no session, so nothing can
+  trace. That reasoning does not hold against the tree. **Every runtime starts
+  its own tracer**: it is the runtime supervisor's last child, started
+  unconditionally (`runtime/supervisor.ex:86-89`), and **any holder of the
+  runtime reference can start a session on it** through
+  `Loopex.Runtime.trace/2`, which resolves the tracer dynamically on every
+  call (`runtime.ex:343-348`). So "the host composed no capability" proves
+  nothing about whether a session is running; it proves only that the sender
+  has no way to exclude itself from one. Omission was safety made optional,
+  and the thing it protects is present in every runtime there is.
+
+  So the rule is one rule, and there is no absent branch: **a model
+  configuration that carries a `:credential_token` must carry a tracing
+  capability**, and one that is **missing, malformed, unbound, or present but
+  unreachable** fails the invocation with `:unavailable` **before the token is
+  routed** — before any lookup, before custody is reached, before a byte
+  exists in the parent. Missing and unreachable now differ only in when they
+  are caught: a missing or malformed capability is refused at **composition**,
+  where every other malformed option is, so an unbound one cannot reach a
+  call; an unreachable one is the per-invocation refusal above. This reverses
+  the earlier decision, and the earlier decision is recorded here as what it
+  was: a case in which the credential would have been resolved in a process a
+  session may have been tracing.
 
   **The MFAs this adapter supplies, exactly three.** They are the functions
   that hold the resolved bytes or the token, and the list is passed to
@@ -493,13 +565,19 @@ boundary, not an absolute:
   while a sender is alive and empty after it exits, which is what separates
   "the monitors work" from "the set was never populated".
 
-  **It fails closed.** Surface: the invocation's own result, plus the child's
-  record of what it received. With the tracer made unavailable at the instant
+  **It fails closed, on every way the capability can be missing.** Surface: the
+  invocation's own result, plus the child's record of what it received. With
+  the tracer made unavailable at the instant
   `exclude_self/2` is called, the invocation is asserted to refuse
   `:unavailable` and the child is asserted to have received **no** credential
-  frame; with the capability explicitly absent, the same invocation is
-  asserted to succeed and the child to receive one. Two configurations, two
-  different answers on the same two surfaces.
+  frame. With the capability **absent** from a configuration that carries a
+  token, and again with one **bound to a dead process**, the same two
+  assertions hold — the refusal and the empty child — where the earlier
+  revision asserted the opposite for the absent case. The two answers that
+  must differ are therefore the refusal and an ordinary success, and the
+  success case is a **complete** configuration, which is the only one there
+  is. A composition given a token and no capability is asserted to refuse at
+  **composition**, so no call reaches the per-invocation branch at all.
 - Everywhere else the earlier absolutes stand unchanged: not in guardian
   state, not in an exit reason, not in a crash report, not in an IO request,
   not in a file, not in the environment, not in argv, and in no durable or
