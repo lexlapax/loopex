@@ -130,7 +130,7 @@ Concept: [Verification stages](M5.md#concept-plan-verification).
 
 | Outcome | Witness | What must be proved, beyond ordinary unit tests |
 | --- | --- | --- |
-| 1 | `apps/loopex_daemon/test/session_lifetime_test.exs` | A real daemon operating-system process per state root. The startup ordering and its readiness line: the line appears on `stdout` only after the marker is held and the socket is bound, permission-checked and accepting, a client connecting the instant it appears is served, and each of a held marker elsewhere, a failed socket permission check and an exceeded index bound prints no readiness line and exits non-zero with its own class. Orderly shutdown on `SIGTERM` sent to the daemon, and on `SIGINT` sent to the launcher that forwards it as `SIGTERM`: new connections refused and new admissions refused from that instant, then core's `quiesce/2` driving every active coordinator to settle within the composed cleanup grace and naming the sessions that did and did not — **both halves asserted**: a dispatched tool effect that settles inside the grace carries its ordinary terminal fact in the journal, and one held past the deadline is ended crash-equivalently with **no terminal claimed for it** — no `cancelled`, no `outcome_unknown`, no abort record — its ambiguous mutation left as `commit_unknown` and resolved to exactly one outcome when that session is next activated, one bounded best-effort `daemon.stopping` naming `operator_stop` attempted per open connection — asserted received where the transport accepts it and an EOF alone accepted where it does not — the socket unlinked while the marker is still held, the Store stopped last, and exit `0` — with the foreground server opening the same root immediately afterwards, which is what proves the marker was released, and the journal byte-identical to what an abrupt death at the same instant would have left. **Store loss is a separate fail-stop, not that sequence**: the Store terminates itself and releases the marker before the daemon can act, so the daemon observes the death, refuses service, closes every connection with `store_lost` (or `store_capacity_exceeded` where that was the reason), unlinks and exits non-zero with that class on `stderr`, attempting no Store stop because there is none to attempt — proved by a second daemon starting on that root with no stale marker to recover. An active session progresses with zero attachments. An orderly stop releases the writer marker and records nothing false; an abrupt kill followed by restart activates nothing, then activates each session the root records when a client reaches for it, under the same placement identity and with no duplicate effect. The restart proves the marker path explicitly: the daemon opens with `recover_stale_writer: true`, a marker whose holder is proved dead is reclaimed, a marker whose holder is alive refuses with `store_writer_active`, and a marker whose holder cannot be decided refuses with `store_writer_unverifiable` — all three before the socket path is read, unlinked or bound. Simultaneous starts on one root resolve at the writer marker with exactly one listener and the loser never touching the socket. A root driven to the 256 MiB log capacity refuses the append with `store_capacity_exceeded`, the store terminates, the caller sees `commit_unknown`, and the daemon closes the listener and every connection and exits naming the capacity with nothing committed lost; a root whose log is already past that bound is refused at open with `store_log_too_large` rather than opened and truncated. `session.list` returns pages of at most 256 entries in session-ID order with an exact continuation cursor from the daemon index, carrying only session identity, recorded placement identity, `residency` and `controlled`. A session committed to the Store whose directory entry was never written — injected at that exact cut — is absent from the listing, still reachable by ID, and present in every listing after the activation that records it. A detached long-running command and a pending admission each cross the idle deadline with every client gone and run to completion, proving dormancy releases attachments and never a coordinator. The activation ceiling refuses the 65th activation of a daemon lifetime with `activation_ceiling_reached` and the restart remedy, and the count starts again after a restart because it counts per lifetime; a fresh `session.create` raises the count by one, and at the ceiling a create is refused with that same reason, so creation is proved to spend an activation rather than being exempt from the bound; attach consults the activation set rather than the listing index, proved at the 4,096-entry ceiling where a session activated but deliberately unrecorded still attaches; killing an activated session's coordinator leaves the daemon serving: the listing still reports `residency: active`, which remains true because this daemon did activate that session, and the next command for it returns core's own refusal forwarded unchanged, with the daemon adding and interpreting nothing; a root whose directory exceeds the recorded-entry bound refuses at start; at that bound a session reached by ID is activated and not recorded and the listing carries `index_full`; a session committed to the Store whose directory entry was never written is recovered both by its ID — validated through core's read-only existence query, with the case asserting the validation itself created no attachment and no durable record — and, by a client that never saw the ID, through ADR 0032's full command-identity sequence run to the end — replay `session.create` with the original `command_id`, core returns the historical result and so the session ID **without starting a coordinator**, the existence query answers `present`, the daemon repairs the directory entry and index row, control is acquired, and `session.resume` with a fresh resume command ID under the granted writer epoch is what activates the session — with the case asserting exactly one session in the root, the returned ID equal to the committed one, the replay itself starting no coordinator, the directory entry and index row present afterwards, the session listed, a live coordinator existing after the resume with the activation count risen by one, and a later prompt landing on that session and producing its events rather than on a second session or on nothing; an unknown ID answers negative from that query with nothing created, nothing attached and no lease granted; a directory write that fails during activation is reported to that client, leaves the session usable and reachable by ID while absent from `session.list`, and is written by the retry the next time the live daemon holds that ID — right after activation, on a later command for the session, or when a client reaches it by ID; a recorded session the daemon's composition cannot serve refuses at activation by name while every other session in the root activates. After an orderly stop the foreground server and the reference CLI reopen the same root and resume a daemon-created session under the same placement identity with identical replay. No durable method reaches the socket |
+| 1 | `apps/loopex_daemon/test/session_lifetime_test.exs` | A real daemon operating-system process per state root. The startup ordering and its readiness line: the line appears on `stdout` only after the marker is held and the socket is bound, permission-checked and accepting, a client connecting the instant it appears is served, and each of a held marker elsewhere, a failed socket permission check and an exceeded index bound prints no readiness line and exits non-zero with its own class. Orderly shutdown on `SIGTERM` sent to the daemon, and on `SIGINT` sent to the launcher that forwards it as `SIGTERM`: new connections refused and new admissions refused from that instant, then core's `quiesce/2` durably admitting an abort with `"cause" => "operator_shutdown"` for every active session **before** cancelling anything, driving each session's in-flight work to settle under that session's own grace within a drain budget derived from `cancellation_bounds/1`, and at the deadline fencing and terminating every coordinator that did not settle before it answers — **both halves asserted**: a dispatched tool effect that settles carries its ordinary terminal fact in the journal, and one held past the budget leaves its coordinator dead at the instant it is reported with **no terminal claimed for that work** — no `cancelled`, no `outcome_unknown` — its ambiguous mutation left as `commit_unknown` and resolved to exactly one outcome when that session is next activated, one bounded best-effort `daemon.stopping` naming `operator_stop` attempted per open connection — asserted received where the transport accepts it and an EOF alone accepted where it does not — the socket unlinked while the marker is still held, the Store stopped last, and exit `0` — with the foreground server opening the same root immediately afterwards, which is what proves the marker was released, and the journal differing from what an abrupt death at the same instant would have left by exactly the admitted-abort records the drain wrote, with the unresolved transaction and its fence identical. **Store loss is a separate fail-stop, not that sequence**: the Store terminates itself and releases the marker before the daemon can act, so the daemon observes the death, refuses service, closes every connection with `store_lost` (or `store_capacity_exceeded` where that was the reason), unlinks and exits non-zero with that class on `stderr`, attempting no Store stop because there is none to attempt — proved by a second daemon starting on that root with no stale marker to recover. An active session progresses with zero attachments. An orderly stop releases the writer marker and records nothing false; an abrupt kill followed by restart activates nothing, then activates each session the root records when a client reaches for it, under the same placement identity and with no duplicate effect. The restart proves the marker path explicitly: the daemon opens with `recover_stale_writer: true`, a marker whose holder is proved dead is reclaimed, a marker whose holder is alive refuses with `store_writer_active`, and a marker whose holder cannot be decided refuses with `store_writer_unverifiable` — all three before the socket path is read, unlinked or bound. Simultaneous starts on one root resolve at the writer marker with exactly one listener and the loser never touching the socket. A root driven to the 256 MiB log capacity refuses the append with `store_capacity_exceeded`, the store terminates, the caller sees `commit_unknown`, and the daemon closes the listener and every connection and exits naming the capacity with nothing committed lost; a root whose log is already past that bound is refused at open with `store_log_too_large` rather than opened and truncated. `session.list` returns pages of at most 256 entries in session-ID order with an exact continuation cursor from the daemon index, carrying only session identity, recorded placement identity, `residency` and `controlled`. A session committed to the Store whose directory entry was never written — injected at that exact cut — is absent from the listing, still reachable by ID, and present in every listing after the activation that records it. A detached long-running command and a pending admission each cross the idle deadline with every client gone and run to completion, proving dormancy releases attachments and never a coordinator. The activation ceiling refuses the 65th activation of a daemon lifetime with `activation_ceiling_reached` and the restart remedy, and the count starts again after a restart because it counts per lifetime; a fresh `session.create` raises the count by one, and at the ceiling a create is refused with that same reason, so creation is proved to spend an activation rather than being exempt from the bound; attach consults the activation set rather than the listing index, proved at the 4,096-entry ceiling where a session activated but deliberately unrecorded still attaches; killing an activated session's coordinator leaves the daemon serving: the listing still reports `residency: active`, which remains true because this daemon did activate that session, and the next command for it returns core's own refusal forwarded unchanged, with the daemon adding and interpreting nothing; a root whose directory exceeds the recorded-entry bound refuses at start; at that bound a session reached by ID is activated and not recorded and the listing carries `index_full`; a session committed to the Store whose directory entry was never written is recovered both by its ID — validated through core's read-only existence query, with the case asserting the validation itself created no attachment and no durable record — and, by a client that never saw the ID, through ADR 0032's full command-identity sequence run to the end — replay `session.create` with the original `command_id`, core returns the historical result and so the session ID **without starting a coordinator**, the existence query answers `present`, the daemon repairs the directory entry and index row, control is acquired, and `session.resume` with a fresh resume command ID under the granted writer epoch is what activates the session — with the case asserting exactly one session in the root, the returned ID equal to the committed one, the replay itself starting no coordinator, the directory entry and index row present afterwards, the session listed, a live coordinator existing after the resume with the activation count risen by one, and a later prompt landing on that session and producing its events rather than on a second session or on nothing; an unknown ID answers negative from that query with nothing created, nothing attached and no lease granted; a directory write that fails during activation is reported to that client, leaves the session usable and reachable by ID while absent from `session.list`, and is written by the retry the next time the live daemon holds that ID — right after activation, on a later command for the session, or when a client reaches it by ID; a recorded session the daemon's composition cannot serve refuses at activation by name while every other session in the root activates. After an orderly stop the foreground server and the reference CLI reopen the same root and resume a daemon-created session under the same placement identity with identical replay. No durable method reaches the socket |
 | 2 | `apps/loopex_daemon/test/socket_transport_test.exs`, `apps/loopex_protocol/test/public_schema_conformance_test.exs` | A raw-byte client over the socket negotiates generation 2 and receives generation 2's **own** exact schema digest, written out as a literal in the conformance module beside generation 1's and different from it by construction: `LoopexProtocol.Session.schema_digest/0` is taken over the generation, the ordered methods, the ordered record families, the ordered error codes and the limits, and generation 2 changes the first two, so a generation 2 that negotiated generation 1's digest would be reporting a contract it does not serve. Generation 1's bytes, digest, method inventory and limits are proved unchanged in the same module and at their own literals — the `3a17…08f4` schema digest, the schema file digest and the vectors file digest the conformance module already pins — so the generation-2 work is proved additive rather than asserted to be. A generation-1-only initialize is refused with nothing created. Generation 2's record families include `daemon.stopping`, with literal vectors for each reason a **client can actually receive** — `operator_stop`, `store_lost`, `store_capacity_exceeded`, and one `fatal:<class>` per linked component of the fixed set (`runtime_lost`, `transfers_lost`, `workspace_lease_lost`, `executor_lost`, `registry_lost`, `custody_lost`, `listener_lost`), plus `control_owner_lost`, which closes one session's controller attachment without ending the daemon — and explicitly none for the startup-phase classes, which carry no vector because no socket exists when they occur and no client can be holding one, and its presence in the digest is what a generation 2 omitting it would fail on. Its delivery bound is proved both ways: a reading client receives the record before the close, and a client that has stopped reading until its 4 MiB output buffer is full receives nothing and is closed anyway, with the daemon making exactly one attempt and never blocking on it. Identical durable identities for the same command corpus through facade, foreground server and socket. Owner-only peer access proved in both layers: the socket's `0700` daemon-owned subdirectory and `0600` socket mode read back after bind, a permissive subdirectory or socket mode refused at start, a subdirectory the daemon does not own refused, a path component below the root that it did not create refused — and a state root at the ordinary `0755` the foreground server creates it with accepted, not refused, because the daemon owns the subdirectory and never re-permissions the root — and an unreadable or undecodable peer credential closing the connection before initialize — all in the fast check, which needs no second user — with the real cross-uid refusal and the same-uid success carried by two `@tag :cross_uid` cases the release check runs as `mix test --only cross_uid` on its single run, which closure requires to be on Linux, and where the script asserts exactly two executed tests so neither a zero nor a lone survivor can pass. Frame, fragment, malformed-input and over-long socket path refusals with distinct stable reasons, the path cases binding at the derived bound and at one byte past it on each platform the release check runs. A client disconnect recorded as transport loss with no cancellation and no interaction change. The generation-2 vectors are literal bytes with literal verdicts, held beside generation 1's in `apps/loopex_protocol/test/public_schema_conformance_test.exs`, never values generated from the implementation they check |
 | 3 | `apps/loopex_daemon/test/collaboration_test.exs` | One lease per session in daemon memory with observers attached. Connection identity, epoch, held state and unexpired term checked together before core admission or any durable write, including a known current epoch sent by an observer. Takeover only after release or expiry, with a fresh epoch minted before the successor's first command. A killed controller fenced and its late commands refused. The three ways a controller stops holding, proved separately because the transport cannot tell two of them apart: an explicit `session.release_control` frees the lease at once, while an EOF from a politely closed client and a killed client both wait for expiry, with a takeover refused before the deadline and granted after. A lease owner killed while a mutation is in flight taking the listener, every connection and the daemon down with it, after which the restarted daemon holds no lease and the previous holder's delayed command is refused on both the holder and the epoch check. A daemon restart leaving every session uncontrolled with every earlier epoch refused. A controller abort cancelling work dispatched under an earlier process with a truthful cleanup outcome. The expiry linearization: a mutation blocked inside core across the deadline settles under its own lease while the eligible takeover waits and is granted only after it resolves; the holder's next mutation refused at the deadline; the acquiring request refusing with `control_pending` when its own deadline elapses first; and the holder disconnecting while a mutation is in flight — in every case exactly one of settle or refuse, never both. No control from content, metadata, answers or attachment order. Forward and backward wall-clock jumps changing neither live admission nor takeover timing |
 | 4 | `apps/loopex/test/concurrent_attachments_test.exs`, `apps/loopex/test/session_existence_query_test.exs`, `apps/loopex_daemon/test/replay_residency_test.exs` | Core's read-only session-existence query answers exactly one of the closed set `present`, `absent`, `invalid_id`, `store_unavailable` and `unexpected`, from a fresh process against a real root, with one case per result. `store_unavailable` is injected through the controllable fault store the suite already has, `Loopex.M1RuntimeTestStore`, whose `fail_reads/2` hook makes its reads refuse — not by making the root unreadable, which cannot produce that answer on the real adapter: `Loopex.Store.Local` answers `ownership_head` from `state.store`, in memory, so a root that has become unreadable on disk still answers. `unexpected` is injected by a stub answering outside the set. It is proved to create no attachment, no incarnation, no durable record and no Store write: the root's journal and session directory are byte-identical before and after a run of queries, including for unknown and malformed IDs. Control acquisition proceeds only on `present`; the other four fail closed with no attachment, no lease and no activation, and name four distinct reasons, so an unreadable store is never reported as an unknown session. Several core attachments to one session remain independent when one detaches or backpressures. A snapshot anchored at the committed sequence, then contiguous at-least-once buffered and live delivery across the window boundary with no gap. Core is the only replay owner: every delivery case runs a second time with the daemon's resident window disabled and a third with it dropped mid-stream, all three byte for byte identical, so the window is proved to establish no snapshot and no cursor. Aggregate reclamation follows the fixed order ADR 0032 sets — zero-attachment windows by ascending last delivery, then the furthest-behind session's window, then detachment — including the case where zero-attachment windows alone consume the ceiling. A slow observer detached at its last emitted cursor while the controller and the other attachments continue. Per-session and per-daemon limits refusing independently. Idle eviction and reconnect with no missing durable event, any duplicate deduplicated by session ID, sequence and event ID. Retained encoded bytes at or below the 4 MiB output buffer, 16 MiB window and 512 MiB aggregate ceilings, enforced in the daemon-owned stages, exercising 512 attachments and maximum-sized output records separately, with observed process RSS recorded beside the ceilings. Progress coalesced or dropped with counted drops and no journal delay |
@@ -485,7 +485,7 @@ and its refusal class:
 | Provider launch | `--provider-launch` / `LOOPEX_PROVIDER_LAUNCH` | none | `provider_launch_required`, `provider_launch_invalid` |
 | Policy | `--policy` / `LOOPEX_POLICY` | **none, deliberately** — authority is the operator's to name, as the app-server host already insists | `policy_required`, `policy_unknown` |
 | Provider credential | `LOOPEX_PROVIDER_API_KEY` | none | `provider_credential_required`, checked at start so an unattended launch refuses in a second rather than at the first dispatch. The daemon reads it once, deletes it from its environment and holds it in custody under ADR 0034 |
-| Cleanup grace | `--cleanup-grace-ms` | the composition default | `cleanup_grace_invalid`, and the admitted domain is **an integer of 1 or more**. Zero is refused, which the local executor's own validation would admit (`apps/loopex_executor_local/lib/executor.ex:897`, `>= 0`) but core's `cancellation_bounds/1` refuses (`apps/loopex/lib/loopex/executor.ex:456`, `grace_ms >= 1`): a daemon composed with zero would carry a grace core cannot derive bounds from |
+| Cleanup grace | `--cleanup-grace-ms` | the composition default | `cleanup_grace_invalid`, and the admitted domain is **an integer from 1 to `18_446_744_073_709_551_615`**, exactly core's own (`@max_cleanup_grace_ms`, `apps/loopex/lib/loopex/executor.ex:75`, and `grace_ms >= 1` at `:456`). Zero is refused, which the local executor's own validation would admit (`apps/loopex_executor_local/lib/executor.ex:897`, `>= 0`): a daemon composed with zero would carry a grace core cannot derive bounds from. A very large value is **accepted, not refused** — the daemon never passes it to a `receive … after` unsliced, for the reason the wait rule below gives |
 | Project resources | as the host already takes them | as today | as today |
 | Socket path | `--socket` | `<root>/daemon/daemon.sock` | `socket_path_too_long`, `socket_permission_unverified`, `invalid_socket_path` for a path outside the root's `daemon/` directory |
 
@@ -1182,12 +1182,89 @@ running with a handler and no owner. That class is in the exit list above and
 in the fatal-class map's note, and it is the one class no linked component
 produces.
 
+**Three clocks, and no component invents a fourth.** An earlier revision gave
+every component "the composed cleanup grace" and gave the Store a floor over
+it. That was wrong twice: a session's `cleanup_grace_ms` is an input to
+*cancellation*, not a shutdown deadline, and a per-component budget makes the
+worst-case stop the sum of the components rather than a bound anyone can
+state. The contract is three clocks:
+
+| Clock | What it bounds | Where the number comes from |
+| --- | --- | --- |
+| **`g`**, each session's committed `cleanup_grace_ms` | The cancellation of that session's effects, and nothing else | The session's own composition; already used by `Loopex.Executor.cancellation_bounds/1` |
+| **`drain_ms`** | The whole drain, across every session | Derived: `max` over the drained sessions of `cancellation_bounds(g_i).cli_backstop_ms` (`apps/loopex/lib/loopex/executor.ex:456-474`, where `cli_backstop_ms` is defined as `observe + reserve + terminal` and documented as "the sum a process-liveness backstop must cover"). `g` itself is never a deadline |
+| **`teardown_ms`** | **One absolute deadline shared by every non-Store stop** — lease owners, the relay, the runtime, executor, workspace lease, transfers, custody, registry | A single budget the owner fixes once, so the worst case is one bound rather than a sum over components |
+| **The Store phase** | The Store's stop alone | A **fixed 30 s**, the Store's own `@call_timeout` (`apps/loopex_store_local/lib/loopex/store/local.ex:65`), independent of `g` and of `teardown_ms` |
+
+`drain_ms` is derived rather than chosen because the cancellation it waits on
+is already bounded by core: `cli_backstop_ms` is the number core itself says a
+liveness backstop must cover for a session with that grace, so a drain that
+waits exactly that long waits neither less than the cancellation needs nor
+longer than core can justify. Taking the maximum over the drained sessions —
+not the sum — is what keeps the bound flat as sessions multiply.
+
+**The Store phase is fixed, not `max(g, 30_000)`.** The previous revision's
+`max` made an operator's grace able to *lengthen* the Store phase, which is
+the one phase whose length has nothing to do with any session. Thirty seconds
+is the Store's own bound on its synced call path, and releasing the marker is
+that same class of work — `File.read`, `File.rm`, a parent-directory sync
+(`writer_lock.ex:105-115`). **The usual release takes milliseconds**; the 30 s
+is a ceiling that matters only when the filesystem is wedged, which is exactly
+when killing the Store mid-release is worst. The same fixed phase applies in
+the failed-start reverse cleanup, for the same reason.
+
+**So the operator-facing bound is stated, once:**
+
+> **Maximum graceful stop = `drain_ms` + `teardown_ms` + 30 s.**
+
+A service manager that kills the daemon sooner than that turns the stop into a
+forced shutdown — the journal is still crash-equivalent, but work that would
+have settled does not, and the marker may be left for the next daemon's
+verified stale-writer recovery. The operator documentation states the bound
+and that consequence together, so a `TimeoutStopSec` shorter than it is a
+choice rather than an accident.
+
+**Every wait is an absolute deadline, sliced — because the BEAM's `after` has
+a domain the plan must respect.** Core admits a `cleanup_grace_ms` up to
+`18_446_744_073_709_551_615` (`@max_cleanup_grace_ms`,
+`apps/loopex/lib/loopex/executor.ex:75`), and the derived budgets above are
+sums of such values. A `receive … after` does not accept numbers that large.
+Probed at **both** toolchain pairs:
+
+| `receive … after` | 1.18.5-otp-27 | 1.20.3-otp-29 |
+| --- | --- | --- |
+| `4_294_967_295` | accepted (waits) | accepted (waits) |
+| `4_294_967_296` | **exits `:timeout_value` at once** | **exits `:timeout_value` at once** |
+| `18_446_744_073_709_551_615` | **exits `:timeout_value` at once** | **exits `:timeout_value` at once** |
+
+The limit is 2^32-1 milliseconds, about 49.7 days, and exceeding it is not a
+long wait but an immediate exit in the waiting process — which for the owner
+would be a shutdown that never runs. Nothing in this repository slices a wait
+today, so the rule is stated here:
+
+- **Every phase is an absolute instant**, `System.monotonic_time(:millisecond)
+  + budget`, computed once. Deadlines compose by comparison, not by
+  subtracting one timeout from another, so no arithmetic can produce a
+  negative `after` — which is the other way `after` fails, as the 1 ms stop
+  probe showed.
+- **Every wait is taken in slices of at most `@wait_slice_ms`, 60_000**, a
+  minute being long enough that slicing costs nothing measurable and short
+  enough to be far inside the domain. After each slice the owner compares the
+  clock with the deadline and either waits again or gives up. A budget of any
+  admitted size is therefore reachable, and no `after` argument is ever larger
+  than the slice.
+- **The composition-input table says what a huge value does**: it is accepted,
+  not refused, because core accepts it; the daemon simply never passes it to
+  `after` unsliced. An operator who composes a grace of a year gets a daemon
+  that waits a year, in minute slices, rather than one that exits instantly at
+  the first stop.
+
 **Daemon-initiated shutdown is a drain and then a teardown, in reverse
 order.** `SIGTERM` reaches the owner — sent directly, or forwarded by the
 launcher from a terminal `SIGINT` — and it performs these six
 steps itself. They are the owner's code, not a supervisor's behaviour, which
-is what lets each one carry a reason and lets the teardown use a bound the
-owner chooses.
+is what lets each one carry a reason and lets the teardown use one deadline
+the owner fixes.
 
 1. **The listener stops accepting, and the daemon refuses new admissions.**
    A new connection is refused rather than queued, and a command arriving on
@@ -1195,30 +1272,37 @@ owner chooses.
    clients yet and nothing is closed: the connections stay open across the
    drain, because a client that is about to be told something true is better
    served by being told it than by an early close.
-2. **The runtime is quiesced within the composed cleanup grace.** The owner
-   calls core's `quiesce/2` and waits for its answer, which names the sessions
-   that settled and the sessions that did not. This is the drain, and it is
-   the step that makes the Concept's promise true rather than aspirational;
-   what it does, and what it cannot do, is set out below.
+2. **The runtime is quiesced within `drain_ms`.** The owner calls core's
+   `quiesce/2` with that derived deadline and waits for its answer, which
+   names the sessions that settled and the sessions that did not — and, by the
+   time it answers, every session it could not settle has already been fenced
+   and terminated inside core. This is the drain; what it does, and what it
+   cannot do, is set out below.
 3. **Clients are told, and the socket path is unlinked.** Each open connection
    gets one `daemon.stopping` naming `operator_stop`, bounded best-effort as
    ADR 0032 fixes — one write attempt into the existing 4 MiB output buffer —
    and is closed. **Then the owner unlinks the socket path, here and not at
    the end**, because this is the last moment at which the daemon is certainly
    still the marker holder.
-4. **Every lease owner stops**, in sequence, sharing one grace. Every lease
-   vanishes with them. Nothing durable is involved, and no client is left
-   holding one, because no connection survived step 3. Their exits are
+4. **Every lease owner stops, then the admission relay**, in sequence,
+   against the shared `teardown_ms` deadline. Every lease vanishes with the
+   owners; the relay goes after them because it is what holds their admission
+   tickets, and stopping it first would discard a ticket a lease owner could
+   still be waiting on. Nothing durable is involved, and no client is left
+   holding a lease, because no connection survived step 3. Their exits are
    consumed like any other the owner asks for — a lease owner stopped here
    closes no controller attachment and produces no `control_owner_lost`,
    because there is no attachment left to close.
-5. **The runtime stops, and this is where whatever did not settle ends.** The
-   helper for this step calls `Supervisor.stop(runtime_supervisor, :normal, grace)`
-   on the pid the composition function handed it, with `grace` the **composed
-   cleanup grace** — the same value the sessions were composed with, so no
-   number is introduced. It does **not** call `Loopex.Runtime.stop/1`: that is
-   arity one and uses the default `:infinity` timeout, which is exactly the
-   bound this step exists to supply.
+5. **The runtime stops.** After the drain there is little left to end — every
+   coordinator quiesce could not settle was fenced and terminated inside core
+   before `quiesce/2` returned — so this step ends the tree rather than the
+   work. The helper calls
+   `Supervisor.stop(runtime_supervisor, :normal, remaining)` on the pid the
+   composition function handed it, where `remaining` is what is left of the
+   **shared `teardown_ms` deadline**, not a per-component grace. It does
+   **not** call `Loopex.Runtime.stop/1`: that is arity one and uses the
+   default `:infinity` timeout, which is exactly the bound this step exists to
+   supply.
 
    `Supervisor.stop/3` is `GenServer.stop(supervisor, reason, timeout)`
    (supervisor.ex:1152-1154 at the floor pair, :1197-1199 at the current
@@ -1226,7 +1310,7 @@ owner chooses.
    same place — the helper — and its outcome is read the same way, from the
    exit on the owner's link. What `:proc_lib.stop/3` does to *its* caller on
    expiry, whatever shape that takes, is the helper's business and dies with
-   it. The owner's `after grace` fires, it kills the runtime supervisor with
+   it. The owner's wait on the shared deadline expires, it kills the runtime supervisor with
    `Process.exit(runtime_supervisor, :kill)`, and it reads the exit that
    follows: `:normal` or `:shutdown` where the tree came down on its own,
    `:killed` where the kill ended it, anything else classified.
@@ -1282,62 +1366,33 @@ owner chooses.
 
    | Process | Bound | What it is waiting for |
    | --- | --- | --- |
-   | The executor | The **composed cleanup grace** | Nothing, in the executor itself: it neither traps exits nor defines `terminate/2`, so this stop returns quickly and the bound is a ceiling. What takes the time is the Port-owning workers it sets going, which the owner does not hold and cannot wait for |
-   | The workspace lease | The same grace | Nothing: it has no `terminate/2` and holds no file — the lease *is* the live process, so stopping it revokes it. The bound is a ceiling it will not reach |
-   | The transfers owner | The same grace | Closing the open transfer descriptors its `terminate/2` holds (`transfers.ex:146-149`) |
-   | The Store | `max(grace, 30_000)` — the one exception, below | Its `terminate/2`, which releases the writer marker (`local.ex:166`) |
+   | The executor | What remains of **`teardown_ms`** | Nothing, in the executor itself: it neither traps exits nor defines `terminate/2`, so this stop returns quickly. What takes the time is the Port-owning workers it sets going, which the owner does not hold and cannot wait for |
+   | The workspace lease | What remains of `teardown_ms` | Nothing: it has no `terminate/2` and holds no file — the lease *is* the live process, so stopping it revokes it |
+   | The transfers owner | What remains of `teardown_ms` | Closing the open transfer descriptors its `terminate/2` holds (`transfers.ex:146-149`) |
+   | Custody, then the registry | What remains of `teardown_ms` | Nothing durable |
+   | **The Store** | A **fixed 30 s**, its own phase | Its `terminate/2`, which releases the writer marker (`local.ex:166`) |
 
-   No number is invented here: three of the four bounds are the composed
-   cleanup grace, which is what step 5 uses and what the sessions carry, and
-   the Store's floor is the Store's own existing call bound. Splitting the
-   grace into fractions would mean inventing ratios, and the minimalism budget
-   takes every number from an accepted or proposed decision or from the code
-   it already governs. **All four are
-   ceilings rather than expected waits**, which is the corrected reading: an
-   earlier revision expected the executor to spend real time here, on the
-   mistaken belief that it traps exits and cleans up in its own process. Only
-   the transfers owner and the Store run a `terminate/2` at all, and both are
-   short. **The transfers owner exists only when artifact transfers
-   were enabled**, as the composed set above says (`transfers` is listed there
-   as absent when disabled); where it is absent its row is not a stop the
-   owner skips at runtime so much as a pid it never held, and the step for it
-   does not exist in that daemon's sequence at all.
+   **"What remains" is one deadline, not one budget each.** The owner computes
+   an absolute instant once — `System.monotonic_time(:millisecond) +
+   teardown_ms` — and every non-Store stop from step 4 through this one waits
+   until that instant or until its exit arrives, whichever comes first, then
+   kills. So a slow lease owner spends the same clock a slow executor would;
+   the worst case is `teardown_ms`, not `teardown_ms` multiplied by the number
+   of components. An earlier revision gave each component its own grace, which
+   made the worst-case stop a sum nobody had written down.
 
-   Each of these bounds is the `after grace` on the owner's own wait, not a
-   second clock: the helper passes the same number to `GenServer.stop/3`, so a
-   component is given the grace once. The wait after the kill carries no
-   `after`, for the reason the general rule gives — it waits for a signal that
-   already exists.
+   **The Store's phase is separate and fixed**, for the reason the three
+   clocks give: it is the one stop whose `terminate/2` releases a durable
+   exclusion, and its length has nothing to do with any session's cancellation
+   grace. It begins when the teardown deadline is done with, runs for at most
+   30 s, and usually finishes in milliseconds.
 
-   **The Store's wait has a floor, and the reason is a defect this plan would
-   otherwise have shipped.** The kill after a wait is `Process.exit(pid,
-   :kill)`, which runs no `terminate/2`. So at a small grace — and `1` is a
-   composable value — the owner's `after grace` fires before the Store can
-   finish releasing the marker, and the kill leaves the marker **on a
-   deliberate operator stop**, which is exactly what this plan promises never
-   happens. An operator flag would have quietly broken a durability claim.
-
-   The Store's wait is therefore `max(grace, 30_000)`. The number is not
-   invented: `30_000` is the Store's own `@call_timeout`
-   (`apps/loopex_store_local/lib/loopex/store/local.ex:65`), the bound it
-   already puts on its synchronous, synced call path — and releasing the
-   marker is the same class of work against the same root, `File.read`,
-   `File.rm` and a parent-directory sync (`writer_lock.ex:105-115`). Using the
-   Store's own bound for the Store's own file I/O introduces no number and
-   asks no one to pick one.
-
-   This is a **ceiling, not a wait**: a healthy Store releases in
-   milliseconds, so an ordinary stop is not lengthened at all. It bites only
-   when the filesystem is wedged, which is precisely when killing the Store
-   mid-release is the wrong thing to do. No other component gets a floor,
-   because no other component's `terminate/2` releases a durable exclusion.
-
-   **The residual is stated.** A Store that has not released within
-   `max(grace, 30_000)` is killed, and the marker survives. That is the same
-   stale marker ADR 0031's recovery rule already answers: the next daemon
-   probes the marker's recorded holder and reclaims it where that holder is
-   proved dead, refuses `store_writer_unverifiable` where it cannot be
-   decided, and refuses `store_writer_active` where it is alive.
+   **The residual is stated.** A Store that has not released within its 30 s
+   is killed, and the marker survives. That is the same stale marker ADR
+   0031's recovery rule already answers: the next daemon probes the marker's
+   recorded holder and reclaims it where that holder is proved dead, refuses
+   `store_writer_unverifiable` where it cannot be decided, and refuses
+   `store_writer_active` where it is alive.
 
    **The operating-system residual, stated for the ordinary path and not only
    for a killed executor.** Whether the executor stops cleanly or is killed,
@@ -1392,43 +1447,78 @@ on 2026-09-20 and gave it one. The mechanism is a **fourth core change**,
 beside concurrent attachment, the existence query and the trace exclusion:
 
 ```elixir
-Loopex.Runtime.quiesce(runtime, deadline_ms) ::
+Loopex.Runtime.quiesce(runtime, drain_deadline_ms) ::
   {:ok, %{settled: [session_id], unsettled: [session_id]}}
 ```
 
-It is defined entirely in terms of mechanisms that already exist:
+**Three parts, and the first is the part an earlier revision got wrong.**
 
-- **Refusal comes first.** Every active coordinator stops admitting new
-  commands for the duration. Nothing new can be started while the drain runs,
-  and no client command can arrive anyway, because step 1 has already refused
-  admissions at the daemon.
-- **What is in flight is driven through the cancellation that exists**, not
-  through a new one. That is the sequence a coordinator already runs for an
-  abort: `Loopex.Executor.cancel/4` (core) under the bounds
-  `Loopex.Executor.cancellation_bounds/1` derives from the session's committed
-  cleanup grace (`apps/loopex/lib/loopex/executor.ex:456-474`), which the coordinator already uses at
-  `session_coordinator.ex:3614` and `:5366`. Quiesce adds no bound, no
-  callback and no durable command.
-- **It returns when every coordinator has settled or the deadline passes**,
-  naming both sets. `Loopex.Runtime.Control` already holds every active
-  session and its coordinator pid, so there is nowhere else this could live
-  and nothing to enumerate that core does not already have.
+1. **A durable cause, admitted before any cancellation.** ADR 0023 fixes that
+   *only* the durable `session.abort` command cancels, and that cancellation
+   is "never inferred from EOF or death"
+   (`0023-…-technical.md:365`, with the method table at `:169`). Quiesce
+   cancels, so quiesce must admit. For every active session it therefore
+   **admits an abort through the existing path, carrying the cause
+   `operator_shutdown`**, and only then runs that session's cancellation. The
+   path is the one that exists: `propose_new/3` for `%{type: :abort}` writes a
+   `command_admitted` record with `"command_type" => "abort"` and
+   `"admission" => "accepted"` (`session_state.ex:1684-1700`), resolving the
+   queued steer and follow-up as it goes, and answers with
+   `"admission" => "rejected_no_active_run"` where nothing is running
+   (`:1750-1761`) — the right answer for an idle session, needing no special
+   case.
+
+   **That is a durable record field**, and the plan says so rather than
+   letting it look like a private detail: the admitted abort record gains a
+   bounded `"cause"` naming why the abort exists — `operator_shutdown` here,
+   absent for a client's own `session.abort` — so an operator reading a
+   journal can tell a shutdown from a cancellation somebody asked for. It is
+   additive to a record generation 1 already writes and changes no existing
+   field.
+
+   The rejected option is recorded: cancelling **without** a durable command,
+   which the previous revision's "quiesce adds no durable command" amounted
+   to, contradicts ADR 0023 outright and would leave a journal saying a run
+   ended for a reason nobody recorded.
+
+2. **A derived budget.** `drain_deadline_ms` is `drain_ms`: the maximum over
+   the drained sessions of `cancellation_bounds(g_i).cli_backstop_ms`
+   (`apps/loopex/lib/loopex/executor.ex:456-474`). Inside it each session's
+   cancellation runs under its own `g`, through `Loopex.Executor.cancel/4`
+   (core) exactly as the coordinator already drives it at
+   `session_coordinator.ex:3614` and `:5366`.
+
+3. **A synchronous fence at the deadline.** When the budget is spent, core
+   does not merely report what did not settle: for each unsettled session it
+   **fences the coordinator, terminates it, and waits for its `DOWN` before
+   returning**. Without that, "unsettled" would name a coordinator still
+   running and free to commit a terminal fact after the daemon had reported it
+   unfinished and moved on to tell clients — a report false by the time it was
+   read. After `quiesce/2` returns, every session in `unsettled` has no live
+   coordinator, and nothing can be appended for it until the next activation.
+
+`Loopex.Runtime.Control` already holds every active session and its
+coordinator pid, so there is nowhere else this could live and nothing to
+enumerate that core does not already have.
 
 **Why core rather than the daemon.** The daemon cannot do this without
 reaching into coordinator internals, which the dependency direction forbids,
 or running a cancellation loop of its own, which is precisely the second loop
-this milestone forbids. Core owns coordinator lifetime and cancellation, so
-core is where a bounded settle belongs. It returns **plain data** — session
+this milestone forbids — and it certainly cannot admit a durable command on
+its own authority. Core owns coordinator lifetime, cancellation and admission,
+so core is where a bounded settle belongs. It returns **plain data** — session
 IDs and two lists — so nothing about a coordinator crosses the boundary.
 
-**What it does not promise, stated because the numbers say so.**
-`cancellation_bounds/1` derives an executor observation bound of
-`max(10_000, grace_ms + 2_000)` (`apps/loopex/lib/loopex/executor.ex:458`). A daemon composed with a
-cleanup grace below about ten seconds will therefore reach its own deadline
-while an effect's cancellation is still within *its* bound. That effect is
-reported **unsettled**, and the teardown ends it crash-equivalently: the
-deadline is the daemon's, not the executor's, and quiesce does not extend one
-to satisfy the other.
+**What it does not promise.** A session whose cancellation cannot finish
+inside the derived budget is reported **unsettled**, and its coordinator is
+fenced and terminated at the deadline. Because the budget is derived from the
+same formula the cancellation uses, this is the case where an effect exceeds
+even its own backstop — not the case where the daemon was impatient. An
+earlier revision used the raw cleanup grace as the drain deadline, which
+guaranteed the mismatch: `cancellation_bounds/1` derives an observation bound
+of `max(10_000, grace_ms + 2_000)` from that same grace
+(`apps/loopex/lib/loopex/executor.ex:458`), and `cli_backstop_ms` is larger
+still.
 
 **A session waiting on an interaction cannot settle, and that is correct.**
 An answer to a durable interaction is a session command under ADR 0024, and
@@ -1465,21 +1555,24 @@ learns the reason from the record where the write succeeds and from the close
 where it does not — that is the whole promise, and no part of this plan
 depends on a stronger one.
 
-**Cancellation is not the daemon's to run**, which an earlier draft claimed.
-It is the coordinator's, as part of a session's own durable command, and a
-daemon-side cancellation path is precisely the second loop this milestone
-forbids. Two alternatives were rejected with it. Host-authorized durable
-aborts — the daemon admitting an abort per session on the way down — would
-have the daemon issuing mutations on nobody's authority, at the moment it is
-least able to see them through. An unbounded natural drain would make
-`SIGTERM` unbounded, which is not a stop.
+**Cancellation is not the daemon's to run**, and that rule survives the drain
+rather than being softened by it. The abort quiesce admits is admitted **by
+core, on the operator's signal, through core's own path** — not by the daemon
+issuing a mutation over the socket, which stays forbidden and is why there is
+no `daemon.stop` method on the wire. An earlier revision rejected
+"host-authorized durable aborts" as the daemon issuing mutations on nobody's
+authority; that was right about the daemon and wrong as a reason to cancel
+with no record at all, which is what it left behind. An unbounded natural
+drain was rejected with it and stays rejected: it would make `SIGTERM`
+unbounded, which is not a stop.
 
 **The drain is core's, not the daemon's**, and that is the same rule seen from
 the other side. The daemon asks for a bounded settle and waits for the answer;
-every decision inside it — which effect to cancel, under what bound, what to
-record — is the coordinator's, running the paths it already has. The daemon
-neither issues a cancellation nor interprets one, and a coordinator that
-cannot settle in time is reported rather than overridden.
+every decision inside it — which abort to admit, which effect to cancel,
+under what bound, what to record — is core's, running the paths it already
+has. The daemon neither admits a command nor interprets a cancellation, and a
+session that cannot settle in time is fenced by core rather than left running
+behind a report.
 
 **Store loss, a fail-stop path.** The owner holds the Store's link and its
 pid, so the adapter's termination arrives as `{:EXIT, store_pid, reason}` at
@@ -1726,26 +1819,40 @@ the cause and try again without a recovery step.
   Store still stopped, the socket still unlinked — and that the exit class is
   `transfers_lost` rather than `operator_stop`, because the component died of
   its own reason and not because the owner asked.
-- **In-flight shutdown, both halves of it.** Two cases, because the drain
-  has two outcomes and proving one would hide the other.
+- **In-flight shutdown, both halves of it.** Two cases, because the drain has
+  two outcomes and proving one would hide the other. Both assert the durable
+  cause first: a `command_admitted` record with `"command_type" => "abort"`
+  and `"cause" => "operator_shutdown"` appears for the active session
+  **before** any cancellation, because ADR 0023 admits no cancellation that
+  was not commanded.
 
   *It settles.* A daemon with a dispatched tool effect that **can** be
-  cancelled inside the composed cleanup grace receives `SIGTERM`. The case
+  cancelled inside its session's own grace receives `SIGTERM`. The case
   asserts the effect settles during `quiesce/2`, that its session is in the
-  returned `settled` list, that the journal carries its ordinary terminal
-  fact, and that the `daemon.stopping` record is written **after** the drain
-  rather than before it.
+  returned `settled` list, that the journal carries its ordinary terminal fact
+  — `cancelled`, which is now a true statement about work that was truly
+  cancelled — and that the `daemon.stopping` record is written **after** the
+  drain rather than before it.
 
-  *It does not.* A daemon with an effect held past the deadline and an
+  *It does not.* A daemon with an effect held past the drain budget and an
   unresolved mutation receives `SIGTERM`. The case asserts the session is in
-  the `unsettled` list, and then the negative that matters: **no terminal
-  mutation is claimed** for it — no `cancelled`, no `outcome_unknown`, no
-  abort record appears in the journal on the way down. The ambiguous mutation
-  stays `commit_unknown`, each client is sent the stop reason on a transport
-  that accepts it and sees the close either way, and the exit is still `0`.
+  the `unsettled` list; that its coordinator is **gone before `quiesce/2`
+  returned**, proved by the pid being dead at the instant the daemon reports
+  it, which is what the synchronous fence exists for; and then the negative
+  that matters: **no terminal is claimed for the work that did not settle** —
+  no `cancelled`, no `outcome_unknown` for it. The ambiguous mutation stays
+  `commit_unknown`, each client is sent the stop reason on a transport that
+  accepts it and sees the close either way, and the exit is still `0`.
   Activating that session again afterwards resolves the transaction to exactly
-  one outcome through the existing reconciliation, and the journal is
-  byte-identical to what an abrupt death at the same instant would have left.
+  one outcome through the existing reconciliation.
+
+  The journal after this path is **not** byte-identical to an abrupt death at
+  the same instant, and the case asserts the difference rather than the old
+  equality: it holds exactly one more record, the admitted abort with its
+  cause. An earlier revision claimed byte-identity, which was true of a design
+  that cancelled nothing and is false of one that records why it cancelled.
+  What remains identical is what the abrupt-death case actually needs: the
+  unresolved transaction, its fence, and the outcome reconciliation produces.
 - **Store-loss fail-stop.** The Store is made to terminate under a live
   listener. The case asserts the daemon observed it, closed the listener and
   every connection with `store_lost`, unlinked the socket, and exited non-zero
@@ -1815,7 +1922,7 @@ the cause and try again without a recovery step.
   daemon exits `registry_lost` and `custody_lost` respectively, sends that
   `fatal:<class>` on the wire, and leaves no stale marker.
 - **The stop timeout is exercised, not assumed.** A session is made to hold
-  the runtime's teardown past the composed cleanup grace. The case asserts the
+  the runtime's teardown past the shared teardown deadline. The case asserts the
   owner **survives** rather than dying of whatever the stop did to the helper,
   that it then kills the runtime supervisor, and that it still reaches the
   Store stop and the socket unlink — the step a stop called inline would skip.
@@ -1834,12 +1941,20 @@ the cause and try again without a recovery step.
 
   It also asserts the thing a grace of 1 ms would otherwise have broken:
   **the next daemon opens that root with no stale marker to recover.** That is
-  the Store's floor doing its work — the Store is waited on for
-  `max(grace, 30_000)`, not for 1 ms — and without it this case would have
-  left a marker behind on a deliberate operator stop. A second case composes
-  `cleanup_grace_ms: 0` and asserts the daemon refuses at startup with
-  `cleanup_grace_invalid`, holding no marker and binding no socket. Both run
-  at both toolchain pairs, because the timeout result was observed at both.
+  the Store's own phase doing its work — the Store is waited on for a fixed
+  30 s that no grace can shorten — and without it this case would have left a
+  marker behind on a deliberate operator stop.
+
+  Two more cases sit beside it. One composes `cleanup_grace_ms: 0` and asserts
+  the daemon refuses at startup with `cleanup_grace_invalid`, holding no
+  marker and binding no socket. One composes a grace **larger than 2^32-1
+  milliseconds** — admitted, because core admits up to
+  `18_446_744_073_709_551_615` — and asserts the daemon starts, stops and
+  releases the marker normally: the value reaches no `receive … after`
+  unsliced, which is what the wait rule promises and what a direct `after`
+  would have turned into an immediate `:timeout_value` exit. All of them run
+  at both toolchain pairs, because both timeout results were observed at
+  both.
 - **Reverse cleanup.** A startup made to fail after the marker is acquired —
   at the socket permission check and at the index bound, separately — leaves
   no marker held and no socket file behind, proved by a second daemon starting
@@ -2010,7 +2125,10 @@ line; M5 introduces none of its own.
 | Socket path bound, over `<root>/daemon/daemon.sock` | the platform's usable `sun_path`, one byte less than the structure because of the terminator: at most 103 bytes on Darwin and 107 on Linux, derived and tested per platform rather than assumed, refused at start as `socket_path_too_long` | ADR 0032 |
 | Protocol frame ceiling on the wire | unchanged from ADR 0023 | ADR 0032 |
 | Cleanup grace | an integer of 1 or more, refusing `0` with `cleanup_grace_invalid`, because core's `cancellation_bounds/1` admits `grace_ms >= 1` (`apps/loopex/lib/loopex/executor.ex:456`) | This plan, against core's existing validation |
-| Floor on the Store's stop | `max(grace, 30_000)`, the Store's own `@call_timeout` (`apps/loopex_store_local/lib/loopex/store/local.ex:65`), so a small grace cannot kill it before `terminate/2` releases the marker | This plan, against the Store's existing bound |
+| Drain budget | `max` over drained sessions of `cancellation_bounds(g_i).cli_backstop_ms` | Derived from `apps/loopex/lib/loopex/executor.ex:456-474`; no number chosen |
+| Non-Store teardown | one absolute deadline shared by every non-Store stop | This plan; one bound rather than a sum over components |
+| Store shutdown phase | a fixed 30 s, the Store's own `@call_timeout` (`apps/loopex_store_local/lib/loopex/store/local.ex:65`), independent of any grace; the usual release takes milliseconds | This plan, against the Store's existing bound |
+| Wait slice | 60_000 ms, so no `receive … after` argument approaches the BEAM's 2^32-1 limit, probed at both pairs | This plan; the limit is the VM's |
 | Lease term | 30 seconds | ADR 0033 |
 | Lease renewal interval for the reference clients | 10 seconds | ADR 0033 |
 | Takeover grace beyond expiry | none; takeover is eligible at expiry and granted once the session's in-flight admission set is empty | ADR 0033 |
