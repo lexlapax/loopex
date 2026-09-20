@@ -46,12 +46,17 @@ Concept: [Scope](M5.md#concept-plan-scope).
 | `loopex_llm_reqllm` | The credential handoff, its sender, the re-pointed credential-plane proofs and the provider suite's concurrency | Any host credential policy, any new credential scope, or anything outside the adapter |
 | `clients/node` | Socket connection, observer following and takeover presentation for the independent client | Normative semantics |
 
-**Rejoin order.** Prerequisite decisions, then the one new application and the
-narrow core attachment change, then marker-first daemon lifetime and the
-socket over the local adapter, then collaboration and takeover on that base,
-then residency, replay and backpressure, then the two-process workflow with
-the reference CLI and the independent Node client, then the documentation and
-the source-archive proof, then independent review of the closure candidate.
+**Rejoin order.** Prerequisite decisions first. Then the new application with
+its dependency-budget change, and the narrow core attachment change, which the
+daemon's attach path needs before it can be proved. Then marker-first daemon
+lifetime and the socket over the local adapter, workstreams 1 and 2, which may
+run together once the application exists. Then the collaboration lease,
+workstream 3, on that base. Then the daemon-side residency, replay and
+backpressure that sit above the core change, the rest of workstream 4. Then
+the two-process workflow with the reference CLI and the independent Node
+client. Then the documentation and the source-archive proof, workstream 6, at
+the end because it describes what the others built. Then independent review of
+the closure candidate.
 
 Prove lifetime, refusal of a second daemon at the marker, shutdown on store
 loss, capacity refusal, reopening under the foreground server after an orderly
