@@ -525,27 +525,50 @@ non-zero with that step's reason class and touches nothing after it — in
 particular, a daemon that does not hold the marker never reads, unlinks or
 binds the socket path.
 
-**Shutdown, in order.** `SIGTERM` or `SIGINT` starts it, and from that instant:
+There are **two** ways a daemon ends, and conflating them was a defect. A
+daemon-initiated shutdown is the ordered sequence below and stops the Store
+last. A **store loss is a fail-stop**, and it cannot be the ordered sequence,
+for a reason that is in the code rather than in taste: `Loopex.Store.Local`
+answers an append error with `{:stop, reason, commit_unknown, state}`, so it
+terminates *itself*, and its `terminate/2` releases the writer marker on the
+way out. By the time the daemon observes anything, the store is gone and the
+marker is already released. A sequence that ends "then stop the Store" cannot
+run when the Store is what died.
+
+**Daemon-initiated shutdown, in order.** `SIGTERM` or `SIGINT` starts it, and
+from that instant:
 
 1. **Refuse new work.** The listener stops accepting, so a new connection is
    refused rather than queued, and the daemon admits no new mutation on any
    existing connection. Queries and attach-state reads still answer, because
    they change nothing and a client deserves to learn what is happening.
-2. **Drain what was already admitted.** Work in flight — a provider call, a
-   dispatched tool effect, an unresolved mutation — gets the composed cleanup
-   grace to finish on its own. Nothing here is a new mechanism, and the plan
-   names the existing ones rather than gesturing at "cleanup": a running
-   effect enters the configured cancellation sequence ADR 0016 fixes, with its
-   bounds, and terminates as `cancelled` or with the truthful
-   `outcome_unknown` ADR 0012 admits; a mutation whose commit is ambiguous is
-   left as `commit_unknown` and fenced, to be resolved by the reconciliation
-   ADR 0006 and ADR 0018 already define when the root is next opened. **No
-   admitted work is abandoned silently**, which is the property this step
-   exists for.
-3. **Tell every client, then close.** Each connection receives one final frame
-   naming the reason — the operator stop, or the fatal class — and the daemon
-   then closes it. A client learns why its session went away from the wire
-   rather than from a socket that simply stopped answering.
+2. **Drain, then end what has not settled — without claiming an outcome.**
+   Admitted work gets the composed cleanup grace to finish on its own. What
+   has not settled when the grace elapses is ended by stopping the runtime:
+   `Loopex.Runtime.stop/1` is `Supervisor.stop(supervisor, :normal)`, and each
+   session coordinator is a `restart: :temporary` child with `shutdown: 5_000`
+   that neither traps exits nor defines `terminate/2` — so it receives the
+   shutdown exit and dies, bounded, without running any terminal code. That is
+   **crash-equivalent by construction**, and it is the point: the daemon
+   claims no terminal mutation for work it ended. A mutation whose commit was
+   ambiguous stays `commit_unknown` and fenced, and the reconciliation
+   ADR 0006 and ADR 0018 already define settles it at the next activation —
+   exactly as it would after an abrupt death.
+
+   An earlier draft said running effects enter the configured cancellation
+   sequence. That is withdrawn: cancellation is the coordinator's to run as
+   part of a session's own durable command, not something a daemon may drive
+   from outside, and a daemon-side cancellation path is precisely the second
+   loop this milestone forbids. Two alternatives were rejected with it.
+   Host-authorized durable aborts — the daemon admitting an abort per session
+   on the way down — would have the daemon issuing mutations on nobody's
+   authority, at the moment it is least able to see them through. An unbounded
+   natural drain — waiting for every effect to finish — would make `SIGTERM`
+   unbounded, which is not a stop.
+3. **Tell every client, then close.** Each connection receives one
+   `daemon.stopping` notification naming the reason, and the daemon then
+   closes it. Delivery is bounded best-effort; the record and its bound are
+   fixed in ADR 0032, and a backpressured or dead client may not receive it.
 4. **Unlink the socket.** The path is removed, so no later client connects to
    a dead endpoint and the next daemon binds cleanly rather than inheriting a
    stale file.
@@ -554,15 +577,56 @@ binds the socket path.
    stopping the Store last is exactly what makes the marker outlive every
    session operation that might still have needed it. Only after it returns
    does the daemon exit.
-6. **Exit.** `0` for an operator stop; non-zero with the reason class on
-   `stderr` for a fatal one, which runs the same steps 1 to 5 and differs only
-   in what it tells clients and what it returns.
+6. **Exit `0`.**
 
-**An abrupt death** — `SIGKILL`, power loss — runs none of this, and is safe
+**Store loss, a fail-stop path.** The daemon composes its runtime through
+`LoopexComposition`, whose `start_edge/2` starts the adapter with
+`start_link`, so the Store is **linked** to the composing process; the daemon
+traps exits there and additionally monitors the adapter, so a store that
+terminates itself is observed either way rather than taking the daemon down
+as an untrapped exit. On that signal, and without the ordered sequence:
+
+1. Refuse service immediately — no further admission, no further attach, and
+   the listener closed.
+2. Close every connection, after one bounded best-effort `daemon.stopping`
+   carrying `store_lost`, or `store_capacity_exceeded` when the store's own
+   reason was the capacity refusal.
+3. Unlink the socket.
+4. Exit non-zero with that class on `stderr`. **There is no "stop the Store"
+   step**, because the Store already stopped and the marker is already
+   released; the next daemon finds no marker to recover rather than a stale
+   one.
+
+Nothing durable is at risk in that ordering: whatever was ambiguous is
+`commit_unknown` in the journal and is reconciled at the next activation, and
+whatever was not committed was never promised.
+
+**An abrupt death** — `SIGKILL`, power loss — runs neither path, and is safe
 for the reasons the durability rules already give: nothing the journal does
 not hold was ever promised, the marker left behind is reclaimed by the next
 daemon's verified stale-writer recovery, and the socket file is a stale path
 the next marker holder removes.
+
+**The fatal-class map.** Every non-zero exit names one class on `stderr`:
+
+| Class | When |
+| --- | --- |
+| `store_writer_active` | Startup: the marker is held by a live holder |
+| `store_writer_unverifiable` | Startup: the marker's holder cannot be decided |
+| `store_log_too_large` | Startup: the log is already past the capacity bound |
+| `session_index_too_large` | Startup: the directory holds more than the index bound |
+| `socket_path_too_long` | Startup: the path exceeds the derived `sun_path` bound |
+| `socket_permission_unverified` | Startup: subdirectory or socket ownership/mode could not be verified |
+| `store_lost` | Fail-stop: the Store terminated under a live listener |
+| `store_capacity_exceeded` | Fail-stop: the Store terminated on the capacity refusal specifically |
+| `supervision_fault` | Fail-stop: a lease owner failed, under ADR 0033's daemon-fatal rule |
+
+**Reverse cleanup.** Every startup failure *after* the marker is acquired
+unwinds what it has done, in reverse: an unlinked-and-bound socket is closed
+and its path unlinked, a created `daemon/` subdirectory it made is removed,
+and the Store is stopped so its `terminate/2` releases the marker. A daemon
+that refuses to start leaves no marker and no socket file behind, which is
+what lets an operator fix the cause and try again without a recovery step.
 
 **Witnesses**, all on real operating-system processes:
 
@@ -572,14 +636,27 @@ the next marker holder removes.
   exits `0`; the foreground server then opens the same root immediately, which
   is what proves the marker was actually released.
 - **In-flight shutdown.** A daemon with a dispatched tool effect and an
-  unresolved mutation receives `SIGTERM`; the effect terminates through the
-  configured cancellation sequence with a truthful terminal, the ambiguous
-  mutation is left as `commit_unknown` rather than reported committed, every
-  client receives the stop reason, and the exit is still `0`. Reopening the
-  root afterwards resolves that transaction to exactly one outcome.
-- **Fatal exit.** Store loss under a live listener closes the listener and
-  every connection with `store_lost`, unlinks the socket, and exits non-zero
-  with that class on `stderr`.
+  unresolved mutation receives `SIGTERM`. What has not settled within the
+  cleanup grace is ended crash-equivalently, and the case asserts the negative
+  that matters: **no terminal mutation is claimed** for it — no `cancelled`,
+  no `outcome_unknown`, no abort record appears in the journal on the way
+  down. The ambiguous mutation stays `commit_unknown`, every client receives
+  the stop reason, and the exit is still `0`. Activating that session again
+  afterwards resolves the transaction to exactly one outcome through the
+  existing reconciliation, and the journal is byte-identical to what an
+  abrupt death at the same instant would have left.
+- **Store-loss fail-stop.** The Store is made to terminate under a live
+  listener. The case asserts the daemon observed it, closed the listener and
+  every connection with `store_lost`, unlinked the socket, and exited non-zero
+  with that class on `stderr` — and that it did **not** attempt the ordered
+  sequence, because the marker was already released by the Store's own
+  `terminate/2` before the daemon could act. A second daemon starts on that
+  root immediately with no stale marker to recover. The capacity variant
+  reports `store_capacity_exceeded` instead.
+- **Reverse cleanup.** A startup made to fail after the marker is acquired —
+  at the socket permission check and at the index bound, separately — leaves
+  no marker held and no socket file behind, proved by a second daemon starting
+  cleanly on the same root with no recovery step.
 - **Readiness ordering.** A client that connects the instant the readiness
   line appears is served; no readiness line is printed when the marker is
   held elsewhere, the socket permission check fails, or the index bound is

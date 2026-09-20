@@ -16,15 +16,33 @@ the foreground server does.
 **The marker invariant, stated as it actually works.** The daemon does not
 hold the marker itself and cannot release it itself: `Loopex.Store.Local`
 takes it at start and releases it in its own `terminate/2`. What the daemon
-owns is the Store *process* — it starts it before the socket is bound and
-stops it last in shutdown, after the listener is closed, every connection is
-closed and the socket is unlinked — so the marker is held for as long as any
-session operation could still need it, and is released by that `terminate/2`
-at the moment the daemon stops the Store. An abrupt kill runs no `terminate/2`
-at all, which is why the marker is left behind and why the next daemon's
-verified stale-writer recovery exists. The shutdown ordering that makes this
-true is fixed in the M5 plan's lifecycle section, and it is ordering rather
-than a new mechanism: stopping the Store last is the whole of it. The adapter's limits are the
+owns is the Store *process*. It starts it before the socket is bound and, in a
+**daemon-initiated** shutdown, stops it last — after the listener is closed,
+every connection is closed and the socket is unlinked — so the marker is held
+for as long as any session operation could still need it and is released by
+that `terminate/2` at the moment the daemon stops the Store. That ordering is
+the whole mechanism; it is fixed in the M5 plan's lifecycle section.
+
+**Store loss inverts it, and the daemon cannot order what it does not
+control.** This adapter answers an append error with
+`{:stop, reason, commit_unknown, state}` — it terminates *itself* — and its
+`terminate/2` releases the marker as it goes. So on a store loss the marker is
+released **before** the daemon can react, and any sequence ending "then stop
+the Store" is unrunnable, because the Store is what died. The daemon's only
+correct response is a fail-stop: observe the termination — it composes the
+adapter through `LoopexComposition.start_edge/2`, which uses `start_link`, so
+the adapter is linked to the composing process, and the daemon both traps
+exits there and monitors the adapter so the signal cannot be missed — then
+refuse service, close every connection with `store_lost`, or
+`store_capacity_exceeded` where that was the store's own reason, unlink the
+socket and exit non-zero. The next daemon finds no marker to recover, because
+the dying store already gave it back.
+
+An abrupt kill of the daemon runs no `terminate/2` at all, which is why *that*
+leaves a marker behind and why the next daemon's verified stale-writer
+recovery exists. The three cases are distinct and the operator documentation
+keeps them so: an orderly stop releases the marker in order, a store loss
+releases it early and unexpectedly, and a kill leaves it for recovery. The adapter's limits are the
 daemon's limits, and every one is an existing constant or refusal of
 `Loopex.Store.Local.Log`:
 
