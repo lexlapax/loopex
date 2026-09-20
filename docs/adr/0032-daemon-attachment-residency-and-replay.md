@@ -9,7 +9,7 @@ Technical depth: [Attachment residency mechanics](0032-daemon-attachment-residen
 - **Supersedes:** nothing; ADR 0023's one-attachment-per-foreground-process rule and generation-1 wire remain in force on the foreground server
 - **Prerequisite for:** M5 outcomes 1, 2 and 4, accepted before the socket is
   bound or the core attachment change lands — that is, before M5's workstreams
-  2 and 4
+  1 and 3
 
 <a id="concept-adr-0032-decision"></a>
 ### Context and Decision
@@ -39,7 +39,9 @@ method. An earlier draft of this decision also added `session.stop` and called
 it durable; that is withdrawn, because core owns durable session truth, core
 has no durable stop command, and M5's only core change is concurrent
 attachment. Ending work is releasing control and disconnecting, after which
-the session goes dormant and `session.resume` brings it back. A client that offers only generation 1 is refused at initialize under
+the session goes dormant and `session.resume` brings it back.
+
+A client that offers only generation 1 is refused at initialize under
 ADR 0023's existing no-common-generation rule and nothing durable is
 created; generation-1 clients keep the M4 foreground server, whose wire,
 one-attachment rule and behavior do not change. A narrow core change lets

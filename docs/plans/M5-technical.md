@@ -17,9 +17,9 @@ decision named only in prose declares nothing.
 
 | Decision | Acceptance point | What its acceptance settles |
 | --- | --- | --- |
-| [ADR 0031](../adr/0031-daemon-grade-store-selection-and-migration.md#concept) | Before the daemon opens a state root, so before workstream 1 lands | The existing local adapter as the daemon's store for `0.2.0`, with the 256 MiB log capacity, 4 MiB frame ceiling, full retention, `store_capacity_exceeded` refusal, the capacity-as-store-loss consequence, explicit stale-writer recovery and the operator root-retirement procedure documented; a daemon-grade adapter and any migration left open for a separate decision |
-| [ADR 0032](../adr/0032-daemon-attachment-residency-and-replay.md#concept) | Before the socket is bound or the core attachment change lands, so before workstreams 2 and 4 | The Unix-domain-socket transport reusing ADR 0023 unchanged, generation 2's methods, refusal of a generation-1-only client, owner-only peer access, the bounded socket path, marker-first startup, race-free attach with at-least-once contiguous delivery, the resident window, daemon-owned output buffers, detachment at the last emitted cursor, idle eviction and bounded session pages, and every residency number below |
-| [ADR 0033](../adr/0033-collaboration-controller-lease-and-takeover.md#concept) | Before any admission check is written, so before workstream 3 | One daemon-owned controller lease per session held in daemon memory with a fresh opaque writer epoch per grant, admission that binds holder connection, held state, unexpired term and epoch together, explicit takeover, cross-process abort through the core's own cancellation, and no authority from content, metadata or order |
+| [ADR 0031](../adr/0031-daemon-grade-store-selection-and-migration.md#concept) | Before the daemon opens a state root, so before workstream 2 lands | The existing local adapter as the daemon's store for `0.2.0`, with the 256 MiB log capacity, 4 MiB frame ceiling, full retention, `store_capacity_exceeded` refusal, the capacity-as-store-loss consequence, explicit stale-writer recovery and the operator root-retirement procedure documented; a daemon-grade adapter and any migration left open for a separate decision |
+| [ADR 0032](../adr/0032-daemon-attachment-residency-and-replay.md#concept) | Before the socket is bound or the core attachment change lands, so before workstreams 1 and 3 | The Unix-domain-socket transport reusing ADR 0023 unchanged, generation 2's methods, refusal of a generation-1-only client, owner-only peer access, the bounded socket path, marker-first startup, race-free attach with at-least-once contiguous delivery, the resident window, daemon-owned output buffers, detachment at the last emitted cursor, idle eviction and bounded session pages, and every residency number below |
+| [ADR 0033](../adr/0033-collaboration-controller-lease-and-takeover.md#concept) | Before any admission check is written, so before workstream 4 | One daemon-owned controller lease per session held in daemon memory with a fresh opaque writer epoch per grant, admission that binds holder connection, held state, unexpired term and epoch together, explicit takeover, cross-process abort through the core's own cancellation, and no authority from content, metadata or order |
 | [ADR 0034](../adr/0034-provider-credential-handoff-over-bootstrap-channel.md#concept) | Before the adapter's credential resolution changes, so before workstream 5's credential item | The credential as a per-invocation input named by a `{resolver_module, reference_term}` reference the host owns, resolved only inside the sender that writes the credential frame, after the child proves nonce, codec version and build manifest digest and before the invocation frame; the resolver's owner, custody, rotation, deadline bounding and every failure outcome; no environment read in the adapter's call path and the launcher's enumeration moved to composition; the re-pointed credential-plane proofs and the security review as acceptance points |
 
 ADR 0031 decides one thing, the `0.2.0` local-adapter selection and its
@@ -47,25 +47,44 @@ Concept: [Scope](M5.md#concept-plan-scope).
 | `clients/node` | Socket connection, observer following and takeover presentation for the independent client | Normative semantics |
 
 **Rejoin order.** Prerequisite decisions first. Then the new application with
-its dependency-budget change, and the narrow core attachment change, which the
-daemon's attach path needs before it can be proved. Then marker-first daemon
-lifetime and the socket over the local adapter, workstreams 1 and 2, which may
-run together once the application exists. Then the collaboration lease,
-workstream 3, on that base. Then the daemon-side residency, replay and
-backpressure that sit above the core change, the rest of workstream 4. Then
-the two-process workflow with the reference CLI and the independent Node
-client. Then the documentation and the source-archive proof, workstream 6, at
-the end because it describes what the others built. Then independent review of
-the closure candidate.
+its dependency-budget change, and the narrow core attachment change — the
+first half of workstream 1, which the daemon's attach path needs before it can
+be proved, and which is why workstream 1 is numbered first in the concept
+pair. Then marker-first daemon lifetime and the socket over the local adapter,
+workstreams 2 and 3, which may run together once the application exists. Then
+the collaboration lease, workstream 4, on that base. Then the daemon-side
+residency, replay and backpressure that sit above the core change, the second
+half of workstream 1. Then the two-process workflow with the reference CLI and
+the independent Node client. Then the documentation and the source-archive
+proof, workstream 6, at the end because it describes what the others built.
+Then independent review of the closure candidate.
 
 Prove lifetime, refusal of a second daemon at the marker, shutdown on store
 loss, capacity refusal, reopening under the foreground server after an orderly
 stop, independent simultaneous core attachments, snapshot-then-contiguous
 delivery, stale-epoch refusal, takeover and cross-process abort before the
-client workflow rejoins. Workstream 5, the credential handoff, is independent
-of every other workstream: it touches `apps/loopex_llm_reqllm` and the host
-composition sites that read the credential variable, shares no file with the
-daemon work, and may land at any point after ADR 0034 is accepted.
+client workflow rejoins.
+
+Workstream 5, the credential handoff and the provider dependency, is
+independent of the daemon's *semantics* and may land at any point after
+ADR 0034 is accepted. It is not, however, file-disjoint from the daemon work,
+and an earlier draft's claim that it shares no file with the other
+workstreams would have set the rejoin up to fail. It owns `apps/loopex_llm_reqllm`
+outright, but four surfaces are shared with the daemon workstreams and belong
+to the integrator, who resolves them rather than either writer:
+
+| Shared surface | Why both reach it |
+| --- | --- |
+| Host composition — `apps/loopex_composition`, `apps/loopex_app_server/lib/loopex_app_server/host.ex`, `apps/loopex_cli` | The credential item changes how every host supplies a credential reference and deletes the operator's variable; the daemon *is* a new host composed the same way, and `host.ex:221` is where the variable is read today |
+| The integration scripts — `scripts/check-release.sh` and its fixtures | Workstream 5 selects the real-provider lane; the daemon workstreams add `loopex_daemon` to `release_apps` and the Linux cross-uid case |
+| Provider and credential documentation under `docs/operator/` and `docs/developer/` | Workstream 5 adds the operator credential sentence and the host-composition note; workstream 6 rewrites the same pages for the daemon |
+| Closure evidence — `docs/evidence/M5-closure-runs.md` and `docs/evidence/README.md` | Every workstream's runs, the security review and the demonstration are retained on one page |
+
+So workstream 5 takes its own worktree like every other writer, and the
+integrator sequences those four surfaces. What is true without qualification
+is narrower and worth stating on its own: workstream 5 touches no daemon
+application code, and no daemon workstream touches the adapter's library
+tree.
 
 Parallel writers take one worktree each over these non-overlapping paths, and
 one integrator owns rejoin, conflicts and post-rejoin verification, as the
@@ -123,8 +142,15 @@ merge needs green in hosted CI, M5 selects exactly these, from the
 - Outcome 6 is provider and credential handling, so it selects
   `bash scripts/check-release.sh` and its real-provider cases;
 - Outcome 6 also changes an operating-system process boundary with the same
-  spawn, control-pipe and cleanup shape the executor's has, so the touched
-  cases run under `bash scripts/fixtures/pinned-load.sh` on a Linux host:
+  spawn, control-pipe and cleanup shape the executor's has. That row of the
+  selection table named only the executor until M5 widened it, so widening it
+  is M5's work and not an assumption M5 may make: both verification documents
+  change in the same milestone, and the provider cases the row now names are
+  `apps/loopex_llm_reqllm/test/provider_launcher_test.exs`,
+  `provider_startup_boundaries_test.exs`, `provider_deadline_test.exs`,
+  `provider_retainer_boundaries_test.exs` and `credential_plane_test.exs`.
+  Those are the cases that run under `bash scripts/fixtures/pinned-load.sh`
+  on a Linux host:
   the test VM and eight busy-loop hogs pinned to four cores with
   `taskset -c 0-3`, one process writing 8 MiB with `dd oflag=dsync` in a loop,
   thirty runs, any run past its 60 s deadline counted as a hang, and no
@@ -166,7 +192,11 @@ and the developer pair `docs/developer/daemon.md` and
 `docs/developer/runtime-and-embedding.md`,
 `docs/developer/agent-loop-and-tools.md`,
 `docs/developer/compatibility-surfaces.md`,
-`docs/developer/agent-context-map.md`, the indexes
+`docs/developer/agent-context-map.md`, the verification pair
+`docs/developer/verification.md` and
+`docs/developer/verification-technical.md`, whose
+operating-system-process-boundary row and its case list M5 widens from the
+executor to the provider child, the indexes
 `docs/operator/README.md`, `docs/developer/README.md`, `docs/README.md` and
 `README.md`, and `CHANGELOG.md`. Outcome 6 adds the operator's credential
 sentence and the developer note on host composition to the pages that describe

@@ -76,13 +76,14 @@ Concept: [Selection](verification.md#concept-verification-selection).
 | Observability | `apps/loopex/test/trace_session_test.exs`, `telemetry_boundary_test.exs`, `apps/loopex_telemetry/test/` |
 | Dependency direction | `mix loopex.deps_budget` and `apps/loopex/test/deps_budget_test.exs` |
 | Documentation chain | `mix loopex.status`, `mix loopex.docs_check` |
-| The executor's OS boundary | `apps/loopex_executor_local/test/coding_tools_test.exs` launch-guard, cleanup and frame cases; reproduced under contention by the procedure below |
+| An operating-system process boundary | The local executor's: `apps/loopex_executor_local/test/coding_tools_test.exs` launch-guard, cleanup and frame cases. The provider adapter's child: `apps/loopex_llm_reqllm/test/provider_launcher_test.exs`, `provider_startup_boundaries_test.exs`, `provider_deadline_test.exs`, `provider_retainer_boundaries_test.exs` and `credential_plane_test.exs`, which own the spawn, the control-pipe bootstrap handshake, the deadline and the cleanup grace. Either is reproduced under contention by the procedure below |
 
 **Reproducing an executor race under contention.** The launch guard, its
 wrapper subshell and the tool share one pipe, and the hosted runner's four
 loaded cores exposed a frame split that a twenty-core machine never showed.
-The procedure that reproduced it on serenity, and that a change to the
-executor's OS boundary is read against: pin the test VM and eight busy-loop
+The procedure that reproduced it on serenity, and that a change to any
+operating-system process boundary is read against — the executor's, and the
+provider child's, which has the same spawn, control-pipe and cleanup shape: pin the test VM and eight busy-loop
 hogs to four cores with `taskset -c 0-3`, add one process writing 8 MiB with
 `dd oflag=dsync` in a loop, and run the case in a loop of thirty, counting any
 run past its 60 s run deadline as a hang. The frame split reproduced 2 in 34

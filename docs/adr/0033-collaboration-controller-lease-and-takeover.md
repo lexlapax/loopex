@@ -8,7 +8,7 @@ Technical depth: [Collaboration mechanics](0033-collaboration-controller-lease-a
 - **Decision owner:** Maintainer
 - **Supersedes:** nothing; the core keeps the vision §11.6 rule that it mandates no controller lease
 - **Prerequisite for:** M5 Outcome 3, accepted before any admission check is
-  written — that is, before M5's workstream 3
+  written — that is, before M5's workstream 4
 
 <a id="concept-adr-0033-decision"></a>
 ### Context and Decision
@@ -71,7 +71,7 @@ release on orderly disconnect. Expiry and an unresolved admission meet on one
 rule, so neither promise is quietly broken by the other: a mutation whose
 holder check completed before the deadline settles under its lease even if the
 deadline passes while core is still deciding; at the deadline the holder gains
-nothing further and every new mutation of its refuses; and a takeover becomes
+nothing further and every new mutation of its own refuses; and a takeover becomes
 eligible at the deadline but is granted only once those in-flight mutations
 have resolved. That adds no grace, because the expired holder can only finish
 what it had already begun. Writer exclusion between two daemons on one
