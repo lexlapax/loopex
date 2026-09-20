@@ -98,7 +98,11 @@ the local store's writer marker, unchanged.
   session ID before attach. The daemon validates durable session existence
   first, and it does so with core's read-only session-existence query — the
   one that asks only whether the root holds that ID, with no attach, no
-  resume and no side effect. That matters here more than anywhere: acquire
+  resume and no side effect. That answer also carries residency, so a daemon
+  whose client is asking to drive a session it has not activated refuses
+  `session_dormant` **here, before any lease is granted** — granting first and
+  refusing later would leave the client holding a lease that blocks the resume
+  it is being told to perform. That matters here more than anywhere: acquire
   must be safe to call on an ID that turns out to be unknown, and an earlier
   draft that learned existence by calling `attach` or `resume` would have
   taken a durable or attaching side effect to answer a question. The

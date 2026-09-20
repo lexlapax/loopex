@@ -156,7 +156,7 @@ which no client requests and every client may receive:
 
 | Field | Value |
 | --- | --- |
-| `reason` | One of `operator_stop`, `store_lost`, `store_capacity_exceeded`, or `fatal:<class>` for the remaining fatal classes the plan's map names |
+| `reason` | One of `operator_stop`, `store_lost`, `store_capacity_exceeded`, or `fatal:<class>` for the remaining fatal classes the plan's map names — `fatal:supervision_fault` being the one a running daemon can reach |
 | `message` | A bounded non-secret sentence for an operator to read |
 | `retry_after_ms` | Present only for `operator_stop`, where a restart is expected; absent for every fatal reason, because the daemon does not know when the cause will be fixed |
 
@@ -177,7 +177,7 @@ into a bound that already exists is the same guarantee with nothing new to
 justify.
 
 **This changes the generation-2 digest, and so do the error codes.**
-`Loopex.Protocol.Session.schema_digest/0` is taken over the generation, the
+`LoopexProtocol.Session.schema_digest/0` is taken over the generation, the
 ordered methods, the ordered record families, the ordered error codes and the
 limits — five inputs, and generation 2 changes four of them:
 
@@ -186,7 +186,7 @@ limits — five inputs, and generation 2 changes four of them:
 | Generation | New string |
 | Methods | Adds `session.list`, `daemon.status`, `session.acquire_control`, `session.release_control` |
 | Record families | Adds `daemon.stopping` |
-| **Error codes** | Adds every refusal generation 2 can return and generation 1 cannot: `control_held`, `session_dormant`, `index_full` where it is returned as a refusal rather than a field, the four existence-query refusals the daemon maps to the wire (`session_unknown`, `session_id_invalid`, `store_unavailable`, `existence_indeterminate`), and the activation and residency refusals (`activation_ceiling_reached`, `session_index_too_large`, `composition_mismatch`) |
+| **Error codes** | Adds every refusal generation 2 can return and generation 1 cannot: `control_held`, `session_dormant`, the four existence-query refusals the daemon maps to the wire (`session_unknown`, `session_id_invalid`, `store_unavailable`, `existence_indeterminate`), and the activation and residency refusals (`activation_ceiling_reached`, `session_index_too_large`, `composition_mismatch`) |
 | Limits | Unchanged from ADR 0023's ceilings |
 
 Listing the error codes matters because it is the input most easily forgotten:
@@ -507,7 +507,12 @@ existing clients agreed to. The generation-2 schema and its
 vectors are new files beside generation 1's, as
 `apps/loopex_protocol/priv/schema/loopex-experimental-2.json` and
 `apps/loopex_protocol/priv/vectors/loopex-experimental-2.json`, reviewed with
-the change that adds them; generation 1's bytes are untouched. A
+the change that adds them, and **each carries its own pinned file digest**
+written into the conformance module beside the two generation 1 already pins —
+so an independent client can fetch either file and verify its bytes, and an
+edit to a generation-2 file fails the same way an edit to a generation-1 file
+does. The digests are computed and pinned when the files are written;
+generation 1's bytes and its two pinned digests are untouched. A
 negotiation vector proves selection from a list that also names generation 1
 and refusal of a generation-1-only list. The M4 foreground server keeps
 serving generation 1 only, with its one-attachment-per-process rule.
