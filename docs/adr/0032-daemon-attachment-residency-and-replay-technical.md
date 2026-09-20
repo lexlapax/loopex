@@ -156,7 +156,9 @@ hold as many connections as the residency limits admit.
 makes that true.** The mechanism is a monitor, not a detach call. Today the
 dispatcher monitors the attaching process only while its snapshot scan is in
 flight and **demonitors it the moment the scan finishes**
-(`event_dispatcher.ex:455`), after which nothing watches that process at all;
+(`event_dispatcher.ex:455`), after which nothing watches that process at all
+and the installed attachment records neither its pid nor a monitor
+(`:764-803`);
 `disconnect/2` marks an attachment disconnected and empties its queue but
 leaves the entry in place (`:879-886`); and the one path that actually removes
 an entry is same-session **supersession** (`:812-823`) — which M5's
@@ -208,6 +210,26 @@ conditional on `replace`, and narrows its scope to the attaching process's own
 prior attachment** for that session. Core's attach options gain `replace`, the
 app server passes the flag it already parses, and the block fires only when it
 is set.
+
+**That scope needs an identity the installed attachment does not carry today,
+and core change 1 adds it.** `install_attachment/3` builds the attachment map
+from the scan's result — `id`, `incarnation_id`, `session_id`, cursors, queue,
+capacity, status, metadata, transfers (`event_dispatcher.ex:764-803`) — and
+**no attacher pid**; the supersession that follows splits `state.attachments`
+on `session_id` alone (`:812-818`); and the monitor the dispatcher held during
+the scan is **demonitored the moment the scan finishes** (`:455`). There is
+therefore nothing on an installed attachment that says which process attached
+it, so "the attaching process's own prior attachment" is not a set anything
+could compute.
+
+Core change 1 therefore **retains the attacher's pid and its monitor reference
+on the installed attachment**. That is not a third half: the change already
+has to keep the monitor rather than dropping it at `:455`, because the `DOWN`
+release is the whole of the second half — and a `DOWN` carries the monitor
+reference and the pid, which is exactly what the handler needs to find the
+attachment to drop. Holding both on the attachment makes the `DOWN` lookup a
+map lookup rather than a scan, and makes the replacement scope a filter on a
+field that exists. One addition, two uses.
 
 - **Generation 1 is behaviour-identical**, which is what ADR 0023 requires and
   what this milestone promises for the foreground server: that host maps one
