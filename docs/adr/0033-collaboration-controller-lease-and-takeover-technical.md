@@ -81,8 +81,15 @@ the local store's writer marker, unchanged.
   the new `writer_epoch` and `expires_in_ms`, the remaining term on the
   daemon's clock. For a known dormant session, a connection may acquire by
   session ID before attach. The daemon validates durable session existence
-  first; the held lease lets that connection call `session.resume` and then
-  attach. Daemon startup recovery of sessions is a root-owner operation under
+  first, and it does so with core's read-only session-existence query — the
+  one that asks only whether the root holds that ID, with no attach, no
+  resume and no side effect. That matters here more than anywhere: acquire
+  must be safe to call on an ID that turns out to be unknown, and an earlier
+  draft that learned existence by calling `attach` or `resume` would have
+  taken a durable or attaching side effect to answer a question. The
+  maintainer rejected that on 2026-09-20. An unknown ID refuses with nothing
+  created, nothing attached and no lease granted; a known one grants, and the
+  held lease lets that connection call `session.resume` and then attach. Daemon startup recovery of sessions is a root-owner operation under
   the store's writer marker, never a client mutation and never a grant of
   controller authority.
 - `session.release_control` (`session_id`, `request_id`): releases the
@@ -108,7 +115,8 @@ the local store's writer marker, unchanged.
   grants control. The caller must acquire control explicitly and use the
   returned epoch for its first session command. Acquire and attach may be
   sent in either order, because acquire is keyed by session ID and validates
-  only durable session existence; the constraint is on the first mutation,
+  only durable session existence, through the read-only query; the
+  constraint is on the first mutation,
   not on the two calls that precede it, and that mutation refuses unless the
   sending connection is the holder, the epoch matches and the connection
   holds a controller-capable attachment.

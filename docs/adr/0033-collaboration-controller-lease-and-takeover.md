@@ -36,8 +36,10 @@ observer cannot reuse an epoch it learned from a result or status.
 it creates an uncontrolled session, and control over it is never implicit.
 
 Attach and acquire are independent of each other and their order is not
-fixed. A connection may acquire control of any session that durably exists,
-by session ID, before or after it attaches to that session; what is fixed is
+fixed. A connection may acquire control of any session that durably exists —
+which the daemon establishes by asking core its read-only existence query, not
+by attaching or resuming to find out — by session ID, before or after it
+attaches to that session; what is fixed is
 that no existing-session mutation is admitted until the lease is held by the
 sending connection, its epoch matches, and — with the single exception of
 `session.resume` on a verified dormant session — that connection holds a

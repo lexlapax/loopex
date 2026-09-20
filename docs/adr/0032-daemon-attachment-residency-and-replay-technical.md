@@ -186,15 +186,28 @@ attaches, and the snapshot carries them at a committed sequence.
 **The recovery procedure for the crash cut**, in four parts, needing no new
 durable record and no Store read by the daemon:
 
-1. **Durable existence is learned only from core.** The daemon never reads
-   Store internals and never enumerates the log to decide whether a session
-   exists. It calls core's existing attach or resume on the ID and treats
-   core's answer as the proof: core resolves it or refuses it, and the daemon
-   forwards that answer. So `session.acquire_control` on an ID the index does
-   not hold validates durable existence the only way the daemon is allowed
-   to — by asking core — and a refusal from core is the refusal the client
-   sees. Nothing about the index is consulted to decide existence, which is
-   why an index that is incomplete is not a correctness problem.
+1. **Durable existence is learned from core, through a query that asks only
+   that.** The daemon never reads Store internals and never enumerates the log
+   to decide whether a session exists. It calls core's read-only
+   session-existence query on the ID — no attach, no resume, no side effect,
+   a plain-data answer — and treats core's answer as the proof.
+
+   An earlier draft had the daemon learn existence from `attach` or `resume`
+   themselves. The maintainer rejected that on 2026-09-20 and admitted the
+   query instead. Asking a question by performing the operation is not a
+   question: `attach` establishes a cursor barrier and an attachment
+   incarnation, `resume` is a durable mutation under ADR 0008's placement
+   rules, and a daemon that had to run one of them to discover that a session
+   does not exist would be taking a side effect to learn a fact — worst of all
+   at `acquire_control`, which must validate existence *before* granting a
+   lease and must be safe to call on an ID that turns out to be unknown.
+
+   So `session.acquire_control` on an ID the index does not hold validates
+   durable existence with the query, and a negative answer is the refusal the
+   client sees, with nothing created and no attachment left behind. Nothing
+   about the index is consulted to decide existence, which is why an index
+   that is incomplete is not a correctness problem, and the daemon still reads
+   no Store internals.
 2. **A client that never saw the session ID recovers by command identity.**
    At the cut where the Store committed the creation and the process died
    before the reply, the client may hold no ID at all. It is not lost: the
