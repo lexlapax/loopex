@@ -57,12 +57,18 @@ foreign peer is refused before initialize.
 
 Every attachment starts from a snapshot anchored at the committed sequence
 and then receives the buffered and live stream contiguously, at least once.
-The daemon keeps a bounded resident window of recent durable events per
-session and replays older ones from the store on demand. On M5's local
-adapter every durable event stays replayable until the operator retires the
-root, so replay always succeeds; `cursor_expired` remains the defined
-response a compacting adapter returns for a cursor older than its retained
-history, and no M5 path produces it. Each connection owns a bounded socket
+Replay has exactly one owner, and it is core. Every attach, reattach and
+reconnect goes through the runtime's cursor transaction, and every durable
+event a client is owed comes from core's dispatcher over the store. The
+daemon's resident window is not a replay source: it is a droppable cache of
+encoded bytes for events core has already delivered, so a second connection
+at the same position is served without re-encoding. It never anchors a
+snapshot, never establishes or advances a cursor, and may be dropped at any
+moment with no effect but re-encoding. On M5's local adapter every durable
+event stays replayable until the operator retires the root, so replay always
+succeeds; `cursor_expired` remains the defined response a compacting adapter
+returns for a cursor older than its retained history, and no M5 path produces
+it. Each connection owns a bounded socket
 output buffer; a slow attachment is detached at its last completely emitted
 cursor while every other attachment continues. Idle attachments are evicted
 at the residency limit and reconnect at their retained cursor with no

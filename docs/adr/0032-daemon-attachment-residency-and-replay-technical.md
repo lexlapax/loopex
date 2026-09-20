@@ -65,6 +65,9 @@ per-connection socket output buffer of encoded frames not yet written to the
 socket, bounded at 4 MiB, and the per-session resident window of encoded
 recent events, bounded at 4,096 events and 16 MiB, and it enforces the
 512 MiB aggregate across every output buffer and resident window it holds.
+Neither daemon stage owns replay: core owns the cursor and decides what is
+owed, and both daemon stages hold only bytes for events core has already
+named.
 When the next event would exceed the core count or a daemon byte bound, the
 daemon detaches the attachment at its last completely emitted cursor with a
 stable reason rather than letting either stage grow. No byte limit is
@@ -179,12 +182,36 @@ exactly N, and durable events after N are buffered for that attachment and
 delivered contiguously after the snapshot. The daemon adds:
 
 - a resident window of at most 4,096 durable events and 16 MiB of encoded
-  events per session held in memory; a cursor inside the window replays from
-  memory and a cursor older than the window replays from the store. On the
-  local adapter every durable event is retained until the root is retired,
-  so store replay always succeeds. `cursor_expired` with a fresh snapshot
-  and cursor is the defined response a compacting adapter returns for a
-  cursor older than its retained history; no M5 witness can produce it and
+  events per session held in memory, defined as a **droppable encoding
+  cache** and nothing else. It holds the encoded bytes of events core has
+  already delivered to at least one attachment of that session, so a second
+  attachment arriving at the same position is served without encoding them
+  again. It is not a replay source: it never anchors a snapshot, never
+  establishes or advances a cursor, and is never consulted to decide what a
+  client is owed. Every attach, reattach and reconnect — including one whose
+  position lies inside the window — goes through core's cursor transaction,
+  and the window is used only to answer the bytes core has already named. It
+  may be dropped whole at any instant; the only consequence is that the next
+  delivery re-encodes. Correctness therefore cannot depend on it, and the
+  tests prove that by running the residency cases twice, once with the window
+  disabled, with identical delivery.
+
+  Reclamation is deterministic so that it can be tested rather than observed.
+  When the daemon's aggregate encoded-byte ceiling would be exceeded, windows
+  are released in this fixed order: first every window whose session has zero
+  attachments, in ascending order of the monotonic time of their last
+  delivery, ties broken by session ID bytes ascending; then, if the ceiling is
+  still exceeded, the window of the session whose slowest attachment is
+  furthest behind, by the same tie-break. Only after every window has been
+  released does the daemon detach the slowest attachment at its last emitted
+  cursor. Independently of pressure, a window whose session has had zero
+  attachments for the idle interval is dropped. No reclamation stalls a
+  journal transaction and none changes what any client is owed.
+
+  On the local adapter every durable event is retained until the root is
+  retired, so store replay always succeeds. `cursor_expired` with a fresh
+  snapshot and cursor is the defined response a compacting adapter returns for
+  a cursor older than its retained history; no M5 witness can produce it and
   none claims to;
 - the core event-count queue and the daemon socket output buffer above; when
   the next event would exceed either, the attachment is detached at its last
@@ -212,7 +239,12 @@ sequence and event ID.
 Tests prove: two core attachments to one session keep independent live handles,
 snapshots and cursors with no implicit replacement; an explicit replacement
 invalidates only its named incarnation; snapshot-then-contiguous at-least-once
-delivery with no gap across the window boundary; a slow observer detached at
+delivery with no gap across the window boundary; the same delivery cases run
+again with the resident window disabled, byte for byte identical, and with the
+window dropped mid-stream, proving the cache establishes nothing; deterministic
+reclamation in the fixed order above, including the case where zero-attachment
+windows alone consume the aggregate ceiling and are released before any
+attachment is detached; a slow observer detached at
 its last emitted cursor while the controller and other attachments continue;
 the per-session and per-daemon limits refusing independently; idle eviction
 and reconnect with no missing durable event and any duplicate deduplicated by

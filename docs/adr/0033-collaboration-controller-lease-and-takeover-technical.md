@@ -89,9 +89,40 @@ the local store's writer marker, unchanged.
 - An orderly connection close by the holder releases the lease; an abrupt
   loss leaves it to expire.
 
+### Expiry against an in-flight admission
+
+Two rules above meet at the deadline and their order has to be stated, not
+left to the implementation. The per-session owner serializes a lease
+transition against a mutation whose holder check has already started, so a
+takeover cannot pass an admission core has not yet resolved; and takeover is
+admitted at expiry with no grace. The linearization rule is:
+
+1. A mutation whose holder, epoch, state and deadline check *completed* while
+   the deadline was still in the future is **in flight** and settles under
+   that lease, even if the deadline passes while core's admission is
+   unresolved. It completes or fails on its own terms; it is neither retried
+   nor fenced by the expiry.
+2. At the deadline the lease state becomes `expired` and the holder gains
+   nothing further: every mutation whose check begins at or after the deadline
+   refuses, including one from the holder, and renewal no longer extends it.
+3. A takeover becomes **eligible** at the deadline and is **granted** only
+   once every in-flight mutation for that session has resolved. Until then the
+   acquire waits, bounded by the acquiring request's own deadline; a wait that
+   exceeds it refuses with a stable reason naming the in-flight admission, and
+   the client may acquire again.
+4. The grant then mints a fresh epoch, so nothing admitted under the previous
+   lease can be confused with anything after it.
+
+This adds no grace to the lease. The expired holder gains no new authority; it
+only finishes what it had already started, which is the same guarantee the
+serialization rule gives at every other moment. A holder cannot extend its
+tenure by starting work, because rule 2 refuses every new check at the
+deadline and the in-flight set can only shrink.
+
 Proposed terms bound at acceptance: lease length 30 seconds, renewal interval
-10 seconds for the reference clients, takeover admitted when the live daemon's
-monotonic deadline is reached, no grace period beyond the lease itself.
+10 seconds for the reference clients, takeover eligible when the live daemon's
+monotonic deadline is reached and granted when the in-flight set is empty, no
+grace period beyond the lease itself.
 
 ### Cancellation across processes
 
@@ -124,8 +155,15 @@ Tests prove: exactly one controller with observers within the ADR 0032 bounds;
 a stale epoch, copied current epoch, non-holder connection, released state
 and expired state each refused before core admission with the current
 controller unaffected; a lease transition racing command admission preserves
-this order; takeover only after release or expiry with a fresh epoch minted
-before the successor's first command; a controller killed mid-run fenced
+this order; the expiry linearization above, with a mutation blocked inside
+core across the deadline settling under its own lease while the eligible
+takeover waits and is granted only after it resolves, the holder's next
+mutation refused at the deadline, the acquiring request refusing with its
+stable reason when its own deadline elapses first, the holder's connection
+disconnecting while its mutation is in flight, and the per-session lease owner
+failing while a mutation is in flight — in every case exactly one of settle or
+refuse, never both, and no epoch reused; takeover only after release or expiry
+with a fresh epoch minted before the successor's first command; a controller killed mid-run fenced
 after takeover, its late commands refused; the per-session lease owner
 process crashing and restarting while the daemon and client sockets survive,
 after which the previous holder's delayed command is refused, no epoch is

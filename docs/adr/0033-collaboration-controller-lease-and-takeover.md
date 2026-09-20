@@ -66,8 +66,15 @@ interaction answer, metadata field or attachment order confers it, and the
 daemon's own configuration may narrow who may take over; it cannot widen what
 the host's policy allows a command to do. The proposed lease terms are exact
 and are bound at acceptance: a thirty-second lease renewed every ten seconds,
-takeover admitted at the live daemon's steady-clock expiry, and immediate
-release on orderly disconnect. Writer exclusion between two daemons on one
+takeover eligible at the live daemon's steady-clock expiry, and immediate
+release on orderly disconnect. Expiry and an unresolved admission meet on one
+rule, so neither promise is quietly broken by the other: a mutation whose
+holder check completed before the deadline settles under its lease even if the
+deadline passes while core is still deciding; at the deadline the holder gains
+nothing further and every new mutation of its refuses; and a takeover becomes
+eligible at the deadline but is granted only once those in-flight mutations
+have resolved. That adds no grace, because the expired holder can only finish
+what it had already begun. Writer exclusion between two daemons on one
 state root stays the local store's writer marker, unchanged.
 
 **Alternatives rejected.** Putting the lease in core was rejected because the
