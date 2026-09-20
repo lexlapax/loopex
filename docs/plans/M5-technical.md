@@ -47,7 +47,7 @@ Concept: [Scope](M5.md#concept-plan-scope).
 
 | Component | Owns | Cannot own |
 | --- | --- | --- |
-| `loopex` | Durable session truth, the race-free attach barrier and cursor, independent concurrent attachments to one session, the read-only session-existence query, **`Loopex.Trace.exclude_self/2`, which installs both the match-specification exclusion ADR 0030 names and the process-level exclusion its callees need, before any message is delivered**, **the bounded `quiesce/2` that settles every active coordinator or names what it could not**, **the runtime-side create and resume results' `disposition` and `control_entry` fields**, the per-attachment event-count dispatcher queues, cancellation and recovery | A lease, a transport, a byte limit, residency policy or any daemon fact |
+| `loopex` | Durable session truth, the race-free attach barrier and cursor, independent concurrent attachments to one session **and their release — the dispatcher monitors the attaching process and drops its attachment on `DOWN`, which is what replaces the supersession this change removes**, the read-only session-existence query, **`Loopex.Trace.exclude_self/2`, which installs both the match-specification exclusion ADR 0030 names and the process-level exclusion its callees need, before any message is delivered**, **the bounded `quiesce/2` that settles every active coordinator or names what it could not**, **the runtime-side create and resume results' `disposition` and `control_entry` fields**, the per-attachment event-count dispatcher queues, cancellation and recovery | A lease, a transport, a byte limit, residency policy or any daemon fact |
 | `loopex_protocol` | Generation-2 records, validators, schema and vectors | Daemon behaviour or lease semantics |
 | `loopex_store_local` | The unchanged local adapter, its 256 MiB log and 4 MiB frame ceilings, its `store_capacity_exceeded` and `store_log_too_large` refusals and its writer marker, which it takes at start and releases in its own `terminate/2` — so the daemon owns the Store *process* and stops it last in an orderly shutdown, and a store loss releases the marker before the daemon can act | Any daemon fact, lease, index or residency state |
 | `loopex_daemon` | Marker-first process and socket lifetime, existence validation by calling core's query rather than by attaching or resuming, the peer-credential check, generation-2 negotiation, per-connection socket output buffers, the resident window and aggregate byte ceiling, attachment residency and eviction, the in-memory controller lease and writer-epoch check, the session index with its recorded-entry bound and its bounded pages, attachment residency and the one-way activation ceiling, and diagnostics | Store or coordinator internals, a second loop, policy selection, host identity, a durable record or a durable method |
@@ -334,7 +334,7 @@ core-internal states a daemon cannot construct through the socket.
 
 | Core change | Core witness | Cases | Lane |
 | --- | --- | --- | --- |
-| Concurrent attachment | `apps/loopex/test/concurrent_attachments_test.exs` (**new**) | `two attachments to one session coexist without replacement`; `one detaching leaves the other delivering`; `one backpressuring does not stall the other`; `each carries its own cursor and incarnation` | fast |
+| Concurrent attachment | `apps/loopex/test/concurrent_attachments_test.exs` (**new**) | `two attachments to one session coexist without replacement`; `one detaching leaves the other delivering`; `an attachment is released when the process that attached it exits`; `the dispatcher holds no attachment for a dead attacher`; `one backpressuring does not stall the other`; `each carries its own cursor and incarnation` | fast |
 | Read-only existence query | `apps/loopex/test/session_existence_query_test.exs` | one per result of the closed set | fast |
 | **`quiesce/2`** | **`apps/loopex/test/runtime_quiesce_test.exs`** (new) | `admits every abort before any cleanup begins`; `releases cancellation concurrently once every admission resolves`; `an empty active set drains with a zero budget`; `reports a Control entry whose coordinator has died as absent`; `fences an unsettled session and refuses its paused transaction as stale`; `fences an absent session too`; `a fence refused stale classifies the session from the journal`; `a fence answering commit_unknown is retried under the same derived tx_id and reported unsettled with fence: :unknown`; `every fence in one drain derives its id from the same drain_id` | fast |
 | **The two-phase abort-path split** | **`apps/loopex/test/cancellation_test.exs`** (existing; the file that already drives an abort against a receipt arriving mid-reduction) | `a drained abort commits without beginning cleanup`; `a client abort still begins cleanup on its commit reply path` — the pair that proves the split changed the drain and nothing else | fast |
@@ -1018,7 +1018,7 @@ leaked until the daemon restarts:
 | Either call refusing — `runtime_command_conflict`, `store_unavailable`, an invalid identifier, a placement mismatch, any other `{:error, _}` | Released |
 | A **resume** crashing or timing out | **Held, then resolved by replay**: replayed under its original `command_id`, whose `disposition`/`control_entry` say whether the original call activated the session. The existence query cannot answer this — it says `present` either way |
 | A **create** crashing or timing out | **Held, then resolved by replay**: replayed under the same `command_id`, which returns the historical result and starts no coordinator (`control.ex:901-907`), carrying the same two fields. Same reservation key, so no second slot |
-| An **attach** crashing or timing out | **Released with the connection**: the reservation is keyed by the connection, ADR 0032 binding a connection to at most one attachment (`0032-…-technical.md:126-129`), so the daemon closes that connection and its ordinary teardown detaches whatever core attachment it held. Nothing is observed, because nothing needs to be |
+| An **attach** crashing or timing out | **Released with the connection**: the reservation is keyed by the connection, ADR 0032 binding a connection to at most one attachment, and core change 1 monitoring the attaching process. The daemon closes that connection, its process ends, and the dispatcher's `DOWN` handler drops the attachment. Nothing is observed, because nothing needs to be |
 
 **That last row is not hypothetical, and the reason is a default nobody
 chose.** The daemon reaches core through `Loopex.Runtime`, whose
@@ -1028,7 +1028,7 @@ returns the daemon an error while core is still starting a coordinator — so
 "the call gave no answer" is an ordinary outcome of a slow root, not an
 exotic one. Every daemon call that consumes a ceiling therefore carries an
 explicit timeout rather than inheriting that default, and resolves its
-reservation by observation when the timeout is what it gets.
+reservation by the rule its own row names when the timeout is what it gets.
 
 **A call that gives the daemon no answer may still have started a coordinator
 or an attachment**, so releasing the reservation would let the ceiling be
@@ -1053,17 +1053,18 @@ because core's resume result carries the same two fields: `:historical` with
 with `control_entry: :dormant` means it did not, and the daemon converts or
 releases on that.
 
-**Attach: close the connection and release with it.** Core exposes no
-attachment count, so there is nothing to observe — and nothing needs to be.
-ADR 0032 binds a connection to **at most one attachment at a time**
-(`0032-…-technical.md:126-129`), so the attachment reservation is keyed by
-the **connection**, not the session. A connection whose `session.attach` never
-answered is closed by the daemon, and its teardown detaches whatever core
-attachment that connection holds — the same path every connection close
-takes, whether it closed because a client went away or because the daemon gave
-up on it. The reservation is released with the connection. That is the whole
-resolution: one rule already in the design, applied to a case that otherwise
-needed an observer core does not have.
+**Attach: end the connection process and the attachment goes with it.** Core
+exposes no attachment count, so there is nothing to observe — and nothing
+needs to be. ADR 0032 binds a connection to **at most one attachment at a
+time** (`0032-…-technical.md:126-129`), the daemon attaches from its
+**per-connection process**, and core change 1 makes the dispatcher monitor
+that process and drop its attachment on `DOWN`. So the reservation is keyed by
+the connection, and a connection whose `session.attach` never answered is
+closed by the daemon — the same path every connection close takes, whether the
+client went away or the daemon gave up on it — its process ends, and the
+attachment is released by the monitor. The reservation is released with it.
+Nothing new is called and nothing is observed; the release path is the one
+core change 1 adds, and it is named in the inventory rather than assumed.
 
 `loopex attach --take-over` against a dormant session therefore acquires
 successfully and is refused at attach, holding a lease it no longer wants.
@@ -2993,12 +2994,14 @@ next daemon removes before binding.
 
   *Attach, no answer.* Two surfaces, and they differ in the two cases. On the
   wire, the client's connection is asserted **closed** — an EOF a test can
-  observe — where a connection whose attach answered stays open. In-VM, core's
-  attachment registry is asserted to hold one fewer entry afterwards, the
-  connection's teardown having detached it, and the daemon's reservation count
-  to be back where it started. Nothing reads an attachment count *from core's
-  public surface*, because none exists there; the case reads core's own state
-  in the same VM and says so.
+  observe — where a connection whose attach answered stays open. In-VM, the
+  dispatcher's attachment count is asserted to drop **after the connection
+  process exits**, and the daemon's reservation count to be back where it
+  started. The code path that produces that drop is core change 1's monitor,
+  which the inventory names as new work; a core witness in
+  `apps/loopex/test/concurrent_attachments_test.exs` proves the monitor
+  itself, and this case proves the daemon rides it. Nothing reads an
+  attachment count from core's *public* surface, because none exists there.
 
   Each case asserts the daemon's remaining slot count **in-VM**, reading the
   reservation state directly rather than through any wire method — no DTO
@@ -3089,7 +3092,7 @@ survive arrives as `runtime_lost`.
 | **Store ↔ daemon** | `loopex_store_local` owns the marker and the log; the **daemon owner process** holds the Store's link and pid | Append error, including the capacity refusal | The Store stops **itself** (`local.ex:251-270` answers `{:stop, reason, commit_unknown, state}`) and releases the marker in `terminate/2` (`local.ex:167`). The owner's `{:EXIT, store_pid, reason}` clause receives it **with the store's real reason**, which is what distinguishes `store_capacity_exceeded` from `store_lost` | `daemon.stopping` with `store_lost` or `store_capacity_exceeded`, one bounded attempt, then the socket closes | **Durable:** whatever committed. **Not:** the failed append; the in-flight transaction is `commit_unknown` and reconciles later |
 | **Store ↔ daemon (startup)** | The adapter | Marker held, unverifiable, log too large | `WriterLock.acquire` refuses with `store_writer_active` / `store_writer_unverifiable`; `Log.open` refuses `store_log_too_large` (`log.ex:80-84`) | Nothing — no socket exists yet | **Not durable:** nothing was written. Reverse cleanup leaves no marker |
 | **Core ↔ daemon: existence query** | `loopex` answers; the daemon asks | Root unreadable, malformed ID, unrecognised answer | The query's own closed result set — `present`, `absent`, `invalid_id`, `store_unavailable`, `unexpected` (this plan's new core operation) | The matching refusal, four of them distinct; nothing created, nothing attached, no lease | **Not durable:** the query writes nothing, proved by a byte-identical root |
-| **Core ↔ daemon: attach** | `loopex` owns the cursor barrier, snapshot and queues | Barrier race, stale handle, queue overflow | Core's existing attach transaction and stale-handle checks; the daemon reads no coordinator state to repair a race | Snapshot then contiguous at-least-once events, or detachment at the last emitted cursor with a stable reason | **Durable:** the events. **Not:** the attachment, the window, the buffer |
+| **Core ↔ daemon: attach** | `loopex` owns the cursor barrier, snapshot and queues | Barrier race, stale handle, queue overflow, **an attachment whose holder is gone** | Core's existing attach transaction and stale-handle checks; **and core change 1's monitor on the attaching process, which is what releases an attachment when its holder exits — the daemon attaches from its per-connection process, so a closed connection releases its attachment with no call**; the daemon reads no coordinator state to repair a race | Snapshot then contiguous at-least-once events, or detachment at the last emitted cursor with a stable reason | **Durable:** the events. **Not:** the attachment, the window, the buffer |
 | **Core ↔ daemon: resume** | `loopex` | Placement mismatch, unknown session, already-resolved command | Core's existing resume path and command idempotency (`control.ex:901-907` returns the historical result without starting an owner) | Core's refusal, forwarded unchanged | **Durable:** the resume command and its result |
 | **Core ↔ daemon: commands** | `loopex` admits; the daemon forwards | **Coordinator death** | Core's `DynamicSupervisor` (`restart: :temporary`, `session_coordinator.ex:134-142`); `Control` consumes the `DOWN`, releases the fence and leaves the entry (`control.ex:821`). **No signal reaches the daemon, and none is owed** — the daemon supervises the runtime, not the coordinators beneath it | Core's existing refusal on the next command for that session, forwarded unchanged. `residency` still reads `active`, which remains true: this daemon did activate it | **Durable:** whatever committed before. **Not:** any claim about liveness |
 | **Lease owner ↔ connections** | `loopex_daemon` | A session's lease owner dies; its in-flight admission set goes with it, and the relay's ticket for any mutation it had authorized does not | The owner's `{:EXIT, pid, reason}` clause maps the pid to **its session** rather than to a daemon class — the one session-scoped row in this table, on the maintainer's decision of 2026-09-20 | That session's controller attachment closes with `control_owner_lost`; observers stay attached; the next `session.acquire_control` starts a fresh owner and mints a fresh epoch, its first grant waiting until the relay's outstanding tickets for that session settle | **Not durable:** the lease, the epoch, the in-flight set. The journal is untouched, and a mutation already inside core settles or refuses exactly once under core's serial ownership |

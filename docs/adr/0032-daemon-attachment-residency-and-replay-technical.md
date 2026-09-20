@@ -126,12 +126,36 @@ unchanged: every existing-session mutation in generation 2 carries
 a schema digest of its own. A connection is
 one attachment after `session.attach`; generation 2 permits a connection to
 hold at most one attachment at a time and a client process to hold as many
-connections as the residency limits admit. **An attachment never outlives its
-connection**: closing a connection — because the client went away, because the
-daemon is stopping, or because the daemon gave up on a request that never
-answered — detaches the core attachment that connection held. That is what
-makes a connection a sufficient handle on an attachment, and it is why a
+connections as the residency limits admit.
+
+**An attachment never outlives the process that attached it, and M5 is what
+makes that true.** The mechanism is a monitor, not a detach call. Today the
+dispatcher monitors the attaching process only while its snapshot scan is in
+flight and **demonitors it the moment the scan finishes**
+(`event_dispatcher.ex:455`), after which nothing watches that process at all;
+`disconnect/2` marks an attachment disconnected and empties its queue but
+leaves the entry in place (`:879-886`); and the one path that actually removes
+an entry is same-session **supersession** (`:812-823`) — which M5's
+concurrent-attachment change removes, because coexisting attachments are the
+point.
+
+So that change has two halves and this pair states both: supersession stops
+removing attachments, **and the dispatcher keeps its monitor after install and
+removes the attachment on that process's `DOWN`**. Without the second half M5
+would leave core with no release path at all, and every attachment ever made
+would live until the runtime stopped.
+
+For the daemon this needs no API: it attaches from its **per-connection
+process**, so a connection that closes — because the client went away, because
+the daemon is stopping, or because the daemon gave up on a request that never
+answered — ends that process, and the `DOWN` releases the attachment. That is
+what makes a connection a sufficient handle on an attachment, and it is why a
 daemon needs no attachment count from core to release what it reserved.
+
+An explicit `detach/1` on the public API was the alternative and is rejected:
+it would add a call every caller must remember on every exit path, including
+the paths where the caller is already gone, which is exactly the case a
+monitor handles for free.
 
 The core EventDispatcher and Control retain multiple live attachment IDs and
 incarnations for one session. A new distinct attachment does not implicitly
