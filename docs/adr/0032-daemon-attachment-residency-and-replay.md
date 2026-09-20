@@ -37,8 +37,11 @@ unchanged — and its request records with exactly one addition, the
 generation 2 a new schema digest rather than a rename. It serves exactly one
 generation,
 `loopex.experimental/2`, which adds `session.list`, `daemon.status`, the two
-control methods, the writer-epoch field ADR 0033 names, and one notification
-record family, `daemon.stopping`, carrying the reason a daemon is going away.
+control methods, the writer-epoch field ADR 0033 names, and **two**
+notification record families: `daemon.stopping`, carrying the reason a daemon
+is going away, and `daemon.notice`, carrying a bounded code for something an
+operator should know about a session whose command nonetheless succeeded —
+today, an activation whose directory write failed.
 The milestone that
 brings this ADR also renames the released generation-1 string to
 `loopex.experimental/1`, so the two generations are named on one scheme and

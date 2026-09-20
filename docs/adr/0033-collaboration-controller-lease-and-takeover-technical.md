@@ -156,7 +156,11 @@ the local store's writer marker, unchanged.
 
 - `session.acquire_control` (`session_id`, `request_id`): grants control when
   no lease is held, or when the held lease is released or expired; refuses
-  with `control_held` naming the current epoch otherwise. The result carries
+  with `control_held` otherwise, **carrying no epoch** — an epoch is
+  authority-shaped, and a client that was just refused control is the last one
+  that should be handed the current one. An earlier revision of this sentence
+  said the refusal named it; ADR 0032's error table is the contract and it
+  carries nothing beyond the envelope. The result carries
   the new `writer_epoch` and `expires_in_ms`, the remaining term on the
   daemon's clock. For a known dormant session, a connection may acquire by
   session ID before attach. The daemon validates durable session existence

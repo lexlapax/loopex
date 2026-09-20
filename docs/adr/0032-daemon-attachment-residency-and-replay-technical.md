@@ -157,6 +157,107 @@ enforced inside core.
 
 ### Generation 2 additions
 
+Every table below is the wire contract at the exactness a literal vector
+needs: the keys a request carries, the keys a result carries, which are
+optional, and what type each is in ADR 0023's vocabulary — `binary identity`,
+`u64` (a canonical unsigned decimal **string**), `bool`, `plain_object`. The
+envelope is ADR 0023's unchanged: a request is a flat object with exactly
+`method`, `request_id` and its row's fields, an optional field is **absent**
+rather than `null`, and unknown fields refuse before a facade call
+(`0023-…-technical.md:131-136`).
+
+**`session.list`**
+
+| Direction | Key | Type | Optionality |
+| --- | --- | --- | --- |
+| request | `limit` | integer 1 to 256 | required |
+| request | `after_session_id` | binary identity | optional |
+| result | `entries` | array of entry objects, at most `limit` | required |
+| entry | `session_id` | binary identity | required |
+| entry | `placement_identity` | binary identity | required |
+| entry | `residency` | `"active"` \| `"dormant"` | required |
+| entry | `controlled` | bool | required |
+| result | `next_after_session_id` | binary identity | present **exactly when** more entries exist |
+| result | `index_full` | bool `true` | present **exactly when** the index is at its 4,096-entry ceiling |
+
+Entries are ordered by session ID bytes ascending, and carry nothing else —
+no content, no durable session state.
+
+**`daemon.status`**
+
+| Direction | Key | Type | Optionality |
+| --- | --- | --- | --- |
+| request | — | — | takes no fields |
+| result | `placement_identity` | binary identity | required |
+| result | `daemon_incarnation` | binary identity | required |
+| result | `socket_path` | string | required |
+| result | `attachments` | integer, and `attachment_limit` beside it | required |
+| result | `active_sessions` | integer, and `activation_limit` beside it | required |
+| result | `index_entries` | integer, and `index_limit` beside it | required |
+| result | `uptime_ms` | `u64` | required |
+
+**`session.acquire_control`**
+
+| Direction | Key | Type | Optionality |
+| --- | --- | --- | --- |
+| request | `session_id` | binary identity | required |
+| result | `writer_epoch` | binary identity, ≤ 64 bytes | required |
+| result | `expires_in_ms` | `u64`, the remaining term on the daemon's clock | required |
+
+**`session.release_control`**
+
+| Direction | Key | Type | Optionality |
+| --- | --- | --- | --- |
+| request | `session_id` | binary identity | required |
+| request | `writer_epoch` | binary identity | required |
+| result | `released` | bool `true` | required |
+
+**Notification records — there are two**, and the Concept says two as well:
+
+| Family | Key | Type | Optionality |
+| --- | --- | --- | --- |
+| `daemon.stopping` | `reason` | one of the closed set below | required |
+| | `message` | bounded non-secret string | required |
+| | `retry_after_ms` | `u64` | present **only** for `operator_stop` |
+| `daemon.notice` | `code` | closed set, today `"index_write_failed"` | required |
+| | `session_id` | binary identity | required |
+| | `message` | bounded non-secret string | required |
+
+Neither is correlated and neither carries a cursor.
+
+**The new error codes, with their shape.** All of these are **correlated**
+errors answering one request: each carries that request's `request_id`, no
+`event_cursor`, no session state, and closes nothing.
+
+| Code | Answers | Carries beyond the envelope |
+| --- | --- | --- |
+| `control_held` | `session.acquire_control` | **Nothing.** It does *not* carry the current epoch: an epoch is authority-shaped, and handing one to a client that was just refused is exactly the value it must not have. An earlier revision of ADR 0033 said it named the current epoch; that is withdrawn |
+| `control_not_held` | `session.release_control` from a non-holder | nothing |
+| `control_pending` | `session.acquire_control` that waited out its deadline | nothing |
+| `control_capacity_reached` | any lease operation beyond the 512 concurrent-owner cap | nothing |
+| `session_dormant` | `session.attach` | nothing |
+| `session_unknown`, `session_id_invalid`, `store_unavailable`, `existence_indeterminate` | any method that validates existence first | nothing |
+| `activation_ceiling_reached` | `session.create`, `session.resume` | nothing |
+| `composition_mismatch` | `session.resume` on a session this composition cannot serve | nothing |
+
+The one **uncorrelated** error generation 2 adds is `control_owner_lost`,
+defined below with its cursor and its close behaviour.
+
+**The limits input is not unchanged**, which an earlier revision's digest
+table said while this pair advertised residency limits a client can read. The
+added keys are enumerated so the digest covers them:
+
+| Limit key | Value |
+| --- | --- |
+| `attachments_per_session` | 64 |
+| `attachments_per_daemon` | 512 |
+| `session_list_page_max` | 256 |
+| `session_index_entries` | 4,096 |
+| `lease_term_ms` | 30,000 |
+
+ADR 0023's own framing and input ceilings are unchanged; these are additions
+beside them, and **all five** digest inputs therefore change in generation 2.
+
 | Method | Required fields | Result |
 | --- | --- | --- |
 | `session.list` | `limit` (1 to 256), optional `after_session_id` | A page of at most `limit` index entries ordered by session ID bytes ascending and starting strictly after `after_session_id`; each entry carries the session identity, the placement identity recorded for it, `residency` of `active` or `dormant`, and `controlled` as a boolean, never content and never durable session state; `next_after_session_id` is present exactly when more entries exist, and `index_full` is present and true exactly when the index is at its 4,096-entry ceiling, so a client is told the listing may be incomplete rather than reading an omission as an absence |
@@ -191,7 +292,7 @@ justify.
 **This changes the generation-2 digest, and so do the error codes.**
 `LoopexProtocol.Session.schema_digest/0` is taken over the generation, the
 ordered methods, the ordered record families, the ordered error codes and the
-limits — five inputs, and generation 2 changes four of them:
+limits — five inputs, and generation 2 changes **all five**:
 
 | Digest input | Generation 2 |
 | --- | --- |
@@ -199,7 +300,7 @@ limits — five inputs, and generation 2 changes four of them:
 | Methods | Adds `session.list`, `daemon.status`, `session.acquire_control`, `session.release_control` |
 | Record families | Adds `daemon.stopping` and `daemon.notice` |
 | **Error codes** | Adds every refusal generation 2 can return and generation 1 cannot: `control_held`, `control_not_held`, `control_pending`, `control_capacity_reached`, `control_owner_lost`, `session_dormant`, the four existence-query refusals the daemon maps to the wire (`session_unknown`, `session_id_invalid`, `store_unavailable`, `existence_indeterminate`), and the activation and residency refusals (`activation_ceiling_reached`, `composition_mismatch`). **Not** `session_index_too_large`, which is a startup exit class and can reach no client |
-| Limits | Unchanged from ADR 0023's ceilings |
+| **Limits** | ADR 0023's framing and input ceilings are unchanged, and generation 2 **adds** the residency keys a client can read: `attachments_per_session`, `attachments_per_daemon`, `session_list_page_max`, `session_index_entries`, `lease_term_ms` |
 
 **`control_owner_lost` closes a controller whose lease owner died.** ADR 0033
 makes a lease owner's failure session-scoped: the daemon closes that session's
