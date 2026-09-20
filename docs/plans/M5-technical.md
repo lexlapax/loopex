@@ -635,12 +635,40 @@ and one shared resolver they both call:
   a hand-written one looks like, since anything but one lowercase 40-character
   hexadecimal commit id and a commit date is refused; or the extracted tree
   **changed during the build**, which is the property `git status` buys in a
-  checkout and which the resolver proves here by a SHA-256 over the extracted
-  tracked source paths, sorted, taken before the build and again after and
-  required equal;
+  checkout and which the resolver has to buy some other way here, because an
+  extraction has no git index to ask what is tracked;
 - the provider build manifest embeds the resolved commit id together with that
   source digest, so an identity naming a commit whose tree is not what was
   built is detectable rather than merely trusted.
+
+**The unchanged-tree check needs an inventory, because an extraction has no
+index.** An earlier revision said the resolver hashes "the extracted tracked
+source paths" — but *tracked* is a fact held in `.git`, and `git archive`
+leaves none, so there is nothing to enumerate and the check would either
+compute over an empty set or fall back to a glob nobody stated. The archive
+therefore carries the enumeration with it:
+
+- a tracked **`SOURCE_INVENTORY`** file, generated from
+  `git ls-files -z` at the moment the archive is staged and written as the
+  sorted list of every path in it, so the extraction holds the same answer the
+  checkout would have given;
+- **both** halves are compared, before the build and again after: the **path
+  set**, so a file created or deleted during the build is caught even if every
+  file it names is byte-identical, and the **bytes**, as a SHA-256 over each
+  path's contents in inventory order;
+- exactly **one** exclusion, named rather than implied: the build-output roots
+  `_build/` and `deps/`, which the build is supposed to create. Nothing else
+  is excluded, and the list of exclusions is part of the retained evidence, so
+  a later exclusion cannot quietly widen what "unchanged" means.
+
+Its witness is the one an inventory-free check could not have: a file is
+created **inside the extraction and outside the excluded roots** during the
+build, and the resolver is asserted to **refuse** with the changed-tree
+reason — where the same build without it succeeds. An empty or missing
+`SOURCE_INVENTORY` is itself a refusal, on the same rule as an unsubstituted
+identity, so a check that enumerated nothing cannot read as a pass. The
+inventory, the exclusion list and both digests are retained with the closure
+runs beside the archive's own SHA-256.
 
 The **mismatch** case is proved where the external truth exists: the release
 check stages the archive with `git archive` from a known commit, retains the
@@ -762,11 +790,13 @@ a client to connect to a socket the daemon has not finished checking. Every
 diagnostic, warning and failure goes to `stderr`, so `stdout` carries the
 readiness line alone and stays machine-readable.
 
-**Stopping.** **`SIGTERM`** begins the orderly shutdown below — or `SIGINT`
-through the launcher, `apps/loopex_cli/bin/loopex`, which forwards it as
-`SIGTERM`. The daemon itself installs no `SIGINT` handler and cannot: the
+**Stopping.** Sent **to the escript**, `SIGTERM` begins the orderly shutdown
+below and is the only signal that does. Sent **to the launcher**,
+`apps/loopex_cli/bin/loopex`, **any of `INT`, `TERM`, `HUP` or `QUIT`** does,
+because the launcher traps all four and forwards `kill -TERM` to its child.
+The daemon itself installs no `SIGINT` handler and cannot: the
 emulator reserves that signal and `:os.set_signal/2` refuses the name, as the
-signal section below sets out.
+signal section below sets out with the full route-by-signal table.
 There is no `daemon.stop` method on the wire: stopping is an operator act
 against the process, and a client-issued stop would let one connection end
 every other client's session residency, which is authority the socket does not
@@ -1888,9 +1918,37 @@ died on `SIGHUP` would exit when the terminal that happened to start it
 closed — which for a background service is a defect rather than a courtesy.
 `SIGQUIT`'s default is a core dump, and taking it over to do a graceful stop
 would take away the one signal an operator has for "stop and leave me a dump".
-So the daemon handles `SIGTERM`, leaves `SIGHUP` and `SIGQUIT` at their
-defaults, and the witnesses cover `SIGTERM` and the launcher's forwarded
-`SIGINT` only.
+So the daemon handles `SIGTERM` and leaves `SIGHUP` and `SIGQUIT` at their
+defaults.
+
+**The contract therefore depends on the entry point, and the plan says so
+rather than giving one answer for two different processes.** It has to,
+because `apps/loopex_cli/bin/loopex` traps **`INT TERM HUP QUIT`** and
+forwards every one of them to its child as `kill -TERM`
+(`bin/loopex:51-60`) — so what a signal means is decided by whether it lands
+on the launcher or on the escript:
+
+| Signal | Sent to the **launcher** | Sent to the **escript** directly |
+| --- | --- | --- |
+| `SIGINT` | Orderly stop: forwarded as `SIGTERM` | Not this plan's to specify — `:os.set_signal/2` refuses `:sigint` (`interrupt.ex:13-17`) and the emulator's break handler owns it |
+| `SIGTERM` | Orderly stop: forwarded as `SIGTERM` | Orderly stop: the one signal the daemon installs a handler for |
+| `SIGHUP` | Orderly stop: forwarded as `SIGTERM` | The emulator's default — the daemon installs nothing, for the reason above |
+| `SIGQUIT` | Orderly stop: forwarded as `SIGTERM` | The emulator's default, a dump |
+
+So "the daemon dies on `SIGHUP` when its terminal closes" is false through the
+escript and **true through the launcher**, which is the shipped path — and
+that is the launcher's existing behaviour, deliberately left alone. An
+earlier revision of this section gave `SIGHUP` and `SIGQUIT` one meaning each
+without naming a route, which contradicted the launcher for two of the four.
+**Changing the launcher was the alternative and is rejected**: it forwards
+all four as `TERM` for every `loopex` command, that behaviour is released, and
+narrowing it for the daemon's sake would change what `loopex run` does on
+`SIGHUP` in the same change.
+
+The witnesses are **one per signal per route** — eight cases, four of which
+assert an orderly stop and four of which assert the entry point's own
+behaviour — rather than the `SIGTERM`-and-forwarded-`SIGINT` pair an earlier
+revision listed.
 
 For `SIGTERM` the daemon does what the CLI already
 does, and reuses the same mechanism rather than inventing one:
@@ -2887,7 +2945,8 @@ step unwinds what that step and its predecessors did, in reverse — and
 "predecessors" means **every process the startup started**, not the three an
 earlier revision named. A bound socket is **closed, and its path left in
 place** — reverse cleanup unlinks nothing, for the same reason no shutdown
-path does — a `daemon/` subdirectory the owner created is removed — no lease owner can exist
+path does — a `daemon/` subdirectory this start created is removed **when it
+is empty**, by the matrix below — no lease owner can exist
 yet, since none is started before a session is activated — and **every pid the
 composition function returned is stopped in reverse
 start order** — runtime, executor, workspace lease, transfers where it exists
@@ -2908,8 +2967,27 @@ The owner does this in its own start path rather than leaving it to a crash,
 because a crashing owner would take the links down without releasing the
 marker or removing the directory it made. A daemon that refuses to start
 leaves **no marker held** — which is what lets an operator fix the cause and
-try again without a recovery step — and may leave a socket pathname, which the
-next daemon removes before binding.
+try again without a recovery step.
+
+**What a failed start leaves on disk is one matrix, because three passages
+gave three answers.** One said a bound socket is closed with its path left in
+place while the `daemon/` subdirectory is removed — which cannot both happen,
+a directory holding a socket file not being empty. Two witnesses then asserted
+"no socket file exists afterwards" while the no-unlink witness asserted the
+opposite for the same failure. The rule is the bind:
+
+| Where the start failed | Socket pathname | `daemon/` subdirectory |
+| --- | --- | --- |
+| **Before the bind** — path resolution, signal install, the registry, custody or capability, composition and the marker, the index read, the subdirectory create | **None exists**; nothing was bound, so nothing is left | Removed **only if this start created it and it is empty**; a subdirectory that was already there, or that holds anything, is left exactly as found |
+| **At or after the bind** — the permission read-back, the accept, the readiness write, or any component dying during those | **Left in place**, closed but not unlinked, like every other exit path | **Left in place**, because it holds that pathname |
+
+Both halves follow from one rule already stated and one plain fact: **no
+predecessor path ever unlinks**, so a bound socket's pathname survives a
+failed start exactly as it survives a stop; and a directory holding a file
+cannot be removed, so the subdirectory removal is conditional on there being
+nothing in it. A daemon that refuses to start may therefore leave a socket
+pathname, which the next verified marker holder removes before binding, and
+that is the one thing it leaves behind.
 
 **Witnesses.** Most run a real daemon operating-system process; a few read
 state no surface exposes and run **in-VM**, in the same VM as the daemon or
@@ -3098,8 +3176,11 @@ children, a pid's liveness, a socket's EOF, or the daemon's own `stderr`.
   its correctness. After an **orderly stop**, the pathname is still on disk
   and `connect` to it fails as refused rather than hanging; the next daemon
   removes it, binds and serves. After a **store-loss fail-stop**, the same.
-  After a **failed start** — the marker acquired and the socket bound, then
-  the index bound exceeded — the same again, with no marker held.
+  After a **failed start at or after the bind** — the marker acquired and the
+  socket bound, then the permission read-back refused — the same again, with
+  no marker held. The index-bound failure is **not** this case and is asserted
+  the other way in the reverse-cleanup witness, because it happens before the
+  bind and there is no pathname to leave.
 
   The race the old design had is then run directly: the first daemon is held
   at the instant it would have unlinked, its Store is killed so the marker is
@@ -3112,18 +3193,23 @@ children, a pid's liveness, a socket's EOF, or the daemon's own `stderr`.
   that is otherwise perfectly valid — right owner, right mode — but outside
   the selected root's `daemon/` directory exits `invalid_socket_path` with no
   marker taken, no socket bound and nothing left behind.
-- **Signals, one case per delivery route.** `SIGTERM` sent to the daemon
-  process itself begins the orderly sequence; `SIGINT` is sent **to the
-  launcher**, `apps/loopex_cli/bin/loopex`, which forwards `SIGTERM` to the
-  child, because `:os.set_signal/2` refuses `:sigint` and a `SIGINT` sent to
-  the daemon process directly is not this plan's to specify. Each case names
-  which process it signals. A third asserts the install order: a `SIGTERM`
+- **Signals, one case per signal per route, and the route is what decides.**
+  Four cases send `INT`, `TERM`, `HUP` and `QUIT` **to the launcher**,
+  `apps/loopex_cli/bin/loopex`, and each asserts the **orderly sequence** —
+  because the launcher traps all four and forwards `kill -TERM`
+  (`bin/loopex:51-60`), so through the shipped path all four mean stop. Four
+  more send the same signals **to the escript process itself**: `TERM` asserts
+  the orderly sequence, and `HUP` and `QUIT` assert the emulator's own
+  behaviour with **no** orderly stop — no `daemon.stopping` record, no drain —
+  which is what makes "the daemon installs on `SIGTERM` and nothing else" a
+  checked claim rather than a preference. `SIGINT` to the escript has no case
+  and states why: `:os.set_signal/2` refuses `:sigint` (`interrupt.ex:13-17`)
+  and the emulator's break handler owns it, so there is nothing of this plan's
+  to assert. Every case names which process it signals, which is the whole
+  point of the pair. A ninth asserts the install order: a `SIGTERM`
   delivered before startup completes ends a daemon that holds no marker and
   has bound no socket, proved by a following daemon starting with nothing to
-  recover. There is **no `SIGHUP` or `SIGQUIT` case**, because the daemon
-  installs on neither: the case list matches the handler set, and a case for a
-  signal nobody handles would be a case for the default behaviour of the
-  emulator.
+  recover.
 - **`owner_lost`, by the monitor and not by a later signal.** The owner is
   killed while the daemon is otherwise healthy and **nothing else happens**:
   no signal is sent. The case asserts the process halts non-zero with
@@ -3154,8 +3240,9 @@ children, a pid's liveness, a socket's EOF, or the daemon's own `stderr`.
   makes observable. That third case asserts the function returns
   `{:error, reason, started}` naming every edge it had started, and that
   reverse cleanup stops exactly those. Each case asserts **no readiness line is printed**, that no marker is
-  held and no socket file exists afterwards, and that a following daemon
-  starts cleanly with nothing to recover. A third kills the Store immediately
+  held, that what is left on disk matches the startup-failure matrix for where
+  it stopped — no pathname for the two pre-bind cases — and that a following
+  daemon starts cleanly with nothing to recover. A third kills the Store immediately
   after the composition call returns and asserts the start aborts into reverse
   cleanup rather than binding a socket and announcing readiness on top of a
   dead component.
@@ -3328,10 +3415,16 @@ children, a pid's liveness, a socket's EOF, or the daemon's own `stderr`.
   reservation state directly rather than through any wire method — no DTO
   field exposes it, and none is added — so a branch that leaked a reservation
   shows up as a daemon that refuses early rather than as a silent drift.
-- **Reverse cleanup.** A startup made to fail after the marker is acquired —
-  at the socket permission check and at the index bound, separately — leaves
-  no marker held and no socket file behind, proved by a second daemon starting
-  cleanly on the same root with no recovery step.
+- **Reverse cleanup, on both sides of the bind.** A startup made to fail
+  **before** the bind — at the index bound, after the marker is acquired —
+  leaves no marker held, **no socket pathname** and no `daemon/` subdirectory
+  it created. A startup made to fail **at or after** the bind — at the socket
+  permission read-back — leaves no marker held, **the socket pathname in
+  place** and the subdirectory with it. Both are proved by a second daemon
+  starting cleanly on the same root with no recovery step, and the two
+  assertions about the pathname are opposite, which is the point: an earlier
+  revision asserted the same answer for both and contradicted the no-unlink
+  rule for one of them.
 - **Readiness ordering.** A client that connects the instant the readiness
   line appears is served; no readiness line is printed when the marker is
   held elsewhere, the socket permission check fails, or the index bound is
