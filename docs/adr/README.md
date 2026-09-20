@@ -40,6 +40,9 @@ a decision adds a new record rather than rewriting the old one.
 | 0028 | Bounded artifact retrieval | Accepted | [Decision](0028-bounded-artifact-retrieval.md#concept) | [Technical depth](0028-bounded-artifact-retrieval-technical.md#technical-depth) |
 | 0029 | Bounded provider failure diagnostics | Accepted | [Decision](0029-bounded-provider-failure-diagnostics.md#concept) | [Technical depth](0029-bounded-provider-failure-diagnostics-technical.md#technical-depth) |
 | 0030 | Observability: tracing and telemetry | Accepted | [Decision](0030-observability-tracing-and-telemetry.md#concept) | [Technical depth](0030-observability-tracing-and-telemetry-technical.md#technical-depth) |
+| 0031 | Daemon-grade store selection and migration | Proposed | [Decision](0031-daemon-grade-store-selection-and-migration.md#concept) | [Technical depth](0031-daemon-grade-store-selection-and-migration-technical.md#technical-depth) |
+| 0032 | Daemon attachment residency and replay | Proposed | [Decision](0032-daemon-attachment-residency-and-replay.md#concept) | [Technical depth](0032-daemon-attachment-residency-and-replay-technical.md#technical-depth) |
+| 0033 | Collaboration: controller lease and takeover | Proposed | [Decision](0033-collaboration-controller-lease-and-takeover.md#concept) | [Technical depth](0033-collaboration-controller-lease-and-takeover-technical.md#technical-depth) |
 
 0001 and 0002 were the prerequisites that unblocked the first milestone
 candidate; the [plans register](../plans/README.md) records current status.
@@ -156,3 +159,15 @@ than assume three. All five were accepted on 2026-09-13 at candidate
 gate record and does not accept the M4 plan pair or gate.
 The protocol/interaction proposals were renumbered from the old draft's 0019/0020
 because those numbers are now accepted M2 decisions.
+
+0031, 0032 and 0033 are the three Proposed M5 prerequisites: the daemon's
+store selection, which for M5 is the existing local adapter with its
+documented limits and retirement procedure and for the successor milestone
+the daemon-grade adapter chosen by contract experiments plus its migration;
+daemon attachment residency and at-least-once replay over the
+generation-2-only Unix-domain-socket transport with bounded session pages;
+and the collaboration rule of one in-memory controller lease with fresh
+per-grant epochs, observers and takeover. They were proposed with the Open M5
+lookahead on 2026-09-14 and revised twice that day on independent review;
+they accept nothing, and each must be accepted before the outcome that
+depends on it is implemented.
