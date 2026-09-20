@@ -80,8 +80,14 @@ is gone, resolution answers `:unavailable` and every invocation on that token
 refuses the same way until the host recomposes. Nothing rebuilds the secret,
 and nothing could: the registry holds no bytes to rebuild it from.
 
-**Exactly one credential-bearing transfer exists in the parent, and this pair
-names it.** A host that keeps the bytes and answers a resolver call has to send
+**Exactly one credential-bearing transfer exists into or within the adapter,
+and this pair names it.** The narrower wording is deliberate: the host puts the
+bytes into custody when it composes, and may replace them there when it
+rotates, and both are transfers in the parent that this pair does not govern —
+they are the host's, before the adapter is involved at all. What this pair
+governs is everything from the adapter's edge inward.
+
+**Within that boundary the transfer is one, and this pair names it.** A host that keeps the bytes and answers a resolver call has to send
 them to the process that asked; a contract saying the value is never in a
 message could never be implemented alongside one. So the rule is a permission
 with a boundary: the custody process's reply to the sender is the one

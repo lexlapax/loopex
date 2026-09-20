@@ -215,9 +215,26 @@ separate:
   refusal, precisely so an operator can tell a refusal from a silence. A
   registry that is *gone* answers immediately, because the call fails rather
   than waits, and that is `:unavailable`.
+- **Every wait on the registry and on custody is deadline-free, because the
+  guardian owns the only deadline.** Both are `GenServer` calls, and a
+  `GenServer.call/2` carries a hidden five-second default that would sit
+  *inside* the invocation deadline and expire first — producing a refusal the
+  guardian never decided, at a time nobody chose. So the sender calls both
+  with `:infinity` (or an equivalent deadline-free protocol) and the guardian
+  kills it at the invocation deadline, reporting `:timeout`. One deadline,
+  owned by one process, is the whole rule; a blocked registry is therefore a
+  `:timeout` from the guardian and never a silent five-second refusal.
 - **Its lifetime is the host supervisor's, and a restart invalidates the
   handle.** The host starts the registry under its own supervisor when it
-  composes the runtime. If the registry dies, the handle a composed runtime
+  composes the runtime. **Exactly which supervisor, per host:** `RuntimeOwner`
+  for the reference CLI and for the app-server host, which is the process that
+  already owns their composed edges; the **daemon's owner process** for the
+  daemon, which links the registry and the custody process as fixed
+  components. In all three the normal path stops them with the rest of the
+  composition, a failed start unwinds them in the same reverse cleanup as any
+  other started edge, and the owner's own death takes them with it — they are
+  linked, so there is no path on which they outlive the host that composed
+  them. If the registry dies, the handle a composed runtime
   holds is invalid and every resolution through it answers `:unavailable`
   **until the host recomposes** — the adapter does not re-look-up, does not
   wait and does not rebuild, because it has nothing to rebuild from. That is
@@ -315,41 +332,88 @@ boundary, not an absolute:
   strictest sense: there is no message for a sink to redact, and ADR 0030's
   rule is satisfied by a stronger mechanism than the one its prose names.
 
-  **The VM does not make it sticky, so core does.** The same probe shows a
-  later `:trace.process(session, pid, true, …)` re-enabling the process, so
-  the exclusion cannot be left to the BEAM. `Loopex.Trace` is a per-runtime
-  `GenServer` holding the session and its configuration; it gains an
-  **excluded-pid set** in that state, and three rules:
+  **The VM does not make it sticky, and neither the tracer nor a pid in
+  options can hold it.** The same probe shows a later
+  `:trace.process(session, pid, true, …)` re-enabling the process, so the
+  exclusion cannot be left to the BEAM. Two further facts decide where it
+  lives, and both contradict an earlier revision of this pair:
 
-  1. `exclude_self/1` adds the caller to the set and, if a session is live,
-     installs `false` for it before replying;
-  2. when a session starts, every pid in the set is skipped where
-     `runtime_processes/1` would otherwise be flagged — the same place
-     `excluded?/3` already excludes the tracer and the dispatcher by role
-     (`trace.ex:411`);
-  3. nothing in a trace **configuration** can clear the set. It is not part of
-     `modules`, `level`, `limits` or `sink`; a host can name any module it
-     likes and cannot name a process back in.
+  - **A tracer pid cannot be an option.** The tracer is the runtime
+    supervisor's **last** child (`runtime/supervisor.ex:87`), while model
+    options are built before the runtime starts — so at the moment the option
+    would be filled there is no tracer to name. Core itself never holds a
+    tracer pid either: `Loopex.Runtime.trace/2` resolves it **dynamically**
+    through `RuntimeSupervisor.children/1` on every call (`runtime.ex:343-345`).
+  - **A tracer pid would not survive a restart.** The supervisor's strategy is
+    `:rest_for_one` (`runtime/supervisor.ex:92`) and the tracer is last, so a
+    tracer crash restarts the tracer **and nothing else** — a new pid, and
+    every earlier child, including `Control`, still alive.
 
-  **The ordering is acknowledged, not hoped for.** The tracer is one process
-  and serializes its mailbox, so by the time `exclude_self/1` returns, either
-  the session started first and the exclusion was installed over it, or the
-  exclusion was recorded first and the session skipped that pid. There is no
-  interleaving in which the sender resolves a credential while traced.
+  So the exclusion is reached through a **capability**, and remembered in a
+  process that outlives the tracer:
 
-  **Reaching the tracer.** The sender has no runtime handle of its own, so
-  composition puts a **tracer reference in the model `options`**, beside the
-  registry handle and the credential token — the same class of composition
-  data as the executor's `reference:`, which `LoopexComposition` already fills
-  with a live pid. Where no tracer is composed, `exclude_self/1` answers
-  `{:error, :trace_unavailable}` and the sender **proceeds**: a tracer that is
-  not running has no session and cannot trace, and making credential delivery
-  depend on an observability process would be the wrong dependency entirely.
+  - **The capability is a host-owned process reference in model options**, the
+    same class as the credential registry handle beside it and as the
+    executor's `reference:`. The host starts it before composition, as it
+    already starts the registry and the custody process, and hands it the
+    runtime reference as soon as the composition function returns one. It
+    holds no membership and makes no decision; it exists because options are
+    built before the runtime and something has to bridge that order.
+  - **Membership lives in `Loopex.Runtime.Control`**, chosen by reading the
+    tree rather than by preference: it is the runtime supervisor's **second**
+    child (`runtime/supervisor.ex:70`), so under `:rest_for_one` it survives
+    every tracer restart; it already holds per-runtime process state; and it
+    already monitors pids and handles `DOWN` (`control.ex:805-826`), which is
+    the exact machinery the set needs.
+  - **The set is bounded because Control monitors every excluded sender and
+    removes it on `DOWN`.** An earlier revision kept a pid per invocation
+    forever, which is a leak measured in invocations; senders are short-lived
+    by construction, so the set returns to its baseline — normally empty —
+    as they exit.
+  - **A new trace session consults the set.** When the tracer starts a session
+    it skips every pid Control holds, the same place `excluded?/3` already
+    excludes the tracer and the dispatcher by role (`trace.ex:411`), and a
+    tracer that has just restarted asks Control rather than starting empty.
 
-  **What is dropped.** The excluded-MFA list and the module-wide exclusion of
-  `ProviderCodec` are withdrawn — they cost this adapter's tracing and never
-  bought the property, for the callee reason above. Core change 3 is now the
-  process exclusion alone, which is smaller and total.
+  **It fails closed.** `exclude_self/1` returns only once the exclusion is
+  installed. If the capability is present but the exclusion cannot be
+  installed — a tracer restarting in that instant — the sender **does not
+  resolve the credential**: the invocation refuses with `:unavailable`, the
+  atom the closed set already carries for "the arrangement needed to resolve
+  is not there", and the caller retries as it would for any other
+  `:unavailable`. The alternative, proceeding untraced-but-unexcluded, would
+  be the one case where a credential is resolved in a process a session may be
+  tracing.
+
+  **Only an explicitly absent capability proceeds.** Where the host composed
+  no tracing capability at all, there is no tracer and no session, so nothing
+  can trace and the sender resolves normally. Absent is not the same as
+  unreachable, and the two are distinguished at composition rather than at
+  the call.
+
+  **Core change 3 is both mechanisms, not one instead of the other.** ADR 0030
+  says the key-bearing call "is excluded by match specification"
+  (`0030-…-technical.md:27`), and an earlier revision of this pair replaced
+  that with process flags while claiming ADR 0030 was honoured — which is not
+  a thing a plan gets to do to an accepted decision. So:
+
+  - **A match-specification exclusion for the direct key-bearing calls**, the
+    functions that receive the resolved bytes themselves —
+    `receive_custody_reply/2` and `write_credential_frame/2` — installed as
+    ADR 0030's own sentence describes, by clearing those `{module, function,
+    arity}` identities after the module pattern. This is the mechanism ADR
+    0030 names, implemented rather than reinterpreted.
+  - **And the process exclusion**, for everything those functions *call*:
+    `ProviderCodec.send/3`, `encode/2` and its private path, `:gen_tcp.send/2`
+    and whatever a future codec calls beneath them. This is the protection ADR
+    0030 did not foresee, because a match specification names functions and
+    the leak is through callees.
+
+  Neither is sufficient alone: the match specification cannot reach a callee,
+  and an earlier revision's claim that process exclusion alone "satisfies" ADR
+  0030 was substituting a different mechanism for a named one. The
+  module-wide exclusion of `ProviderCodec` is dropped, since the process
+  exclusion covers its calls without costing every other frame's tracing.
 
   **What is kept as defence in depth**, explicitly labelled so nobody mistakes
   it for the mechanism: the **keyed shape**. The three bridge functions carry
@@ -378,8 +442,19 @@ boundary, not an absolute:
 
   The third is the ordering: `exclude_self/1` is asserted to return **before**
   the token is routed, and a session started concurrently with it is asserted
-  to produce no message from the sender either way round, which is the
-  serialization claim made checkable rather than asserted.
+  to produce no message from the sender either way round.
+
+  Three more cover what the capability is for. **A tracer restart keeps the
+  exclusion**: the tracer is killed, the supervisor restarts it, a new session
+  starts, and a sender that excluded itself before the restart is asserted to
+  produce no message under the new session — which a design holding a tracer
+  pid in options would fail. **The set returns to baseline**: after a run of
+  invocations, the excluded-pid set `Control` holds is asserted empty again,
+  proving the monitors remove what the senders left. And **it fails closed**:
+  with the tracer made unavailable at the instant `exclude_self/1` is called,
+  the invocation is asserted to refuse `:unavailable` and **no credential is
+  resolved**, while a composition with no tracing capability at all is
+  asserted to resolve normally.
 - Everywhere else the earlier absolutes stand unchanged: not in guardian
   state, not in an exit reason, not in a crash report, not in an IO request,
   not in a file, not in the environment, not in argv, and in no durable or
