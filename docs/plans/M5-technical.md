@@ -696,34 +696,48 @@ and one shared resolver they both call:
   source digest, so an identity naming a commit whose tree is not what was
   built is detectable rather than merely trusted.
 
-**The unchanged-tree check needs an inventory, because an extraction has no
-index.** An earlier revision said the resolver hashes "the extracted tracked
-source paths" — but *tracked* is a fact held in `.git`, and `git archive`
-leaves none, so there is nothing to enumerate and the check would either
-compute over an empty set or fall back to a glob nobody stated. The archive
-therefore carries the enumeration with it:
+**The unchanged-tree check needs an inventory, and the inventory cannot ride
+inside the archive.** An earlier revision said the resolver hashes "the
+extracted tracked source paths" — but *tracked* is a fact held in `.git`, and
+`git archive` leaves none. A later one put a tracked `SOURCE_INVENTORY` in the
+archive, "generated at the moment the archive is staged", which cannot happen
+either: `git archive` exports the **committed** bytes of tracked files, and
+`export-subst` substitutes a fixed set of `$Format:…$` placeholders into a
+file's contents — there is no placeholder that expands to a path list, so a
+tracked file cannot learn what the tree contains at staging time. Both designs
+asked the extraction to carry an answer only the repository has.
 
-- a tracked **`SOURCE_INVENTORY`** file, generated from
-  `git ls-files -z` at the moment the archive is staged and written as the
-  sorted list of every path in it, so the extraction holds the same answer the
-  checkout would have given;
-- **both** halves are compared, before the build and again after: the **path
-  set**, so a file created or deleted during the build is caught even if every
-  file it names is byte-identical, and the **bytes**, as a SHA-256 over each
-  path's contents in inventory order;
+So the inventory stays **outside** the archive, with the party that has the
+repository:
+
+- **the closure evidence records the candidate's inventory**: the output of
+  `git ls-files -z` at that commit, and its SHA-256, retained on
+  `docs/evidence/M5-closure-runs.md` **beside the archive's own digest and
+  commit**. The closure runner is in the checkout when it stages the archive,
+  so this costs one command it is already positioned to run;
+- **the extracted-build witness compares against that recorded inventory**,
+  not against anything inside the extraction: it takes the built tree's
+  **path set**, so a file created or deleted during the build is caught even
+  if every file it names is byte-identical, and its **bytes**, as a SHA-256
+  over each path's contents in inventory order, and requires both to match
+  what was recorded;
 - exactly **one** exclusion, named rather than implied: the build-output roots
   `_build/` and `deps/`, which the build is supposed to create. Nothing else
   is excluded, and the list of exclusions is part of the retained evidence, so
   a later exclusion cannot quietly widen what "unchanged" means.
 
-Its witness is the one an inventory-free check could not have: a file is
+The extracted tree therefore needs to carry only `SOURCE_IDENTITY`, which
+`export-subst` genuinely can fill, and the inventory is evidence rather than a
+build input — which is also the more honest arrangement, an inventory shipped
+inside the thing it describes being checkable only against itself.
+
+Its witness is the one neither earlier design could have: a file is
 created **inside the extraction and outside the excluded roots** during the
-build, and the resolver is asserted to **refuse** with the changed-tree
-reason — where the same build without it succeeds. An empty or missing
-`SOURCE_INVENTORY` is itself a refusal, on the same rule as an unsubstituted
-identity, so a check that enumerated nothing cannot read as a pass. The
-inventory, the exclusion list and both digests are retained with the closure
-runs beside the archive's own SHA-256.
+build, and the comparison against the recorded inventory is asserted to
+**refuse** with the changed-tree reason — where the same build without it
+succeeds. A missing or empty recorded inventory is itself a closure refusal,
+on the same rule as an unsubstituted identity, so a check that compared
+against nothing cannot read as a pass.
 
 The **mismatch** case is proved where the external truth exists: the release
 check stages the archive with `git archive` from a known commit, retains the
@@ -2200,7 +2214,7 @@ that already exists somewhere, and the operator maximum is the sum:
 | 3 | **Cancellation** | The derived backstop: `max` over drained sessions of `cancellation_bounds(g_i).cli_backstop_ms` | Core's own number for how long a cancellation may take |
 | 4 | **Fence** | **90 s** — **three** Store calls deep at worst, again **concurrent** across sessions | A head read, then the `advance_owner`, and on `commit_unknown` one `transaction_status` query. Three sequential calls, no retries |
 | 5 | **Coordinator termination** | **5 s**, the coordinator's own `shutdown` (`session_coordinator.ex:134-142`); **per phase, concurrent** across the unsettled coordinators | The value core already gives a coordinator to stop in — and a ceiling nothing approaches, because a coordinator does **not** trap exits (`init/1` sets no flag, `session_coordinator.ex:260-292`, and the module's only `Process.flag(:trap_exit, true)` is at `:3108-3109`, inside the per-invocation provider guard it spawns), so it has no `terminate/2` to run and dies at once |
-| 6 | **Daemon teardown** | **5 s** | This plan's one chosen number, covering the notice, the closes, the lease owners, the relay and the edges |
+| 6 | **Daemon teardown** | **5 s** | One of this plan's two chosen numbers, covering the notice, the closes, the lease owners, the relay, **the runtime tree** and the edges. The runtime stop is attempted with what remains and killed at the bound; its trapping descendants unwind afterwards on their own clock, which the daemon does not wait for |
 | 7 | **Store** | **30 s**, its own `@call_timeout` | The stop that releases the marker |
 
 > **Maximum graceful stop = 5 s + 300 s + 90 s + `budget_ms` + 90 s + 5 s +
@@ -2398,11 +2412,30 @@ the failed-start reverse cleanup, for the same reason.
 formula.** An
 earlier revision named the clock and never gave it a value, which left the
 operator bound unstatable and every "what remains" reference undefined. Five
-seconds is chosen, not derived: nothing under this deadline waits on a
-session, an effect or a filesystem sync — the notification writes are one
-attempt into an existing buffer, the closes are closes, and of the processes
-stopped here only the transfers owner runs a `terminate/2` at all — so the
-budget is a ceiling for a set of actions that are each milliseconds. It is
+seconds is **chosen, not derived**: the notification writes are one
+attempt into an existing buffer, the closes are closes, the lease owners and
+the daemon's own processes run no `terminate/2`, and the transfers owner's
+closes the descriptors it holds — each of them milliseconds.
+
+**One process under this deadline is not like the others, and an earlier
+revision's justification was false for it.** That revision said "of the
+processes stopped here only the transfers owner runs a `terminate/2` at all",
+which forgets that **step 5, the runtime stop, is inside phase 6**:
+`Supervisor.stop(runtime_supervisor, :normal, remaining)` brings down a tree
+whose `OwnerGroup` children trap exits, carry `shutdown: :infinity` and have a
+`terminate/2` that stops their own worker supervisor with `:infinity`
+(`owner_group.ex:14-19`, `:50`, `:86-90`). Nothing bounds that from inside.
+
+So the rule is the one this file already argues for the kill path, applied
+honestly here: **the runtime stop is attempted with what remains of phase 6
+and killed at the bound.** A tree killed that way is crash-equivalent in the
+only sense this plan ever claims — about the journal, not about processes —
+and its trapping descendants go on unwinding on their own clock afterwards,
+which the daemon does not wait for and the halt at the end of the sequence
+ends. Five seconds is therefore a ceiling for the work phase 6 *performs*, not
+a promise about what the runtime's subtree has finished, and the drain is why
+that is affordable: by the time step 5 runs, every coordinator quiesce could
+not settle has already been fenced and terminated inside core. It is
 recorded in the limits table with that rationale.
 
 **Phase 6's deadline starts when phase 5 ends**, and it covers every
@@ -4165,7 +4198,7 @@ line; M5 introduces none of its own.
 | Phase 3, the drain budget | `max` over drained sessions of `cancellation_bounds(g_i).cli_backstop_ms`, returned as `budget_ms` | Derived from `apps/loopex/lib/loopex/executor.ex:456-474`; no number chosen |
 | Phase 4, the fence | a fixed **90 s** — three sequential Store calls at 30 s: the head read, the `advance_owner`, and at most one `transaction_status` query; concurrent across sessions, and no retries | Core, against `local.ex:65`, `:111-113`, `:116-122`, `:130-132` |
 | Phase 5, coordinator termination | **5_000 ms**, the coordinator's own `shutdown` value (`apps/loopex/lib/loopex/runtime/session_coordinator.ex:134-142`) | Core's existing child specification |
-| Phase 6, non-Store teardown | **5_000 ms**, one absolute deadline from the instant `quiesce/1` returns, covering the stop records, the connection and listener closes, the collective lease-owner sweep and every non-Store stop | This plan. Chosen, not derived: nothing under it waits on a session, an effect or a filesystem sync, so it is a ceiling for actions that are each milliseconds |
+| Phase 6, non-Store teardown | **5_000 ms**, one absolute deadline from the instant `quiesce/1` returns, covering the stop records, the connection and listener closes, the collective lease-owner sweep, **the runtime tree's stop** and every other non-Store stop | This plan. Chosen, not derived. A ceiling for the work the phase performs rather than a promise about the runtime's subtree: an `OwnerGroup` traps exits and carries `shutdown: :infinity` (`owner_group.ex:14-19`, `:50`, `:86-90`), so the runtime stop is attempted with what remains and killed at the bound |
 | Phase 7, the Store stop | a fixed 30 s, the Store's own `@call_timeout` (`apps/loopex_store_local/lib/loopex/store/local.ex:65`), independent of any grace; the usual release takes milliseconds | This plan, against the Store's existing bound |
 | Maximum graceful stop | `budget_ms` + **525 s**, the sum of the seven fixed phases above — eight phases, of which only the drain budget is derived; a worst case built from the adapter's wedged-filesystem ceiling, not the cost of an ordinary stop | This plan, as the sum of its parts |
 | Wait slice | 60_000 ms, so no `receive … after` argument approaches the BEAM's 2^32-1 limit, probed at both pairs | This plan; the limit is the VM's |
