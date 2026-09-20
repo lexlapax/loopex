@@ -754,7 +754,7 @@ Three proofs are new:
   three functions exist with their exact identities and that a one-byte
   canary credential appears in no captured message or entry, so neither of the
   first two can pass vacuously.
-- **Host custody, proved at each host rather than in the adapter.** The
+- **The host-owned processes, proved at each host rather than in the adapter.** The
   adapter's test tree cannot prove a claim about the CLI's or the daemon's
   composition, and an earlier draft filed all three there. Each case lives
   where its subject lives, named to the file and the case so the closure
@@ -762,9 +762,9 @@ Three proofs are new:
 
   | Host | File | Cases | Lane |
   | --- | --- | --- | --- |
-  | Reference CLI | `apps/loopex_cli/test/credential_custody_test.exs` | `reads the credential variable exactly once at composition`; `deletes the credential variable from the VM environment`; `custody state is redacted in a forced crash report` | fast |
-  | App-server host | `apps/loopex_app_server/test/credential_custody_test.exs` | the same three | fast |
-  | Daemon | `apps/loopex_daemon/test/credential_custody_test.exs` | the same three, plus `custody and registry are stopped with the daemon and on a failed start` | fast |
+  | Reference CLI | `apps/loopex_cli/test/credential_custody_test.exs` | `reads the credential variable exactly once at composition`; `deletes the credential variable from the VM environment`; `custody state is redacted in a forced crash report`; `the tracing capability is composed and reaches the current tracer` | fast |
+  | App-server host | `apps/loopex_app_server/test/credential_custody_test.exs` | the same four | fast |
+  | Daemon | `apps/loopex_daemon/test/credential_custody_test.exs` | the same four, plus `registry, custody and capability are stopped with the daemon and on a failed start` | fast |
 
   Each proves that composition reads the variable exactly once, deletes it
   from the VM's environment, and that the holding process's `format_status/1`
@@ -775,7 +775,7 @@ Three proofs are new:
 The parent-environment and concurrent-independence proofs and the resolution
 failure cases belong in `credential_plane_test.exs` beside the cases they
 generalise; the drift case and the trace-exclusion case stay in the adapter's
-tree with it. The **host-custody cases do not**: each lives at its own host,
+tree with it. The **host-owned-process cases do not**: each lives at its own host,
 as the bullet above assigns them — `apps/loopex_cli/test/`,
 `apps/loopex_app_server/test/` and `apps/loopex_daemon/test/` — because the
 adapter's tree cannot prove a claim about another application's composition.
