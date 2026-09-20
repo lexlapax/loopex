@@ -282,21 +282,18 @@ boundary, not an absolute:
   already protects that process — the sender installs its own group-leader
   sink so no IO request can carry anything out of it, it is unregistered, and
   it reports only an atom or a `{:error, atom}` pair to the guardian.
-- **What keeps credential bytes out of a trace: the credential-bearing
-  *process* is excluded before it resolves anything.** ADR 0030 requires the
-  key-bearing call to be excluded by match specification *before* delivery
-  (`0030-…-technical.md:27`), and this pair has now twice failed to satisfy
-  it. The first attempt was sink-time redaction, which is too late because
-  tracing delivers the raw call tuple to the tracer first (`trace.ex:331`,
-  `:152`, `:219`). The second was an excluded-MFA list naming this adapter's
-  own functions — and that fails for a reason worth recording, because it is
-  the reason no function-level list can work here:
+- **What keeps credential bytes out of a trace: one core call that does two
+  things.** ADR 0030 requires the key-bearing call to be excluded by match
+  specification *before* delivery (`0030-…-technical.md:33-35`). That is
+  necessary and it is not sufficient, and this pair states both halves
+  together rather than replacing one with the other:
 
-  **A function that carries the credential calls functions it does not own.**
-  `ProviderCodec.send/3` hands the encoded credential frame to
-  `:gen_tcp.send/2`. A trace session that names `:gen_tcp` explicitly sees the
-  frame, whatever this adapter's modules are excluded. Reproduced, with a
-  canary standing in for the credential:
+  **A match specification alone cannot hold, because a function that carries
+  the credential calls functions it does not own.** `ProviderCodec.send/3`
+  hands the encoded credential frame to `:gen_tcp.send/2`; a trace session
+  that names `:gen_tcp` explicitly sees the frame, whatever this adapter's
+  own functions are excluded. Reproduced, with a canary standing in for the
+  credential:
 
   ```
   :trace.function(session, {:gen_tcp, :send, 2}, true, [:local])
@@ -308,29 +305,42 @@ boundary, not an absolute:
   future one, is outside the list again. An enumeration of callees is not a
   contract anyone can keep.
 
-  **So the exclusion is by process, and it is mandatory.** The sender — the
-  short-lived process that resolves the credential and writes the frame —
-  calls a core API **before it resolves anything**:
+  **So the core API takes both, and the adapter supplies the function list.**
+  The sender — the short-lived process that resolves the credential and writes
+  the frame — calls, **before it resolves anything**:
 
   ```elixir
-  Loopex.Trace.exclude_self(tracer)   # returns only once the exclusion is installed
+  Loopex.Trace.exclude_self(capability, functions: [{module, function, arity}])
   ```
 
-  It returns `:ok` once this process is excluded from **every** live trace
+  One call, two inputs, one core change. Core installs **both**: the
+  match-specification clear for each named `{module, function, arity}`, after
+  the module pattern, exactly as ADR 0030's sentence describes; and the
+  process flag for the caller, which is what reaches the callees a match
+  specification cannot name.
+
+  **The adapter supplies its own MFAs, and that is what keeps the dependency
+  direction intact.** Core never names an adapter function — it takes a list
+  from the caller and installs it — so nothing in `loopex` knows that
+  `Loopex.LLM.ReqLLM.ProviderBridge` exists. The inventory of key-bearing
+  functions belongs to the component that has them, which is this adapter, and
+  it is listed below.
+
+  It returns `:ok` once the caller is excluded from **every** live trace
   session and recorded as excluded for every future one. Only then does the
   sender route the token, receive the credential and write the frame. Nothing
   the sender does after that point can appear in a trace, whatever modules or
   functions a host names — including `:gen_tcp`, including modules nobody has
   thought of.
 
-  **The mechanism, probed at both toolchain pairs before it was written
+  **The process half, probed at both toolchain pairs before it was written
   down.** A process flagged by inheritance (`:set_on_spawn` from a traced
   parent) calls `:trace.process(session, self(), false, [:all])`; the call
   returns `1`, the flags are gone, and its subsequent `:gen_tcp.send/2` with
   the canary produces **no trace message at all**, while a non-excluded
-  control process's identical call produces one. That is pre-delivery in the
-  strictest sense: there is no message for a sink to redact, and ADR 0030's
-  rule is satisfied by a stronger mechanism than the one its prose names.
+  control process's identical call produces one. There is no message for a
+  sink to redact — which is the property ADR 0030 asks for, reached for the
+  callees as well as for the named calls.
 
   **The VM does not make it sticky, and neither the tracer nor a pid in
   options can hold it.** The same probe shows a later
@@ -375,7 +385,7 @@ boundary, not an absolute:
     excludes the tracer and the dispatcher by role (`trace.ex:411`), and a
     tracer that has just restarted asks Control rather than starting empty.
 
-  **It fails closed.** `exclude_self/1` returns only once the exclusion is
+  **It fails closed.** `exclude_self/2` returns only once both exclusions are
   installed, and it carries an **explicit** bound rather than inheriting a
   `GenServer.call` default — a hidden five seconds here would be a silent
   deadline inside the invocation's, exactly the fault the registry and custody
@@ -396,29 +406,30 @@ boundary, not an absolute:
   unreachable, and the two are distinguished at composition rather than at
   the call.
 
-  **Core change 3 is both mechanisms, not one instead of the other.** ADR 0030
-  says the key-bearing call "is excluded by match specification"
-  (`0030-…-technical.md:27`), and an earlier revision of this pair replaced
-  that with process flags while claiming ADR 0030 was honoured — which is not
-  a thing a plan gets to do to an accepted decision. So:
+  **The MFAs this adapter supplies, exactly three.** They are the functions
+  that hold the resolved bytes or the token, and the list is passed to
+  `exclude_self/2` by the adapter itself:
 
-  - **A match-specification exclusion for the direct key-bearing calls**, the
-    functions that receive the resolved bytes themselves —
-    `receive_custody_reply/2` and `write_credential_frame/2` — installed as
-    ADR 0030's own sentence describes, by clearing those `{module, function,
-    arity}` identities after the module pattern. This is the mechanism ADR
-    0030 names, implemented rather than reinterpreted.
-  - **And the process exclusion**, for everything those functions *call*:
-    `ProviderCodec.send/3`, `encode/2` and its private path, `:gen_tcp.send/2`
-    and whatever a future codec calls beneath them. This is the protection ADR
-    0030 did not foresee, because a match specification names functions and
-    the leak is through callees.
+  | MFA | What it holds |
+  | --- | --- |
+  | `Loopex.LLM.ReqLLM.ProviderBridge.route_credential/2` | The registry handle and the token |
+  | `Loopex.LLM.ReqLLM.ProviderBridge.receive_custody_reply/2` | The resolved credential |
+  | `Loopex.LLM.ReqLLM.ProviderBridge.write_credential_frame/2` | The resolved credential |
 
-  Neither is sufficient alone: the match specification cannot reach a callee,
-  and an earlier revision's claim that process exclusion alone "satisfies" ADR
-  0030 was substituting a different mechanism for a named one. The
-  module-wide exclusion of `ProviderCodec` is dropped, since the process
-  exclusion covers its calls without costing every other frame's tracing.
+  Three, not two: `route_credential/2` carries the token, which the closed
+  reason set treats as credential-adjacent and which this pair refuses to put
+  in a trace entry either. The same three are named wherever this set counts
+  them.
+
+  **What each half buys, so neither is mistaken for the other.** The match
+  specification stops those three producing a raw message at all, which is
+  what ADR 0030 asks for by name. The process flag stops everything they call
+  — `ProviderCodec.send/3`, `encode/2` and its private path, `:gen_tcp.send/2`,
+  and whatever a future codec calls beneath them — which a match specification
+  cannot reach, because it names functions and the leak is through callees.
+  Neither is sufficient alone, and the module-wide exclusion of
+  `ProviderCodec` an earlier revision proposed is dropped: the process flag
+  covers its calls without costing every other frame's tracing.
 
   **What is kept as defence in depth**, explicitly labelled so nobody mistakes
   it for the mechanism: the **keyed shape**. The three bridge functions carry
@@ -445,7 +456,7 @@ boundary, not an absolute:
   through `:application.get_key(application, :modules)` and
   `Loopex.LLM.ReqLLM.ProviderBridge` lives in `loopex_llm_reqllm`.
 
-  The third is the ordering: `exclude_self/1` is asserted to return **before**
+  The third is the ordering: `exclude_self/2` is asserted to return **before**
   the token is routed, and a session started concurrently with it is asserted
   to produce no message from the sender either way round.
 
@@ -456,7 +467,7 @@ boundary, not an absolute:
   pid in options would fail. **The set returns to baseline**: after a run of
   invocations, the excluded-pid set `Control` holds is asserted empty again,
   proving the monitors remove what the senders left. And **it fails closed**:
-  with the tracer made unavailable at the instant `exclude_self/1` is called,
+  with the tracer made unavailable at the instant `exclude_self/2` is called,
   the invocation is asserted to refuse `:unavailable` and **no credential is
   resolved**, while a composition with no tracing capability at all is
   asserted to resolve normally.

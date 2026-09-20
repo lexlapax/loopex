@@ -126,7 +126,12 @@ unchanged: every existing-session mutation in generation 2 carries
 a schema digest of its own. A connection is
 one attachment after `session.attach`; generation 2 permits a connection to
 hold at most one attachment at a time and a client process to hold as many
-connections as the residency limits admit.
+connections as the residency limits admit. **An attachment never outlives its
+connection**: closing a connection — because the client went away, because the
+daemon is stopping, or because the daemon gave up on a request that never
+answered — detaches the core attachment that connection held. That is what
+makes a connection a sufficient handle on an attachment, and it is why a
+daemon needs no attachment count from core to release what it reserved.
 
 The core EventDispatcher and Control retain multiple live attachment IDs and
 incarnations for one session. A new distinct attachment does not implicitly
