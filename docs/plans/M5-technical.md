@@ -784,31 +784,38 @@ reads:
 
 **The field is cleared by that exit, not by the call returning**, and the
 distinction is not pedantry. **A stop can end four ways**, and the owner
-catches three of them. Each branch returns a tag, so the wait that follows
-reads mechanically rather than by re-deriving what happened:
+catches three of them — and one of those shapes can mean two different
+things, which is why one branch carries a guard. Each branch returns a tag,
+so the wait that follows reads mechanically rather than by re-deriving what
+happened:
 
 | How the stop ends | What the owner sees | What it does | Tag |
 | --- | --- | --- | --- |
 | The component stopped | `:ok` | Wait for its exit | `:ok` |
-| It did not stop in time | `exit {:timeout, {GenServer, :stop, [pid, :normal, grace]}}` | `Process.exit(pid, :kill)`, then wait | `{:killed, pid}` |
+| It did not stop in time | `exit {:timeout, {GenServer, :stop, [pid, :normal, grace]}}` | `Process.alive?(pid)` first: alive, so `Process.exit(pid, :kill)`, then wait | `{:killed, pid}` |
+| It died **of the bare atom** `:timeout` | the same shape — the two are indistinguishable | `Process.alive?(pid)` is false, so nothing to kill; wait | `:already_gone` |
 | **It was already dead** | `exit {:noproc, {GenServer, :stop, [pid, :normal, grace]}}` | Nothing to kill; wait for the exit already queued | `:already_gone` |
 | **It died of its own reason while stopping** | `exit {reason, {GenServer, :stop, [pid, :normal, grace]}}` for any other `reason` | Nothing to kill; wait for the exit its own death queued | `:already_gone` |
+
+The last three rows share one tag because the owner's response to them is the
+same: it killed nothing, so the exit waiting for it is not its own doing.
 
 The wait then has one rule with no case analysis left in it: **`:ok` and
 `{:killed, pid}` are the owner's own doing, so the exit is consumed;
 `:already_gone` is not, so the exit is classified** — first class wins — and
 either way `stopping` is cleared before the next component is named.
 
-The last two rows are the ones earlier drafts got wrong, and neither is
+Those same three are what earlier drafts got wrong, and none of them is
 hypothetical. The owner does not read its mailbox while stopping, so a
 component that dies during the sequence has its `{:EXIT, …}` queued and unread
 when the sequence reaches its step, and `GenServer.stop/3` raises rather than
 returning:
 
 - **Already dead.** `sys:terminate/3`'s `gen:call` fails with `noproc` and is
-  wrapped to `{noproc, {sys, terminate, _}}` (sys.erl:757-763), which
-  `:proc_lib.stop/3` catches and re-raises as the bare `exit(noproc)`
-  (proc_lib.erl:1586-1589).
+  wrapped to `{noproc, {sys, terminate, _}}` (sys.erl:757-763 at the floor
+  pair, :756-762 at the current pair), which `:proc_lib.stop/3` catches and
+  re-raises as the bare `exit(noproc)` (proc_lib.erl:1586-1589 at the floor
+  pair, :1599-1601 at the current pair).
 - **Dying of its own reason during its own stop.** `sys:terminate/3` succeeds,
   and `:proc_lib.stop/3` then waits on its monitor with `Reason` **bound from
   the function head** to the reason it was asked for. A `DOWN` carrying
@@ -833,14 +840,36 @@ component's own reason is whatever the component had. The breadth costs
 nothing it should keep: the only other shape `GenServer.stop/3` raises is
 `{:calling_self, _}`, and the owner passes a child's pid, never its own.
 
+**The timeout branch is guarded, because one reason collides with it.** A
+component that dies with the *bare atom* `:timeout` during its own stop wraps
+to `{:timeout, {GenServer, :stop, [pid, :normal, grace]}}` — byte for byte
+what `:proc_lib.stop/3` raises when its own wait expires. Unguarded, the owner
+would kill an already-dead pid, tag the branch `{:killed, pid}`, and the wait
+would *consume* that component's exit as its own doing: the class lost and the
+daemon exiting `0` on a failure. So the branch asks `Process.alive?(pid)`
+first — alive means a real timeout and the kill is the only thing that ends
+the tree; dead means the component died of that atom, the exit is already
+queued, and the tag is `:already_gone` so the wait classifies it. No component
+composed today reaches this: their reasons are tuples — `{:store_capacity_exceeded, N}`,
+a `File.close` error, a crash tuple, `:shutdown` — and even a death by
+`{:timeout, {GenServer, :call, …}}` is tuple-headed and lands on the catch-all
+correctly. The guard is for the two components M5 itself writes, and the rule
+that goes with it is stated here so it is not discovered later: **no daemon
+component exits with the bare atom `:timeout`**; the lease owner and the
+listener report an expiry or a refusal as a tagged reason.
+
 ```elixir
 try do
   GenServer.stop(pid, :normal, grace)
   :ok
 catch
   :exit, {:timeout, _} ->
-    Process.exit(pid, :kill)
-    {:killed, pid}
+    if Process.alive?(pid) do
+      Process.exit(pid, :kill)
+      {:killed, pid}
+    else
+      :already_gone
+    end
 
   :exit, {:noproc, _} ->
     :already_gone
@@ -850,7 +879,7 @@ catch
 end
 ```
 
-After each of the four the owner waits for that exact pid's exit, in a
+After every one of them the owner waits for that exact pid's exit, in a
 selective receive. **That receive carries no `after`**, so it sits outside the
 composed cleanup grace and adds no second bound to reason about; it terminates
 in every row because the exit it waits for is guaranteed to exist — on `:ok`
@@ -1074,8 +1103,8 @@ chooses.
    **What bounds the wait after each stop: nothing, and that is the safe
    answer.** The selective receive that follows a stop carries no `after`, so
    it is outside the composed grace and adds no second bound to reason about.
-   It terminates in all four endings, for the reason the stop-ending table
-   above gives: the exit it waits for is guaranteed to exist, in flight on
+   It terminates in every row of the stop-ending table above, for the reason
+   that table gives: the exit it waits for is guaranteed to exist, in flight on
    `:ok`, guaranteed by the owner's own kill on the timeout, and already in
    the mailbox on both `:already_gone` rows — the owner only attempts a stop
    for a component whose exit it has not already consumed, so a stop that
