@@ -105,11 +105,13 @@ without touching the socket.
 that follows from the same rule read in the other direction. A daemon's claim
 on the path is its marker, so the claim ends when the marker does — which can
 happen without the daemon being asked, since the Store releases the marker in
-its own `terminate/2`. A daemon therefore unlinks only while it can still show
-it holds the marker, and one that has lost it, or cannot show it, leaves the
-file. Nothing is lost by that: the next daemon to acquire and verify the
-marker removes the stale pathname before binding, which is the one moment at
-which removing a socket file is unambiguously correct. If the daemon loses store ownership while
+its own `terminate/2`. **No daemon unlinks on its way out at all** — not on an orderly stop, not on
+any fail-stop, not in reverse cleanup — because a daemon that checked its
+ownership and then unlinked would be acting across a window in which the Store
+can die, the marker can be released and a successor can bind, and the
+predecessor would then delete the successor's socket. The next daemon to
+acquire and verify the marker removes the stale pathname before binding, which
+is the one moment at which removing a socket file is unambiguously correct. If the daemon loses store ownership while
 running, because its Store child exits or the marker can no longer be
 proved held, it closes the listener and every connection before anything
 else and then exits; no connection outlives the daemon's ownership of the

@@ -64,9 +64,10 @@ revision of this paragraph said the daemon bypasses composition entirely,
 which would have meant a second copy of the wiring layer. On the reported exit it
 refuses service, closes every connection with `store_lost`, or
 `store_capacity_exceeded` where that was the store's own reason, and exits
-non-zero. It does **not** unlink the socket: the marker is already released,
-so this daemon's claim on that pathname has ended, and ADR 0032 makes removing
-it the next verified marker holder's job. The next daemon finds no marker to
+non-zero. It does **not** unlink the socket — and neither does any other exit path,
+orderly or otherwise: a daemon's claim on that pathname is its marker, and ADR
+0032 makes removing the pathname the next verified marker holder's job
+precisely so that no departing daemon can remove a successor's socket. The next daemon finds no marker to
 recover, because the dying store already gave it back, and removes the stale
 pathname before it binds.
 
