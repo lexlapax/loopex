@@ -219,52 +219,50 @@ coordinator's durable decision under ADR 0018, unchanged.
   for the duration of one send, in this process's own mailbox and stack, and
   nowhere else — no guardian state, no exit reason and no crash report can
   hold it.
-- **In the parent's environment.** The adapter performs no environment read
-  for the credential by any route. `Loopex.LLM.ReqLLM.credential_variable/0`
-  remains as the one name the *host* reads when it composes a runtime — the
-  reference CLI at start, and the real-provider lane when it names the
-  variable in its own failure message — and the host deletes that name once it
-  has read it. `ProviderLauncher.spawn_environment/0`'s enumeration of the live
-  environment — `System.get_env/0` on every launch — is **deleted**, and
-  nothing replaces it: no enumeration at launch, and none at composition
-  either. The launcher passes the Port a fixed, closed list instead — the
-  `@excluded` names removed unconditionally, plus the explicit downstream
-  names — which is a constant in the source, so no code path reads the
-  environment to build it. The fixed `env -i` argument lists stay as they are.
+- **In the parent's environment.** The adapter performs no *credential*
+  environment read by any route. That is the property this decision owns, and
+  it is narrower than "no environment read at all" on purpose.
+  `Loopex.LLM.ReqLLM.credential_variable/0` remains as the one name the *host*
+  reads when it composes a runtime — the reference CLI at start, and the
+  real-provider lane when it names the variable in its own failure message —
+  and the host deletes that name once it has read it. `ProviderBridge`, which
+  holds the sender and the whole credential path, reads no environment
+  variable at all.
 
-  An earlier draft moved the snapshot to composition. That is withdrawn on
-  2026-09-20, because it quietly weakened an accepted decision. ADR 0019's
-  companion requires that the trusted host "must not mutate unrelated launch
-  environment **during this operation**" — a constraint on one launch, not a
-  promise of immutability for the runtime's lifetime. A snapshot taken at
-  composition and reused would let a name introduced afterwards reach a later
-  launch's first image, which is a property ADR 0019 never gave away. Deleting
-  the enumeration rather than relocating it needs no amendment to ADR 0019.
+  `ProviderLauncher.spawn_environment/0` keeps its launch-time
+  `System.get_env/0` enumeration, and keeps it exactly where it is. The
+  maintainer decided this on 2026-09-20, reversing an earlier draft of this
+  pair that deleted the enumeration in favour of a fixed closed removal list,
+  and an earlier one still that moved the snapshot to composition. Both are
+  withdrawn, and the reason is that the enumeration is not part of the
+  credential plane at all — it is ADR 0019's scrubbing, and ADR 0019 is
+  accepted.
 
-  What the fixed list preserves exactly is ADR 0019's actual guarantee, which
-  its companion states as "Explicit credential removals are unconditional": no
-  credential name and no loader or startup-injection name reaches the first
-  image, whether or not it was present. What it does not preserve — stated
-  rather than implied — is the clearing of *unlisted* names from the
-  `/usr/bin/env` image's own environment block in the microseconds before it
-  execs. Three things bound that. `/usr/bin/env` acts on none of them; `env -i`
-  clears every one of them for the exec'd child, so the M0 child-environment
-  conformance case, which asserts about the worker and not the first image, is
-  untouched; and the block is readable only by the same user who can already
-  read the parent VM's own environment, which is the case ADR 0019 explicitly
-  declines to defend — "This is not a new guarantee against hostile same-VM
-  code". After this decision the credential is not in the parent's environment
-  at all, so the enumeration's protective value against the credential is zero
-  by then.
+  What it does: at each launch it reads the live environment so the Port can
+  remove every name in it, plus the unconditional `@excluded` credential and
+  loader names, from the first spawned image. That image is `/usr/bin/env`
+  itself, whose environment `env -i` does not clear, so without the
+  enumeration an unlisted name introduced after some earlier snapshot would
+  reach it. A fixed list cannot have that property, because the set of names
+  present is not known until the launch. Reading it at launch, per launch, is
+  what makes ADR 0019's first-image scrubbing true rather than approximately
+  true, and it needs no amendment to ADR 0019 because it is ADR 0019's own
+  design left alone.
 
-  One mechanical note for whoever writes the change, measured rather than
-  assumed: `Port.open`'s `{:env, …}` option **merges** into the inherited
-  environment; it does not replace it. A probe on this toolchain spawned
-  `/usr/bin/env` with `{:env, [{~c"PATH", …}]}` and the first image still
-  received all 67 of the parent's names, including a planted sentinel. So
-  "pass an exact environment and receive exactly that set" is not reachable
-  through the Port option, and the closed unconditional removal list above is
-  what is actually implementable for the same purpose.
+  The line this decision draws is therefore between *a credential read* and
+  *an environment read*. The launcher's read is never consulted for a
+  credential: it does not look up the credential name, it does not pass a
+  value anywhere, and every name it finds it uses only to remove. The proof
+  below asserts that directly rather than inferring it from the absence of
+  reads.
+
+  One measurement is retained from the withdrawn design, because it is a fact
+  about the platform rather than about the design: `Port.open`'s `{:env, …}`
+  option **merges** into the inherited environment and does not replace it. A
+  probe on this toolchain spawned `/usr/bin/env` with
+  `{:env, [{~c"PATH", …}]}` and the first image still received all 67 of the
+  parent's names, including a planted sentinel. That is why removal is name by
+  name, and therefore why the enumeration exists.
 - **In the child.** Unchanged: the child receives the credential on the socket
   and nowhere else. Its environment at entry is the fixed `PATH`, `LANG`,
   `LC_ALL` and the two crash-dump suppressions, and ADR 0029's bounded
@@ -332,18 +330,38 @@ Three proofs are new:
   exact `System.get_env` arguments per library file, including
   `"provider_bridge.ex" -> ["\"LOOPEX_PROVIDER_API_KEY\""]` and
   `"provider_launcher.ex" -> [""]`, the arity-zero enumeration. That case must
-  survive, strengthened rather than deleted, in two ways. Both of those
-  expected lists become `[]`, leaving only `provider_worker.ex`'s two
-  non-secret crash-dump names, so the case then proves that no file in the
-  adapter's library tree reads any environment variable at all except those
-  two. And its scan is widened from one regular expression over
-  `System.get_env(...)` to every route by which an environment read can be
-  written: `System.get_env/0` and `/1`, `System.fetch_env/1` and
-  `fetch_env!/1`, `System.get_env/2`, `:os.getenv/0`, `/1` and `/2`,
-  `:os.env/0`, and indirect application of any of them through `apply/3` or a
-  captured function. Each route it does not pin is refuted outright. The
-  narrower scan is what lets an environment read return by a name the current
-  expression does not match, which is the drift the case exists to catch.
+  survive, strengthened rather than deleted, and the allowlist it ends with is
+  exact:
+
+  | File | Expected reads | Why |
+  | --- | --- | --- |
+  | `provider_bridge.ex` | `[]` | The credential path reads no environment variable at all; this is the read the decision removes |
+  | `provider_launcher.ex` | the arity-zero enumeration, and only that | ADR 0019's first-image scrubbing, which stays. It is not a credential read |
+  | `provider_worker.ex` | its two non-secret crash-dump names | Unchanged |
+  | every other file | `[]` | Unchanged |
+
+  So the claim the case proves is "**no credential** environment read in the
+  adapter's library tree", not "no environment read at all". The maintainer's
+  decision of 2026-09-20 draws it there, and the earlier draft that expected
+  `[]` for the launcher too is withdrawn with the deletion it belonged to.
+
+  Because the launcher's read survives, the case carries one more obligation
+  than a count: it must show that read is **never consulted for a credential**.
+  Pinning an argument list cannot show that on its own, so the case asserts
+  the use as well as the read — the enumeration's result flows only into the
+  Port's removal list, every name it yields is mapped to `false`, no name it
+  yields is compared against `credential_variable/0`, and no value it yields
+  reaches the sender, the frame or any caller. A refactor that started reading
+  a credential out of that enumeration would fail there.
+
+  Its scan is widened from one regular expression over `System.get_env(...)`
+  to every route by which an environment read can be written:
+  `System.get_env/0` and `/1`, `System.fetch_env/1` and `fetch_env!/1`,
+  `System.get_env/2`, `:os.getenv/0`, `/1` and `/2`, `:os.env/0`, and indirect
+  application of any of them through `apply/3` or a captured function. Each
+  route the allowlist does not name is refuted outright. The narrow scan is
+  what lets an environment read return by a name the current expression does
+  not match, which is the drift the case exists to catch.
 - **Resolution failures.** One case per row of the failure table above:
   absent token, malformed token, a token with no registry row, a gone
   registry, a dead custody process, each of the four refusal atoms, a custody
@@ -371,8 +389,8 @@ Three proofs are new:
   reads the variable exactly once, deletes it from the VM's environment, and
   that the holding process's `format_status/1` redacts its state under a
   forced crash report. The adapter's own tree keeps only what is the adapter's
-  to prove: that it reads no environment variable and that the resolver
-  contract behaves.
+  to prove: that it reads no environment variable for a credential and that
+  the token and resolution contract behaves.
 
 The first two, the failure cases and the custody cases belong in
 `credential_plane_test.exs` beside the cases they generalise; the drift case
@@ -383,9 +401,9 @@ Two details of that case matter to whoever writes the change. The literal
 `provider_bridge.ex:401`, inside the credential sender, while
 `credential_variable/0` and its module attribute live in `req_llm.ex:49` and
 `:149-150`; only the first disappears. The arity-zero enumeration the case
-also pins lives in `provider_launcher.ex:23-27`, and it does not disappear —
-it moves to composition, so the file that holds it afterwards is a host
-composition site rather than the adapter's call path. So `adapter_test.exs:50`'s
+also pins lives in `provider_launcher.ex:23-27`, and it stays exactly there,
+doing exactly what it does now: ADR 0019's first-image scrubbing, per launch.
+So `adapter_test.exs:50`'s
 `assert variable == "LOOPEX_PROVIDER_API_KEY"` is, afterwards, a pin on the
 host-facing accessor — the one name an operator configures — and that is what
 it should say it is. The neighbouring case `a missing credential is reported

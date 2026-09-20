@@ -111,20 +111,27 @@ Outcome 6's claim is stated at that boundary: a claim that the variable is
 never set at all would contradict the way an operator supplies a secret to a
 process they start.
 
-One enumeration goes with it. The launcher reads the whole parent environment
-on every launch, to clear it name by name from the first spawned image. That
-read is deleted outright rather than relocated: the launcher passes a fixed,
-closed removal list — the credential and loader names it already removes
-unconditionally — so no code path reads the environment to build it, at launch
-or anywhere else. Moving the read to composition was considered and withdrawn,
-because ADR 0019 constrains the host only *during one launch* and a snapshot
-reused across launches would claim an immutability that decision never gave.
-What the fixed list keeps is ADR 0019's actual guarantee, that credential and
-loader names never reach the first image; what it gives up, and this pair says
-so, is clearing unlisted names from one short-lived `/usr/bin/env` image that
-acts on none of them, whose child is cleared by `env -i` regardless, and whose
-environment block is readable only by the user who can already read the parent
-VM's.
+**One environment read stays, and this pair says why.** The launcher reads the
+whole parent environment on every launch, so the Port can clear it name by
+name from the first spawned image — `/usr/bin/env` itself, whose environment
+`env -i` does not clear. That read is ADR 0019's scrubbing, not part of the
+credential plane, and the maintainer decided on 2026-09-20 that it stays
+exactly where it is.
+
+Two earlier drafts of this pair touched it and both are withdrawn. Moving the
+snapshot to composition was withdrawn because ADR 0019 constrains the host
+only *during one launch*, so a snapshot reused across launches would claim an
+immutability that decision never gave. Replacing it with a fixed closed
+removal list was withdrawn because a fixed list cannot remove a name nobody
+knew was there: the set present at a launch is not knowable before it, which
+is precisely why ADR 0019 reads it then. Neither weakening is worth taking,
+and leaving the read alone needs no amendment to ADR 0019.
+
+So the prohibition this decision makes is narrower and exact: no **credential**
+environment read in the adapter's call path. `ProviderBridge`, which holds the
+sender and the whole credential path, reads no environment variable at all.
+The launcher's read remains and is proved never to be consulted for a
+credential — every name it yields is used only to remove that name.
 
 **Alternatives rejected.** Keeping the environment variable and buying the
 speed by sharding the provider suite across test VMs was rejected: it is
@@ -168,7 +175,9 @@ flight at once are proved to be independent successes rather than a refusal;
 the one permitted credential-bearing reply, and the resolver call that
 carries it, are proved excluded from tracing under a trace session at the
 `arguments` level; the adapter's library tree is proved to read
-no environment variable by any route; and a named reviewer reads
+no environment variable for a credential by any route, with the launcher's
+ADR 0019 scrubbing read proved never to be consulted for one; and a named
+reviewer reads
 the handoff — the token's opacity, the registry's routing-only contents,
 resolution point, frame ordering, failure paths, the host implementations'
 custody, and every place a value could be retained
