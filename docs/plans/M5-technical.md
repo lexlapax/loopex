@@ -47,7 +47,7 @@ Concept: [Scope](M5.md#concept-plan-scope).
 
 | Component | Owns | Cannot own |
 | --- | --- | --- |
-| `loopex` | Durable session truth, the race-free attach barrier and cursor, independent concurrent attachments to one session **and their release — the dispatcher monitors the attaching process and drops its attachment on `DOWN`, which is what replaces the supersession this change removes**, the read-only session-existence query, **`Loopex.Trace.exclude_self/2`, which installs both the match-specification exclusion ADR 0030 names and the process-level exclusion its callees need, before any message is delivered**, **the bounded `quiesce/1` that settles every active coordinator or names what it could not**, **the runtime-side create and resume results' `disposition` and `control_entry` fields**, the per-attachment event-count dispatcher queues, cancellation and recovery | A lease, a transport, a byte limit, residency policy or any daemon fact |
+| `loopex` | Durable session truth, the race-free attach barrier and cursor, independent concurrent attachments to one session **and their release — the dispatcher monitors the attaching process and drops its attachment on `DOWN`, which is what replaces the supersession this change removes**, the read-only session-existence query, **`Loopex.Trace.exclude_self/2`, which installs both the match-specification exclusion ADR 0030 names and the process-level exclusion its callees need, before any message is delivered**, **the bounded `quiesce/1` that settles every active coordinator or names what it could not**, **`create_session_detailed/3` and `resume_session_detailed/3`, the two runtime-side functions carrying `disposition` and `control_entry` beside the unchanged create and resume**, the per-attachment event-count dispatcher queues, cancellation and recovery | A lease, a transport, a byte limit, residency policy or any daemon fact |
 | `loopex_protocol` | Generation-2 records, validators, schema and vectors | Daemon behaviour or lease semantics |
 | `loopex_store_local` | The unchanged local adapter, its 256 MiB log and 4 MiB frame ceilings, its `store_capacity_exceeded` and `store_log_too_large` refusals and its writer marker, which it takes at start and releases in its own `terminate/2` — so the daemon owns the Store *process* and stops it last in an orderly shutdown, and a store loss releases the marker before the daemon can act | Any daemon fact, lease, index or residency state |
 | `loopex_daemon` | Marker-first process and socket lifetime, existence validation by calling core's query rather than by attaching or resuming, the peer-credential check, generation-2 negotiation, per-connection socket output buffers, the resident window and aggregate byte ceiling, attachment residency and eviction, the in-memory controller lease and writer-epoch check, the session index with its recorded-entry bound and its bounded pages, attachment residency and the one-way activation ceiling, and diagnostics | Store or coordinator internals, a second loop, policy selection, host identity, a durable record or a durable method |
@@ -904,10 +904,30 @@ Rather than make the daemon use a mode it does not otherwise want, the plain
 resume result carries the same `disposition` and `control_entry` the create result
 does. That is one shape for both, not two.
 
-**The public protocol result is unchanged.** Generation 1 and generation 2
+**The two fields arrive on new functions, not on the existing ones**, and that
+is the half an earlier revision left unsaid. `Loopex.Runtime.create_session/3`
+and `resume_session/3` are specified `{:ok, binary()} | {:error, term()}`
+(`runtime.ex:156`, `:169`), and the embedded facade forwards exactly that:
+`Loopex.create_session/3` returns what `Runtime.create_session/3` returns
+(`loopex.ex:87-91`) and `Loopex.resume_session/3` likewise (`:110-113`).
+Widening those returns would change what a released embedded caller receives
+from a call it already makes — a compatibility break taken for a daemon's
+bookkeeping.
+
+So core change 5 adds **two daemon-facing functions beside them**,
+`Loopex.Runtime.create_session_detailed/3` and
+`resume_session_detailed/3`, answering
+`{:ok, %{session_id: binary(), disposition: :fresh | :historical,
+control_entry: :active | :dormant}} | {:error, term()}`. The existing pair
+keeps its exact spec and its exact return, implemented as a projection of the
+detailed one, so `loopex.ex:87` and `:110` forward what they forward today and
+no embedded caller sees anything move. The daemon calls the detailed pair,
+which is the only caller that needs them.
+
+**The public protocol result is unchanged too.** Generation 1 and generation 2
 return what they return today; this is an in-VM API detail between core and
 any host, and no wire schema, digest or vector moves. A host that ignores the
-fields behaves exactly as it does now.
+detailed functions behaves exactly as it does now.
 
 **What happens at the ceiling, stated because the honest answer is not the
 neat one.** The brief for this change asked whether a fresh create can be
@@ -1001,13 +1021,31 @@ core is called at all**, which is the only place a refusal can be both
 truthful and early. The reservation is taken in the daemon's own serial
 owner, so "atomic" needs no new mechanism: it is one process deciding.
 
-**A reservation is keyed by the identity the daemon has when it takes one** —
-the session ID for a resume, the create `command_id` for a create, whose
-session ID does not exist yet — and it is **converted or released
+**A reservation is keyed by `(command_id, session_id)`**, and the pair matters
+in both directions. An earlier revision keyed a resume's reservation by its
+**session ID alone**, which collides the moment two clients send two different
+resume commands for one dormant session: the second would find a reservation
+already taken for a key it does not own, and either double-count or refuse a
+command that should have refused for a different reason. The command
+identity is what makes a reservation *this call's*. A create's session
+position is empty until the call answers — no session ID exists to key on —
+and is filled in when it does; a resume carries both from the start.
+
+It is **converted or released
 idempotently**: converting records the session ID in the activation set and
 drops the reservation; releasing drops it. Repeating either for the same key
 is a no-op, so a retry, a crash-recovered handler or a duplicated reply
 cannot double-count or double-free.
+
+**A session already in the activation set takes no reservation at all**, which
+an earlier revision also got wrong: it refused a resume at the ceiling for a
+session this daemon had *already* activated, although that resume adds no
+activation — the coordinator exists, the slot was spent when it started, and
+core's own command idempotency handles the rest. So the rule is checked in
+that order: if the session ID is already counted, the call proceeds with no
+reservation and no ceiling test; only a call that may add an activation
+reserves. That is also what keeps a controller from being locked out of a
+session it is already driving merely because the daemon is full.
 
 **Every branch of both results resolves the reservation, and the table is
 complete rather than illustrative**, because a branch nobody listed is a slot
@@ -1022,33 +1060,46 @@ leaked until the daemon restarts:
 | Resume, `:historical` | Released — the replayed result is returned without starting an owner (`control.ex:311-312`) |
 | Resume answering a **prepared** capability, where the activation is begun but not finished | **Held**: the reservation stays until that activation resolves, then converts on success and releases on abandonment. It is the one branch that is neither yet |
 | Either call refusing — `runtime_command_conflict`, `store_unavailable`, an invalid identifier, a placement mismatch, any other `{:error, _}` | Released |
-| A **resume** crashing or timing out | **Held, then resolved by replay**: replayed under its original `command_id`, whose `disposition`/`control_entry` say whether the original call activated the session. The existence query cannot answer this — it says `present` either way |
-| A **create** crashing or timing out | **Held, then resolved by replay**: replayed under the same `command_id`, which returns the historical result and starts no coordinator (`control.ex:901-907`), carrying the same two fields. Same reservation key, so no second slot |
+| A **resume** whose connection is lost while the call is in flight | **Held, then resolved by the relay**, which holds the call's real answer whether or not the process that asked is still there; where the daemon must re-establish it later, the client's replay under its original `command_id` carries the same `disposition`/`control_entry`. The existence query cannot answer this — it says `present` either way |
+| A **create** whose connection is lost while the call is in flight | **Held, then resolved by the relay** the same way; a later replay under the same `command_id` returns the historical result and starts no coordinator (`control.ex:901-907`), carrying the same two fields. Same reservation key, so no second slot |
 | An **attach whose connection process ends before it answers** | **Released with the connection**: the reservation is keyed by the connection, ADR 0032 binding a connection to at most one attachment, and core change 1 monitoring the attaching process. The daemon closes that connection, its process ends, and the dispatcher's `DOWN` handler drops the attachment. Nothing is observed, because nothing needs to be |
 
-**That last row is not hypothetical, and the reason is a default nobody
-chose.** The daemon reaches core through `Loopex.Runtime`, whose
-`control_call/3` and `dispatcher_call/3` default to a **five-second** reply
-timeout (`runtime.ex:470`, `:478`). A create or resume that takes longer
-returns the daemon an error while core is still starting a coordinator — so
-"the call gave no answer" is an ordinary outcome of a slow root, not an
-exotic one. Every daemon call that consumes a ceiling **and accepts one**
-therefore carries an explicit timeout rather than inheriting that default, and
-resolves its reservation by the rule its own row names when the timeout is
-what it gets.
+**Those rows used to say "crashing or timing out", and the timing-out half was
+false.** An earlier revision rested it on a default: `Loopex.Runtime`'s
+`control_call/3` and `dispatcher_call/3` do default to a **five-second** reply
+timeout (`runtime.ex:470`, `:478`) — but **`create_session/3` and
+`resume_session/3` both pass `:infinity` explicitly**
+(`runtime.ex:156-163`, `:169-177`), so neither inherits it and neither can
+time out. There is no deadline on those calls to give the daemon "no answer".
+What actually ends the wait is the **per-connection process dying** while the
+call is still running in core, which is why the rows now name that.
 
-**`Runtime.attach/3` accepts none and needs none**, which is why the qualifier
-matters. Its signature takes a runtime, a session ID and options and no
+**`Runtime.attach/3` is the same shape for its own reason.** Its signature
+takes a runtime, a session ID and options and no
 timeout at all (`runtime.ex:198-210`), and inside it waits `:infinity` twice —
 at the dispatcher and again at the install (`:538`, `:547`) — **precisely so a
 caller timeout cannot revoke a mutation it cannot see**, which is what the
 code says there in as many words: the dispatcher has already created the
 attachment and the install is registering its routing, so a caller that gave
 up would be revoking neither mutation, and could not report truthfully that
-the attach failed. The attach row above is written against that reality
-rather than against a timeout the call does not have.
+the attach failed. All three activation-capable calls therefore wait
+`:infinity`, and the daemon's rule is the simpler one an earlier revision
+obscured: **it adds no timeout to a core call that consumes a ceiling**,
+because a timeout it could not act on truthfully would be worse than the
+wait.
 
-**A call that gives the daemon no answer may still have started a coordinator
+**Who resolves a reservation when the asking process is gone: the relay.** The
+relay's task performs the core call and returns core's answer whether or not
+the connection that asked still exists, so for the two ticketed calls the
+relay holds the `disposition` and `control_entry` and hands them to the
+daemon's serial owner, which converts or releases by the row above. That is
+the whole of the ordinary path, and it is why creates are ticketed. The
+client, which saw nothing, recovers as it always does — by re-presenting the
+same `command_id`, whose replay returns the historical result and the same two
+fields, charging no second slot because the reservation key is the pair.
+
+**A call whose answer the daemon holds no route to may still have started a
+coordinator
 or an attachment**, so releasing the reservation would let the ceiling be
 exceeded and converting it would spend a slot that may not exist. What
 resolves it differs by call, and an earlier revision used one resolution for
@@ -2876,11 +2927,11 @@ nothing proves. Each is named where it is used:
 
 | Surface | Created by | Read by |
 | --- | --- | --- |
-| The dispatcher's release on `DOWN` | Core change 1 | The concurrent-attachment cases and the attach no-answer case |
+| The dispatcher's release on `DOWN` | Core change 1 | The concurrent-attachment cases and the attach connection-loss case |
 | The existence query's five-result set | Core change 2 | `session_existence_query_test.exs`, one case per result, and Outcome 4's row |
 | `Control`'s excluded-pid set | Core change 3 | The trace-exclusion cases |
 | `quiesce/1`'s three lists, `budget_ms`, `drain_id` and the per-session `fences` map | Core change 4 | The drain cases, the fence cases and the stop line |
-| `disposition` and `control_entry` | Core change 5 | The create and resume no-answer cases |
+| `disposition` and `control_entry`, on `create_session_detailed/3` and `resume_session_detailed/3` | Core change 5 | The create and resume connection-loss cases, and the case asserting `create_session/3`'s own return is byte-identical to today's |
 
 Everything read outside those five exists today — the journal, a supervisor's
 children, a pid's liveness, a socket's EOF, or the daemon's own `stderr`.
@@ -3238,26 +3289,30 @@ children, a pid's liveness, a socket's EOF, or the daemon's own `stderr`.
   `:823`) in the same VM and asserts **512**, not 513. Saying "proved by core holding 512" without saying where
   that number is read would have been the same unobservable claim this round
   removed elsewhere.
-- **Every branch releases or converts its reservation, and the no-answer
+- **Every branch releases or converts its reservation, and the connection-loss
   cases are written so the two outcomes can differ.** One case per row: a
   fresh create, a replayed create against an active and a dormant session, a
-  fresh resume, a replayed resume, a refusal, and then the three no-answer
-  rows, each constructed so that a resolution which could not discriminate
-  would fail:
+  fresh resume, a replayed resume, a refusal, and then the three
+  connection-loss rows, each constructed so that a resolution which could not
+  discriminate would fail. Two more sit beside them: a resume for a session
+  **already in the activation set** at the ceiling, asserted to **succeed**
+  with no reservation taken, since it adds no activation; and two different
+  resume commands for one dormant session, asserted to hold two reservations
+  under their two `(command_id, session_id)` keys rather than colliding on one:
 
-  *Resume, no answer, two sub-cases.* One where the original resume **did**
+  *Resume, connection lost in flight, two sub-cases.* One where the original resume **did**
   activate the session and one where it **did not** — the same session ID, the
   same query answer `present` in both. The case asserts the daemon converts in
   the first and releases in the second, which it can only do from the replayed
   result's `disposition` and `control_entry`. A resolution by existence query
   would give the same answer to both and is thereby excluded.
 
-  *Create, no answer.* The replay is asserted **in-VM** to start no
+  *Create, connection lost in flight.* The replay is asserted **in-VM** to start no
   coordinator — no new pid under core's session supervisor — and to charge no
   second slot, and the slot count afterwards distinguishes a fresh
   original from a replayed one.
 
-  *Attach, no answer.* Two surfaces, and they differ in the two cases. On the
+  *Attach, connection lost in flight.* Two surfaces, and they differ in the two cases. On the
   wire, the client's connection is asserted **closed** — an EOF a test can
   observe — where a connection whose attach answered stays open. In-VM, the
   dispatcher's `attachments` map (`event_dispatcher.ex:154`, `:823`), read
@@ -3420,10 +3475,14 @@ a codec, which cost every other frame's tracing. The match-specification list
 is not dropped; it is half the call, and the process flag is the other half,
 because a list of `{module, function, arity}` identities cannot cover what an
 excluded function *calls*: a traced `:gen_tcp.send/2` shows the credential
-frame however this adapter's own functions are patterned. **Two plain fields on the runtime-side create and resume results** — which unify
+frame however this adapter's own functions are patterned. **Two plain fields on two new runtime-side functions beside create and resume** — which unify
 nothing and add no wire surface: they exist because core computes `fresh?` at
 `control.ex:895` and then throws it away four lines later, leaving every
-caller unable to tell a fresh create from a replay. Direct code cannot supply
+caller unable to tell a fresh create from a replay. They are new functions
+rather than widened returns because widening `create_session/3` would change
+what `Loopex.create_session/3` forwards to a released embedded caller
+(`loopex.ex:87-91`), which is a compatibility break bought for a daemon's
+bookkeeping. Direct code cannot supply
 them, because the only alternative is inferring the answer from side effects,
 which is a race. **One bounded `quiesce/1`** — which unifies nothing today and says so:
 its only caller is the daemon's orderly stop, and the app-server host does not
