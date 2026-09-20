@@ -1,7 +1,7 @@
 <a id="technical-depth"></a>
 ## Technical depth
 
-Concept: [Daemon-grade store selection and migration](0031-daemon-grade-store-selection-and-migration.md#concept).
+Concept: [Daemon store selection for `0.2.0`](0031-daemon-grade-store-selection-and-migration.md#concept).
 
 <a id="technical-adr-0031-decision"></a>
 ### Contract and Evidence

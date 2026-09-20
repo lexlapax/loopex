@@ -1,7 +1,7 @@
 <a id="concept"></a>
 ## Concept
 
-Technical depth: [Daemon-grade store mechanics](0031-daemon-grade-store-selection-and-migration-technical.md#technical-depth).
+Technical depth: [Local adapter limits and what stays open](0031-daemon-grade-store-selection-and-migration-technical.md#technical-depth).
 
 - **Status:** Proposed
 - **Date:** 2026-09-14
