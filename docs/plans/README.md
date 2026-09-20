@@ -22,9 +22,9 @@ its last `Closed` row identifies the last closed product baseline.
 | --- | --- |
 | Integrated phase | Closed milestone product baseline |
 | Last closed product checkpoint | `M4` — 2026-09-19 |
-| Blockers | `M5` is open and not accepted; the maintainer must accept its plan pair; `M5` waits on ADR 0031, ADR 0032, and ADR 0033 before the outcomes that depend on them |
+| Blockers | `M5` is open and not accepted; the maintainer must accept its plan pair; `M5` waits on ADR 0031, ADR 0032, ADR 0033, and ADR 0034 before the outcomes that depend on them |
 | Authorized work | Explicitly authorized planning, ADR, bootstrap, and review work only; no product implementation |
-| Next maintainer decision | Accept or reject the `M5` plan pair; disposition [ADR 0031](../adr/0031-daemon-grade-store-selection-and-migration.md#concept), [ADR 0032](../adr/0032-daemon-attachment-residency-and-replay.md#concept), and [ADR 0033](../adr/0033-collaboration-controller-lease-and-takeover.md#concept) |
+| Next maintainer decision | Accept or reject the `M5` plan pair; disposition [ADR 0031](../adr/0031-daemon-grade-store-selection-and-migration.md#concept), [ADR 0032](../adr/0032-daemon-attachment-residency-and-replay.md#concept), [ADR 0033](../adr/0033-collaboration-controller-lease-and-takeover.md#concept), and [ADR 0034](../adr/0034-provider-credential-handoff-over-bootstrap-channel.md#concept) |
 | Next transition | Record the acceptance governance row and move `M5` to Accepted |
 | Validation | `bash scripts/check-bootstrap.sh` |
 <!-- loopex:current-status:end -->
