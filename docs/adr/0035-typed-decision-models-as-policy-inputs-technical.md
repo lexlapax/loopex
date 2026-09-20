@@ -117,7 +117,7 @@ order, because each earlier one is the cheaper proof of the same invariant.
 ### Nothing here runs inside M5
 
 An earlier draft admitted one piece early: an offline scorer in M5's release
-check that would call the real endpoint to prove the 1.24 API and take the
+check that would call the real endpoint to prove the `1.24.0` API and take the
 first latency and price measurement. That is withdrawn on 2026-09-20.
 
 The reason is not caution about the scorer itself, which really would have
@@ -132,8 +132,9 @@ complete set, whatever the call does.
 
 So the first real call, and with it the first latency and price measurement,
 belongs to the milestone that accepts this decision. M5's move to `req_llm`
-1.24 happens for its own dependency reasons and adds no call path: nothing in
-M5 calls anything 1.24 makes newly reachable.
+`~> 1.24.0` is explicit M5 scope for its own dependency reasons, separate from
+this decision and not conditional on it, and adds no call path: nothing in M5
+calls anything `1.24.0` makes newly reachable.
 
 ### Evidence
 
