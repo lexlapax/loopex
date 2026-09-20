@@ -20,7 +20,7 @@ decision named only in prose declares nothing.
 | [ADR 0031](../adr/0031-daemon-grade-store-selection-and-migration.md#concept) | Before the daemon opens a state root, so before workstream 2 lands | The existing local adapter as the daemon's store for `0.2.0`, with the 256 MiB log capacity, 4 MiB frame ceiling, full retention, `store_capacity_exceeded` refusal, the capacity-as-store-loss consequence, explicit stale-writer recovery and the operator root-retirement procedure documented; a daemon-grade adapter and any migration left open for a separate decision |
 | [ADR 0032](../adr/0032-daemon-attachment-residency-and-replay.md#concept) | Before the socket is bound or either core change lands, so before workstreams 1 and 3 | The Unix-domain-socket transport reusing ADR 0023 unchanged, generation 2's methods, durable existence established by core's read-only query rather than by attaching or resuming, refusal of a generation-1-only client, owner-only peer access, the bounded socket path, marker-first startup, race-free attach with at-least-once contiguous delivery, the resident window, daemon-owned output buffers, detachment at the last emitted cursor, idle eviction and bounded session pages, and every residency number below |
 | [ADR 0033](../adr/0033-collaboration-controller-lease-and-takeover.md#concept) | Before any admission check is written, so before workstream 4 | One daemon-owned controller lease per session held in daemon memory with a fresh opaque writer epoch per grant, admission that binds holder connection, held state, unexpired term and epoch together, explicit takeover, cross-process abort through the core's own cancellation, and no authority from content, metadata or order |
-| [ADR 0034](../adr/0034-provider-credential-handoff-over-bootstrap-channel.md#concept) | Before the adapter's credential resolution changes, so before workstream 5's credential item | The credential as a per-invocation input named by a `{resolver_module, reference_term}` reference the host owns, resolved only inside the sender that writes the credential frame, after the child proves nonce, codec version and build manifest digest and before the invocation frame; the resolver's owner, custody, rotation, deadline bounding and every failure outcome; no environment read anywhere in the adapter's library tree and the launcher's enumeration deleted rather than relocated, which is what leaves ADR 0019 unamended; the re-pointed credential-plane proofs and the security review as acceptance points |
+| [ADR 0034](../adr/0034-provider-credential-handoff-over-bootstrap-channel.md#concept) | Before the adapter's credential resolution changes, so before workstream 5's credential item | The credential as a per-invocation input named by an opaque token, routed by a host-owned registry that holds routing only, resolved from a host-owned custody process only inside the sender that writes the credential frame, after the child proves nonce, codec version and build manifest digest and before the invocation frame; custody and registry ownership, rotation, the guardian-enforced deadline, `:unavailable` on lost custody or registry with no reconstruction, and every failure outcome; no environment read anywhere in the adapter's library tree and the launcher's enumeration deleted rather than relocated, which is what leaves ADR 0019 unamended; the re-pointed credential-plane proofs and the security review as acceptance points |
 
 ADR 0031 decides one thing, the `0.2.0` local-adapter selection and its
 documented limits. It prescribes no successor engine, experiment or migration;
@@ -75,7 +75,7 @@ to the integrator, who resolves them rather than either writer:
 
 | Shared surface | Why both reach it |
 | --- | --- |
-| Host composition — `apps/loopex_composition`, `apps/loopex_app_server/lib/loopex_app_server/host.ex`, `apps/loopex_cli` | The credential item changes how every host supplies a credential reference and deletes the operator's variable; the daemon *is* a new host composed the same way, and `host.ex:221` is where the variable is read today |
+| Host composition — `apps/loopex_composition`, `apps/loopex_app_server/lib/loopex_app_server/host.ex`, `apps/loopex_cli` | The credential item makes every host compose a routing registry and a custody process, pass a token with the call and delete the operator's variable; the daemon *is* a new host composed the same way, and `host.ex:221` is where the variable is read today |
 | The integration scripts — `scripts/check-release.sh` and its fixtures | Workstream 5 selects the real-provider lane; the daemon workstreams add `loopex_daemon` to `release_apps` and the Linux cross-uid case |
 | Provider and credential documentation under `docs/operator/` and `docs/developer/` | Workstream 5 adds the operator credential sentence and the host-composition note; workstream 6 rewrites the same pages for the daemon |
 | Closure evidence — `docs/evidence/M5-closure-runs.md` and `docs/evidence/README.md` | Every workstream's runs, the security review and the demonstration are retained on one page |
@@ -252,7 +252,7 @@ Outcome 6 changes no public surface. The `Loopex.Model` callbacks, the private
 provider codec's version and frame kinds, the build manifest and ADR 0019's
 process topology are all unchanged. Its one compatibility effect is on host
 composition: an embedder that relied on the adapter reading the environment
-for it supplies a credential reference with the call instead, and gets the
+for it passes a credential token with the call instead, over a registry and custody it composes, and gets the
 adapter's ordinary refusal to dispatch rather than a silent fallback if it
 does not.
 
@@ -395,16 +395,19 @@ answer, which takes an attaching or durable side effect to ask a question —
 one in-memory lease record and one
 admission check, one resident window and eviction policy, one per-connection
 output buffer, one session index with bounded pages, three CLI commands and
-the Node client's socket mode. Outcome 6 adds exactly one abstraction, the
-one-callback `Loopex.LLM.ReqLLM.CredentialResolver` behaviour, because the
-reference has to travel in configuration that is copied between processes and
-may be printed by a crash report, so it must be plain boundary data and a
-closure cannot be: it unifies the three reference hosts that hold a credential
-today — the CLI, the app-server host and the daemon — and any embedder that
-holds one elsewhere. Beside it, each reference host gains one holding process
-for the one value it already reads. Nothing else: the change otherwise moves
-where one value is resolved and deletes two environment reads from the call
-path.
+the Node client's socket mode. Outcome 6 adds exactly one indirection, the
+credential token and the host-owned routing registry it is resolved through,
+because the value that travels in adapter configuration is copied between
+processes and may be printed by a crash report: an opaque token is the
+smallest thing that can travel there while disclosing neither the credential
+nor the host's arrangement of it, and a registry row is what a host adds for a
+second credential instead of widening the value. It unifies the three
+reference hosts that hold a credential today — the CLI, the app-server host
+and the daemon — and any embedder that holds one elsewhere. Beside it, each
+reference host gains one custody process for the one value it already reads
+and one registry row for it. Nothing else: the change otherwise moves where
+one value is resolved and deletes the credential environment read from the
+call path.
 
 Nothing else. No lease, transport, byte limit or residency policy in core; no
 second loop, event dispatcher, cancellation path or protocol codec; no

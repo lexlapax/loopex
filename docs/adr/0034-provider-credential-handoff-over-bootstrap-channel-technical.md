@@ -52,42 +52,57 @@ booting — never reaches step 5. That is the property the two existing
 bootstrap-refusal cases assert, and it is why the credential is not carried by
 the step-3 frame.
 
-### The reference, its resolver, and its failures
+### The token, the routing registry, and the custody process
 
-The per-invocation option is `:credential_reference`, one member of the
-configuration map the host already supplies to `complete/3`. Its value is
-`{resolver_module, reference_term}`:
+The per-invocation option is `:credential_token`, one member of the
+configuration map the host already supplies to `complete/3`. Its value is an
+**opaque token**: a binary of at most 256 bytes from ADR 0023's identifier
+alphabet, carrying no structure the adapter interprets and no authority of its
+own. It is not the credential, it does not name a module, and it cannot be
+resolved by anyone who is not already holding the host's registry. Any other
+shape, including a bare binary that could plausibly be the bytes themselves —
+anything outside the alphabet or over the bound — is refused as an invalid
+option before any child is spawned.
 
-- `resolver_module` is an atom naming a module that implements
-  `Loopex.LLM.ReqLLM.CredentialResolver`, one callback,
-  `resolve(reference_term, deadline) :: {:ok, binary()} | {:error, reason}`,
-  where `deadline` is an **absolute monotonic instant** in native units, not a
-  remaining duration — a duration is stale the moment it is computed, and the
-  sender and the resolver are different processes. `reason` comes from the
-  closed set below and never from the resolver's own vocabulary;
-- `reference_term` is bounded plain boundary data — at most 256 bytes when
-  encoded by the repository's canonical encoding, and never a PID, port,
-  function, monitor or reference. It names which credential is wanted; it is
-  not the credential and carries no authority of its own.
+The token replaces the `{resolver_module, reference_term}` pair an earlier
+draft used. The maintainer decided that on 2026-09-20. A pair that named a
+module was doing two jobs at once: it carried routing (which process answers)
+in the same value that travelled through adapter configuration, so every
+copy of that configuration disclosed the shape of the host's credential
+arrangement, and adding a second provider would have meant widening the value
+rather than adding a row. An opaque token discloses nothing and is the same
+size whatever the host is doing behind it.
 
-Any other shape, including a bare binary that could be the bytes themselves,
-is refused as an invalid option before any child is spawned. The behaviour
-exists rather than a closure because the reference travels in configuration
-that is copied between processes and may be printed by a crash report, and
-plain boundary data is what may travel there.
+**The routing registry is the host's, and holds routing only.** The host
+composes a registry that maps token to custody process, and that is the whole
+of its contents: no credential bytes, no derived material, nothing from which
+a secret could be reconstructed. It is the indirection that lets the token be
+opaque. The sender resolves the token through the registry to reach the
+custody process; the registry itself never sees or holds a credential, so
+reading it discloses which tokens exist and nothing about what they stand
+for.
 
-**Owner and custody.** The resolver is the host's. The adapter declares the
-behaviour, calls it, and knows nothing about where the bytes live. Each
-reference implementation states its own custody and proves it for itself:
-the reference CLI, the app-server host and the M5 daemon read
-`Loopex.LLM.ReqLLM.credential_variable/0` exactly once, where they compose the
-runtime, delete that name from the VM's environment in the same step, and hold
-the bytes in one host-owned custody process, registered under the runtime
-reference rather than a global name, whose `format_status/1` redacts its state
-and which answers `resolve/2` only for its own reference term. The
-real-provider lane composes the same way. Nothing in the adapter depends on
-that arrangement, and a different host may keep the bytes anywhere it can
-defend.
+**Custody is a separate process, and is where the bytes live.** Each reference
+implementation states and proves its own: the reference CLI, the app-server
+host and the M5 daemon read `Loopex.LLM.ReqLLM.credential_variable/0` exactly
+once, where they compose the runtime, delete that name from the VM's
+environment in the same step, hold the bytes in one host-owned custody process
+registered under the runtime reference rather than a global name, whose
+`format_status/1` redacts its state, and register its token in the routing
+registry. The real-provider lane composes the same way. Nothing in the adapter
+depends on that arrangement, and a different host may keep the bytes anywhere
+it can defend.
+
+**Loss of either is `:unavailable`, and neither is reconstructed.** If the
+custody process is gone, or the registry has no row for the token, or the
+registry itself is gone, resolution answers `:unavailable` and the invocation
+refuses. The adapter does not retry, does not fall back, and above all does
+not attempt to rebuild the secret from anything — there is nothing to rebuild
+it from, by construction, because the registry holds no bytes. The host
+recomposes; until it does, every invocation on that token refuses the same
+way. That is the whole recovery story, and it is deliberately the shortest one
+available: a mechanism that could restore a credential after its custodian
+died would be a mechanism that had kept a second copy somewhere.
 
 **Exactly one credential-bearing transfer exists in the parent, and it is
 named.** An earlier draft said the value never appears in a message while also
@@ -96,25 +111,31 @@ true, because answering is a message. The contract is a permission with a
 boundary, not an absolute:
 
 - The **only** permitted credential-bearing transfer in the parent is the
-  custody process's reply to `resolve/2`, carrying `{:ok, bytes}` to the one
-  sender process that asked. It is bounded by the same 1..65,536-byte rule as
-  the frame, it is never logged, never forwarded, and never held after the
-  frame is written.
+  custody process's reply to the sender's `resolve` call, carrying
+  `{:ok, bytes}` to the one sender process that asked. It is bounded by the
+  same 1..65,536-byte rule as the frame, it is never logged, never forwarded,
+  and never held after the frame is written. The registry lookup that precedes
+  it carries no credential, so the token's journey through the registry adds
+  no second place a secret can be seen.
 - It is deliberately the same class of act as the credential frame write: one
   short-lived process receives the bytes, uses them once, and dies. ADR 0019
   already protects that process — the sender installs its own group-leader
   sink so no IO request can carry anything out of it, it is unregistered, and
   it reports only an atom or a `{:error, atom}` pair to the guardian.
-- Observation of the sender is governed by the tracing rules rather than left
-  to hope. ADR 0030's `arguments` level redacts "a credential reference, model
-  content, tool arguments and artifact bytes to placeholders" and replaces
-  "any value reachable through a credential reference". The sender is a
-  `Loopex.*` module and, spawned beneath runtime-owned processes, is reachable
-  by `set_on_spawn`, so M5 must **prove** that the reply and the resolved value
-  fall inside that redaction class: a trace session at the `arguments` level
-  over a real invocation shows placeholders and no credential bytes. That is a
-  proof obligation on M5, not a change to ADR 0030, whose redaction class
-  already names this category.
+- **The credential-bearing resolver call is excluded from tracing, and the
+  mechanism is named.** ADR 0030's `arguments` level redacts "a credential
+  reference, model content, tool arguments and artifact bytes to placeholders"
+  and replaces "any value reachable through a credential reference" — the
+  token and the value it resolves to are inside that class by construction,
+  since the token *is* the credential reference and the bytes are what it
+  reaches. The sender is a `Loopex.*` module and, spawned beneath
+  runtime-owned processes, is reachable by `set_on_spawn`, so being inside
+  the class is what excludes it rather than being out of scope. M5 must
+  **prove** it: a trace session at the `arguments` level over a real
+  invocation shows placeholders for the resolver call, its reply and the
+  resolved value, and no credential bytes anywhere in the captured entries.
+  That is a proof obligation on M5, not a change to ADR 0030, whose redaction
+  class already names this category.
 - Everywhere else the earlier absolutes stand unchanged: not in guardian
   state, not in an exit reason, not in a crash report, not in an IO request,
   not in a file, not in the environment, not in argv, and in no durable or
@@ -125,44 +146,61 @@ process, between the child's `ready` frame and the credential frame — step 5
 above and nowhere else. A resolved value is never cached, never reused for a
 second invocation, and never returned to the guardian.
 
-**Rotation.** Per invocation, by construction: the resolver may answer
-different bytes for the same reference on a later call, and no layer holds a
-previous answer to contradict it. A rotation that happens while an invocation
+**Rotation.** Per invocation, by construction: the custody process may answer
+different bytes for the same token on a later call, and no layer holds a
+previous answer to contradict it. The host may also rotate by pointing the
+token's registry row at a new custody process, which the next invocation
+follows and an in-flight one does not. A rotation that happens while an invocation
 is in flight does not reach that invocation, which has already resolved; it
 reaches the next one. Nothing is invalidated and no invocation is restarted.
 
-**Timeout.** Resolution is bounded by the invocation's existing deadline and by
-nothing else; this decision adds no second clock. The sender passes that
-deadline as an absolute monotonic instant, and a resolver that has not answered
-when it is reached is a failed resolution reported as `:timeout`.
+**The guardian enforces the deadline, not the resolver.** Resolution is
+bounded by the invocation's existing deadline and by nothing else; this
+decision adds no second clock and, after the maintainer's decision of
+2026-09-20, it does not ask the resolver to honour one either. The callback
+takes no deadline argument. The guardian already owns the invocation deadline
+and already supervises the sender, so it bounds the whole resolution — the
+registry lookup, the call, and the wait for a reply — and kills the sender
+when the instant is reached, reporting `:timeout`.
 
-**The closed reason set.** A resolver answers `{:error, reason}` only with
-`:missing`, `:expired`, `:oversized` or `:unavailable`; the sender itself
-produces `:timeout`. Nothing else is admitted — a resolver returning anything
-outside the set is treated as `:unavailable`, because a host-authored term is
-exactly where a secret could be smuggled into a reason. The five atoms carry no
+An earlier draft passed an absolute monotonic instant to the resolver and
+relied on it to answer in time. That is withdrawn: it made every host's
+resolver responsible for a safety property the adapter must have whatever the
+host wrote, and a resolver that simply blocked would have hung the invocation
+past its deadline. Enforcement belongs to the process that can act on it by
+killing something. The resolver's only obligation is to answer or not.
+
+**The closed reason set is unchanged.** A custody process answers
+`{:error, reason}` only with `:missing`, `:expired`, `:oversized` or
+`:unavailable`; the guardian produces `:timeout`, and `:unavailable` is also
+what a missing registry row, a gone registry and a dead custody process
+answer. Nothing else is admitted — anything returned outside the set is
+treated as `:unavailable`, because a host-authored term is exactly where a
+secret could be smuggled into a reason. The five atoms carry no
 content, so they are safe in a message, an exit reason and a bounded
 diagnostic.
 
 **What the sender reports.** `:ok` or `{:error, reason}` from that same closed
-set, never a bare `:error`. The guardian has to distinguish a resolver that
-refused from one that never answered: they are different operational faults and
-ADR 0029's bounded status has to say which happened. The reported reason is one
-of the five atoms and never the resolved value, the reference, or a
-resolver-authored string.
+set, never a bare `:error`. The guardian has to distinguish a custody process
+that refused from one that never answered — they are different operational
+faults and ADR 0029's bounded status has to say which happened — and it can,
+because a refusal arrives as one of the four atoms while a silence is the
+guardian's own `:timeout`. The reported reason is never the resolved value,
+the token, or a host-authored string.
 
 **Failures.** Each is a refusal with a bounded non-secret reason, and each
 leaves no retained copy of anything the resolver may have produced:
 
 | Condition | Outcome |
 | --- | --- |
-| No `:credential_reference` in the configuration | Refused before the namespace is created and before any child is spawned, with the adapter's existing missing-credential reason |
-| Malformed reference, or a `resolver_module` that does not export the callback | The same refusal, before any child is spawned |
-| Resolver answers `{:error, :missing}` or `{:error, :expired}` | The sender reports `{:error, that_atom}`; the invocation fails through ADR 0019's existing credential-send failure path, the guard tears the child down, and the atom becomes the bounded non-secret status ADR 0029 fixes |
-| Resolver answers `{:error, :unavailable}`, or anything outside the closed set | The same path, reported as `:unavailable` |
-| Resolver has not answered when the deadline instant is reached | The sender reports `{:error, :timeout}`, distinct from every refusal, and is killed so its stack goes with it |
+| No `:credential_token` in the configuration | Refused before the namespace is created and before any child is spawned, with the adapter's existing missing-credential reason |
+| Malformed token — outside the identifier alphabet or over 256 bytes | The same refusal, before any child is spawned |
+| The registry holds no row for the token, the registry is gone, or the custody process is dead | `:unavailable`. The host recomposes; nothing is reconstructed, because the registry holds no bytes to reconstruct from |
+| Custody answers `{:error, :missing}` or `{:error, :expired}` | The sender reports `{:error, that_atom}`; the invocation fails through ADR 0019's existing credential-send failure path, the guard tears the child down, and the atom becomes the bounded non-secret status ADR 0029 fixes |
+| Custody answers `{:error, :unavailable}`, or anything outside the closed set | The same path, reported as `:unavailable` |
+| Resolution has not completed when the guardian's invocation deadline is reached | The **guardian** kills the sender and reports `{:error, :timeout}`, distinct from every refusal; the sender's stack goes with it. A custody process that simply blocks cannot hang the invocation, because nothing depends on it noticing the time |
 | Resolved value outside 1 to 65,536 bytes | Refused in the sender before the frame is written, exactly as the size check refuses today, reported as `{:error, :oversized}` |
-| Two resolutions in flight at once | Independent **successes**. Each invocation has its own sender and resolves for itself; the adapter serialises nothing and shares nothing between them, and two answers for the same reference may differ. Concurrency is not a refusal condition, and a custody process that refused concurrent callers would reintroduce exactly the serialisation this decision exists to remove |
+| Two resolutions in flight at once | Independent **successes**. Each invocation has its own sender and resolves for itself; the adapter serialises nothing and shares nothing between them, and two answers for the same token may differ. Concurrency is not a refusal condition, and a custody process that refused concurrent callers would reintroduce exactly the serialisation this decision exists to remove |
 
 No failure is retried inside the adapter. Whether to attempt again is the
 coordinator's durable decision under ADR 0018, unchanged.
@@ -171,11 +209,13 @@ coordinator's durable decision under ADR 0018, unchanged.
 
 - **In the sender.** The minimal credential sender keeps the shape it has
   today: it is spawned for this one send, it installs its own group leader
-  sink so no IO request can carry anything out of it, it calls `resolve/2`,
-  receives the one permitted credential-bearing reply, validates the size
-  bound, writes the frame itself and reports `:ok` or `{:error, reason}` from
-  the closed set to the guardian. Its closure holds the reference, never the
-  resolved value; in the parent the value exists in the custody process and,
+  sink so no IO request can carry anything out of it, it looks the token up in
+  the host's routing registry, calls the custody process it names, receives the
+  one permitted credential-bearing reply, validates the size bound, writes the
+  frame itself and reports `:ok` or `{:error, reason}` from the closed set to
+  the guardian — which is supervising it against the invocation deadline
+  throughout. Its closure holds the token, never the resolved value; in the
+  parent the value exists in the custody process and,
   for the duration of one send, in this process's own mailbox and stack, and
   nowhere else — no guardian state, no exit reason and no crash report can
   hold it.
@@ -234,9 +274,9 @@ coordinator's durable decision under ADR 0018, unchanged.
 
 Every case below exists today in
 `apps/loopex_llm_reqllm/test/credential_plane_test.exs`. Each is re-pointed at
-the per-invocation reference — the module's `setup` and the two rotation cases
-stop writing the process-wide variable, and each fixture carries its own
-credential — and each must hold with its assertion unchanged in meaning:
+the per-invocation token — the module's `setup` and the two rotation cases
+stop writing the process-wide variable, and each fixture composes its own
+custody process and registry row — and each must hold with its assertion unchanged in meaning:
 
 | Claim | Case |
 | --- | --- |
@@ -271,8 +311,8 @@ cannot carry over unchanged. The size-bound case in
 drives the 65,536-byte ceiling, delivers its credential through
 `System.put_env(Adapter.credential_variable(), …)` in that module's `setup`
 and again in the case body. Both writes go: the module's fixtures carry their
-own credential reference, and the case supplies the 65,536-byte value as that
-invocation's reference rather than writing it into the VM. The ceiling it
+own custody, and the case has that invocation's custody process hold the
+65,536-byte value rather than writing it into the VM. The ceiling it
 proves, and the refusal above the ceiling, are unchanged.
 
 Three proofs are new:
@@ -304,12 +344,15 @@ Three proofs are new:
   captured function. Each route it does not pin is refuted outright. The
   narrower scan is what lets an environment read return by a name the current
   expression does not match, which is the drift the case exists to catch.
-- **Resolution failures.** One case per row of the failure table above: absent
-  reference, malformed reference, a resolver module without the callback, each
-  of the four refusal atoms, a resolver returning a term outside the closed set
-  (reported `:unavailable`), a resolver silent past the deadline instant
-  (reported `:timeout`, and asserted **distinct** from every refusal so the
-  guardian can tell them apart), and a value outside the size bound. Each
+- **Resolution failures.** One case per row of the failure table above:
+  absent token, malformed token, a token with no registry row, a gone
+  registry, a dead custody process, each of the four refusal atoms, a custody
+  process returning a term outside the closed set (reported `:unavailable`), a
+  custody process that blocks past the invocation deadline (the **guardian**
+  kills the sender and reports `:timeout`, asserted **distinct** from every
+  refusal so the guardian can tell them apart, and asserted to bound the
+  invocation whatever the custody process does), and a value outside the size
+  bound. Each
   asserts the outcome, its closed-set atom, that no child was spawned where
   the contract says none is, and that no message but the permitted reply, no
   exit reason and no crash report carries the resolved value. The
@@ -348,22 +391,26 @@ host-facing accessor — the one name an operator configures — and that is wha
 it should say it is. The neighbouring case `a missing credential is reported
 before any provider is called` proves the refusal today by deleting the
 variable from the VM; under this decision it proves the same refusal by
-supplying no credential reference with the call, which is the path that
+supplying no credential token with the call, which is the path that
 replaces it.
 
 ### Security review
 
 The review is an acceptance point of M5 Outcome 6, read by someone other than
-the implementer, over the exact diff. It answers: where the reference is held
-between the call and the send; that the resolved value has no path into
-guardian state, a message, an exit reason, a crash report, an IO request, a
-file or the environment; that every row of the failure table refuses without
-retaining a copy; that the deadline, cleanup and abandonment paths do not
-resurrect one; that a host supplying no reference is refused rather than
-falling back to an ambient read; and, on the host side of the boundary, that
-each reference implementation reads the operator's variable once, deletes it,
-redacts the holding process's state, and hands the adapter a reference that
-carries no bytes. Its record is retained with the milestone's evidence.
+the implementer, over the exact diff. It answers: that the token is opaque
+and carries no credential and no authority; that the routing registry holds
+routing only, with no bytes and no material a secret could be derived from;
+that the resolved value has no path into guardian state, a message other than
+the one permitted reply, an exit reason, a crash report, an IO request, a file
+or the environment; that every row of the failure table refuses without
+retaining a copy; that the guardian's deadline bounds the whole resolution
+whatever a custody process does; that the cleanup and abandonment paths do not
+resurrect a value; that loss of custody or registry answers `:unavailable`
+rather than reconstructing anything; that a host supplying no token is refused
+rather than falling back to an ambient read; and, on the host side of the
+boundary, that each reference implementation reads the operator's variable
+once, deletes it, redacts its custody process's state, and registers a token
+that carries no bytes. Its record is retained with the milestone's evidence.
 
 ### Concurrency, as a measurement
 
@@ -391,12 +438,12 @@ child built from the same manifest digest behaves identically; the build
 manifest is not revised by this decision.
 
 The one visible change is host composition: a host that starts a runtime with
-this adapter supplies a credential reference with the call and owns the bytes
-behind it. The reference CLI, the app-server host, the M5 daemon and the
+this adapter passes a credential token with the call and owns both the
+registry that routes it and the custody process that holds the bytes. The reference CLI, the app-server host, the M5 daemon and the
 real-provider lane keep reading `LOOPEX_PROVIDER_API_KEY` where they compose,
 and delete it there, so an operator's setup is unchanged and the release
 check's credential frame is unchanged. An embedder that relied on the adapter reading
-the environment for it must pass the reference instead; that is the refusal
+the environment for it must pass a token instead; that is the refusal
 path, not a silent fallback, and it is stated in the operator and developer
 documentation the milestone updates.
 
