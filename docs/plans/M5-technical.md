@@ -133,7 +133,7 @@ Concept: [Verification stages](M5.md#concept-plan-verification).
 | 2 | `apps/loopex_daemon/test/socket_transport_test.exs`, `apps/loopex_protocol/test/public_schema_conformance_test.exs` | A raw-byte client over the socket negotiates generation 2 and receives generation 2's **own** exact schema digest, written out as a literal in the conformance module beside generation 1's and different from it by construction: `Loopex.Protocol.Session.schema_digest/0` is taken over the generation, the ordered methods, the ordered record families, the ordered error codes and the limits, and generation 2 changes the first two, so a generation 2 that negotiated generation 1's digest would be reporting a contract it does not serve. Generation 1's bytes, digest, method inventory and limits are proved unchanged in the same module and at their own literals — the `3a17…08f4` schema digest, the schema file digest and the vectors file digest the conformance module already pins — so the generation-2 work is proved additive rather than asserted to be. A generation-1-only initialize is refused with nothing created. Identical durable identities for the same command corpus through facade, foreground server and socket. Owner-only peer access proved in both layers: the socket's `0700` daemon-owned subdirectory and `0600` socket mode read back after bind, a permissive subdirectory or socket mode refused at start, a subdirectory the daemon does not own refused, a path component below the root that it did not create refused — and a state root at the ordinary `0755` the foreground server creates it with accepted, not refused, because the daemon owns the subdirectory and never re-permissions the root — and an unreadable or undecodable peer credential closing the connection before initialize — all in the fast check, which needs no second user — with the real cross-uid refusal and the same-uid success carried by two `@tag :cross_uid` cases the release check runs on the Linux lane as `mix test --only cross_uid`, where the suite-summary judge makes a zero executed count red rather than a skip. Frame, fragment, malformed-input and over-long socket path refusals with distinct stable reasons, the path cases binding at the derived bound and at one byte past it on each platform the release check runs. A client disconnect recorded as transport loss with no cancellation and no interaction change. The generation-2 vectors are literal bytes with literal verdicts, held beside generation 1's in `apps/loopex_protocol/test/public_schema_conformance_test.exs`, never values generated from the implementation they check |
 | 3 | `apps/loopex_daemon/test/collaboration_test.exs` | One lease per session in daemon memory with observers attached. Connection identity, epoch, held state and unexpired term checked together before core admission or any durable write, including a known current epoch sent by an observer. Takeover only after release or expiry, with a fresh epoch minted before the successor's first command. A killed controller fenced and its late commands refused. The three ways a controller stops holding, proved separately because the transport cannot tell two of them apart: an explicit `session.release_control` frees the lease at once, while an EOF from a politely closed client and a killed client both wait for expiry, with a takeover refused before the deadline and granted after. A per-session lease owner killed while a mutation is in flight taking the listener, every connection and the daemon down with it, after which the restarted daemon holds no lease and the previous holder's delayed command is refused on both the holder and the epoch check. A daemon restart leaving every session uncontrolled with every earlier epoch refused. A controller abort cancelling work dispatched under an earlier process with a truthful cleanup outcome. The expiry linearization: a mutation blocked inside core across the deadline settles under its own lease while the eligible takeover waits and is granted only after it resolves; the holder's next mutation refused at the deadline; the acquiring request refusing with its stable reason when its own deadline elapses first; and the holder disconnecting while a mutation is in flight — in every case exactly one of settle or refuse, never both. No control from content, metadata, answers or attachment order. Forward and backward wall-clock jumps changing neither live admission nor takeover timing |
 | 4 | `apps/loopex/test/concurrent_attachments_test.exs`, `apps/loopex/test/session_existence_query_test.exs`, `apps/loopex_daemon/test/replay_residency_test.exs` | Core's read-only session-existence query answers exactly one of the closed set `present`, `absent`, `invalid_id`, `store_unavailable` and `unexpected`, from a fresh process against a real root, with one case per result — `store_unavailable` injected by making the root unreadable and `unexpected` by a stub answering outside the set. It is proved to create no attachment, no incarnation, no durable record and no Store write: the root's journal and session directory are byte-identical before and after a run of queries, including for unknown and malformed IDs. Control acquisition proceeds only on `present`; the other four fail closed with no attachment, no lease and no activation, and name four distinct reasons, so an unreadable store is never reported as an unknown session. Several core attachments to one session remain independent when one detaches or backpressures. A snapshot anchored at the committed sequence, then contiguous at-least-once buffered and live delivery across the window boundary with no gap. Core is the only replay owner: every delivery case runs a second time with the daemon's resident window disabled and a third with it dropped mid-stream, all three byte for byte identical, so the window is proved to establish no snapshot and no cursor. Aggregate reclamation follows the fixed order ADR 0032 sets — zero-attachment windows by ascending last delivery, then the furthest-behind session's window, then detachment — including the case where zero-attachment windows alone consume the ceiling. A slow observer detached at its last emitted cursor while the controller and the other attachments continue. Per-session and per-daemon limits refusing independently. Idle eviction and reconnect with no missing durable event, any duplicate deduplicated by session ID, sequence and event ID. Retained encoded bytes at or below the 4 MiB output buffer, 16 MiB window and 512 MiB aggregate ceilings, enforced in the daemon-owned stages, exercising 512 attachments and maximum-sized output records separately, with observed process RSS recorded beside the ceilings. Progress coalesced or dropped with counted drops and no journal delay |
-| 5 | `apps/loopex_daemon/test/multi_client_workflow_test.exs`, `apps/loopex_daemon/test/external_socket_workflow_test.exs`, `docs/evidence/M5-closure-runs.md` | From a fresh extraction of the exact candidate — staged with `git archive`, extracted and built outside the checkout — an operator follows the documented prerequisites and commands, supplies workspace, provider and policy inputs, starts the daemon, and drives one session from the reference CLI as controller and the Node client as observer, kills the controller, takes over from the observer and aborts cross-process work. The documented CLI build and the provider companion build both run inside that extraction, on the archive-carried source identity rather than on `.git`, with the missing, unsubstituted-or-malformed, changed-during-build and mismatched-commit refusals each proved and the identity the build reports asserted equal to the commit the archive was staged from. The attended real-provider cases run from that extraction, against the escript it built there. The workflow drives ADR 0030's existing core spans end to end — command admission, commit, effect intent, publication, interaction, and the model, store, policy and executor port callbacks — with the same bounded identity metadata an embedded caller produces, and no event outside that closed inventory is emitted by anything M5 adds. Daemon-internal functions are proved by the daemon's own tests and logs: `Loopex.Trace` traces only processes the runtime owns, flagged with `set_on_spawn` from the runtime's supervisor, and the daemon's listener, connections and lease owners are host processes above the runtime, so no trace-session witness is claimed for them. `VERSION` in the extracted tree is exactly `0.2.0`. Every tracked file under `docs/operator/` and `docs/developer/` has been read against the candidate, including the ones M5 leaves unchanged, recorded as a checklist derived at that commit — `git ls-files -- docs/operator docs/developer`, sorted, one row per path, each row marked *updated* or *reviewed unchanged* — retained with the closure runs. The derivation is over **every tracked file** in those two trees, not only Markdown, and that is deliberate: the gate promises that every file under them was read, so a diagram, a fixture or a data file added later must appear rather than slip through a `*.md` filter that was true when it was written and silently false afterwards. It also avoids a pathspec trap, checked rather than assumed: `git ls-files 'docs/operator/**/*.md'` without `:(glob)` matches nothing at all and would have made the gate pass vacuously. The directory form returns 26 tracked files as of this revision — 18 under `docs/developer/` and 8 under `docs/operator/`, all Markdown today — and the closure checklist states the count it derived so a reviewer can see the list was not empty, with every path in the tree present, no row unmarked, and each finding named and resolved before the closure packet |
+| 5 | `apps/loopex_daemon/test/multi_client_workflow_test.exs`, `apps/loopex_daemon/test/external_socket_workflow_test.exs`, `docs/evidence/M5-closure-runs.md` | The operator workflow end to end, each step a command an operator types: `loopex daemon` refusing once per missing or invalid composition input with its own class and leaving no marker or socket behind, then starting and printing the one-line JSON readiness record; `loopex run --daemon` creating and driving a session; `loopex resume --daemon` activating a dormant one through acquire, resume with a fresh command ID, attach; `loopex attach --observe` refused with `session_dormant` against a session this daemon has not activated and succeeding against one it has; `--after` starting strictly after a sequence and its absence replaying from `0`; a controller whose renewal fails continuing as an observer and sending no further mutation; a reconnecting controller acquiring again and receiving a fresh epoch before any mutation. From a fresh extraction of the exact candidate — staged with `git archive`, extracted and built outside the checkout — an operator follows the documented prerequisites and commands, supplies workspace, provider and policy inputs, starts the daemon, and drives one session from the reference CLI as controller and the Node client as observer, kills the controller, takes over from the observer and aborts cross-process work. The documented CLI build and the provider companion build both run inside that extraction, on the archive-carried source identity rather than on `.git`, with the missing, unsubstituted-or-malformed, changed-during-build and mismatched-commit refusals each proved and the identity the build reports asserted equal to the commit the archive was staged from. The attended real-provider cases run from that extraction, against the escript it built there. The workflow drives ADR 0030's existing core spans end to end — command admission, commit, effect intent, publication, interaction, and the model, store, policy and executor port callbacks — with the same bounded identity metadata an embedded caller produces, and no event outside that closed inventory is emitted by anything M5 adds. Daemon-internal functions are proved by the daemon's own tests and logs: `Loopex.Trace` traces only processes the runtime owns, flagged with `set_on_spawn` from the runtime's supervisor, and the daemon's listener, connections and lease owners are host processes above the runtime, so no trace-session witness is claimed for them. `VERSION` in the extracted tree is exactly `0.2.0`. Every tracked file under `docs/operator/` and `docs/developer/` has been read against the candidate, including the ones M5 leaves unchanged, recorded as a checklist derived at that commit — `git ls-files -- docs/operator docs/developer`, sorted, one row per path, each row marked *updated* or *reviewed unchanged* — retained with the closure runs. The derivation is over **every tracked file** in those two trees, not only Markdown, and that is deliberate: the gate promises that every file under them was read, so a diagram, a fixture or a data file added later must appear rather than slip through a `*.md` filter that was true when it was written and silently false afterwards. It also avoids a pathspec trap, checked rather than assumed: `git ls-files 'docs/operator/**/*.md'` without `:(glob)` matches nothing at all and would have made the gate pass vacuously. The directory form returns 26 tracked files as of this revision — 18 under `docs/developer/` and 8 under `docs/operator/`, all Markdown today — and the closure checklist states the count it derived so a reviewer can see the list was not empty, with every path in the tree present, no row unmarked, and each finding named and resolved before the closure packet |
 | 6 | `apps/loopex_llm_reqllm/test/credential_plane_test.exs`, `apps/loopex_llm_reqllm/test/adapter_test.exs`, `apps/loopex_llm_reqllm/test/provider_retainer_boundaries_test.exs`, `docs/evidence/M5-closure-runs.md` | From the completion of a reference host's composition onward, the parent VM's environment holds no credential under the adapter's name and no value equal to the credential in use, before, during or after a call — "during" observed from inside the call at child readiness; composition is proved to read the operator's variable once and delete it. Every row of ADR 0034's failure table resolves to its closed-set atom and retains no copy: `:no_token` for an absent token, `:invalid_token` for a malformed one, `:unavailable` for a token with no registry row, a gone registry, a dead custody process and a malformed successful reply, and each of `:missing`, `:expired` and `:oversized`, a term outside the closed set reported as `:unavailable`, and a custody process blocking past the invocation deadline, where the **guardian** kills the sender and reports `:timeout`, asserted distinct from every refusal so the guardian can tell a refusal from a silence and asserted to bound the invocation whatever the custody process does. Two resolutions in flight at once is a success case, not a refusal: both invocations complete with their own credentials. The three credential-bearing calls in the sender — the registry route call, the custody reply handling and the credential frame write — are excluded from tracing by match specification, as accepted ADR 0030 already requires of a key-bearing call, and the proof is an absence: under a real trace session at the `arguments` level no trace entry names any of the three, the tracer receives no raw trace message for them, and no credential bytes and no token appear in any captured entry. A placeholder entry for one of them fails the case as surely as the bytes would. The registry lookup is proved to carry no credential. Two invocations with distinct credentials run at once and neither child, nor either child's diagnostics, observes the other's. Every re-pointed case of `apps/loopex_llm_reqllm/test/credential_plane_test.exs` passes with its assertion unchanged in meaning: version refusal and bootstrap refusal before any credential, late delivery after expiry impossible, rotation between invocations, two live credentials in one VM, sink loss, one child's loss not poisoning another, ordinary host messages and returned reasons, every child Logger form and metadata, and the four crash-report cases. The child-environment witness inside the version-refusal and bootstrap-refusal cases — the child's recorded `entry-env` marker refuting `Adapter.credential_variable()` — holds unchanged. The 65,536-byte ceiling case in `provider_retainer_boundaries_test.exs` is re-pointed too, because that module delivers its credential through `System.put_env` in its `setup` and again in the case body; that invocation's own custody process holds the oversized value instead. The drift-protection case in `adapter_test.exs` survives strengthened, with an exact allowlist: `[]` for `provider_bridge.ex`, the arity-zero enumeration and only that for `provider_launcher.ex` because it is ADR 0019's first-image scrubbing rather than a credential read, `provider_worker.ex`'s two non-secret crash-dump names, and `[]` everywhere else. Because the launcher's read survives, the case also asserts its *use*: the enumeration's result flows only into the Port's removal list, every name is mapped to `false`, none is compared against `credential_variable/0`, and no value reaches the sender, the frame or any caller. Its scan is widened from one `System.get_env(...)` expression to every route an environment read can be written — `System.get_env/0`, `/1` and `/2`, `System.fetch_env/1` and `fetch_env!/1`, `:os.getenv/0`, `/1` and `/2`, `:os.env/0`, and indirect application through `apply/3` or a captured function — each unpinned route refuted outright. The `req_llm` move to `~> 1.24.0` — pinned to that minor, not to `~> 1.24`, so the reviewed diff is the version actually built against — lands as its own reviewed change before the credential change, with the reviewed changelog diff across the intervening releases named in the commit, the adapter and streaming-conformance suites green, and the *existing* real-provider case at closure run against it. It adds no call path: nothing in M5 calls anything `1.24.0` makes newly reachable, and no second provider, second credential or new release-check case enters this milestone. It is explicit M5 scope, separate from ADR 0035 and not conditional on it. A security review by someone other than the implementer is recorded. The twelve modules are then converted to run concurrently one at a time, each kept only while its application's suite stays green, any module that stays serial keeping its reason beside it, and the measured duration is recorded beside the M4-closure baseline as evidence about the change rather than a threshold |
 
 **Checks a boundary selects.** Beyond `bash scripts/check.sh`, which every
@@ -441,16 +441,41 @@ or the daemon refuses the arguments.
 
 #### `loopex daemon`: starting, readiness, stopping
 
-**Selection.** `loopex daemon [--state-root DIR] [--socket PATH]`. The root
-resolves as every other command resolves it. The socket defaults to
-`<root>/daemon/daemon.sock` in the `0700` daemon-owned subdirectory; a
-`--socket` beyond the platform's derived `sun_path` bound is refused at start
-with `socket_path_too_long` before anything else happens.
+**Composition inputs.** A daemon is a host, so it takes the same inputs the
+app-server host takes today, as flags with environment fallbacks, and refuses
+the same way — `LoopexAppServer.Host` documents them and halts on standard
+error when one is missing or unusable. The daemon's set, each with its default
+and its refusal class:
 
-**Readiness.** Exactly one line on `stdout`, and nothing else on that stream:
+| Input | Flag / environment | Default | Missing or invalid |
+| --- | --- | --- | --- |
+| State root | `--state-root` / `LOOPEX_HOME` | none | `state_root_required`, or `state_root_unusable` when it cannot be created or read |
+| Workspace | `--workspace` / `LOOPEX_WORKSPACE` | none | `workspace_required`, `workspace_unusable` |
+| Provider launch | `--provider-launch` / `LOOPEX_PROVIDER_LAUNCH` | none | `provider_launch_required`, `provider_launch_invalid` |
+| Policy | `--policy` / `LOOPEX_POLICY` | **none, deliberately** — authority is the operator's to name, as the app-server host already insists | `policy_required`, `policy_unknown` |
+| Provider credential | `LOOPEX_PROVIDER_API_KEY` | none | `provider_credential_required`, checked at start so an unattended launch refuses in a second rather than at the first dispatch. The daemon reads it once, deletes it from its environment and holds it in custody under ADR 0034 |
+| Cleanup grace | `--cleanup-grace-ms` | the composition default | `cleanup_grace_invalid` |
+| Project resources | as the host already takes them | as today | as today |
+| Socket path | `--socket` | `<root>/daemon/daemon.sock` | `socket_path_too_long`, `socket_permission_unverified` |
 
-```text
-loopex daemon ready root=<state-root> socket=<socket-path> incarnation=<id>
+Every one of these is refused **before** the marker is acquired where that is
+possible, so the common operator mistake costs nothing and leaves nothing
+behind; the ones that can only fail later are covered by the reverse-cleanup
+rule.
+
+A `--socket` override is constrained exactly as the default is: its parent
+directory must be owned by the daemon's user and mode `0700`, no component
+below the state root may be a symbolic link the daemon did not create, and the
+socket is created `0600` and verified after bind. An override does not buy a
+weaker rule; it only moves where the rule applies.
+
+**Readiness.** Exactly one line on `stdout`, and nothing else on that stream.
+It is **one JSON object on one line**, not a space-separated phrase, because a
+state root or socket path may contain a space or a newline and a phrase would
+then be ambiguous to the process manager parsing it:
+
+```json
+{"record":"daemon_ready","root":"…","socket":"…","incarnation":"…","version":"0.2.0"}
 ```
 
 It is printed **only after** all of: the Store is open and its writer marker
@@ -475,23 +500,78 @@ naming its class rather than a stack: `store_writer_active`,
 `socket_permission_unverified`, `session_index_too_large`, `store_lost`, and
 `supervision_fault` for the daemon-fatal rules ADR 0032 and ADR 0033 define.
 
-#### `loopex attach`: driving and watching
+#### How a session is created and driven over the socket
 
-`loopex attach <session-id> --daemon <socket> [--observe] [--take-over]`.
+`loopex attach` alone cannot start work, because a session has to exist and be
+resumed before anything can be sent to it. The daemon forms of the two
+released commands are what reach the socket:
 
-- Default is **controller**: acquire control, then attach, then drive. If
-  another connection holds the lease the command refuses with `control_held`,
-  naming the epoch that holds it, rather than waiting.
-- `--observe` attaches without acquiring and never sends a mutation. An
-  observer that tries is refused by the daemon, not by the client, which is
-  where the rule belongs.
-- `--take-over` asks for control on a lease that is released or expired and
-  waits while an in-flight admission settles, as ADR 0033's linearization
-  requires. It never forces a live holder off.
-- **Cursor and reconnect.** The client remembers the last event cursor it
-  emitted and, on transport loss, reconnects at it, deduplicating by session
-  ID, event sequence and event ID. Delivery is contiguous and at least once,
-  so a duplicate at the seam is expected and a gap is a defect.
+- **`loopex run --daemon <socket> --policy … "<prompt>"`** — creates a session
+  and sends its first prompt. It performs the whole sequence: `session.create`,
+  then `session.acquire_control`, then the prompt under the granted writer
+  epoch, then attach, then stream. The offline `loopex run` is unchanged and
+  keeps composing its own runtime; `--daemon` is what redirects it.
+- **`loopex resume --daemon <socket> <session-id>`** — reaches an existing
+  session. It performs ADR 0033's sequence exactly: acquire control, then
+  `session.resume` with a **fresh resume command ID** and the granted epoch,
+  then attach, then stream. That is the sequence that activates a dormant
+  session, and it is the only one that does.
+- **`loopex attach <session-id> --daemon <socket>`** — joins a session that is
+  already activated. It does **not** resume, so it does not activate.
+
+**`loopex attach` is observe-or-one-shot-control, and that is a deliberate
+restriction.** Its forms are:
+
+| Form | What it does |
+| --- | --- |
+| `--observe` (default when neither role flag is given) | Attaches without acquiring, streams events, sends nothing. Refused by the daemon, not the client, if it ever tries |
+| `--take-over` | Acquires a released or expired lease, waiting while an in-flight admission settles as ADR 0033's linearization requires; never forces a live holder off. Then attaches and streams |
+| `--take-over --prompt "<text>"`, or `--take-over` with the prompt on stdin | The same, plus **one** command under the granted epoch, then streams to a terminal outcome |
+
+There is no interactive multi-turn controller in M5. A controller that could
+accept turn after turn from a terminal would need a full interactive contract
+— input framing, mid-run steering, interrupt handling, what a partial line
+means — and none of that is in this milestone's scope. One-shot control is
+what the two-process demonstration actually needs, and the restriction is
+stated here so it is a decision rather than an omission. Multi-turn driving is
+`loopex run --daemon` and `loopex resume --daemon`, which already own it.
+
+**Initial cursor.** `--after <sequence>` starts the stream strictly after that
+event sequence. Without it the cursor is `0` and the client receives the
+session's full replay, which is the honest default: a client that did not say
+where it left off has not established a position, and silently starting at the
+live tail would hide everything before it.
+
+**Lease renewal, and what a failed renewal does.** A controller CLI renews
+every ten seconds against a thirty-second term, as ADR 0033's proposed terms
+fix. A renewal that is refused or that cannot be sent is not retried silently:
+the client stops sending mutations immediately, reports the loss on `stderr`,
+and continues **as an observer** on the same attachment until the process
+ends or the operator re-runs with `--take-over`. It does not race the
+deadline, because a mutation sent after the term elapsed will be refused
+anyway and a client that keeps trying only obscures when control was lost.
+
+**A dormant session refuses an observer.** `loopex attach --observe` against a
+session this daemon has not activated is refused with `session_dormant`,
+naming the remedy: `loopex resume --daemon`. Attaching does not activate.
+Activation is a controller's act — acquire, then resume with a fresh command
+ID — because it starts a coordinator and counts against the activation
+ceiling, and letting a read-only observer trigger it would let a watcher
+consume a resource a controller needs and start durable recovery nobody asked
+for.
+
+**Cursor, reconnection and re-acquisition.** The client remembers the last
+event cursor it emitted and, on transport loss, reconnects at it,
+deduplicating by session ID, event sequence and event ID; delivery is
+contiguous and at least once, so a duplicate at the seam is expected and a gap
+is a defect. A reconnecting **controller** does not resume its old authority:
+the lease it held is expiring or expired, and it must acquire again and
+receive a **fresh writer epoch** before any further mutation. If the session
+went dormant in between — because the daemon restarted — it must resume
+first, with a fresh resume command ID under that new epoch. That is the same
+acquire → resume → attach → drive sequence ADR 0033 fixes, reached from a
+different starting point, and the CLI contract and that ADR say it the same
+way on purpose.
 
 Exit status: `0` when the session reaches a terminal outcome or the operator
 detaches; non-zero on a refusal, or on a transport loss reconnection could not
@@ -502,9 +582,11 @@ repair, with the reason class on `stderr`.
 | Contract | Operator page |
 | --- | --- |
 | `loopex sessions` offline, unchanged | `docs/operator/coding-sessions.md`, its existing command rows, reviewed unchanged |
+| `loopex run` and `loopex resume` offline, unchanged | `docs/operator/coding-sessions.md`, reviewed unchanged |
+| `loopex run --daemon`, `loopex resume --daemon` and the create-and-drive sequence | `docs/operator/daemon.md`, driving section |
 | `loopex sessions --daemon`, `--limit`, `--after`, `--status`, `index_full` | `docs/operator/daemon.md`, listing section |
-| `loopex daemon` selection, readiness line, signals, exit classes | `docs/operator/daemon.md`, running section |
-| `loopex attach` roles, takeover, reconnect, exit classes | `docs/operator/daemon.md`, attaching section |
+| `loopex daemon` composition inputs, readiness record, signals, exit classes | `docs/operator/daemon.md`, running section |
+| `loopex attach` roles, one-shot control, `--after`, renewal loss, `session_dormant`, reconnect and re-acquisition | `docs/operator/daemon.md`, attaching section |
 
 <a id="technical-plan-lifecycle"></a>
 ### Daemon Lifecycle and Orderly Shutdown
