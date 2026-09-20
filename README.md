@@ -30,8 +30,9 @@ while the session lives; a session "brain" can coordinate local or remote
 [Canonical milestone status and plan records](docs/plans/)
 <!-- loopex:readme-status:end -->
 
-M0 through M4 are closed and integrated; no milestone is active. M1 delivered the durability kernel: an explicit
-embedded runtime, durable local Store, canonical model boundary, trusted-local
+M0 through M4 are closed and integrated, and `M5` is open and not yet
+accepted, as the capsule above records. M1 delivered the durability kernel:
+an explicit embedded runtime, durable local Store, canonical model boundary, trusted-local
 executor, thin reference client, durable events, and receipt reconciliation
 across a real runtime-process crash. What it deliberately did not deliver is a
 usable coding loop — that loop ran a fixed two turns, carried no conversation
@@ -128,6 +129,27 @@ The repaired reference local executor requires `/bin/bash` for its internal
 supervision on Darwin and Linux; raw commands still use `/bin/sh`. See the
 [runtime prerequisite](docs/operator/tools-and-policy.md#operator-local-supervision-shell)
 before using the reference stack. Core and custom executors are unaffected.
+
+### What Comes Next
+
+`M5` is the next milestone, and it is the durable-service rung: a local daemon
+that owns session lifetime for a state root, so sessions keep running while no
+client is connected; several independent client processes reaching one session
+over a Unix-domain socket; one of them driving while the others watch, with an
+explicit takeover when the driver dies; and all of it on the existing local
+store adapter within that adapter's documented limits. Read the
+[M5 plan](docs/plans/M5.md#concept) and its
+[technical companion](docs/plans/M5-technical.md#technical-depth) for the
+purpose, outcomes and how each one is to be proved.
+
+Nothing in it is settled yet. The plan pair is open and not accepted, and its
+four prerequisite decisions — ADRs [0031](docs/adr/0031-daemon-grade-store-selection-and-migration.md#concept),
+[0032](docs/adr/0032-daemon-attachment-residency-and-replay.md#concept),
+[0033](docs/adr/0033-collaboration-controller-lease-and-takeover.md#concept)
+and [0034](docs/adr/0034-provider-credential-handoff-over-bootstrap-channel.md#concept)
+— are proposed, not accepted. The status capsule above and the
+[canonical register](docs/plans/README.md) carry the milestone state; this
+paragraph only says what the work is for.
 
 The [roadmap](docs/roadmap.md#concept) is non-normative capability guidance;
 [CHANGELOG.md](CHANGELOG.md) records what changed.
