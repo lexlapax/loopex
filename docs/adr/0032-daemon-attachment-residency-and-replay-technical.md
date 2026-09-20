@@ -162,10 +162,67 @@ concurrent-attachment change removes, because coexisting attachments are the
 point.
 
 So that change has two halves and this pair states both: supersession stops
-removing attachments, **and the dispatcher keeps its monitor after install and
+removing attachments **unconditionally**, **and the dispatcher keeps its
+monitor after install and
 removes the attachment on that process's `DOWN`**. Without the second half M5
 would leave core with no release path at all, and every attachment ever made
 would live until the runtime stopped.
+
+**The `DOWN` removal must release the attachment's transfers, and saying so is
+not optional.** The supersession block is the **sole** caller of
+`release_transfers/2` — the call is at `event_dispatcher.ex:817`, inside the
+block at `:812-818`, and the function is defined at `:1105` with no other call
+site in the module. Removing the block without moving that call would leave
+accepted **ADR 0028** unsatisfied, its technical companion requiring that
+"detaching releases every transfer the attachment opened"
+(`0028-…-technical.md:28-30`). So the dispatcher's `DOWN` handler calls
+`release_transfers/2` for the attachment it drops, and the conditional
+replacement path below calls it for the attachment it supersedes. ADR 0028 is
+thereby satisfied on both of the two paths that end an attachment, where today
+it is satisfied on one; its witness is a case in
+`apps/loopex/test/concurrent_attachments_test.exs` asserting that an
+attachment with an open transfer, released by its process exiting, leaves no
+transfer behind.
+
+**And supersession becomes conditional rather than disappearing, because
+today it *is* the implementation of `replace`.** That took checking rather
+than assuming, and the answer is not what ADR 0032 said. ADR 0023 puts an
+optional `replace` boolean on `session.attach`
+(`0023-…-technical.md:165`) and requires that a second attach refuse "unless
+it names explicit replacement, which detaches the first at its last completely
+emitted cursor" (`:359`). **Core never sees that flag.** The app server reads
+it (`mapping.ex:162`, `:458`) and uses it for one thing only — whether a
+connection already holding an attachment may open a second
+(`attachable/3`, `:466-470`) — and then builds core's options without it
+(`attach_options/1`, `:450-456`); `Control.validate_attach_options/1` would
+refuse it anyway, its `Keyword.validate/2` defaults naming only
+`after_event_sequence`, `request_id`, `client_id` and `attachment_key`
+(`control.ex:1293-1310`). What actually replaces the attachment is core's
+**unconditional same-session** block, which reads no flag and supersedes
+*every* attachment of that session.
+
+So the change is stated as what it is: **the same-session supersession becomes
+conditional on `replace`, and narrows its scope to the attaching process's own
+prior attachment** for that session. Core's attach options gain `replace`, the
+app server passes the flag it already parses, and the block fires only when it
+is set.
+
+- **Generation 1 is behaviour-identical**, which is what ADR 0023 requires and
+  what this milestone promises for the foreground server: that host maps one
+  connection to one attachment, so its supersession only ever fired behind a
+  `replace: true` the app server had already admitted, and narrowing the scope
+  to the attaching process changes nothing where there is one attacher.
+- **Generation 2 needs both halves of the change.** Without the condition, a
+  daemon's second connection would detach the first — the thing concurrent
+  attachment exists to stop. Without the narrowed scope, a `replace: true`
+  from one connection would detach *every other connection's* attachment to
+  that session, which is worse.
+- **"The named prior incarnation" is corrected.** An earlier revision of this
+  pair said explicit replacement "invalidates only the named prior
+  incarnation at its last emitted cursor". There is no name on the wire —
+  `replace` is a boolean — so what it invalidates is the attaching process's
+  own prior attachment for that session, at its last completely emitted
+  cursor, with `release_transfers/2` called for it.
 
 For the daemon this needs no API: it attaches from its **per-connection
 process**, so a connection that closes — because the client went away, because
@@ -190,7 +247,9 @@ The core EventDispatcher and Control retain multiple live attachment IDs and
 incarnations for one session. A new distinct attachment does not implicitly
 detach another session attachment or cancel its pending read. Repetition of
 the same attachment request returns its live attachment; explicit replacement
-invalidates only the named prior incarnation at its last emitted cursor.
+— `replace: true` — invalidates the attaching process's own prior attachment
+for that session at its last completely emitted cursor, and releases its
+transfers.
 Snapshot barriers, queued durable delivery, stale-handle checks and detach
 remain core operations. The daemon neither copies the snapshot into a second
 fan-out owner nor reads coordinator state to repair an attachment race.
@@ -1142,8 +1201,12 @@ sequence and event ID.
 ### Evidence
 
 Tests prove: two core attachments to one session keep independent live handles,
-snapshots and cursors with no implicit replacement; an explicit replacement
-invalidates only its named incarnation; snapshot-then-contiguous at-least-once
+snapshots and cursors with no implicit replacement; an explicit `replace: true`
+invalidates only the attaching process's own prior attachment for that session,
+releasing its transfers, while every other connection's attachment to it
+continues; an attachment released by its process exiting leaves no transfer
+behind, which is accepted ADR 0028's requirement on the path that replaces the
+only caller `release_transfers/2` has today; snapshot-then-contiguous at-least-once
 delivery with no gap across the window boundary; the same delivery cases run
 again with the resident window disabled, byte for byte identical, and with the
 window dropped mid-stream, proving the cache establishes nothing; deterministic

@@ -346,9 +346,9 @@ core-internal states a daemon cannot construct through the socket.
 
 | Core change | Core witness | Cases | Lane |
 | --- | --- | --- | --- |
-| Concurrent attachment | `apps/loopex/test/concurrent_attachments_test.exs` (**new**) | `two attachments to one session coexist without replacement`; `one detaching leaves the other delivering`; `an attachment is released when the process that attached it exits`; `the dispatcher holds no attachment for a dead attacher`; `one backpressuring does not stall the other`; `each carries its own cursor and incarnation` | fast |
+| Concurrent attachment | `apps/loopex/test/concurrent_attachments_test.exs` (**new**) | `two attachments to one session coexist without replacement`; `one detaching leaves the other delivering`; `an attachment is released when the process that attached it exits`; `an attachment released by its process exiting leaves no open transfer`; `replace true supersedes only the attaching process's own prior attachment and releases its transfers`; `replace true leaves every other connection's attachment to that session delivering`; `the dispatcher holds no attachment for a dead attacher`; `one backpressuring does not stall the other`; `each carries its own cursor and incarnation` | fast |
 | Read-only existence query | `apps/loopex/test/session_existence_query_test.exs` | one per result of the closed set | fast |
-| **`quiesce/1`** | **`apps/loopex/test/runtime_quiesce_test.exs`** (new) | `admits every abort before any cleanup begins`; `a drained abort commit is presented once and never re-presented on commit_unknown`; `a fresh create executes nine store calls, ten with the retry`; `a drained abort admission executes three store calls`; `a fence executes three store calls at worst`; `releases cancellation concurrently once every admission resolves`; `an empty active set drains with a zero budget`; `reports a Control entry whose coordinator has died as absent`; `reports an unavailable Control entry as absent and fences it`; `reports an acquiring entry as unsettled and fences it`; `fences an unsettled session and refuses its paused transaction as stale`; `fences an absent session too`; `a fence refused stale_owner_epoch rereads the head and attempts once more`; `a fence refused stale_journal_version is superseded, not an error`; `a fence answering commit_unknown is resolved through transaction_status under the same derived tx_id and reported unsettled with fences[id] == :unknown`; `a fence id recomputed from the head alone matches the one the drain used`; `a session whose abort admission is ambiguous has no cleanup released and is fenced` | fast |
+| **`quiesce/1`** | **`apps/loopex/test/runtime_quiesce_test.exs`** (new) | `admits every abort before any cleanup begins`; `a drained abort commit is presented once and never re-presented on commit_unknown`; `a fresh create executes nine store calls, ten with the retry`; `a drained abort admission executes three store calls`; `a fence executes three store calls at worst`; `releases cancellation concurrently once every admission resolves`; `an empty active set drains with a zero budget`; `reports a Control entry whose coordinator has died as absent`; `reports an unavailable Control entry as absent and fences it`; `reports an acquiring entry as unsettled and fences it`; `fences an unsettled session and refuses its paused transaction as stale`; `fences an absent session too`; `a fence refused stale_owner_epoch is superseded with no second attempt`; `a fence refused stale_journal_version is superseded too, not an error`; `a fence answering commit_unknown is resolved through transaction_status under the same derived tx_id and reported unsettled with fences[id] == {:unknown, head}`; `a fence id recomputed from the head alone matches the one the drain used`; `a session whose abort admission is ambiguous has no cleanup released and is fenced` | fast |
 | **The two-phase abort-path split** | **`apps/loopex/test/cancellation_test.exs`** (existing; the file that already drives an abort against a receipt arriving mid-reduction) | `a drained abort commits without beginning cleanup`; `a client abort still begins cleanup on its commit reply path` — the pair that proves the split changed the drain and nothing else | fast |
 | **`Loopex.Trace.exclude_self/2`, `Control`'s excluded-pid set and `Entry`'s keyword-key redaction** | **`apps/loopex/test/trace_session_test.exs`** (existing; extended) | `the named MFAs produce no raw message under an explicitly named module, before any process flag is set`; `an excluded process produces no trace message`; `the exclusion survives a tracer restart`; `a new session skips an already-excluded pid`; `fails closed while the tracer is absent`; `fails closed while Control is unavailable` — the case that constructs a `Control` restart, and which therefore asserts what that costs: every child after `Control` restarts with it, so every session coordinator in that runtime is gone and the case starts a fresh session rather than reusing one;  `the excluded set returns to baseline after the sender exits`; `a keyword list's value is redacted under its own key`; `the same value under a key naming nothing is rendered, so the case cannot pass vacuously` | fast |
 
@@ -3492,7 +3492,7 @@ nothing proves. Each is named where it is used:
 
 | Surface | Created by | Read by |
 | --- | --- | --- |
-| The dispatcher's release on `DOWN` | Core change 1 | The concurrent-attachment cases and the attach connection-loss case |
+| The dispatcher's release on `DOWN`, and the transfers it releases with it | Core change 1 | The concurrent-attachment cases, the ADR 0028 transfer case and the attach connection-loss case |
 | The existence query's five-result set | Core change 2 | `session_existence_query_test.exs`, one case per result, and Outcome 4's row |
 | `Control`'s excluded-pid set, and `Entry`'s redaction of a keyword pair under its own key | Core change 3 | The trace-exclusion cases, and the render pair that must differ |
 | `quiesce/1`'s three lists, `budget_ms`, `drain_id` and the per-session `fences` map | Core change 4 | The drain cases, the fence cases and the stop line |
@@ -4056,9 +4056,14 @@ the two callers that need the edges assembled, `RuntimeOwner` and the daemon's
 owner, and which direct code cannot replace because the alternative is a
 second copy of the whole wiring layer. One socket listener, **one narrow core
 concurrent-attachment change with two halves** — supersession stops removing
-an attachment, and the dispatcher monitors the attaching process and removes
-on its `DOWN` — because the first half alone would leave core with no release
-path at all, supersession being the only one there is today. **One
+an attachment *unconditionally*, becoming conditional on ADR 0023's existing
+`replace` flag and scoped to the attaching process's own prior attachment, and
+the dispatcher monitors the attaching process and removes
+on its `DOWN`, releasing that attachment's transfers — because the first half
+alone would leave core with no release
+path at all, supersession being the only one there is today, and would leave
+the only caller of `release_transfers/2` with no replacement, which accepted
+ADR 0028 forbids. **One
 trace-exclusion call,
 `Loopex.Trace.exclude_self(capability, functions: [mfa])`** — which unifies
 nothing and is not asked for by this milestone's features at all: it exists
