@@ -1018,7 +1018,7 @@ leaked until the daemon restarts:
 | Either call refusing — `runtime_command_conflict`, `store_unavailable`, an invalid identifier, a placement mismatch, any other `{:error, _}` | Released |
 | A **resume** crashing or timing out | **Held, then resolved by replay**: replayed under its original `command_id`, whose `disposition`/`control_entry` say whether the original call activated the session. The existence query cannot answer this — it says `present` either way |
 | A **create** crashing or timing out | **Held, then resolved by replay**: replayed under the same `command_id`, which returns the historical result and starts no coordinator (`control.ex:901-907`), carrying the same two fields. Same reservation key, so no second slot |
-| An **attach** crashing or timing out | **Released with the connection**: the reservation is keyed by the connection, ADR 0032 binding a connection to at most one attachment, and core change 1 monitoring the attaching process. The daemon closes that connection, its process ends, and the dispatcher's `DOWN` handler drops the attachment. Nothing is observed, because nothing needs to be |
+| An **attach whose connection process ends before it answers** | **Released with the connection**: the reservation is keyed by the connection, ADR 0032 binding a connection to at most one attachment, and core change 1 monitoring the attaching process. The daemon closes that connection, its process ends, and the dispatcher's `DOWN` handler drops the attachment. Nothing is observed, because nothing needs to be |
 
 **That last row is not hypothetical, and the reason is a default nobody
 chose.** The daemon reaches core through `Loopex.Runtime`, whose
@@ -1026,9 +1026,21 @@ chose.** The daemon reaches core through `Loopex.Runtime`, whose
 timeout (`runtime.ex:470`, `:478`). A create or resume that takes longer
 returns the daemon an error while core is still starting a coordinator — so
 "the call gave no answer" is an ordinary outcome of a slow root, not an
-exotic one. Every daemon call that consumes a ceiling therefore carries an
-explicit timeout rather than inheriting that default, and resolves its
-reservation by the rule its own row names when the timeout is what it gets.
+exotic one. Every daemon call that consumes a ceiling **and accepts one**
+therefore carries an explicit timeout rather than inheriting that default, and
+resolves its reservation by the rule its own row names when the timeout is
+what it gets.
+
+**`Runtime.attach/3` accepts none and needs none**, which is why the qualifier
+matters. Its signature takes a runtime, a session ID and options and no
+timeout at all (`runtime.ex:198-210`), and inside it waits `:infinity` twice —
+at the dispatcher and again at the install (`:538`, `:547`) — **precisely so a
+caller timeout cannot revoke a mutation it cannot see**, which is what the
+code says there in as many words: the dispatcher has already created the
+attachment and the install is registering its routing, so a caller that gave
+up would be neither revoking either mutation nor able to report truthfully
+that the attach failed. The attach row below is written against that reality
+rather than against a timeout the call does not have.
 
 **A call that gives the daemon no answer may still have started a coordinator
 or an attachment**, so releasing the reservation would let the ceiling be
@@ -1062,7 +1074,16 @@ that process and drop its attachment on `DOWN`. So the reservation is keyed by
 the connection, and a connection whose `session.attach` never answered is
 closed by the daemon — the same path every connection close takes, whether the
 client went away or the daemon gave up on it — its process ends, and the
-attachment is released by the monitor. The reservation is released with it.
+attachment is released by the monitor. **"Gave up" here is the owner ending
+that connection process from outside**, since the process itself is inside an
+`:infinity` wait and cannot give up on its own; the `DOWN` is the release
+either way, which is the point of keying the reservation to the process rather
+than to the call.
+
+**And the attach must be made from that process**, not from a task the daemon
+could bound: the attaching process *is* the release handle, so a bounded
+attach and a monitor on the attacher are mutually exclusive. Choosing the
+monitor is what makes an unanswered attach releasable at all. The reservation is released with it.
 Nothing new is called and nothing is observed; the release path is the one
 core change 1 adds, and it is named in the inventory rather than assumed.
 
@@ -2676,13 +2697,21 @@ could not be checked.** Every witness here names the **surface** it reads, the
 **two answers** that must differ on it, and — where the surface is new — the
 **change that creates it**. A case asserting "core holds N" without saying
 where N is read is not a case anybody can write; nor is one whose difference
-depends on a code path that does not exist. Three of this plan's surfaces are
-new work rather than existing behaviour, and each is named where it is used:
-the **dispatcher's release on `DOWN`** (core change 1), **`Control`'s
-excluded-pid set** (core change 3), and **`quiesce/1`'s three lists and
-`budget_ms`** (core change 4). Everything else is read from something that
-exists today — the journal, a supervisor's children, a pid's liveness, a
-socket's EOF, or the daemon's own `stderr`.
+depends on a code path that does not exist. **Five** of this plan's surfaces
+are new work rather than existing behaviour — one per core change, which is
+not a coincidence: a core change that no witness could read would be a change
+nothing proves. Each is named where it is used:
+
+| Surface | Created by | Read by |
+| --- | --- | --- |
+| The dispatcher's release on `DOWN` | Core change 1 | The concurrent-attachment cases and the attach no-answer case |
+| The existence query's five-result set | Core change 2 | `session_existence_query_test.exs`, one case per result, and Outcome 4's row |
+| `Control`'s excluded-pid set | Core change 3 | The trace-exclusion cases |
+| `quiesce/1`'s three lists and `budget_ms` | Core change 4 | The drain cases and the stop line |
+| `disposition` and `control_entry` | Core change 5 | The create and resume no-answer cases |
+
+Everything read outside those five exists today — the journal, a supervisor's
+children, a pid's liveness, a socket's EOF, or the daemon's own `stderr`.
 
 - **Idle shutdown.** A daemon with sessions activated and no work in flight
   receives `SIGTERM`, writes nothing further to `stdout`, closes every
@@ -3001,8 +3030,8 @@ socket's EOF, or the daemon's own `stderr`.
   attachments receives two `session.attach` calls at once. On the wire the
   case asserts exactly one result and one refusal — two answers that plainly
   differ. The count is **in-VM**: core exposes no attachment count, so the
-  case reads core's own attachment registry in the same VM and asserts
-  **512**, not 513. Saying "proved by core holding 512" without saying where
+  case reads **the dispatcher's `attachments` map** (`event_dispatcher.ex:154`,
+  `:823`) in the same VM and asserts **512**, not 513. Saying "proved by core holding 512" without saying where
   that number is read would have been the same unobservable claim this round
   removed elsewhere.
 - **Every branch releases or converts its reservation, and the no-answer
@@ -3027,8 +3056,9 @@ socket's EOF, or the daemon's own `stderr`.
   *Attach, no answer.* Two surfaces, and they differ in the two cases. On the
   wire, the client's connection is asserted **closed** — an EOF a test can
   observe — where a connection whose attach answered stays open. In-VM, the
-  dispatcher's attachment count is asserted to drop **after the connection
-  process exits**, and the daemon's reservation count to be back where it
+  dispatcher's `attachments` map (`event_dispatcher.ex:154`, `:823`), read
+  in-VM, is asserted to lose that entry **after the connection process
+  exits**, and the daemon's reservation count to be back where it
   started. The code path that produces that drop is core change 1's monitor,
   which the inventory names as new work; a core witness in
   `apps/loopex/test/concurrent_attachments_test.exs` proves the monitor
@@ -3166,8 +3196,12 @@ unifies and why direct code is insufficient. One application, because a
 daemon is a host and a host is an application. One daemon owner process, one new public composition function — which unifies
 the two callers that need the edges assembled, `RuntimeOwner` and the daemon's
 owner, and which direct code cannot replace because the alternative is a
-second copy of the whole wiring layer. One socket listener, one narrow
-core concurrent-attachment change, **one trace-exclusion call,
+second copy of the whole wiring layer. One socket listener, **one narrow core
+concurrent-attachment change with two halves** — supersession stops removing
+an attachment, and the dispatcher monitors the attaching process and removes
+on its `DOWN` — because the first half alone would leave core with no release
+path at all, supersession being the only one there is today. **One
+trace-exclusion call,
 `Loopex.Trace.exclude_self(capability, functions: [mfa])`** — which unifies
 nothing and is not asked for by this milestone's features at all: it exists
 because accepted ADR 0030 already requires that a key-bearing call be excluded
