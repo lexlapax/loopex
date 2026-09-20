@@ -270,8 +270,8 @@ because both are facts an operator cannot derive from the software and a
 reviewer can check against this sentence at closure.
 
 - **`docs/operator/daemon.md` must state the maximum graceful stop**: the
-  derived session drain, plus the one shared non-Store teardown budget, plus
-  the fixed 30-second Store phase — and, with it, that a shorter external
+  derived session drain, plus the fixed five-second budget covering every
+  non-Store action after it, plus the fixed 30-second Store phase — and, with it, that a shorter external
   service-manager timeout turns the stop into a **forced shutdown**, where
   work that would have settled does not and the writer marker may be left for
   the next daemon's verified recovery. It must also distinguish the **usual
@@ -1244,7 +1244,9 @@ only from the exit the owner observes on its own link.** For each component:
 
 1. The owner sets `stopping` to that component, as before.
 2. It `spawn_monitor`s a **helper** whose whole body is
-   `GenServer.stop(pid, :normal, grace)`. The helper is monitored, never
+   `GenServer.stop(pid, :normal, remaining(deadline))`, where `remaining/1` is
+   what is left of the phase's own deadline and no component carries a budget
+   of its own. The helper is monitored, never
    linked, so whatever that call raises, exits or returns dies with the helper
    and never reaches the owner. The owner needs nothing from it — not its
    return value, not its `DOWN` — and ignores both.
@@ -1334,7 +1336,7 @@ process** spawned per bounded job), and the module defines **no
 `terminate/2`** at all. Two consequences, re-derived:
 
 - **Stopping the executor is fast, not slow.** With no trap and no
-  `terminate/2`, `GenServer.stop(executor, :normal, grace)` returns about as
+  `terminate/2`, that stop returns about as
   quickly as the mailbox allows. It is not the step that spends the grace; it
   is the step that *starts* the cleanup.
 - **The cleanup happens elsewhere, in processes the daemon does not hold.**
@@ -1504,7 +1506,7 @@ state. The contract is three clocks:
 | --- | --- | --- |
 | **`g`**, each session's committed `cleanup_grace_ms` | The cancellation of that session's effects, and nothing else | The session's own composition; already used by `Loopex.Executor.cancellation_bounds/1` |
 | **`drain_ms`** | The whole drain, across every session | Derived: `max` over the drained sessions of `cancellation_bounds(g_i).cli_backstop_ms` (`apps/loopex/lib/loopex/executor.ex:456-474`, where `cli_backstop_ms` is defined as `observe + reserve + terminal` and documented as "the sum a process-liveness backstop must cover"). `g` itself is never a deadline |
-| **`teardown_ms`** | **One absolute deadline shared by every non-Store stop** — lease owners, the relay, the runtime, executor, workspace lease, transfers, custody, registry | A single budget the owner fixes once, so the worst case is one bound rather than a sum over components |
+| **`teardown_ms`, fixed at `5_000`** | **One absolute deadline covering every non-Store action after the drain** — the `daemon.stopping` writes, closing the connections, closing the listener, the lease owners, the relay, the runtime, the executor, the workspace lease, transfers, custody and the registry | A plan decision, and the rationale is that each of those is a bounded write or a stop of a process with no `terminate/2` to run: milliseconds apiece, so five seconds is a ceiling none of them should approach and an upper bound an operator can add up |
 | **The Store phase** | The Store's stop alone | A **fixed 30 s**, the Store's own `@call_timeout` (`apps/loopex_store_local/lib/loopex/store/local.ex:65`), independent of `g` and of `teardown_ms` |
 
 `drain_ms` is derived rather than chosen because the cancellation it waits on
@@ -1524,9 +1526,27 @@ is a ceiling that matters only when the filesystem is wedged, which is exactly
 when killing the Store mid-release is worst. The same fixed phase applies in
 the failed-start reverse cleanup, for the same reason.
 
-**So the operator-facing bound is stated, once:**
+**`teardown_ms` is `5_000`, and it is a number rather than a formula.** An
+earlier revision named the clock and never gave it a value, which left the
+operator bound unstatable and every "what remains" reference undefined. Five
+seconds is chosen, not derived: nothing under this deadline waits on a
+session, an effect or a filesystem sync — the notification writes are one
+attempt into an existing buffer, the closes are closes, and of the processes
+stopped here only the transfers owner runs a `terminate/2` at all — so the
+budget is a ceiling for a set of actions that are each milliseconds. It is
+recorded in the limits table with that rationale.
 
-> **Maximum graceful stop = `drain_ms` + `teardown_ms` + 30 s.**
+**The deadline starts the instant `quiesce/2` returns**, and it covers
+**every** non-Store action from that point: the stop records, the connection
+closes, the listener close, and every stop from the lease owners through the
+registry. An earlier revision's formula covered only the stops, which left the
+notification and closure steps outside any bound at all. Every helper under it
+is given `remaining(teardown_deadline)` and nothing else — no component has a
+budget of its own to spend.
+
+**So the operator-facing bound is stated, once, and it adds up:**
+
+> **Maximum graceful stop = `drain_ms` + 5 s + 30 s.**
 
 That maximum is as large as the composed grace makes it: `drain_ms` is
 derived from `cli_backstop_ms`, which grows with `g`, so an operator who
@@ -2054,9 +2074,11 @@ to write.
    class on the other six.
 3. **Stop the executor** — on every class but `executor_lost`, where it is
    the component that already died — under the same discipline as every other
-   stop: a monitored helper calling `GenServer.stop(pid, :normal, grace)`, the
-   owner waiting on its own link until the shared teardown deadline and
-   killing on expiry — the same deadline the ordered path's step 6 uses. This is not tidiness: the executor is
+   stop: a monitored helper calling
+   `GenServer.stop(pid, :normal, remaining(deadline))`, the owner waiting on
+   its own link until the shared teardown deadline and killing on expiry — the
+   same five-second deadline the ordered path uses, started when this path
+   began. This is not tidiness: the executor is
    the one linked process whose work reaches outside the VM, and stopping it
    is what tells its Port-owning workers to terminate the captured process
    groups. Halting without stopping it would never start that cleanup at
@@ -2072,8 +2094,8 @@ to write.
    is nothing to stop. On the other six, the Store is **still alive**, and
    because `System.halt/1` runs no `terminate/2`, halting past it would leave
    the marker file behind on a daemon that shut down deliberately. So the
-   owner stops it here, under the same bounded treatment as every other stop
-   and under the same floor: the Store's wait is `max(grace, 30_000)`, so a
+   owner stops it here, in **its own fixed 30-second phase**, exactly as the
+   orderly path gives it — no grace of any kind enters that number — so a
    deliberate fail-stop cannot kill it mid-release either.
 
    **If that stop times out and the Store is killed, the marker survives.**
@@ -2691,7 +2713,7 @@ line; M5 introduces none of its own.
 | Protocol frame ceiling on the wire | unchanged from ADR 0023 | ADR 0032 |
 | Cleanup grace | an integer of 1 or more, refusing `0` with `cleanup_grace_invalid`, because core's `cancellation_bounds/1` admits `grace_ms >= 1` (`apps/loopex/lib/loopex/executor.ex:456`) | This plan, against core's existing validation |
 | Drain budget | `max` over drained sessions of `cancellation_bounds(g_i).cli_backstop_ms` | Derived from `apps/loopex/lib/loopex/executor.ex:456-474`; no number chosen |
-| Non-Store teardown | one absolute deadline shared by every non-Store stop | This plan; one bound rather than a sum over components |
+| Non-Store teardown | **5_000 ms**, one absolute deadline from the instant `quiesce/2` returns, covering the stop records, the connection and listener closes and every non-Store stop | This plan. Chosen, not derived: nothing under it waits on a session, an effect or a filesystem sync, so it is a ceiling for actions that are each milliseconds |
 | Store shutdown phase | a fixed 30 s, the Store's own `@call_timeout` (`apps/loopex_store_local/lib/loopex/store/local.ex:65`), independent of any grace; the usual release takes milliseconds | This plan, against the Store's existing bound |
 | Wait slice | 60_000 ms, so no `receive … after` argument approaches the BEAM's 2^32-1 limit, probed at both pairs | This plan; the limit is the VM's |
 | Lease term | 30 seconds | ADR 0033 |
