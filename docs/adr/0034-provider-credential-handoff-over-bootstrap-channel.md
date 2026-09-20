@@ -40,9 +40,14 @@ test change shortens the check while the slot is shared.
 
 **Decide that the credential is a per-invocation input, named by an opaque
 token and resolved only inside the process that writes it to the child's
-private channel.** The host supplies the adapter, with each call, a
-*credential token*: an opaque identifier that carries no credential, no
-routing and no authority of its own. Behind it the host owns two things the
+private channel.** The host gives the adapter a *credential token* where it
+composes the runtime: an opaque identifier that carries no credential, no
+routing and no authority of its own. **"Per-invocation" qualifies the
+resolution, not the token's arrival** — the token is bound once, per runtime,
+and resolved afresh on every call. There is nowhere else it could arrive:
+`complete/3` receives a request and the composition-time options and nothing
+per-call from the host, so a token "supplied with each call" would have no
+seam to arrive through. Behind it the host owns two things the
 adapter does not: a **routing registry** that maps a token to a custody
 process and holds routing only — never bytes, never anything a secret could be
 derived from — and the **custody process** that holds the bytes. The adapter
@@ -84,12 +89,16 @@ transfer — bounded, unlogged, never forwarded, never retained after the frame
 is written — and it is the same class of act as writing the credential frame,
 protected the same way ADR 0019 already protects that sender. The registry
 lookup before it carries no credential, so routing adds no second place a
-secret can be seen, and the three credential-bearing calls are **excluded by
-match specification**, the mechanism accepted ADR 0030 already fixes for a
-key-bearing call. Exclusion, not redaction: an excluded call produces no trace
-entry at all, where a redacted one would produce an entry with a placeholder.
-The companion names the three functions exactly, because a match specification
-needs a target, and M5 proves the absence.
+secret can be seen. What keeps those bytes out of a trace is stated against
+the implementation rather than against ADR 0030's prose, which claims a
+match-specification exclusion the tracer does not have: the adapter is in no
+default trace namespace, so the credential work is untraced under every
+default configuration, and a host that explicitly names the adapter module
+gets entries whose credential values the implemented redaction pass replaces
+with placeholders. The companion names the three functions that touch
+credential bytes — they are the whole of the parent-side surface — and M5
+proves both tiers. The drift between ADR 0030's prose and its implementation
+is flagged for the maintainer, not patched here.
 
 **Everywhere else the boundary is where the adapter's claims stop.** Inside it
 — the token, the sender, the frame, the child — the adapter proves what it

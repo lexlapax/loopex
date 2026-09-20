@@ -424,10 +424,10 @@ byte position.
 
 ### Session residency: active, dormant, and their bounds
 
-A session is **active** when the daemon holds a live coordinator for it and
-**dormant** when the index records it and the daemon has never activated it in
-this process's lifetime. Nothing durable distinguishes the two; dormancy is a
-daemon fact.
+A session is **active** when this daemon activated it in this lifetime and
+**dormant** when the index records it and this daemon has not. Nothing durable
+distinguishes the two, and neither is a claim about a live coordinator: both
+are daemon facts, recorded when the daemon acted.
 
 A dormant session costs less than an active one, but not nothing, and the
 plan should not pretend otherwise. It holds one index row against the

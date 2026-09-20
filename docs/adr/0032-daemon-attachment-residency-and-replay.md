@@ -100,9 +100,10 @@ at the residency limit and reconnect at their retained cursor with no
 missing durable event. Transient progress is coalesced or dropped first and
 never delays a journal transaction.
 
-A session is *active* when the daemon holds a live coordinator for it and
-*dormant* when the root records it and the daemon has not activated it in this
-process's lifetime. Recovery is lazy: a restarted daemon activates nothing,
+A session is *active* when **this daemon activated it in this lifetime** and
+*dormant* when the root records it and this daemon has not. Both are daemon
+facts, true by construction; neither is a claim about a live coordinator,
+which the daemon has no way to know. Recovery is lazy: a restarted daemon activates nothing,
 reads its index, and activates a session when a client reaches for it.
 Activation is one-way: dormancy applies to attachments, resident windows and
 output buffers, never to a coordinator, because a session with no attachment

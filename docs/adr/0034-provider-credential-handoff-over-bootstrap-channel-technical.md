@@ -54,15 +54,54 @@ the step-3 frame.
 
 ### The token, the routing registry, and the custody process
 
-The per-invocation option is `:credential_token`, one member of the
-configuration map the host already supplies to `complete/3`. Its value is an
-**opaque token**: a binary of at most 256 bytes from ADR 0023's identifier
+**Where the token is bound, and what "per-invocation" qualifies.** The token
+is bound at **composition**, per runtime, and what happens per invocation is
+its **resolution**. That distinction is the whole of this section, and getting
+it wrong would have made the decision unimplementable.
+
+The seam admits nothing else. `complete/3` is called as
+`module.complete(request, options, progress)`, with `options` taken from
+`state.model.options` — the model configuration the runtime validated at
+composition as `%{module:, model:, options:}` — and `request` is the closed
+canonical projection a turn is staged into. There is no third place a caller
+could put a value, and no per-call channel between the host and the adapter.
+So a token "supplied with each call" has nowhere to arrive from.
+
+The token therefore sits in `options`, beside the registry handle, and is the
+same class as the executor `reference:` the runtime already takes and
+`LoopexComposition` already fills with a live process reference. Its value is
+an **opaque token**: a binary of at most 256 bytes from ADR 0023's identifier
 alphabet, carrying no structure the adapter interprets and no authority of its
 own. It is not the credential, it does not name a module, and it cannot be
-resolved by anyone who is not already holding the host's registry. Any other
-shape, including a bare binary that could plausibly be the bytes themselves —
-anything outside the alphabet or over the bound — is refused as an invalid
-option before any child is spawned.
+resolved by anyone not already holding the host's registry. Any other shape —
+outside the alphabet, over the bound, or a bare binary that could plausibly be
+bytes — is refused as an invalid option before any child is spawned.
+
+**Every later use of "per-invocation" in this pair qualifies the resolution.**
+On each call the sender routes the token through the handle, receives the
+custody process's reply, writes the frame and dies; the bytes exist in the
+parent only in that process, only for that write. Two invocations resolve
+independently and concurrently, and a rotation between them is visible to the
+second.
+
+**Why a per-runtime token is not the process-wide slot one level down**, which
+is the obvious objection and deserves a direct answer rather than a
+reassurance. The slot this decision removes was the VM's environment: one
+global location, shared by every runtime in the VM, holding the **bytes**, and
+read inside each call so that whichever invocation wrote last determined what
+every concurrent invocation sent. A token in `options` is none of those. It is
+per runtime, so two runtimes in one VM carry **different tokens routed through
+different handles to different custody processes** — the isolation proof this
+pair requires. It is not global, because nothing looks it up by name. And it
+holds **no bytes at any time**: it is an identifier whose resolution is a call
+to a process the host owns. The property that made the environment variable
+wrong — concurrent invocations in one VM unable to carry distinct credentials
+— is exactly the property this arrangement restores.
+
+Nothing carries `options` into a durable or observable plane, which is worth
+confirming rather than assuming: the model span is built from a fixed identity
+map of `session_id`, `run_id`, `attempt`, `model` and `provider`, and no
+journal record, public event or snapshot contains the model configuration.
 
 The token replaces the `{resolver_module, reference_term}` pair an earlier
 draft used. The maintainer decided that on 2026-09-20. A pair that named a
@@ -177,49 +216,64 @@ boundary, not an absolute:
   already protects that process — the sender installs its own group-leader
   sink so no IO request can carry anything out of it, it is unregistered, and
   it reports only an atom or a `{:error, atom}` pair to the guardian.
-- **The credential-bearing calls are excluded from tracing by match
-  specification, and are named exactly.** Accepted ADR 0030 already fixes the
-  mechanism — "the key-bearing call is excluded by match specification" — so
-  this pair does not invent one, it names which calls that covers. They are
-  three, all in the sender:
+- **What actually keeps credential bytes out of a trace, verified against
+  `Loopex.Trace` rather than against prose.** ADR 0030's companion says "the
+  key-bearing call is excluded by match specification". No such mechanism
+  exists in the implementation, and this pair says so rather than promising
+  it: `Loopex.Trace` installs one pattern per **module**,
+  `:trace.function(session, {module, :_, :_}, match_spec(level), [:local])`,
+  with no function or arity selectivity, and its only exclusion is by **pid**,
+  decided inside core by role — the tracer itself and, on the diagnostics
+  sink, the dispatcher. There is no adapter-side API to exclude a pid and no
+  way to exclude one function of a traced module. **That prose-implementation
+  drift is a finding for the maintainer about an accepted ADR; M5 does not
+  edit ADR 0030 and its progress entry flags it.**
 
-  A match specification needs a target, so the three are **named private
-  functions that must exist**, and their identities are part of this contract
-  rather than an implementation detail:
+  What does hold is a two-tier property, and both tiers are real:
 
-  | Excluded function | Why |
+  1. **The adapter is not in the default traced set.** A session's modules come
+     from `modules/1`, which expands the `:loopex` and `:loopex_protocol`
+     namespaces through `:application.get_key(application, :modules)` — the
+     application's own module list, and the code says why it is not a name
+     prefix: "reading the application's module list rather than matching a
+     name prefix keeps a module that merely starts with `Loopex` in some other
+     application out of the session." `Loopex.LLM.ReqLLM.ProviderBridge` lives
+     in `loopex_llm_reqllm`, so **no namespace wildcard reaches it**. Under
+     every default configuration the credential-bearing work is untraced,
+     which is the strong property and the one M5 proves first.
+  2. **If a host explicitly names the adapter module**, its functions become
+     traceable — the sender inherits the trace flag, since `process_flags/2`
+     sets `:set_on_spawn` on every non-root traced process — and what protects
+     the bytes then is the redaction pass, which *is* implemented:
+     `Entry.render/2` calls `redact/3`, which replaces a credential-keyed
+     value with a `credential` placeholder and **any binary longer than the
+     identity bound with a `bytes` placeholder**. A credential is 1 to 65,536
+     bytes, so it is redacted by size even as a bare positional argument.
+
+  **The three functions stay, and their role is now precise.** They are not
+  match-specification targets, because those do not exist; they are **the only
+  functions that touch credential bytes, all executed in the sender process**:
+
+  | Function | What it touches |
   | --- | --- |
-  | `Loopex.LLM.ReqLLM.ProviderBridge.route_credential/2` | Its arguments carry the registry handle and the token, and the token is the credential reference |
-  | `Loopex.LLM.ReqLLM.ProviderBridge.receive_custody_reply/2` | Its argument is the resolved credential |
-  | `Loopex.LLM.ReqLLM.ProviderBridge.write_credential_frame/2` | Its argument is the resolved credential |
+  | `Loopex.LLM.ReqLLM.ProviderBridge.route_credential/2` | The registry handle and the token |
+  | `Loopex.LLM.ReqLLM.ProviderBridge.receive_custody_reply/2` | The resolved credential |
+  | `Loopex.LLM.ReqLLM.ProviderBridge.write_credential_frame/2` | The resolved credential |
 
-  The names are the contract; the arities are as written here. Inlining any of
-  the three into its caller, or renaming one, removes the match
-  specification's target and silently widens what a trace session can capture
-  — so a test asserts the three exist with exactly these identities, and a
-  rename breaks the proof loudly instead of quietly.
+  Naming them is what makes the witness precise and the redaction obligation
+  checkable: any credential byte in the parent passes through one of these
+  three and nowhere else. The names and arities are the contract, and a test
+  asserts they exist with these identities so an inlining or a rename breaks
+  the proof loudly rather than quietly moving bytes into an unnamed function.
 
-  Exclusion by match specification means the trace session never matches
-  those functions, so the VM emits **no raw trace message** for them and the
-  tracer never sees one. That is stronger than redaction and it is the
-  difference an earlier draft blurred: it said in one breath that the call was
-  excluded from tracing and in the next that M5 would prove placeholders
-  appear for it. Both cannot be true — a placeholder is a trace entry, and an
-  excluded call produces none — and the placeholder expectation is withdrawn
-  wherever it appeared, here and in the plan's evidence row. Redaction remains
-  the safety net for everything that *is* traced; it is not the mechanism for
-  these three.
-
-  **The proof is an absence, and is stated as one.** Under a real trace
-  session at the `arguments` level over a real invocation, the case asserts
-  that no trace entry names any of the three functions, that the tracer
-  received no raw trace message for them, and that no credential bytes and no
-  token appear anywhere in the captured entries. An entry bearing a
-  placeholder for one of them fails the case exactly as an entry bearing the
-  bytes would, because it would prove the match specification did not exclude
-  what it was supposed to. A second, smaller case asserts the three functions
-  exist with the identities above, so the first case cannot pass vacuously
-  against a build where they no longer do.
+  **The proof is two cases, matching the two tiers.** Under the **default**
+  configuration, a real trace session at the `arguments` level over a real
+  invocation produces no entry naming any of the three, no raw trace message
+  for them, and no credential bytes or token anywhere in the captured entries.
+  Under a configuration that **explicitly names** `ProviderBridge`, entries for
+  the three may exist and every one of them is asserted to carry placeholders
+  and no credential bytes and no token. Proving only the first would leave the
+  case a host can actually create unproved.
 - Everywhere else the earlier absolutes stand unchanged: not in guardian
   state, not in an exit reason, not in a crash report, not in an IO request,
   not in a file, not in the environment, not in argv, and in no durable or
@@ -481,14 +535,17 @@ Three proofs are new:
   exit reason and no crash report carries the resolved value. The
   two-resolutions-at-once case is a **success** case, not a refusal: both
   invocations complete with their own credentials.
-- **The credential-bearing calls are not traced at all.** Under a trace
-  session at the `arguments` level over a real invocation, no trace entry
-  names the registry route call, the custody reply handling or the credential
-  frame write; the tracer received no raw trace message for any of them; and
-  no credential bytes and no token appear anywhere in the captured entries. A
-  placeholder entry for one of the three fails the case as surely as the bytes
-  would, because it would prove the match specification did not exclude what
-  it was supposed to.
+- **Tracing, in two cases matching the two tiers above.** Under the
+  **default** trace configuration, a session at the `arguments` level over a
+  real invocation produces no entry naming `route_credential/2`,
+  `receive_custody_reply/2` or `write_credential_frame/2`, no raw trace
+  message for them, and no credential bytes or token anywhere — because the
+  adapter is in no namespace wildcard. Under a configuration that
+  **explicitly names** `Loopex.LLM.ReqLLM.ProviderBridge`, entries for those
+  three may exist, and every one is asserted to carry placeholders and no
+  credential bytes and no token, which is what the redaction pass promises. A
+  third case asserts the three functions exist with their exact identities, so
+  neither of the first two can pass vacuously.
 - **Host custody, proved at each host rather than in the adapter.** The
   adapter's test tree cannot prove a claim about the CLI's or the daemon's
   composition, and an earlier draft filed all three there. Each case lives
