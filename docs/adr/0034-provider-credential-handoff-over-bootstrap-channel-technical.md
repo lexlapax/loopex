@@ -409,8 +409,11 @@ an accepted port, which this decision explicitly does not make.
 set, never a bare `:error`. The guardian has to distinguish a custody process
 that refused from one that never answered — they are different operational
 faults and ADR 0029's bounded status has to say which happened — and it can,
-because a refusal arrives as one of the four atoms while a silence is the
-guardian's own `:timeout`. The reported reason is never the resolved value,
+because a refusal arrives as one of the six atoms produced below the guardian
+— `:no_token` and `:invalid_token` from the adapter, `:missing` and
+`:expired` from a custody process, `:oversized` from the sender, and
+`:unavailable` from the registry or custody — while a silence is the
+guardian's own `:timeout`, the seventh. The reported reason is never the resolved value,
 the token, or a host-authored string.
 
 **Failures.** Each is a refusal with a bounded non-secret reason, and each
