@@ -68,49 +68,65 @@ is gone by any other route:
   the same takeover mechanics this ADR already defines for a lease that has
   been released.
 
-The fresh epoch is what makes the lost set harmless: a command admitted under
-the dead owner's epoch cannot be accepted after the new grant, and a mutation
-already inside core settles or refuses exactly once under the serial ownership
-core enforces, which no lease transition can affect. What is *not* claimed is
-that the daemon knows whether such a mutation is still settling; it does not,
-and a successor's work is ordered after it by core rather than by the daemon.
+The fresh epoch alone is **not** what makes the lost set harmless, and an
+earlier revision of this section said it was. It stops a *later* command from
+the old tenure, which is a different thing from ordering: a successor's first
+call could still reach a coordinator ahead of an older call that was already
+on its way, because core orders what it receives rather than what is in
+flight, and core never sees the writer epoch at all.
+
+**The daemon closes that window with one fixed process, the admission relay**,
+added on the maintainer's decision of 2026-09-20. Every core call the daemon
+makes is routed through it; it issues a ticket per call, naming the session;
+it survives lease-owner death, being fixed rather than per-session; and **a
+replacement owner's first grant for a session blocks until that session's
+outstanding tickets have settled**. A ticket settles when the relay has
+observed the call's outcome — its own task returning core's result, or that
+task dying and the relay treating the call as settled-unknown, the fact
+`commit_unknown` already carries. A connection disappearing settles nothing,
+because the call it made is still running.
+
+So the ordering claim rests on the relay, and the session-scoped rule gives
+the rest: the successor is granted a fresh epoch, the dead controller's
+connection is closed with `control_owner_lost`, and no command from the old
+tenure can be admitted afterwards. The cost is still stated honestly: the
+daemon does not tell a new controller what an earlier mutation did, only that
+nothing of it is still unaccounted for.
 
 An earlier draft had the daemon restart the owner and carry on with its
 sockets intact, and a 2026-09-20 revision made the failure fatal to the whole
-daemon instance. Both are superseded by the decision above: the restart was
-wrong because a restarted owner would claim an admission set it cannot know,
-and daemon-fatal was more than the fault requires — one session's
-collaboration state is not grounds to end every other session's.
+daemon instance. Both are superseded: the restart was wrong because a
+restarted owner would claim an admission set it cannot know, and daemon-fatal
+was the smaller design the maintainer declined on 2026-09-20 — it ends every
+other session's work for one session's fault, where the relay ends none of it.
 
 So a lease owner's failure is **session-scoped**, and the daemon's own
 structure supplies that without special-case code: each lease owner is
 `start_link`ed by the daemon's owner process, which traps exits, and its
 `{:EXIT, pid, reason}` clause maps the pid to the session it belonged to
 rather than to a daemon-wide class. Every other linked process the daemon
-holds is still daemon-fatal; the lease owners are the one class with a
-session-scoped rule, and the reason is the one above. There are no restarts to
-configure and no strategy to get wrong: nothing is restarted, and the next
-acquisition starts a new owner from nothing.
+holds is still daemon-fatal — the relay included, because a daemon without it
+can no longer honour the ordering rule for any session. The lease owners are
+the one class with a session-scoped rule. There are no restarts to configure
+and no strategy to get wrong: nothing is restarted, and the next acquisition
+starts a new owner from nothing.
 
-**What this does not claim, stated because an earlier draft claimed it.**
-Core never sees the writer epoch, as the lease record above sets out, and the
-fences core does have protect against a stale *coordinator owner* rather than
-a stale *controller* — which is the gap this ADR exists to fill. So the daemon
-is the only thing keeping a successor's grant from racing an admission the
-dead owner had already passed into core. What the session-scoped rule gives is
-not that the race cannot exist; it is that the successor is granted a **fresh
-epoch** and the dead controller's connection is closed, so no command from the
-old tenure can be admitted afterwards, and the one admission already inside
-core settles or refuses exactly once under core's own serial ownership. The
-cost is the honest one: the daemon cannot tell a new controller whether an
-earlier mutation is still settling, and does not pretend to.
+**When an owner exists at all.** One starts on the **first lease operation for
+that session after its existence has been validated**, not at activation: a
+dormant session is acquired *before* it is resumed, and `attach --take-over`
+may acquire and release a session it never activates, so an activation-scoped
+owner would not exist when the lease it serves does. One retires when the
+lease is free, no acquisition is waiting, and the relay holds no outstanding
+ticket for that session — all three, since any one alone would retire an owner
+something still depends on.
 
 Retaining the in-flight set in a survivor was the alternative and was
 rejected: whichever process held it would then be the process whose failure
 loses it, so the window moves up one level rather than closing, and a daemon
 that cannot lose the set is a daemon that has made the set durable — a durable
 lease record by another name, which this decision rejects for its own
-reasons.
+reasons. The relay is not that: it holds no lease and no authority, only the
+fact that a call it made has not yet been accounted for.
 
 Expiry and
 admission use the daemon's monotonic clock: a deadline is set only by a
