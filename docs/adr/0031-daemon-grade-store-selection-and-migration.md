@@ -100,7 +100,7 @@ successor adapter's evidence, and buying it here would double M5's store
 evidence to make one operator message nicer. Until then the daemon's capacity
 behaviour is the adapter's, stated plainly rather than promised away.
 
-**Evidence its acceptance requires.** The M5 half is a durability claim, so
+**Implementation and milestone-closure evidence.** The M5 half is a durability claim, so
 its class is process and store fault injection on the real adapter plus a
 rollback proof: a root driven to capacity refuses the append with the store's
 own reason, terminates the store, and the daemon closes the listener and every

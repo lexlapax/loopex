@@ -35,8 +35,20 @@ the daemon does not promise is that every process has finished before it
 exits.
 
 The adapter also **traps exits**, which this arrangement relies on: an owner
-that crashes rather than stopping still runs the Store's `terminate/2`, so the
-marker comes back. What leaves it is a kill, a power loss, or a bounded stop
+that crashes rather than stopping gives the Store's `terminate/2` the chance
+to run, so the marker ordinarily comes back.
+
+**Ordinarily, not always**, and the qualification is about process lifetime
+rather than about the adapter. The Store runs `terminate/2` only while the VM
+is alive, and the command process that monitors the daemon owner halts the VM
+the moment it sees that owner's `DOWN` — a race the adapter cannot win from
+inside. So **owner loss is crash-equivalent for the marker**: it is released
+or it is stale, the daemon cannot tell which, and neither can this ADR. That
+costs nothing, because the successor's liveness-probed recovery already
+handles both — a marker whose recorded holder is proved dead is reclaimed, one
+that cannot be decided refuses `store_writer_unverifiable`, and a live holder
+refuses `store_writer_active`. Claiming the release always happens would have
+been a claim about scheduling. What leaves it is a kill, a power loss, or a bounded stop
 of the Store that expired and had to be ended with `Process.exit(pid, :kill)`
 — the three cases the next daemon's verified stale-writer recovery is for.
 

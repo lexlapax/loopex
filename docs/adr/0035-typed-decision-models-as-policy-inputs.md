@@ -83,7 +83,7 @@ schema constrains the shape of an answer but yields no probability and no
 confidence, so a host has nothing to threshold on, and it costs a full
 generation to obtain.
 
-**Evidence its acceptance requires.** This is a trust claim, so its class is
+**Implementation and milestone-closure evidence.** This is a trust claim, so its class is
 negative tests plus a real-provider proof. The negatives are the load-bearing
 half: no typed answer, at any confidence including 1.0, ever produces a grant
 the host's policy would not otherwise have produced; a missing, malformed,

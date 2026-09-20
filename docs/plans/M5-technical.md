@@ -12,7 +12,17 @@ Concept: [Non-goals](M5.md#concept-plan-non-goals).
 
 M5 waits on four decisions. Each is accepted before the implementation that
 depends on it, not before unrelated work, and none may be outstanding at
-closure. The repository status check reads the links in this section, so a
+closure.
+
+**Acceptance binds a design and its evidence obligations, not the evidence
+itself**, which is the only reading that is not circular. Each of these ADRs
+lists tests that exist once the milestone implements it; requiring those
+tests *before* acceptance would mean no decision could ever be accepted,
+since implementation waits on acceptance. So acceptance means the maintainer
+has read the design and the obligations it commits to, and those obligations —
+renamed in every one of the five to **implementation and milestone-closure
+evidence** — are discharged at Outcome closure, where the exact-diff tests and
+the security review belong. The repository status check reads the links in this section, so a
 decision named only in prose declares nothing.
 
 | Decision | Acceptance point | What its acceptance settles |

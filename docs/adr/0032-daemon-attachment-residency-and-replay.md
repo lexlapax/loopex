@@ -181,7 +181,7 @@ lazy recovery avoids: a root with 4,096 recorded sessions would start 4,096
 coordinators to serve the one a client wanted. And a root with one unservable
 session would fail a start that need never have reached it. The companion records each in full.
 
-**Evidence its acceptance requires.** Two classes together. The transport and
+**Implementation and milestone-closure evidence.** Two classes together. The transport and
 its generation are a protocol claim, so they need vectors and a compatibility
 proof: a generation-2 negotiation vector, refusal of a generation-1-only
 initialize, and an independent client over the socket. The residency rules are

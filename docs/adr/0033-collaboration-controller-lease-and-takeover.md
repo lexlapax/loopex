@@ -103,7 +103,7 @@ survivor moves the same window one process up; making it survivable at all
 would mean making it durable, which is the durable lease record this decision
 already rejects.
 
-**Evidence its acceptance requires.** This is a trust claim, so its class is
+**Implementation and milestone-closure evidence.** This is a trust claim, so its class is
 negative tests on real processes plus a security reading of the admission
 path: every refusal — stale epoch, copied current epoch, non-holder
 connection, released lease, expired lease, observer abort — proved before core

@@ -184,7 +184,7 @@ decision buys. A resolver supplied as a function was rejected because a
 closure is not plain boundary data and its captured environment is exactly the
 retention the security review has to exclude.
 
-**Evidence its acceptance requires.** This is a trust claim, so its class is
+**Implementation and milestone-closure evidence.** This is a trust claim, so its class is
 negative tests plus a security review, with a real-provider proof for the path
 the release check already runs. Every credential-plane negative that M0 to M2
 established is re-pointed at the new handoff and must hold with its assertion
