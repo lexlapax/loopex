@@ -17,14 +17,14 @@ decision named only in prose declares nothing.
 
 | Decision | Acceptance point | What its acceptance settles |
 | --- | --- | --- |
-| [ADR 0031](../adr/0031-daemon-grade-store-selection-and-migration.md#concept) | Before the daemon opens a state root, so before workstream 1 lands | The existing local adapter as the daemon's store for `0.2.0`, with the 256 MiB log capacity, 4 MiB frame ceiling, full retention, `store_capacity_exceeded` refusal and operator root-retirement procedure documented; the daemon-grade adapter, its experiments and its migration reserved for the successor milestone |
+| [ADR 0031](../adr/0031-daemon-grade-store-selection-and-migration.md#concept) | Before the daemon opens a state root, so before workstream 1 lands | The existing local adapter as the daemon's store for `0.2.0`, with the 256 MiB log capacity, 4 MiB frame ceiling, full retention, `store_capacity_exceeded` refusal, the capacity-as-store-loss consequence, explicit stale-writer recovery and the operator root-retirement procedure documented; a daemon-grade adapter and any migration left open for a separate decision |
 | [ADR 0032](../adr/0032-daemon-attachment-residency-and-replay.md#concept) | Before the socket is bound or the core attachment change lands, so before workstreams 2 and 4 | The Unix-domain-socket transport reusing ADR 0023 unchanged, generation 2's methods, refusal of a generation-1-only client, owner-only peer access, the bounded socket path, marker-first startup, race-free attach with at-least-once contiguous delivery, the resident window, daemon-owned output buffers, detachment at the last emitted cursor, idle eviction and bounded session pages, and every residency number below |
 | [ADR 0033](../adr/0033-collaboration-controller-lease-and-takeover.md#concept) | Before any admission check is written, so before workstream 3 | One daemon-owned controller lease per session held in daemon memory with a fresh opaque writer epoch per grant, admission that binds holder connection, held state, unexpired term and epoch together, explicit takeover, cross-process abort through the core's own cancellation, and no authority from content, metadata or order |
 | [ADR 0034](../adr/0034-provider-credential-handoff-over-bootstrap-channel.md#concept) | Before the adapter's credential resolution changes, so before workstream 5's credential item | The credential as a per-invocation input named by a `{resolver_module, reference_term}` reference the host owns, resolved only inside the sender that writes the credential frame, after the child proves nonce, codec version and build manifest digest and before the invocation frame; the resolver's owner, custody, rotation, deadline bounding and every failure outcome; no environment read in the adapter's call path and the launcher's enumeration moved to composition; the re-pointed credential-plane proofs and the security review as acceptance points |
 
-ADR 0031's daemon-grade adapter, its contract experiments and its migration
-belong to the successor milestone and bind nothing in M5; only its
-local-adapter selection and documented limits are M5 prerequisites.
+ADR 0031 decides one thing, the `0.2.0` local-adapter selection and its
+documented limits. It prescribes no successor engine, experiment or migration;
+those are named as open questions there and settled by their own decision.
 
 M4 owns interactions, transfers, the foreground server and observability. An
 inherited defect is reproduced at the exact base and repaired at its owner; a
