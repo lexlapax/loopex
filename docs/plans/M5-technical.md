@@ -47,7 +47,7 @@ Concept: [Scope](M5.md#concept-plan-scope).
 
 | Component | Owns | Cannot own |
 | --- | --- | --- |
-| `loopex` | Durable session truth, the race-free attach barrier and cursor, independent concurrent attachments to one session **and their release — the dispatcher monitors the attaching process and drops its attachment on `DOWN`, which is what replaces the supersession this change removes**, the read-only session-existence query, **`Loopex.Trace.exclude_self/2`, which installs both the match-specification exclusion ADR 0030 names and the process-level exclusion its callees need, before any message is delivered, and the `Loopex.Trace.Entry` clause that redacts a keyword list's values under their own keys**, **the bounded `quiesce/1` that settles every active coordinator or names what it could not**, **`create_session_detailed/3` and `resume_session_detailed/3`, the two runtime-side functions carrying `disposition` and `control_entry` beside the unchanged create and resume**, the per-attachment event-count dispatcher queues, cancellation and recovery | A lease, a transport, a byte limit, residency policy or any daemon fact |
+| `loopex` | Durable session truth, the race-free attach barrier and cursor, independent concurrent attachments to one session **and their release — the dispatcher monitors the attaching process and drops its attachment on `DOWN`, which is what replaces the supersession this change removes**, the read-only session-existence query, **`Loopex.Trace.exclude_self/2`, which installs both the match-specification exclusion ADR 0030 names and the process-level exclusion its callees need, before any message is delivered, and the `Loopex.Trace.Entry` clause that redacts a keyword list's values under their own keys**, **the bounded `quiesce/1` that settles every active coordinator or names what it could not, together with the one coordinator change it needs in two halves — a drained abort pauses where cleanup would have begun, and its commit is presented once rather than retried on an ambiguous answer**, **`create_session_detailed/3` and `resume_session_detailed/3`, the two runtime-side functions carrying `disposition` and `control_entry` beside the unchanged create and resume**, the per-attachment event-count dispatcher queues, cancellation and recovery | A lease, a transport, a byte limit, residency policy or any daemon fact |
 | `loopex_protocol` | Generation-2 records, validators, schema and vectors | Daemon behaviour or lease semantics |
 | `loopex_store_local` | The unchanged local adapter, its 256 MiB log and 4 MiB frame ceilings, its `store_capacity_exceeded` and `store_log_too_large` refusals and its writer marker, which it takes at start and releases in its own `terminate/2` — so the daemon owns the Store *process* and stops it last in an orderly shutdown, and a store loss releases the marker before the daemon can act | Any daemon fact, lease, index or residency state |
 | `loopex_daemon` | Marker-first process and socket lifetime, existence validation by calling core's query rather than by attaching or resuming, the peer-credential check, generation-2 negotiation, per-connection socket output buffers, the resident window and aggregate byte ceiling, attachment residency and eviction, the in-memory controller lease and writer-epoch check, the session index with its recorded-entry bound and its bounded pages, attachment residency and the one-way activation ceiling, and diagnostics | Store or coordinator internals, a second loop, policy selection, host identity, a durable record or a durable method |
@@ -294,9 +294,13 @@ reviewer can check against this sentence at closure.
 
 - **`docs/operator/daemon.md` must state the maximum graceful stop as the sum
   of the seven phase bounds**, in the form the lifecycle section fixes:
-  **`budget_ms` + 195 s**, being 5 s for the admission cut, 60 s for abort
+  **`budget_ms` + 405 s**, being 5 s for closing admissions, 180 s for
+  settling what was already admitted, 90 s for abort
   admission, `budget_ms` for cancellation, 90 s for the fence, 5 s for
   coordinator termination, 5 s for daemon teardown and 30 s for the Store —
+  together with the sentence that keeps the number from being read as a
+  duration: every fixed term counts the Store's thirty-second ceiling for a
+  wedged filesystem, and an ordinary stop finishes in milliseconds —
   with the six constants written out beside the one derived term, so an
   operator setting a `TimeoutStopSec` adds up numbers rather than trusting a
   total. It must say that six of the seven are fixed and
@@ -341,7 +345,7 @@ core-internal states a daemon cannot construct through the socket.
 | --- | --- | --- | --- |
 | Concurrent attachment | `apps/loopex/test/concurrent_attachments_test.exs` (**new**) | `two attachments to one session coexist without replacement`; `one detaching leaves the other delivering`; `an attachment is released when the process that attached it exits`; `the dispatcher holds no attachment for a dead attacher`; `one backpressuring does not stall the other`; `each carries its own cursor and incarnation` | fast |
 | Read-only existence query | `apps/loopex/test/session_existence_query_test.exs` | one per result of the closed set | fast |
-| **`quiesce/1`** | **`apps/loopex/test/runtime_quiesce_test.exs`** (new) | `admits every abort before any cleanup begins`; `releases cancellation concurrently once every admission resolves`; `an empty active set drains with a zero budget`; `reports a Control entry whose coordinator has died as absent`; `reports an unavailable Control entry as absent and fences it`; `fences an unsettled session and refuses its paused transaction as stale`; `fences an absent session too`; `a fence refused stale_owner_epoch rereads the head and attempts once more`; `a fence refused stale_journal_version is superseded, not an error`; `a fence answering commit_unknown is resolved through transaction_status under the same derived tx_id and reported unsettled with fences[id] == :unknown`; `a fence id recomputed from the head alone matches the one the drain used`; `a session whose abort admission is ambiguous has no cleanup released and is fenced` | fast |
+| **`quiesce/1`** | **`apps/loopex/test/runtime_quiesce_test.exs`** (new) | `admits every abort before any cleanup begins`; `a drained abort commit is presented once and never re-presented on commit_unknown`; `releases cancellation concurrently once every admission resolves`; `an empty active set drains with a zero budget`; `reports a Control entry whose coordinator has died as absent`; `reports an unavailable Control entry as absent and fences it`; `fences an unsettled session and refuses its paused transaction as stale`; `fences an absent session too`; `a fence refused stale_owner_epoch rereads the head and attempts once more`; `a fence refused stale_journal_version is superseded, not an error`; `a fence answering commit_unknown is resolved through transaction_status under the same derived tx_id and reported unsettled with fences[id] == :unknown`; `a fence id recomputed from the head alone matches the one the drain used`; `a session whose abort admission is ambiguous has no cleanup released and is fenced` | fast |
 | **The two-phase abort-path split** | **`apps/loopex/test/cancellation_test.exs`** (existing; the file that already drives an abort against a receipt arriving mid-reduction) | `a drained abort commits without beginning cleanup`; `a client abort still begins cleanup on its commit reply path` — the pair that proves the split changed the drain and nothing else | fast |
 | **`Loopex.Trace.exclude_self/2`, `Control`'s excluded-pid set and `Entry`'s keyword-key redaction** | **`apps/loopex/test/trace_session_test.exs`** (existing; extended) | `the named MFAs produce no raw message under an explicitly named module, before any process flag is set`; `an excluded process produces no trace message`; `the exclusion survives a tracer restart`; `a new session skips an already-excluded pid`; `fails closed while the tracer is absent`; `fails closed while Control is unavailable` — the case that constructs a `Control` restart, and which therefore asserts what that costs: every child after `Control` restarts with it, so every session coordinator in that runtime is gone and the case starts a fresh session rather than reusing one;  `the excluded set returns to baseline after the sender exits`; `a keyword list's value is redacted under its own key`; `the same value under a key naming nothing is rendered, so the case cannot pass vacuously` | fast |
 
@@ -2117,17 +2121,26 @@ that already exists somewhere, and the operator maximum is the sum:
 
 | # | Phase | Bound | Where the number comes from |
 | --- | --- | --- | --- |
-| 1 | **Admission cut** | **5 s**, this plan's teardown number reused | A synchronous acknowledgement from a process with no work of its own to finish; a relay that does not answer inside it is a relay the daemon has lost, so the stop becomes the `relay_lost` fail-stop rather than waiting longer |
-| 2 | **Abort admission** | **60 s** — **two** Store calls deep, at 30 s each; **per phase, not per session**, because the sessions are admitted **concurrently** | The admission may have to wait behind the transaction the coordinator already has in flight, and then make its own; those are sequential, so the phase is two calls long |
+| 1a | **Close admissions** | **5 s**, this plan's teardown number reused | A synchronous acknowledgement of a **state change**, not of any work: the relay sets a flag, refuses everything after it, and answers. It has nothing to finish, so this bound measures the relay's own responsiveness and nothing else; a relay that does not answer inside it is a relay the daemon has lost, and the stop becomes the `relay_lost` fail-stop |
+| 1b | **Settle the admitted** | **180 s** — **six** Store calls deep, the deepest ticket kind; **per phase, not per ticket**, the tickets settling concurrently | The tickets already inside core when 1a answered. The per-kind derivation is below, and at this bound the stop **proceeds** rather than waiting further |
+| 2 | **Abort admission** | **90 s** — **three** Store calls deep, at 30 s each; **per phase, not per session**, because the sessions are admitted **concurrently** | The admission may wait behind the transaction the coordinator already has in flight, which is itself two calls because core's ordinary path retries a `commit_unknown` once; then the drain's own admission, which is one call because it does **not** retry |
 | 3 | **Cancellation** | The derived backstop: `max` over drained sessions of `cancellation_bounds(g_i).cli_backstop_ms` | Core's own number for how long a cancellation may take |
 | 4 | **Fence** | **90 s** — **three** Store calls deep at worst, again **concurrent** across sessions | A head read, then the `advance_owner`, and on `commit_unknown` one `transaction_status` query. Three sequential calls, no retries |
 | 5 | **Coordinator termination** | **5 s**, the coordinator's own `shutdown` (`session_coordinator.ex:134-142`) | The value core already gives a coordinator to stop in |
 | 6 | **Daemon teardown** | **5 s** | This plan's one chosen number, covering the notice, the closes, the lease owners, the relay and the edges |
 | 7 | **Store** | **30 s**, its own `@call_timeout` | The stop that releases the marker |
 
-> **Maximum graceful stop = 5 s + 60 s + `budget_ms` + 90 s + 5 s + 5 s + 30 s
-> = `budget_ms` + 195 s**, and `budget_ms` is the one term an operator cannot
-> compute in advance.
+> **Maximum graceful stop = 5 s + 180 s + 90 s + `budget_ms` + 90 s + 5 s +
+> 5 s + 30 s = `budget_ms` + 405 s**, and `budget_ms` is the one term an
+> operator cannot compute in advance.
+
+**That is a worst case nobody approaches, and saying so is part of stating
+it.** Every term but `budget_ms` is a count of the local adapter's 30 s
+`@call_timeout`, and that timeout is a ceiling for a wedged filesystem, not a
+cost: the calls it bounds are a `File.read`, an append and a directory sync,
+microseconds apiece on a working disk. An ordinary stop of an idle daemon
+finishes in milliseconds. The sum is what a `TimeoutStopSec` must not be
+shorter than if a stop is never to be cut off, not what a stop takes.
 
 **Every phase bound is a Store-call count, and an earlier revision counted
 one where the sequence is two or three.** *Every* call into the local adapter
@@ -2137,27 +2150,56 @@ is the same 30 s: `transact/2` at `local.ex:111-113`, `ownership_head/3` at
 **(the worst sequential count of Store calls in it) × 30 s**, and the counts
 are these:
 
-- **Phase 2 is two.** The abort admission goes to a **live coordinator**, whose
+- **Phase 1b is six, and the derivation is per ticket kind.** A ticket settles
+  when its core call answers, and what that call does before answering is not
+  the same for all ten. Counted from the code, in sequence:
+
+  | Ticket kind | Sequential Store calls before the ticket settles | Where |
+  | --- | --- | --- |
+  | The seven non-resume lease-authorized mutations — `prompt`, `steer`, `follow_up`, `abort`, `respond_interaction`, `admit_resources`, `activate_skill` | **2** | One `OwnerLane.transact/2`, retried once on `commit_unknown` (`session_coordinator.ex:1761-1764`). The wait-behind does **not** apply: this call *is* the session's one in-flight transaction, and the coordinator's `command/3` waits `:infinity` for it (`:146-149`) |
+  | `session.create`, fresh | **6** | `Store.runtime_command/2` for the genesis command (`control.ex:960`); then the coordinator it starts must reach `:ready` before the reply, which is `load_all_records` (one empty page, `:1302-1309`, `:7076-7081`, `@page_size 1_024` at `:49`), `ownership_head` (`:1338`), the owner `OwnerLane.transact` (`:1363`), then `recover_committed_owner`'s `load_all_records` and `load_all_events` (`:1397-1400`) before `phase: :ready` at `:1407` |
+  | `session.attach` | **1 + ⌈events ÷ 1,024⌉** | The dispatcher's snapshot scan pages the session's events (`event_dispatcher.ex:169-199`, `:926`) |
+  | `session.resume`, fresh | **6 + the pages its history needs** | The same six as a create minus the genesis command, plus `prior_transaction_resolved`'s `transaction_status` (`:1324-1335`), and with every one of the three `load_*` calls paged over real history rather than over an empty session |
+
+  **The maximum over the kinds whose depth is a constant is six**, which is a
+  fresh create, so 1b is bounded at six calls. **Two kinds have no constant
+  depth** — attach and resume both page over the root's history at 1,024 rows
+  a call — and that is stated rather than papered over with an average,
+  because it is the reason 1b is a **bounded wait that then proceeds** rather
+  than a guarantee that everything has settled.
+- **Phase 2 is three.** The abort admission goes to a **live coordinator**, whose
   lane is serial — `OwnerLane.transact/2` is a plain synchronous call the
   coordinator makes from its own process (`store/owner_lane.ex:83-99`, called
   at `session_coordinator.ex:1242`, `:1363`, `:1702`) — so the admission may
-  wait out one transaction already in flight and then make its own. Two, in
-  sequence.
+  wait out one transaction already in flight and then make its own. The
+  wait-behind is **two** calls, not one: an ordinary commit goes through
+  `resolve_transaction/2`, which re-presents once on `commit_unknown`
+  (`:1752-1768`). The drain's own admission is **one**, because it does not —
+  see the non-retrying commit below. Three, in sequence.
 - **Phase 4 is three at worst.** A head read, then the `advance_owner`, then,
   only where that answers `commit_unknown`, **one** `transaction_status` query.
-- **And the drain retries nothing**, which is what keeps both counts finite.
-  Core's ordinary commit path retries a `commit_unknown` once —
-  `resolve_transaction/2` re-presents the transaction on the second line of its
-  own case (`session_coordinator.ex:1761-1764`) — and the drain does not use
-  that path for either of these. An ambiguous **admission** is not retried: the
-  session is fenced, by the rule this section already states. An ambiguous
-  **fence** is resolved by the one status query, not re-proposed. A **stale**
+- **And the drain retries nothing, which is a change to the coordinator rather
+  than a statement about it.** Core's ordinary commit path retries a
+  `commit_unknown` once — `resolve_transaction/2` re-presents the transaction
+  on the second line of its own case (`session_coordinator.ex:1752-1768`) —
+  and an earlier revision said the drain's abort "is not retried" while also
+  saying the admission path was "otherwise untouched". Those cannot both hold:
+  a drained abort that took the ordinary path **would** retry. So the drain's
+  abort admission commits through a **non-retrying** path, and that is the
+  **second half of core change 4's coordinator change**, beside the
+  admit-and-pause split — one change with two halves, both in the same clause
+  of the same function, and both named in the concept pair's core-change list
+  and in the ownership table. A `commit_unknown` on a drained abort is
+  therefore ambiguous immediately: the session is fenced, by the rule this
+  section already states. An ambiguous **fence** is resolved by the one status
+  query, not re-proposed. A **stale**
   fence is not reattempted at all, for the reason the fence table gives.
 
 **The seven phases and the six steps are two cuts through the same stop, and
 the mapping is stated rather than left to be inferred.** The numbered sequence
 below is what the daemon's owner *does*; the phases are what each part of it
-is *bounded by*. Phase 1 is step 1's call to the relay. **Phases 2 to 5 are
+is *bounded by*. Phases 1a and 1b are step 1: 1a is the owner's call to the
+relay, 1b is the owner's wait afterwards. **Phases 2 to 5 are
 inside `quiesce/1`** — they are core's to enforce, because core owns the
 admission, the cancellation, the fence and the coordinator, and the daemon
 passes no deadline in — and together they are step 2. Of the four, only
@@ -2334,17 +2376,40 @@ the owner fixes.
    even pass through the relay. Quiesce would then have been snapshotting a
    set of sessions that could still grow underneath it.
 
-   So the cut is a call. The owner calls the **relay** — whose scope this
+   So the cut is a call **and then a wait**, which an earlier revision folded
+   into one five-second step it could not possibly contain. The owner calls
+   the **relay** — whose scope this
    extends to cover `session.create` and `session.attach` as well as every
-   ticketed mutation, ten calls in all — and
-   the relay **acknowledges only when admissions are closed and every ticket
-   it holds has settled**. Not "settled or recorded": a recorded ticket is a
-   call still running inside core, and quiesce would then enumerate `Control`
-   while an admission, a create or an attach was still changing it. Until that
-   acknowledgement returns
-   the owner does nothing else; after it, no work can enter core through the
-   daemon at all, which is what lets quiesce treat `Control` as a set that no
-   longer moves. A command arriving on an open connection after the cut is
+   ticketed mutation, ten calls in all — and the relay **closes admissions and
+   answers at once**: that is phase **1a**, an acknowledgement of a state
+   change, five seconds being a bound on the relay's responsiveness and on
+   nothing else. The owner then **waits for the tickets already inside core to
+   settle**, which is phase **1b**, bounded at the deepest ticket kind's own
+   Store-call depth.
+
+   Folding the two together was the defect: a ticket settles only when its
+   core call answers, a prompt's commit is bounded by the Store's 30 s and by
+   core's one retry, and `SessionCoordinator.command/3` waits `:infinity` for
+   it (`session_coordinator.ex:146-149`) — so a `SIGTERM` arriving during any
+   ordinary prompt would have blown a five-second acknowledgement and turned
+   an operator stop into `relay_lost`. Refusing new work is instant; waiting
+   for admitted work is not, and the two now have their own bounds.
+
+   **At 1b's bound the stop proceeds**, and what that costs is stated. A
+   ticket still settling is a core call still running, so `Control` is not
+   quite the frozen set an unconditional wait would have given: a still-running
+   mutation leaves its session `:active`, which drains and fences exactly as
+   any other active session does, and a still-running **create or resume**
+   leaves it **`:acquiring`**, because that is the status `Control` writes
+   while an owner is being started. So the `:acquiring` row in the
+   classification table below is **live on this path, not defensive**, and it
+   is classified `unsettled` and fenced for the reason given there. An attach
+   still settling changes nothing about the classification at all: it installs
+   into the dispatcher, not into `Control`.
+
+   After the cut, no work can enter core through the
+   daemon at all. A request of **any kind** arriving on an open connection
+   after it is
    refused **`daemon_stopping`**, a generation-2 error code added for it.
 
    Nothing is written to clients yet and nothing is closed: the connections
@@ -2585,17 +2650,32 @@ carried: it described three outcomes and returned none of them.
    (`session_coordinator.ex:4806-4815`). Admitting session A's abort therefore
    begins A's cleanup while session B's abort is still unwritten.
 
-   So quiesce **splits admission from cleanup**, and the split is the change
-   to that path: under a drain, a coordinator admits the abort and **pauses at
+   So quiesce **splits admission from cleanup**, and that split is the first
+   of the **two halves** of core change 4's coordinator change: under a drain,
+   a coordinator admits the abort and **pauses at
    exactly the point `begin_admitted_cleanup/1` would have begun** — the
    record is committed, the queued steer and follow-up are resolved as they
-   already are, and no cancellation runs. The admission path is otherwise
-   untouched: `propose_new/3` for `%{type: :abort}` writes the same
+   already are, and no cancellation runs.
+
+   **The second half is that a drained abort commits without the retry**, and
+   an earlier revision missed it by saying the admission path was "otherwise
+   untouched" four lines above a rule that an ambiguous admission is not
+   retried. Both cannot hold: an abort taking the ordinary path goes through
+   `resolve_transaction/2`, which re-presents once on `commit_unknown`
+   (`session_coordinator.ex:1752-1768`). Under a drain it presents **once**
+   and an unknown answer is an unknown answer, which is what makes phase 2's
+   third call the last one it can make and what lets the session be fenced
+   rather than waited on. Two halves, one clause, one change.
+
+   **What is genuinely untouched is the record**: `propose_new/3` for
+   `%{type: :abort}` writes the same
    `command_admitted` record with `"command_type" => "abort"` and
    `"admission" => "accepted"` (`session_state.ex:1684-1700`), and answers
    `"admission" => "rejected_no_active_run"` where nothing is running
    (`:1750-1761`), which is the right answer for an idle session and needs no
-   special case.
+   special case. Nothing about what is written changes; what changes is
+   whether the commit is presented a second time and whether cleanup begins on
+   the reply.
 
 2. **Phase 3 of the stop, the cancellation: it is released, concurrently,
    only once every admission has resolved.** Core waits for phase 2 to finish for every
@@ -2890,19 +2970,26 @@ carried: it described three outcomes and returned none of them.
    | `:active` with a live coordinator | The ordinary case | `settled` or `unsettled`, by whether its cancellation finished inside the budget | Only when `unsettled` |
    | `:active` whose coordinator is already dead | Its `DOWN` handler releases the dispatcher fence and **leaves the entry** (`control.ex:805-826`), which is right for residency and misleading for a drain | `absent` | **Yes** — an old transaction from that dead coordinator is precisely the case the fence exists for |
    | `:unavailable` | The status `Control` writes when an acquisition it was waiting on failed or its coordinator went down mid-acquisition (`control.ex:620`, `:818`, `:862`, `:1150`) | `absent` | **Yes**, for the same reason: there is no coordinator, and there may be a transaction |
-   | `:acquiring` | The status while an owner is being started (`control.ex:569`, `:1030`, `:1189`) | **Cannot be reached after the cut** — see below — and, if one is found, `unsettled` | **Yes** |
+   | `:acquiring` | The status while an owner is being started (`control.ex:569`, `:1030`, `:1189`) | `unsettled` | **Yes** |
    | No entry | The session is dormant in this daemon, or belongs to no daemon at all | In no list; quiesce enumerates `Control` and nothing else | No |
 
-   **`:acquiring` cannot exist once the cut has answered**, and the reason is
-   the cut rather than an assumption about timing. Only `session.create` and
-   `session.resume` put an entry into that status, both of them start a
-   coordinator inside the call, and both are **ticketed**; the cut answers only
-   when every ticket has **settled**, so no create and no resume is in flight
-   when quiesce begins. The daemon is the only host on this runtime, so there
-   is no other caller to have started one. It is nonetheless given a row —
-   treated as `unsettled` and fenced — because a classification that omits a
-   status the code can write is a classification a reviewer cannot check, and
-   fencing is the safe answer for a session whose ownership may be moving.
+   **`:acquiring` is reachable, and an earlier revision called it unreachable.**
+   That revision's argument was the cut: only `session.create` and
+   `session.resume` write that status, both start a coordinator inside the
+   call, both are ticketed, and the cut waited for every ticket to settle — so
+   none could be in flight. The argument died with the phase split. Phase 1b
+   waits for the admitted tickets and then **proceeds at its bound**, and a
+   resume whose replay is paging a long history is exactly the ticket most
+   likely to still be running when it does. So an `:acquiring` entry is an
+   ordinary outcome of a stop that fell back on its bound, not a defect.
+
+   It is classified `unsettled` and **fenced**, which is the safe answer and
+   also the right one: the session's ownership is mid-advance, so either the
+   owner transaction commits — and the fence, reading a head that has moved,
+   is superseded and says so — or it does not, and the fence moves the epoch
+   under a candidate that will then be refused. Both are decided outcomes.
+   Quiesce admits no abort for it, because there is no ready coordinator to
+   admit one.
 
    **Where "reports" lands, since a list in a return value is not a surface.**
    The daemon has two places to put what quiesce answers, and it uses both:
@@ -3878,7 +3965,10 @@ what `Loopex.create_session/3` forwards to a released embedded caller
 (`loopex.ex:87-95`), which is a compatibility break bought for a daemon's
 bookkeeping. Direct code cannot supply
 them, because the only alternative is inferring the answer from side effects,
-which is a race. **One bounded `quiesce/1`** — which unifies nothing today and says so:
+which is a race. **One bounded `quiesce/1`, and the one coordinator change it needs** — the
+admit-and-pause split and the non-retrying drained commit, which are two
+halves of one clause rather than two changes, and neither of which is
+reachable from outside a drain. It unifies nothing today and says so:
 its only caller is the daemon's orderly stop, and the app-server host does not
 drain by hand, because `LoopexComposition.with_runtime/2` brackets a runtime
 that lives and dies with one client's stdin and has nothing to drain
@@ -3946,14 +4036,15 @@ line; M5 introduces none of its own.
 | Socket path bound, over `<root>/daemon/daemon.sock` | the platform's usable `sun_path`, one byte less than the structure because of the terminator: at most 103 bytes on Darwin and 107 on Linux, derived and tested per platform rather than assumed, refused at start as `socket_path_too_long` | ADR 0032 |
 | Protocol frame ceiling on the wire | unchanged from ADR 0023 | ADR 0032 |
 | Cleanup grace | an integer of 1 or more, refusing `0` with `cleanup_grace_invalid`, because core's `cancellation_bounds/1` admits `grace_ms >= 1` (`apps/loopex/lib/loopex/executor.ex:456`) | This plan, against core's existing validation |
-| Phase 1, the admission cut | **5_000 ms**, the teardown number reused; an unanswered cut becomes the `relay_lost` fail-stop | This plan |
-| Phase 2, abort admission | a fixed **60 s** — two sequential Store calls at the adapter's own 30 s `@call_timeout`, the admission waiting out at most one transaction already in the coordinator's serial lane and then making its own; one phase for every session, because they are admitted concurrently | Core, against `apps/loopex_store_local/lib/loopex/store/local.ex:65`, `:111-113` |
+| Phase 1a, closing admissions | **5_000 ms**, the teardown number reused; it bounds the relay's answer to a state change, not any work, and an unanswered close becomes the `relay_lost` fail-stop | This plan |
+| Phase 1b, settling the admitted | **180 s** — six sequential Store calls, a fresh `session.create` being the deepest ticket kind whose depth is a constant; the stop **proceeds** at this bound rather than waiting further | This plan, counted from `control.ex:960` and `session_coordinator.ex:1302-1309`, `:1338`, `:1363`, `:1397-1400`, `:1407` |
+| Phase 2, abort admission | a fixed **90 s** — three sequential Store calls at the adapter's own 30 s `@call_timeout`: the two of a transaction already in the coordinator's serial lane, which retries a `commit_unknown` once, then the drain's own admission, which does not; one phase for every session, because they are admitted concurrently | Core, against `apps/loopex_store_local/lib/loopex/store/local.ex:65`, `:111-113` and `session_coordinator.ex:1752-1768` |
 | Phase 3, the drain budget | `max` over drained sessions of `cancellation_bounds(g_i).cli_backstop_ms`, returned as `budget_ms` | Derived from `apps/loopex/lib/loopex/executor.ex:456-474`; no number chosen |
 | Phase 4, the fence | a fixed **90 s** — three sequential Store calls at 30 s: the head read, the `advance_owner`, and at most one `transaction_status` query; concurrent across sessions, and no retries | Core, against `local.ex:65`, `:111-113`, `:116-122`, `:130-132` |
 | Phase 5, coordinator termination | **5_000 ms**, the coordinator's own `shutdown` value (`apps/loopex/lib/loopex/runtime/session_coordinator.ex:134-142`) | Core's existing child specification |
 | Phase 6, non-Store teardown | **5_000 ms**, one absolute deadline from the instant `quiesce/1` returns, covering the stop records, the connection and listener closes, the collective lease-owner sweep and every non-Store stop | This plan. Chosen, not derived: nothing under it waits on a session, an effect or a filesystem sync, so it is a ceiling for actions that are each milliseconds |
 | Phase 7, the Store stop | a fixed 30 s, the Store's own `@call_timeout` (`apps/loopex_store_local/lib/loopex/store/local.ex:65`), independent of any grace; the usual release takes milliseconds | This plan, against the Store's existing bound |
-| Maximum graceful stop | `budget_ms` + **195 s**, the sum of the six fixed phases above | This plan, as the sum of its parts |
+| Maximum graceful stop | `budget_ms` + **405 s**, the sum of the seven fixed phases above; a worst case built from the adapter's wedged-filesystem ceiling, not the cost of an ordinary stop | This plan, as the sum of its parts |
 | Wait slice | 60_000 ms, so no `receive … after` argument approaches the BEAM's 2^32-1 limit, probed at both pairs | This plan; the limit is the VM's |
 | Lease term | 30 seconds | ADR 0033 |
 | Lease renewal interval for the reference clients | 10 seconds | ADR 0033 |
