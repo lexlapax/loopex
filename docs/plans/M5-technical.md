@@ -1202,7 +1202,7 @@ readiness *after* a stop it has already been told about, or after a component
 it depends on has already died — and then read both and shut down, having
 announced itself ready in between.
 
-Three rules, each narrow:
+Four rules, each narrow:
 
 - **The owner is started unlinked and monitored.** The escript command process
   calls **`GenServer.start/3`, not `start_link/3`**, and monitors the owner
@@ -1214,6 +1214,47 @@ Three rules, each narrow:
   `DOWN`, and gives the operating system an exit status — which is the whole
   of its job. The inventory row says unlinked-and-monitored, and now the
   design does too.
+- **Startup does not run in `init/1`, because a monitor taken after
+  `GenServer.start/3` returns cannot see a death inside it.** That call
+  returns only once `init/1` has answered (it waits for the started process's
+  acknowledgement), so an owner that took the marker, bound the socket and
+  then died *in `init/1`* would leave the command process with no owner to
+  monitor and a `{:error, reason}` that says nothing about what was acquired
+  before the failure. Every acquisition would sit inside the one window the
+  monitor cannot cover.
+
+  So `init/1` acquires **nothing**. It sets `trap_exit`, builds the state from
+  the already-validated inputs, and returns
+  `{:ok, state, {:continue, :start}}`; the seven steps run in
+  `handle_continue(:start, state)`. That is enough to make `GenServer.start/3`
+  return before the first step, and the ordering is then explicit rather than
+  incidental:
+
+  | # | Who | What |
+  | --- | --- | --- |
+  | 1 | Command process | `GenServer.start(Owner, args)` |
+  | 2 | Owner | `init/1` returns `{:ok, state, {:continue, :start}}`, having acquired nothing |
+  | 3 | Command process | `Process.monitor(owner)` |
+  | 4 | Command process | sends the owner `:go` |
+  | 5 | Owner | `handle_continue/2` **waits for `:go`** before step 1 of the startup sequence, then runs the seven steps |
+
+  **Step 5's wait is what makes the monitor provably installed**, and it is
+  why the continue does not simply begin. Without it the ordering would rest
+  on the command process winning a race it has no reason to win: the owner is
+  runnable the instant `init/1` returns, and a scheduler is free to run its
+  continue before the caller's next line. The `:go` message turns a hope about
+  scheduling into a happens-before: the owner cannot pass step 5 until a
+  message exists, and the message does not exist until the monitor does. The
+  wait is bounded by the same phase-6 number every other wait uses, and a
+  `:go` that never arrives — a command process that died between steps 2 and
+  4 — ends the owner through the reverse cleanup with nothing acquired, which
+  is correct, because there is nobody left to report a daemon to.
+
+  The alternative was to keep the sequence in `init/1` and have the owner
+  monitor the *command process* instead. It is rejected: it inverts the
+  reporting direction, gives the operating system no exit status when the
+  owner is the thing that dies, and still leaves the `{:error, reason}` return
+  as the only account of an acquisition that already happened.
 - **The owner drains and checks before every acquisition it performs itself.**
   Before taking the marker, before calling the composition function, before
   binding the socket and before printing the readiness line, the owner reads
@@ -3038,6 +3079,20 @@ children, a pid's liveness, a socket's EOF, or the daemon's own `stderr`.
   the command process's monitor doing it. A second case kills the owner and
   *then* sends `SIGTERM`, asserting the same class by whichever route wins, so
   the two cannot both fail silently.
+
+  **Two more cases straddle the marker, and they are what the `{:continue,
+  :start}` ordering exists for.** The owner is killed **before** it acquires
+  the marker and again **after** it has acquired it but before the socket is
+  bound. Both assert the same two answers on the same two surfaces: the
+  process exits non-zero with `owner_lost` on `stderr`, and a following daemon
+  starts on that root — with nothing to recover in the first case, and with
+  the stale marker its verified recovery reclaims in the second. A design that
+  ran the sequence inside `init/1` fails the first of them outright, because
+  `GenServer.start/3` has not returned yet and no monitor exists to fire. A
+  third asserts the happens-before directly: the command process is made to
+  delay its `:go`, and the case asserts the marker is **not** taken until the
+  message is sent, which is what proves the monitor precedes the first
+  irreversible acquisition rather than merely usually preceding it.
 - **Startup is interruptible, including inside the composition call.** A
   `SIGTERM` is delivered mid-startup at the step before the marker is taken,
   again at the step before the socket is bound, and again **between two edges
@@ -3250,7 +3305,7 @@ individually would make this table a copy that rots.
 
 | Process | Started by | Linked to | Stopped by | Its death |
 | --- | --- | --- | --- | --- |
-| **Daemon owner** | The `loopex daemon` command process, `GenServer.start/3` — **unlinked**, monitored immediately | Nothing; the command process holds a monitor | Itself; it halts the VM | The command process halts non-zero with `owner_lost`; the signal handler's backstop is the second route |
+| **Daemon owner** | The `loopex daemon` command process, `GenServer.start/3` — **unlinked**, monitored immediately, with `init/1` acquiring nothing and the startup sequence running in `handle_continue(:start, …)` behind a `:go` the caller sends after the monitor | Nothing; the command process holds a monitor | Itself; it halts the VM | The command process halts non-zero with `owner_lost`; the signal handler's backstop is the second route |
 | Credential routing **registry** (ADR 0034) | Daemon owner, first | Daemon owner | Orderly step 6 | `registry_lost`, daemon-fatal |
 | Credential **custody process** (ADR 0034), one for the one composed model configuration | Daemon owner, second | Daemon owner | Orderly step 6 | `custody_lost`, daemon-fatal |
 | **Tracing capability** (ADR 0034) | Daemon owner, third, before composition | Daemon owner | Orderly step 6 | `capability_lost`, daemon-fatal: a sender that cannot confirm its trace exclusion refuses rather than resolves, so every model invocation would fail for a reason no client can fix |
