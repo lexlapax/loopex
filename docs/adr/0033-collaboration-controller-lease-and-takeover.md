@@ -90,7 +90,8 @@ requires the holder connection, so durability could only preserve a counter
 nothing needs. A counter-based epoch scoped to the daemon incarnation was
 rejected on 2026-09-14 because a lease-owner restart under the same
 incarnation would mint values already issued. Restarting a failed lease owner
-beneath live sockets was rejected on 2026-09-20: the owner holds the session's
+beneath live sockets was rejected on 2026-09-20, on an independent review's
+finding: the owner holds the session's
 in-flight admission set, a takeover waits on that set being empty, and a
 restarted owner cannot know what it has forgotten. Retaining the set in a
 survivor moves the same window one process up; making it survivable at all

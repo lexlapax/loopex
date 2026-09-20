@@ -142,7 +142,7 @@ was rejected the same day because an observer without filesystem access to the
 root would have no way to discover sessions. Rebuilding an authoritative
 inventory by enumerating the Store, and writing the inventory entry inside the
 session-creating transaction so it is crash-atomic with the commit, were both
-rejected on 2026-09-19: each is a change to the Store port or to the local
+rejected on 2026-09-20: each is a change to the Store port or to the local
 adapter's transaction shape, and both are exactly what M5's selection of the
 unchanged adapter declines to buy. Activating every recorded session at
 daemon start was rejected the same day: the local adapter replays a full log

@@ -40,8 +40,8 @@ epoch does, which is which client may drive.
 One owner process per session serializes every lease read, grant, renewal,
 release and expiry transition with that session's mutation-admission handoff,
 so a takeover cannot pass a mutation whose holder check has already started
-but whose core admission is unresolved; that admission first resolves or
-remains fenced.
+but whose core admission is unresolved; that admission first resolves, or the
+daemon's own holder-and-epoch check refuses it before it ever reaches core.
 
 **A lease owner's failure is fatal to that daemon instance, deliberately.**
 The owner holds the session's in-flight admission set in its own memory, and
@@ -49,7 +49,8 @@ that set is the whole basis of the expiry rule below: a takeover is granted
 only when it is empty. An owner that dies takes the set with it, so a
 restarted owner cannot know whether an admission is still on its way into
 core. An earlier draft had the daemon restart the owner and carry on with its
-sockets intact; that is withdrawn on 2026-09-20, because a successor acquire
+sockets intact; that was withdrawn on 2026-09-20, on an independent review's
+finding, because a successor acquire
 could then be granted while a forgotten admission was still able to settle.
 
 So the session-owner tree is supervised `one_for_all` up to the listener: an
@@ -60,17 +61,13 @@ no connection survives to make one.
 
 That rule stands on its own, and this pair does not lean on core to help it.
 An earlier draft said core would fence the forgotten admission by epoch
-regardless, making the daemon-fatal rule defence in depth. That is wrong and
-is withdrawn on the maintainer's decision of 2026-09-20: **core knows nothing
-of the writer epoch.** The epoch is a daemon-owned value on a daemon-owned
-wire, checked by the daemon before it forwards anything, and core never sees
-it. What core does fence is its own: the Store's `{owner_epoch,
-owner_incarnation_id}` pair under ADR 0006, runtime control's post-commit
-fence admitting the exact generation and owner pair, and command identity for
-idempotency. Those protect against a stale *coordinator owner*, not against a
-stale *controller*, which is exactly the gap this ADR exists to fill. So the
-only thing preventing a successor's grant from racing a forgotten admission
-is the daemon rule above, and it has to be absolute for that reason.
+regardless, making the daemon-fatal rule defence in depth. The maintainer
+withdrew that on 2026-09-20 because it was not true: core never sees the
+writer epoch, as the lease record above sets out, and the fences core does
+have protect against a stale *coordinator owner* rather than a stale
+*controller* — which is the gap this ADR exists to fill. So the daemon rule
+is the only thing preventing a successor's grant from racing a forgotten
+admission, and it has to be absolute for that reason.
 
 Retaining the in-flight set in a survivor was the alternative and was
 rejected: whichever process held it would then be the process whose failure

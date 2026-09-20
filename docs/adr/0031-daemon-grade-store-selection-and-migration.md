@@ -62,8 +62,8 @@ makes the durable-service claim truthful without adding an engine.
 successor milestone's engine candidates, its experiment procedure and its
 migration, then said that half bound nothing — while its companion said
 acceptance binds the pair. Those cannot both be true, and an ADR that carries
-a non-binding half is not one decision. The successor half is withdrawn on
-2026-09-19. A daemon-grade adapter behind the unchanged private Store ports
+a non-binding half is not one decision. The successor half was withdrawn in
+this pair's revision of 2026-09-20, on an independent review's finding. A daemon-grade adapter behind the unchanged private Store ports
 remains an open question, and the questions it must answer — which engine, on
 what measured evidence, with what migration, what interrupted-import recovery,
 what backup and restore, and which binary is the oldest reader of the new root
@@ -82,7 +82,7 @@ inside M5 was rejected because it doubles the milestone's evidence — a new
 engine, its fault matrix, its migration and its rollback — without adding a
 proved capability to the durable-service question M5 exists to answer.
 Deciding the successor's engine and migration procedure here, ahead of the
-experiments that would inform them, was rejected on 2026-09-19: a decision
+experiments that would inform them, was rejected on 2026-09-20: a decision
 recorded before its evidence is a preference, and one that has to call itself
 non-binding to be tolerable is not a decision at all.
 Raising or removing the local log's 256 MiB capacity to postpone retirement
@@ -90,7 +90,7 @@ was rejected because a silently growing log trades a truthful refusal for an
 unbounded replay at open. Changing the local adapter so that a capacity
 refusal is definite and survivable — answered as a plain refusal without
 terminating the Store, so a daemon could keep its observers attached and stop
-in an orderly way — was rejected for M5 on 2026-09-19. It is a change to the
+in an orderly way — was rejected for M5 on 2026-09-20. It is a change to the
 Store's own behaviour at the one point where that behaviour is most
 load-bearing: today every append error is commit-ambiguous, and separating one
 error class from the rest means proving, through the shared conformance suite

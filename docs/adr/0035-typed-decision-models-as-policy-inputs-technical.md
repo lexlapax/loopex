@@ -10,7 +10,7 @@ Concept: [Context and decision](0035-typed-decision-models-as-policy-inputs.md#c
 
 ### What the model is, exactly
 
-Everything below was read from `req_llm` 1.24.0's own source on 2026-09-19,
+Everything below was read from `req_llm` 1.24.0's own source on 2026-09-20,
 not from a description of it.
 
 - `ReqLLM.Evaluation.evaluate/4`, reached as `ReqLLM.evaluate/4`, takes a model
@@ -118,7 +118,8 @@ order, because each earlier one is the cheaper proof of the same invariant.
 
 An earlier draft admitted one piece early: an offline scorer in M5's release
 check that would call the real endpoint to prove the `1.24.0` API and take the
-first latency and price measurement. That is withdrawn on 2026-09-20.
+first latency and price measurement. The maintainer withdrew it on
+2026-09-20.
 
 The reason is not caution about the scorer itself, which really would have
 touched no live path. It is that the release check is a check M5 is *required*

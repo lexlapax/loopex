@@ -4,7 +4,7 @@
 Technical depth: [Typed decision model mechanics](0035-typed-decision-models-as-policy-inputs-technical.md#technical-depth).
 
 - **Status:** Proposed
-- **Date:** 2026-09-19
+- **Date:** 2026-09-20
 - **Decision owner:** Maintainer
 - **Supersedes:** nothing; it refines where a host may get the *inputs* to the
   ADR 0009 policy decision, and changes nothing about who makes it
