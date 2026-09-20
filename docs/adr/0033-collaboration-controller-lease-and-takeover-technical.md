@@ -37,11 +37,22 @@ idempotency. Those remain the commit-authority fence, and they answer a
 different question — which coordinator owner may commit — than the writer
 epoch does, which is which client may drive.
 
-One owner process per session serializes every lease read, grant, renewal,
-release and expiry transition with that session's mutation-admission handoff,
-so a takeover cannot pass a mutation whose holder check has already started
-but whose core admission is unresolved; that admission first resolves, or the
-daemon's own holder-and-epoch check refuses it before it ever reaches core.
+**One lease-owner process per daemon**, holding **one lease record per
+session**, serializes every lease read, grant, renewal, release and expiry
+transition with that session's mutation-admission handoff, so a takeover
+cannot pass a mutation whose holder check has already started but whose core
+admission is unresolved; that admission first resolves, or the daemon's own
+holder-and-epoch check refuses it before it ever reaches core.
+
+The serialization a session needs is against **its own** lease transitions,
+and one process serializes each session's independently by holding each
+session's record and in-flight set separately; sessions do not contend for
+anything but that process's mailbox. An earlier revision required a process
+per session. That is withdrawn on the maintainer's decision: it made the
+daemon's process population dynamic, needing a retirement rule, a per-session
+fatal semantics and a place for the population to be bounded, none of which
+the lease itself asks for. **The lease is data; the process count is
+topology.**
 
 **A lease owner's failure is fatal to that daemon instance, deliberately.**
 The owner holds the session's in-flight admission set in its own memory, and
@@ -53,11 +64,12 @@ sockets intact; that was withdrawn on 2026-09-20, on an independent review's
 finding, because a successor acquire
 could then be granted while a forgotten admission was still able to settle.
 
-So a lease owner's failure is fatal to the daemon instance, and the daemon's
+So the lease owner's failure is fatal to the daemon instance, and the daemon's
 own structure supplies that without special-case code: the lease owner is one
-of four processes the daemon's owner process `start_link`s, the owner traps
-exits, and its `{:EXIT, pid, reason}` clause treats **any** linked exit as
-fatal. There are no restarts to configure and no strategy to get wrong. The
+of the fixed set of processes the daemon's owner process `start_link`s, the
+owner traps exits, and its `{:EXIT, pid, reason}` clause classifies an exit it
+did not ask for — which is every exit outside its own stop sequence — as
+fatal, mapping this pid to `supervision_fault`. There are no restarts to configure and no strategy to get wrong. The
 owner classifies the exit as `fatal:supervision_fault`, has the listener tell
 every client, closes them, unlinks the socket and exits non-zero; the daemon
 comes back with no lease anywhere, no connection and no session activated. No
@@ -162,7 +174,7 @@ the local store's writer marker, unchanged.
 ### Expiry against an in-flight admission
 
 Two rules above meet at the deadline and their order has to be stated, not
-left to the implementation. The per-session owner serializes a lease
+left to the implementation. The lease owner serializes a lease
 transition against a mutation whose holder check has already started, so a
 takeover cannot pass an admission core has not yet resolved; and takeover is
 admitted at expiry with no grace. The linearization rule is:
@@ -233,7 +245,7 @@ core across the deadline settling under its own lease while the eligible
 takeover waits and is granted only after it resolves, the holder's next
 mutation refused at the deadline, the acquiring request refusing with
 `control_pending` when its own deadline elapses first, the holder's connection
-disconnecting while its mutation is in flight, and the per-session lease owner
+disconnecting while its mutation is in flight, and the lease owner
 failing while a mutation is in flight — in every case exactly one of settle or
 refuse, never both, and no epoch reused; takeover only after release or expiry
 with a fresh epoch minted before the successor's first command; the three ways
@@ -243,7 +255,7 @@ early and the transport cannot tell the other two apart — an explicit
 closed client and a killed client both wait for expiry, with a takeover
 refused before the deadline and granted after it in both cases; a controller
 killed mid-run fenced after takeover, its late commands refused; a
-per-session lease owner killed while a mutation is in flight taking the
+lease owner killed while a mutation is in flight taking the
 listener, every connection and the daemon down with it, after which the
 restarted daemon holds no lease, has activated nothing, and the previous
 holder's delayed command is refused on both the holder and the epoch check;
