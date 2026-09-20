@@ -991,13 +991,16 @@ carries two plain fields beside the session ID:**
 | `disposition` | `:fresh` \| `:historical` | Charge an activation for `:fresh`; charge nothing for `:historical` |
 | `control_entry` | `:active` \| `:acquiring` \| `:dormant` | Repair the directory entry and index row without activating when `:dormant`; leave both alone when `:active`, since an activated session already recorded them |
 
-**`control_entry` is three values over three statuses plus no-entry, and an
+**`control_entry` is three values over four statuses plus no-entry, and an
 earlier revision argued one of them away.** `Control` holds `:active`,
-`:acquiring` and `:unavailable`, and a session may have no entry at all
-(`control.ex:569`, `:620`, `:818`, `:862`, `:1030`, `:1150`, `:1189`). The
+`:acquiring`, `:unavailable` and `:awaiting_owner_barrier`, and a session may
+have no entry at all
+(`control.ex:569`, `:620`, `:818`, `:835`, `:862`, `:1030`, `:1150`, `:1189`).
+The
 mapping is `:active` → **`:active`**; `:acquiring` → **`:acquiring`**;
-`:unavailable` and no-entry → **`:dormant`**, there being no coordinator
-either way.
+`:unavailable`, `:awaiting_owner_barrier` and no-entry → **`:dormant`**,
+there being no live coordinator in any of the three — the barrier status
+meaning the coordinator has already died.
 
 That revision said `:acquiring` "is never observed by the caller of a
 completed create or resume", reasoning that the status exists only while that
@@ -2382,8 +2385,9 @@ are these:
   where `resolve_transaction/2` re-presents on `commit_unknown`
   (`:1752-1768`).
 
-  **A ready callback commits twice, and an earlier revision said once.** That
-  revision argued that a committing callback ends by sending itself
+  **A ready callback commits three times, and two earlier revisions said
+  once and then twice.** The first
+  argued that a committing callback ends by sending itself
   `:advance_work` and so cannot continue — which is true of
   `apply_transaction/3`, where that send sits (`:1720`), and of nothing else:
   the module has **thirteen** such sends (`:465`, `:627`, `:1425`, `:1720`,
@@ -2445,8 +2449,10 @@ are these:
   later change fails against them rather than around them: the rule that
   quiesce admits only into `:active`, which keeps the acquisition callback out
   of the wait; and this enumeration, that no ready callback reaches
-  `commit_internal_result/2` more than twice. The executed-count witness below
-  is what holds the second to a number.
+  `commit_internal_result/2` more than three times. The executed-count witness
+  below is what holds the second to a number — and it has now been wrong twice
+  by reading and right once by execution, which is the whole argument for
+  requiring the witness.
 - **Phase 5 is three at worst.** A head read, then the `advance_owner`, then,
   only where that answers `commit_unknown`, **one** `transaction_status` query.
 - **And the drain retries nothing, which is a change to the coordinator rather
