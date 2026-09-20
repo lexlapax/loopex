@@ -196,8 +196,8 @@ Empty governance slots may be filled only from an explicit disposition; a
 completed governance row is a record of a decision that was made. A conflict
 between the pair blocks acceptance and closure.
 
-Every Concept plan contains a `## Governance Records` table outside its
-envelope:
+Every Concept plan contains a `## Governance Records` table outside its other
+sections:
 
 | Decision | Authority | Authority evidence | Bound bytes |
 | --- | --- | --- | --- |
@@ -218,147 +218,16 @@ it may not be supplied or inferred. An independent reviewer reads the exact
 candidate before either transition, and the transition itself changes only the
 governance row, the disposition it names, and the derived status blocks.
 
-The exact skeletons are below. Neither file has an H1 because the filename and
-register own identity. Replace `<name>` with the registered milestone name.
-
-Concept plan, `docs/plans/<name>.md`:
-
-```markdown
-<a id="concept"></a>
-## Concept
-
-Technical depth: [Milestone mechanics](<name>-technical.md#technical-depth).
-
-<!-- loopex:plan-concept-envelope:start -->
-## Normative Concept Envelope
-
-<a id="concept-plan-purpose"></a>
-### Purpose
-
-<one bounded purpose>
-
-<a id="concept-plan-outcomes"></a>
-### Outcomes
-
-| # | Outcome | Evidence class | Verification |
-| --- | --- | --- | --- |
-| 1 | <observable outcome> | <required evidence> | <exact test or command> |
-
-Technical depth: [Evidence obligations and mapping](<name>-technical.md#technical-plan-evidence).
-
-<a id="concept-plan-scope"></a>
-### Scope
-
-<included work and observable constraints, including compatibility or rollout expectations>
-
-Technical depth: [Prerequisites and acceptance points](<name>-technical.md#technical-plan-prerequisites).
-
-Technical depth: [Ownership and rejoin barriers](<name>-technical.md#technical-plan-ownership).
-
-Technical depth: [Packaging mechanics](<name>-technical.md#technical-plan-packaging).
-
-Technical depth: [Proportional minimalism budget](<name>-technical.md#technical-plan-minimalism).
-
-Technical depth: [Compatibility mechanics](<name>-technical.md#technical-plan-compatibility).
-
-Technical depth: [Migration and rollback](<name>-technical.md#technical-plan-migration).
-
-<a id="concept-plan-non-goals"></a>
-### Non-Goals
-
-<explicit exclusions and any explicitly accepted deferrals>
-
-Technical depth: [Deferral acceptance points](<name>-technical.md#technical-plan-prerequisites).
-<!-- loopex:plan-concept-envelope:end -->
-
-## Workstreams
-
-<mutable decomposition that respects both envelopes>
-
-## Progress and Evidence
-
-| # | State | Evidence |
-| --- | --- | --- |
-| 1 | Open | — |
-
-## Governance Records
-
-| Decision | Authority | Authority evidence | Bound bytes |
-| --- | --- | --- | --- |
-| Acceptance | — | — | — |
-| Closure | — | — | — |
-```
-
-Technical depth plan, `docs/plans/<name>-technical.md`:
-
-```markdown
-<a id="technical-depth"></a>
-## Technical depth
-
-Concept: [Milestone purpose and outcomes](<name>.md#concept).
-
-<!-- loopex:plan-technical-envelope:start -->
-## Normative Technical Envelope
-
-<a id="technical-plan-prerequisites"></a>
-### Prerequisites and Acceptance Points
-
-Concept: [Milestone scope](<name>.md#concept-plan-scope).
-
-Concept: [Milestone non-goals](<name>.md#concept-plan-non-goals).
-
-<accepted decisions and unresolved decisions with their stop points>
-
-<a id="technical-plan-ownership"></a>
-### Ownership, Decision Owners, and Rejoin Barriers
-
-Concept: [Milestone scope](<name>.md#concept-plan-scope).
-
-<ownership, decision authority, and rejoin conditions>
-
-<a id="technical-plan-evidence"></a>
-### Evidence Obligations and Mapping
-
-Concept: [Milestone outcomes](<name>.md#concept-plan-outcomes).
-
-<cross-cutting evidence obligations and exact outcome mapping>
-
-<a id="technical-plan-compatibility"></a>
-### Compatibility
-
-Concept: [Milestone scope](<name>.md#concept-plan-scope).
-
-<compatibility effect or none>
-
-<a id="technical-plan-migration"></a>
-### Migration and Rollback
-
-Concept: [Milestone scope](<name>.md#concept-plan-scope).
-
-<migration and rollback obligations>
-
-<a id="technical-plan-packaging"></a>
-### Packaging
-
-Concept: [Milestone scope](<name>.md#concept-plan-scope).
-
-<packaging effect or none>
-
-<a id="technical-plan-minimalism"></a>
-### Proportional Minimalism Budget
-
-Concept: [Milestone scope](<name>.md#concept-plan-scope).
-
-<justified abstractions and scope-specific ceilings or negative constraints>
-<!-- loopex:plan-technical-envelope:end -->
-```
-
-Both marked normative envelopes record what the maintainer accepted: purpose,
-outcomes, scope, and the constraints the work runs under. Workstreams, progress,
-resolved outcome state, and evidence links stay outside them and are updated as
-the work proceeds. Changing an accepted purpose, outcome, or scope is a new
-maintainer decision, recorded in the plan where the change lands; independent
-review decides whether the pair is clear, consistent, and adequate.
+The sections a plan pair carries, and what each states, are defined once in
+the [milestone guide](../developer/milestones-technical.md#technical-milestones-agree);
+this index does not repeat the skeleton. Neither file has an H1, because the
+filename and the register own identity, and the Concept file's `## Governance
+Records` table stays outside every other section. The `loopex:plan-*-envelope`
+markers and the `Normative ... Envelope` headings in the M0–M4 pairs belonged
+to the retired gate structure and are read as written in those records; a new
+pair does not carry them. Changing an accepted purpose, outcome, or scope is a
+new maintainer decision, recorded in the plan where the change lands;
+independent review decides whether the pair is clear, consistent, and adequate.
 
 Evidence links live in the Concept plan's Progress and Evidence table, and the
 Outcomes rows name how each outcome is verified. Do not add an evidence sidecar
