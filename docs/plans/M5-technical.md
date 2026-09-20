@@ -494,11 +494,21 @@ possible, so the common operator mistake costs nothing and leaves nothing
 behind; the ones that can only fail later are covered by the reverse-cleanup
 rule.
 
-A `--socket` override is constrained exactly as the default is: its parent
+A `--socket` override is constrained exactly as the default is — its parent
 directory must be owned by the daemon's user and mode `0700`, no component
 below the state root may be a symbolic link the daemon did not create, and the
-socket is created `0600` and verified after bind. An override does not buy a
-weaker rule; it only moves where the rule applies.
+socket is created `0600` and verified after bind — **and it must resolve
+inside the selected root's `daemon/` directory**. A path outside it is refused
+at startup with `invalid_socket_path`, before the marker is acquired.
+
+That last constraint is not tidiness. Socket ownership in this design is
+derived from the writer marker, and a marker is per state root: two daemons on
+two different roots hold two different markers and have no exclusion between
+them at all. An override that let them name one path would put two daemons
+with equal claim on one file, which no rule in this plan can adjudicate.
+Inside one root there is exactly one marker holder, so there is exactly one
+daemon entitled to bind or unlink. An override therefore moves where the rule
+applies, never which root it applies within.
 
 **Readiness.** Exactly one line on `stdout`, and nothing else on that stream.
 It is **one JSON object on one line**, not a space-separated phrase, because a
@@ -526,10 +536,22 @@ carry and this milestone does not grant.
 
 **Exit status.** `0` when an orderly shutdown completes, whatever the sessions
 were doing. Non-zero, with one reason line on `stderr`, for every fatal exit,
-naming its class rather than a stack: `store_writer_active`,
-`store_writer_unverifiable`, `store_log_too_large`, `socket_path_too_long`,
-`socket_permission_unverified`, `session_index_too_large`, `store_lost`, and
-`supervision_fault` for the daemon-fatal rules ADR 0032 and ADR 0033 define.
+naming its class rather than a stack. The classes are the fatal-class map's,
+in full, and this list is derived from it rather than summarising it:
+
+- **at startup**, before any socket exists: `store_writer_active`,
+  `store_writer_unverifiable`, `store_log_too_large`, `socket_path_too_long`,
+  `invalid_socket_path`, `socket_permission_unverified`,
+  `session_index_too_large`, and one class per missing or invalid composition
+  input;
+- **while running**, one per linked component: `store_lost`,
+  `store_capacity_exceeded`, `runtime_lost`, `transfers_lost`,
+  `workspace_lease_lost`, `executor_lost`, `registry_lost`, `custody_lost`,
+  `supervision_fault` for the lease owner — the daemon-fatal rule ADR 0033
+  defines — and `listener_lost`;
+- **from the signal handler**, `owner_lost`, the one class no component
+  produces: a signal arrived and the owner that would run the shutdown is not
+  there to receive it.
 
 #### How a session is created and driven over the socket
 
@@ -674,15 +696,45 @@ Outcome 1 requires that an orderly stop and an abrupt death both leave only
 what the journal proves. That is a claim about a sequence, so the sequence is
 written out rather than left implied by the words "foreground process".
 
-**Startup, in order.** Resolve root and socket path; open the Store and
-acquire the writer marker, with `recover_stale_writer: true` and the three
-holder outcomes ADR 0032 fixes; read the session directory and build the
-index, refusing at the recorded-entry bound; create the `0700` subdirectory
-and bind the `0600` socket, then read back and verify ownership and mode;
-begin accepting; print the readiness line. A failure at any step exits
-non-zero with that step's reason class and touches nothing after it — in
-particular, a daemon that does not hold the marker never reads, unlinks or
-binds the socket path.
+**Startup, in order.** The order is written against the seam that actually
+exists — one composition function that assembles every edge and ends with the
+runtime — rather than against a staged one the plan would have to invent:
+
+1. **Resolve root and socket path**, including the `--socket` constraint
+   below; a path outside the root's `daemon/` directory is refused here with
+   `invalid_socket_path`, before anything is acquired.
+2. **Install the signal handlers**, for the reason the signal section gives:
+   before this, the default handler would stop the VM outright and strand
+   whatever the next steps take.
+3. **Start the credential routing registry and the custody process.** They are
+   the daemon's own, as ADR 0034's host, and they must exist before the model
+   configuration that carries the registry handle and the token is built.
+4. **Call the composition function**, which opens the Store and acquires the
+   writer marker with `recover_stale_writer: true` and the three holder
+   outcomes ADR 0032 fixes, then assembles the artifact transfers owner where
+   enabled, the workspace lease, the executor and the runtime, and returns
+   every pid it linked. A daemon that does not hold the marker fails here and
+   never reads, unlinks or binds the socket path.
+5. **Read the session directory and build the index**, refusing at the
+   recorded-entry bound.
+6. **Start the lease owner.**
+7. **Create the `0700` subdirectory and bind the `0600` socket**, read back
+   and verify ownership and mode, and **capture the bound path's device and
+   inode** — the identity the fail-stop unlink rule below compares against.
+8. **Begin accepting**, then **print the readiness line**.
+
+A failure at any step exits non-zero with that step's reason class, after the
+reverse cleanup below, and touches nothing after it.
+
+**One cost of matching the seam is stated rather than hidden.** The directory
+and index read is step 5, after the composition function has already taken the
+workspace lease and started the executor, so a root whose directory exceeds
+the recorded-entry bound is now refused *after* those were taken and released
+rather than before they were taken. Nothing durable is at risk — the reverse
+cleanup below releases them in order — and the alternative was worse: a staged
+seam, two public composition functions where one suffices, so that the daemon
+could interleave its own step between them. That is rejected; the minimalism
+budget does not buy a second public function to reorder a refusal.
 
 **The daemon's top-level component is an owner process, not a supervisor.**
 That is a decision this section has to make before it can describe any
@@ -715,35 +767,51 @@ So `apps/loopex_daemon` has one top-level process, `Loopex.Daemon.Owner`, a
 `GenServer` that traps exits and holds the links itself — the same pattern
 `RuntimeOwner` already uses, for the same reason.
 
-**It links seven processes, not four.** An earlier draft of this section said
-four, having counted the components the daemon *thinks* about rather than the
-processes composition actually starts. Because the new composition function
-runs the edge-assembly chain in the caller's process, every `start_edge/2` in
-that chain links the owner — five of them — and the daemon adds two of its
-own:
+**It links nine processes when artifact transfers are enabled, eight when
+they are not.** Earlier drafts said four and then seven, each time having
+counted the components the daemon *thinks* about rather than the processes
+that actually exist. The set is fixed — nothing here is started dynamically,
+per session or on demand — and it is this:
 
-| # | Linked process | Where it comes from | Optional? |
+| Start order | Linked process | Where it comes from | Optional? |
 | --- | --- | --- | --- |
-| 1 | The Store adapter | `start_edge(Store.Local, …)` | no |
-| 2 | The artifact transfers owner | `start_edge(Transfers, …)` | **yes** — only when transfers are enabled |
-| 3 | The workspace lease | `start_edge(WorkspaceLease, …)` | no |
-| 4 | The local executor | `start_edge(Local, …)` | no |
-| 5 | The runtime root | `start_edge(Loopex, …)` | no |
-| 6 | The lease owner | The daemon's own, under ADR 0033 | no |
-| 7 | The listener | Bound and permission-checked last, so nothing accepts before the rest exists | no |
+| 1 | The credential **routing registry** | The daemon's own, as the host ADR 0034 names | no |
+| 2 | The credential **custody process** | The daemon's own, as the host ADR 0034 names | no |
+| 3 | The Store adapter | `start_edge(Store.Local, …)` | no |
+| 4 | The artifact transfers owner | `start_edge(Transfers, …)` | **yes** — only when transfers are enabled |
+| 5 | The workspace lease | `start_edge(WorkspaceLease, …)` | no |
+| 6 | The local executor | `start_edge(Local, …)` | no |
+| 7 | The runtime root | `start_edge(Loopex, …)` | no |
+| 8 | The lease owner | The daemon's own, under ADR 0033 — **one process for the daemon**, holding one lease record per session | no |
+| 9 | The listener | Bound and permission-checked last, so nothing accepts before the rest exists | no |
 
-The numbering is the composition's actual start order, not a tidied one: the
-Store first, then the artifact placement and the executor's own edges, and the
-runtime **last**, because it is the thing that depends on all of them. Reverse
-that and the shutdown order falls out — listener, lease owner, runtime,
-executor, workspace lease, transfers, Store — with the runtime stopping before
-the executor it drives and the Store stopping after everything that could
-still have written to it.
+**The registry and the custody process are first, and that is forced rather
+than chosen.** ADR 0034 makes the *host* own both, and for a daemon the host
+is the daemon. The runtime's model configuration carries the registry handle
+and the token in `options`, so both processes must exist before the
+composition function builds that configuration — which means before the
+runtime starts, and the composition function starts the runtime at the end of
+its own chain, so before the composition call itself.
+
+Order 3 to 7 is the composition's actual chain, not a tidied one: the Store
+first, then the artifact placement and the executor's own edges, and the
+runtime last within that chain, because it depends on all of them.
+
+**The stop order is the reverse, with one deliberate exception.** Reversed:
+listener, lease owner, runtime, executor, workspace lease, transfers, custody,
+registry — and then **the Store, last of all**, out of reverse order. The
+Store is moved to the end because its `terminate/2` releases the writer
+marker, and the marker must outlive every operation the owner can end;
+custody and registry hold nothing durable, so stopping them before it costs
+nothing and keeps the one exception to one line. The socket is unlinked
+earlier still, for the reason the socket-ownership rule below gives.
 
 The composition function therefore returns **every pid it linked**, not only
 the ones the daemon names in prose: a map carrying `store`, `runtime` (the
 `%Loopex.Runtime{}` struct), `runtime_supervisor`, `transfers` (absent when
-disabled), `workspace_lease` and `executor`. Returning the runtime supervisor
+disabled), `workspace_lease` and `executor`. The registry and custody pids are
+not in it: the daemon started them itself, before the call, and already holds
+them. Returning the runtime supervisor
 pid separately is a convenience rather than a necessity, and the plan says so
 plainly: the owner needs that pid to bound its stop, composition already holds
 it, so handing it over costs nothing. `%Loopex.Runtime{}`'s type is declared
@@ -753,10 +821,10 @@ runs no dialyzer, and `RuntimeOwner` itself already destructures the field, at
 not, and the real argument is the simpler one above.
 
 **There is no restart strategy, because there are no restarts.** Every one of
-the seven is `start_link`ed by the owner, and the owner's
+the nine is `start_link`ed by the owner, and the owner's
 `handle_info({:EXIT, pid, reason}, state)` clause is the failure rule. That
 clause is also the **reader** the fatal-class map needs — it matches the pid
-against the seven it holds, maps it to a component, classifies `reason`, and
+against the set it holds, maps it to a component, classifies `reason`, and
 has the class in hand before anything else happens. Nothing here is
 `rest_for_one`, `one_for_all` or `max_restarts`; those words belonged to the
 withdrawn design and are gone.
@@ -764,7 +832,7 @@ withdrawn design and are gone.
 **One field keeps that clause from firing on the owner's own work.** An
 earlier draft said "any linked exit, whatever the reason, is fatal", which is
 right for an exit the owner did not cause and wrong for every exit it does:
-an orderly stop terminates all seven deliberately, so that rule would classify
+an orderly stop terminates them all deliberately, so that rule would classify
 step 1 as `listener_lost`, step 2 as `supervision_fault`, step 3's clean
 return as `runtime_lost` — a daemon that could never exit `0`, and an
 idle-shutdown witness that could never pass.
@@ -782,122 +850,100 @@ reads:
   still `store_lost`, and must be: the daemon is going down either way, but
   the operator is owed the real reason rather than `operator_stop`.
 
-**The field is cleared by that exit, not by the call returning**, and the
-distinction is not pedantry. **A stop can end four ways**, and the owner
-catches three of them — and one of those shapes can mean two different
-things, which is why one branch carries a guard. Each branch returns a tag,
-so the wait that follows reads mechanically rather than by re-deriving what
-happened:
+**The owner never calls `GenServer.stop/3` itself**, and the reason is a
+result an earlier draft did not have. Every previous version of this section
+put the call in the owner and tried to name the shapes it must catch. That
+approach is abandoned here, because at a boundary the composition already
+admits the call does not raise an *exit* at all.
 
-| How the stop ends | What the owner sees | What it does | Tag |
-| --- | --- | --- | --- |
-| The component stopped | `:ok` | Wait for its exit | `:ok` |
-| It did not stop in time | `exit {:timeout, {GenServer, :stop, [pid, :normal, grace]}}` | `Process.alive?(pid)` first: alive, so `Process.exit(pid, :kill)`, then wait | `{:killed, pid}` |
-| It died **of the bare atom** `:timeout` | the same shape — the two are indistinguishable | `Process.alive?(pid)` is false, so nothing to kill; wait | `:already_gone` |
-| **It was already dead** | `exit {:noproc, {GenServer, :stop, [pid, :normal, grace]}}` | Nothing to kill; wait for the exit already queued | `:already_gone` |
-| **It died of its own reason while stopping** | `exit {reason, {GenServer, :stop, [pid, :normal, grace]}}` for any other `reason` | Nothing to kill; wait for the exit its own death queued | `:already_gone` |
+**The probe.** A trapping `GenServer` whose `terminate/2` takes longer than
+the grace, stopped with the grace the executor admits at its lower end
+— the local executor validates it as `is_integer(cleanup_grace_ms) and
+cleanup_grace_ms >= 0` (`executor.ex:897`), so `1` is a composable value, not
+a contrived one — run at both toolchain pairs:
 
-The last three rows share one tag because the owner's response to them is the
-same: it killed nothing, so the exit waiting for it is not its own doing.
+| grace | `terminate/2` | what `GenServer.stop/3` did | `Process.alive?` right after | the link exit the owner then got |
+| --- | --- | --- | --- | --- |
+| 1 ms | 50 ms | **raised `ErlangError`, `:timeout_value`** | `true` | `:normal` |
+| 1 ms | 0 ms | returned `:ok` | `false` | `:normal` |
+| 5000 ms | 50 ms | returned `:ok` | `false` | `:normal` |
+| 10 ms | 500 ms | exited `{:timeout, {GenServer, :stop, [pid, :normal, 10]}}` | `true` | `:normal` |
 
-The wait then has one rule with no case analysis left in it: **`:ok` and
-`{:killed, pid}` are the owner's own doing, so the exit is consumed;
-`:already_gone` is not, so the exit is classified** — first class wins — and
-either way `stopping` is cleared before the next component is named.
+Identical on 1.18.5-otp-27 and 1.20.3-otp-29. Two things in that table end the
+inline design:
 
-Those same three are what earlier drafts got wrong, and none of them is
-hypothetical. The owner does not read its mailbox while stopping, so a
-component that dies during the sequence has its `{:EXIT, …}` queued and unread
-when the sequence reaches its step, and `GenServer.stop/3` raises rather than
-returning:
+- **Row 1 is an error, not an exit.** `:proc_lib.stop/3` computes
+  `RemainingTimeout = Timeout - elapsed` after `sys:terminate/3` returns, and
+  at a grace that small the subtraction goes negative, so its `receive … after
+  RemainingTimeout` raises `error:timeout_value` (proc_lib.erl:1578-1604 at
+  the floor pair, :1591-1618 at the current pair). No `catch :exit` clause
+  matches an error; the owner would die mid-shutdown with no class, no status
+  and the socket left behind — the same failure the last two rounds fixed
+  twice, reached by a third route. Chasing shapes is what keeps failing.
+- **`Process.alive?` cannot tell success from failure here.** In rows 1 and 4
+  it answered `true`, and in both the component then exited `:normal` a
+  moment later — it had stopped correctly. A design that kills on "alive after
+  the call" turns a successful stop into a killed one; the guard an earlier
+  round added on exactly that test is withdrawn with the rest.
 
-- **Already dead.** `sys:terminate/3`'s `gen:call` fails with `noproc` and is
-  wrapped to `{noproc, {sys, terminate, _}}` (sys.erl:757-763 at the floor
-  pair, :756-762 at the current pair), which `:proc_lib.stop/3` catches and
-  re-raises as the bare `exit(noproc)` (proc_lib.erl:1586-1589 at the floor
-  pair, :1599-1601 at the current pair).
-- **Dying of its own reason during its own stop.** `sys:terminate/3` succeeds,
-  and `:proc_lib.stop/3` then waits on its monitor with `Reason` **bound from
-  the function head** to the reason it was asked for. A `DOWN` carrying
-  anything else falls to the second clause, `exit(Reason2)`
-  (proc_lib.erl:1597-1600 at the floor pair, :1612-1615 at the current pair).
-  So a component whose `terminate/2` fails, or that was already terminating
-  for its own reason, ends the stop with *its* reason rather than `:normal`.
-  Verified by execution at the current pair: a trapping `GenServer` whose
-  `terminate/2` exits `{:badthing, :during_cleanup}`, stopped under the
-  two-clause catch, killed the caller —
-  `** (exit) exited in: GenServer.stop(…) ** (EXIT) {:badthing,
-  :during_cleanup}` — and under the three-clause catch returned
-  `:already_gone` with `{:EXIT, pid, {:badthing, :during_cleanup}}` waiting in
-  the mailbox, which is exactly the exit the wait then classifies.
+**So the stop is driven from outside the owner, and the classification comes
+only from the exit the owner observes on its own link.** For each component:
 
-`GenServer.stop/3` wraps all three the same way (gen_server.ex:1076-1092 at
-the floor pair, :1131-1147 at the current pair), and a catch matching only
-`{:timeout, _}` matches none of them: the owner would die mid-shutdown with no
-class on `stderr`, no status and the socket never unlinked. The clause is
-therefore three, and the third is deliberately a catch-all, because the
-component's own reason is whatever the component had. The breadth costs
-nothing it should keep: the only other shape `GenServer.stop/3` raises is
-`{:calling_self, _}`, and the owner passes a child's pid, never its own.
-
-**The timeout branch is guarded, because one reason collides with it.** A
-component that dies with the *bare atom* `:timeout` during its own stop wraps
-to `{:timeout, {GenServer, :stop, [pid, :normal, grace]}}` — byte for byte
-what `:proc_lib.stop/3` raises when its own wait expires. Unguarded, the owner
-would kill an already-dead pid, tag the branch `{:killed, pid}`, and the wait
-would *consume* that component's exit as its own doing: the class lost and the
-daemon exiting `0` on a failure. So the branch asks `Process.alive?(pid)`
-first — alive means a real timeout and the kill is the only thing that ends
-the tree; dead means the component died of that atom, the exit is already
-queued, and the tag is `:already_gone` so the wait classifies it. No component
-composed today reaches this: their reasons are tuples — `{:store_capacity_exceeded, N}`,
-a `File.close` error, a crash tuple, `:shutdown` — and even a death by
-`{:timeout, {GenServer, :call, …}}` is tuple-headed and lands on the catch-all
-correctly. The guard is for the two components M5 itself writes, and the rule
-that goes with it is stated here so it is not discovered later: **no daemon
-component exits with the bare atom `:timeout`**; the lease owner and the
-listener report an expiry or a refusal as a tagged reason.
+1. The owner sets `stopping` to that component, as before.
+2. It `spawn_monitor`s a **helper** whose whole body is
+   `GenServer.stop(pid, :normal, grace)`. The helper is monitored, never
+   linked, so whatever that call raises, exits or returns dies with the helper
+   and never reaches the owner. The owner needs nothing from it — not its
+   return value, not its `DOWN` — and ignores both.
+3. The owner then waits on the link it already holds:
 
 ```elixir
-try do
-  GenServer.stop(pid, :normal, grace)
-  :ok
-catch
-  :exit, {:timeout, _} ->
-    if Process.alive?(pid) do
-      Process.exit(pid, :kill)
-      {:killed, pid}
-    else
-      :already_gone
+receive do
+  {:EXIT, ^pid, reason} -> reason
+after
+  grace ->
+    Process.exit(pid, :kill)
+
+    receive do
+      {:EXIT, ^pid, reason} -> reason
     end
-
-  :exit, {:noproc, _} ->
-    :already_gone
-
-  :exit, _other ->
-    :already_gone
 end
 ```
 
-After every one of them the owner waits for that exact pid's exit, in a
-selective receive. **That receive carries no `after`**, so it sits outside the
-composed cleanup grace and adds no second bound to reason about; it terminates
-in every row because the exit it waits for is guaranteed to exist — on `:ok`
-the component has terminated and the signal is in flight, on the timeout the
-owner's own kill guarantees one, and on both `:already_gone` rows it is
-already in the mailbox, which is how the owner found out. Whether the exit or
-the monitor's `DOWN` reached the owner first is not ordered for us, which is
-why the wait exists at all.
+4. **The reason decides, and nothing else does.** `:normal` and `:shutdown`
+   are the stop the owner asked for, so the exit is consumed. `:killed`
+   following the owner's own kill is likewise the owner's doing — nothing else
+   in the daemon holds these pids — and is consumed. **Every other reason is
+   classified**, first class wins, and that is true whether the component died
+   before the stop, during it, or of something unrelated at that moment.
 
-That is enough to lose nothing, without draining the mailbox before the halt,
-because of one invariant: **a component that dies during the sequence always
-has its own step still ahead of it.** A component whose step has passed is
-already stopped and cannot die a second time. So every unexpected death meets
-its own step, and meets it in one of three ways: classified before the
-sequence began, as `noproc` where it died earlier in the sequence, or as its
-own reason where it died during its own step. Other messages sit unread
-meanwhile and are read when the owner returns to its loop; nothing is skipped,
-only ordered.
+This is smaller than what it replaces and it is total. There is no shape to
+enumerate, because the owner reads the one thing the VM guarantees it: the
+exit reason on a link it holds. The four-row catch table of the previous
+revision, its `{:timeout, _}` / `{:noproc, _}` / catch-all clauses, its
+`Process.alive?` guard and its "no daemon component exits with the bare atom
+`:timeout`" rule are all withdrawn — they were an attempt to classify a
+component's fate from what a library function did to the caller, and row 1
+shows that is not derivable.
+
+**What bounds each step.** The outer `receive` carries `after grace`, the
+composed cleanup grace — one bound per component, the same number everywhere,
+and the same number the helper passed to `GenServer.stop/3`, so a component
+gets the grace once rather than twice. The inner `receive` after the kill
+carries no `after`, and needs none: `Process.exit(pid, :kill)` on a live
+process is unconditional, and on one already dead the exit the owner is
+waiting for is the one that made it dead, already queued. It is a wait for a
+signal that exists, not a second bound.
+
+**Other messages wait their turn.** Both receives are selective on one pid, so
+an exit from another component, a client's frame, or anything else stays in
+the mailbox and is read when the owner returns to its loop. Nothing is
+skipped, only ordered — and nothing is lost even so, because of one invariant:
+**a component that dies during the sequence always has its own step still
+ahead of it.** One whose step has passed is already stopped and cannot die a
+second time. So every unexpected death is met at its own step, by the wait
+above, as a reason that is neither `:normal`, `:shutdown` nor the owner's own
+`:killed` — and is classified there.
 
 Two consequences the sequences below depend on, stated here once:
 
@@ -908,19 +954,20 @@ Two consequences the sequences below depend on, stated here once:
   operator gets the reason the daemon went down for rather than the last thing
   that happened on the way out.
 - **"Already dead" is something the owner learns, not something it knows.**
-  A component is known dead when its exit has been consumed — classified
-  before the sequence began, or read by the wait after `:already_gone`. It is
-  never assumed from a class recorded earlier in the same sequence, because
-  the unread `{:EXIT, …}` and the `noproc` are how the owner finds out, and
-  both are handled rather than avoided. A component that died before the
-  sequence started and was classified then is simply skipped.
+  A component is known dead when its exit has been consumed or classified. A
+  component that died before the sequence began was classified then and its
+  step is skipped; one that dies during the sequence is found at its own step,
+  where the helper's call fails in whatever way it fails — which the owner
+  never sees — and the wait reads the exit that is already queued. The owner
+  never assumes a component is gone from a class recorded earlier in the same
+  sequence.
 
 One field, one place, and it is what makes the two paths distinguishable at
 all. Both sequences below rely on it, and the idle-shutdown witness asserts
 the consequence directly: **no fatal class is recorded during an orderly
 stop**.
 
-Two of the seven trap exits, and the plan states that as contract rather than
+Two of them trap exits, and the plan states that as contract rather than
 relying on it as luck: the **Store adapter** traps, so an owner that crashes
 still runs its `terminate/2` and returns the marker; the **local executor**
 traps, so an owner exit lets it complete its own cleanup rather than leaving
@@ -969,69 +1016,137 @@ than in taste: `Loopex.Store.Local` answers an append error with
 observes it, the store is gone and the marker is already released. A sequence
 that ends "then stop the Store" cannot run when the Store is what died.
 
+**Who may unlink the socket, and when that stops being this daemon.** The
+socket path is not the daemon's by possession; it is the daemon's *because it
+holds the writer marker*, which is what ADR 0032 already says — only the
+marker holder may unlink or bind. The consequence an earlier revision missed
+is that the permission **ends when the marker does**, and the marker is
+released by the Store's `terminate/2` (`local.ex:166`), which can happen
+before the daemon is finished.
+
+Two paths, two rules:
+
+- **Orderly stop: unlink while still holding the marker.** Step 1 does it,
+  immediately after the listener stops and long before the Store. No successor
+  can have acquired the marker yet, so the path being unlinked is certainly
+  this daemon's. Leaving the unlink to the end — where earlier revisions had
+  it — meant unlinking after the marker was already released, and a successor
+  that acquired it in that window would have had *its* socket removed by a
+  daemon on its way out.
+- **Fail-stop where the marker is already gone.** On `store_lost` and
+  `store_capacity_exceeded` the Store released the marker before the daemon
+  could act, so the daemon can no longer assume the path is its own. It
+  therefore compares identity rather than presence: at bind it captured the
+  path's `File.stat` device and inode, and at unlink it stats the path again.
+  **Equal device and inode: unlink. Anything else — a different inode, or
+  `{:error, :enoent}` — leave the path alone.** A successor's socket is a
+  different inode, which is what makes this decidable; verified by probe: a
+  bound path stats as `type: :other` with an inode, and a rebind of the same
+  path yields a different inode.
+
+**The residual is the window between the stat and the unlink**, and it is
+stated rather than papered over: a successor that acquires the marker, removes
+the stale path and binds entirely between our two syscalls would still lose
+its socket file. Nothing narrows that further without a second lock, and a
+second daemon-owned lock file is rejected — it would duplicate the marker's
+stale-writer recovery machinery, including its own staleness question, to
+guard a window one syscall pair wide. What is at stake is also bounded: the
+socket is a path, never durable truth. A successor that loses its file serves
+no client and is restarted; the marker it holds, which is the real exclusion,
+is untouched, so nothing can write to the root behind it.
+
+**`--socket` is constrained to the selected root.** An override must resolve
+inside that root's `daemon/` directory — the same directory the default path
+sits in, under the same owner and symbolic-link rules — and a path outside it
+is refused at startup with `invalid_socket_path`, before the marker is
+acquired. Without that constraint two daemons on *different* roots could be
+pointed at one path, and neither's marker would say anything about the other's
+socket: the identity rule above would be comparing inodes between daemons that
+have no exclusion between them at all. Inside one root, the marker is the
+exclusion and there is exactly one holder.
+
+**How a signal reaches the owner, and when the handler is installed.** The
+daemon does not inherit a usable signal disposition; it installs one, and the
+order matters more than the mechanism.
+
+`SIGINT` cannot be installed on at all: the emulator reserves it for its break
+handler and `:os.set_signal/2` refuses the name outright, which
+`LoopexCli.Interrupt` states as a fact about that function rather than about
+the command (`interrupt.ex:13-17`). So a terminal `Ctrl-C` reaches a daemon
+the only way a reserved signal can — from outside the emulator.
+`apps/loopex_cli/bin/loopex` traps `INT TERM HUP QUIT` and forwards
+`kill -TERM` to its child (`bin/loopex:51-60`), so **`SIGINT` is a launcher
+concern and `SIGTERM` is the escript's**. A daemon started without that
+launcher has no `SIGINT` behaviour to specify, and the plan says so rather
+than implying one.
+
+For `SIGTERM`, `SIGHUP` and `SIGQUIT` the daemon does what the CLI already
+does, and reuses the same mechanism rather than inventing one:
+`:os.set_signal(signal, :handle)` (`interrupt.ex:782`), a `:gen_event` handler
+added to `:erl_signal_server` (`interrupt.ex:806` and `:818`), and the
+**default handler removed** (`interrupt.ex:870-873`) because the runtime's
+default stops the emulator immediately, which would end the process before any
+of the sequence below could run.
+
+**The installation happens before the marker is acquired**, before the socket
+is bound, and before any other resource whose release depends on the daemon
+still running. That order is the whole point: with the default handler still
+in place, a `SIGTERM` in the window between taking the marker and installing
+the handler would stop the VM with no `terminate/2` anywhere, stranding the
+marker for the next daemon's stale-writer recovery and leaving the socket file
+behind. Installing first costs nothing — there is nothing to shut down yet, so
+a signal arriving before startup completes ends a daemon that holds nothing.
+
+**The handler does one thing: it sends the owner a stop message.** It runs in
+`:erl_signal_server`, not in the owner, so it performs no teardown, holds no
+state and makes no decision; the owner's own code runs the sequence, from its
+own process, exactly as it does for every other path.
+
+**The owner-loss backstop.** If the owner is not alive when the signal
+arrives — it crashed, or the signal raced its own start — there is nobody to
+run the sequence and nothing to wait for. The handler halts with
+`fatal:owner_lost` on `stderr` rather than returning and leaving the process
+running with a handler and no owner. That class is in the exit list above and
+in the fatal-class map's note, and it is the one class no linked component
+produces.
+
 **Daemon-initiated shutdown is the owner stopping its children, in reverse
 order.** `SIGTERM` or `SIGINT` reaches the owner, which performs these four
 steps itself. They are the owner's code, not a supervisor's behaviour, which
 is what lets each one carry a reason and lets step 3 use a bound the owner
 chooses.
 
-1. **The listener stops first.** It stops accepting, so a new connection is
-   refused rather than queued; it writes each open connection one
-   `daemon.stopping` naming `operator_stop`, bounded best-effort as ADR 0032
-   fixes — one write attempt into the existing 4 MiB output buffer — and
-   closes it. Clients therefore learn *first*, before anything else is torn
+1. **The listener stops first, and the socket path is unlinked with it.** It
+   stops accepting, so a new connection is refused rather than queued; it
+   attempts one `daemon.stopping` naming `operator_stop` per open connection,
+   bounded best-effort as ADR 0032 fixes — one write attempt into the existing
+   4 MiB output buffer — and closes it. **Then the owner unlinks the socket
+   path, here and not at the end**, because this is the last moment at which
+   the daemon is certainly still the marker holder. Clients therefore learn
+   *first*, before anything else is torn
    down, which is the right order for the one party that cannot see inside the
    daemon.
 2. **The lease owner stops.** Every lease vanishes with it. Nothing durable is
    involved, and no client is left holding one, because no connection survived
    step 1.
-3. **The runtime stops, and this is where admitted work ends.** The owner
-   calls `Supervisor.stop(runtime_supervisor, :normal, grace)` on the pid the
-   composition function handed it, with `grace` the **composed cleanup
-   grace** — the same value the sessions were composed with, so no number is
-   introduced. It does **not** call `Loopex.Runtime.stop/1`: that is arity one
-   and uses the default `:infinity` timeout, which is exactly the bound this
-   step exists to supply.
+3. **The runtime stops, and this is where admitted work ends.** The helper
+   for this step calls `Supervisor.stop(runtime_supervisor, :normal, grace)`
+   on the pid the composition function handed it, with `grace` the **composed
+   cleanup grace** — the same value the sessions were composed with, so no
+   number is introduced. It does **not** call `Loopex.Runtime.stop/1`: that is
+   arity one and uses the default `:infinity` timeout, which is exactly the
+   bound this step exists to supply.
 
-   **What a timeout does, read from the installed stdlib rather than
-   assumed — and the chain is not the obvious one.** `Supervisor.stop/3` is
-   `GenServer.stop(supervisor, reason, timeout)` (supervisor.ex:1152-1154 at
-   the floor pair, :1197-1199 at the current pair),
-   and `GenServer.stop/3` calls **`:proc_lib.stop/3` directly**, not
-   `:gen.stop/3`, wrapping any exit it catches:
-   `catch :exit, err -> exit({err, {__MODULE__, :stop, [server, reason,
-   timeout]}})` (gen_server.ex:1076-1092, identical at the floor pair and the
-   current pair, 1.18.5-otp-27 and 1.20.3-otp-29). Beneath that wrapper,
-   `:proc_lib.stop/3` monitors the target, calls `sys:terminate/3`, and on
-   expiry — from `sys:terminate` raising `exit:{timeout, {sys, terminate,
-   _}}` or from its own `after RemainingTimeout` — demonitors and calls the
-   bare **`exit(timeout)`** (proc_lib.erl:1575-1604).
-
-   So the shape the owner actually sees is
-   **`{:timeout, {GenServer, :stop, [pid, :normal, grace]}}`**, not a bare
-   `:timeout`. `catch :exit, {:timeout, _}` matches it — but only because of
-   that wrapper, and the plan names the wrapper so nobody later "simplifies"
-   the clause to match what `proc_lib` raises. Two consequences follow, and
-   both shape this step:
-
-   - **The target is not killed.** A timeout abandons the wait; the runtime
-     supervisor is still running afterwards. So the owner's kill is not a
-     belt-and-braces addition — it is the only thing that ends the tree.
-   - **The exit lands on the caller.** Left alone, the owner would die of
-     `timeout` and never reach step 4. So the call runs inside
-     `try … catch :exit, {:timeout, _} -> …`, which is the simplest form the
-     semantics allow: because `proc_lib:stop/3` exits the *caller*, a
-     `try/catch` in the owner is enough and no monitored helper process is
-     needed.
-
-   On that catch the owner kills the runtime supervisor —
-   `Process.exit(runtime_supervisor, :kill)`. While the owner is blocked in
-   the stop call it cannot *act* on incoming exits, but it traps them, so they
-   queue as messages and are handled when the call returns — against the
-   `stopping` field, so the runtime's own exit is consumed and any other
-   component's is still classified; nothing is lost,
-   only deferred, which during a shutdown the owner is already performing is
-   what should happen.
+   `Supervisor.stop/3` is `GenServer.stop(supervisor, reason, timeout)`
+   (supervisor.ex:1152-1154 at the floor pair, :1197-1199 at the current
+   pair), so it is the same call the general rule above describes, made in the
+   same place — the helper — and its outcome is read the same way, from the
+   exit on the owner's link. What `:proc_lib.stop/3` does to *its* caller on
+   expiry, whatever shape that takes, is the helper's business and dies with
+   it. The owner's `after grace` fires, it kills the runtime supervisor with
+   `Process.exit(runtime_supervisor, :kill)`, and it reads the exit that
+   follows: `:normal` or `:shutdown` where the tree came down on its own,
+   `:killed` where the kill ended it, anything else classified.
 
    **What "crash-equivalent" does and does not claim.** An earlier draft said
    the kill makes the tree crash-equivalent "by definition". That is true of
@@ -1039,7 +1154,7 @@ chooses.
    stating because a reader will otherwise assume more than holds.
    `Process.exit(sup, :kill)` ends the root only; `killed` then propagates over
    links, and a **trapping** descendant receives it as a message and unwinds on
-   its own clock. Three of the root's seven children are supervisors, and
+   its own clock. Three of the runtime root's own children are supervisors, and
    `OwnerGroup` traps exits, carries `shutdown: :infinity`, and has a
    `terminate/2` that itself calls `Supervisor.stop(workers, :shutdown,
    :infinity)`. So:
@@ -1062,10 +1177,11 @@ chooses.
    order puts the executor, the workspace lease and the transfers owner
    between the runtime and the Store, and each is stopped in turn — the
    executor first, since it is the one with OS effects to clean up and it
-   traps exits to do so. Then the Store, whose `terminate/2` releases the
-   writer marker — see the marker invariant in ADR 0031. Finally the socket
-   path is unlinked and the owner **halts with `0`** — or with the class, in
-   the case above where something failed on the way out.
+   traps exits to do so. Then custody and the registry, which hold nothing
+   durable. Then the Store, whose `terminate/2` releases the writer marker —
+   see the marker invariant in ADR 0031. The socket path is already gone,
+   unlinked in step 1, so the last act is the halt: **`0`**, or the class,
+   in the case above where something failed on the way out.
 
    **The executor is stopped before the lease, and that order is load-bearing**
    rather than alphabetical. The executor privately monitors the lease holder
@@ -1075,12 +1191,11 @@ chooses.
    executor first means the lease's death is observed by nobody, which is
    what an orderly stop wants.
 
-   **Each of these four is `GenServer.stop(pid, :normal, bound)` under the
-   same treatment as step 3** — `try/catch :exit` on the wrapped timeout, then
-   `Process.exit(pid, :kill)` — because all four are `GenServer`s
+   **Each of these four is a helper calling
+   `GenServer.stop(pid, :normal, bound)`, with the owner waiting on its own
+   link** — the same rule as step 3, and all four are `GenServer`s
    (`executor.ex:22`, `workspace_lease.ex:15`, `transfers.ex:26`,
-   `local.ex:55`) and the same OTP semantics apply: a timeout does not kill
-   the target, and the exit lands on the owner. The bounds:
+   `local.ex:55`), so the same call fits all four. The bounds:
 
    | Process | Bound | What it is waiting for |
    | --- | --- | --- |
@@ -1100,17 +1215,11 @@ chooses.
    owner skips at runtime so much as a pid it never held, and the step for it
    does not exist in that daemon's sequence at all.
 
-   **What bounds the wait after each stop: nothing, and that is the safe
-   answer.** The selective receive that follows a stop carries no `after`, so
-   it is outside the composed grace and adds no second bound to reason about.
-   It terminates in every row of the stop-ending table above, for the reason
-   that table gives: the exit it waits for is guaranteed to exist, in flight on
-   `:ok`, guaranteed by the owner's own kill on the timeout, and already in
-   the mailbox on both `:already_gone` rows — the owner only attempts a stop
-   for a component whose exit it has not already consumed, so a stop that
-   raises means an unread exit. An `after` here would be a number with no
-   failure to catch, and it would turn a guaranteed signal into a second thing
-   that can go wrong.
+   Each of these bounds is the `after grace` on the owner's own wait, not a
+   second clock: the helper passes the same number to `GenServer.stop/3`, so a
+   component is given the grace once. The wait after the kill carries no
+   `after`, for the reason the general rule gives — it waits for a signal that
+   already exists.
 
    **A killed executor is the residual, and the plan states it rather than
    explaining it away.** The kill by itself is not the leak. The executor
@@ -1197,9 +1306,10 @@ to write.
    store's own reason was the capacity refusal, and the failed component's own
    class on the other six.
 3. **Stop the executor** — on every class but `executor_lost`, where it is
-   the component that already died — as `GenServer.stop(pid, :normal, grace)`
-   under the same try/catch-and-kill treatment and the same composed cleanup
-   grace the ordered path's step 4 uses. This is not tidiness: the executor is
+   the component that already died — under the same discipline as every other
+   stop: a monitored helper calling `GenServer.stop(pid, :normal, grace)`, the
+   owner waiting on its own link with `after grace` and killing on expiry, and
+   the composed cleanup grace the ordered path's step 4 uses. This is not tidiness: the executor is
    the one linked process that owns effects outside the VM, and it traps exits
    precisely so it can clean them up. Halting without stopping it would end
    that cleanup where it stood. The residual is the one stated there and is
@@ -1224,10 +1334,15 @@ to write.
    and found dead, refuses with `store_writer_unverifiable` where it cannot be
    decided, and refuses with `store_writer_active` where it is alive. A
    surviving marker is a case with a defined answer, not a corruption.
-5. Unlink the socket. **The runtime root, the lease owner and the transfers
-   owner are not stopped on this path**, and that is deliberate rather than an
-   omission. A fail-stop is not a drain, and none of the three owns anything
-   that outlives the VM: the executor does, which is why step 3 exists, and
+5. Unlink the socket **only if it is still ours**. On the six classes where
+   the daemon still holds the marker this is unconditional. On the two store
+   classes the marker is already gone, so the owner applies the identity rule
+   above: stat the path, unlink on an equal device and inode, leave it alone
+   on anything else. **The runtime root, the lease owner, the registry, the
+   custody process and the transfers owner are not stopped on this path**, and
+   that is deliberate rather than an omission. A fail-stop is not a drain, and
+   none of them owns anything that outlives the VM: the executor does, which
+   is why step 3 exists, and
    the Store holds the marker, which is why step 4 does, while the transfers
    owner's open descriptors are closed by the operating system when the VM
    goes. Stopping the lease owner would buy less here than on the ordered
@@ -1235,8 +1350,8 @@ to write.
    `executor_lost` there is no executor left to read the lease holder's `DOWN`
    at all.
 6. Write the class on `stderr`, then **halt with the non-zero status** for
-   that class. Nothing restarts anything: the owner `start_link`s its seven
-   and restarts none, so an exit it did not cause is fatal by its own clause —
+   that class. Nothing restarts anything: the owner `start_link`s its fixed
+   set and restarts none, so an exit it did not cause is fatal by its own clause —
    which is why this path exists at all rather than being a restart.
 
 Nothing durable is at risk in that ordering: whatever was ambiguous is
@@ -1278,7 +1393,7 @@ the next marker holder removes.
 
 **The fatal-class map.** Every non-zero exit names one class on `stderr`. Its
 **reader is the owner's `{:EXIT, pid, reason}` clause**, which matches the pid
-against the seven it holds, maps it to a component and classifies the reason;
+against the fixed set it holds, maps it to a component and classifies the reason;
 there is one place in the daemon where a class is decided, and this is it. The
 set is closed: **one class per linked component**, so no linked process can
 die without a name for it.
@@ -1291,20 +1406,45 @@ die without a name for it.
 | `session_index_too_large` | Startup: the directory holds more than the index bound | — |
 | `socket_path_too_long` | Startup: the path exceeds the derived `sun_path` bound | — |
 | `socket_permission_unverified` | Startup: subdirectory or socket ownership/mode could not be verified | — |
-| `store_capacity_exceeded` | Linked process 1, the Store, exited **on the capacity refusal**, distinguished by its own reason | `store_capacity_exceeded` |
-| `store_lost` | Linked process 1, the Store, exited for any other reason | `store_lost` |
-| `runtime_lost` | Linked process 5, the runtime root, exited | `fatal:runtime_lost` |
-| `transfers_lost` | Linked process 2, the artifact transfers owner, exited | `fatal:transfers_lost` |
-| `workspace_lease_lost` | Linked process 3, the workspace lease, exited | `fatal:workspace_lease_lost` |
-| `executor_lost` | Linked process 4, the local executor, exited | `fatal:executor_lost` |
-| `supervision_fault` | Linked process 6, a lease owner, exited — ADR 0033's daemon-fatal rule | `fatal:supervision_fault` |
-| `listener_lost` | Linked process 7, the listener, exited | `fatal:listener_lost` |
+| `invalid_socket_path` | Startup: a `--socket` override outside the selected root's `daemon/` directory | — |
+| `store_capacity_exceeded` | The Store exited **on the capacity refusal**, distinguished by its own reason | `store_capacity_exceeded` |
+| `store_lost` | The Store exited for any other reason | `store_lost` |
+| `transfers_lost` | The artifact transfers owner exited | `fatal:transfers_lost` |
+| `workspace_lease_lost` | The workspace lease exited | `fatal:workspace_lease_lost` |
+| `executor_lost` | The local executor exited | `fatal:executor_lost` |
+| `registry_lost` | The credential routing registry exited | `fatal:registry_lost` |
+| `custody_lost` | The credential custody process exited | `fatal:custody_lost` |
+| `runtime_lost` | The runtime root exited | `fatal:runtime_lost` |
+| `supervision_fault` | The lease owner exited — ADR 0033's daemon-fatal rule | `fatal:supervision_fault` |
+| `listener_lost` | The listener exited | `fatal:listener_lost` |
+
+The rows are named rather than numbered, because a number is a fact about the
+start order and this table is a fact about which pid died; the two drifted
+apart in an earlier revision and the numbers are gone for that reason. There
+is one row per linked process, and the transfers row exists only in a daemon
+that has one.
+
+**`registry_lost` and `custody_lost` are fail-stop like every other row, and
+that follows from ADR 0034 rather than adding to it.** That ADR makes a dead
+registry answer `:unavailable` for every later resolution *until the host
+recomposes*; in a daemon, recomposing is restarting the process. A daemon that
+kept running would serve a runtime whose every model invocation refuses for a
+reason no client can fix, which is exactly the shape the fail-stop rule
+exists for.
+
+**One class comes from outside this map:** `owner_lost`, which the signal
+handler halts with when a signal arrives and the owner is not alive to run the
+sequence. No linked process produces it, and it is the only exit class that is
+not a row above.
 
 The wire column matters because ADR 0032's `daemon.stopping` `reason` admits
 `operator_stop`, `store_lost`, `store_capacity_exceeded` and `fatal:<class>`,
 so every class above that a running daemon can reach has a reason a client can
-receive. The startup classes have none, deliberately: no socket exists when
-they occur, so no client is holding one.
+receive — *if* there is still a socket and the write succeeds. The startup
+classes have none, deliberately: no socket exists when they occur, so no
+client is holding one. Neither does `listener_lost`, where the listener is
+what died, nor `owner_lost`, where the process that would write it is gone:
+those clients learn by EOF.
 
 **The daemon's own log is bounded and redacted by the rules that already
 exist.** Everything the daemon writes to `stderr` — refusals, warnings, the
@@ -1317,14 +1457,27 @@ already sends on the wire, and the fatal-class map above is the whole
 vocabulary of what an exit may say.
 
 **Reverse cleanup.** Startup happens inside the owner, so a failure at any
-step unwinds what that step and its predecessors did, in reverse: a bound
-socket is closed and its path unlinked, a `daemon/` subdirectory the owner
-created is removed, and the Store is stopped so its `terminate/2` releases the
-marker. The owner does this in its own start path rather than leaving it to a
-crash, because a crashing owner would take the links down without unlinking
-the socket file, which no exit signal removes. A daemon
-that refuses to start leaves no marker and no socket file behind, which is
-what lets an operator fix the cause and try again without a recovery step.
+step unwinds what that step and its predecessors did, in reverse — and
+"predecessors" means **every process the startup started**, not the three an
+earlier revision named. A bound socket is closed and its path unlinked, a
+`daemon/` subdirectory the owner created is removed, the lease owner is
+stopped, **every pid the composition function returned is stopped in reverse
+start order** — runtime, executor, workspace lease, transfers where it exists
+— then custody and the registry, and the Store last, so its `terminate/2`
+releases the marker.
+
+Each of those stops is the same call and the same discipline as a shutdown
+stop: a monitored helper running `GenServer.stop(pid, :normal, grace)` with
+the composed cleanup grace, the owner waiting on its own link with `after
+grace`, and a kill on expiry. Startup introduces no second teardown
+mechanism; it reuses the one the shutdown sequence defines, against the pid
+map it already holds.
+
+The owner does this in its own start path rather than leaving it to a crash,
+because a crashing owner would take the links down without unlinking the
+socket file, which no exit signal removes. A daemon that refuses to start
+leaves no marker and no socket file behind, which is what lets an operator fix
+the cause and try again without a recovery step.
 
 **Witnesses**, all on real operating-system processes:
 
@@ -1335,7 +1488,7 @@ what lets an operator fix the cause and try again without a recovery step.
   is what proves the marker was actually released. The case also asserts the
   negative that the `stopping` field exists for: **no fatal class is recorded
   at any point during the stop**, and nothing appears on `stderr` — stopping
-  seven linked processes deliberately produces seven exits, and every one of
+  every linked process deliberately produces an exit from each, and every one of
   them must be consumed rather than classified.
 - **A real failure during an orderly stop is still classified, and the
   sequence still finishes.** The Store is made to fail while the listener is
@@ -1377,7 +1530,7 @@ what lets an operator fix the cause and try again without a recovery step.
   was stopped — and that the stop *returned* rather than timing out into a
   kill — before the halt, so its cleanup ran and no operating-system child is
   left behind.
-- **One class per linked component.** Each of the seven linked processes is
+- **One class per linked component.** Each linked process is
   killed in turn, in its own case, and the daemon is asserted to exit with
   that component's class, to send that component's `fatal:<class>` on the wire
   where a socket still exists, and — for the six classes where the Store is
@@ -1387,12 +1540,53 @@ what lets an operator fix the cause and try again without a recovery step.
   `listener_lost`, beside the two store classes. The set is closed, so a
   linked process dying without a class is a failing case rather than a silent
   `:shutdown`.
+- **A successor's socket survives its predecessor's exit.** Two daemons on
+  one root. The first is paused between the Store's marker release and its
+  unlink — the fail-stop window, reached by making the Store terminate and
+  holding the owner at that point. The second acquires the marker, removes the
+  stale path, binds its own socket, and prints readiness. The first is then
+  released. The case asserts that it **does not unlink** the path, because the
+  inode it stats is not the one it captured at bind, and that the second
+  daemon's socket is still bound and still serving a client afterwards. The
+  orderly variant asserts the other half: the unlink happens in step 1, while
+  the marker is still held, so a successor cannot even reach that window.
+- **A `--socket` path outside the root is refused.** A path in a directory
+  that is otherwise perfectly valid — right owner, right mode — but outside
+  the selected root's `daemon/` directory exits `invalid_socket_path` with no
+  marker taken, no socket bound and nothing left behind.
+- **Signals, one case per delivery route.** `SIGTERM` sent to the daemon
+  process itself begins the orderly sequence; `SIGINT` is sent **to the
+  launcher**, `apps/loopex_cli/bin/loopex`, which forwards `SIGTERM` to the
+  child, because `:os.set_signal/2` refuses `:sigint` and a `SIGINT` sent to
+  the daemon process directly is not this plan's to specify. Each case names
+  which process it signals. A third asserts the install order: a `SIGTERM`
+  delivered before startup completes ends a daemon that holds no marker and
+  has bound no socket, proved by a following daemon starting with nothing to
+  recover.
+- **`owner_lost`.** The owner is killed while the daemon is otherwise healthy,
+  then `SIGTERM` is delivered. The process halts with `fatal:owner_lost` on
+  `stderr` rather than sitting with a handler and no owner.
+- **The credential processes are fatal like every other component.** The
+  registry and the custody process are each killed in their own case; the
+  daemon exits `registry_lost` and `custody_lost` respectively, sends that
+  `fatal:<class>` on the wire, and leaves no stale marker.
 - **The stop timeout is exercised, not assumed.** A session is made to hold
   the runtime's teardown past the composed cleanup grace. The case asserts the
-  owner **survives** the resulting `exit(timeout)` from `proc_lib:stop/3`
-  rather than dying of it, that it then kills the runtime supervisor, and that
-  it still reaches the Store stop and the socket unlink — the whole point of
-  wrapping the call, and the step an unwrapped call would skip.
+  owner **survives** rather than dying of whatever the stop did to the helper,
+  that it then kills the runtime supervisor, and that it still reaches the
+  Store stop and the socket unlink — the step a stop called inline would skip.
+- **Cleanup grace 1 ms: the owner survives and classifies from the exit.** The
+  same daemon is composed with `cleanup_grace_ms: 1`, a value the local
+  executor's own validation admits (`executor.ex:897`), and stopped with a
+  component whose teardown takes longer than that. This is the case that broke
+  every inline design: at that grace `GenServer.stop/3` raises
+  `ErlangError`/`:timeout_value` rather than exiting, so no `catch :exit`
+  clause would have run. The case asserts the owner survives, that it kills
+  and reads the exit, that the class follows the **exit reason** and not the
+  stop's outcome — `operator_stop` and exit `0` where the component still
+  managed to exit `:normal`, its own class where it did not — and that the
+  sequence still reaches the Store stop and the socket unlink. It runs at both
+  toolchain pairs, because the result was observed at both.
 - **Reverse cleanup.** A startup made to fail after the marker is acquired —
   at the socket permission check and at the index bound, separately — leaves
   no marker held and no socket file behind, proved by a second daemon starting
@@ -1427,7 +1621,7 @@ plan names as new. It is the thing to check a change against.
 | **Listener ↔ connections** | `loopex_daemon` | Foreign peer, malformed frame, over-long path, backpressure | Filesystem permission verified after bind, then the per-platform peer-credential read (`LOCAL_PEERCRED` / `SO_PEERCRED`), then ADR 0023's framing refusals; backpressure at the 4 MiB output buffer | Closed before initialize for a peer refusal; a stable framing reason otherwise; detachment at the last emitted cursor under backpressure | **Not durable:** connections, buffers, windows |
 | **Registry ↔ sender ↔ custody** | The **host** owns the registry and custody; the adapter owns the sender. The token is bound at composition, resolved per invocation | No registry row, registry dead, custody dead, refusal, malformed reply, deadline | `route(handle, token)` answers `:unavailable`; custody answers one of the four atoms; the **guardian** enforces the deadline and kills the sender | The adapter's existing `Loopex.Model` refusal shape, with the atom in the bounded diagnostic | **Not durable:** nothing about credentials is ever journaled, and no span or record carries model `options` — the model span is a fixed identity map. The invocation's failure is durable |
 | **CLI ↔ socket** | `loopex_cli` | Socket unreachable, refusal, transport loss, renewal failure | The client's own reconnect loop and its renewal timer | Reconnect at the retained cursor, deduplicating; a failed renewal drops to observer with the loss on `stderr`; a reconnecting controller must acquire again for a fresh epoch | **Durable:** nothing the client holds. The cursor is a client-side position |
-| **Daemon ↔ OS: signals** | The operator | `SIGTERM` / `SIGINT` | The owner stops its linked processes in reverse order itself — listener, lease owner, runtime, then the composed edges, Store last — each bounded by the composed cleanup grace and each under `try/catch :exit` on the wrapped `{:timeout, {GenServer, :stop, _}}` (`Supervisor.stop/3` → `GenServer.stop/3` → `:proc_lib.stop/3`), since a timeout exits the caller without killing the target, then killing that target on the catch. Every exit these stops cause is consumed by the owner's `stopping` field rather than classified | `daemon.stopping` with `operator_stop`, then close | **Durable:** whatever committed. **Not:** work ended crash-equivalently — a claim about the journal, not about every process being gone |
+| **Daemon ↔ OS: signals** | The operator | `SIGTERM` / `SIGINT`, delivered to the handler the daemon installs before it takes the marker | The owner stops its linked processes in reverse order itself, each stop driven by a monitored helper calling `GenServer.stop(pid, :normal, grace)` while the owner waits on its own link with `after grace` and kills on expiry. Classification is from the observed exit reason alone: `:normal`, `:shutdown` and the owner's own `:killed` are consumed, everything else is classified | `daemon.stopping` with `operator_stop`, then close | **Durable:** whatever committed. **Not:** work ended crash-equivalently — a claim about the journal, not about every process being gone |
 | **Daemon ↔ OS: kill** | The operator | `SIGKILL`, power loss | Nothing runs — no handler, no `terminate/2` | The socket closes with no record at all | **Durable:** the journal. The marker is left for the next daemon's verified stale-writer recovery |
 | **Daemon ↔ OS: socket file** | `loopex_daemon` | A stale `daemon.sock` from a dead daemon | Only the marker holder may unlink and rebind, so two starts resolve at the marker and never at the socket | The loser exits without touching the socket | **Not durable:** the socket file is a path, never state |
 | **Daemon ↔ OS: marker** | `loopex_store_local` | Released in order, released early, or left behind | Four dispositions, and the plan states all four: `terminate/2` in an orderly stop; `terminate/2` early, before the daemon can act, on store loss; `terminate/2` on a **fatal class where the Store is still alive**, because the fail-stop path stops it before halting; and **nothing** on a `SIGKILL`, a power loss, or a Store stop that timed out and was killed | The client sees only the `daemon.stopping` reason; the marker is invisible to it | **Not durable in the journal sense:** the marker is exclusion, not truth. A surviving marker is the case ADR 0031's recovery rule answers |
