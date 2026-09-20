@@ -349,7 +349,7 @@ core-internal states a daemon cannot construct through the socket.
 | --- | --- | --- | --- |
 | Concurrent attachment | `apps/loopex/test/concurrent_attachments_test.exs` (**new**) | `two attachments to one session coexist without replacement`; `one detaching leaves the other delivering`; `an attachment is released when the process that attached it exits`; `an attachment released by its process exiting leaves no open transfer`; `the installed attachment records the attacher pid and the monitor reference`; `replace true supersedes only the attaching process's own prior attachment and releases its transfers`; `replace true from a second process supersedes nothing of the first's`; `replace true leaves every other connection's attachment to that session delivering`; `the dispatcher holds no attachment for a dead attacher`; `one backpressuring does not stall the other`; `each carries its own cursor and incarnation` | fast |
 | Read-only existence query | `apps/loopex/test/session_existence_query_test.exs` | one per result of the closed set | fast |
-| **`quiesce/1`** | **`apps/loopex/test/runtime_quiesce_test.exs`** (new) | `admits every abort before any cleanup begins`; `a drained abort commit is presented once and never re-presented on commit_unknown`; `a fresh create executes nine store calls, ten with the retry`; `attach executes one store call over an empty session and two over eight events`; `resume of a twelve-record session executes eleven store calls`; `a drained abort admitted behind a ready coordinator's in-flight callback spends three store calls in phase 2`; `quiesce admits no abort into an acquiring entry, and terminates and fences it instead`; `a fence executes three store calls at worst`; `releases cancellation concurrently once every admission resolves`; `an empty active set drains with a zero budget`; `reports a Control entry whose coordinator has died as absent`; `reports an unavailable Control entry as absent and fences it`; `reports an acquiring entry as unsettled and fences it`; `fences an unsettled session and refuses its paused transaction as stale`; `fences an absent session too`; `fences a settled session too, and refuses its straggler commit released during the store phase`; `reports not_needed only for an entry that never had a coordinator`; `a fence refused stale_owner_epoch is superseded with no second attempt`; `a fence refused stale_journal_version is superseded too, not an error`; `a fence answering commit_unknown is resolved through transaction_status under the same derived tx_id and reported unsettled with fences[id] == {:unknown, head}`; `a fence id recomputed from the head alone matches the one the drain used`; `a session whose abort admission is ambiguous has no cleanup released and is fenced`; `a phase-2 task shut down mid-call still leaves the coordinator admitting the abort and pausing at the split` | fast |
+| **`quiesce/1`** | **`apps/loopex/test/runtime_quiesce_test.exs`** (new) | `admits every abort before any cleanup begins`; `a coordinator commit during phase 2 is served by Control and its session settles`; `a drained abort commit is presented once and never re-presented on commit_unknown`; `a fresh create executes nine store calls, ten with the retry`; `attach executes one store call over an empty session and two over eight events`; `resume of a twelve-record session executes eleven store calls`; `a drained abort admitted behind a ready coordinator's in-flight callback spends three store calls in phase 2`; `quiesce admits no abort into an acquiring entry, and terminates and fences it instead`; `a fence executes three store calls at worst`; `releases cancellation concurrently once every admission resolves`; `an empty active set drains with a zero budget`; `reports a Control entry whose coordinator has died as absent`; `reports an unavailable Control entry as absent and fences it`; `reports an acquiring entry as unsettled and fences it`; `fences an unsettled session and refuses its paused transaction as stale`; `fences an absent session too`; `fences a settled session too, and refuses its straggler commit released during the store phase`; `reports not_needed only for an entry that never had a coordinator`; `a fence refused stale_owner_epoch is superseded with no second attempt`; `a fence refused stale_journal_version is superseded too, not an error`; `a fence answering commit_unknown is resolved through transaction_status under the same derived tx_id and reported unsettled with fences[id] == {:unknown, head}`; `a fence id recomputed from the head alone matches the one the drain used`; `a session whose abort admission is ambiguous has no cleanup released and is fenced`; `a phase-2 task shut down mid-call still leaves the coordinator admitting the abort and pausing at the split` | fast |
 | **The two-phase abort-path split** | **`apps/loopex/test/cancellation_test.exs`** (existing; the file that already drives an abort against a receipt arriving mid-reduction) | `a drained abort commits without beginning cleanup`; `a client abort still begins cleanup on its commit reply path` — the pair that proves the split changed the drain and nothing else | fast |
 | **`Loopex.Trace.exclude_self/2`, `Control`'s excluded-pid set and `Entry`'s keyword-key redaction** | **`apps/loopex/test/trace_session_test.exs`** (existing; extended) | `the named MFAs produce no raw message under an explicitly named module, before any process flag is set`; `an excluded process produces no trace message`; `the exclusion survives a tracer restart`; `a new session skips an already-excluded pid`; `fails closed while the tracer is absent`; `fails closed while Control is unavailable` — the case that constructs a `Control` restart, and which therefore asserts what that costs: every child after `Control` restarts with it, so every session coordinator in that runtime is gone and the case starts a fresh session rather than reusing one;  `the excluded set returns to baseline after the sender exits`; `a keyword list's value is redacted under its own key`; `the same value under a key naming nothing is rendered, so the case cannot pass vacuously` | fast |
 
@@ -3401,18 +3401,47 @@ carried: it described three outcomes and returned none of them.
    is therefore distinguishable from one in `settled` exactly where the
    difference is actionable, and nowhere it would be noise.
 
-**Quiesce is not called through the facade's default timeout.** `control_call/3`
+**Quiesce's reads are not made through the facade's default timeout.** `control_call/3`
 and `dispatcher_call/3` both default to `5_000` (`runtime.ex:470`, `:478`), and
 a drain whose budget is derived from a session's cleanup grace will routinely
 exceed that — a five-second reply timeout would abandon a drain that was
-working and leave the daemon tearing down underneath it. `quiesce/1` therefore
-calls with an explicit `:infinity` reply timeout and carries its **own**
-deadline as data: the budget is enforced inside core, where the work is, and
-the caller waits for the answer rather than racing it.
+working and leave the daemon tearing down underneath it. The reads `quiesce/1`
+makes into `Control` therefore carry explicit bounds rather than the default,
+and the drain's own budget is data it holds rather than a reply timeout.
 
-`Loopex.Runtime.Control` already holds every active session and its
-coordinator pid, so there is nowhere else this could live and nothing to
-enumerate that core does not already have.
+**`quiesce/1` runs in its caller's process, and putting it inside `Control`
+would deadlock the runtime.** An earlier revision said `Control` "already
+holds every active session and its coordinator pid, so there is nowhere else
+this could live". It could not live there. `Control` is on the commit path of
+every coordinator in the runtime: a commit ends in `Control.post_commit/5`,
+which is a `GenServer.call(control, …, :infinity)`
+(`control.ex:182-209`, the call at `:199-203`, made at
+`session_coordinator.ex:1710` and `:6431`), and scheduling asks
+`Control.current_owner/3`, another `:infinity` call (`control.ex:92-98`, at
+`session_coordinator.ex:1778`). A drain executing **inside** `Control`'s
+process would therefore hold the mailbox that every abort it just admitted
+must reach to commit: each coordinator would block in `post_commit` forever,
+every admission would time out as ambiguous, and nothing would ever settle.
+Not a race — a certainty, on the first session with work to drain.
+
+So `quiesce/1` is a function of **`Loopex.Runtime`** that executes in the
+**caller's** process — the daemon's owner, which sits on no commit path —
+and `Control` keeps serving `post_commit` and `current_owner` throughout.
+What it asks `Control` for is exactly two bounded reads:
+
+- **the enumeration**, once: every session entry with its status, its
+  coordinator pid and its **owner**, which is what the per-session calls need
+  to identify themselves as the current owner;
+- **nothing else.** The drain's work — admitting, cancelling, terminating,
+  fencing and reading status — is per-session calls the caller's own tasks
+  make **directly to coordinators and to the Store**, never through
+  `Control`.
+
+Neither read blocks `Control` for longer than a map projection, so a
+coordinator committing in the middle of phase 2 is served as usual. That is
+the witness: **a commit made by a coordinator during phase 2 completes** — its
+`post_commit` answered while the drain is running — **and its session
+settles**. Under the design this replaces, that case hangs.
 
 **Why core rather than the daemon.** The daemon cannot do this without
 reaching into coordinator internals, which the dependency direction forbids,
