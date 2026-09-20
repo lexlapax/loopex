@@ -2472,11 +2472,11 @@ are these:
   **This bound rests on two claims and not on one**, and both are stated so a
   later change fails against them rather than around them: the rule that
   quiesce admits only into `:active`, which keeps the acquisition callback out
-  of the wait; and this enumeration, that no ready callback reaches
-  `commit_internal_result/2` more than three times. The executed-count witness
-  below is what holds the second to a number — and it has now been wrong twice
-  by reading and right once by execution, which is the whole argument for
-  requiring the witness.
+  of the wait; and this enumeration over **both** commit routes, that no ready
+  callback commits more than three times. The executed-count witness
+  below is what holds the second to a number — and it has now been wrong three
+  times by reading and right once by execution, which is the whole argument
+  for requiring the witness rather than the enumeration.
 - **Phase 5 is three at worst.** A head read, then the `advance_owner`, then,
   only where that answers `commit_unknown`, **one** `transaction_status` query.
 - **And the drain retries nothing, which is a change to the coordinator rather
@@ -4763,7 +4763,7 @@ line; M5 introduces none of its own.
 | Cleanup grace | an integer of 1 or more, refusing `0` with `cleanup_grace_invalid`, because core's `cancellation_bounds/1` admits `grace_ms >= 1` (`apps/loopex/lib/loopex/executor.ex:456`) | This plan, against core's existing validation |
 | Phase 1a, closing admissions | **5_000 ms**, the teardown number reused; it bounds the relay's answer to a state change, not any work, and an unanswered close becomes the `relay_lost` fail-stop | This plan |
 | Phase 1b, settling the admitted | **300 s** — ten sequential Store calls, a fresh `session.create` being the deepest ticket kind whose depth is a constant; the stop **proceeds** at this bound rather than waiting further | This plan, counted from a **traced run** of that path: `control.ex:959-965`, `:896-897`, `:1679-1684` and `session_coordinator.ex:1302-1309`, `:1338`, `:1363`, `:1397-1400`, `:1407`, `:7090-7114` |
-| Phase 2, abort admission | a fixed **210 s** — seven sequential Store calls at the adapter's own 30 s `@call_timeout`: the six of the deepest callback a **ready** coordinator may be running — `close_execute_result_reserve/3`, which commits the executor fact, then an unproved tool result where that fact's commit was refused, then the run terminal, each re-presented once — and then the drain's own admission, which does not retry; one phase for every session, because they are admitted concurrently. It rests on two claims — quiesce admits only into an `:active` entry, so the acquisition callback is never what an admission waits behind, and no ready callback reaches `commit_internal_result/2` more than three times | Core, against `apps/loopex_store_local/lib/loopex/store/local.ex:65`, `:111-113` and `session_coordinator.ex:146-149`, `:1752-1768`, `:5336-5351`, `:5353-5364`, `:5396-5400`, `control.ex:575-591` |
+| Phase 2, abort admission | a fixed **210 s** — seven sequential Store calls at the adapter's own 30 s `@call_timeout`: the six of the deepest callback a **ready** coordinator may be running — `close_execute_result_reserve/3`, which commits the executor fact, then an unproved tool result where that fact's commit was refused, then the run terminal, each re-presented once — and then the drain's own admission, which does not retry; one phase for every session, because they are admitted concurrently. It rests on two claims — quiesce admits only into an `:active` entry, so the acquisition callback is never what an admission waits behind, and no ready callback commits more than three times, counting **both** the `commit_internal_result/2` route and the `apply_transaction/3` admission route | Core, against `apps/loopex_store_local/lib/loopex/store/local.ex:65`, `:111-113` and `session_coordinator.ex:146-149`, `:1752-1768`, `:5336-5351`, `:5353-5364`, `:5396-5400`, `control.ex:575-591` |
 | Phase 3, the drain budget | `max` over drained sessions of `cancellation_bounds(g_i).cli_backstop_ms`, returned as `budget_ms` | Derived from `apps/loopex/lib/loopex/executor.ex:456-474`; no number chosen |
 | Phase 4, coordinator termination | **5_000 ms**, the coordinator's own `shutdown` value (`apps/loopex/lib/loopex/runtime/session_coordinator.ex:134-142`), concurrent across **every** enumerated coordinator; it runs **before** the fence, so the fence races no live **writer** — at most the one transaction the serial lane may already have delivered, which its stale handling covers | Core's existing child specification |
 | Phase 5, the fence | a fixed **90 s** — three sequential Store calls at 30 s: the head read, the `advance_owner`, and at most one `transaction_status` query; concurrent across sessions, and no retries | Core, against `local.ex:65`, `:111-113`, `:116-122`, `:130-132` |
