@@ -166,9 +166,9 @@ credential from the completion of composition onward — before, during and
 after a call; two invocations running at once are proved unable to observe
 each other's credential; every resolution failure the contract names — absent
 token, malformed token, no registry row, a gone registry, a dead custody
-process, a refusing custody process, one that blocks past the invocation
-deadline, and a value outside the size bound — is proved to refuse with one of
-the five closed reason atoms and to leave no retained copy, with the
+process, a refusing custody process, a malformed successful reply, one that
+blocks past the invocation deadline, and a value outside the size bound — is
+proved to refuse with one of the seven closed reason atoms and to leave no retained copy, with the
 guardian's timeout proved distinguishable from every refusal and proved to
 bound the invocation whatever the custody process does; two resolutions in
 flight at once are proved to be independent successes rather than a refusal;

@@ -82,6 +82,42 @@ custody process; the registry itself never sees or holds a credential, so
 reading it discloses which tokens exist and nothing about what they stand
 for.
 
+**How the sender reaches it, given what `complete/3` actually receives.** The
+callback takes three arguments and no more — `module.complete(request,
+options, progress)` is the exact call the coordinator makes — so a token in
+the per-invocation configuration names *which* credential but says nothing
+about *where* to ask. Those are two different things and this pair keeps them
+separate:
+
+- **The registry reference is a per-runtime capability, carried in
+  `options`.** The model configuration a host composes is
+  `%{module:, model:, options:}` with `options` a keyword list the runtime
+  validates and hands to `complete/3` unchanged, so it is the seam that
+  already exists for exactly this: something the host decides once, per
+  runtime, that every invocation needs. Composition puts the registry
+  reference there, under its own key, beside the token the caller supplies per
+  invocation.
+- **It is plain data, and a name rather than a pid.** The reference is a
+  runtime-scoped registered name — bounded, serializable, meaningless in
+  another VM and in another runtime — never a pid, port or function. The
+  boundary rule that keeps PIDs out of durable and public data is not
+  negotiated here; a registered name satisfies it and a pid would not, and a
+  name also survives the registry process being restarted by its own
+  supervisor, which a pid does not.
+- **No global state.** The name is scoped to the runtime, so two runtimes in
+  one VM have two registries and neither can reach the other's. Nothing is
+  read from application environment and nothing is looked up by a fixed
+  global name, which is the rule core already holds itself to.
+- **The lookup is one operation, and it is the host's.**
+  `route(registry_ref, token) -> {:ok, custody_ref} | {:error, :unavailable}`.
+  It returns *where to ask*, never bytes; `:unavailable` covers a registry
+  that is gone and a token with no row, because from the sender's side those
+  are the same fact and neither is recoverable by asking again.
+- **Its lifetime is the host's.** The host starts the registry when it
+  composes the runtime and it dies with recomposition. The adapter neither
+  starts it, supervises it nor restarts it, and a sender that finds it absent
+  refuses rather than waiting for it to come back.
+
 **Custody is a separate process, and is where the bytes live.** Each reference
 implementation states and proves its own: the reference CLI, the app-server
 host and the M5 daemon read `Loopex.LLM.ReqLLM.credential_variable/0` exactly
@@ -122,20 +158,37 @@ boundary, not an absolute:
   already protects that process — the sender installs its own group-leader
   sink so no IO request can carry anything out of it, it is unregistered, and
   it reports only an atom or a `{:error, atom}` pair to the guardian.
-- **The credential-bearing resolver call is excluded from tracing, and the
-  mechanism is named.** ADR 0030's `arguments` level redacts "a credential
-  reference, model content, tool arguments and artifact bytes to placeholders"
-  and replaces "any value reachable through a credential reference" — the
-  token and the value it resolves to are inside that class by construction,
-  since the token *is* the credential reference and the bytes are what it
-  reaches. The sender is a `Loopex.*` module and, spawned beneath
-  runtime-owned processes, is reachable by `set_on_spawn`, so being inside
-  the class is what excludes it rather than being out of scope. M5 must
-  **prove** it: a trace session at the `arguments` level over a real
-  invocation shows placeholders for the resolver call, its reply and the
-  resolved value, and no credential bytes anywhere in the captured entries.
-  That is a proof obligation on M5, not a change to ADR 0030, whose redaction
-  class already names this category.
+- **The credential-bearing calls are excluded from tracing by match
+  specification, and are named exactly.** Accepted ADR 0030 already fixes the
+  mechanism — "the key-bearing call is excluded by match specification" — so
+  this pair does not invent one, it names which calls that covers. They are
+  three, all in the sender:
+
+  | Excluded call | Why |
+  | --- | --- |
+  | The registry route call | Its arguments carry the token, and the token is the credential reference |
+  | The custody reply handling | Its argument is the resolved credential |
+  | The credential frame write | Its argument is the resolved credential |
+
+  Exclusion by match specification means the trace session never matches
+  those functions, so the VM emits **no raw trace message** for them and the
+  tracer never sees one. That is stronger than redaction and it is the
+  difference an earlier draft blurred: it said in one breath that the call was
+  excluded from tracing and in the next that M5 would prove placeholders
+  appear for it. Both cannot be true — a placeholder is a trace entry, and an
+  excluded call produces none — and the placeholder expectation is withdrawn
+  wherever it appeared, here and in the plan's evidence row. Redaction remains
+  the safety net for everything that *is* traced; it is not the mechanism for
+  these three.
+
+  **The proof is an absence, and is stated as one.** Under a real trace
+  session at the `arguments` level over a real invocation, the case asserts
+  that no trace entry names any of the three functions, that the tracer
+  received no raw trace message for them, and that no credential bytes and no
+  token appear anywhere in the captured entries. An entry bearing a
+  placeholder for one of them fails the case exactly as an entry bearing the
+  bytes would, because it would prove the match specification did not
+  exclude what it was supposed to.
 - Everywhere else the earlier absolutes stand unchanged: not in guardian
   state, not in an exit reason, not in a crash report, not in an IO request,
   not in a file, not in the environment, not in argv, and in no durable or
@@ -170,15 +223,26 @@ host wrote, and a resolver that simply blocked would have hung the invocation
 past its deadline. Enforcement belongs to the process that can act on it by
 killing something. The resolver's only obligation is to answer or not.
 
-**The closed reason set is unchanged.** A custody process answers
-`{:error, reason}` only with `:missing`, `:expired`, `:oversized` or
-`:unavailable`; the guardian produces `:timeout`, and `:unavailable` is also
-what a missing registry row, a gone registry and a dead custody process
-answer. Nothing else is admitted — anything returned outside the set is
-treated as `:unavailable`, because a host-authored term is exactly where a
-secret could be smuggled into a reason. The five atoms carry no
-content, so they are safe in a message, an exit reason and a bounded
-diagnostic.
+**The closed reason set, complete.** Every way resolution can fail maps to one
+of seven atoms, and the set is closed in both directions: nothing else is
+produced, and nothing else is accepted.
+
+| Atom | Produced by | For |
+| --- | --- | --- |
+| `:no_token` | The adapter | The configuration carries no `:credential_token` at all |
+| `:invalid_token` | The adapter | A token outside the identifier alphabet or over 256 bytes, refused before any lookup |
+| `:missing` | A custody process | It has no credential for this token |
+| `:expired` | A custody process | It has one and considers it no longer valid |
+| `:oversized` | The sender | A successful reply whose bytes fall outside 1 to 65,536 |
+| `:unavailable` | The registry or a custody process | A missing registry row, a gone registry, a dead custody process, a custody process that answers `:unavailable`, or **a successful reply that is malformed** — not a binary, or a shape the sender does not recognise — because a reply it cannot read is not a credential it can send |
+| `:timeout` | The guardian | Resolution had not completed when the invocation deadline was reached |
+
+An earlier draft left the first two unnamed and folded a malformed successful
+reply nowhere at all, which meant three real failures had no atom to carry.
+Anything returned outside this set is treated as `:unavailable`, because a
+host-authored term is exactly where a secret could be smuggled into a reason.
+All seven atoms carry no content, so they are safe in a message, an exit
+reason and a bounded diagnostic.
 
 **What the sender reports.** `:ok` or `{:error, reason}` from that same closed
 set, never a bare `:error`. The guardian has to distinguish a custody process
@@ -193,8 +257,9 @@ leaves no retained copy of anything the resolver may have produced:
 
 | Condition | Outcome |
 | --- | --- |
-| No `:credential_token` in the configuration | Refused before the namespace is created and before any child is spawned, with the adapter's existing missing-credential reason |
-| Malformed token — outside the identifier alphabet or over 256 bytes | The same refusal, before any child is spawned |
+| No `:credential_token` in the configuration | `:no_token`, refused before the namespace is created and before any child is spawned |
+| Malformed token — outside the identifier alphabet or over 256 bytes | `:invalid_token`, refused before any lookup and before any child is spawned |
+| A successful custody reply that is malformed — not a binary, or a shape the sender does not recognise | `:unavailable`; a reply the sender cannot read is not a credential it can send |
 | The registry holds no row for the token, the registry is gone, or the custody process is dead | `:unavailable`. The host recomposes; nothing is reconstructed, because the registry holds no bytes to reconstruct from |
 | Custody answers `{:error, :missing}` or `{:error, :expired}` | The sender reports `{:error, that_atom}`; the invocation fails through ADR 0019's existing credential-send failure path, the guard tears the child down, and the atom becomes the bounded non-secret status ADR 0029 fixes |
 | Custody answers `{:error, :unavailable}`, or anything outside the closed set | The same path, reported as `:unavailable` |
@@ -376,10 +441,14 @@ Three proofs are new:
   exit reason and no crash report carries the resolved value. The
   two-resolutions-at-once case is a **success** case, not a refusal: both
   invocations complete with their own credentials.
-- **The permitted reply is redacted.** A trace session at the `arguments`
-  level over a real invocation shows placeholders where the reply and the
-  resolved value would be, and no credential bytes anywhere in the captured
-  entries.
+- **The credential-bearing calls are not traced at all.** Under a trace
+  session at the `arguments` level over a real invocation, no trace entry
+  names the registry route call, the custody reply handling or the credential
+  frame write; the tracer received no raw trace message for any of them; and
+  no credential bytes and no token appear anywhere in the captured entries. A
+  placeholder entry for one of the three fails the case as surely as the bytes
+  would, because it would prove the match specification did not exclude what
+  it was supposed to.
 - **Host custody, proved at each host rather than in the adapter.** The
   adapter's test tree cannot prove a claim about the CLI's or the daemon's
   composition, and an earlier draft filed all three there. Each case lives
