@@ -71,7 +71,7 @@ what backup and restore, and which binary is the oldest reader of the new root
 their own ADR, proposed with the successor milestone's plan, accepted on its
 own review, declaring `Supersedes: 0031` for the selection this pair makes.
 Nothing about that work binds M5, and nothing in M5 forecloses it: the local
-adapter, its format and its ports are unchanged, so any successor starts from
+format and its ports are unchanged, and its adapter is unchanged in behaviour, gaining one read-only call that reports whether it still holds its marker, so any successor starts from
 exactly the root M5 leaves.
 
 **Alternatives rejected.** Deferring this decision out of M5 entirely was
