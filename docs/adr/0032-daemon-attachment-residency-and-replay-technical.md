@@ -462,7 +462,18 @@ be a second core change this milestone does not make.
   is unaffected.
 - **Lazy recovery.** A restarted daemon activates no session. It acquires the
   writer marker, reads the index, binds the socket, and activates a session
-  the first time a client attaches to, acquires control of or resumes it.
+  when a client first reaches it — by `session.resume`, or by `session.create`,
+  which starts a coordinator for a session that did not exist before.
+  **Creation counts as an activation** against the ceiling below, because it
+  costs exactly what any other activation costs: a live coordinator the daemon
+  holds for its lifetime. A ceiling that counted resumes but not creations
+  would be a ceiling on the wrong thing.
+
+  `session.acquire_control` and `session.attach` do **not** activate. Acquire
+  is a lease over a session that durably exists, validated by the existence
+  query, and attach is refused with `session_dormant` against a session this
+  lifetime has not activated — which is exactly why the CLI's `resume` form
+  exists and why `attach` alone cannot start work.
 - **Activation ceiling.** At most 64 sessions are activated **per daemon
   lifetime**, not at once, because nothing gives a slot back. The 65th
   activation refuses with a stable reason naming the ceiling and the remedy,

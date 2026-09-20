@@ -857,7 +857,7 @@ not hold was ever promised, the marker left behind is reclaimed by the next
 daemon's verified stale-writer recovery, and the socket file is a stale path
 the next marker holder removes.
 
-**The fatal-class map.** Every non-zero exit names one class on `stderr`:
+**The fatal-class map.** Every non-zero exit names one class on `stderr`. Its **reader is the owner's `{:EXIT, pid, reason}` clause**, which matches the pid against the four it holds and classifies the reason; there is one place in the daemon where a class is decided, and this is it:
 
 | Class | When |
 | --- | --- |
@@ -881,10 +881,13 @@ has no diagnostic surface of its own beyond these lines and the records it
 already sends on the wire, and the fatal-class map above is the whole
 vocabulary of what an exit may say.
 
-**Reverse cleanup.** Every startup failure *after* the marker is acquired
-unwinds what it has done, in reverse: an unlinked-and-bound socket is closed
-and its path unlinked, a created `daemon/` subdirectory it made is removed,
-and the Store is stopped so its `terminate/2` releases the marker. A daemon
+**Reverse cleanup.** Startup happens inside the owner, so a failure at any
+step unwinds what that step and its predecessors did, in reverse: a bound
+socket is closed and its path unlinked, a `daemon/` subdirectory the owner
+created is removed, and the Store is stopped so its `terminate/2` releases the
+marker. The owner does this in its own start path rather than leaving it to a
+crash, because a crashing owner would take the links down without unlinking
+the socket file, which no exit signal removes. A daemon
 that refuses to start leaves no marker and no socket file behind, which is
 what lets an operator fix the cause and try again without a recovery step.
 
@@ -956,14 +959,20 @@ Three rows deserve their reading stated, because they are where earlier drafts
 went wrong. The **coordinator death** row is the one that forced `residency`
 to mean a daemon fact: there is no observer column entry available, so any
 design that needed one was unimplementable. The **Store ↔ daemon** row is the
-one that forced the fail-stop split: the marker is already released by the
+one that forced the fail-stop split — the marker is already released by the
 time anything can act, so an ordered shutdown ending "stop the Store" had
-nothing to stop. And that same row is why the daemon supervises its own tree:
-an earlier draft filled its observer column with a link and a monitor the
-daemon could not actually hold, because `LoopexComposition` takes the link in
-a process it spawns and returns no adapter pid. Every observer cell in this
-table is now a parent-child relationship the daemon itself establishes, or a
-mechanism inside core with a line number, and nothing in between.
+nothing to stop — and it is also the row that has now been written wrong
+twice. The first draft filled its observer column with a link and a monitor
+the daemon could not hold, because `LoopexComposition` takes the link in a
+process it spawns and returns no adapter pid. The second put a `Supervisor`
+there, which cannot report a child's exit reason at all and cannot host the
+runtime's struct return. Both failures were the same mistake: naming an
+observer without checking that something could observe.
+
+So the standard this table holds itself to is now explicit. **Every observer
+cell names either a process the daemon itself links, with the clause that
+receives the exit, or a mechanism inside core with a line number.** A cell
+that can name neither is a boundary the plan has not finished.
 
 <a id="technical-plan-minimalism"></a>
 ### Proportional Minimalism Budget

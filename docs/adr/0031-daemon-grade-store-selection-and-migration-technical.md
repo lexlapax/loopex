@@ -30,9 +30,12 @@ control.** This adapter answers an append error with
 released **before** the daemon can react, and any sequence ending "then stop
 the Store" is unrunnable, because the Store is what died. The daemon's only
 correct response is a fail-stop, and it arranges to be able to make it: the
-daemon supervises the adapter **directly**, as the first child of its own
-supervisor, so the adapter's termination and its exit reason are reported to
-a process the daemon controls. It does not compose through
+daemon **start_links the adapter itself**, from an owner process that traps
+exits and keeps the adapter's pid, so the termination arrives as
+`{:EXIT, store_pid, reason}` at a clause the daemon wrote — carrying the
+store's own reason, which is what separates `store_capacity_exceeded` from
+`store_lost`. An OTP supervisor would not do: it reports no child's exit
+reason to any callback. It does not compose through
 `LoopexComposition`, whose `start_edge/2` takes the `start_link` inside a
 process `RuntimeOwner` spawns and which returns no adapter pid — a daemon on
 that bracket could not observe this failure at all. On the reported exit it

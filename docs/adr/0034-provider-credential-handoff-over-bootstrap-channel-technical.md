@@ -206,7 +206,8 @@ boundary, not an absolute:
 
 - The **only** permitted credential-bearing transfer in the parent is the
   custody process's reply to the sender's `resolve` call, carrying
-  `{:ok, bytes}` to the one sender process that asked. It is bounded by the
+  `{:ok, %{credential: bytes}}` — **keyed**, for the redaction reason below —
+  to the one sender process that asked. It is bounded by the
   same 1..65,536-byte rule as the frame, it is never logged, never forwarded,
   and never held after the frame is written. The registry lookup that precedes
   it carries no credential, so the token's journey through the registry adds
@@ -355,7 +356,7 @@ produced, and nothing else is accepted.
 | `:missing` | A custody process | It has no credential for this token |
 | `:expired` | A custody process | It has one and considers it no longer valid |
 | `:oversized` | The sender | A successful reply whose bytes fall outside 1 to 65,536 |
-| `:unavailable` | The registry or a custody process | A missing registry row, a gone registry, a dead custody process, a custody process that answers `:unavailable`, or **a successful reply that is malformed** — not a binary, or a shape the sender does not recognise — because a reply it cannot read is not a credential it can send |
+| `:unavailable` | The registry or a custody process | A missing registry row, a gone registry, a dead custody process, a custody process that answers `:unavailable`, or **a successful reply that is malformed** — not `{:ok, %{credential: binary}}`, including a bare binary where the keyed map is required — because a reply the sender cannot read, or reads in a shape the redaction pass does not protect, is not a credential it can send |
 | `:timeout` | The guardian | Resolution had not completed when the invocation deadline was reached |
 
 An earlier draft left the first two unnamed and folded a malformed successful
@@ -389,7 +390,7 @@ leaves no retained copy of anything the resolver may have produced:
 | --- | --- |
 | No `:credential_token` in the configuration | `:no_token`, refused before the namespace is created and before any child is spawned |
 | Malformed token — outside the identifier alphabet or over 256 bytes | `:invalid_token`, refused before any lookup and before any child is spawned |
-| A successful custody reply that is malformed — not a binary, or a shape the sender does not recognise | `:unavailable`; a reply the sender cannot read is not a credential it can send |
+| A successful custody reply that is malformed — not `{:ok, %{credential: binary}}`, a bare binary included | `:unavailable`; a bare binary is refused rather than accepted, because accepting it would carry bytes in a shape the redaction pass leaves verbatim below 65 bytes |
 | The registry holds no row for the token, the registry is gone, or the custody process is dead | `:unavailable`. The host recomposes; nothing is reconstructed, because the registry holds no bytes to reconstruct from |
 | Custody answers `{:error, :missing}` or `{:error, :expired}` | The sender reports `{:error, that_atom}`; the invocation fails through ADR 0019's existing credential-send failure path, the guard tears the child down, and the atom becomes the bounded non-secret status ADR 0029 fixes |
 | Custody answers `{:error, :unavailable}`, or anything outside the closed set | The same path, reported as `:unavailable` |
