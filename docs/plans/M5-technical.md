@@ -348,7 +348,7 @@ core-internal states a daemon cannot construct through the socket.
 | --- | --- | --- | --- |
 | Concurrent attachment | `apps/loopex/test/concurrent_attachments_test.exs` (**new**) | `two attachments to one session coexist without replacement`; `one detaching leaves the other delivering`; `an attachment is released when the process that attached it exits`; `an attachment released by its process exiting leaves no open transfer`; `the installed attachment records the attacher pid and the monitor reference`; `replace true supersedes only the attaching process's own prior attachment and releases its transfers`; `replace true from a second process supersedes nothing of the first's`; `replace true leaves every other connection's attachment to that session delivering`; `the dispatcher holds no attachment for a dead attacher`; `one backpressuring does not stall the other`; `each carries its own cursor and incarnation` | fast |
 | Read-only existence query | `apps/loopex/test/session_existence_query_test.exs` | one per result of the closed set | fast |
-| **`quiesce/1`** | **`apps/loopex/test/runtime_quiesce_test.exs`** (new) | `admits every abort before any cleanup begins`; `a drained abort commit is presented once and never re-presented on commit_unknown`; `a fresh create executes nine store calls, ten with the retry`; `a drained abort admitted behind an in-flight callback spends four store calls in phase 2`; `a fence executes three store calls at worst`; `releases cancellation concurrently once every admission resolves`; `an empty active set drains with a zero budget`; `reports a Control entry whose coordinator has died as absent`; `reports an unavailable Control entry as absent and fences it`; `reports an acquiring entry as unsettled and fences it`; `fences an unsettled session and refuses its paused transaction as stale`; `fences an absent session too`; `fences a settled session too, and refuses its straggler commit released during the store phase`; `reports not_needed only for an entry that never had a coordinator`; `a fence refused stale_owner_epoch is superseded with no second attempt`; `a fence refused stale_journal_version is superseded too, not an error`; `a fence answering commit_unknown is resolved through transaction_status under the same derived tx_id and reported unsettled with fences[id] == {:unknown, head}`; `a fence id recomputed from the head alone matches the one the drain used`; `a session whose abort admission is ambiguous has no cleanup released and is fenced` | fast |
+| **`quiesce/1`** | **`apps/loopex/test/runtime_quiesce_test.exs`** (new) | `admits every abort before any cleanup begins`; `a drained abort commit is presented once and never re-presented on commit_unknown`; `a fresh create executes nine store calls, ten with the retry`; `attach executes one store call over an empty session and two over eight events`; `resume of a twelve-record session executes eleven store calls`; `a drained abort admitted behind an in-flight callback spends four store calls in phase 2`; `a fence executes three store calls at worst`; `releases cancellation concurrently once every admission resolves`; `an empty active set drains with a zero budget`; `reports a Control entry whose coordinator has died as absent`; `reports an unavailable Control entry as absent and fences it`; `reports an acquiring entry as unsettled and fences it`; `fences an unsettled session and refuses its paused transaction as stale`; `fences an absent session too`; `fences a settled session too, and refuses its straggler commit released during the store phase`; `reports not_needed only for an entry that never had a coordinator`; `a fence refused stale_owner_epoch is superseded with no second attempt`; `a fence refused stale_journal_version is superseded too, not an error`; `a fence answering commit_unknown is resolved through transaction_status under the same derived tx_id and reported unsettled with fences[id] == {:unknown, head}`; `a fence id recomputed from the head alone matches the one the drain used`; `a session whose abort admission is ambiguous has no cleanup released and is fenced`; `a phase-2 task shut down mid-call still leaves the coordinator admitting the abort and pausing at the split` | fast |
 | **The two-phase abort-path split** | **`apps/loopex/test/cancellation_test.exs`** (existing; the file that already drives an abort against a receipt arriving mid-reduction) | `a drained abort commits without beginning cleanup`; `a client abort still begins cleanup on its commit reply path` — the pair that proves the split changed the drain and nothing else | fast |
 | **`Loopex.Trace.exclude_self/2`, `Control`'s excluded-pid set and `Entry`'s keyword-key redaction** | **`apps/loopex/test/trace_session_test.exs`** (existing; extended) | `the named MFAs produce no raw message under an explicitly named module, before any process flag is set`; `an excluded process produces no trace message`; `the exclusion survives a tracer restart`; `a new session skips an already-excluded pid`; `fails closed while the tracer is absent`; `fails closed while Control is unavailable` — the case that constructs a `Control` restart, and which therefore asserts what that costs: every child after `Control` restarts with it, so every session coordinator in that runtime is gone and the case starts a fresh session rather than reusing one;  `the excluded set returns to baseline after the sender exits`; `a keyword list's value is redacted under its own key`; `the same value under a key naming nothing is rendered, so the case cannot pass vacuously` | fast |
 
@@ -388,6 +388,7 @@ where it is not (`Loopex.M1RuntimeTestStore`, which core's tree can reach and
 | Bound | What the case executes and counts | File | Case | Lane |
 | --- | --- | --- | --- | --- |
 | Phase 1b, ten calls | A fresh `session.create` driven to its reply, asserting **nine** adapter calls in the traced order and **ten** when the genesis commit is made to answer `commit_unknown` once | `apps/loopex/test/runtime_quiesce_test.exs` | `a fresh create executes nine store calls, ten with the retry` | fast |
+| The two history-paged kinds, at **fixed** sizes, so the claim that they have no constant is itself checked | `session.attach` over an empty session asserting **1**, and over an eight-event session asserting **2**; `session.resume` of a **twelve-record, eight-event** session asserting **11**, in the traced order, including **two** `transact` calls — the staged owner attempt and the advance | `apps/loopex/test/runtime_quiesce_test.exs` | `attach executes one store call over an empty session and two over eight events`; `resume of a twelve-record session executes eleven store calls` | fast |
 | Phase 2, four calls | A drained abort admitted behind the **deepest callback**, constructed rather than waited for: the coordinator is made to run a commit that answers `commit_unknown` once — two calls — and to load records in that same callback, and the drained abort is admitted behind it. Asserts **four**, and asserts that the three of them belonged to **one** callback, which is what makes the unit the callback rather than the call | `apps/loopex/test/runtime_quiesce_test.exs` | `a drained abort admitted behind an in-flight callback spends four store calls in phase 2` | fast |
 | Phase 4, three calls | A fence run to `commit_unknown` and resolved, asserting **three** — head, advance, status | `apps/loopex/test/runtime_quiesce_test.exs` | `a fence executes three store calls at worst` | fast |
 
@@ -411,10 +412,13 @@ to both and then named an enforcement point that cannot enforce it.** ADR
 0031, 0032 and 0033 describe their evidence in prose, as accepted ADRs in this
 repository do, and rewriting three proposed ADRs into three-column tables buys
 nothing a reader needs: the decisions are what those files are for. So the
-obligation sits where the tables already are — **this pair's witness tables
-carry the file, case and lane for every witness the ADRs describe**, and a
-witness an ADR names with no row here is a gap this pair closes, not a defect
-in that ADR. That is the smaller of the two changes and it is the one taken.
+obligation sits where the tables already are — **this pair's core-witness
+table carries the file, case and lane for every witness the ADRs describe**,
+and a witness an ADR names with no row there is a gap this pair closes, not a
+defect in that ADR. It is that table specifically, and not the Outcome rows:
+those name a witness **file** per outcome and then describe what it must
+prove in prose, which is the right shape for an outcome and the wrong one for
+finding a case by name. That is the smaller of the two changes and it is the one taken.
 
 And the enforcement point is **review**, stated plainly. The earlier revision
 pointed at the derived documentation checklist in Outcome 5's evidence row,
@@ -595,7 +599,7 @@ foreground server on the same root exactly as it would without this decision;
 what a `0.1.0` *client* then talks to is a `0.1.0` server, which speaks the old
 string again.
 
-**Fifteen files carry the string today; the rename edits thirteen**, named
+**Seventeen files carry the string today; the rename edits thirteen**, named
 here so workstream 3 can be checked against a list rather than a grep:
 `apps/loopex_app_server/lib/loopex_app_server.ex` and its three tests
 (`app_server_test.exs`, `initialization_test.exs`, `stdio_probe_test.exs`);
@@ -610,18 +614,20 @@ the code is being made to agree with;
 The documents are closure obligations under the docs gate, which reads every
 tracked file in `docs/operator` and `docs/developer`, so none can be missed.
 
-**Two carriers are deliberately *not* rewritten, which is why fifteen and
+**Four carriers are deliberately *not* rewritten, which is why seventeen and
 thirteen are both right.** `CHANGELOG.md` carries the string in the entry that
 records what `0.1.0` shipped, and that
 entry stays true: `0.1.0` did serve `loopex.session.v1-experimental`. The
 rename is recorded as a **new** `0.2.0` entry instead, so the changelog is
-touched without that occurrence moving. And
-**`docs/adr/0032-daemon-attachment-residency-and-replay-technical.md` is the
-fifteenth**: it carries the retired name inside *this* set, in the passage
-that explains the rename, and it is changed by this milestone's own ADR work
-rather than by workstream 3's search-and-replace. An earlier revision said
-"fourteen files that carry it" and then listed thirteen edits, which is the
-arithmetic this paragraph exists to close.
+touched without that occurrence moving. The other three are **inside this
+planning set**, each carrying the retired name only in the passage that
+explains why it is being retired:
+`docs/adr/0032-daemon-attachment-residency-and-replay-technical.md`,
+`docs/plans/M5.md` and this file. They are changed by this milestone's own
+planning work rather than by workstream 3's search-and-replace, and they are
+counted here so a reviewer running the grep finds seventeen and reads it as
+agreement rather than as drift. Earlier revisions said fourteen, then
+fifteen, each time counting the carriers they had happened to look at.
 
 Rollback to `0.1.0` is stopping the daemon. Removing it restores the M4
 foreground server and the CLI on the same root with no durable dependency on
@@ -2263,7 +2269,7 @@ is the same 30 s: `transact/2` at `local.ex:111-113`, `ownership_head/3` at
 **(the worst sequential count of Store calls in it) × 30 s**, and the counts
 are these:
 
-- **Phase 1b is six, and the derivation is per ticket kind.** A ticket settles
+- **Phase 1b is ten, and the derivation is per ticket kind.** A ticket settles
   when its core call answers, and what that call does before answering is not
   the same for all ten. Counted from the code, in sequence:
 
@@ -2271,8 +2277,8 @@ are these:
   | --- | --- | --- |
   | The seven non-resume lease-authorized mutations — `prompt`, `steer`, `follow_up`, `abort`, `respond_interaction`, `admit_resources`, `activate_skill` | **2** | One `OwnerLane.transact/2`, retried once on `commit_unknown` (`session_coordinator.ex:1752-1768`). The wait-behind does **not** apply: this call *is* the session's one in-flight transaction, and the coordinator's `command/3` waits `:infinity` for it (`:146-149`) |
   | `session.create`, fresh | **9**, or **10** with the one retry | Traced, not counted by eye — see below |
-  | `session.attach` | **2 + ⌈events ÷ 1,024⌉** | The dispatcher's snapshot scan pages the session's events (`event_dispatcher.ex:169-199`, `:926`) |
-  | `session.resume` | **no constant** | The create sequence without the genesis pair, plus `prior_transaction_resolved`'s `transaction_status` (`:1324-1335`), with all three `load_all_*` calls paged over real history |
+  | `session.attach` | **1 + ⌈events ÷ 1,024⌉** — traced at 1 over an empty session and 2 over eight events | The dispatcher's snapshot scan pages the session's events (`event_dispatcher.ex:169-199`, `:926`) |
+  | `session.resume` | **no constant**, and traced at **11** over a twelve-record, eight-event session | `Store.runtime_command` (`control.ex:310`), then `load_records` ×2, `transaction_status` (`:1324-1335`), `ownership_head`, **`transact` ×2** — the staged owner attempt `owner_stage_tx` (`:1162-1167`) and then the advance (`:1363`) — then `load_records` ×2 and `load_events` ×2 |
 
   **A fresh create executes nine adapter calls, and the earlier figure of six
   was a reading of the code rather than a run of it.** Two errors, both of
@@ -2300,11 +2306,20 @@ are these:
   because a fresh session has no events yet). **Nine, or ten with the retry.**
 
   **The maximum over the kinds whose depth is a constant is ten**, which is a
-  fresh create, so 1b is bounded at ten calls — **300 s**. **Two kinds have no
-  constant depth** — attach and resume both page over the root's history at
-  1,024 rows a call — and that is stated rather than papered over with an
-  average, because it is the reason 1b is a **bounded wait that then proceeds**
-  rather than a guarantee that everything has settled.
+  fresh create — constant because a fresh session holds exactly its genesis
+  record and no events, so its two `load_records` and one `load_events` are
+  fixed. So 1b is bounded at ten calls — **300 s**.
+
+  **Two kinds have no constant depth**, attach and resume, both paging over
+  the root's history at 1,024 rows a call. And the resume trace is worth
+  reading rather than filing: a **twelve-record, eight-event** session — a
+  small one by any measure — already executes **eleven**, one more than the
+  bound. That is not an argument for raising the bound to cover it, because no
+  number covers a session whose history is unbounded; it is the plainest
+  possible demonstration that **1b is a bounded wait that then proceeds**, and
+  that the `:acquiring` row in the classification table is an ordinary
+  outcome rather than a remote one. An operator whose daemon is stopping with
+  resumes in flight should expect the stop to reach 1b's bound and go on.
 - **Phase 2 is four, and the unit that blocks is the callback rather than the
   call.** The abort admission goes to a **live coordinator**, and
   `SessionCoordinator.command/3` is a `GenServer` call
@@ -2381,6 +2396,23 @@ below carries both rows:
 - **phase 5 needs no task**, being `Supervisor`-shaped already: terminating a
   coordinator is bounded by the `shutdown: 5_000` its own child specification
   carries (`session_coordinator.ex:134-142`), which is the enforcer.
+
+**Shutting down a task does not cancel the call it made**, and the phase-2
+row's consequence is worth writing out rather than leaving as an
+implication. `Task.shutdown/2` ends the task; the `GenServer` call that task
+already delivered runs to completion in the coordinator regardless, which is
+the same property that makes a dead caller's transaction commit and a dead
+relay task's mutation reach core. So a phase-2 admission the drain gave up on
+still **lands**: the coordinator admits the abort, writes the same
+`command_admitted` record, and **pauses at the split** with no cancellation
+released, because the drained path is what it is running. The drain simply
+does not know which of those happened, which is why the session is fenced
+rather than cancelled.
+
+That is the right outcome and not a regrettable one: the journal ends up with
+an admitted abort and no cleanup, which is exactly what an unsettled session's
+journal holds on every other route to it. What the drain must not do — release
+a cancellation for a command it cannot confirm — it does not do.
 
 **One rule keeps a phase from starting work it cannot finish, and with the
 counts above it can always be honoured.** *No Store
@@ -3236,7 +3268,7 @@ carried: it described three outcomes and returned none of them.
    | `:unavailable` | The status `Control` writes when an acquisition it was waiting on failed or its coordinator went down mid-acquisition (`control.ex:620`, `:818`, `:862`, `:1150`) | `absent` | **Yes**, for the same reason: there is no coordinator, and there may be a transaction |
    | `:acquiring` | The status while an owner is being started (`control.ex:569`, `:1030`, `:1189`) | `unsettled` | **Yes** |
    | No entry | The session is dormant in this daemon, or belongs to no daemon at all | In no list; quiesce enumerates `Control` and nothing else | No |
-   | **A phase-2 admission that did not answer** inside the phase, its task shut down | The session's abort is neither known-committed nor known-refused | `unsettled`, with no cleanup released | **Yes** |
+   | **A phase-2 admission that did not answer** inside the phase, its task shut down | The session's abort is neither known-committed nor known-refused **to the drain** — see below for what the coordinator does | `unsettled`, with no cleanup released | **Yes** |
    | **A phase-4 fence that did not answer** inside the phase, its task shut down **after** the head was read | The fence's outcome cannot be read | `unsettled`, `{:unknown, head}` | The attempt was made; the domain stays fenced |
    | **A phase-4 task shut down before its head read answered** | There is no head, so there is no identity a successor could recompute and nothing was proposed | `unsettled`, `{:unknown, :no_head}` | No fence was attempted. A successor reads the head itself and proceeds; nothing is outstanding at any version |
 
