@@ -105,10 +105,11 @@ unresolved `commit_unknown` or an executing admission in flight, and because
 stopping one would need a core deactivation operation M5 does not add. The
 cost is stated rather than hidden: at most 64 sessions are activated per
 daemon lifetime, the 65th refuses, and the remedy is to restart the daemon.
-Losing an activated session's coordinator is fatal to the daemon instance for
-the same reason a lease owner's loss is — core signals no lifecycle transition
-the daemon could use, so the only way to keep `active` from meaning something
-false is to stop being a daemon that claims it.
+`residency` therefore means *this daemon activated this session in this
+lifetime* — a daemon-owned fact, true by construction — and never *a live
+coordinator exists*, which the daemon has no way to know. A coordinator that
+dies is core's to supervise and surfaces through core's own refusal on the
+next command for that session, which the daemon forwards unchanged.
 
 Lazy recovery is what a daemon can honestly promise on a store whose session
 directory is not Store truth and whose every open replays a full log.
