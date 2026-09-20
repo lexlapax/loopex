@@ -184,15 +184,47 @@ coordinator's durable decision under ADR 0018, unchanged.
   remains as the one name the *host* reads when it composes a runtime — the
   reference CLI at start, and the real-provider lane when it names the
   variable in its own failure message — and the host deletes that name once it
-  has read it. `ProviderLauncher.spawn_environment/0`'s enumeration moves off
-  the call path: the removal list is computed once where the host composes the
-  runtime, under ADR 0019's existing rule that the trusted host introduces no
-  further environment names while the snapshot is in use, and is carried in
-  the launch configuration the adapter already builds. The unconditional
-  `@excluded` names and the fixed `env -i` argument lists stay as they are.
-  Deleting the enumeration outright was rejected: the first spawned image is
-  `/usr/bin/env` itself, whose environment `env -i` does not clear, so without
-  the removal list that image would carry the parent's whole environment.
+  has read it. `ProviderLauncher.spawn_environment/0`'s enumeration of the live
+  environment — `System.get_env/0` on every launch — is **deleted**, and
+  nothing replaces it: no enumeration at launch, and none at composition
+  either. The launcher passes the Port a fixed, closed list instead — the
+  `@excluded` names removed unconditionally, plus the explicit downstream
+  names — which is a constant in the source, so no code path reads the
+  environment to build it. The fixed `env -i` argument lists stay as they are.
+
+  An earlier draft moved the snapshot to composition. That is withdrawn on
+  2026-09-20, because it quietly weakened an accepted decision. ADR 0019's
+  companion requires that the trusted host "must not mutate unrelated launch
+  environment **during this operation**" — a constraint on one launch, not a
+  promise of immutability for the runtime's lifetime. A snapshot taken at
+  composition and reused would let a name introduced afterwards reach a later
+  launch's first image, which is a property ADR 0019 never gave away. Deleting
+  the enumeration rather than relocating it needs no amendment to ADR 0019.
+
+  What the fixed list preserves exactly is ADR 0019's actual guarantee, which
+  its companion states as "Explicit credential removals are unconditional": no
+  credential name and no loader or startup-injection name reaches the first
+  image, whether or not it was present. What it does not preserve — stated
+  rather than implied — is the clearing of *unlisted* names from the
+  `/usr/bin/env` image's own environment block in the microseconds before it
+  execs. Three things bound that. `/usr/bin/env` acts on none of them; `env -i`
+  clears every one of them for the exec'd child, so the M0 child-environment
+  conformance case, which asserts about the worker and not the first image, is
+  untouched; and the block is readable only by the same user who can already
+  read the parent VM's own environment, which is the case ADR 0019 explicitly
+  declines to defend — "This is not a new guarantee against hostile same-VM
+  code". After this decision the credential is not in the parent's environment
+  at all, so the enumeration's protective value against the credential is zero
+  by then.
+
+  One mechanical note for whoever writes the change, measured rather than
+  assumed: `Port.open`'s `{:env, …}` option **merges** into the inherited
+  environment; it does not replace it. A probe on this toolchain spawned
+  `/usr/bin/env` with `{:env, [{~c"PATH", …}]}` and the first image still
+  received all 67 of the parent's names, including a planted sentinel. So
+  "pass an exact environment and receive exactly that set" is not reachable
+  through the Port option, and the closed unconditional removal list above is
+  what is actually implementable for the same purpose.
 - **In the child.** Unchanged: the child receives the credential on the socket
   and nowhere else. Its environment at entry is the fixed `PATH`, `LANG`,
   `LC_ALL` and the two crash-dump suppressions, and ADR 0029's bounded

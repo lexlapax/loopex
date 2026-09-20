@@ -79,13 +79,20 @@ Outcome 6's claim is stated at that boundary: a claim that the variable is
 never set at all would contradict the way an operator supplies a secret to a
 process they start.
 
-One enumeration leaves the call path with it. The launcher's first spawned
-image is `/usr/bin/env`, whose own environment the port can only clear name by
-name, so the launcher enumerates the parent's environment on every launch
-today. That snapshot moves to composition, under the same ADR 0019 constraint
-that already forbids the host to introduce environment names while it is in
-use, and is carried in the launch configuration the adapter already builds. No
-per-invocation path then reads the environment for any purpose at all.
+One enumeration goes with it. The launcher reads the whole parent environment
+on every launch, to clear it name by name from the first spawned image. That
+read is deleted outright rather than relocated: the launcher passes a fixed,
+closed removal list — the credential and loader names it already removes
+unconditionally — so no code path reads the environment to build it, at launch
+or anywhere else. Moving the read to composition was considered and withdrawn,
+because ADR 0019 constrains the host only *during one launch* and a snapshot
+reused across launches would claim an immutability that decision never gave.
+What the fixed list keeps is ADR 0019's actual guarantee, that credential and
+loader names never reach the first image; what it gives up, and this pair says
+so, is clearing unlisted names from one short-lived `/usr/bin/env` image that
+acts on none of them, whose child is cleared by `env -i` regardless, and whose
+environment block is readable only by the user who can already read the parent
+VM's.
 
 **Alternatives rejected.** Keeping the environment variable and buying the
 speed by sharding the provider suite across test VMs was rejected: it is
