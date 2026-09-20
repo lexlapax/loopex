@@ -322,10 +322,18 @@ core-internal states a daemon cannot construct through the socket.
 | **The two-phase abort-path split** | **`apps/loopex/test/cancellation_test.exs`** (existing; the file that already drives an abort against a receipt arriving mid-reduction) | `a drained abort commits without beginning cleanup`; `a client abort still begins cleanup on its commit reply path` — the pair that proves the split changed the drain and nothing else | fast |
 | **`Loopex.Trace.exclude_self/1` and `Control`'s excluded-pid set** | **`apps/loopex/test/trace_session_test.exs`** (existing; extended) | `an excluded process produces no trace message`; `the exclusion survives a tracer restart`; `a new session skips an already-excluded pid`; `fails closed while the tracer is absent`; `the excluded set returns to baseline after the sender exits` | fast |
 
-The paused-transaction case in `runtime_quiesce_test.exs` is the one that
-needs the adapter's fault probe, injecting at `:before_linearization`
-(`local.ex:252`); it stays a core test because what it proves is core's
-fence, not the adapter's behaviour.
+The paused-transaction case in `runtime_quiesce_test.exs` pauses the
+transaction through core's own controllable store, not the shipped adapter:
+`apps/loopex` depends on nothing but the protocol and telemetry
+(`apps/loopex/mix.exs:34-36`), the dependency direction forbids a test-only
+edge to a store implementation, and `Loopex.M1RuntimeTestStore` already holds
+a transaction pending outside its process for exactly this order
+(`hold_next_record_before_linearization/3`,
+`apps/loopex/test/support/m1_runtime_helper.exs:40-46`) and refuses a stale
+`advance_owner` with `:stale_owner_epoch` (`:598-599`). It stays a core test
+because what it proves is core's fence; the shipped adapter's own
+`:before_linearization` probe (`local.ex:252`) is the same seam for the
+adapter's suite, not for this one.
 
 **The downstream witnesses stay**, and their job is different: the daemon's
 lifetime suite proves the drain happens in the stop sequence a real operator
@@ -2518,9 +2526,13 @@ next daemon removes before binding.
 - **The fence is a Store fence, proved against a transaction in flight.**
   This is the case a terminated coordinator alone would fail. A session's
   terminal transaction is **paused inside the Store, before linearization**,
-  using the adapter's existing fault probe — `checkpoint(state.fault_probe,
-  transition, :before_linearization)` at `local.ex:252` is exactly that
-  injection point. With it paused, the coordinator is killed, so the caller of
+  using core's controllable store, `Loopex.M1RuntimeTestStore`, whose
+  `hold_next_record_before_linearization/3` keeps the caller pending outside
+  the store process for exactly this order
+  (`apps/loopex/test/support/m1_runtime_helper.exs:40-46`); the shipped
+  adapter's `checkpoint(state.fault_probe, transition, :before_linearization)`
+  at `local.ex:252` is the same seam, but core's tree cannot reach that
+  module. With it paused, the coordinator is killed, so the caller of
   that transaction is dead while the transaction itself is still pending.
   Quiesce then runs its deadline path: it terminates the coordinator, waits
   for the `DOWN`, and commits the `advance_owner` fence for that session. The
