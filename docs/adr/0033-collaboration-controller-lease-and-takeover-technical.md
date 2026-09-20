@@ -53,9 +53,12 @@ sockets intact; that was withdrawn on 2026-09-20, on an independent review's
 finding, because a successor acquire
 could then be granted while a forgotten admission was still able to settle.
 
-So the session-owner tree is supervised `one_for_all` up to the listener: an
-owner's failure closes the listener and every connection, the daemon exits,
-and the daemon restarts with no lease anywhere, no connection, and no
+So a lease owner's failure is fatal to the daemon instance, and the daemon's
+supervision supplies that without special-case code: the lease owner is a
+child of the daemon's own supervisor, which carries `max_restarts: 0`, so the
+failure exceeds the restart intensity at once, the supervisor terminates its
+remaining children in reverse start order and exits. Every connection closes
+with it, and the daemon restarts with no lease anywhere, no connection and no
 session activated. No successor acquire exists to be granted wrongly, because
 no connection survives to make one.
 

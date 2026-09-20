@@ -29,13 +29,16 @@ control.** This adapter answers an append error with
 `terminate/2` releases the marker as it goes. So on a store loss the marker is
 released **before** the daemon can react, and any sequence ending "then stop
 the Store" is unrunnable, because the Store is what died. The daemon's only
-correct response is a fail-stop: observe the termination — it composes the
-adapter through `LoopexComposition.start_edge/2`, which uses `start_link`, so
-the adapter is linked to the composing process, and the daemon both traps
-exits there and monitors the adapter so the signal cannot be missed — then
-refuse service, close every connection with `store_lost`, or
-`store_capacity_exceeded` where that was the store's own reason, unlink the
-socket and exit non-zero. The next daemon finds no marker to recover, because
+correct response is a fail-stop, and it arranges to be able to make it: the
+daemon supervises the adapter **directly**, as the first child of its own
+supervisor, so the adapter's termination and its exit reason are reported to
+a process the daemon controls. It does not compose through
+`LoopexComposition`, whose `start_edge/2` takes the `start_link` inside a
+process `RuntimeOwner` spawns and which returns no adapter pid — a daemon on
+that bracket could not observe this failure at all. On the reported exit it
+refuses service, closes every connection with `store_lost`, or
+`store_capacity_exceeded` where that was the store's own reason, unlinks the
+socket and exits non-zero. The next daemon finds no marker to recover, because
 the dying store already gave it back.
 
 An abrupt kill of the daemon runs no `terminate/2` at all, which is why *that*

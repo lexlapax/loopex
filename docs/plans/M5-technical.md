@@ -75,7 +75,7 @@ to the integrator, who resolves them rather than either writer:
 
 | Shared surface | Why both reach it |
 | --- | --- |
-| Host composition — `apps/loopex_composition`, `apps/loopex_app_server/lib/loopex_app_server/host.ex`, `apps/loopex_cli` | The credential item makes every host compose a routing registry and a custody process, pass a token with the call and delete the operator's variable; the daemon *is* a new host composed the same way, and `host.ex:221` is where the variable is read today |
+| Host composition — `apps/loopex_composition`, `apps/loopex_app_server/lib/loopex_app_server/host.ex`, `apps/loopex_cli` | The credential item makes every host compose a routing registry, a custody process and the token bound in its model options, and delete the operator's variable; the daemon *is* a new host composed the same way, and `host.ex:221` is where the variable is read today |
 | The integration scripts — `scripts/check-release.sh` and its fixtures | Workstream 5 selects the real-provider lane; the daemon workstreams add `loopex_daemon` to `release_apps` and the Linux cross-uid case |
 | Provider and credential documentation under `docs/operator/` and `docs/developer/` | Workstream 5 adds the operator credential sentence and the host-composition note; workstream 6 rewrites the same pages for the daemon |
 | Closure evidence — `docs/evidence/M5-closure-runs.md` and `docs/evidence/README.md` | Every workstream's runs, the security review and the demonstration are retained on one page |
@@ -682,7 +682,7 @@ this plan wants impossible. Two facts in the code say so:
   `{:EXIT, _owned_pid, reason}` and the owner runs `cleanup/1` **immediately**
   — stopping every owned edge including the Store, and releasing the marker —
   before the daemon has told a single client, unlinked the socket, or reached
-  anything this section calls step 3.
+  told a single client or unlinked the socket.
 
 So `apps/loopex_daemon` supervises its own children directly, in start order:
 
@@ -693,13 +693,31 @@ So `apps/loopex_daemon` supervises its own children directly, in start order:
 | 3 | The lease owner supervisor | The daemon's own, under ADR 0033 |
 | 4 | The listener | Bound and permission-checked last, so nothing accepts before the rest exists |
 
-The strategy is **`rest_for_one`**. It is the strategy that matches the
-dependency direction already present: each child depends on the ones started
-before it and on none started after, so the Store failing must take the
-runtime, the lease owner and the listener with it, while the listener failing
-need not take the Store. `one_for_all` would also be safe but says less — it
-would claim the listener's failure must destroy the Store, which is not true
-and would make the tree harder to reason about later.
+**The strategy is `rest_for_one` with `max_restarts: 0`**, and the second half
+is what makes the failure rules in ADR 0032 and ADR 0033 true rather than
+aspirational.
+
+`rest_for_one` expresses the dependency direction that is actually there: each
+child depends on those started before it and on none started after. But by
+itself it would *restart* — and every restart here is wrong. A Store that
+terminated on an append error has a durable cause a restart cannot fix, and
+restarting it would reacquire the marker only to fail again. A lease owner
+that died lost the in-flight admission set, which is precisely what ADR 0033
+says must not be silently reconstructed. So the daemon supervisor carries
+`max_restarts: 0`: **any child's failure exceeds the intensity immediately**,
+the supervisor terminates its remaining children in reverse start order and
+exits, and the daemon is fail-stop for every child uniformly.
+
+That one setting is what gives this section its shape. The Store's fail-stop
+and the lease owner's daemon-fatal rule are the same mechanism seen twice,
+not two special cases anyone has to implement separately. And reverse-start-
+order termination — a property of every strategy, not only this one — is what
+stops the Store last without a written sequence.
+
+`one_for_all` would also have been safe but says less: it would claim the
+listener's failure must destroy the Store, which is not the dependency that
+exists, and would make the tree harder to reason about when something is
+added to it later.
 
 This buys exactly the two properties the bracket could not give:
 
@@ -711,8 +729,35 @@ This buys exactly the two properties the bracket could not give:
   supervisor terminates children in the reverse of their start order, so
   listener, lease owner, runtime, Store — which is the ordered shutdown below,
   obtained from the supervision strategy rather than from a sequence someone
-  has to remember to write. And step 2's explicit `Runtime.stop/1` targets
-  child 2, a *sibling*, so it cannot reach the Store.
+  has to remember to write. The runtime is terminated before it, as a sibling
+  in that order, so nothing the daemon does to end work can reach the Store
+  early.
+
+**What the daemon still takes from `loopex_composition`, and one seam that
+needs a decision.** Owning the tree is about *lifetime*, not about wiring.
+The daemon still needs everything that application assembles — the executor
+with its workspace lease and coding tools, the artifact store, the resolved
+policy, the runtime identity, the tool definitions — and duplicating that
+would be a second copy of a wiring layer, which the minimalism budget forbids
+on its face.
+
+The difficulty is that both public entry points, `start/1` and
+`with_runtime/2`, bundle the wiring with the ownership: each goes through
+`RuntimeOwner`, which is the bracket the daemon must not use. So one of two
+things happens, and the maintainer should choose rather than have it decided
+by whoever writes the code first:
+
+- **`loopex_composition` gains a narrow compose-without-owning entry point**
+  — the wiring it already performs, returning the started pieces to a caller
+  that supervises them — and the daemon calls that. This is a small addition
+  to a shared application, and it is a *different* change from the one
+  rejected below: it exposes wiring, not store death or adapter identity.
+- **Or the daemon assembles those pieces itself** from the same public
+  building blocks the composition uses, accepting a second assembly site.
+
+This pair states the first as the preferred shape, because it keeps one
+wiring layer, and marks it as the open implementation decision the daemon
+workstream opens with.
 
 The rejected option is recorded: changing `LoopexComposition` to surface store
 death and return the adapter pid. It is a host convenience application that
@@ -734,77 +779,74 @@ than in taste: `Loopex.Store.Local` answers an append error with
 observes it, the store is gone and the marker is already released. A sequence
 that ends "then stop the Store" cannot run when the Store is what died.
 
-**Daemon-initiated shutdown, in order.** `SIGTERM` or `SIGINT` starts it, and
-from that instant:
+**Daemon-initiated shutdown is the tree terminating, in reverse start order.**
+`SIGTERM` or `SIGINT` asks the daemon supervisor to terminate. It is not a
+sequence anyone writes: a supervisor terminates children in the reverse of
+their start order, so listener, lease owner, runtime, Store falls out of the
+tree above, and each child's own `shutdown` value bounds its part. An ordered
+termination is also not a child failure, so it does not trip `max_restarts:
+0` — that setting governs a child dying on its own, which is the fail-stop
+path below.
 
-1. **Refuse new work.** The listener stops accepting, so a new connection is
-   refused rather than queued, and the daemon admits no new mutation on any
-   existing connection. Queries and attach-state reads still answer, because
-   they change nothing and a client deserves to learn what is happening.
-2. **Drain, then end what has not settled — without claiming an outcome.**
-   Admitted work gets the composed cleanup grace to finish on its own. What
-   has not settled when the grace elapses is ended by stopping the runtime:
-   `Loopex.Runtime.stop/1` is `Supervisor.stop(supervisor, :normal)`, and each
-   session coordinator is a `restart: :temporary` child with `shutdown: 5_000`
-   that neither traps exits in `init/1` nor defines `terminate/2` — so it
-   receives the shutdown exit and dies without running any terminal code. That
-   is **crash-equivalent by construction**, and it is the point: the daemon
-   claims no terminal mutation for work it ended.
+1. **The listener terminates first.** It stops accepting, so a new connection
+   is refused rather than queued; it sends each open connection one
+   `daemon.stopping` naming `operator_stop`, bounded best-effort as ADR 0032
+   fixes — one write attempt into the existing 4 MiB output buffer — and
+   closes it. Clients therefore learn *first*, before anything else is torn
+   down, which is the right order for the one party that cannot see inside the
+   daemon.
+2. **The lease owner terminates.** Every lease vanishes with it. Nothing
+   durable is involved, and no client is left holding one, because no
+   connection survived step 1.
+3. **The runtime terminates, and this is where admitted work ends.** The
+   daemon gives the runtime child a `shutdown` value of the **composed cleanup
+   grace** — the same value the sessions were composed with, so no number is
+   introduced. Work that settles within it settles normally. Work that does
+   not is ended when the supervisor's shutdown timeout elapses and it kills
+   the child, which is **crash-equivalent by definition**: no terminal
+   mutation is claimed, no `cancelled`, no `outcome_unknown`, no abort record.
+   A mutation whose commit was ambiguous stays `commit_unknown` and fenced,
+   and the reconciliation ADR 0006 and ADR 0018 already define settles it at
+   the next activation — exactly as after an abrupt death.
 
-   **The daemon does not rely on the runtime's own teardown being bounded,
-   because it is not.** `Supervisor.stop/3` takes an `:infinity` call timeout
-   by default, and the runtime tree's own values do not close that: core
-   declares `shutdown: 5_000` for a session coordinator but `shutdown:
-   :infinity` for an owner group — whose `terminate/2` itself calls
+   **This is why the daemon sets that value rather than trusting the
+   runtime's own.** The runtime's internal teardown is bounded only
+   transitively: core declares `shutdown: 5_000` for a session coordinator but
+   `shutdown: :infinity` for an owner group — whose `terminate/2` itself calls
    `Supervisor.stop(workers, :shutdown, :infinity)` — and three of the runtime
-   supervisor's children are supervisors, which default to `:infinity`. The
-   runtime's teardown is bounded only transitively, by whatever leaf workers
-   happen to carry, and "5,000 ms for a coordinator" is not the bound of
-   anything.
+   supervisor's children are supervisors, which default to `:infinity`. "5,000
+   ms for a coordinator" is not the bound of anything. A `shutdown` value on
+   the daemon's own child spec is a bound the daemon owns, and it ends in a
+   kill, which is the property this step wants rather than a compromise of it.
 
-   So the daemon supplies its own. Step 2 calls `Runtime.stop/1` under the
-   **composed cleanup grace** — the same value the session was composed with,
-   so no number is introduced — and if it has not returned when that elapses,
-   the daemon kills the runtime supervisor outright:
-   `Process.exit(runtime.supervisor, :kill)`, the pid `%Loopex.Runtime{}`
-   exposes. A brutal kill is crash-equivalent *by definition*, which is
-   precisely what this step claims to be, so the fallback is not a compromise
-   of the property — it is the property, reached directly. A mutation whose commit was
-   ambiguous stays `commit_unknown` and fenced, and the reconciliation
-   ADR 0006 and ADR 0018 already define settles it at the next activation —
-   exactly as it would after an abrupt death.
+   An earlier draft had the daemon call `Runtime.stop/1` explicitly and then
+   kill the supervisor pid on a timer. That is withdrawn: with
+   `max_restarts: 0` an explicit kill of a supervised child would itself
+   exceed the intensity and tear the tree down from under the remaining
+   steps. Expressing the same bound as the child's `shutdown` value obtains
+   it without that contradiction.
 
-   An earlier draft said running effects enter the configured cancellation
-   sequence. That is withdrawn: cancellation is the coordinator's to run as
-   part of a session's own durable command, not something a daemon may drive
-   from outside, and a daemon-side cancellation path is precisely the second
-   loop this milestone forbids. Two alternatives were rejected with it.
+   Also withdrawn, from an earlier draft: that running effects enter the
+   configured cancellation sequence. Cancellation is the coordinator's to run
+   as part of a session's own durable command, not something a daemon may
+   drive from outside, and a daemon-side cancellation path is precisely the
+   second loop this milestone forbids. Two alternatives were rejected with it.
    Host-authorized durable aborts — the daemon admitting an abort per session
    on the way down — would have the daemon issuing mutations on nobody's
    authority, at the moment it is least able to see them through. An unbounded
-   natural drain — waiting for every effect to finish — would make `SIGTERM`
-   unbounded, which is not a stop.
-3. **Tell every client, then close.** Each connection gets one
-   `daemon.stopping` notification naming the reason — `operator_stop` here —
-   and the daemon then closes it. Delivery is bounded best-effort: one write
-   attempt into the connection's existing 4 MiB output buffer, then close
-   regardless. ADR 0032 fixes the record and that bound, and a backpressured
-   or dead client may receive nothing and learn of the stop only by its socket
-   closing.
-4. **Unlink the socket.** The path is removed, so no later client connects to
-   a dead endpoint and the next daemon binds cleanly rather than inheriting a
-   stale file.
-5. **Stop the Store, last.** The marker is released by the Store's own
-   `terminate/2` at that moment — see the marker invariant in ADR 0031 — so
-   stopping the Store last is exactly what makes the marker outlive every
-   session operation that might still have needed it.
+   natural drain would make `SIGTERM` unbounded, which is not a stop.
+4. **The Store terminates last**, and its `terminate/2` releases the writer
+   marker — see the marker invariant in ADR 0031. Stopping it last is what
+   makes the marker outlive every session operation that might still have
+   needed it, and it is obtained from the start order rather than from a step
+   someone has to remember.
+5. **The socket path is unlinked** and the daemon **exits `0`**.
 
-   This is not a step someone has to remember to write: the daemon supervisor
-   starts the Store first, so reverse-start-order termination stops it last.
-   Stopping the daemon supervisor *is* steps 3 to 5 in order — listener, lease
-   owner, runtime, Store — and the marker comes back when the last of those
-   terminates.
-6. **Exit `0`.**
+One ordering consequence is worth stating because it reverses an earlier
+draft: clients are told *before* work is drained, not after. That is
+deliberate. The drain does not need connections to exist, and a client that
+must reconnect elsewhere is better served by learning immediately than by
+waiting out a cleanup grace it cannot see.
 
 **Store loss, a fail-stop path.** The daemon supervisor is the Store adapter's
 parent, so the adapter's termination is reported to it with the adapter's own
@@ -824,11 +866,9 @@ the ordered sequence:
 4. Exit non-zero with that class on `stderr`. **There is no "stop the Store"
    step**, because the Store already stopped and the marker is already
    released; the next daemon finds no marker to recover rather than a stale
-   one. The daemon does not restart the Store either: `rest_for_one` would
-   ordinarily restart child 1, so the Store's child specification is
-   `restart: :temporary` in this tree — a store that terminated on an append
-   error has a durable cause a restart cannot fix, and restarting it would
-   reacquire the marker only to fail again.
+   one. Nothing restarts the Store: the daemon supervisor's `max_restarts: 0`
+   makes this failure fatal to the tree rather than a restart, which is why
+   this path exists at all.
 
 Nothing durable is at risk in that ordering: whatever was ambiguous is
 `commit_unknown` in the journal and is reconciled at the next activation, and
@@ -925,12 +965,12 @@ plan names as new. It is the thing to check a change against.
 | **Core ↔ daemon: attach** | `loopex` owns the cursor barrier, snapshot and queues | Barrier race, stale handle, queue overflow | Core's existing attach transaction and stale-handle checks; the daemon reads no coordinator state to repair a race | Snapshot then contiguous at-least-once events, or detachment at the last emitted cursor with a stable reason | **Durable:** the events. **Not:** the attachment, the window, the buffer |
 | **Core ↔ daemon: resume** | `loopex` | Placement mismatch, unknown session, already-resolved command | Core's existing resume path and command idempotency (`control.ex:901-907` returns the historical result without starting an owner) | Core's refusal, forwarded unchanged | **Durable:** the resume command and its result |
 | **Core ↔ daemon: commands** | `loopex` admits; the daemon forwards | **Coordinator death** | Core's `DynamicSupervisor` (`restart: :temporary`, `session_coordinator.ex:134-142`); `Control` consumes the `DOWN`, releases the fence and leaves the entry (`control.ex:821`). **No signal reaches the daemon, and none is owed** — the daemon supervises the runtime, not the coordinators beneath it | Core's existing refusal on the next command for that session, forwarded unchanged. `residency` still reads `active`, which remains true: this daemon did activate it | **Durable:** whatever committed before. **Not:** any claim about liveness |
-| **Lease owner ↔ connections** | `loopex_daemon` | The per-session lease owner dies, taking the in-flight admission set with it | The daemon supervisor, where the lease owner is child 3: under `rest_for_one` its failure takes child 4, the listener, with it, and ADR 0033 makes it fatal to the instance | `daemon.stopping` with `fatal:supervision_fault`, then every connection closes; the daemon restarts uncontrolled | **Not durable:** the lease, the epoch, the in-flight set. The journal is untouched |
+| **Lease owner ↔ connections** | `loopex_daemon` | The per-session lease owner dies, taking the in-flight admission set with it | The daemon supervisor, where the lease owner is child 3: `max_restarts: 0` makes the failure exceed intensity at once, so the supervisor terminates the tree in reverse start order and exits — ADR 0033's daemon-fatal rule, obtained from the supervision setting rather than from special-case code | `daemon.stopping` with `fatal:supervision_fault`, then every connection closes; the daemon restarts uncontrolled | **Not durable:** the lease, the epoch, the in-flight set. The journal is untouched |
 | **Lease owner ↔ connections (expiry)** | `loopex_daemon` | A holder stops renewing, or a mutation is unresolved at the deadline | The lease owner's own monotonic deadline; the in-flight set decides when a takeover is granted | The holder's next mutation refuses; a takeover is eligible at the deadline and granted when the in-flight set empties | **Not durable:** the lease. The mutation that was in flight settles or refuses exactly once |
 | **Listener ↔ connections** | `loopex_daemon` | Foreign peer, malformed frame, over-long path, backpressure | Filesystem permission verified after bind, then the per-platform peer-credential read (`LOCAL_PEERCRED` / `SO_PEERCRED`), then ADR 0023's framing refusals; backpressure at the 4 MiB output buffer | Closed before initialize for a peer refusal; a stable framing reason otherwise; detachment at the last emitted cursor under backpressure | **Not durable:** connections, buffers, windows |
 | **Registry ↔ sender ↔ custody** | The **host** owns the registry and custody; the adapter owns the sender. The token is bound at composition, resolved per invocation | No registry row, registry dead, custody dead, refusal, malformed reply, deadline | `route(handle, token)` answers `:unavailable`; custody answers one of the four atoms; the **guardian** enforces the deadline and kills the sender | The adapter's existing `Loopex.Model` refusal shape, with the atom in the bounded diagnostic | **Not durable:** nothing about credentials is ever journaled, and no span or record carries model `options` — the model span is a fixed identity map. The invocation's failure is durable |
 | **CLI ↔ socket** | `loopex_cli` | Socket unreachable, refusal, transport loss, renewal failure | The client's own reconnect loop and its renewal timer | Reconnect at the retained cursor, deduplicating; a failed renewal drops to observer with the loss on `stderr`; a reconnecting controller must acquire again for a fresh epoch | **Durable:** nothing the client holds. The cursor is a client-side position |
-| **Daemon ↔ OS: signals** | The operator | `SIGTERM` / `SIGINT` | The daemon's signal handler begins the ordered shutdown; the tree's reverse-start-order termination supplies steps 3 to 5, and step 2's `Runtime.stop/1` targets child 2 under the daemon's own grace, killing `runtime.supervisor` on expiry | `daemon.stopping` with `operator_stop`, then close | **Durable:** whatever committed. **Not:** work ended crash-equivalently, for which no terminal is claimed |
+| **Daemon ↔ OS: signals** | The operator | `SIGTERM` / `SIGINT` | The daemon supervisor terminates; reverse start order gives listener, lease owner, runtime, Store, and the runtime child's `shutdown` value — the composed cleanup grace — bounds the drain and ends in a kill | `daemon.stopping` with `operator_stop`, then close | **Durable:** whatever committed. **Not:** work ended crash-equivalently, for which no terminal is claimed |
 | **Daemon ↔ OS: kill** | The operator | `SIGKILL`, power loss | Nothing runs — no handler, no `terminate/2` | The socket closes with no record at all | **Durable:** the journal. The marker is left for the next daemon's verified stale-writer recovery |
 | **Daemon ↔ OS: socket file** | `loopex_daemon` | A stale `daemon.sock` from a dead daemon | Only the marker holder may unlink and rebind, so two starts resolve at the marker and never at the socket | The loser exits without touching the socket | **Not durable:** the socket file is a path, never state |
 | **Daemon ↔ OS: marker** | `loopex_store_local` | Released in order, released early, or left behind | `terminate/2` in an orderly stop; `terminate/2` early on store loss; nothing on a kill | Nothing directly; the next daemon's start succeeds, succeeds, or recovers | **Not durable in the journal sense:** the marker is exclusion, not truth |
