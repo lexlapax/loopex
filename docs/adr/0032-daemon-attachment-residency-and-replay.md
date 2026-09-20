@@ -51,15 +51,19 @@ distinct attachments to the same session coexist without replacing one
 another; the core continues to own their independent cursor barriers and
 event-count queues, while the daemon owns per-connection socket output
 buffers, the resident window and the residency ceilings. The socket path is
-the state root's `daemon.sock` unless the operator names another, and a path
-beyond the platform bound is refused at start rather than truncated. A daemon
+`daemon.sock` inside a `0700` daemon-owned subdirectory of the state root
+unless the operator names another, and a path beyond the platform bound is
+refused at start rather than truncated. The subdirectory exists so the daemon
+never has to re-permission or reject an operator's existing root, which the
+foreground server creates `0755` under the ordinary umask. A daemon
 acquires the root's store writer marker before it touches the socket path,
 so two simultaneous starts resolve at the marker and never at the socket,
 and a daemon that loses its store closes the listener and every connection
 before it exits. Only the daemon's own operating-system user may connect, and
-the boundary that enforces it is the filesystem: an owner-only directory and
-socket whose ownership and mode the daemon verifies after bind and refuses to
-serve without, which is what stops a foreign peer reaching `accept` at all.
+the boundary that enforces it is the filesystem: an owner-only subdirectory
+and socket whose ownership and mode the daemon verifies after bind and refuses
+to serve without, which is what stops a foreign peer reaching `accept` at all,
+while the state root itself keeps whatever mode it already had.
 Peer-credential inspection is a second, fail-closed layer whose mechanism is
 named per platform, because there is no portable one: the supported OTP 29
 Darwin toolchain reports no `peercred` or `passcred` socket option, so Darwin

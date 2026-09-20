@@ -10,8 +10,22 @@ Concept: [Context and decision](0032-daemon-attachment-residency-and-replay.md#c
 
 ### Transport
 
-The daemon listens on one Unix-domain socket. Its path is
-`<state root>/daemon.sock` by default and may be set explicitly.
+The daemon listens on one Unix-domain socket, and where it puts it matters.
+Its path is `<state root>/daemon/daemon.sock` by default, inside a
+daemon-owned subdirectory the daemon creates mode `0700`, and it may be set
+explicitly to another path under the same rule.
+
+It is a subdirectory rather than the state root itself because the root is not
+the daemon's to re-permission. `LoopexAppServer.Host` creates it with
+`File.mkdir_p/1` and no mode, so under the ordinary umask of 022 an existing
+M4 root is `0755` — measured, not assumed. Requiring the *root* to be `0700`
+would have made the daemon refuse every root the foreground server and the CLI
+have been writing since M4, which contradicts this milestone's central
+compatibility claim that moving a root between the daemon and the foreground
+surfaces is stopping one and starting the other. Tightening the root instead
+would be an unannounced permission change to an operator's existing directory.
+The daemon therefore owns one subdirectory and leaves the root's mode exactly
+as it found it.
 
 **The path bound is derived, not assumed.** `sun_path` is 104 bytes on Darwin
 and 108 on Linux *including* the NUL terminator, so the usable path is one
@@ -25,12 +39,13 @@ truncated. The tests bind at the bound and at one byte past it on every
 platform the release check runs.
 
 **Peer authorization has two layers, and the load-bearing one is the
-filesystem.** The socket lives in a directory the daemon owns with mode
-`0700`, and the socket itself is created mode `0600`; both are verified after
-bind by reading back their owner and mode and comparing them with the daemon's
-own effective user, and the daemon refuses to serve if either is wrong, if the
-parent is not owned by that user, or if any component of the path is a
-symbolic link it did not create. That is what actually keeps another user out:
+filesystem.** The socket lives in that `0700` daemon-owned subdirectory and is
+itself created mode `0600`. Both are verified after bind by reading back their
+owner and mode and comparing them with the daemon's own effective user, and
+the daemon refuses to serve if either is wrong, if the subdirectory is not
+owned by that user, or if any component of the path below the state root is a
+symbolic link it did not create. The state root above it is read, never
+re-permissioned and never required to be `0700`. That is what actually keeps another user out:
 connecting to a Unix-domain socket requires write permission on the socket and
 traversal of its directory, so a foreign peer never reaches `accept`. It is
 the same arrangement ADR 0019 already uses for the provider child's private
