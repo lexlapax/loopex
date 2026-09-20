@@ -621,15 +621,76 @@ non-zero with that step's reason class and touches nothing after it — in
 particular, a daemon that does not hold the marker never reads, unlinks or
 binds the socket path.
 
+**The daemon composes its own supervision tree, and does not use
+`LoopexComposition`'s bracket.** That is a decision this section has to make
+before it can describe any shutdown, because the bracket makes the shutdown
+this plan wants impossible. Two facts in the code say so:
+
+- `LoopexComposition.start_edge/2` runs inside a process `RuntimeOwner`
+  **spawns** — `own_started/5` and `own_bracketed/6` are `spawn_monitor` bodies
+  and `initialize/1` sets `trap_exit` there — so the `start_link` to the Store
+  adapter links that *owner* process, not the daemon. The daemon is only the
+  caller of `start/1` or `with_runtime/2`, and `%Loopex.Runtime{}` is
+  `[:supervisor, :token]`: no composition function hands back the adapter pid.
+  **A daemon using the bracket has no way to observe the Store's death and no
+  pid to monitor.**
+- Worse, it inverts the ordering. `Runtime.stop/1` is
+  `Supervisor.stop(supervisor, :normal)`, and the runtime supervisor is one of
+  the owner's linked edges, so its exit arrives at the owner as
+  `{:EXIT, _owned_pid, reason}` and the owner runs `cleanup/1` **immediately**
+  — stopping every owned edge including the Store, and releasing the marker —
+  before the daemon has told a single client, unlinked the socket, or reached
+  anything this section calls step 3.
+
+So `apps/loopex_daemon` supervises its own children directly, in start order:
+
+| # | Child | Started how |
+| --- | --- | --- |
+| 1 | The Store adapter | `Loopex.Store.Local.start_link/1` with the root and `recover_stale_writer: true` — the same call `LoopexComposition` makes through `start_edge/2` |
+| 2 | The runtime | `Loopex.Runtime.start_link/1` with the store, model, executor, policy and tool configuration the daemon composed |
+| 3 | The lease owner supervisor | The daemon's own, under ADR 0033 |
+| 4 | The listener | Bound and permission-checked last, so nothing accepts before the rest exists |
+
+The strategy is **`rest_for_one`**. It is the strategy that matches the
+dependency direction already present: each child depends on the ones started
+before it and on none started after, so the Store failing must take the
+runtime, the lease owner and the listener with it, while the listener failing
+need not take the Store. `one_for_all` would also be safe but says less — it
+would claim the listener's failure must destroy the Store, which is not true
+and would make the tree harder to reason about later.
+
+This buys exactly the two properties the bracket could not give:
+
+- **The daemon supervisor holds the Store's link**, so the adapter's exit
+  reason — the `{:stop, reason, …}` `Loopex.Store.Local` answers an append
+  error with — arrives at a process the daemon controls, carrying
+  `store_capacity_exceeded` or whatever the store's own reason was.
+- **Reverse-start-order termination stops the Store last by construction.** A
+  supervisor terminates children in the reverse of their start order, so
+  listener, lease owner, runtime, Store — which is the ordered shutdown below,
+  obtained from the supervision strategy rather than from a sequence someone
+  has to remember to write. And step 2's explicit `Runtime.stop/1` targets
+  child 2, a *sibling*, so it cannot reach the Store.
+
+The rejected option is recorded: changing `LoopexComposition` to surface store
+death and return the adapter pid. It is a host convenience application that
+the app server uses and the daemon does not need — the daemon is a different
+kind of host, one that must outlive its clients and own its own shutdown
+ordering, and widening a shared helper to serve it would put daemon concerns
+into an application whose other caller has none. **The two hosts therefore
+compose differently, deliberately:** `LoopexAppServer.Host` keeps using
+`with_runtime/2`, whose bracket is exactly right for a process that lives and
+dies with one client's stdin, and the daemon supervises its own tree because
+it does not.
+
 There are **two** ways a daemon ends, and conflating them was a defect. A
-daemon-initiated shutdown is the ordered sequence below and stops the Store
-last. A **store loss is a fail-stop**, and it cannot be the ordered sequence,
-for a reason that is in the code rather than in taste: `Loopex.Store.Local`
-answers an append error with `{:stop, reason, commit_unknown, state}`, so it
-terminates *itself*, and its `terminate/2` releases the writer marker on the
-way out. By the time the daemon observes anything, the store is gone and the
-marker is already released. A sequence that ends "then stop the Store" cannot
-run when the Store is what died.
+daemon-initiated shutdown is the ordered sequence below. A **store loss is a
+fail-stop**, and it cannot be that sequence, for a reason in the code rather
+than in taste: `Loopex.Store.Local` answers an append error with
+`{:stop, reason, commit_unknown, state}`, so it terminates *itself*, and its
+`terminate/2` releases the writer marker on the way out. By the time anything
+observes it, the store is gone and the marker is already released. A sequence
+that ends "then stop the Store" cannot run when the Store is what died.
 
 **Daemon-initiated shutdown, in order.** `SIGTERM` or `SIGINT` starts it, and
 from that instant:
@@ -648,14 +709,25 @@ from that instant:
    is **crash-equivalent by construction**, and it is the point: the daemon
    claims no terminal mutation for work it ended.
 
-   The bound is the supervision tree's, and the plan says whose rather than
-   asserting one. `Supervisor.stop/3` takes an `:infinity` call timeout by
-   default and the daemon adds none; what bounds the step is each child's own
-   `shutdown` value — 5,000 ms for a coordinator, after which the supervisor
-   kills it brutally — applied as the tree terminates. So the step is bounded
-   by values the tree already carries, not by a timer this milestone
-   introduces, and a coordinator cannot hold the shutdown open past its own
-   shutdown value. A mutation whose commit was
+   **The daemon does not rely on the runtime's own teardown being bounded,
+   because it is not.** `Supervisor.stop/3` takes an `:infinity` call timeout
+   by default, and the runtime tree's own values do not close that: core
+   declares `shutdown: 5_000` for a session coordinator but `shutdown:
+   :infinity` for an owner group — whose `terminate/2` itself calls
+   `Supervisor.stop(workers, :shutdown, :infinity)` — and three of the runtime
+   supervisor's children are supervisors, which default to `:infinity`. The
+   runtime's teardown is bounded only transitively, by whatever leaf workers
+   happen to carry, and "5,000 ms for a coordinator" is not the bound of
+   anything.
+
+   So the daemon supplies its own. Step 2 calls `Runtime.stop/1` under the
+   **composed cleanup grace** — the same value the session was composed with,
+   so no number is introduced — and if it has not returned when that elapses,
+   the daemon kills the runtime supervisor outright:
+   `Process.exit(runtime.supervisor, :kill)`, the pid `%Loopex.Runtime{}`
+   exposes. A brutal kill is crash-equivalent *by definition*, which is
+   precisely what this step claims to be, so the fallback is not a compromise
+   of the property — it is the property, reached directly. A mutation whose commit was
    ambiguous stays `commit_unknown` and fenced, and the reconciliation
    ADR 0006 and ADR 0018 already define settles it at the next activation —
    exactly as it would after an abrupt death.
@@ -685,30 +757,21 @@ from that instant:
    stopping the Store last is exactly what makes the marker outlive every
    session operation that might still have needed it.
 
-   This is the order the composition bracket already performs, which is worth
-   knowing before anyone writes a teardown of their own.
-   `LoopexComposition` starts the Store adapter first and the runtime last,
-   and `start_edge/2` **prepends** each started edge to its owned list, so
-   that list is runtime-first and Store-last; `RuntimeOwner`'s cleanup reduces
-   over it in order and therefore stops the runtime first and the Store last.
-   A daemon that composes through `with_runtime/2` gets this ordering by
-   returning from the bracket. Step 2 stops the runtime explicitly rather than
-   leaving it to that cleanup only because the daemon wants the sequence — end
-   work, *then* tell clients, *then* unlink — and the bracket's own teardown
-   would do it after the daemon had already closed everything.
+   This is not a step someone has to remember to write: the daemon supervisor
+   starts the Store first, so reverse-start-order termination stops it last.
+   Stopping the daemon supervisor *is* steps 3 to 5 in order — listener, lease
+   owner, runtime, Store — and the marker comes back when the last of those
+   terminates.
 6. **Exit `0`.**
 
-**Store loss, a fail-stop path.** The daemon composes its runtime through
-`LoopexComposition`, whose `start_edge/2` starts the adapter with
-`start_link`, so the adapter is **linked** to the composing process. The
-daemon arranges to observe its death rather than be killed by it: the process
-holding that link traps exits, and the daemon additionally monitors the
-adapter, so the signal arrives whichever way the link behaves and a store that
-terminates itself cannot take the daemon down as an untrapped exit before the
-daemon has told anyone. This path does **not** depend on the composition
-bracket's own teardown ordering, and must not: the marker is already gone by
-the time the signal arrives, so there is nothing left for an ordered teardown
-to protect. On that signal, and without the ordered sequence:
+**Store loss, a fail-stop path.** The daemon supervisor is the Store adapter's
+parent, so the adapter's termination is reported to it with the adapter's own
+exit reason — that is the whole observation mechanism, and it needs no link
+the daemon does not already hold and no monitor it has to remember to set.
+Under `rest_for_one` the Store is child 1, so its failure takes the runtime,
+the lease owner and the listener with it, which is the refusal-of-service this
+path wants. The daemon reads the reason to classify the exit and then, without
+the ordered sequence:
 
 1. Refuse service immediately — no further admission, no further attach, and
    the listener closed.
@@ -719,7 +782,11 @@ to protect. On that signal, and without the ordered sequence:
 4. Exit non-zero with that class on `stderr`. **There is no "stop the Store"
    step**, because the Store already stopped and the marker is already
    released; the next daemon finds no marker to recover rather than a stale
-   one.
+   one. The daemon does not restart the Store either: `rest_for_one` would
+   ordinarily restart child 1, so the Store's child specification is
+   `restart: :temporary` in this tree — a store that terminated on an append
+   error has a durable cause a restart cannot fix, and restarting it would
+   reacquire the marker only to fail again.
 
 Nothing durable is at risk in that ordering: whatever was ambiguous is
 `commit_unknown` in the journal and is reconciled at the next activation, and
