@@ -595,8 +595,8 @@ foreground server on the same root exactly as it would without this decision;
 what a `0.1.0` *client* then talks to is a `0.1.0` server, which speaks the old
 string again.
 
-**The fourteen files that carry the string today**, named here so workstream 3
-can be checked against a list rather than a grep:
+**Fifteen files carry the string today; the rename edits thirteen**, named
+here so workstream 3 can be checked against a list rather than a grep:
 `apps/loopex_app_server/lib/loopex_app_server.ex` and its three tests
 (`app_server_test.exs`, `initialization_test.exs`, `stdio_probe_test.exs`);
 `apps/loopex_protocol/lib/loopex_protocol/session.ex:32` with
@@ -610,12 +610,18 @@ the code is being made to agree with;
 The documents are closure obligations under the docs gate, which reads every
 tracked file in `docs/operator` and `docs/developer`, so none can be missed.
 
-**`CHANGELOG.md` is the fourteenth and is deliberately *not* rewritten.** It
-carries the string in the entry that records what `0.1.0` shipped, and that
+**Two carriers are deliberately *not* rewritten, which is why fifteen and
+thirteen are both right.** `CHANGELOG.md` carries the string in the entry that
+records what `0.1.0` shipped, and that
 entry stays true: `0.1.0` did serve `loopex.session.v1-experimental`. The
-rename is recorded as a `0.2.0` entry instead. An earlier list of these files
-had thirteen and omitted it, which would have left the rename either missing
-from the changelog or silently editing history.
+rename is recorded as a **new** `0.2.0` entry instead, so the changelog is
+touched without that occurrence moving. And
+**`docs/adr/0032-daemon-attachment-residency-and-replay-technical.md` is the
+fifteenth**: it carries the retired name inside *this* set, in the passage
+that explains the rename, and it is changed by this milestone's own ADR work
+rather than by workstream 3's search-and-replace. An earlier revision said
+"fourteen files that carry it" and then listed thirteen edits, which is the
+arithmetic this paragraph exists to close.
 
 Rollback to `0.1.0` is stopping the daemon. Removing it restores the M4
 foreground server and the CLI on the same root with no durable dependency on
@@ -976,21 +982,32 @@ carries two plain fields beside the session ID:**
 | Field | Values | What the daemon does with it |
 | --- | --- | --- |
 | `disposition` | `:fresh` \| `:historical` | Charge an activation for `:fresh`; charge nothing for `:historical` |
-| `control_entry` | `:active` \| `:dormant` | Repair the directory entry and index row without activating when `:dormant`; leave both alone when `:active`, since an activated session already recorded them |
+| `control_entry` | `:active` \| `:acquiring` \| `:dormant` | Repair the directory entry and index row without activating when `:dormant`; leave both alone when `:active`, since an activated session already recorded them |
 
-**`control_entry` is two values over three statuses, and the mapping is
-stated rather than left to be guessed.** `Control` holds `:active`,
+**`control_entry` is three values over three statuses plus no-entry, and an
+earlier revision argued one of them away.** `Control` holds `:active`,
 `:acquiring` and `:unavailable`, and a session may have no entry at all
-(`control.ex:569`, `:620`, `:818`, `:862`, `:1030`, `:1150`, `:1189`).
-`control_entry` answers the only question the daemon has — *is there a live
-coordinator for this session right now?* — so `:active` maps to `:active`,
-and **`:unavailable` and no-entry both map to `:dormant`**, there being no
-coordinator either way. `:acquiring` is never observed by the caller of a
-**completed** create or resume: it is the status while that very call is
-starting an owner, and the call does not answer until the owner is ready or
-the attempt has failed, at which point the entry is `:active` or
-`:unavailable`. A caller therefore cannot see it, and the field does not need
-a third value to be total.
+(`control.ex:569`, `:620`, `:818`, `:862`, `:1030`, `:1150`, `:1189`). The
+mapping is `:active` → **`:active`**; `:acquiring` → **`:acquiring`**;
+`:unavailable` and no-entry → **`:dormant`**, there being no coordinator
+either way.
+
+That revision said `:acquiring` "is never observed by the caller of a
+completed create or resume", reasoning that the status exists only while that
+very call is starting an owner. The reasoning is wrong on both **replayed**
+branches, which are the branches the daemon most cares about. A replayed
+create takes the second arm of the `cond` at `control.ex:902-919` and replies
+`{:ok, session_id}` **immediately, whatever the entry holds**; a replayed
+resume replies the same way at `:311-312`. Neither starts an owner and
+neither waits for one. So a client replaying a create while another connection
+is concurrently resuming that same session — which sets `:acquiring` at
+`:1185-1192` — reads `:acquiring`, from a call that completed without
+touching it.
+
+The field therefore carries it, and the reservation table says what to do
+with it: a **replay** that sees `:acquiring` **releases** its reservation,
+because some other call is doing the activating and holds its own; a **fresh**
+resume can never answer `:acquiring`, having waited for its own owner.
 
 **It is `control_entry`, not `residency`, and the rename is the point.**
 `residency` is a **daemon** fact on the wire — what `session.list` reports
@@ -1031,7 +1048,7 @@ So core change 5 adds **two daemon-facing functions beside them**,
 `Loopex.Runtime.create_session_detailed/3` and
 `resume_session_detailed/3`, answering
 `{:ok, %{session_id: binary(), disposition: :fresh | :historical,
-control_entry: :active | :dormant}} | {:error, term()}`. The existing pair
+control_entry: :active | :acquiring | :dormant}} | {:error, term()}`. The existing pair
 keeps its exact spec and its exact return, implemented as a projection of the
 detailed one, so `loopex.ex:87-95` and `:110-117` forward what they forward today and
 no embedded caller sees anything move. The daemon calls the detailed pair,
@@ -1169,6 +1186,8 @@ leaked until the daemon restarts:
 | Create, `disposition: :fresh` | **Converted** — a coordinator started |
 | Create, `:historical` with `control_entry: :active` | Released — that session was counted when it was activated |
 | Create, `:historical` with `control_entry: :dormant` | Released — a replay starts nothing. `:dormant` here covers both a `Control` entry that is `:unavailable` and no entry at all: neither is a live coordinator, and neither was charged |
+| Create or resume, `:historical` with `control_entry: :acquiring` | Released — another call is activating that session **and holds its own reservation**; charging this one too would spend two slots for one coordinator. The replay started nothing, which is what `:historical` says |
+| Resume, `disposition: :fresh`, `control_entry: :acquiring` | **Cannot occur**, and the row says so rather than omitting it: a fresh resume waits for its own owner, so by the time it answers the entry it created is `:active` or the call has failed |
 | Resume, `disposition: :fresh` | **Converted** — a coordinator started |
 | Resume, `:historical` | Released — the replayed result is returned without starting an owner (`control.ex:311-312`) |
 | Any of the three refusing — `runtime_command_conflict`, `store_unavailable`, an invalid identifier, a placement mismatch, an attach whose first leg answers `{:error, :runtime_unavailable}` on its 5 s default, any other `{:error, _}` | Released. An attach refused at its first leg is the same case as any other refusal, because that leg mutates nothing (`control.ex:1235-1251`) |
@@ -1375,13 +1394,19 @@ runtime — rather than against a staged one the plan would have to invent:
    never reads, unlinks or binds the socket path.
 5. **Read the session directory and build the index**, refusing at the
    recorded-entry bound.
-6. **Create the `0700` subdirectory, remove any stale socket pathname, and
+6. **Start the admission relay.** It is the ninth of the ten linked
+   processes and the last before the listener: it needs the runtime step 4
+   returned, and it must exist before any connection can be accepted, because
+   every call that changes core state goes through it. An earlier
+   revision gave it a row in the process table and no step here, which left
+   the one process the admission cut depends on with no place in the order.
+7. **Create the `0700` subdirectory, remove any stale socket pathname, and
    bind the `0600` socket**, then read back and verify ownership and mode.
    Removing the stale pathname is this daemon's right and only this daemon's:
    it holds the verified marker, which is the only moment at which removing a
    socket file is unambiguously correct. A predecessor that left one — every
    fail-stop leaves one — is cleaned up here rather than by itself.
-7. **Begin accepting**, then **print the readiness line**.
+8. **Begin accepting**, then **print the readiness line**.
 
 No lease owner exists at this point, and none is started here: one is started
 when a session is activated, which cannot happen before a client connects.
@@ -1455,6 +1480,7 @@ Four rules, each narrow:
   as the only account of an acquisition that already happened.
 - **The owner drains and checks before every acquisition it performs itself.**
   Before taking the marker, before calling the composition function, before
+  starting the relay, before
   binding the socket and before printing the readiness line, the owner reads
   whatever is in its mailbox for a stop message or an `{:EXIT, …}` and checks
   that every component it has already started is alive. Any of those aborts
@@ -2116,7 +2142,7 @@ handler and `:os.set_signal/2` refuses the name outright, which
 the command (`interrupt.ex:13-17`). So a terminal `Ctrl-C` reaches a daemon
 the only way a reserved signal can — from outside the emulator.
 `apps/loopex_cli/bin/loopex` traps `INT TERM HUP QUIT` and forwards
-`kill -TERM` to its child (`bin/loopex:51-60`), so **`SIGINT` is a launcher
+`kill -TERM` to its child (`bin/loopex:60`), so **`SIGINT` is a launcher
 concern and `SIGTERM` is the escript's**. A daemon started without that
 launcher has no `SIGINT` behaviour to specify, and the plan says so rather
 than implying one.
@@ -2139,7 +2165,7 @@ defaults.
 rather than giving one answer for two different processes.** It has to,
 because `apps/loopex_cli/bin/loopex` traps **`INT TERM HUP QUIT`** and
 forwards every one of them to its child as `kill -TERM`
-(`bin/loopex:51-60`) — so what a signal means is decided by whether it lands
+(`bin/loopex:60`) — so what a signal means is decided by whether it lands
 on the launcher or on the escript:
 
 | Signal | Sent to the **launcher** | Sent to the **escript** directly |
@@ -2321,6 +2347,32 @@ and covers steps 3, 4, 5 and the non-Store part of step 6. Phase 7 is the
 Store stop at the end of step 6. Nothing is bounded twice and nothing is
 bounded by nobody.
 
+**Who enforces a phase, since a bound with no enforcer is a wish.** Phases 2,
+4 and 5 are core's, and none of them can be bounded by the call that does the
+work: a coordinator's `command/3` waits `:infinity` by design
+(`session_coordinator.ex:146-149`), and must, because a timeout there is not
+evidence of anything. So quiesce runs **each session's admission and each
+session's fence in its own task**, and bounds the task rather than the call:
+`Task.async/1` per session, one `Task.yield/2` against what remains of the
+phase's absolute deadline, then `Task.shutdown/2` for whatever has not
+answered. That is the ordinary bounded-task idiom, it needs no new mechanism,
+and it is what makes "concurrent across sessions" and "bounded per phase"
+the same sentence rather than two hopes.
+
+What a shutdown means is decided, not left open, and the classification table
+below carries both rows:
+
+- **a phase-2 admission that does not answer** leaves the session's abort
+  neither known-committed nor known-refused, which is the ambiguous case this
+  section already handles: **no cleanup is released for it and it is fenced**;
+- **a phase-4 fence that does not answer** is exactly a fence whose outcome
+  the drain cannot read, so it is reported **`{:unknown, head}`** and the
+  domain stays fenced — the same disposition a `commit_unknown` gets, reached
+  by a different route;
+- **phase 5 needs no task**, being `Supervisor`-shaped already: terminating a
+  coordinator is bounded by the `shutdown: 5_000` its own child specification
+  carries (`session_coordinator.ex:134-142`), which is the enforcer.
+
 **One rule keeps a phase from starting work it cannot finish, and with the
 counts above it can always be honoured.** *No Store
 operation begins without at least its own 30 s remaining in its phase.* Because
@@ -2390,7 +2442,7 @@ not the sum — is what keeps the bound flat as sessions multiply.
 **And core derives it because the daemon cannot.** Each `g_i` is the grace
 that session **committed**, read from its durable state
 (`session_coordinator.ex:422`); the daemon's `--cleanup-grace-ms` is the
-default a *new* session is composed with (`control.ex:890-891`), not a fact
+default a *new* session is composed with (`control.ex:894`), not a fact
 about sessions already in the root. A root carrying sessions created under an
 earlier composition therefore holds graces the daemon has never seen. An
 earlier revision had the daemon compute the budget from its own option, which
@@ -2643,8 +2695,9 @@ the owner fixes.
    executor first, since stopping it is what sets its Port-owning workers
    terminating the captured process groups. Then the tracing capability,
    custody and the registry, which hold nothing durable. Then the Store, whose `terminate/2` releases the writer marker —
-   see the marker invariant in ADR 0031. The socket path is already gone,
-   left in place by step 3 for the next marker holder to remove, so the last
+   see the marker invariant in ADR 0031. The socket path is **left in place**
+   by step 3 for the next marker holder to remove — "already gone" was a
+   residue of the design that unlinked — so the last
    act is the halt: **`0`**, or the class,
    in the case above where something failed on the way out.
 
@@ -3021,8 +3074,16 @@ carried: it described three outcomes and returned none of them.
    ID bound to the canonical mutation digest
    (`vision-technical.md:710-716`), and a random incarnation is what breaks
    that binding. So the fence's incarnation derives from the same three inputs
-   the `tx_id` does, through the same `owner_identity/3` discipline, and a
-   re-presentation is **byte-identical**.
+   the `tx_id` does, through the same `owner_identity/3` discipline, **under a
+   second namespace**: `"drain_fence"` for the transaction id and
+   `"drain_fence_incarnation"` for the incarnation. The two namespaces matter
+   rather than being tidiness — `owner_identity/3` hashes the namespace with
+   its inputs, so one namespace over identical inputs would make the
+   incarnation and the transaction id the *same string*. The coordinator
+   already does exactly this, deriving both from `owner_identity/3` under
+   `"owner_tx"` and `"owner_incarnation"`
+   (`session_coordinator.ex:1222-1224`). A
+   re-presentation is then **byte-identical**.
 
    A `:tx_id_conflict` is nonetheless given a row, because a rule with no
    answer for a result the adapter can return is not total: it is handled
@@ -3123,6 +3184,8 @@ carried: it described three outcomes and returned none of them.
    | `:unavailable` | The status `Control` writes when an acquisition it was waiting on failed or its coordinator went down mid-acquisition (`control.ex:620`, `:818`, `:862`, `:1150`) | `absent` | **Yes**, for the same reason: there is no coordinator, and there may be a transaction |
    | `:acquiring` | The status while an owner is being started (`control.ex:569`, `:1030`, `:1189`) | `unsettled` | **Yes** |
    | No entry | The session is dormant in this daemon, or belongs to no daemon at all | In no list; quiesce enumerates `Control` and nothing else | No |
+   | **A phase-2 admission that did not answer** inside the phase, its task shut down | The session's abort is neither known-committed nor known-refused | `unsettled`, with no cleanup released | **Yes** |
+   | **A phase-4 fence that did not answer** inside the phase, its task shut down | The fence's outcome cannot be read | `unsettled`, `{:unknown, head}` | The attempt was made; the domain stays fenced |
 
    **`:acquiring` is reachable, and an earlier revision called it unreachable.**
    That revision's argument was the cut: only `session.create` and
@@ -3329,7 +3392,17 @@ to write.
    `executor_lost` there is no executor left to read the lease holder's `DOWN`
    at all.
 6. Write the class on `stderr`, then **halt with the non-zero status** for
-   that class. Nothing restarts anything: the owner `start_link`s its fixed
+   that class.
+
+   **A fail-stop has an operator bound too, and it is much smaller than an
+   orderly stop's.** Only two of its steps can wait: the executor stop, under
+   the same five seconds phase 6 uses, and the Store stop, in its own fixed
+   thirty. Nothing else waits on anything — there is no drain, no admission,
+   no fence, no coordinator to terminate and no runtime tree to bring down.
+   So **the maximum for any fatal class is 5 s + 30 s = 35 s**, with no
+   derived term in it at all, which is the one number an operator setting a
+   restart policy needs and which an earlier revision left them to infer. On
+   the two store classes it is 5 s, the Store being already gone. Nothing restarts anything: the owner `start_link`s its fixed
    set and restarts none, so an exit it did not cause is fatal by its own clause —
    which is why this path exists at all rather than being a restart.
 
@@ -3498,7 +3571,7 @@ opposite for the same failure. The rule is the bind:
 
 | Where the start failed | Socket pathname | `daemon/` subdirectory |
 | --- | --- | --- |
-| **Before the bind** — path resolution, signal install, the registry, custody or capability, composition and the marker, the index read, the subdirectory create | **None exists**; nothing was bound, so nothing is left | Removed **only if this start created it and it is empty**; a subdirectory that was already there, or that holds anything, is left exactly as found |
+| **Before the bind** — path resolution, signal install, the registry, custody or capability, composition and the marker, the index read, the relay, the subdirectory create | **None exists**; nothing was bound, so nothing is left | Removed **only if this start created it and it is empty**; a subdirectory that was already there, or that holds anything, is left exactly as found |
 | **At or after the bind** — the permission read-back, the accept, the readiness write, or any component dying during those | **Left in place**, closed but not unlinked, like every other exit path | **Left in place**, because it holds that pathname |
 
 Both halves follow from one rule already stated and one plain fact: **no
@@ -3728,7 +3801,7 @@ children, a pid's liveness, a socket's EOF, or the daemon's own `stderr`.
   Four cases send `INT`, `TERM`, `HUP` and `QUIT` **to the launcher**,
   `apps/loopex_cli/bin/loopex`, and each asserts the **orderly sequence** —
   because the launcher traps all four and forwards `kill -TERM`
-  (`bin/loopex:51-60`), so through the shipped path all four mean stop. Four
+  (`bin/loopex:60`), so through the shipped path all four mean stop. Four
   more send the same signals **to the escript process itself**: `TERM` asserts
   the orderly sequence, and `HUP` and `QUIT` assert the emulator's own
   behaviour with **no** orderly stop — no `daemon.stopping` record, no drain —
@@ -4200,6 +4273,7 @@ line; M5 introduces none of its own.
 | Phase 5, coordinator termination | **5_000 ms**, the coordinator's own `shutdown` value (`apps/loopex/lib/loopex/runtime/session_coordinator.ex:134-142`) | Core's existing child specification |
 | Phase 6, non-Store teardown | **5_000 ms**, one absolute deadline from the instant `quiesce/1` returns, covering the stop records, the connection and listener closes, the collective lease-owner sweep, **the runtime tree's stop** and every other non-Store stop | This plan. Chosen, not derived. A ceiling for the work the phase performs rather than a promise about the runtime's subtree: an `OwnerGroup` traps exits and carries `shutdown: :infinity` (`owner_group.ex:14-19`, `:50`, `:86-90`), so the runtime stop is attempted with what remains and killed at the bound |
 | Phase 7, the Store stop | a fixed 30 s, the Store's own `@call_timeout` (`apps/loopex_store_local/lib/loopex/store/local.ex:65`), independent of any grace; the usual release takes milliseconds | This plan, against the Store's existing bound |
+| Maximum fail-stop exit | **35 s** — 5 s for the executor stop and the Store's own fixed 30 s, the only two steps of that path that wait; 5 s on the two store classes, where the Store is already gone | This plan, as the sum of its parts |
 | Maximum graceful stop | `budget_ms` + **525 s**, the sum of the seven fixed phases above — eight phases, of which only the drain budget is derived; a worst case built from the adapter's wedged-filesystem ceiling, not the cost of an ordinary stop | This plan, as the sum of its parts |
 | Wait slice | 60_000 ms, so no `receive … after` argument approaches the BEAM's 2^32-1 limit, probed at both pairs | This plan; the limit is the VM's |
 | Lease term | 30 seconds | ADR 0033 |

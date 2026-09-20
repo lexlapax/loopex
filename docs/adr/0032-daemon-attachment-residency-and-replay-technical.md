@@ -147,8 +147,10 @@ is a malformed request, answered with ADR 0023's `invalid_request`, and never
 well-formed to put through it. Every other field of those requests is ADR
 0023's, unchanged. A connection is
 one attachment after `session.attach`; generation 2 permits a connection to
-hold at most one attachment at a time and a client process to hold as many
-connections as the residency limits admit.
+hold at most one attachment at a time — **and at most one controller lease**,
+which ADR 0033 fixes for the same reason and which is what makes closing "the
+controller's connection" name exactly one session — and a client process to
+hold as many connections as the residency limits admit.
 
 **An attachment never outlives the process that attached it, and M5 is what
 makes that true.** The mechanism is a monitor, not a detach call. Today the
@@ -555,8 +557,10 @@ recomputed and re-pinned alongside generation 2's, with every other input to
 it byte-identical. Its two published manifests are not touched: they already
 declare `loopex.experimental/1`, so the rename makes the code agree with them
 rather than changing them. The
-negotiation list a server advertises therefore carries `loopex.experimental/1`
-and `loopex.experimental/2`, and neither carries the old name.
+generations the two servers advertise are therefore `loopex.experimental/1`
+from the foreground server and `loopex.experimental/2` from the daemon —
+**neither advertises both**, each serving exactly one generation, which is what
+the exact-generation rule means here — and neither carries the old name.
 
 
 ### Generation 2, at the precision literal vectors need

@@ -158,6 +158,16 @@ lease record by another name, which this decision rejects for its own
 reasons. The relay is not that: it holds no lease and no authority, only the
 fact that a call it made has not yet been accounted for.
 
+**One lease per connection.** A connection holds at most one controller lease
+at a time, so a client that wants to drive two sessions opens two connections.
+That is the same shape ADR 0032 already gives attachments — one per
+connection — and it is what makes the session-scoped close exact: when a lease
+owner dies, "close the controller's connection" names one session's controller
+and cannot take a second session's control down with it. Without the rule the
+close would be ambiguous, and a second acquisition on a connection that
+already holds a lease refuses `control_held` for its own session rather than
+being quietly admitted.
+
 A holder's connection is **exempt from ADR 0032's idle eviction while the
 lease is held**, for the reason that decision states: evicting it would close
 the connection the lease is bound to, and only an explicit
