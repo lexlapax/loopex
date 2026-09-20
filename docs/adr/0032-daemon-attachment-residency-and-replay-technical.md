@@ -167,15 +167,38 @@ the daemon itself owns or reads once:
 - `residency`, a daemon fact, set to `active` at activation and never set back
   within a daemon's lifetime, because activation is one-way;
 - `controlled`, a daemon fact, updated on every lease grant, release and
-  expiry by the same per-session owner ADR 0033 gives those transitions —
-  **and on that owner's failure**, which is not a transition the owner can
-  record for itself. Under ADR 0033 a lease owner's failure is fatal to the
-  daemon instance, so both fields are reconstructed by the restart rather than
-  repaired in place: after it, every session is `dormant` and `controlled` is
-  false, which is exactly true of a daemon that has activated nothing and
-  granted nothing. A coordinator that fails is core's to supervise; the daemon
-  does not invent a `residency` value for it, and a client learns of it by
-  attaching, where core answers authoritatively.
+  expiry by the same per-session owner ADR 0033 gives those transitions.
+
+**Keeping `residency` honest costs a rule, and this pair pays it.** `active`
+means the daemon holds a live coordinator. The index sets it once and never
+back. Put those together and a coordinator that dies would leave the index
+saying `active` about a session that has none — a field that is silently
+false, which is worse than an absent one and is exactly what the four list
+fields were narrowed to avoid.
+
+Core does not close that gap for us. `Loopex.Runtime.Control` monitors each
+coordinator, and when an `:active` one goes down it releases the dispatcher
+fence and returns without altering the session entry, which keeps the entry in
+place with a dead coordinator pid. That is the right thing for core to do and
+it is not a defect; it simply means no notification arrives that the daemon
+could use to move the index.
+
+So **the loss of an activated session's coordinator is fatal to the daemon
+instance**, by the same rule and the same supervision shape ADR 0033 gives a
+lease owner's failure: `one_for_all` up to the listener, every connection
+closed, the daemon exits and restarts with nothing activated, no lease, and an
+index rebuilt from the directory in which every session is `dormant` and
+`controlled` is false — which is exactly true of a daemon that has activated
+nothing. The activation count starts again with it, since the ceiling counts
+activations per daemon lifetime and a restart is a new lifetime.
+
+The alternative — a lifecycle notification from core, an index transition to
+some third state, and a recovery route back to `active` — was rejected. A
+transition out of `active` is a deactivation, and deciding when a session may
+leave `active` is deciding when its coordinator may stop: that is the core
+deactivation operation M5 does not have and cannot invent here, wearing a
+different name. Taking the daemon down instead costs an outage and buys a
+listing that is never wrong.
 
 Lineage, lifecycle state and last committed sequence are deliberately absent.
 A daemon index cannot keep them current without reading the Store on the

@@ -135,8 +135,19 @@ the local store's writer marker, unchanged.
   not on the two calls that precede it, and that mutation refuses unless the
   sending connection is the holder, the epoch matches and the connection
   holds a controller-capable attachment.
-- An orderly connection close by the holder releases the lease; an abrupt
-  loss leaves it to expire.
+- **Only an explicit release releases early.** A successful
+  `session.release_control` from the holder frees the lease at once. Every
+  other way a connection ends — an orderly close, an EOF, a killed client, a
+  severed socket — leaves the lease to expire on its term.
+
+  An earlier draft said an orderly close released the lease while an abrupt
+  loss waited. That cannot be implemented over a Unix-domain socket and is
+  withdrawn: the daemon sees EOF, and EOF is EOF. A client that closed
+  politely and a client that was killed present the reading end with exactly
+  the same event, so a rule that distinguishes them is a rule the daemon
+  cannot execute. Binding early release to a message the client actually sent
+  is the only version of this the transport can support, and it is also the
+  more honest one — a controller that wants to hand over says so.
 
 ### Expiry against an in-flight admission
 
@@ -212,7 +223,12 @@ stable reason when its own deadline elapses first, the holder's connection
 disconnecting while its mutation is in flight, and the per-session lease owner
 failing while a mutation is in flight — in every case exactly one of settle or
 refuse, never both, and no epoch reused; takeover only after release or expiry
-with a fresh epoch minted before the successor's first command; a controller
+with a fresh epoch minted before the successor's first command; the three ways
+a controller stops holding proved separately, because only one of them is
+early and the transport cannot tell the other two apart — an explicit
+`session.release_control` frees the lease at once, while an EOF from a politely
+closed client and a killed client both wait for expiry, with a takeover
+refused before the deadline and granted after it in both cases; a controller
 killed mid-run fenced after takeover, its late commands refused; a
 per-session lease owner killed while a mutation is in flight taking the
 listener, every connection and the daemon down with it, after which the

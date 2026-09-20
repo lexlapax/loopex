@@ -47,8 +47,12 @@ controller-capable attachment. So a newly created session is driven by
 attaching and acquiring in either order and then sending the first command
 with the granted epoch, and a known dormant session is driven by acquiring
 by ID, resuming with the granted epoch and attaching. A
-controller renews its lease while it lives and releases it on an orderly
-disconnect; a lease that is not renewed expires. Takeover is explicit: an
+controller renews its lease while it lives and releases it early only by
+sending `session.release_control` and having it succeed; a lease that is not
+renewed expires. Nothing about how the connection ended shortens the term,
+because over a Unix-domain socket the daemon cannot tell a polite close from a
+killed client — both are EOF — so only a message the client actually sent can
+mean "I am done". Takeover is explicit: an
 observer asks for control and receives it only when the lease is released or
 expired, and the grant mints a new writer epoch before the new controller's
 first command can be admitted, so a controller that was killed mid-run and
@@ -69,7 +73,8 @@ daemon's own configuration may narrow who may take over; it cannot widen what
 the host's policy allows a command to do. The proposed lease terms are exact
 and are bound at acceptance: a thirty-second lease renewed every ten seconds,
 takeover eligible at the live daemon's steady-clock expiry, and immediate
-release on orderly disconnect. Expiry and an unresolved admission meet on one
+release only on a successful explicit release. Expiry and an unresolved
+admission meet on one
 rule, so neither promise is quietly broken by the other: a mutation whose
 holder check completed before the deadline settles under its lease even if the
 deadline passes while core is still deciding; at the deadline the holder gains
