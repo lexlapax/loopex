@@ -3090,7 +3090,30 @@ carried: it described three outcomes and returned none of them.
    Terminating a settled session's coordinator costs nothing it was still
    doing: it settled. What it buys is that after phase 4 no enumerated session
    has a process that could start a transaction at all, so phase 5's fence
-   races nothing. An earlier revision stopped there and claimed nothing could be
+   races nothing.
+
+   **The drain's guarantee rests on that termination and not on how a
+   coordinator handles a refusal**, which is worth saying because the
+   coordinator's handling is **incomplete** and a design that leaned on it
+   would be leaning on a gap. `apply_transaction/3` maps two of the three
+   stale results to `{:error, :superseded_owner}` and marks the coordinator
+   superseded so it performs no later run work — `:stale_owner_epoch` and
+   `:stale_owner_incarnation_id`, at `session_coordinator.ex:1731-1732`. The
+   third, **`:stale_journal_version`**, falls through to the general clause at
+   `:1734-1735`: the caller is told the reason, and the coordinator is **not**
+   marked superseded.
+
+   **That is an observation for core, not an M5 change**, and the argument is
+   the one P0-2 just supplied. A drain never meets it: every enumerated
+   coordinator is dead before any fence commits, so no live coordinator can
+   receive a refusal caused by the drain's epoch move, and the fence's
+   correctness never passes through that clause. Outside a drain it is core's
+   ordinary succession business under ADR 0006, where a stale journal version
+   is a legitimate retry condition rather than proof of supersession — which
+   may well be why the clause reads as it does. M5 therefore changes nothing
+   here, and records the asymmetry so that a later change which *does* need a
+   live coordinator to stand down on `:stale_journal_version` finds the
+   question already asked rather than discovering it. An earlier revision stopped there and claimed nothing could be
    appended for that session afterwards. **That claim was false**, and the
    reason is worth stating because it is the general shape of this whole
    class of bug: a coordinator commits through a *synchronous* call —
