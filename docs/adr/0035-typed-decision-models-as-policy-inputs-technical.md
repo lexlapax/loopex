@@ -197,8 +197,30 @@ exemption predicate ADR 0009 refuses, arriving with a number attached.
 Concept: [Consequences and rollback](0035-typed-decision-models-as-policy-inputs.md#concept-adr-0035-consequences).
 
 Nothing public changes. The `Loopex.Policy` and `Loopex.Model` callbacks, the
-public protocol and its generations, public events, snapshots, artifacts, the
-executor protocol and every durable record are untouched. A runtime with no
+public protocol and its generations, public events, snapshots, artifacts and
+the executor protocol are untouched.
+
+**Three questions are recorded for whoever takes this pair to acceptance**,
+because they are contradictions or gaps in the design as written rather than
+in its prose, and this pair stays Proposed and deferred rather than resolving
+them now:
+
+1. **`evaluation_recorded` versus "every durable record untouched".** The
+   evidence above requires a new journaled record and this section says no
+   durable record changes. Both cannot hold: a new record kind is a durable
+   addition, with the compatibility question that carries — which readers
+   accept it, and what a reader that does not makes of it.
+2. **"Never widens what a policy would otherwise allow" needs to be a
+   monotonicity property, not a sentence.** As written it is a claim about
+   intent; to be checkable it has to say that for any host policy and any
+   evaluation answer the admitted set is a subset of what the same policy
+   admits with no evaluation at all, and the evidence has to test that shape
+   rather than two chosen answers.
+3. **The evaluation provider is a provider.** It resolves a credential, spawns
+   a process and talks to a network endpoint, so it belongs behind ADR 0019's
+   protected provider process and ADR 0034's credential handoff rather than
+   beside them. Whether it reuses that machinery or duplicates it is the
+   largest implementation question this pair leaves open. A runtime with no
 evaluation configured is byte-for-byte the runtime that exists today. The one
 compatibility effect is on host composition and arrives with the prerequisite
 amendment rather than with this pair: a host that configures evaluation

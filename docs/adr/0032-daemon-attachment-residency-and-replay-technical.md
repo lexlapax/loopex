@@ -332,8 +332,8 @@ a refusal reason invented at implementation time and not entered in the
 ordered list would make the served contract differ from the digest the server
 advertises, which is exactly the drift the digest exists to catch. The
 generation-2 literal the conformance module pins is the digest of the contract
-*including* all four changes, and a build missing any of them computes a
-different value and fails there. Generation 1 gains no method, no record family and no error code — but its
+*including* all five changed inputs, and a build missing any of them computes
+a different value and fails there. Generation 1 gains no method, no record family and no error code — but its
 digest is **not** untouched, because M5 renames its generation string from
 `loopex.session.v1-experimental` to `loopex.experimental/1` and the generation
 is the digest's first input. That rename is the plan's decision, taken under
@@ -696,8 +696,9 @@ awaiting an answer, a recovery in progress, an unresolved `commit_unknown`, or
 an admission executing inside core. Stopping it would destroy exactly what
 Outcome 1 exists to prove, that work progresses with zero attachments. And
 there is no operation to stop one with: core owns coordinator lifetime, and
-none of M5's four core changes (concurrent attachment, the read-only existence
-query, the excluded-function trace list, and `quiesce/2`) stops a coordinator,
+none of M5's five core changes (concurrent attachment, the read-only existence
+query, the trace exclusion, `quiesce/2`, and the create and resume results'
+`disposition` and `residency` fields) stops a coordinator,
 so a deactivation call would be a further core change this milestone does not
 make.
 

@@ -658,12 +658,22 @@ proves, and the refusal above the ceiling, are unchanged.
 
 Three proofs are new:
 
-- **Parent environment.** From the completion of composition onward — before,
-  during and after a call — the parent VM's environment holds no credential
-  under the adapter's name and no value equal to the credential in use.
-  "During" is observed from inside the call, at the point the child reports
-  readiness. The case composes the runtime the way a reference host does, with
-  the variable set, and asserts that composition returns having deleted it.
+- **Parent environment**, stated as two checkable things rather than one
+  unfalsifiable one. From the completion of composition onward — before,
+  during and after a call — **the configured credential name is absent from
+  the parent VM's environment**, and **no function in the adapter's call path
+  reads the environment for a credential**. "During" is observed from inside
+  the call, at the point the child reports readiness. The case composes the
+  runtime the way a reference host does, with the variable set, and asserts
+  that composition returns having deleted it.
+
+  An earlier revision also asserted that no environment value **equals** the
+  credential in use, which is a different and much weaker claim than it
+  sounds: it scans values the test cannot enumerate ahead of time, it would
+  fail for a host that legitimately keeps the same secret under a second name
+  of its own, and passing it proves nothing about where the adapter looks.
+  The two assertions above are what the decision actually rests on, and the
+  drift-protection case is what enforces the second.
 - **Independence across runtimes.** Two runtimes composed in one VM, each
   with its own registry, custody and token, run invocations at once; each
   child records only its own credential, and neither child — nor either
@@ -742,12 +752,18 @@ Three proofs are new:
 - **Host custody, proved at each host rather than in the adapter.** The
   adapter's test tree cannot prove a claim about the CLI's or the daemon's
   composition, and an earlier draft filed all three there. Each case lives
-  where its subject lives: `apps/loopex_cli/test/` for the reference CLI,
-  `apps/loopex_app_server/test/` for the app-server host, and
-  `apps/loopex_daemon/test/` for the daemon. Each proves that composition
-  reads the variable exactly once, deletes it from the VM's environment, and
-  that the holding process's `format_status/1` redacts its state under a
-  forced crash report. The adapter's own tree keeps only what is the adapter's
+  where its subject lives, named to the file and the case so the closure
+  matrix can be checked against a list rather than a directory:
+
+  | Host | File | Cases | Lane |
+  | --- | --- | --- | --- |
+  | Reference CLI | `apps/loopex_cli/test/credential_custody_test.exs` | `reads the credential variable exactly once at composition`; `deletes the credential variable from the VM environment`; `custody state is redacted in a forced crash report` | fast |
+  | App-server host | `apps/loopex_app_server/test/credential_custody_test.exs` | the same three | fast |
+  | Daemon | `apps/loopex_daemon/test/credential_custody_test.exs` | the same three, plus `custody and registry are stopped with the daemon and on a failed start` | fast |
+
+  Each proves that composition reads the variable exactly once, deletes it
+  from the VM's environment, and that the holding process's `format_status/1`
+  redacts its state under a forced crash report. The adapter's own tree keeps only what is the adapter's
   to prove: that it reads no environment variable for a credential and that
   the token and resolution contract behaves.
 
