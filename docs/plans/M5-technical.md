@@ -642,6 +642,20 @@ carries two plain fields beside the session ID:**
 | `disposition` | `:fresh` \| `:historical` | Charge an activation for `:fresh`; charge nothing for `:historical` |
 | `residency` | `:active` \| `:dormant` | Repair the directory entry and index row without activating when `:dormant`; leave both alone when `:active`, since an activated session already recorded them |
 
+**The same two fields belong on the runtime-side `resume` result**, which my
+own pass over this section found and the finding did not name. `resume` has
+exactly the same ambiguity: a replayed resume takes the `{:completed, …}`
+branch and answers `{:ok, session_id}` (`control.ex:311-312`), a fresh one
+answers the same through `start_resume_owner`, and the daemon charges an
+activation for resume as it does for create — so a client retrying a resume
+under its original `command_id` would be charged twice. Core already knows the
+difference and already exposes it in one mode: `completed_resume_reply/2`
+answers `{:ok, {:replayed, session_id}}` for the **prepared** mode at
+`control.ex:526` and a bare `{:ok, session_id}` for the plain one at `:527`.
+Rather than make the daemon use a mode it does not otherwise want, the plain
+resume result carries the same `disposition` and `residency` the create result
+does. That is one shape for both, not two.
+
 **The public protocol result is unchanged.** Generation 1 and generation 2
 return what they return today; this is an in-VM API detail between core and
 any host, and no wire schema, digest or vector moves. A host that ignores the
@@ -1384,8 +1398,13 @@ the failed-start reverse cleanup, for the same reason.
 
 > **Maximum graceful stop = `drain_ms` + `teardown_ms` + 30 s.**
 
-A service manager that kills the daemon sooner than that turns the stop into a
-forced shutdown — the journal is still crash-equivalent, but work that would
+That maximum is as large as the composed grace makes it: `drain_ms` is
+derived from `cli_backstop_ms`, which grows with `g`, so an operator who
+composes a grace of days has told the daemon it may drain for days. The bound
+is a statement about *this* daemon's configuration rather than a constant, and
+the operator documentation says so where it says what to set
+`TimeoutStopSec` to. A service manager that kills the daemon sooner than that
+turns the stop into a forced shutdown — the journal is still crash-equivalent, but work that would
 have settled does not, and the marker may be left for the next daemon's
 verified stale-writer recovery. The operator documentation states the bound
 and that consequence together, so a `TimeoutStopSec` shorter than it is a
@@ -1688,6 +1707,17 @@ guaranteed the mismatch: `cancellation_bounds/1` derives an observation bound
 of `max(10_000, grace_ms + 2_000)` from that same grace
 (`apps/loopex/lib/loopex/executor.ex:458`), and `cli_backstop_ms` is larger
 still.
+
+**What queues while the owner waits for it.** The owner is blocked in the
+`quiesce/2` call for at most `drain_ms`, and while it is blocked it is not
+reading its mailbox: a linked component's `{:EXIT, …}` waits, as does a second
+signal. That is safe in one direction and deliberate in the other. The wait is
+bounded, so nothing waits indefinitely; and when the call returns, the owner
+reads what queued **before** telling a single client, so a Store that died
+during the drain switches the daemon to the fail-stop path with its real class
+rather than being reported as an orderly stop. A second `SIGTERM` during the
+drain is idempotent: the sequence is already running, and the owner discards
+it rather than restarting anything.
 
 **A session waiting on an interaction cannot settle, and that is correct.**
 An answer to a durable interaction is a session command under ADR 0024, and
@@ -2201,29 +2231,33 @@ do. This table is the answer to both: one row per boundary M5 touches, and
 every cell resting on a code line that exists today or on a component this
 plan names as new. It is the thing to check a change against.
 
-**First, the process inventory**, because more than one review found two
-documents counting the same processes differently. Every process any document
-in this set names appears here once, with who starts it, who holds its link,
-who stops it and what its death means.
+**First, the process inventory**, rebuilt from scratch for this revision
+because more than one review found two documents counting the same processes
+differently. Every process any document in this set names appears here once,
+with who starts it, who holds its link, who stops it and what its death means.
+Nine fixed, one bounded dynamic population, and everything else owned by core,
+the adapter or the executor.
 
 | Process | Started by | Linked to | Stopped by | Its death |
 | --- | --- | --- | --- | --- |
-| **Daemon owner** | The `loopex daemon` escript | — | Itself; it halts the VM | There is nothing above it; the signal handler's backstop halts with `owner_lost` if a signal finds it gone |
+| **Daemon owner** | The `loopex daemon` command process | — (monitored by that command process) | Itself; it halts the VM | The command process's monitor halts non-zero with `owner_lost`; the signal handler's backstop is the second route |
 | Credential routing **registry** (ADR 0034) | Daemon owner, first | Daemon owner | Orderly step 6 | `registry_lost`, daemon-fatal |
-| Credential **custody process** (ADR 0034), **one, for the one composed model configuration** | Daemon owner, second | Daemon owner | Orderly step 6 | `custody_lost`, daemon-fatal. ADR 0034 fixes one token per composed model configuration and no more; a second provider needs that ADR's stated amendment before a second custody process exists |
-| **Store adapter** (ADR 0031) | The composition function, in the owner's process | Daemon owner | Orderly step 6, **last of all** | `store_lost`, or `store_capacity_exceeded` on its own capacity refusal — both fail-stop |
+| Credential **custody process** (ADR 0034), **one, for the one composed model configuration** | Daemon owner, second | Daemon owner | Orderly step 6 | `custody_lost`, daemon-fatal. A second provider needs ADR 0034's stated amendment before a second exists |
+| **Store adapter** (ADR 0031) | The composition function, in the owner's process | Daemon owner | Orderly step 6, **last of all**, in its own fixed 30 s phase | `store_lost`, or `store_capacity_exceeded` on its own capacity refusal — both fail-stop |
 | **Artifact transfers owner** | The composition function | Daemon owner | Orderly step 6 | `transfers_lost`, daemon-fatal. **Absent** where transfers are disabled |
 | **Workspace lease** | The composition function | Daemon owner | Orderly step 6 | `workspace_lease_lost`, daemon-fatal |
 | **Local executor** | The composition function | Daemon owner | Orderly step 6, before the lease | `executor_lost`, daemon-fatal |
 | **Runtime root** (a supervisor) | The composition function | Daemon owner | Orderly step 5 | `runtime_lost`, daemon-fatal |
-| **Listener** | Daemon owner, last of the fixed set | Daemon owner | Orderly step 1 stops it accepting; step 3 closes and unlinks | `listener_lost`, daemon-fatal, and the one fatal class no client can be told |
-| **Lease owner, one per activated session** (ADR 0033) | Daemon owner, on activation | Daemon owner | Orderly step 4, in sequence | **Session-scoped**: that session's controller closes with `control_owner_lost`, observers stay, the next acquisition starts a fresh owner with a fresh epoch. Population bounded by the 64-activation ceiling |
-| **Connection**, one per accepted client | The listener | The listener | Orderly step 3, or the client | That client's connection closes. Nothing else |
+| **Admission relay** | Daemon owner, after the runtime | Daemon owner | Orderly step 4, after the lease owners whose tickets it holds | `relay_lost`, daemon-fatal: the record of every in-flight admission is gone |
+| **Listener** | Daemon owner, last of the fixed set | Daemon owner | Step 1 stops it accepting; step 3 closes and unlinks | `listener_lost`, daemon-fatal, and the one fatal class no client can be told |
+| **Lease owner, one per session under lease or acquisition** (ADR 0033) | Daemon owner, on the first lease operation after existence validation | Daemon owner | Retires when the lease is free, no acquisition waits and the relay holds no ticket; stopped unconditionally in step 4 | **Session-scoped**: that session's controller closes with `control_owner_lost`, observers stay, the next acquisition starts a fresh owner with a fresh epoch. At most 512 at once |
+| **Connection**, one per accepted client | The listener | The listener | Step 3, or the client | That client's connection closes. Nothing else |
 | **Stop helper**, one per stop | Daemon owner, `spawn_monitor` | Monitored, never linked | Its own call returning or raising | Nothing: it is monitored so that whatever `GenServer.stop/3` does to it cannot reach the owner |
-| **Session coordinator** | Core, under a `DynamicSupervisor` (`restart: :temporary`) | Core | Core, when the runtime stops | Core's own refusal on the next command for that session; **no signal reaches the daemon and none is owed** |
+| **Relay task**, one per core call | The relay, `spawn_monitor` | Monitored by the relay | The call returning | Settles that call's ticket as unknown, the same fact `commit_unknown` carries |
+| **Session coordinator** | Core, under a `DynamicSupervisor` (`restart: :temporary`) | Core | Core; **and `quiesce/2` fences and terminates it** at the drain deadline | Core's own refusal on the next command for that session; **no signal reaches the daemon and none is owed** |
 | **Owner group and workers** | Core, beneath a coordinator | Core | Core | Core's; a trapping owner group unwinds on its own clock and the daemon does not wait for it |
 | **Attachment dispatcher** | Core, per attachment | Core | Core | That attachment's, and core's existing detachment rules |
-| **Trace tracer** | Core, per trace session | Core | Core | The trace session's; it carries no daemon meaning |
+| **Trace tracer** | Core, per runtime | Core | Core | The trace session's; it holds the excluded-pid set, so its loss ends tracing rather than exposing anything |
 | **Provider sender and guardian** (ADR 0034) | The adapter, per invocation, inside the calling process | Neither is linked to the daemon owner | The guardian kills the sender at the deadline; both end with the invocation | That invocation's refusal, as one of the seven atoms. No daemon class |
 | **Provider child**, its Port and OS process (ADR 0019) | The adapter's launcher, per invocation | The Port's owner | The invocation | That invocation's refusal |
 | **Per-job Port worker, carrier and guard** (ADR 0022) | The local executor, per job | The worker is monitored by the executor; the carrier and guard are OS processes | The worker terminates the captured group when the executor goes | The job's outcome, reconciled through `commit_unknown`. **These are the processes the daemon cannot wait for at a halt** |

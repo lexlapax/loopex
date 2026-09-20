@@ -305,6 +305,17 @@ tell a client its command failed when it did not, and saying nothing would
 leave a session absent from `session.list` with no explanation. The family
 enters the digest's record-families input beside `daemon.stopping`.
 
+**Correlation, for the refusals above.** `control_not_held`,
+`control_pending`, `control_capacity_reached`, `control_held`,
+`session_dormant` and the four existence-query refusals are ordinary
+**correlated** errors: each answers one request and carries that request's
+`request_id`, no `event_cursor` and no session state, and none closes
+anything — the connection and every attachment on it are untouched. The two
+uncorrelated cases in generation 2 are the ones named above,
+`control_owner_lost` and the `daemon.stopping` and `daemon.notice` records,
+and each states its own close behaviour where it is defined. Stating this once
+is what lets the vectors be written without guessing.
+
 **The existence query's `unexpected` maps to `existence_indeterminate`.** Core
 answers one of five results; the daemon maps `store_unavailable` to the wire's
 `store_unavailable` and **`unexpected` to `existence_indeterminate`**, because
