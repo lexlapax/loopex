@@ -104,13 +104,15 @@ session, which the holder may send before attaching. "Verified" means verified
 by core's read-only existence query, not by having attached or resumed already:
 acquire validates existence with that query and refuses an unknown ID with
 nothing created. The lease record lives
-in the daemon's memory, keyed by session, for the daemon process's lifetime; one
-owner process per session serializes its lease transitions with its admission
-handoff, and that owner's failure is fatal to the daemon instance rather than
-survivable — it holds the session's in-flight admission set, which a takeover
-waits on, so a restart beneath live sockets could grant a successor while a
-forgotten admission could still settle. ADR 0033 fixes the rule; the daemon
-restarts with no lease, no connection and no activated session. For
+in the daemon's memory, keyed by session, for as long as that session has a
+lease or an acquisition; one owner process per session serializes its lease
+transitions with its admission handoff, and that owner's failure is **scoped
+to its session**: the controller attachment closes with `control_owner_lost`,
+every observer stays, and the next acquisition starts a fresh owner with a
+fresh epoch. What keeps a successor's call from overtaking an older one is the
+**admission relay**, a fixed daemon process that holds a ticket for every core
+call and blocks the replacement's first grant until that session's tickets
+settle. ADR 0033 fixes both rules. For
 every existing-session mutation the daemon checks the requesting connection
 identity, the current epoch, the held state and the unexpired term together
 before forwarding to core; an epoch alone is not authority, and every epoch is

@@ -144,11 +144,24 @@ reachable.
 
 The negatives carry the decision and are written before the seams:
 
-- for every seam, an answer at every extreme — probability 0, probability 1,
-  confidence 1.0, a `:choice` concentrated on one option — produces exactly the
-  decision the host would have made without an evaluation, proved by running
-  each case twice, with the evaluation stubbed at that extreme and with it
-  absent, and requiring identical decisions and identical durable records;
+- **the evaluation changes the decision, and the host's thresholds are what
+  change it** — the discriminating witness, because the obvious one proves the
+  opposite of what it looks like. Requiring that every evaluation result
+  produces the same decision as no evaluation at all would prove the
+  evaluation is *ignored*, which is the failure mode, not the property. So for
+  every seam, two answers that straddle a host threshold are run against the
+  same host policy and asserted to produce **different** decisions; the same
+  two answers against a host whose threshold sits outside both produce the
+  **same** decision; and a host with no evaluation configured is asserted
+  byte-identical to today in decision and durable record. What is held
+  constant is that Loopex decides nothing: the difference is always the host's
+  threshold applied to a typed input, never a Loopex rule;
+- **the journaled fact has a name and a shape**, and is asserted by both:
+  an `evaluation_recorded` record carrying the seam, the model identity, the
+  typed answer's plain projection, `usage`, and the durable command it
+  informed — and nothing else, in particular no prose and no provider payload.
+  A decision reached without an evaluation writes no such record, which is how
+  a later reader tells the two apart;
 - no evaluation result appears in a grant, a lease, an epoch, a fence, a
   receipt or any executor argument, proved by the same drift-style scan that
   pins other forbidden reaches;

@@ -52,10 +52,16 @@ exits and keeps the adapter's pid, so the termination arrives as
 `{:EXIT, store_pid, reason}` at a clause the daemon wrote — carrying the
 store's own reason, which is what separates `store_capacity_exceeded` from
 `store_lost`. An OTP supervisor would not do: it reports no child's exit
-reason to any callback. It does not compose through
-`LoopexComposition`, whose `start_edge/2` takes the `start_link` inside a
-process `RuntimeOwner` spawns and which returns no adapter pid — a daemon on
-that bracket could not observe this failure at all. On the reported exit it
+reason to any callback. Nor does the daemon use
+`LoopexComposition.with_runtime/2`, whose bracket takes the `start_link`
+inside a process `RuntimeOwner` spawns and returns no adapter pid — a daemon
+on that bracket could not observe this failure at all. It **does** compose
+through `LoopexComposition`: M5 gives that application a caller-owned entry
+point which runs the same edge-assembly sequence **in the caller's process**
+and returns every pid it linked, so the adapter is started by the composition
+code as it always was and the link lands on the daemon's owner. An earlier
+revision of this paragraph said the daemon bypasses composition entirely,
+which would have meant a second copy of the wiring layer. On the reported exit it
 refuses service, closes every connection with `store_lost`, or
 `store_capacity_exceeded` where that was the store's own reason, and exits
 non-zero. It does **not** unlink the socket: the marker is already released,

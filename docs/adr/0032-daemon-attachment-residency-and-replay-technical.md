@@ -335,7 +335,12 @@ the daemon itself owns or reads once:
   this lifetime*, set to `active` at activation and never set back, because
   activation is one-way. It is not a claim about a live coordinator;
 - `controlled`, a daemon fact, updated on every lease grant, release and
-  expiry by the same lease owner ADR 0033 gives those transitions.
+  expiry by the same lease owner ADR 0033 gives those transitions — **and on
+  that owner's death**, which is a fourth way a lease stops being held and
+  which an earlier revision left out. The daemon's owner process, which
+  observes the exit, clears `controlled` for that session as it closes the
+  controller attachment; a listing that still said `controlled: true` would be
+  naming a holder that no longer exists.
 
 **`residency` says what the daemon knows, not what core is doing.** Its two
 values mean exactly:

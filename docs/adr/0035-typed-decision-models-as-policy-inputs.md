@@ -52,7 +52,7 @@ interactions, model output, context and metadata never grant authority, and
 ADR 0009 already makes every executor-backed tool call consult the host's
 policy with no exemption predicate. What this decision adds is that a *typed,
 calibrated* model answer is still model output, and gets no privilege for
-being numeric.
+being numeric. The record has a name, `evaluation_recorded`, and the companion fixes its fields; a decision reached without an evaluation writes none, which is how a later reader tells the two apart.
 
 The seams, in the order they are worth doing:
 
