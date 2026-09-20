@@ -294,8 +294,8 @@ reviewer can check against this sentence at closure.
 
 - **`docs/operator/daemon.md` must state the maximum graceful stop as the sum
   of the seven phase bounds**, in the form the lifecycle section fixes:
-  **`budget_ms` + 105 s**, being 5 s for the admission cut, 30 s for abort
-  admission, `budget_ms` for cancellation, 30 s for the fence, 5 s for
+  **`budget_ms` + 195 s**, being 5 s for the admission cut, 60 s for abort
+  admission, `budget_ms` for cancellation, 90 s for the fence, 5 s for
   coordinator termination, 5 s for daemon teardown and 30 s for the Store —
   with the six constants written out beside the one derived term, so an
   operator setting a `TimeoutStopSec` adds up numbers rather than trusting a
@@ -2026,16 +2026,41 @@ that already exists somewhere, and the operator maximum is the sum:
 | # | Phase | Bound | Where the number comes from |
 | --- | --- | --- | --- |
 | 1 | **Admission cut** | **5 s**, this plan's teardown number reused | A synchronous acknowledgement from a process with no work of its own to finish; a relay that does not answer inside it is a relay the daemon has lost, so the stop becomes the `relay_lost` fail-stop rather than waiting longer |
-| 2 | **Abort admission** | **30 s**, the Store's `@call_timeout` (`local.ex:65`) — **per phase, not per session**, because the sessions are admitted **concurrently** | One Store call each; running them at once makes the phase one call long rather than *N* |
+| 2 | **Abort admission** | **60 s** — **two** Store calls deep, at 30 s each; **per phase, not per session**, because the sessions are admitted **concurrently** | The admission may have to wait behind the transaction the coordinator already has in flight, and then make its own; those are sequential, so the phase is two calls long |
 | 3 | **Cancellation** | The derived backstop: `max` over drained sessions of `cancellation_bounds(g_i).cli_backstop_ms` | Core's own number for how long a cancellation may take |
-| 4 | **Fence** | **30 s**, the same Store call timeout, again **concurrent** across sessions | Each fence is one `advance_owner` transaction |
+| 4 | **Fence** | **90 s** — **three** Store calls deep at worst, again **concurrent** across sessions | A head read, then the `advance_owner`, and on `commit_unknown` one `transaction_status` query. Three sequential calls, no retries |
 | 5 | **Coordinator termination** | **5 s**, the coordinator's own `shutdown` (`session_coordinator.ex:134-142`) | The value core already gives a coordinator to stop in |
 | 6 | **Daemon teardown** | **5 s** | This plan's one chosen number, covering the notice, the closes, the lease owners, the relay and the edges |
 | 7 | **Store** | **30 s**, its own `@call_timeout` | The stop that releases the marker |
 
-> **Maximum graceful stop = 5 s + 30 s + `budget_ms` + 30 s + 5 s + 5 s + 30 s
-> = `budget_ms` + 105 s**, and `budget_ms` is the one term an operator cannot
+> **Maximum graceful stop = 5 s + 60 s + `budget_ms` + 90 s + 5 s + 5 s + 30 s
+> = `budget_ms` + 195 s**, and `budget_ms` is the one term an operator cannot
 > compute in advance.
+
+**Every phase bound is a Store-call count, and an earlier revision counted
+one where the sequence is two or three.** *Every* call into the local adapter
+is the same 30 s: `transact/2` at `local.ex:111-113`, `ownership_head/3` at
+`:130-132` and `transaction_status/4` at `:116-122` all pass `@call_timeout`
+(`:65`). So a phase's bound is not "30 s because it is a Store call"; it is
+**(the worst sequential count of Store calls in it) × 30 s**, and the counts
+are these:
+
+- **Phase 2 is two.** The abort admission goes to a **live coordinator**, whose
+  lane is serial — `OwnerLane.transact/2` is a plain synchronous call the
+  coordinator makes from its own process (`store/owner_lane.ex:83-99`, called
+  at `session_coordinator.ex:1242`, `:1363`, `:1702`) — so the admission may
+  wait out one transaction already in flight and then make its own. Two, in
+  sequence.
+- **Phase 4 is three at worst.** A head read, then the `advance_owner`, then,
+  only where that answers `commit_unknown`, **one** `transaction_status` query.
+- **And the drain retries nothing**, which is what keeps both counts finite.
+  Core's ordinary commit path retries a `commit_unknown` once —
+  `resolve_transaction/2` re-presents the transaction on the second line of its
+  own case (`session_coordinator.ex:1761-1764`) — and the drain does not use
+  that path for either of these. An ambiguous **admission** is not retried: the
+  session is fenced, by the rule this section already states. An ambiguous
+  **fence** is resolved by the one status query, not re-proposed. A **stale**
+  fence is not reattempted at all, for the reason the fence table gives.
 
 **The seven phases and the six steps are two cuts through the same stop, and
 the mapping is stated rather than left to be inferred.** The numbered sequence
@@ -2050,12 +2075,23 @@ and covers steps 3, 4, 5 and the non-Store part of step 6. Phase 7 is the
 Store stop at the end of step 6. Nothing is bounded twice and nothing is
 bounded by nobody.
 
-**One rule keeps a phase from starting work it cannot finish.** *No Store
-operation begins without at least its own timeout remaining in its phase.* A
-fence with four seconds left on a thirty-second phase is not attempted; the
-session is reported `fence: :not_needed` if the head already moved and
-`:unknown` otherwise, and the daemon proceeds. Starting a 30 s call inside a
-4 s remainder is how a bounded sequence becomes an unbounded one.
+**One rule keeps a phase from starting work it cannot finish, and with the
+counts above it can always be honoured.** *No Store
+operation begins without at least its own 30 s remaining in its phase.* Because
+each phase's bound **is** its worst sequential call count times 30 s, a phase
+that has reached its *k*th call still has at least 30 s left, so the rule never
+fires on the intended sequence; it is a guard against a sequence longer than
+the one counted, not a routine exit.
+
+**The escape an earlier revision gave it is deleted, because it was
+circular.** That revision said a fence with four seconds left is not attempted
+and "the session is reported `fence: :not_needed` if the head already moved
+and `:unknown` otherwise" — but deciding whether the head moved *is* a Store
+read, which is the very thing the rule has just refused. There is no way to
+take that branch. `:not_needed` now means one thing only, decided without
+reading anything: **quiesce does not fence a session it reports `settled`**,
+its own work having already ended. Unsettled and absent sessions are fenced,
+and their entry is `:committed`, `:superseded` or `:unknown`.
 
 **Phase 6 stops the lease owners as a collective sweep, not one at a time.**
 Up to 512 of them exist, and stopping them in sequence inside five seconds was
@@ -2398,7 +2434,9 @@ Loopex.Runtime.quiesce(runtime) ::
      absent: [session_id],
      budget_ms: non_neg_integer(),
      drain_id: binary(),
-     fences: %{session_id => :committed | :superseded | :unknown | :not_needed}
+     fences: %{session_id => :committed | :superseded | :not_needed
+                             | {:unknown, %{owner_epoch: non_neg_integer(),
+                                           journal_version: non_neg_integer()}}}
    }}
 ```
 
@@ -2418,9 +2456,11 @@ gone, which is neither settled nor unsettled and must not be counted as
 either. `budget_ms` is the drain budget core derived and used. `drain_id` is
 the label this drain reports, and `fences` is what the fence below actually
 did for each session it touched — `:committed` where the epoch moved,
-`:superseded` where an older transaction won the race first, `:unknown` where
-the Store could not say, and `:not_needed` where the head had already moved
-under the session's own settled work. **Without `fences` a fence's failure is
+`:superseded` where the one transaction that could still linearize won the
+race first, `:not_needed` where the session settled and needed no fence, and
+`{:unknown, head}` where the Store could not say, **carrying the head the
+fence was built from**, because that head is the only thing a successor can
+discriminate on. **Without `fences` a fence's failure is
 a thing no caller can observe**, which is the defect an earlier revision
 carried: it described three outcomes and returned none of them.
 
@@ -2590,35 +2630,47 @@ carried: it described three outcomes and returned none of them.
    command or operation identity* and that resolution be restart-safe
    (`vision-technical.md:710-715`), and a value in RAM is neither.
 
-   So the identity is the head itself. A successor — the next daemon, or the
-   next activation of that session — **rereads `ownership_head/3`, recomputes
-   the same `tx_id` from `(session_id, owner_epoch, journal_version)`, and asks
-   `Store.transaction_status/4`** (`apps/loopex/lib/loopex/store.ex:1026-1048`,
-   the adapter's own at `local.ex:118-122`), whose closed result set —
-   `{:terminal, :committed}`, `{:terminal, {:not_committed, reason}}`,
-   `:absent`, `:unavailable` (`store.ex:293-297`) — is exactly the resolution
-   this needs. Two of them end it: committed means the epoch moved and the
-   fence held; not-committed or absent means it did not and the successor's own
-   ordinary owner advance supersedes the state anyway. `:unavailable` leaves
-   the domain fenced, which is what the founding rule already requires of any
-   unresolved unknown.
+   So the identity is the head itself, and the drain **reports the head it
+   fenced from** for every session it leaves `:unknown`: `fences` carries
+   `{:unknown, %{owner_epoch: …, journal_version: …}}` for those, and the stop
+   line names the same three values per session beside `drain_id`. That pair —
+   the recorded head and the head a successor reads — is what discriminates.
 
-   **Reading the head and then asking about a transaction is not
-   check-then-act here, and the reason is that the identity is a function of
-   the head.** The obvious objection is that the head can move between the
-   successor's read and its query, so the successor would be asking about a
-   transaction nobody proposed. It would be — and that is the correct answer
-   rather than a race. The fence binds `expected_owner_epoch` and
-   `expected_journal_version` to the head it read, so **a head that has moved
-   is a fence that is already decided**: either that fence was the mover and
-   committed, or it can no longer linearize at all, since the adapter refuses a
-   transaction whose expected version no longer matches
-   (`succession_refusal/3`, `state.ex:450-463`). So the successor's question is
-   always the right one: `transaction_status/4` on the id derived from the
-   **current** head answers `:absent` when the head has moved past the fence —
-   there is nothing unresolved at this version — and answers the fence's real
-   status when it has not. There is no window in which the successor is fenced
-   by an unknown it cannot name.
+   **The surface is the head, not the transaction status**, and an earlier
+   revision got that exactly backwards. It had a successor reread
+   `ownership_head/3`, recompute the `tx_id` **from the head it just read**,
+   and ask `Store.transaction_status/4`. That question cannot answer anything:
+   if the fence committed, the head has moved, so the id recomputed from the
+   **new** head is an id nobody ever proposed and the status is `:absent`
+   (`state.ex:48-60` answers `:absent` for any tx_id with no retained
+   resolution); if the fence never linearized, the head has not moved, the id
+   is the fence's own — and the status is `:absent` again. **Two different
+   worlds, one answer.**
+
+   The recovery is therefore two steps in this order:
+
+   1. **Read `ownership_head/3` and compare it with the recorded head.** If it
+      has moved, the fence is decided and the successor is done — either that
+      fence was the mover or it can no longer linearize at all, the adapter
+      refusing any transaction whose expected epoch or version no longer
+      matches (`succession_refusal/3`, `state.ex:450-463`). Nothing is
+      unresolved at the recorded version, and the successor's own ordinary
+      owner advance proceeds from the head it just read.
+   2. **Only if the head is unchanged**, recompute the `tx_id` from the
+      **recorded** head — which is the current head, so the two agree — and ask
+      `Store.transaction_status/4` (`apps/loopex/lib/loopex/store.ex:1026-1048`,
+      the adapter's own at `local.ex:116-122`), whose closed result set —
+      `{:terminal, :committed}`, `{:terminal, {:not_committed, reason}}`,
+      `:absent`, `:unavailable` (`store.ex:293-297`) — resolves it.
+      `{:terminal, :committed}` with an unmoved head cannot occur and is a
+      defect if seen; `{:terminal, {:not_committed, _}}` and `:absent` both
+      mean the fence is not there and the successor proceeds; `:unavailable`
+      leaves the domain fenced, which is what the founding rule already
+      requires of any unresolved unknown.
+
+   That ordering also disposes of the check-then-act objection without an
+   argument about windows: step 1's answer is the decision, and step 2 runs
+   only in the world where step 1 said nothing has moved.
 
    **`drain_id` survives as a report label and nothing more.** Core still mints
    one per call, with the generator it already uses for identifiers of its own
@@ -2658,17 +2710,28 @@ carried: it described three outcomes and returned none of them.
    | Outcome | What it means | `fences[session_id]` | How the session is reported |
    | --- | --- | --- | --- |
    | The fence **commits** | The epoch has moved; any older `session_commit` linearized afterwards is refused `:stale_owner_epoch` (`state.ex:548-551`) | `:committed` | `unsettled`, fenced |
-   | The fence is refused **`:stale_owner_epoch`** or **`:stale_journal_version`** | Another transaction linearized **first**. The fence lost the race on the epoch or on the version, which in both cases means the state it read is no longer the state there is | `:superseded` | Quiesce **rereads the head and recomputes the id from it**; if the session is still unsettled it makes **one new attempt** under the new head's identity, and classifies **from the journal** if that attempt is superseded too. It is not reported as fenced, because it was not |
-   | The fence answers **`commit_unknown`** | The Store cannot say whether it linearized | `:unknown` | Resolved with `Store.transaction_status/4` under the **same derived `tx_id`**, which is idempotent by construction, until the phase's bound; still unknown at the bound leaves the session `unsettled` with `fences[session_id] == :unknown`, and the domain fenced |
-   | **No fence is attempted** | The head had already moved under the session's own settled work, or the phase had less than a Store call timeout left in it | `:not_needed` | As its own work left it |
+   | The fence is refused **`:stale_owner_epoch`** or **`:stale_journal_version`** | The one transaction that could still have been in flight linearized **first**. The fence lost the race on the epoch or on the version; either way the state it read is no longer the state there is, and there is **nothing left to fence** | `:superseded` | Classified **from the journal**, as whatever that commit made it. **No second attempt.** It is not reported as fenced, because it was not |
+   | The fence answers **`commit_unknown`** | The Store cannot say whether it linearized | `{:unknown, head}` | Resolved by **one** `Store.transaction_status/4` query under the same derived `tx_id`; an answer that is still unknown after it leaves the session `unsettled` with `{:unknown, head}` carrying the head the fence read, and the domain fenced |
+   | **No fence is attempted** | The session is in `settled` — its own work ended, so there is nothing ambiguous to fence | `:not_needed` | As its own work left it |
 
-   **A retry is never a blind repeat of a refused attempt.** The two stale
-   results say the head moved, so retrying the same transaction would refuse
-   identically forever; the recovery is to read durable state again and build a
-   new attempt from it, which is what the coordinator's own
-   `discover_and_advance_owner/1` already does on the same refusals. A
+   **A stale refusal ends the fence rather than starting a second one, and the
+   reason is the serial lane.** An earlier revision rereads the head and makes
+   one new attempt — which would be right if more transactions could keep
+   arriving, and none can. By the time a fence is attempted the coordinator is
+   **dead** (quiesce terminates it and waits for the `DOWN` first), and while
+   it was alive it held **at most one** Store transaction in flight for that
+   session, because `OwnerLane.transact/2` is a synchronous call the
+   coordinator makes from its own process and threads the returned lane through
+   its state (`store/owner_lane.ex:83-99`, `session_coordinator.ex:1242`,
+   `:1363`, `:1702`). So at most one transaction can linearize after the
+   coordinator is gone. A stale refusal is proof that it did — and proof that
+   nothing else will, there being no process left to send one. Reattempting
+   would spend a third and fourth Store call to fence a session that no longer
+   has anything to fence, and would make the phase's bound a number nobody
+   could state. A
    `commit_unknown` is the opposite case: the transaction may have linearized,
-   so it is **resolved**, never re-proposed under a new identity.
+   so it is **resolved once**, never re-proposed under a new identity and
+   never retried into an unbounded loop.
 
    So the claim the plan makes is the one the mechanism supports: when
    `quiesce/1` returns, every session whose `fences` entry is `:committed` has
@@ -2683,7 +2746,7 @@ carried: it described three outcomes and returned none of them.
    — a refusal that is not `rejected_no_active_run`, or a `commit_unknown` on
    the admission itself — has no cleanup released for it at all. It is fenced
    like an unsettled session, or, where the fence too is unknown, left fenced
-   and reported `unsettled` with `fences[session_id] == :unknown`. Releasing a
+   and reported `unsettled` with `{:unknown, head}`. Releasing a
    cancellation for a session whose abort may or may not be in the journal is
    the one thing a drain must not do, because it would cancel work no command
    admitted.
@@ -3000,8 +3063,11 @@ a trace or a telemetry span. Nothing here is a new logging plane: the daemon
 has no diagnostic surface of its own beyond these lines and the records it
 already sends on the wire, and the fatal-class map above is the whole
 vocabulary of what a **fatal** exit may say. An **orderly** stop adds exactly
-one line and no class: a census naming `drain_id`, `budget_ms` and the three
-counts quiesce returned. That line is the only thing an ordinary stop writes
+one line and no class: a census naming `drain_id`, `budget_ms`, the three
+counts quiesce returned and, for every session it left `{:unknown, head}`,
+that session's id with the `owner_epoch` and `journal_version` its fence read
+— the values a successor compares against, and the only part of the census
+that is recovery data rather than a count. That line is the only thing an ordinary stop writes
 to `stderr`, and it names no fatal class, which is what a reader checks it
 for.
 
@@ -3087,7 +3153,8 @@ children, a pid's liveness, a socket's EOF, or the daemon's own `stderr`.
   is what proves the marker was actually released. The case also asserts the
   negative that the `stopping` field exists for: **no fatal class is recorded
   at any point during the stop**, and `stderr` carries **nothing but the one
-  census line** — `drain_id`, `budget_ms` and three counts — **with no fatal
+  census line** — `drain_id`, `budget_ms`, three counts and no unknown-fence
+  heads, an idle daemon having none — **with no fatal
   class in it**. Stopping every linked process deliberately produces an exit
   from each, and every one of them must be consumed rather than classified.
   (Real process.)
@@ -3134,14 +3201,24 @@ children, a pid's liveness, a socket's EOF, or the daemon's own `stderr`.
   and that the drain does not treat it as an unexplained failure — the
   assertion a design handling only the epoch refusal would fail.
 
-  A fourth proves the recovery property, and it is the case the memory-held
-  `drain_id` could not have passed: the fence is made to answer
-  `commit_unknown`, the whole daemon is **killed** before it can resolve it,
-  and a **second process** reads the head, recomputes the `tx_id` from
-  `(session_id, owner_epoch, journal_version)` alone and resolves it with
-  `Store.transaction_status/4`. The two answers that must differ are that
-  status for a fence that did linearize and for one that did not; neither is
-  reachable from anything the dead daemon held.
+  A fourth proves the recovery property, and its surface is the **head**,
+  which is the correction a review found: the fence is made to answer
+  `commit_unknown`, the drain records `{:unknown, head}` for that session and
+  reports it on the stop line, the whole daemon is **killed** before it can
+  resolve anything, and a **second process** reads
+  `ownership_head/3` and compares it with the recorded head. The case runs
+  **twice** and the two runs must give different answers on that surface: in
+  the first the held fence is released so it linearizes, and the successor
+  reads a head that has **moved**, concludes the fence is decided and asks no
+  status at all; in the second it never linearizes, the successor reads the
+  **unchanged** head, recomputes the `tx_id` from `(session_id, owner_epoch,
+  journal_version)` and gets `:absent` from `Store.transaction_status/4`. The
+  case that asserted `transaction_status/4` alone is withdrawn: that call
+  answers `:absent` in **both** worlds — a committed fence moves the head, so
+  the id recomputed from the new head was never proposed — and a witness whose
+  two branches assert the same value proves nothing. Neither surface is
+  reachable from anything the dead daemon held, which is the property the
+  memory-held `drain_id` could not have given.
 - **The drain is globally durable-first, not per session.** Two sessions are
   active, each with a cancellable effect. The case asserts that **both**
   aborts are committed to the journal **before either** cleanup begins —
@@ -3718,13 +3795,13 @@ line; M5 introduces none of its own.
 | Protocol frame ceiling on the wire | unchanged from ADR 0023 | ADR 0032 |
 | Cleanup grace | an integer of 1 or more, refusing `0` with `cleanup_grace_invalid`, because core's `cancellation_bounds/1` admits `grace_ms >= 1` (`apps/loopex/lib/loopex/executor.ex:456`) | This plan, against core's existing validation |
 | Phase 1, the admission cut | **5_000 ms**, the teardown number reused; an unanswered cut becomes the `relay_lost` fail-stop | This plan |
-| Phase 2, abort admission | a fixed **30 s**, the Store's own `@call_timeout`; one phase for every session, because they are admitted concurrently | Core, against `apps/loopex_store_local/lib/loopex/store/local.ex:65` |
+| Phase 2, abort admission | a fixed **60 s** — two sequential Store calls at the adapter's own 30 s `@call_timeout`, the admission waiting out at most one transaction already in the coordinator's serial lane and then making its own; one phase for every session, because they are admitted concurrently | Core, against `apps/loopex_store_local/lib/loopex/store/local.ex:65`, `:111-113` |
 | Phase 3, the drain budget | `max` over drained sessions of `cancellation_bounds(g_i).cli_backstop_ms`, returned as `budget_ms` | Derived from `apps/loopex/lib/loopex/executor.ex:456-474`; no number chosen |
-| Phase 4, the fence | a fixed **30 s**, the same Store call timeout, concurrent across sessions | Core, against the Store's existing bound |
+| Phase 4, the fence | a fixed **90 s** — three sequential Store calls at 30 s: the head read, the `advance_owner`, and at most one `transaction_status` query; concurrent across sessions, and no retries | Core, against `local.ex:65`, `:111-113`, `:116-122`, `:130-132` |
 | Phase 5, coordinator termination | **5_000 ms**, the coordinator's own `shutdown` value (`apps/loopex/lib/loopex/runtime/session_coordinator.ex:134-142`) | Core's existing child specification |
 | Phase 6, non-Store teardown | **5_000 ms**, one absolute deadline from the instant `quiesce/1` returns, covering the stop records, the connection and listener closes, the collective lease-owner sweep and every non-Store stop | This plan. Chosen, not derived: nothing under it waits on a session, an effect or a filesystem sync, so it is a ceiling for actions that are each milliseconds |
 | Phase 7, the Store stop | a fixed 30 s, the Store's own `@call_timeout` (`apps/loopex_store_local/lib/loopex/store/local.ex:65`), independent of any grace; the usual release takes milliseconds | This plan, against the Store's existing bound |
-| Maximum graceful stop | `budget_ms` + **105 s**, the sum of the six fixed phases above | This plan, as the sum of its parts |
+| Maximum graceful stop | `budget_ms` + **195 s**, the sum of the six fixed phases above | This plan, as the sum of its parts |
 | Wait slice | 60_000 ms, so no `receive … after` argument approaches the BEAM's 2^32-1 limit, probed at both pairs | This plan; the limit is the VM's |
 | Lease term | 30 seconds | ADR 0033 |
 | Lease renewal interval for the reference clients | 10 seconds | ADR 0033 |
