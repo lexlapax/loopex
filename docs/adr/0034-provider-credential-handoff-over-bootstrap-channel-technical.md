@@ -52,12 +52,71 @@ booting — never reaches step 5. That is the property the two existing
 bootstrap-refusal cases assert, and it is why the credential is not carried by
 the step-3 frame.
 
-### Resolution and scrub points
+### The reference, its resolver, and its failures
 
-- **At the call.** The credential reaches the adapter as an opaque reference
-  in the per-invocation configuration the host already supplies to
-  `complete/3`. The reference is not the bytes: it is resolved exactly once,
-  and only where the frame is written.
+The per-invocation option is `:credential_reference`, one member of the
+configuration map the host already supplies to `complete/3`. Its value is
+`{resolver_module, reference_term}`:
+
+- `resolver_module` is an atom naming a module that implements
+  `Loopex.LLM.ReqLLM.CredentialResolver`, one callback,
+  `resolve(reference_term) :: {:ok, binary()} | {:error, term()}`;
+- `reference_term` is bounded plain boundary data — at most 256 bytes when
+  encoded by the repository's canonical encoding, and never a PID, port,
+  function, monitor or reference. It names which credential is wanted; it is
+  not the credential and carries no authority of its own.
+
+Any other shape, including a bare binary that could be the bytes themselves,
+is refused as an invalid option before any child is spawned. The behaviour
+exists rather than a closure because the reference travels in configuration
+that is copied between processes and may be printed by a crash report, and
+plain boundary data is what may travel there.
+
+**Owner and custody.** The resolver is the host's. The adapter declares the
+behaviour, calls it, and knows nothing about where the bytes live. Each
+reference implementation states its own custody and proves it for itself:
+the reference CLI, the app-server host and the M5 daemon read
+`Loopex.LLM.ReqLLM.credential_variable/0` exactly once, where they compose the
+runtime, delete that name from the VM's environment in the same step, and hold
+the bytes in one host-owned process, registered under the runtime reference
+rather than a global name, whose `format_status/1` redacts its state and which
+answers `resolve/1` only for its own reference term. The real-provider lane
+composes the same way. Nothing in the adapter depends on that arrangement, and
+a different host may keep the bytes anywhere it can defend.
+
+**When it is resolved.** Exactly once per invocation, inside the sender
+process, between the child's `ready` frame and the credential frame — step 5
+above and nowhere else. A resolved value is never cached, never reused for a
+second invocation, and never returned to the guardian.
+
+**Rotation.** Per invocation, by construction: the resolver may answer
+different bytes for the same reference on a later call, and no layer holds a
+previous answer to contradict it. A rotation that happens while an invocation
+is in flight does not reach that invocation, which has already resolved; it
+reaches the next one. Nothing is invalidated and no invocation is restarted.
+
+**Timeout.** Resolution is bounded by the invocation's existing deadline and by
+nothing else; this decision adds no second clock. The sender calls the
+resolver with the remaining time to that deadline, and a resolver that has not
+answered when it elapses is a failed resolution.
+
+**Failures.** Each is a refusal with a bounded non-secret reason, and each
+leaves no retained copy of anything the resolver may have produced:
+
+| Condition | Outcome |
+| --- | --- |
+| No `:credential_reference` in the configuration | Refused before the namespace is created and before any child is spawned, with the adapter's existing missing-credential reason |
+| Malformed reference, or a `resolver_module` that does not export the callback | The same refusal, before any child is spawned |
+| Resolver answers `{:error, reason}` | The sender reports `:error`; the invocation fails through ADR 0019's existing credential-send failure path, the guard tears the child down, and `reason` is reduced to the bounded non-secret status ADR 0029 fixes |
+| Resolver does not answer before the invocation deadline | The same failure path, distinguished by its own stable reason; the sender is killed and its stack goes with it |
+| Resolved value outside 1 to 65,536 bytes | Refused in the sender before the frame is written, exactly as the size check refuses today |
+| Two resolutions in flight at once | Independent. Each invocation has its own sender and resolves for itself; the adapter serializes nothing and shares nothing between them, and two answers for the same reference may differ |
+
+No failure is retried inside the adapter. Whether to attempt again is the
+coordinator's durable decision under ADR 0018, unchanged.
+
+### Scrub points
+
 - **In the sender.** The minimal credential sender keeps the shape it has
   today: it is spawned for this one send, it installs its own group leader
   sink so no IO request can carry anything out of it, it resolves the
@@ -66,14 +125,20 @@ the step-3 frame.
   reference, never the resolved value; the value exists only in that
   process's own stack for the duration of one send, so no guardian state, no
   message, no exit reason and no crash report can hold it.
-- **In the parent's environment.** The adapter performs no `System.get_env/1`
-  for the credential. `Loopex.LLM.ReqLLM.credential_variable/0` remains as the
-  one name the *host* reads when it composes a runtime — the reference CLI at
-  start, and the real-provider lane when it names the variable in its own
-  failure message — and nothing in the adapter's call path reads it.
-  `ProviderLauncher.spawn_environment/0` keeps removing that name, and every
-  other known credential and loader name, from the first spawned image; the
-  fixed `env -i` argument lists stay as they are.
+- **In the parent's environment.** The adapter performs no environment read
+  for the credential by any route. `Loopex.LLM.ReqLLM.credential_variable/0`
+  remains as the one name the *host* reads when it composes a runtime — the
+  reference CLI at start, and the real-provider lane when it names the
+  variable in its own failure message — and the host deletes that name once it
+  has read it. `ProviderLauncher.spawn_environment/0`'s enumeration moves off
+  the call path: the removal list is computed once where the host composes the
+  runtime, under ADR 0019's existing rule that the trusted host introduces no
+  further environment names while the snapshot is in use, and is carried in
+  the launch configuration the adapter already builds. The unconditional
+  `@excluded` names and the fixed `env -i` argument lists stay as they are.
+  Deleting the enumeration outright was rejected: the first spawned image is
+  `/usr/bin/env` itself, whose environment `env -i` does not clear, so without
+  the removal list that image would carry the parent's whole environment.
 - **In the child.** Unchanged: the child receives the credential on the socket
   and nowhere else. Its environment at entry is the fixed `PATH`, `LANG`,
   `LC_ALL` and the two crash-dump suppressions, and ADR 0029's bounded
@@ -126,10 +191,12 @@ proves, and the refusal above the ceiling, are unchanged.
 
 Three proofs are new:
 
-- **Parent environment.** Before, during and after a call, the parent VM's
-  environment holds no credential under the adapter's name or any value equal
-  to the credential in use. "During" is observed from inside the call, at the
-  point the child reports readiness.
+- **Parent environment.** From the completion of composition onward — before,
+  during and after a call — the parent VM's environment holds no credential
+  under the adapter's name and no value equal to the credential in use.
+  "During" is observed from inside the call, at the point the child reports
+  readiness. The case composes the runtime the way a reference host does, with
+  the variable set, and asserts that composition returns having deleted it.
 - **Concurrent independence.** Two invocations with distinct credentials run
   at once and each child records only its own; neither child, nor either
   child's diagnostics, ever sees the other's.
@@ -137,20 +204,44 @@ Three proofs are new:
   drift-protection case in `apps/loopex_llm_reqllm/test/adapter_test.exs` —
   `the adapter reads exactly one credential environment variable` — pins the
   exact `System.get_env` arguments per library file, including
-  `"provider_bridge.ex" -> ["\"LOOPEX_PROVIDER_API_KEY\""]`. That case must
-  survive, strengthened rather than deleted: the expected list for
-  `provider_bridge.ex` becomes `[]`, so the case then proves that no file in
-  the adapter's library tree reads any environment variable for a credential
-  at all, which is a stronger claim than the one it makes today.
+  `"provider_bridge.ex" -> ["\"LOOPEX_PROVIDER_API_KEY\""]` and
+  `"provider_launcher.ex" -> [""]`, the arity-zero enumeration. That case must
+  survive, strengthened rather than deleted, in two ways. Both of those
+  expected lists become `[]`, leaving only `provider_worker.ex`'s two
+  non-secret crash-dump names, so the case then proves that no file in the
+  adapter's library tree reads any environment variable at all except those
+  two. And its scan is widened from one regular expression over
+  `System.get_env(...)` to every route by which an environment read can be
+  written: `System.get_env/0` and `/1`, `System.fetch_env/1` and
+  `fetch_env!/1`, `System.get_env/2`, `:os.getenv/0`, `/1` and `/2`,
+  `:os.env/0`, and indirect application of any of them through `apply/3` or a
+  captured function. Each route it does not pin is refuted outright. The
+  narrower scan is what lets an environment read return by a name the current
+  expression does not match, which is the drift the case exists to catch.
+- **Resolution failures.** One case per row of the failure table above: absent
+  reference, malformed reference, a resolver module without the callback, a
+  refusing resolver, a resolver that does not answer before the invocation
+  deadline, a value outside the size bound, and two resolutions in flight at
+  once. Each asserts the refusal, its stable reason, that no child was spawned
+  where the contract says none is, and that no message, exit reason or crash
+  report from the invocation carries the resolver's value.
+- **Host custody.** For each reference host — the CLI, the app-server host and
+  the daemon — composition reads the variable exactly once, deletes it, and
+  the holding process's `format_status/1` redacts its state under a forced
+  crash report.
 
-The first two belong in `credential_plane_test.exs` beside the cases they
-generalise; the third stays where it is.
+The first two, the failure cases and the custody cases belong in
+`credential_plane_test.exs` beside the cases they generalise; the drift case
+stays where it is.
 
 Two details of that case matter to whoever writes the change. The literal
 `"LOOPEX_PROVIDER_API_KEY"` it pins today lives in
 `provider_bridge.ex:401`, inside the credential sender, while
 `credential_variable/0` and its module attribute live in `req_llm.ex:49` and
-`:149-150`; only the first disappears. So `adapter_test.exs:50`'s
+`:149-150`; only the first disappears. The arity-zero enumeration the case
+also pins lives in `provider_launcher.ex:23-27`, and it does not disappear —
+it moves to composition, so the file that holds it afterwards is a host
+composition site rather than the adapter's call path. So `adapter_test.exs:50`'s
 `assert variable == "LOOPEX_PROVIDER_API_KEY"` is, afterwards, a pin on the
 host-facing accessor — the one name an operator configures — and that is what
 it should say it is. The neighbouring case `a missing credential is reported
@@ -165,10 +256,13 @@ The review is an acceptance point of M5 Outcome 6, read by someone other than
 the implementer, over the exact diff. It answers: where the reference is held
 between the call and the send; that the resolved value has no path into
 guardian state, a message, an exit reason, a crash report, an IO request, a
-file or the environment; that a failed or partial send leaves no retained
-copy; that the deadline, cleanup and abandonment paths do not resurrect one;
-and that a host supplying no reference is refused rather than falling back to
-an ambient read. Its record is retained with the milestone's evidence.
+file or the environment; that every row of the failure table refuses without
+retaining a copy; that the deadline, cleanup and abandonment paths do not
+resurrect one; that a host supplying no reference is refused rather than
+falling back to an ambient read; and, on the host side of the boundary, that
+each reference implementation reads the operator's variable once, deletes it,
+redacts the holding process's state, and hands the adapter a reference that
+carries no bytes. Its record is retained with the milestone's evidence.
 
 ### Concurrency, as a measurement
 
@@ -196,10 +290,11 @@ child built from the same manifest digest behaves identically; the build
 manifest is not revised by this decision.
 
 The one visible change is host composition: a host that starts a runtime with
-this adapter supplies a credential reference with the call. The reference CLI
-and the real-provider lane keep reading `LOOPEX_PROVIDER_API_KEY` where they
-compose, so an operator's setup is unchanged and the release check's
-credential frame is unchanged. An embedder that relied on the adapter reading
+this adapter supplies a credential reference with the call and owns the bytes
+behind it. The reference CLI, the app-server host, the M5 daemon and the
+real-provider lane keep reading `LOOPEX_PROVIDER_API_KEY` where they compose,
+and delete it there, so an operator's setup is unchanged and the release
+check's credential frame is unchanged. An embedder that relied on the adapter reading
 the environment for it must pass the reference instead; that is the refusal
 path, not a silent fallback, and it is stated in the operator and developer
 documentation the milestone updates.

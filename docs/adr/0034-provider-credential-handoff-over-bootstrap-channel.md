@@ -38,21 +38,46 @@ measured the result at M4 closure — that application is the critical path of
 the fast check, 96% of its time sits in those twelve modules, and no further
 test change shortens the check while the slot is shared.
 
-**Decide that the credential is a per-invocation input, delivered on the
-child's private channel and never resident in any process-wide slot.** The
-host supplies the credential to the adapter with the call, as an opaque
-reference it owns; the adapter resolves that reference to bytes only inside
-the minimal sender process that writes the credential frame, and only after
-the child has proved its nonce, codec version and build manifest digest. The
-adapter reads no environment variable for the credential. Nothing else
-changes about where the credential may go: it is never in the child's
-environment, never in argv, never in the journal, a public event, a snapshot,
-a progress item or a diagnostic, never in a process state, a message, an exit
-reason or a crash report, and never written to a file. The operator still
-names the credential once, to the host, through the same environment variable;
-the host reads it where it composes the runtime and holds a reference from
-then on, so the variable is a configuration input rather than a live transport
-for every call.
+**Decide that the credential is a per-invocation input, resolved only inside
+the process that writes it to the child's private channel.** The host supplies
+the adapter, with each call, a *credential reference*: bounded plain data
+naming a host-owned resolver, never the bytes themselves. The adapter resolves
+that reference exactly once per invocation, inside the minimal sender process
+that writes the credential frame, and only after the child has proved its
+nonce, codec version and build manifest digest. The adapter reads no
+environment variable for the credential, and no resolved value exists anywhere
+but that one process's own stack for the duration of one send. A call that
+carries no reference is refused before any child is spawned, which is the
+refusal a missing environment variable produces today.
+
+**The resolution boundary is where the adapter's claims stop.** Inside it — the
+reference, the sender, the frame, the child — the adapter proves what it says:
+the value is never in the child's environment, in argv, in the journal, in a
+public event, a snapshot, a progress item or a diagnostic, in adapter process
+state, a message, an exit reason, a crash report or an IO request, and never
+written to a file. Outside it, custody belongs to the host and the adapter
+proves nothing about it. This pair therefore states the reference
+implementations' custody as their own obligation rather than claiming a
+property of every host that might supply a resolver.
+
+The operator still names the credential once, through the same environment
+variable, and the reference implementations — the CLI, the app-server host and
+the M5 daemon — read it exactly once where they compose the runtime and delete
+it from the VM's environment in the same step, holding the bytes behind the
+resolver from then on. The variable is a configuration input consumed at
+composition, not a live transport for every call, and from the moment
+composition completes the parent VM's environment carries no credential. M5
+Outcome 6's claim is stated at that boundary: a claim that the variable is
+never set at all would contradict the way an operator supplies a secret to a
+process they start.
+
+One enumeration leaves the call path with it. The launcher's first spawned
+image is `/usr/bin/env`, whose own environment the port can only clear name by
+name, so the launcher enumerates the parent's environment on every launch
+today. That snapshot moves to composition, under the same ADR 0019 constraint
+that already forbids the host to introduce environment names while it is in
+use, and is carried in the launch configuration the adapter already builds. No
+per-invocation path then reads the environment for any purpose at all.
 
 **Alternatives rejected.** Keeping the environment variable and buying the
 speed by sharding the provider suite across test VMs was rejected: it is
@@ -67,16 +92,33 @@ frames, without removing a single place the credential can be observed. Widening
 the existing bootstrap frame to carry the credential alongside the manifest
 digest was rejected because the child must prove its identity before it is
 handed a secret, and that frame is sent before the child has proved anything.
+Carrying the credential bytes in the per-invocation configuration, rather than
+a reference, was rejected because the bytes would then sit in adapter state,
+in the messages that configuration travels in, and in any crash report that
+prints it — the retention this decision exists to remove. A single
+adapter-level credential set once at composition was rejected because it is
+the process-wide slot again one level down: two concurrent invocations with
+different credentials could not be independent, which is half of what this
+decision buys. A resolver supplied as a function was rejected because a
+closure is not plain boundary data and its captured environment is exactly the
+retention the security review has to exclude.
 
 **Evidence its acceptance requires.** This is a trust claim, so its class is
 negative tests plus a security review, with a real-provider proof for the path
 the release check already runs. Every credential-plane negative that M0 to M2
 established is re-pointed at the new handoff and must hold with its assertion
 unchanged in meaning; the parent VM's environment is proved empty of the
-credential before, during and after a call; two invocations running at once
-are proved unable to observe each other's credential; and a named reviewer
-reads the handoff — resolution point, frame ordering, failure paths and every
-place a value could be retained — and records the reading with the milestone.
+credential from the completion of composition onward — before, during and
+after a call; two invocations running at once are proved unable to observe
+each other's credential; every resolution failure the contract names — absent
+reference, refusing resolver, a resolver that does not answer within the
+invocation's deadline, a value outside the size bound, and two resolutions in
+flight at once — is proved to refuse with a bounded non-secret reason and to
+leave no retained copy; the adapter's library tree is proved to read no
+environment variable for a credential by any route; and a named reviewer reads
+the handoff — resolution point, frame ordering, failure paths, the host
+reference implementations' custody, and every place a value could be retained
+— and records the reading with the milestone.
 The real-provider lane in `bash scripts/check-release.sh` proves the path
 still reaches a real provider. The concurrency result is a measurement
 recorded beside the M4-closure baseline, not a pass condition.
@@ -91,11 +133,12 @@ has: the secret exists in the parent only inside one short-lived process that
 does nothing but send it, and in the child that needs it. Two invocations in
 one VM become independent, so the twelve provider test modules can run
 concurrently and the fast check stops being pinned by that application. Host
-composition gains one explicit input: a host that starts a runtime with this
-adapter says which credential reference the adapter is to use, instead of
-relying on the VM's environment being right at call time. A host that supplies
-no reference gets the adapter's ordinary refusal to dispatch, which is what a
-missing environment variable produces today.
+composition gains one explicit input and one explicit obligation: a host that
+starts a runtime with this adapter says which credential reference the adapter
+is to use, instead of relying on the VM's environment being right at call
+time, and it owns where the bytes live behind that reference. A host that
+supplies no reference gets the adapter's ordinary refusal to dispatch, which
+is what a missing environment variable produces today.
 
 Nothing public changes. This is adapter-internal: no Model callback, no public
 event, snapshot, artifact, wire method or protocol generation, no durable
