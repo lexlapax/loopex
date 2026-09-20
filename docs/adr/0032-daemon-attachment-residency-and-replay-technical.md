@@ -230,8 +230,15 @@ ordered list would make the served contract differ from the digest the server
 advertises, which is exactly the drift the digest exists to catch. The
 generation-2 literal the conformance module pins is the digest of the contract
 *including* all four changes, and a build missing any of them computes a
-different value and fails there. Generation 1's digest is untouched, since
-generation 1 gains no method, no record family and no error code.
+different value and fails there. Generation 1 gains no method, no record family and no error code — but its
+digest is **not** untouched, because M5 renames its generation string from
+`loopex.session.v1-experimental` to `loopex.experimental/1` and the generation
+is the digest's first input. That rename is the plan's decision, taken under
+the vision's 0.x experimental policy; this ADR records its consequence here,
+which is that generation 1's schema digest is recomputed and re-pinned
+alongside generation 2's, with every other input to it byte-identical. The
+negotiation list a server advertises therefore carries `loopex.experimental/1`
+and `loopex.experimental/2`, and neither carries the old name.
 
 
 ### Generation 2, at the precision literal vectors need
@@ -644,10 +651,14 @@ value: the digest is taken over the generation, the ordered methods, the
 ordered record families, the ordered error codes and the limits, and
 generation 2 changes the generation and the method list, so it cannot and must
 not equal generation 1's. It is written out as a literal beside generation
-1's, and generation 1's literal digest, schema-file digest and vectors-file
-digest are asserted unchanged in the same place, so an accidental edit to
-generation 1's contract fails there rather than silently renaming what
-existing clients agreed to. The generation-2 schema and its
+1's. Generation 1's three literals are **re-pinned** in the same place rather
+than asserted unchanged, because the rename above moves them, and the case
+that pins them asserts every *other* input to generation 1's digest — its
+ordered methods, record families, error codes and limits — is byte-identical
+to what `0.1.0` served. That is what still catches an accidental edit to
+generation 1's contract: the inputs are compared, not just the result, so a
+changed method list fails there instead of hiding behind a digest that was
+expected to move anyway. The generation-2 schema and its
 vectors are new files beside generation 1's, as
 `apps/loopex_protocol/priv/schema/loopex-experimental-2.json` and
 `apps/loopex_protocol/priv/vectors/loopex-experimental-2.json`, reviewed with
@@ -656,9 +667,13 @@ written into the conformance module beside the two generation 1 already pins —
 so an independent client can fetch either file and verify its bytes, and an
 edit to a generation-2 file fails the same way an edit to a generation-1 file
 does. The digests are computed and pinned when the files are written;
-generation 1's bytes and its two pinned digests are untouched. A
-negotiation vector proves selection from a list that also names generation 1
-and refusal of a generation-1-only list. The M4 foreground server keeps
+generation 1's two file digests are **re-pinned** with its schema digest,
+because the rename above changes the bytes of the files that carry the
+generation string; everything those files say about methods, records, errors
+and limits is unchanged. A negotiation vector proves selection from a list
+that also names generation 1 under its new string, refusal of a list naming
+only generation 1, and refusal of a list naming only the retired
+`loopex.session.v1-experimental`. The M4 foreground server keeps
 serving generation 1 only, with its one-attachment-per-process rule.
 
 ### Attachment lifecycle

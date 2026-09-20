@@ -39,6 +39,14 @@ generation,
 `loopex.experimental/2`, which adds `session.list`, `daemon.status`, the two
 control methods, the writer-epoch field ADR 0033 names, and one notification
 record family, `daemon.stopping`, carrying the reason a daemon is going away.
+The milestone that
+brings this ADR also renames the released generation-1 string to
+`loopex.experimental/1`, so the two generations are named on one scheme and
+neither claims the `v1` the vision reserves for the stable protocol; that
+rename is the plan's decision under the 0.x experimental policy, and its
+consequence here is that generation 1's pinned digests are recomputed with
+its new name while everything else about generation 1 stays as it is.
+
 That record is a new record family, so it is part of what generation 2's
 schema digest is taken over; its delivery is one bounded best-effort write
 attempt into the connection's existing output buffer, after which the
