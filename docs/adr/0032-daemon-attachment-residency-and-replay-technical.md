@@ -195,8 +195,8 @@ limits — five inputs, and generation 2 changes four of them:
 | --- | --- |
 | Generation | New string |
 | Methods | Adds `session.list`, `daemon.status`, `session.acquire_control`, `session.release_control` |
-| Record families | Adds `daemon.stopping` |
-| **Error codes** | Adds every refusal generation 2 can return and generation 1 cannot: `control_held`, `control_pending`, `control_owner_lost`, `session_dormant`, the four existence-query refusals the daemon maps to the wire (`session_unknown`, `session_id_invalid`, `store_unavailable`, `existence_indeterminate`), and the activation and residency refusals (`activation_ceiling_reached`, `session_index_too_large`, `composition_mismatch`) |
+| Record families | Adds `daemon.stopping` and `daemon.notice` |
+| **Error codes** | Adds every refusal generation 2 can return and generation 1 cannot: `control_held`, `control_not_held`, `control_pending`, `control_capacity_reached`, `control_owner_lost`, `session_dormant`, the four existence-query refusals the daemon maps to the wire (`session_unknown`, `session_id_invalid`, `store_unavailable`, `existence_indeterminate`), and the activation and residency refusals (`activation_ceiling_reached`, `composition_mismatch`). **Not** `session_index_too_large`, which is a startup exit class and can reach no client |
 | Limits | Unchanged from ADR 0023's ceilings |
 
 **`control_owner_lost` closes a controller whose lease owner died.** ADR 0033
@@ -218,6 +218,12 @@ from `control_held` and deserves a different refusal. It enters the ordered
 error list, the digest above, and the generation-2 vectors alongside the
 others.
 
+`control_capacity_reached` is the refusal for a lease operation that would
+exceed the concurrent lease-owner cap — 512, the per-daemon ceiling this ADR
+already fixes, reused rather than doubled by a second number. The plan's
+companion states where that cap comes from and why the population it bounds is
+not the activation count.
+
 Listing the error codes matters because it is the input most easily forgotten:
 a refusal reason invented at implementation time and not entered in the
 ordered list would make the served contract differ from the digest the server
@@ -226,6 +232,87 @@ generation-2 literal the conformance module pins is the digest of the contract
 *including* all four changes, and a build missing any of them computes a
 different value and fails there. Generation 1's digest is untouched, since
 generation 1 gains no method, no record family and no error code.
+
+
+### Generation 2, at the precision literal vectors need
+
+Every code and record below has to be written as bytes before the conformance
+module can pin a digest, so each is fixed here rather than left to the
+implementation. Seven were underspecified in an earlier revision, and this is
+the whole of what was missing.
+
+**`control_not_held`, the non-holder release.** `session.release_control` from
+a connection that is not the current holder refuses with `control_not_held`.
+It is distinct from `control_held`, which refuses an *acquisition* because
+somebody else holds the lease, and from `control_owner_lost` below. The
+refusal changes nothing: the current holder's lease, epoch and deadline are
+untouched, which is the point — a release that could be issued by a non-holder
+would be a way to take control away without taking it over.
+
+**`control_pending` and the deadline behind it.** A request carries exactly
+`method`, `request_id` and its row's fields (ADR 0023's request shape,
+`0023-…-technical.md:131-133`), so there is **no deadline field on the wire**
+and none is added. The deadline is the **daemon's**, it starts when the
+acquisition request is admitted — not when the client sent it, which the
+daemon cannot know — and it equals the **lease term**, 30 seconds, so no
+number enters that ADR 0033 has not already fixed. A waiter that reaches it
+refuses `control_pending` and the client may acquire again.
+
+**A waiter whose connection disappears is cancelled**, and the lease owner
+learns of it the same way it learns of any connection loss: the waiter is
+bound to the connection that made the request, so when that connection is
+gone the acquisition is abandoned, no grant is made, and no epoch is minted.
+A grant to a connection that no longer exists would hold a lease nobody could
+release until it expired.
+
+**`control_owner_lost`, exactly.** It reuses the record family ADR 0023
+already defines for post-admission writer loss rather than adding one: **one
+uncorrelated `error`**, with
+
+| Field | Value |
+| --- | --- |
+| `code` | `control_owner_lost` |
+| `session_id` | the session whose lease owner died |
+| `event_cursor` | the last completely emitted durable cursor for that attachment, exactly as `detached` carries it |
+
+It is uncorrelated because no request caused it. **Close behaviour:** the
+daemon emits it to the **controller's** attachment and then closes that
+attachment only — the connection stays open, and observer attachments on it or
+on any other connection are untouched, because an observer holds no lease and
+loses nothing. A client that sees it may acquire again; the next acquisition
+starts a fresh owner and mints a fresh epoch.
+
+**`session_index_too_large` is not a wire code**, and an earlier revision
+listed it as one. It is a **startup** refusal: the daemon exits non-zero with
+that class before any socket exists, so no client can be holding a connection
+to be told. It is removed from the generation-2 error inventory and stays in
+the daemon's exit classes, where it belongs.
+
+**A failed directory write is a notification, not an error.** Generation 2
+adds a **second notification record family**, `daemon.notice`, beside
+`daemon.stopping`:
+
+| Field | Value |
+| --- | --- |
+| `code` | one of a closed set, today `index_write_failed` |
+| `session_id` | the session the notice is about |
+| `message` | a bounded non-secret sentence for an operator |
+
+The activation it follows **succeeded**: the session is usable and reachable
+by ID, and only its directory entry and index row are missing, to be written
+by the retry the plan already describes. Reporting that as an `error` would
+tell a client its command failed when it did not, and saying nothing would
+leave a session absent from `session.list` with no explanation. The family
+enters the digest's record-families input beside `daemon.stopping`.
+
+**The existence query's `unexpected` maps to `existence_indeterminate`.** Core
+answers one of five results; the daemon maps `store_unavailable` to the wire's
+`store_unavailable` and **`unexpected` to `existence_indeterminate`**, because
+a result core did not recognise is exactly a case where existence could not be
+decided, and inventing a distinct wire code for "core said something we do not
+understand" would expose an internal disagreement a client cannot act on. The
+two refuse identically in effect — nothing created, nothing attached, no lease
+— and differ only in the reason a client is given.
 
 ### The session index, and what it may claim
 
