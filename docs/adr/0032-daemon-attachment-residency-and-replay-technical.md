@@ -533,9 +533,12 @@ delivered contiguously after the snapshot. The daemon adds:
   it is measured in bytes rather than in each session's own sequence numbers.
   A sequence-distance metric would not be comparable: sequence numbers are
   per-session and say nothing about how much memory an attachment is costing.
-  Ties break by session ID bytes ascending. Only after every window has been
-  released does the daemon detach the slowest attachment at its last emitted
-  cursor. Independently of pressure, a window whose session has had zero
+  Ties break by session ID bytes ascending. Each step is **repeated until the
+  aggregate is below the ceiling**, not applied once: releasing one window may
+  not be enough, so zero-attachment windows are released in that order until
+  either the aggregate fits or none is left. Only when none is left does the
+  daemon detach the slowest attachment at its last emitted cursor, and that
+  too repeats until the aggregate fits. Independently of pressure, a window whose session has had zero
   attachments for the idle interval is dropped. No reclamation stalls a
   journal transaction and none changes what any client is owed.
 
@@ -600,8 +603,10 @@ recorded-entry bound refusing at start with its stable reason; at that bound a
 session reached by ID activated, not recorded, and the listing carrying
 `index_full`; a client that never saw a session ID recovering it through the
 create command's durable `command_id`; a directory write failing at activation
-reported to that client, the session still usable, and the record retried at
-the next activation; a
+reported to that client, the session still usable, and the record written by
+the retry the next time the live daemon holds that ID — right after
+activation, on a later command for the session, or when a client reaches it by
+ID; a
 recorded session the current composition cannot serve refused at activation by
 name while every other session in the root activates; progress coalescing under
 pressure with counted drops and no journal delay; peer-credential refusal; a

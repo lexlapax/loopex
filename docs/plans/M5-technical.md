@@ -39,7 +39,7 @@ Concept: [Scope](M5.md#concept-plan-scope).
 | --- | --- | --- |
 | `loopex` | Durable session truth, the race-free attach barrier and cursor, independent concurrent attachments to one session, the read-only session-existence query, the per-attachment event-count dispatcher queues, cancellation and recovery | A lease, a transport, a byte limit, residency policy or any daemon fact |
 | `loopex_protocol` | Generation-2 records, validators, schema and vectors | Daemon behaviour or lease semantics |
-| `loopex_store_local` | The unchanged local adapter, its 256 MiB log and 4 MiB frame ceilings, its `store_capacity_exceeded` and `store_log_too_large` refusals and its writer marker, which the daemon holds for its process's lifetime | Any daemon fact, lease, index or residency state |
+| `loopex_store_local` | The unchanged local adapter, its 256 MiB log and 4 MiB frame ceilings, its `store_capacity_exceeded` and `store_log_too_large` refusals and its writer marker, which it takes at start and releases in its own `terminate/2` — so the daemon owns the Store *process* and stops it last in an orderly shutdown, and a store loss releases the marker before the daemon can act | Any daemon fact, lease, index or residency state |
 | `loopex_daemon` | Marker-first process and socket lifetime, existence validation by calling core's query rather than by attaching or resuming, the peer-credential check, generation-2 negotiation, per-connection socket output buffers, the resident window and aggregate byte ceiling, attachment residency and eviction, the in-memory controller lease and writer-epoch check, the session index with its recorded-entry bound and its bounded pages, attachment residency and the one-way activation ceiling, and diagnostics | Store or coordinator internals, a second loop, policy selection, host identity, a durable record or a durable method |
 | `loopex_app_server` | The foreground stdio server unchanged, sharing the protocol mapping the daemon reuses | Daemon lifetime or residency |
 | `loopex_cli` | `loopex daemon` with its readiness line, signal handling and exit classes, `loopex attach` with its roles, takeover presentation and cursor reconnect, the live `loopex sessions --daemon` form beside the unchanged offline one, and the host-side credential custody and registry it composes | Normative lease or session semantics, and any change to the released offline `loopex sessions` |
@@ -715,6 +715,16 @@ the next marker holder removes.
 | `store_lost` | Fail-stop: the Store terminated under a live listener |
 | `store_capacity_exceeded` | Fail-stop: the Store terminated on the capacity refusal specifically |
 | `supervision_fault` | Fail-stop: a lease owner failed, under ADR 0033's daemon-fatal rule |
+
+**The daemon's own log is bounded and redacted by the rules that already
+exist.** Everything the daemon writes to `stderr` — refusals, warnings, the
+fatal reason — is a bounded non-secret line under ADR 0029's discipline, and
+carries no credential, no token, no model content, no tool argument or result,
+and no artifact bytes, exactly as ADR 0030's metadata rule already forbids for
+a trace or a telemetry span. Nothing here is a new logging plane: the daemon
+has no diagnostic surface of its own beyond these lines and the records it
+already sends on the wire, and the fatal-class map above is the whole
+vocabulary of what an exit may say.
 
 **Reverse cleanup.** Every startup failure *after* the marker is acquired
 unwinds what it has done, in reverse: an unlinked-and-bound socket is closed

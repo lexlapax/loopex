@@ -156,10 +156,13 @@ session-creating transaction so it is crash-atomic with the commit, were both
 rejected on 2026-09-20: each is a change to the Store port or to the local
 adapter's transaction shape, and both are exactly what M5's selection of the
 unchanged adapter declines to buy. Activating every recorded session at
-daemon start was rejected the same day: the local adapter replays a full log
-at every open, so startup cost would grow with the product of session count
-and history, and a root with one unservable session would fail a start that
-need never have read it. The companion records each in full.
+daemon start was rejected the same day. The local adapter replays the root's
+**one** log in full at every open, so the cost is not a product of session
+count and history — it is that single replay, paid once, plus the cost of
+starting a coordinator for every recorded session and holding it. That is what
+lazy recovery avoids: a root with 4,096 recorded sessions would start 4,096
+coordinators to serve the one a client wanted. And a root with one unservable
+session would fail a start that need never have reached it. The companion records each in full.
 
 **Evidence its acceptance requires.** Two classes together. The transport and
 its generation are a protocol claim, so they need vectors and a compatibility

@@ -275,6 +275,15 @@ host-authored term is exactly where a secret could be smuggled into a reason.
 All seven atoms carry no content, so they are safe in a message, an exit
 reason and a bounded diagnostic.
 
+**They are internal diagnostic classes, not a new public result shape.** The
+seven live inside the adapter and in what the guardian records; the value
+`complete/3` returns to the coordinator keeps the **existing `Loopex.Model`
+refusal shape**, unchanged by this decision. A host that pattern-matches on
+the adapter's result today matches the same shapes afterwards, and the atom is
+what the bounded non-secret diagnostic says happened rather than a second
+return contract to learn. Widening the callback's result would be a change to
+an accepted port, which this decision explicitly does not make.
+
 **What the sender reports.** `:ok` or `{:error, reason}` from that same closed
 set, never a bare `:error`. The guardian has to distinguish a custody process
 that refused from one that never answered — they are different operational
