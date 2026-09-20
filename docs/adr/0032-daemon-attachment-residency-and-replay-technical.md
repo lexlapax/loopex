@@ -128,7 +128,7 @@ enforced inside core.
 
 | Method | Required fields | Result |
 | --- | --- | --- |
-| `session.list` | `limit` (1 to 256), optional `after_session_id` | A page of at most `limit` index entries ordered by session ID bytes ascending and starting strictly after `after_session_id`; each entry carries the session identity, the placement identity recorded for it, `residency` of `active` or `dormant`, and `controlled` as a boolean, never content and never durable session state; `next_after_session_id` is present exactly when more entries exist |
+| `session.list` | `limit` (1 to 256), optional `after_session_id` | A page of at most `limit` index entries ordered by session ID bytes ascending and starting strictly after `after_session_id`; each entry carries the session identity, the placement identity recorded for it, `residency` of `active` or `dormant`, and `controlled` as a boolean, never content and never durable session state; `next_after_session_id` is present exactly when more entries exist, and `index_full` is present and true exactly when the index is at its 4,096-entry ceiling, so a client is told the listing may be incomplete rather than reading an omission as an absence |
 | `daemon.status` | none | Placement identity, daemon incarnation, socket path, attachment, active-session and index counts against their limits, uptime |
 | `session.acquire_control`, `session.release_control` | `session_id`, `request_id` and the lease fields ADR 0033 fixes | Lease result naming the writer epoch and the remaining lease term |
 
@@ -149,10 +149,18 @@ the daemon itself owns or reads once:
 - `session_id` and the recorded placement identity, read from the directory
   entry at daemon start, or written when the daemon first activates a session
   the directory does not hold;
-- `residency`, a daemon fact, updated on every activation and every transition
-  to dormant;
+- `residency`, a daemon fact, set to `active` at activation and never set back
+  within a daemon's lifetime, because activation is one-way;
 - `controlled`, a daemon fact, updated on every lease grant, release and
-  expiry by the same per-session owner ADR 0033 gives those transitions.
+  expiry by the same per-session owner ADR 0033 gives those transitions —
+  **and on that owner's failure**, which is not a transition the owner can
+  record for itself. Under ADR 0033 a lease owner's failure is fatal to the
+  daemon instance, so both fields are reconstructed by the restart rather than
+  repaired in place: after it, every session is `dormant` and `controlled` is
+  false, which is exactly true of a daemon that has activated nothing and
+  granted nothing. A coordinator that fails is core's to supervise; the daemon
+  does not invent a `residency` value for it, and a client learns of it by
+  attaching, where core answers authoritatively.
 
 Lineage, lifecycle state and last committed sequence are deliberately absent.
 A daemon index cannot keep them current without reading the Store on the
@@ -160,14 +168,42 @@ request path or subscribing to every session it is not holding, and a field
 that is silently stale is worse than an absent one; a client that needs them
 attaches, and the snapshot carries them at a committed sequence.
 
-The recovery procedure for the crash cut is explicit and needs no new durable
-record. A session absent from the index is still reachable by its ID: a client
-that knows the ID acquires control and resumes it, the Store answers because
-the Store is the authority, and the daemon records the directory entry as part
-of that activation, so the session appears in every later listing. The
-operator documentation states this, because an operator who lost a terminal
-mid-creation is exactly who meets it. `session.list` is documented as *the
-sessions this root records*, not *the sessions this root contains*.
+**The recovery procedure for the crash cut**, in four parts, needing no new
+durable record and no Store read by the daemon:
+
+1. **Durable existence is learned only from core.** The daemon never reads
+   Store internals and never enumerates the log to decide whether a session
+   exists. It calls core's existing attach or resume on the ID and treats
+   core's answer as the proof: core resolves it or refuses it, and the daemon
+   forwards that answer. So `session.acquire_control` on an ID the index does
+   not hold validates durable existence the only way the daemon is allowed
+   to — by asking core — and a refusal from core is the refusal the client
+   sees. Nothing about the index is consulted to decide existence, which is
+   why an index that is incomplete is not a correctness problem.
+2. **A client that never saw the session ID recovers by command identity.**
+   At the cut where the Store committed the creation and the process died
+   before the reply, the client may hold no ID at all. It is not lost: the
+   create command's `command_id` is durable and re-presenting it returns the
+   historical result rather than creating a second session — the idempotency
+   the session directory and the resume path already rely on. That is the
+   named route, and the operator page states it.
+3. **Recording can fail, and says so.** If writing the directory entry fails
+   during activation, the failure is reported to the client that triggered it,
+   as an explicit warning that this session will not appear in `session.list`
+   — the reference CLI already reports exactly that failure today. The
+   activation itself succeeds, the session is fully usable, and the daemon
+   retries the record on the next activation of that session.
+4. **A full index still activates.** If the index already holds 4,096 entries
+   and a client reaches an unrecorded session by ID, the session is activated
+   and is **not** recorded. Reachability never depends on the ceiling. What
+   changes is the listing's honesty: `session.list` then carries `index_full`,
+   so an operator is told the listing is incomplete rather than reading a
+   silent omission as an absence.
+
+`session.list` is documented as *the sessions this root records*, not *the
+sessions this root contains*, and the operator documentation states all four
+parts, because an operator who lost a terminal mid-creation is exactly who
+meets them.
 
 A page is consistent with the index at the moment it is read; no consistency
 is promised across pages, so a session created or dropped between pages may
@@ -180,24 +216,48 @@ byte position.
 ### Session residency: active, dormant, and their bounds
 
 A session is **active** when the daemon holds a live coordinator for it and
-**dormant** when the index records it and the daemon does not. Nothing durable
-distinguishes the two; dormancy is a daemon fact and costs a dormant session
-nothing.
+**dormant** when the index records it and the daemon has never activated it in
+this process's lifetime. Nothing durable distinguishes the two; dormancy is a
+daemon fact and costs a dormant session nothing.
 
+**Activation is one-way for the daemon's lifetime.** A session the daemon has
+activated keeps its coordinator until the daemon exits. Dormancy is *not*
+deactivation, and the daemon has no operation that stops a coordinator.
+
+That is a correction, not a simplification. An earlier draft let an idle
+session "go dormant, releasing its slot", which is wrong twice over. The idle
+condition it named — no attachment and no admitted command — is not the same
+question as whether work is running: a session with every client detached can
+still have a model request in flight, a tool effect dispatched, an interaction
+awaiting an answer, a recovery in progress, an unresolved `commit_unknown`, or
+an admission executing inside core. Stopping it would destroy exactly what
+Outcome 1 exists to prove, that work progresses with zero attachments. And
+there is no operation to stop one with: core owns coordinator lifetime, and
+M5's only core change is concurrent attachment, so a deactivation call would
+be a second core change this milestone does not make.
+
+- **What dormancy applies to.** Attachments, resident windows and socket
+  output buffers, and nothing else. An idle attachment is evicted, its window
+  may be reclaimed, its buffer is released — and the coordinator beneath them
+  keeps running. Every byte ceiling in this decision is about those three and
+  is unaffected.
 - **Lazy recovery.** A restarted daemon activates no session. It acquires the
   writer marker, reads the index, binds the socket, and activates a session
   the first time a client attaches to, acquires control of or resumes it.
-- **Active-session ceiling.** At most 64 sessions are active at once per
-  daemon. A session that has had no attachment and no admitted command for the
-  idle interval goes dormant, releasing its slot. An activation that would
-  exceed the ceiling while every active session is still in use refuses with a
-  stable reason naming the ceiling; it never evicts a session that a client is
-  driving or watching.
-- **Index bound.** The index holds at most 4,096 entries. A root whose session
-  directory holds more refuses at daemon start with a stable reason naming the
-  bound and pointing at root retirement, in the same posture as
-  `store_log_too_large`: refuse rather than serve a truncated view of what the
-  root records.
+- **Activation ceiling.** At most 64 sessions are activated **per daemon
+  lifetime**, not at once, because nothing gives a slot back. The 65th
+  activation refuses with a stable reason naming the ceiling and the remedy,
+  which is to restart the daemon. That is a real limitation rather than a
+  design, it is recorded as one in the plan and in the operator page, and it
+  is the honest cost of leaving coordinator lifetime alone in M5. Lifting it
+  needs a core deactivation operation that can tell "quiescent" from "idle",
+  which is a decision of its own.
+- **Index bound.** The index holds at most 4,096 **recorded** entries. A root
+  whose session directory holds more refuses at daemon start with a stable
+  reason naming the bound and pointing at root retirement, in the same posture
+  as `store_log_too_large`: refuse rather than serve a truncated view of what
+  the root records. The ceiling is on recorded entries only, and it never
+  makes a session unreachable — see the crash cut below.
 - **Homogeneity.** One state root is one host composition for the daemon's
   process lifetime. The daemon is composed once, with one workspace, policy,
   provider configuration and set of project resources, and serves every
@@ -319,9 +379,17 @@ fields above; a session committed to the Store whose directory entry was never
 written — injected at exactly that cut — absent from the listing, still
 reachable by ID, and present in every listing after the activation that
 records it; a restarted daemon activating nothing until a client reaches for a
-session; the active-session ceiling refusing an activation while every slot is
-in use, and admitting one after a session goes dormant; a root whose directory
-holds more than the index bound refusing at start with its stable reason; a
+session; a detached long-running command and a pending admission each crossing
+the idle deadline with every client gone and running to completion, so
+dormancy is proved to release attachments and never a coordinator; the
+activation ceiling refusing the 65th activation of a daemon lifetime with its
+stable reason and restart remedy; a root whose directory holds more than the
+recorded-entry bound refusing at start with its stable reason; at that bound a
+session reached by ID activated, not recorded, and the listing carrying
+`index_full`; a client that never saw a session ID recovering it through the
+create command's durable `command_id`; a directory write failing at activation
+reported to that client, the session still usable, and the record retried at
+the next activation; a
 recorded session the current composition cannot serve refused at activation by
 name while every other session in the root activates; progress coalescing under
 pressure with counted drops and no journal delay; peer-credential refusal; a

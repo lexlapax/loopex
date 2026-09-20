@@ -38,8 +38,10 @@ control methods and the writer-epoch field ADR 0033 names. It adds no durable
 method. An earlier draft of this decision also added `session.stop` and called
 it durable; that is withdrawn, because core owns durable session truth, core
 has no durable stop command, and M5's only core change is concurrent
-attachment. Ending work is releasing control and disconnecting, after which
-the session goes dormant and `session.resume` brings it back.
+attachment. Ending a client's involvement is releasing control and
+disconnecting; the session itself keeps running, which is the point of a
+daemon, and another client reaches it again by acquiring control and
+attaching.
 
 A client that offers only generation 1 is refused at initialize under
 ADR 0023's existing no-common-generation rule and nothing durable is
@@ -86,11 +88,20 @@ missing durable event. Transient progress is coalesced or dropped first and
 never delays a journal transaction.
 
 A session is *active* when the daemon holds a live coordinator for it and
-*dormant* when the root records it and the daemon does not. Recovery is lazy:
-a restarted daemon activates nothing, reads its index, and activates a session
-when a client reaches for it. That is what a daemon can honestly promise on a
-store whose session directory is not Store truth and whose every open replays
-a full log. `session.list` returns bounded pages, with an exact continuation
+*dormant* when the root records it and the daemon has not activated it in this
+process's lifetime. Recovery is lazy: a restarted daemon activates nothing,
+reads its index, and activates a session when a client reaches for it.
+Activation is one-way: dormancy applies to attachments, resident windows and
+output buffers, never to a coordinator, because a session with no attachment
+may still have a model request, a tool effect, an interaction, a recovery, an
+unresolved `commit_unknown` or an executing admission in flight, and because
+stopping one would need a core deactivation operation M5 does not add. The
+cost is stated rather than hidden: at most 64 sessions are activated per
+daemon lifetime, the 65th refuses, and the remedy is to restart the daemon.
+
+Lazy recovery is what a daemon can honestly promise on a store whose session
+directory is not Store truth and whose every open replays a full log.
+`session.list` returns bounded pages, with an exact continuation
 cursor, over a daemon-owned index of what the root *records* — identity,
 recorded placement identity, active or dormant, controlled or not — and never
 over what the Store contains, because no index built from the session
@@ -102,7 +113,8 @@ limits are exact and are bound at acceptance: 64 attachments per session,
 resident window per session, 4 MiB of encoded output buffered per
 connection, 16 MiB of encoded resident-window events per session, 512 MiB
 of aggregate retained encoded events per daemon, ten minutes of idle time
-before eviction, 64 active sessions per daemon, 4,096 index entries per root,
+before eviction, 64 sessions activated per daemon lifetime, 4,096 recorded
+index entries per root,
 256 sessions per list page, and the ADR 0023 frame ceiling
 unchanged. Count and byte ceilings apply together; an event that would
 exceed either triggers the stated detachment, eviction or refusal behavior
