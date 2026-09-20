@@ -104,7 +104,12 @@ A session is *active* when **this daemon activated it in this lifetime** and
 *dormant* when the root records it and this daemon has not. Both are daemon
 facts, true by construction; neither is a claim about a live coordinator,
 which the daemon has no way to know. Recovery is lazy: a restarted daemon activates nothing,
-reads its index, and activates a session when a client reaches for it.
+reads its index, and activates a session when a client creates or resumes it.
+Creating a session activates it, so `session.create` spends one of the
+activations the ceiling counts — a created session has a coordinator like any
+other, and a ceiling that counted resumes but not creations would bound the
+wrong thing. Acquiring control and attaching do not activate.
+
 Activation is one-way: dormancy applies to attachments, resident windows and
 output buffers, never to a coordinator, because a session with no attachment
 may still have a model request, a tool effect, an interaction, a recovery, an

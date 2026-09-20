@@ -95,8 +95,10 @@ different handles to different custody processes** — the isolation proof this
 pair requires. It is not global, because nothing looks it up by name. And it
 holds **no bytes at any time**: it is an identifier whose resolution is a call
 to a process the host owns. The property that made the environment variable
-wrong — concurrent invocations in one VM unable to carry distinct credentials
-— is exactly the property this arrangement restores.
+wrong — concurrent work in one VM unable to carry distinct credentials — is
+exactly the property this arrangement restores, now at the granularity that
+matters: two *runtimes* in one VM carry different credentials, where the
+environment variable gave them one slot between them.
 
 Nothing carries `options` into a durable or observable plane, which is worth
 confirming rather than assuming: the model span is built from a fixed identity
@@ -517,9 +519,14 @@ Three proofs are new:
   "During" is observed from inside the call, at the point the child reports
   readiness. The case composes the runtime the way a reference host does, with
   the variable set, and asserts that composition returns having deleted it.
-- **Concurrent independence.** Two invocations with distinct credentials run
-  at once and each child records only its own; neither child, nor either
-  child's diagnostics, ever sees the other's.
+- **Independence across runtimes.** Two runtimes composed in one VM, each
+  with its own registry, custody and token, run invocations at once; each
+  child records only its own credential, and neither child — nor either
+  child's diagnostics — ever sees the other's. It is stated across *runtimes*
+  rather than across invocations because a composition-bound token makes the
+  within-one-runtime form vacuous: two invocations of one runtime necessarily
+  carry the same token. Their independence is a corollary of this case, not a
+  separate witness.
 - **No credential environment read in the adapter's lib tree.** The existing
   drift-protection case in `apps/loopex_llm_reqllm/test/adapter_test.exs` —
   `the adapter reads exactly one credential environment variable` — pins the

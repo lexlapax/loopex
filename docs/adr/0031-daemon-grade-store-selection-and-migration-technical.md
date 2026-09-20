@@ -18,10 +18,26 @@ hold the marker itself and cannot release it itself: `Loopex.Store.Local`
 takes it at start and releases it in its own `terminate/2`. What the daemon
 owns is the Store *process*. It starts it before the socket is bound and, in a
 **daemon-initiated** shutdown, stops it last — after the listener is closed,
-every connection is closed and the socket is unlinked — so the marker is held
-for as long as any session operation could still need it and is released by
-that `terminate/2` at the moment the daemon stops the Store. That ordering is
-the whole mechanism; it is fixed in the M5 plan's lifecycle section.
+every connection is closed and the runtime is stopped — so the marker is held
+for as long as any operation **the daemon can end** could still need it, and
+is released by that `terminate/2` at the moment the daemon stops the Store.
+That ordering is the whole mechanism; it is fixed in the M5 plan's lifecycle
+section.
+
+The qualification is deliberate and is the strongest true form. Where the
+runtime does not stop within its grace the daemon kills its supervisor, and a
+*trapping* descendant — an owner group, or a trapping worker beneath one —
+may still be unwinding when the Store goes. Such an orphan meets a stopped
+Store and gets the same refusal it would get after a VM death: it cannot
+write, because there is nothing left to write to. So the marker is never held
+open by a straggler, and no straggler appends behind the daemon's back; what
+the daemon does not promise is that every process has finished before it
+exits.
+
+The adapter also **traps exits**, which this arrangement relies on: an owner
+that crashes rather than stopping still runs the Store's `terminate/2`, so the
+marker comes back. Only a kill or a power loss leaves it, which is what the
+next daemon's verified stale-writer recovery is for.
 
 **Store loss inverts it, and the daemon cannot order what it does not
 control.** This adapter answers an append error with
