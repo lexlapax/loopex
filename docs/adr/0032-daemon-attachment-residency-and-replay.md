@@ -145,8 +145,9 @@ over what the Store contains, because no index built from the session
 directory can claim that. Lineage, lifecycle state and committed sequence are
 not list fields: a client that needs them attaches and reads the snapshot.
 The proposed
-limits are exact and are bound at acceptance: 64 attachments per session,
-512 per daemon, a 1,024-event core queue per attachment, a 4,096-event
+limits are exact and are bound at acceptance: 512 concurrent connections per
+daemon, 64 attachments per session,
+512 attachments per daemon, a 1,024-event core queue per attachment, a 4,096-event
 resident window per session, 4 MiB of encoded output buffered per
 connection, 16 MiB of encoded resident-window events per session, 512 MiB
 of aggregate retained encoded events per daemon, ten minutes of idle time

@@ -229,6 +229,8 @@ no content, no durable session state.
 | result | `placement_identity` | binary identity | required |
 | result | `daemon_incarnation` | binary identity | required |
 | result | `socket_path` | string | required |
+| result | `connections` | integer, accepted connections currently open | required |
+| result | `connection_limit` | integer, 512 | required |
 | result | `attachments` | integer | required |
 | result | `attachment_limit` | integer, 512 | required |
 | result | `active_sessions` | integer | required |
@@ -293,6 +295,7 @@ added keys are enumerated so the digest covers them:
 
 | Limit key | Value |
 | --- | --- |
+| `connections_per_daemon` | 512 |
 | `attachments_per_session` | 64 |
 | `attachments_per_daemon` | 512 |
 | `session_list_page_max` | 256 |
@@ -301,6 +304,31 @@ added keys are enumerated so the digest covers them:
 
 ADR 0023's own framing and input ceilings are unchanged; these are additions
 beside them, and **all five** digest inputs therefore change in generation 2.
+
+**Connections are bounded, and an earlier revision said they were bounded by
+the attachment ceiling, which they are not.** A client may connect,
+`initialize`, call `session.list`, `daemon.status` or
+`session.acquire_control`, or sit idle, without ever attaching — so the
+attachment ceilings bound nothing about the number of sockets the daemon
+holds, and a daemon whose bound is "the attachment ceiling" has no bound on
+connections at all. The ceiling is **512 concurrent accepted connections**,
+the attachment number reused rather than a fourth 512 invented, and the
+daemon reports it as `connection_limit` with the live count as `connections`
+so an operator can see the headroom before it is gone.
+
+**The refusal is ADR 0023's, not a new one.** A connection accepted beyond the
+ceiling is answered, at its `initialize`, with a correlated
+**`capacity_exceeded`** — which generation 1 already carries, so generation
+2's ordered error list gains nothing for it — and then closed. It is answered
+at `initialize` rather than refused at `accept` because a peer that is never
+answered cannot tell a full daemon from a wedged one, and because ADR 0023
+already fixes what a refused `initialize` means: the connection remains
+uninitialized and gets no second negotiation attempt
+(`0023-…-technical.md:357-358`). The peer-credential and filesystem checks
+still run first; a foreign peer is closed before any of this. Its witness is a
+boundary pair: the 512th connection initializes and is served, the 513th is
+refused `capacity_exceeded` and closed, and closing one of the 512 lets the
+next through.
 
 The tables above are the contract for both directions; an earlier revision
 kept a second, prose summary of the same four methods beside them, which is
@@ -343,7 +371,7 @@ limits — five inputs, and generation 2 changes **all five**:
 | Methods | Adds `session.list`, `daemon.status`, `session.acquire_control`, `session.release_control` |
 | Record families | Adds `daemon.stopping` and `daemon.notice` |
 | **Error codes** | Adds every refusal generation 2 can return and generation 1 cannot: `control_held`, `control_not_held`, `control_pending`, `control_capacity_reached`, `control_owner_lost`, `session_dormant`, `daemon_stopping`, the four existence-query refusals the daemon maps to the wire (`session_unknown`, `session_id_invalid`, `store_unavailable`, `existence_indeterminate`), and the activation and residency refusals (`activation_ceiling_reached`, `composition_mismatch`). **Not** `session_index_too_large`, which is a startup exit class and can reach no client, and **not** `capacity_exceeded`, which generation 1 already carries and generation 2 reuses for the connection ceiling |
-| **Limits** | ADR 0023's framing and input ceilings are unchanged, and generation 2 **adds** the residency keys a client can read: `attachments_per_session`, `attachments_per_daemon`, `session_list_page_max`, `session_index_entries`, `lease_term_ms` |
+| **Limits** | ADR 0023's framing and input ceilings are unchanged, and generation 2 **adds** the residency keys a client can read: `connections_per_daemon`, `attachments_per_session`, `attachments_per_daemon`, `session_list_page_max`, `session_index_entries`, `lease_term_ms` |
 
 **`control_owner_lost` closes a controller whose lease owner died.** ADR 0033
 makes a lease owner's failure session-scoped: the daemon closes that session's

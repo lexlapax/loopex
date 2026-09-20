@@ -696,8 +696,8 @@ without `--daemon` nothing reaches a socket — and it presents:
   contains*. A warning rather than a failure, because the page it accompanies
   is still true as far as it goes;
 - `--status`, which issues `daemon.status` and prints placement identity,
-  daemon incarnation, socket path, attachment, activation and index counts
-  against their limits, and uptime.
+  daemon incarnation, socket path, connection, attachment, activation and
+  index counts against their limits, and uptime.
 
 Exit status: `0` for a page printed, including an empty one; non-zero with the
 reason on `stderr` when the socket cannot be reached, the peer check refuses,
@@ -1074,7 +1074,7 @@ releases on that.
 **Attach: end the connection process and the attachment goes with it.** Core
 exposes no attachment count, so there is nothing to observe — and nothing
 needs to be. ADR 0032 binds a connection to **at most one attachment at a
-time** (`0032-…-technical.md:127-129`, with the release rule at `:131-155`), the daemon attaches from its
+time** (ADR 0032's transport section, with its release rule beside it), the daemon attaches from its
 **per-connection process**, and core change 1 makes the dispatcher monitor
 that process and drop its attachment on `DOWN`. So the reservation is keyed by
 the connection, and a connection whose `session.attach` never answered is
@@ -1470,7 +1470,7 @@ implementation:
 | When does one start? | On the **first lease operation for that session after successful existence validation** — an `session.acquire_control`, whether or not the session is active. Not at activation: an earlier revision said activation, which was wrong twice over, since dormant recovery acquires *before* it resumes and `loopex attach --take-over` may acquire and release a session it never activates |
 | When does one retire? | When the lease is free — released or expired — **and** no acquisition is waiting **and** the relay holds no outstanding ticket for that session. All three, because any one of them alone would retire an owner whose state something still depends on |
 | When does one stop unconditionally? | At daemon exit, in the stop sequence below |
-| How many can exist at once? | One per session under lease or acquisition, capped at **512, the per-daemon attachment ceiling ADR 0032 already fixes** (`0032-…-technical.md:854`), reused rather than invented, with the cap and its refusal stated at `0032-…-technical.md:333-335` and `:247`; a lease operation that would exceed it refuses with `control_capacity_reached`. The population is **independent of the activation ceiling**, which counts something else entirely |
+| How many can exist at once? | One per session under lease or acquisition, capped at **512, the per-daemon attachment ceiling ADR 0032 already fixes**, reused rather than invented, with the cap and its `control_capacity_reached` refusal stated in that pair's error inventory; a lease operation that would exceed it refuses with `control_capacity_reached`. The population is **independent of the activation ceiling**, which counts something else entirely |
 | What does its death mean? | That **session's** collaboration state, not the daemon's — the one exception to fail-stop uniformity, below |
 
 **Why not the activation ceiling.** An earlier revision bounded the population
@@ -3325,7 +3325,7 @@ individually would make this table a copy that rots.
 | Group | Started by | Bound | Its death |
 | --- | --- | --- | --- |
 | **Lease owners**, one per session under lease or acquisition | Daemon owner, on the first lease operation after existence validation | At most 512 at once, ADR 0032's per-daemon ceiling reused | **Session-scoped**: that session's controller closes with `control_owner_lost`, observers stay, the replacement's first grant waits on the relay's tickets |
-| **Connections**, one per accepted client | The listener | ADR 0032's attachment ceilings | That client's connection closes |
+| **Connections**, one per accepted client | The listener | **512 concurrent**, ADR 0032's connection ceiling — the attachment number reused, and not the attachment ceiling itself, which bounds nothing about a client that never attaches | That client's connection closes |
 | **Stop helpers**, one per stop | Daemon owner, `spawn_monitor` | One at a time | Nothing: monitored, never linked |
 | **Relay tasks**, one per ticketed mutation | The relay, after the ticket is acknowledged | One per outstanding ticket | Keeps its ticket; the relay exits `relay_lost` |
 
@@ -3477,13 +3477,14 @@ line; M5 introduces none of its own.
 | Log capacity per state root | 256 MiB; an append past it refused as `store_capacity_exceeded`, which terminates the store and closes the daemon, a log already past it refused at open as `store_log_too_large` | ADR 0031 |
 | Frame ceiling on any single store record | 4 MiB | ADR 0031 |
 | Retention and replay | Full history, no compaction, full replay at open | ADR 0031 |
+| Concurrent connections per daemon | 512, the attachment number reused; the 513th is refused `capacity_exceeded` at `initialize` and closed | ADR 0032 |
 | Attachments per session | 64 | ADR 0032 |
-| Attachments per daemon | 512 | ADR 0032, `:854`, with the limit key at `:263` |
+| Attachments per daemon | 512 | ADR 0032, its attachment-lifecycle list, with the limit key in its limits table |
 | Core event-count queue per attachment | 1,024 events | ADR 0032 |
 | Daemon socket output buffer per connection | 4 MiB encoded | ADR 0032 |
 | Resident window per session | 4,096 events and 16 MiB encoded | ADR 0032 |
-| Aggregate retained encoded events per daemon | 512 MiB | ADR 0032, `:154` and `:850` |
-| Concurrent lease owners | 512, the attachment number reused rather than a second limit | ADR 0032, `:333-335`, with its refusal at `:247` |
+| Aggregate retained encoded events per daemon | 512 MiB | ADR 0032, its queue-ownership and attachment-lifecycle sections |
+| Concurrent lease owners | 512, the attachment number reused rather than a second limit; the refusal is `control_capacity_reached` | ADR 0032, where that refusal is defined |
 | Idle time before an attachment is evicted and its window and buffer released | 10 minutes; it never stops a coordinator | ADR 0032 |
 | Sessions activated per daemon lifetime | 64; the 65th activation refused, the remedy being to restart the daemon. It is per lifetime rather than concurrent because nothing deactivates a coordinator, which is recorded as a limitation | ADR 0032 |
 | Recorded session index entries per root | 4,096; a root whose directory holds more refused at daemon start. The ceiling is on recorded entries and never on reachability: a session reached by ID beyond it is activated and not recorded, and the listing carries `index_full` | ADR 0032 |
@@ -3508,13 +3509,15 @@ line; M5 introduces none of its own.
 | Credential frame cap | 69,632 bytes | ADR 0034, which is where the frame's shape is written; no ADR 0019 file states it |
 | `req_llm` version pin | `~> 1.24.0` | Maintainer decision 4B of 2026-09-20, a **plan** decision. A dependency pin is not a contract number: it binds what this milestone builds against and is changed by an ordinary reviewed dependency change, not by an ADR amendment |
 
-**Three rows say 512 and they are three different bounds**, which is worth one
+**Four rows say 512 and they are four different bounds**, which is worth one
 sentence because "one number, one ADR" would otherwise read as one limit: 512
-*attachments* per daemon (ADR 0032 `:854`), 512 *MiB* of retained encoded
-events across every buffer and window (`:147`, `:716`), and at most 512
-concurrent *lease owners* (`:333-335`), the last deliberately reusing the
-attachment number rather than introducing a third limit that could drift from
-it.
+*attachments* per daemon, 512 *MiB* of retained encoded
+events across every buffer and window, at most 512
+concurrent *lease owners*, and at most 512 concurrent *connections* — the last
+two deliberately reusing the attachment number rather than introducing limits
+that could drift from it. The connection bound is not implied by the
+attachment bound and is stated separately for that reason: a client may
+connect, initialize, list and acquire without ever attaching.
 
 Count and byte ceilings apply together: an event that would exceed either
 triggers the stated detachment, eviction or refusal before the ceiling is
