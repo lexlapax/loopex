@@ -40,8 +40,8 @@ generation,
 control methods and the writer-epoch field ADR 0033 names. It adds no durable
 method. An earlier draft of this decision also added `session.stop` and called
 it durable; that is withdrawn, because core owns durable session truth, core
-has no durable stop command, and M5's only core change is concurrent
-attachment. Ending a client's involvement is releasing control and
+has no durable stop command, and M5's core changes are concurrent attachment
+and a read-only existence query, neither of which is a durable command. Ending a client's involvement is releasing control and
 disconnecting; the session itself keeps running, which is the point of a
 daemon, and another client reaches it again by acquiring control and
 attaching.

@@ -105,9 +105,13 @@ proved held, it closes the listener and every connection before anything
 else and then exits; no connection outlives the daemon's ownership of the
 root.
 
-Framing, the initialize handshake, request and admission records, snapshot,
+Framing, the initialize handshake, admission records, snapshot,
 event and progress records, the frame ceiling, the strict UTF-8/LF rule and
-the unknown-field rule are reused from ADR 0023 unchanged. A connection is
+the unknown-field rule are reused from ADR 0023 unchanged. **Request records
+are the one exception**, and they are reused with one addition rather than
+unchanged: every existing-session mutation in generation 2 carries
+`writer_epoch`. That is the addition, and it is the reason generation 2 needs
+a schema digest of its own. A connection is
 one attachment after `session.attach`; generation 2 permits a connection to
 hold at most one attachment at a time and a client process to hold as many
 connections as the residency limits admit.
@@ -307,7 +311,13 @@ durable record and no Store read by the daemon:
    as an explicit warning that this session will not appear in `session.list`
    — the reference CLI already reports exactly that failure today. The
    activation itself succeeds, the session is fully usable, and the daemon
-   retries the record on the next activation of that session.
+   retries the record at the next **daemon start**, when the index is rebuilt
+   from the directory and the missing entry is written then. It cannot be
+   "the next activation of that session", which an earlier draft said:
+   activation is one-way, so within a daemon's lifetime there is no next
+   activation to retry at. Until the restart, the session is reachable by ID
+   and absent from `session.list`, which is exactly what the client was
+   told.
 4. **A full index still activates.** If the index already holds 4,096 entries
    and a client reaches an unrecorded session by ID, the session is activated
    and is **not** recorded. Reachability never depends on the ceiling. What
@@ -320,10 +330,18 @@ sessions this root contains*, and the operator documentation states all four
 parts, because an operator who lost a terminal mid-creation is exactly who
 meets them.
 
-A page is consistent with the index at the moment it is read; no consistency
-is promised across pages, so a session created or dropped between pages may
-appear in neither or both, and a client that needs a stable view deduplicates
-by session ID. A `limit` outside 1 to 256 or an `after_session_id` that is not
+A page is consistent with the index at the moment it is read, and no
+consistency is promised across pages. What that can actually produce is
+narrower than an earlier draft claimed, because the index is append-only
+within a daemon's lifetime and keyed by unique session ID: rows are added,
+never removed and never renumbered, and ordering is by session ID bytes. So a
+session recorded between two page reads may be **missed** — if its ID sorts
+before the cursor the client has already passed — and that is the only
+anomaly paging can show. A row cannot vanish between pages and cannot be
+returned twice, because nothing deletes a row and no two rows share an ID. A
+client that needs a complete view pages again from the start; deduplication is
+unnecessary here, though a client that deduplicates by session ID loses
+nothing. A `limit` outside 1 to 256 or an `after_session_id` that is not
 a well-formed session ID refuses with the existing invalid-argument reason; an
 `after_session_id` naming an unknown session is admitted and pages from its
 byte position.
@@ -333,7 +351,16 @@ byte position.
 A session is **active** when the daemon holds a live coordinator for it and
 **dormant** when the index records it and the daemon has never activated it in
 this process's lifetime. Nothing durable distinguishes the two; dormancy is a
-daemon fact and costs a dormant session nothing.
+daemon fact.
+
+A dormant session costs less than an active one, but not nothing, and the
+plan should not pretend otherwise. It holds one index row against the
+4,096-entry ceiling, and its history sits in the root's single append-only log
+against the 256 MiB capacity that every session in the root shares — so a
+dormant session still consumes the two resources whose exhaustion stops the
+daemon, and retiring a root is what actually frees them. What it costs nothing
+in is the things activation buys: no coordinator, no replay at start, no
+attachment, no window, no buffer.
 
 **Activation is one-way for the daemon's lifetime.** A session the daemon has
 activated keeps its coordinator until the daemon exits. Dormancy is *not*
@@ -348,7 +375,8 @@ awaiting an answer, a recovery in progress, an unresolved `commit_unknown`, or
 an admission executing inside core. Stopping it would destroy exactly what
 Outcome 1 exists to prove, that work progresses with zero attachments. And
 there is no operation to stop one with: core owns coordinator lifetime, and
-M5's only core change is concurrent attachment, so a deactivation call would
+M5's core changes are concurrent attachment and a read-only existence query,
+neither of which stops anything, so a deactivation call would
 be a second core change this milestone does not make.
 
 - **What dormancy applies to.** Attachments, resident windows and socket

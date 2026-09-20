@@ -461,9 +461,15 @@ Three proofs are new:
   to prove: that it reads no environment variable for a credential and that
   the token and resolution contract behaves.
 
-The first two, the failure cases and the custody cases belong in
-`credential_plane_test.exs` beside the cases they generalise; the drift case
-stays where it is.
+The parent-environment and concurrent-independence proofs and the resolution
+failure cases belong in `credential_plane_test.exs` beside the cases they
+generalise; the drift case and the trace-exclusion case stay in the adapter's
+tree with it. The **host-custody cases do not**: each lives at its own host,
+as the bullet above assigns them — `apps/loopex_cli/test/`,
+`apps/loopex_app_server/test/` and `apps/loopex_daemon/test/` — because the
+adapter's tree cannot prove a claim about another application's composition.
+An earlier draft assigned them correctly and then took it back two lines
+later; this is the assignment that holds.
 
 Two details of that case matter to whoever writes the change. The literal
 `"LOOPEX_PROVIDER_API_KEY"` it pins today lives in

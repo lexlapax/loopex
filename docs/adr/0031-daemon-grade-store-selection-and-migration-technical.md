@@ -11,8 +11,20 @@ Concept: [Context and decision](0031-daemon-grade-store-selection-and-migration.
 ### M5 selection: the local adapter and its limits
 
 The M5 daemon opens the state root through `loopex_store_local` exactly as
-the foreground server does, and holds its writer marker from before the
-socket is bound until the daemon process exits. The adapter's limits are the
+the foreground server does.
+
+**The marker invariant, stated as it actually works.** The daemon does not
+hold the marker itself and cannot release it itself: `Loopex.Store.Local`
+takes it at start and releases it in its own `terminate/2`. What the daemon
+owns is the Store *process* — it starts it before the socket is bound and
+stops it last in shutdown, after the listener is closed, every connection is
+closed and the socket is unlinked — so the marker is held for as long as any
+session operation could still need it, and is released by that `terminate/2`
+at the moment the daemon stops the Store. An abrupt kill runs no `terminate/2`
+at all, which is why the marker is left behind and why the next daemon's
+verified stale-writer recovery exists. The shutdown ordering that makes this
+true is fixed in the M5 plan's lifecycle section, and it is ordering rather
+than a new mechanism: stopping the Store last is the whole of it. The adapter's limits are the
 daemon's limits, and every one is an existing constant or refusal of
 `Loopex.Store.Local.Log`:
 
