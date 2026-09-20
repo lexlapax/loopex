@@ -225,12 +225,36 @@ durable record and no Store read by the daemon:
    at `acquire_control`, which must validate existence *before* granting a
    lease and must be safe to call on an ID that turns out to be unknown.
 
-   So `session.acquire_control` on an ID the index does not hold validates
-   durable existence with the query, and a negative answer is the refusal the
-   client sees, with nothing created and no attachment left behind. Nothing
-   about the index is consulted to decide existence, which is why an index
-   that is incomplete is not a correctness problem, and the daemon still reads
-   no Store internals.
+   **The query's result set is closed, and only one member is a yes.** "A
+   plain-data answer" is not a contract on its own — a caller has to know what
+   it may receive and what each result obliges it to do, especially a caller
+   about to grant authority on the strength of it. The query answers exactly
+   one of:
+
+   | Result | Means | What the daemon does |
+   | --- | --- | --- |
+   | `present` | The root holds this session durably | Proceed: acquire may be granted, activation may follow |
+   | `absent` | The root does not hold it, and core is certain of that | Refuse, naming the session as unknown |
+   | `invalid_id` | The argument is not a well-formed session identifier | Refuse as an invalid argument, before anything is looked up |
+   | `store_unavailable` | Core could not read the root to decide | Refuse, naming the store as unavailable — **not** as an unknown session, because those are different facts and an operator acts on them differently |
+   | `unexpected` | Anything else, including a result shape the daemon does not recognise | Refuse, the same way as `store_unavailable`, because an answer that cannot be interpreted is not a yes |
+
+   **Control acquisition proceeds only on `present`.** Every other result
+   fails closed and identically in what it leaves behind: no attachment, no
+   lease, no activation, no index row, nothing created. What differs is only
+   what the client is told, and the client is always told which — a refusal
+   that said "unknown session" when the store was unreadable would send an
+   operator looking for a session that exists.
+
+   Nothing about the index is consulted to decide existence, which is why an
+   index that is incomplete is not a correctness problem, and the daemon still
+   reads no Store internals.
+
+   Each of the five results is a witness: `present` granting, `absent`,
+   `invalid_id`, `store_unavailable` injected by making the root unreadable,
+   and `unexpected` injected by a stub that answers outside the set. All five
+   assert the same absence afterwards — no attachment, no lease, no activation
+   — and assert that the four refusals name distinct reasons.
 2. **A client that never saw the session ID recovers by command identity, and
    the sequence is written out here rather than left as a gesture.** At the
    cut where the Store committed the creation and the process died before the
@@ -243,23 +267,41 @@ durable record and no Store read by the daemon:
    | 1 | Client | Reconnects to the daemon and re-presents `session.create` with **the same `command_id`** it used before. It knows no session ID, so it cannot ask for one |
    | 2 | Daemon | Forwards it as an ordinary create. It does not consult the index, which by construction may not hold this session |
    | 3 | Core | Recognises the command identity as already resolved and returns the **historical result** — the same session ID it committed before — rather than creating a second session. This is the command idempotency the resume path already relies on, not a new mechanism |
-   | 4 | Client | Now holds the session ID for the first time |
-   | 5 | Daemon | Validates durable existence with the read-only existence query on that ID, which answers yes because the Store committed it in the first place |
-   | 6 | Daemon | Records the directory entry it is missing, so every later `session.list` shows the session. If that write fails, step 3 of this procedure applies: the client is told, the session stays usable, and the record is retried next time |
-   | 7 | Client | Acquires control and attaches in either order, and drives the session normally |
+   | 4 | Client | Now holds the session ID for the first time. **No coordinator is running for it** — see below |
+   | 5 | Daemon | Validates durable existence with the read-only existence query on that ID, which answers `present` because the Store committed it in the first place |
+   | 6 | Daemon | Repairs what is missing: writes the directory entry and adds the index row, so every later `session.list` shows the session. If that write fails, step 3 of this procedure applies |
+   | 7 | Client | Acquires control, receiving the writer epoch |
+   | 8 | Client | Sends `session.resume` with a **fresh resume `command_id`** and that writer epoch. This is the step that activates the session: it is a new command, not a replay, because the create's identity is spent |
+   | 9 | Daemon | Activates the session — a live coordinator now exists — and counts it against the activation ceiling |
+   | 10 | Client | Attaches and drives |
 
-   Steps 5 and 6 are what turn a recovery into a repair: the session is not
-   merely reachable once, it stops being missing. A client that *does* still
-   hold the session ID skips steps 1 to 4 and enters at step 5.
+   **Step 8 is the one an earlier draft left out, and without it the recovery
+   ends with nothing running.** Replaying a completed create does not start a
+   coordinator: `Loopex.Runtime.Control.create_session/4` resolves the
+   transaction, sees the command was already resolved, and replies `{:ok,
+   session_id}` on the `not fresh?` branch *without* calling `start_owner`.
+   That is correct — a replay must not create a second owner — but it means
+   steps 1 to 4 return an identity and nothing more. The session is durable
+   and idle. `session.resume`, with its own fresh command identity and under
+   the lease acquired at step 7, is what brings it back, and the sequence is
+   only a recovery once it reaches there.
+
+   Steps 5 and 6 turn the recovery into a repair: the session is not merely
+   reachable once, it stops being missing. A client that *does* still hold the
+   session ID skips steps 1 to 4 and enters at step 5.
 
    **Its witness.** One case injects the exact cut — Store commit of the
    create followed by process death before the directory write and before the
    reply — then, from a client that never received the session ID, replays
-   `session.create` with the original `command_id` and asserts: exactly one
-   session exists in the root, the returned ID equals the committed one, the
-   existence query answers yes for it, the directory entry is present
-   afterwards, the session appears in `session.list`, and a prompt sent after
-   acquiring control lands on the same session rather than a second one.
+   `session.create` with the original `command_id` and runs the sequence to
+   the end. It asserts: exactly one session exists in the root; the returned
+   ID equals the committed one; the replay itself started no coordinator; the
+   existence query answers `present`; the directory entry and index row are
+   present afterwards and the session appears in `session.list`; the resume
+   under the granted epoch activates it, so a **live coordinator exists** and
+   the activation count has risen by one; and a prompt sent afterwards lands
+   on that session and produces its events, rather than on a second session or
+   on nothing at all.
 3. **Recording can fail, and says so.** If writing the directory entry fails
    during activation, the failure is reported to the client that triggered it,
    as an explicit warning that this session will not appear in `session.list`
