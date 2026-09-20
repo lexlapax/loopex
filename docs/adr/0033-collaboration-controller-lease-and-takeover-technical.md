@@ -154,6 +154,14 @@ lease record by another name, which this decision rejects for its own
 reasons. The relay is not that: it holds no lease and no authority, only the
 fact that a call it made has not yet been accounted for.
 
+A holder's connection is **exempt from ADR 0032's idle eviction while the
+lease is held**, for the reason that decision states: evicting it would close
+the connection the lease is bound to, and only an explicit
+`session.release_control` frees a lease early, so the session would be
+uncontrollable until the term ran out. A holder that stops renewing loses the
+lease on its own clock and becomes an ordinary observer, evictable like any
+other.
+
 Expiry and
 admission use the daemon's monotonic clock: a deadline is set only by a
 successful grant or renewal, and a wall-clock jump cannot shorten or extend
@@ -219,7 +227,13 @@ the local store's writer marker, unchanged.
   `session.resume`, `session.prompt`, `session.steer`,
   `session.follow_up`, `session.abort`, `session.respond_interaction`,
   `session.admit_resources` and `session.activate_skill`, carries
-  `writer_epoch`. The daemon admits it only if the sending connection is the
+  `writer_epoch` — a **required** binary identity of at most 64 bytes, exactly
+  as ADR 0032's request table fixes it, together with
+  `session.release_control`, which is lease-authorized in the same way though
+  it starts no core call. A request of those nine that omits it is malformed
+  and answered with ADR 0023's `invalid_request`
+  (`0023-…-technical.md:304-307`), never with `control_not_held`: the gate is
+  not reached, because there is nothing well-formed to put through it. The daemon admits it only if the sending connection is the
   recorded holder, the epoch matches, the lease state is `held`, the deadline
   is later than the live daemon's monotonic admission time, and the
   connection holds a controller-capable attachment, except that a verified
@@ -244,8 +258,20 @@ the local store's writer marker, unchanged.
   about the current holder's lease, epoch or deadline. Queries and attach
   carry no epoch and pass no gate.
 
-  The witnesses assert the six refusals separately in the daemon's own state —
-  which condition each case constructed — and assert that all six are the
+  **Five conditions, six cases**, and the mapping is written out so the two
+  numbers stop reading as a disagreement:
+
+  | Case | Condition it fails |
+  | --- | --- |
+  | A stale epoch from the previous tenure | epoch equality |
+  | An observer replaying the **current** epoch it saw | holder connection — the epoch matches, the connection is not the holder |
+  | A mutation from a connection that never acquired | holder connection |
+  | A mutation after `session.release_control` | `held` state |
+  | A mutation after the term elapsed | unexpired deadline |
+  | A mutation from a connection with an observer-only attachment | controller-capable attachment |
+
+  The witnesses assert each case separately in the daemon's own state — which
+  condition it constructed — and assert that all six produce the
   **same** code and the same fields on the wire, which is what stops a later
   revision from helpfully differentiating them.
 - `session.create` has no `writer_epoch` because the session lease does not

@@ -123,7 +123,29 @@ the unknown-field rule are reused from ADR 0023 unchanged. **Request records
 are the one exception**, and they are reused with one addition rather than
 unchanged: every existing-session mutation in generation 2 carries
 `writer_epoch`. That is the addition, and it is the reason generation 2 needs
-a schema digest of its own. A connection is
+a schema digest of its own.
+
+**The addition, at the exactness a vector needs**, because "carries
+`writer_epoch`" is not a type, an optionality or a list:
+
+| Generation-2 request | `writer_epoch` |
+| --- | --- |
+| `session.resume` | **binary identity, ≤ 64 bytes, required** |
+| `session.prompt` | the same |
+| `session.steer` | the same |
+| `session.follow_up` | the same |
+| `session.abort` | the same |
+| `session.respond_interaction` | the same |
+| `session.admit_resources` | the same |
+| `session.activate_skill` | the same |
+| `session.release_control` | the same — it is lease-authorized like the eight, though it starts no core call and takes no relay ticket |
+| `session.create`, `session.attach`, `session.list`, `daemon.status`, `session.acquire_control`, and every ADR 0023 query | **absent, and refused if present** — an unknown field refuses before a facade call under ADR 0023's own rule (`0023-…-technical.md:131-136`) |
+
+It is **required**, not optional: an absent `writer_epoch` on one of the nine
+is a malformed request, answered with ADR 0023's `invalid_request`, and never
+`control_not_held` — the gate has not been reached, because there is nothing
+well-formed to put through it. Every other field of those requests is ADR
+0023's, unchanged. A connection is
 one attachment after `session.attach`; generation 2 permits a connection to
 hold at most one attachment at a time and a client process to hold as many
 connections as the residency limits admit.
@@ -304,7 +326,7 @@ errors answering one request: each carries that request's `request_id`, no
 | Code | Answers | Carries beyond the envelope |
 | --- | --- | --- |
 | `control_held` | `session.acquire_control` | **Nothing.** It does *not* carry the current epoch: an epoch is authority-shaped, and handing one to a client that was just refused is exactly the value it must not have. An earlier revision of ADR 0033 said it named the current epoch; that is withdrawn |
-| `control_not_held` | `session.release_control` from a non-holder, **and every lease-authorized existing-session mutation whose combined admission gate fails** — wrong connection, wrong epoch, released lease, expired lease, or an attachment without controller capability | **Nothing**, deliberately: the five conditions are indistinguishable on the wire, because saying which one failed would make the refusal an epoch and lease oracle. ADR 0033 fixes the gate; this is the one answer it has |
+| `control_not_held` | `session.release_control` from a non-holder, **and every lease-authorized existing-session mutation whose combined admission gate fails** — any of the **five** conditions ADR 0033 lists: wrong connection, wrong epoch, a lease that is not `held`, a deadline already passed, or an attachment without controller capability. A request missing `writer_epoch` altogether is `invalid_request` instead, being malformed before the gate | **Nothing**, deliberately: the five conditions are indistinguishable on the wire, because saying which one failed would make the refusal an epoch and lease oracle. ADR 0033 fixes the gate; this is the one answer it has |
 | `control_pending` | `session.acquire_control` that waited out its deadline | nothing |
 | `control_capacity_reached` | any lease operation beyond the 512 concurrent-owner cap | nothing |
 | `session_dormant` | `session.attach` | nothing |
@@ -356,6 +378,29 @@ still run first; a foreign peer is closed before any of this. Its witness is a
 boundary pair: the 512th connection initializes and is served, the 513th is
 refused `capacity_exceeded` and closed, and closing one of the 512 lets the
 next through.
+
+**An accepted connection that never initializes is closed on a deadline**, and
+without one the ceiling would be a ceiling on nothing: a peer that connects
+and then says nothing occupies a slot for as long as it likes, and 512 of
+them would refuse every real client while the daemon held 512 silent sockets.
+Nothing else releases such a connection — there is no attachment to evict, no
+lease to expire, and ADR 0023's connection-state rules govern what a
+connection may *do* before `initialize`, not how long it may take. So an
+accepted connection that has not completed `initialize` within the **lease
+term, 30 seconds**, is closed. That number is reused rather than chosen: it is
+already this milestone's one connection-lifetime bound, fixed by ADR 0033 and
+listed in this pair's limits as `lease_term_ms`, and a `initialize` handshake
+is one frame each way on a local socket, so thirty seconds is a ceiling no
+honest client approaches. The close carries no record — the connection has
+negotiated nothing, so there is no generation whose error shape it could be
+sent in — exactly as the peer-credential refusal closes before initialize.
+
+Its witness is the pair that must differ: a connection accepted and left
+silent is asserted **closed** after the term and the slot it held asserted
+free, while one that completes `initialize` inside it is asserted to stay open
+indefinitely with no such close. It is a long-duration bound, so it is tagged
+`long_bound` and injected where it is armed, with the production default
+asserted once.
 
 The tables above are the contract for both directions; an earlier revision
 kept a second, prose summary of the same four methods beside them, which is
@@ -683,7 +728,9 @@ out to the daemon would export core's supervision topology across the boundary
 and invite the daemon to reason about it. M5's core changes stay at five, and
 neither of these is among them.
 
-The lease-owner fatal rule in ADR 0033 is untouched by this and stays. The
+ADR 0033's lease-owner rule is untouched by this and stays — and it is a
+**session-scoped** rule, not a fatal one; this sentence said "fatal" from the
+revision before that decision was taken. The
 difference is ownership: a lease owner is a **daemon** process holding
 daemon-only state that nothing can reconstruct, so losing it is the daemon's
 failure to handle; a coordinator is core's, supervised by core, and its loss
@@ -1037,9 +1084,30 @@ delivered contiguously after the snapshot. The daemon adds:
   a journal transaction, and by the same record-then-close;
 - 64 attachments per session and 512 per daemon, refused at attach with a
   stable reason when exhausted;
-- eviction of an attachment that has consumed nothing for ten minutes; the
+- eviction of an **observer** attachment that has consumed nothing for ten
+  minutes; the
   `detached` record names the cursor the client may resume from and the
-  connection is closed with it;
+  connection is closed with it.
+
+  **A connection holding a controller lease is exempt while it holds it**, and
+  that exemption is a correction rather than a convenience. A controller of a
+  quiet session — one waiting on a long model call, a slow tool or an
+  unanswered interaction — consumes nothing for minutes at a time and is
+  perfectly healthy; evicting it would close the connection its lease is bound
+  to, and ADR 0033 frees a lease early only on an explicit
+  `session.release_control`, so the session would then be uncontrollable until
+  the term expired, with the outgoing controller told nothing it could act on.
+  Renewals are that connection's activity, and they are already required every
+  ten seconds against a thirty-second term, so a controller that has stopped
+  renewing loses its lease on its own clock and becomes an ordinary observer,
+  at which point the idle interval applies to it like any other.
+
+  **What resets the interval**, stated because "consumed nothing" is not a
+  mechanism: any **durable record the daemon completely emits to that
+  connection**, and any **request that connection sends**. Either is evidence
+  of a live peer. Progress that is coalesced or dropped does not reset it, and
+  neither does a record the daemon buffered but did not finish writing — the
+  cases where the client may be exactly the one that has stopped reading;
 - transient progress coalesced per attachment and dropped first under
   pressure, with a counted drop; no progress item ever waits on a journal
   transaction.

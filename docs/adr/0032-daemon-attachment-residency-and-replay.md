@@ -108,9 +108,11 @@ succeeds; `cursor_expired` remains the defined response a compacting adapter
 returns for a cursor older than its retained history, and no M5 path produces
 it. Each connection owns a bounded socket
 output buffer; a slow attachment is detached at its last completely emitted
-cursor while every other attachment continues. Idle attachments are evicted
-at the residency limit and reconnect at their retained cursor with no
-missing durable event. **Every detach the daemon initiates is a record and a
+cursor while every other attachment continues. Idle **observer** attachments
+are evicted at the residency limit and reconnect at their retained cursor with
+no missing durable event; a connection holding a controller lease is exempt
+while it holds it, because a controller of a quiet session is healthy and
+evicting it would strand a lease only an explicit release can free. **Every detach the daemon initiates is a record and a
 close**: the client is told, best-effort, on the connection being ended, and
 that connection is closed with its attachment while every other connection is
 untouched. A connection holds one attachment, so there is nothing for it to
