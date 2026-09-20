@@ -156,12 +156,15 @@ directory can claim that. Lineage, lifecycle state and committed sequence are
 not list fields: a client that needs them attaches and reads the snapshot.
 The proposed
 limits are exact and are bound at acceptance: 512 concurrent connections per
-daemon, 64 attachments per session,
+daemon, thirty seconds for an accepted connection to complete `initialize`
+before it is closed — a value derived from the lease term but carried as a key
+of its own, so neither contract moves the other — 64 attachments per session,
 512 attachments per daemon, a 1,024-event core queue per attachment, a 4,096-event
 resident window per session, 4 MiB of encoded output buffered per
 connection, 16 MiB of encoded resident-window events per session, 512 MiB
 of aggregate retained encoded events per daemon, ten minutes of idle time
-before eviction, 64 sessions activated per daemon lifetime, 4,096 recorded
+before an **observer** connection is evicted — a lease holder being exempt
+while it holds its lease — 64 sessions activated per daemon lifetime, 4,096 recorded
 index entries per root,
 256 sessions per list page, and the ADR 0023 frame ceiling
 unchanged. Count and byte ceilings apply together; an event that would
