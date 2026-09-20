@@ -81,13 +81,21 @@ bounded plain-data contract stay out by the rules that already exclude them.
 place where this decision constrains an earlier one.
 [ADR 0034](0034-provider-credential-handoff-over-bootstrap-channel.md#concept)
 fixes a per-invocation credential reference the host owns and the sender
-resolves. With a second provider it has to be **per provider**: the reference a
-call carries names which credential is wanted, and a host composing both
-providers supplies two references rather than one ambient value per process.
-Nothing about resolution, custody, rotation or the failure table changes; only
-the arity of what a host supplies does. This decision therefore depends on
-ADR 0034 and cannot be implemented before it is accepted and its change has
-landed.
+resolves, and it fixes **one** reference per call, which is right for the one
+provider that exists today. A second provider needs one reference per
+provider: a call names which credential is wanted, and a host composing both
+supplies two references. ADR 0034 does not define that, and this pair does not
+pretend it does — the generalisation is **a prerequisite change to ADR 0034**,
+made by its own amendment or by an ADR superseding it, proposed with the
+milestone that accepts this decision.
+
+Its shape is small and is named here only so the later change is cheap to
+scope: the option becomes a map keyed by provider rather than one
+`{resolver_module, reference_term}` pair, resolution picks the entry for the
+provider being invoked, and nothing about custody, rotation, the deadline
+instant or the closed reason set changes. Until that change is accepted and
+landed, this decision cannot be implemented, and nothing in M5 anticipates
+it.
 
 ### Seams, in the order they are worth doing
 
@@ -99,23 +107,29 @@ landed.
 | 4 | Session classification | What kind of work a session is, for listing and residency | The daemon, over sessions it already holds; a daemon-side convenience with no durable effect |
 | 5 | Offline transcript scoring | Whatever the release check wants to measure about retained transcripts | The release check, over retained evidence, on no live path |
 
-Seams 1 to 4 belong to the milestone after M5 and are implemented in that
+All five seams belong to the milestone after M5 and are implemented in that
 order, because each earlier one is the cheaper proof of the same invariant.
-Seam 5 is the one piece admitted earlier; see below.
 
-### The one experiment allowed inside M5
+### Nothing here runs inside M5
 
-M5's provider workstream already moves to `req_llm` 1.24 for other reasons, so
-the evaluation seam becomes reachable there. One bounded experiment is allowed
-inside it, and only this one: an **offline scorer in the release check's
-real-provider case** that calls `ReqLLM.evaluate/4` against the real endpoint
-over retained transcript material, records the typed answers and the reported
-`usage`, and touches no part of the agent loop. It exists to prove the 1.24 API
-against the real service and to take the first latency and price measurement,
-which this decision otherwise has to assert without evidence. It admits no
-seam, changes no policy, journals nothing durable, and gates nothing: if it is
-removed, the release check is exactly what it was. Anything beyond it waits for
-this ADR's acceptance.
+An earlier draft admitted one piece early: an offline scorer in M5's release
+check that would call the real endpoint to prove the 1.24 API and take the
+first latency and price measurement. That is withdrawn on 2026-09-20.
+
+The reason is not caution about the scorer itself, which really would have
+touched no live path. It is that the release check is a check M5 is *required*
+to pass, and putting a real call to a second provider inside it would make
+M5's completeness depend on three things this decision has not settled: a
+second credential the release check does not carry, a per-provider credential
+reference ADR 0034 does not define, and the availability of an external
+service whose failure would then be indistinguishable from M5 failing. A
+milestone whose required check depends on an unaccepted decision is not a
+complete set, whatever the call does.
+
+So the first real call, and with it the first latency and price measurement,
+belongs to the milestone that accepts this decision. M5's move to `req_llm`
+1.24 happens for its own dependency reasons and adds no call path: nothing in
+M5 calls anything 1.24 makes newly reachable.
 
 ### Evidence
 
@@ -164,15 +178,16 @@ Nothing public changes. The `Loopex.Policy` and `Loopex.Model` callbacks, the
 public protocol and its generations, public events, snapshots, artifacts, the
 executor protocol and every durable record are untouched. A runtime with no
 evaluation configured is byte-for-byte the runtime that exists today. The one
-compatibility effect is on host composition, and it is ADR 0034's: a credential
-reference becomes per provider.
+compatibility effect is on host composition, and it arrives with the
+prerequisite amendment to ADR 0034 rather than with this pair: a credential
+reference becomes one per provider instead of one per call.
 
 Rollback is removing the evaluation. Every seam is an input, so a host that
 stops asking decides as it did before by the same path; a journaled answer
 remains a true record of what was observed at the time and is not a premise
-anything later depends on, so nothing has to be migrated or repaired. The
-offline scorer, if it exists from M5, is deleted with no effect on the release
-check's other cases.
+anything later depends on, so nothing has to be migrated or repaired. Nothing
+from this decision exists before its own milestone, so there is nothing in M5
+to roll back.
 
 Acceptance binds this complete pair at the exact candidate the maintainer names
 in the governance record. Its claims remain unproved until the tests above

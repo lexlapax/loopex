@@ -9,8 +9,7 @@ Technical depth: [Typed decision model mechanics](0035-typed-decision-models-as-
 - **Supersedes:** nothing; it refines where a host may get the *inputs* to the
   ADR 0009 policy decision, and changes nothing about who makes it
 - **Prerequisite for:** the milestone after M5. It is **not** an M5
-  prerequisite and blocks nothing in M5; one bounded experiment named below is
-  allowed inside M5's provider workstream
+  prerequisite, blocks nothing in M5, and no part of it runs inside M5
 
 <a id="concept-adr-0035-decision"></a>
 ### Context and Decision
@@ -108,9 +107,11 @@ Three consequences are real costs rather than benefits, and are stated as
 such. It is a **second provider credential**, `TYPESAFE_API_KEY` alongside the
 model credential, which means
 [ADR 0034](0034-provider-credential-handoff-over-bootstrap-channel.md#concept)'s
-per-invocation credential reference has to be **per provider** rather than one
-per call — this decision depends on that one and cannot be implemented before
-it. The **state sent to the model** is bounded, redacted, provenance-typed
+per-invocation credential reference has to become **one per provider** rather
+than one per call. ADR 0034 fixes one reference per call and does not define
+that, so the generalisation is a prerequisite amendment to it, proposed with
+the milestone that accepts this decision; this one cannot be implemented
+before that lands. The **state sent to the model** is bounded, redacted, provenance-typed
 data the runtime already holds, under the same context-admission discipline
 that governs anything else staged for a provider; nothing new becomes
 sendable. And **latency and price are unmeasured** until the first real call;

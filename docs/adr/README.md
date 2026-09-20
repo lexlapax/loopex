@@ -180,7 +180,7 @@ must be accepted before the outcome that depends on it is implemented.
 0035 is Proposed for the milestone after M5 and is not an M5 prerequisite: it
 decides that a typed decision model — one that returns probabilities and
 confidences rather than text — may be an input to a host's policy decision and
-a journaled plain-data fact, and may never be the decision. It depends on 0034,
-because a second provider makes the per-invocation credential reference per
-provider. M5 may run one bounded offline experiment against the real endpoint
-inside its provider workstream; nothing else waits on it.
+a journaled plain-data fact, and may never be the decision. It depends on 0034
+and on a prerequisite amendment to it, because a second provider needs one
+credential reference per provider where 0034 fixes one per call. No part of it
+runs inside M5.
