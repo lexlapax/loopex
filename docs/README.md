@@ -79,6 +79,7 @@ pairing, link, review, code-documentation, and enforcement contracts.
 | 0031 — daemon-grade store selection and migration | [Decision](adr/0031-daemon-grade-store-selection-and-migration.md#concept) | [Technical depth](adr/0031-daemon-grade-store-selection-and-migration-technical.md#technical-depth) |
 | 0032 — daemon attachment residency and replay | [Decision](adr/0032-daemon-attachment-residency-and-replay.md#concept) | [Technical depth](adr/0032-daemon-attachment-residency-and-replay-technical.md#technical-depth) |
 | 0033 — collaboration: controller lease and takeover | [Decision](adr/0033-collaboration-controller-lease-and-takeover.md#concept) | [Technical depth](adr/0033-collaboration-controller-lease-and-takeover-technical.md#technical-depth) |
+| 0034 — provider credential handoff over the bootstrap channel | [Decision](adr/0034-provider-credential-handoff-over-bootstrap-channel.md#concept) | [Technical depth](adr/0034-provider-credential-handoff-over-bootstrap-channel-technical.md#technical-depth) |
 
 An ADR pair is one decision. Its status and governance record live in the
 Concept file and bind both files when accepted.
