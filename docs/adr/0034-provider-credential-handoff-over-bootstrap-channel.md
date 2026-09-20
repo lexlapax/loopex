@@ -38,9 +38,9 @@ measured the result at M4 closure — that application is the critical path of
 the fast check, 96% of its time sits in those twelve modules, and no further
 test change shortens the check while the slot is shared.
 
-**Decide that the credential is a per-invocation input, named by an opaque
-token and resolved only inside the process that writes it to the child's
-private channel.** The host gives the adapter a *credential token* where it
+**Decide that the credential is named by an opaque token bound at
+composition, whose resolution is per invocation and happens only inside the
+process that writes it to the child's private channel.** The host gives the adapter a *credential token* where it
 composes the runtime: an opaque identifier that carries no credential, no
 routing and no authority of its own. **"Per-invocation" qualifies the
 resolution, not the token's arrival** — the token is bound once, per runtime,

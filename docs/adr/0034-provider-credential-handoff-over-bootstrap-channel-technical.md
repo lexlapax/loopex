@@ -93,10 +93,22 @@ credential bytes never arrive as `%CredentialToken{}`, so the refusal is a
 pattern match rather than a judgement, and a credential accidentally passed as
 a token is refused at composition instead of being routed.
 
-**One token per configured provider, bound at composition.** A runtime that
-names two providers carries two tokens, each with its own registry row and its
-own custody process; it does not mint one per call. That is what makes ADR
-0035's second credential a second row rather than a widened value.
+**One token per composed model configuration, bound at composition.** That is
+the whole of what this decision fixes, and it is narrower than an earlier
+revision claimed. A runtime composes **one** model configuration, its
+`options` carry **one** token and **one** registry handle, and one custody
+process holds the bytes behind it. There is no token collection, no
+provider-selection seam and no per-call model `options` — `complete/3` takes
+the composition-time configuration unchanged — so a design for two providers
+would be describing a seam that does not exist.
+
+**The per-provider generalisation is a stated future amendment**, not part of
+this decision. When a second provider credential arrives, the registry's
+routing-only contents make it a second row and a second token rather than a
+widened value; that is the shape the generalisation will take, and it needs
+its own amendment to this ADR because it needs the seam that would select
+between them. ADR 0035, which is the decision that would bring one, says the
+same thing from its side and is Proposed and deferred.
 
 **Every later use of "per-invocation" in this pair qualifies the resolution.**
 On each call the sender routes the token through the handle, receives the
@@ -158,7 +170,7 @@ separate:
   already exists for exactly this: something the host decides once, per
   runtime, that every invocation needs. Composition puts the registry
   reference there, under its own key, beside the token — which composition
-  also puts there, once, per configured provider. An earlier sentence said
+  also puts there, once, for the one model configuration this runtime has. An earlier sentence said
   the caller supplies the token "per invocation"; that contradicted this
   pair's own binding rule and is corrected: what happens per invocation is the
   **resolution**, never the supply.
@@ -190,9 +202,19 @@ separate:
 - **The lookup is one operation, and it is the host's.**
   `route(handle, token) -> {:ok, custody_ref} | {:error, :unavailable}`, a
   call to the registry process. It returns *where to ask*, never bytes;
-  `:unavailable` covers a token with no row, a registry that is gone, and a
-  registry that does not answer — from the sender's side those are one fact
-  and none is recoverable by asking again.
+  `:unavailable` covers a token with no row and a registry that is gone —
+  from the sender's side those are one fact, and neither is recoverable by
+  asking again.
+
+  **A registry that is merely slow is not one of them**, and an earlier
+  revision blurred the two by putting "does not answer" in this list. Silence
+  is the guardian's business: the sender's lookup has no deadline of its own,
+  the **invocation deadline** bounds the whole resolution, and a registry that
+  has not answered when it expires produces the guardian's `:timeout` with the
+  sender killed — which the closed reason set already distinguishes from every
+  refusal, precisely so an operator can tell a refusal from a silence. A
+  registry that is *gone* answers immediately, because the call fails rather
+  than waits, and that is `:unavailable`.
 - **Its lifetime is the host supervisor's, and a restart invalidates the
   handle.** The host starts the registry under its own supervisor when it
   composes the runtime. If the registry dies, the handle a composed runtime
@@ -243,104 +265,121 @@ boundary, not an absolute:
   already protects that process — the sender installs its own group-leader
   sink so no IO request can carry anything out of it, it is unregistered, and
   it reports only an atom or a `{:error, atom}` pair to the guardian.
-- **What keeps credential bytes out of a trace: exclusion before delivery,
-  which M5 implements because ADR 0030 already requires it.** That accepted
-  companion says the key-bearing call "is excluded by match specification"
-  (`0030-…-technical.md:27`). An earlier revision of this pair found no such
-  mechanism in `Loopex.Trace` and substituted namespace omission plus
-  sink-time redaction. That substitution is withdrawn: redaction happens in
-  `Entry.render/2`, at the sink, while tracing delivers the **raw** call tuple
-  to the tracer process first (`trace.ex:331`, `:152`, `:219`). A host that
-  names the adapter module would therefore create another message carrying the
-  credential — one more place the bytes exist — which is precisely what the
-  "only permitted transfer" contract forbids. Redaction cannot satisfy a
-  pre-delivery requirement.
+- **What keeps credential bytes out of a trace: the credential-bearing
+  *process* is excluded before it resolves anything.** ADR 0030 requires the
+  key-bearing call to be excluded by match specification *before* delivery
+  (`0030-…-technical.md:27`), and this pair has now twice failed to satisfy
+  it. The first attempt was sink-time redaction, which is too late because
+  tracing delivers the raw call tuple to the tracer first (`trace.ex:331`,
+  `:152`, `:219`). The second was an excluded-MFA list naming this adapter's
+  own functions — and that fails for a reason worth recording, because it is
+  the reason no function-level list can work here:
 
-  **So M5 implements the requirement.** `Loopex.Trace` gains an excluded-MFA
-  list applied when a session's patterns are installed: the module pattern
-  first, then each excluded `{module, function, arity}` cleared. The mechanism
-  is the one `:trace.function/4` already supports, and it was verified by
-  probe at **both** toolchain pairs before being written here:
+  **A function that carries the credential calls functions it does not own.**
+  `ProviderCodec.send/3` hands the encoded credential frame to
+  `:gen_tcp.send/2`. A trace session that names `:gen_tcp` explicitly sees the
+  frame, whatever this adapter's modules are excluded. Reproduced, with a
+  canary standing in for the credential:
 
   ```
-  :trace.function(session, {Probe, :_, :_}, true, [:local])     # => 6
-  :trace.function(session, {Probe, :secret, 1}, false, [:local]) # => 1
-  # tracer then receives, for a process calling both:
-  #   {:trace, #PID<…>, :call, {Probe, :visible, ~c"\n"}}
-  # and nothing at all for Probe.secret/1
+  :trace.function(session, {:gen_tcp, :send, 2}, true, [:local])
+  # tracer receives:
+  {:trace, #PID<0.97.0>, :call, {:gen_tcp, :send, [#Port<0.4>, "FRAMECANARY-SECRET-42"]}}
   ```
 
-  A later, more specific pattern replaces the module-wide one for that MFA, so
-  the excluded function is not traced at all — no raw message, nothing for the
-  tracer to hold, nothing for the sink to redact. This is core's **third** M5
-  change, recorded as such in the plan's ownership table and minimalism
-  budget.
+  Excluding `:gen_tcp` would not close it either: the next callee down, or a
+  future one, is outside the list again. An enumeration of callees is not a
+  contract anyone can keep.
 
-  **The excluded inventory is complete, and completeness is why it is drawn
-  this way.** Credential bytes and the token reach exactly two places in the
-  parent:
+  **So the exclusion is by process, and it is mandatory.** The sender — the
+  short-lived process that resolves the credential and writes the frame —
+  calls a core API **before it resolves anything**:
 
-  | Excluded | Why |
-  | --- | --- |
-  | `Loopex.LLM.ReqLLM.ProviderBridge.route_credential/2` | The registry handle and the token |
-  | `Loopex.LLM.ReqLLM.ProviderBridge.receive_custody_reply/2` | The resolved credential |
-  | `Loopex.LLM.ReqLLM.ProviderBridge.write_credential_frame/2` | The resolved credential |
-  | **`Loopex.LLM.ReqLLM.ProviderCodec`, every function** | The credential frame is encoded by the same generic encoder as every other frame: `send/3` calls `encode/2` (`provider_codec.ex:127-131`, `:87-92`), which calls `valid_payload?/2` and `encode_value/4`, which recurse through `encode_members/5`, `encode_pairs/4` and `encode_key/2,3`. `[:local]` tracing covers private calls, so every one of those frames carries the bytes |
+  ```elixir
+  Loopex.Trace.exclude_self(tracer)   # returns only once the exclusion is installed
+  ```
 
-  The codec is excluded as a **module** rather than as a list of private
-  MFAs, and the rejected option is recorded: an MFA list of private helpers
-  would be a list that rots silently, since a refactor inside the codec could
-  add a private function carrying the payload and no test would notice. The
-  cost is stated too — codec calls are not traceable for any frame — and it is
-  small, because the encode path is shared, so excluding only the
-  credential-carrying calls was never possible: the same functions encode
-  every frame.
+  It returns `:ok` once this process is excluded from **every** live trace
+  session and recorded as excluded for every future one. Only then does the
+  sender route the token, receive the credential and write the frame. Nothing
+  the sender does after that point can appear in a trace, whatever modules or
+  functions a host names — including `:gen_tcp`, including modules nobody has
+  thought of.
 
-  **The keyed shape stays, as defence in depth rather than as the mechanism.**
-  The three bridge functions carry credential bytes only as a value under a
-  credential-named key — `receive_custody_reply/2` returns
-  `{:ok, %{credential: bytes}}` and never `{:ok, bytes}`;
-  `write_credential_frame/2` takes that keyed map, not a bare binary — so if
-  an exclusion were ever lost, `@credential_pattern` still placeholders the
-  value at any size. That matters because the size rule alone does not: an
-  earlier draft of this pair concluded a credential is "redacted by size even
-  as a bare positional argument", and running `Entry.render/2` says otherwise.
+  **The mechanism, probed at both toolchain pairs before it was written
+  down.** A process flagged by inheritance (`:set_on_spawn` from a traced
+  parent) calls `:trace.process(session, self(), false, [:all])`; the call
+  returns `1`, the flags are gone, and its subsequent `:gen_tcp.send/2` with
+  the canary produces **no trace message at all**, while a non-excluded
+  control process's identical call produces one. That is pre-delivery in the
+  strictest sense: there is no message for a sink to redact, and ADR 0030's
+  rule is satisfied by a stronger mechanism than the one its prose names.
 
-  | Credential size | Bare arg `[cred]` | Tuple `{:ok, cred}` | Keyed `%{credential: cred}` |
-  | --- | --- | --- | --- |
-  | 1 byte | **leaks** | **leaks** | placeholdered |
-  | 40 bytes | **leaks** | **leaks** | placeholdered |
-  | 51 bytes | **leaks** | **leaks** | placeholdered |
-  | 64 bytes | **leaks** | **leaks** | placeholdered |
-  | 65 bytes | placeholdered | placeholdered | placeholdered |
+  **The VM does not make it sticky, so core does.** The same probe shows a
+  later `:trace.process(session, pid, true, …)` re-enabling the process, so
+  the exclusion cannot be left to the BEAM. `Loopex.Trace` is a per-runtime
+  `GenServer` holding the session and its configuration; it gains an
+  **excluded-pid set** in that state, and three rules:
 
-  ADR 0019 admits a credential of 1 to 65,536 bytes, so the leaking range is
-  real. The size reading is withdrawn with those numbers recorded, and the
-  shape is contract.
+  1. `exclude_self/1` adds the caller to the set and, if a session is live,
+     installs `false` for it before replying;
+  2. when a session starts, every pid in the set is skipped where
+     `runtime_processes/1` would otherwise be flagged — the same place
+     `excluded?/3` already excludes the tracer and the dispatcher by role
+     (`trace.ex:411`);
+  3. nothing in a trace **configuration** can clear the set. It is not part of
+     `modules`, `level`, `limits` or `sink`; a host can name any module it
+     likes and cannot name a process back in.
 
-  **ADR 0030 is not edited.** Its prose is honoured once this change lands,
-  and not before; until then the requirement is real and the implementation is
-  missing, which is the finding an earlier revision recorded and this one
-  closes rather than reinterprets. The alternative — amending ADR 0030 down to
-  what the code did — is rejected: it would weaken an accepted security
-  contract to match an omission.
+  **The ordering is acknowledged, not hoped for.** The tracer is one process
+  and serializes its mailbox, so by the time `exclude_self/1` returns, either
+  the session started first and the exclusion was installed over it, or the
+  exclusion was recorded first and the session skipped that pid. There is no
+  interleaving in which the sender resolves a credential while traced.
 
-  **The proof is three cases.** Under the **default** configuration, a real
-  trace session at the `arguments` level over a real invocation produces no
-  entry naming any excluded function, no raw trace message for them, and no
-  credential bytes or token anywhere in the captured entries — the adapter is
-  not in the default traced set, because `modules/1` expands the `:loopex` and
-  `:loopex_protocol` namespaces through `:application.get_key(application,
-  :modules)` and `Loopex.LLM.ReqLLM.ProviderBridge` is in
-  `loopex_llm_reqllm`. Under a configuration that **explicitly names**
-  `ProviderBridge` and `ProviderCodec`, the tracer is asserted to receive **no
-  raw trace message** for any excluded MFA — the pre-delivery property itself,
-  read from the tracer rather than from the sink — while a non-excluded
-  function of the same module is asserted to produce one, so the case cannot
-  pass by tracing nothing. A third case calls each of the three bridge
-  functions with a **one-byte** credential and asserts no captured entry
-  contains that byte, which is the keyed-shape tier and would fail under a
-  size-based rule.
+  **Reaching the tracer.** The sender has no runtime handle of its own, so
+  composition puts a **tracer reference in the model `options`**, beside the
+  registry handle and the credential token — the same class of composition
+  data as the executor's `reference:`, which `LoopexComposition` already fills
+  with a live pid. Where no tracer is composed, `exclude_self/1` answers
+  `{:error, :trace_unavailable}` and the sender **proceeds**: a tracer that is
+  not running has no session and cannot trace, and making credential delivery
+  depend on an observability process would be the wrong dependency entirely.
+
+  **What is dropped.** The excluded-MFA list and the module-wide exclusion of
+  `ProviderCodec` are withdrawn — they cost this adapter's tracing and never
+  bought the property, for the callee reason above. Core change 3 is now the
+  process exclusion alone, which is smaller and total.
+
+  **What is kept as defence in depth**, explicitly labelled so nobody mistakes
+  it for the mechanism: the **keyed shape**. The three bridge functions carry
+  credential bytes only as a value under a credential-named key —
+  `receive_custody_reply/2` returns `{:ok, %{credential: bytes}}` and never
+  `{:ok, bytes}`; `write_credential_frame/2` takes that keyed map — so a
+  credential that somehow reached `Entry.render/2` would be placeholdered at
+  any size. It protects nothing about callees, and it is not what satisfies
+  ADR 0030.
+
+  **The proof is three cases, and the first one is the one that would have
+  caught the old design.** A trace session is configured to name
+  **`:gen_tcp`** explicitly, alongside `ProviderBridge` and `ProviderCodec`,
+  and a real invocation runs with a **one-byte canary** as the credential. The
+  case asserts the tracer receives **no raw trace message from the sender
+  process at all** — not for `:gen_tcp.send/2`, not for any function — while a
+  non-excluded control process performing the same `:gen_tcp.send/2` in the
+  same session **does** produce one, so the case cannot pass by tracing
+  nothing. The canary appears nowhere in any captured message or entry.
+
+  The second is the default configuration: no module naming, and no entry, no
+  raw message and no credential byte anywhere — the adapter is in no namespace
+  wildcard, because `modules/1` expands `:loopex` and `:loopex_protocol`
+  through `:application.get_key(application, :modules)` and
+  `Loopex.LLM.ReqLLM.ProviderBridge` lives in `loopex_llm_reqllm`.
+
+  The third is the ordering: `exclude_self/1` is asserted to return **before**
+  the token is routed, and a session started concurrently with it is asserted
+  to produce no message from the sender either way round, which is the
+  serialization claim made checkable rather than asserted.
 - Everywhere else the earlier absolutes stand unchanged: not in guardian
   state, not in an exit reason, not in a crash report, not in an IO request,
   not in a file, not in the environment, not in argv, and in no durable or
