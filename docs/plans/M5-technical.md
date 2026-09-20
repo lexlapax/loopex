@@ -294,8 +294,8 @@ reviewer can check against this sentence at closure.
 
 - **`docs/operator/daemon.md` must state the maximum graceful stop as the sum
   of the eight phase bounds**, in the form the lifecycle section fixes:
-  **`budget_ms` + 525 s**, being 5 s for closing admissions, 300 s for
-  settling what was already admitted, 90 s for abort
+  **`budget_ms` + 585 s**, being 5 s for closing admissions, 300 s for
+  settling what was already admitted, 150 s for abort
   admission, `budget_ms` for cancellation, 5 s for coordinator termination,
   90 s for the fence, 5 s for daemon teardown and 30 s for the Store —
   together with the sentence that keeps the number from being read as a
@@ -349,7 +349,7 @@ core-internal states a daemon cannot construct through the socket.
 | --- | --- | --- | --- |
 | Concurrent attachment | `apps/loopex/test/concurrent_attachments_test.exs` (**new**) | `two attachments to one session coexist without replacement`; `one detaching leaves the other delivering`; `an attachment is released when the process that attached it exits`; `an attachment released by its process exiting leaves no open transfer`; `the installed attachment records the attacher pid and the monitor reference`; `replace true supersedes only the attaching process's own prior attachment and releases its transfers`; `replace true from a second process supersedes nothing of the first's`; `replace true leaves every other connection's attachment to that session delivering`; `the dispatcher holds no attachment for a dead attacher`; `one backpressuring does not stall the other`; `each carries its own cursor and incarnation` | fast |
 | Read-only existence query | `apps/loopex/test/session_existence_query_test.exs` | one per result of the closed set | fast |
-| **`quiesce/1`** | **`apps/loopex/test/runtime_quiesce_test.exs`** (new) | `admits every abort before any cleanup begins`; `a coordinator commit during phase 2 is served by Control and its session settles`; `a drained abort commit is presented once and never re-presented on commit_unknown`; `a fresh create executes nine store calls, ten with the retry`; `attach executes one store call over an empty session and two over eight events`; `resume of a twelve-record session executes eleven store calls`; `a drained abort admitted behind a ready coordinator's in-flight callback spends three store calls in phase 2`; `quiesce admits no abort into an acquiring entry, and terminates and fences it instead`; `a fence executes three store calls at worst`; `releases cancellation concurrently once every admission resolves`; `an empty active set drains with a zero budget`; `reports a Control entry whose coordinator has died as absent`; `reports an unavailable Control entry as absent and fences it`; `reports an acquiring entry as unsettled and fences it`; `fences an unsettled session and refuses its paused transaction as stale`; `fences an absent session too`; `fences a settled session too, and refuses its straggler commit released during the store phase`; `reports not_needed only for an entry that never had a coordinator`; `a fence refused stale_owner_epoch is superseded with no second attempt`; `a fence refused stale_journal_version is superseded too, not an error`; `a fence answering commit_unknown is resolved through transaction_status under the same derived tx_id and reported unsettled with fences[id] == {:unknown, head}`; `a fence id recomputed from the head alone matches the one the drain used`; `a session whose abort admission is ambiguous has no cleanup released and is fenced`; `a phase-2 task shut down mid-call still leaves the coordinator admitting the abort and pausing at the split` | fast |
+| **`quiesce/1`** | **`apps/loopex/test/runtime_quiesce_test.exs`** (new) | `admits every abort before any cleanup begins`; `a coordinator commit during phase 2 is served by Control and its session settles`; `a drained abort commit is presented once and never re-presented on commit_unknown`; `a fresh create executes nine store calls, ten with the retry`; `attach executes one store call over an empty session and two over eight events`; `resume of a twelve-record session executes eleven store calls`; `a drained abort admitted behind the cleanup callback spends five store calls in phase 2`; `the cleanup callback commits at most twice on either branch`; `quiesce admits no abort into an acquiring entry, and terminates and fences it instead`; `a fence executes three store calls at worst`; `releases cancellation concurrently once every admission resolves`; `an empty active set drains with a zero budget`; `reports a Control entry whose coordinator has died as absent`; `reports an unavailable Control entry as absent and fences it`; `reports an acquiring entry as unsettled and fences it`; `fences an unsettled session and refuses its paused transaction as stale`; `fences an absent session too`; `fences a settled session too, and refuses its straggler commit released during the store phase`; `reports not_needed only for an entry that never had a coordinator`; `a fence refused stale_owner_epoch is superseded with no second attempt`; `a fence refused stale_journal_version is superseded too, not an error`; `a fence answering commit_unknown is resolved through transaction_status under the same derived tx_id and reported unsettled with fences[id] == {:unknown, head}`; `a fence id recomputed from the head alone matches the one the drain used`; `a session whose abort admission is ambiguous has no cleanup released and is fenced`; `a phase-2 task shut down mid-call still leaves the coordinator admitting the abort and pausing at the split` | fast |
 | **The two-phase abort-path split** | **`apps/loopex/test/cancellation_test.exs`** (existing; the file that already drives an abort against a receipt arriving mid-reduction) | `a drained abort commits without beginning cleanup`; `a client abort still begins cleanup on its commit reply path` — the pair that proves the split changed the drain and nothing else | fast |
 | **`Loopex.Trace.exclude_self/2`, `Control`'s excluded-pid set and `Entry`'s keyword-key redaction** | **`apps/loopex/test/trace_session_test.exs`** (existing; extended) | `the named MFAs produce no raw message under an explicitly named module, before any process flag is set`; `an excluded process produces no trace message`; `the exclusion survives a tracer restart`; `a new session skips an already-excluded pid`; `fails closed while the tracer is absent`; `fails closed while Control is unavailable` — the case that constructs a `Control` restart, and which therefore asserts what that costs: every child after `Control` restarts with it, so every session coordinator in that runtime is gone and the case starts a fresh session rather than reusing one;  `the excluded set returns to baseline after the sender exits`; `a keyword list's value is redacted under its own key`; `the same value under a key naming nothing is rendered, so the case cannot pass vacuously` | fast |
 
@@ -390,7 +390,7 @@ where it is not (`Loopex.M1RuntimeTestStore`, which core's tree can reach and
 | --- | --- | --- | --- | --- |
 | Phase 1b, ten calls | A fresh `session.create` driven to its reply, asserting **nine** adapter calls in the traced order and **ten** when the genesis commit is made to answer `commit_unknown` once | `apps/loopex/test/runtime_quiesce_test.exs` | `a fresh create executes nine store calls, ten with the retry` | fast |
 | The two history-paged kinds, at **fixed** sizes, so the claim that they have no constant is itself checked | `session.attach` over an empty session asserting **1**, and over an eight-event session asserting **2**; `session.resume` of a **twelve-record, eight-event** session asserting **11**, in the traced order, including **two** `transact` calls — the staged owner attempt and the advance | `apps/loopex/test/runtime_quiesce_test.exs` | `attach executes one store call over an empty session and two over eight events`; `resume of a twelve-record session executes eleven store calls` | fast |
-| Phase 2, three calls | A drained abort admitted behind the deepest callback a **ready** coordinator can be running, constructed rather than waited for: that coordinator is made to run a commit which answers `commit_unknown` once — two calls — and the drained abort is admitted behind it. Asserts **three**, and asserts that the two of them belonged to **one** callback, which is what makes the unit the callback rather than the call. A second case asserts the acquisition callback is never what an admission waits behind, by driving a session that is still `:acquiring` and asserting **no abort is admitted for it** | `apps/loopex/test/runtime_quiesce_test.exs` | `a drained abort admitted behind a ready coordinator's in-flight callback spends three store calls in phase 2`; `quiesce admits no abort into an acquiring entry, and terminates and fences it instead` | fast |
+| Phase 2, five calls | A drained abort admitted behind **the real deepest callback**, not a synthetic one: a run is driven to `complete_cleanup/3` so that the coordinator commits the executor fact and then the run terminal in **one** callback, each commit made to answer `commit_unknown` once — four calls — and the drained abort is admitted behind it. Asserts **five**, and asserts the four belonged to **one** callback, which is what makes the unit the callback rather than the call. A second case asserts the acquisition callback is never what an admission waits behind, by driving a session that is still `:acquiring` and asserting **no abort is admitted for it**. A third pins the ceiling itself: the same cleanup callback driven down its `:unconfirmed` branch is asserted to commit **twice, not three times**, the executor fact and the unproved tool result being mutually exclusive | `apps/loopex/test/runtime_quiesce_test.exs` | `a drained abort admitted behind the cleanup callback spends five store calls in phase 2`; `quiesce admits no abort into an acquiring entry, and terminates and fences it instead`; `the cleanup callback commits at most twice on either branch` | fast |
 | Phase 5, three calls | A fence run to `commit_unknown` and resolved, asserting **three** — head, advance, status | `apps/loopex/test/runtime_quiesce_test.exs` | `a fence executes three store calls at worst` | fast |
 
 All three are **core** witnesses, because all three paths are core's: the
@@ -2243,15 +2243,15 @@ that already exists somewhere, and the operator maximum is the sum:
 | --- | --- | --- | --- |
 | 1a | **Close admissions** | **5 s**, this plan's teardown number reused | A synchronous acknowledgement of a **state change**, not of any work: the relay sets a flag, refuses everything after it, and answers. It has nothing to finish, so this bound measures the relay's own responsiveness and nothing else; a relay that does not answer inside it is a relay the daemon has lost, and the stop becomes the `relay_lost` fail-stop |
 | 1b | **Settle the admitted** | **300 s** — **ten** Store calls deep, the deepest ticket kind, counted from a traced run rather than from the code; **per phase, not per ticket**, the tickets settling concurrently | The tickets already inside core when 1a answered. The per-kind derivation is below, and at this bound the stop **proceeds** rather than waiting further |
-| 2 | **Abort admission** | **90 s** — **three** Store calls deep, at 30 s each; **per phase, not per session**, because the sessions are admitted **concurrently** | The admission waits behind the **callback** a **ready** coordinator is already running, which is at most two calls, and then makes its own, which is one |
+| 2 | **Abort admission** | **150 s** — **five** Store calls deep, at 30 s each; **per phase, not per session**, because the sessions are admitted **concurrently** | The admission waits behind the **callback** a **ready** coordinator is already running, which is at most two commits and so four calls, and then makes its own, which is one |
 | 3 | **Cancellation** | The derived backstop: `max` over drained sessions of `cancellation_bounds(g_i).cli_backstop_ms` | Core's own number for how long a cancellation may take |
 | 4 | **Coordinator termination** | **5 s**, the coordinator's own `shutdown` (`session_coordinator.ex:134-142`); **per phase, concurrent** across **every** enumerated coordinator | The value core already gives a coordinator to stop in — and a ceiling nothing approaches, because a coordinator does **not** trap exits (`init/1` sets no flag, `session_coordinator.ex:260-292`, and the module's only `Process.flag(:trap_exit, true)` is at `:3108-3109`, inside the per-invocation provider guard it spawns), so it has no `terminate/2` to run and dies at once |
 | 5 | **Fence** | **90 s** — **three** Store calls deep at worst, again **concurrent** across sessions | A head read, then the `advance_owner`, and on `commit_unknown` one `transaction_status` query. Three sequential calls, no retries |
 | 6 | **Daemon teardown** | **5 s** | One of this plan's two chosen numbers, covering the notice, the closes, the lease owners, the relay, **the runtime tree** and the edges. The runtime stop is attempted with what remains and killed at the bound; its trapping descendants unwind afterwards on their own clock, which the daemon does not wait for |
 | 7 | **Store** | **30 s**, its own `@call_timeout` | The stop that releases the marker |
 
-> **Maximum graceful stop = 5 s + 300 s + 90 s + `budget_ms` + 5 s + 90 s +
-> 5 s + 30 s = `budget_ms` + 525 s**, and `budget_ms` is the one term an
+> **Maximum graceful stop = 5 s + 300 s + 150 s + `budget_ms` + 5 s + 90 s +
+> 5 s + 30 s = `budget_ms` + 585 s**, and `budget_ms` is the one term an
 > operator cannot compute in advance.
 
 **That is a worst case nobody approaches, and saying so is part of stating
@@ -2357,25 +2357,72 @@ are these:
   **The ready coordinator's callbacks, traced.** Every adapter call this
   module makes is at one of nine sites, and they divide cleanly:
 
+  **The enumeration below is over the calls this module makes; the bound needs
+  the calls made in the coordinator's *process*.** Those differ if a
+  coordinator callback calls out to something that reaches the Store itself.
+  The table is what makes the claim checkable by reading; what makes it true
+  is the **executed count**, and the phase-2 witness below is where it is
+  measured rather than argued.
+
   | Site | Callback | On the ready path? |
   | --- | --- | --- |
   | `transaction_status` `:1214`, `OwnerLane.transact` `:1242`, `runtime_command` `:1265`, `transaction_status` `:1325`, `ownership_head` `:1338`, `OwnerLane.transact` `:1363` | acquisition only | **no** |
   | `load_records` `:7077`, `load_events` `:7088` | reached only from `discover_prior_tx_id/1` (`:1303`) and `recover_committed_owner/1` (`:1399-1400`) | **no** |
   | `OwnerLane.transact` `:1761-1762`, inside `resolve_transaction/2` | every ready commit, through `apply_transaction/3` (`:1702`) or `commit_internal_result/2` (`:6423`) | **yes** |
 
-  So a ready callback makes **one commit and nothing else**, and that commit
-  is **one adapter call, or two** where `resolve_transaction/2` re-presents on
-  `commit_unknown` (`:1752-1768`). **No ready callback pages**, the two paging
-  helpers having no caller outside acquisition. And **no ready callback
-  commits twice**: each of the thirteen commit sites sits in its own function
-  and each callback reaches one of them, because a committing callback ends by
-  *sending itself* `:advance_work` (`:1720`) rather than continuing — so
-  scheduling and any further commit happen in a **later** callback, which the
-  admission is no longer behind.
+  So **no ready callback pages**, the two paging helpers having no caller
+  outside acquisition, and every ready commit is **one adapter call, or two**
+  where `resolve_transaction/2` re-presents on `commit_unknown`
+  (`:1752-1768`).
 
-  **Maximum over the ready callbacks: two.** Plus the drain's own admission,
-  which is **one** because it does not retry — see the non-retrying commit
-  below. **Three, in sequence.**
+  **A ready callback commits twice, and an earlier revision said once.** That
+  revision argued that a committing callback ends by sending itself
+  `:advance_work` and so cannot continue — which is true of
+  `apply_transaction/3`, where that send sits (`:1720`), and of nothing else:
+  the module has **thirteen** such sends (`:465`, `:627`, `:1425`, `:1720`,
+  `:1996`, `:2237`, `:2249`, `:4013`, `:4051`, `:4078`, `:5894`, `:6304`,
+  `:6775`), and reaching one is not the same as reaching it *before* the
+  callback's second commit. There are **fifteen** paths into
+  `commit_internal_result/2`: the thirteen `commit_internal/2` call sites and
+  the two into `retain_terminal_operation_fact/2` (`:4062`, `:6381`).
+
+  The traced double is the **cleanup-completion** callback,
+  `complete_cleanup/3` (`:5045-5068`):
+
+  1. `settle_executor_work/2` (`:5235`) → `put_executor_fact/3` (`:6379-6384`)
+     → `retain_terminal_operation_fact/2` → `commit_internal_result/2` —
+     **the executor fact**;
+  2. `finish_settled_cleanup/4` (`:5070-5078`) → `finish_cleanup/4`
+     (`:5080-5090`) → `commit_terminal/4` (`:2558-2563`) →
+     `commit_internal/2` → `commit_internal_result/2` — **the run terminal**.
+
+  Both inside one callback, with no return in between.
+
+  **And never three, which is the part that needs an argument rather than a
+  count.** The only candidate third is `settle_owned_operation/3`'s
+  `:unconfirmed` clause (`:5399-5400`), which commits a tool result through
+  `commit_owned_operation_unknown/2` (`:5426-5444`, the commit at `:5437`)
+  between the two above. It cannot co-occur with the first, and the code says
+  why in its own comment at `:5396-5398`: *"a run whose executor answered and
+  whose fact committed has already left `effect_dispatched`, so this is a
+  no-op there, and a `:cleaned` cleanup has nothing unproved to record."* The
+  two are mutually exclusive by the stage the run is in — either the executor
+  answered and step 1 committed the fact, or it did not and
+  `commit_owned_operation_unknown/2` records the unproved result instead — so
+  the callback commits the run terminal plus **exactly one** of them. Every
+  other ready path reaches `commit_internal_result/2` once, each of the
+  fifteen sites sitting in its own function.
+
+  **Maximum over the ready callbacks: two commits, so four adapter calls.**
+  Plus the drain's own admission, which is **one** because it does not
+  retry — see the non-retrying commit below. **Five, in sequence.**
+
+  **This bound rests on two claims and not on one**, and both are stated so a
+  later change fails against them rather than around them: the rule that
+  quiesce admits only into `:active`, which keeps the acquisition callback out
+  of the wait; and this enumeration, that no ready callback reaches
+  `commit_internal_result/2` more than twice. The executed-count witness below
+  is what holds the second to a number.
 - **Phase 5 is three at worst.** A head read, then the `advance_owner`, then,
   only where that answers `commit_unknown`, **one** `transaction_status` query.
 - **And the drain retries nothing, which is a change to the coordinator rather
@@ -4492,14 +4539,14 @@ line; M5 introduces none of its own.
 | Cleanup grace | an integer of 1 or more, refusing `0` with `cleanup_grace_invalid`, because core's `cancellation_bounds/1` admits `grace_ms >= 1` (`apps/loopex/lib/loopex/executor.ex:456`) | This plan, against core's existing validation |
 | Phase 1a, closing admissions | **5_000 ms**, the teardown number reused; it bounds the relay's answer to a state change, not any work, and an unanswered close becomes the `relay_lost` fail-stop | This plan |
 | Phase 1b, settling the admitted | **300 s** — ten sequential Store calls, a fresh `session.create` being the deepest ticket kind whose depth is a constant; the stop **proceeds** at this bound rather than waiting further | This plan, counted from a **traced run** of that path: `control.ex:959-965`, `:896-897`, `:1679-1684` and `session_coordinator.ex:1302-1309`, `:1338`, `:1363`, `:1397-1400`, `:1407`, `:7090-7114` |
-| Phase 2, abort admission | a fixed **90 s** — three sequential Store calls at the adapter's own 30 s `@call_timeout`: the two of the deepest callback a **ready** coordinator may be running, which is one commit re-presented once, and then the drain's own admission, which does not retry; one phase for every session, because they are admitted concurrently. Quiesce admits only into an `:active` entry, so the acquisition callback — which pages and may re-enter itself up to 1,024 times — is never what an admission waits behind | Core, against `apps/loopex_store_local/lib/loopex/store/local.ex:65`, `:111-113` and `session_coordinator.ex:146-149`, `:1752-1768`, `control.ex:575-591` |
+| Phase 2, abort admission | a fixed **150 s** — five sequential Store calls at the adapter's own 30 s `@call_timeout`: the four of the deepest callback a **ready** coordinator may be running, which is **two** commits each re-presented once, and then the drain's own admission, which does not retry; one phase for every session, because they are admitted concurrently. It rests on two claims — quiesce admits only into an `:active` entry, so the acquisition callback is never what an admission waits behind, and no ready callback reaches `commit_internal_result/2` more than twice | Core, against `apps/loopex_store_local/lib/loopex/store/local.ex:65`, `:111-113` and `session_coordinator.ex:146-149`, `:1752-1768`, `:5045-5068`, `:5396-5400`, `control.ex:575-591` |
 | Phase 3, the drain budget | `max` over drained sessions of `cancellation_bounds(g_i).cli_backstop_ms`, returned as `budget_ms` | Derived from `apps/loopex/lib/loopex/executor.ex:456-474`; no number chosen |
 | Phase 4, coordinator termination | **5_000 ms**, the coordinator's own `shutdown` value (`apps/loopex/lib/loopex/runtime/session_coordinator.ex:134-142`), concurrent across **every** enumerated coordinator; it runs **before** the fence so that fence races no live writer | Core's existing child specification |
 | Phase 5, the fence | a fixed **90 s** — three sequential Store calls at 30 s: the head read, the `advance_owner`, and at most one `transaction_status` query; concurrent across sessions, and no retries | Core, against `local.ex:65`, `:111-113`, `:116-122`, `:130-132` |
 | Phase 6, non-Store teardown | **5_000 ms**, one absolute deadline from the instant `quiesce/1` returns, covering the stop records, the connection and listener closes, the collective lease-owner sweep, **the runtime tree's stop** and every other non-Store stop | This plan. Chosen, not derived. A ceiling for the work the phase performs rather than a promise about the runtime's subtree: an `OwnerGroup` traps exits and carries `shutdown: :infinity` (`owner_group.ex:14-19`, `:50`, `:86-90`), so the runtime stop is attempted with what remains and killed at the bound |
 | Phase 7, the Store stop | a fixed 30 s, the Store's own `@call_timeout` (`apps/loopex_store_local/lib/loopex/store/local.ex:65`), independent of any grace; the usual release takes milliseconds | This plan, against the Store's existing bound |
 | Maximum fail-stop exit | **35 s** — 5 s for the executor stop and the Store's own fixed 30 s, the only two steps of that path that wait; 5 s on the two store classes, where the Store is already gone | This plan, as the sum of its parts |
-| Maximum graceful stop | `budget_ms` + **525 s**, the sum of the seven fixed phases above — eight phases, of which only the drain budget is derived; a worst case built from the adapter's wedged-filesystem ceiling, not the cost of an ordinary stop | This plan, as the sum of its parts |
+| Maximum graceful stop | `budget_ms` + **585 s**, the sum of the seven fixed phases above — eight phases, of which only the drain budget is derived; a worst case built from the adapter's wedged-filesystem ceiling, not the cost of an ordinary stop | This plan, as the sum of its parts |
 | Wait slice | 60_000 ms, so no `receive … after` argument approaches the BEAM's 2^32-1 limit, probed at both pairs | This plan; the limit is the VM's |
 | Lease term | 30 seconds | ADR 0033 |
 | Lease renewal interval for the reference clients | 10 seconds | ADR 0033 |
