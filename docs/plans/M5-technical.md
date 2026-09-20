@@ -280,11 +280,16 @@ because both are facts an operator cannot derive from the software and a
 reviewer can check against this sentence at closure.
 
 - **`docs/operator/daemon.md` must state the maximum graceful stop**: the
-  derived session drain, plus the fixed five-second budget covering every
-  non-Store action after it, plus the fixed 30-second Store phase — and, with it, that a shorter external
-  service-manager timeout turns the stop into a **forced shutdown**, where
-  work that would have settled does not and the writer marker may be left for
-  the next daemon's verified recovery. It must also distinguish the **usual
+  drain budget core derives, plus the fixed five-second budget covering every
+  non-Store action after it, plus the fixed 30-second Store phase — and, with
+  it, that the drain budget is **not** read off the daemon's own
+  `--cleanup-grace-ms`, because each session drains under the grace it
+  committed and a root may carry sessions composed earlier, so the page must
+  point an operator at the figure the daemon **reports** in its stop line and
+  in `daemon.status` rather than at one they can compute from flags. And that
+  a shorter external service-manager timeout turns the stop into a **forced
+  shutdown**, where work that would have settled does not and the writer
+  marker may be left for the next daemon's verified recovery. It must also distinguish the **usual
   millisecond** Store release from that 30-second **safety ceiling**, so the
   number is read as a bound on the worst case rather than as the cost of every
   stop. Nothing is written until the implementation exists; this row is what
@@ -316,9 +321,9 @@ core-internal states a daemon cannot construct through the socket.
 
 | Core change | Core witness | Cases | Lane |
 | --- | --- | --- | --- |
-| Concurrent attachment | `apps/loopex/test/concurrent_attachments_test.exs` | as that file already states | fast |
+| Concurrent attachment | `apps/loopex/test/concurrent_attachments_test.exs` (**new**) | `two attachments to one session coexist without replacement`; `one detaching leaves the other delivering`; `one backpressuring does not stall the other`; `each carries its own cursor and incarnation` | fast |
 | Read-only existence query | `apps/loopex/test/session_existence_query_test.exs` | one per result of the closed set | fast |
-| **`quiesce/2`** | **`apps/loopex/test/runtime_quiesce_test.exs`** (new) | `admits every abort before any cleanup begins`; `releases cancellation concurrently once every admission resolves`; `an empty active set drains with a zero budget`; `reports a Control entry whose coordinator has died as absent`; `fences an unsettled session and refuses its paused transaction as stale`; `fences an absent session too` | fast |
+| **`quiesce/2`** | **`apps/loopex/test/runtime_quiesce_test.exs`** (new) | `admits every abort before any cleanup begins`; `releases cancellation concurrently once every admission resolves`; `an empty active set drains with a zero budget`; `reports a Control entry whose coordinator has died as absent`; `fences an unsettled session and refuses its paused transaction as stale`; `fences an absent session too`; `a fence refused stale classifies the session from the journal`; `a fence answering commit_unknown is retried under the same derived tx_id and reported unsettled with fence: :unknown`; `every fence in one drain derives its id from the same drain_id` | fast |
 | **The two-phase abort-path split** | **`apps/loopex/test/cancellation_test.exs`** (existing; the file that already drives an abort against a receipt arriving mid-reduction) | `a drained abort commits without beginning cleanup`; `a client abort still begins cleanup on its commit reply path` — the pair that proves the split changed the drain and nothing else | fast |
 | **`Loopex.Trace.exclude_self/1` and `Control`'s excluded-pid set** | **`apps/loopex/test/trace_session_test.exs`** (existing; extended) | `an excluded process produces no trace message`; `the exclusion survives a tracer restart`; `a new session skips an already-excluded pid`; `fails closed while the tracer is absent`; `the excluded set returns to baseline after the sender exits` | fast |
 
@@ -1716,16 +1721,27 @@ state. The contract is three clocks:
 | Clock | What it bounds | Where the number comes from |
 | --- | --- | --- |
 | **`g`**, each session's committed `cleanup_grace_ms` | The cancellation of that session's effects, and nothing else | The session's own composition; already used by `Loopex.Executor.cancellation_bounds/1` |
-| **`drain_ms`** | The whole drain, across every session | Derived: `max` over the drained sessions of `cancellation_bounds(g_i).cli_backstop_ms` (`apps/loopex/lib/loopex/executor.ex:456-474`, where `cli_backstop_ms` is defined as `observe + reserve + terminal` and documented as "the sum a process-liveness backstop must cover"). `g` itself is never a deadline |
+| **`budget_ms`**, the drain budget | The whole drain, across every session | Derived **by core, inside `quiesce/2`**, and **returned** in its result: `max` over the drained sessions of `cancellation_bounds(g_i).cli_backstop_ms` (`apps/loopex/lib/loopex/executor.ex:456-474`, where `cli_backstop_ms` is `observe + reserve + terminal`, documented as "the sum a process-liveness backstop must cover"). The daemon does not compute it, because it does not hold the `g_i` |
 | **`teardown_ms`, fixed at `5_000`** | **One absolute deadline covering every non-Store action after the drain** — the `daemon.stopping` writes, closing the connections, closing the listener, the lease owners, the relay, the runtime, the executor, the workspace lease, transfers, custody and the registry | A plan decision, and the rationale is that each of those is a bounded write or a stop of a process with no `terminate/2` to run: milliseconds apiece, so five seconds is a ceiling none of them should approach and an upper bound an operator can add up |
 | **The Store phase** | The Store's stop alone | A **fixed 30 s**, the Store's own `@call_timeout` (`apps/loopex_store_local/lib/loopex/store/local.ex:65`), independent of `g` and of `teardown_ms` |
 
-`drain_ms` is derived rather than chosen because the cancellation it waits on
+The budget is derived rather than chosen because the cancellation it waits on
 is already bounded by core: `cli_backstop_ms` is the number core itself says a
 liveness backstop must cover for a session with that grace, so a drain that
 waits exactly that long waits neither less than the cancellation needs nor
 longer than core can justify. Taking the maximum over the drained sessions —
 not the sum — is what keeps the bound flat as sessions multiply.
+
+**And core derives it because the daemon cannot.** Each `g_i` is the grace
+that session **committed**, read from its durable state
+(`session_coordinator.ex:422`); the daemon's `--cleanup-grace-ms` is the
+default a *new* session is composed with (`control.ex:890-891`), not a fact
+about sessions already in the root. A root carrying sessions created under an
+earlier composition therefore holds graces the daemon has never seen. An
+earlier revision had the daemon compute the budget from its own option, which
+would have been wrong for exactly the roots a daemon is for. So `quiesce/2`
+derives it from the durable graces and **returns** it as `budget_ms`, and the
+daemon reports that figure rather than one it assumed.
 
 **The Store phase is fixed, not `max(g, 30_000)`.** The previous revision's
 `max` made an operator's grace able to *lengthen* the Store phase, which is
@@ -1757,14 +1773,17 @@ budget of its own to spend.
 
 **So the operator-facing bound is stated, once, and it adds up:**
 
-> **Maximum graceful stop = `drain_ms` + 5 s + 30 s.**
+> **Maximum graceful stop = `budget_ms` + 5 s + 30 s.**
 
-That maximum is as large as the composed grace makes it: `drain_ms` is
-derived from `cli_backstop_ms`, which grows with `g`, so an operator who
-composes a grace of days has told the daemon it may drain for days. The bound
-is a statement about *this* daemon's configuration rather than a constant, and
-the operator documentation says so where it says what to set
-`TimeoutStopSec` to. A service manager that kills the daemon sooner than that
+**`budget_ms` is not knowable from the daemon's flags alone**, and the
+operator page says so rather than implying a constant. The composed
+`--cleanup-grace-ms` bounds the sessions this daemon *creates*; a root
+carrying sessions created earlier may drain longer, because each session
+drains under the grace it committed. What an operator can rely on is that the
+figure actually used is **reported**: the daemon's stop line carries the
+`budget_ms` core returned, and `daemon.status` carries the budget the daemon
+would use if it were asked to stop now. A `TimeoutStopSec` is therefore set
+from an observed figure rather than a guessed one. A service manager that kills the daemon sooner than that
 turns the stop into a forced shutdown — the journal is still crash-equivalent, but work that would
 have settled does not, and the marker may be left for the next daemon's
 verified stale-writer recovery. The operator documentation states the bound
@@ -1819,8 +1838,9 @@ the owner fixes.
    clients yet and nothing is closed: the connections stay open across the
    drain, because a client that is about to be told something true is better
    served by being told it than by an early close.
-2. **The runtime is quiesced within `drain_ms`.** The owner calls core's
-   `quiesce/2` with that derived deadline and waits for its answer, which
+2. **The runtime is quiesced within the budget core derives.** The owner
+   calls core's `quiesce/2`, passing its own teardown deadline so core will
+   not overrun what the daemon has left, and waits for its answer, which
    names the sessions that settled and the sessions that did not — and, by the
    time it answers, every session it could not settle has already been fenced
    and terminated inside core. This is the drain; what it does, and what it
@@ -1996,9 +2016,23 @@ on 2026-09-20 and gave it one. The mechanism is a **fourth core change**,
 beside concurrent attachment, the existence query and the trace exclusion:
 
 ```elixir
-Loopex.Runtime.quiesce(runtime, drain_deadline_ms) ::
-  {:ok, %{settled: [session_id], unsettled: [session_id]}}
+Loopex.Runtime.quiesce(runtime, teardown_deadline_ms) ::
+  {:ok, %{
+     settled: [session_id],
+     unsettled: [session_id],
+     absent: [session_id],
+     budget_ms: non_neg_integer()
+   }}
 ```
+
+**Four keys, and two of them are answers to questions the daemon cannot
+ask.** `absent` names the sessions `Control` still held as active whose
+coordinator was already gone, which is neither settled nor unsettled and must
+not be counted as either. `budget_ms` is the drain budget **core derived and
+used**, returned because the daemon cannot compute it — the argument below.
+The single argument is the daemon's own clock, not a drain budget: it is the
+teardown deadline the daemon must still meet afterwards, so core can refuse to
+exceed what the caller has left.
 
 **Three parts, in order, and the first two are one thing split in half.**
 
@@ -2048,6 +2082,8 @@ Loopex.Runtime.quiesce(runtime, drain_deadline_ms) ::
    (`apps/loopex/lib/loopex/executor.ex:456-474`), and over an **empty** set
    of drained sessions that maximum is **`0`**: a daemon with nothing active
    drains instantly rather than waiting out a number derived from nothing.
+   Core **returns** the figure it used as `budget_ms`, because a daemon that
+   cannot compute it cannot report it either.
 
    Inside the budget each session's cancellation runs under its own `g`,
    through `Loopex.Executor.cancel/4` (core), exactly as the coordinator
@@ -2150,9 +2186,32 @@ Loopex.Runtime.quiesce(runtime, drain_deadline_ms) ::
    | --- | --- |
    | `session_id` | The session being fenced |
    | `mutation_domain` | The ownership domain, as every owner transaction uses |
-   | `tx_id` | **Derived, not random**, by the discipline the coordinator already uses: `owner_identity/3` hashes a namespace, a succession identity and an attempt into a stable ID (`session_coordinator.ex:1346`, `:1490-1498`). Quiesce derives its own from the drain's identity — the session and the `command_id` it minted for that session's abort — so the fence has a preallocated, recoverable ID rather than a fresh guess, which is what the durability rule requires of any effect identity |
+   | `tx_id` | **Derived, not random**, by the discipline the coordinator already uses: `owner_identity/3` hashes a namespace, a succession identity and an attempt into a stable ID (`session_coordinator.ex:1346`, `:1490-1498`). Quiesce derives its own from **`(drain_id, session_id)`** — see below |
    | `expected_owner_epoch`, `expected_journal_version` | Read **fresh** from `Store.ownership_head/3`, exactly as the coordinator reads them (`session_coordinator.ex:1337-1343`), so the fence binds the state it is actually fencing |
    | `proposed_owner_incarnation_id` | A fresh incarnation, in the same form the coordinator mints (`fresh_incarnation/2`, `:1500`) |
+
+   **`drain_id` is one identity per `quiesce/2` call, and it has to be, because
+   the abort's `command_id` is not available for every fenced session.** An
+   earlier revision derived the fence's `tx_id` from that abort — which works
+   for a session that was drained and fails for an `absent` one, where no
+   abort is admitted at all. So core mints **one** `drain_id` when the call
+   begins, with the generator it already uses for identifiers of its own
+   (`:crypto.strong_rand_bytes(16)` rendered base16,
+   `session_directory.ex:545-548`), and every fence in that drain derives its
+   `tx_id` from `(drain_id, session_id)`. One identity, every session, drained
+   or absent.
+
+   **What makes that recoverable, which is the property the durability rule
+   actually asks for.** The rule is that a preallocated ID be *recoverable
+   from the owning command or operation identity* — not that the identity
+   itself be durable. Here the owning operation is one drain, and two things
+   make its fences recoverable without journaling anything new: the derivation
+   is total, so given `drain_id` every fence ID in that drain can be
+   recomputed; and `drain_id` is **reported** on the daemon's stop line beside
+   the budget, so an operator reconciling a root has the one value the
+   derivation needs. Nothing about the drain is written to the journal for its
+   own sake — the fence transactions are the durable record, and each carries
+   its own derived ID.
 
    **The proposed incarnation is a fence marker, not an owner**, and nothing
    inherits it. The next activation of that session builds its own candidate
@@ -2163,12 +2222,22 @@ Loopex.Runtime.quiesce(runtime, drain_deadline_ms) ::
    activation supersedes. Fencing therefore costs the next activation one
    ordinary epoch step and nothing else.
 
-   That turns an unanswerable question into a decided one. An old transaction
-   either wins the race to linearization — in which case it commits, is
-   observed, and the session's durable state includes it — or it loses, and is
-   refused as stale. Either way, when `quiesce/2` returns, **no transaction
-   for an unsettled session can still commit**, and the daemon's report is
-   true when it is read rather than true when it was written.
+   That turns an unanswerable question into a decided one, and the decision
+   has exactly three outcomes — an earlier revision claimed only the first
+   two and overstated what the mechanism gives:
+
+   | Outcome | What it means | How the session is reported |
+   | --- | --- | --- |
+   | The fence **commits** | The epoch has moved; any older `session_commit` linearized afterwards is refused `:stale_owner_epoch` | `unsettled`, fenced |
+   | The fence is **refused `:stale_owner_epoch`** | The old transaction linearized **first** and committed. The fence lost the race, which means there is nothing left to fence: the session's durable state already includes that commit | Classified **from the journal**, as whatever that commit made it — settled by its own terminal if it carried one. It is not reported as fenced, because it was not |
+   | The fence answers **`commit_unknown`** | The Store cannot say whether it linearized | Retried with the **same derived `tx_id`**, which is idempotent by construction, until the drain deadline; if it is still unknown then, the session is reported `unsettled` with `fence: :unknown` |
+
+   So the claim the plan makes is the one the mechanism supports: when
+   `quiesce/2` returns, every session it reports as fenced has had its epoch
+   moved, and every session it reports otherwise is classified from what the
+   journal actually holds. What it does **not** claim is that no transaction
+   anywhere can still commit — a fence that is itself `commit_unknown` is
+   precisely the case where the daemon says so rather than pretending.
 
    **The classification quiesce returns has three lists, not two**, because
    `Control` can hold an entry whose coordinator is already dead: its `DOWN`
@@ -2212,7 +2281,7 @@ of `max(10_000, grace_ms + 2_000)` from that same grace
 still.
 
 **What queues while the owner waits for it.** The owner is blocked in the
-`quiesce/2` call for at most `drain_ms`, and while it is blocked it is not
+`quiesce/2` call for at most the budget core derives, and while it is blocked it is not
 reading its mailbox: a linked component's `{:EXIT, …}` waits, as does a second
 signal. That is safe in one direction and deliberate in the other. The wait is
 bounded, so nothing waits indefinitely; and when the call returns, the owner
