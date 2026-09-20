@@ -107,13 +107,13 @@ Three consequences are real costs rather than benefits, and are stated as
 such. It is a **second provider credential**, `TYPESAFE_API_KEY` alongside the
 model credential, which means
 [ADR 0034](0034-provider-credential-handoff-over-bootstrap-channel.md#concept)'s
-per-invocation credential **token** has to become one per provider rather than
-one per call. ADR 0034 fixes one token per call and does not define that, so
-the generalisation is a prerequisite amendment to it, proposed with the
-milestone that accepts this decision; this one cannot be implemented before
-that lands. Because a token is routed through a host-owned registry, a second
-provider is a second row and a second token rather than a wider value, which
-is what keeps that amendment small. The **state sent to the model** is bounded, redacted, provenance-typed
+credential **token** — already one per configured provider, bound at
+composition, with resolution happening per invocation — is composed a second
+time, with a second registry row and a second custody process. No amendment to
+ADR 0034 is needed for that: it is the arrangement that pair already fixes,
+and an earlier revision of this one described it as "one token per call",
+which ADR 0034 never said. A second provider is a second row and a second
+token rather than a wider value. The **state sent to the model** is bounded, redacted, provenance-typed
 data the runtime already holds, under the same context-admission discipline
 that governs anything else staged for a provider; nothing new becomes
 sendable. And **latency and price are unmeasured** until the first real call;

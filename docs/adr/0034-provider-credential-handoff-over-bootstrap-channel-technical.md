@@ -70,12 +70,33 @@ So a token "supplied with each call" has nowhere to arrive from.
 The token therefore sits in `options`, beside the registry handle, and is the
 same class as the executor `reference:` the runtime already takes and
 `LoopexComposition` already fills with a live process reference. Its value is
-an **opaque token**: a binary of at most 256 bytes from ADR 0023's identifier
-alphabet, carrying no structure the adapter interprets and no authority of its
-own. It is not the credential, it does not name a module, and it cannot be
-resolved by anyone not already holding the host's registry. Any other shape —
-outside the alphabet, over the bound, or a bare binary that could plausibly be
-bytes — is refused as an invalid option before any child is spawned.
+a **struct**, not a binary:
+
+```elixir
+%Loopex.LLM.ReqLLM.CredentialToken{id: <<_::128>>}
+```
+
+— sixteen random bytes under a tagged name, carrying no structure the adapter
+interprets and no authority of its own. It is not the credential, it does not
+name a module, and it cannot be resolved by anyone not already holding the
+host's registry. The registry **refuses anything that is not that struct**,
+and an option carrying anything else is refused as invalid before any child is
+spawned.
+
+**A bare binary was the earlier shape, and it could not be validated.** That
+revision called the token an opaque binary of at most 256 bytes from ADR
+0023's alphabet and then said a bare binary "that could plausibly be bytes" is
+refused — which is not decidable, because a credential *is* a bare binary and
+many credentials are alphabet-clean and under 256 bytes. There is no content
+test that separates a token from a secret. A struct separates them by type:
+credential bytes never arrive as `%CredentialToken{}`, so the refusal is a
+pattern match rather than a judgement, and a credential accidentally passed as
+a token is refused at composition instead of being routed.
+
+**One token per configured provider, bound at composition.** A runtime that
+names two providers carries two tokens, each with its own registry row and its
+own custody process; it does not mint one per call. That is what makes ADR
+0035's second credential a second row rather than a widened value.
 
 **Every later use of "per-invocation" in this pair qualifies the resolution.**
 On each call the sender routes the token through the handle, receives the
@@ -136,8 +157,11 @@ separate:
   validates and hands to `complete/3` unchanged, so it is the seam that
   already exists for exactly this: something the host decides once, per
   runtime, that every invocation needs. Composition puts the registry
-  reference there, under its own key, beside the token the caller supplies per
-  invocation.
+  reference there, under its own key, beside the token — which composition
+  also puts there, once, per configured provider. An earlier sentence said
+  the caller supplies the token "per invocation"; that contradicted this
+  pair's own binding rule and is corrected: what happens per invocation is the
+  **resolution**, never the supply.
 - **It is a runtime-local capability handle, exactly the class the runtime
   already takes.** The precedent is the executor: `Loopex.Runtime`'s executor
   configuration carries `reference:`, and `LoopexComposition` fills it with
@@ -358,7 +382,7 @@ produced, and nothing else is accepted.
 | Atom | Produced by | For |
 | --- | --- | --- |
 | `:no_token` | The adapter | The configuration carries no `:credential_token` at all |
-| `:invalid_token` | The adapter | A token outside the identifier alphabet or over 256 bytes, refused before any lookup |
+| `:invalid_token` | The adapter | A `:credential_token` that is not a `%Loopex.LLM.ReqLLM.CredentialToken{}` struct with a 16-byte `id`, refused before any lookup |
 | `:missing` | A custody process | It has no credential for this token |
 | `:expired` | A custody process | It has one and considers it no longer valid |
 | `:oversized` | The sender | A successful reply whose bytes fall outside 1 to 65,536 |
@@ -395,7 +419,7 @@ leaves no retained copy of anything the resolver may have produced:
 | Condition | Outcome |
 | --- | --- |
 | No `:credential_token` in the configuration | `:no_token`, refused before the namespace is created and before any child is spawned |
-| Malformed token — outside the identifier alphabet or over 256 bytes | `:invalid_token`, refused before any lookup and before any child is spawned |
+| Malformed token — anything that is not a `%CredentialToken{}` struct with a 16-byte `id`, a bare binary included | `:invalid_token`, refused before any lookup and before any child is spawned. The struct is what makes this decidable: a credential is a bare binary, and no content test separates one from a token |
 | A successful custody reply that is malformed — not `{:ok, %{credential: binary}}`, a bare binary included | `:unavailable`; a bare binary is refused rather than accepted, because accepting it would carry bytes in a shape the redaction pass leaves verbatim below 65 bytes |
 | The registry holds no row for the token, the registry is gone, or the custody process is dead | `:unavailable`. The host recomposes; nothing is reconstructed, because the registry holds no bytes to reconstruct from |
 | Custody answers `{:error, :missing}` or `{:error, :expired}` | The sender reports `{:error, that_atom}`; the invocation fails through ADR 0019's existing credential-send failure path, the guard tears the child down, and the atom becomes the bounded non-secret status ADR 0029 fixes |

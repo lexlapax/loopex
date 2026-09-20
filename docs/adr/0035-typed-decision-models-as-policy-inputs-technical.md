@@ -80,25 +80,23 @@ bounded plain-data contract stay out by the rules that already exclude them.
 `TYPESAFE_API_KEY` is a **second** provider credential, and this is the one
 place where this decision constrains an earlier one.
 [ADR 0034](0034-provider-credential-handoff-over-bootstrap-channel.md#concept)
-fixes a per-invocation credential **token**, opaque to the adapter, routed by
-a host-owned registry to the custody process that holds the bytes — and it
-fixes **one** token per call, which is right for the one provider that exists
-today. A second provider needs one token per provider: a call says which
-credential is wanted, and a host composing both registers two tokens. ADR 0034
-does not define that, and this pair does not pretend it does — the
-generalisation is **a prerequisite change to ADR 0034**, made by its own
-amendment or by an ADR superseding it, proposed with the milestone that
-accepts this decision.
+fixes a credential **token** — a `%Loopex.LLM.ReqLLM.CredentialToken{}`
+struct, opaque to the adapter, routed by a host-owned registry to the custody
+process that holds the bytes — as **one per configured provider, bound at
+composition**, with resolution happening per invocation. An earlier revision
+of this pair said ADR 0034 fixed "one token per call" and called the
+generalisation a prerequisite amendment. That was a misreading of ADR 0034,
+and it is withdrawn: a second provider is a second token, a second registry
+row and a second custody process, composed the same way the first is, and
+**no amendment to ADR 0034 is required**.
 
-The token shape makes that change smaller than it would otherwise have been,
-which is worth recording because it is the practical consequence of the
-maintainer's decision of 2026-09-20. The registry already maps token to
-custody process, so a second provider is a second row and a second token, not
-a wider value: the option becomes one token per provider being invoked,
-resolution looks up the row for the token that call carries, and nothing about
-the registry's routing-only contents, custody, rotation, the
-guardian-enforced deadline or the closed reason set changes. Until that change
-is accepted and landed, this decision cannot be implemented, and nothing in M5
+What remains true is the shape of the consequence. The registry maps token to
+custody process, so a second provider costs a row rather than a wider value:
+a runtime carries the token for each provider it is configured with,
+resolution looks up the row for the token that invocation carries, and nothing
+about the registry's routing-only contents, custody, rotation, the
+guardian-enforced deadline or the closed reason set changes. Until ADR 0034 is
+accepted and landed, this decision cannot be implemented, and nothing in M5
 anticipates it.
 
 ### Seams, in the order they are worth doing
@@ -186,10 +184,9 @@ Nothing public changes. The `Loopex.Policy` and `Loopex.Model` callbacks, the
 public protocol and its generations, public events, snapshots, artifacts, the
 executor protocol and every durable record are untouched. A runtime with no
 evaluation configured is byte-for-byte the runtime that exists today. The one
-compatibility effect is on host composition, and it arrives with the
-prerequisite amendment to ADR 0034 rather than with this pair: a credential
-token becomes one per provider instead of one per call, and a host registers a
-second routing row.
+compatibility effect is on host composition and arrives with this pair: a host
+that configures evaluation composes a second credential token, a second
+registry row and a second custody process, exactly as it composes the first.
 
 Rollback is removing the evaluation. Every seam is an input, so a host that
 stops asking decides as it did before by the same path; a journaled answer
