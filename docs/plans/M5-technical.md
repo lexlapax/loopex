@@ -1392,6 +1392,13 @@ reported **unsettled**, and the teardown ends it crash-equivalently: the
 deadline is the daemon's, not the executor's, and quiesce does not extend one
 to satisfy the other.
 
+**A session waiting on an interaction cannot settle, and that is correct.**
+An answer to a durable interaction is a session command under ADR 0024, and
+step 1 has already refused admissions, so no answer can arrive during the
+drain. Such a session is reported **unsettled**, its interaction stays durable
+and unanswered, and the next daemon can answer it — which is exactly what a
+durable interaction is for. Quiesce does not answer, expire or abandon one.
+
 So the outcome has two halves and both are said: **work that settled within
 the grace has its ordinary terminal facts in the journal** — including
 `cancelled` where a cancellation produced one, which is a true statement about
@@ -1536,7 +1543,7 @@ performs itself, then a halt that cannot hang.
 Store's marker release does not happen at the halt. On the ordered path that
 is fine — the Store was already stopped in step 6, and its `terminate/2` ran
 then. On the **fatal** path it was not fine, and an earlier draft left a real
-hole: for the seven classes where the Store is still alive (`runtime_lost`,
+hole: for the classes where the Store is still alive (`runtime_lost`,
 `transfers_lost`, `workspace_lease_lost`, `executor_lost`, `registry_lost`,
 `custody_lost`, `listener_lost`), nothing stopped the Store, so the halt
 left the marker file behind on a daemon that had shut down deliberately. The
@@ -1714,9 +1721,10 @@ the cause and try again without a recovery step.
 - **One class per linked component of the fixed set.** Each is
   killed in turn, in its own case, and the daemon is asserted to exit with
   that component's class, to send that component's `fatal:<class>` on the wire
-  where a socket still exists, and — for the seven classes where the Store is
+  where a socket still exists, and — for the classes where the Store is
   still alive — **to leave no stale marker**, proved by the next daemon
-  opening that root with nothing to recover — `runtime_lost`, `transfers_lost`,
+  opening that root with nothing to recover; seven of them in a daemon with
+  transfers enabled and six without — `runtime_lost`, `transfers_lost`,
   `workspace_lease_lost`, `executor_lost`, `registry_lost`, `custody_lost`,
   `listener_lost`, beside the two store classes. The set is closed for the
   fixed set, so one of those dying without a class is a failing case rather
@@ -1803,6 +1811,33 @@ where the daemon was given a job the code on the other side does not let it
 do. This table is the answer to both: one row per boundary M5 touches, and
 every cell resting on a code line that exists today or on a component this
 plan names as new. It is the thing to check a change against.
+
+**First, the process inventory**, because more than one review found two
+documents counting the same processes differently. Every process any document
+in this set names appears here once, with who starts it, who holds its link,
+who stops it and what its death means.
+
+| Process | Started by | Linked to | Stopped by | Its death |
+| --- | --- | --- | --- | --- |
+| **Daemon owner** | The `loopex daemon` escript | — | Itself; it halts the VM | There is nothing above it; the signal handler's backstop halts with `owner_lost` if a signal finds it gone |
+| Credential routing **registry** (ADR 0034) | Daemon owner, first | Daemon owner | Orderly step 6 | `registry_lost`, daemon-fatal |
+| Credential **custody process** (ADR 0034) | Daemon owner, second | Daemon owner | Orderly step 6 | `custody_lost`, daemon-fatal |
+| **Store adapter** (ADR 0031) | The composition function, in the owner's process | Daemon owner | Orderly step 6, **last of all** | `store_lost`, or `store_capacity_exceeded` on its own capacity refusal — both fail-stop |
+| **Artifact transfers owner** | The composition function | Daemon owner | Orderly step 6 | `transfers_lost`, daemon-fatal. **Absent** where transfers are disabled |
+| **Workspace lease** | The composition function | Daemon owner | Orderly step 6 | `workspace_lease_lost`, daemon-fatal |
+| **Local executor** | The composition function | Daemon owner | Orderly step 6, before the lease | `executor_lost`, daemon-fatal |
+| **Runtime root** (a supervisor) | The composition function | Daemon owner | Orderly step 5 | `runtime_lost`, daemon-fatal |
+| **Listener** | Daemon owner, last of the fixed set | Daemon owner | Orderly step 1 stops it accepting; step 3 closes and unlinks | `listener_lost`, daemon-fatal, and the one fatal class no client can be told |
+| **Lease owner, one per activated session** (ADR 0033) | Daemon owner, on activation | Daemon owner | Orderly step 4, in sequence | **Session-scoped**: that session's controller closes with `control_owner_lost`, observers stay, the next acquisition starts a fresh owner with a fresh epoch. Population bounded by the 64-activation ceiling |
+| **Connection**, one per accepted client | The listener | The listener | Orderly step 3, or the client | That client's connection closes. Nothing else |
+| **Stop helper**, one per stop | Daemon owner, `spawn_monitor` | Monitored, never linked | Its own call returning or raising | Nothing: it is monitored so that whatever `GenServer.stop/3` does to it cannot reach the owner |
+| **Session coordinator** | Core, under a `DynamicSupervisor` (`restart: :temporary`) | Core | Core, when the runtime stops | Core's own refusal on the next command for that session; **no signal reaches the daemon and none is owed** |
+| **Owner group and workers** | Core, beneath a coordinator | Core | Core | Core's; a trapping owner group unwinds on its own clock and the daemon does not wait for it |
+| **Attachment dispatcher** | Core, per attachment | Core | Core | That attachment's, and core's existing detachment rules |
+| **Trace tracer** | Core, per trace session | Core | Core | The trace session's; it carries no daemon meaning |
+| **Provider sender and guardian** (ADR 0034) | The adapter, per invocation, inside the calling process | Neither is linked to the daemon owner | The guardian kills the sender at the deadline; both end with the invocation | That invocation's refusal, as one of the seven atoms. No daemon class |
+| **Provider child**, its Port and OS process (ADR 0019) | The adapter's launcher, per invocation | The Port's owner | The invocation | That invocation's refusal |
+| **Per-job Port worker, carrier and guard** (ADR 0022) | The local executor, per job | The worker is monitored by the executor; the carrier and guard are OS processes | The worker terminates the captured group when the executor goes | The job's outcome, reconciled through `commit_unknown`. **These are the processes the daemon cannot wait for at a halt** |
 
 | Boundary | Owner | What fails | Who observes it, and how | What the client sees | Durable / not durable |
 | --- | --- | --- | --- | --- | --- |
