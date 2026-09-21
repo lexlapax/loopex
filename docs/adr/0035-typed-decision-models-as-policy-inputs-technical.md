@@ -227,12 +227,12 @@ amendment rather than with this pair: a host that configures evaluation
 composes a second credential token, a second registry row and a second custody
 process, and the adapter gains the seam that selects between them.
 
-Rollback is removing the evaluation. Every seam is an input, so a host that
-stops asking decides as it did before by the same path; a journaled answer
-remains a true record of what was observed at the time and is not a premise
-anything later depends on, so nothing has to be migrated or repaired. Nothing
-from this decision exists before its own milestone, so there is nothing in M5
-to roll back.
+Composition rollback is removing the evaluation. Every seam is an input, so a
+host that stops asking decides as it did before by the same path. Acceptance
+must still resolve whether later records depend on a journaled answer and what
+migration, repair or old-reader behavior that answer requires, as the first
+open question above states. Nothing from this decision exists before its own
+milestone, so there is nothing in M5 to roll back.
 
 Acceptance binds this complete pair at the exact candidate the maintainer names
 in the governance record. Its claims remain unproved until the tests above

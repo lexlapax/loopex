@@ -531,10 +531,10 @@ where it is not (`Loopex.M1RuntimeTestStore`, which core's tree can reach and
 executed counts this plan already holds are the ones named in the `quiesce/1`
 row of the evidence table above: a fresh create's nine Store calls, ten with
 the retry; an attach's one over an empty session and two over eight events; a
-resume's fifteen over a twelve-record session on the path where both plausible
-abort IDs and both plausible fence IDs are absent — the original eleven plus
-two abort-status and two fence-status queries — and thirteen when the current
-abort and fence IDs are terminal; a shutdown
+resume's fifteen over a twelve-record session containing one committed event
+on the path where both plausible abort IDs and both plausible fence IDs are
+absent — the original eleven plus two abort-status and two fence-status queries
+— and thirteen when the current abort and fence IDs are terminal; a shutdown
 fence's three at worst.
 
 Those are **core** witnesses, because those paths are core's: the daemon
@@ -2191,7 +2191,9 @@ runtime — rather than against a staged one the plan would have to invent:
    `LoopexComposition.Placement.acquire/1`. A live or unverifiable owner, or a
    lock operation failure, ends startup with its typed placement class before
    the Store or socket is touched. A stale owner is reclaimed only under the
-   utility's existing OS-incarnation guard.
+   utility's existing OS-incarnation guard. Immediately after acquisition,
+   `File.stat/1` reads the acquisition-specific regular-file owner handle that
+   this start created and retains its uid as `daemon_uid`.
 4. **Start the credential routing registry, the custody process and the
    tracing capability**, in that order. All three are
    the daemon's own, as ADR 0034's host, and all three must exist before the
@@ -2207,12 +2209,10 @@ runtime — rather than against a staged one the plan would have to invent:
    enabled, the workspace lease, the executor and the runtime, and returns
    every pid it linked. A daemon that does not hold the marker fails here and
    never reads, unlinks or binds the socket path.
-6. **Establish one owner UID, create or verify the owner-only `0700`,
+6. **Use the retained owner UID to create or verify the owner-only `0700`,
    non-symlink `daemon/` directory, then load the daemon's versioned index.**
-   Immediately after placement acquisition, `File.stat/1` reads the
-   acquisition-specific regular-file owner handle that this start created and
-   retains its uid as `daemon_uid`. The `daemon/` directory must have that
-   uid; this comparison does not depend on an OTP effective-uid API. The index
+   The `daemon/` directory must have `daemon_uid`; this comparison does not
+   depend on an OTP effective-uid API. The index
    read consumes at most its fixed encoded-file ceiling, validating its
    version, digest, unique sorted rows and
    4,096-entry ceiling, and never enumerating `sessions/`. A root with session

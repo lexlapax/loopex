@@ -937,8 +937,8 @@ defmodule Loopex.Checks.Register do
     )
     |> Map.put(
       "Next transition",
-      "Implement the accepted outcomes with `bash scripts/check.sh` green, then move " <>
-        "`#{name}` to In progress and In review"
+      "Move `#{name}` to In progress and implement the accepted outcomes with " <>
+        "`bash scripts/check.sh` green; the completed tested commit then moves it to In review"
     )
   end
 
