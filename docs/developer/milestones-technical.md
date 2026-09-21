@@ -93,11 +93,46 @@ At the candidate commit:
    correctness, test honesty, public impact, security and rollback; blocking
    findings are fixed first.
 5. The packet to the maintainer: outcomes and their proof, the runs, the
-   review, what remains. On their decision, the closure commit moves the
-   register row to `Closed`, fills the plan's Closure row with the reviewed
-   candidate SHA, and records the maintainer's words in
+   review, what remains. On their decision, the **administrative closure
+   commit** moves the register row to `Closed`, fills the plan's Closure row,
+   and records the maintainer's words in
    `docs/developer/agent-context-map.md`. `mix loopex.status` derives the
    `Closed` capsule; run it and copy what it expects.
+
+**The two SHAs, and what each one carries.**
+
+| | Tested implementation SHA | Administrative closure SHA |
+| --- | --- | --- |
+| What it is | The candidate the checks ran on and the reviewer read | The commit that records the decision |
+| What it changes | Everything the milestone implemented | The register row, the plan's Closure row, the context-map entry, and nothing else |
+| What names it | Every run on the evidence page, and the review | The register, once `Closed` |
+| Its evidence | The runs of step 3, taken from it | None of its own; it is a record, not a claim |
+
+The plan's **Closure row carries both**: the tested implementation SHA the
+packet was assembled from, and the administrative SHA that closed it. A
+reviewer checking the milestone reads the first; a reader tracing the decision
+reads the second. Recording only one leaves either the evidence or the
+decision unlocatable.
+
+**The administrative commit is verifiable as administrative**, and that is
+what keeps the split honest rather than decorative: its diff touches only the
+four places above, so `git show` over it is the check. Anything else in that
+diff means the evidence no longer covers the tree, and the packet is
+reassembled from a new implementation SHA.
+
+**The documentation and archive checks run on the tagged SHA.** They are the
+two whose subject is the published bytes — the documentation gate reads every
+tracked file under `docs/`, and the archive proof builds an extraction of the
+exact commit — so running them only on the implementation SHA leaves the
+administrative commit's own documentation changes unchecked and the archive
+proved for a tree nobody publishes. They run again on the tag, and their
+results join the evidence page with the tag named.
+
+**Run evidence is immutable.** A run's identity, platform, toolchain, result
+and duration are retained where they cannot be edited after the packet is
+read: attached to the annotated tag, or held outside the repository with its
+digest recorded here. An evidence page that can be rewritten after a reviewer
+read it is a record of what someone later wished had happened.
 
 <a id="technical-milestones-release"></a>
 ### Tags

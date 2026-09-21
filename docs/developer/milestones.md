@@ -62,6 +62,24 @@ page; ask an independent reviewer to read the candidate; then present the
 packet to the maintainer. The maintainer closes it; the register moves to
 `Closed`, and the plan records the closing decision and the candidate. Use
 the `close-milestone` skill.
+
+**Closure names two commits, because one cannot name itself.** The checks and
+the review are of a **tested implementation commit**; recording the closure —
+the register row, the Closure row, the context-map entry — is a further commit
+that necessarily comes after, and that the evidence therefore cannot have
+been taken from. Earlier wording asked for both from one SHA, which no
+sequence of commits can satisfy. So a closure carries the **tested
+implementation SHA**, which the runs and the review name, and the
+**administrative closure SHA**, which records the decision and changes nothing
+the runs covered. A closure whose administrative commit touches anything
+else is not administrative, and its evidence is stale.
+
+**Two obligations follow from that split.** The documentation and archive
+checks are the ones a later commit can invalidate, so they run **on the tagged
+SHA** — the exact bytes published — rather than on the implementation commit
+alone. And run evidence is **immutable**: retained where it cannot be edited
+after the fact, attached to the tag or held outside the repository, so that
+what a reviewer read and what a reader later finds are the same thing.
 Technical depth: [The closure packet](milestones-technical.md#technical-milestones-close).
 
 <a id="concept-milestones-release"></a>
