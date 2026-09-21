@@ -1135,7 +1135,7 @@ returned twice, because nothing deletes a row and no two rows share an ID. A
 client that needs a complete view pages again from the start; deduplication is
 unnecessary here, though a client that deduplicates by session ID loses
 nothing. A `limit` outside 1 to 256 or an `after_session_id` that is not
-a well-formed session ID refuses with the existing invalid-argument reason; an
+a well-formed session ID refuses with ADR 0023's existing `invalid_request`; an
 `after_session_id` naming an unknown session is admitted and pages from its
 byte position.
 

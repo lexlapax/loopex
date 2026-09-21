@@ -215,8 +215,8 @@ maintainer or a recorded delegate, durable evidence of that authority's explicit
 disposition, and the accepted candidate SHA. Moving it to `Closed` requires the
 same for the reviewed closure candidate. An explicit decision may be recorded;
 it may not be supplied or inferred. An independent reviewer reads the exact
-candidate before either transition, and the transition itself changes only the
-governance row, the disposition it names, and the derived status blocks.
+candidate before either transition, and the transition itself is confined to
+[the four paths the milestone guide names](../developer/milestones-technical.md#technical-milestones-confinement).
 
 The sections a plan pair carries, and what each states, are defined once in
 the [milestone guide](../developer/milestones-technical.md#technical-milestones-agree);
