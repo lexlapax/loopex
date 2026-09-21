@@ -56,10 +56,15 @@ controller can relinquish a dormant session after attach refuses; a lease that i
 renewed expires. Nothing about how the connection ended shortens the term,
 because over a Unix-domain socket the daemon cannot tell a polite close from a
 killed client — both are EOF — so only a message the client actually sent can
-mean "I am done". Takeover is explicit: while the lease owner remains live, an
-observer asks for control and receives it only when the lease is released or
-expired. If the lease owner itself fails, a later acquisition starts no fresh
-owner until the exact dead-owner pop, classification acknowledgement and
+mean "I am done". Core's non-prepared owner-succession cut does not end the
+daemon connection: it invalidates that session's attachment and sends
+`detached`, while the exact lease holder, epoch and deadline remain unchanged.
+The holder must reattach before another mutation can pass the live-attachment
+gate; it may still release without an attachment. Takeover is explicit: while
+the lease owner remains live, an observer asks for control and receives it only
+when the lease is released or expired. If the lease owner itself fails, a later
+acquisition starts no fresh owner until the exact dead-owner pop,
+classification acknowledgement and
 terminal holder-close or correlated-refusal settlement complete. Its first
 grant additionally waits until every retained predecessor ticket and retirement
 completion settles. Every grant mints a new writer epoch before
@@ -186,7 +191,11 @@ receives exactly its classified refusal or holder close and starts no core task,
 a promoted task settles to its real result, its observers stay, and the
 replacement's grant is held until both populations and the owner-loss
 notification barrier settle — and a daemon
-restart leaving every session uncontrolled with every earlier epoch refused. No durable record changes, so no migration or
+restart leaving every session uncontrolled with every earlier epoch refused.
+A non-prepared core succession additionally proves `detached` leaves both
+daemon connections open, preserves the controller's exact holder, epoch and
+deadline, refuses its mutation until reattach, and permits another connection
+to take over only after explicit release or expiry. No durable record changes, so no migration or
 rollback evidence is owed.
 
 Technical depth: [Contract and evidence](0033-collaboration-controller-lease-and-takeover-technical.md#technical-adr-0033-decision).

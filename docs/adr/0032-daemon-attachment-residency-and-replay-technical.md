@@ -55,8 +55,12 @@ current-pair CI and release lanes.
 filesystem.** The socket lives in that `0700` daemon-owned subdirectory and is
 itself created mode `0600`. Immediately after placement acquisition, the
 daemon retains as `daemon_uid` the uid read from that acquisition-specific
-regular-file owner handle. The directory and socket are verified by reading
-back their owner and mode and comparing them with `daemon_uid`, and
+regular-file owner handle. An unreadable, malformed or undecodable uid on that
+handle refuses startup as `placement_lock_failed` before the Store or socket
+path is touched, because the daemon has not established the placement identity
+against which later ownership is checked. The directory and socket are
+verified by reading back their owner and mode and comparing them with
+`daemon_uid`, and
 the daemon refuses to serve if either is wrong, if the subdirectory is not
 owned by that user, or if any component of the path below the state root is a
 symbolic link it did not create. The state root above it is read, never
@@ -805,16 +809,24 @@ all matching pending and live rows, kills their workers, calls
 `release_transfers/2` for every installed attachment, and acknowledges the
 exact removed identities. Control then removes the matching repetition and
 monitor state and sends each live stable holder an exact invalidation notice.
-Pending attach callers receive `attachment_superseded`; installed embedded
-handles become stale.
+Pending attach callers receive the private core result
+`attachment_superseded`; the generation-2 adapter maps that result to ADR
+0023's existing correlated `attachment_conflict`, so succession adds no wire
+code. Installed embedded handles become stale.
 
 The daemon registry joins that notice with the core cleanup acknowledgement
 before it releases each attachment charge. Release is idempotent by attachment
 identity, so a racing holder `DOWN` cannot double-free. A live generation-2
 holder receives one best-effort uncorrelated `detached` record with the
-session ID and last completely emitted cursor, then its connection closes.
-A succession may invalidate every connection attached to that session; it
-does not affect attachments to any other session.
+session ID and last completely emitted cursor. It clears that connection's
+local attachment identity but keeps the initialized, session-bound connection
+open. If the connection holds the controller lease, the daemon preserves its
+exact holder, writer epoch and absolute deadline; the missing attachment makes
+every later mutation refuse `control_not_held` until the holder reattaches.
+Succession grants no takeover: another connection still waits for successful
+explicit release or expiry. A
+succession may invalidate the attachment on every connection attached to that
+session; it does not affect attachments to any other session.
 
 **Dispatcher replacement is an attachment-generation cut, including for an
 embedded runtime.** The runtime supervisor can restart EventDispatcher without
@@ -1334,6 +1346,14 @@ errors answering one request: each carries that request's `request_id`, no
 | `activation_ceiling_reached` | a fresh `session.create` or dormant `session.resume`; an exact historical create replay remains available through the read-only discriminator | nothing |
 | `composition_mismatch` | `session.resume` on a session this composition cannot serve | nothing |
 
+`attachment_superseded` is not a generation-2 code. It is core's private
+result for an attach transaction invalidated by non-prepared owner succession
+while the dispatcher remains live, and the daemon maps it to ADR 0023's
+existing correlated `attachment_conflict`. The result carries the attach
+request's `request_id`, keeps the connection open and changes no generation-2
+error inventory or schema digest. A literal vector and the succession race
+witness bind that mapping.
+
 The same `control_owner_lost` code also has one **uncorrelated** granted-holder
 form, defined below with its cursor and close behaviour. Its two exact shapes
 are distinguished by `request_id` versus `session_id`; neither shape admits
@@ -1549,7 +1569,7 @@ limits — five inputs, and generation 2 changes **all five**:
 | Generation | New string |
 | Methods | Adds `session.list`, `daemon.status`, `session.acquire_control`, `session.release_control` |
 | Record families | Adds `daemon.stopping` and `daemon.notice` |
-| **Error codes** | Adds every refusal generation 2 can return and generation 1 cannot: `control_held`, `control_not_held`, `control_pending`, `control_capacity_reached`, `control_owner_lost`, `session_dormant`, `session_unavailable`, `daemon_stopping`, the three existence-query refusals the daemon maps to the wire (`session_unknown`, `session_id_invalid`, `store_unavailable`), and the activation and residency refusals (`activation_ceiling_reached`, `composition_mismatch`). **Not** `session_index_too_large`, `session_index_corrupt` or `session_index_upgrade_required`, which are startup exit classes and can reach no client, and **not** `capacity_exceeded`, which generation 1 already carries and generation 2 keeps for the two **attachment** ceilings — `attachments_per_session` and `attachments_per_daemon`, the "stable reason when exhausted" the attachment-lifecycle list names — and no longer for the connection ceiling, which is enforced at `accept` and therefore reaches no `initialize` |
+| **Error codes** | Adds every refusal generation 2 can return and generation 1 cannot: `control_held`, `control_not_held`, `control_pending`, `control_capacity_reached`, `control_owner_lost`, `session_dormant`, `session_unavailable`, `daemon_stopping`, the three existence-query refusals the daemon maps to the wire (`session_unknown`, `session_id_invalid`, `store_unavailable`), and the activation and residency refusals (`activation_ceiling_reached`, `composition_mismatch`). **Not** `session_index_too_large`, `session_index_corrupt` or `session_index_upgrade_required`, which are startup exit classes and can reach no client, and **not** `capacity_exceeded`, which generation 1 already carries and generation 2 keeps for the two **attachment** ceilings — `attachments_per_session` and `attachments_per_daemon`, the "stable reason when exhausted" the attachment-lifecycle list names — and no longer for the connection ceiling, which is enforced at `accept` and therefore reaches no `initialize`. `attachment_superseded` is also not added: it is a private core result mapped to generation 1's existing correlated `attachment_conflict` wire code |
 | **Limits** | ADR 0023's framing and input ceilings are unchanged, and generation 2 **adds** the residency keys a client can read: `connections_per_daemon`, `initialize_deadline_ms`, `attachments_per_session`, `attachments_per_daemon`, `session_list_page_max`, `session_index_entries`, `lease_term_ms` |
 
 **The uncorrelated `control_owner_lost` form closes a controller whose lease
@@ -1682,14 +1702,14 @@ connection to at most one attachment. A client that sees it may reconnect and
 acquire again; the next acquisition starts a fresh owner and mints a fresh
 epoch.
 
-**Every daemon-initiated detach is a record and a close, and the rule is one
-rule.** A connection holds at most one attachment, so a daemon that "detaches"
-a connection has left it holding nothing — no cursor position it can act on,
-no way to be told what it may resume from except the record it is being sent,
-and no mechanism to re-establish an attachment except a fresh `session.attach`
-it could equally send on a fresh connection. An earlier revision left such a
-connection open and declined a detach API in the same breath, which left the
-client in a state neither side had defined. So:
+**Every ordinary daemon-initiated eviction is a record and a close; succession
+is attachment-only invalidation.** A connection holds at most one attachment,
+so pressure, idle eviction or lease-owner loss ends the connection after its
+one bounded record attempt. Core succession is different: core has invalidated
+the attachment without ending the daemon connection or its lease. The daemon
+clears the connection-local attachment, reports the retained cursor and leaves
+the initialized connection open so the client can issue a fresh
+`session.attach`. So:
 
 | Occasion | Record written first | Then |
 | --- | --- | --- |
@@ -1697,7 +1717,7 @@ client in a state neither side had defined. So:
 | Output-buffer or core-queue overflow | `error`, ADR 0023's `detached`, with `session_id` and `event_cursor` | close that connection |
 | Aggregate byte pressure chose this attachment | the same `detached` | close that connection |
 | Idle observer eviction at ten minutes; a connection holding a controller lease is exempt until release or expiry | the same `detached` | close that connection |
-| Core reports a non-prepared session-succession invalidation after transfer cleanup | the same `detached` | close every notified connection for that session |
+| Core reports a non-prepared session-succession invalidation after transfer cleanup | the same `detached` | clear the local attachment and keep every notified connection open; any held lease, epoch and deadline remain exact |
 
 Reusing `detached` for the four attachment-removal rows is a **widening inside
 generation 2**, stated rather than slipped in: ADR 0023 defines that code for
@@ -1718,18 +1738,20 @@ gap is a defect.
 
 **"Best-effort" is the bound `daemon.stopping` already has**, reused rather
 than restated: exactly **one** non-blocking write attempt of the record into
-the connection's existing 4 MiB output buffer, and the close happens whatever
-that attempt did. A backpressured client — which is precisely the client an
-overflow detach is about — will usually not receive it and learns by EOF
-instead. No new timer and no new number.
+the connection's existing 4 MiB output buffer. An ordinary eviction closes
+whatever that attempt did; succession alone keeps the connection open whatever
+that attempt did. A backpressured client evicted for overflow will usually not
+receive the record and learns by EOF instead. No new timer and no new number.
 
 For the first four rows, no other connection is affected. The succession row
-instead closes every attachment for that session and leaves an attachment to a
-different session running. The witnesses assert that distinction: each
+instead invalidates every attachment for that session, keeps those initialized
+connections open and leaves an attachment to a different session running. The
+witnesses assert that distinction: each
 single-connection occasion keeps a second same-session connection delivering,
-while succession notifies and closes both same-session holders after transfer
-and charge cleanup and preserves the unrelated-session control connection. The five
-daemon-initiated close occasions have generation-2 vector coverage: both
+while succession notifies both same-session holders after transfer and charge
+cleanup, clears their local attachment identities and preserves all three
+connections. The five daemon-initiated removal occasions have generation-2
+vector coverage: both
 optional-cursor shapes of the uncorrelated `control_owner_lost` form and one
 vector for each of the four `detached` occasions. The correlated in-flight
 lease-operation `control_owner_lost` refusal has its separate
@@ -2019,8 +2041,9 @@ enters the digest's record-families input beside `daemon.stopping`.
 **Correlation, for the refusals above.** `control_not_held`,
 `control_pending`, `control_capacity_reached`, `control_held`,
 the in-flight lease-operation form of `control_owner_lost`, `session_dormant`,
-`session_unavailable`,
-`daemon_stopping` and the three existence-query refusals are
+`session_unavailable`, inherited `attachment_conflict` (including the mapping
+from core `attachment_superseded`), `daemon_stopping` and the three
+existence-query refusals are
 ordinary **correlated** errors: each answers one request and carries that
 request's `request_id`, no `event_cursor` and no session state, and none
 closes anything **by itself** — the connection and every attachment on it are
@@ -2760,16 +2783,31 @@ waiter or charge; after promotion, primary connection loss retains the one task
 and charge through its real result. Every result settles registry accounting
 before any primary or waiter reply, and shutdown abandonment reuses no charge.
 
-Succession cases resume an already active session under a fresh, non-prepared
-command identity while two generation-2 holders and one embedded holder are
-attached. No holder dies. Control clears every old route; EventDispatcher
-releases every attachment's transfers before acknowledging the exact identity
-set; Control notifies each holder; and the registry releases each daemon charge
-once, sends `detached` at that connection's last emitted cursor and closes both
-daemon connections. A racing holder `DOWN` in each mailbox order produces the
-same zero-count result. The embedded handles are stale, the unrelated-session
-control attachment keeps delivering, and a reconnect at each retained cursor
-is contiguous and at least once.
+Succession cases have a core witness and an integrated daemon witness. In both,
+one **embedded holder** issues a fresh, non-prepared resume of an already active
+session while two generation-2 holders and that embedded holder are attached;
+no holder dies. Control clears every old route, EventDispatcher releases every
+attachment's transfers before acknowledging the exact identity set, and
+Control notifies each holder. A racing holder `DOWN` in each mailbox order
+produces the same zero-count result, the embedded handles are stale, and the
+unrelated-session control attachment keeps delivering.
+
+The daemon witness starts with one attached controller and one observer and
+retains both initialized connections through that cut. It proves the registry
+releases each daemon attachment charge once, clears both connection-local
+attachment identities, sends `detached` at each last emitted cursor and keeps
+both initialized connections open. A pending
+generation-2 attach invalidated by the same succession receives the correlated
+inherited wire code `attachment_conflict`, never a private
+`attachment_superseded` string. The controller's exact lease holder, writer
+epoch and absolute deadline are byte-for-byte unchanged after invalidation; a
+mutation before reattach refuses `control_not_held` and changes none of them.
+Both connections then attach at their retained cursors with contiguous
+at-least-once delivery, and, with the monotonic clock still before the
+unchanged deadline, the controller's next mutation is admitted under the same
+epoch. The observer's takeover refuses `control_held` before the unchanged term
+ends, then succeeds only in paired cases where the controller explicitly
+releases or that deadline expires.
 
 Dispatcher-restart cases kill EventDispatcher with several holders before
 stage, after stage, after authorization, and after the publication
@@ -2855,7 +2893,11 @@ publication outcomes reverses the session operation, and command-ID recovery
 repairs an omitted row without creating a second session.
 The transport cases also cover simultaneous starts, Store
 loss, generation negotiation, peer authorization, socket-path bounds and ADR
-0023 framing refusals. A positive restart case verifies the retained path's uid
+0023 framing refusals. A forced unreadable and, separately, undecodable uid on
+the acquisition-specific placement owner handle refuses
+`placement_lock_failed` before Store open, daemon-directory access or socket
+work; it is distinct from a later socket metadata failure, which remains
+`socket_permission_unverified`. A positive restart case verifies the retained path's uid
 against the acquisition-specific placement owner handle, plus `:other`
 metadata and `S_IFSOCK` mode bits before replacement. A paired final-component
 replacement proves `File.rm/1` follows no replaced final component.
@@ -2917,8 +2959,10 @@ while supporting independent same-session and same-holder attachments. Three
 intentional transient behaviors change: a second attach no longer implicitly
 supersedes the first, and holder death releases that holder's complete
 attachment set and transfers; a non-prepared succession still invalidates the
-whole session set, but now releases every transfer and tells each live daemon
-holder to detach before its charge is freed. The new index
+whole session set, but now releases every transfer. The registry joins each
+holder notice with acknowledged core cleanup before freeing its charge, then
+clears the daemon attachment and reports `detached` while leaving the daemon
+connection and any held lease, epoch and deadline intact. The new index
 is a bounded daemon discoverability file only: no journal record, Store port,
 session event or snapshot depends on it. Foreground rollback ignores it, while
 an M5 daemon validates and reuses it. A legacy root is upgraded explicitly by

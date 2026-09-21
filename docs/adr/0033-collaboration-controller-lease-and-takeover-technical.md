@@ -810,6 +810,15 @@ uncontrollable until the term ran out. A holder that stops renewing loses the
 lease on its own clock and becomes an ordinary observer, evictable like any
 other.
 
+ADR 0032's non-prepared core-succession invalidation is not idle eviction and
+does not end the connection. The connection loses only its attachment and is
+sent `detached`; the lease owner retains the exact holder connection,
+`writer_epoch` and absolute deadline. The five-condition mutation gate then
+refuses `control_not_held` on its missing-attachment condition until that same
+connection reattaches. Release remains available without an attachment, and a
+different connection still receives `control_held` until explicit release or
+monotonic expiry makes takeover eligible.
+
 Expiry and
 admission use the daemon's monotonic clock: a deadline is set only by a
 successful grant or renewal, and a wall-clock jump cannot shorten or extend
@@ -957,6 +966,11 @@ the host placement lock and Store writer marker, never a client mutation and nev
   other way a connection ends — an orderly close, an EOF, a killed client, a
   severed socket — leaves the lease to expire on its term.
 
+  Core succession does not enter that list because it leaves the connection
+  open. Its attachment invalidation neither releases nor renews the lease:
+  holder, epoch and absolute deadline stay exact, mutation waits for reattach,
+  and takeover remains limited to explicit release or expiry.
+
   An earlier draft said an orderly close released the lease while an abrupt
   loss waited. That cannot be implemented over a Unix-domain socket and is
   withdrawn: the daemon sees EOF, and EOF is EOF. A client that closed
@@ -1037,7 +1051,13 @@ expired state and a holder lacking a live attachment each refused before core ad
 controller unaffected; release applies its four-condition gate without an
 attachment condition, including dormant acquire, failed attach, successful
 release and immediate acquisition by another connection; a lease transition racing command admission preserves
-this order; every ticketed call first has its retained
+this order. A non-prepared core succession invalidates a controller attachment
+and an observer attachment while keeping both daemon connections open; it
+preserves the controller's exact holder, epoch and absolute deadline, refuses a
+controller mutation on the missing-attachment condition before reattach,
+admits it under the same epoch after reattach, and refuses observer takeover
+until paired explicit-release and expiry cases make it eligible. Every ticketed
+call first has its retained
 `{connection_incarnation, request_slot, request_sequence}` origin row, a lease
 mutation binds its waiting worker before crossing to the owner, and any
 activation or attachment charge is bound by the registry before the exact
