@@ -3769,8 +3769,8 @@ information lost on the way.
 two store ones.** Store loss is the instance worth reading first because it is
 the one where the thing the daemon would otherwise stop is already gone; the
 other **ten** differ only in which component is missing by the time the owner
-runs them. **Twelve classes reach this path**, one per linked component of the
-fixed set: the two store classes, and `transfers_lost`,
+runs them. **Twelve classes reach this path** — one per linked component of
+the fixed set, eleven of them, with the Store carrying two: the two store classes, and `transfers_lost`,
 `workspace_lease_lost`, `executor_lost`, `registry_lost`, `custody_lost`,
 `capability_lost`, `runtime_lost`, `relay_lost`, `connections_lost` and
 `listener_lost` — eleven in a

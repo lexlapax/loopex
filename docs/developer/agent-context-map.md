@@ -5395,10 +5395,12 @@ covered" left that page with no home at all.
 
 The **tag names the administrative SHA**, because that is the tree a reader
 who fetches the tag gets. The release verifies that commit is confined —
-`git diff --stat <tested>..<administrative>` touching nothing outside
-`docs/` — and on that basis re-proves documentation only: `check.sh --docs` on
-the tagged SHA and a recomputed archive manifest against the one the tested
-SHA recorded. **No suite and no release check run twice**, and no provider
+`git diff --name-only <tested>..<administrative>` reaching only the four paths
+above, all of which are under `docs/`, so nothing outside `docs/` moved — and
+on that basis re-proves documentation only: `check.sh --docs` on
+the tagged SHA, and a recomputed archive manifest compared, for every entry
+outside `docs/`, with the one recorded on the evidence page for the tested
+SHA. **No suite and no release check run twice**, and no provider
 credential is spent again. Run evidence is immutable, held where it cannot be
 edited after the packet is read.
 

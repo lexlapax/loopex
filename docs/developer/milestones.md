@@ -57,11 +57,12 @@ A closure candidate is one commit on `main` at which every outcome maps to
 tests, retained evidence or a demonstration, the documentation the milestone
 changed is updated, and the plan's progress table says Proved for each
 outcome. From that exact commit run the fast check under the floor toolchain
-pair and the release check once; retain the run identities on an evidence
-page; ask an independent reviewer to read the candidate; then present the
-packet to the maintainer. The maintainer closes it; the register moves to
-`Closed`, and the plan records the closing decision and the candidate. Use
-the `close-milestone` skill.
+pair and the release check once; ask an independent reviewer to read the
+candidate; then present the packet to the maintainer. The maintainer closes
+it; the register moves to `Closed`, the plan records the closing decision and
+both SHAs, and the run identities are written to the milestone's evidence page
+— by that closing commit, since the runs are of the candidate and the
+candidate cannot carry runs of itself. Use the `close-milestone` skill.
 
 **Closure names two commits, because one cannot name itself.** The checks and
 the review are of a **tested implementation commit**; recording the closure is
