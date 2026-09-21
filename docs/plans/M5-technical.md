@@ -803,6 +803,21 @@ merely extractable.
 reviewed commit before closure, as the
 [milestone guide](../developer/milestones-technical.md#technical-milestones-release)
 sets out; every application reads it at compile time. The release-ready source
+**How a run is retained immutably, since a tag does not exist yet when the
+runs happen.** Every run in the closure matrix is produced *before* any tag,
+so "attach it to the annotated tag" cannot be the mechanism for any of them.
+The mechanism is the other one: each run's full output is written to a file
+outside the repository, its **SHA-256 recorded on
+`docs/evidence/M5-closure-runs.md`** beside that run's identity, platform,
+toolchain, result and measured duration, and the page itself committed at the
+tested implementation SHA — so the page a reviewer reads is fixed by the
+commit they review, and any later edit to it is a visible diff against that
+commit rather than a silent rewrite. What the tag adds is a second anchor for
+the two runs that happen *at* the tag: the release's `check.sh --docs` and the
+recomputed archive manifest, which the tag's own annotation can carry because
+they postdate it.
+
+The source
 archive is staged from the exact committed candidate with `git archive`,
 extracted outside the checkout, compiled, and used to run the two-process
 workflow from the extraction following the operator guide; its SHA-256, source
@@ -1830,6 +1845,17 @@ once the connection process is the caller.
   decided by one resolution rather than by draining a queue of unknown
   depth.
 
+  **That queue is bounded, and by a number this milestone does not invent.**
+  Only the controller connection may mutate a session, so every queued
+  mutation for one session came from one connection — and ADR 0023 already
+  fixes that "no more than 32 requests are in flight per connection"
+  (`0023-…-technical.md:332-333`), checked at admission rather than after
+  enqueue. So a lease owner holds **at most one unresolved ticket and at most
+  31 mutations behind it**, and the daemon adds no second queue and no second
+  bound. A client that exceeds the in-flight bound is refused by the rule that
+  already exists, at the connection, before any of this. The limits table
+  carries the row.
+
   **Two of the ten are not mutation tickets and the rule does not reach
   them**, stated because a rule that silently excluded them would be read as
   covering them. `session.create` has no session to be one-per, its ticket is
@@ -1966,7 +1992,7 @@ composition function builds that configuration — which means before the
 runtime starts, and the composition function starts the runtime at the end of
 its own chain, so before the composition call itself.
 
-Order 3 to 7 is the composition's actual chain, not a tidied one: the Store
+Links 4 to 8 are the composition's actual chain, not a tidied one: the Store
 first, then the artifact placement and the executor's own edges, and the
 runtime last within that chain, because it depends on all of them.
 
@@ -4763,6 +4789,7 @@ line; M5 introduces none of its own.
 | Store stop | a fixed 30 s, the Store's own `@call_timeout` (`apps/loopex_store_local/lib/loopex/store/local.ex:65`), independent of any grace; the usual release takes milliseconds | This plan, against the Store's existing bound |
 | Maximum fail-stop exit | **35 s** — 5 s for the executor stop and the Store's own fixed 30 s, the only two steps of that path that wait; 5 s on the two store classes, where the Store is already gone | This plan, as the sum of its parts |
 | Wait slice | 60_000 ms, so no `receive … after` argument approaches the BEAM's 2^32-1 limit, probed at both pairs | This plan; the limit is the VM's |
+| Queued mutations per session in its lease owner | at most 31, behind the one unresolved ticket: only the controller connection mutates a session, and ADR 0023 bounds a connection to 32 requests in flight, checked at admission | ADR 0023, reused; this plan adds no second queue bound |
 | Lease term | 30 seconds | ADR 0033 |
 | Lease renewal interval for the reference clients | 10 seconds | ADR 0033 |
 | Takeover grace beyond expiry | none; takeover is eligible at expiry and granted once the session's in-flight admission set is empty | ADR 0033 |

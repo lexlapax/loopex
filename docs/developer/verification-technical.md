@@ -125,8 +125,10 @@ asynchronous; after step 3, 49 of 119 are. Step 3 examined the four heavy
 applications only; the six light ones (62 s in sequence, 25 serial modules)
 were not read and are not claimed here. In the four examined, each
 module still serial carries one of: the one provider credential variable
-written into this VM's environment so the child inherits it (the twelve heavy
-`loopex_llm_reqllm` modules, `cli`, `session_directory`, `coding_tools`,
+written into this VM's environment so the child inherits it (eleven of the
+thirteen heavy `loopex_llm_reqllm` modules — the other two are serial with
+them because the application cannot run part of itself concurrently — plus
+`cli`, `session_directory`, `coding_tools`,
 `executor`, `host_policy`); a global `:erlang.trace_pattern` (`cancellation`,
 `cancellation_observation_contract`, `context_admission`, `skill_context`,
 `local_authority_contract`, `post_closure_hotfix`, `ledger_record_conformance`,
@@ -219,9 +221,11 @@ on the Mac: `loopex` 191 → 125 s, the others within a few seconds of before;
 the whole fast check, warm build, 254 → 224 s at `69dd710`. The three returned modules
 run about 1 s, 0.1 s and 22 s. The limit on the critical path is structural: the
 applications run in parallel VMs, `loopex_llm_reqllm` is the longest, and 96%
-of its 209 s sits in the twelve modules that share the process-wide
-credential variable, so two of them running at once would hand each other's
-canary to each other's child. Making those concurrent means passing the
+of its 209 s sits in the **thirteen** modules that run serially — **eleven**
+of which share the process-wide credential variable, so two of those running
+at once would hand each other's canary to each other's child, and the other
+two are serial with them because the application runs its modules under one
+setting. Making those concurrent means passing the
 credential to the child per invocation instead of through the environment,
 which is a change to the credential plane and a maintainer decision, not a
 suite change; until then `loopex_llm_reqllm` pins the check near 210 s.

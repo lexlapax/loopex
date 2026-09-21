@@ -30,9 +30,13 @@ weaker property than the rest of the plane: a secret that has to sit in a
 process-wide slot for the duration of every call is reachable by anything in
 the VM that can read the environment, and it is exactly the kind of ambient
 authority the runtime refuses everywhere else. And it forces serialisation:
-the thirteen heavy `loopex_llm_reqllm` test modules each install their own
-canary in that slot, so two of them running at once would hand each other's
-canary to each other's child. The
+**eleven of the thirteen** heavy `loopex_llm_reqllm` test modules install
+their own canary in that slot, so two of *those* running at once would hand
+each other's canary to each other's child — and because a suite cannot run
+eleven of thirteen concurrently and the other two serially without knowing
+which is which, all thirteen declare `async: false`. An earlier revision of
+this sentence said all thirteen install a canary, which is the serial count
+rather than the sharing one. The
 [verification companion](../developer/verification-technical.md#technical-verification-speed)
 measured the result at M4 closure — that application is the critical path of
 the fast check, 96% of its time sits in those thirteen modules, and no further
