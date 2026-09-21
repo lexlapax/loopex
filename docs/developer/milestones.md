@@ -56,24 +56,26 @@ Technical depth: [Branches, worktrees and progress](milestones-technical.md#tech
 A closure candidate is one commit on `main` at which every outcome maps to
 tests, retained evidence or a demonstration, the documentation the milestone
 changed is updated, and the plan's progress table says Proved for each
-outcome. From that exact commit run the fast check under the floor toolchain
-pair and the release check once; ask an independent reviewer to read the
-candidate; then present the packet to the maintainer. The maintainer closes
-it; the register moves to `Closed`, the plan records the closing decision and
-the tested implementation SHA, and the run identities are written to the
-milestone's evidence page
-— by that closing commit, since the runs are of the candidate and the
-candidate cannot carry runs of itself. Use the `close-milestone` skill.
+outcome. It also carries the indexed evidence-page scaffold that closure will
+fill. From that exact commit run the fast check under the floor toolchain pair
+and the release check once; ask an independent reviewer to read the candidate;
+then present the packet to the maintainer. The maintainer closes it; the
+register moves to `Closed`, the plan records the closing decision and the
+tested implementation SHA, and the closing commit fills the existing evidence
+page with the run and review identities, retained-output references, and
+SHA-256 digests. Use the `close-milestone` skill.
 
 **Closure names two commits, because one cannot name itself.** The checks and
 the review are of a **tested implementation commit**; recording the closure is
 a further commit that necessarily comes after, and that the evidence therefore
-cannot have been taken from — the runs are *of* the tested commit, so the
-evidence page that holds them is written by the second, not the first. Earlier
-wording asked for both from one SHA, which no sequence of commits can satisfy.
+cannot have been taken from. The tested commit carries the indexed evidence-page
+scaffold; the administrative commit fills it with runs *of* the tested commit.
+Earlier wording created the page in the second commit, which also required its
+index to change and broke the four-path confinement.
 So a closure carries the **tested implementation SHA**, which the runs and the
 review name, and the **administrative closure SHA**, which records the
-decision. That second commit is **confined to four paths** — the register row,
+decision as the tested commit's direct child. That second commit is
+**confined to four paths** — the register row,
 the plan's Closure row, the context-map entry and the evidence page — which
 the [technical companion](milestones-technical.md#technical-milestones-confinement)
 states once and everything else refers to. A closure whose administrative
@@ -105,26 +107,27 @@ closure evidence does not cover, and the release stops. All four are under
 `docs/`, so a passing check also establishes that nothing outside `docs/`
 moved; that is a consequence of the confinement, not a second rule.
 
-**Two checks run at the tag, and neither is a second closure.** The tagged
-tree differs from the tested one only in documentation, so what is re-proved
-is documentation: `bash scripts/check.sh --docs` runs on the tagged SHA, and
-the archive manifest is recomputed from the tagged SHA and compared with the
-one recorded on the evidence page for the tested SHA, **entry by entry
-outside `docs/`**, which must match exactly. It is not compared whole — the archive carries `docs/` too, so
-a whole-manifest equality could never hold and would be a check that always
-fails. Comparing the rest is what catches an archive that includes or excludes
-differently from the tree the first step examined, which `.gitattributes` can
-do without any diff showing it. No suite is re-run, no release check is
-re-run, and no provider credential is spent again. Their results join the evidence
-page with the tag named.
+**Three re-proofs run before the tag exists, and none is a second closure.** The
+administrative tree differs from the tested one only in documentation, so
+`bash scripts/check.sh --docs` runs on the administrative SHA. The final
+semantic documentation gate then reads the relevant `docs/operator/` and
+`docs/developer/` pages from that same SHA. The archive manifest is also
+recomputed there. Every entry outside `docs/`, except `SOURCE_IDENTITY`, must
+match the tested archive entry. Each archive's `SOURCE_IDENTITY` differs by
+design and must name that archive's own commit and source identity correctly.
+This comparison catches archive inclusion or exclusion changes that
+`.gitattributes` can cause without a path appearing in the commit diff. No
+suite is re-run, no release check is re-run, and no provider credential is
+spent again.
 
-**Run evidence is immutable.** A run's identity, platform, toolchain, result
-and duration are retained where they cannot be edited after the packet is
-read: attached to the annotated tag once it exists, or — for everything
-produced before the tag, which is all of the closure matrix — held outside the
-repository with its digest recorded on the evidence page. An evidence page
-that can be rewritten after a reviewer read it is a record of what someone
-later wished had happened.
+**Run evidence is immutable.** Complete closure-matrix outputs stay outside the
+repository; the administrative commit records their retained-output references
+and SHA-256 digests on the existing evidence page. Complete release-proof
+outputs also stay outside the repository; the tag annotation records their
+results, retained-output references, and SHA-256 digests when the tag is
+created. The evidence page never changes after the administrative commit, and
+the tag never predates evidence named by its annotation. This sequence needs
+two commits and one tag, with no third commit.
 Technical depth: [Tags](milestones-technical.md#technical-milestones-release).
 
 ### The skills

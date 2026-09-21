@@ -163,7 +163,8 @@ A milestone runs in four steps; the
    the first integrated workflow early, then add boundary and failure cases as
    implementation reaches them.
 3. **Close.** Every outcome maps to tests, retained evidence, or a
-   demonstration. From the exact candidate run the closure matrix the
+   demonstration. The exact candidate already carries an indexed evidence-page
+   scaffold. From that candidate run the closure matrix the
    [verification guide](docs/developer/verification.md#concept-verification-stages)
    states once: `bash scripts/check.sh` under the floor toolchain pair and
    `bash scripts/check-release.sh` once, counting the current-pair CI run the
@@ -171,24 +172,30 @@ A milestone runs in four steps; the
    reads the candidate; the maintainer closes it and the register moves to
    `Closed`. Closure names **two commits**: the *tested implementation SHA*
    the matrix ran on and the reviewer read, and the *administrative closure
-   SHA* that records the decision. One commit cannot name itself: the runs are
+   SHA* that records the decision as its direct child. One commit cannot name
+   itself: the runs are
    of the first, so the second writes them down, and the Closure row names the
    first, because that row is the second's own content. The administrative SHA
    is located by the register's `Closed` transition and by the tag. It is
    confined to four paths — register row, Closure row, context-map entry,
-   evidence page —
+   the existing evidence-page scaffold —
    which the
    [milestone guide](docs/developer/milestones-technical.md#technical-milestones-confinement)
-   states once. Run evidence is immutable — held where it cannot
-   be edited after the packet is read.
+   states once. Complete run outputs are immutable outside the repository; the
+   evidence page records each retained-output reference and SHA-256 digest.
 4. **Release.** Publication, tags, and packages are separate maintainer
    decisions that reuse the closure evidence when the source is unchanged. The
-   tag names the **administrative** closure SHA, whose diff from the tested
-   SHA is verified to be confined to those four paths — all under `docs/`, so
-   nothing outside `docs/` moved; on that basis the release
-   re-proves documentation only — `bash scripts/check.sh --docs` on the tagged
-   SHA, and a recomputed archive manifest matching the tested SHA's for every
-   entry outside `docs/` — and re-runs no suite and no release check.
+   tag names the **administrative** closure SHA. Before creating it, verify that
+   the diff from the tested SHA is confined to those four paths. Then run
+   `bash scripts/check.sh --docs`, the final semantic review of the relevant
+   `docs/operator/` and `docs/developer/` pages, and the archive comparison on
+   the administrative SHA. Every non-documentation archive entry except
+   `SOURCE_IDENTITY` matches the tested archive; validate each archive's
+   `SOURCE_IDENTITY` against its own commit. Retain the complete outputs outside
+   the repository and put their results, retained-output references and
+   SHA-256 digests in the immutable annotated tag when it is created. Do not
+   amend the evidence page or create a third commit. No suite or release check
+   runs again.
 
 Historical milestones keep their plans, evidence logs, and dispositions as
 records of what was proved at the revisions they name. Current tests belong to

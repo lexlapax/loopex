@@ -1552,7 +1552,8 @@ defmodule Loopex.StatusCheckTest do
           accepted
           | "Blockers" => "None; `#{name}` is in progress against its accepted plan pair",
             "Next transition" =>
-              "Map every outcome to evidence, run `bash scripts/check.sh` under the floor " <>
+              "Create and index `docs/evidence/#{name}-closure-runs.md` as a scaffold, map " <>
+                "every outcome to evidence, run `bash scripts/check.sh` under the floor " <>
                 "toolchain pair and `bash scripts/check-release.sh` once from the tested " <>
                 "implementation SHA, then move `#{name}` to In review"
         }
@@ -1564,8 +1565,9 @@ defmodule Loopex.StatusCheckTest do
             "Next maintainer decision" =>
               "Close `#{name}` or reject its closure candidate on the review findings",
             "Next transition" =>
-              "Record the closure governance row, naming the tested implementation SHA, " <>
-                "and move `#{name}` to Closed"
+              "Fill the existing `docs/evidence/#{name}-closure-runs.md` scaffold, record " <>
+                "the closure governance row naming the tested implementation SHA, and move " <>
+                "`#{name}` to Closed"
         }
 
       "Closed" ->

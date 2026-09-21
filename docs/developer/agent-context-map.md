@@ -5420,3 +5420,31 @@ together with `apps/loopex/test/status_check_test.exs`, which pins those exact
 strings and would otherwise be the thing that decides what the guide says. All
 of it in one change with this entry. It grants no tag, release or
 publication.
+
+### Closure and release evidence sequencing — 2026-09-20
+
+The maintainer corrected the two-commit closure rule after external review.
+The tested implementation commit now contains an indexed, unfilled
+`docs/evidence/<NAME>-closure-runs.md` scaffold. The administrative closure
+commit is the tested commit's direct child and fills that existing page, so its
+confinement remains exactly four paths and does not require an unlisted index
+change. This entry supersedes the prior entry only where that entry said the
+administrative commit creates the evidence page.
+
+Release proofs run on the administrative closure SHA before the tag exists.
+They are `bash scripts/check.sh --docs`, the milestone's final semantic review
+of the relevant `docs/operator/` and `docs/developer/` pages, and the archive
+comparison. The archive comparison requires every non-documentation entry
+except `SOURCE_IDENTITY` to match the tested archive. Each archive's
+`SOURCE_IDENTITY` is validated against that archive's own commit and source
+identity instead of being compared byte for byte.
+
+Complete closure outputs remain outside the repository; the administrative
+commit records their retained-output references and SHA-256 digests on the
+evidence page. Complete release proofs also remain outside the repository;
+their results, retained-output references, and SHA-256 digests enter the
+annotated tag when it is created. The evidence page does not change after the
+administrative commit, and the tag does not name evidence produced after tag
+creation. The sequence is the tested commit, the administrative commit, and
+the tag. It adds no third commit and grants no closure, tag, release, or
+publication by itself.
