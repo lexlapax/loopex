@@ -101,8 +101,13 @@ closure evidence does not cover, and the release stops.
 tree differs from the tested one only in documentation, so what is re-proved
 is documentation: `bash scripts/check.sh --docs` runs on the tagged SHA, and
 the archive manifest is recomputed from the tagged SHA and compared with the
-one the tested SHA recorded. No suite is re-run, no release check is re-run,
-and no provider credential is spent again. Their results join the evidence
+one the tested SHA recorded **entry by entry outside `docs/`**, which must
+match exactly. It is not compared whole — the archive carries `docs/` too, so
+a whole-manifest equality could never hold and would be a check that always
+fails. Comparing the rest is what catches an archive that includes or excludes
+differently from the tree the first step examined, which `.gitattributes` can
+do without any diff showing it. No suite is re-run, no release check is
+re-run, and no provider credential is spent again. Their results join the evidence
 page with the tag named.
 
 **Run evidence is immutable.** A run's identity, platform, toolchain, result

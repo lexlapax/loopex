@@ -829,7 +829,11 @@ Four things are verified at the tag, in this order: `git diff --stat
 <tested>..<administrative>` touches **nothing outside `docs/`**, which is what
 makes everything below sufficient; `bash scripts/check.sh --docs` is green on
 the tagged SHA; the archive manifest recomputed from the tagged SHA equals the
-one the tested SHA recorded; and the tag object is annotated, with
+one the tested SHA recorded **for every entry outside `docs/`**, the `docs/`
+entries being expected to differ and therefore not compared — which catches an
+archive that includes or excludes differently from the tree, as
+`.gitattributes` can without showing in any diff; and the tag object is
+annotated, with
 `v0.2.0^{commit}` reachable from `main` and `git show <that commit>:VERSION`
 exactly `0.2.0`. Nothing else re-runs — no suite, no release check, no
 provider credential — because the confinement check is what proves the tagged
@@ -4566,14 +4570,14 @@ owned by core, the adapter or the executor appears as a **group with its
 owner**, because their counts are those components' business and naming them
 individually would make this table a copy that rots.
 
-**The daemon's fixed processes — eleven rows, ten without transfers: the owner
-and the ten it links.** The count is stated that way because the table has one
-more row than the link set does, the owner being the process that holds the
-links rather than one of them. Earlier revisions headed eleven rows "ten", and
-then left the **connection registry** — a fixed, linked, daemon-fatal process
-— in the dynamic table below under the heading "one fixed process", where a
-reader looking for the linked set could not find it. Twelve rows, eleven
-links.
+**The daemon's fixed processes — twelve rows, eleven without transfers: the
+owner and the eleven it links.** The count is stated that way because the
+table has one more row than the link set does, the owner being the process
+that holds the links rather than one of them. Earlier revisions headed eleven
+rows "ten", and then left the **connection registry** — a fixed, linked,
+daemon-fatal process — in the dynamic table below under the heading "one fixed
+process", where a reader looking for the linked set could not find it. It is
+the eleventh link and it is in this table.
 
 | Process | Started by | Linked to | Stopped by | Its death |
 | --- | --- | --- | --- | --- |

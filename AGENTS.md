@@ -179,8 +179,8 @@ A milestone runs in four steps; the
    tag names the **administrative** closure SHA, whose diff from the tested
    SHA is verified to touch nothing outside `docs/`; on that basis the release
    re-proves documentation only — `bash scripts/check.sh --docs` on the tagged
-   SHA and a recomputed archive manifest — and re-runs no suite and no release
-   check.
+   SHA, and a recomputed archive manifest matching the tested SHA's for every
+   entry outside `docs/` — and re-runs no suite and no release check.
 
 Historical milestones keep their plans, evidence logs, and dispositions as
 records of what was proved at the revisions they name. Current tests belong to

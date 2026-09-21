@@ -140,7 +140,7 @@ reader who fetches the tag gets. Before tagging:
 | --- | --- | --- |
 | Confine the administrative diff | `git diff --stat <tested>..<administrative>` | Any path outside `docs/` means the tag would publish source the closure evidence does not cover; the release stops and the packet is reassembled from a new implementation SHA |
 | Re-prove the documentation | `bash scripts/check.sh --docs` on the tagged SHA | The administrative commit's own documentation changes are not green; fix and re-tag |
-| Re-prove the archive identity | Recompute the archive manifest from the tagged SHA and compare it with the manifest the tested SHA recorded | The published bytes are not the closed bytes outside `docs/`, which the first step should already have caught |
+| Re-prove the archive identity | Recompute the archive manifest from the tagged SHA and compare every entry **outside `docs/`** with the manifest the tested SHA recorded | The published bytes are not the closed bytes outside `docs/`. The entries under `docs/` are expected to differ and are not compared; comparing the whole manifest would be a check that can never pass. What this catches beyond step 1 is an archive that includes or excludes differently from the tree — `.gitattributes` moves bytes into and out of an archive without appearing in a `git diff` |
 
 Nothing else is re-run. There is no second suite, no second release check and
 no second provider credential: the tested tree and the tagged tree differ only
