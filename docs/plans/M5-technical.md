@@ -1331,7 +1331,7 @@ forms never reinterpret a released composition flag as client data:
 
 | Form | Accepted flags | Refused released flags | Ownership and combinations |
 | --- | --- | --- | --- |
-| `run --daemon` | `--daemon`; optional `--steer` or `--follow-up` | `--skill`, `--skill-resource`, `--policy`, `--state-root`, `--workspace`, `--cleanup-grace-ms`, `--context-token-budget` | Steer and follow-up are request choices. The reference daemon supplies a project manifest but no channel for the host's exact project-resource trust decision, so its CLI cannot admit or activate resources and refuses both resource-selection flags before dialing. Generation 2 keeps the resource methods for host-integrated clients whose host supplies that decision out of band. The daemon owns policy, root, workspace and runtime configuration. The existing steer/follow-up mutual exclusion applies unchanged |
+| `run --daemon` | `--daemon`; optional `--steer` or `--follow-up` | `--skill`, `--skill-resource`, `--policy`, `--state-root`, `--workspace`, `--cleanup-grace-ms`, `--context-token-budget` | Steer and follow-up are request choices. Generation 2 exposes neither the immutable workspace binding and pre-admission manifest data needed to construct ADR 0023's exact project-skills decision nor a channel that hands that decision to the reference client, so the CLI cannot admit or activate resources and refuses both resource-selection flags before dialing. Generation 2 keeps the resource methods for host-integrated clients that receive the exact decision out of band. The daemon owns policy, root, workspace and runtime configuration. The existing steer/follow-up mutual exclusion applies unchanged |
 | `resume --daemon` | `--daemon` | `--policy`, `--state-root`, `--workspace`, `--cleanup-grace-ms`, `--context-token-budget` | The daemon owns composition and checks the resumed session's binding. The live form does not ask the client to repeat or assert host configuration; in particular it does not require the offline form's `--policy` |
 | `sessions --daemon` | `--daemon`; `--limit`; `--after`; `--status` | `--state-root` | `--limit` and `--after` select one listing page. `--status` is a different query and is refused with either paging flag. The socket identifies the root |
 | `attach --daemon` | `--daemon`; `--observe`; `--take-over`; `--prompt`; `--after` | none; `attach` is new in M5 | Neither role flag means observe. Supplying both roles refuses. `--prompt` requires `--take-over`; observe may not send. A bare `--take-over` acquires, attaches and streams without sending a command; M5 never reads an attach prompt from standard input. `--after` is an unsigned 64-bit event sequence. Repeated non-repeatable flags refuse |
@@ -1358,10 +1358,13 @@ The daemon forms of the two released driving commands behave as follows:
   `session.create`, `session.acquire_control`, **`session.attach`**, then the
   prompt under the granted writer epoch. The reference live CLI sends no
   `resources.catalog`, `resources.read`, `session.admit_resources` or
-  `session.activate_skill` request: ADRs 0023 and 0025 keep the exact
-  project-resource trust decision at host launch, and M5 adds no channel that
-  could convey it to this client. Generation 2 retains those methods for a
-  host-integrated client that receives the decision out of band. Attach comes
+  `session.activate_skill` request. ADRs 0023 and 0025 distinguish the
+  seven-field project-skills decision from launch-time project-resource trust;
+  generation 2 exposes neither the immutable workspace binding and
+  pre-admission manifest data needed to construct that exact decision nor a
+  decision-handoff channel for the reference client. Generation 2 retains
+  those methods for a host-integrated client that receives the exact decision
+  out of band. Attach comes
   *before* the prompt because
   ADR 0033 admits an existing-session mutation only from a connection that
   holds a live attachment for the pinned session, and grants exactly one exception —
