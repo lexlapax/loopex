@@ -80,6 +80,7 @@ SHA** — the exact bytes published — rather than on the implementation commit
 alone. And run evidence is **immutable**: retained where it cannot be edited
 after the fact, attached to the tag or held outside the repository, so that
 what a reviewer read and what a reader later finds are the same thing.
+
 Technical depth: [The closure packet](milestones-technical.md#technical-milestones-close).
 
 <a id="concept-milestones-release"></a>
