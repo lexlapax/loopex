@@ -1438,9 +1438,9 @@ defmodule Loopex.StatusCheckTest do
                "None until `current` is ready for independent review; `next` cannot be " <>
                  "accepted before `current` closes",
              "Next transition" =>
-               "Complete `current` with its closure checks green, move it to In progress " <>
-                 "and then In review with cleared independent review, and close it; then " <>
-                 "accept or reject `next`"
+               "Complete `current`, move it to In progress, then make its tested candidate " <>
+                 "by moving it to In review; run the closure matrix and independent review, " <>
+                 "close it, then accept or reject `next`"
            }
 
     # The retired structure is not describable from here any more: no capsule
@@ -1553,20 +1553,22 @@ defmodule Loopex.StatusCheckTest do
           | "Blockers" => "None; `#{name}` is in progress against its accepted plan pair",
             "Next transition" =>
               "Create and index `docs/evidence/#{name}-closure-runs.md` as a scaffold, map " <>
-                "every outcome to evidence, run `bash scripts/check.sh` under the floor " <>
-                "toolchain pair and `bash scripts/check-release.sh` once from the tested " <>
-                "implementation SHA, then move `#{name}` to In review"
+                "every outcome to evidence, then make the tested implementation commit by " <>
+                "moving `#{name}` to In review; run the closure matrix and independent " <>
+                "review from that exact SHA"
         }
 
       "In review" ->
         %{
           accepted
-          | "Blockers" => "None; `#{name}` awaits independent review of its closure candidate",
+          | "Blockers" =>
+              "`#{name}` awaits the closure matrix and independent review of its exact candidate",
             "Next maintainer decision" =>
-              "Close `#{name}` or reject its closure candidate on the review findings",
+              "Close `#{name}` or reject its closure candidate on the matrix or review findings",
             "Next transition" =>
-              "Fill the existing `docs/evidence/#{name}-closure-runs.md` scaffold, record " <>
-                "the closure governance row naming the tested implementation SHA, and move " <>
+              "After the maintainer closes it, make the administrative direct child: fill " <>
+                "the existing `docs/evidence/#{name}-closure-runs.md` scaffold, record the " <>
+                "closure governance row naming the tested implementation SHA, and move " <>
                 "`#{name}` to Closed"
         }
 

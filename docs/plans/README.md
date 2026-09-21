@@ -224,7 +224,9 @@ maintainer or a recorded delegate, durable evidence of that authority's explicit
 disposition, and the accepted candidate SHA. Moving it to `Closed` requires the
 same for the reviewed closure candidate. An explicit decision may be recorded;
 it may not be supplied or inferred. An independent reviewer reads the exact
-candidate before either transition. Only the `In review` to `Closed`
+candidate before acceptance and before closure. The tested implementation
+commit itself owns `In progress` to `In review`; the reviewer then reads that
+exact commit. Only its administrative direct child's `In review` to `Closed`
 administrative transition is confined to
 [the five paths the milestone guide names](../developer/milestones-technical.md#technical-milestones-confinement);
 acceptance also updates the prerequisite ADR governance records it accepts.
@@ -269,15 +271,16 @@ transition records exactly this:
 | → `Open` | The plan pair exists, is indexed below, and every Progress and Evidence row reads `Open` |
 | `Open` → `Accepted` | The maintainer's disposition in the plan's Acceptance row: authority, durable authority evidence, and the accepted candidate |
 | `Accepted` → `In progress` | Implementation has begun against the accepted pair; evidence rows change as outcomes are proved |
-| `In progress` → `In review` | A closure candidate exists and an independent reviewer is reading that exact candidate |
+| `In progress` → `In review` | The tested implementation commit declares itself the closure candidate and supplies both marked status blocks; an independent reviewer then reads that exact commit |
 | `In review` → `Closed` | The maintainer's closure disposition in the plan's Closure row, naming the reviewed candidate, with every Progress row resolved |
 
 Every transition updates the register row, the complete Current Status capsule
-above, and README's derived summary in one change. Construct both canonical
-blocks from the register under the status contract, then run
-`mix loopex.status` to validate them; the task reports pass or failure rather
-than printing replacement bytes. The task handles any milestone name; nothing
-about a new name is written in code.
+above, and README's summary in one change. The transition author supplies both
+complete marked blocks. For a closure, the checkpoint date is the date of the
+maintainer's recorded closure disposition. Run `mix loopex.status` to validate
+the supplied values against the register; the task reports pass or failure
+rather than generating replacement bytes. The task handles any milestone name;
+nothing about a new name is written in code.
 
 A retry is diagnostic, not a pass. A same-revision failure that disappears on
 retry is a flake to fix, not a pass.
@@ -294,7 +297,11 @@ skeletons above are complete: do not add a third normative plan surface, and do
 not add a gate file. Progress and Evidence has exactly one uniquely numbered row
 for every normative Outcome and no other rows. Its states are `Open`, `Proved`,
 `Accepted limitation`, or `Accepted deferral`; the latter two require
-disposition evidence. Every row remains `Open` while the register state is Open,
+disposition evidence. `Proved` means completed implementation is mapped to its
+named proof obligation. It does not assert that a closure run or review taken
+after the tested commit already has a result; those facts use predeclared
+`Pending` fields in the closure evidence scaffold. Every row remains `Open`
+while the register state is Open,
 so a planning candidate cannot claim product progress. Nothing closes while any
 row remains `Open`, either companion is missing, or the pair conflicts.
 

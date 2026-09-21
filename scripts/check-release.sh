@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # The slow check, run once from the exact candidate before closure: the
-# real-provider workflows, the independent Node client, and the fresh-source
-# build. An unchanged-source release reuses that evidence and does not run this
-# command again. It needs a provider credential in LOOPEX_PROVIDER_API_KEY,
+# real-provider workflows, the independent Node client, the fresh-source build,
+# and the long-duration bound proofs. An unchanged-source release reuses that
+# evidence and does not run this command again. It needs a provider credential in LOOPEX_PROVIDER_API_KEY,
 # which reaches only the test processes and is never printed. It also needs
 # the Node version pinned in
 # scripts/fixtures/m4/client-toolchain.txt. Output streams as it happens.

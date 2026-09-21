@@ -775,9 +775,9 @@ defmodule Loopex.Checks.Register do
     |> Map.put(
       "Next transition",
       "Create and index `docs/evidence/#{name}-closure-runs.md` as a scaffold, map every " <>
-        "outcome to evidence, run `bash scripts/check.sh` under the floor toolchain pair " <>
-        "and `bash scripts/check-release.sh` once from the tested implementation SHA, then " <>
-        "move `#{name}` to In review"
+        "outcome to evidence, then make the tested implementation commit by moving " <>
+        "`#{name}` to In review; run the closure matrix and independent review from that " <>
+        "exact SHA"
     )
   end
 
@@ -786,15 +786,16 @@ defmodule Loopex.Checks.Register do
     |> accepted_values()
     |> Map.put(
       "Blockers",
-      "None; `#{name}` awaits independent review of its closure candidate"
+      "`#{name}` awaits the closure matrix and independent review of its exact candidate"
     )
     |> Map.put(
       "Next maintainer decision",
-      "Close `#{name}` or reject its closure candidate on the review findings"
+      "Close `#{name}` or reject its closure candidate on the matrix or review findings"
     )
     |> Map.put(
       "Next transition",
-      "Fill the existing `docs/evidence/#{name}-closure-runs.md` scaffold, record the closure " <>
+      "After the maintainer closes it, make the administrative direct child: fill the " <>
+        "existing `docs/evidence/#{name}-closure-runs.md` scaffold, record the closure " <>
         "governance row naming the tested implementation SHA, and move `#{name}` to Closed"
     )
   end
@@ -813,8 +814,9 @@ defmodule Loopex.Checks.Register do
     )
     |> Map.put(
       "Next transition",
-      "Complete `#{delivery_name}` with its closure checks green, move it to In progress and " <>
-        "then In review with cleared independent review, and close it; then accept or reject " <>
+      "Complete `#{delivery_name}`, move it to In progress, then make its tested candidate " <>
+        "by moving it to In review; run the closure matrix and independent review, close it, " <>
+        "then accept or reject " <>
         "`#{lookahead_name}`"
     )
   end

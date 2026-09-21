@@ -5476,3 +5476,33 @@ scaffold's headings and prose, every pre-existing context-map byte, and all
 bytes outside the two status markers remain fixed. This correction changes
 what the release confinement proof must retain; it grants no closure, tag,
 release or publication.
+
+### Closure candidate ownership and archive producer — 2026-09-21
+
+External review found three executable gaps in the 2026-09-20 closure
+sequence. This entry supersedes the preceding closure entries only where they
+differ on those gaps.
+
+The tested implementation commit itself moves the register and both supplied
+marked status blocks from `In progress` to `In review`; its administrative
+direct child later makes only `In review` to `Closed`. A `Proved` progress row
+means completed implementation is mapped to its named proof obligation. A
+predeclared `Pending` scaffold field is the result or identity of a run or
+review taken of that tested commit after it exists, which the administrative
+commit records. The supplied `Closed` checkpoint date comes from the
+maintainer's recorded closure disposition. `mix loopex.status` validates the
+supplied blocks against the register and generates no replacement bytes.
+
+M5 must add `scripts/source-archive-manifest.sh` as the single producer for the
+canonical NUL-delimited manifest. The closure run retains its exact output from
+a fresh tested-SHA archive extraction outside that extraction. Before the tag,
+the release stages a fresh administrative-SHA archive, runs the same command,
+retains its exact output, rejects malformed or duplicate records, and compares
+every complete tuple outside `docs` and its descendants except exact root
+`README.md` and `SOURCE_IDENTITY`. Each source identity is validated
+separately. No suite or release check runs again.
+
+The two-commit procedure applies from M5 onward. Earlier milestones and tags
+keep their recorded procedure; `v0.1.0` remains the separately authorized tag
+of M4's integrated source commit. This correction grants no acceptance,
+closure, tag, release or publication.

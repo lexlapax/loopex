@@ -164,13 +164,21 @@ A milestone runs in four steps; the
    implementation reaches them.
 3. **Close.** Every outcome maps to tests, retained evidence, or a
    demonstration. The exact candidate already carries an indexed evidence-page
-   scaffold. From that candidate run the closure matrix the
+   scaffold. Its `Proved` progress rows mean the implementation is complete and
+   name the proof obligation; scaffold fields marked `Pending` hold results or
+   identities produced later by runs and review of that exact commit. The
+   candidate commit itself moves the register and both marked status blocks
+   from `In progress` to `In review`. From that candidate run the closure matrix the
    [verification guide](docs/developer/verification.md#concept-verification-stages)
    states once: `bash scripts/check.sh` under the floor toolchain pair and
    `bash scripts/check-release.sh` once, counting the current-pair CI run the
-   candidate already produced rather than repeating it. An independent reviewer
-   reads the candidate; the maintainer closes it and the register moves to
-   `Closed`. Closure names **two commits**: the *tested implementation SHA*
+   candidate already produced rather than repeating it. From M5 onward, the
+   release check's fresh-source lane retains outside its extraction the exact
+   NUL-delimited bytes emitted by `scripts/source-archive-manifest.sh` for the
+   tested archive, under their own reference and SHA-256 digest. An independent reviewer
+   reads the candidate; the maintainer closes it and the administrative direct
+   child makes only the `In review` to `Closed` transition. Closure names
+   **two commits**: the *tested implementation SHA*
    the matrix ran on and the reviewer read, and the *administrative closure
    SHA* that records the decision as its direct child. One commit cannot name
    itself: the runs are
@@ -178,21 +186,29 @@ A milestone runs in four steps; the
    first, because that row is the second's own content. The administrative SHA
    is located by the register's `Closed` transition and by the tag. It is
    confined to five paths and to the exact administrative region in each —
-   register row and generated status block, Closure row, appended context-map
+   register row and supplied marked status block, Closure row, appended context-map
    disposition, designated evidence-scaffold placeholders, and the root
-   README's marked derived-status block —
+   README's supplied marked status summary —
    which the
    [milestone guide](docs/developer/milestones-technical.md#technical-milestones-confinement)
    states once. Complete run outputs are immutable outside the repository; the
    evidence page records each retained-output reference and SHA-256 digest.
 4. **Release.** Publication, tags, and packages are separate maintainer
    decisions that reuse the closure evidence when the source is unchanged. The
-   tag names the **administrative** closure SHA. Before creating it, verify that
+   tag names the **administrative** closure SHA. This two-commit closure and tag
+   rule applies from M5 onward; earlier milestones and tags remain governed by
+   their recorded procedures. Before creating a new tag, verify that
    the diff from the tested SHA is confined to those five paths and allowed
    regions by retaining and reviewing its complete patch. Then run
    `bash scripts/check.sh --docs`, the final semantic review of the relevant
    `docs/operator/` and `docs/developer/` pages, and the archive comparison on
-   the administrative SHA. Every non-documentation archive entry except the
+   the administrative SHA. Stage that SHA into a fresh `git archive`
+   extraction and run
+   `bash "$tree/scripts/source-archive-manifest.sh" "$tree" >"$retained_manifest"`
+   with the output outside the extraction. Retain its exact NUL-delimited
+   bytes, reject malformed or duplicate records, and compare complete tuples
+   with the tested manifest after applying the documented exclusions. Every
+   non-documentation archive entry except the
    root `README.md` and `SOURCE_IDENTITY` matches the tested archive; the root
    README is validated as an exact marked-block replacement by the content-
    confinement proof and by the documentation/status gate, and

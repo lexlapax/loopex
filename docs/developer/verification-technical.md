@@ -20,8 +20,18 @@ Concept: [Three stages](verification.md#concept-verification-stages).
 | --- | --- | --- |
 | Change, while editing | `mix test <path>`, `mix format`, `mix compile --warnings-as-errors`; the client Stop hook runs format, the dependency budget and the adapter check | Seconds |
 | Change, before merge | `bash scripts/check.sh --select` in hosted CI on the branch; a read-only review of `git diff main..<candidate>` | 12 min 54 s and 12 min 38 s on the hosted runner at the final M4 candidates; on the Mac 287 s at the final candidate `d738ec7` with a warm build and ten applications at once (346 s at `031554c`, before the bound and concurrency work), against 870 s Mac and 809 s Linux in the sequential shape it replaced; 18 s before the suite starts |
-| Close | An indexed evidence-page scaffold at the tested SHA; `bash scripts/check.sh` under the floor pair (replace `NAME` with the milestone name in `env -u MIX_BUILD_PATH MIX_BUILD_ROOT="/absolute/retained-work/NAME-otp27-build" mise exec erlang@27.3.4 elixir@1.18.5-otp-27 -- bash scripts/check.sh`); `bash scripts/check-release.sh` once on the current pair | Release check: 149–163 s on Linux, 12 tests |
-| Release | Before tag creation: confine the administrative commit's complete retained patch to its five paths and each path's exact allowed region, reconstructing both marked status files byte-for-byte; run `check.sh --docs` and the final semantic operator/developer documentation gate on that SHA; recompute its archive manifest; compare every non-documentation entry except the derived root `README.md` and `SOURCE_IDENTITY` with the tested manifest; validate both archive identities | The documentation-scoped check alone: 12–13 s on the Mac at this revision, warm build, plus the confinement review, semantic review and manifest comparison. No suite and no release check |
+| Close | An indexed evidence-page scaffold at the tested SHA; `bash scripts/check.sh` under the floor pair (replace `NAME` with the milestone name in `env -u MIX_BUILD_PATH MIX_BUILD_ROOT="/absolute/retained-work/NAME-otp27-build" mise exec erlang@27.3.4 elixir@1.18.5-otp-27 -- bash scripts/check.sh`); `bash scripts/check-release.sh` once on the current pair, with its fresh-source lane retaining outside the extraction the exact NUL-delimited output of `bash "$tree/scripts/source-archive-manifest.sh" "$tree"` for the tested archive | Release check: 149–163 s on Linux, 12 tests |
+| Release | Before tag creation: confine the administrative commit's complete retained patch to its five paths and each path's exact allowed region, reconstructing both marked status files byte-for-byte; run `check.sh --docs` and the final semantic operator/developer documentation gate on that SHA; stage a fresh `git archive` extraction and run `bash "$tree/scripts/source-archive-manifest.sh" "$tree" >"$retained_manifest"` with the output outside the extraction; retain its exact bytes; reject malformed or duplicate records; remove `docs` and its descendants plus exact root `README.md` and `SOURCE_IDENTITY`; compare every remaining complete tuple with the retained tested manifest; validate both archive identities | The documentation-scoped check alone: 12–13 s on the Mac at this revision, warm build, plus the confinement review, semantic review and manifest comparison. No suite and no release check |
+
+These Close and Release rows apply from M5 onward. M4 and its `v0.1.0` tag
+remain historical records governed by the procedure they name.
+
+The tested commit itself owns `In progress` to `In review` and both marked
+status blocks; its administrative direct child owns only `In review` to
+`Closed`. The tested candidate's `Proved` rows map completed implementation to these
+proof obligations. Its predeclared `Pending` scaffold fields hold the results
+or identities produced when the obligations are run against that commit; they
+are filled only by the administrative direct child.
 
 `check.sh` step order and cost: warning-free compilation 1 s (warm), formatting
 1 s, repository structure 11–14 s (`scripts/check-bootstrap.sh`: client
@@ -58,7 +68,9 @@ costs about 210 s, which is why it is off by default.
 Evidence retention: the tested candidate carries an indexed scaffold under
 `docs/evidence/`. The administrative closure commit fills that page with the
 candidate, each closure run's platform, toolchain, result, measured duration,
-retained-output reference, and SHA-256 digest. It also records the independent
+retained-output reference, and SHA-256 digest. The fresh-source lane retains
+the tested archive manifest's exact NUL-delimited bytes under a separate
+reference and digest. It also records the independent
 review result, retained-output reference, and SHA-256 digest, and fills every
 plan-required outcome field or placeholder predeclared by the tested
 scaffold. The

@@ -32,8 +32,20 @@ Technical depth: [What each stage runs](verification-technical.md#technical-veri
 | Stage | Question | What runs | Who or what can stop it |
 | --- | --- | --- | --- |
 | Change | Is this change whole, and is it what it claims to be? | While editing: the focused tests for the changed boundary, `mix format`, a warning-free compile. Before merge to `main`: `bash scripts/check.sh` green in hosted CI on the branch, plus an independent review of the diff against its stated purpose. Every merge, not only milestone closures. | A red check or a blocking review finding; the integrator merges only a green, reviewed candidate |
-| Close | Did the milestone deliver its outcomes? | An indexed evidence-page scaffold in the candidate; `check.sh` once under the floor toolchain pair (the current pair is already proved by CI on every change); `bash scripts/check-release.sh` once; the outcome-to-evidence map in the plan; an independent review of the candidate. All checks and review use the **tested implementation SHA** once. The **administrative closure SHA** fills the scaffold and records the decision without re-running the matrix | The maintainer, who closes it or does not |
-| Release | Is the source about to be tagged the closed source? | Reuse the closure evidence when the source is unchanged. On the **administrative closure SHA**, verify the five paths and each path's exact allowed region from the complete retained patch, including byte-for-byte reconstruction of both marked status files; run `check.sh --docs`; run the final semantic gate over the relevant operator and developer documentation; and compare the archive with the tested archive outside `docs/`, except for the derived root `README.md` and separately validated `SOURCE_IDENTITY`. Retain these proofs outside the repository and put their results, retained-output references, and SHA-256 digests in the annotated tag at creation. No suite and no release check run twice | The maintainer's separate release decision |
+| Close | Did the milestone deliver its outcomes? | An indexed evidence-page scaffold in the candidate; `check.sh` once under the floor toolchain pair (the current pair is already proved by CI on every change); `bash scripts/check-release.sh` once, whose fresh-source lane retains the exact NUL-delimited output from `scripts/source-archive-manifest.sh` on the tested archive extraction; the outcome-to-evidence map in the plan; an independent review of the candidate. All checks and review use the **tested implementation SHA** once. The **administrative closure SHA** fills the scaffold and records the decision without re-running the matrix | The maintainer, who closes it or does not |
+| Release | Is the source about to be tagged the closed source? | Reuse the closure evidence when the source is unchanged. On the **administrative closure SHA**, verify the five paths and each path's exact allowed region from the complete retained patch, including byte-for-byte reconstruction of both marked status files; run `check.sh --docs`; run the final semantic gate over the relevant operator and developer documentation; stage a fresh `git archive` extraction and run its repository-owned `scripts/source-archive-manifest.sh`; and compare that exact manifest with the retained tested manifest outside `docs/`, except for the supplied root `README.md` and separately validated `SOURCE_IDENTITY`. Retain these proofs outside the repository and put their results, retained-output references, and SHA-256 digests in the annotated tag at creation. No suite and no release check run twice | The maintainer's separate release decision |
+
+The two-commit closure and release rows govern M5 and later milestones.
+Earlier closures and tags retain their recorded procedure; `v0.1.0` remains
+the separately authorized tag of M4's integrated source commit.
+
+The tested commit itself moves the register and both marked status blocks from
+`In progress` to `In review`; the administrative direct child later makes only
+`In review` to `Closed`. At the tested SHA, a `Proved` progress row records completed implementation
+and its named proof obligation. A scaffold value marked `Pending` is the later
+result or identity of a closure run or review taken of that SHA; the
+administrative commit records it without implying that the tested commit knew
+its own future result.
 
 The fast check is the everyday gate. It is credential-free, needs no network,
 and is the same command locally and in CI, where it runs as

@@ -56,15 +56,21 @@ Technical depth: [Branches, worktrees and progress](milestones-technical.md#tech
 A closure candidate is one commit on `main` at which every outcome maps to
 tests, retained evidence or a demonstration, the documentation the milestone
 changed is updated, and the plan's progress table says Proved for each
-outcome. It also carries the indexed evidence-page scaffold that closure will
-fill. From that exact commit run the fast check under the floor toolchain pair
-and the release check once; ask an independent reviewer to read the candidate;
+outcome. Here `Proved` maps completed implementation to a named proof
+obligation; it does not claim that a closure run or review performed after the
+commit already has a result. Those later results and identities occupy the
+scaffold's predeclared `Pending` fields. The same candidate commit moves the
+register and its two marked status blocks from `In progress` to `In review`.
+It also carries the indexed evidence-page scaffold that closure will fill.
+From that exact commit run the fast check under the floor toolchain pair and
+the release check once; ask an independent reviewer to read the candidate;
 then present the packet to the maintainer. The maintainer closes it; the
-register moves to `Closed`, the plan records the closing decision and the
-tested implementation SHA, and the closing commit fills the existing evidence
-page with the run and review identities, retained-output references, and
-SHA-256 digests, plus every plan-required outcome field or placeholder the
-tested scaffold predeclared. Use the `close-milestone` skill.
+administrative direct child makes only the `In review` to `Closed` transition,
+the plan records the closing decision and the tested implementation SHA, and
+that commit fills the existing evidence page with the run and review
+identities, retained-output references, and SHA-256 digests, plus every
+plan-required outcome field or placeholder the tested scaffold predeclared.
+Use the `close-milestone` skill.
 
 **Closure names two commits, because one cannot name itself.** The checks and
 the review are of a **tested implementation commit**; recording the closure is
@@ -77,9 +83,9 @@ So a closure carries the **tested implementation SHA**, which the runs and the
 review name, and the **administrative closure SHA**, which records the
 decision as the tested commit's direct child. That second commit is
 **confined to five paths and the exact administrative region in each** — the
-register row and generated status block, the plan's Closure row, an appended
+register row and supplied marked status block, the plan's Closure row, an appended
 context-map disposition, the evidence scaffold's designated placeholders and
-the root README's marked derived-status block — which
+the root README's supplied marked status summary — which
 the [technical companion](milestones-technical.md#technical-milestones-confinement)
 states once and everything else refers to. A closure whose administrative
 commit touches anything else is not administrative, and its evidence is
@@ -99,6 +105,11 @@ A release is a separate maintainer decision: a tag on the exact integrated
 closure commit, reusing the closure evidence when the source is unchanged. A
 package, installer or publication is its own decision with its own evidence.
 
+The two-commit closure and tag procedure below governs M5 and later
+milestones. Earlier closures and tags remain governed by the procedures their
+records name; the existing `v0.1.0` tag identifies M4's integrated source
+commit and is not retrofitted to this later procedure.
+
 **The tag names the administrative closure SHA**, which is the commit that
 carries the closure record and therefore the tree a reader who fetches the tag
 gets. That is only safe because the administrative commit is confined to
@@ -112,14 +123,17 @@ only confined path outside `docs/`; it is reconstructed as the tested file with
 only its marked block replaced, then checked byte-for-byte as well as by
 `check.sh --docs`, including that command's `mix loopex.status` step.
 
-**Three re-proofs run before the tag exists, and none is a second closure.** The
+**Four pre-tag proofs run before the tag exists, and none is a second closure.** The
 administrative tree differs from the tested one only in documentation, so
 `bash scripts/check.sh --docs` runs on the administrative SHA. The final
 semantic documentation gate then reads the relevant `docs/operator/` and
 `docs/developer/` pages from that same SHA. The archive manifest is also
-recomputed there. Every entry outside `docs/`, except the root `README.md` and
-`SOURCE_IDENTITY`, must match the tested archive entry. The README is validated
-by the marked-block confinement proof and documentation/status checks. Each archive's
+recomputed from a fresh `git archive` extraction by the same repository-owned
+`scripts/source-archive-manifest.sh` command whose exact NUL-delimited output
+the tested run retained. Every entry outside `docs/`, except the root
+`README.md` and `SOURCE_IDENTITY`, must match the tested archive entry. The
+README is validated by the marked-block confinement proof and
+documentation/status checks. Each archive's
 `SOURCE_IDENTITY` differs by design and must name that archive's own commit and
 source identity correctly.
 This comparison catches archive inclusion or exclusion changes that
