@@ -1553,8 +1553,8 @@ defmodule Loopex.StatusCheckTest do
           | "Blockers" => "None; `#{name}` is in progress against its accepted plan pair",
             "Next transition" =>
               "Map every outcome to evidence, run `bash scripts/check.sh` under the floor " <>
-                "toolchain pair and `bash scripts/check-release.sh` once from the candidate, " <>
-                "then move `#{name}` to In review"
+                "toolchain pair and `bash scripts/check-release.sh` once from the tested " <>
+                "implementation SHA, then move `#{name}` to In review"
         }
 
       "In review" ->
@@ -1563,7 +1563,9 @@ defmodule Loopex.StatusCheckTest do
           | "Blockers" => "None; `#{name}` awaits independent review of its closure candidate",
             "Next maintainer decision" =>
               "Close `#{name}` or reject its closure candidate on the review findings",
-            "Next transition" => "Record the closure governance row and move `#{name}` to Closed"
+            "Next transition" =>
+              "Record the closure governance row, naming both the tested implementation " <>
+                "SHA and the administrative closure SHA, and move `#{name}` to Closed"
         }
 
       "Closed" ->

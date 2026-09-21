@@ -74,12 +74,10 @@ implementation SHA**, which the runs and the review name, and the
 the runs covered. A closure whose administrative commit touches anything
 else is not administrative, and its evidence is stale.
 
-**Two obligations follow from that split.** The documentation and archive
-checks are the ones a later commit can invalidate, so they run **on the tagged
-SHA** — the exact bytes published — rather than on the implementation commit
-alone. And run evidence is **immutable**: retained where it cannot be edited
-after the fact, attached to the tag or held outside the repository, so that
-what a reviewer read and what a reader later finds are the same thing.
+The closure matrix is run **once**, from the tested implementation SHA, and
+nothing in closure is re-run because of the administrative commit. What that
+commit can invalidate is a matter for the release, which is where the tag
+exists; Close states the two SHAs and their relation and stops there.
 
 Technical depth: [The closure packet](milestones-technical.md#technical-milestones-close).
 
@@ -89,6 +87,31 @@ Technical depth: [The closure packet](milestones-technical.md#technical-mileston
 A release is a separate maintainer decision: a tag on the exact integrated
 closure commit, reusing the closure evidence when the source is unchanged. A
 package, installer or publication is its own decision with its own evidence.
+
+**The tag names the administrative closure SHA**, which is the commit that
+carries the closure record and therefore the tree a reader who fetches the tag
+gets. That is only safe because the administrative commit is confined: its
+diff from the tested implementation SHA must touch **nothing outside
+`docs/`**, and the release step verifies that rather than trusting it —
+`git diff --stat <tested>..<administrative>` with every path under `docs/`.
+A diff that reaches anything else means the tag would publish source the
+closure evidence does not cover, and the release stops.
+
+**Two checks run at the tag, and neither is a second closure.** The tagged
+tree differs from the tested one only in documentation, so what is re-proved
+is documentation: `bash scripts/check.sh --docs` runs on the tagged SHA, and
+the archive manifest is recomputed from the tagged SHA and compared with the
+one the tested SHA recorded. No suite is re-run, no release check is re-run,
+and no provider credential is spent again. Their results join the evidence
+page with the tag named.
+
+**Run evidence is immutable.** A run's identity, platform, toolchain, result
+and duration are retained where they cannot be edited after the packet is
+read: attached to the annotated tag once it exists, or — for everything
+produced before the tag, which is all of the closure matrix — held outside the
+repository with its digest recorded on the evidence page. An evidence page
+that can be rewritten after a reviewer read it is a record of what someone
+later wished had happened.
 Technical depth: [Tags](milestones-technical.md#technical-milestones-release).
 
 ### The skills

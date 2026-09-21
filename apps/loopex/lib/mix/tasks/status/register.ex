@@ -775,8 +775,8 @@ defmodule Loopex.Checks.Register do
     |> Map.put(
       "Next transition",
       "Map every outcome to evidence, run `bash scripts/check.sh` under the floor toolchain " <>
-        "pair and `bash scripts/check-release.sh` once from the candidate, then move " <>
-        "`#{name}` to In review"
+        "pair and `bash scripts/check-release.sh` once from the tested implementation SHA, " <>
+        "then move `#{name}` to In review"
     )
   end
 
@@ -793,7 +793,8 @@ defmodule Loopex.Checks.Register do
     )
     |> Map.put(
       "Next transition",
-      "Record the closure governance row and move `#{name}` to Closed"
+      "Record the closure governance row, naming both the tested implementation SHA and " <>
+        "the administrative closure SHA, and move `#{name}` to Closed"
     )
   end
 

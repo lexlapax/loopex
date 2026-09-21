@@ -120,24 +120,35 @@ four places above, so `git show` over it is the check. Anything else in that
 diff means the evidence no longer covers the tree, and the packet is
 reassembled from a new implementation SHA.
 
-**The documentation and archive checks run on the tagged SHA.** They are the
-two whose subject is the published bytes — the documentation gate reads every
-tracked file under `docs/`, and the archive proof builds an extraction of the
-exact commit — so running them only on the implementation SHA leaves the
-administrative commit's own documentation changes unchecked and the archive
-proved for a tree nobody publishes. They run again on the tag, and their
-results join the evidence page with the tag named.
-
-**Run evidence is immutable.** A run's identity, platform, toolchain, result
-and duration are retained where they cannot be edited after the packet is
-read: attached to the annotated tag, or held outside the repository with its
-digest recorded here. An evidence page that can be rewritten after a reviewer
-read it is a record of what someone later wished had happened.
+**The closure matrix runs once, from the tested implementation SHA**, and the
+administrative commit re-runs nothing. What the tag re-proves, and how it is
+confined so that two documentation checks are enough, is in
+[Tags](#technical-milestones-release) — it belongs to the release decision,
+which is what creates a tag at all, and an earlier revision of this section
+put it here and made closure depend on a tag that closure authorizes.
 
 <a id="technical-milestones-release"></a>
 ### Tags
 
 Concept: [Release](milestones.md#concept-milestones-release).
+
+`COMMIT` is the **administrative closure SHA**, not the tested implementation
+SHA: it is the commit that carries the closure record, so it is the tree a
+reader who fetches the tag gets. Before tagging:
+
+| Step | Command | What a failure means |
+| --- | --- | --- |
+| Confine the administrative diff | `git diff --stat <tested>..<administrative>` | Any path outside `docs/` means the tag would publish source the closure evidence does not cover; the release stops and the packet is reassembled from a new implementation SHA |
+| Re-prove the documentation | `bash scripts/check.sh --docs` on the tagged SHA | The administrative commit's own documentation changes are not green; fix and re-tag |
+| Re-prove the archive identity | Recompute the archive manifest from the tagged SHA and compare it with the manifest the tested SHA recorded | The published bytes are not the closed bytes outside `docs/`, which the first step should already have caught |
+
+Nothing else is re-run. There is no second suite, no second release check and
+no second provider credential: the tested tree and the tagged tree differ only
+in documentation, which is exactly the property the first step establishes and
+the reason two documentation-scoped checks suffice. The documentation gate's
+scope is unchanged — `docs/operator` and `docs/developer`, as the verification
+guide fixes it — and widening it to all of `docs/` was a claim an earlier
+revision of the closure section made and nothing implements.
 
 `git tag -a vVERSION COMMIT -m "NAME closure"` and `git push
 origin vVERSION`, on the maintainer's explicit decision. The source version

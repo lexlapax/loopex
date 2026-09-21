@@ -5375,3 +5375,34 @@ above remain records of what was proved at the revisions they name. The
 source version is `0.1.0` as accepted ADR 0023 decides; the `v0.1.0` tag is a
 separate maintainer decision on the integrated closure. This record grants no
 tag, release or publication.
+
+### Closure names two commits — 2026-09-20
+
+The maintainer changed what a closure must show. Closure had asked for its
+evidence and its closure record at one SHA, which no sequence of commits can
+satisfy: recording the decision is itself a commit, and it comes after the
+runs. Closure now names a **tested implementation SHA** — the candidate the
+matrix ran on and the reviewer read — and an **administrative closure SHA**
+that records the decision and changes nothing the runs covered. The matrix
+runs once, from the first.
+
+The **tag names the administrative SHA**, because that is the tree a reader
+who fetches the tag gets. The release verifies that commit is confined —
+`git diff --stat <tested>..<administrative>` touching nothing outside
+`docs/` — and on that basis re-proves documentation only: `check.sh --docs` on
+the tagged SHA and a recomputed archive manifest against the one the tested
+SHA recorded. **No suite and no release check run twice**, and no provider
+credential is spent again. Run evidence is immutable, held where it cannot be
+edited after the packet is read.
+
+What changed in what a check proves: the documentation gate and the archive
+identity are now proved of the **published** bytes rather than only of the
+tested ones, at the cost of two documentation-scoped runs at release. Nothing
+else moved, and the documentation gate's scope is unchanged — `docs/operator`
+and `docs/developer`. Written into
+[the milestone guide](milestones.md#concept-milestones-close) and its
+[technical companion](milestones-technical.md#technical-milestones-close),
+`AGENTS.md` § Milestones and Checks steps 3 and 4, and
+[the verification guide](verification.md#concept-verification-stages)'s stage
+table, in one change with this entry. It grants no tag, release or
+publication.

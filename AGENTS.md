@@ -169,9 +169,18 @@ A milestone runs in four steps; the
    `bash scripts/check-release.sh` once, counting the current-pair CI run the
    candidate already produced rather than repeating it. An independent reviewer
    reads the candidate; the maintainer closes it and the register moves to
-   `Closed`.
+   `Closed`. Closure names **two commits**: the *tested implementation SHA*
+   the matrix ran on and the reviewer read, and the *administrative closure
+   SHA* that records the decision and changes nothing the runs covered. One
+   commit cannot name itself. Run evidence is immutable — held where it cannot
+   be edited after the packet is read.
 4. **Release.** Publication, tags, and packages are separate maintainer
-   decisions that reuse the closure evidence when the source is unchanged.
+   decisions that reuse the closure evidence when the source is unchanged. The
+   tag names the **administrative** closure SHA, whose diff from the tested
+   SHA is verified to touch nothing outside `docs/`; on that basis the release
+   re-proves documentation only — `bash scripts/check.sh --docs` on the tagged
+   SHA and a recomputed archive manifest — and re-runs no suite and no release
+   check.
 
 Historical milestones keep their plans, evidence logs, and dispositions as
 records of what was proved at the revisions they name. Current tests belong to

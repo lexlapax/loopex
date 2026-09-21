@@ -807,10 +807,18 @@ archive is staged from the exact committed candidate with `git archive`,
 extracted outside the checkout, compiled, and used to run the two-process
 workflow from the extraction following the operator guide; its SHA-256, source
 commit and tree are retained with the closure runs. The release itself is one
-annotated `v0.2.0` tag on the integrated closure commit, created on the
-maintainer's separate decision, after which the tag object is verified
-annotated, `v0.2.0^{commit}` is the reviewed integration commit and reachable
-from `main`, and `git show <that commit>:VERSION` is exactly `0.2.0`. Do not
+annotated `v0.2.0` tag created on the maintainer's separate decision, and the
+commit it names is the **administrative closure SHA** — the one carrying the
+closure record, and therefore the tree a reader who fetches the tag gets.
+Four things are verified at the tag, in this order: `git diff --stat
+<tested>..<administrative>` touches **nothing outside `docs/`**, which is what
+makes everything below sufficient; `bash scripts/check.sh --docs` is green on
+the tagged SHA; the archive manifest recomputed from the tagged SHA equals the
+one the tested SHA recorded; and the tag object is annotated, with
+`v0.2.0^{commit}` reachable from `main` and `git show <that commit>:VERSION`
+exactly `0.2.0`. Nothing else re-runs — no suite, no release check, no
+provider credential — because the confinement check is what proves the tagged
+source and the closed source are the same source. Do not
 move the tag, and publish no package, binary, installer or service unit.
 
 <a id="technical-plan-cli"></a>
