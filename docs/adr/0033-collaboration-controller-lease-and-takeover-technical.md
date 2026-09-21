@@ -41,23 +41,23 @@ epoch does, which is which client may drive.
 One owner process per session serializes every lease read, grant, renewal,
 release and expiry transition with that session's mutation-admission handoff,
 so a takeover cannot pass a mutation whose holder check has already started
-but whose core admission is unresolved; that admission first resolves, or the
-daemon's own holder-and-epoch check refuses it before it ever reaches core.
+but whose relay ticket is unresolved; the relay accounts for that admission
+first, or the daemon's own holder-and-epoch check refuses it before it ever
+reaches core.
 
 A revision of 2026-09-20 proposed collapsing these into one process for the
 daemon holding a record per session. The maintainer rejected that on
-2026-09-20 and kept the process per session: the process *is* the
-serialization boundary and the holder of that session's in-flight admission
-set, and collapsing it would put every session's lease transitions behind one
-mailbox. The plan's companion states the population and its bound.
+2026-09-20 and kept the process per session: the process *is* the lease
+serialization boundary and failure-isolation unit, while the fixed relay owns
+the cross-owner ticket ledger. Collapsing the lease owners would put every
+session's lease transitions behind one mailbox. The plan's companion states
+the population and its bound.
 
 **A lease owner's failure ends that session's collaboration state, not the
-daemon**, on the maintainer's decision of 2026-09-20. The owner holds the
-session's in-flight admission set in its own memory, and that set is the basis
-of the expiry rule below: a takeover is granted only when it is empty. An
-owner that dies takes the set with it, so no successor owner can inherit it —
-and none tries to. What happens instead is exactly what happens when a lease
-is gone by any other route:
+daemon**, on the maintainer's decision of 2026-09-20. The owner loses its
+transient lease record, but it does not take admitted work with it: the fixed
+relay retains the session's ticket set and a successor queries that set before
+grant. What happens is:
 
 - the daemon writes `control_owner_lost` to that session's **controller**
   connection and closes it with its attachment, under the daemon-initiated
@@ -66,55 +66,61 @@ is gone by any other route:
   holds no lease, is on a connection of its own and loses nothing;
 - the lease itself is gone, held by nobody;
 - the next `session.acquire_control` for that session starts a **fresh**
-  owner, holding no lease and no admission set, and mints a **fresh epoch** —
-  the same takeover mechanics this ADR already defines for a lease that has
-  been released.
+  owner holding no lease, waits until the relay reports no unresolved mutation
+  ticket for the session, and then mints a **fresh epoch**.
 
-The fresh epoch alone is **not** what makes the lost set harmless, and an
+The fresh epoch alone is **not** what orders the old and new tenures, and an
 earlier revision of this section said it was. It stops a *later* command from
-the old tenure, which is a different thing from ordering: a successor's first
-call could still reach a coordinator ahead of an older call that was already
-on its way, because core orders what it receives rather than what is in
-flight, and core never sees the writer epoch at all.
+the old tenure, which is different from accounting for a call already on its
+way. The relay's retained ticket is what keeps a successor's first call from
+overtaking that older call; core orders what it receives and never sees the
+writer epoch.
 
 **The daemon closes that window with one fixed process, the admission relay**,
-added on the maintainer's decision of 2026-09-20. Every **lease-authorized
-existing-session mutation** — the set this pair lists below, each carrying
-`writer_epoch` and admitted only from the recorded holder — is routed through
-it, and so are two calls that carry no epoch: `session.create`, whose ticket
-the connection process takes because no lease owner exists for a session that
-does not exist yet, and `session.attach`, whose second leg mutates the
-runtime's dispatcher. Ten in all. Nothing else is: reads are not ticketed,
-since a read grants nothing, orders nothing, and a
-blocking read would otherwise hold a takeover
-for as long as an observer sat on it — and neither are ADR 0023's three
-artifact-transfer methods, which do write per-attachment dispatcher state but
-touch neither `Control` nor the journal, so they cannot disturb what a drain
-enumerates. The plan's companion states that boundary and what becomes of a
-transfer in flight at the cut. Neither the create ticket nor the attach
-ticket blocks a grant — the first names no session yet, the second grants
-nothing a successor could overtake — and both exist so that the
-daemon's orderly stop can close admissions with an acknowledgement covering
-**every** call that changes core state, which a relay they bypassed could not
-give. The plan's companion owns that cut.
+added on the maintainer's decision of 2026-09-20. Every post-initialize method
+request takes an admission permit from it, which gives orderly stop one linearization point.
+Ten calls also take retained tickets: the eight lease-authorized core mutations
+that carry `writer_epoch`, `session.create`, and `session.attach`. Reads and the
+three artifact-transfer methods take unticketed permits: they grant no lease,
+touch neither Control nor the journal, and cannot disturb the session census,
+but sharing the permit gate prevents them from slipping past a connection-side
+check while the relay cuts admission.
 
-The lease owner — or, for a create, the connection process — **calls** the
-relay and waits for the acknowledgement before
-the core call is made, so no mutation exists that the relay has not recorded;
-the relay **monitors** every lease owner, so the BEAM's per-sender message
-ordering puts every ticket an owner sent ahead of that owner's `DOWN`; it
-survives lease-owner death, being fixed rather than per-session; and **a
-replacement owner's first grant for a session blocks until that session's
-outstanding tickets have settled**.
+For a lease-authorized call, the per-session lease owner validates the combined
+gate and sends the complete core-call descriptor to the relay. For create, the
+connection sends the descriptor and its request-bound activation reservation.
+For attach, the connection sends its stable holder pid and reserved attachment
+slot; the relay task invokes `Runtime.attach_for_holder/4`, so the task that
+executes the call never becomes the lifetime holder. In every ticketed case the
+relay performs this sequence before its caller receives an admission reply:
 
-A ticket settles **only** when the relay has the call's real outcome — its
-task returning core's answer, refusal included. A task that dies **without**
-one settles nothing and keeps its ticket: a delivered call completes whether
-or not its caller lives, so a dead task says nothing about whether core
-received the mutation, and the relay exits `relay_lost` rather than admit a
-successor over a mutation it can no longer account for. A connection
-disappearing settles nothing either, because the call it made is still
-running.
+1. allocate and retain the ticket row, including session where one exists,
+   request identity and canonical request digest;
+2. start and monitor the task that will make the core call;
+3. only then answer `admitted` with the ticket identity.
+
+The task can begin or even finish before the acknowledgement is delivered;
+what cannot happen is an acknowledged mutation with no retained ticket or no
+started, monitored executor. That is the maintainer's selected order. A
+connection or lease owner that dies after acknowledgement does not cancel the
+core call. The relay keeps the ticket until the task returns the real core
+result, refusal included, and routes the result to the connection only if it
+still exists.
+
+A task that dies without a result settles nothing. The relay cannot infer
+whether core received the call, so it exits `relay_lost` and makes the daemon
+fail-stop rather than delete the ticket or grant a successor over it. The relay
+monitors every lease owner; signal ordering puts a ticket request an owner sent
+before the corresponding owner `DOWN`. A replacement owner's first grant for
+a session waits until that session's mutation tickets settle. Create names no
+existing session and attach grants no control, so neither blocks an unrelated
+lease grant; both remain visible to the drain.
+
+The relay's `cut` changes it to closed and acknowledges immediately. Requests
+linearized before the cut retain their permits and may enter or remain in core;
+requests processed after it refuse. Ticket settlement is a separate bounded
+drain step. This is an admission cut, not a claim that every admitted call has
+finished or that no pre-cut task can enter core after the acknowledgement.
 
 So the ordering claim rests on the relay, and the session-scoped rule gives
 the rest: the successor is granted a fresh epoch, the dead controller's
@@ -126,7 +132,7 @@ nothing of it is still unaccounted for.
 An earlier draft had the daemon restart the owner and carry on with its
 sockets intact, and a 2026-09-20 revision made the failure fatal to the whole
 daemon instance. Both are superseded: the restart was wrong because a
-restarted owner would claim an admission set it cannot know, and daemon-fatal
+restarted owner would claim the lease record it cannot know, and daemon-fatal
 was the smaller design the maintainer declined on 2026-09-20 — it ends every
 other session's work for one session's fault, where the relay ends none of it.
 
@@ -150,13 +156,12 @@ lease is free, no acquisition is waiting, and the relay holds no outstanding
 ticket for that session — all three, since any one alone would retire an owner
 something still depends on.
 
-Retaining the in-flight set in a survivor was the alternative and was
-rejected: whichever process held it would then be the process whose failure
-loses it, so the window moves up one level rather than closing, and a daemon
-that cannot lose the set is a daemon that has made the set durable — a durable
-lease record by another name, which this decision rejects for its own
-reasons. The relay is not that: it holds no lease and no authority, only the
-fact that a call it made has not yet been accounted for.
+Retaining the **lease** in a survivor was rejected: it would make a replacement
+process claim collaboration state it cannot reconstruct. The relay retains
+only tickets for calls it itself started, holds no lease or authority, and is
+not restarted. Its own failure is daemon-fatal, which is the fail-closed edge
+that lets its volatile accounting be sufficient without turning it into a
+durable lease record.
 
 **One lease per connection.** A connection holds at most one controller lease
 at a time, so a client that wants to drive two sessions opens two connections.
@@ -250,7 +255,7 @@ the local store's writer marker, unchanged.
   not reached, because there is nothing well-formed to put through it. The daemon admits it only if the sending connection is the
   recorded holder, the epoch matches, the lease state is `held`, the deadline
   is later than the live daemon's monotonic admission time, and the
-  connection holds a controller-capable attachment, except that a verified
+  connection holds a live attachment for its pinned session, except that a verified
   dormant session's `session.resume` may precede attach under that
   connection's held lease. The check and core handoff are serialized against
   lease transitions for the session.
@@ -258,7 +263,7 @@ the local store's writer marker, unchanged.
   **Every way that gate can fail answers one code, `control_not_held`, and it
   says nothing about which condition failed.** The gate has five conditions —
   holder connection, epoch equality, `held` state, unexpired deadline,
-  controller-capable attachment — and an earlier revision required each of
+  live attachment for the pinned session — and an earlier revision required each of
   them without naming the result any of them produces, which left the one
   refusal a client actually meets undefined and ADR 0032's error table
   incomplete. It is deliberately **non-oracular**: a stale epoch, a copied
@@ -270,7 +275,8 @@ the local store's writer marker, unchanged.
   must not be. It refuses before core admission and before any session write,
   carries the request's `request_id` and nothing else, and changes nothing
   about the current holder's lease, epoch or deadline. Queries and attach
-  carry no epoch and pass no gate.
+  carry no epoch and pass no **lease** gate; they still take the relay permit,
+  and attach takes a relay ticket under the rule above.
 
   **Five conditions, six cases**, and the mapping is written out so the two
   numbers stop reading as a disagreement:
@@ -282,7 +288,7 @@ the local store's writer marker, unchanged.
   | A mutation from a connection that never acquired | holder connection |
   | A mutation after `session.release_control` | `held` state |
   | A mutation after the term elapsed | unexpired deadline |
-  | A mutation from a connection with an observer-only attachment | controller-capable attachment |
+  | A mutation from the holder connection after its attachment ended, or before it attached | live attachment |
 
   The witnesses assert each case separately in the daemon's own state — which
   condition it constructed — and assert that all six produce the
@@ -297,7 +303,7 @@ the local store's writer marker, unchanged.
   constraint is on the first mutation,
   not on the two calls that precede it, and that mutation refuses unless the
   sending connection is the holder, the epoch matches and the connection
-  holds a controller-capable attachment.
+  holds a live attachment for its pinned session.
 - **Only an explicit release releases early.** A successful
   `session.release_control` from the holder frees the lease at once. Every
   other way a connection ends — an orderly close, an EOF, a killed client, a
@@ -315,21 +321,21 @@ the local store's writer marker, unchanged.
 ### Expiry against an in-flight admission
 
 Two rules above meet at the deadline and their order has to be stated, not
-left to the implementation. The lease owner serializes a lease
-transition against a mutation whose holder check has already started, so a
-takeover cannot pass an admission core has not yet resolved; and takeover is
-admitted at expiry with no grace. The linearization rule is:
+left to the implementation. The lease owner serializes the gate and relay
+ticket handoff against lease transitions; the relay then retains the admitted
+call until its real result. Takeover is admitted at expiry with no grace. The
+linearization rule is:
 
-1. A mutation whose holder, epoch, state and deadline check *completed* while
-   the deadline was still in the future is **in flight** and settles under
-   that lease, even if the deadline passes while core's admission is
-   unresolved. It completes or fails on its own terms; it is neither retried
-   nor fenced by the expiry.
+1. A mutation whose holder, epoch, state, deadline and attachment check
+   completed while the deadline was still in the future, and whose relay
+   ticket was admitted, is **in flight** and settles under that lease even if
+   the deadline passes while core is unresolved. It completes or fails on its
+   own terms; it is neither retried nor fenced by the expiry.
 2. At the deadline the lease state becomes `expired` and the holder gains
    nothing further: every mutation whose check begins at or after the deadline
    refuses, including one from the holder, and renewal no longer extends it.
 3. A takeover becomes **eligible** at the deadline and is **granted** only
-   once every in-flight mutation for that session has resolved. Until then the
+   once the relay reports every mutation ticket for that session settled. Until then the
    acquire waits, bounded by the acquiring request's own deadline; a wait that
    exceeds it refuses with **`control_pending`**, the stable reason ADR 0032's
    generation-2 error inventory carries for exactly this case, and the client
@@ -379,9 +385,13 @@ is itself command authority.
 
 Tests prove: exactly one controller with observers within the ADR 0032 bounds;
 a stale epoch, copied current epoch, non-holder connection, released state
-and expired state each refused before core admission with the current
+expired state and a holder lacking a live attachment each refused before core admission with the current
 controller unaffected; a lease transition racing command admission preserves
-this order; the expiry linearization above, with a mutation blocked inside
+this order; every ticketed call has both its retained row and monitored task
+before the sender receives `admitted`; attach's task uses the connection as
+stable holder; killing that task before a result makes the relay and daemon
+fail-stop; a cut answers immediately, carries pre-cut calls to their real
+results, and refuses every post-cut permit; the expiry linearization above, with a mutation blocked inside
 core across the deadline settling under its own lease while the eligible
 takeover waits and is granted only after it resolves, the holder's next
 mutation refused at the deadline, the acquiring request refusing with

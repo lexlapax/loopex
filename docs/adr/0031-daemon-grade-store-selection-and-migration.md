@@ -33,7 +33,8 @@ be decided now is which store the daemon runs on and what the operator is
 owed about its limits.
 
 **Select the existing local adapter as the daemon's store for `0.2.0`.** The
-daemon holds the local writer marker for its process's lifetime and inherits
+Store process holds the local writer marker for the Store process's lifetime,
+while the daemon owns and watches that process, and the daemon inherits
 the adapter's exact, documented limits: one append-only log per state root
 with a hard 256 MiB capacity, a 4 MiB frame ceiling, full-history retention
 with no compaction, full replay at open, and one writer per root. Reaching
@@ -131,9 +132,12 @@ is a separate compatibility surface: adding an adapter later freezes no wire,
 artifact or embedded contract, and the exact private format stays
 experimental in 0.x.
 
-M5 rollback is stopping the daemon: the foreground server and CLI reopen the
-same root under the same placement identity. There is no forward migration to
-roll back, because M5 introduces none.
+M5 rollback is stopping the daemon in its ordered Store-last path, which lets
+the Store process release the marker before the foreground server or CLI
+reopens the same root under the same placement identity. A Store that exits on
+its own releases the marker before the daemon can react; a kill or power loss
+may instead leave a stale marker for the adapter's verified recovery. There is
+no forward migration to roll back, because M5 introduces none.
 
 Technical depth: [Compatibility mechanics](0031-daemon-grade-store-selection-and-migration-technical.md#technical-adr-0031-compatibility).
 

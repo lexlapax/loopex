@@ -29,7 +29,9 @@ record. Every other attachment is an observer: it receives the same snapshot
 and events and may not admit a command. For an existing session, the daemon
 admits a mutation only when the sending connection is the current holder,
 its supplied writer epoch matches, the lease is held and unexpired, and the
-attachment has command capability. The daemon checks those facts together
+connection has a live attachment for its pinned session. Attachments carry no
+controller capability: the lease is the only controller role, and any live
+attachment satisfies the liveness condition. The daemon checks those facts together
 before core admission and serializes that handoff with lease changes; an
 observer cannot reuse an epoch it learned from a result or status.
 `session.create` is the one exception because no session lease exists yet:
@@ -43,7 +45,7 @@ attaches to that session; what is fixed is
 that no existing-session mutation is admitted until the lease is held by the
 sending connection, its epoch matches, and — with the single exception of
 `session.resume` on a verified dormant session — that connection holds a
-controller-capable attachment. So a newly created session is driven by
+live attachment for the pinned session. So a newly created session is driven by
 attaching and acquiring in either order and then sending the first command
 with the granted epoch, and a known dormant session is driven by acquiring
 by ID, resuming with the granted epoch and attaching. A
@@ -84,6 +86,19 @@ have resolved. That adds no grace, because the expired holder can only finish
 what it had already begun. Writer exclusion between two daemons on one
 state root stays the local store's writer marker, unchanged.
 
+One fixed admission relay makes that ordering survive a lease owner's death
+and gives shutdown one cut. Every post-initialize method request linearizes
+there. The eight
+lease-authorized core mutations, `session.create` and `session.attach` also
+take retained tickets: the relay records the ticket and starts its monitored
+core task **before** it answers that the request was admitted. Attach's task
+uses the connection pid as an explicit stable holder, so relay execution does
+not transfer attachment lifetime to the task. A relay cut acknowledges as
+soon as it closes admission; calls admitted before it may finish, calls after
+it refuse, and ticket settlement is the drain's separate bounded wait. Relay
+loss is daemon-fatal because no process may guess what its missing ticket set
+contained.
+
 **Alternatives rejected.** Putting the lease in core was rejected because the
 vision keeps collaboration policy above core and another host may choose a
 different rule. Last-writer-wins without an epoch was rejected because a
@@ -95,18 +110,16 @@ requires the holder connection, so durability could only preserve a counter
 nothing needs. A counter-based epoch scoped to the daemon incarnation was
 rejected on 2026-09-14 because a lease-owner restart under the same
 incarnation would mint values already issued. Restarting a failed lease owner
-beneath live sockets was rejected on 2026-09-20, on an independent review's
-finding: the owner holds the session's
-in-flight admission set, a takeover waits on that set being empty, and a
-restarted owner cannot know what it has forgotten. Retaining the set in a
-survivor moves the same window one process up; making it survivable at all
-would mean making it durable, which is the durable lease record this decision
-already rejects.
+beneath live sockets was rejected on 2026-09-20 because it would claim a lease
+record it cannot reconstruct. The fixed admission relay retains only the
+tickets for calls it started, never the lease; its loss is daemon-fatal rather
+than reconstructed, so the ticket ledger needs no durable record.
 
 **Implementation and milestone-closure evidence.** This is a trust claim, so its class is
 negative tests on real processes plus a security reading of the admission
 path: every refusal — stale epoch, copied current epoch, non-holder
-connection, released lease, expired lease, observer abort — proved before core
+connection, released lease, expired lease, holder without a live attachment,
+observer abort — proved before core
 admission and before any session write, a controller killed mid-run fenced
 after takeover, a lease owner killed while a mutation is in flight taking neither the daemon
 nor any other session down — its controller's connection sent

@@ -41,7 +41,7 @@ control methods, the writer-epoch field ADR 0033 names, and **two**
 notification record families: `daemon.stopping`, carrying the reason a daemon
 is going away, and `daemon.notice`, carrying a bounded code for something an
 operator should know about a session whose command nonetheless succeeded —
-today, an activation whose directory write failed.
+today, an activation whose persistent discoverability-index write failed.
 The milestone that
 brings this ADR also renames the released generation-1 string to
 `loopex.experimental/1`, so the two generations are named on one scheme and
@@ -57,10 +57,11 @@ connection closes whatever happened, so a client may learn of a shutdown only
 by its socket closing. It adds no durable
 method. An earlier draft of this decision also added `session.stop` and called
 it durable; that is withdrawn, because core owns durable session truth, core
-has no durable stop command, and M5's six core changes — concurrent
-attachment, a read-only existence query, the trace exclusion, the bounded
-`quiesce/1`, the create and resume results' two new fields and a bounded
-session listing — are none of them durable commands. Ending a client's involvement is releasing control and
+has no durable stop command, and M5's five core changes — the complete
+concurrent-attachment lifecycle, a read-only existence query, the trace
+exclusion, bounded `quiesce/1`, and the create and resume results' two new
+fields — are none of them durable commands. The daemon's bounded maintained
+index is adapter state, not a sixth core change. Ending a client's involvement is releasing control and
 disconnecting; the session itself keeps running, which is the point of a
 daemon, and another client reaches it again by acquiring control and
 attaching.
@@ -70,17 +71,25 @@ ADR 0023's existing no-common-generation rule and nothing durable is
 created; generation-1 clients keep the M4 foreground server, whose wire,
 one-attachment rule and behavior do not change. A narrow core change lets
 distinct attachments to the same session coexist without replacing one
-another: the same-session supersession that replaces them today becomes
-**conditional on ADR 0023's existing `replace` flag** and narrows to the
-attaching process's own prior attachment, and the dispatcher's release on that
-process's exit takes over releasing the attachment's open transfers, which
-accepted ADR 0028 requires of every detach and which that supersession is the
-only caller of today. **ADR 0023 is unamended by this**: its `replace` field,
-its refusal of an unnamed second attachment and the foreground server's
-behaviour are all exactly what they were, one connection there holding one
-attachment; the core continues to own their independent cursor barriers and
-event-count queues, while the daemon owns per-connection socket output
-buffers, the resident window and the residency ceilings. The socket path is
+another, including several attachments owned by one embedded holder. Every
+attachment has its own identity. Replacement therefore names the exact
+`replace_attachment_id`; the target must belong to that holder and session,
+and no boolean can choose among several candidates. The daemon still binds a
+connection to at most one attachment, while embedded callers may hold a set.
+The first attach or acquire tentatively reserves that connection's session
+before asynchronous work begins, coalesces only an exact repeated request, and
+rolls the reservation back only on a definite refusal. When a connection
+ends, its attachment slots stay charged until the relay has accounted for its
+tasks and core has acknowledged complete holder cleanup.
+The foreground generation-1 and daemon generation-2 adapters translate their
+existing per-connection `replace: true` onto the only attachment that each
+connection may hold, so the wire remains unambiguous and ADR 0023 stays
+unchanged. Core monitors the stable holder, removes all
+of its attachments when it dies, and releases every transfer they opened as
+ADR 0028 requires. The core continues to own each attachment's independent
+cursor barrier and event-count queue, while the daemon owns per-connection
+socket output buffers, the resident window and the residency ceilings. The
+socket path is
 `daemon.sock` inside a `0700` daemon-owned subdirectory of the state root
 unless the operator names another, and a path beyond the platform bound is
 refused at start rather than truncated. The subdirectory exists so the daemon
@@ -127,7 +136,11 @@ untouched. A connection holds one attachment, so there is nothing for it to
 do afterwards, and the close is what releases the attachment in core.
 Concurrent connections are themselves bounded, at 512, because a client that
 never attaches is bounded by no attachment ceiling. Transient progress is coalesced or dropped first and
-never delays a journal transaction.
+never delays a journal transaction. Listener loss leaves the connection
+registry alive, so existing clients receive best-effort
+`fatal:listener_lost` before close. Connection-registry loss leaves no live
+socket inventory or writer, so the daemon closes the listener, cuts admission
+and halts without claiming it delivered `fatal:connections_lost`.
 
 A session is *active* when **this daemon activated it in this lifetime** and
 *dormant* when the root holds it durably and this daemon has not — whether or
@@ -156,12 +169,18 @@ next command for that session, which the daemon forwards unchanged.
 
 Lazy recovery is what a daemon can honestly promise on a store whose session
 directory is not Store truth and whose every open replays a full log.
-`session.list` returns bounded pages, with an exact continuation
-cursor, over a daemon-owned index of what the root *records* — identity,
-recorded placement identity, active or dormant, controlled or not — and never
-over what the Store contains, because no index built from the session
-directory can claim that. Lineage, lifecycle state and committed sequence are
-not list fields: a client that needs them attaches and reads the snapshot.
+`session.list` returns bounded pages, with an exact continuation cursor, over
+a bounded, daemon-owned persistent discoverability index — identity, recorded
+placement identity, active or dormant, controlled or not — and never over what
+the Store contains. Daemon startup reads only that size-capped index and never
+enumerates the legacy session directory, so malformed or arbitrarily numerous
+directory names cannot defeat the startup bound. An existing root without the
+index requires an explicit offline import before the daemon serves it; the
+import's legacy directory scan is intentionally outside the service-start
+bound. The index is not Store truth and can omit a session committed across a
+crash cut; exact-ID and command-ID recovery repair such an omission. Lineage,
+lifecycle state and committed sequence are not list fields: a client that
+needs them attaches and reads the snapshot.
 The proposed
 limits are exact and are bound at acceptance: 512 concurrent connections per
 daemon, thirty seconds for an accepted connection to complete `initialize`
@@ -184,7 +203,10 @@ invites remote exposure by misconfiguration. Serving generation 1 from the
 daemon would need a second fencing path with no wire epoch, and its one
 exclusive connection per session is what the foreground server already
 provides. Keeping M4's one-attachment-per-process rule contradicts what a
-daemon is for. An unbounded per-attachment queue lets one slow client grow
+daemon is for. Limiting one holder to one attachment was rejected after the
+maintainer selected embedded same-holder concurrency on 2026-09-20; a boolean
+replacement flag cannot identify one member of that set. An unbounded
+per-attachment queue lets one slow client grow
 coordinator-adjacent memory without bound. A daemon-owned proxy fan-out would
 duplicate core's cursor and queue ownership and need a second replay boundary
 to preserve the subscribe/snapshot race. Promising exactly-once replay was
@@ -210,11 +232,14 @@ its generation are a protocol claim, so they need vectors and a compatibility
 proof: a generation-2 negotiation vector, refusal of a generation-1-only
 initialize, and an independent client over the socket. The residency rules are
 a durability and resource claim, so they need process fault injection and
-bounded-resource negatives on real processes: simultaneous daemon starts, loss
-of the store under a live listener, a slow observer detached at its last
-emitted cursor, idle eviction and reconnect with no missing durable event, and
-each count and byte ceiling refusing independently with observed process RSS
-recorded beside it.
+bounded-resource negatives on real processes: simultaneous daemon starts,
+loss of the store under a live listener, two attachments from one embedded
+holder remaining independent, an explicit replacement removing only its named
+target, holder death releasing the holder's complete attachment and transfer
+set, a slow observer detached at its last emitted cursor, idle eviction and
+reconnect with no missing durable event, bounded-index startup independent of
+legacy directory population, and each count and byte ceiling refusing
+independently with observed process RSS recorded beside it.
 
 Technical depth: [Contract and evidence](0032-daemon-attachment-residency-and-replay-technical.md#technical-adr-0032-decision).
 
@@ -231,10 +256,12 @@ at initialize that this daemon does not serve it, and the foreground server
 still does. The public protocol remains experimental with exact-generation
 agreement and no mixed-generation stream promise.
 
-Rollback is the M4 foreground server on the same local store: the daemon
-carries no residency state, so removing it loses nothing durable. The numbers
-are safety ceilings the M5 tests must show are enforced, not measured service
-promises.
+Rollback is the M4 foreground server on the same local store: it ignores the
+daemon's bounded discoverability index, and no Store record, event or snapshot
+depends on that file. Removing the daemon loses only live residency and lease
+state. An existing root enters M5 through the explicit marker-protected
+offline index import; no reverse migration is needed. The numbers are safety
+ceilings the M5 tests must show are enforced, not measured service promises.
 
 Technical depth: [Compatibility mechanics](0032-daemon-attachment-residency-and-replay-technical.md#technical-adr-0032-compatibility).
 

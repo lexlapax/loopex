@@ -125,10 +125,10 @@ condition to observe.
 Framing, the initialize handshake, admission records, snapshot,
 event and progress records, the frame ceiling, the strict UTF-8/LF rule and
 the unknown-field rule are reused from ADR 0023 unchanged. **Request records
-are the one exception**, and they are reused with one addition rather than
-unchanged: every existing-session mutation in generation 2 carries
-`writer_epoch`. That is the addition, and it is the reason generation 2 needs
-a schema digest of its own.
+have one generation-2 addition**: every existing-session mutation carries
+`writer_epoch`. Attach keeps ADR 0023's optional boolean `replace`; because
+each protocol connection holds at most one attachment, the adapter can map
+that boolean to core's exact replacement selector without ambiguity.
 
 **The addition, at the exactness a vector needs**, because "carries
 `writer_epoch`" is not a type, an optionality or a list:
@@ -155,203 +155,106 @@ one attachment after `session.attach`; generation 2 permits a connection to
 hold at most one attachment at a time — **and at most one controller lease**,
 which ADR 0033 fixes for the same reason and which is what makes closing "the
 controller's connection" name exactly one session — and a client process to
-hold as many connections as the residency limits admit.
+hold as many connections as the residency limits admit. Its attach request
+keeps optional `replace`: on either protocol generation `true` maps to that
+connection's sole live attachment, while a second attach with `false` refuses
+ADR 0023's existing `attachment_conflict`. Embedded callers are not subject to
+the connection rule and use core's explicit `replace_attachment_id` option.
 
-**An attachment never outlives the process that attached it, and M5 is what
-makes that true.** The mechanism is a monitor, not a detach call. Today the
-dispatcher monitors the attaching process only while its snapshot scan is in
-flight and **demonitors it the moment the scan finishes**
-(`event_dispatcher.ex:455`), after which nothing watches that process at all
-and the installed attachment records neither its pid nor a monitor
-(`:764-803`);
-`disconnect/2` marks an attachment disconnected and empties its queue but
-leaves the entry in place (`:879-886`); and the one path that actually removes
-an entry is same-session **supersession** (`:812-823`) — which M5's
-concurrent-attachment change removes, because coexisting attachments are the
-point.
+**An attachment never outlives its holder, and M5 makes the holder explicit.**
+Today `Runtime.attach/3` uses the process that calls it as the transient scan
+caller, the dispatcher drops that monitor after installation, and `Control`
+keeps only one attachment per session. Those three facts cannot implement
+multiple attachments, and a daemon relay task cannot stand in for the
+connection whose lifetime the attachment must follow.
 
-**And there is a third place the change has to reach, which two reviews of
-this pair missed: `Control` is single-attachment too.** The dispatcher is not
-the only component holding attachment state. `Control`'s session entry has one
-`attachment` field, `finish_attach/5` **overwrites** it on every successful
-attach (`control.ex:1273-1283`), the command path validates against that one
-field (`:343`, `current_attachment?/3` at `:1649-1657`, answering
-`{:error, :stale_attachment}` for anything else), and `attachment_repetition/4`
-keeps its repetition state for that same single attachment (`:1312-1314`).
+Core change 1 therefore has two entry paths with one implementation:
 
-So with only the dispatcher changed, two coexisting attachments would still
-break the session at `Control`: an observer attaching after a controller
-overwrites the controller's slot, and the controller's **next command** fails
-— the daemon's central case, failing on the component nobody had looked at.
+- `Runtime.attach/3` remains the embedded entry and uses `self()` as the
+  holder;
+- the daemon-only `Runtime.attach_for_holder/4` accepts the already-authorized
+  connection pid as the stable holder. The admission relay starts the
+  monitored attach task and passes that pid before acknowledging the ticket,
+  so the task may end without changing whose lifetime owns the result.
 
-**Core change 1 therefore includes `Control`'s attachment and repetition
-state, held per holder rather than per session.** The **holder pid** — the
-connection process the dispatcher already monitors for the release half of
-this change — is what the entry belongs to, so the two components agree about
-whose attachment is whose and one `DOWN` drops the entry in both. `Control`
-keeps one attachment *per holder* per session rather than one per session, and
-keeps repetition state per holder entry. Nothing about the
-single-attachment-per-connection rule changes: one holder still has one
-attachment.
+Both EventDispatcher and Control install their **own** monitor of the stable
+holder. A monitor is observed only by the process that creates it, so sharing
+one reference or expecting Control to receive EventDispatcher's `DOWN` would
+be an unrunnable design. Each component keeps a holder entry containing a set
+of attachment IDs. EventDispatcher owns the cursor barriers, queues and open
+transfers; Control owns command routing and repetition state. A holder may own
+several attachments to the same session, and each ID resolves exactly one
+entry in both components. On `DOWN`, EventDispatcher removes every attachment
+in that holder set and calls `release_transfers/2` for each; Control removes
+the same IDs and their repetition state. Each component demonitors only after
+its set for that holder is empty.
 
-**But the holder pid cannot be the only key, because the reader has no holder
-pid**, and an earlier revision said "keyed by the holder pid" without checking
-that. The one reader is the command path: `handle_call({:route_command, token,
-session_id, attachment_id, incarnation_id}, _from, state)` **discards `_from`**
-(`control.ex:336`) and resolves the attachment from the handle's
-`attachment_id` and `incarnation_id` (`:343`, `current_attachment?/3` at
-`:1649-1657`). Under the daemon the caller is not the holder at all — the
-holder is the connection process, and the command arrives from a **relay
-task** — so a lookup by caller pid would find nothing, and a lookup by `_from`
-would find the wrong entry.
+The monitors are installed before the snapshot scan starts. A holder `DOWN`
+marks every pending attach for that holder cancelled in each serial owner; an
+install step rechecks that mark and refuses rather than publishing an
+attachment for a process already known dead. This covers death before, during
+and immediately after the relay task's core call.
 
-So the entries are **reachable both ways**, which is one change and not two:
+**Replacement names one attachment.** Core attach options gain optional
+`replace_attachment_id`; when present, the target must be a live attachment
+owned by the same holder and session. Installation and removal are one serial
+EventDispatcher transition: the named target is removed at its last emitted
+cursor, its transfers are released, and the new attachment takes its place.
+An absent, stale, foreign-holder or other-session target refuses
+`:stale_attachment` in core, mapped to generation 2's inherited
+`attachment_conflict`, and changes nothing. With no selector, a distinct request
+installs another attachment even when that holder already owns one for the
+session. Exact repetition of the same attach identity returns the same live
+handle rather than installing a duplicate.
 
-| Operation | Key | Why |
-| --- | --- | --- |
-| Insert, on a successful attach | Holder pid | It is what the attachment belongs to and what a `DOWN` will name |
-| Release, on the holder's `DOWN` | Holder pid | The `DOWN` carries the pid and nothing else |
-| Validate a command (`:343`) | **`attachment_id`** from the handle | The caller is a relay task; the handle is the only thing that identifies which attachment is speaking |
-| Repetition (`attachment_repetition/4`, `:1312-1314`) | The holder entry the command resolved to | Repetition is per attachment, and the command has already found it |
+ADR 0023's boolean remains the wire field on both protocol adapters. Each
+adapter permits only one connection attachment, so on `replace: true` it maps
+the sole handle it already holds to core's `replace_attachment_id`; on
+`replace: false` it keeps ADR 0023's second-attach refusal. Embedded callers
+use the core selector directly and are the case for which several candidates
+can exist.
 
-An implementation may keep a second index from `attachment_id` to holder pid,
-or keep the id on the pid-keyed entry and resolve by scanning the session's
-holders — at most 64 per session by the ceiling below, so either is bounded.
-What is fixed here is the contract, not the data structure: **the id resolves
-the entry, the pid owns it, and the `DOWN` releases it.**
+**Holder cleanup and daemon ceiling release are one acknowledged sequence.**
+The daemon registry owns connection and attachment reservations. When a
+connection ends it marks that holder's installed and in-flight slots
+`closing`; it does not release them merely because its own monitor fired. The
+admission relay first accounts for every ticket from that holder. The registry
+then calls the internal, idempotent `Runtime.release_holder/2`, which returns
+only after EventDispatcher and Control contain no attachment for the holder;
+a cleanup already caused by their monitors is success. Only that reply frees
+the daemon slots. If core cannot confirm the cleanup, the slots remain charged
+and the runtime failure follows the daemon's fatal path. A late attach cannot
+appear after confirmation because the relay had already settled every holder
+ticket. This ordering prevents the registry from admitting a replacement
+while core still holds the old attachment and makes the 64-per-session and
+512-per-daemon ceilings true at every instant rather than eventually.
 
-Its witness is the case that fails today: a controller attaches, an observer
-attaches to the same session, and **both remain usable** — the controller's
-next command is admitted and the observer keeps receiving.
+The same path handles an orderly daemon close and an abrupt peer loss. For an
+embedded caller no daemon counter exists; the two core monitors still remove
+the whole holder set. The runtime-local pids and monitor references cross no
+durable, public or executor boundary.
 
-So that change has three parts and this pair states all of them: supersession
-stops removing attachments **unconditionally**, **the dispatcher keeps its
-monitor after install and
-removes the attachment on that process's `DOWN`**, and **`Control` scopes its
-attachment and repetition state by holder**. Without the second half M5
-would leave core with no release path at all, and every attachment ever made
-would live until the runtime stopped.
+**Transfer cleanup remains mandatory.** `release_transfers/2` is currently
+called only by unconditional same-session supersession. M5 moves that call to
+each named-replacement removal and to every holder-set removal. The witness
+opens transfers from two same-holder attachments, replaces one by ID and then
+kills the holder: replacement releases only the target's transfers; holder
+loss releases the survivor's; a different holder's attachments continue.
 
-**The `DOWN` removal must release the attachment's transfers, and saying so is
-not optional.** The supersession block is the **sole** caller of
-`release_transfers/2` — the call is at `event_dispatcher.ex:817`, inside the
-block at `:812-818`, and the function is defined at `:1105` with no other call
-site in the module. Removing the block without moving that call would leave
-accepted **ADR 0028** unsatisfied, its technical companion requiring that
-"detaching releases every transfer the attachment opened"
-(`0028-…-technical.md:28-30`). So the dispatcher's `DOWN` handler calls
-`release_transfers/2` for the attachment it drops, and the conditional
-replacement path below calls it for the attachment it supersedes. ADR 0028 is
-thereby satisfied on both of the two paths that end an attachment, where today
-it is satisfied on one; its witness is a case in
-`apps/loopex/test/concurrent_attachments_test.exs` asserting that an
-attachment with an open transfer, released by its process exiting, leaves no
-transfer behind.
+A general public `detach/1` remains rejected. It would require every caller to
+remember cleanup precisely when the caller may already be dead. The two
+internal operations above have narrower purposes: `attach_for_holder/4`
+separates the relay task from the lifetime owner, and `release_holder/2` lets
+the daemon retain resource reservations until the automatic monitor cleanup is
+confirmed. Neither gives a client authority to detach another holder.
 
-**And supersession becomes conditional rather than disappearing, because
-today it *is* the implementation of `replace`.** That took checking rather
-than assuming, and the answer is not what ADR 0032 said. ADR 0023 puts an
-optional `replace` boolean on `session.attach`
-(`0023-…-technical.md:165`) and requires that a second attach refuse "unless
-it names explicit replacement, which detaches the first at its last completely
-emitted cursor" (`:359`). **Core never sees that flag.** The app server reads
-it (`mapping.ex:162`, `:458`) and uses it for one thing only — whether a
-connection already holding an attachment may open a second
-(`attachable/3`, `:466-470`) — and then builds core's options without it
-(`attach_options/1`, `:450-456`); `Control.validate_attach_options/1` would
-refuse it anyway, its `Keyword.validate/2` defaults naming only
-`after_event_sequence`, `request_id`, `client_id` and `attachment_key`
-(`control.ex:1293-1310`). What actually replaces the attachment is core's
-**unconditional same-session** block, which reads no flag and supersedes
-*every* attachment of that session.
-
-So the change is stated as what it is: **the same-session supersession becomes
-conditional on `replace`, and narrows its scope to the attaching process's own
-prior attachment** for that session. Core's attach options gain `replace`, the
-app server passes the flag it already parses, and the block fires only when it
-is set.
-
-**That scope needs an identity the installed attachment does not carry today,
-and core change 1 adds it.** `install_attachment/3` builds the attachment map
-from the scan's result — `id`, `incarnation_id`, `session_id`, cursors, queue,
-capacity, status, metadata, transfers (`event_dispatcher.ex:764-803`) — and
-**no attacher pid**; the supersession that follows splits `state.attachments`
-on `session_id` alone (`:812-818`); and the monitor the dispatcher held during
-the scan is **demonitored the moment the scan finishes** (`:455`). There is
-therefore nothing on an installed attachment that says which process attached
-it, so "the attaching process's own prior attachment" is not a set anything
-could compute.
-
-Core change 1 therefore **retains the attacher's pid and its monitor reference
-on the installed attachment**. That is not a third half: the change already
-has to keep the monitor rather than dropping it at `:455`, because the `DOWN`
-release is the whole of the second half — and a `DOWN` carries the monitor
-reference and the pid, which is exactly what the handler needs to find the
-attachment to drop. Holding both on the attachment makes the `DOWN` lookup a
-map lookup rather than a scan, and makes the replacement scope a filter on a
-field that exists. One addition, two uses.
-
-**A pid on an attachment crosses no boundary the vision fences.** The rule is
-about durable and public or executor contracts; the dispatcher's
-`state.attachments` is neither — it is runtime-local process state, exactly as
-the `caller_monitor` it already holds on a pending scan is
-(`event_dispatcher.ex:186-192`). Nothing about the attachment's pid is
-journaled, sent on the wire, put in a snapshot or handed to an executor, and
-the snapshot and `attached` records a client receives are unchanged.
-
-- **Generation 1 is behaviour-identical**, which is what ADR 0023 requires and
-  what this milestone promises for the foreground server: that host maps one
-  connection to one attachment, so its supersession only ever fired behind a
-  `replace: true` the app server had already admitted, and narrowing the scope
-  to the attaching process changes nothing where there is one attacher.
-- **Generation 2 needs both halves of the change.** Without the condition, a
-  daemon's second connection would detach the first — the thing concurrent
-  attachment exists to stop. Without the narrowed scope, a `replace: true`
-  from one connection would detach *every other connection's* attachment to
-  that session, which is worse.
-- **ADR 0023 stays unamended.** Its `replace` field is unchanged, its rule
-  that a second attachment refuses unless replacement is named is unchanged,
-  and what the foreground server does is unchanged. What changes is on which
-  side of the boundary the flag is honoured: the app server keeps its
-  connection-level check and now also passes the flag through, and core stops
-  superseding without being told to. No wire field moves, so no digest input
-  moves either.
-- **"The named prior incarnation" is corrected.** An earlier revision of this
-  pair said explicit replacement "invalidates only the named prior
-  incarnation at its last emitted cursor". There is no name on the wire —
-  `replace` is a boolean — so what it invalidates is the attaching process's
-  own prior attachment for that session, at its last completely emitted
-  cursor, with `release_transfers/2` called for it.
-
-For the daemon this needs no API: it attaches from its **per-connection
-process**, so a connection that closes — because the client went away, because
-the daemon is stopping, or because the daemon gave up on a request that never
-answered — ends that process, and the `DOWN` releases the attachment. That is
-what makes a connection a sufficient handle on an attachment, and it is why a
-daemon needs no attachment count from core to release what it reserved.
-
-An explicit `detach/1` on **core's** public API was the alternative and is
-rejected:
-it would add a call every caller must remember on every exit path, including
-the paths where the caller is already gone, which is exactly the case a
-monitor handles for free. That rejection is about the core API and about a
-*caller* detaching itself. It is not a rule against the daemon ending an
-attachment — the daemon does that four ways, listed with `control_owner_lost`
-below, and every one of them is a record written to that connection and then
-the close of that connection, which is the same monitor-driven release read
-from the other side: the connection process ends, and its `DOWN` releases the
-attachment with no call at all.
-
-The core EventDispatcher and Control retain multiple live attachment IDs and
-incarnations for one session. A new distinct attachment does not implicitly
-detach another session attachment or cancel its pending read. Repetition of
-the same attachment request returns its live attachment; explicit replacement
-— `replace: true` — invalidates the attaching process's own prior attachment
-for that session at its last completely emitted cursor, and releases its
-transfers.
-Snapshot barriers, queued durable delivery, stale-handle checks and detach
-remain core operations. The daemon neither copies the snapshot into a second
-fan-out owner nor reads coordinator state to repair an attachment race.
+The core EventDispatcher and Control therefore retain multiple live attachment
+IDs and incarnations for one session and multiple IDs for one holder. A new
+distinct attachment does not implicitly detach another or cancel its pending
+read. Snapshot barriers, queued durable delivery, stale-handle checks and
+holder cleanup remain core operations. The daemon neither copies the snapshot
+into a second fan-out owner nor reads coordinator state to repair an
+attachment race.
 
 ### Queue ownership
 
@@ -437,26 +340,35 @@ The rule is that **a reservation counts**:
   activation is one-way and the daemon has no way to know a coordinator died,
   which this pair says twice elsewhere. It differs from `activations_used`
   only by the reservations in flight;
-- `attachments` counts installed attachments plus reserved attachment slots,
-  for the same reason `activations_used` does;
+- `attachments` counts installed attachments plus reserved and
+  cleanup-pending attachment slots, for the same reason `activations_used`
+  does; a connection `DOWN` does not lower it before core confirms holder
+  cleanup;
 - `connections` counts accepted connections, reservation-free by nature.
 
 So `activations_used` may exceed `active_sessions` for as long as a call is in
 flight, and settles to it. Reporting the set alone would advertise headroom
 the very next call would refuse.
 
-**At the attachment ceiling a `replace: true` is net-zero, and it reserves
+**At the attachment ceiling a named replacement is net-zero, and it reserves
 that way.** A replacing attach ends one attachment and installs one, so it
 needs no free slot — but the daemon reserves before it calls core, and a naive
 reservation would refuse at 512 a request that leaves the count at 512. So a
 replacing attach takes an **atomic net-zero reservation**: in the daemon's
-serial owner it claims the slot its own connection's prior attachment for that
-session already holds rather than a free one, and it converts or releases that
-claim through the same table every other reservation uses, so the count never
-moves and no second caller can take the slot in between. A `replace: true`
-from a connection that holds no prior attachment for that session is not
-net-zero — core will install a second attachment rather than supersede one —
-so it reserves ordinarily and is refused at the ceiling like any other attach.
+serial owner it claims the slot held by the exact
+attachment ID to which the connection's `replace: true` was mapped, and it converts or releases that claim through the
+same table every other reservation uses, so the count never moves and no
+second caller can take the slot in between. A stale, foreign-holder or
+other-session core selector refuses and releases the claim; an ordinary
+attach with no selector reserves a new slot and is refused at the ceiling.
+
+**Create reservations bind the request, not only the command identity.** The
+reservation key retains `command_id` together with the canonical digest of all
+creation inputs, including `session_options`. An exact retransmission may
+coalesce behind the first ticket. Reusing the command ID with different input
+refuses as a command conflict and never receives the first request's success.
+The binding is retained until the relay has the real core result, so a caller
+disconnect cannot free the slot while its create is still executing.
 
 **`session.acquire_control`**
 
@@ -487,7 +399,6 @@ opaque.
 | --- | --- | --- | --- |
 | `daemon.stopping` | `reason` | one of the closed set below | required |
 | | `message` | bounded non-secret string | required |
-| | `retry_after_ms` | `u64` | present **only** for `operator_stop` |
 | `daemon.notice` | `code` | closed set, today `"index_write_failed"` | required |
 | | `session_id` | binary identity | required |
 | | `message` | bounded non-secret string | required |
@@ -501,7 +412,7 @@ errors answering one request: each carries that request's `request_id`, no
 | Code | Answers | Carries beyond the envelope |
 | --- | --- | --- |
 | `control_held` | `session.acquire_control` | **Nothing.** It does *not* carry the current epoch: an epoch is authority-shaped, and handing one to a client that was just refused is exactly the value it must not have. An earlier revision of ADR 0033 said it named the current epoch; that is withdrawn |
-| `control_not_held` | `session.release_control` from a non-holder, **and every lease-authorized existing-session mutation whose combined admission gate fails** — any of the **five** conditions ADR 0033 lists: wrong connection, wrong epoch, a lease that is not `held`, a deadline already passed, or an attachment without controller capability. A request missing `writer_epoch` altogether is `invalid_request` instead, being malformed before the gate | **Nothing**, deliberately: the five conditions are indistinguishable on the wire, because saying which one failed would make the refusal an epoch and lease oracle. ADR 0033 fixes the gate; this is the one answer it has |
+| `control_not_held` | `session.release_control` from a non-holder, **and every lease-authorized existing-session mutation whose combined admission gate fails** — any of the **five** conditions ADR 0033 lists: wrong connection, wrong epoch, a lease that is not `held`, a deadline already passed, or no live attachment for the pinned session. A request missing `writer_epoch` altogether is `invalid_request` instead, being malformed before the gate | **Nothing**, deliberately: the five conditions are indistinguishable on the wire, because saying which one failed would make the refusal an epoch and lease oracle. ADR 0033 fixes the gate; this is the one answer it has |
 | `control_pending` | `session.acquire_control` that waited out its deadline | nothing |
 | `control_capacity_reached` | any lease operation beyond the 512 concurrent-owner cap | nothing |
 | `session_dormant` | `session.attach` | nothing |
@@ -530,27 +441,33 @@ added keys are enumerated so the digest covers them:
 ADR 0023's own framing and input ceilings are unchanged; these are additions
 beside them, and **all five** digest inputs therefore change in generation 2.
 
-**A connection is pinned to one session, and both paths pin it.** The first
-`session.attach` or `session.acquire_control` a connection completes fixes
-which session that connection is about; every later call on it naming a
-different session is refused with ADR 0023's existing **`invalid_request`**
-(`0023-…-technical.md:304-307`) — the request is well-formed bytes but names a
-session this connection is not about, which is an argument fault rather than a
-lease or attachment one, so it is answered before any gate and never with
-`control_not_held` or `not_attached`, neither of which would be true — and
-the daemon's per-connection state is keyed by that one session rather than by
-whatever the last frame said. Without the rule a connection could hold a lease
-on one session and an attachment on another, and `control_owner_lost` — whose
-close ends *the connection* — would take down an attachment belonging to a
-session that had nothing to do with the lost owner.
+**A connection reserves its one session before asynchronous work begins.**
+Its state is `unbound`, `reserving(session_id, request_id, request_digest)` or
+`bound(session_id)`. The first well-formed `session.attach` or
+`session.acquire_control` changes `unbound` to `reserving` atomically in the
+connection process **before** it asks the relay, existence query or core to do
+anything. An exact retransmission with the same request ID and canonical
+digest coalesces on that result. Any different request while reservation is in
+flight, and every later request naming another session after binding, refuses
+with ADR 0023's existing `invalid_request` before any gate or side effect.
+
+Success converts the reservation to `bound`. A definite refusal that created
+neither attachment nor lease clears it back to `unbound`; an admitted relay
+ticket keeps it reserved until the real result arrives, and an unaccounted
+task makes the relay fatal rather than guessing. This closes the pipeline race
+in which attach for one session and acquire for another could both pass while
+the connection still appeared unpinned. Without the rule a connection could
+hold a lease on one session and an attachment on another, and
+`control_owner_lost` — whose close ends *the connection* — would take down an
+attachment belonging to a session that had nothing to do with the lost owner.
 
 **`control_owner_lost` therefore carries `event_cursor` exactly when there was
-an attachment to carry one for.** A connection that acquired and never
-attached has no emitted cursor, and inventing one would be a lie about what it
-received; the field is **absent** in that case and present otherwise, which
-is an optional-field rule the DTO tables already have vocabulary for. Both
-shapes are generation-2 vectors — one with the cursor, one without — because a
-client parsing the record has to know that absence is legal.
+an attachment to carry one for.** It is an ADR 0023 `error` record with
+required `code`, bounded non-secret `message` and `session_id`. A connection
+that acquired and never attached has no emitted cursor, and inventing one
+would be a lie about what it received; `event_cursor` is **absent** in that
+case and present otherwise. Both shapes are generation-2 vectors — one with
+the cursor, one without — because a client parser must accept both.
 
 **Connections are bounded, and an earlier revision said they were bounded by
 the attachment ceiling, which they are not.** A client may connect,
@@ -636,9 +553,12 @@ carry.
 
 | Field | Value |
 | --- | --- |
-| `reason` | One of `operator_stop`, `store_lost`, `store_capacity_exceeded`, or `fatal:<class>` for the remaining classes the plan's fatal-class map names, one per linked component: `fatal:runtime_lost`, `fatal:transfers_lost`, `fatal:workspace_lease_lost`, `fatal:executor_lost`, `fatal:registry_lost`, `fatal:custody_lost`, `fatal:capability_lost`, `fatal:relay_lost` — eight in a daemon with artifact transfers and seven without. **`fatal:listener_lost` and `fatal:connections_lost` are not among them**: the listener is what would have written the record, and the connection registry owns the buffer-control interface it would have been written *through*, so no client can be told either reason. The plan's own class table says both, this set contradicted the first, and a later revision added `fatal:connections_lost` here without noticing it had the same defect. A lease owner's death is not among them: it closes one session's controller connection with `control_owner_lost` and ends no daemon. The startup classes carry no reason, because no socket exists when they occur, and neither does `owner_lost`, where the process that would write it is the one that is gone |
+| `reason` | One of `operator_stop`, `store_lost`, `store_capacity_exceeded`, or `fatal:<class>` for a live-registry fatal class. The set includes `fatal:listener_lost`: listener loss stops new accepts but leaves the connection registry and existing sockets available, so the registry can make the bounded write and close them. The set excludes `fatal:connections_lost`: once that registry is gone there is no live inventory or buffer-control interface through which to write. On that class the owner closes the listener, synchronously cuts relay admission, stops the remaining components and halts; existing sockets close with the VM. The ordinary component reasons remain `fatal:runtime_lost`, `fatal:transfers_lost`, `fatal:workspace_lease_lost`, `fatal:executor_lost`, `fatal:registry_lost`, `fatal:custody_lost`, `fatal:capability_lost`, and `fatal:relay_lost`. A lease owner's death is session-scoped and uses `control_owner_lost`. Startup classes have no socket, and `owner_lost` has no owner to write a record |
 | `message` | A bounded non-secret sentence for an operator to read |
-| `retry_after_ms` | Present only for `operator_stop`, where a restart is expected; absent for every fatal reason, because the daemon does not know when the cause will be fixed |
+
+There is no `retry_after_ms`. Even on `operator_stop` the daemon does not know
+when an external service manager or operator will start a successor, so any
+numeric retry promise would be invented.
 
 **Its delivery is bounded best-effort, and the bound is one the daemon already
 has.** The daemon makes exactly **one** write attempt of the record into the
@@ -666,7 +586,7 @@ limits — five inputs, and generation 2 changes **all five**:
 | Generation | New string |
 | Methods | Adds `session.list`, `daemon.status`, `session.acquire_control`, `session.release_control` |
 | Record families | Adds `daemon.stopping` and `daemon.notice` |
-| **Error codes** | Adds every refusal generation 2 can return and generation 1 cannot: `control_held`, `control_not_held`, `control_pending`, `control_capacity_reached`, `control_owner_lost`, `session_dormant`, `daemon_stopping`, the four existence-query refusals the daemon maps to the wire (`session_unknown`, `session_id_invalid`, `store_unavailable`, `existence_indeterminate`), and the activation and residency refusals (`activation_ceiling_reached`, `composition_mismatch`). **Not** `session_index_too_large`, which is a startup exit class and can reach no client, and **not** `capacity_exceeded`, which generation 1 already carries and generation 2 keeps for the two **attachment** ceilings — `attachments_per_session` and `attachments_per_daemon`, the "stable reason when exhausted" the attachment-lifecycle list names — and no longer for the connection ceiling, which is enforced at `accept` and therefore reaches no `initialize` |
+| **Error codes** | Adds every refusal generation 2 can return and generation 1 cannot: `control_held`, `control_not_held`, `control_pending`, `control_capacity_reached`, `control_owner_lost`, `session_dormant`, `daemon_stopping`, the four existence-query refusals the daemon maps to the wire (`session_unknown`, `session_id_invalid`, `store_unavailable`, `existence_indeterminate`), and the activation and residency refusals (`activation_ceiling_reached`, `composition_mismatch`). **Not** `session_index_too_large`, `session_index_corrupt` or `session_index_upgrade_required`, which are startup exit classes and can reach no client, and **not** `capacity_exceeded`, which generation 1 already carries and generation 2 keeps for the two **attachment** ceilings — `attachments_per_session` and `attachments_per_daemon`, the "stable reason when exhausted" the attachment-lifecycle list names — and no longer for the connection ceiling, which is enforced at `accept` and therefore reaches no `initialize` |
 | **Limits** | ADR 0023's framing and input ceilings are unchanged, and generation 2 **adds** the residency keys a client can read: `connections_per_daemon`, `initialize_deadline_ms`, `attachments_per_session`, `attachments_per_daemon`, `session_list_page_max`, `session_index_entries`, `lease_term_ms` |
 
 **`control_owner_lost` closes a controller whose lease owner died.** ADR 0033
@@ -727,8 +647,8 @@ the whole of what was missing.
 `session.release_control` from a connection that is not the current holder or
 whose `writer_epoch` does not match, **and** every lease-authorized
 existing-session mutation that fails ADR 0033's combined check on holder
-connection, epoch, `held` state, unexpired deadline or controller-capable
-attachment. One code for all of them, carrying nothing beyond the envelope:
+connection, epoch, `held` state, unexpired deadline or a live attachment for
+the pinned session. One code for all of them, carrying nothing beyond the envelope:
 the refusals a client can provoke must not tell it whether a lease exists,
 whether its epoch was right or whether it was merely late, because that is an
 oracle for the value the gate protects. It is distinct from `control_held`,
@@ -760,9 +680,11 @@ uncorrelated `error`**, with
 
 | Field | Value |
 | --- | --- |
+| `type` | `error` |
 | `code` | `control_owner_lost` |
+| `message` | bounded non-secret explanation |
 | `session_id` | the session whose lease owner died |
-| `event_cursor` | the last completely emitted durable cursor for that attachment, exactly as `detached` carries it |
+| `event_cursor` | optional; present exactly when this connection held an attachment, carrying that attachment's last completely emitted durable cursor exactly as `detached` does |
 
 It is uncorrelated because no request caused it. **Close behaviour:** it is one
 instance of the daemon-initiated detach rule below — the daemon writes the
@@ -785,7 +707,7 @@ client in a state neither side had defined. So:
 
 | Occasion | Record written first | Then |
 | --- | --- | --- |
-| The controller's lease owner died | `error`, `control_owner_lost`, with `session_id` and `event_cursor` | close that connection |
+| The controller's lease owner died | `error`, `control_owner_lost`, with required `message` and `session_id`, plus `event_cursor` exactly when the connection held an attachment | close that connection |
 | Output-buffer or core-queue overflow | `error`, ADR 0023's `detached`, with `session_id` and `event_cursor` | close that connection |
 | Aggregate byte pressure chose this attachment | the same `detached` | close that connection |
 | Idle eviction at ten minutes | the same `detached` | close that connection |
@@ -799,10 +721,11 @@ record — same code, same fields, same uncorrelated shape — and generation 1'
 use of it is untouched, so the foreground server's behaviour does not move and
 the ordered error list gains nothing for it.
 
-**`event_cursor` is the same quantity in all four**: the **last completely
-emitted durable cursor** for that attachment — the highest event sequence the
-daemon finished writing to that socket, never one it had only encoded or
-buffered. That is the position the client reconnects at, and delivery from it
+**Where `event_cursor` is present, it is the same quantity in all four**: the
+**last completely emitted durable cursor** for that attachment — the highest
+event sequence the daemon finished writing to that socket, never one it had
+only encoded or buffered. A controller connection that never attached omits
+it. The cursor is the position the client reconnects at, and delivery from it
 is contiguous and at least once, so a duplicate at the seam is expected and a
 gap is a defect.
 
@@ -824,42 +747,38 @@ are identical, which is deliberate, because why the daemon detached is an
 operator fact in its logs and not authority-shaped information a client acts
 on differently.
 
-**`daemon_stopping`, the refusal after the admission cut.** An orderly stop
-begins with a synchronous, acknowledged cut: the daemon's owner calls the
-admission relay, the relay closes admissions and answers only once every
-ticket it holds has **settled** — not merely been recorded, a recorded ticket
-being a call still running — and nothing enters core through
-the daemon after that answer. A connection that is still open — and every
-connection is, because the cut precedes the closes — may still send a frame.
-**Every** method is refused after it, whatever it would have done — the eight
-lease-authorized mutations, `session.create`, `session.attach`, the queries,
-and ADR 0023's three artifact-transfer methods alike — because the refusal is
-about the daemon's state rather than about the request's effect. It is
-answered with a **correlated** `daemon_stopping` carrying that request's
-`request_id` and nothing else: no `event_cursor`, no session state, and it
-closes nothing on its own. The connection is closed a moment later by step 3
-of the stop sequence, which is where a client is told the reason it is going
-away; `daemon_stopping` answers the one request that arrived in between.
+**`daemon_stopping`, the refusal after the admission cut.** Every
+post-initialize method request takes a linearized permit from the admission relay. For the ten
+state-changing calls ADR 0033 names, the relay records a ticket and starts the
+monitored core task before returning the permit. For queries and artifact
+transfer calls it returns an unticketed permit; those calls grant no lease and
+change neither Control nor the journal, but using the same gate removes a
+connection-layer check/use race.
 
-The instant it names is the relay's acknowledgement, not the signal, and it
-is an **admission instant and nothing more**. A command whose relay ticket was
-recorded **before** the acknowledgement was admitted and is carried; one that
-arrives after it is refused. The acknowledgement says nothing about whether an
-admitted command has *finished*: the daemon waits for that separately, for a
-bounded time, and its stop proceeds at that bound with anything still running
-classified and fenced. An earlier revision of this passage said an admitted
-command "has settled by the time it returns", which was the design the bounded
-wait replaced and which a resume paging a long history defeats. Those are
-the two witnesses, and they must give different answers on the same surface —
-the connection's own reply stream.
+An orderly stop sends `cut` to that relay. When the relay handles the message
+it switches to closed and acknowledges immediately. The mailbox order is the
+linearization order: a request admitted before the cut may enter or remain in
+core and is allowed to finish; a request processed after the cut refuses with
+the correlated `daemon_stopping` carrying its `request_id` and nothing else.
+The acknowledgement means **no later request can be admitted**. It does not
+mean admitted work has settled or that no pre-cut task will enter core after
+the acknowledgement. The drain waits separately, to its absolute bound, for
+the tickets that the cut returned as outstanding.
 
-**`session_index_too_large` is not a wire code**, and an earlier revision
-listed it as one. It is a **startup** refusal: the daemon exits non-zero with
-that class before any socket exists, so no client can be holding a connection
-to be told. It is removed from the generation-2 error inventory and stays in
-the daemon's exit classes, where it belongs.
+The connection stays open until the later close phase, so a post-cut frame can
+still receive its correlated refusal. That refusal closes nothing by itself;
+`daemon.stopping` is the subsequent uncorrelated best-effort notice that names
+why the connection is closing. The two witnesses deliberately differ: a
+pre-cut request completes on its own terms, while the same request admitted
+after the cut receives `daemon_stopping` and never invokes its facade.
 
-**A failed directory write is a notification, not an error.** Generation 2
+**Index startup failures are not wire codes.** `session_index_too_large`,
+`session_index_corrupt` and `session_index_upgrade_required` all stop startup
+before a socket exists, so no client can be holding a negotiated connection to
+be told. They stay in the daemon's exit classes and out of generation 2's
+ordered error inventory.
+
+**A failed discoverability-index write is a notification, not an error.** Generation 2
 adds a **second notification record family**, `daemon.notice`, beside
 `daemon.stopping`:
 
@@ -878,8 +797,9 @@ reachable regardless, and the daemon's own `stderr` keeps the operator's copy.
 It is never broadcast; other connections did not ask.
 
 The activation it follows **succeeded**: the session is usable and reachable
-by ID, and only its directory entry and index row are missing, to be written
-by the retry the plan already describes. Reporting that as an `error` would
+by ID, and its persistent index row is missing, to be written by the retry the
+plan already describes. The legacy directory entry is an independent rollback
+artifact and its failure is logged separately. Reporting the index failure as an `error` would
 tell a client its command failed when it did not, and saying nothing would
 leave a session absent from `session.list` with no explanation. The family
 enters the digest's record-families input beside `daemon.stopping`.
@@ -909,235 +829,137 @@ two refuse identically in effect — nothing created, nothing attached, no lease
 
 ### The session index, and what it may claim
 
-`session.list` reads a daemon-owned index, never the session directory or the
-store on the request path. What the index *is* follows from what it is built
-from. `Loopex.SessionDirectory` holds plain files beside the log and states
-that neither is Store durable truth; a host records an entry after
-`create_session/3` commits, and that write can fail on its own — the reference
-CLI reports exactly that failure to the operator. So there is a real crash cut
-between a committed session and its directory entry, and a daemon rebuilt from
-the directory can be missing a session the Store holds.
+`session.list` reads a daemon-owned persistent discoverability index loaded at
+startup. It never enumerates `sessions/` and never reads the Store on either
+the startup or request path. This is a **maintained index**, chosen because the
+supported OTP file API exposes `File.ls/1` as a complete list and supplies no
+portable incremental directory iterator: wrapping that call in a function
+which stops after 4,097 valid rows would still materialize every filename and
+could inspect arbitrarily many malformed rows before reaching the bound.
 
-The index therefore claims only what it can keep true, and each field is one
-the daemon itself owns or reads once:
+The file is `<state root>/daemon/session-index-v1`. It contains only durable
+discoverability inputs: `session_id` and `placement_identity`. `residency` and
+`controlled` are live daemon overlays and are rebuilt as `dormant` and `false`
+at each start. The index is **not Store truth**. It neither proves existence nor
+participates in create, resume, admission, replay or recovery. Core's read-only
+existence query is the only yes/no authority the daemon uses for an exact ID.
 
-- `session_id` and the recorded placement identity, read from the directory
-  entry at daemon start, or written when the daemon first activates a session
-  the directory does not hold;
-- `residency`, a daemon fact meaning *this daemon activated this session in
-  this lifetime*, set to `active` at activation and never set back, because
-  activation is one-way. It is not a claim about a live coordinator;
-- `controlled`, a daemon fact, updated on every lease grant, release and
-  expiry by the same lease owner ADR 0033 gives those transitions — **and on
-  that owner's death**, which is a fourth way a lease stops being held and
-  which an earlier revision left out. The daemon's owner process, which
-  observes the exit, clears `controlled` for that session as it closes the
-  controller attachment; a listing that still said `controlled: true` would be
-  naming a holder that no longer exists.
+**The persisted format is bounded before parsing.** The file is canonical
+UTF-8 JSON Lines with one version header, zero to 4,096 rows sorted by session
+ID bytes, and one SHA-256 trailer over the exact header-and-row bytes. Header,
+row and trailer keys and their order are fixed; unknown keys, duplicate or
+out-of-order IDs, invalid identity alphabets and bad digests are corruption.
+Each line is at most 1,024 bytes and the complete file is at most 4 MiB. The
+daemon opens without following a symbolic link, checks the regular-file
+identity and byte size before reading, reads no more than 4 MiB plus the
+single byte needed to prove overflow, and checks the identity again after the
+read. Oversize refuses `session_index_too_large`; malformed content refuses
+`session_index_corrupt`. Both occur before socket bind.
 
-**`residency` says what the daemon knows, not what core is doing.** Its two
-values mean exactly:
+**Updates are atomic snapshots, not an append protocol.** The marker-holding
+daemon serializes index changes, writes the complete next canonical image to a
+mode-`0600` sibling created with exclusive creation, syncs that file, renames
+it over `session-index-v1`, and syncs the `daemon/` directory before it reports
+success. A crash before rename leaves the prior image; a crash after the
+directory sync leaves the next one. Only a daemon that has acquired the Store
+marker may remove an abandoned temporary. This adds no journal record and
+changes no local Store byte. At 4,096 rows a new exact-ID session remains
+usable but is not added; `session.list` reports `index_full: true` rather than
+pretending completeness.
 
-- `active` — **this daemon activated this session during this lifetime**;
-- `dormant` — it has not.
+A successful activation or exact-ID recovery adds the row after durable
+existence is established. The row becomes visible in memory only after the
+snapshot is durable. A failed index write does not reverse the session
+operation; the causing connection receives `daemon.notice` with
+`index_write_failed`, the daemon logs it, and later commands carrying that ID
+retry the same idempotent write. A retry with the same placement is idempotent;
+a different placement conflicts. The independent legacy
+`SessionDirectory.record_session/3` write remains for foreground rollback and
+may succeed or fail separately.
 
-That is a daemon-owned fact, recorded by the daemon at the moment it acted,
-and it is **true by construction**: nothing else has to hold for it to stay
-accurate, and no other process has to tell the daemon anything.
+**Upgrade is explicit so startup stays bounded.** A new root whose `sessions/`
+directory does not exist gets an empty canonical index before bind. If
+`sessions/` exists but the index does not, daemon startup performs only the
+bounded `stat` needed to learn those two facts and refuses
+`session_index_upgrade_required`; it never calls `File.ls/1`. The operator runs
+`loopex daemon prepare-index` while no daemon or foreground server owns the
+root. That offline command acquires the local Store marker, uses the legacy
+session-directory enumeration, validates every non-temporary row, refuses
+rather than truncates above 4,096 valid rows, writes the atomic index, and
+releases the marker. Its scan is explicitly **not** a bounded service-start
+operation: the command warns that legacy `File.ls/1` materializes the directory
+and may need operator repair of a corrupt or oversized legacy directory. This
+one-time cost is kept outside daemon availability rather than mislabeled as a
+bound.
 
-An earlier draft defined `active` as "the daemon holds a live coordinator",
-which is a claim about core's state that the daemon has no way to keep
-current, and then paid for it with a rule that took the whole daemon down when
-a coordinator died. Both are withdrawn. The reason the first was untenable is
-in the code: a coordinator is a `restart: :temporary` child of core's
-`DynamicSupervisor`, and when one goes down `Loopex.Runtime.Control` consumes
-the `DOWN`, releases the dispatcher fence and returns without altering the
-session entry. No notification leaves core, and none is owed — that is core
-minding its own supervision.
+Rollback needs no reverse migration. The M4 foreground server ignores
+`daemon/session-index-v1` and continues using `sessions/`; the index may remain.
+A later daemon reuses and validates it, but `session.list` never claims that a
+row absent from this advisory index is absent from Store truth. If a foreground
+server created sessions while the daemon was absent, the operator reruns the
+offline import before relying on a complete discoverability view; exact-ID
+access works regardless. Deleting the index is not a repair: on a root with
+`sessions/` it restores the upgrade refusal and requires another explicit
+import.
 
-**So a dead coordinator is surfaced by core's own refusal, not by the index.**
-A client that sends the next command for that session gets core's existing
-refusal, and the daemon forwards it unchanged, adding nothing and interpreting
-nothing. The client learns at the moment it matters, from the component that
-knows, and the listing never claimed otherwise: `residency: active` said this
-daemon activated the session, which remains true. The activation ceiling still
-counts activations per daemon lifetime, for the same reason — it counts what
-the daemon did.
+The in-memory projection claims only facts its owners can keep true:
 
-Two alternatives were rejected, and both would be **a further core change**
-beyond the six this milestone makes. A lifecycle notification from core to the daemon
-would be a new core-to-host signal, with its own delivery and ordering
-questions, added for a listing field. A monitorable coordinator handle handed
-out to the daemon would export core's supervision topology across the boundary
-and invite the daemon to reason about it. M5's core changes stay at six, and
-neither of these is among them — the bounded listing this section adds is one
-of the six, and a notification or a handle would be a seventh.
+- `session_id` and `placement_identity` come from the validated persisted row
+  or from an exact-ID operation after core answered `present`;
+- `residency: active` means this daemon activated that session in this
+  lifetime; `dormant` means it has not. It never claims a coordinator is live;
+- `controlled` is updated by the one lease owner on grant, release, expiry and
+  owner death. It names no durable controller.
 
-ADR 0033's lease-owner rule is untouched by this and stays — and it is a
-**session-scoped** rule, not a fatal one; this sentence said "fatal" from the
-revision before that decision was taken. The
-difference is ownership: a lease owner is a **daemon** process holding
-daemon-only state that nothing can reconstruct, so losing it is the daemon's
-failure to handle; a coordinator is core's, supervised by core, and its loss
-is core's to report.
+Lineage, lifecycle state and committed sequence are deliberately absent. A
+client that needs them attaches and reads the snapshot anchored by core.
 
-Lineage, lifecycle state and last committed sequence are deliberately absent.
-A daemon index cannot keep them current without reading the Store on the
-request path or subscribing to every session it is not holding, and a field
-that is silently stale is worse than an absent one; a client that needs them
-attaches, and the snapshot carries them at a committed sequence.
+**Recovery of an omitted row uses identity the client already owns.** Core's
+existence query answers exactly `present`, `absent`, `invalid_id`,
+`store_unavailable` or `unexpected`; only `present` permits an index write,
+lease grant or later activation. The other four leave no attachment, lease,
+activation or row and map to their distinct generation-2 refusals.
 
-**The recovery procedure for the crash cut**, in four parts, needing no new
-durable record and no Store read by the daemon:
+A client that lost the create reply and therefore lacks a session ID recovers
+in this exact sequence:
 
-1. **Durable existence is learned from core, through a query that asks only
-   that.** The daemon never reads Store internals and never enumerates the log
-   to decide whether a session exists. It calls core's read-only
-   session-existence query on the ID — no attach, no resume, no side effect,
-   a plain-data answer — and treats core's answer as the proof.
+1. Re-present `session.create` with the original `command_id` and byte-identical
+   creation inputs.
+2. The daemon reservation verifies the canonical request digest and forwards
+   the replay without consulting the index.
+3. Core returns the historical session ID; a changed request under that ID is
+   a conflict, not a coalesced success.
+4. Replayed create starts no coordinator.
+5. The daemon asks core's read-only existence query for the returned ID and
+   proceeds only on `present`.
+6. It idempotently repairs the legacy directory entry and the daemon index row;
+   either write may report its own failure without changing Store truth.
+7. The client acquires control and receives a writer epoch.
+8. It sends `session.resume` with a fresh resume `command_id` and that epoch.
+9. The daemon activates the session and charges the lifetime ceiling.
+10. The client attaches and drives it.
 
-   An earlier draft had the daemon learn existence from `attach` or `resume`
-   themselves. The maintainer rejected that on 2026-09-20 and admitted the
-   query instead. Asking a question by performing the operation is not a
-   question: `attach` establishes a cursor barrier and an attachment
-   incarnation, `resume` is a durable mutation under ADR 0008's placement
-   rules, and a daemon that had to run one of them to discover that a session
-   does not exist would be taking a side effect to learn a fact — worst of all
-   at `acquire_control`, which must validate existence *before* granting a
-   lease and must be safe to call on an ID that turns out to be unknown.
+A client that already knows the session ID begins at step 5. If the index is
+full, step 6 reports `index_full` and omits the row while steps 7 through 10
+remain available. The witness injects the Store-commit/before-reply crash cut,
+runs all ten steps, and proves one durable session, no coordinator from the
+create replay, a repaired row, one charged activation and a subsequent prompt
+on the recovered session.
 
-   **The query's result set is closed, and only one member is a yes.** "A
-   plain-data answer" is not a contract on its own — a caller has to know what
-   it may receive and what each result obliges it to do, especially a caller
-   about to grant authority on the strength of it. The query answers exactly
-   one of:
+A page is consistent with the in-memory index at the moment it is read and is
+ordered by session ID bytes. Rows are added but never removed during one daemon
+lifetime, so insertion before a page cursor can make a later page miss the new
+row; rows do not vanish or repeat. A client that needs a refreshed view pages
+again from the start. `limit` outside 1 to 256 and a malformed
+`after_session_id` refuse `invalid_request`; an unknown but well-formed cursor
+pages from its byte position.
 
-   | Result | Means | What the daemon does |
-   | --- | --- | --- |
-   | `present` | The root holds this session durably | Proceed: acquire may be granted, activation may follow |
-   | `absent` | The root does not hold it, and core is certain of that | Refuse, naming the session as unknown |
-   | `invalid_id` | The argument is not a well-formed session identifier | Refuse as an invalid argument, before anything is looked up |
-   | `store_unavailable` | Core could not read the root to decide | Refuse, naming the store as unavailable — **not** as an unknown session, because those are different facts and an operator acts on them differently |
-   | `unexpected` | Anything else, including a result shape the daemon does not recognise | Refuse, the same way as `store_unavailable`, because an answer that cannot be interpreted is not a yes |
-
-   **Control acquisition proceeds only on `present`.** Every other result
-   fails closed and identically in what it leaves behind: no attachment, no
-   lease, no activation, no index row, nothing created. What differs is only
-   what the client is told, and the client is always told which — a refusal
-   that said "unknown session" when the store was unreadable would send an
-   operator looking for a session that exists.
-
-   Nothing about the index is consulted to decide existence, which is why an
-   index that is incomplete is not a correctness problem, and the daemon still
-   reads no Store internals.
-
-   Each of the five results is a witness: `present` granting, `absent`,
-   `invalid_id`, `store_unavailable` injected through the suite's controllable
-   fault store rather than by making the root unreadable — `Loopex.Store.Local`
-   answers `ownership_head` from memory, so an unreadable root does not produce
-   that result —
-   and `unexpected` injected by a stub that answers outside the set. All five
-   assert the same absence afterwards — no attachment, no lease, no activation
-   — and assert that the four refusals name distinct reasons.
-2. **A client that never saw the session ID recovers by command identity, and
-   the sequence is written out here rather than left as a gesture.** At the
-   cut where the Store committed the creation and the process died before the
-   reply, the client holds no session ID at all — only the `command_id` it
-   chose for its own `session.create`. Every step below uses something the
-   client already has or something already durable:
-
-   | Step | Who acts | What happens |
-   | --- | --- | --- |
-   | 1 | Client | Reconnects to the daemon and re-presents `session.create` with **the same `command_id`** it used before. It knows no session ID, so it cannot ask for one |
-   | 2 | Daemon | Forwards it as an ordinary create. It does not consult the index, which by construction may not hold this session |
-   | 3 | Core | Recognises the command identity as already resolved and returns the **historical result** — the same session ID it committed before — rather than creating a second session. This is the command idempotency the resume path already relies on, not a new mechanism |
-   | 4 | Client | Now holds the session ID for the first time. **No coordinator is running for it** — see below |
-   | 5 | Daemon | Validates durable existence with the read-only existence query on that ID, which answers `present` because the Store committed it in the first place |
-   | 6 | Daemon | Repairs what is missing: writes the directory entry and adds the index row, so every later `session.list` shows the session. If that write fails, step 3 of this procedure applies |
-   | 7 | Client | Acquires control, receiving the writer epoch |
-   | 8 | Client | Sends `session.resume` with a **fresh resume `command_id`** and that writer epoch. This is the step that activates the session: it is a new command, not a replay, because the create's identity is spent |
-   | 9 | Daemon | Activates the session — a live coordinator now exists — and counts it against the activation ceiling |
-   | 10 | Client | Attaches and drives |
-
-   **Step 8 is the one an earlier draft left out, and without it the recovery
-   ends with nothing running.** Replaying a completed create does not start a
-   coordinator: `Loopex.Runtime.Control.create_session/4` resolves the
-   transaction, sees the command was already resolved, and replies `{:ok,
-   session_id}` on the `not fresh?` branch *without* calling `start_owner`.
-   That is correct — a replay must not create a second owner — but it means
-   steps 1 to 4 return an identity and nothing more. The session is durable
-   and idle. `session.resume`, with its own fresh command identity and under
-   the lease acquired at step 7, is what brings it back, and the sequence is
-   only a recovery once it reaches there.
-
-   Steps 5 and 6 turn the recovery into a repair: the session is not merely
-   reachable once, it stops being missing. A client that *does* still hold the
-   session ID skips steps 1 to 4 and enters at step 5.
-
-   **Its witness.** One case injects the exact cut — Store commit of the
-   create followed by process death before the directory write and before the
-   reply — then, from a client that never received the session ID, replays
-   `session.create` with the original `command_id` and runs the sequence to
-   the end. It asserts: exactly one session exists in the root; the returned
-   ID equals the committed one; the replay itself started no coordinator; the
-   existence query answers `present`; the directory entry and index row are
-   present afterwards and the session appears in `session.list`; the resume
-   under the granted epoch activates it, so a **live coordinator exists** and
-   the activation count has risen by one; and a prompt sent afterwards lands
-   on that session and produces its events, rather than on a second session or
-   on nothing at all.
-3. **Recording can fail, and says so.** If writing the directory entry fails
-   during activation, the failure is reported to the client that triggered it,
-   as an explicit warning that this session will not appear in `session.list`
-   — the reference CLI already reports exactly that failure today. The
-   activation itself succeeds, the session is fully usable, and the daemon
-   **retries while it still holds the ID**, which is the only time it can:
-
-   - immediately after activation, once;
-   - on each later command for that session, since the daemon has the ID in
-     hand at that moment anyway and the retry costs one file write it already
-     knows how to make;
-   - and when any later client reaches the session by ID, or replays its
-     create command, since both paths put the ID back in the daemon's hands.
-
-   The retry stops as soon as it succeeds. Two earlier answers were wrong and
-   both are withdrawn. "At the next activation of that session" cannot happen:
-   activation is one-way, so within a lifetime there is no second one. "At the
-   next daemon start" cannot happen either, and for a sharper reason — a
-   restarted daemon builds its index *from the directory*, so a session the
-   directory does not hold is a session the new daemon has never heard of. It
-   has no ID to retry with. Only a live daemon that still holds the ID can
-   repair the gap, which is why the retry is bound to the moments it does.
-
-   Until it succeeds, the session is reachable by ID and absent from
-   `session.list`, which is exactly what the client was told.
-4. **A full index still activates.** If the index already holds 4,096 entries
-   and a client reaches an unrecorded session by ID, the session is activated
-   and is **not** recorded. Reachability never depends on the ceiling. What
-   changes is the listing's honesty: `session.list` then carries `index_full`,
-   so an operator is told the listing is incomplete rather than reading a
-   silent omission as an absence.
-
-`session.list` is documented as *the sessions this root records*, not *the
-sessions this root contains*, and the operator documentation states all four
-parts, because an operator who lost a terminal mid-creation is exactly who
-meets them.
-
-A page is consistent with the index at the moment it is read, and no
-consistency is promised across pages. What that can actually produce is
-narrower than an earlier draft claimed, because the index is append-only
-within a daemon's lifetime and keyed by unique session ID: rows are added,
-never removed and never renumbered, and ordering is by session ID bytes. So a
-session recorded between two page reads may be **missed** — if its ID sorts
-before the cursor the client has already passed — and that is the only
-anomaly paging can show. A row cannot vanish between pages and cannot be
-returned twice, because nothing deletes a row and no two rows share an ID. A
-client that needs a complete view pages again from the start; deduplication is
-unnecessary here, though a client that deduplicates by session ID loses
-nothing. A `limit` outside 1 to 256 or an `after_session_id` that is not
-a well-formed session ID refuses with ADR 0023's existing `invalid_request`; an
-`after_session_id` naming an unknown session is admitted and pages from its
-byte position.
+The startup witness places more than 4,096 valid legacy entries and an
+arbitrarily large population of malformed names beside a valid bounded index,
+and proves that daemon start reads only the index bytes and performs no
+`File.ls/1` call. Separate cases prove oversize, digest failure, duplicate ID,
+interrupted snapshot replacement, missing-index upgrade refusal, successful
+offline import and foreground rollback with the extra file present.
 
 ### Session residency: active, dormant, and their bounds
 
@@ -1155,7 +977,7 @@ durable distinguishes active from dormant, and neither is a claim about a live
 coordinator: both are daemon facts, recorded when the daemon acted.
 
 A dormant session costs less than an active one, but not nothing, and the
-plan should not pretend otherwise. It holds one index row against the
+plan should not pretend otherwise. If indexed, it holds one row against the
 4,096-entry ceiling, and its history sits in the root's single append-only log
 against the 256 MiB capacity that every session in the root shares — so a
 dormant session still consumes the two resources whose exhaustion stops the
@@ -1176,10 +998,10 @@ awaiting an answer, a recovery in progress, an unresolved `commit_unknown`, or
 an admission executing inside core. Stopping it would destroy exactly what
 Outcome 1 exists to prove, that work progresses with zero attachments. And
 there is no operation to stop one with: core owns coordinator lifetime, and
-none of M5's six core changes (concurrent attachment, the read-only existence
-query, the trace exclusion, `quiesce/1`, the `disposition` and
-`control_entry` fields on the detailed create and resume functions, and the
-bounded session listing) stops a coordinator,
+none of M5's five core changes (the complete concurrent-attachment lifecycle,
+the read-only existence query, the trace exclusion, `quiesce/1`, and the
+`disposition` and `control_entry` fields on the detailed create and resume
+functions) stops a coordinator,
 so a deactivation call would be a further core change this milestone does not
 make.
 
@@ -1210,33 +1032,15 @@ make.
   is the honest cost of leaving coordinator lifetime alone in M5. Lifting it
   needs a core deactivation operation that can tell "quiescent" from "idle",
   which is a decision of its own.
-- **Index bound.** The index holds at most 4,096 **recorded** entries. A root
-  whose session directory holds more refuses at daemon start with a stable
-  reason naming the bound and pointing at root retirement, in the same posture
-  as `store_log_too_large`: refuse rather than serve a truncated view of what
-  the root records. The ceiling is on recorded entries only, and it never
-  makes a session unreachable — see the crash cut below.
-
-  **Enforcing it needs a bounded read, and core does not have one.** The
-  listing the daemon builds its index from is core's:
-  `Loopex.list_sessions/1` (`loopex.ex:452-453`) calls
-  `SessionDirectory.list_sessions/1` (`session_directory.ex:231-266`: the head
-at `:231`, the full read and sort at `:238-247`, the answer at `:249`, and the
-invalid-root clause at `:266`), which
-  does `File.ls` and then reads **every** entry before sorting and returning.
-  A root holding a hundred thousand entries is therefore read in full before
-  the daemon can refuse at the four-thousand-and-ninety-seventh — a refusal
-  whose point is to avoid exactly that cost. So this milestone adds one
-  further narrow read to core and counts it: **`Loopex.list_sessions/2`
-  taking a bound and stopping after the bound-plus-first valid entry**,
-  answering what it read and whether it stopped early. The entries it returns
-  when it stopped early are in directory order, not a sorted prefix: the
-  arity-one form sorts only after it has read everything, which is the cost
-  the bound exists to avoid, so the bounded form cannot sort and does not
-  claim to. Its answer is the early-stop flag; the daemon reads nothing else
-  from it. It is read-only and additive — the arity-one form keeps its exact
-  meaning and its callers — and it is the smallest thing that lets the bound
-  be enforced rather than discovered.
+- **Index bound.** The maintained index holds at most 4,096 recorded entries
+  and its complete persisted image is at most 4 MiB. Startup refuses an
+  oversize or corrupt index before bind; runtime discovery of an additional
+  exact-ID session sets `index_full` and leaves the session usable. The daemon
+  never scans the legacy session directory. A root that predates the index is
+  prepared explicitly by the offline import described above, which refuses
+  above 4,096 rather than writing a truncated image. This mechanism belongs to
+  the daemon adapter and removes the proposed `Loopex.list_sessions/2` change
+  from core.
 - **Homogeneity.** One state root is one host composition for the daemon's
   process lifetime. The daemon is composed once, with one workspace, policy,
   provider configuration and set of project resources, and serves every
@@ -1395,54 +1199,41 @@ sequence and event ID.
 
 ### Evidence
 
-Tests prove: two core attachments to one session keep independent live handles,
-snapshots and cursors with no implicit replacement; an explicit `replace: true`
-invalidates only the attaching process's own prior attachment for that session,
-releasing its transfers, while every other connection's attachment to it
-continues; an attachment released by its process exiting leaves no transfer
-behind, which is accepted ADR 0028's requirement on the path that replaces the
-only caller `release_transfers/2` has today; snapshot-then-contiguous at-least-once
-delivery with no gap across the window boundary; the same delivery cases run
-again with the resident window disabled, byte for byte identical, and with the
-window dropped mid-stream, proving the cache establishes nothing; deterministic
-reclamation in the fixed order above, including the case where zero-attachment
-windows alone consume the aggregate ceiling and are released before any
-attachment is detached; a slow observer detached at
-its last emitted cursor — its `detached` record written best-effort and its
-connection closed — while the controller and other attachments on their own
-connections continue;
-the per-session and per-daemon limits refusing independently; idle eviction, its close, and reconnect on a
-fresh connection with no missing durable event and any duplicate deduplicated
-by session ID, sequence and event ID; the three encoded-byte ceilings at maximum
-attachment count and payload pressure enforced in the daemon-owned stages,
-with process RSS observed and reported separately; a generation-1-only
-initialize refused with `unsupported_generation` and nothing created;
-simultaneous daemon starts on one root leaving exactly one listener with the
-loser never touching the socket; Store-child failure closing the listener and
-every connection before exit; `session.list` pages of at most 256 entries in
-session-ID order with an exact continuation cursor, carrying only the four
-fields above; a session committed to the Store whose directory entry was never
-written — injected at exactly that cut — absent from the listing, still
-reachable by ID, and present in every listing after the activation that
-records it; a restarted daemon activating nothing until a client reaches for a
-session; a detached long-running command and a pending admission each crossing
-the idle deadline with every client gone and running to completion, so
-dormancy is proved to release attachments and never a coordinator; the
-activation ceiling refusing the 65th activation of a daemon lifetime with its
-stable reason and restart remedy; a root whose directory holds more than the
-recorded-entry bound refusing at start with its stable reason; at that bound a
-session reached by ID activated, not recorded, and the listing carrying
-`index_full`; a client that never saw a session ID recovering it through the
-create command's durable `command_id`; a directory write failing at activation
-reported to that client, the session still usable, and the record written by
-the retry the next time the live daemon holds that ID — right after
-activation, on a later command for the session, or when a client reaches it by
-ID; a
-recorded session the current composition cannot serve refused at activation by
-name while every other session in the root activates; progress coalescing under
-pressure with counted drops and no journal delay; peer-credential refusal; a
-socket path beyond the bound refused at start; frame, fragment and
-malformed-input refusals identical to the foreground server's.
+Tests prove: two attachments from one embedded holder and attachments from two
+holders keep independent handles, snapshots and cursors; named replacement
+removes only its exact same-holder target and releases only that target's
+transfers; a foreign, stale or other-session selector changes nothing; holder
+death removes its complete attachment set in EventDispatcher and Control and
+releases every transfer while another holder continues; the daemon retains
+closing slots until relay settlement and `release_holder/2` acknowledgement,
+so a replacement attach never crosses either count ceiling.
+
+The protocol suite proves the inherited boolean replacement remains byte- and
+behavior-compatible in both generations and each adapter maps it to core's
+exact target, a
+pipelined attach and acquire cannot bind one connection to different sessions,
+`control_owner_lost` vectors cover both optional-cursor shapes with the
+required message, `fatal:listener_lost` reaches existing clients and
+`fatal:connections_lost` does not claim a record, and the synchronous cut
+admits pre-cut work while refusing every post-cut request.
+
+Replay evidence proves snapshot-then-contiguous at-least-once delivery with no
+gap across enabled, disabled and mid-stream-dropped resident windows; bounded
+reclamation, slow-client detach, idle eviction and reconnect leave other
+attachments progressing; all count and byte ceilings refuse independently
+with process RSS recorded; and progress is coalesced or dropped without a
+journal delay.
+
+Index evidence proves startup reads at most the 4 MiB index image and never
+enumerates `sessions/`, including with more than 4,096 valid legacy files and
+arbitrarily many malformed names; oversize, corrupt, duplicate and interrupted
+images fail or recover as specified; a missing legacy-root index requires the
+offline import; foreground rollback ignores a valid index; paging carries only
+the four fields and exact cursor; full-index exact-ID activation succeeds with
+`index_full`; and command-ID recovery repairs an omitted row without creating
+a second session. The transport cases also cover simultaneous starts, Store
+loss, generation negotiation, peer authorization, socket-path bounds and ADR
+0023 framing refusals.
 
 ### Alternatives
 
@@ -1451,7 +1242,9 @@ check and invites remote exposure by misconfiguration; WebSocket and HTTP
 remain later transports under vision §18.8. An unbounded per-attachment queue
 was rejected because it lets one client grow coordinator-adjacent memory
 without bound. Keeping the M4 one-attachment-per-process rule was rejected
-because a daemon's clients are processes by definition. A daemon-owned proxy
+because a daemon's clients are processes by definition. Keeping one
+attachment per holder was also rejected: an embedded holder may need several,
+and a boolean replacement cannot identify one of them. A daemon-owned proxy
 fan-out was rejected because it would duplicate core cursor and queue
 ownership and need a second replay boundary to preserve the
 subscribe/snapshot race. Serving generation 1 on the daemon was rejected: its
@@ -1463,7 +1256,12 @@ at-least-once with client deduplication, and a stronger daemon promise would
 create an expectation no other surface honors. Removing `session.list` was
 rejected on the same day because an observer without filesystem access to
 the root would have no way to discover sessions; the bounded page contract
-above is the cost of keeping it.
+above is the cost of keeping it. A bounded wrapper around `File.ls/1` was
+rejected because the complete name list has already been materialized before
+the wrapper can stop. A daemon-maintained index was selected instead of a
+native directory iterator because OTP exposes no portable streaming iterator
+on the supported platforms and the index changes neither Store ports nor
+journal bytes.
 
 <a id="technical-adr-0032-compatibility"></a>
 ### Compatibility and Rollback Mechanics
@@ -1477,8 +1275,11 @@ server still serves generation 1 with one attachment in its process. The
 residency limits are server-enforced ceilings advertised at initialize under
 the existing `limits` member. Removing the daemon leaves the foreground server
 unchanged; existing embedded callers retain their behavior, and the core
-supports independent same-session attachments. No durable record depends on
-residency state or on the session index.
+supports independent same-session and same-holder attachments. The new index
+is a bounded daemon discoverability file only: no journal record, Store port,
+session event or snapshot depends on it. Foreground rollback ignores it, while
+an M5 daemon validates and reuses it. A legacy root is upgraded explicitly by
+the marker-protected offline import; there is no reverse migration.
 
 Acceptance binds this complete pair at the exact candidate the maintainer
 names in the governance record. Its evidence and compatibility claims remain
