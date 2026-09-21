@@ -507,7 +507,11 @@ beside them, and **all five** digest inputs therefore change in generation 2.
 **A connection is pinned to one session, and both paths pin it.** The first
 `session.attach` or `session.acquire_control` a connection completes fixes
 which session that connection is about; every later call on it naming a
-different session is refused with the existing invalid-argument reason, and
+different session is refused with ADR 0023's existing **`invalid_request`**
+(`0023-…-technical.md:304-307`) — the request is well-formed bytes but names a
+session this connection is not about, which is an argument fault rather than a
+lease or attachment one, so it is answered before any gate and never with
+`control_not_held` or `not_attached`, neither of which would be true — and
 the daemon's per-connection state is keyed by that one session rather than by
 whatever the last frame said. Without the rule a connection could hold a lease
 on one session and an attachment on another, and `control_owner_lost` — whose
@@ -541,22 +545,28 @@ and closes the socket immediately when none is free — before any frame is
 read, before the peer check, with no record, because a connection that was
 never admitted has no generation to be told anything in. The slot is released
 when the connection process ends, which is the same `DOWN` everything else
-about a connection hangs from. The `initialize`-time refusal below still
-exists for the case a slot was free at accept and the handshake is what fails.
+about a connection hangs from.
 
-**The refusal is ADR 0023's, not a new one.** A connection accepted beyond the
-ceiling is answered, at its `initialize`, with a correlated
-**`capacity_exceeded`** — which generation 1 already carries, so generation
-2's ordered error list gains nothing for it — and then closed. It is answered
-at `initialize` rather than refused at `accept` because a peer that is never
-answered cannot tell a full daemon from a wedged one, and because ADR 0023
-already fixes what a refused `initialize` means: the connection remains
-uninitialized and gets no second negotiation attempt
-(`0023-…-technical.md:357-358`). The peer-credential and filesystem checks
-still run first; a foreign peer is closed before any of this. Its witness is a
-boundary pair: the 512th connection initializes and is served, the 513th is
-refused `capacity_exceeded` and closed, and closing one of the 512 lets the
-next through.
+**There is no `initialize`-time refusal for the connection ceiling, and an
+earlier revision of this section kept one beside the accept-time slot.** The
+two cannot both hold: a slot taken at `accept` means the 513th socket never
+reaches `initialize` to be answered anything, and a ceiling answered at
+`initialize` is the ceiling on nothing that the paragraph above rejects. The
+accept-time slot is the rule. What is lost with the refusal is stated rather
+than glossed: a peer beyond the ceiling is closed **without being told why**,
+and cannot tell a full daemon from one that is wedged or gone. That is the
+price of bounding sockets rather than handshakes, and `daemon.status` is where
+an operator sees the headroom instead. The peer-credential and filesystem
+checks are unaffected, running on connections that did get a slot; a foreign
+peer is closed before any of this.
+
+Its witness is the boundary pair that matches the rule: the **512th**
+connection is accepted, initializes and is served; the **513th socket is
+accepted and closed with no frame read and no record written**, asserted from
+the client side as an immediate EOF rather than as an error record; and
+closing one of the 512 lets the next one through. A witness asserting a
+`capacity_exceeded` at `initialize` would be asserting a path this decision
+does not have.
 
 **An accepted connection that never initializes is closed on a deadline**, and
 without one the ceiling would be a ceiling on nothing: a peer that connects
@@ -630,7 +640,7 @@ limits — five inputs, and generation 2 changes **all five**:
 | Generation | New string |
 | Methods | Adds `session.list`, `daemon.status`, `session.acquire_control`, `session.release_control` |
 | Record families | Adds `daemon.stopping` and `daemon.notice` |
-| **Error codes** | Adds every refusal generation 2 can return and generation 1 cannot: `control_held`, `control_not_held`, `control_pending`, `control_capacity_reached`, `control_owner_lost`, `session_dormant`, `daemon_stopping`, the four existence-query refusals the daemon maps to the wire (`session_unknown`, `session_id_invalid`, `store_unavailable`, `existence_indeterminate`), and the activation and residency refusals (`activation_ceiling_reached`, `composition_mismatch`). **Not** `session_index_too_large`, which is a startup exit class and can reach no client, and **not** `capacity_exceeded`, which generation 1 already carries and generation 2 reuses for the connection ceiling |
+| **Error codes** | Adds every refusal generation 2 can return and generation 1 cannot: `control_held`, `control_not_held`, `control_pending`, `control_capacity_reached`, `control_owner_lost`, `session_dormant`, `daemon_stopping`, the four existence-query refusals the daemon maps to the wire (`session_unknown`, `session_id_invalid`, `store_unavailable`, `existence_indeterminate`), and the activation and residency refusals (`activation_ceiling_reached`, `composition_mismatch`). **Not** `session_index_too_large`, which is a startup exit class and can reach no client, and **not** `capacity_exceeded`, which generation 1 already carries and generation 2 keeps for the two **attachment** ceilings — `attachments_per_session` and `attachments_per_daemon`, the "stable reason when exhausted" the attachment-lifecycle list names — and no longer for the connection ceiling, which is enforced at `accept` and therefore reaches no `initialize` |
 | **Limits** | ADR 0023's framing and input ceilings are unchanged, and generation 2 **adds** the residency keys a client can read: `connections_per_daemon`, `initialize_deadline_ms`, `attachments_per_session`, `attachments_per_daemon`, `session_list_page_max`, `session_index_entries`, `lease_term_ms` |
 
 **`control_owner_lost` closes a controller whose lease owner died.** ADR 0033
@@ -1306,8 +1316,10 @@ delivered contiguously after the snapshot. The daemon adds:
   buffers and resident windows; on aggregate pressure, evict or detach the
   slowest eligible attachment before admitting more bytes, without stalling
   a journal transaction, and by the same record-then-close;
-- 64 attachments per session and 512 per daemon, refused at attach with a
-  stable reason when exhausted;
+- 64 attachments per session and 512 per daemon, refused at attach with
+  **`capacity_exceeded`** when exhausted — ADR 0023's existing code, and after
+  the connection ceiling moved to `accept` the only thing in generation 2 that
+  produces it;
 - eviction of an **observer** attachment that has consumed nothing for ten
   minutes; the
   `detached` record names the cursor the client may resume from and the

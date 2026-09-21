@@ -4736,7 +4736,7 @@ line; M5 introduces none of its own.
 | Log capacity per state root | 256 MiB; an append past it refused as `store_capacity_exceeded`, which terminates the store and closes the daemon, a log already past it refused at open as `store_log_too_large` | ADR 0031 |
 | Frame ceiling on any single store record | 4 MiB | ADR 0031 |
 | Retention and replay | Full history, no compaction, full replay at open | ADR 0031 |
-| Concurrent connections per daemon | 512, the attachment number reused; the 513th is refused `capacity_exceeded` at `initialize` and closed | ADR 0032 |
+| Concurrent connections per daemon | 512, the attachment number reused; the slot is taken at `accept`, so the 513th socket is accepted and **closed with no frame read and no record written** — an EOF, not a refusal, because a connection that was never admitted has no generation to be told anything in | ADR 0032 |
 | Time an accepted connection may take to complete `initialize` | 30 s, advertised under its own limits key `initialize_deadline_ms`, after which the connection is closed with no record; without it the connection ceiling would bound nothing | ADR 0032, its value derived from ADR 0033's lease term rather than chosen, and carried as a separate key so neither contract moves the other |
 | Attachments per session | 64 | ADR 0032 |
 | Attachments per daemon | 512 | ADR 0032, its attachment-lifecycle list, with the limit key in its limits table |
