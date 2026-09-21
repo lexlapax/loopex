@@ -165,10 +165,39 @@ an entry is same-session **supersession** (`:812-823`) — which M5's
 concurrent-attachment change removes, because coexisting attachments are the
 point.
 
-So that change has two halves and this pair states both: supersession stops
-removing attachments **unconditionally**, **and the dispatcher keeps its
+**And there is a third place the change has to reach, which two reviews of
+this pair missed: `Control` is single-attachment too.** The dispatcher is not
+the only component holding attachment state. `Control`'s session entry has one
+`attachment` field, `finish_attach/5` **overwrites** it on every successful
+attach (`control.ex:1273-1283`), the command path validates against that one
+field (`:343`, `current_attachment?/3` at `:1649-1657`, answering
+`{:error, :stale_attachment}` for anything else), and `attachment_repetition/4`
+keeps its repetition state for that same single attachment (`:1312-1314`).
+
+So with only the dispatcher changed, two coexisting attachments would still
+break the session at `Control`: an observer attaching after a controller
+overwrites the controller's slot, and the controller's **next command** fails
+— the daemon's central case, failing on the component nobody had looked at.
+
+**Core change 1 therefore includes `Control`'s attachment and repetition
+state, keyed by a stable holder identity.** That identity is the **holder
+pid** — the connection process the dispatcher already monitors for the release
+half of this change — so the two components key on the same thing and a
+`DOWN` drops the entry in both. `Control` keeps one attachment *per holder*
+per session rather than one per session, validates a command against the
+holder's own attachment, and keeps repetition state per holder. Nothing about
+the single-attachment-per-connection rule changes: one holder still has one
+attachment, which is why the key is the holder and not the attachment id.
+
+Its witness is the case that fails today: a controller attaches, an observer
+attaches to the same session, and **both remain usable** — the controller's
+next command is admitted and the observer keeps receiving.
+
+So that change has three parts and this pair states all of them: supersession
+stops removing attachments **unconditionally**, **the dispatcher keeps its
 monitor after install and
-removes the attachment on that process's `DOWN`**. Without the second half M5
+removes the attachment on that process's `DOWN`**, and **`Control` scopes its
+attachment and repetition state by holder**. Without the second half M5
 would leave core with no release path at all, and every attachment ever made
 would live until the runtime stopped.
 
