@@ -32,11 +32,13 @@ the VM that can read the environment, and it is exactly the kind of ambient
 authority the runtime refuses everywhere else. And it forces serialisation:
 **eleven of the thirteen** heavy `loopex_llm_reqllm` test modules install
 their own canary in that slot, so two of *those* running at once would hand
-each other's canary to each other's child — and because a suite cannot run
-eleven of thirteen concurrently and the other two serially without knowing
-which is which, all thirteen declare `async: false`. An earlier revision of
-this sentence said all thirteen install a canary, which is the serial count
-rather than the sharing one. The
+each other's canary to each other's child. The other two of the thirteen are
+serial for reasons of their own, which this decision does not touch: one
+writes a process-wide environment sentinel of its own
+(`m0_child_environment_conformance_test.exs`) and one builds a shared artifact
+(`provider_build_test.exs`). An earlier revision of this sentence said all
+thirteen install a canary, which is the serial count rather than the sharing
+one, and made this decision look like it frees two modules it does not. The
 [verification companion](../developer/verification-technical.md#technical-verification-speed)
 measured the result at M4 closure — that application is the critical path of
 the fast check, 96% of its time sits in those thirteen modules, and no further
@@ -230,8 +232,10 @@ process, which holds it and answers for it, and the short-lived sender, which
 receives it once, writes it and dies — and in the child that needs it. Nowhere
 else: not in adapter state, not in the environment, not in a durable or public
 plane, and in no message but the one reply this pair permits. Two invocations in
-one VM become independent, so the twelve provider test modules can run
-concurrently and the fast check stops being pinned by that application. Host
+one VM become independent, so the **eleven** provider test modules serial for
+this reason can run concurrently and the fast check stops being pinned by that
+application. The other two stay serial on their own reasons, which is why the
+claim is eleven rather than thirteen. Host
 composition gains one explicit input and one explicit obligation: a host that
 starts a runtime with this adapter passes a credential token with the call,
 instead of relying on the VM's environment being right at call time, and it

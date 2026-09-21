@@ -999,9 +999,10 @@ that carries no bytes. Its record is retained with the milestone's evidence.
 
 ### Concurrency, as a measurement
 
-With the process-wide read gone, the twelve `loopex_llm_reqllm` modules that
-declare `async: false` for that reason may declare `async: true` one at a
-time, each kept only after the application's suite stays green across several
+With the process-wide read gone, the **eleven** `loopex_llm_reqllm` modules
+that declare `async: false` for that reason may declare `async: true` one at a
+time — the other two of the thirteen stay serial on reasons of their own, a
+process-wide environment sentinel and a shared build artifact — each kept only after the application's suite stays green across several
 seeds, exactly as the M4 speed work converted the other twenty-one modules.
 The result is recorded against the baseline in the
 [verification companion](../developer/verification-technical.md#technical-verification-speed):

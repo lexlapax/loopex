@@ -126,8 +126,9 @@ applications only; the six light ones (62 s in sequence, 25 serial modules)
 were not read and are not claimed here. In the four examined, each
 module still serial carries one of: the one provider credential variable
 written into this VM's environment so the child inherits it (eleven of the
-thirteen heavy `loopex_llm_reqllm` modules — the other two are serial with
-them because the application cannot run part of itself concurrently — plus
+thirteen heavy `loopex_llm_reqllm` modules; the other two of the thirteen
+carry a different one of these reasons each — a process-wide environment
+sentinel of their own, and a shared build artifact — plus
 `cli`, `session_directory`, `coding_tools`,
 `executor`, `host_policy`); a global `:erlang.trace_pattern` (`cancellation`,
 `cancellation_observation_contract`, `context_admission`, `skill_context`,
@@ -223,9 +224,9 @@ run about 1 s, 0.1 s and 22 s. The limit on the critical path is structural: the
 applications run in parallel VMs, `loopex_llm_reqllm` is the longest, and 96%
 of its 209 s sits in the **thirteen** modules that run serially — **eleven**
 of which share the process-wide credential variable, so two of those running
-at once would hand each other's canary to each other's child, and the other
-two are serial with them because the application runs its modules under one
-setting. Making those concurrent means passing the
+at once would hand each other's canary to each other's child, while the
+remaining two are serial on their own reasons and would stay serial either
+way. Making those concurrent means passing the
 credential to the child per invocation instead of through the environment,
 which is a change to the credential plane and a maintainer decision, not a
 suite change; until then `loopex_llm_reqllm` pins the check near 210 s.
