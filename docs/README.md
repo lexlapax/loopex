@@ -93,7 +93,7 @@ whose path or explicit fragment does not resolve.
 
 - [M3 foundations](plans/M3.md#concept) and [technical plan](plans/M3-technical.md#technical-depth) — project skills and core repairs; Closed with retained evidence in the plan.
 - [M4 headless external consumption](plans/M4.md#concept) and [technical plan](plans/M4-technical.md#technical-depth) — durable interactions, artifact transfers, the floor refresh, observability, and the experimental session protocol driven by an independent Node consumer in plain JavaScript; Closed, with its runs in [M4 closure runs](evidence/M4-closure-runs.md).
-- [M5 durable service](plans/M5.md#concept) and [technical plan](plans/M5-technical.md#technical-depth) — daemon-owned session lifetime on the ADR-selected local store within its documented limits, generation-2-only Unix-domain-socket transport, in-memory controller lease with observers and takeover, and at-least-once replay with residency limits over M4; Open planning lookahead with a red gate.
+- [M5 durable service](plans/M5.md#concept) and [technical plan](plans/M5-technical.md#technical-depth) — daemon-owned session lifetime on the ADR-selected local store within its documented limits, generation-2-only Unix-domain-socket transport, in-memory controller lease with observers and takeover, and at-least-once replay with residency limits over M4. The [plans register](plans/README.md) carries its state, which is `Open`.
 
 - [Development contract](../AGENTS.md) — canonical tool-neutral authority,
   autonomy, documentation, milestone, and enforcement rules.

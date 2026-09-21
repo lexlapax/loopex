@@ -112,8 +112,9 @@ version and nothing more: accepted
 [ADR 0023](docs/adr/0023-experimental-public-session-protocol.md#concept) keeps
 it independent of the negotiated protocol generation, and it is not a tag, a
 package, a publication or a compatibility freeze. The source-only `v0.1.0` tag
-is applied to the exact `main` integration commit only under separate release
-and tag authority; no release has happened. See the
+**has been applied** to M4's exact `main` integration commit under the
+maintainer's separate release decision; it publishes no package, installer or
+service unit and freezes no surface. See the
 [M4 plan](docs/plans/M4.md#concept) for the accepted scope and its workstreams,
 [App server operations](docs/operator/app-server.md#concept) for driving it,
 and the [canonical register](docs/plans/README.md) for its current status.

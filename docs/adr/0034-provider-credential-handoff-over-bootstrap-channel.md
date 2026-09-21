@@ -30,12 +30,12 @@ weaker property than the rest of the plane: a secret that has to sit in a
 process-wide slot for the duration of every call is reachable by anything in
 the VM that can read the environment, and it is exactly the kind of ambient
 authority the runtime refuses everywhere else. And it forces serialisation:
-the twelve heavy `loopex_llm_reqllm` test modules each install their own
+the thirteen heavy `loopex_llm_reqllm` test modules each install their own
 canary in that slot, so two of them running at once would hand each other's
 canary to each other's child. The
 [verification companion](../developer/verification-technical.md#technical-verification-speed)
 measured the result at M4 closure — that application is the critical path of
-the fast check, 96% of its time sits in those twelve modules, and no further
+the fast check, 96% of its time sits in those thirteen modules, and no further
 test change shortens the check while the slot is shared.
 
 **Decide that the credential is named by an opaque token bound at

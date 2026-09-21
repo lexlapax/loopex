@@ -405,8 +405,12 @@ The rule is that **a reservation counts**:
   `activation_limit` are directly comparable and a client can never read
   `activations_used < activation_limit` on a daemon that would refuse its next
   create;
-- `active_sessions` is `|activation set|` alone — sessions with a coordinator
-  now, which is a different question and is why the two fields both exist;
+- `active_sessions` is `|activation set|` alone — **the sessions this daemon
+  has activated in this lifetime**, which is what the set holds and what
+  `residency: active` means. It is *not* "sessions with a live coordinator":
+  activation is one-way and the daemon has no way to know a coordinator died,
+  which this pair says twice elsewhere. It differs from `activations_used`
+  only by the reservations in flight;
 - `attachments` counts installed attachments plus reserved attachment slots,
   for the same reason `activations_used` does;
 - `connections` counts accepted connections, reservation-free by nature.
@@ -414,6 +418,19 @@ The rule is that **a reservation counts**:
 So `activations_used` may exceed `active_sessions` for as long as a call is in
 flight, and settles to it. Reporting the set alone would advertise headroom
 the very next call would refuse.
+
+**At the attachment ceiling a `replace: true` is net-zero, and it reserves
+that way.** A replacing attach ends one attachment and installs one, so it
+needs no free slot — but the daemon reserves before it calls core, and a naive
+reservation would refuse at 512 a request that leaves the count at 512. So a
+replacing attach takes an **atomic net-zero reservation**: in the daemon's
+serial owner it claims the slot its own connection's prior attachment for that
+session already holds rather than a free one, and it converts or releases that
+claim through the same table every other reservation uses, so the count never
+moves and no second caller can take the slot in between. A `replace: true`
+from a connection that holds no prior attachment for that session is not
+net-zero — core will install a second attachment rather than supersede one —
+so it reserves ordinarily and is refused at the ceiling like any other attach.
 
 **`session.acquire_control`**
 
@@ -583,7 +600,7 @@ carry.
 
 | Field | Value |
 | --- | --- |
-| `reason` | One of `operator_stop`, `store_lost`, `store_capacity_exceeded`, or `fatal:<class>` for the remaining classes the plan's fatal-class map names, one per linked component: `fatal:runtime_lost`, `fatal:transfers_lost`, `fatal:workspace_lease_lost`, `fatal:executor_lost`, `fatal:registry_lost`, `fatal:custody_lost`, `fatal:capability_lost`, `fatal:relay_lost`, `fatal:listener_lost` — nine in a daemon with artifact transfers and eight without, one per linked component of the fixed set. A lease owner's death is not among them: it closes one session's controller connection with `control_owner_lost` and ends no daemon. The startup classes carry no reason, because no socket exists when they occur, and neither does `owner_lost`, where the process that would write it is the one that is gone |
+| `reason` | One of `operator_stop`, `store_lost`, `store_capacity_exceeded`, or `fatal:<class>` for the remaining classes the plan's fatal-class map names, one per linked component: `fatal:runtime_lost`, `fatal:transfers_lost`, `fatal:workspace_lease_lost`, `fatal:executor_lost`, `fatal:registry_lost`, `fatal:custody_lost`, `fatal:capability_lost`, `fatal:relay_lost`, `fatal:connections_lost` — nine in a daemon with artifact transfers and eight without. **`fatal:listener_lost` is not among them**: the listener is what would have written the record, so no client can be told that reason, which the plan's own class table says and this set contradicted. A lease owner's death is not among them: it closes one session's controller connection with `control_owner_lost` and ends no daemon. The startup classes carry no reason, because no socket exists when they occur, and neither does `owner_lost`, where the process that would write it is the one that is gone |
 | `message` | A bounded non-secret sentence for an operator to read |
 | `retry_after_ms` | Present only for `operator_stop`, where a restart is expected; absent for every fatal reason, because the daemon does not know when the cause will be fixed |
 
@@ -809,6 +826,14 @@ adds a **second notification record family**, `daemon.notice`, beside
 | `code` | one of a closed set, today `index_write_failed` |
 | `session_id` | the session the notice is about |
 | `message` | a bounded non-secret sentence for an operator |
+
+**It goes to the connection whose command caused it, and only that one**, and
+it is written **after** that command's result rather than before: a client
+that sees the notice first would be told about a session it has not yet been
+told the identity of. If that connection is gone by then the notice is
+**dropped** — it is about a command nobody is waiting on, the session is
+reachable regardless, and the daemon's own `stderr` keeps the operator's copy.
+It is never broadcast; other connections did not ask.
 
 The activation it follows **succeeded**: the session is usable and reachable
 by ID, and only its directory entry and index row are missing, to be written

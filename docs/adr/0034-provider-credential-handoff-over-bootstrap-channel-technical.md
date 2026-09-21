@@ -1006,7 +1006,9 @@ seeds, exactly as the M4 speed work converted the other twenty-one modules.
 The result is recorded against the baseline in the
 [verification companion](../developer/verification-technical.md#technical-verification-speed):
 that application was the fast check's critical path at M4 closure, with 96% of
-its time in those twelve modules. Any module that stays serial keeps its
+its time in those thirteen modules -- eleven of which reference the credential
+variable, the count measured by loading them rather than by globbing
+`test/*.exs`. Any module that stays serial keeps its
 reason recorded beside it. The measurement is evidence about the change, never
 a condition a test may be weakened to meet.
 

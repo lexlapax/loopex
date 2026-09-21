@@ -96,8 +96,9 @@ with its complete holder inventory. It maps the shared facade through strict
 foreground stdio JSONL, and an independent consumer written in plain JavaScript
 selects a skill, answers an interaction, observes a real tool result, retrieves
 an artifact and recovers after process loss. The daemon remains a later host.
-The source `VERSION` is `0.1.0`; the annotated `v0.1.0` tag on M4's exact
-integration commit on `main` awaits separate release authority. Neither is a
+The source `VERSION` is `0.1.0`, and the annotated `v0.1.0` tag **is applied**
+to M4's exact integration commit on `main`, taken under the maintainer's
+separate release decision. Neither is a
 package, installer, service or public-surface freeze.
 The [plans register](plans/README.md) remains the authority for its current state.
 

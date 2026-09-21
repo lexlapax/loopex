@@ -47,7 +47,7 @@ brings this ADR also renames the released generation-1 string to
 `loopex.experimental/1`, so the two generations are named on one scheme and
 neither claims the `v1` the vision reserves for the stable protocol; that
 rename is the plan's decision under the 0.x experimental policy, and its
-consequence here is that generation 1's pinned digests are recomputed with
+consequence here is that generation 1's pinned **schema digest** is recomputed with
 its new name while everything else about generation 1 stays as it is.
 
 That record is a new record family, so it is part of what generation 2's
