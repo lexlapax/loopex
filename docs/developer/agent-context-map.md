@@ -5506,3 +5506,24 @@ The two-commit procedure applies from M5 onward. Earlier milestones and tags
 keep their recorded procedure; `v0.1.0` remains the separately authorized tag
 of M4's integrated source commit. This correction grants no acceptance,
 closure, tag, release or publication.
+
+### Administrative reconstruction and four release proofs — 2026-09-21
+
+External review found two propagation errors in the closure records above.
+Those entries remain historical records; this correction supersedes their
+descriptions of status-file reconstruction and the pre-tag proof count.
+
+The administrative region in `docs/plans/README.md` contains both the exact
+milestone register row and the complete supplied Current Status block. Release
+review reconstructs that file from the tested bytes by replacing both regions.
+It reconstructs the root `README.md` by replacing only its supplied marked
+status block. Each reconstruction must equal the administrative file byte for
+byte. The closed milestone name comes from the register; the checkpoint date
+comes from the maintainer's recorded closure disposition. `mix loopex.status`
+validates these supplied values and does not generate them.
+
+Four pre-tag proofs run on the administrative SHA: confinement and exact
+status-file reconstruction, `bash scripts/check.sh --docs`, the final semantic
+review of `docs/operator/` and `docs/developer/`, and archive identity. The
+last proof uses the manifest producer and `SOURCE_IDENTITY` that M5 delivers.
+This correction grants no acceptance, closure, tag, release or publication.

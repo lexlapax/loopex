@@ -30,8 +30,9 @@ its last `Closed` row identifies the last closed product baseline.
 <!-- loopex:current-status:end -->
 
 Until the first planned milestone closes, `Last closed product checkpoint` is the
-exact seed-bootstrap sentinel shown above. After that it is derived from the
-register's final `Closed` row in this form:
+exact seed-bootstrap sentinel shown above. After that, its milestone name is
+derived from the register's final `Closed` row and its date is supplied from
+the maintainer's recorded closure disposition, in this form:
 
 ```text
 `<final Closed milestone>` — YYYY-MM-DD
@@ -40,8 +41,9 @@ register's final `Closed` row in this form:
 The status checker deliberately does not claim that accepted governance was
 merged: identical bytes on a topic branch and on `main` are indistinguishable.
 The integrator verifies the exact base, and the pre-integration review verifies
-integration eligibility. This field states only the product fact the register
-can derive.
+integration eligibility. The status checker validates the milestone name
+against the register and the supplied date as a calendar date; it does not
+invent the date.
 
 `Integrated phase` is derived from the same rows by the same standard, and has
 exactly two values. It reads `Pre-implementation planning` while the register

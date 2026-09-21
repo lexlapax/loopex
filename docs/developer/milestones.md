@@ -122,16 +122,19 @@ closure evidence does not cover, and the release stops. The root README is the
 only confined path outside `docs/`; it is reconstructed as the tested file with
 only its marked block replaced, then checked byte-for-byte as well as by
 `check.sh --docs`, including that command's `mix loopex.status` step.
+The plans index is reconstructed separately from the tested file by replacing
+both its exact milestone register row and its marked Current Status block.
 
 **Four pre-tag proofs run before the tag exists, and none is a second closure.** The
 administrative tree differs from the tested one only in documentation, so
 `bash scripts/check.sh --docs` runs on the administrative SHA. The final
 semantic documentation gate then reads the relevant `docs/operator/` and
-`docs/developer/` pages from that same SHA. The archive manifest is also
-recomputed from a fresh `git archive` extraction by the same repository-owned
-`scripts/source-archive-manifest.sh` command whose exact NUL-delimited output
-the tested run retained. Every entry outside `docs/`, except the root
-`README.md` and `SOURCE_IDENTITY`, must match the tested archive entry. The
+`docs/developer/` pages from that same SHA. From M5 onward, the archive
+manifest is also recomputed from a fresh `git archive` extraction by the
+M5-delivered repository-owned `scripts/source-archive-manifest.sh` command
+whose exact NUL-delimited output the tested run retained. Every entry outside
+`docs/`, except the root `README.md` and the M5-delivered `SOURCE_IDENTITY`,
+must match the tested archive entry. The
 README is validated by the marked-block confinement proof and
 documentation/status checks. Each archive's
 `SOURCE_IDENTITY` differs by design and must name that archive's own commit and

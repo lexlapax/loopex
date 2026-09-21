@@ -107,9 +107,9 @@ At the **tested implementation commit**, which is the closure candidate:
    the current pair with the credential and pinned Node; CI already holds the
    current-pair fast check for the candidate. Each run's revision, platform,
    toolchain, result and measured duration is retained outside the repository
-   under a stable retained-output reference with a SHA-256 digest. The
-   release check's fresh-source lane stages the tested SHA with `git archive`
-   into an empty extraction and runs
+   under a stable retained-output reference with a SHA-256 digest. For M5 and
+   later, the release check's fresh-source lane stages the tested SHA
+   with `git archive` into an empty extraction and runs the M5-delivered producer
    `bash "$tree/scripts/source-archive-manifest.sh" "$tree" >"$retained_manifest"`
    before the build, with `retained_manifest` outside `tree`. The
    command writes only the canonical NUL-delimited manifest bytes to standard
@@ -188,15 +188,18 @@ indexes that page; the administrative commit only fills it.
 
 Path membership is only the first half of confinement. Inspect the complete
 `git diff --no-ext-diff --unified=0 <tested>..<administrative> -- <the five
-paths>` and map every changed byte to the table above. Reconstruct each marked
-status file by taking its tested bytes and replacing only its named marked
-block with the exact marked-block bytes from the administrative file, then
-require byte equality with that file. The same review requires
-the exact register row, Closure row, appended context-map subsection and
-scaffold placeholders to be the only other changed regions. Retain the full
+paths>` and map every changed byte to the table above. Reconstruct
+`docs/plans/README.md` from its tested bytes by replacing both its exact
+`<NAME>` register row and its marked Current Status block with the corresponding
+administrative bytes. Reconstruct the root `README.md` from its tested bytes by
+replacing only its marked status block. Require each reconstruction to equal
+its administrative file byte for byte. The same review requires the Closure
+row, appended context-map subsection and scaffold placeholders to be the only
+other changed regions. Retain the full
 patch and that five-row content-confinement result outside the repository under
 a stable reference and SHA-256 digest. `mix loopex.status` inside
-`check.sh --docs` separately validates the derived status values; it is not a
+`check.sh --docs` separately validates the supplied status values against the
+register; it is not a
 substitute for proving that bytes outside their markers did not change.
 
 Content confinement does not cover Git tree metadata. Compare the five paths'
@@ -238,10 +241,10 @@ creating the tag:
 
 | Step | Command | What a failure means |
 | --- | --- | --- |
-| Confine the administrative commit | Require `git rev-list --parents -n 1 <administrative>` to return exactly `<administrative> <tested>`; compare `git diff --name-only <tested>..<administrative>` with [the five paths](#technical-milestones-confinement); compare their `git ls-tree` entries and inspect `git diff --raw --no-renames` to require ordinary blobs with unchanged modes; inspect and retain the complete zero-context patch; map every changed byte to its one allowed region; and reconstruct both marked status files from the tested bytes plus the exact marked-block bytes in the administrative files, requiring byte equality | An extra parent, intermediate commit, missing or extra path, changed object type or mode, hunk outside a named region, changed pre-existing context-map byte, changed scaffold structure, or changed byte outside either status marker means the tag would publish a tree outside the two-commit closure contract. `mix loopex.status` proving the values does not prove this metadata and byte confinement. The release stops and the packet is reassembled |
+| Confine the administrative commit | Require `git rev-list --parents -n 1 <administrative>` to return exactly `<administrative> <tested>`; compare `git diff --name-only <tested>..<administrative>` with [the five paths](#technical-milestones-confinement); compare their `git ls-tree` entries and inspect `git diff --raw --no-renames` to require ordinary blobs with unchanged modes; inspect and retain the complete zero-context patch; map every changed byte to its one allowed region; reconstruct `docs/plans/README.md` from its tested bytes plus the administrative register row and marked Current Status block; and reconstruct the root `README.md` from its tested bytes plus the administrative marked status block, requiring byte equality for both files | An extra parent, intermediate commit, missing or extra path, changed object type or mode, hunk outside a named region, changed pre-existing context-map byte, changed scaffold structure, or changed byte outside any permitted region means the tag would publish a tree outside the two-commit closure contract. `mix loopex.status` proving the values does not prove this metadata and byte confinement. The release stops and the packet is reassembled |
 | Re-prove the documentation structure | `bash scripts/check.sh --docs` on `COMMIT` | The administrative commit's own documentation changes are not green; fix the candidate and assemble a replacement administrative commit |
 | Re-prove documentation meaning | Run the milestone's final semantic documentation gate on the relevant `docs/operator/` and `docs/developer/` pages at `COMMIT` | The operator and developer accounts disagree with each other, the plan, the accepted ADRs, or the implemented behavior; fix the candidate and assemble a replacement administrative commit |
-| Re-prove the archive identity | Stage `COMMIT` with `git archive` into a fresh empty extraction, then run `bash "$tree/scripts/source-archive-manifest.sh" "$tree" >"$retained_manifest"` with `retained_manifest` outside `tree`. Retain those exact bytes. A NUL-aware parser rejects malformed or duplicate records, removes `docs` and its descendants plus exact root `README.md` and `SOURCE_IDENTITY`, and compares every remaining complete tuple with the manifest bytes retained for the tested SHA. Require exactly one root `SOURCE_IDENTITY` in each archive and validate it against that archive's own commit and source identity | The command is absent, fails, emits a malformed or duplicate record stream, or the published bytes are not the closed bytes outside the confined regions, or an archive identifies the wrong source. Entries under `docs/`, the supplied root README and the two `SOURCE_IDENTITY` payloads are expected to differ. The preceding content-confinement proof covers every permitted documentation hunk and the README's exact marked-block replacement. This comparison catches archive inclusion or exclusion changes that `.gitattributes` can cause without a path appearing in `git diff` |
+| Re-prove the archive identity | For M5 and later, stage `COMMIT` with `git archive` into a fresh empty extraction, then run the M5-delivered producer as `bash "$tree/scripts/source-archive-manifest.sh" "$tree" >"$retained_manifest"` with `retained_manifest` outside `tree`. Retain those exact bytes. A NUL-aware parser rejects malformed or duplicate records, removes `docs` and its descendants plus exact root `README.md` and the M5-delivered `SOURCE_IDENTITY`, and compares every remaining complete tuple with the manifest bytes retained for the tested SHA. Require exactly one root `SOURCE_IDENTITY` in each archive and validate it against that archive's own commit and source identity | The command or source identity is absent, fails validation, emits a malformed or duplicate record stream, or the published bytes are not the closed bytes outside the confined regions. Entries under `docs/`, the supplied root README and the two `SOURCE_IDENTITY` payloads are expected to differ. The preceding content-confinement proof covers every permitted documentation hunk and the README's exact marked-block replacement. This comparison catches archive inclusion or exclusion changes that `.gitattributes` can cause without a path appearing in `git diff` |
 
 Nothing else is re-run. There is no second suite, no second release check and
 no second provider credential: the tested tree and the administrative tree

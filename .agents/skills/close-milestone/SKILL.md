@@ -35,7 +35,7 @@ technical guidance. The process is the
    CI run the candidate already produced; count it rather than repeating it.
    Retain each run's complete output outside the repository, with its stable
    retained-output reference, SHA-256 digest, tested implementation SHA,
-   platform, and toolchain. The release check's fresh-source lane runs
+   platform, and toolchain. The release check's M5-delivered fresh-source lane runs
    `bash "$tree/scripts/source-archive-manifest.sh" "$tree" >"$retained_manifest"`
    before building, with the retained output outside
    the extraction, and retains those exact NUL-delimited bytes under their own
@@ -52,7 +52,9 @@ technical guidance. The process is the
    results, review findings, and what remains. The maintainer closes it; then
    make the **administrative closure commit**, which is
    [confined to five paths and the exact allowed region in each](../../../docs/developer/milestones-technical.md#technical-milestones-confinement):
-   the register row moved only from `In review` to `Closed`, the plan's Closure row naming the
+   the register row moved only from `In review` to `Closed` together with the
+   complete supplied Current Status block in `docs/plans/README.md`, the plan's
+   Closure row naming the
    **tested implementation SHA** and the content digests — not this commit,
    which cannot contain its own hash and is located by the register transition
    instead — the context-map disposition, the existing evidence page filled
@@ -74,12 +76,13 @@ authorizes a tag, follow the milestone guide's release sequence. Re-prove the
 five-path and allowed-region confinement, then run
 the documentation check, the final semantic operator/developer
 documentation gate, and the archive comparison on the administrative SHA.
-For that comparison, stage a fresh `git archive` extraction, run
+For that comparison, stage a fresh `git archive` extraction, run the
+M5-delivered producer
 `bash "$tree/scripts/source-archive-manifest.sh" "$tree" >"$retained_manifest"`
 with the output outside the extraction, retain those
 exact NUL-delimited bytes, reject malformed or duplicate records, and compare
 complete tuples after removing `docs` and its descendants plus exact root
-`README.md` and `SOURCE_IDENTITY`
+`README.md` and the M5-delivered `SOURCE_IDENTITY`
 before creating the tag. Retain those outputs outside the repository and put
 their results, retained-output references, and SHA-256 digests in the
 annotation at creation. Do not amend the evidence page or create a third
