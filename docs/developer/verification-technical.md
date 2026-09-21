@@ -21,7 +21,7 @@ Concept: [Three stages](verification.md#concept-verification-stages).
 | Change, while editing | `mix test <path>`, `mix format`, `mix compile --warnings-as-errors`; the client Stop hook runs format, the dependency budget and the adapter check | Seconds |
 | Change, before merge | `bash scripts/check.sh --select` in hosted CI on the branch; a read-only review of `git diff main..<candidate>` | 12 min 54 s and 12 min 38 s on the hosted runner at the final M4 candidates; on the Mac 287 s at the final candidate `d738ec7` with a warm build and ten applications at once (346 s at `031554c`, before the bound and concurrency work), against 870 s Mac and 809 s Linux in the sequential shape it replaced; 18 s before the suite starts |
 | Close | `bash scripts/check.sh` under the floor pair (`mise exec erlang@27.3.4 elixir@1.18.5-otp-27 -- bash scripts/check.sh`), `bash scripts/check-release.sh` once on the current pair | Release check: 149–163 s on Linux, 12 tests |
-| Release | The administrative commit's diff confined to its four paths; `check.sh --docs` on the tagged SHA; the archive manifest recomputed there and matched outside `docs/` | Seconds: a documentation-scoped check and a manifest comparison, no suite and no release check |
+| Release | The administrative commit's diff confined to its four paths; `check.sh --docs` on the tagged SHA; the archive manifest recomputed there and matched outside `docs/` | The documentation-scoped check alone: 12–13 s on the Mac at this revision, warm build, plus a manifest comparison. No suite and no release check |
 
 `check.sh` step order and cost: warning-free compilation 1 s (warm), formatting
 1 s, repository structure 11–14 s (`scripts/check-bootstrap.sh`: client
