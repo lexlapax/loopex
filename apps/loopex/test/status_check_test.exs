@@ -1564,8 +1564,8 @@ defmodule Loopex.StatusCheckTest do
             "Next maintainer decision" =>
               "Close `#{name}` or reject its closure candidate on the review findings",
             "Next transition" =>
-              "Record the closure governance row, naming both the tested implementation " <>
-                "SHA and the administrative closure SHA, and move `#{name}` to Closed"
+              "Record the closure governance row, naming the tested implementation SHA, " <>
+                "and move `#{name}` to Closed"
         }
 
       "Closed" ->

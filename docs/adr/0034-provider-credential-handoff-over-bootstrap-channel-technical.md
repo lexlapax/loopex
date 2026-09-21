@@ -1007,10 +1007,46 @@ seeds, exactly as the M4 speed work converted the other twenty-one modules.
 The result is recorded against the baseline in the
 [verification companion](../developer/verification-technical.md#technical-verification-speed):
 that application was the fast check's critical path at M4 closure, with 96% of
-its time in those thirteen modules -- eleven of which reference the credential
-variable, the count measured by loading them rather than by globbing
-`test/*.exs`. Any module that stays serial keeps its
-reason recorded beside it. The measurement is evidence about the change, never
+its time in those thirteen modules. Any module that stays serial keeps its
+reason recorded beside it.
+
+<a id="technical-adr-0034-serial-modules"></a>
+**The thirteen, by name, because the count has been wrong three times.** Every
+one of those corrections came from reading a glob instead of running the
+suite, so the list is written out once here and every other passage in this
+repository cites it rather than recounting.
+
+| # | Module | Serial because |
+| --- | --- | --- |
+| 1 | `test/adapter_test.exs` | credential variable |
+| 2 | `test/credential_plane_test.exs` | credential variable |
+| 3 | `test/m0_child_environment_conformance_test.exs` | **not the credential variable** — it writes a process-wide environment sentinel of its own (`LOOPEX_M0_CHILDENV_PARENT_ONLY`) and mutates `PATH` |
+| 4 | `test/provider_attempt_adapter_contract_test.exs` | credential variable |
+| 5 | `test/provider_backpressure_observer_test.exs` | credential variable |
+| 6 | `test/provider_backpressure_test.exs` | credential variable |
+| 7 | `test/provider_bridge_test.exs` | credential variable |
+| 8 | `test/provider_build_test.exs` | **not the credential variable** — it builds a shared artifact (the provider build identity `.beam`) against the application's own `mix.exs` |
+| 9 | `test/provider_retainer_boundaries_test.exs` | credential variable |
+| 10 | `test/provider_startup_boundaries_test.exs` | credential variable |
+| 11 | `test/provider_test.exs` | credential variable |
+| 12 | `test/real_model_lane_test.exs` | credential variable |
+| 13 | `test/support/provider_entry_test.exs` | credential variable — and the module the count kept losing, for living under `test/support/` |
+
+**Eleven** reference the credential variable, directly or through
+`Adapter.credential_variable()`; **two** do not and would stay serial whatever
+this decision does. Removing the process-wide read therefore frees eleven, not
+thirteen.
+
+**The derivation is executed, not globbed**, which is what row 13 costs when
+it is skipped. `apps/loopex_llm_reqllm` sets no `test_paths`, no
+`test_pattern` and no `elixirc_paths`, so Mix's default pattern applies
+**recursively** under `test/`, and its `test_ignore_filters` name three
+non-`_test` fixture and diagnostic files and nothing else
+(`apps/loopex_llm_reqllm/mix.exs:16-22`). Measured in that application:
+`mix test --only <an unused tag>` reports **179 excluded**; the twelve
+`test/*_test.exs` files alone report **164**; the difference of **15** is
+exactly what `mix test test/support/provider_entry_test.exs` runs. A
+non-recursive `test/*.exs` glob reports twelve and is wrong every time. The measurement is evidence about the change, never
 a condition a test may be weakened to meet.
 
 <a id="technical-adr-0034-compatibility"></a>

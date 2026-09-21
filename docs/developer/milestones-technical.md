@@ -113,11 +113,19 @@ At the **tested implementation commit**, which is the closure candidate:
 | What names it | Every run on the evidence page, and the review | The register, once `Closed` |
 | Its evidence | The runs of step 3, taken from it | None of its own; it is a record, not a claim |
 
-The plan's **Closure row carries both**: the tested implementation SHA the
-packet was assembled from, and the administrative SHA that closed it. A
-reviewer checking the milestone reads the first; a reader tracing the decision
-reads the second. Recording only one leaves either the evidence or the
-decision unlocatable.
+The plan's **Closure row names the tested implementation SHA** — the candidate
+the packet was assembled from — with the content digests closure rows have
+always carried. It does **not** name the administrative SHA, for the reason
+the whole split exists: that row *is* the administrative commit's content, and
+a commit cannot contain its own hash. An earlier revision asked the row to
+name both, which is the same impossibility as asking one commit to carry runs
+of itself, one level down.
+
+**The administrative SHA is located rather than written.** Two things point at
+it and neither is inside it: the register's transition to `Closed`, whose
+commit is that commit, and — once a release happens — the annotated tag, which
+names it. A reader tracing the decision follows either; a reviewer checking
+the evidence reads the tested SHA out of the Closure row, where it is.
 
 <a id="technical-milestones-confinement"></a>
 **The confinement, stated once and referenced everywhere else.** The
@@ -126,7 +134,7 @@ administrative closure commit touches **exactly these four paths**:
 | Path | What it carries |
 | --- | --- |
 | `docs/plans/README.md` | The register row, moved to `Closed` |
-| `docs/plans/<NAME>.md` | The plan's Closure row, naming both SHAs |
+| `docs/plans/<NAME>.md` | The plan's Closure row, naming the tested implementation SHA and the content digests |
 | `docs/developer/agent-context-map.md` | The maintainer's closure disposition |
 | `docs/evidence/<NAME>-closure-runs.md` | The run identities, results and measured durations of step 3, the archive manifest's digest, and the security review |
 

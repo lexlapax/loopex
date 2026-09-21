@@ -171,9 +171,12 @@ A milestone runs in four steps; the
    reads the candidate; the maintainer closes it and the register moves to
    `Closed`. Closure names **two commits**: the *tested implementation SHA*
    the matrix ran on and the reviewer read, and the *administrative closure
-   SHA* that records the decision. One commit cannot name itself, and the runs
-   are of the first, so the second is what writes them down. It is confined to
-   four paths — register row, Closure row, context-map entry, evidence page —
+   SHA* that records the decision. One commit cannot name itself: the runs are
+   of the first, so the second writes them down, and the Closure row names the
+   first, because that row is the second's own content. The administrative SHA
+   is located by the register's `Closed` transition and by the tag. It is
+   confined to four paths — register row, Closure row, context-map entry,
+   evidence page —
    which the
    [milestone guide](docs/developer/milestones-technical.md#technical-milestones-confinement)
    states once. Run evidence is immutable — held where it cannot

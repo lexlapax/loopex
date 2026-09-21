@@ -793,8 +793,8 @@ defmodule Loopex.Checks.Register do
     )
     |> Map.put(
       "Next transition",
-      "Record the closure governance row, naming both the tested implementation SHA and " <>
-        "the administrative closure SHA, and move `#{name}` to Closed"
+      "Record the closure governance row, naming the tested implementation SHA, and move " <>
+        "`#{name}` to Closed"
     )
   end
 

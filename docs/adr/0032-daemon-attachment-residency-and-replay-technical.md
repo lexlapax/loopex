@@ -185,14 +185,40 @@ overwrites the controller's slot, and the controller's **next command** fails
 — the daemon's central case, failing on the component nobody had looked at.
 
 **Core change 1 therefore includes `Control`'s attachment and repetition
-state, keyed by a stable holder identity.** That identity is the **holder
-pid** — the connection process the dispatcher already monitors for the release
-half of this change — so the two components key on the same thing and a
-`DOWN` drops the entry in both. `Control` keeps one attachment *per holder*
-per session rather than one per session, validates a command against the
-holder's own attachment, and keeps repetition state per holder. Nothing about
-the single-attachment-per-connection rule changes: one holder still has one
-attachment, which is why the key is the holder and not the attachment id.
+state, held per holder rather than per session.** The **holder pid** — the
+connection process the dispatcher already monitors for the release half of
+this change — is what the entry belongs to, so the two components agree about
+whose attachment is whose and one `DOWN` drops the entry in both. `Control`
+keeps one attachment *per holder* per session rather than one per session, and
+keeps repetition state per holder entry. Nothing about the
+single-attachment-per-connection rule changes: one holder still has one
+attachment.
+
+**But the holder pid cannot be the only key, because the reader has no holder
+pid**, and an earlier revision said "keyed by the holder pid" without checking
+that. The one reader is the command path: `handle_call({:route_command, token,
+session_id, attachment_id, incarnation_id}, _from, state)` **discards `_from`**
+(`control.ex:336`) and resolves the attachment from the handle's
+`attachment_id` and `incarnation_id` (`:343`, `current_attachment?/3` at
+`:1649-1657`). Under the daemon the caller is not the holder at all — the
+holder is the connection process, and the command arrives from a **relay
+task** — so a lookup by caller pid would find nothing, and a lookup by `_from`
+would find the wrong entry.
+
+So the entries are **reachable both ways**, which is one change and not two:
+
+| Operation | Key | Why |
+| --- | --- | --- |
+| Insert, on a successful attach | Holder pid | It is what the attachment belongs to and what a `DOWN` will name |
+| Release, on the holder's `DOWN` | Holder pid | The `DOWN` carries the pid and nothing else |
+| Validate a command (`:343`) | **`attachment_id`** from the handle | The caller is a relay task; the handle is the only thing that identifies which attachment is speaking |
+| Repetition (`attachment_repetition/4`, `:1312-1314`) | The holder entry the command resolved to | Repetition is per attachment, and the command has already found it |
+
+An implementation may keep a second index from `attachment_id` to holder pid,
+or keep the id on the pid-keyed entry and resolve by scanning the session's
+holders — at most 64 per session by the ceiling below, so either is bounded.
+What is fixed here is the contract, not the data structure: **the id resolves
+the entry, the pid owns it, and the `DOWN` releases it.**
 
 Its witness is the case that fails today: a controller attaches, an observer
 attaches to the same session, and **both remain usable** — the controller's
@@ -1194,7 +1220,9 @@ make.
   **Enforcing it needs a bounded read, and core does not have one.** The
   listing the daemon builds its index from is core's:
   `Loopex.list_sessions/1` (`loopex.ex:452-453`) calls
-  `SessionDirectory.list_sessions/1` (`session_directory.ex:230-253`), which
+  `SessionDirectory.list_sessions/1` (`session_directory.ex:231-266`: the head
+at `:231`, the full read and sort at `:238-247`, the answer at `:249`, and the
+invalid-root clause at `:266`), which
   does `File.ls` and then reads **every** entry before sorting and returning.
   A root holding a hundred thousand entries is therefore read in full before
   the daemon can refuse at the four-thousand-and-ninety-seventh — a refusal

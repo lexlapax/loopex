@@ -33,8 +33,10 @@ technical guidance. The process is the
    results, review findings, and what remains. The maintainer closes it; then
    make the **administrative closure commit**, which is
    [confined to four paths](../../../docs/developer/milestones-technical.md#technical-milestones-confinement):
-   the register row moved to `Closed`, the plan's Closure row naming **both**
-   the tested implementation SHA and this commit, the context-map disposition,
-   and the evidence page with step 3's runs. Nothing else belongs in it.
+   the register row moved to `Closed`, the plan's Closure row naming the
+   **tested implementation SHA** and the content digests — not this commit,
+   which cannot contain its own hash and is located by the register transition
+   instead — the context-map disposition, and the evidence page with step 3's
+   runs. Nothing else belongs in it.
 
 Tags, packages, and publication are separate maintainer decisions.

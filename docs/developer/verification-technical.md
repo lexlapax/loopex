@@ -21,7 +21,7 @@ Concept: [Three stages](verification.md#concept-verification-stages).
 | Change, while editing | `mix test <path>`, `mix format`, `mix compile --warnings-as-errors`; the client Stop hook runs format, the dependency budget and the adapter check | Seconds |
 | Change, before merge | `bash scripts/check.sh --select` in hosted CI on the branch; a read-only review of `git diff main..<candidate>` | 12 min 54 s and 12 min 38 s on the hosted runner at the final M4 candidates; on the Mac 287 s at the final candidate `d738ec7` with a warm build and ten applications at once (346 s at `031554c`, before the bound and concurrency work), against 870 s Mac and 809 s Linux in the sequential shape it replaced; 18 s before the suite starts |
 | Close | `bash scripts/check.sh` under the floor pair (`mise exec erlang@27.3.4 elixir@1.18.5-otp-27 -- bash scripts/check.sh`), `bash scripts/check-release.sh` once on the current pair | Release check: 149–163 s on Linux, 12 tests |
-| Release | None new; the tag names the integrated closure commit | — |
+| Release | The administrative commit's diff confined to its four paths; `check.sh --docs` on the tagged SHA; the archive manifest recomputed there and matched outside `docs/` | Seconds: a documentation-scoped check and a manifest comparison, no suite and no release check |
 
 `check.sh` step order and cost: warning-free compilation 1 s (warm), formatting
 1 s, repository structure 11–14 s (`scripts/check-bootstrap.sh`: client
@@ -126,9 +126,9 @@ applications only; the six light ones (62 s in sequence, 25 serial modules)
 were not read and are not claimed here. In the four examined, each
 module still serial carries one of: the one provider credential variable
 written into this VM's environment so the child inherits it (eleven of the
-thirteen heavy `loopex_llm_reqllm` modules; the other two of the thirteen
-carry a different one of these reasons each — a process-wide environment
-sentinel of their own, and a shared build artifact — plus
+thirteen heavy `loopex_llm_reqllm` modules, listed by name in
+[ADR 0034's technical companion](../adr/0034-provider-credential-handoff-over-bootstrap-channel-technical.md#technical-adr-0034-serial-modules),
+where the other two are marked with the different reason each carries — plus
 `cli`, `session_directory`, `coding_tools`,
 `executor`, `host_policy`); a global `:erlang.trace_pattern` (`cancellation`,
 `cancellation_observation_contract`, `context_admission`, `skill_context`,
@@ -226,7 +226,8 @@ of its 209 s sits in the **thirteen** modules that run serially — **eleven**
 of which share the process-wide credential variable, so two of those running
 at once would hand each other's canary to each other's child, while the
 remaining two are serial on their own reasons and would stay serial either
-way. Making those concurrent means passing the
+way. The thirteen are named, and the split derived by execution, in
+[ADR 0034's technical companion](../adr/0034-provider-credential-handoff-over-bootstrap-channel-technical.md#technical-adr-0034-serial-modules). Making those concurrent means passing the
 credential to the child per invocation instead of through the environment,
 which is a change to the credential plane and a maintainer decision, not a
 suite change; until then `loopex_llm_reqllm` pins the check near 210 s.
