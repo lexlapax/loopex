@@ -177,8 +177,10 @@ A milestone runs in four steps; the
    of the first, so the second writes them down, and the Closure row names the
    first, because that row is the second's own content. The administrative SHA
    is located by the register's `Closed` transition and by the tag. It is
-   confined to four paths — register row, Closure row, context-map entry,
-   the existing evidence-page scaffold —
+   confined to five paths and to the exact administrative region in each —
+   register row and generated status block, Closure row, appended context-map
+   disposition, designated evidence-scaffold placeholders, and the root
+   README's marked derived-status block —
    which the
    [milestone guide](docs/developer/milestones-technical.md#technical-milestones-confinement)
    states once. Complete run outputs are immutable outside the repository; the
@@ -186,12 +188,15 @@ A milestone runs in four steps; the
 4. **Release.** Publication, tags, and packages are separate maintainer
    decisions that reuse the closure evidence when the source is unchanged. The
    tag names the **administrative** closure SHA. Before creating it, verify that
-   the diff from the tested SHA is confined to those four paths. Then run
+   the diff from the tested SHA is confined to those five paths and allowed
+   regions by retaining and reviewing its complete patch. Then run
    `bash scripts/check.sh --docs`, the final semantic review of the relevant
    `docs/operator/` and `docs/developer/` pages, and the archive comparison on
-   the administrative SHA. Every non-documentation archive entry except
-   `SOURCE_IDENTITY` matches the tested archive; validate each archive's
-   `SOURCE_IDENTITY` against its own commit. Retain the complete outputs outside
+   the administrative SHA. Every non-documentation archive entry except the
+   root `README.md` and `SOURCE_IDENTITY` matches the tested archive; the root
+   README is validated as an exact marked-block replacement by the content-
+   confinement proof and by the documentation/status gate, and
+   each archive's `SOURCE_IDENTITY` is validated against its own commit. Retain the complete outputs outside
    the repository and put their results, retained-output references and
    SHA-256 digests in the immutable annotated tag when it is created. Do not
    amend the evidence page or create a third commit. No suite or release check
@@ -246,7 +251,9 @@ repository's checks are two commands, described in
   workflows, the independent Node client, the fresh-source archive build, and
   the long-duration bound proofs the fast check excludes. It needs a provider
   credential in `LOOPEX_PROVIDER_API_KEY`, pinned Node and a clean tree, two of
-  its tests are attended, and it runs before closure and release.
+  its tests are attended, and it runs only once for the candidate before
+  closure. An unchanged-source release reuses that evidence and runs only the
+  pre-tag administrative-SHA proofs.
 
 Both run locally from a clean checkout with the toolchain in
 [DEVELOPMENT.md](DEVELOPMENT.md): Git, shell and POSIX tools, and the accepted

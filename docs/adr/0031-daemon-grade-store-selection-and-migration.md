@@ -23,17 +23,20 @@ state root, replayed in full at every open, held by one operating-system
 process through a writer marker, with a hard capacity, no compaction and no
 session index. That is exactly right for a foreground process that owns one
 session at a time and exits with it. The vision's reference daemon runs on
-an ADR-selected store, and a service makes operational claims that the
-bootstrap adapters were never asked to make: bounded replay, an index, a
-migration pair with interrupted-migration recovery, backup and restore, and
-a stated oldest binary that may reopen a migrated root. The vision freezes
-the store contract, not an engine, and says adapters are selected by
-evidence. None of those operational claims is made for `0.2.0`; what has to
-be decided now is which store the daemon runs on and what the operator is
-owed about its limits.
+an ADR-selected store, and a daemon-grade Store engine makes operational
+claims that the bootstrap adapters were never asked to make: bounded replay,
+a Store-owned index, a Store/journal-format migration pair with
+interrupted-migration recovery, backup and restore, and a stated oldest binary
+that may reopen a migrated root. The vision freezes the store contract, not an
+engine, and says adapters are selected by evidence. None of those
+**Store-engine** claims is made for `0.2.0`; what has to be decided now is
+which store the daemon runs on and what the operator is owed about its limits.
+ADR 0032 separately adds a daemon-owned bounded listing index and explicit
+offline compatibility import over the unchanged journal. That projection is
+not a Store index or Store migration.
 
 **Select the existing local adapter as the daemon's store for `0.2.0`.** The
-Store process holds the local writer marker for the Store process's lifetime,
+Store process claims the local writer marker for that Store process's lifetime,
 while the daemon owns and watches that process, and the daemon inherits
 the adapter's exact, documented limits: one append-only log per state root
 with a hard 256 MiB capacity, a 4 MiB frame ceiling, full-history retention
@@ -42,14 +45,40 @@ capacity is a truthful stop, never a silent loss, and it is not survivable on
 this adapter. The append is refused before a byte is written, with
 `store_capacity_exceeded`; the adapter then terminates its Store process and
 the caller receives `commit_unknown` for that transaction, because that is
-what this adapter does with every append error. So the daemon meets capacity
-as a loss of the store, not as a recoverable refusal: it closes the listener
+what this adapter does with every append error. An abnormal Store self-stop
+runs its marker-release path before the daemon can react, but that path is best
+effort: its success result does not prove that the marker was removed. The
+daemon therefore holds the **host placement lock** accepted ADR 0008 requires
+independently of that marker. It acquires the same crash-reclaimable root lock
+the reference CLI uses before opening the Store, and an orderly teardown
+attempts its acquisition-specific release only after the old Control is gone
+and the Store has stopped. That release runs in a monitored helper under a
+fixed five-second deadline; completion is still only a best-effort attempt, and
+a timeout hard-halts. A residual remains safe and the next acquirer reclaims it
+after the daemon's operating-system incarnation is dead. Fatal exit leaves the
+same recovery obligation. This keeps
+a successor out while the old Runtime Control may still route consequences
+without changing the adapter for every embedded host. So the daemon meets
+capacity as a loss of the store, not as a recoverable refusal: it closes the listener
 and every connection and exits, naming the capacity in the close, and the
 operator retires the root. A log already past the bound is refused at open as
 `store_log_too_large` rather than opened and truncated. Nothing committed is
 lost and nothing false is recorded, which is what the truthfulness claim
 means here. Sessions in a retired root are resumable only by reopening that
 root.
+
+The existing marker implementation can leave a residual in two ways the daemon
+cannot classify from a release result. Marker creation may fail after exclusive
+create but before a Store pid or lock handle is returned. A completed Store
+`terminate/2` can also leave the complete marker because `WriterLock.release/1`
+ignores marker-unlink and parent-sync failures and always returns `:ok`. A
+complete marker follows the adapter's existing live, dead and unverifiable
+holder rules; an empty or partial startup marker is unverifiable and requires
+the documented operator inspection and removal while no holder is live. The
+daemon reports a failed acquisition, keeps placement through cleanup and never
+touches the socket. On the healthy release path, marker absence and an immediate
+reopen without recovery are the evidence; callback completion alone is not.
+This limit is part of selecting the adapter unchanged.
 
 This is a bounded, experimental selection made on
 evidence the local adapter already carries; it is not a daemon-grade store,
@@ -72,9 +101,15 @@ what backup and restore, and which binary is the oldest reader of the new root
 their own ADR, proposed with the successor milestone's plan, accepted on its
 own review, declaring `Supersedes: 0031` for the selection this pair makes.
 Nothing about that work binds M5, and nothing in M5 forecloses it: the local
-format, its ports and its adapter are unchanged — the adapter gains nothing at
-all, the read-only marker query an earlier revision gave it having gone with
-the unlink it was invented for — so any successor starts from
+durable format and private port shape are unchanged. ADR 0032's daemon-owned
+listing index and legacy-root import remain an external compatibility
+projection, not part of this adapter or its journal. M5 adds the missing read
+projection for a retained create through the existing `runtime_command/2`
+callback and result union. The daemon also reuses the reference CLI's existing
+placement-lock mechanism through a shared host utility; this changes no Store
+callback, transaction or durable byte and preserves the lock's current path,
+record and recovery rules. The read-only marker query an earlier revision proposed is
+gone with the unlink it was invented for, so any successor starts from
 exactly the root M5 leaves.
 
 **Alternatives rejected.** Deferring this decision out of M5 entirely was
@@ -108,12 +143,19 @@ its class is process and store fault injection on the real adapter plus a
 rollback proof: a root driven to capacity refuses the append with the store's
 own reason, terminates the store, and the daemon closes the listener and every
 connection and exits naming the capacity, with nothing committed lost; a root
-already past the bound refuses at open; and after an orderly stop on a root
-below the bound the foreground server and reference CLI reopen it. No new
-conformance evidence is required, because the adapter and its suites are
-unchanged — which is the point of selecting it. That is the whole of the
-evidence this pair owes, because that selection is the whole of what it
-decides.
+already past the bound refuses at open; and after a healthy orderly stop on a
+root below the bound the marker is absent and the foreground server and
+reference CLI immediately reopen it without recovery. Recovery evidence covers
+a complete residual marker whose holder is live, proved dead or unverifiable;
+the Store's `terminate/2` result itself cannot say which filesystem action
+failed when the residual remains. The existing
+Store conformance lane gains the exact create-history projection case on the
+real local adapter and its controllable test Store: an exact canonical create
+binding returns `{:completed, %{result: session_id}}`, while changed options and
+a cross-kind command ID return `runtime_command_conflict`, with byte-identical
+durable storage. No new Store callback or persistence conformance class is
+required. That is the whole of the evidence this pair owes, because that
+selection is the whole of what it decides.
 
 Technical depth: [Contract and evidence](0031-daemon-grade-store-selection-and-migration-technical.md#technical-adr-0031-decision).
 
@@ -123,7 +165,10 @@ Technical depth: [Contract and evidence](0031-daemon-grade-store-selection-and-m
 The daemon and its clients see the same durable session truth the embedded
 API and the foreground server see; the store adapter is a host choice, not a
 semantic one. In M5 the foreground server, the reference CLI and the daemon
-all run on the local adapter and can reopen one another's roots. A root that
+all run on the local adapter and can reopen the same journal bytes. ADR 0032's
+separate daemon index means a populated legacy root needs its one-time offline
+import before the first M5 daemon start; daemon-to-foreground rollback and
+later switches after that import need no Store or journal conversion. A root that
 reaches the local log's capacity takes its daemon down with it and is retired
 by the operator; nothing already committed is lost, and the operator
 documentation says plainly that capacity is an outage rather than a
@@ -132,12 +177,22 @@ is a separate compatibility surface: adding an adapter later freezes no wire,
 artifact or embedded contract, and the exact private format stays
 experimental in 0.x.
 
-M5 rollback is stopping the daemon in its ordered Store-last path, which lets
-the Store process release the marker before the foreground server or CLI
-reopens the same root under the same placement identity. A Store that exits on
-its own releases the marker before the daemon can react; a kill or power loss
-may instead leave a stale marker for the adapter's verified recovery. There is
-no forward migration to roll back, because M5 introduces none.
+M5 rollback is stopping the daemon in its ordered Store-last path, which runs
+the Store marker's best-effort release and then attempts the placement lock's
+exact-handle release, under its fixed helper deadline, only after the old
+Control and Store are gone. The healthy
+path proves release by marker absence and immediate foreground-server and CLI
+reopen, rather than by either release function's unconditional `:ok`. A Store
+that exits abnormally on its own attempts its marker release, but the placement
+lock still names the live daemon process and refuses a contender until the
+daemon halts. Either release can leave a complete residual after an ignored
+unlink failure: Store-marker recovery applies the existing live, dead and
+unverifiable classifications, and the next placement acquirer reclaims a stale
+lock only after proving the old operating-system incarnation dead. A kill or
+power loss leaves the same recovery obligations. There is no forward Store or
+journal-format migration to roll back. ADR 0032's offline daemon-index import
+can leave only the complete bounded projection states and residuals that its
+own rollback contract names; it never rewrites the journal.
 
 Technical depth: [Compatibility mechanics](0031-daemon-grade-store-selection-and-migration-technical.md#technical-adr-0031-compatibility).
 

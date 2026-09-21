@@ -7,7 +7,7 @@ Technical depth: [Collaboration mechanics](0033-collaboration-controller-lease-a
 - **Date:** 2026-09-14
 - **Decision owner:** Maintainer
 - **Supersedes:** nothing; the core keeps the vision §11.6 rule that it mandates no controller lease
-- **Prerequisite for:** M5 Outcome 3, accepted before any admission check is
+- **Prerequisite for:** M5 outcomes 3 and 5, accepted before any admission check is
   written — that is, before M5's workstream 4
 
 <a id="concept-adr-0033-decision"></a>
@@ -42,7 +42,7 @@ fixed. A connection may acquire control of any session that durably exists —
 which the daemon establishes by asking core its read-only existence query, not
 by attaching or resuming to find out — by session ID, before or after it
 attaches to that session; what is fixed is
-that no existing-session mutation is admitted until the lease is held by the
+that no existing-session core mutation is admitted until the lease is held by the
 sending connection, its epoch matches, and — with the single exception of
 `session.resume` on a verified dormant session — that connection holds a
 live attachment for the pinned session. So a newly created session is driven by
@@ -50,14 +50,20 @@ attaching and acquiring in either order and then sending the first command
 with the granted epoch, and a known dormant session is driven by acquiring
 by ID, resuming with the granted epoch and attaching. A
 controller renews its lease while it lives and releases it early only by
-sending `session.release_control` and having it succeed; a lease that is not
+sending `session.release_control` and having it succeed. Release checks the
+holder, epoch, held state and unexpired term but requires no attachment, so a
+controller can relinquish a dormant session after attach refuses; a lease that is not
 renewed expires. Nothing about how the connection ended shortens the term,
 because over a Unix-domain socket the daemon cannot tell a polite close from a
 killed client — both are EOF — so only a message the client actually sent can
-mean "I am done". Takeover is explicit: an
+mean "I am done". Takeover is explicit: while the lease owner remains live, an
 observer asks for control and receives it only when the lease is released or
-expired, and the grant mints a new writer epoch before the new controller's
-first command can be admitted, so a controller that was killed mid-run and
+expired. If the lease owner itself fails, a later acquisition starts no fresh
+owner until the exact dead-owner pop, classification acknowledgement and
+terminal holder-close or correlated-refusal settlement complete. Its first
+grant additionally waits until every retained predecessor ticket and retirement
+completion settles. Every grant mints a new writer epoch before
+the new controller's first command can be admitted, so a controller that was killed mid-run and
 comes back late is fenced by its stale epoch. The writer epoch is an opaque
 value minted fresh for every grant and never reused, so a stale epoch from
 any earlier tenure, including one issued before the lease owner or the whole
@@ -83,21 +89,71 @@ deadline passes while core is still deciding; at the deadline the holder gains
 nothing further and every new mutation of its own refuses; and a takeover becomes
 eligible at the deadline but is granted only once those in-flight mutations
 have resolved. That adds no grace, because the expired holder can only finish
-what it had already begun. Writer exclusion between two daemons on one
-state root stays the local store's writer marker, unchanged.
+what it had already begun. Runtime-Control exclusion between two daemons on one
+state root uses the shared crash-reclaimable host placement lock accepted ADR
+0008 requires; the local Store's unchanged writer marker remains physical
+Store-writer exclusion.
 
 One fixed admission relay makes that ordering survive a lease owner's death
 and gives shutdown one cut. Every post-initialize method request linearizes
 there. The eight
 lease-authorized core mutations, `session.create` and `session.attach` also
-take retained tickets: the relay records the ticket and starts its monitored
-core task **before** it answers that the request was admitted. Attach's task
+take retained tickets: each connection first installs a bounded request-slot
+row at the relay. A lease owner promotes an ordinary mutation; the connection
+registry first binds any activation or attachment reservation for create,
+activation-capable resume and attach, then promotes the exact primary or records
+an exact duplicate as a waiter. The relay starts each primary's monitored core
+task **before** it acknowledges promotion; a waiter starts no task. Attach's task
 uses the connection pid as an explicit stable holder, so relay execution does
 not transfer attachment lifetime to the task. A relay cut acknowledges as
-soon as it closes admission; calls admitted before it may finish, calls after
-it refuse, and ticket settlement is the drain's separate bounded wait. Relay
+soon as it closes admission; calls admitted before it may finish inside the
+separate bounded wait, whose fixed `admission_wait_ms` candidate value is
+selected from the maximum 16,384-origin/512-connection witness and recorded with
+its closure conditions; pending lightweight permits are cancelled at that
+deadline, as are unpromoted ticket rows; executing non-lease calls remain tracked to result or connection
+teardown, and executing lease calls receive their exact shutdown disposition;
+every call after the cut refuses. Any frozen pre-cut permit may claim before the
+shared admission deadline, but only acquisition may start an owner. Immediately
+before core quiesce the relay enters `quiescing(drain_id)`; after successful
+quiesce a teardown-bounded seal preserves real results and explicitly abandons
+the remaining unresolved ticket IDs before teardown. At most 512 provisional
+(including aborting), live-or-closing accepted slots times 32 request rows bound
+the relay to 16,384 origins and no more primary tasks. At the admission deadline
+a lease-operation barrier rejects or ends every uncompleted start, mirror and
+release-settlement operation; after connections close, a second mailbox barrier freezes the
+remaining idle or granted owner set that teardown sweeps, so no owner or routing
+mirror appears behind it. Relay
 loss is daemon-fatal because no process may guess what its missing ticket set
 contained.
+
+A lease-owner failure remains session-scoped in every owner state. The linked
+daemon owner serializes every exact mirror install, clear and dead-owner pop into the connection
+registry on the lease owner's behalf; the lease owner never writes that mirror
+directly. Signal ordering therefore puts a sent install ahead of that owner's
+later exit. After resolving that operation, the daemon atomically pops only the
+dead pid/incarnation's row and returns the exact holder it must close before a
+successor install may run; a stale pop cannot erase the successor. The relay
+also classifies every acquire, release or lease-authorized mutation that had no
+visible result. An origin on the returned holder receives only the uncorrelated
+`control_owner_lost` close. Any other claimed acquire or release, or a pending
+or queued mutation claimed before promotion, receives the correlated
+request-shaped refusal and its connection stays usable. A promoted
+mutation remains relay-owned until its real core result or shutdown settlement,
+while a mutation that had not reached core starts no task. A free or retiring
+owner with no such operation has nobody to notify. In every case successor
+start waits for mirror pop, classification acknowledgement and terminal
+holder-close or correlated-refusal settlement. Its first grant additionally
+waits for every predecessor ticket and retirement completion; the relay then
+releases the bounded transient rows.
+
+Starting-waiting-pop, starting, live and retiring lease-owner rows share one
+512-slot count. A
+retiring predecessor keeps its slot until exact process exit; a same-session
+successor is queued and receives that slot only when the daemon consumes the
+exit, while an unrelated 513th owner is refused. A holder-changing acquisition
+is provisional until its permit result wins: connection loss first clears the
+provisional route and makes no grant, while result first promotes the exact
+route even when the connection closes before the reply.
 
 **Alternatives rejected.** Putting the lease in core was rejected because the
 vision keeps collaboration policy above core and another host may choose a
@@ -111,21 +167,25 @@ nothing needs. A counter-based epoch scoped to the daemon incarnation was
 rejected on 2026-09-14 because a lease-owner restart under the same
 incarnation would mint values already issued. Restarting a failed lease owner
 beneath live sockets was rejected on 2026-09-20 because it would claim a lease
-record it cannot reconstruct. The fixed admission relay retains only the
-tickets for calls it started, never the lease; its loss is daemon-fatal rather
+record it cannot reconstruct. The fixed admission relay retains pending,
+waiting and promoted request origins, including tickets for calls it started,
+but never the lease; its loss is daemon-fatal rather
 than reconstructed, so the ticket ledger needs no durable record.
 
-**Implementation and milestone-closure evidence.** This is a trust claim, so its class is
+**Implementation and milestone-closure evidence.** Outcome 5's integrated
+controller-kill and takeover workflow waits on this decision as well as Outcome
+3. This is a trust claim, so its class is
 negative tests on real processes plus a security reading of the admission
 path: every refusal — stale epoch, copied current epoch, non-holder
 connection, released lease, expired lease, holder without a live attachment,
 observer abort — proved before core
 admission and before any session write, a controller killed mid-run fenced
-after takeover, a lease owner killed while a mutation is in flight taking neither the daemon
-nor any other session down — its controller's connection sent
-`control_owner_lost` and closed,
-its observers kept, and the replacement's grant held until the relay's
-outstanding ticket settles — and a daemon
+after takeover, a lease owner killed before and after a mutation is promoted
+taking neither the daemon nor any other session down — an unpromoted operation
+receives exactly its classified refusal or holder close and starts no core task,
+a promoted task settles to its real result, its observers stay, and the
+replacement's grant is held until both populations and the owner-loss
+notification barrier settle — and a daemon
 restart leaving every session uncontrolled with every earlier epoch refused. No durable record changes, so no migration or
 rollback evidence is owed.
 

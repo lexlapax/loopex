@@ -50,7 +50,7 @@ separate decision duty when a founding boundary or invariant would change.
 | Embedded API, transports, clients, ACP | [API and transports](../vision.md#concept-vision-api-transports) | [Transport mechanics](../vision-technical.md#technical-vision-api-transports) | One semantic contract, JSONL RPC first, reference surfaces. The first non-Elixir surface is the foreground app server: read the [protocol pair](app-server-protocol.md#concept), the [operator runbook](../operator/app-server.md#concept), and the independent consumers in [`clients/`](../../clients/README.md). |
 | Hosts and wrappers | [Hosts](../vision.md#concept-vision-hosts) | [Host mechanics](../vision-technical.md#technical-vision-hosts) | Expected consumers, secured sample host, independent implementation. |
 | Repository layout and ADR agenda | [Repository seed](../vision.md#concept-vision-repository-seed) | [Exact seed](../vision-technical.md#technical-vision-repository-seed) | Pair with the [ADR 0001 decision](../adr/0001-repository-and-application-layout.md#concept-adr-0001-decision) and its [technical mechanics](../adr/0001-repository-and-application-layout-technical.md#technical-adr-0001-decision). |
-| Delivery shape and milestones | [Delivery strategy](../vision.md#concept-vision-delivery-strategy) and [roadmap](../roadmap.md#concept-roadmap-ladder) | [Delivery mechanics](../vision-technical.md#technical-vision-delivery-strategy) and [roadmap evidence](../roadmap-technical.md#technical-roadmap-ladder) | The [plans index](../plans/README.md) owns current status; an accepted plan pair is the commitment. [M4](../plans/M4.md#concept) is Closed and no milestone is active; how one is planned, run and closed is the [milestone guide](milestones.md#concept), and which checks a change must pass is the [verification guide](verification.md#concept). |
+| Delivery shape and milestones | [Delivery strategy](../vision.md#concept-vision-delivery-strategy) and [roadmap](../roadmap.md#concept-roadmap-ladder) | [Delivery mechanics](../vision-technical.md#technical-vision-delivery-strategy) and [roadmap evidence](../roadmap-technical.md#technical-roadmap-ladder) | The [plans index](../plans/README.md) owns current status; an accepted plan pair is the commitment. [M4](../plans/M4.md#concept) is Closed; the register carries the current M5 state. How a milestone is planned, run and closed is the [milestone guide](milestones.md#concept), and which checks a change must pass is the [verification guide](verification.md#concept). |
 | Serial barriers | [Ordering constraint](../vision.md#concept-vision-serial-barriers) | [Exact rejoin order](../vision-technical.md#technical-vision-serial-barriers) | A milestone may add barriers but cannot weaken the founding sequence. |
 | Verification, invariants, budgets | [Verification](../vision.md#concept-vision-verification) | [Exact evidence](../vision-technical.md#technical-vision-verification) | Claim-proportional tests and scope-specific minimalism budgets. |
 | Compatibility and release governance | [Compatibility](../vision.md#concept-vision-compatibility) | [Compatibility mechanics](../vision-technical.md#technical-vision-compatibility) | Versioned surfaces, 0.x labels, migrations, rollback, freezes. What is exposed today, with M4's experimental labels and the app server's exact-generation rule, is in [compatibility surfaces](compatibility-surfaces.md#concept); M4 moved the source `VERSION` to `0.1.0`, which ADR 0023 keeps separate from any package, tag, publication or freeze. |
@@ -66,8 +66,10 @@ are Mix tasks: `mix loopex.deps_budget`, `loopex.core_only`, `loopex.matrix`,
 `bash scripts/check-bootstrap.sh` runs the bootstrap aggregate.
 `bash scripts/check.sh` is the fast check each integration candidate runs
 once, in CI on the branch or locally before the merge, and
-`bash scripts/check-release.sh` is the slow check run before closure and
-release; [DEVELOPMENT.md](../../DEVELOPMENT.md) describes both. The milestone
+`bash scripts/check-release.sh` is the slow check run once before closure; an
+unchanged-source release reuses that evidence and runs only its pre-tag
+administrative-SHA proofs. [DEVELOPMENT.md](../../DEVELOPMENT.md) describes
+both. The milestone
 gate runners they replaced are gone, and the gate files under `docs/plans/`
 are historical records of what those runs proved. The four repository skills
 are `open-milestone`, `close-milestone`, `adr`, and `mutant-hunt` as an
@@ -5384,9 +5386,9 @@ satisfy: recording the decision is itself a commit, and it comes after the
 runs. Closure now names a **tested implementation SHA** — the candidate the
 matrix ran on and the reviewer read — and an **administrative closure SHA**
 that records the decision. The matrix runs once, from the first, and the
-second is **confined to four paths** — the register row, the plan's Closure
-row, this context map's own entry, and the milestone's closure-runs evidence
-page — stated once in
+second is **confined to five paths** — the register row, the plan's Closure
+row, this context map's own entry, the milestone's closure-runs evidence page,
+and the root README's exact derived status summary — stated once in
 [the confinement rule](milestones-technical.md#technical-milestones-confinement).
 The evidence page is in that list deliberately: the runs are *of* the tested
 commit, so the commit that records them is necessarily the later one, and an
@@ -5394,15 +5396,18 @@ earlier wording that let the administrative commit change "nothing the runs
 covered" left that page with no home at all.
 
 The **tag names the administrative SHA**, because that is the tree a reader
-who fetches the tag gets. The release verifies that commit is confined —
-`git diff --name-only <tested>..<administrative>` reaching only the four paths
-above, all of which are under `docs/`, so nothing outside `docs/` moved — and
-on that basis re-proves documentation only: `check.sh --docs` on
-the tagged SHA, and a recomputed archive manifest compared, for every entry
-outside `docs/`, with the one recorded on the evidence page for the tested
-SHA. **No suite and no release check run twice**, and no provider
-credential is spent again. Run evidence is immutable, held where it cannot be
-edited after the packet is read.
+who fetches the tag gets. Before creating the tag, the release verifies that
+commit is confined — `git diff --name-only
+<tested>..<administrative>` reaching only the five paths above — and re-proves
+documentation with `check.sh --docs` and the final semantic gate on that
+administrative SHA. A recomputed archive manifest must match the tested archive
+for every entry outside `docs/` except root `README.md` and `SOURCE_IDENTITY`;
+the README is validated by confinement plus the documentation/status gate, and
+each archive's `SOURCE_IDENTITY` is separately validated against that archive's
+own commit and source identity. **No suite and no
+release check run twice**, and no provider credential is spent again. Run
+evidence is immutable, held where it cannot be edited after the packet is
+read.
 
 What changed in what a check proves: the documentation gate and the archive
 identity are now proved of the **published** bytes rather than only of the
@@ -5426,18 +5431,20 @@ publication.
 The maintainer corrected the two-commit closure rule after external review.
 The tested implementation commit now contains an indexed, unfilled
 `docs/evidence/<NAME>-closure-runs.md` scaffold. The administrative closure
-commit is the tested commit's direct child and fills that existing page, so its
-confinement remains exactly four paths and does not require an unlisted index
-change. This entry supersedes the prior entry only where that entry said the
-administrative commit creates the evidence page.
+commit has the tested commit as its sole parent and fills that existing page.
+Its confinement has five paths because the enforced lifecycle contract also
+requires the root README's exact derived status summary to move to `Closed`.
+This entry supersedes the prior entry's closure and release sequence wherever
+the two differ.
 
 Release proofs run on the administrative closure SHA before the tag exists.
 They are `bash scripts/check.sh --docs`, the milestone's final semantic review
 of the relevant `docs/operator/` and `docs/developer/` pages, and the archive
 comparison. The archive comparison requires every non-documentation entry
-except `SOURCE_IDENTITY` to match the tested archive. Each archive's
-`SOURCE_IDENTITY` is validated against that archive's own commit and source
-identity instead of being compared byte for byte.
+except root `README.md` and `SOURCE_IDENTITY` to match the tested archive. The
+README is validated by confinement plus the documentation/status gate. Each
+archive's `SOURCE_IDENTITY` is validated against that archive's own commit and
+source identity instead of being compared byte for byte.
 
 Complete closure outputs remain outside the repository; the administrative
 commit records their retained-output references and SHA-256 digests on the
@@ -5448,3 +5455,24 @@ administrative commit, and the tag does not name evidence produced after tag
 creation. The sequence is the tested commit, the administrative commit, and
 the tag. It adds no third commit and grants no closure, tag, release, or
 publication by itself.
+
+### Administrative confinement is content confinement — 2026-09-21
+
+The maintainer's two-commit closure decision remains unchanged, but the path
+test recorded in the two preceding entries was incomplete. Those entries are
+historical records; this correction supersedes their path-only descriptions.
+The administrative commit is confined to both the five named paths and the
+exact allowed region within each path, as the
+[single confinement rule](milestones-technical.md#technical-milestones-confinement)
+defines. Release review retains the complete zero-context patch, maps every
+changed byte to that table, and reconstructs the two marked status files from
+the tested bytes plus their canonical replacement blocks, requiring
+byte-for-byte equality. A path-only diff and a passing `mix loopex.status`
+cannot prove those properties.
+
+The root README comparison in the archive step relies on that exact
+marked-block reconstruction plus the documentation/status checks. The evidence
+scaffold's headings and prose, every pre-existing context-map byte, and all
+bytes outside the two status markers remain fixed. This correction changes
+what the release confinement proof must retain; it grants no closure, tag,
+release or publication.

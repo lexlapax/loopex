@@ -32,9 +32,10 @@ technical guidance. The process is the
 4. Add the row to the register in `docs/plans/README.md` as `Open`, with the
    pair's links and `—` in the Gate column. That row is the pair's index;
    nothing else lists it. Every Progress and Evidence row reads `Open`.
-5. Run `mix loopex.status`: it derives the Current Status capsule and the root
-   `README.md` summary sentence from the register and prints the exact values
-   it expects. Update both in the same change.
+5. Construct the Current Status capsule and root `README.md` summary from the
+   register under the status contract, then run `mix loopex.status` to validate
+   them. The task reports pass or failure rather than printing replacement
+   bytes. Update both in the same change.
 6. Run `bash scripts/check.sh --docs`.
 7. Present the plan to the maintainer with every decision it needs.
    Acceptance is theirs; record it by moving the row to `Accepted`.

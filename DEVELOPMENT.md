@@ -76,8 +76,8 @@ coding-agent client, and runs once per integration candidate: hosted CI runs
 `bash scripts/check.sh --select` on every push to `main` and every pull request
 and does not define it.
 
-Before closing a milestone or releasing, once from the exact committed
-candidate, on a machine with the pinned Node and a provider credential:
+Before closing a milestone, once from the exact committed candidate, on a
+machine with the pinned Node and a provider credential:
 
 ```bash
 LOOPEX_PROVIDER_API_KEY=... bash scripts/check-release.sh
@@ -95,6 +95,10 @@ reaches only the test processes; never put it in a command argument, log,
 fixture, or retained evidence. Two of the real-provider tests are attended:
 they prompt on the controlling terminal for the operator's trust decisions
 (`Type yes and press Enter.`), so run the command from a terminal.
+
+An unchanged-source release reuses this closure evidence. It runs only the
+pre-tag administrative-SHA proofs described by the milestone and verification
+guides; it does not run `scripts/check-release.sh` again.
 
 The individual commands can also be run directly:
 

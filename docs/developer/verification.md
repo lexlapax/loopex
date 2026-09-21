@@ -33,13 +33,15 @@ Technical depth: [What each stage runs](verification-technical.md#technical-veri
 | --- | --- | --- | --- |
 | Change | Is this change whole, and is it what it claims to be? | While editing: the focused tests for the changed boundary, `mix format`, a warning-free compile. Before merge to `main`: `bash scripts/check.sh` green in hosted CI on the branch, plus an independent review of the diff against its stated purpose. Every merge, not only milestone closures. | A red check or a blocking review finding; the integrator merges only a green, reviewed candidate |
 | Close | Did the milestone deliver its outcomes? | An indexed evidence-page scaffold in the candidate; `check.sh` once under the floor toolchain pair (the current pair is already proved by CI on every change); `bash scripts/check-release.sh` once; the outcome-to-evidence map in the plan; an independent review of the candidate. All checks and review use the **tested implementation SHA** once. The **administrative closure SHA** fills the scaffold and records the decision without re-running the matrix | The maintainer, who closes it or does not |
-| Release | Is the source about to be tagged the closed source? | Reuse the closure evidence when the source is unchanged. On the **administrative closure SHA**, verify the four-path confinement, run `check.sh --docs`, run the final semantic gate over the relevant operator and developer documentation, and compare the archive with the tested archive outside `docs/`, except for separately validated `SOURCE_IDENTITY`. Retain these proofs outside the repository and put their results, retained-output references, and SHA-256 digests in the annotated tag at creation. No suite and no release check run twice | The maintainer's separate release decision |
+| Release | Is the source about to be tagged the closed source? | Reuse the closure evidence when the source is unchanged. On the **administrative closure SHA**, verify the five paths and each path's exact allowed region from the complete retained patch, including byte-for-byte reconstruction of both marked status files; run `check.sh --docs`; run the final semantic gate over the relevant operator and developer documentation; and compare the archive with the tested archive outside `docs/`, except for the derived root `README.md` and separately validated `SOURCE_IDENTITY`. Retain these proofs outside the repository and put their results, retained-output references, and SHA-256 digests in the annotated tag at creation. No suite and no release check run twice | The maintainer's separate release decision |
 
 The fast check is the everyday gate. It is credential-free, needs no network,
 and is the same command locally and in CI, where it runs as
 `check.sh --select` on every push to `main` and every pull request. The release check is the expensive one: it spends a provider
 credential, needs the pinned Node, and runs the attended operator workflow, so
-it runs at closure, at release, and whenever a change touches what it proves.
+it runs once at milestone closure and whenever a change touches what it proves
+during development. An unchanged-source release reuses that closure evidence
+and runs only the pre-tag administrative-SHA proofs in the table.
 
 <a id="concept-verification-selection"></a>
 ### A changed guarantee selects its checks

@@ -7,7 +7,7 @@ Technical depth: [Attachment residency mechanics](0032-daemon-attachment-residen
 - **Date:** 2026-09-14
 - **Decision owner:** Maintainer
 - **Supersedes:** nothing; ADR 0023's one-attachment-per-foreground-process rule and generation-1 wire remain in force on the foreground server
-- **Prerequisite for:** M5 outcomes 1, 2 and 4, accepted before the socket is
+- **Prerequisite for:** M5 outcomes 1, 2, 4 and 5, accepted before the socket is
   bound or the core attachment change lands — that is, before M5's workstreams
   1 and 3
 
@@ -31,10 +31,15 @@ durable events and terminal outcomes, not every dropped progress fragment.
 Decide the transport and the residency rules together, because the numbers
 only mean something against a transport. The daemon carries the ADR 0023
 JSONL protocol over a Unix-domain socket, reusing its framing, initialize
-handshake, admission, snapshot, event and progress records and limits
-unchanged — and its request records with exactly one addition, the
-`writer_epoch` every existing-session mutation carries, which is what makes
-generation 2 a new schema digest rather than a rename. It serves exactly one
+handshake, admission, snapshot, event and progress records and ADR 0023's
+existing limit keys unchanged while adding the technical contract's exact seven
+initialize-limit keys. The remaining residency ceilings are server-enforced and
+reported through `daemon.status` where the contract says so. Its request records
+have exactly one addition, the
+`writer_epoch` every existing-session mutation carries. Request fields are not
+inputs to the current schema-digest function; generation 2 has a distinct
+digest because its generation, method, record-family, error-code and limit
+inventories differ. It serves exactly one
 generation,
 `loopex.experimental/2`, which adds `session.list`, `daemon.status`, the two
 control methods, the writer-epoch field ADR 0033 names, and **two**
@@ -57,14 +62,69 @@ connection closes whatever happened, so a client may learn of a shutdown only
 by its socket closing. It adds no durable
 method. An earlier draft of this decision also added `session.stop` and called
 it durable; that is withdrawn, because core owns durable session truth, core
-has no durable stop command, and M5's five core changes — the complete
-concurrent-attachment lifecycle, a read-only existence query, the trace
-exclusion, bounded `quiesce/1`, and the create and resume results' two new
-fields — are none of them durable commands. The daemon's bounded maintained
-index is adapter state, not a sixth core change. Ending a client's involvement is releasing control and
+has no durable stop command, and M5's six core changes — the complete
+concurrent-attachment lifecycle, a read-only existence-and-create-history
+query surface, the trace exclusion, bounded `quiesce/1`, the create and resume
+results' two new fields, and managed provider lifetime — are none of them
+durable commands. The daemon's bounded maintained index is adapter state, not
+another core change. Ending a client's involvement is releasing control and
 disconnecting; the session itself keeps running, which is the point of a
 daemon, and another client reaches it again by acquiring control and
 attaching.
+
+The bounded `quiesce/1` preserves the founding serial-writer rule from its
+first census through its final fence. Its first `Control` operation atomically
+enters a terminal quiescing state and returns the initial entries and ordinary
+coordinators. That operation also freezes the entry key set until fencing is
+complete: lifecycle messages may update a retained entry, but none may insert
+or delete one, and delayed owner-ready or owner-group continuations may not
+start another ordinary coordinator. Create and resume are serialized in that
+same `Control` mailbox, so one already being handled finishes its Store work
+and its entry-or-dormant decision before the barrier can run; every resulting
+coordinator writer has an entry, while a post-commit owner-start failure is
+dormant with no writer. One ordered after the barrier refuses before Store
+access. Attach uses its pending-row reservation as the
+cut: gate first refuses without dispatcher state, while reservation first lets
+only that exact transaction finish or discard under its retained relay ticket
+and capacity charge. For a command that obtained a route before the barrier, a
+drain-specific coordinator call closes ordinary command admission in that
+coordinator's mailbox before it proposes the abort. A command processed first
+is included in the abort; one processed afterwards refuses, while internal
+commit and recovery messages remain admissible. After every retained ordinary
+coordinator is gone, core starts one temporary fence-mode
+`SessionCoordinator` per frozen writer domain. `Control` retains the monotonic
+set of session IDs for which a coordinator writer ever started and projects
+only that set, bounded at 64, when quiesce begins. No-writer dormant entries are
+outside the drain result and spawn no work. A drain abort uses a deterministic
+`drain_abort` command and transaction ID derived from the session ID plus the
+pre-admission owner epoch. The Store binds that identity to the exact journal
+version, owner incarnation and canonical abort digest. If that abort is ambiguous, the
+temporary coordinator resolves its exact ID before fencing: a committed result
+is replayed, a terminal non-commit proceeds, an absent result is ordered against
+the fresh fence CAS, and Store unavailability proposes no fence. A successor
+resolves the bounded current-epoch and predecessor-epoch abort identities,
+attributing a committed candidate only when replay carries the exact drain-abort
+binding; a different committed binding is a client collision and no drain,
+then uses its ordinary fresh owner CAS before admitting commands. The fence
+transaction ID and proposed incarnation are deterministic from the session ID
+and expected owner epoch. The Store still binds that identity to the exact
+expected journal version and canonical mutation digest on first presentation.
+Only the live fence operation re-presents those exact transaction bytes after
+`commit_unknown`. After a crash, a successor reads the current epoch `E` and
+resolves the bounded recoverable identities `drain_fence(E)` and, only when the
+first is absent or proved to be a client collision, `drain_fence(E - 1)`. A
+committed candidate counts as a fence only when replay carries the exact
+owner-advance binding. Those cover a non-committing fence at the
+current epoch and a committed fence that advanced it. Both absent means neither
+identity that can represent the immediately unresolved stop is retained;
+unavailable or an impossible result stays fail-closed. Only
+after resolving that operation does the successor complete ordinary fresh
+owner succession and admit commands.
+The temporary
+coordinator alone performs that resolution, the single
+`advance_owner` and, on `commit_unknown`, one exact byte-identical
+re-presentation of that fence transaction, then exits; the daemon
+and quiesce helper never receive a Store handle or write session truth directly.
 
 A client that offers only generation 1 is refused at initialize under
 ADR 0023's existing no-common-generation rule and nothing durable is
@@ -77,16 +137,28 @@ attachment has its own identity. Replacement therefore names the exact
 and no boolean can choose among several candidates. The daemon still binds a
 connection to at most one attachment, while embedded callers may hold a set.
 The first attach or acquire tentatively reserves that connection's session
-before asynchronous work begins, coalesces only an exact repeated request, and
-rolls the reservation back only on a definite refusal. When a connection
-ends, its attachment slots stay charged until the relay has accounted for its
-tasks and core has acknowledged complete holder cleanup.
+before asynchronous work begins. Every activation or attachment reservation is
+bound to an exact relay origin before the one primary task starts; only an exact
+repetition becomes a waiter, and it starts no second task. A different request
+cannot borrow the same live replacement target while one replacement is
+pending. When a connection ends, its accepted slot enters `closing`. The
+registry remains responsive while a monitored worker asks core to release that
+holder, and the slot stays charged until every bounded origin and request worker
+is terminal and the cleanup worker has acknowledged and exited.
 The foreground generation-1 and daemon generation-2 adapters translate their
 existing per-connection `replace: true` onto the only attachment that each
 connection may hold, so the wire remains unambiguous and ADR 0023 stays
 unchanged. Core monitors the stable holder, removes all
 of its attachments when it dies, and releases every transfer they opened as
-ADR 0028 requires. The core continues to own each attachment's independent
+ADR 0028 requires. Publication is irreversible for a named replacement, but
+it does not resurrect a dead holder: if Control observes holder death before a
+committed publication acknowledgement, it completes that transaction directly
+to released, with no live route, after both owners acknowledge cleanup. An EventDispatcher-only restart is an attachment-generation
+cut: Control clears every predecessor attachment and pending transaction,
+seeds the replacement with its retained acknowledged event positions before
+the dispatcher becomes ready, and rejects late predecessor messages. Old
+handles become stale and embedded callers reattach; the replacement never
+forgets a publication fence merely because its local map began empty. The core continues to own each attachment's independent
 cursor barrier and event-count queue, while the daemon owns per-connection
 socket output buffers, the resident window and the residency ceilings. The
 socket path is
@@ -94,9 +166,12 @@ socket path is
 unless the operator names another, and a path beyond the platform bound is
 refused at start rather than truncated. The subdirectory exists so the daemon
 never has to re-permission or reject an operator's existing root, which the
-foreground server creates `0755` under the ordinary umask. A daemon
-acquires the root's store writer marker before it touches the socket path,
-so two simultaneous starts resolve at the marker and never at the socket,
+foreground server creates `0755` under the ordinary umask. A daemon first
+acquires the root's crash-reclaimable host placement lock, then the Store's
+writer marker, before it touches the socket path. Two simultaneous daemon
+starts therefore resolve at the placement lock and never at the socket; the
+marker still excludes a raw or embedded writer that does not participate in
+that host lock,
 and a daemon that loses its store closes the listener and every connection
 before it exits. Only the daemon's own operating-system user may connect, and
 the boundary that enforces it is the filesystem: an owner-only subdirectory
@@ -134,8 +209,22 @@ close**: the client is told, best-effort, on the connection being ended, and
 that connection is closed with its attachment while every other connection is
 untouched. A connection holds one attachment, so there is nothing for it to
 do afterwards, and the close is what releases the attachment in core.
-Concurrent connections are themselves bounded, at 512, because a client that
-never attaches is bounded by no attachment ceiling. Transient progress is coalesced or dropped first and
+Accepted connection slots are themselves bounded, at 512 provisional —
+including a failed handoff being reaped — plus live plus closing,
+because a client that never attaches is bounded by no attachment ceiling. A
+connection exists only under registry ownership: the registry creates the
+waiting child linked inside the same serialized callback that records its pid,
+monitor and incarnation, then unlinks it only after that row is prepared. The
+registry traps exits before serving, retains the exact daemon-owner pid whose
+exit still stops it, and handles the exact temporary-child exit idempotently
+with its monitor. The child monitors the registry and listener from its inert
+initialization. A
+provisional row with no child pid therefore means that no child exists; a
+listener death queued during creation is processed only after the row owns the
+child and can reap it. A
+disconnected slot is not reusable while one of its at most 32 request rows or
+its holder cleanup remains, which also bounds relay work under reconnect churn.
+Transient progress is coalesced or dropped first and
 never delays a journal transaction. Listener loss leaves the connection
 registry alive, so existing clients receive best-effort
 `fatal:listener_lost` before close. Connection-registry loss leaves no live
@@ -154,18 +243,26 @@ activations the ceiling counts — a created session has a coordinator like any
 other, and a ceiling that counted resumes but not creations would bound the
 wrong thing. Acquiring control and attaching do not activate.
 
-Activation is one-way: dormancy applies to attachments, resident windows and
-output buffers, never to a coordinator, because a session with no attachment
+Activation is one-way: idle eviction and reclamation apply to attachments,
+resident windows and output buffers, never to a coordinator, because a session with no attachment
 may still have a model request, a tool effect, an interaction, a recovery, an
 unresolved `commit_unknown` or an executing admission in flight, and because
 stopping one would need a core deactivation operation M5 does not add. The
 cost is stated rather than hidden: at most 64 sessions are activated per
-daemon lifetime, the 65th refuses, and the remedy is to restart the daemon.
+daemon lifetime, the 65th fresh activation refuses, and the remedy is to restart
+the daemon. Dormancy means only that this daemon has never activated the
+durable session in its current lifetime. An exact historical create replay remains available at that bound:
+the read-only create-history discriminator returns its committed session ID
+without starting a coordinator or spending an activation.
 `residency` therefore means *this daemon activated this session in this
 lifetime* — a daemon-owned fact, true by construction — and never *a live
 coordinator exists*, which the daemon has no way to know. A coordinator that
 dies is core's to supervise and surfaces through core's own refusal on the
-next command for that session, which the daemon forwards unchanged.
+next command for that session, which the daemon forwards unchanged. Retrying
+against that lifetime repeats the refusal; the operator recovery is to restart
+the daemon and retry `loopex resume --daemon`, whose dormant branch starts a
+new coordinator. Same-lifetime repair would require another core lifecycle
+surface and is outside this decision.
 
 Lazy recovery is what a daemon can honestly promise on a store whose session
 directory is not Store truth and whose every open replays a full log.
@@ -174,17 +271,19 @@ a bounded, daemon-owned persistent discoverability index — identity, recorded
 placement identity, active or dormant, controlled or not — and never over what
 the Store contains. Daemon startup reads only that size-capped index and never
 enumerates the legacy session directory, so malformed or arbitrarily numerous
-directory names cannot defeat the startup bound. An existing root without the
-index requires an explicit offline import before the daemon serves it; the
+directory names cannot defeat the startup bound. A populated legacy root with
+session entries and no index requires an explicit offline import before the daemon serves it; the
 import's legacy directory scan is intentionally outside the service-start
 bound. The index is not Store truth and can omit a session committed across a
 crash cut; exact-ID and command-ID recovery repair such an omission. Lineage,
 lifecycle state and committed sequence are not list fields: a client that
 needs them attaches and reads the snapshot.
 The proposed
-limits are exact and are bound at acceptance: 512 concurrent connections per
-daemon, thirty seconds for an accepted connection to complete `initialize`
-before it is closed — a value derived from the lease term but carried as a key
+limits are exact and are bound at acceptance: 512 occupied accepted slots
+across provisional (including aborting), live and closing per
+daemon, thirty seconds from kernel accept for an accepted connection to complete
+`initialize` before it is closed — one absolute deadline retained through
+provisional handoff and promotion, and a value derived from the lease term but carried as a key
 of its own, so neither contract moves the other — 64 attachments per session,
 512 attachments per daemon, a 1,024-event core queue per attachment, a 4,096-event
 resident window per session, 4 MiB of encoded output buffered per
@@ -227,12 +326,29 @@ lazy recovery avoids: a root with 4,096 recorded sessions would start 4,096
 coordinators to serve the one a client wanted. And a root with one unservable
 session would fail a start that need never have reached it. The companion records each in full.
 
-**Implementation and milestone-closure evidence.** Two classes together. The transport and
+**Implementation and milestone-closure evidence.** Outcome 5's integrated
+real-provider socket workflow waits on this decision as well as the direct
+outcomes above. Two classes together. The transport and
 its generation are a protocol claim, so they need vectors and a compatibility
 proof: a generation-2 negotiation vector, refusal of a generation-1-only
 initialize, and an independent client over the socket. The residency rules are
 a durability and resource claim, so they need process fault injection and
 bounded-resource negatives on real processes: simultaneous daemon starts,
+connect-before-readiness followed by readiness-output failure with no accepted
+process or daemon/core state; a parked listener exit whose owner fatal notice
+the lifecycle sentinel consumes before release authorization selecting startup
+`listener_start_failed`, while the same loss after the sentinel sends exact
+`begin_accept` selects running `listener_lost`; and one-sentinel arbitration
+forcing both orders of stop versus completed success and deadline, and owner
+component-fatal notice versus completed success and deadline, with every
+pre-release winner keeping the gate parked even when the line is visible and
+release authorization first making the later signal or failure take its
+running path,
+the accept-time initialize deadline held across provisional handoff and
+promotion with queued-late completion losing and exact rows reaped,
+listener death while the registry is paused after child start but before its
+atomic row bind, with the trapped child exit unable to kill the registry and
+the child, row, socket and slot all reaped,
 loss of the store under a live listener, two attachments from one embedded
 holder remaining independent, an explicit replacement removing only its named
 target, holder death releasing the holder's complete attachment and transfer
@@ -259,8 +375,11 @@ agreement and no mixed-generation stream promise.
 Rollback is the M4 foreground server on the same local store: it ignores the
 daemon's bounded discoverability index, and no Store record, event or snapshot
 depends on that file. Removing the daemon loses only live residency and lease
-state. An existing root enters M5 through the explicit marker-protected
-offline index import; no reverse migration is needed. The numbers are safety
+state. A populated legacy root with session entries and no index enters M5
+through the explicit offline index import; that import acquires the host
+placement lock and then the Store marker. A root with neither sessions nor an
+index creates the canonical empty index at ordinary startup. No reverse
+migration is needed. The numbers are safety
 ceilings the M5 tests must show are enforced, not measured service promises.
 
 Technical depth: [Compatibility mechanics](0032-daemon-attachment-residency-and-replay-technical.md#technical-adr-0032-compatibility).

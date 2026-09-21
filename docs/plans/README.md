@@ -99,7 +99,7 @@ envelope governs: size is a review signal weighed against the dropped-behaviour
 list, never a pass condition, because a ceiling rewards compressed code, hidden
 complexity, and deleted coverage. The replacement is in fact larger, and whether
 that is proportionate is a judgment recorded with the evidence.
-Each founding ADR's Acceptance row uses the same authority and disposition
+Each ADR's Acceptance row uses the same authority and disposition
 syntax as a plan, with Bound bytes in this exact form:
 
 ```text
@@ -109,7 +109,9 @@ candidate `<40-hex>`; concept `sha256:<64-hex>`; technical `sha256:<64-hex>`
 The candidate must be the reachable historical Proposed ADR pair. Acceptance
 binds both files as they existed at that candidate. Within the pair, acceptance
 changes only the Concept file's status and empty governance row; the same
-administrative commit updates the derived Current Status capsule. A mismatch or
+administrative commit updates that ADR's status cell and every directly
+superseded ADR's supersession annotation in `docs/adr/README.md`, and the
+derived Current Status capsule when the ADR is a blocker. A mismatch or
 missing companion blocks acceptance.
 
 Only accepted, delivering, closed, or explicitly named next-candidate milestones
@@ -206,17 +208,26 @@ sections:
 
 A complete row uses `Maintainer` or `Delegate: <recorded identity>` for
 Authority, `[disposition](<durable-pointer>)` for Authority evidence, and the
-accepted or reviewed candidate SHA for Bound bytes. Closed milestones bind
-envelope and gate digests there as well, because that is what their acceptance
-and closure covered; those rows are read as written and are not rewritten.
+accepted or reviewed candidate SHA for Bound bytes. A plan with no gate file,
+including M5, uses this exact gate-less form for both Acceptance and Closure:
+
+```text
+candidate `<40-hex>`; concept `sha256:<64-hex>`; technical `sha256:<64-hex>`
+```
+
+Historical milestones with gate files also bind their envelope and gate
+digests there, because that is what their acceptance and closure covered;
+those rows are read as written and are not rewritten.
 
 Moving the register to `Accepted` requires a complete acceptance row naming the
 maintainer or a recorded delegate, durable evidence of that authority's explicit
 disposition, and the accepted candidate SHA. Moving it to `Closed` requires the
 same for the reviewed closure candidate. An explicit decision may be recorded;
 it may not be supplied or inferred. An independent reviewer reads the exact
-candidate before either transition, and the transition itself is confined to
-[the four paths the milestone guide names](../developer/milestones-technical.md#technical-milestones-confinement).
+candidate before either transition. Only the `In review` to `Closed`
+administrative transition is confined to
+[the five paths the milestone guide names](../developer/milestones-technical.md#technical-milestones-confinement);
+acceptance also updates the prerequisite ADR governance records it accepts.
 
 The sections a plan pair carries, and what each states, are defined once in
 the [milestone guide](../developer/milestones-technical.md#technical-milestones-agree);
@@ -262,9 +273,11 @@ transition records exactly this:
 | `In review` → `Closed` | The maintainer's closure disposition in the plan's Closure row, naming the reviewed candidate, with every Progress row resolved |
 
 Every transition updates the register row, the complete Current Status capsule
-above, and README's derived summary in one change. `mix loopex.status` derives
-the capsule and the summary from the register and prints the exact values it
-expects, for any milestone name; nothing about a new name is written in code.
+above, and README's derived summary in one change. Construct both canonical
+blocks from the register under the status contract, then run
+`mix loopex.status` to validate them; the task reports pass or failure rather
+than printing replacement bytes. The task handles any milestone name; nothing
+about a new name is written in code.
 
 A retry is diagnostic, not a pass. A same-revision failure that disappears on
 retry is a flake to fix, not a pass.

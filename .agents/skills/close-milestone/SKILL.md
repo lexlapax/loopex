@@ -29,8 +29,10 @@ technical guidance. The process is the
    Retain each run's complete output outside the repository, with its stable
    retained-output reference, SHA-256 digest, tested implementation SHA,
    platform, and toolchain. Step 5 writes those identities, references, and
-   digests into the existing evidence-page scaffold: the runs are of the
-   candidate, and the candidate cannot carry its own later results.
+   digests into the existing evidence-page scaffold, together with every
+   plan-required outcome field or placeholder that scaffold predeclared: the
+   runs are of the candidate, and the candidate cannot carry its own later
+   results.
 4. Ask an independent reviewer to read the candidate for outcome compliance,
    correctness, test honesty, public impact, security, and rollback. Retain the
    complete review report outside the repository under a retained-output
@@ -38,17 +40,25 @@ technical guidance. The process is the
 5. Present the packet to the maintainer: outcomes and their proof, check
    results, review findings, and what remains. The maintainer closes it; then
    make the **administrative closure commit**, which is
-   [confined to four paths](../../../docs/developer/milestones-technical.md#technical-milestones-confinement):
+   [confined to five paths and the exact allowed region in each](../../../docs/developer/milestones-technical.md#technical-milestones-confinement):
    the register row moved to `Closed`, the plan's Closure row naming the
    **tested implementation SHA** and the content digests — not this commit,
    which cannot contain its own hash and is located by the register transition
-   instead — the context-map disposition, and the existing evidence page filled
-   with step 3's runs and step 4's review. Nothing else belongs in it; in particular,
-   `docs/evidence/README.md` does not change in the administrative commit.
+   instead — the context-map disposition, the existing evidence page filled
+   with step 3's runs, step 4's review and every predeclared plan-required
+   outcome value, and the root `README.md` updated only
+   between its status markers to the exact canonical `Closed` block constructed
+   from the register under the status contract. Run `mix loopex.status` to
+   validate that block; the task reports pass or failure rather than printing
+   replacement bytes. Retain and inspect the complete patch, mapping every
+   changed byte to the guide's allowed-region table. Nothing
+   else belongs in it; in particular, `docs/evidence/README.md` does not change
+   in the administrative commit.
 
 Tags, packages, and publication are separate maintainer decisions. If the
 maintainer later authorizes a tag, follow the milestone guide's release
-sequence. Run the documentation check, the final semantic operator/developer
+sequence. Re-prove the five-path and allowed-region confinement, then run
+the documentation check, the final semantic operator/developer
 documentation gate, and the archive comparison on the administrative SHA
 before creating the tag. Retain those outputs outside the repository and put
 their results, retained-output references, and SHA-256 digests in the

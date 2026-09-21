@@ -56,9 +56,11 @@ ownership, anchors, reciprocal links, and review form.
    the exact candidate/concept-digest/technical-digest form defined in
    `docs/plans/README.md`. The digests bind both historical Proposed files. Do
    not change decision or technical bytes in that transition. Within the pair,
-   only Status and the empty row change; the same commit updates the plans
-   index's derived Current Status capsule when the ADR is a blocker, and it is
-   reviewed before merge like every other change.
+   only Status and the empty row change; the same commit updates that ADR's
+   status cell and every directly superseded ADR's supersession annotation in
+   `docs/adr/README.md`, and the plans index's derived Current Status capsule
+   when the ADR is a blocker. The transition is reviewed before merge like
+   every other change.
 6. Dropping a required check or a real-path test, deferring scope, or reversing
    a vision boundary requires the maintainer's explicit approval under
    `AGENTS.md`; an ADR cannot grant that authority.

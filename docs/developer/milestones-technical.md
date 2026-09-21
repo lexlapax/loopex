@@ -33,9 +33,10 @@ to the Milestone Register table in `docs/plans/README.md`. The register's Gate
 column is history: a milestone run under the retired gate machinery links its
 gate file, and a new milestone's entry is `—`. That row is the pair's index —
 the index's Files section states the naming convention and indexes nothing.
-Then run
-`mix loopex.status`; it refuses until the Current Status capsule holds the
-values it derives for an `Open` milestone and prints what it expects.
+Then construct the Current Status capsule from the register under the status
+contract and run `mix loopex.status`; it refuses until the capsule holds the
+derived values for an `Open` milestone. The task reports pass or failure; it
+does not print replacement bytes.
 
 Names: lowercase ASCII letters and digits separated by single hyphens, `M`
 followed by digits, or a version-shaped numeric slug such as `1.0` or `v0.1`;
@@ -86,9 +87,12 @@ At the **tested implementation commit**, which is the closure candidate:
    in `docs/evidence/README.md`. The scaffold has the final headings and fields,
    marks results pending, and claims no run that has not happened.
 3. The closure matrix, run **from** that commit: `bash scripts/check.sh` under
-   the floor pair
-   (`mise exec erlang@27.3.4 elixir@1.18.5-otp-27 -- bash scripts/check.sh`,
-   with its own `MIX_BUILD_ROOT`), and `bash scripts/check-release.sh` once on
+   the floor pair with an absolute, pair-specific build root and the
+   higher-priority build-path variable removed
+   (replace `NAME` with the milestone name in
+   `env -u MIX_BUILD_PATH MIX_BUILD_ROOT="/absolute/retained-work/NAME-otp27-build"
+   mise exec erlang@27.3.4 elixir@1.18.5-otp-27 -- bash scripts/check.sh`), and
+   `bash scripts/check-release.sh` once on
    the current pair with the credential and pinned Node; CI already holds the
    current-pair fast check for the candidate. Each run's revision, platform,
    toolchain, result and measured duration is retained outside the repository
@@ -96,7 +100,8 @@ At the **tested implementation commit**, which is the closure candidate:
    administrative commit fills the existing
    `docs/evidence/NAME-closure-runs.md` scaffold with those identities and
    digests, including the tested archive manifest's retained-output reference
-   and SHA-256 digest. The runs are *of* the tested commit, and that commit
+   and SHA-256 digest, and every plan-required outcome value whose final field
+   or row was predeclared `Pending` in the tested scaffold. The runs are *of* the tested commit, and that commit
    cannot carry its own later results.
 4. An independent reviewer reads the candidate for outcome compliance,
    correctness, test honesty, public impact, security and rollback; blocking
@@ -107,15 +112,18 @@ At the **tested implementation commit**, which is the closure candidate:
    commit** moves the register row to `Closed`, fills the plan's Closure row,
    records the maintainer's words in
    `docs/developer/agent-context-map.md`, and fills the evidence-page scaffold
-   with the runs of step 3 and the review of step 4. `mix loopex.status` derives the
-   `Closed` capsule; run it and copy what it expects.
+   with the runs of step 3, the review of step 4 and every predeclared
+   plan-required outcome value. Construct the canonical
+   `Closed` capsule from the register under the status contract and run
+   `mix loopex.status` to validate it; the task does not print replacement
+   bytes.
 
 **The two SHAs, and what each one carries.**
 
 | | Tested implementation SHA | Administrative closure SHA |
 | --- | --- | --- |
 | What it is | The candidate the checks ran on and the reviewer read | The commit that records the decision |
-| What it changes | Everything the milestone implemented | The four paths below, and nothing else |
+| What it changes | Everything the milestone implemented | Only the five paths and the allowed regions within them below |
 | What names it | Every run on the evidence page, and the review | The register, once `Closed` |
 | Its evidence | The runs of step 3, taken from it | None of its own; it is a record, not a claim |
 
@@ -124,8 +132,10 @@ sole parent. An intermediate or merge commit would add a third revision to the
 closure and could hide changed-then-restored paths from an endpoint diff.
 
 The plan's **Closure row names the tested implementation SHA** — the candidate
-the packet was assembled from — with the content digests closure rows have
-always carried. It does **not** name the administrative SHA, for the reason
+the packet was assembled from — with the exact Bound-bytes syntax defined by
+the plans register: for a gate-less milestone,
+`candidate <40-hex>; concept sha256:<64-hex>; technical sha256:<64-hex>`.
+It does **not** name the administrative SHA, for the reason
 the whole split exists: that row *is* the administrative commit's content, and
 a commit cannot contain its own hash. An earlier revision asked the row to
 name both, which is the same impossibility as asking one commit to carry runs
@@ -139,16 +149,18 @@ the evidence reads the tested SHA out of the Closure row, where it is.
 
 <a id="technical-milestones-confinement"></a>
 **The confinement, stated once and referenced everywhere else.** The
-administrative closure commit touches **exactly these four paths**:
+administrative closure commit touches **exactly these five paths, and only the
+named region within each path**:
 
 | Path | What it carries |
 | --- | --- |
-| `docs/plans/README.md` | The register row, moved to `Closed` |
-| `docs/plans/<NAME>.md` | The plan's Closure row, naming the tested implementation SHA and the content digests |
-| `docs/developer/agent-context-map.md` | The maintainer's closure disposition |
-| `docs/evidence/<NAME>-closure-runs.md` | The existing scaffold, filled with the run identities, results, measured durations, retained-output references and SHA-256 digests of step 3; the tested archive manifest's retained-output reference and SHA-256 digest; and the independent review result, retained-output reference and SHA-256 digest |
+| `docs/plans/README.md` | The exact `<NAME>` register-table row, moved to `Closed`, and the bytes between `<!-- loopex:current-status:start -->` and `<!-- loopex:current-status:end -->`, replaced only by the canonical status block `mix loopex.status` derives from that row |
+| `docs/plans/<NAME>.md` | Only the plan's Closure governance-table row, naming the tested implementation SHA and the content digests |
+| `docs/developer/agent-context-map.md` | One newly appended, dated subsection recording the maintainer's closure disposition; every pre-existing byte remains unchanged |
+| `docs/evidence/<NAME>-closure-runs.md` | Only the scaffold's designated `Pending` value fields and placeholder rows. The tested candidate predeclares every label, heading and row slot that closure will fill, including the generic run identities, results, measured durations, retained-output references and SHA-256 digests of step 3; the tested archive manifest's retained-output reference and SHA-256 digest; the independent review result, retained-output reference and SHA-256 digest; and any plan-required outcome fact, review, demonstration identity, source inventory or measured observation. The administrative commit replaces only those `Pending` values or placeholder cells; it adds no label, heading, row or prose. Every non-placeholder byte remains unchanged |
+| `README.md` | Only the bytes between `<!-- loopex:readme-status:start -->` and `<!-- loopex:readme-status:end -->`, replaced by the exact derived status block for the register's `Closed` state; every byte outside the markers remains unchanged |
 
-and **nothing else**. That is the whole rule; every other passage in this
+and **nothing else in those files or the tree**. That is the whole rule; every other passage in this
 repository that bounds the administrative commit refers here rather than
 restating it, because three different formulations of it — "changes nothing
 the runs covered", "the register row, the Closure row and the context-map
@@ -156,14 +168,24 @@ entry", "nothing outside `docs/`" — coexisted in five documents and disagreed
 about whether the evidence page had a home. The tested candidate creates and
 indexes that page; the administrative commit only fills it.
 
-All four are under `docs/`, so "the administrative commit touches nothing
-outside `docs/`" is a **consequence** of this rule rather than a second rule,
-and that is how the release step states it. `git diff --name-only
-<tested>..<administrative>` against those four paths is the content check;
-`git rev-list --parents -n 1 <administrative>` must show exactly
-`<administrative> <tested>`. Anything else in the parent line or the diff means
-the evidence no longer covers the tree, and the packet is reassembled from a
-new implementation SHA.
+Path membership is only the first half of confinement. Inspect the complete
+`git diff --no-ext-diff --unified=0 <tested>..<administrative> -- <the five
+paths>` and map every changed byte to the table above. Reconstruct each marked
+status file by taking its tested bytes and replacing only its named marked
+block with the canonical block derived from the administrative register, then
+require byte equality with the administrative file. The same review requires
+the exact register row, Closure row, appended context-map subsection and
+scaffold placeholders to be the only other changed regions. Retain the full
+patch and that five-row content-confinement result outside the repository under
+a stable reference and SHA-256 digest. `mix loopex.status` inside
+`check.sh --docs` separately validates the derived status values; it is not a
+substitute for proving that bytes outside their markers did not change.
+
+`git diff --name-only <tested>..<administrative>` must name exactly the five
+paths, and `git rev-list --parents -n 1 <administrative>` must show exactly
+`<administrative> <tested>`. Any extra parent, path, hunk or byte outside an
+allowed region means the evidence no longer covers the tree, and the packet is
+reassembled from a new implementation SHA.
 
 **The closure matrix runs once, from the tested implementation SHA**, and the
 administrative commit re-runs nothing. The pre-tag release proofs and their
@@ -184,10 +206,10 @@ creating the tag:
 
 | Step | Command | What a failure means |
 | --- | --- | --- |
-| Confine the administrative commit | Require `git rev-list --parents -n 1 <administrative>` to return exactly `<administrative> <tested>`, then compare `git diff --name-only <tested>..<administrative>` with [the four paths](#technical-milestones-confinement) | An extra parent, an intermediate commit, a missing path or any other path means the tag would publish a tree outside the two-commit closure contract; the release stops and the packet is reassembled. Because all four paths are under `docs/`, a passing check also establishes that nothing outside `docs/` moved, which is what makes the three re-proofs below sufficient |
+| Confine the administrative commit | Require `git rev-list --parents -n 1 <administrative>` to return exactly `<administrative> <tested>`; compare `git diff --name-only <tested>..<administrative>` with [the five paths](#technical-milestones-confinement); inspect and retain the complete zero-context patch; map every changed byte to its one allowed region; and reconstruct both marked status files from the tested bytes plus the canonical administrative status blocks, requiring byte equality | An extra parent, intermediate commit, missing or extra path, hunk outside a named region, changed pre-existing context-map byte, changed scaffold structure, or changed byte outside either status marker means the tag would publish a tree outside the two-commit closure contract. `mix loopex.status` proving the values does not prove this byte confinement. The release stops and the packet is reassembled |
 | Re-prove the documentation structure | `bash scripts/check.sh --docs` on `COMMIT` | The administrative commit's own documentation changes are not green; fix the candidate and assemble a replacement administrative commit |
 | Re-prove documentation meaning | Run the milestone's final semantic documentation gate on the relevant `docs/operator/` and `docs/developer/` pages at `COMMIT` | The operator and developer accounts disagree with each other, the plan, the accepted ADRs, or the implemented behavior; fix the candidate and assemble a replacement administrative commit |
-| Re-prove the archive identity | Recompute the archive manifest from `COMMIT`. Compare every entry outside `docs/`, except `SOURCE_IDENTITY`, with the manifest retained for the tested SHA. Require exactly one root `SOURCE_IDENTITY` in each archive and validate it against that archive's own commit and source identity | The published bytes are not the closed bytes outside `docs/`, or an archive identifies the wrong source. The entries under `docs/` and the two `SOURCE_IDENTITY` payloads are expected to differ. What this catches beyond step 1 is an archive that includes or excludes differently from the tree; `.gitattributes` can make that change without a path appearing in `git diff` |
+| Re-prove the archive identity | Recompute the archive manifest from `COMMIT`. Compare every entry outside `docs/`, except root `README.md` and `SOURCE_IDENTITY`, with the manifest retained for the tested SHA. Require exactly one root `SOURCE_IDENTITY` in each archive and validate it against that archive's own commit and source identity | The published bytes are not the closed bytes outside the confined regions, or an archive identifies the wrong source. Entries under `docs/`, the derived root README and the two `SOURCE_IDENTITY` payloads are expected to differ. The preceding content-confinement proof covers every permitted documentation hunk and the README's exact marked-block replacement. This comparison catches archive inclusion or exclusion changes that `.gitattributes` can cause without a path appearing in `git diff` |
 
 Nothing else is re-run. There is no second suite, no second release check and
 no second provider credential: the tested tree and the administrative tree

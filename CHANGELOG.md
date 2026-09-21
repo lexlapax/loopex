@@ -25,8 +25,8 @@ Nothing since the `0.1.0` source version.
 ## [0.1.0] — 2026-09-19
 
 M4's closed product baseline: the first numbered source version. It is a source
-version only, not a package, a publication or a compatibility freeze; the
-`v0.1.0` tag follows under its own release decision.
+version only, not a package, a publication or a compatibility freeze. The
+separately authorized annotated `v0.1.0` tag identifies that source.
 
 No package or compatibility-labelled surface is pending.
 

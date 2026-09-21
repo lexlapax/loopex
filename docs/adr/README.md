@@ -165,7 +165,8 @@ because those numbers are now accepted M2 decisions.
 0031 to 0034 are the four Proposed M5 prerequisites: the daemon's store
 selection for `0.2.0`, which is the existing local adapter with its documented
 limits, its capacity-as-store-loss consequence and its retirement procedure,
-leaving a daemon-grade adapter and any migration open for a separate decision;
+leaving a daemon-grade adapter and its Store/journal-format migration open for
+a separate decision while ADR 0032 owns the daemon-index compatibility import;
 daemon
 attachment residency and at-least-once replay over the generation-2-only
 Unix-domain-socket transport with bounded session pages; the collaboration
