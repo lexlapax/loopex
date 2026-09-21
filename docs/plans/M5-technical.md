@@ -433,7 +433,12 @@ Core change 3 also reroutes `Loopex.Runtime.trace/2` and the matching trace
 stop through `Control`. Start receives the current excluded-pid/MFA snapshot
 without calling back into `Control`. Trace creates a private ETS table owned by
 the Trace process and stores every full handle returned by
-`:trace.session_create/3` only in that table. Only Trace accesses it; the
+`:trace.session_create/3` only in that table. Its existing internal
+`trace_module` option becomes the sole dispatch seam for Trace's named-session
+create, function/process selection, delivery, information and destroy calls;
+production selects `:trace`, while the test module returns an identifiable
+canary-bearing handle and records that the later calls receive that exact
+handle. Only Trace accesses the table; the
 GenServer callback state carries the private table identifier, normalized
 configuration and weak session identities, never a full handle. Consequently
 `:sys.get_state/1` can copy the callback state without copying a handle, and a
@@ -2449,8 +2454,9 @@ operator.
 The import uses its own strict reader and does not call
 `Loopex.SessionDirectory.list_sessions/1`, whose released operator projection
 intentionally drops entries it cannot decode. The importer opens the
-`sessions/` directory without following a symbolic link, retains its
-owner/non-symlink device-and-inode identity, materializes the names once with
+`sessions/` directory without following a symbolic link, requires its owner UID
+to equal the daemon's effective UID, and retains that owner plus its non-symlink
+directory type, device and inode. It materializes the names once with
 `File.ls/1`, excludes only names matching the released
 `String.contains?(name, ".tmp-")` rule, and rechecks the directory identity.
 Every remaining name must pass the released one-component session-ID
@@ -2464,9 +2470,12 @@ UTF-8, NUL-free and 1 through 256 bytes; there are at most 4,096 commands, and
 every cached result equals that session ID. Any non-temporary entry that fails
 containment, file kind, size, stable read, safe decode, exact keys, identity,
 UTF-8 or command validation returns `session_index_corrupt` before publication.
-Failure to open, list or retain the directory identity returns
-`state_root_unusable`. Every refusal leaves a pre-existing index byte-for-byte
-unchanged and runs the same bounded pre-rename exclusion cleanup.
+Failure to open or list the directory, an initial owner mismatch, or an owner,
+type, device or inode change at the post-list recheck returns
+`state_root_unusable`. An injected metadata seam proves both owner-mismatch
+orders without requiring filesystem ownership privileges. Every refusal leaves
+a pre-existing index byte-for-byte unchanged, publishes no union and runs the
+same bounded pre-rename exclusion cleanup.
 
 **The daemon's top-level component is an owner process, not a supervisor.**
 That is a decision this section has to make before it can describe any

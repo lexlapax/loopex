@@ -641,11 +641,11 @@ boundary, not an absolute:
   cannot protect the callback's last-message crash material. Trace therefore
   implements the same defensive `format_status/1` boundary as the credential
   custodians: it replaces `state`, `message` and `reason` with fixed redacted
-  atoms and `log` with `[]`. A forced callback crash while a `complete/3`
-  tuple carrying distinct token and registry-handle canaries is the actual last
-  message captures the complete OTP report and owner-observed exit, proves
-  those four replacements occurred, and refutes both canaries everywhere in
-  both. Entry rendering and Trace status
+  atoms and `log` with `[]`. A raw arguments-level trace tuple for `complete/3`
+  carrying distinct token and registry-handle canaries is the actual last
+  message when the callback is forced to crash. The case captures the complete
+  OTP report and owner-observed exit, proves those four replacements occurred,
+  and refutes both canaries everywhere in both. Entry rendering and Trace status
   redaction are separate witnesses: the first protects emitted entries; the
   second protects the one process allowed to consume raw trace messages.
 
@@ -751,6 +751,11 @@ boundary, not an absolute:
     the current version.
 
     Trace creates one private ETS table that only the Trace process may access.
+    The existing internal `trace_module` option becomes the sole dispatch seam
+    for every named-session operation Trace performs: session create, function
+    and process selection, delivery barriers, information queries and destroy.
+    Production always supplies `:trace`; the test module supplies the same
+    closed operation surface and returns an identifiable canary-bearing handle.
     Each full handle returned by `:trace.session_create/3` moves immediately
     from the creating callback's local variable into that table and never enters
     callback state, a reply or another message. Callback state retains only the
@@ -804,7 +809,10 @@ boundary, not an absolute:
     `DOWN` before replacement hello and replacement hello before old `DOWN` —
     and in each observes exactly one current Trace monitor and one private
     handle table after acknowledgement, no start or status publication before
-    it, and no lookup by the shared session name. `:sys.get_state/1`, an OTP
+    it, and no lookup by the shared session name. The fake module records that
+    every operation after creation received its exact canary-bearing handle, so
+    the witness proves the handle entered the private table and remained usable
+    without exposing it. `:sys.get_state/1`, an OTP
     status request and a complete forced-crash report are each inspected and
     contain no full handle; the status and crash cases also prove the defensive
     replacements rather than passing because no report was emitted. Killing
@@ -1251,9 +1259,10 @@ boundary, not an absolute:
   confirms the host-owned custody state contains the canary before resolution.
   It enumerates the actual registry request and reply, `:begin_bootstrap`,
   `:bootstrap_result`, `:credential_context`, every phase result and
-  continuation, monitor and ownership message, and every gated mailbox; every
-  application message except the custody reply is canary-free, and registry
-  and guardian state are canary-free. After the frame write, the sender
+  continuation, monitor and ownership message, and every gated mailbox. During
+  this invocation census, every application message from the adapter edge
+  inward except the custody reply is canary-free, and registry and guardian
+  state are canary-free. After the frame write, the sender
   tail-calls the non-secret final wait; the case proves its
   `current_function` is the named final-wait MFA, then refutes the canary in
   its current stack, mailbox, process dictionary and forced-crash material
@@ -1966,7 +1975,8 @@ Six proof groups are new:
   mailbox, with that live call's generated reply tag and the exact custody
   success as its payload, and enumerates
   the registry, custody, guardian and sender application-message sequence, and
-  refutes that canary in every other application-message payload. Each mailbox
+  refutes that canary in every other adapter-edge-inward application-message
+  payload during that invocation census. Each mailbox
   read occurs in an unlinked one-use inspector that reports a fixed non-secret
   verdict, is killed and awaited, and never copies the canary into the test
   process. It then proves the raw Task has tail-called its non-secret final
@@ -2064,8 +2074,9 @@ private owner-only table and never in callback state or an exported status,
 Trace status redaction keeps raw token and registry-handle material in its last
 message out of the complete crash report, and the last MFA owner restores every live session's
 selected pattern;
-that the resolved value has no path into guardian state, a BEAM message other than
-the one permitted reply, an exit reason, a crash report, an IO request, a file
+that the resolved value has no path into guardian state, an adapter-edge-inward
+BEAM message during the invocation other than the one permitted reply, an exit
+reason, a crash report, an IO request, a file
 or the environment; that every row of the failure table refuses without
 retaining a copy; that managed mode allocates its absolute invocation deadline
 before either start, never resets it and, after guardian registration, exact

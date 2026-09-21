@@ -2189,9 +2189,11 @@ legacy-only row both survive.
 The strict reader does not call `Loopex.SessionDirectory.list_sessions/1`:
 that released operator projection intentionally drops a row when its entry
 cannot be decoded. The daemon reader opens the `sessions/` directory without
-following a symbolic link, retains its device/inode identity, materializes the
-names with `File.ls/1`, applies the released temporary-name exclusion
-(`String.contains?(name, ".tmp-")`), and rechecks the directory identity. For
+following a symbolic link and requires its owner UID to equal the daemon's
+effective UID. It retains the owner UID, non-symlink directory type, device and
+inode, materializes the names with `File.ls/1`, applies the released
+temporary-name exclusion (`String.contains?(name, ".tmp-")`), and rechecks all
+four fields, including current-daemon ownership. For
 every remaining name it requires the released one-component session-ID
 containment rule, a regular non-symlink file,
 and an identity-stable read of at most the released 1 MiB entry ceiling plus one
@@ -2204,8 +2206,9 @@ filename; the runtime ID and every command ID must be valid UTF-8, 1 through
 result must equal the session ID. A non-temporary name or row that fails
 containment, file-kind, size, stable-read, safe-decode, exact-key, identity,
 UTF-8 or command validation refuses `session_index_corrupt`; it is never
-filtered out. Failure to open, list or retain the directory identity uses the
-exact `state_root_unusable` refusal. All such failures precede publication, preserve
+filtered out. Failure to open or list the directory, an initial owner mismatch,
+or any owner, type, device or inode change across the listing uses the exact
+`state_root_unusable` refusal. All such failures precede publication, preserve
 an existing index byte-for-byte and run the same bounded exclusion cleanup as
 the other pre-rename failures. This reader remains in the daemon adapter and
 adds no core listing API.
@@ -2356,7 +2359,11 @@ reader cases place, respectively, a corrupt term, an entry larger than 1 MiB
 and an entry whose stored runtime ID contains invalid UTF-8 under otherwise valid
 non-temporary names. Each refuses `session_index_corrupt`, leaves the complete
 pre-existing index byte-for-byte identical, publishes no partial union and
-proves the offending row was not silently omitted.
+proves the offending row was not silently omitted. An injected directory-
+metadata seam separately reports a foreign owner before listing and an owner
+change after listing. Each case refuses `state_root_unusable`, preserves the
+prior index byte for byte and publishes no union; the witness does not depend
+on the test process having permission to change filesystem ownership.
 
 ### Session residency: active, dormant, and their bounds
 

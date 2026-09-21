@@ -216,6 +216,9 @@ core restores each live trace session's selected pattern for that function.
 Trace-session start and stop route through `Control`, using a deadlock-free
 snapshot handshake, so they serialize with exclusion. Trace stores each full
 strong OTP session handle in a private ETS table owned by the Trace process.
+Its existing internal trace-module option becomes the dispatch seam for every
+named-session operation Trace performs; production always selects `:trace`, and
+the test implementation returns an identifiable canary-bearing handle.
 Only that process reads the table. Its GenServer state carries the private table
 identifier, weak `{name, id}` identities and non-secret selection/configuration,
 never a full handle; `Control` retains the same weak material. Trace returns a
@@ -445,10 +448,11 @@ to baseline. Trace-session state, status and forced-crash witnesses prove that
 non-secret metadata, never a full handle; a non-owner cannot read that table.
 `format_status/1` keeps full handles and arbitrary message, state, reason and
 log terms out of status and crash output while exact Trace operations still
-work. Its forced-crash case makes a raw `complete/3` tuple carrying distinct
-token and registry-handle canaries the actual last message, asserts the fixed
-redacted fields, and refutes both canaries in the complete report and observed
-exit. The ordinary restart case retains only the weak identity and proves that
+work. Its forced-crash case makes a raw arguments-level trace tuple for
+`complete/3` carrying distinct token and registry-handle canaries the actual
+last message; it asserts the fixed redacted fields and refutes both canaries in
+the complete report and observed exit. The ordinary restart case retains only
+the weak identity and proves that
 predecessor death deletes the private table and makes that identity absent.
 
 A deliberate fault fixture retains one extra strong handle to exercise the
@@ -487,9 +491,10 @@ input transiently, and another host may choose a different defensible custody
 mechanism. This is a dataflow and logical-custody claim, not a claim of erased
 memory or forensic inaccessibility; ADR 0019's disclaimer remains. The secret
 is not retained in guardian, coordinator, registry or other long-lived adapter
-state, the environment after reference-host composition, a
-durable or public plane, or any message except the one custody reply this pair
-permits. Two separately composed runtimes in one VM can carry distinct tokens,
+state, the environment after reference-host composition, or a durable or public
+plane. From the adapter edge inward during an invocation, it is in no message
+except the one custody reply this pair permits. Two separately composed runtimes
+in one VM can carry distinct tokens,
 custody processes and credentials. Reference runtime hosts and Direct callers
 each compose their own registry, custody and token, so the **eleven** provider
 test modules serial for this reason can run concurrently and the fast check

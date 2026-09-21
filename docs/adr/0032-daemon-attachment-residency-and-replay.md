@@ -292,9 +292,12 @@ directory names cannot defeat the startup bound. A populated legacy root with
 session entries and no index requires an explicit offline import before the daemon serves it; the
 import's legacy directory scan is intentionally outside the service-start
 bound. That import uses a strict daemon-owned reader rather than the released
-listing projection, which deliberately skips entries it cannot decode: every
-non-temporary legacy row must validate, and one corrupt, oversized or invalid-
-UTF-8 row refuses the whole import without changing an existing index. The
+listing projection, which deliberately skips entries it cannot decode. Before
+and after the one materialized listing, the legacy directory must be a
+non-symlink directory owned by the daemon's effective user with the same owner,
+device and inode. Every non-temporary legacy row must validate, and one corrupt,
+oversized or invalid-UTF-8 row refuses the whole import without changing an
+existing index. The
 index is not Store truth and can omit a session committed across a
 crash cut; exact-ID and command-ID recovery repair such an omission. Lineage,
 lifecycle state and committed sequence are not list fields: a client that
