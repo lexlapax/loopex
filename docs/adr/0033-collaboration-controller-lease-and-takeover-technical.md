@@ -449,13 +449,13 @@ release_ref}`, where disposition is the row's already selected `result` or
 while provisional mirror resolution or child cleanup remains uses
 `{:settling_acquire, permit_id, disposition, actor_pid, actor_incarnation,
 start_op_ref, op_ref}` for `result` or `connection_lost`; the daemon's exact
-retained `op_ref` record supplies its provisional row and phase. Owner loss can
-win before a release owner sends a proposal, so a
-release or acquire already awaiting dead-owner classification instead uses
+retained `op_ref` record supplies its provisional row and phase. Every release
+or acquire whose dead-owner classification is already selected uses
 `{:settling_owner_loss, permit_id, class, actor_pid, actor_incarnation,
-op_ref}` and requires no daemon release record. The immutable actor
-binding supplies each pid and incarnation; the daemon's exact `release_ref`
-record and retained acquisition `op_ref` supply the selected settlement phases,
+op_ref}`. It may have no accepted daemon operation record, or may have the exact
+acquire/release record whose later result CAS lost to `owner_lost`. The immutable
+actor binding supplies each pid and incarnation; the daemon's exact
+`release_ref` record and retained acquisition `op_ref` supply the selected settlement phases,
 so neither process scans an actor map or infers a winner. If an actor result,
 connection loss or owner loss CAS wins before the barrier's atomic transition,
 the row appears in its exact settling variant; if the barrier wins, the later
@@ -480,11 +480,13 @@ its real core result, fatal disposition or orderly seal. The barrier already won
 the target permit before any destructive cleanup begins; a late actor result is
 cleanup-only. The cleanup is idempotent and the mirror must be absent before
 core quiesce.
-For a fresh acquire, whose actor is the daemon
-owner itself, the daemon owner remains alive and kills and reaps only the
-provisional child named by the descriptor's `start_op_ref`, pid and incarnation;
-if its provisional mirror was installed, the daemon first resolves it cancelled
-and requires its exact absence before quiesce. A barrier-owned operation is not
+For a fresh acquire, whose descriptor actor is the daemon owner itself, that
+owner remains alive. Its retained exact start record keyed by `start_op_ref`
+must say `not_materialized` or carry the exact `{child_pid, child_incarnation}`;
+the former is tombstoned and the latter is killed and reaped. Missing or
+mismatched start state selects the barrier's `relay_lost` path rather than an
+actor-map scan. If its provisional mirror was installed, the daemon first
+resolves it cancelled and requires its exact absence before quiesce. A barrier-owned operation is not
 described as rolled back; `shutdown_admitted` is the terminal disposition that
 authorized this exact cleanup.
 
@@ -496,17 +498,30 @@ disposition whose owner already restored finishes its no-reply relay settlement
 and leaves the restored holder alive for the drain. If restoration is unresolved,
 the daemon kills and reaps that exact owner, exact-pops and classifies its mirror
 without client output, sends the no-reply cancellation supersede and
-terminalizes `connection_lost`. A `settling_owner_loss` descriptor requires no
-release record: it completes the retained exact `DOWN`, mirror-pop and
-classification join without client output and terminalizes `owner_lost`. A
+terminalizes `connection_lost`. A `settling_owner_loss` descriptor completes
+the retained exact `DOWN`, mirror-pop and classification join without client
+output. With no accepted daemon operation record it terminalizes directly. With
+a matching release record it tombstones that record; with a matching acquisition
+record it finishes or confirms provisional cancellation and discards the
+existing-owner proposal or exact fresh start record. Missing a record whose
+accepted phase requires one selects `relay_lost`; unfinished mirror cleanup
+selects `connections_lost`. It then terminalizes `owner_lost`. A
 `settling_acquire` descriptor requires its matching retained `op_ref` record. A
 `result` row finishes or confirms `resolve_provisional(granted)`, renders no
 post-cut reply and retains the granted owner for the drain. A `connection_lost`
 row finishes or confirms `resolve_provisional(cancelled)`, discards an
 existing-owner proposal or kills and reaps its exact fresh `start_op_ref` child,
 and renders nothing. Either path leaves no provisional mirror operation pending.
-A
-missing or mismatched required release record, malformed relay answer or
+A permit's selected disposition does not change if its exact actor owner dies
+later. The daemon first completes the descriptor's release or provisional
+settlement, then consumes and reaps any retained or newly arrived exact owner
+`DOWN` and exact-pops and classifies the mirror under the same
+`freeze_deadline`, without ordinary output. A restored `connection_lost`
+release therefore completes cancellation before owner loss; an acquire or
+release `result` remains `result`, and the later pop is present or absent
+according to the mirror state that exact settlement produced. No second clock
+or replacement disposition begins.
+A missing or mismatched required release record, malformed relay answer or
 unfinished relay join or terminalization by `freeze_deadline` selects
 `relay_lost`; unfinished exact mirror work, including a mirror that remains
 after an executing-owner kill, selects `connections_lost`. Shutdown owns those
@@ -1087,15 +1102,17 @@ second cut. A missing or malformed relay settlement also selects `relay_lost`.
 Separate cut crossings overtake each serving instant and prove the exact row
 joins the fixed admission/freeze cleanup without a private extension. If it is
 still settling at the admission deadline, the barrier returns its exact tagged
-settling-acquire, settling-release or pre-proposal settling-owner-loss
+settling-acquire, settling-release or settling-owner-loss
 descriptor. Forced acquisition `result` and `connection_lost`, release
 `result`, restored `connection_lost`, unresolved `connection_lost` and
-`owner_lost` rows each complete their specified no-output cleanup before
+`owner_lost` rows before and after acquire grant/provisional install and release
+proposal each complete their specified no-output cleanup before
 `freeze_deadline`; a missing required daemon release record, wrong tag and
 deadline crossing select the named relay or registry fatal class without
 beginning core quiesce. Fresh executing acquisition is frozen before and after
-provisional install and must cancel or remove that exact row before child reap;
-existing-owner acquire and pre-proposal release are held across freeze in both
+child materialization and provisional install; the exact `start_op_ref` record
+must tombstone or name the child, and any installed row must be cancelled before
+child reap. Existing-owner acquire and release are held across freeze in both
 result-versus-stop and owner-`DOWN`-versus-pop orders. The exact mirror is absent,
 every claimable origin has a terminal no-output disposition, and a promoted
 mutation remains on its real-result path before quiesce. An owner-loss winner preserves
@@ -1121,7 +1138,11 @@ settling-owner-loss descriptor set in both orders. Renewal, existing-owner
 acquire/release and fresh acquire each force actor-result versus atomic freeze in
 both relay-mailbox orders: result first enters the exact settling protocol, while
 freeze first terminalizes `shutdown_admitted` and makes the late result
-cleanup-only. One disposition exists per permit without scanning the daemon
+cleanup-only. Each settling result and restored connection-loss case is then
+forced with exact owner `DOWN` both before and after descriptor settlement:
+the selected disposition stays fixed, settlement finishes first, and the same
+freeze deadline covers the later no-output reap, exact pop and classification.
+One disposition exists per permit without scanning the daemon
 owner map. A paused
 artifact read that claims and dispatches before the cut remains `executing`
 across the admission deadline and quiesce, then the step-3 peer close kills it

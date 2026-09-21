@@ -1581,6 +1581,13 @@ daemon cannot know — and it equals the **lease term**, 30 seconds, so no
 number enters that ADR 0033 has not already fixed. A waiter that reaches it
 refuses `control_pending` and the client may acquire again.
 
+**`session_unavailable`, exactly.** The literal generation-2 vector is an
+ordinary correlated `error` record with `code: session_unavailable`, the
+request's `request_id` and one bounded non-secret `message`. It has no
+`session_id`, `event_cursor` or session state and leaves the connection open.
+The daemon emits it only when `session.inspect` returns core's exact
+`:session_unavailable`; it never derives the code by parsing `message`.
+
 **A waiter whose connection disappears before the permit's result CAS is
 cancelled.** Connection `DOWN` wins `connection_lost`; for a fresh acquire the
 daemon owner then exact-clears any provisional routing mirror and kills and
@@ -1858,11 +1865,15 @@ ADR 0033's actor or provisional-child teardown and become
 `shutdown_admitted`; their mutation is not described as rolled back. The closed
 terminal permit states are therefore exactly `result`, `owner_lost`,
 `connection_lost`, `shutdown_cancelled`, or `shutdown_admitted`, with one winner.
-The same barrier returns ADR 0033's tagged acquisition, proposed-release and
-pre-proposal owner-loss settlement descriptors. Each keeps its already selected
+The same barrier returns ADR 0033's tagged settling-acquire, settling-release
+and settling-owner-loss descriptors. Each keeps its already selected
 disposition, finishes exact no-output relay and mirror cleanup inside
 `freeze_deadline`, and leaves no permit or owner mirror before core quiesce; it
 is never silently treated as an executing row or omitted from the frozen set.
+If exact owner `DOWN` is retained or arrives after `result` or
+`connection_lost` was selected, descriptor settlement finishes first and the
+same deadline covers the later reap, exact pop and classification; the selected
+disposition does not change and no ordinary output is emitted.
 Core then installs its early quiescing barrier. A surviving mutation that already
 obtained a coordinator route is ordered against the coordinator's drain-specific
 admission close; one that has not reached its first `Control` operation refuses
@@ -1895,11 +1906,14 @@ result CAS: loss first exact-clears the provisional mirror, reaps the start chil
 and exposes no epoch; result first promotes the exact mirror even if the holder
 slot is already closing and leaves a granted lease whose reply may be lost.
 Each cut is also held past the admission bound. A fresh executing acquisition is
-frozen before and after provisional install, and settling acquisition, proposed
-release settlement and pre-proposal owner-loss classification are separately
+frozen before and after provisional install, and settling acquisition, release
+settlement and owner-loss classification are separately
 held through the barrier. It must return their tagged descriptors, retain their
 winning dispositions and remove every cancelled row and mirror without post-cut
-output before quiesce. It
+output before quiesce. Result and restored connection-loss cases order exact
+owner `DOWN` on both sides of that settlement and prove the original
+disposition survives while the later pop/classification finishes under the same
+deadline. It
 asserts one terminal permit
 disposition and at most one correlated reply, `daemon_stopping` for every
 unlinearized survivor, no rollback of a linearized lease change, no stale mirror,
