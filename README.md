@@ -143,12 +143,13 @@ store adapter within that adapter's documented limits. Read the
 [technical companion](docs/plans/M5-technical.md#technical-depth) for the
 purpose, outcomes and how each one is to be proved.
 
-Its four prerequisite decisions are ADRs
+The four prerequisite decision records are ADRs
 [0031](docs/adr/0031-daemon-grade-store-selection-and-migration.md#concept),
 [0032](docs/adr/0032-daemon-attachment-residency-and-replay.md#concept),
 [0033](docs/adr/0033-collaboration-controller-lease-and-takeover.md#concept)
-and [0034](docs/adr/0034-provider-credential-handoff-over-bootstrap-channel.md#concept)
-. The status capsule above and the [canonical register](docs/plans/README.md)
+and [0034](docs/adr/0034-provider-credential-handoff-over-bootstrap-channel.md#concept).
+The status capsule above and the
+[canonical register](docs/plans/README.md)
 carry the milestone and decision state; this paragraph only says what the work
 is for.
 

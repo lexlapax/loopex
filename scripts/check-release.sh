@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
-# The slow check, run before closure and release: the real-provider
-# workflows, the independent Node client, and the fresh-source build. Needs a
-# provider credential in LOOPEX_PROVIDER_API_KEY, which reaches only the test
-# processes and is never printed, and the Node version pinned in
+# The slow check, run once from the exact candidate before closure: the
+# real-provider workflows, the independent Node client, and the fresh-source
+# build. An unchanged-source release reuses that evidence and does not run this
+# command again. It needs a provider credential in LOOPEX_PROVIDER_API_KEY,
+# which reaches only the test processes and is never printed. It also needs
+# the Node version pinned in
 # scripts/fixtures/m4/client-toolchain.txt. Output streams as it happens.
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
