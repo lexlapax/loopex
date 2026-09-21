@@ -53,10 +53,20 @@ resolution, not the token's arrival** — the token is bound once, per runtime,
 and resolved afresh on every call. There is nowhere else it could arrive:
 `complete/3` receives a request and the composition-time options and nothing
 per-call from the host, so a token "supplied with each call" would have no
-seam to arrive through. Behind it the host owns two things the
+seam to arrive through. Behind it the host owns three things the
 adapter does not: a **routing registry** that maps a token to a custody
 process and holds routing only — never bytes, never anything a secret could be
-derived from — and the **custody process** that holds the bytes. The adapter
+derived from — the **custody process** that holds the bytes, and a mandatory
+**tracing capability** through which the sender excludes itself before it can
+receive either the token or the registry handle. The host starts all three
+before the runtime, puts the token, registry handle and tracing capability in
+the model options, and binds the capability to the runtime reference after the
+runtime starts but before composition reports success to its caller. A missing,
+malformed or unbound capability refuses composition and unwinds the started
+edges; an immediately unreachable capability refuses an
+invocation before the token is routed. The capability holds no credential,
+registry membership or policy. It only bridges composition order to the
+runtime-owned exclusion state. The adapter
 resolves the token exactly once per invocation, inside the minimal sender
 process that writes the credential frame, and only after the child has proved
 its nonce, codec version and build manifest digest. The adapter reads no
@@ -123,15 +133,35 @@ adapter's own functions are patterned. M5 proves both at the tracer rather
 than at the sink, in a case that names `:gen_tcp` on purpose. ADR 0030 is not edited: its prose is honoured
 once this lands.
 
+The spawn ordering is part of that decision. The spawned closure contains only
+the tracing capability and the guardian to acknowledge; it contains no token,
+registry handle or credential. The process installs both exclusions and
+acknowledges them synchronously. Only then does the guardian send the token and
+registry handle to it. When the last sender using an excluded function exits,
+core restores each live trace session's selected pattern for that function.
+Destroying a trace session removes its process flags; `Control` retains live
+sender membership and the ref-counted function set so a replacement trace
+session reapplies the same exclusion. A `Control` restart destroys the trace
+sessions and the downstream sender owners together, so no credential-bearing
+sender crosses that loss with an unremembered exclusion.
+
+The guardian's existing invocation deadline is the only clock for this
+sequence. A capability or `Control` that is immediately unreachable produces
+`:unavailable`; an exclusion that has not completed when the deadline arrives
+causes the guardian to kill the sender and report `:timeout`. There is no
+separate exclusion timeout and no hidden `GenServer.call/2` timeout.
+
 **Everywhere else the boundary is where the adapter's claims stop.** Inside it
 — the token, the sender, the frame, the child — the adapter proves what it
 says: the value is never in the child's environment, in argv, in the journal,
 in a public event, a snapshot, a progress item or a diagnostic, in adapter
 process state, in any message but that one, in an exit reason, a crash report
 or an IO request, and never written to a file. Outside it, custody belongs to the host and the adapter
-proves nothing about it beyond the two structural rules it does impose: the
-registry holds routing only, and losing custody or the registry answers
-`:unavailable` rather than reconstructing anything. This pair therefore states
+proves nothing about it beyond the structural rules it does impose: the
+registry holds routing only; the mandatory capability confirms exclusion before
+the sender receives the token or registry handle; and losing custody, the
+registry or the capability answers `:unavailable` rather than reconstructing or
+bypassing anything. This pair therefore states
 the reference implementations' custody as their own obligation rather than
 claiming a property of every host that might compose a registry.
 
@@ -207,9 +237,16 @@ proved to refuse with one of the seven closed reason atoms and to leave no retai
 guardian's timeout proved distinguishable from every refusal and proved to
 bound the invocation whatever the custody process does; two resolutions in
 flight at once are proved to be independent successes rather than a refusal;
-the one permitted credential-bearing reply, and the resolver call that
+the token-free spawn entry, the post-exclusion token-and-registry message, the
+one permitted credential-bearing reply, and the resolver call that
 carries it, are proved excluded from tracing under a trace session at the
-`arguments` level; the adapter's library tree is proved to read
+`arguments` level; the last owner restores every live session's selected MFA
+pattern; trace-session and tracer restart cases prove that destroyed-session
+flags are not treated as persistent and retained membership protects a
+replacement session; capability loss before binding, immediate
+unreachability and delayed exclusion distinguish composition refusal,
+`:unavailable` and the guardian's `:timeout`; the adapter's library tree is
+proved to read
 no environment variable for a credential by any route, with the launcher's
 ADR 0019 scrubbing read proved never to be consulted for one; and a named
 reviewer reads
@@ -235,12 +272,13 @@ plane, and in no message but the one reply this pair permits. Two invocations in
 one VM become independent, so the **eleven** provider test modules serial for
 this reason can run concurrently and the fast check stops being pinned by that
 application. The other two stay serial on their own reasons, which is why the
-claim is eleven rather than thirteen. Host
-composition gains one explicit input and one explicit obligation: a host that
-starts a runtime with this adapter passes a credential token with the call,
-instead of relying on the VM's environment being right at call time, and it
-owns both the registry that routes the token and the custody process the
-bytes live in. A host that supplies no token gets the adapter's ordinary
+claim is eleven rather than thirteen. Host composition gains three explicit
+model inputs — the credential token, registry handle and tracing capability —
+and owns the registry, custody process and capability behind them. It starts
+those processes before the runtime, binds the capability after runtime start
+but before reporting composition success, and stops all three on normal stop,
+failed start and owner loss. A host that supplies no token gets the adapter's
+ordinary
 refusal to dispatch, which is what a missing environment variable produces
 today.
 
@@ -248,9 +286,10 @@ Nothing public changes. This is adapter-internal: no Model callback, no public
 event, snapshot, artifact, wire method or protocol generation, no durable
 record, and no change to what the child may receive, from whom, or when. The
 credential-size bound and the refusal behaviour ADR 0019 fixed stay as they
-are. Rollback is reverting the adapter change; no data, root or protocol
+are. Rollback reverts the adapter, trace-exclusion support and the CLI,
+app-server and daemon composition changes together. No data, root or protocol
 depends on which mechanism delivered a credential to a process that has since
-exited.
+exited, so rollback needs no data migration or repair.
 
 Technical depth: [Compatibility mechanics](0034-provider-credential-handoff-over-bootstrap-channel-technical.md#technical-adr-0034-compatibility).
 

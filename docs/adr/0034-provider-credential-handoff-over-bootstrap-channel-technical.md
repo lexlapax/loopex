@@ -47,8 +47,12 @@ earlier frame:
 4. The child answers with a `ready` frame that must equal that payload
    exactly. Until this point the child has proved nothing, and no credential
    exists anywhere in the invocation.
-5. Only then does the parent send the `credential` frame, from a process
-   spawned for that one send.
+5. Only then does the guardian spawn the one-send process with a closure that
+   contains only the tracing capability and guardian pid. That process installs
+   its group-leader sink and both trace exclusions, then acknowledges the
+   completed exclusion. Only after that acknowledgement does the guardian send
+   it the token and registry handle in one message. The process resolves the
+   token and sends the `credential` frame.
 6. The `invocation` frame follows, carrying the request, its canonical bytes
    and its staged digest. Possible delivery begins here, not before.
 
@@ -58,7 +62,7 @@ booting — never reaches step 5. That is the property the two existing
 bootstrap-refusal cases assert, and it is why the credential is not carried by
 the step-3 frame.
 
-### The token, the routing registry, and the custody process
+### The token, routing registry, custody process and tracing capability
 
 **Where the token is bound, and what "per-invocation" qualifies.** The token
 is bound at **composition**, per runtime, and what happens per invocation is
@@ -230,17 +234,17 @@ separate:
   kills it at the invocation deadline, reporting `:timeout`. One deadline,
   owned by one process, is the whole rule; a blocked registry is therefore a
   `:timeout` from the guardian and never a silent five-second refusal.
-- **Its lifetime is the host supervisor's, and a restart invalidates the
-  handle.** The host starts the registry under its own supervisor when it
-  composes the runtime. **Exactly which supervisor, per host:** `RuntimeOwner`
-  for the reference CLI and for the app-server host, which is the process that
-  already owns their composed edges; the **daemon's owner process** for the
-  daemon, which links the registry and the custody process as fixed
-  components. In all three the normal path stops them with the rest of the
-  composition, a failed start unwinds them in the same reverse cleanup as any
-  other started edge, and the owner's own death takes them with it — they are
-  linked, so there is no path on which they outlive the host that composed
-  them. If the registry dies, the handle a composed runtime
+- **Its lifetime is the host owner's, and a restart invalidates the
+  handle.** The host owner process starts the registry when it composes the
+  runtime. **Exactly which owner, per host:** the owner process spawned by
+  `LoopexComposition.RuntimeOwner` for the reference CLI and app-server host,
+  and the daemon's owner process for the daemon. `RuntimeOwner` creates an owner
+  process; it is not a supervisor. Each owner links the registry, custody
+  process and tracing capability as fixed components. In all three the normal path stops
+  them with the rest of the composition, a failed start unwinds them in the
+  same reverse cleanup as any other started edge, and the owner's own death
+  takes them with it, so there is no path on which they outlive the host that
+  composed them. If the registry dies, the handle a composed runtime
   holds is invalid and every resolution through it answers `:unavailable`
   **until the host recomposes** — the adapter does not re-look-up, does not
   wait and does not rebuild, because it has nothing to rebuild from. That is
@@ -448,9 +452,11 @@ boundary, not an absolute:
 
   - **The capability is a host-owned process reference in model options**, the
     same class as the credential registry handle beside it and as the
-    executor's `reference:`. The host starts it before composition, as it
-    already starts the registry and the custody process, and hands it the
-    runtime reference as soon as the composition function returns one. It
+    executor's `reference:`. The host starts it before the runtime, as it
+    already starts the registry and custody process, and hands it the runtime
+    reference after runtime start but before the composition owner reports
+    success to its caller. A failed bind is a failed composition and unwinds
+    the runtime, capability, custody and registry in reverse order. It
     holds no membership and makes no decision; it exists because options are
     built before the runtime and something has to bridge that order.
   - **Membership lives in `Loopex.Runtime.Control`**, chosen by reading the
@@ -466,9 +472,13 @@ boundary, not an absolute:
     excluded pid set, and a **ref-counted union of the excluded MFAs** — a
     count per identity, incremented when a sender installs it and decremented
     when that sender's `DOWN` arrives, so an identity is cleared for a new
-    session exactly while some live sender needs it. A set without counts
-    would either leak the identity forever or drop it while another sender
-    still relied on it.
+    session exactly while some live sender needs it. On the transition from one
+    owner to zero, `Control` restores that MFA in every live session to the
+    pattern selected by that session's own configuration; a session that did
+    not select it remains clear. It derives the restoration from the retained
+    session selection rather than from a stale captured pattern. A set without
+    counts would either leak the clear forever, restore while another sender
+    still relied on it, or overwrite a host's selected pattern.
   - **And starting a session is serialised against installing an exclusion.**
     Both are `Control` operations, so both run in its process, one at a time:
     a session cannot be created between a sender's flag going on and its MFA
@@ -491,45 +501,35 @@ boundary, not an absolute:
     it skips every pid Control holds, the same place `excluded?/3` already
     excludes the tracer and the dispatcher by role (`trace.ex:411`), and a
     tracer that has just restarted asks Control rather than starting empty.
-  - **A `Control` restart is the one gap, and it is a runtime-wide event
-    rather than a tracing one.** `Control` is a `:permanent` child under
+  - **A `Control` restart is a runtime-wide event rather than a tracing
+    continuation.** `Control` is a `:permanent` child under
     `:rest_for_one` and is the **second** of the root's seven children
     (`runtime/supervisor.ex:64-90`, strategy at `:92`), so its restart clears
     the set — and also restarts **every child after it**: the worker task
     supervisor, the owner-group and session dynamic supervisors, the event
     dispatcher and, last, the tracer (`:73`, `:74-77`, `:78-81`, `:82-85`,
     `:86-89`). That ends every live trace session, and it also ends every
-    live **session coordinator**, which is the larger fact and the one an
-    earlier revision left out by naming only the tracer. A daemon meets it as
-    `runtime_lost` if the root does not survive, and otherwise as core's own
-    refusal on the next command for every session. What that means precisely: the **process flags already
-    installed on live sessions persist**, being state in the VM's trace
-    sessions rather than in `Control`; only sessions started **after** the
-    restart consult the set, and those find it empty. A sender that resolved
-    before the restart is therefore still excluded for the session it was
-    excluded from, and a sender that starts after it excludes itself again, as
-    every sender does. The remaining case is a sender whose `exclude_self/2`
-    call **finds `Control` unavailable** — mid-restart — and that one fails
-    closed like any other unconfirmed exclusion: it refuses the invocation
-    rather than resolving. So the absolute form — "no trace configuration can
-    name it back in" — holds for configuration, which is what it is about, and
-    the plan does not extend it to a supervision event that ends the sessions
-    anyway.
+    live **session coordinator** and sender owner. Destroying each trace session
+    removes that session's process flags; they do not persist after session
+    destruction. The downstream restart also kills the senders those flags
+    protected, so no credential-bearing sender crosses the loss while
+    `Control`'s retained set is empty. A later sender excludes itself anew. A
+    sender whose `exclude_self/2` call finds the capability or `Control`
+    immediately unreachable fails `:unavailable` before it receives the token;
+    one whose call remains unanswered is killed by the guardian at the
+    invocation deadline and reports `:timeout`.
 
-  **It fails closed.** `exclude_self/2` returns only once both exclusions are
-  installed, and it carries an **explicit** bound rather than inheriting a
-  `GenServer.call` default — a hidden five seconds here would be a silent
-  deadline inside the invocation's, exactly the fault the registry and custody
-  calls avoid by waiting deadline-free. Here a bound is correct where there it
-  was not, because the safe answer to "I cannot confirm the exclusion" is to
-  refuse rather than to wait. If the capability is present but the exclusion cannot be
-  installed — a tracer restarting in that instant — the sender **does not
-  resolve the credential**: the invocation refuses with `:unavailable`, the
-  atom the closed set already carries for "the arrangement needed to resolve
-  is not there", and the caller retries as it would for any other
-  `:unavailable`. The alternative, proceeding untraced-but-unexcluded, would
-  be the one case where a credential is resolved in a process a session may be
-  tracing.
+  **It fails closed under the guardian's one deadline.** `exclude_self/2`
+  returns only once both exclusions are installed. Its call has no independent
+  timeout and uses no hidden `GenServer.call/2` default: the guardian's existing
+  invocation deadline bounds bootstrap, exclusion, resolution and the frame
+  write together. If the capability or `Control` is immediately unreachable,
+  the sender refuses `:unavailable` before it receives the token. If exclusion
+  is merely slow or remains unanswered, the guardian kills the sender at the
+  invocation deadline and reports `:timeout`. A tracer restart destroys its
+  sessions; while the tracer is absent, `Control` can record the sender and MFA
+  set for the replacement session. The sender never proceeds on an unconfirmed
+  exclusion.
 
   **The capability is mandatory wherever a credential token is configured,
   and an absent one refuses.** An earlier revision of this pair let an
@@ -547,13 +547,13 @@ boundary, not an absolute:
 
   So the rule is one rule, and there is no absent branch: **a model
   configuration that carries a `:credential_token` must carry a tracing
-  capability**, and one that is **missing, malformed, unbound, or present but
-  unreachable** fails the invocation with `:unavailable` **before the token is
-  routed** — before any lookup, before custody is reached, before a byte
-  exists in the parent. Missing and unreachable now differ only in when they
-  are caught: a missing or malformed capability is refused at **composition**,
-  where every other malformed option is, so an unbound one cannot reach a
-  call; an unreachable one is the per-invocation refusal above. This reverses
+  capability**. A missing, malformed or unbound capability is refused at
+  **composition**, where every other malformed option is, so it cannot reach a
+  call. A capability or `Control` found immediately unreachable during a call
+  produces `:unavailable` **before the token is routed** — before any lookup,
+  before custody is reached, before a byte exists in the parent. An exclusion
+  call that remains unanswered ends at the guardian's invocation deadline as
+  `:timeout`. This reverses
   the earlier decision, and the earlier decision is recorded here as what it
   was: a case in which the credential would have been resolved in a process a
   session may have been tracing.
@@ -608,39 +608,59 @@ boundary, not an absolute:
   through `:application.get_key(application, :modules)` and
   `Loopex.LLM.ReqLLM.ProviderBridge` lives in `loopex_llm_reqllm`.
 
-  The third is the ordering: `exclude_self/2` is asserted to return **before**
-  the token is routed, and a session started concurrently with it is asserted
-  to produce no message from the sender either way round.
+  The third is the ordering: under inherited `set_on_spawn` tracing, the
+  sender's entry call proves its closure contains only the tracing capability
+  and guardian pid. `exclude_self/2` is asserted to return **before** the
+  guardian sends the one message carrying the token and registry handle, and a
+  session started concurrently with exclusion is asserted to produce no
+  credential-adjacent message from the sender in either order.
 
-  Three more cover what the capability is for, and each names the surface it
+  Four more cover what the capability is for, and each names the surface it
   reads and the two answers that must differ on it.
 
-  **A tracer restart keeps the exclusion.** Surface: the tracer's own message
-  stream. The tracer is killed, the supervisor restarts it, a new session
-  starts, and a long-lived sender that excluded itself before the restart is
-  asserted to produce **no** message under the new session while a
+  **A tracer restart reconstructs the exclusion for a new session.** Surface:
+  the tracer's own message stream and the old session's destruction. Killing
+  the tracer destroys its trace sessions and removes their process flags; the
+  test first proves the old session is gone. The supervisor restarts the
+  tracer, a new session starts, and a long-lived sender retained in `Control`
+  from before the restart is asserted to produce **no** message under the new
+  session while a
   non-excluded control process in the same session produces one. A design
   holding a tracer pid in options fails the first half; a case without the
   control process could pass by tracing nothing.
 
-  **The set returns to baseline.** Surface: `Control`'s excluded-pid set, read
-  **in-VM** — no wire method reports it and none is added. Asserted non-empty
-  while a sender is alive and empty after it exits, which is what separates
-  "the monitors work" from "the set was never populated".
+  **A `Control` restart destroys the old tracing state and its downstream
+  senders together.** Surface: process monitors and the tracer's session list.
+  The case holds a sender after exclusion but before giving it the token, kills
+  `Control`, and asserts that the old trace session and sender both terminate
+  and that no credential-bearing message was ever sent. After the runtime tree
+  recovers, a new trace session and new sender establish a fresh exclusion and
+  complete normally. The case does not assert that a destroyed session's
+  process flags persist.
+
+  **The set returns to baseline and restores selected patterns.** Surface:
+  `Control`'s excluded-pid set and the live session's selected MFA pattern, read
+  **in-VM** — no wire method reports either and none is added. The set is
+  asserted non-empty while a sender is alive and empty after it exits. While
+  excluded, the named MFA produces no raw message; after the last owner exits,
+  the same live session again traces it according to its original selection. A
+  second sender keeps it excluded until that sender exits. Those observations
+  separate working monitors and reference counts from a set that was never
+  populated or a clear that permanently overwrote the host's trace pattern.
 
   **It fails closed, on every way the capability can be missing.** Surface: the
   invocation's own result, plus the child's record of what it received. With
-  the tracer made unavailable at the instant
+  the capability or `Control` made immediately unreachable when
   `exclude_self/2` is called, the invocation is asserted to refuse
-  `:unavailable` and the child is asserted to have received **no** credential
-  frame. With the capability **absent** from a configuration that carries a
-  token, and again with one **bound to a dead process**, the same two
-  assertions hold — the refusal and the empty child — where the earlier
-  revision asserted the opposite for the absent case. The two answers that
-  must differ are therefore the refusal and an ordinary success, and the
-  success case is a **complete** configuration, which is the only one there
-  is. A composition given a token and no capability is asserted to refuse at
-  **composition**, so no call reaches the per-invocation branch at all.
+  `:unavailable`; with the exclusion call held unanswered until the invocation
+  deadline, the guardian kills the sender and reports `:timeout`. In both cases
+  the child receives **no** credential frame. A composition given a token and
+  no capability is asserted to refuse at **composition**, so no call reaches
+  the per-invocation branch. A capability that dies after a successful bind is
+  asserted to refuse the later invocation as `:unavailable`. Each refusal is
+  paired with an ordinary success from a complete, live configuration, and
+  every path asserts that the child receives no credential before exclusion is
+  confirmed.
 - Everywhere else the earlier absolutes stand unchanged: not in guardian
   state, not in an exit reason, not in a crash report, not in an IO request,
   not in a file, not in the environment, not in argv, and in no durable or
@@ -686,8 +706,8 @@ produced, and nothing else is accepted.
 | `:missing` | A custody process | It has no credential for this token |
 | `:expired` | A custody process | It has one and considers it no longer valid |
 | `:oversized` | The sender | A successful reply whose bytes fall outside 1 to 65,536 |
-| `:unavailable` | The registry or a custody process | A missing registry row, a gone registry, a dead custody process, a custody process that answers `:unavailable`, or **a successful reply that is malformed** — not `{:ok, %{credential: binary}}`, including a bare binary where the keyed map is required — because a reply the sender cannot read, or reads in a shape the redaction pass does not protect, is not a credential it can send |
-| `:timeout` | The guardian | Resolution had not completed when the invocation deadline was reached |
+| `:unavailable` | The tracing capability, registry or a custody process | A capability or `Control` that is immediately unreachable, a missing registry row, a gone registry, a dead custody process, a custody process that answers `:unavailable`, or **a successful reply that is malformed** — not `{:ok, %{credential: binary}}`, including a bare binary where the keyed map is required — because a reply the sender cannot read, or reads in a shape the redaction pass does not protect, is not a credential it can send |
+| `:timeout` | The guardian | Exclusion or resolution had not completed when the invocation deadline was reached |
 
 An earlier draft left the first two unnamed and folded a malformed successful
 reply nowhere at all, which meant three real failures had no atom to carry.
@@ -712,7 +732,8 @@ faults and ADR 0029's bounded status has to say which happened — and it can,
 because a refusal arrives as one of the six atoms produced below the guardian
 — `:no_token` and `:invalid_token` from the adapter, `:missing` and
 `:expired` from a custody process, `:oversized` from the sender, and
-`:unavailable` from the registry or custody — while a silence is the
+`:unavailable` from the tracing capability, registry or custody — while a
+silence is the
 guardian's own `:timeout`, the seventh. The reported reason is never the resolved value,
 the token, or a host-authored string.
 
@@ -723,6 +744,9 @@ leaves no retained copy of anything the resolver may have produced:
 | --- | --- |
 | No `:credential_token` in the configuration | `:no_token`, refused before the namespace is created and before any child is spawned |
 | Malformed token — anything that is not a `%CredentialToken{}` struct with a 16-byte `id`, a bare binary included | `:invalid_token`, refused before any lookup and before any child is spawned. The struct is what makes this decidable: a credential is a bare binary, and no content test separates one from a token |
+| A token is configured without a well-formed capability bound to the returned runtime | Refused at composition; no invocation or child starts |
+| The capability or `Control` is immediately unreachable when the sender asks for exclusion | `:unavailable`, before the guardian sends the token or registry handle and before custody is reached |
+| Exclusion remains unanswered when the invocation deadline is reached | The guardian kills the sender and reports `{:error, :timeout}`, before sending the token or registry handle |
 | A successful custody reply that is malformed — not `{:ok, %{credential: binary}}`, a bare binary included | `:unavailable`; a bare binary is refused rather than accepted, because accepting it would carry bytes in a shape the redaction pass leaves verbatim below 65 bytes |
 | The registry holds no row for the token, the registry is gone, or the custody process is dead | `:unavailable`. The host recomposes; nothing is reconstructed, because the registry holds no bytes to reconstruct from |
 | Custody answers `{:error, :missing}` or `{:error, :expired}` | The sender reports `{:error, that_atom}`; the invocation fails through ADR 0019's existing credential-send failure path, the guard tears the child down, and the atom becomes the bounded non-secret status ADR 0029 fixes |
@@ -736,14 +760,16 @@ coordinator's durable decision under ADR 0018, unchanged.
 
 ### Scrub points
 
-- **In the sender.** The minimal credential sender keeps the shape it has
-  today: it is spawned for this one send, it installs its own group leader
-  sink so no IO request can carry anything out of it, it looks the token up in
-  the host's routing registry, calls the custody process it names, receives the
-  one permitted credential-bearing reply, validates the size bound, writes the
-  frame itself and reports `:ok` or `{:error, reason}` from the closed set to
-  the guardian — which is supervising it against the invocation deadline
-  throughout. Its closure holds the token, never the resolved value; in the
+- **In the sender.** The sender is spawned with a token-free closure containing
+  only the tracing capability and the guardian pid. It installs its group
+  leader sink, calls `exclude_self/2`, and acknowledges the completed exclusion.
+  Only then does the guardian send it the token and registry handle in one
+  message. It looks the token up in that registry, calls the custody process it
+  names, receives the one permitted credential-bearing reply, validates the
+  size bound, writes the frame itself and reports `:ok` or `{:error, reason}`
+  from the closed set to the guardian, which supervises the entire sequence
+  against the invocation deadline. Neither the spawn closure nor any message
+  sent before exclusion holds the token, registry handle or credential. In the
   parent the value exists in the custody process and,
   for the duration of one send, in this process's own mailbox and stack, and
   nowhere else — no guardian state, no exit reason and no crash report can
@@ -842,7 +868,7 @@ own custody, and the case has that invocation's custody process hold the
 65,536-byte value rather than writing it into the VM. The ceiling it
 proves, and the refusal above the ceiling, are unchanged.
 
-Three proofs are new:
+Six proof groups are new:
 
 - **Parent environment**, stated as two checkable things rather than one
   unfalsifiable one. From the completion of composition onward — before,
@@ -907,7 +933,9 @@ Three proofs are new:
   what lets an environment read return by a name the current expression does
   not match, which is the drift the case exists to catch.
 - **Resolution failures.** One case per row of the failure table above:
-  absent token, malformed token, a token with no registry row, a gone
+  absent token, malformed token, a token with no tracing capability, a failed
+  capability bind, an immediately unreachable capability or `Control`, an
+  exclusion held past the invocation deadline, a token with no registry row, a gone
   registry, a dead custody process, each of the four refusal atoms, a custody
   process returning a term outside the closed set (reported `:unavailable`), a
   custody process that blocks past the invocation deadline (the **guardian**
@@ -920,7 +948,7 @@ Three proofs are new:
   exit reason and no crash report carries the resolved value. The
   two-resolutions-at-once case is a **success** case, not a refusal: both
   invocations complete with their own credentials.
-- **Tracing, in two cases matching the two tiers above.** Under the
+- **Tracing, in three cases matching the two tiers above.** Under the
   **default** trace configuration, a session at the `arguments` level over a
   real invocation produces no entry naming `route_credential/2`,
   `receive_custody_reply/2` or `write_credential_frame/2`, no raw trace
@@ -943,13 +971,14 @@ Three proofs are new:
 
   | Host | File | Cases | Lane |
   | --- | --- | --- | --- |
-  | Reference CLI | `apps/loopex_cli/test/credential_custody_test.exs` | `reads the credential variable exactly once at composition`; `deletes the credential variable from the VM environment`; `custody state is redacted in a forced crash report`; `the tracing capability is composed and reaches the current tracer` | fast |
-  | App-server host | `apps/loopex_app_server/test/credential_custody_test.exs` | the same four | fast |
-  | Daemon | `apps/loopex_daemon/test/credential_custody_test.exs` | the same four, plus `registry, custody and capability are stopped with the daemon and on a failed start` | fast |
+  | Reference CLI | `apps/loopex_cli/test/credential_custody_test.exs` | `reads the credential variable exactly once at composition`; `deletes the credential variable from the VM environment`; `custody state is redacted in a forced crash report`; `starts the tracing capability before the runtime and binds it before reporting composition success`; `registry, custody and capability stop on normal stop, failed start and owner loss` | fast |
+  | App-server host | `apps/loopex_app_server/test/credential_custody_test.exs` | the same five | fast |
+  | Daemon | `apps/loopex_daemon/test/credential_custody_test.exs` | the same five | fast |
 
   Each proves that composition reads the variable exactly once, deletes it
-  from the VM's environment, and that the holding process's `format_status/1`
-  redacts its state under a forced crash report. The adapter's own tree keeps only what is the adapter's
+  from the VM's environment, that the holding process's `format_status/1`
+  redacts its state under a forced crash report, and that the capability's
+  start-bind-stop lifecycle follows its host owner. The adapter's own tree keeps only what is the adapter's
   to prove: that it reads no environment variable for a credential and that
   the token and resolution contract behaves.
 
@@ -985,13 +1014,23 @@ The review is an acceptance point of M5 Outcome 6, read by someone other than
 the implementer, over the exact diff. It answers: that the token is opaque
 and carries no credential and no authority; that the routing registry holds
 routing only, with no bytes and no material a secret could be derived from;
+that the spawned closure is token-free and receives the token and registry
+handle only after synchronous exclusion; that the mandatory tracing capability
+starts before the runtime, binds before composition reports success and stops
+with its host owner on every exit path; that immediate capability loss refuses
+`:unavailable` while a delayed exclusion ends only at the guardian's invocation
+deadline as `:timeout`; that trace-session destruction removes its process
+flags, a tracer restart reconstructs exclusions from `Control`, a `Control`
+restart kills downstream senders with the destroyed sessions, and the last MFA
+owner restores every live session's selected pattern;
 that the resolved value has no path into guardian state, a message other than
 the one permitted reply, an exit reason, a crash report, an IO request, a file
 or the environment; that every row of the failure table refuses without
-retaining a copy; that the guardian's deadline bounds the whole resolution
+retaining a copy; that the guardian's deadline bounds exclusion and resolution
 whatever a custody process does; that the cleanup and abandonment paths do not
-resurrect a value; that loss of custody or registry answers `:unavailable`
-rather than reconstructing anything; that a host supplying no token is refused
+resurrect a value; that immediate loss of custody, registry or capability
+answers `:unavailable` rather than reconstructing or bypassing anything; that a
+host supplying no token is refused
 rather than falling back to an ambient read; and, on the host side of the
 boundary, that each reference implementation reads the operator's variable
 once, deletes it, redacts its custody process's state, and registers a token
@@ -1062,8 +1101,12 @@ child built from the same manifest digest behaves identically; the build
 manifest is not revised by this decision.
 
 The one visible change is host composition: a host that starts a runtime with
-this adapter passes a credential token with the call and owns both the
-registry that routes it and the custody process that holds the bytes. The reference CLI, the app-server host, the M5 daemon and the
+this adapter puts a credential token, registry handle and tracing capability in
+the model options and owns the registry, custody process and capability behind
+them. It starts those three before the runtime, binds the capability to the
+runtime reference before reporting composition success, and stops them on
+normal stop, failed start and owner loss. The reference CLI, app-server host,
+M5 daemon and
 real-provider lane keep reading `LOOPEX_PROVIDER_API_KEY` where they compose,
 and delete it there, so an operator's setup is unchanged and the release
 check's credential frame is unchanged. An embedder that relied on the adapter reading
@@ -1071,10 +1114,13 @@ the environment for it must pass a token instead; that is the refusal
 path, not a silent fallback, and it is stated in the operator and developer
 documentation the milestone updates.
 
-Rollback is reverting the adapter change. Nothing durable, no root and no
-protocol generation records which mechanism delivered a credential to a
-process that has since exited, so a rollback needs no migration and leaves no
-trace to repair.
+Rollback is a coordinated code rollback of the adapter, the core
+trace-exclusion support and the CLI, app-server and daemon composition changes.
+Hosts resume supplying the credential by the pre-M5 mechanism in the same
+change; no host may keep passing a token to an adapter that no longer resolves
+one. Nothing durable, no root and no protocol generation records which
+mechanism delivered a credential to a process that has since exited, so a
+rollback needs no data migration and leaves no retained trace state to repair.
 
 Acceptance binds this complete pair at the exact candidate the maintainer
 names in the governance record. Its claims remain unproved until the tests the
