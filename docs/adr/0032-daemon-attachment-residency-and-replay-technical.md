@@ -1229,10 +1229,14 @@ invalid-root clause at `:266`), which
   whose point is to avoid exactly that cost. So this milestone adds one
   further narrow read to core and counts it: **`Loopex.list_sessions/2`
   taking a bound and stopping after the bound-plus-first valid entry**,
-  answering what it read and whether it stopped early. It is read-only and
-  additive — the arity-one form keeps its exact meaning and its callers — and
-  it is the smallest thing that lets the bound be enforced rather than
-  discovered.
+  answering what it read and whether it stopped early. The entries it returns
+  when it stopped early are in directory order, not a sorted prefix: the
+  arity-one form sorts only after it has read everything, which is the cost
+  the bound exists to avoid, so the bounded form cannot sort and does not
+  claim to. Its answer is the early-stop flag; the daemon reads nothing else
+  from it. It is read-only and additive — the arity-one form keeps its exact
+  meaning and its callers — and it is the smallest thing that lets the bound
+  be enforced rather than discovered.
 - **Homogeneity.** One state root is one host composition for the daemon's
   process lifetime. The daemon is composed once, with one workspace, policy,
   provider configuration and set of project resources, and serves every
