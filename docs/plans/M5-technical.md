@@ -777,7 +777,7 @@ repository:
   before/after pair is what catches a build that writes into its own source
   tree. The first manifest is also compared with the inventory the closure
   evidence recorded, which is what ties the extraction to the commit;
-- exactly **one** exclusion, named rather than implied: the build-output roots
+- exactly **one** exclusion rule, named rather than implied: the two build-output roots
   `_build/` and `deps/`, which the build is supposed to create. Nothing else
   is excluded, and the list of exclusions is part of the retained evidence, so
   a later exclusion cannot quietly widen what "unchanged" means.
@@ -1665,7 +1665,7 @@ So `apps/loopex_daemon` has one top-level process, `Loopex.Daemon.Owner`, a
 `GenServer` that traps exits and holds the links itself — the same pattern
 `RuntimeOwner` already uses, for the same reason.
 
-**It links a fixed set of ten processes — nine without artifact
+**It links a fixed set of eleven processes — ten without artifact
 transfers — and a bounded, dynamic population of lease owners beside them.**
 Earlier drafts said four, then seven, then nine, each time having counted the
 components the daemon *thinks* about rather than the processes that actually
@@ -2042,7 +2042,7 @@ runs no dialyzer, and `RuntimeOwner` itself already destructures the field, at
 not, and the real argument is the simpler one above.
 
 **There is no restart strategy, because there are no restarts.** Every one of
-the fixed ten — nine without transfers — is `start_link`ed by the owner,
+the fixed eleven — ten without transfers — is `start_link`ed by the owner,
 as is each lease owner beside them, and the owner's
 `handle_info({:EXIT, pid, reason}, state)` clause is the failure rule. That
 clause is also the **reader** the fatal-class map needs — it matches the pid
