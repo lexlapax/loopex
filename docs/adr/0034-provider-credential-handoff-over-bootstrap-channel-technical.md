@@ -311,9 +311,35 @@ boundary, not an absolute:
   future one, is outside the list again. An enumeration of callees is not a
   contract anyone can keep.
 
-  **So the core API takes both, and the adapter supplies the function list.**
-  The sender — the short-lived process that resolves the credential and writes
-  the frame — calls, **before it resolves anything**:
+  **The sender cannot exclude itself first, because it is already traced when
+  it starts.** This pair said for several revisions that the sender "calls
+  `exclude_self/2` before it resolves anything", which is true of the
+  function body and beside the point: `set_on_spawn` gives a spawned process
+  its parent's trace flags **at spawn**, so the closure's own entry call is
+  traced — and the closure **holds the token**, because that is how a spawned
+  function receives anything. An audit probe saw exactly that: the entry call,
+  token included, delivered to the tracer before the first line of the body
+  could run. Ordering inside the body cannot fix an exposure that happens at
+  the boundary into it.
+
+  **So the bridge spawns a token-free bootstrap process.** What is spawned
+  holds **no token, no registry handle and no credential** — nothing but the
+  capability reference it needs to exclude itself and the pid to report back
+  to. Its body does one thing first: establish its exclusion, synchronously,
+  and confirm it. **Only then** does it receive the token and the registry
+  reference **by message**, and only then does it resolve and write the frame.
+  A message sent to an already-excluded process is not a traced call, so
+  nothing the tracer can see ever carries the token.
+
+  Its witness asserts the property the old ordering could not: the tracer
+  receives **no raw trace message from that process carrying the token, at any
+  point in its life** — entry included — while a non-excluded control process
+  spawned with the same closure shape does produce one, so the case cannot
+  pass by tracing nothing.
+
+  **The core API takes both inputs, and the adapter supplies the function
+  list.** The bootstrap process — which becomes the sender once it has the
+  token — calls, **before it receives anything**:
 
   ```elixir
   Loopex.Trace.exclude_self(capability, functions: [{module, function, arity}])
@@ -333,8 +359,9 @@ boundary, not an absolute:
   it is listed below.
 
   It returns `:ok` once the caller is excluded from **every** live trace
-  session and recorded as excluded for every future one. Only then does the
-  sender route the token, receive the credential and write the frame. Nothing
+  session and recorded as excluded for every future one. Only then is the
+  token sent to it, and only then does it route the token, receive the
+  credential and write the frame. Nothing
   the sender does after that point can appear in a trace, whatever modules or
   functions a host names — including `:gen_tcp`, including modules nobody has
   thought of.
@@ -514,7 +541,7 @@ boundary, not an absolute:
 
   | MFA | What it holds |
   | --- | --- |
-  | `Loopex.LLM.ReqLLM.ProviderBridge.route_credential/2` | The registry handle and the token |
+  | `Loopex.LLM.ReqLLM.ProviderBridge.route_credential/2` | The registry handle and the token — received **by message** after the exclusion, never carried into the process |
   | `Loopex.LLM.ReqLLM.ProviderBridge.receive_custody_reply/2` | The resolved credential |
   | `Loopex.LLM.ReqLLM.ProviderBridge.write_credential_frame/2` | The resolved credential |
 
