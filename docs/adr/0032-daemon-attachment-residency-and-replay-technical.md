@@ -727,7 +727,11 @@ It is **required**, not optional: an absent `writer_epoch` on one of the nine
 is a malformed request, answered with ADR 0023's `invalid_request`, and never
 `control_not_held` — the gate has not been reached, because there is nothing
 well-formed to put through it. Every other field of those requests is ADR
-0023's, unchanged. A connection is
+0023's, unchanged. `writer_epoch` is generation-2 transport authorization,
+not part of ADR 0023's durable command semantics: ADR 0033's gate consumes and
+removes it before the request is mapped to core, so exact command-ID
+re-presentation after reacquisition uses the fresh epoch without changing the
+core command digest. A connection is
 one attachment after `session.attach`; generation 2 permits a connection to
 hold at most one attachment at a time — **and at most one controller lease**,
 which ADR 0033 fixes for the same reason and which is what makes closing "the

@@ -893,8 +893,13 @@ the host placement lock and Store writer marker, never a client mutation and nev
   connection holds a live attachment for its pinned session, except that a verified
   dormant session's `session.resume` may precede attach under that
   connection's held lease. The check and core handoff are serialized against
-  lease transitions for the session. Release uses the same serialized check
-  without the attachment condition.
+  lease transitions for the session. `writer_epoch` is consumed only by this
+  daemon authorization gate and is removed before the ADR 0023 request is
+  mapped to the core command. It never enters the core command digest or a
+  durable record. Re-presenting the same method, durable `command_id` and
+  canonical semantic input after reacquisition therefore uses the fresh epoch
+  to authorize the call while core sees the same idempotent command binding.
+  Release uses the same serialized check without the attachment condition.
 
   **Every way either gate can fail answers one code, `control_not_held`, and it
   says nothing about which condition failed.** The gate has five conditions —
