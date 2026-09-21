@@ -600,7 +600,7 @@ carry.
 
 | Field | Value |
 | --- | --- |
-| `reason` | One of `operator_stop`, `store_lost`, `store_capacity_exceeded`, or `fatal:<class>` for the remaining classes the plan's fatal-class map names, one per linked component: `fatal:runtime_lost`, `fatal:transfers_lost`, `fatal:workspace_lease_lost`, `fatal:executor_lost`, `fatal:registry_lost`, `fatal:custody_lost`, `fatal:capability_lost`, `fatal:relay_lost`, `fatal:connections_lost` — nine in a daemon with artifact transfers and eight without. **`fatal:listener_lost` is not among them**: the listener is what would have written the record, so no client can be told that reason, which the plan's own class table says and this set contradicted. A lease owner's death is not among them: it closes one session's controller connection with `control_owner_lost` and ends no daemon. The startup classes carry no reason, because no socket exists when they occur, and neither does `owner_lost`, where the process that would write it is the one that is gone |
+| `reason` | One of `operator_stop`, `store_lost`, `store_capacity_exceeded`, or `fatal:<class>` for the remaining classes the plan's fatal-class map names, one per linked component: `fatal:runtime_lost`, `fatal:transfers_lost`, `fatal:workspace_lease_lost`, `fatal:executor_lost`, `fatal:registry_lost`, `fatal:custody_lost`, `fatal:capability_lost`, `fatal:relay_lost` — eight in a daemon with artifact transfers and seven without. **`fatal:listener_lost` and `fatal:connections_lost` are not among them**: the listener is what would have written the record, and the connection registry owns the buffer-control interface it would have been written *through*, so no client can be told either reason. The plan's own class table says both, this set contradicted the first, and a later revision added `fatal:connections_lost` here without noticing it had the same defect. A lease owner's death is not among them: it closes one session's controller connection with `control_owner_lost` and ends no daemon. The startup classes carry no reason, because no socket exists when they occur, and neither does `owner_lost`, where the process that would write it is the one that is gone |
 | `message` | A bounded non-secret sentence for an operator to read |
 | `retry_after_ms` | Present only for `operator_stop`, where a restart is expected; absent for every fatal reason, because the daemon does not know when the cause will be fixed |
 
@@ -805,9 +805,15 @@ closes nothing on its own. The connection is closed a moment later by step 3
 of the stop sequence, which is where a client is told the reason it is going
 away; `daemon_stopping` answers the one request that arrived in between.
 
-The instant it names is the relay's acknowledgement, not the signal: a command
-whose relay ticket was recorded **before** the acknowledgement has settled by
-the time it returns, and one that arrives after it is refused. Those are
+The instant it names is the relay's acknowledgement, not the signal, and it
+is an **admission instant and nothing more**. A command whose relay ticket was
+recorded **before** the acknowledgement was admitted and is carried; one that
+arrives after it is refused. The acknowledgement says nothing about whether an
+admitted command has *finished*: the daemon waits for that separately, for a
+bounded time, and its stop proceeds at that bound with anything still running
+classified and fenced. An earlier revision of this passage said an admitted
+command "has settled by the time it returns", which was the design the bounded
+wait replaced and which a resume paging a long history defeats. Those are
 the two witnesses, and they must give different answers on the same surface —
 the connection's own reply stream.
 
