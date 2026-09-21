@@ -923,12 +923,13 @@ counts activations per daemon lifetime, for the same reason — it counts what
 the daemon did.
 
 Two alternatives were rejected, and both would be **a further core change**
-beyond the five this milestone makes. A lifecycle notification from core to the daemon
+beyond the six this milestone makes. A lifecycle notification from core to the daemon
 would be a new core-to-host signal, with its own delivery and ordering
 questions, added for a listing field. A monitorable coordinator handle handed
 out to the daemon would export core's supervision topology across the boundary
-and invite the daemon to reason about it. M5's core changes stay at five, and
-neither of these is among them.
+and invite the daemon to reason about it. M5's core changes stay at six, and
+neither of these is among them — the bounded listing this section adds is one
+of the six, and a notification or a handle would be a seventh.
 
 ADR 0033's lease-owner rule is untouched by this and stays — and it is a
 **session-scoped** rule, not a fatal one; this sentence said "fatal" from the
