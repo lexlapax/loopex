@@ -1995,7 +1995,7 @@ with the stable reason on `stderr`.
 | Contract | Operator page |
 | --- | --- |
 | `loopex sessions`, `loopex run` and `loopex resume` offline grammar, session-driving semantics and output | `docs/operator/coding-sessions.md`, whose syntax rows stay unchanged while its numeric-validation account is corrected, Outcome 6's host-composition credential change is stated, and its daemon-page cross-link is added |
-| `loopex run --daemon`, `loopex resume --daemon`, the create-and-drive sequence, bounded post-attach inspection, phase-specific reconnect clock, and the restart-then-resume remedy after a temporary coordinator dies | `docs/operator/daemon.md`, driving and recovery sections |
+| `loopex run --daemon`, `loopex resume --daemon`, the create-and-drive sequence, the pre-dial `--skill` and `--skill-resource` refusals where no exact project-skills decision is handed to the reference client, bounded post-attach inspection, phase-specific reconnect clock, and the restart-then-resume remedy after a temporary coordinator dies | `docs/operator/daemon.md`, driving and recovery sections |
 | `loopex sessions --daemon`, `--limit`, `--after`, `--status`, exact compact JSON output, one-query retry and `index_full` | `docs/operator/daemon.md`, listing and recovery sections |
 | `loopex daemon` composition inputs, readiness record, signals, exit classes | `docs/operator/daemon.md`, running section |
 | `loopex daemon prepare-index`, its state-root-only grammar, exclusion order, success and residual outcomes | `docs/operator/daemon.md`, migration section |
