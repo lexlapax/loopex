@@ -164,8 +164,12 @@ socket output buffers, the resident window and the residency ceilings. The
 socket path is
 `daemon.sock` inside a `0700` daemon-owned subdirectory of the state root
 unless the operator names another, and a path beyond the platform bound is
-refused at start rather than truncated. The subdirectory exists so the daemon
-never has to re-permission or reject an operator's existing root, which the
+refused at start rather than truncated. The selected state root and any
+explicit socket path must also be valid UTF-8 before path resolution or any
+filesystem, placement, Store or socket effect: invalid root bytes refuse
+`state_root_unusable`, including for the offline import, while invalid explicit
+socket bytes refuse startup as `invalid_socket_path`. The subdirectory exists
+so the daemon never has to re-permission or reject an operator's existing root, which the
 foreground server creates `0755` under the ordinary umask. A daemon first
 acquires the root's crash-reclaimable host placement lock, then the Store's
 writer marker, before it touches the socket path. Two simultaneous daemon
@@ -267,6 +271,16 @@ dormant branch starts, reattaches and inspects a new coordinator. Other command
 failures retain their existing mappings. Same-lifetime repair would require another core lifecycle
 surface and is outside this decision.
 
+A reconnecting resume client keeps one resume command identity while that
+activation attempt is unresolved. A resolved historical success does not prove
+that the successor daemon activated the session: core replays a completed
+resume without starting a coordinator. If the following attach still reports
+`session_dormant`, the client ends that resolved attempt, allocates a new resume
+command identity for the successor's activation attempt, and retains that new
+identity across any further loss. It repeats that sequence only inside the one
+non-resetting recovery clock; it never substitutes a new identity while an
+attempt remains unresolved.
+
 Lazy recovery is what a daemon can honestly promise on a store whose session
 directory is not Store truth and whose every open replays a full log.
 `session.list` returns bounded pages, with an exact continuation cursor, over
@@ -277,7 +291,11 @@ enumerates the legacy session directory, so malformed or arbitrarily numerous
 directory names cannot defeat the startup bound. A populated legacy root with
 session entries and no index requires an explicit offline import before the daemon serves it; the
 import's legacy directory scan is intentionally outside the service-start
-bound. The index is not Store truth and can omit a session committed across a
+bound. That import uses a strict daemon-owned reader rather than the released
+listing projection, which deliberately skips entries it cannot decode: every
+non-temporary legacy row must validate, and one corrupt, oversized or invalid-
+UTF-8 row refuses the whole import without changing an existing index. The
+index is not Store truth and can omit a session committed across a
 crash cut; exact-ID and command-ID recovery repair such an omission. Lineage,
 lifecycle state and committed sequence are not list fields: a client that
 needs them attaches and reads the snapshot.
@@ -357,7 +375,12 @@ holder remaining independent, an explicit replacement removing only its named
 target, holder death releasing the holder's complete attachment and transfer
 set, a slow observer detached at its last emitted cursor, idle eviction and
 reconnect with no missing durable event, bounded-index startup independent of
-legacy directory population, and each count and byte ceiling refusing
+legacy directory population, strict offline import refusing corrupt, oversized
+and invalid UTF-8 legacy rows without omitting them or changing the prior index,
+a completed resume reply lost across daemon replacement and replayed to success
+without activation followed by a fresh resume command identity that activates
+and attaches, direct invalid-binary root and socket inputs refusing before any
+effect, and each count and byte ceiling refusing
 independently with observed process RSS recorded beside it.
 
 Technical depth: [Contract and evidence](0032-daemon-attachment-residency-and-replay-technical.md#technical-adr-0032-decision).

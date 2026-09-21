@@ -15,6 +15,16 @@ Its path is `<state root>/daemon/daemon.sock` by default, inside a
 daemon-owned subdirectory the daemon creates mode `0700`, and it may be set
 explicitly to another path under the same rule.
 
+The shared parser/path resolver first applies `String.valid?/1` to the selected
+state-root binary and to an explicit socket-path binary, before `Path.expand/1`,
+path containment, readiness encoding, or any filesystem, placement, Store,
+component or socket operation. Invalid state-root bytes refuse
+`state_root_unusable` for daemon startup and `daemon prepare-index`; because the
+default socket derives from that root, the root refusal owns that case. Invalid
+bytes in an explicit `--socket` value refuse startup as `invalid_socket_path`.
+This is a direct binary boundary rather than an assumption about how a given OS
+normalizes environment or argument bytes.
+
 It is a subdirectory rather than the state root itself because the root is not
 the daemon's to re-permission. `LoopexAppServer.Host` creates it with
 `File.mkdir_p/1` and no mode, so under the ordinary umask of 022 an existing
@@ -2149,8 +2159,8 @@ bounded `stat` needed to learn those two facts and refuses
 `loopex daemon prepare-index` while no daemon or foreground server owns the
 root. That offline command acquires the same host placement lock first and the
 local Store marker second, creates or verifies
-the same owner-only, non-symlink mode-`0700` `daemon/` directory, uses the legacy
-session-directory enumeration, and validates any existing canonical index. It
+the same owner-only, non-symlink mode-`0700` `daemon/` directory, uses a strict
+daemon-owned legacy reader, and validates any existing canonical index. It
 constructs the **union** of those two inputs. A session present in both must
 carry the exact same placement identity; a disagreement refuses as
 `session_index_corrupt` with status 84 and leaves the old index byte-for-byte
@@ -2175,6 +2185,30 @@ and may need operator repair of a corrupt or oversized legacy directory. This
 one-time cost is kept outside daemon availability rather than mislabeled as a
 bound. Re-running the command is therefore a refresh: an index-only row and a
 legacy-only row both survive.
+
+The strict reader does not call `Loopex.SessionDirectory.list_sessions/1`:
+that released operator projection intentionally drops a row when its entry
+cannot be decoded. The daemon reader opens the `sessions/` directory without
+following a symbolic link, retains its device/inode identity, materializes the
+names with `File.ls/1`, applies the released temporary-name exclusion
+(`String.contains?(name, ".tmp-")`), and rechecks the directory identity. For
+every remaining name it requires the released one-component session-ID
+containment rule, a regular non-symlink file,
+and an identity-stable read of at most the released 1 MiB entry ceiling plus one
+byte to prove overflow. It rejects the compressed external-term tag before it
+decodes the existing Erlang-term entry with
+`:erlang.binary_to_term(contents, [:safe])`, and requires exactly
+`session_id`, `runtime_id` and `commands`: the stored session ID must equal the
+filename; the runtime ID and every command ID must be valid UTF-8, 1 through
+256 bytes and NUL-free; at most 4,096 commands may exist; and every cached
+result must equal the session ID. A non-temporary name or row that fails
+containment, file-kind, size, stable-read, safe-decode, exact-key, identity,
+UTF-8 or command validation refuses `session_index_corrupt`; it is never
+filtered out. Failure to open, list or retain the directory identity uses the
+exact `state_root_unusable` refusal. All such failures precede publication, preserve
+an existing index byte-for-byte and run the same bounded exclusion cleanup as
+the other pre-rename failures. This reader remains in the daemon adapter and
+adds no core listing API.
 
 Successful import exits `0` after those bounded release attempts, remains
 silent on `stdout`, and emits no daemon readiness record. Parser refusals use
@@ -2241,6 +2275,19 @@ in this exact sequence:
    directory entry and daemon index row from the now-proved placement; either
    write may report its own failure without changing Store truth.
 
+That resume identity belongs to one activation attempt, not to the session for
+all future daemon lifetimes. While its result is unresolved, every transport
+retry re-presents the same command ID and byte-identical input. Once a success
+is resolved, the client attaches. If a daemon replacement made the session
+dormant and core answered by replaying the completed resume command, that
+successful replay starts no coordinator; an ensuing `session_dormant` attach
+therefore closes the resolved attempt and causes the client to allocate a new
+resume command ID for a new activation attempt. That new ID is retained across
+any loss until its own result resolves. Another resolved-success/dormant pair
+may repeat the transition, but every attempt remains inside the original
+non-resetting client recovery deadline. The client never allocates a new ID to
+escape an unresolved result.
+
 The create-history arm is the companion host-facing API:
 
 ```elixir
@@ -2304,7 +2351,12 @@ complete and valid, no rollback is attempted, and an abrupt restart accepts
 either complete snapshot. The import
 case starts with index-only session A and legacy-only session B and proves both
 rows in the replacement; a second case gives one shared ID two placement
-identities and proves refusal with the original index unchanged.
+identities and proves refusal with the original index unchanged. Three strict-
+reader cases place, respectively, a corrupt term, an entry larger than 1 MiB
+and an entry whose stored runtime ID contains invalid UTF-8 under otherwise valid
+non-temporary names. Each refuses `session_index_corrupt`, leaves the complete
+pre-existing index byte-for-byte identical, publishes no partial union and
+proves the offending row was not silently omitted.
 
 ### Session residency: active, dormant, and their bounds
 
@@ -2677,6 +2729,14 @@ byte ceilings refuse
 independently with process RSS recorded; and progress is coalesced or dropped
 without a journal delay.
 
+Client-recovery evidence forces the resume replay cut: a resume commits and
+activates, its reply is lost, the daemon is replaced, and the retained command
+ID resolves as a completed replay that starts no coordinator. Attach still
+returns `session_dormant`; the client then allocates one new resume command ID,
+and a loss before that attempt's reply reuses that new ID. The fresh attempt
+activates exactly one coordinator and the subsequent attach succeeds, all
+inside the original non-resetting recovery clock.
+
 Index evidence proves startup reads at most the 4 MiB index image and never
 enumerates `sessions/`, including with more than 4,096 valid legacy files and
 arbitrarily many malformed names; oversize, corrupt, duplicate and interrupted
@@ -2696,7 +2756,13 @@ publication outcomes reverses the session operation, and command-ID recovery
 repairs an omitted row without creating a second session.
 The transport cases also cover simultaneous starts, Store
 loss, generation negotiation, peer authorization, socket-path bounds and ADR
-0023 framing refusals.
+0023 framing refusals. Direct parser/path-resolver cases pass binaries containing
+`<<0xFF>>` as the selected state root and as the explicit socket path rather
+than relying on an OS argument or environment representation. They assert exact
+`state_root_unusable` and `invalid_socket_path` refusals, respectively, before
+path normalization or any placement, Store, filesystem, component, readiness
+encoding or socket call; `daemon prepare-index` repeats the root case with the
+same zero-effect assertion.
 
 ### Alternatives
 

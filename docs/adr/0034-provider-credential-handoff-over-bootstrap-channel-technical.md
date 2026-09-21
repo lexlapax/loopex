@@ -162,7 +162,7 @@ an earlier frame:
    deadline and permits only the `credential` frame write under the bound nonce
    after the sender's receipt-time and immediate-pre-write rechecks. After a
    successful write the sender drops every credential-bearing logical reference
-   and tail-calls a final wait whose arguments and state are non-secret. That
+   and tail-calls a final wait whose arguments are non-secret. That
    wait sends the exact result tuple with `:credential_frame, :ok` and parks; an
    immediate write failure instead sends normalized
    `{:error, :unavailable}`. Only the
@@ -637,6 +637,18 @@ boundary, not an absolute:
   nothing does — so a case cannot pass because the value was short, absent or
   never rendered.
 
+  Entry redaction happens after Trace has received the raw trace tuple, so it
+  cannot protect the callback's last-message crash material. Trace therefore
+  implements the same defensive `format_status/1` boundary as the credential
+  custodians: it replaces `state`, `message` and `reason` with fixed redacted
+  atoms and `log` with `[]`. A forced callback crash while a `complete/3`
+  tuple carrying distinct token and registry-handle canaries is the actual last
+  message captures the complete OTP report and owner-observed exit, proves
+  those four replacements occurred, and refutes both canaries everywhere in
+  both. Entry rendering and Trace status
+  redaction are separate witnesses: the first protects emitted entries; the
+  second protects the one process allowed to consume raw trace messages.
+
   **The process half, probed at both toolchain pairs before it was written
   down.** A process flagged by inheritance (`:set_on_spawn` from a traced
   parent) calls `:trace.process(session, self(), false, [:all])`; the call
@@ -738,11 +750,15 @@ boundary, not an absolute:
     exclusions, and replies to the trace caller only after Trace acknowledges
     the current version.
 
-    Trace alone holds each full handle returned by `:trace.session_create/3`
-    in its process state and never sends or copies that value. It splits the
-    weak `{name, id}` element from that exact newly created full handle and
-    sends only the weak element to Control; it never finds the session by name
-    in `:trace.session_info(:all)`, where another runtime may have the same
+    Trace creates one private ETS table that only the Trace process may access.
+    Each full handle returned by `:trace.session_create/3` moves immediately
+    from the creating callback's local variable into that table and never enters
+    callback state, a reply or another message. Callback state retains only the
+    table identifier, normalized configuration and weak `{name, id}` identity;
+    `:sys.get_state/1` can therefore copy no full handle, and the private table
+    denies a caller that learns its identifier. Trace sends only the weak
+    identity to Control; it never finds the session by name in
+    `:trace.session_info(:all)`, where another runtime may have the same
     `:loopex_trace` name. Control retains normalized configuration and selected
     MFAs plus that weak identity, which does not keep the session alive, and
     monitors the exact Trace pid. A
@@ -751,9 +767,10 @@ boundary, not an absolute:
     the weak identity, normalized configuration and selected MFAs, but Control
     preserves the existing experimental embedded API: `Loopex.Runtime.trace/2`
     still returns its present `{:ok, session_description}` shape and trace stop
-    and status retain their present shapes. Explicit stop makes Trace destroy
-    its full handle and acknowledge absence before Control drops the retained
-    weak identity and selection.
+    and status retain their present shapes. Explicit stop makes Trace read and
+    destroy the full handle inside its private table, delete that row and
+    acknowledge absence before Control drops the retained weak identity and
+    selection.
 
     Trace replacement has a registration handshake because supervisor start and
     delivery of Control's monitor `DOWN` are not ordered. A new Trace announces
@@ -767,8 +784,10 @@ boundary, not an absolute:
     current until its acknowledgement, and trace start and status publish
     nothing from it meanwhile.
 
-    The last full handles die with the predecessor Trace. Before creating a
-    replacement session the new process checks the exact old weak identity in
+    The private table is owned by Trace and has no heir, so process death
+    deletes the table and releases its last full handles even when
+    `terminate/2` is bypassed. Before creating a replacement session the new
+    process checks the exact old weak identity in
     `:trace.session_info(:all)`. When absent it skips destroy. When present it
     calls `:trace.session_destroy(old_weak)` and accepts `true`; it normalizes a
     racing `false` or `ArgumentError`/`:badarg` only after a fresh all-session
@@ -783,12 +802,15 @@ boundary, not an absolute:
     mailbox orders, races stop with the last sender exit, and proves Control
     never receives a full handle. The test forces both mailbox orders — old
     `DOWN` before replacement hello and replacement hello before old `DOWN` —
-    and in each observes exactly one current Trace monitor and one full-handle
-    owner after acknowledgement, no start or status publication before it, and
-    no lookup by the shared session name. Killing Trace while the test retains
-    only the weak handle makes the old weak identity disappear before the
-    replacement publishes; a non-excluded control process proves the
-    replacement is live.
+    and in each observes exactly one current Trace monitor and one private
+    handle table after acknowledgement, no start or status publication before
+    it, and no lookup by the shared session name. `:sys.get_state/1`, an OTP
+    status request and a complete forced-crash report are each inspected and
+    contain no full handle; the status and crash cases also prove the defensive
+    replacements rather than passing because no report was emitted. Killing
+    Trace while the test retains only the weak handle deletes the table and
+    makes the old weak identity disappear before the replacement publishes; a
+    non-excluded control process proves the replacement is live.
   - **The set is leak-free and proportional rather than bounded**, and the
     distinction is worth the word: nothing caps it, because nothing may refuse
     a sender. What holds is that every entry has an owner whose `DOWN`
@@ -812,9 +834,10 @@ boundary, not an absolute:
     the set — and also restarts **every child after it**: the worker task
     supervisor, the owner-group and session dynamic supervisors, the event
     dispatcher and, last, the tracer (`:73`, `:74-77`, `:78-81`, `:82-85`,
-    `:86-89`). Trace is the sole holder of every full strong session handle, so
-    stopping it releases those last strong handles even if its `terminate/2`
-    callback is bypassed; Control retains only weak identities. The replacement
+    `:86-89`). Trace's private ETS table is the sole retained holder of every
+    full strong session handle, so stopping its owner deletes the table and
+    releases those last strong handles even if `terminate/2` is bypassed;
+    callback state and Control retain only weak identities. The replacement
     destroys an old weak identity or confirms its absence before it publishes a
     new session. The same restart ends every session coordinator.
     M5 also extends `Loopex.Runtime.ProviderLifetime` with an opaque supervised
@@ -1009,10 +1032,11 @@ boundary, not an absolute:
   If the capability or `Control` is immediately unreachable,
   the sender refuses `:unavailable` before it receives the token. If exclusion
   is merely slow or remains unanswered, the guardian kills the sender at the
-  invocation deadline and reports `:timeout`. A tracer restart drops its sole
-  strong handles; the production replacement confirms Control's weak old
-  identities absent before publishing new sessions. The defensive destroy
-  branch exists for a present identity and is exercised only by the explicit
+  invocation deadline and reports `:timeout`. A tracer restart deletes its
+  owner-only private table and therefore drops its sole retained strong
+  handles; the production replacement confirms Control's weak old identities
+  absent before publishing new sessions. The defensive destroy branch exists
+  for a present identity and is exercised only by the explicit
   forbidden-extra-strong-handle fault fixture described below. While Trace is absent,
   `Control` can record the sender and MFA set for the replacement session. The
   sender never proceeds on an unconfirmed exclusion.
@@ -1211,22 +1235,31 @@ boundary, not an absolute:
   makes the private messages part of the operation binding rather than
   descriptive tags.
 
-  **The application-message proof is a separate state census, not a trace
+  **The application-message proof is a separate mailbox census, not a trace
   inference.** The named `credential_plane_test.exs` case `custody reply is the
   sole credential-bearing BEAM message` pauses the real registry, custody,
-  guardian and sender at every documented handoff. It positively confirms the host-owned custody state contains the
-  canary before resolution and observes the exact
-  `{:ok, %{credential: canary}}` reply retained by the sender after resolution
-  and before its non-secret `:custody` result. The case enumerates the actual
-  registry request and reply,
-  `:begin_bootstrap`, `:bootstrap_result`, `:credential_context`, every phase
-  result and continuation, monitor and ownership message, and every gated mailbox; every application
-  message except the custody reply is canary-free, registry and guardian state
-  are canary-free, and the sender is canary-free again before
-  its `:credential_frame` result. These assertions use deterministic phase
-  pauses and direct state and mailbox inspection. Neither call tracing nor the
-  absence of a trace event is accepted as evidence that an application message
-  was observed.
+  guardian and raw Task sender at every documented handoff. For each send it
+  suspends the intended receiver before releasing the preceding sender, then
+  uses a short-lived, unlinked inspector to read that receiver's actual
+  `Process.info(pid, :messages)` after enqueue and before receipt. For the
+  custody call it observes the complete two-tuple whose first field is that
+  live `GenServer.call`'s generated reply tag and whose second field is
+  `{:ok, %{credential: canary}}`; seeing the payload outside its real OTP reply
+  envelope does not satisfy the case. The inspector reports only a fixed
+  non-secret verdict, is killed and awaited before the receiver resumes, and
+  cannot leave its copied canary in the test process. The case positively
+  confirms the host-owned custody state contains the canary before resolution.
+  It enumerates the actual registry request and reply, `:begin_bootstrap`,
+  `:bootstrap_result`, `:credential_context`, every phase result and
+  continuation, monitor and ownership message, and every gated mailbox; every
+  application message except the custody reply is canary-free, and registry
+  and guardian state are canary-free. After the frame write, the sender
+  tail-calls the non-secret final wait; the case proves its
+  `current_function` is the named final-wait MFA, then refutes the canary in
+  its current stack, mailbox, process dictionary and forced-crash material
+  before `:credential_frame`. It makes no `:sys.get_state`
+  claim about a raw Task. Neither call tracing nor the absence of a trace event
+  is accepted as evidence that an application message was observed.
 
   The managed liveness half delays the delivery marker and therefore the Trace
   acknowledgement beyond 5,000 ms under a
@@ -1246,16 +1279,19 @@ boundary, not an absolute:
   reads and the two answers that must differ on it.
 
   **A tracer restart reconstructs the exclusion for a new session.** Surface:
-  the tracer's own message stream, `:trace.session_info(:all)` and the weak old
-  identity. Trace is the sole process holding the full strong handle; the test
-  retains only `{name, id}`, kills Trace and first proves that weak identity is
+  the tracer's own message stream, private handle table,
+  `:trace.session_info(:all)` and the weak old identity. The test first proves
+  that `:sys.get_state/1` and an OTP status request expose the table identifier
+  and weak identity but no full handle. It retains only `{name, id}`, kills
+  Trace, observes the owner-only table disappear and proves that weak identity
   absent. The supervisor restarts the
   tracer, a new session starts, and a long-lived sender retained in `Control`
   from before the restart is asserted to produce **no** message under the new
   session while a
   non-excluded control process in the same session produces one. That production
-  fixture proves the ordinary absent path: the sole strong owner died, so
-  membership is absent and destroy is skipped. A separate fault-injection
+  fixture proves the ordinary absent path: the sole retained strong-handle
+  table died with its owner, so membership is absent and destroy is skipped. A
+  separate fault-injection
   fixture deliberately retains one forbidden extra strong handle outside
   `Control` — a state production must never create — so the exact old weak
   identity remains present and destroy returns `true`. Releasing that fixture
@@ -1671,8 +1707,9 @@ credential-bearing reply; the pre-write suspension proves the second check
 scrubs those bytes, writes no frame and exits with the fixed non-secret
 `:credential_deadline` reason. At the final-continuation
 cut the credential frame may already exist, but the sender is already in its
-non-secret final wait. The case refutes the canary in its state, mailbox,
-process dictionary and forced-crash material before the continuation, then
+non-secret final wait. The case proves that exact current function and refutes
+the canary in its mailbox, process dictionary and forced-crash material before
+the continuation, then
 proves the sender's deadline exit and the guardian's own clock check prevent
 the invocation helper from starting.
 Every case proves that the unchanged deadline, rather than send time, governs
@@ -1709,7 +1746,7 @@ custody process and registry row — and each must hold with its assertion uncha
 | Bootstrap refusal before any credential | `invalid protected bootstrap cannot receive a credential or dispatch` |
 | Late delivery after expiry is impossible | `expired bootstrap cannot deliver a credential later or relaunch` |
 | Rotation between invocations | `a child transport raise after environment rotation cannot expose its request credential` |
-| Two live credentials in one VM | `one child diagnostic containing two concurrently live synthetic keys cannot escape` |
+| Two live credentials in one VM, held by two composed runtimes | `one child diagnostic containing two concurrently live synthetic keys cannot escape` |
 | Sink loss | `loss of child diagnostic protection cannot leak its credential` |
 | One child's loss does not poison another | `losing one credential-bearing child does not poison another invocation or host logs` |
 | Nothing in ordinary host messages | `ordinary guardian messages and results never carry its credential` |
@@ -1784,8 +1821,12 @@ Six proof groups are new:
   child's diagnostics — ever sees the other's. It is stated across *runtimes*
   rather than across invocations because a composition-bound token makes the
   within-one-runtime form vacuous: two invocations of one runtime necessarily
-  carry the same token. Their independence is a corollary of this case, not a
-  separate witness.
+  carry the same token. A separate same-runtime case proves the property that
+  does exist there: concurrent invocations resolve independently, each exact
+  custody reply remains bound to its own sender and private frame, rotation
+  between resolutions is visible only to the invocation that receives the new
+  reply, and no stale or wrong reply can cross-route. It does not claim
+  distinct-credential isolation inside one runtime.
 - **No credential environment read in the adapter's lib tree.** The existing
   drift-protection case in `apps/loopex_llm_reqllm/test/adapter_test.exs` —
   `the adapter reads exactly one credential environment variable` — pins the
@@ -1846,8 +1887,11 @@ Six proof groups are new:
   asserts the outcome, its closed-set atom, that no child was spawned where
   the contract says none is, and that no message but the permitted reply, no
   exit reason and no crash report carries the resolved value. The
-  two-resolutions-at-once case is a **success** case, not a refusal: both
-  invocations complete with their own credentials. Paired bootstrap cases make
+  two-resolutions-at-once case is a **success** case, not a refusal: two
+  same-runtime invocations complete with independently obtained replies bound
+  to their own senders and frames. The distinct-credential case composes two
+  runtimes, registries and custodians in the same VM and proves that each child
+  receives only its own runtime's credential. Paired bootstrap cases make
   the sender's group-leader sink fail immediately and block past the guardian
   deadline: they return `:unavailable` and `:timeout` respectively, deliver no
   token and leave no sink or sender behind.
@@ -1866,9 +1910,10 @@ Six proof groups are new:
   `:credential_deadline` sender exit, and the guardian's independent clock
   confirmation. The custody-to-frame case pauses with bytes held and proves
   scrub without a credential frame. The final-continuation case pauses in the
-  non-secret final wait and refutes the canary in sender state, mailbox, process
-  dictionary and forced-crash material before proving no invocation helper
-  starts. Every case awaits cleanup and restores the sampled
+  non-secret final wait, proves its exact current function, and refutes the
+  canary in its mailbox, process dictionary, current stack and forced-crash
+  material before proving no invocation helper starts. Every case awaits
+  cleanup and restores the sampled
   sender, sink, helper, provider-tree and trace-membership baselines.
 
   Malformed-shape cases forge every private struct with a canary-bearing extra
@@ -1913,14 +1958,21 @@ Six proof groups are new:
   first case must show the one-byte canary never reaches any captured raw
   message or rendered entry, so neither of the first two cases can pass
   vacuously or against the wrong signatures.
-- **Credential-bearing application messages, by state rather than trace.**
+- **Credential-bearing application messages, by mailbox rather than trace.**
   `apps/loopex_llm_reqllm/test/credential_plane_test.exs` contains the exact
   case `custody reply is the sole credential-bearing BEAM message`. At
   deterministic phase pauses it positively finds the one-byte canary in the
-  exact custody success retained by the sender, enumerates the registry,
-  custody, guardian and sender application-message sequence, and refutes that
-  canary in every other application-message payload before proving the sender
-  dropped it before its `:credential_frame` result. The host-owned custody
+  complete `GenServer.call` reply envelope queued in the suspended sender's
+  mailbox, with that live call's generated reply tag and the exact custody
+  success as its payload, and enumerates
+  the registry, custody, guardian and sender application-message sequence, and
+  refutes that canary in every other application-message payload. Each mailbox
+  read occurs in an unlinked one-use inspector that reports a fixed non-secret
+  verdict, is killed and awaited, and never copies the canary into the test
+  process. It then proves the raw Task has tail-called its non-secret final
+  wait by its exact current function and refutes the canary in its mailbox,
+  process dictionary, current stack and forced-crash material before
+  `:credential_frame`. The host-owned custody
   process remains the expected authoritative holder between invocations. Call-only tracing and trace
   absence cannot satisfy this case.
 - **The host-owned processes, proved at each host rather than in the adapter.** The
@@ -1953,8 +2005,9 @@ Six proof groups are new:
   to prove: that it reads no environment variable for a credential and that
   the token and resolution contract behaves.
 
-The parent-environment and concurrent-independence proofs and the resolution
-failure cases belong in `credential_plane_test.exs` beside the cases they
+The parent-environment, cross-runtime credential-isolation and same-runtime
+independent-resolution proofs and the resolution failure cases belong in
+`credential_plane_test.exs` beside the cases they
 generalise; the drift case and the trace-exclusion case stay in the adapter's
 tree with it. The **host-owned-process cases do not**: each lives at its own host,
 as the bullet above assigns them — `apps/loopex_cli/test/`,
@@ -2006,8 +2059,11 @@ with its host owner on every exit path; that immediate capability loss refuses
 deadline as `:timeout`; that trace-session destruction removes its process
 flags, a tracer restart reconstructs exclusions from `Control`, a `Control`
 restart tears down owner-workers and awaits their managed guardians and senders
-before the replacement tracer starts, and the last MFA
-owner restores every live session's selected pattern;
+before the replacement tracer starts, the full handles live only in Trace's
+private owner-only table and never in callback state or an exported status,
+Trace status redaction keeps raw token and registry-handle material in its last
+message out of the complete crash report, and the last MFA owner restores every live session's
+selected pattern;
 that the resolved value has no path into guardian state, a BEAM message other than
 the one permitted reply, an exit reason, a crash report, an IO request, a file
 or the environment; that every row of the failure table refuses without

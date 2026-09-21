@@ -122,9 +122,10 @@ gets a continuation. The sender rechecks the retained instant when it receives e
 continuation and immediately before the one operation that continuation
 permits. It makes the same two checks on credential context before registry
 routing. The custody gate carries no bytes. After a successful credential-frame
-write, the sender drops its credential-bearing state and enters a final wait
-whose state is non-secret before it emits the `:credential_frame` result. The
-final continuation therefore permits only normal exit; after consuming that
+write, the sender tail-calls a named final-wait function whose arguments are
+non-secret. That function emits the `:credential_frame` result and waits for
+the final continuation; the credential-bearing stack frame is no longer live.
+The final continuation therefore permits only normal exit; after consuming that
 exact normal sender `DOWN`, the guardian checks the deadline again and starts
 the generic helper that sends the invocation frame. Any other sender `DOWN`
 before expiry is `:unavailable` and starts no invocation helper; a deadline
@@ -213,21 +214,27 @@ non-secret channel context — the accepted socket and invocation nonce — to i
 When the last sender using an excluded function exits,
 core restores each live trace session's selected pattern for that function.
 Trace-session start and stop route through `Control`, using a deadlock-free
-snapshot handshake, so they serialize with exclusion. Trace alone holds each
-full strong OTP session handle; Control retains only the weak `{name, id}` plus
-selection/configuration. Explicit stop destroys the strong handle, and tracer
-death drops the last strong holder; the replacement confirms the weak old
-identity is absent before it creates and publishes a new session. A replacement
-hello may reach Control before or after the predecessor monitor `DOWN`; Control
-resolves that exact predecessor first and keeps the replacement idle until it
-has received and applied the retained snapshot. `Control` retains live
+snapshot handshake, so they serialize with exclusion. Trace stores each full
+strong OTP session handle in a private ETS table owned by the Trace process.
+Only that process reads the table. Its GenServer state carries the private table
+identifier, weak `{name, id}` identities and non-secret selection/configuration,
+never a full handle; `Control` retains the same weak material. Trace returns a
+fixed redacted `format_status/1` view for message, state, reason and log
+contexts and never reads table contents into that view. Explicit stop retrieves
+and destroys the full handle before deleting its row. Tracer death deletes the
+table and drops the last ordinary strong holder; the replacement confirms the
+weak old identity is absent before it creates and publishes a new session. A
+replacement hello may reach Control before or after the predecessor monitor
+`DOWN`; Control resolves that exact predecessor first and keeps the replacement
+idle until it has received and applied the retained snapshot. `Control` retains live
 sender membership and the ref-counted function set so a replacement trace
 session reapplies the same exclusion. The tracer retains pending return timing
 only at levels that request returns, monitors every pid represented there and
 purges that pid's rows when it exits; managed exclusion also purges the sender's
 rows after the delivery barrier. Thus clearing a flag cannot strand one call
 row, and the Direct path returns to baseline when its sender exits. A `Control`
-restart stops the sole strong-handle owner and, through `:rest_for_one`, the owner groups beneath it. M5's
+restart stops the private-table owner and, through `:rest_for_one`, the owner
+groups beneath it. M5's
 managed provider-lifetime starter makes both guardian and sender temporary
 children of the existing per-owner worker supervisor; owner-group teardown
 kills and awaits them before the supervisor may start the replacement tracer.
@@ -346,11 +353,13 @@ handed a secret, and that frame is sent before the child has proved anything.
 Carrying the credential bytes in the per-invocation configuration, rather than
 a token, was rejected because the bytes would then sit in adapter state,
 in the messages that configuration travels in, and in any crash report that
-prints it — the retention this decision exists to remove. A single
-adapter-level credential set once at composition was rejected because it is
-the process-wide slot again one level down: two concurrent invocations with
-different credentials could not be independent, which is half of what this
-decision buys. A resolver supplied as a function was rejected because a
+prints it — the retention this decision exists to remove. Caching a resolved
+credential in adapter-level state at composition was rejected for the same
+retention reason and because a later rotation would not be resolved afresh by
+each invocation. The selected token remains composition-bound, so two calls in
+one runtime do not imply two different credentials. Two composed runtimes can
+instead carry distinct tokens and custody processes without sharing a
+credential slot. A resolver supplied as a function was rejected because a
 closure is not plain boundary data and its captured environment is exactly the
 retention the security review has to exclude.
 
@@ -362,9 +371,11 @@ the release check already runs. Every credential-plane negative that M0 to M2
 established is re-pointed at the new handoff and must hold with its assertion
 unchanged in meaning; the parent VM's environment is proved empty of the
 credential from the completion of composition onward — before, during and
-after a call; two invocations running at once are proved unable to observe
-each other's credential; the two adapter preflight failures — absent and
-malformed token — and every remaining invocation-private failure the contract names —
+after a call; two runtimes with distinct registries, custody processes, tokens
+and canaries run invocations at once, and each child and its diagnostics see
+only its own runtime's credential; the two adapter preflight failures — absent
+and malformed token — and every remaining invocation-private failure the
+contract names —
 immediate guardian start, Core registration, guardian authorization, sender
 start or adoption refusal; sender raise, exit or kill before expiry and the
 same `DOWN` consumed after expiry; an expired initialized deadline; immediate or blocked
@@ -396,31 +407,58 @@ operation, until the instant has passed. On resume it starts no next operation,
 scrubs any credential bytes it still holds and exits with the fixed non-secret
 `:credential_deadline` reason. The custody-to-frame cut specifically proves
 that held bytes never reach a frame. A separate final-gate witness pauses after
-the `:credential_frame` result and proves the parked sender already retains no
-canary in its state, mailbox or forced-crash material; expiry there starts no
-invocation helper. The
+the frame write and `:credential_frame` result but before the final
+continuation. It proves the raw Task has tail-called the named non-secret
+final-wait MFA through `Process.info/2` current-function and stacktrace evidence,
+then refutes the canary in its mailbox, process dictionary and complete
+forced-crash material; expiry there starts no invocation helper. The
 guardian reports `:timeout` only after its own clock confirms expiry. Direct
 mode separately proves that its
 request's pre-launch absolute instant survives a delay beyond 5 seconds,
 expires a clear held through that instant, and bounds custody and frame write;
 at each of those cuts guardian loss reaps the raw linked-and-monitored sender
-and sink with no late frame, while normal cleanup stops and awaits both. Two resolutions
-in flight at once are proved to be independent successes rather than a refusal;
-the tracer captures the expected token-free sender start entry, deliberately backlogs
+and sink with no late frame, while normal cleanup stops and awaits both. Two
+same-runtime resolutions in flight at once are proved to be independent
+successes rather than a refusal. A rotation fixture returns distinguishable
+credentials to the two calls and binds each exact custody reply to that
+invocation's sender and frame; a stale, wrong or cross-routed reply cannot
+advance. Without a rotation, this same-runtime case makes no
+distinct-credential claim. The tracer captures the expected token-free sender
+start entry, deliberately backlogs
 pre-clear traffic, and after the delivery-barrier-backed exclusion
 acknowledgement receives no further raw trace event from that sender — including
-no `:gen_tcp.send/2` event — while an unexcluded control produces one. Separate
-state assertions prove token delivery follows the acknowledgement and that the
-one custody reply is the only credential-bearing BEAM message; call-only tracing
-is not used to claim application messages were observed. The last owner restores every live session's selected MFA
-pattern; managed and Direct sender exit restore the tracer's pending-call state
-to baseline; trace-session and tracer restart cases prove that destroyed-session
-flags are not treated as persistent and retained membership protects a
-replacement session; missing or malformed registry handles and missing,
-malformed or unbound tracing capabilities,
+no `:gen_tcp.send/2` event — while an unexcluded control produces one. An
+isolated inspector proves token delivery follows the acknowledgement and that
+the one custody reply is the only credential-bearing BEAM message. At each
+handoff a fresh inspector suspends the intended receiver and reads that
+receiver's actual `Process.info(pid, :messages)` after enqueue and before
+receipt. At the credential-bearing handoff it matches the exact call-reference
+reply wrapper containing the custody success. The inspector returns only a
+fixed canary-free assertion outcome and terminates after each secret-bearing
+observation because the read copies the canary into that process. It makes no
+raw-Task state-inspection claim, and call-only tracing is not used to claim
+application messages were observed. The last owner restores every live
+session's selected MFA pattern; managed and Direct sender exit restore the
+tracer's pending-call state
+to baseline. Trace-session state, status and forced-crash witnesses prove that
+`:sys.get_state/1` exposes the private table identifier and only weak or
+non-secret metadata, never a full handle; a non-owner cannot read that table.
+`format_status/1` keeps full handles and arbitrary message, state, reason and
+log terms out of status and crash output while exact Trace operations still
+work. Its forced-crash case makes a raw `complete/3` tuple carrying distinct
+token and registry-handle canaries the actual last message, asserts the fixed
+redacted fields, and refutes both canaries in the complete report and observed
+exit. The ordinary restart case retains only the weak identity and proves that
+predecessor death deletes the private table and makes that identity absent.
+
+A deliberate fault fixture retains one extra strong handle to exercise the
+still-present identity and defensive destroy branch. The restart cases also
+prove that destroyed-session flags are not treated as persistent and retained
+membership protects a replacement session; missing or malformed registry
+handles and missing, malformed or unbound tracing capabilities,
 immediate capability loss and delayed exclusion distinguish composition
-refusal, `:unavailable` and the guardian's `:timeout`; the adapter's library tree is
-proved to read
+refusal, `:unavailable` and the guardian's `:timeout`; the adapter's library
+tree is proved to read
 no environment variable for a credential by any route, with the launcher's
 ADR 0019 scrubbing read proved never to be consulted for one; and a named
 reviewer reads
@@ -451,12 +489,17 @@ memory or forensic inaccessibility; ADR 0019's disclaimer remains. The secret
 is not retained in guardian, coordinator, registry or other long-lived adapter
 state, the environment after reference-host composition, a
 durable or public plane, or any message except the one custody reply this pair
-permits. Two invocations in
-one VM become independent, so the **eleven** provider test modules serial for
-this reason can run concurrently and the fast check stops being pinned by that
-application. The other two stay serial on their own reasons, which is why the
-claim is eleven rather than thirteen. Host composition gains three explicit
-model inputs — the credential token, registry handle and tracing capability —
+permits. Two separately composed runtimes in one VM can carry distinct tokens,
+custody processes and credentials. Reference runtime hosts and Direct callers
+each compose their own registry, custody and token, so the **eleven** provider
+test modules serial for this reason can run concurrently and the fast check
+stops being pinned by that application. Within one runtime, concurrent calls
+still resolve the composition-bound token independently; a custody rotation
+binds the reply it returned to that invocation's sender and frame. Calls in one
+runtime do not otherwise claim distinct credentials. The other two modules
+stay serial on their own reasons, which is why the claim is eleven rather than
+thirteen. Host composition gains three explicit model inputs — the credential
+token, registry handle and tracing capability —
 and owns the registry, custody process and capability behind them. It starts
 those processes before the runtime, binds the capability after runtime start
 but before reporting composition success, and stops all three on normal stop,
