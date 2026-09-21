@@ -188,9 +188,11 @@ Darwin toolchain reports no `peercred` or `passcred` socket option, so Darwin
 reads `LOCAL_PEERCRED` and Linux reads `SO_PEERCRED`, and a credential that
 cannot be obtained or decoded closes the connection rather than admitting it.
 A foreign peer is refused before initialize.
-After both exclusions are held, an existing selected socket pathname is removed
-only when a no-follow metadata read proves a Unix-domain socket owned by that
-same operating-system user. A regular file, symbolic link, other file kind,
+After placement acquisition, the daemon retains the uid of that
+acquisition-specific regular-file owner handle and verifies the owner-only
+subdirectory against it. After both exclusions are held, an existing selected
+socket pathname is removed only when a no-follow metadata read proves a
+Unix-domain socket with that retained uid. A regular file, symbolic link, other file kind,
 foreign owner, unreadable identity or failed removal is preserved and startup refuses
 `socket_permission_unverified`.
 
@@ -213,10 +215,15 @@ cursor while every other attachment continues. Idle **observer** attachments
 are evicted at the residency limit and reconnect at their retained cursor with
 no missing durable event; a connection holding a controller lease is exempt
 while it holds it, because a controller of a quiet session is healthy and
-evicting it would strand a lease only an explicit release can free. **Every detach the daemon initiates is a record and a
+evicting it would strand a lease only an explicit release can free. A
+non-prepared owner succession is a separate core invalidation cut: it removes
+every attachment of that session, releases every transfer and daemon charge
+after acknowledged cleanup, tells each live generation-2 holder `detached` at
+its last emitted cursor, and closes those connections. **Every detach the daemon initiates is a record and a
 close**: the client is told, best-effort, on the connection being ended, and
-that connection is closed with its attachment while every other connection is
-untouched. A connection holds one attachment, so there is nothing for it to
+that connection is closed with its attachment. The ordinary eviction occasions
+leave every other connection untouched; succession may close every attachment
+of that session, while unrelated sessions remain untouched. A connection holds one attachment, so there is nothing for it to
 do afterwards, and the close is what releases the attachment in core.
 Accepted connection slots are themselves bounded, at 512 provisional —
 including a failed handoff being reaped — plus live plus closing,
@@ -299,7 +306,8 @@ import's legacy directory scan is intentionally outside the service-start
 bound. That import uses a strict daemon-owned reader rather than the released
 listing projection, which deliberately skips entries it cannot decode. Before
 and after the one materialized listing, the legacy directory must be a
-non-symlink directory owned by the daemon's effective user with the same owner,
+non-symlink directory whose uid equals the acquisition-specific placement owner
+handle retained by the importer, with the same owner,
 device and inode. Every non-temporary legacy row must validate, and one corrupt,
 oversized or invalid-UTF-8 row refuses the whole import without changing an
 existing index. The import installs its signal lifecycle before either
@@ -307,7 +315,9 @@ exclusion. A handled stop interrupts and reaps the scan, runs the same bounded
 Store and placement cleanup, emits no readiness or wire output, and exits with
 the distinct non-zero `prepare_index_interrupted` status; an image already
 renamed remains a complete valid image rather than being rolled back or
-partially published. The
+partially published. The exact success report and a late stop use
+first-consumed arbitration: success first exits `0` and makes the stop
+cleanup-only, while stop first retains the interruption status. The
 index is not Store truth and can omit a session committed across a
 crash cut; exact-ID and command-ID recovery repair such an omission. Lineage,
 lifecycle state and committed sequence are not list fields: a client that
@@ -386,7 +396,9 @@ the child, row, socket and slot all reaped,
 loss of the store under a live listener, two attachments from one embedded
 holder remaining independent, an explicit replacement removing only its named
 target, holder death releasing the holder's complete attachment and transfer
-set, a slow observer detached at its last emitted cursor, idle eviction and
+set, non-prepared succession invalidating every session attachment without a
+holder death and releasing transfers and charges before detached-and-close
+notification, a slow observer detached at its last emitted cursor, idle eviction and
 reconnect with no missing durable event, bounded-index startup independent of
 legacy directory population, strict offline import refusing corrupt, oversized
 and invalid UTF-8 legacy rows without omitting them or changing the prior index,

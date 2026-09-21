@@ -156,11 +156,12 @@ The negatives carry the decision and are written before the seams:
   byte-identical to today in decision and durable record. What is held
   constant is that Loopex decides nothing: the difference is always the host's
   threshold applied to a typed input, never a Loopex rule;
-- **the journaled fact has a name and a shape**, and is asserted by both:
-  an `evaluation_recorded` record carrying the seam, the model identity, the
+- **the journaled fact has a provisional name and candidate projection**, and
+  is asserted by both: a working `evaluation_recorded` record carrying the seam, the model identity, the
   typed answer's plain projection, `usage`, and the durable command it
   informed — and nothing else, in particular no prose and no provider payload.
-  A decision reached without an evaluation writes no such record, which is how
+  These fields do not bind a version, exact key set or encoding while this ADR
+  remains Proposed. A decision reached without an evaluation writes no such record, which is how
   a later reader tells the two apart;
 - no evaluation result appears in a grant, a lease, an epoch, a fence, a
   receipt or any executor argument, proved by the same drift-style scan that

@@ -52,7 +52,11 @@ interactions, model output, context and metadata never grant authority, and
 ADR 0009 already makes every executor-backed tool call consult the host's
 policy with no exemption predicate. What this decision adds is that a *typed,
 calibrated* model answer is still model output, and gets no privilege for
-being numeric. The record has a name, `evaluation_recorded`, and the companion fixes its fields; a decision reached without an evaluation writes none, which is how a later reader tells the two apart.
+being numeric. The companion uses `evaluation_recorded` as a working name and
+sketches a candidate field projection; the accepted decision must still fix
+the record version, exact key set, encoding, readers and rollback behavior. A
+decision reached without an evaluation writes no such record, which is how a
+later reader would tell the two apart.
 
 The seams, in the order they are worth doing:
 
@@ -123,10 +127,12 @@ sendable. And **latency and price are unmeasured** until the first real call;
 they are measured from the response's own `usage` there, and no threshold, no
 budget and no timing claim is made before that.
 
-Rollback is removing the evaluation: every seam is an input, so a host that
-stops asking makes the same decisions it made before, by the same paths. No
-durable record depends on an answer existing, because an answer is journaled
-as a fact about what was observed, not as a premise anything later requires.
+The intended rollback is removing evaluation from each seam, so a host that
+stops asking again uses its earlier decision paths. This Proposed pair does not
+yet prove durable rollback: before acceptance it must define the private
+evaluation record's version, readers and old-reader behavior. The design goal
+is that no later decision depends on an evaluation record existing; the open
+compatibility work must make that true rather than assume it.
 
 Technical depth: [Compatibility mechanics](0035-typed-decision-models-as-policy-inputs-technical.md#technical-adr-0035-compatibility).
 

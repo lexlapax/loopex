@@ -53,8 +53,10 @@ current-pair CI and release lanes.
 
 **Peer authorization has two layers, and the load-bearing one is the
 filesystem.** The socket lives in that `0700` daemon-owned subdirectory and is
-itself created mode `0600`. Both are verified after bind by reading back their
-owner and mode and comparing them with the daemon's own effective user, and
+itself created mode `0600`. Immediately after placement acquisition, the
+daemon retains as `daemon_uid` the uid read from that acquisition-specific
+regular-file owner handle. The directory and socket are verified by reading
+back their owner and mode and comparing them with `daemon_uid`, and
 the daemon refuses to serve if either is wrong, if the subdirectory is not
 owned by that user, or if any component of the path below the state root is a
 symbolic link it did not create. The state root above it is read, never
@@ -299,7 +301,7 @@ before the socket path is read, unlinked or bound. Only a daemon that holds
 both the placement lock and the Store marker may inspect a selected socket
 pathname. It uses `File.lstat/1`, without following the final component. An
 absent path proceeds to bind. A present path is removable only when its owner
-uid equals the already verified daemon effective uid, `type` is `:other`,
+uid equals retained `daemon_uid`, `type` is `:other`,
 and `Bitwise.band(mode, 0o170000) == 0o140000` proves `S_IFSOCK`; Elixir
 reports Unix sockets as `:other`, so `type` alone is insufficient. A
 regular file, symbolic link, other file kind, owner mismatch, metadata failure
@@ -316,6 +318,10 @@ on the path is its placement lock plus its successfully opened Store. **No daemo
 an orderly stop, not on any fail-stop, not in reverse cleanup. The next daemon
 to acquire and verify the placement lock and marker applies the no-follow
 kind-and-owner check above and removes only a proved socket before binding.
+That `lstat`/remove pair is two syscalls, not an atomic claim about an
+unchanged object. Placement and marker exclusion name the only eligible
+remover in the same-uid-writable `0700` directory, and `File.rm/1` does not
+follow a replaced final component.
 
 M5 also closes the placement gap behind that rule. A Store self-stop invokes
 its best-effort marker release before the daemon can react, so the marker alone cannot protect the
@@ -788,6 +794,27 @@ entry in both components. On `DOWN`, EventDispatcher removes every attachment
 in that holder set and calls `release_transfers/2` for each; Control removes
 the same IDs and their repetition state. Each component demonitors only after
 its set for that holder is empty.
+
+Holder death is not the only removal path. Existing
+`Control.invalidate_attachments/3` runs on every non-prepared owner
+succession, while `carried_attachment/2` preserves a prepared attachment.
+Core change 1 makes succession invalidation an acknowledged transaction rather
+than the current cast. Control clears the superseded command routes while
+retaining the exact attachment identities and holders. EventDispatcher removes
+all matching pending and live rows, kills their workers, calls
+`release_transfers/2` for every installed attachment, and acknowledges the
+exact removed identities. Control then removes the matching repetition and
+monitor state and sends each live stable holder an exact invalidation notice.
+Pending attach callers receive `attachment_superseded`; installed embedded
+handles become stale.
+
+The daemon registry joins that notice with the core cleanup acknowledgement
+before it releases each attachment charge. Release is idempotent by attachment
+identity, so a racing holder `DOWN` cannot double-free. A live generation-2
+holder receives one best-effort uncorrelated `detached` record with the
+session ID and last completely emitted cursor, then its connection closes.
+A succession may invalidate every connection attached to that session; it
+does not affect attachments to any other session.
 
 **Dispatcher replacement is an attachment-generation cut, including for an
 embedded runtime.** The runtime supervisor can restart EventDispatcher without
@@ -1560,11 +1587,11 @@ generation-2 literal the conformance module pins is the digest of the contract
 a different value and fails there. Generation 1 gains no method, no record family and no error code — but its
 digest is **not** untouched, because M5 renames its generation string from
 `loopex.session.v1-experimental` to `loopex.experimental/1` and the generation
-is the digest's first input. That rename is the plan's decision, taken under
+is one field in the canonical map input to `Canonical.digest/1`. That rename is the plan's decision, taken under
 the vision's 0.x experimental policy; this ADR records its consequence here,
-which is that generation 1's **schema digest** — and only that — is
-recomputed and re-pinned alongside generation 2's, with every other input to
-it byte-identical. Its two published manifests are not touched: they already
+which is that generation 1's **schema digest** is recomputed and all three
+assertions that pin it are updated alongside generation 2's, with every other
+field in its canonical map byte-identical. Its two published manifests are not touched: they already
 declare `loopex.experimental/1`, so the rename makes the code agree with them
 rather than changing them. The
 generations the two servers advertise are therefore `loopex.experimental/1`
@@ -1670,8 +1697,9 @@ client in a state neither side had defined. So:
 | Output-buffer or core-queue overflow | `error`, ADR 0023's `detached`, with `session_id` and `event_cursor` | close that connection |
 | Aggregate byte pressure chose this attachment | the same `detached` | close that connection |
 | Idle observer eviction at ten minutes; a connection holding a controller lease is exempt until release or expiry | the same `detached` | close that connection |
+| Core reports a non-prepared session-succession invalidation after transfer cleanup | the same `detached` | close every notified connection for that session |
 
-Reusing `detached` for the three eviction rows is a **widening inside
+Reusing `detached` for the four attachment-removal rows is a **widening inside
 generation 2**, stated rather than slipped in: ADR 0023 defines that code for
 post-admission writer loss, and its own pressure rule already says to detach
 at the last completely emitted cursor and say so
@@ -1680,7 +1708,7 @@ record — same code, same fields, same uncorrelated shape — and generation 1'
 use of it is untouched, so the foreground server's behaviour does not move and
 the ordered error list gains nothing for it.
 
-**Where `event_cursor` is present, it is the same quantity in all four**: the
+**Where `event_cursor` is present, it is the same quantity in all five**: the
 **last completely emitted durable cursor** for that attachment — the highest
 event sequence the daemon finished writing to that socket, never one it had
 only encoded or buffered. A controller connection that never attached omits
@@ -1695,16 +1723,17 @@ that attempt did. A backpressured client — which is precisely the client an
 overflow detach is about — will usually not receive it and learns by EOF
 instead. No new timer and no new number.
 
-**No other connection is affected by any of the four**, and that is the
-property the witnesses assert: a case per occasion, each with a second
-connection attached to the same session, asserting the first connection sees
-the record where its buffer admits one and sees EOF either way, and the second
-keeps receiving durable events across the whole of it. The four
+For the first four rows, no other connection is affected. The succession row
+instead closes every attachment for that session and leaves an attachment to a
+different session running. The witnesses assert that distinction: each
+single-connection occasion keeps a second same-session connection delivering,
+while succession notifies and closes both same-session holders after transfer
+and charge cleanup and preserves the unrelated-session control connection. The five
 daemon-initiated close occasions have generation-2 vector coverage: both
 optional-cursor shapes of the uncorrelated `control_owner_lost` form and one
-vector for each of the three `detached` occasions. The correlated in-flight
+vector for each of the four `detached` occasions. The correlated in-flight
 lease-operation `control_owner_lost` refusal has its separate
-request-shaped vector. The three `detached` vectors have identical code and
+request-shaped vector. The four `detached` vectors have identical code and
 fields, which is deliberate, because why the daemon detached is an operator
 fact in its logs and not authority-shaped information a client acts on
 differently.
@@ -2210,6 +2239,12 @@ placement-release helper. The sentinel hard-halts at the absolute
 interruption status remains authoritative and any marker or placement residual
 follows the existing verified recovery rule.
 
+The sentinel also arbitrates the exact successful-import report against a late
+stop. The first consumed disposition wins: success first makes a later stop
+cleanup-only and exits `0`; stop first retains status
+`prepare_index_interrupted`/`110` even when success is already queued.
+Cleanup runs once in either order.
+
 The owner drains the stop message before each exclusion, before scan-worker
 start, after the worker result and before publication, immediately after
 rename, after the directory sync, before Store stop and before placement
@@ -2218,15 +2253,17 @@ than waiting for enumeration to finish. A stop before rename preserves the
 prior index; one consumed after rename leaves the newly named complete image
 and makes no rollback claim. Every interrupted branch emits no readiness,
 protocol record or stdout byte and exits with the plan's distinct non-zero
-status. Forced cuts cover enumeration, pre-rename, post-rename, Store stop and
-placement release, proving no partial image and the stated healthy absence or
-complete recoverable residual.
+status. Forced cuts cover enumeration, pre-rename, post-rename, Store stop,
+placement release, and success-report versus late-stop in both mailbox orders,
+proving no partial image, deterministic status and the stated healthy absence
+or complete recoverable residual.
 
 The strict reader does not call `Loopex.SessionDirectory.list_sessions/1`:
 that released operator projection intentionally drops a row when its entry
 cannot be decoded. The daemon reader opens the `sessions/` directory without
-following a symbolic link and requires its owner UID to equal the daemon's
-effective UID. It retains the owner UID, non-symlink directory type, device and
+following a symbolic link and requires its owner uid to equal the uid retained
+from the importer's acquisition-specific placement owner handle. It retains
+that uid, non-symlink directory type, device and
 inode, materializes the names with `File.ls/1`, applies the released
 temporary-name exclusion (`String.contains?(name, ".tmp-")`), and rechecks all
 four fields, including current-daemon ownership. For
@@ -2400,12 +2437,14 @@ metadata seam separately reports a foreign owner before listing and an owner
 change after listing. Each case refuses `state_root_unusable`, preserves the
 prior index byte for byte and publishes no union; the witness does not depend
 on the test process having permission to change filesystem ownership.
-Five signal cuts interrupt the scan worker, pre-rename publication,
+Six signal cuts interrupt the scan worker, pre-rename publication,
 post-rename publication, Store stop and placement release. Each produces the
 distinct non-zero import-interrupted status with no stdout, readiness or wire
 record, proves the worker is gone, and observes either the unchanged prior
 index or the complete renamed image plus only the documented exclusion
-residual.
+residual. The sixth cut queues the exact success report with a late stop in
+both mailbox orders: success consumed first exits `0`; stop consumed first
+retains status `110`.
 
 ### Session residency: active, dormant, and their bounds
 
@@ -2535,8 +2574,8 @@ value: the digest is taken over the generation, the ordered methods, the
 ordered record families, the ordered error codes and the limits, and
 generation 2 changes the generation and the method list, so it cannot and must
 not equal generation 1's. It is written out as a literal beside generation
-1's. Generation 1's **schema digest** is re-pinned in the same place rather
-than asserted unchanged, because the rename above moves it — its two
+1's. Generation 1's **schema digest** is re-pinned at all three assertion
+sites rather than asserted unchanged, because the rename above moves it — its two
 manifest file digests do not move, those files already carrying the new
 name — and the case that pins it asserts every *other* input to generation 1's
 digest, its ordered methods, record families, error codes and limits, is
@@ -2721,6 +2760,17 @@ waiter or charge; after promotion, primary connection loss retains the one task
 and charge through its real result. Every result settles registry accounting
 before any primary or waiter reply, and shutdown abandonment reuses no charge.
 
+Succession cases resume an already active session under a fresh, non-prepared
+command identity while two generation-2 holders and one embedded holder are
+attached. No holder dies. Control clears every old route; EventDispatcher
+releases every attachment's transfers before acknowledging the exact identity
+set; Control notifies each holder; and the registry releases each daemon charge
+once, sends `detached` at that connection's last emitted cursor and closes both
+daemon connections. A racing holder `DOWN` in each mailbox order produces the
+same zero-count result. The embedded handles are stale, the unrelated-session
+control attachment keeps delivering, and a reconnect at each retained cursor
+is contiguous and at least once.
+
 Dispatcher-restart cases kill EventDispatcher with several holders before
 stage, after stage, after authorization, and after the publication
 acknowledgement was sent but before Control consumed it. At every cut the
@@ -2805,8 +2855,10 @@ publication outcomes reverses the session operation, and command-ID recovery
 repairs an omitted row without creating a second session.
 The transport cases also cover simultaneous starts, Store
 loss, generation negotiation, peer authorization, socket-path bounds and ADR
-0023 framing refusals. A positive restart case verifies the retained path's
-same-user `:other` metadata and `S_IFSOCK` mode bits before replacement.
+0023 framing refusals. A positive restart case verifies the retained path's uid
+against the acquisition-specific placement owner handle, plus `:other`
+metadata and `S_IFSOCK` mode bits before replacement. A paired final-component
+replacement proves `File.rm/1` follows no replaced final component.
 Negative cases put a regular file, final-component symlink and non-socket
 `:other` object at the selected path, inject a foreign uid, metadata failure
 and removal failure, and prove each exact object is preserved while startup
@@ -2861,10 +2913,12 @@ the remaining residency ceilings are server-enforced and, where specified,
 reported by `daemon.status`. Removing the daemon leaves the foreground server
 unchanged. For embedded callers, core keeps the same attach API shape and
 preserves the common one-attachment case
-while supporting independent same-session and same-holder attachments. Two
+while supporting independent same-session and same-holder attachments. Three
 intentional transient behaviors change: a second attach no longer implicitly
 supersedes the first, and holder death releases that holder's complete
-attachment set and transfers. The new index
+attachment set and transfers; a non-prepared succession still invalidates the
+whole session set, but now releases every transfer and tells each live daemon
+holder to detach before its charge is freed. The new index
 is a bounded daemon discoverability file only: no journal record, Store port,
 session event or snapshot depends on it. Foreground rollback ignores it, while
 an M5 daemon validates and reuses it. A legacy root is upgraded explicitly by

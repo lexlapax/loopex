@@ -31,7 +31,7 @@ Release is best effort, not a proof of removal. `WriterLock.release/1` first
 compares the path's bytes with the exact marker for this acquisition. On a
 match it calls `File.rm/1` and syncs the parent, ignores both results and always
 returns `:ok`; an unreadable, absent or foreign path also returns `:ok`
-(`writer_lock.ex:103-115`). A completed Store `terminate/2` therefore proves
+(`writer_lock.ex:105-115`). A completed Store `terminate/2` therefore proves
 only that this release path was invoked. The healthy-path evidence separately
 asserts marker absence and an immediate reopen without recovery. An ignored
 unlink failure can leave a complete residual, and an ignored parent-sync
@@ -109,7 +109,7 @@ halts without waiting further. Failed-start cleanup and the offline
 `prepare-index` command use the same helper and deadline, preserving an earlier
 failure class when one is already latched.
 
-`LoopexCli.Placement.release/1` compares the owner handle and canonical lock
+`LoopexComposition.Placement.release/1` compares the owner handle and canonical lock
 inode before removing the canonical path, then removes the handle; it ignores
 both removal results and always returns `:ok` (`placement.ex:77-99,233-241`). A
 completed call therefore does not prove either pathname absent. The exact-handle

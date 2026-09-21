@@ -2146,10 +2146,11 @@ it is skipped. `apps/loopex_llm_reqllm` sets no `test_paths`, no
 **recursively** under `test/`, and its `test_ignore_filters` name three
 non-`_test` fixture and diagnostic files and nothing else
 (`apps/loopex_llm_reqllm/mix.exs:16-22`). Measured in that application:
-`mix test --only <an unused tag>` reports **179 excluded**; the twelve
+`mix test --only <an unused tag>` reports **179 excluded**; the eighteen
 `test/*_test.exs` files alone report **164**; the difference of **15** is
 exactly what `mix test test/support/provider_entry_test.exs` runs. A
-non-recursive `test/*.exs` glob reports twelve and is wrong every time. The measurement is evidence about the change, never
+non-recursive scan finds twelve serial modules and misses the thirteenth under
+`test/support/`; it is wrong every time. The measurement is evidence about the change, never
 a condition a test may be weakened to meet.
 
 <a id="technical-adr-0034-compatibility"></a>
