@@ -5822,8 +5822,11 @@ reclaimed by their verified stale-owner recovery, and the socket file is a
 stale path the next placement-lock and marker holder removes.
 
 **The fatal-class and status map.** Exit status is the authoritative
-operator result: `0` means a completed operator stop or successful offline
-import, and every fatal class has
+operator result: `0` means an operator-requested termination or successful
+offline import. At the pre-handler root-resource prompt it is BEAM's default
+termination, with no daemon-owned resource acquired and no daemon cleanup path
+run; after handler installation it means the documented reverse-clean orderly
+sequence completed. Every fatal class has
 one unique integer from 65 through 109. A one-shot helper attempts the class on
 `stderr`, but the sentinel never awaits that helper, so a blocked diagnostic
 cannot change or delay the status. Running-component failures enter the owner's
