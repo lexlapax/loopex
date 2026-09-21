@@ -171,9 +171,10 @@ daemon
 attachment residency and at-least-once replay over the generation-2-only
 Unix-domain-socket transport with bounded session pages; the collaboration
 rule of one in-memory controller lease with fresh per-grant epochs, observers
-and takeover; and the provider adapter's credential handoff, moved off the
-parent VM's process-wide environment onto the per-invocation private channel
-the launcher already opens. The first three were proposed with the Open M5
+and takeover; and the provider adapter's credential resolution, moved from the
+parent VM's process-wide environment to a composition-bound opaque token and
+host-owned custody before the sender writes the bytes over the unchanged
+per-invocation private channel the launcher already opens. The first three were proposed with the Open M5
 plan on 2026-09-14 and revised twice that day on independent review; 0034
 follows the maintainer's outcome of 2026-09-19. They accept nothing, and each
 must be accepted before the outcome that depends on it is implemented.

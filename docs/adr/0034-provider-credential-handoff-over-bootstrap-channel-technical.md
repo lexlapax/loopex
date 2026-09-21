@@ -1144,7 +1144,7 @@ boundary, not an absolute:
   the opaque 128-bit token while model options cross core before the sender
   exists; MFA and process exclusion protect the credential.
 
-  **The proof is three cases, and the first one is the one that would have
+  **The trace proof is three cases, and the first one is the one that would have
   caught the old design.** A trace session is configured to name
   **`:gen_tcp`** explicitly, alongside `ProviderBridge` — including its private
   `sink_loop/1` — and `ProviderCodec`,
@@ -1210,6 +1210,23 @@ boundary, not an absolute:
   every once-valid tuple after its phase has advanced is likewise inert. This
   makes the private messages part of the operation binding rather than
   descriptive tags.
+
+  **The application-message proof is a separate state census, not a trace
+  inference.** The named `credential_plane_test.exs` case `custody reply is the
+  sole credential-bearing BEAM message` pauses the real registry, custody,
+  guardian and sender at every documented handoff. It positively confirms the host-owned custody state contains the
+  canary before resolution and observes the exact
+  `{:ok, %{credential: canary}}` reply retained by the sender after resolution
+  and before its non-secret `:custody` result. The case enumerates the actual
+  registry request and reply,
+  `:begin_bootstrap`, `:bootstrap_result`, `:credential_context`, every phase
+  result and continuation, monitor and ownership message, and every gated mailbox; every application
+  message except the custody reply is canary-free, registry and guardian state
+  are canary-free, and the sender is canary-free again before
+  its `:credential_frame` result. These assertions use deterministic phase
+  pauses and direct state and mailbox inspection. Neither call tracing nor the
+  absence of a trace event is accepted as evidence that an application message
+  was observed.
 
   The managed liveness half delays the delivery marker and therefore the Trace
   acknowledgement beyond 5,000 ms under a
@@ -1896,6 +1913,16 @@ Six proof groups are new:
   first case must show the one-byte canary never reaches any captured raw
   message or rendered entry, so neither of the first two cases can pass
   vacuously or against the wrong signatures.
+- **Credential-bearing application messages, by state rather than trace.**
+  `apps/loopex_llm_reqllm/test/credential_plane_test.exs` contains the exact
+  case `custody reply is the sole credential-bearing BEAM message`. At
+  deterministic phase pauses it positively finds the one-byte canary in the
+  exact custody success retained by the sender, enumerates the registry,
+  custody, guardian and sender application-message sequence, and refutes that
+  canary in every other application-message payload before proving the sender
+  dropped it before its `:credential_frame` result. The host-owned custody
+  process remains the expected authoritative holder between invocations. Call-only tracing and trace
+  absence cannot satisfy this case.
 - **The host-owned processes, proved at each host rather than in the adapter.** The
   adapter's test tree cannot prove a claim about the CLI's or the daemon's
   composition, and an earlier draft filed all three there. Each case lives

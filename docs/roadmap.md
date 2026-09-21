@@ -114,9 +114,11 @@ collaboration with crash takeover, snapshot and cursor replay, residency
 limits, and cancellation that crosses processes, all on an ADR-selected store.
 For `0.2` that store is the existing local adapter with its limits and its
 root-retirement procedure documented; the daemon-grade adapter and its
-migration are the successor milestone's. M5 also moves the provider
-credential off the parent VM's environment onto the private per-invocation
-channel. The protocol still remains experimental.
+migration are the successor milestone's. M5 also moves provider-credential
+resolution out of the parent VM's process-wide environment: composition binds
+an opaque token and the sender resolves it per invocation through host custody
+before writing the credential over the private channel ADR 0019 already
+provides. The protocol still remains experimental.
 
 Technical depth: [Durable-service candidate proof](roadmap-technical.md#technical-roadmap-durable-service)
 
