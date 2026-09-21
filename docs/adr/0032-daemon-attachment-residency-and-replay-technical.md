@@ -2171,9 +2171,9 @@ passes does it atomically write or replace the mode-`0600` index, sync the
 directory, stop the Store so its best-effort marker-release callback runs, and
 then attempt the acquisition-specific placement-handle release through the
 fixed `placement_release_ms` helper. A healthy branch proves both paths absent
-and an immediate foreground reopen. Injected marker or placement removal and
-sync failures instead prove that a complete residual is handled only by the
-corresponding dead/live/unverifiable-owner recovery; a suspended placement
+and an immediate foreground reopen. Injected marker removal or parent-sync
+failures and placement-removal failures instead prove that a complete residual
+is handled only by the corresponding dead/live/unverifiable-owner recovery; a suspended placement
 release reaches its deadline and exits non-zero without an unbounded tail. On a failure before rename it removes
 only an empty `daemon/` directory that this invocation created and leaves a
 pre-existing valid index unchanged. On a directory-sync failure after rename,

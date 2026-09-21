@@ -201,15 +201,12 @@ public protocol and its generations, public events, snapshots, artifacts and
 the executor protocol are untouched.
 
 **Three questions are recorded for whoever takes this pair to acceptance**,
-because they are contradictions or gaps in the design as written rather than
-in its prose, and this pair stays Proposed and deferred rather than resolving
-them now:
+because they are compatibility obligations or gaps this Proposed, deferred pair
+does not resolve:
 
-1. **`evaluation_recorded` versus "every durable record untouched".** The
-   evidence above requires a new journaled record and this section says no
-   durable record changes. Both cannot hold: a new record kind is a durable
-   addition, with the compatibility question that carries — which readers
-   accept it, and what a reader that does not makes of it.
+1. **`evaluation_recorded` is a new private durable record.** Before acceptance,
+   define its version and exact key set, name which existing readers accept it,
+   and specify rollback and old-reader behavior.
 2. **"Never widens what a policy would otherwise allow" needs to be a
    monotonicity property, not a sentence.** As written it is a claim about
    intent; to be checkable it has to say that for any host policy and any
@@ -220,8 +217,10 @@ them now:
    a process and talks to a network endpoint, so it belongs behind ADR 0019's
    protected provider process and ADR 0034's credential handoff rather than
    beside them. Whether it reuses that machinery or duplicates it is the
-   largest implementation question this pair leaves open. A runtime with no
-evaluation configured is byte-for-byte the runtime that exists today. The one
+   largest implementation question this pair leaves open.
+
+A runtime with no evaluation configured is byte-for-byte the runtime that
+exists today. The one
 compatibility effect is on host composition and arrives with the prerequisite
 amendment rather than with this pair: a host that configures evaluation
 composes a second credential token, a second registry row and a second custody

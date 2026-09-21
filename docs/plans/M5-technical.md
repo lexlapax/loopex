@@ -1209,8 +1209,8 @@ rendered strings:
 `{:error, {:placement_active, os_pid}}`,
 `{:error, {:placement_unverifiable, reason}}`, or
 `{:error, {:placement_lock_failed, reason}}`; `release/1` is idempotent `:ok`
-and uses the acquisition-specific owner handle, but ignores path-removal and
-directory-sync results. Callers therefore treat it as a best-effort attempt,
+and uses the acquisition-specific owner handle, but ignores both exact-handle
+path-removal results. Callers therefore treat it as a best-effort attempt,
 not proof that the lock path is absent. The daemon, failed-start cleanup and
 `prepare-index` run it in an unlinked monitored helper under the fixed absolute
 `placement_release_ms: 5_000` deadline. Exact `:ok` followed by normal helper
@@ -4638,7 +4638,7 @@ No timeout infers a payload or reconstructs one from the daemon owner's maps.
    | The transfers owner | What remains of `teardown_ms` | Closing the open transfer descriptors its `terminate/2` holds (`transfers.ex:146-149`) |
    | The tracing capability, then custody, then the registry | What remains of `teardown_ms` | Nothing durable |
    | **The Store** | A **fixed 30 s**, its own phase | Its `terminate/2`, which invokes the best-effort writer-marker release (`local.ex:167`) |
-   | **Placement release helper** | A **fixed 5 s**, after the Store phase | The exact-handle best-effort removal and parent-directory sync; completion does not prove absence |
+   | **Placement release helper** | A **fixed 5 s**, after the Store phase | The existing two exact-handle best-effort removals; completion does not prove absence |
 
    **"What remains" is one deadline, not one budget each.** The owner computes
    an absolute instant once — `System.monotonic_time(:millisecond) +
@@ -5950,7 +5950,7 @@ terms remain only in bounded redacted diagnostics and never become a class.
 | `cleanup_grace_invalid` | 75 | Startup input: cleanup grace is outside core's admitted domain | — |
 | `placement_active` | 76 | Startup or offline import: the host placement lock is held by a proved-live daemon | — |
 | `placement_unverifiable` | 77 | Startup or offline import: the placement holder cannot be decided | — |
-| `placement_lock_failed` | 78 | Startup, offline import or final cleanup: placement identity/create/write/sync/close failed without a proved predecessor classification, or the bounded exact-handle release helper failed or expired with no earlier class | — |
+| `placement_lock_failed` | 78 | Startup, offline import or final cleanup: placement identity/create/write/link/close failed without a proved predecessor classification, or the bounded exact-handle release helper failed or expired with no earlier class | — |
 | `store_writer_active` | 79 | Startup or offline import: the marker is held by a live holder | — |
 | `store_writer_unverifiable` | 80 | Startup or offline import: the marker's holder cannot be decided | — |
 | `store_writer_acquisition_failed` | 81 | Startup or offline import: marker identity/recovery/create/write/sync/close failed for a reason other than a proved live or unverifiable predecessor; an error after exclusive create may leave a complete stale or undecodable partial marker | — |
@@ -6991,7 +6991,7 @@ children, a pid's liveness, a socket's EOF, or the daemon's own `stderr`.
   assertions about the pathname are opposite, which is the point: an earlier
   revision asserted the same answer for both and contradicted the no-unlink
   rule for one of them. Paired injected marker-unlink/parent-sync and
-  placement-remove/sync failures leave complete residuals; only after the old
+  placement-removal failures leave complete residuals; only after the old
   OS incarnation is dead does the successor's verified recovery proceed. A
   suspended placement helper reaches `placement_release_ms`, leaves the safe
   residual and cannot extend process exit.
