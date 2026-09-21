@@ -1868,7 +1868,7 @@ terminal permit states are therefore exactly `result`, `owner_lost`,
 The same barrier returns ADR 0033's tagged settling-acquire, settling-release
 and settling-owner-loss descriptors. Each keeps its already selected
 disposition, finishes exact no-output relay and mirror cleanup inside
-`freeze_deadline`, and leaves no nonterminal or claimable operation permit and
+`freeze_deadline`, and leaves no nonterminal or claimable lease-operation permit and
 no provisional, pending or stale owner mirror before core quiesce. An exact
 granted acquisition or restored holder and its valid holder mirror remain for
 the drain; the barrier never removes live collaboration state merely because
@@ -1914,10 +1914,13 @@ frozen before and after provisional install, and settling acquisition, release
 settlement and owner-loss classification are separately
 held through the barrier. It must return their tagged descriptors, retain their
 winning dispositions and remove every cancelled row and mirror without post-cut
-output before quiesce. Result and restored connection-loss cases order exact
-owner `DOWN` on both sides of that settlement and prove the original
-disposition survives while the later pop/classification finishes under the same
-deadline. It
+output before quiesce. Existing-owner acquire/release results and restored
+release order the recorded actor-owner `DOWN` on both sides of settlement;
+fresh-acquire result orders the resulting child lease-owner `DOWN` named by
+retained start/operation state, while fresh-acquire connection loss already
+reaps its child and leaves the daemon actor alive. Each proves the original
+disposition survives while the later pop/classification finishes under the
+same deadline. It
 asserts one terminal permit
 disposition and at most one correlated reply, `daemon_stopping` for every
 unlinearized survivor, no rollback of a linearized lease change, no stale mirror,

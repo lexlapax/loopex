@@ -512,10 +512,13 @@ post-cut reply and retains the granted owner for the drain. A `connection_lost`
 row finishes or confirms `resolve_provisional(cancelled)`, discards an
 existing-owner proposal or kills and reaps its exact fresh `start_op_ref` child,
 and renders nothing. Either path leaves no provisional mirror operation pending.
-A permit's selected disposition does not change if its exact actor owner dies
-later. The daemon first completes the descriptor's release or provisional
-settlement, then consumes and reaps any retained or newly arrived exact owner
-`DOWN` and exact-pops and classifies the mirror under the same
+A permit's selected disposition does not change if its exact lease owner dies
+later. For an existing-owner operation that is the recorded actor owner; for a
+fresh acquire whose `result` granted, it is the resulting child lease owner
+named by the retained start record, never the daemon owner that acted as the
+permit's completion authority. The daemon first completes the descriptor's
+release or provisional settlement, then consumes and reaps any retained or
+newly arrived exact lease-owner `DOWN` and exact-pops and classifies the mirror under the same
 `freeze_deadline`, without ordinary output. A restored `connection_lost`
 release therefore completes cancellation before owner loss; an acquire or
 release `result` remains `result`, and the later pop is present or absent
@@ -1140,8 +1143,10 @@ settling-owner-loss descriptor set in both orders. Renewal, existing-owner
 acquire/release and fresh acquire each force actor-result versus atomic freeze in
 both relay-mailbox orders: result first enters the exact settling protocol, while
 freeze first terminalizes `shutdown_admitted` and makes the late result
-cleanup-only. Each settling result and restored connection-loss case is then
-forced with exact owner `DOWN` both before and after descriptor settlement:
+cleanup-only. Each existing-owner result and restored connection-loss case is
+then forced with exact actor-owner `DOWN` both before and after descriptor
+settlement; each fresh-acquire result instead forces the resulting child
+lease-owner `DOWN` in those two orders, never daemon-owner death. In every case
 the selected disposition stays fixed, settlement finishes first, and the same
 freeze deadline covers the later no-output reap, exact pop and classification.
 One disposition exists per permit without scanning the daemon
