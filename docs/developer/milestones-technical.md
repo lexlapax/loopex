@@ -181,6 +181,15 @@ a stable reference and SHA-256 digest. `mix loopex.status` inside
 `check.sh --docs` separately validates the derived status values; it is not a
 substitute for proving that bytes outside their markers did not change.
 
+Content confinement does not cover Git tree metadata. Compare the five paths'
+entries with `git ls-tree <tested> -- <the five paths>` and
+`git ls-tree <administrative> -- <the five paths>`, and inspect
+`git diff --raw --no-renames <tested>..<administrative> -- <the five paths>`.
+Every path must remain an ordinary blob with the same file mode at both SHAs;
+an object-type or mode change fails confinement even when the changed bytes and
+hunks are otherwise allowed. Object IDs may differ because the administrative
+regions change.
+
 `git diff --name-only <tested>..<administrative>` must name exactly the five
 paths, and `git rev-list --parents -n 1 <administrative>` must show exactly
 `<administrative> <tested>`. Any extra parent, path, hunk or byte outside an
@@ -206,7 +215,7 @@ creating the tag:
 
 | Step | Command | What a failure means |
 | --- | --- | --- |
-| Confine the administrative commit | Require `git rev-list --parents -n 1 <administrative>` to return exactly `<administrative> <tested>`; compare `git diff --name-only <tested>..<administrative>` with [the five paths](#technical-milestones-confinement); inspect and retain the complete zero-context patch; map every changed byte to its one allowed region; and reconstruct both marked status files from the tested bytes plus the canonical administrative status blocks, requiring byte equality | An extra parent, intermediate commit, missing or extra path, hunk outside a named region, changed pre-existing context-map byte, changed scaffold structure, or changed byte outside either status marker means the tag would publish a tree outside the two-commit closure contract. `mix loopex.status` proving the values does not prove this byte confinement. The release stops and the packet is reassembled |
+| Confine the administrative commit | Require `git rev-list --parents -n 1 <administrative>` to return exactly `<administrative> <tested>`; compare `git diff --name-only <tested>..<administrative>` with [the five paths](#technical-milestones-confinement); compare their `git ls-tree` entries and inspect `git diff --raw --no-renames` to require ordinary blobs with unchanged modes; inspect and retain the complete zero-context patch; map every changed byte to its one allowed region; and reconstruct both marked status files from the tested bytes plus the canonical administrative status blocks, requiring byte equality | An extra parent, intermediate commit, missing or extra path, changed object type or mode, hunk outside a named region, changed pre-existing context-map byte, changed scaffold structure, or changed byte outside either status marker means the tag would publish a tree outside the two-commit closure contract. `mix loopex.status` proving the values does not prove this metadata and byte confinement. The release stops and the packet is reassembled |
 | Re-prove the documentation structure | `bash scripts/check.sh --docs` on `COMMIT` | The administrative commit's own documentation changes are not green; fix the candidate and assemble a replacement administrative commit |
 | Re-prove documentation meaning | Run the milestone's final semantic documentation gate on the relevant `docs/operator/` and `docs/developer/` pages at `COMMIT` | The operator and developer accounts disagree with each other, the plan, the accepted ADRs, or the implemented behavior; fix the candidate and assemble a replacement administrative commit |
 | Re-prove the archive identity | Recompute the archive manifest from `COMMIT`. Compare every entry outside `docs/`, except root `README.md` and `SOURCE_IDENTITY`, with the manifest retained for the tested SHA. Require exactly one root `SOURCE_IDENTITY` in each archive and validate it against that archive's own commit and source identity | The published bytes are not the closed bytes outside the confined regions, or an archive identifies the wrong source. Entries under `docs/`, the derived root README and the two `SOURCE_IDENTITY` payloads are expected to differ. The preceding content-confinement proof covers every permitted documentation hunk and the README's exact marked-block replacement. This comparison catches archive inclusion or exclusion changes that `.gitattributes` can cause without a path appearing in `git diff` |

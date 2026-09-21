@@ -1011,9 +1011,12 @@ Before the tag is created, four proofs run on the administrative SHA, in this
 order. First, the confinement proof requires its sole parent to be the tested
 SHA, requires the complete zero-context patch to reach exactly
 [the five confined paths and each path's allowed region](../developer/milestones-technical.md#technical-milestones-confinement),
-maps every changed byte to that table, reconstructs both marked status files
-byte-for-byte from the tested files plus their canonical new blocks, and
-requires the root README to be the sole path outside `docs/`. Second,
+compares the five paths' `git ls-tree` entries and raw diff to require ordinary
+blobs with unchanged modes, maps every changed byte to that table, reconstructs
+both marked status files byte-for-byte from the tested files plus their
+canonical new blocks, and requires the root README to be the sole path outside
+`docs/`. Any object-type or mode change fails confinement even when every
+changed byte lies in an allowed region. Second,
 `bash scripts/check.sh --docs`, including its `mix loopex.status` step,
 validates the resulting documentation structure and reconstructed status
 summary. Third, the final
