@@ -188,6 +188,11 @@ Darwin toolchain reports no `peercred` or `passcred` socket option, so Darwin
 reads `LOCAL_PEERCRED` and Linux reads `SO_PEERCRED`, and a credential that
 cannot be obtained or decoded closes the connection rather than admitting it.
 A foreign peer is refused before initialize.
+After both exclusions are held, an existing selected socket pathname is removed
+only when a no-follow metadata read proves a Unix-domain socket owned by that
+same operating-system user. A regular file, symbolic link, other file kind,
+foreign owner, unreadable identity or failed removal is preserved and startup refuses
+`socket_permission_unverified`.
 
 Every attachment starts from a snapshot anchored at the committed sequence
 and then receives the buffered and live stream contiguously, at least once.
@@ -297,7 +302,12 @@ and after the one materialized listing, the legacy directory must be a
 non-symlink directory owned by the daemon's effective user with the same owner,
 device and inode. Every non-temporary legacy row must validate, and one corrupt,
 oversized or invalid-UTF-8 row refuses the whole import without changing an
-existing index. The
+existing index. The import installs its signal lifecycle before either
+exclusion. A handled stop interrupts and reaps the scan, runs the same bounded
+Store and placement cleanup, emits no readiness or wire output, and exits with
+the distinct non-zero `prepare_index_interrupted` status; an image already
+renamed remains a complete valid image rather than being rolled back or
+partially published. The
 index is not Store truth and can omit a session committed across a
 crash cut; exact-ID and command-ID recovery repair such an omission. Lineage,
 lifecycle state and committed sequence are not list fields: a client that

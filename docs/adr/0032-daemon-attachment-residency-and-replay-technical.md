@@ -296,18 +296,26 @@ recorded holder and finds it dead, leaves it in place with
 `store_writer_unverifiable` where the holder cannot be decided, and refuses
 with `store_writer_active` where the holder is alive. All three are proved
 before the socket path is read, unlinked or bound. Only a daemon that holds
-both the placement lock and the Store marker may remove a stale `daemon.sock`
-left by a dead daemon and bind a new one, so two simultaneous daemon starts on
-one root resolve at the placement lock, exactly one listener exists, and the
-loser exits without touching the Store or socket.
+both the placement lock and the Store marker may inspect a selected socket
+pathname. It uses `File.lstat/1`, without following the final component. An
+absent path proceeds to bind. A present path is removable only when its owner
+uid equals the already verified daemon effective uid, `type` is `:other`,
+and `Bitwise.band(mode, 0o170000) == 0o140000` proves `S_IFSOCK`; Elixir
+reports Unix sockets as `:other`, so `type` alone is insufficient. A
+regular file, symbolic link, other file kind, owner mismatch, metadata failure
+or removal failure preserves the path and refuses
+`socket_permission_unverified`. Only the proved socket is removed before the
+new bind. Two simultaneous daemon starts on one root resolve at the placement
+lock, exactly one listener exists, and the loser exits without touching the
+Store or socket.
 
-**Removing the pathname is the successor's job, not the predecessor's**, and
-that follows from the same rule read in the other direction. A daemon's claim
+**Removing a proved stale socket pathname is the successor's job, not the
+predecessor's**, and that follows from the same rule read in the other
+direction. A daemon's claim
 on the path is its placement lock plus its successfully opened Store. **No daemon unlinks on its way out at all** — not on
 an orderly stop, not on any fail-stop, not in reverse cleanup. The next daemon
-to acquire and verify the placement lock and marker removes the stale pathname before binding,
-which is the one moment at which removing a socket file is unambiguously
-correct.
+to acquire and verify the placement lock and marker applies the no-follow
+kind-and-owner check above and removes only a proved socket before binding.
 
 M5 also closes the placement gap behind that rule. A Store self-stop invokes
 its best-effort marker release before the daemon can react, so the marker alone cannot protect the
@@ -316,7 +324,8 @@ and stays held through every fatal halt. While the predecessor daemon and its
 Control remain live, a contender receives the placement live-owner refusal and
 cannot open the Store or touch the socket. After the predecessor halts,
 verified stale-owner recovery reclaims the placement lock; the successor then
-acquires or recovers the Store marker and removes the pathname. The forced
+acquires or recovers the Store marker and removes the pathname only after the
+same no-follow socket check. The forced
 interleaving witness holds predecessor Store-EXIT handling after the release
 attempt returns,
 starts both a separate-VM contender and a same-VM second acquisition and proves
@@ -2186,6 +2195,33 @@ one-time cost is kept outside daemon availability rather than mislabeled as a
 bound. Re-running the command is therefore a refresh: an index-only row and a
 legacy-only row both survive.
 
+The offline import has its own lifecycle rather than borrowing daemon
+readiness. After parser and path-byte validation, but before placement or Store
+acquisition, the command process installs the same `SIGTERM` route and becomes
+the import sentinel. It starts an unlinked import owner behind a ref-tagged
+`:go` gate after installing the owner monitor. The owner traps exits and owns
+the placement handle and Store pid. The materialized `File.ls/1` plus strict
+per-entry reads run in one monitored scan worker that receives no Store handle
+and publishes nothing. A matching stop makes the sentinel retain
+`prepare_index_interrupted`; the owner kills and reaps any scan worker, then
+stops Store under its fixed 30-second phase and runs the existing five-second
+placement-release helper. The sentinel hard-halts at the absolute
+`prepare_index_interrupt_ms: 40_000` if the owner has not ended; the retained
+interruption status remains authoritative and any marker or placement residual
+follows the existing verified recovery rule.
+
+The owner drains the stop message before each exclusion, before scan-worker
+start, after the worker result and before publication, immediately after
+rename, after the directory sync, before Store stop and before placement
+release. A stop during the unbounded scan is therefore interruptible rather
+than waiting for enumeration to finish. A stop before rename preserves the
+prior index; one consumed after rename leaves the newly named complete image
+and makes no rollback claim. Every interrupted branch emits no readiness,
+protocol record or stdout byte and exits with the plan's distinct non-zero
+status. Forced cuts cover enumeration, pre-rename, post-rename, Store stop and
+placement release, proving no partial image and the stated healthy absence or
+complete recoverable residual.
+
 The strict reader does not call `Loopex.SessionDirectory.list_sessions/1`:
 that released operator projection intentionally drops a row when its entry
 cannot be decoded. The daemon reader opens the `sessions/` directory without
@@ -2364,6 +2400,12 @@ metadata seam separately reports a foreign owner before listing and an owner
 change after listing. Each case refuses `state_root_unusable`, preserves the
 prior index byte for byte and publishes no union; the witness does not depend
 on the test process having permission to change filesystem ownership.
+Five signal cuts interrupt the scan worker, pre-rename publication,
+post-rename publication, Store stop and placement release. Each produces the
+distinct non-zero import-interrupted status with no stdout, readiness or wire
+record, proves the worker is gone, and observes either the unchanged prior
+index or the complete renamed image plus only the documented exclusion
+residual.
 
 ### Session residency: active, dormant, and their bounds
 
@@ -2763,7 +2805,13 @@ publication outcomes reverses the session operation, and command-ID recovery
 repairs an omitted row without creating a second session.
 The transport cases also cover simultaneous starts, Store
 loss, generation negotiation, peer authorization, socket-path bounds and ADR
-0023 framing refusals. Direct parser/path-resolver cases pass binaries containing
+0023 framing refusals. A positive restart case verifies the retained path's
+same-user `:other` metadata and `S_IFSOCK` mode bits before replacement.
+Negative cases put a regular file, final-component symlink and non-socket
+`:other` object at the selected path, inject a foreign uid, metadata failure
+and removal failure, and prove each exact object is preserved while startup
+refuses `socket_permission_unverified` before bind, listener or readiness.
+Direct parser/path-resolver cases pass binaries containing
 `<<0xFF>>` as the selected state root and as the explicit socket path rather
 than relying on an OS argument or environment representation. They assert exact
 `state_root_unusable` and `invalid_socket_path` refusals, respectively, before
