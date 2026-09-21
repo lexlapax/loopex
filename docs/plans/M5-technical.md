@@ -825,11 +825,14 @@ commit and tree are retained with the closure runs. The release itself is one
 annotated `v0.2.0` tag created on the maintainer's separate decision, and the
 commit it names is the **administrative closure SHA** — the one carrying the
 closure record, and therefore the tree a reader who fetches the tag gets.
-Four things are verified at the tag, in this order: `git diff --stat
-<tested>..<administrative>` touches **nothing outside `docs/`**, which is what
+Four things are verified at the tag, in this order: `git diff --name-only
+<tested>..<administrative>` reaches **only
+[the four confined paths](../developer/milestones-technical.md#technical-milestones-confinement)**
+— all under `docs/`, so nothing outside `docs/` moved, which is what
 makes everything below sufficient; `bash scripts/check.sh --docs` is green on
 the tagged SHA; the archive manifest recomputed from the tagged SHA equals the
-one the tested SHA recorded **for every entry outside `docs/`**, the `docs/`
+one recorded on the evidence page for the tested SHA **for every entry outside
+`docs/`**, the `docs/`
 entries being expected to differ and therefore not compared — which catches an
 archive that includes or excludes differently from the tree, as
 `.gitattributes` can without showing in any diff; and the tag object is
@@ -1787,10 +1790,9 @@ performs the call nor owns its lifetime. An earlier revision proposed an
 internal attach form taking a stable holder pid instead of the caller, which
 would have added a core surface no inventory carried and contradicted every
 caller-is-holder passage in this pair; it is withdrawn, and nothing needs it
-once the connection process is the caller.
-
- An
-  earlier revision called it a read and left it out, which it is not: its
+once the connection process is the caller. An
+  earlier revision called `session.attach` a read and left it out of the
+  ticketed set, which it is not: its
   second leg **mutates the dispatcher**. `Runtime.attach/3` calls
   `{:attach, …}` on the dispatcher (`runtime.ex:199-210`, `:538`), whose
   handler spawns a scan worker, monitors the caller and records a pending scan
@@ -3893,8 +3895,11 @@ the next marker holder removes.
 **reader is the owner's `{:EXIT, pid, reason}` clause**, which matches the pid
 against the fixed set it holds, maps it to a component and classifies the reason;
 there is one place in the daemon where a class is decided, and this is it. The
-set is closed: **one class per linked component**, so no linked process can
-die without a name for it.
+set is closed: **one class per linked component** — eleven components, twelve
+non-startup rows, the Store carrying two — so no linked process can
+die without a name for it. An earlier revision added the connection registry
+to the process table, the class enumeration and the witness without adding it
+here, which made exactly this sentence false.
 
 | Class | When | Wire reason |
 | --- | --- | --- |
@@ -3915,7 +3920,8 @@ die without a name for it.
 | `capability_lost` | The tracing capability exited | `fatal:capability_lost` |
 | `runtime_lost` | The runtime root exited | `fatal:runtime_lost` |
 | `relay_lost` | The admission relay exited, taking every outstanding admission ticket with it | `fatal:relay_lost` |
-| `listener_lost` | The listener exited | — the listener is what would have written it |
+| `connections_lost` | The connection registry exited, taking every connection's slot, monitor and buffer control with it | — one of the two that reach no client: the record would have gone out **through** the interface that is gone |
+| `listener_lost` | The listener exited | — one of the two that reach no client: the listener is what would have written it |
 
 **A lease owner's exit is the one that is not in this table**, and its absence
 is the rule rather than an omission. The owner's clause maps that pid to the

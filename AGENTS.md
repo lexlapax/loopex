@@ -171,13 +171,18 @@ A milestone runs in four steps; the
    reads the candidate; the maintainer closes it and the register moves to
    `Closed`. Closure names **two commits**: the *tested implementation SHA*
    the matrix ran on and the reviewer read, and the *administrative closure
-   SHA* that records the decision and changes nothing the runs covered. One
-   commit cannot name itself. Run evidence is immutable — held where it cannot
+   SHA* that records the decision. One commit cannot name itself, and the runs
+   are of the first, so the second is what writes them down. It is confined to
+   four paths — register row, Closure row, context-map entry, evidence page —
+   which the
+   [milestone guide](docs/developer/milestones-technical.md#technical-milestones-confinement)
+   states once. Run evidence is immutable — held where it cannot
    be edited after the packet is read.
 4. **Release.** Publication, tags, and packages are separate maintainer
    decisions that reuse the closure evidence when the source is unchanged. The
    tag names the **administrative** closure SHA, whose diff from the tested
-   SHA is verified to touch nothing outside `docs/`; on that basis the release
+   SHA is verified to be confined to those four paths — all under `docs/`, so
+   nothing outside `docs/` moved; on that basis the release
    re-proves documentation only — `bash scripts/check.sh --docs` on the tagged
    SHA, and a recomputed archive manifest matching the tested SHA's for every
    entry outside `docs/` — and re-runs no suite and no release check.

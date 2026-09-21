@@ -64,15 +64,19 @@ packet to the maintainer. The maintainer closes it; the register moves to
 the `close-milestone` skill.
 
 **Closure names two commits, because one cannot name itself.** The checks and
-the review are of a **tested implementation commit**; recording the closure —
-the register row, the Closure row, the context-map entry — is a further commit
-that necessarily comes after, and that the evidence therefore cannot have
-been taken from. Earlier wording asked for both from one SHA, which no
-sequence of commits can satisfy. So a closure carries the **tested
-implementation SHA**, which the runs and the review name, and the
-**administrative closure SHA**, which records the decision and changes nothing
-the runs covered. A closure whose administrative commit touches anything
-else is not administrative, and its evidence is stale.
+the review are of a **tested implementation commit**; recording the closure is
+a further commit that necessarily comes after, and that the evidence therefore
+cannot have been taken from — the runs are *of* the tested commit, so the
+evidence page that holds them is written by the second, not the first. Earlier
+wording asked for both from one SHA, which no sequence of commits can satisfy.
+So a closure carries the **tested implementation SHA**, which the runs and the
+review name, and the **administrative closure SHA**, which records the
+decision. That second commit is **confined to four paths** — the register row,
+the plan's Closure row, the context-map entry and the evidence page — which
+the [technical companion](milestones-technical.md#technical-milestones-confinement)
+states once and everything else refers to. A closure whose administrative
+commit touches anything else is not administrative, and its evidence is
+stale.
 
 The closure matrix is run **once**, from the tested implementation SHA, and
 nothing in closure is re-run because of the administrative commit. What that
@@ -90,19 +94,21 @@ package, installer or publication is its own decision with its own evidence.
 
 **The tag names the administrative closure SHA**, which is the commit that
 carries the closure record and therefore the tree a reader who fetches the tag
-gets. That is only safe because the administrative commit is confined: its
-diff from the tested implementation SHA must touch **nothing outside
-`docs/`**, and the release step verifies that rather than trusting it —
-`git diff --stat <tested>..<administrative>` with every path under `docs/`.
+gets. That is only safe because the administrative commit is confined to
+[its four paths](milestones-technical.md#technical-milestones-confinement),
+and the release step verifies that rather than trusting it —
+`git diff --name-only <tested>..<administrative>` against exactly those four.
 A diff that reaches anything else means the tag would publish source the
-closure evidence does not cover, and the release stops.
+closure evidence does not cover, and the release stops. All four are under
+`docs/`, so a passing check also establishes that nothing outside `docs/`
+moved; that is a consequence of the confinement, not a second rule.
 
 **Two checks run at the tag, and neither is a second closure.** The tagged
 tree differs from the tested one only in documentation, so what is re-proved
 is documentation: `bash scripts/check.sh --docs` runs on the tagged SHA, and
 the archive manifest is recomputed from the tagged SHA and compared with the
-one the tested SHA recorded **entry by entry outside `docs/`**, which must
-match exactly. It is not compared whole — the archive carries `docs/` too, so
+one recorded on the evidence page for the tested SHA, **entry by entry
+outside `docs/`**, which must match exactly. It is not compared whole — the archive carries `docs/` too, so
 a whole-manifest equality could never hold and would be a check that always
 fails. Comparing the rest is what catches an archive that includes or excludes
 differently from the tree the first step examined, which `.gitattributes` can

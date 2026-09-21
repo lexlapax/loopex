@@ -5383,8 +5383,15 @@ evidence and its closure record at one SHA, which no sequence of commits can
 satisfy: recording the decision is itself a commit, and it comes after the
 runs. Closure now names a **tested implementation SHA** — the candidate the
 matrix ran on and the reviewer read — and an **administrative closure SHA**
-that records the decision and changes nothing the runs covered. The matrix
-runs once, from the first.
+that records the decision. The matrix runs once, from the first, and the
+second is **confined to four paths** — the register row, the plan's Closure
+row, this context map's own entry, and the milestone's closure-runs evidence
+page — stated once in
+[the confinement rule](milestones-technical.md#technical-milestones-confinement).
+The evidence page is in that list deliberately: the runs are *of* the tested
+commit, so the commit that records them is necessarily the later one, and an
+earlier wording that let the administrative commit change "nothing the runs
+covered" left that page with no home at all.
 
 The **tag names the administrative SHA**, because that is the tree a reader
 who fetches the tag gets. The release verifies that commit is confined —
@@ -5404,5 +5411,10 @@ and `docs/developer`. Written into
 [technical companion](milestones-technical.md#technical-milestones-close),
 `AGENTS.md` § Milestones and Checks steps 3 and 4, and
 [the verification guide](verification.md#concept-verification-stages)'s stage
-table, in one change with this entry. It grants no tag, release or
+table — and, because the register derives its own prose, into
+`apps/loopex/lib/mix/tasks/status/register.ex`, whose `In progress` and
+`In review` capsule strings named "the candidate" and a single closure row,
+together with `apps/loopex/test/status_check_test.exs`, which pins those exact
+strings and would otherwise be the thing that decides what the guide says. All
+of it in one change with this entry. It grants no tag, release or
 publication.
