@@ -1868,8 +1868,12 @@ terminal permit states are therefore exactly `result`, `owner_lost`,
 The same barrier returns ADR 0033's tagged settling-acquire, settling-release
 and settling-owner-loss descriptors. Each keeps its already selected
 disposition, finishes exact no-output relay and mirror cleanup inside
-`freeze_deadline`, and leaves no permit or owner mirror before core quiesce; it
-is never silently treated as an executing row or omitted from the frozen set.
+`freeze_deadline`, and leaves no nonterminal or claimable operation permit and
+no provisional, pending or stale owner mirror before core quiesce. An exact
+granted acquisition or restored holder and its valid holder mirror remain for
+the drain; the barrier never removes live collaboration state merely because
+its operation settled. No descriptor is silently treated as an executing row
+or omitted from the frozen set.
 If exact owner `DOWN` is retained or arrives after `result` or
 `connection_lost` was selected, descriptor settlement finishes first and the
 same deadline covers the later reap, exact pop and classification; the selected

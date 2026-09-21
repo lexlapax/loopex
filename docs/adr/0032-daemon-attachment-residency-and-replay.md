@@ -257,11 +257,14 @@ without starting a coordinator or spending an activation.
 `residency` therefore means *this daemon activated this session in this
 lifetime* — a daemon-owned fact, true by construction — and never *a live
 coordinator exists*, which the daemon has no way to know. A coordinator that
-dies is core's to supervise and surfaces through core's own refusal on the
-next command for that session, which the daemon forwards unchanged. Retrying
-against that lifetime repeats the refusal; the operator recovery is to restart
-the daemon and retry `loopex resume --daemon`, whose dormant branch starts a
-new coordinator. Same-lifetime repair would require another core lifecycle
+dies is core's to supervise. After attach, the live resume client performs one
+bounded `session.inspect`; generation 2 maps core's exact
+`:session_unavailable` result to the correlated `session_unavailable` code
+before any driving mutation. Retrying inspect against that lifetime repeats
+the refusal; the client attempts release while writable, and the operator
+recovery is to restart the daemon and retry `loopex resume --daemon`, whose
+dormant branch starts, reattaches and inspects a new coordinator. Other command
+failures retain their existing mappings. Same-lifetime repair would require another core lifecycle
 surface and is outside this decision.
 
 Lazy recovery is what a daemon can honestly promise on a store whose session

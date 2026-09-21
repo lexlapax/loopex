@@ -1113,8 +1113,10 @@ beginning core quiesce. Fresh executing acquisition is frozen before and after
 child materialization and provisional install; the exact `start_op_ref` record
 must tombstone or name the child, and any installed row must be cancelled before
 child reap. Existing-owner acquire and release are held across freeze in both
-result-versus-stop and owner-`DOWN`-versus-pop orders. The exact mirror is absent,
-every claimable origin has a terminal no-output disposition, and a promoted
+result-versus-stop and owner-`DOWN`-versus-pop orders. No provisional, pending
+or stale operation mirror remains. A result-granted or restored holder's exact
+mirror remains for the drain unless the paired later owner-`DOWN` case pops it.
+Every claimable origin has a terminal no-output disposition, and a promoted
 mutation remains on its real-result path before quiesce. An owner-loss winner preserves
 the mirror and selects exactly the classified refusal or close; a result winner
 clears the mirror before rendering the correlated success, makes a later pop
