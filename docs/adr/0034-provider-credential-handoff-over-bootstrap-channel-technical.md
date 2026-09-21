@@ -459,7 +459,30 @@ boundary, not an absolute:
     every tracer restart; it already holds per-runtime process state; and it
     already monitors pids and handles `DOWN` (`control.ex:805-826`), which is
     the exact machinery the set needs.
-  - **The set is bounded because Control monitors every excluded sender and
+  - **A future trace session must find the MFA exclusions too, not only the
+    pids.** `Control` holding excluded pids answers "skip this process" for a
+    session that starts later; it does not answer "clear these functions",
+    which is the half ADR 0030 names by name. So `Control` retains **both**: the
+    excluded pid set, and a **ref-counted union of the excluded MFAs** — a
+    count per identity, incremented when a sender installs it and decremented
+    when that sender's `DOWN` arrives, so an identity is cleared for a new
+    session exactly while some live sender needs it. A set without counts
+    would either leak the identity forever or drop it while another sender
+    still relied on it.
+  - **And starting a session is serialised against installing an exclusion.**
+    Both are `Control` operations, so both run in its process, one at a time:
+    a session cannot be created between a sender's flag going on and its MFA
+    clear being recorded. Without that, a session starting in that window
+    traces a sender that had already excluded itself. The witness starts a
+    session concurrently with an exclusion, many times, and asserts the
+    tracer receives nothing from the sender in either order.
+  - **The set is leak-free and proportional rather than bounded**, and the
+    distinction is worth the word: nothing caps it, because nothing may refuse
+    a sender. What holds is that every entry has an owner whose `DOWN`
+    removes it, so the set is proportional to the senders alive at that
+    instant and returns to its baseline — normally empty — as they exit.
+    Calling it "bounded" implied a ceiling the design does not have.
+  - **Control monitors every excluded sender and
     removes it on `DOWN`.** An earlier revision kept a pid per invocation
     forever, which is a leak measured in invocations; senders are short-lived
     by construction, so the set returns to its baseline — normally empty —

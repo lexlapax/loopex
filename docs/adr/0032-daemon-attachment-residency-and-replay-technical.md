@@ -111,11 +111,16 @@ ownership and then unlinked would be acting across a window in which the Store
 can die, the marker can be released and a successor can bind, and the
 predecessor would then delete the successor's socket. The next daemon to
 acquire and verify the marker removes the stale pathname before binding, which
-is the one moment at which removing a socket file is unambiguously correct. If the daemon loses store ownership while
-running, because its Store child exits or the marker can no longer be
-proved held, it closes the listener and every connection before anything
-else and then exits; no connection outlives the daemon's ownership of the
-root.
+is the one moment at which removing a socket file is unambiguously correct. If the daemon's **Store process exits**, it closes the listener and every
+connection before anything else and then exits; no connection outlives the
+daemon's ownership of the root. An earlier revision wrote that as "its Store
+child exits **or the marker can no longer be proved held**", which named a
+check that does not exist: nothing polls the marker, and the read-only
+ownership call a revision once invented for it was withdrawn with the unlink
+it existed for. **The marker's lifetime is the Store process's lifetime** —
+`Loopex.Store.Local` takes it at start and releases it in its own
+`terminate/2` — so the Store's exit *is* the event, and there is no second
+condition to observe.
 
 Framing, the initialize handshake, admission records, snapshot,
 event and progress records, the frame ceiling, the strict UTF-8/LF rule and
@@ -482,6 +487,24 @@ added keys are enumerated so the digest covers them:
 ADR 0023's own framing and input ceilings are unchanged; these are additions
 beside them, and **all five** digest inputs therefore change in generation 2.
 
+**A connection is pinned to one session, and both paths pin it.** The first
+`session.attach` or `session.acquire_control` a connection completes fixes
+which session that connection is about; every later call on it naming a
+different session is refused with the existing invalid-argument reason, and
+the daemon's per-connection state is keyed by that one session rather than by
+whatever the last frame said. Without the rule a connection could hold a lease
+on one session and an attachment on another, and `control_owner_lost` — whose
+close ends *the connection* — would take down an attachment belonging to a
+session that had nothing to do with the lost owner.
+
+**`control_owner_lost` therefore carries `event_cursor` exactly when there was
+an attachment to carry one for.** A connection that acquired and never
+attached has no emitted cursor, and inventing one would be a lie about what it
+received; the field is **absent** in that case and present otherwise, which
+is an optional-field rule the DTO tables already have vocabulary for. Both
+shapes are generation-2 vectors — one with the cursor, one without — because a
+client parsing the record has to know that absence is legal.
+
 **Connections are bounded, and an earlier revision said they were bounded by
 the attachment ceiling, which they are not.** A client may connect,
 `initialize`, call `session.list`, `daemon.status` or
@@ -492,6 +515,17 @@ connections at all. The ceiling is **512 concurrent accepted connections**,
 the attachment number reused rather than a fourth 512 invented, and the
 daemon reports it as `connection_limit` with the live count as `connections`
 so an operator can see the headroom before it is gone.
+
+**The slot is taken at `accept`, not at `initialize`.** A ceiling enforced
+only at the handshake bounds nothing that matters: a peer that connects and
+never speaks holds a socket, a process and a buffer, and the daemon would
+count it as zero. So the listener **reserves a connection slot as it accepts**
+and closes the socket immediately when none is free — before any frame is
+read, before the peer check, with no record, because a connection that was
+never admitted has no generation to be told anything in. The slot is released
+when the connection process ends, which is the same `DOWN` everything else
+about a connection hangs from. The `initialize`-time refusal below still
+exists for the case a slot was free at accept and the handshake is what fails.
 
 **The refusal is ADR 0023's, not a new one.** A connection accepted beyond the
 ceiling is answered, at its `initialize`, with a correlated
@@ -1074,10 +1108,10 @@ awaiting an answer, a recovery in progress, an unresolved `commit_unknown`, or
 an admission executing inside core. Stopping it would destroy exactly what
 Outcome 1 exists to prove, that work progresses with zero attachments. And
 there is no operation to stop one with: core owns coordinator lifetime, and
-none of M5's five core changes (concurrent attachment, the read-only existence
-query, the trace exclusion, `quiesce/1`, and the `disposition` and
-`control_entry` fields on the detailed create and resume functions) stops a
-coordinator,
+none of M5's six core changes (concurrent attachment, the read-only existence
+query, the trace exclusion, `quiesce/1`, the `disposition` and
+`control_entry` fields on the detailed create and resume functions, and the
+bounded session listing) stops a coordinator,
 so a deactivation call would be a further core change this milestone does not
 make.
 
@@ -1114,6 +1148,21 @@ make.
   as `store_log_too_large`: refuse rather than serve a truncated view of what
   the root records. The ceiling is on recorded entries only, and it never
   makes a session unreachable — see the crash cut below.
+
+  **Enforcing it needs a bounded read, and core does not have one.** The
+  listing the daemon builds its index from is core's:
+  `Loopex.list_sessions/1` (`loopex.ex:452-453`) calls
+  `SessionDirectory.list_sessions/1` (`session_directory.ex:230-253`), which
+  does `File.ls` and then reads **every** entry before sorting and returning.
+  A root holding a hundred thousand entries is therefore read in full before
+  the daemon can refuse at the four-thousand-and-ninety-seventh — a refusal
+  whose point is to avoid exactly that cost. So this milestone adds one
+  further narrow read to core and counts it: **`Loopex.list_sessions/2`
+  taking a bound and stopping after the bound-plus-first valid entry**,
+  answering what it read and whether it stopped early. It is read-only and
+  additive — the arity-one form keeps its exact meaning and its callers — and
+  it is the smallest thing that lets the bound be enforced rather than
+  discovered.
 - **Homogeneity.** One state root is one host composition for the daemon's
   process lifetime. The daemon is composed once, with one workspace, policy,
   provider configuration and set of project resources, and serves every

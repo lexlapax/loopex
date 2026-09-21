@@ -679,9 +679,16 @@ M5 therefore adds an archive-carried source identity that both paths accept,
 and one shared resolver they both call:
 
 - a tracked `SOURCE_IDENTITY` file holding `$Format:%H$` and the commit date,
-  with a tracked `.gitattributes` marking it `export-subst`, so `git archive`
-  substitutes the exact commit into the extracted copy while the checkout's
-  copy keeps the unsubstituted literal;
+  with a tracked `.gitattributes` marking it `export-subst`. What that does,
+  stated because the refusals below depend on it: `git archive` rewrites
+  `$Format:…$` placeholders **inside a file's contents** as it exports, so the
+  extracted copy carries the exact commit while the copy in a checkout keeps
+  the unsubstituted literal — which is why an unsubstituted value is a
+  reliable "this was not exported" signal rather than a formatting accident.
+  It substitutes only into files marked `export-subst`, and only the
+  placeholders `git log --format` defines, so the mechanism cannot be extended
+  to carry a path list — which is why the inventory lives outside the
+  archive;
 - a resolver that prefers git when `.git` is present — the existing behaviour,
   unchanged, including the clean-tree requirement — and otherwise reads
   `SOURCE_IDENTITY`;
@@ -716,12 +723,19 @@ repository:
   `docs/evidence/M5-closure-runs.md` **beside the archive's own digest and
   commit**. The closure runner is in the checkout when it stages the archive,
   so this costs one command it is already positioned to run;
-- **the extracted-build witness compares against that recorded inventory**,
-  not against anything inside the extraction: it takes the built tree's
-  **path set**, so a file created or deleted during the build is caught even
-  if every file it names is byte-identical, and its **bytes**, as a SHA-256
-  over each path's contents in inventory order, and requires both to match
-  what was recorded;
+- **the extracted-build witness compares a canonical manifest**, taken over
+  the extraction before the build and again after, and requires the two to be
+  identical. The manifest is one record per path, **NUL-separated** so no
+  filename containing a newline or a quote can forge a boundary — `git
+  ls-files -z` is read the same way — holding the **path**, its **kind and
+  mode** (regular with its permission bits, symbolic link, directory), and
+  either the **SHA-256 of its contents** or, for a link, its **target**. A
+  digest over contents alone would miss a file made executable, a regular
+  file replaced by a link to one, or a path that appeared and another that
+  vanished; the path set, the kind and the mode are what close those, and the
+  before/after pair is what catches a build that writes into its own source
+  tree. The first manifest is also compared with the inventory the closure
+  evidence recorded, which is what ties the extraction to the commit;
 - exactly **one** exclusion, named rather than implied: the build-output roots
   `_build/` and `deps/`, which the build is supposed to create. Nothing else
   is excluded, and the list of exclusions is part of the retained evidence, so
@@ -1148,6 +1162,16 @@ A call that cannot reserve is refused `activation_ceiling_reached` **before
 core is called at all**, which is the only place a refusal can be both
 truthful and early. The reservation is taken in the daemon's own serial
 owner, so "atomic" needs no new mechanism: it is one process deciding.
+
+**A duplicate create does not take a second reservation; it waits on the
+first.** A reservation is owned by the call that took it and carries a
+waiter set: an **exact** re-presentation of the same `command_id` while that
+reservation is in flight is not a new activation and must not reserve a
+second slot, so it is **coalesced** — it joins the waiters and is answered
+with the same result, converting or releasing once for all of them. A
+different `command_id` is a different call and reserves on its own. Without
+this a client retrying a create it never heard back from spends two of the
+sixty-four for one coordinator.
 
 **A reservation is keyed by `(command_id, session_id)`**, and the pair matters
 in both directions. An earlier revision keyed a resume's reservation by its
@@ -1583,6 +1607,35 @@ before composition, for the reason all three share: model options carry their
 references, and options are built before the runtime exists. It is handed the
 runtime reference as soon as the composition function returns one.
 
+**Connections have an owner, and it is not the listener.** A connection is a
+process, a reserved slot, a monitor, an output buffer and — once it has
+negotiated — a generation. Something has to hold all five together, and an
+earlier revision left them scattered: the listener accepted, the connection
+process held its own buffer, and nothing owned the set. So the daemon runs one
+fixed **connection registry** beside the relay, and it owns exactly that:
+
+- **the slot**, reserved at `accept` and released on the connection's `DOWN`,
+  which is what makes the 512 ceiling a ceiling rather than a handshake rule;
+- **the monitor**, so a connection that dies releases its slot, its buffer and
+  its attachment without anyone calling anything;
+- **the buffer-control interface**, so backpressure and the bounded
+  best-effort writes go through one place rather than each caller reaching
+  into a connection's state;
+- **the generation**, so a broadcast reaches only connections that negotiated
+  one. **Generation-2 records — `daemon.stopping`, `daemon.notice`,
+  `control_owner_lost`, `detached` — go only to connections that completed a
+  generation-2 `initialize`.** An uninitialized socket has agreed no encoding,
+  so it is **closed with EOF** and told nothing; writing a generation-2 record
+  to it would be sending bytes under a contract the peer never accepted.
+
+**Losing the listener does not lose the connections, and losing the registry
+does.** `listener_lost` stops new connections arriving; every open one is
+still served until the fail-stop closes it, which is why that class has no
+wire reason — the listener is what would have written it. The registry is
+daemon-fatal for the opposite reason: without it no slot is released, no
+`DOWN` is observed and no buffer can be controlled, so every later connection
+is a leak and every write is unbounded.
+
 **The admission relay is new in this revision, and it exists because of a
 window nothing else closes.** Core has no writer epoch — the lease is the
 daemon's, and core never sees it — so when a lease owner dies with an
@@ -1645,7 +1698,17 @@ as though it does:
   outside the relay entirely, which made the cut a promise the daemon could
   not keep.
 
-  **The tenth is `session.attach`, and it is ticketed for the cut alone.** An
+  **The tenth is `session.attach`, and it is ticketed for the cut alone — but
+it is not performed by a relay task.** The dispatcher monitors **its caller**
+(`event_dispatcher.ex:186-192`), so an attach made from a short-lived relay
+task would be released the instant that task exited, which is immediately. So
+core change 1 adds an internal attach form taking a **stable holder pid** the
+dispatcher monitors instead of the caller, the daemon passes its
+**connection process**, and the relay's ticket accounts for the call without
+owning it. The witness asserts the monitored pid **is** the connection
+process, and that the attachment survives the task that started it.
+
+ An
   earlier revision called it a read and left it out, which it is not: its
   second leg **mutates the dispatcher**. `Runtime.attach/3` calls
   `{:attach, …}` on the dispatcher (`runtime.ex:199-210`, `:538`), whose
@@ -3803,20 +3866,21 @@ could not be checked.** Every witness here names the **surface** it reads, the
 **two answers** that must differ on it, and — where the surface is new — the
 **change that creates it**. A case asserting "core holds N" without saying
 where N is read is not a case anybody can write; nor is one whose difference
-depends on a code path that does not exist. **Five** of this plan's surfaces
+depends on a code path that does not exist. **Six** of this plan's surfaces
 are new work rather than existing behaviour — one per core change, which is
 not a coincidence: a core change that no witness could read would be a change
 nothing proves. Each is named where it is used:
 
 | Surface | Created by | Read by |
 | --- | --- | --- |
-| The dispatcher's release on `DOWN`, the attacher pid and monitor reference it keeps on the attachment to do it, and the transfers it releases with it | Core change 1 | The concurrent-attachment cases, the ADR 0028 transfer case, the scoped-replacement case and the attach connection-loss case |
+| The dispatcher's release on `DOWN`, the attacher pid and monitor reference it keeps on the attachment to do it, the transfers it releases with it, **and `Control`'s per-holder attachment and repetition state** | Core change 1 | The concurrent-attachment cases, the ADR 0028 transfer case, the scoped-replacement case and the attach connection-loss case |
 | The existence query's five-result set | Core change 2 | `session_existence_query_test.exs`, one case per result, and Outcome 4's row |
 | `Control`'s excluded-pid set, and `Entry`'s redaction of a keyword pair under its own key | Core change 3 | The trace-exclusion cases, and the render pair that must differ |
 | `quiesce/1`'s three lists, `budget_ms`, `drain_id` and the per-session `fences` map | Core change 4 | The drain cases, the fence cases and the stop line |
 | `disposition` and `control_entry`, on `create_session_detailed/3` and `resume_session_detailed/3` | Core change 5 | The create and resume connection-loss cases, and the case asserting `create_session/3`'s own return is byte-identical to today's |
+| `Loopex.list_sessions/2`'s bound and its early-stop answer | Core change 6 | The startup index-bound case, which asserts a root past the bound is refused **without** the directory having been read in full |
 
-Everything read outside those five exists today — the journal, a supervisor's
+Everything read outside those six exists today — the journal, a supervisor's
 children, a pid's liveness, a socket's EOF, or the daemon's own `stderr`.
 
 - **Idle shutdown.** A daemon with sessions activated and no work in flight
@@ -4215,6 +4279,18 @@ children, a pid's liveness, a socket's EOF, or the daemon's own `stderr`.
   and that core started **one** coordinator, not two: the refusal happens
   before the second call is made, so there is no second coordinator to
   discover afterwards.
+
+  **It is deterministic, not a race the case hopes to lose.** Both calls are
+  held at the daemon's serial owner — the one process that takes reservations
+  — and released in a fixed order, so the case asserts *which* one is refused
+  rather than that one of them is. A witness that ran two calls and accepted
+  either outcome would pass against a daemon that reserved after the call.
+- **A duplicate create coalesces rather than reserving twice.** A create is
+  held in flight and the identical `command_id` is re-presented on a second
+  connection. The case asserts **one** reservation existed throughout, that
+  both callers received the same result, and that the activation count rose by
+  **one** — where a second reservation would have spent two slots for one
+  coordinator, and a second *call* would have been a second create.
 - **A dormant resume at the ceiling is refused before the call.** A daemon at
   **64** receives `session.resume` for a dormant session. The case asserts the
   refusal, and asserts core was **not called** — proved by that session having
@@ -4329,7 +4405,8 @@ links rather than one of them, and an earlier revision headed eleven rows
 | Group | Started by | Bound | Its death |
 | --- | --- | --- | --- |
 | **Lease owners**, one per session under lease or acquisition | Daemon owner, on the first lease operation after existence validation | At most 512 at once, ADR 0032's per-daemon ceiling reused | **Session-scoped**: that session's controller closes with `control_owner_lost`, observers stay, the replacement's first grant waits on the relay's tickets |
-| **Connections**, one per accepted client | The listener | **512 concurrent**, ADR 0032's connection ceiling — the attachment number reused, and not the attachment ceiling itself, which bounds nothing about a client that never attaches | That client's connection closes |
+| **Connection registry**, one fixed process | Daemon owner, beside the relay | one | `connections_lost`, daemon-fatal: it owns every connection's monitor and the buffer-control interface, so a daemon without it can neither release a slot nor stop writing to a gone peer |
+| **Connections**, one per accepted client | The listener, their slots reserved at `accept` and their monitors held by the connection registry | **512 concurrent**, ADR 0032's connection ceiling — the attachment number reused, and not the attachment ceiling itself, which bounds nothing about a client that never attaches | That client's connection closes |
 | **Stop helpers**, one per stop | Daemon owner, `spawn_monitor` | One at a time, except the teardown's lease-owner sweep, which spawns one per lease owner at once and so is bounded by the 512 above | Nothing: monitored, never linked |
 | **Relay tasks**, one per ticketed call — the eight lease-authorized mutations, `session.create` and `session.attach`; **not** the three artifact-transfer methods, which mutate neither `Control` nor the journal | The relay, after the ticket is acknowledged | One per outstanding ticket | Keeps its ticket; the relay exits `relay_lost` |
 

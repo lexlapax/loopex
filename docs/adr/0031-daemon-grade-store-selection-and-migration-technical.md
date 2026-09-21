@@ -27,12 +27,17 @@ section.
 The qualification is deliberate and is the strongest true form. Where the
 runtime does not stop within its grace the daemon kills its supervisor, and a
 *trapping* descendant — an owner group, or a trapping worker beneath one —
-may still be unwinding when the Store goes. Such an orphan meets a stopped
-Store and gets the same refusal it would get after a VM death: it cannot
-write, because there is nothing left to write to. So the marker is never held
-open by a straggler, and no straggler appends behind the daemon's back; what
-the daemon does not promise is that every process has finished before it
-exits.
+may still be unwinding when the Store goes. **What refuses such a straggler is the drain's fence, not a stopped Store**,
+and an earlier revision of this paragraph had it the other way round. The
+Store is *not* stopped while a straggler is most likely to be unwinding: the
+daemon stops it last, in its own phase, so there is a window in which the
+Store is alive and accepting. What makes the straggler harmless is that the
+drain moved that session's owner epoch before the runtime came down, so its
+commit is refused `:stale_owner_epoch` like any other stale writer. The marker
+is therefore never held open by a straggler and no straggler appends behind
+the daemon's back — but for the fence's reason, which holds whether the Store
+is alive or not, rather than for an absence that only begins later. What the
+daemon does not promise is that every process has finished before it exits.
 
 The adapter also **traps exits**, which this arrangement relies on: an owner
 that crashes rather than stopping gives the Store's `terminate/2` the chance
