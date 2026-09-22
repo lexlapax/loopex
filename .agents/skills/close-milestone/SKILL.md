@@ -35,7 +35,10 @@ technical guidance. The process is the
    CI run the candidate already produced; count it rather than repeating it.
    Retain each run's complete output outside the repository, with its stable
    retained-output reference, SHA-256 digest, tested implementation SHA,
-   platform, and toolchain. The release check's M5-delivered fresh-source lane runs
+   platform, and toolchain. The release check's M5-delivered fresh-source lane
+   stages its tree under the milestone guide's
+   [canonical archive-extraction rule](../../../docs/developer/milestones-technical.md#technical-milestones-archive-extraction),
+   including the hostile caller-umask proof, then runs
    `bash "$tree/scripts/source-archive-manifest.sh" "$tree" >"$retained_manifest"`
    before building, with the retained output outside
    the extraction, and retains those exact NUL-delimited bytes under their own
@@ -76,11 +79,16 @@ authorizes a tag, follow the milestone guide's release sequence. Re-prove the
 five-path and allowed-region confinement, then run
 the documentation check, the final semantic operator/developer
 documentation gate, and the archive comparison on the administrative SHA.
-For that comparison, stage a fresh `git archive` extraction, run the
+For that comparison, stage a fresh `git archive` extraction under the same
+[canonical archive-extraction rule](../../../docs/developer/milestones-technical.md#technical-milestones-archive-extraction),
+including the hostile caller-umask proof, then run the
 M5-delivered producer
 `bash "$tree/scripts/source-archive-manifest.sh" "$tree" >"$retained_manifest"`
 with the output outside the extraction, retain those
-exact NUL-delimited bytes, reject malformed or duplicate records, and compare
+exact NUL-delimited bytes, reject malformed or duplicate records, require each
+archive's complete unexcluded `(kind, mode, path)` projection to match its
+commit's independent Git-tree projection, and require the tested and
+administrative projections to be identical before exclusions. Then compare
 complete tuples after removing `docs` and its descendants plus exact root
 `README.md` and the M5-delivered `SOURCE_IDENTITY`
 before creating the tag. Retain those outputs outside the repository and put

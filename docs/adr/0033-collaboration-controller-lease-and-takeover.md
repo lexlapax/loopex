@@ -58,9 +58,15 @@ because over a Unix-domain socket the daemon cannot tell a polite close from a
 killed client — both are EOF — so only a message the client actually sent can
 mean "I am done". Core's non-prepared owner-succession cut does not end the
 daemon connection: it invalidates that session's attachment and sends
-`detached`, while the exact lease holder, epoch and deadline remain unchanged.
+`detached`, while the cut itself leaves the exact lease holder, epoch and
+deadline unchanged.
 The holder must reattach before another mutation can pass the live-attachment
-gate; it may still release without an attachment. Takeover is explicit: while
+gate; it may still release without an attachment. A mutation crossing the gate
+holds a candidate renewal at that gate instant. Accepted or outcome-unknown
+admission commits it; a proved pre-admission succession loss or other refusal
+discards it. Thus a controller whose own accepted `session.resume` caused the
+cut renews normally, while another actor's succession and a refused resume do
+not move its deadline. Takeover is explicit: while
 the lease owner remains live, an observer asks for control and receives it only
 when the lease is released or expired. If the lease owner itself fails, a later
 acquisition starts no fresh owner until the exact dead-owner pop,
@@ -194,7 +200,9 @@ notification barrier settle — and a daemon
 restart leaving every session uncontrolled with every earlier epoch refused.
 A non-prepared core succession additionally proves `detached` leaves both
 daemon connections open, preserves the controller's exact holder, epoch and
-deadline, refuses its mutation until reattach, and permits another connection
+deadline when another actor caused the cut, orders an already-routed mutation
+to its real result, `admission_unknown`, or `detached` then
+`control_not_held`, refuses later mutation until reattach, and permits another connection
 to take over only after explicit release or expiry. No durable record changes, so no migration or
 rollback evidence is owed.
 

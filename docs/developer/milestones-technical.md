@@ -109,7 +109,9 @@ At the **tested implementation commit**, which is the closure candidate:
    toolchain, result and measured duration is retained outside the repository
    under a stable retained-output reference with a SHA-256 digest. For M5 and
    later, the release check's fresh-source lane stages the tested SHA
-   with `git archive` into an empty extraction and runs the M5-delivered producer
+   with `git archive` into an empty extraction under the
+   [canonical archive-extraction rule](#technical-milestones-archive-extraction)
+   and runs the M5-delivered producer
    `bash "$tree/scripts/source-archive-manifest.sh" "$tree" >"$retained_manifest"`
    before the build, with `retained_manifest` outside `tree`. The
    command writes only the canonical NUL-delimited manifest bytes to standard
@@ -224,6 +226,31 @@ retention are in
 which is what creates a tag at all, and an earlier revision of this section
 put it here and made closure depend on a tag that closure authorizes.
 
+<a id="technical-milestones-archive-extraction"></a>
+### Canonical source-archive extraction
+
+The tested-SHA manifest retained by the closure run and the
+administrative-SHA manifest retained before the tag use one staging rule. Each
+runner creates and populates its fresh empty extraction inside a subshell that
+sets `umask 022` before `mkdir` or the `git archive` extraction. Both operations
+run inside that subshell. The runner never inherits the caller's ambient umask
+for archive staging. The manifest output remains outside the extraction.
+
+Each of the two retained manifest proofs invokes that subshell from a
+deliberately hostile caller `umask 0777` and records the caller and
+scoped values. Recording those values is not evidence by itself. For each
+archive, a NUL-aware source projection reads that commit with
+`git ls-tree -rz -r -t --full-tree`, restricts it to paths present in the unexcluded archive
+manifest, and maps Git modes `100644`, `100755`, `120000` and `040000` to the
+producer tuples `f/644`, `f/755`, `l/0` and `d/755`. Every manifest path must
+have one matching source kind and canonical mode; an absent path, unsupported
+Git mode or mismatch fails. This independent comparison catches two broken
+runners that both inherit `0777` and therefore still agree with each other.
+Before applying any content exclusions, the separate change comparison then
+requires the tested and administrative manifests to have the same complete
+ordered `(kind, mode, path)` projection. The runner does not normalize either
+retained manifest after extraction.
+
 <a id="technical-milestones-release"></a>
 ### Tags
 
@@ -244,7 +271,7 @@ creating the tag:
 | Confine the administrative commit | Require `git rev-list --parents -n 1 <administrative>` to return exactly `<administrative> <tested>`; compare `git diff --name-only <tested>..<administrative>` with [the five paths](#technical-milestones-confinement); compare their `git ls-tree` entries and inspect `git diff --raw --no-renames` to require ordinary blobs with unchanged modes; inspect and retain the complete zero-context patch; map every changed byte to its one allowed region; reconstruct `docs/plans/README.md` from its tested bytes plus the administrative register row and marked Current Status block; and reconstruct the root `README.md` from its tested bytes plus the administrative marked status block, requiring byte equality for both files | An extra parent, intermediate commit, missing or extra path, changed object type or mode, hunk outside a named region, changed pre-existing context-map byte, changed scaffold structure, or changed byte outside any permitted region means the tag would publish a tree outside the two-commit closure contract. `mix loopex.status` proving the values does not prove this metadata and byte confinement. The release stops and the packet is reassembled |
 | Re-prove the documentation structure | `bash scripts/check.sh --docs` on `COMMIT` | The administrative commit's own documentation changes are not green; fix the candidate and assemble a replacement administrative commit |
 | Re-prove documentation meaning | Run the milestone's final semantic documentation gate on the relevant `docs/operator/` and `docs/developer/` pages at `COMMIT` | The operator and developer accounts disagree with each other, the plan, the accepted ADRs, or the implemented behavior; fix the candidate and assemble a replacement administrative commit |
-| Re-prove the archive identity | For M5 and later, stage `COMMIT` with `git archive` into a fresh empty extraction, then run the M5-delivered producer as `bash "$tree/scripts/source-archive-manifest.sh" "$tree" >"$retained_manifest"` with `retained_manifest` outside `tree`. Retain those exact bytes. A NUL-aware parser rejects malformed or duplicate records, removes `docs` and its descendants plus exact root `README.md` and the M5-delivered `SOURCE_IDENTITY`, and compares every remaining complete tuple with the manifest bytes retained for the tested SHA. Require exactly one root `SOURCE_IDENTITY` in each archive and validate it against that archive's own commit and source identity | The command or source identity is absent, fails validation, emits a malformed or duplicate record stream, or the published bytes are not the closed bytes outside the confined regions. Entries under `docs/`, the supplied root README and the two `SOURCE_IDENTITY` payloads are expected to differ. The preceding content-confinement proof covers every permitted documentation hunk and the README's exact marked-block replacement. This comparison catches archive inclusion or exclusion changes that `.gitattributes` can cause without a path appearing in `git diff` |
+| Re-prove the archive identity | For M5 and later, stage `COMMIT` with `git archive` into a fresh empty extraction under the [canonical archive-extraction rule](#technical-milestones-archive-extraction), then run the M5-delivered producer as `bash "$tree/scripts/source-archive-manifest.sh" "$tree" >"$retained_manifest"` with `retained_manifest` outside `tree`. Retain those exact bytes. For each archive, first require its complete unexcluded `(kind, mode, path)` projection to match the independent Git-tree source projection. Then require the tested and administrative manifests to have identical ordered projections before exclusions. A NUL-aware parser rejects malformed or duplicate records, removes `docs` and its descendants plus exact root `README.md` and the M5-delivered `SOURCE_IDENTITY`, and compares every remaining complete tuple with the manifest bytes retained for the tested SHA. Require exactly one root `SOURCE_IDENTITY` in each archive and validate it against that archive's own commit and source identity | The command or source identity is absent, fails validation, emits a malformed or duplicate record stream, depends on the ambient umask, differs from its commit's source modes, changes a canonical mode, or the published bytes are not the closed bytes outside the confined regions. Entries under `docs/`, the supplied root README and the two `SOURCE_IDENTITY` payloads are expected to differ. The preceding content-confinement proof covers every permitted documentation hunk and the README's exact marked-block replacement. This comparison catches archive inclusion or exclusion changes that `.gitattributes` can cause without a path appearing in `git diff` |
 
 Nothing else is re-run. There is no second suite, no second release check and
 no second provider credential: the tested tree and the administrative tree

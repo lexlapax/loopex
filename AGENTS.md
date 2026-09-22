@@ -175,7 +175,10 @@ A milestone runs in four steps; the
    candidate already produced rather than repeating it. From M5 onward, the
    release check's fresh-source lane retains outside its extraction the exact
    NUL-delimited bytes emitted by `scripts/source-archive-manifest.sh` for the
-   tested archive, under their own reference and SHA-256 digest. An independent reviewer
+   tested archive staged under the milestone guide's
+   [canonical archive-extraction rule](docs/developer/milestones-technical.md#technical-milestones-archive-extraction),
+   retaining them under their own reference and SHA-256 digest. An independent
+   reviewer
    reads the candidate; the maintainer closes it and the administrative direct
    child makes only the `In review` to `Closed` transition. Closure names
    **two commits**: the *tested implementation SHA*
@@ -194,7 +197,8 @@ A milestone runs in four steps; the
    states once. Complete run outputs are immutable outside the repository; the
    evidence page records each retained-output reference and SHA-256 digest.
 4. **Release.** Publication, tags, and packages are separate maintainer
-   decisions that reuse the closure evidence when the source is unchanged. The
+   decisions that reuse the closure evidence when implementation source is
+   unchanged and the administrative documentation is re-proved below. The
    tag names the **administrative** closure SHA. This two-commit closure and tag
    rule applies from M5 onward; earlier milestones and tags remain governed by
    their recorded procedures. Before creating a new tag, verify that
@@ -203,11 +207,16 @@ A milestone runs in four steps; the
    `bash scripts/check.sh --docs`, the final semantic review of the relevant
    `docs/operator/` and `docs/developer/` pages, and the archive comparison on
    the administrative SHA. Stage that SHA into a fresh `git archive`
-   extraction and run
+   extraction under the milestone guide's scoped-umask
+   [archive-extraction rule](docs/developer/milestones-technical.md#technical-milestones-archive-extraction)
+   and run
    `bash "$tree/scripts/source-archive-manifest.sh" "$tree" >"$retained_manifest"`
    with the output outside the extraction. Retain its exact NUL-delimited
-   bytes, reject malformed or duplicate records, and compare complete tuples
-   with the tested manifest after applying the documented exclusions. Every
+   bytes, reject malformed or duplicate records, require each archive's complete
+   unexcluded `(kind, mode, path)` projection to match its commit's independent
+   Git-tree projection, and require the tested and administrative projections
+   to be identical before applying the documented exclusions. Then compare
+   complete tuples with the tested manifest after those exclusions. Every
    non-documentation archive entry except the
    root `README.md` and `SOURCE_IDENTITY` matches the tested archive; the root
    README is validated as an exact marked-block replacement by the content-

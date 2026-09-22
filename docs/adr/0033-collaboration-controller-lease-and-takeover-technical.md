@@ -522,8 +522,8 @@ newly arrived exact lease-owner `DOWN` and exact-pops and classifies the mirror 
 `freeze_deadline`, without ordinary output. A restored `connection_lost`
 release therefore completes cancellation before owner loss; an acquire or
 release `result` remains `result`, and the later pop is present or absent
-according to the mirror state that exact settlement produced. No second clock
-or replacement disposition begins.
+according to the mirror state that exact settlement produced. No second
+disposition or clock begins.
 A missing or mismatched required release record, malformed relay answer or
 unfinished relay join or terminalization by `freeze_deadline` selects
 `relay_lost`; unfinished exact mirror work, including a mirror that remains
@@ -813,11 +813,26 @@ other.
 ADR 0032's non-prepared core-succession invalidation is not idle eviction and
 does not end the connection. The connection loses only its attachment and is
 sent `detached`; the lease owner retains the exact holder connection,
-`writer_epoch` and absolute deadline. The five-condition mutation gate then
+`writer_epoch` and, absent an independently admitted mutation, absolute
+deadline. The five-condition mutation gate then
 refuses `control_not_held` on its missing-attachment condition until that same
 connection reattaches. Release remains available without an attachment, and a
 different connection still receives `control_held` until explicit release or
 monotonic expiry makes takeover eligible.
+
+A mutation that passed that gate before the cut retains a candidate renewal,
+not an immediately visible deadline. If core returns accepted, or returns
+`admission_unknown` after a successful route so admission cannot be excluded,
+the daemon commits the candidate absolute deadline calculated from the gate's
+monotonic instant. Exact pre-call `session_unavailable`, a positively proved
+succession-before-admission `control_not_held`, or any other real refusal
+discards it. The mutation stays in the existing in-flight set until this
+disposition and the corresponding succession join settle, so expiry cannot
+grant takeover through the gap. Targeted attachment replacement waits for each
+older origin to settle this same accepted, refused or unknown disposition
+before its core transaction begins. Succession itself never renews. An accepted controller-issued
+`session.resume` renews because it is an admitted mutation; another actor's
+succession and a refused resume preserve the prior deadline.
 
 Expiry and
 admission use the daemon's monotonic clock: a deadline is set only by a
@@ -884,8 +899,11 @@ the host placement lock and Store writer marker, never a client mutation and nev
   the connection. An earlier revision said both "refuses with `control_held`
   otherwise" and "renewal is explicit through `session.acquire_control` from
   the holder" without saying which clause a holder's own acquire took.
-  Renewal is also implicit on any admitted mutation, which extends the
-  deadline the same way and likewise never changes the epoch.
+  Renewal is also implicit on any admitted mutation and likewise never changes
+  the epoch. The gate records a candidate deadline from its exact monotonic
+  instant; an accepted result commits it, `admission_unknown` commits it
+  conservatively, and a proved pre-admission or real refusal discards it. This
+  is what "admitted" means at the route and succession races.
 - Every existing-session core mutation in generation 2, including
   `session.resume`, `session.prompt`, `session.steer`,
   `session.follow_up`, `session.abort`, `session.respond_interaction`,
@@ -1053,7 +1071,15 @@ attachment condition, including dormant acquire, failed attach, successful
 release and immediate acquisition by another connection; a lease transition racing command admission preserves
 this order. A non-prepared core succession invalidates a controller attachment
 and an observer attachment while keeping both daemon connections open; it
-preserves the controller's exact holder, epoch and absolute deadline, refuses a
+preserves the controller's exact holder and epoch, and preserves the absolute
+deadline when another actor caused the cut. Forced route orders prove a real
+accepted result commits its gate-time renewal candidate, exact
+superseded-before-admission discards it, and post-route `admission_unknown`
+commits it conservatively; takeover waits for each disposition. A targeted
+replacement begins only after every predecessor mutation has reached one of
+those outcomes, so it adds no renewal branch. A controller-issued accepted resume receives `detached`
+before its real result and commits the renewal, while its refused-resume pair
+preserves the prior deadline. The cut refuses a
 controller mutation on the missing-attachment condition before reattach,
 admits it under the same epoch after reattach, and refuses observer takeover
 until paired explicit-release and expiry cases make it eligible. Every ticketed

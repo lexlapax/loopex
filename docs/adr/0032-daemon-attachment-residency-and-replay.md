@@ -221,13 +221,63 @@ no missing durable event; a connection holding a controller lease is exempt
 while it holds it, because a controller of a quiet session is healthy and
 evicting it would strand the connection-bound lease until explicit release or
 expiry. A
-non-prepared owner succession is a separate core invalidation cut: it removes
+non-prepared owner succession is a separate core invalidation cut, begun before
+the successor enters acquisition: it removes
 every attachment of that session, releases every transfer and daemon charge
 after acknowledged cleanup, tells each live generation-2 holder `detached` at
 its last emitted cursor, and clears the connection-local attachment while
-keeping those connections open. A controller's held lease, epoch and deadline
-are unchanged: it must reattach before another mutation, and another connection
-cannot take over until the holder explicitly releases or the term expires.
+keeping those connections open. Each attached connection reserves, inside its
+existing 4 MiB total, enough output headroom for the maximal encoded succession
+`detached` record followed by one maximal correlated succession-reply slot,
+reused serially across ADR 0023's at most 32 in-flight lease-authorized
+mutation origins. Ordinary frames cannot consume it, so a live holder cannot
+miss the notice or a cut-ordered mutation reply merely because its data buffer
+is full. The pending attach reserves that local
+headroom and a matching share of the
+512 MiB aggregate before core preparation; ordinary output and resident-window
+admission cannot borrow either reserve, while replacement transfers the exact
+target's reserve without a transient second charge. The cut itself leaves a
+controller's holder, epoch and deadline unchanged: it must reattach
+before another mutation, and another connection cannot take over until the
+holder explicitly releases or the term expires. An accepted
+succession-causing mutation may renew the deadline under the ordinary lease
+rule; the cut does not renew it on its own.
+
+The notice uses the first part of the reserve; predecessor mutation replies
+reuse the one reply slot serially. The connection pauses post-cut request
+admission until those replies are emitted or it is reaped, then resumes in wire
+order. A
+ordinary pending attach invalidated before publication uses the same reply slot for
+`attachment_conflict` and owes no `detached`. Thus a post-cut query, mutation
+or reattach cannot borrow or starve the reserved delivery. A query, read or
+transfer result admitted before the cut remains ordinary output and may invoke
+the existing overflow close independently; the succession reserve does not
+promise space for it.
+
+One route may already have crossed the daemon gate when succession begins. A
+daemon-only detailed core path distinguishes that cut from independent
+coordinator death while preserving the embedded command API's released result:
+a command the predecessor handled keeps its real result; succession first
+sends `detached` and then correlated `control_not_held` with no durable
+admission; death before any core call sends `session_unavailable`; death after
+a route sends `admission_unknown`. The `detached` record never settles the
+pending request. A controller that initiated succession with `session.resume`
+therefore receives `detached` followed by its one real correlated resume result,
+keeps its lease, applies the ordinary renewal only if admission succeeded or is
+unknown, and reattaches. Reattachment waits until every mutation origin that
+crossed the old attachment gate has settled or been reaped and its reserved
+reply space is released. Targeted replacement normally creates no succession
+record: the daemon closes the target's local mutation gate, settles or reaps
+every older mutation origin, and only then performs the core replacement and
+publishes the new handle. If non-prepared succession crosses that still-pending
+replacement, the registry serializes the exact target, pending transaction and
+preallocated new attachment identity. Succession first converts the one
+borrowed reserve into the old target's succession row, sends `detached`, and
+returns the replacement's `attachment_conflict` through the reply slot; the
+replacement never becomes a local handle. If replacement publication wins the
+registry cut first, its success is ordinary and succession then invalidates the
+newly installed attachment. Both orders release one charge and one reserve. No
+order needs an old-handle route disposition or core tombstone.
 **Every ordinary eviction the daemon initiates is a record and a close**: the
 client is told, best-effort, on the connection being ended, and that connection
 is closed with its attachment. Succession is the one attachment-only
@@ -339,8 +389,10 @@ provisional handoff and promotion, and a value derived from the lease term but c
 of its own, so neither contract moves the other — 64 attachments per session,
 512 attachments per daemon, a 1,024-event core queue per attachment, a 4,096-event
 resident window per session, 4 MiB of encoded output buffered per
-connection, 16 MiB of encoded resident-window events per session, 512 MiB
-of aggregate retained encoded events per daemon, ten minutes of idle time
+connection — including the derived succession-delivery headroom that ordinary
+frames cannot consume —, 16 MiB of encoded resident-window events per session,
+512 MiB of aggregate commitment across retained encoded bytes and unused
+per-attachment succession-delivery reserves per daemon, ten minutes of idle time
 before an **observer** connection is evicted — a lease holder being exempt
 while it holds its lease — 64 sessions activated per daemon lifetime, 4,096 recorded
 index entries per root,
@@ -406,7 +458,19 @@ holder remaining independent, an explicit replacement removing only its named
 target, holder death releasing the holder's complete attachment and transfer
 set, non-prepared succession invalidating every session attachment without a
 holder death and releasing transfers and charges before `detached` notification
-while every daemon connection remains open, a slow observer detached at its
+while every daemon connection remains open, including with ordinary output
+filled to the local threshold and aggregate commitment filled by 512
+succession-delivery reserves, with 32 routed mutations receiving the notice
+before every correlated reply; attach reserving local and aggregate headroom
+before core preparation; replacement transferring both at full capacity only
+after its local mutation barrier settles predecessor mutation origins;
+succession crossing replacement before promotion, during core preparation,
+after core publication but before daemon finalization, and after finalization,
+with one local CAS, one reserve and no stale handle; both
+route-versus-succession orders, post-result classification on both sides of the
+cut and in both holder-notice orders, coordinator death before and after route,
+and an attached generation-2 controller issuing the succession-causing resume
+then receiving `detached`, its real result and a successful reattachment; a slow observer detached at its
 last emitted cursor, idle eviction and
 reconnect with no missing durable event, bounded-index startup independent of
 legacy directory population, strict offline import refusing corrupt, oversized

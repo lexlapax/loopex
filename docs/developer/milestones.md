@@ -70,6 +70,8 @@ the plan records the closing decision and the tested implementation SHA, and
 that commit fills the existing evidence page with the run and review
 identities, retained-output references, and SHA-256 digests, plus every
 plan-required outcome field or placeholder the tested scaffold predeclared.
+The release check's fresh-source lane stages the tested archive under the
+[canonical archive-extraction rule](milestones-technical.md#technical-milestones-archive-extraction).
 Use the `close-milestone` skill.
 
 **Closure names two commits, because one cannot name itself.** The checks and
@@ -102,7 +104,8 @@ Technical depth: [The closure packet](milestones-technical.md#technical-mileston
 ### Release
 
 A release is a separate maintainer decision: a tag on the exact integrated
-closure commit, reusing the closure evidence when the source is unchanged. A
+closure commit, reusing the closure evidence when implementation source is
+unchanged and re-proving the administrative documentation. A
 package, installer or publication is its own decision with its own evidence.
 
 The two-commit closure and tag procedure below governs M5 and later
@@ -130,9 +133,14 @@ administrative tree differs from the tested one only in documentation, so
 `bash scripts/check.sh --docs` runs on the administrative SHA. The final
 semantic documentation gate then reads the relevant `docs/operator/` and
 `docs/developer/` pages from that same SHA. From M5 onward, the archive
-manifest is also recomputed from a fresh `git archive` extraction by the
-M5-delivered repository-owned `scripts/source-archive-manifest.sh` command
-whose exact NUL-delimited output the tested run retained. Every entry outside
+manifest is also recomputed from a fresh `git archive` extraction staged under
+the technical guide's
+[canonical archive-extraction rule](milestones-technical.md#technical-milestones-archive-extraction)
+by the M5-delivered repository-owned `scripts/source-archive-manifest.sh` command
+whose exact NUL-delimited output the tested run retained. Before exclusions,
+each archive's complete `(kind, mode, path)` projection must match its commit's
+independent Git-tree projection, and the tested and administrative projections
+must match each other. Every entry outside
 `docs/`, except the root `README.md` and the M5-delivered `SOURCE_IDENTITY`,
 must match the tested archive entry. The
 README is validated by the marked-block confinement proof and

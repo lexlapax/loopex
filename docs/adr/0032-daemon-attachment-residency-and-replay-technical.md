@@ -814,19 +814,169 @@ Pending attach callers receive the private core result
 0023's existing correlated `attachment_conflict`, so succession adds no wire
 code. Installed embedded handles become stale.
 
+Core change 1 preserves the released embedded `Runtime.command/2` collapse to
+`session_unavailable` and adds one `@doc false` daemon-only entry,
+`Runtime.command_for_daemon/2`, to discriminate a stale route from a dead or
+missing session owner. Before any coordinator call, a dead or missing exact
+coordinator returns `session_unavailable` and proves no admission occurred. A
+successful daemon route instead carries an opaque token bound to the session,
+attachment and incarnation identities, exact coordinator and owner generation.
+If that exact attachment is already absent, the daemon-only entry returns the
+private `{:attachment_route_invalidated, attachment_id,
+attachment_incarnation}` result and makes no coordinator call. Core does not
+retain a tombstone or infer why the attachment ended. The daemon registry must
+join that result to its exact local succession row for the same identity. The
+relay result and the connection's holder notice may arrive in either order, so
+the existing bounded origin row retains an unmatched result while the registry
+retains an unmatched notice by attachment identity. A matching pair classifies
+the result; an identity mismatch, or a live connection reaching the origin's
+existing deadline without its counterpart, is `runtime_unavailable` and
+daemon-fatal `runtime_lost`. Connection death instead reaps the origin and row.
+
+The daemon-only entry uses a matching detailed coordinator call. An accepted or
+refused command result is returned unchanged except that the current private
+`superseded_owner` refusal is paired with the route token. Every matching
+`superseded_owner` that the coordinator returns before entering
+`commit_command/2` is positive no-admission proof: the callback's initial
+phase, supplied-owner and superseded checks, and its nested
+`Control.current_owner/3` fence all precede that call. The pair therefore
+becomes the token's `superseded_before_admission` disposition, including when
+the command callback was dequeued before the succession cut but the cut won
+Control's mailbox before the nested fence, and when superseded cleanup keeps
+the coordinator alive. Only that proof becomes the private
+succession-invalidated result. Every other exit or lost reply after a
+successful route becomes `admission_unknown`, even when Control has already
+installed a later generation, because the older command may have committed
+before its coordinator died. Generation 2 maps that branch to ADR 0023's
+existing correlated `admission_unknown`. Loss of exact Control is still fatal.
+No new result is exposed through the embedded facade.
+
+A real accepted or refused result has one more daemon-only ordering step before
+the relay may render it. The relay calls
+`Runtime.classify_daemon_result/2` with the opaque route token. Control
+serializes that read-only call against the same invalidation cut: it returns
+`:before_succession_cut` while the token's exact attachment and incarnation
+remain live, including when prepared succession carried that attachment across
+an owner-generation advance, or `{:after_succession_cut, attachment_id,
+attachment_incarnation}` only when an owner advance and non-prepared
+invalidation removed that exact route.
+The latter is derived from the token plus current Control state and retains no
+tombstone. A lost or mismatched exact Control returns `:runtime_unavailable`
+and is daemon-fatal. Classification before the cut permits immediate rendering,
+so that result may precede a later `detached`. Cut before classification makes
+the registry retain the unchanged real result in its bounded origin row, join
+the returned identity to the holder notice in either message order, enqueue
+`detached` first, and only then use the reserved reply slot. The origin's
+existing deadline and connection reap bound the join. This barrier cannot hang
+an ordinary no-succession result and cannot lower a real result to a refusal.
+
+The succession cut itself begins before Control installs the non-prepared
+`:acquiring` entry. Control first clears the old command routes, then completes the dispatcher
+cleanup transaction and notifies those holders before it starts the new owner.
+A daemon route that Control handles before this cut receives the old route
+token; one handled after the cut begins receives the succession-invalidated
+private result that the registry joins to the succession row, including while
+the new entry is still `:acquiring`. If a routed
+command and the old coordinator's supersede cross, the last order is the
+pre-commit fence: a command that passes the nested `Control.current_owner/3`
+call can return its real result or, if that reply is lost,
+`admission_unknown`; a succession that wins before that call returns the exact
+no-admission disposition even when the coordinator dequeued the command
+callback first. A forced command commit and
+coordinator crash before reply, concurrent with a later succession, therefore
+stays unknown and can never be lowered to `control_not_held`. A failed
+successor still leaves the old attachment invalidated and returns the resume
+failure; the holder reattaches only after a later successful activation.
+
 The daemon registry joins that notice with the core cleanup acknowledgement
 before it releases each attachment charge. Release is idempotent by attachment
 identity, so a racing holder `DOWN` cannot double-free. A live generation-2
-holder receives one best-effort uncorrelated `detached` record with the
+holder receives one capacity-reserved uncorrelated `detached` record with the
 session ID and last completely emitted cursor. It clears that connection's
 local attachment identity but keeps the initialized, session-bound connection
-open. If the connection holds the controller lease, the daemon preserves its
-exact holder, writer epoch and absolute deadline; the missing attachment makes
-every later mutation refuse `control_not_held` until the holder reattaches.
+open. If the connection holds the controller lease, the succession cut itself
+preserves its exact holder, writer epoch and absolute deadline; the missing
+attachment makes every later mutation refuse `control_not_held` until the
+holder reattaches. A succession-causing mutation may independently commit the
+ordinary implicit renewal described below; the cut neither adds nor removes
+that renewal.
 Succession grants no takeover: another connection still waits for successful
 explicit release or expiry. A
 succession may invalidate the attachment on every connection attached to that
 session; it does not affect attachments to any other session.
+
+The relay never renders a routed invalidation result on its own. It hands the
+exact origin and attachment identity to the registry, which first performs the
+order-independent join above and then retains its local succession row for that
+removed identity until every origin that crossed the connection gate with it
+settles or is reaped. The cut clears the
+connection-local attachment idempotently and
+enqueues the capacity-reserved `detached` record. A real core result whose
+post-result classification linearized before the cut may already have answered;
+one classified after the cut is held and answers after `detached`. A positively
+proved superseded-before-admission route instead becomes correlated
+`control_not_held`, after the `detached` record, with no durable admission and
+no succession-caused change to lease holder, epoch or deadline. A result that
+completed the post-result classification before the cut may precede `detached`;
+the record never settles an in-flight request.
+Later queued mutations meet the already-cleared local gate.
+
+Absent overlapping succession, targeted replacement is not a succession and
+emits no `detached`. The daemon
+registry closes the exact target's local mutation gate before replacement,
+waits until every older origin on that attachment has a real result,
+`admission_unknown`, or terminal connection reap, and only then invokes the
+core replacement transaction. New origins wait behind the replacement and use
+the new handle after publication. Connection death cancels the unpublished
+replacement and reaps the older origins first. This preserves real results
+without a tombstone or a replacement-specific route disposition in either
+core or the daemon. The barrier is bounded by the existing per-origin clocks
+and the connection's retirement bound, and repeated replacements return its
+one gate row to baseline. Missing or mismatched succession join state remains
+daemon-fatal `runtime_lost`; it never degrades into `session_unavailable`.
+
+Non-prepared succession has priority over a replacement that has not crossed
+the registry's local-publication cut. The registry binds the target identity,
+pending ticket and preallocated replacement attachment identity in one row and
+owns one `replacement_cut` compare-and-set from `pending` to exactly one of
+`succession_owned` or `published`. If
+succession arrives before relay promotion, it cancels that ticket before any
+core call. If core preparation has started, the acknowledged core invalidation
+cancels or removes the pending replacement and the registry waits for that
+cleanup; a holder notice naming either side of the transaction joins the same
+row. This includes core-reserved, dispatcher-staged and core-publish-committed
+states before daemon finalization. Even if core briefly published the replacement before its result reached
+the daemon, a succession notice consumed first prevents local publication and
+the later result becomes the pending attach's correlated
+`attachment_conflict`. In all three cases the old target's one borrowed charge
+and reserve become one succession row: its notice portion emits `detached`, its
+reply slot emits `attachment_conflict`, and cleanup releases each exactly once.
+If the replacement result crosses the registry's local-publication cut first,
+the result publishes the new handle and transfers the charge and reserve; a
+later notice is ordinary succession of that installed replacement. Thus a
+success can precede `detached`, or notice-first can select conflict, but a stale
+handle is never published and two reserves never coexist. Every late stage,
+publish or result message observes the selected CAS as cleanup-only; it can
+neither publish after `succession_owned` nor restore either attachment.
+
+The lease owner retains a candidate implicit renewal with the mutation's gate
+instant while either route race is unresolved. An accepted admission commits
+that absolute deadline; `admission_unknown` commits it conservatively because
+admission may have happened. A pre-call `session_unavailable`, a locally joined
+succession-invalidated disposition, or a real refused admission discards it. The
+candidate remains in the mutation's existing in-flight set, so takeover cannot
+pass while its disposition is pending.
+
+A generation-2 `session.resume` can itself initiate the cut. The registry
+matches its retained command origin to the succession identity, clears the
+issuer's attachment and enqueues `detached` before the correlated resume result
+that Control cannot return until the cut has begun. A successful issuer gets
+exactly one real resume result, keeps its lease holder and epoch, then
+reattaches. The cut preserves its prior deadline, while the accepted resume
+commits the ordinary candidate renewal and may move that deadline for that
+reason alone; a failed activation gets its real
+refusal after the same attachment loss and leaves the prior deadline exact.
+Transport loss at either point follows durable command-ID recovery.
 
 **Dispatcher replacement is an attachment-generation cut, including for an
 embedded runtime.** The runtime supervisor can restart EventDispatcher without
@@ -997,6 +1147,23 @@ retained; the cleanup acknowledgement restores equality before either is
 released. During dispatcher replacement both are cleared before ready, and
 pending rows must return to zero.
 
+The same reservation transfers the complete succession-delivery headroom. A
+nonreplacement pending daemon attach obtains one
+`succession_delivery_reserve_bytes` aggregate reserve and lowers that
+connection's ordinary-output allowance before core preparation starts. A
+replacement first closes the target's local mutation gate and waits for its
+older origins to settle, then exclusively borrows the exact target's
+attachment charge, aggregate succession reserve and already-established local
+headroom. It remains net-zero at both the attachment and 512 MiB ceilings.
+Commit transfers those three reservations to the new attachment; discard
+restores them to the target or releases them with an ordinary pending row. No
+intermediate state owns two succession reserves for one replacement.
+The succession-priority rule above is the only conversion of a borrowed
+replacement reserve: before local publication it becomes the old target's one
+succession row and pays for both `detached` and the replacement's correlated
+`attachment_conflict`; after local publication it belongs to the new installed
+attachment and follows the ordinary succession path.
+
 Borrowing is exclusive by the exact live target identity
 `{holder, attachment_id, attachment_incarnation}`. The connection first installs
 its exact `pending_ticket(origin_id, :attach, nil)` at the relay. The connection
@@ -1143,6 +1310,101 @@ per-connection socket output buffer of encoded frames not yet written to the
 socket, bounded at 4 MiB, and the per-session resident window of encoded
 recent events, bounded at 4,096 events and 16 MiB, and it enforces the
 512 MiB aggregate across every output buffer and resident window it holds.
+While a connection has a pending or installed attachment or a retained local
+succession row, ordinary frames may use at most that 4 MiB minus
+`succession_delivery_reserve_bytes`. The
+implementation constructs the maximal legal generation-2 succession
+`detached` record — a 256-byte raw session identity rendered by
+`Wire.encode_identity/1`, `18_446_744_073_709_551_615` rendered by
+`Wire.encode_u64/1`, and the exact message
+`session attachment invalidated; reattach to continue` — and derives
+`succession_notice_bytes` as `IO.iodata_length(encoded)` after
+`{:ok, encoded} = LoopexProtocol.Frame.encode(maximal_notice)`. It separately
+constructs every maximal correlated reply a lease-authorized existing-session
+mutation can produce after the cut: accepted and refused admissions for all
+eight methods using ADR 0023's maximal 64-byte request ID, 65,536-byte command
+ID, 256-byte session ID where present and every closed reason; plus
+`admission_unknown`, `session_unavailable` and `control_not_held`, whose exact
+message is `control is not held by this connection`, and the inherited
+`attachment_conflict` error returned to a pending attach invalidated by the
+same succession. The largest encoded frame
+defines `succession_reply_bytes`. The reserved amount is
+`succession_delivery_reserve_bytes = succession_notice_bytes + succession_reply_bytes`.
+ADR 0023 admits at most 32 in-flight request origins. The reserved reply
+candidate covers only lease-authorized mutation origins that crossed the old
+attachment gate and a pending attach invalidated by the same succession. The
+registry retains their small dispositions in the existing bounded rows and
+uses one reply slot serially rather than reserving 32 maximal encoded frames at
+once. A query, read or transfer result admitted before the cut remains ordinary
+output and may independently take the existing overflow close; it is not a
+succession reply and is not included in this reserve.
+Literal boundary vectors pin the maximal notice, every reply candidate, the
+selected maximum and the formula, and assert that the derived reserve is less
+than 4 MiB and that 512 unused reserves fit within 512 MiB on both toolchain
+pairs. The reservation is inside the existing 4 MiB total and is not an
+advertised limit of its own.
+
+The local reservation starts at the daemon's pre-core attachment reservation,
+not at publication. The buffer controller first makes one nonblocking flush
+attempt, then requires current buffered bytes to be at most
+`4 MiB - succession_delivery_reserve_bytes`; otherwise it refuses the attach with
+`capacity_exceeded` without a core call or published attachment. If that
+correlated refusal cannot fit the still-unattached connection's ordinary
+buffer, the existing output-overflow rule closes the connection and the client
+learns by EOF. Once reserved, every later ordinary admission on that connection
+uses the lower allowance until publication converts the reservation or refusal
+releases it. A replacement transfers the target's existing local reservation
+rather than testing or allocating a second one.
+
+The aggregate has the matching capacity commitment. Each pending or installed
+daemon attachment owns one unused `succession_delivery_reserve_bytes` reserve
+until it is removed or succession begins consuming it. Every output-buffer or resident-window
+admission must preserve
+`charged_encoded_bytes + pending_admission_bytes + unused_succession_reserves <= 512 MiB`.
+An ordinary attach obtains its reserve through the same deterministic
+reclamation pass before core preparation; inability to reserve refuses that
+attach with the existing `capacity_exceeded` result and installs nothing. A
+replacement transfers the exact target's aggregate reserve with its borrowed
+attachment charge, including when aggregate commitment already equals the
+ceiling.
+Succession atomically converts the first part of the unused reserve to the
+actual encoded notice charge and retains the rest on the local succession row.
+If an ordinary pending attach is invalidated before publication, no `detached`
+record is owed: its reservation instead enqueues the correlated
+`attachment_conflict` through the same reply slot, never through ordinary
+overflow, and then releases the unused notice portion and charge. A pending
+replacement crossing succession is different only because its borrowed target
+was locally installed: the same one reserve first emits that target's
+`detached`, then emits the pending replacement's `attachment_conflict`, and
+releases the single charge after both core identities are clean.
+After the notice frame is completely emitted, the one reply slot converts to
+the next old-attachment lease-authorized mutation origin's actual correlated
+reply charge,
+whether that reply is a real admission, `admission_unknown`,
+`session_unavailable`, or the positively proved pre-admission
+`control_not_held`. The registry schedules those replies in origin-admission
+order and reuses the slot only after the preceding frame is completely
+emitted; these cut replies never take the ordinary overflow path. After all
+such mutation origins are terminal and their replies are emitted or the connection is
+reaped, the registry releases the unused remainder and the attachment charge.
+It does not permit reattach on that connection before this join clears. At the
+full ordinary-output threshold, the notice and 32 maximal mutation replies
+therefore progress through one reserved slot with the notice first, remain
+within 4 MiB and the aggregate commitment, and do not close the connection.
+While the succession row exists, the connection dispatcher pauses reading and
+promoting post-cut requests; at most its already-decoded bounded frame remains
+local and the socket applies ordinary transport backpressure. After the notice
+and predecessor mutation replies are emitted or the connection is reaped, the row and
+reserve clear before the dispatcher resumes in wire order. Thus a post-cut
+query cannot consume the reply slot, a mutation cannot overtake its own
+`detached`, and reattach cannot starve predecessor delivery.
+Pre-cut query, read, transfer and delivery results remain subject to the
+existing output-overflow rule and may close and reap the connection before or
+after the notice for that independent reason. Ordinary
+attachment removal releases the whole unused reserve. Thus unused headroom
+does not claim retained bytes or RSS, but it does reduce what ordinary bytes
+may consume and the hard aggregate can never prevent the promised succession
+delivery.
 Neither daemon stage owns replay: core owns the cursor and decides what is
 owed, and both daemon stages hold only bytes for events core has already
 named.
@@ -1335,24 +1597,44 @@ errors answering one request: each carries that request's `request_id`, no
 | Code | Answers | Carries beyond the envelope |
 | --- | --- | --- |
 | `control_held` | `session.acquire_control` | **Nothing.** It does *not* carry the current epoch: an epoch is authority-shaped, and handing one to a client that was just refused is exactly the value it must not have. An earlier revision of ADR 0033 said it named the current epoch; that is withdrawn |
-| `control_not_held` | `session.release_control` from a non-holder, **and every lease-authorized existing-session mutation whose combined admission gate fails**, except the verified dormant-session `session.resume` ADR 0033 expressly allows before attachment — any of the **five** conditions ADR 0033 lists: wrong connection, wrong epoch, a lease that is not `held`, a deadline already passed, or no live attachment for the pinned session. A request missing `writer_epoch` altogether is `invalid_request` instead, being malformed before the gate | **Nothing**, deliberately: the five conditions are indistinguishable on the wire, because saying which one failed would make the refusal an epoch and lease oracle. ADR 0033 fixes the gate; this is the one answer it has |
+| `control_not_held` | `session.release_control` from a non-holder; every lease-authorized existing-session mutation whose combined admission gate fails, except the verified dormant-session `session.resume` ADR 0033 expressly allows before attachment — any of the **five** conditions ADR 0033 lists: wrong connection, wrong epoch, a lease that is not `held`, a deadline already passed, or no live attachment for the pinned session; and a daemon-only route either joined to the exact succession-invalidated identity before any coordinator call or positively proved `superseded_before_admission` at the coordinator's pre-commit fence. A request missing `writer_epoch` altogether is `invalid_request` instead, being malformed before the gate | **Nothing**, deliberately: the conditions are indistinguishable on the wire, because saying which one failed would make the refusal an epoch and lease oracle. ADR 0033 fixes the gate; this is the one answer it has |
 | `control_pending` | `session.acquire_control` that waited out its deadline | nothing |
 | `control_capacity_reached` | an acquisition for an unrelated session that would reserve a 513th lease-owner slot; a same-session successor takes the freed process slot only after the daemon owner consumes the predecessor's exact linked `EXIT`, starts only after exact mirror pop, owner-loss classification acknowledgement and terminal holder-close or correlated-refusal settlement, and grants only after the relay's monitored `DOWN`, retirement completion and prior tickets, while renew and release use an existing owner and remain available at the cap | nothing |
 | `control_owner_lost` | an acquire or release whose `owner_lost` CAS wins, or a pending/queued lease-authorized mutation claimed before promotion because its exact lease owner or fresh acquisition child is lost | nothing; this correlated form carries only its request envelope and keeps a non-holder connection open. An origin on the returned granted holder receives the mutually exclusive uncorrelated form below and closes instead; a promoted mutation remains relay-owned to its real core result |
 | `session_dormant` | `session.attach` | nothing |
-| `session_unavailable` | `session.inspect` after an attach to a session whose one-way daemon activation remains recorded but whose temporary core coordinator has died | nothing; generation 2 maps only core's exact `:session_unavailable` reason to this code and never parses `message`. Other inspection failures keep their existing mapping or select the daemon's runtime-fatal path |
+| `session_unavailable` | `session.inspect` after an attach to a session whose one-way daemon activation remains recorded but whose temporary core coordinator has died, or an existing-session mutation whose daemon-only route proves that death before any coordinator call | nothing; this code proves no mutation call began. An independent death after a route token was returned maps conservatively to inherited `admission_unknown`; non-prepared succession maps to `control_not_held`. Generation 2 never parses `message` to choose among them |
 | `daemon_stopping` | any post-initialize method arriving after the daemon's admission cut; an uninitialized peer has negotiated no encoding and receives EOF instead | nothing |
-| `session_unknown`, `session_id_invalid`, `store_unavailable` | any method that validates existence first | nothing |
+| `session_unknown`, `store_unavailable` | any method that validates existence first | nothing |
 | `activation_ceiling_reached` | a fresh `session.create` or dormant `session.resume`; an exact historical create replay remains available through the read-only discriminator | nothing |
-| `composition_mismatch` | `session.resume` on a session this composition cannot serve | nothing |
+| `composition_mismatch` | `session.resume` returning the detailed runtime result `{:error, :runtime_placement_mismatch, %{disposition: :no_activation, control_entry: :dormant}}` | nothing; the daemon uses the literal message `session cannot be activated by this daemon composition` |
+
+Generation 2 has no `session_id_invalid` code. Its parser applies
+`Wire.session_identity/1` before the existence query and maps every empty,
+oversized or otherwise malformed wire identity to ADR 0023's existing
+`invalid_request`; those are the same nonempty-at-most-256-byte boundaries the
+Store accepts. Core's `{:ok, :invalid_id}` remains a host-facing result and its
+direct test remains required, but no conforming generation-2 frame can reach
+it. The parser vectors prove both boundary sides and prove the malformed side
+makes no core call.
 
 `attachment_superseded` is not a generation-2 code. It is core's private
-result for an attach transaction invalidated by non-prepared owner succession
-while the dispatcher remains live, and the daemon maps it to ADR 0023's
-existing correlated `attachment_conflict`. The result carries the attach
-request's `request_id`, keeps the connection open and changes no generation-2
-error inventory or schema digest. A literal vector and the succession race
-witness bind that mapping.
+attach-transaction result, and the daemon maps it to ADR 0023's existing
+correlated `attachment_conflict`. The daemon-only command path instead returns
+private `{:attachment_route_invalidated, attachment_id,
+attachment_incarnation}`. Only an exact join to the registry's succession row
+maps it to correlated `control_not_held`, ordered after the uncorrelated
+`detached`; targeted replacement drains predecessor mutation origins before core
+replacement and produces no route-invalidated result. The correlated mapping
+carries the originating request's `request_id`, uses the exact message
+`control is not held by this connection`, keeps the
+connection open and changes no generation-2 error inventory or schema digest.
+Literal vectors and the forced route races bind the private attach result, the
+daemon-only route result and their distinct mappings.
+After a successful daemon route, any coordinator death or lost reply without
+the exact superseded-before-admission proof instead maps to inherited correlated
+`admission_unknown`; the client retains the exact method, durable command ID
+and canonical input and advances no later step until re-presentation resolves
+it.
 
 The same `control_owner_lost` code also has one **uncorrelated** granted-holder
 form, defined below with its cursor and close behaviour. Its two exact shapes
@@ -1569,7 +1851,7 @@ limits — five inputs, and generation 2 changes **all five**:
 | Generation | New string |
 | Methods | Adds `session.list`, `daemon.status`, `session.acquire_control`, `session.release_control` |
 | Record families | Adds `daemon.stopping` and `daemon.notice` |
-| **Error codes** | Adds every refusal generation 2 can return and generation 1 cannot: `control_held`, `control_not_held`, `control_pending`, `control_capacity_reached`, `control_owner_lost`, `session_dormant`, `session_unavailable`, `daemon_stopping`, the three existence-query refusals the daemon maps to the wire (`session_unknown`, `session_id_invalid`, `store_unavailable`), and the activation and residency refusals (`activation_ceiling_reached`, `composition_mismatch`). **Not** `session_index_too_large`, `session_index_corrupt` or `session_index_upgrade_required`, which are startup exit classes and can reach no client, and **not** `capacity_exceeded`, which generation 1 already carries and generation 2 keeps for the two **attachment** ceilings — `attachments_per_session` and `attachments_per_daemon`, the "stable reason when exhausted" the attachment-lifecycle list names — and no longer for the connection ceiling, which is enforced at `accept` and therefore reaches no `initialize`. `attachment_superseded` is also not added: it is a private core result mapped to generation 1's existing correlated `attachment_conflict` wire code |
+| **Error codes** | Adds every refusal generation 2 can return and generation 1 cannot: `control_held`, `control_not_held`, `control_pending`, `control_capacity_reached`, `control_owner_lost`, `session_dormant`, `session_unavailable`, `daemon_stopping`, the two existence-query refusals the daemon maps to the wire (`session_unknown`, `store_unavailable`), and the activation and residency refusals (`activation_ceiling_reached`, `composition_mismatch`). **Not** `session_id_invalid`: malformed identities fail generation 2's parser as inherited `invalid_request` before core. Also **not** `session_index_too_large`, `session_index_corrupt` or `session_index_upgrade_required`, which are startup exit classes and can reach no client, and **not** `capacity_exceeded`, which generation 1 already carries and generation 2 keeps for attachment admission and retained-byte capacity — including inability to reserve succession-delivery headroom — and no longer for the connection ceiling, which is enforced at `accept` and therefore reaches no `initialize`. Neither `attachment_superseded` nor `attachment_route_invalidated` is added: the first is a private attach result mapped to existing `attachment_conflict`, and the daemon-only disposition maps to existing `control_not_held` |
 | **Limits** | ADR 0023's framing and input ceilings are unchanged, and generation 2 **adds** the residency keys a client can read: `connections_per_daemon`, `initialize_deadline_ms`, `attachments_per_session`, `attachments_per_daemon`, `session_list_page_max`, `session_index_entries`, `lease_term_ms` |
 
 **The uncorrelated `control_owner_lost` form closes a controller whose lease
@@ -1632,7 +1914,10 @@ the whole of what was missing.
 whose `writer_epoch` does not match, **and** every lease-authorized
 existing-session mutation that fails ADR 0033's combined check on holder
 connection, epoch, `held` state, unexpired deadline or a live attachment for
-the pinned session. One code for all of them, carrying nothing beyond the envelope:
+the pinned session, plus the two positively proved succession-before-admission
+routes named above. Every form uses the exact message
+`control is not held by this connection`. One code
+for all of them, carrying nothing beyond the envelope:
 the refusals a client can provoke must not tell it whether a lease exists,
 whether its epoch was right or whether it was merely late, because that is an
 oracle for the value the gate protects. It is distinct from `control_held`,
@@ -1655,8 +1940,26 @@ refuses `control_pending` and the client may acquire again.
 ordinary correlated `error` record with `code: session_unavailable`, the
 request's `request_id` and one bounded non-secret `message`. It has no
 `session_id`, `event_cursor` or session state and leaves the connection open.
-The daemon emits it only when `session.inspect` returns core's exact
-`:session_unavailable`; it never derives the code by parsing `message`.
+The daemon emits it when `session.inspect` returns core's exact
+`:session_unavailable` or when the daemon-only command route proves the exact
+coordinator died before any coordinator call; it never derives the code by
+parsing `message`. A death or lost reply after a successful route is instead
+the inherited correlated `admission_unknown` and retains the durable command
+identity for re-presentation.
+
+**`composition_mismatch`, exactly.** The daemon calls
+`Runtime.resume_session_detailed/3`, not `SessionDirectory.resume/4`. The local
+Store stage's `:runtime_placement_mismatch` reaches live Control as the exact
+domain result `{:error, :runtime_placement_mismatch, %{disposition:
+:no_activation, control_entry: :dormant}}`. Only that shape maps to the
+correlated generation-2 code `composition_mismatch`, with the literal bounded
+message `session cannot be activated by this daemon composition`; no Store,
+coordinator or configuration term is serialized. Any different atom, metadata
+shape or outer `{:error, :runtime_unavailable}` follows its own existing domain
+or fatal path. The literal vector fixes that record, and the integrated resume
+witness uses a session created under another `runtime_id`, observes this exact
+detailed result, emits the exact wire code and message, starts no coordinator,
+charges no activation, and publishes no directory or index row.
 
 **A waiter whose connection disappears before the permit's result CAS is
 cancelled.** Connection `DOWN` wins `connection_lost`; for a fresh acquire the
@@ -1736,12 +2039,15 @@ it. The cursor is the position the client reconnects at, and delivery from it
 is contiguous and at least once, so a duplicate at the seam is expected and a
 gap is a defect.
 
-**"Best-effort" is the bound `daemon.stopping` already has**, reused rather
-than restated: exactly **one** non-blocking write attempt of the record into
-the connection's existing 4 MiB output buffer. An ordinary eviction closes
-whatever that attempt did; succession alone keeps the connection open whatever
-that attempt did. A backpressured client evicted for overflow will usually not
-receive the record and learns by EOF instead. No new timer and no new number.
+**Notification is nonblocking, and succession reserves its capacity.** Each
+occasion makes exactly one enqueue attempt into the connection's existing
+4 MiB output buffer. An ordinary eviction then makes its one nonblocking
+write/flush attempt and closes, so transport backpressure may still leave only
+EOF. For a live succession holder, ordinary frames could not consume the
+derived `succession_delivery_reserve_bytes` headroom, so buffer capacity cannot drop the
+`detached` record. The connection stays open and drains the queued record in
+order; transport death before delivery instead enters ordinary EOF recovery.
+This adds no timer, raises no byte ceiling and chooses no new numeric limit.
 
 For the first four rows, no other connection is affected. The succession row
 instead invalidates every attachment for that session, keeps those initialized
@@ -2041,8 +2347,9 @@ enters the digest's record-families input beside `daemon.stopping`.
 **Correlation, for the refusals above.** `control_not_held`,
 `control_pending`, `control_capacity_reached`, `control_held`,
 the in-flight lease-operation form of `control_owner_lost`, `session_dormant`,
-`session_unavailable`, inherited `attachment_conflict` (including the mapping
-from core `attachment_superseded`), `daemon_stopping` and the three
+`session_unavailable`, inherited `attachment_conflict`, inherited
+`admission_unknown`, `activation_ceiling_reached`, `composition_mismatch`,
+`daemon_stopping` and the two wire-reachable
 existence-query refusals are
 ordinary **correlated** errors: each answers one request and carries that
 request's `request_id`, no `event_cursor` and no session state, and none
@@ -2348,8 +2655,10 @@ inside `{:ok, result}` or the distinct outer
 activation but **does not permit publication**, because that result carries no
 recorded placement identity. The daemon writes the directory/index row only
 after create or resume succeeds under its configured placement. The other three
-leave no attachment, lease, activation or row and map to their distinct
-generation-2 refusals. Runtime unavailability is daemon-fatal `runtime_lost`
+leave no attachment, lease, activation or row. `:absent` and
+`:store_unavailable` map to their distinct generation-2 refusals; `:invalid_id`
+remains host-facing because the generation-2 parser has already mapped the same
+invalid domain to `invalid_request` without a core call. Runtime unavailability is daemon-fatal `runtime_lost`
 and reaches no existence refusal. A session stored under placement A, absent from both
 publications and reached by a daemon composed as B, answers `{:ok, :present}` but its
 resume refuses the placement mismatch and neither publication may record B.
@@ -2577,11 +2886,12 @@ make.
 - **Homogeneity.** One state root is one host composition for the daemon's
   process lifetime. The daemon is composed once, with one workspace, policy,
   provider configuration and set of project resources, and serves every
-  session in the root under it. A recorded session the current composition
-  cannot serve — a placement identity it does not hold, or retained
-  configuration it cannot satisfy — is reported at *activation*, naming the
-  session and the mismatch, with the existing refusal reasons; it is never a
-  reason a start fails, because recovery is lazy and start never reads it. The
+  session in the root under it. The one retained compatibility discriminator
+  core currently exposes is the session's `runtime_id`. A recorded session
+  whose placement identity differs from this daemon's receives the exact
+  `composition_mismatch` mapping above at *activation*; M5 claims no additional
+  retained-configuration mismatch class. It is never a reason daemon start
+  fails, because recovery is lazy and start never reads the session. The
   operator documentation says that mixing compositions in one root means some
   sessions will refuse to activate, and that the remedy is one root per
   composition.
@@ -2650,8 +2960,15 @@ delivered contiguously after the snapshot. The daemon adds:
   disabled, with identical delivery.
 
   Reclamation is deterministic so that it can be tested rather than observed.
-  Before an encoded-byte admission, the candidate bytes remain pending and
-  uncharged. If `charged_aggregate + pending_admission_bytes` would exceed the
+  Before any ordinary encoded-frame or resident-window admission, the candidate
+  must fit both the applicable stage bound and the aggregate commitment. On an
+  connection with a pending or installed attachment or retained local
+  succession row, an ordinary output candidate must also fit that connection's
+  `4 MiB - succession_delivery_reserve_bytes` allowance and the aggregate. It remains
+  pending and uncharged while those checks run; no pending ordinary admission
+  may borrow a per-connection or aggregate succession reserve. If
+  `charged_encoded_bytes + pending_admission_bytes + unused_succession_reserves`
+  would exceed the
   daemon's aggregate ceiling, the registry takes one accounting snapshot and
   reclaims from that snapshot in
   this fixed order: first every window whose session has zero
@@ -2665,7 +2982,8 @@ delivered contiguously after the snapshot. The daemon adds:
   A sequence-distance metric would not be comparable: sequence numbers are
   per-session and say nothing about how much memory an attachment is costing.
   Ties break by session ID bytes ascending. Each step is **repeated until
-  `charged_aggregate + pending_admission_bytes` is at or below the ceiling**,
+  `charged_encoded_bytes + pending_admission_bytes + unused_succession_reserves`
+  is at or below the ceiling**,
   not applied once: releasing one window may not be enough, so zero-attachment
   windows are released in that order until either the pending admission fits
   or none is left. Active-session windows follow in
@@ -2694,20 +3012,25 @@ delivered contiguously after the snapshot. The daemon adds:
   snapshot and cursor is the defined response a compacting adapter returns for
   a cursor older than its retained history; no M5 witness can produce it and
   none claims to;
-- the core event-count queue and the daemon socket output buffer above; when
-  the next event would exceed either, the attachment is detached at its last
+- the core event-count queue and the daemon socket output buffer above; the
+  buffer remains at most 4 MiB total, while ordinary frames on a connection
+  with a pending or installed attachment or retained local succession row stop
+  at `4 MiB - succession_delivery_reserve_bytes`. When the next event
+  would exceed either ordinary allowance, the attachment is detached at its last
   completely emitted cursor with a stable reason — a `detached` record and the
   close of that connection, under the detach rule above — and the client
   reconnects at that cursor on a new connection;
-- at most 512 MiB of retained encoded events across the daemon's output
-  buffers and resident windows; on aggregate pressure, evict windows, close
+- at most 512 MiB of aggregate commitment across the daemon's charged output
+  buffers, charged resident windows and unused per-attachment succession-delivery
+  reserves; on aggregate pressure, evict windows, close
   unattached buffered connections, or detach the slowest eligible attachment
   in the exact order above before admitting more bytes, without stalling a
   journal transaction;
-- 64 attachments per session and 512 per daemon, refused at attach with
-  **`capacity_exceeded`** when exhausted — ADR 0023's existing code, and after
-  the connection ceiling moved to `accept` the only thing in generation 2 that
-  produces it;
+- 64 attachments per session and 512 per daemon, with each daemon attachment
+  also requiring its aggregate succession-delivery reserve before installation;
+  a count or reserve failure refuses attach with **`capacity_exceeded`** — ADR
+  0023's existing code. After the connection ceiling moved to `accept`, attach
+  admission is the only generation-2 path that produces it;
 - eviction of an **observer** attachment that has consumed nothing for ten
   minutes; the
   `detached` record names the cursor the client may resume from and the
@@ -2786,9 +3109,11 @@ before any primary or waiter reply, and shutdown abandonment reuses no charge.
 Succession cases have a core witness and an integrated daemon witness. In both,
 one **embedded holder** issues a fresh, non-prepared resume of an already active
 session while two generation-2 holders and that embedded holder are attached;
-no holder dies. Control clears every old route, EventDispatcher releases every
-attachment's transfers before acknowledging the exact identity set, and
-Control notifies each holder. A racing holder `DOWN` in each mailbox order
+no holder dies. Before the successor entry becomes `:acquiring`, Control clears
+every old route, EventDispatcher releases every attachment's transfers before
+acknowledging the exact identity set, and Control notifies each holder. A
+successor-start refusal proves those attachments remain invalidated and the
+resume caller receives its real refusal. A racing holder `DOWN` in each mailbox order
 produces the same zero-count result, the embedded handles are stale, and the
 unrelated-session control attachment keeps delivering.
 
@@ -2796,10 +3121,66 @@ The daemon witness starts with one attached controller and one observer and
 retains both initialized connections through that cut. It proves the registry
 releases each daemon attachment charge once, clears both connection-local
 attachment identities, sends `detached` at each last emitted cursor and keeps
-both initialized connections open. A pending
+both initialized connections open. A paired case fills each connection's
+ordinary-data allowance to exactly `4 MiB - succession_delivery_reserve_bytes`, proves
+one more ordinary byte would take the usual backpressure path, installs 32
+lease-authorized mutation origins across every route/cut disposition, then
+forces succession and proves the maximal literal `detached` frame arrives
+before every correlated reply, all 32 maximal replies reuse the one reserved
+reply slot only after its preceding frame is completely emitted, and both
+connections remain open. Reattachment stays refused until those predecessor
+origins are terminal and their replies emitted, or the connection is reaped,
+and the unused reserve returns to baseline. A post-cut query, mutation and
+reattach frame are injected before that join; none is read or promoted, none
+borrows the reply slot, and all three resume in wire order only after the
+succession row clears. A maximum-population case installs 512
+daemon attachments, fills charged ordinary buffers and windows until
+`charged_encoded_bytes + pending_admission_bytes + unused_succession_reserves`
+equals 512 MiB, then forces one session succession and proves every affected
+reserve atomically becomes the notice and reply charges without exceeding the
+ceiling. It also proves a replacement
+at both full attachment and aggregate capacity borrows and transfers the exact
+target's attachment charge, aggregate reserve and local headroom without a
+transient second reserve.
+
+The routed-result ordering witness separately forces a real result message
+before its holder notice with post-result classification on each side of the
+Control cut. Classification first permits the unchanged result to render and a
+later `detached`; cut first retains that same result until the notice joins and
+emits `detached` before the result. It also delivers the holder notice before
+the classification reply, proves both arrival orders use the same identity,
+and makes missing, mismatched or exact-Control-loss classification fatal while
+connection reap clears both bounded rows. The no-succession control case
+classifies immediately and renders without waiting for a notice. A prepared
+succession advances the owner generation while carrying the exact attachment;
+classification returns `:before_succession_cut`, renders normally and waits for
+no holder notice, proving generation change alone is not the discriminator.
+
+The replacement-crossing witness forces succession before relay promotion,
+while core has reserved, while the dispatcher has staged, after core publish
+commit but before daemon finalization, and after finalization. The first four
+select `replacement_cut = succession_owned`, publish no local handle, emit the
+old target's `detached` before the replacement's `attachment_conflict`, consume
+one borrowed reserve, and release one charge after exact old/new core cleanup;
+late core messages cannot publish or restore either identity. Finalization
+first selects `published`, returns the replacement success, transfers that same
+reserve and charge, and then performs ordinary succession of the new installed
+identity. Holder-notice-first and replacement-result-first delivery are forced
+at the publish-committed cut.
+
+An unattached initialized connection is separately filled just above
+`4 MiB - succession_delivery_reserve_bytes`. Its attach reservation makes one
+nonblocking flush attempt and, while the writer is held, refuses
+`capacity_exceeded` without a core row; a paired case at the exact threshold
+reserves local and aggregate headroom before another origin can enqueue output,
+then publishes without either bound moving. Refusal and holder death release
+both reservations. A pending
 generation-2 attach invalidated by the same succession receives the correlated
 inherited wire code `attachment_conflict`, never a private
-`attachment_superseded` string. The controller's exact lease holder, writer
+`attachment_superseded` string. The paired case fills ordinary output to the
+same threshold before invalidation and proves that refusal uses the reserved
+reply slot, emits no `detached`, keeps the connection open and releases the
+unused notice portion. The controller's exact lease holder, writer
 epoch and absolute deadline are byte-for-byte unchanged after invalidation; a
 mutation before reattach refuses `control_not_held` and changes none of them.
 Both connections then attach at their retained cursors with contiguous
@@ -2808,6 +3189,49 @@ unchanged deadline, the controller's next mutation is admitted under the same
 epoch. The observer's takeover refuses `control_held` before the unchanged term
 ends, then succeeds only in paired cases where the controller explicitly
 releases or that deadline expires.
+
+The daemon command witness forces every route/cut order. A mutation whose real
+coordinator result settles before invalidation may precede `detached`. A route
+token obtained first but settled after the cut still returns its real result if
+the old coordinator passed its nested Control fence and completed the command;
+if the supersede wins before that fence, the reserved `detached` precedes
+correlated `control_not_held` and no durable command exists. The witness forces
+both a supersede dequeued first and a command callback dequeued first whose
+nested `Control.current_owner/3` call loses to the cut, including when
+superseded cleanup keeps the old coordinator alive long enough to return its
+private `superseded_owner`. A cut handled before daemon routing takes the same
+private classification by joining the returned old identity to the daemon's
+local succession row. Holder-notice-first and relay-result-first delivery both
+produce that same join; a wrong identity or a live origin whose counterpart is
+held through its existing deadline selects fatal `runtime_lost`, while
+connection death reaps both without a reply. Killing
+the same-generation coordinator before routing returns `session_unavailable`
+without a core call; killing it after a successful route returns
+`admission_unknown`, and re-presenting the exact command ID resolves without a
+duplicate. A command forced to commit and crash before reply while a later
+succession advances Control remains `admission_unknown`, proving generation
+change alone cannot erase uncertainty. Loss of Control or an absent succession join selects fatal
+`runtime_lost`, never either domain result.
+
+Targeted replacement and mutation are forced on both sides of its local
+barrier. Origins admitted before the barrier receive their real result or
+`admission_unknown`; the core replacement does not begin and the new handle is
+not published until all are settled or reaped. Origins presented after the
+barrier wait and then route only through the new identity. Connection death
+cancels an unpublished replacement, and repeated replacements return the one
+gate row plus every borrowed charge and reserve to baseline. Without overlapping
+succession, no replacement case produces `detached`, a route-invalidated result
+or retained core state; the crossing cases above instead select their one
+succession-owned row. A
+generation-2 controller then issues a
+fresh `session.resume` while attached. Its own invalidation record arrives
+before its correlated real resume result in both daemon mailbox orders, its
+lease holder and epoch remain exact, its accepted admission commits the
+gate-time candidate deadline, and it reattaches at the retained cursor. The
+paired successor-start refusal has the same preceding `detached`, discards its
+renewal candidate, preserves the prior deadline,
+and returns the real refusal rather than hanging or inventing
+`control_not_held`.
 
 Dispatcher-restart cases kill EventDispatcher with several holders before
 stage, after stage, after authorization, and after the publication
@@ -2844,6 +3268,11 @@ The protocol suite proves the inherited boolean replacement remains byte- and
 behavior-compatible in both generations and each adapter maps it to core's
 exact target, a
 pipelined attach and acquire cannot bind one connection to different sessions,
+every added generation-2 error code has a literal vector and one exact source
+mapping — including `control_held`, `session_dormant`, `session_unknown`,
+`store_unavailable`, `activation_ceiling_reached` and
+`composition_mismatch` — while malformed session identities pin inherited
+`invalid_request` and no core call,
 `control_owner_lost` vectors cover the correlated in-flight lease-operation shape
 and both uncorrelated optional-cursor shapes, with the required message and
 their opposite discriminators forbidden; `fatal:listener_lost` reaches existing clients and
@@ -2855,10 +3284,11 @@ gap across enabled, disabled and mid-stream-dropped resident windows; bounded
 reclamation, slow-client detach, idle-observer eviction and reconnect leave other
 attachments progressing; a population consisting only of initialized but
 unattached clients attempts the next output-buffer admission for which
-`charged_aggregate + pending_admission_bytes` would pass the aggregate
+`charged_encoded_bytes + pending_admission_bytes + unused_succession_reserves`
+would pass the aggregate
 threshold, proves those pending bytes are never charged, reclaims until that
 sum fits or closes in the specified order without admitting them, and observes
-that the aggregate never exceeds 512 MiB, without a fabricated detach cursor;
+that the aggregate commitment never exceeds 512 MiB, without a fabricated detach cursor;
 a suspended initialized peer proves the
 single non-blocking attempt cannot stall reclamation and its retained bytes are
 charged until close, then return the aggregate to at most 512 MiB; all count and

@@ -5527,3 +5527,22 @@ status-file reconstruction, `bash scripts/check.sh --docs`, the final semantic
 review of `docs/operator/` and `docs/developer/`, and archive identity. The
 last proof uses the manifest producer and `SOURCE_IDENTITY` that M5 delivers.
 This correction grants no acceptance, closure, tag, release or publication.
+
+### Archive extraction ignores the caller umask — 2026-09-21
+
+Internal review found that deriving manifest modes from an extracted tree made
+the retained result depend on the caller's ambient umask. This correction
+supersedes the archive-staging instructions above only on that point. Both the
+tested-SHA closure lane and the administrative-SHA pre-tag proof create and
+populate their fresh extraction inside a subshell with scoped `umask 022`.
+Neither extraction inherits its caller's umask.
+
+Each retained manifest proof invokes that extraction from hostile caller
+`umask 0777`. Each complete unexcluded manifest projection must first match its
+commit's independent Git-tree `(kind, mode, path)` projection, so two runners
+that both forgot the scoped umask cannot agree vacuously. Before content
+exclusions, the release comparison also requires the tested and administrative
+manifests to have identical ordered projections. The
+single executable rule is in the
+[milestone technical guide](milestones-technical.md#technical-milestones-archive-extraction).
+This correction grants no acceptance, closure, tag, release or publication.
