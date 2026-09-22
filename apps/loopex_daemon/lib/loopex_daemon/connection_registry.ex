@@ -27,6 +27,14 @@ defmodule LoopexDaemon.ConnectionRegistry do
   return OTP asynchronous request identifiers so the daemon owner can classify
   other component exits while it waits under one absolute deadline. Private
   pids, references and tokens are redacted from formatted process status.
+
+  The same serialized owner retains the daemon-lifetime activation set and
+  every activation reservation. Exact create or resume repetition joins its
+  primary reservation, a conflicting create binding is refused, and a session
+  already activated in this daemon lifetime consumes no reservation. Resolving
+  a reservation removes its exact binding before optionally adding the session
+  to the monotonic activation set; a repeated resolution of an absent reference
+  is an idempotent no-op.
   """
 
   use GenServer
@@ -36,6 +44,7 @@ defmodule LoopexDaemon.ConnectionRegistry do
   alias LoopexProtocol.Session.V2
 
   @connection_limit 512
+  @activation_limit 64
   @aggregate_output_bytes 536_870_912
 
   @typedoc false
@@ -46,6 +55,13 @@ defmodule LoopexDaemon.ConnectionRegistry do
 
   @typedoc false
   @type request_id :: term()
+
+  @typedoc false
+  @type origin_id :: {binary(), 0..31, pos_integer()}
+
+  @typedoc false
+  @type activation_binding ::
+          {:create, binary(), binary()} | {:resume, binary(), binary()}
 
   @doc false
   @spec start_link(keyword()) :: GenServer.on_start()
@@ -164,6 +180,24 @@ defmodule LoopexDaemon.ConnectionRegistry do
   end
 
   @doc false
+  @spec reserve_activation(pid(), origin_id(), activation_binding()) ::
+          {:ok, {:primary, binary()} | {:duplicate, origin_id(), binary()} | :already_active}
+          | {:error, :activation_ceiling_reached | :activation_conflict | :invalid_activation}
+  def reserve_activation(registry, origin_id, binding) do
+    GenServer.call(registry, {:reserve_activation, origin_id, binding})
+  end
+
+  @doc false
+  @spec resolve_activation(pid(), binary(), :activated | :no_activation, binary() | nil) ::
+          :ok | {:error, :activation_resolution_invalid}
+  def resolve_activation(registry, reservation_ref, disposition, session_id \\ nil) do
+    GenServer.call(
+      registry,
+      {:resolve_activation, reservation_ref, disposition, session_id}
+    )
+  end
+
+  @doc false
   @spec abort_provisional(pid(), binary(), :peer_credential_unverified | :handoff_failed) ::
           :ok | {:error, :abort_unavailable}
   def abort_provisional(registry, rollback_token, reason) do
@@ -204,6 +238,10 @@ defmodule LoopexDaemon.ConnectionRegistry do
           output_commitment: non_neg_integer(),
           output_commitment_limit: pos_integer(),
           succession_reservations: non_neg_integer(),
+          active_sessions: non_neg_integer(),
+          activation_reservations: non_neg_integer(),
+          activations_used: non_neg_integer(),
+          activation_limit: 64,
           limit: 512
         }
   def status(registry), do: GenServer.call(registry, :status)
@@ -259,6 +297,11 @@ defmodule LoopexDaemon.ConnectionRegistry do
            succession_notice_bytes: succession_capacity.notice_bytes,
            succession_reply_bytes: succession_capacity.reply_bytes,
            output_commitment: 0,
+           activation_set: MapSet.new(),
+           activation_reservations: %{},
+           activation_bindings: %{},
+           activation_origins: %{},
+           activation_create_commands: %{},
            rows: %{},
            child_monitors: %{},
            listeners: %{},
@@ -613,6 +656,24 @@ defmodule LoopexDaemon.ConnectionRegistry do
     )
   end
 
+  def handle_call({:reserve_activation, origin_id, binding}, _from, state) do
+    case reserve_activation_binding(state, origin_id, binding) do
+      {:ok, reply, state} -> {:reply, {:ok, reply}, state}
+      {:error, reason} -> {:reply, {:error, reason}, state}
+    end
+  end
+
+  def handle_call(
+        {:resolve_activation, reservation_ref, disposition, session_id},
+        _from,
+        state
+      ) do
+    case resolve_activation_reservation(state, reservation_ref, disposition, session_id) do
+      {:ok, state} -> {:reply, :ok, state}
+      {:error, reason} -> {:reply, {:error, reason}, state}
+    end
+  end
+
   def handle_call(
         {:abort_provisional, token, reason},
         {caller, _tag},
@@ -780,6 +841,11 @@ defmodule LoopexDaemon.ConnectionRegistry do
        output_commitment_limit: state.aggregate_output_bytes,
        succession_reservations:
          Enum.count(state.rows, fn {_token, row} -> OutputBuffer.succession?(row.output) end),
+       active_sessions: MapSet.size(state.activation_set),
+       activation_reservations: map_size(state.activation_reservations),
+       activations_used:
+         MapSet.size(state.activation_set) + map_size(state.activation_reservations),
+       activation_limit: @activation_limit,
        limit: @connection_limit
      }, state}
   end
@@ -1160,6 +1226,179 @@ defmodule LoopexDaemon.ConnectionRegistry do
     case Map.fetch(state.rows, token) do
       {:ok, row} -> put_in(state, [:rows, token], function.(row))
       :error -> state
+    end
+  end
+
+  defp reserve_activation_binding(state, origin_id, binding) do
+    with :ok <- validate_activation_origin(origin_id),
+         {:ok, key, expected_session_id, create_command} <-
+           normalize_activation_binding(binding),
+         :ok <- activation_origin_available(state, origin_id, key),
+         :ok <- activation_create_command_available(state, create_command) do
+      case Map.fetch(state.activation_bindings, key) do
+        {:ok, %{primary_origin_id: primary_origin_id, reservation_ref: reservation_ref}} ->
+          if primary_origin_id == origin_id do
+            {:ok, {:primary, reservation_ref}, state}
+          else
+            Logger.debug("loopex daemon activation reservation joined")
+            {:ok, {:duplicate, primary_origin_id, reservation_ref}, state}
+          end
+
+        :error ->
+          cond do
+            not is_nil(expected_session_id) and
+                MapSet.member?(state.activation_set, expected_session_id) ->
+              Logger.debug("loopex daemon activation already counted")
+              {:ok, :already_active, state}
+
+            MapSet.size(state.activation_set) + map_size(state.activation_reservations) >=
+                @activation_limit ->
+              Logger.debug("loopex daemon activation capacity reached")
+              {:error, :activation_ceiling_reached}
+
+            true ->
+              reservation_ref = :crypto.strong_rand_bytes(16)
+
+              reservation = %{
+                origin_id: origin_id,
+                key: key,
+                expected_session_id: expected_session_id,
+                create_command: create_command
+              }
+
+              binding_entry = %{
+                primary_origin_id: origin_id,
+                reservation_ref: reservation_ref
+              }
+
+              state =
+                state
+                |> put_in([:activation_reservations, reservation_ref], reservation)
+                |> put_in([:activation_bindings, key], binding_entry)
+                |> put_in([:activation_origins, origin_id], %{
+                  key: key,
+                  reservation_ref: reservation_ref
+                })
+                |> put_create_command(create_command, reservation_ref)
+
+              Logger.debug("loopex daemon activation slot reserved")
+              {:ok, {:primary, reservation_ref}, state}
+          end
+      end
+    end
+  end
+
+  defp resolve_activation_reservation(state, reservation_ref, disposition, session_id)
+       when is_binary(reservation_ref) and byte_size(reservation_ref) == 16 and
+              disposition in [:activated, :no_activation] do
+    case Map.fetch(state.activation_reservations, reservation_ref) do
+      :error ->
+        {:ok, state}
+
+      {:ok, reservation} ->
+        with :ok <- validate_activation_resolution(reservation, disposition, session_id) do
+          state = drop_activation_reservation(state, reservation_ref, reservation)
+
+          state =
+            if disposition == :activated do
+              update_in(state.activation_set, &MapSet.put(&1, session_id))
+            else
+              state
+            end
+
+          Logger.debug("loopex daemon activation reservation resolved")
+          {:ok, state}
+        end
+    end
+  end
+
+  defp resolve_activation_reservation(_state, _reservation_ref, _disposition, _session_id),
+    do: {:error, :activation_resolution_invalid}
+
+  defp normalize_activation_binding({:create, command_id, digest})
+       when is_binary(command_id) and byte_size(command_id) in 1..64 and is_binary(digest) and
+              byte_size(digest) == 32 do
+    {:ok, {:create, command_id, digest}, nil, {command_id, digest}}
+  end
+
+  defp normalize_activation_binding({:resume, session_id, command_id})
+       when is_binary(session_id) and byte_size(session_id) in 1..256 and is_binary(command_id) and
+              byte_size(command_id) in 1..64 do
+    {:ok, {:resume, session_id, command_id}, session_id, nil}
+  end
+
+  defp normalize_activation_binding(_binding), do: {:error, :invalid_activation}
+
+  defp validate_activation_origin({incarnation, slot, sequence})
+       when is_binary(incarnation) and byte_size(incarnation) == 16 and slot in 0..31 and
+              is_integer(sequence) and sequence > 0,
+       do: :ok
+
+  defp validate_activation_origin(_origin_id), do: {:error, :invalid_activation}
+
+  defp activation_origin_available(state, origin_id, key) do
+    case Map.fetch(state.activation_origins, origin_id) do
+      {:ok, %{key: ^key}} -> :ok
+      {:ok, _other} -> {:error, :activation_conflict}
+      :error -> :ok
+    end
+  end
+
+  defp activation_create_command_available(_state, nil), do: :ok
+
+  defp activation_create_command_available(state, {command_id, digest}) do
+    case Map.fetch(state.activation_create_commands, command_id) do
+      {:ok, %{digest: ^digest}} -> :ok
+      {:ok, _other} -> {:error, :activation_conflict}
+      :error -> :ok
+    end
+  end
+
+  defp put_create_command(state, nil, _reservation_ref), do: state
+
+  defp put_create_command(state, {command_id, digest}, reservation_ref) do
+    put_in(state, [:activation_create_commands, command_id], %{
+      digest: digest,
+      reservation_ref: reservation_ref
+    })
+  end
+
+  defp validate_activation_resolution(
+         %{expected_session_id: expected_session_id},
+         :activated,
+         session_id
+       )
+       when is_binary(session_id) and byte_size(session_id) in 1..256 do
+    if is_nil(expected_session_id) or expected_session_id == session_id,
+      do: :ok,
+      else: {:error, :activation_resolution_invalid}
+  end
+
+  defp validate_activation_resolution(_reservation, :no_activation, nil), do: :ok
+
+  defp validate_activation_resolution(_reservation, _disposition, _session_id),
+    do: {:error, :activation_resolution_invalid}
+
+  defp drop_activation_reservation(state, reservation_ref, reservation) do
+    state = %{
+      state
+      | activation_reservations: Map.delete(state.activation_reservations, reservation_ref),
+        activation_bindings: Map.delete(state.activation_bindings, reservation.key),
+        activation_origins: Map.delete(state.activation_origins, reservation.origin_id)
+    }
+
+    case reservation.create_command do
+      {command_id, _digest} ->
+        case Map.get(state.activation_create_commands, command_id) do
+          %{reservation_ref: ^reservation_ref} ->
+            update_in(state.activation_create_commands, &Map.delete(&1, command_id))
+
+          _other ->
+            state
+        end
+
+      nil ->
+        state
     end
   end
 

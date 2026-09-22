@@ -266,6 +266,10 @@ defmodule LoopexDaemon.ConnectionRegistryTest do
         output_commitment: 6,
         output_commitment_limit: 10,
         succession_reservations: 0,
+        active_sessions: 0,
+        activation_reservations: 0,
+        activations_used: 0,
+        activation_limit: 64,
         limit: 512
       }
     end)
@@ -427,6 +431,208 @@ defmodule LoopexDaemon.ConnectionRegistryTest do
     assert :ok = manual_registry_call(connection.pid, {:output_emitted, frame_ref})
     assert :ok = manual_registry_call(connection.pid, :reserve_succession)
     assert :ok = manual_registry_call(connection.pid, :release_succession)
+  end
+
+  test "activation reservations coalesce exact commands and reject conflicting bindings" do
+    registry = start_registry(5_000)
+    command_id = "create-command"
+    digest = :crypto.hash(:sha256, "options-a")
+    first = activation_origin(0, 1)
+    duplicate = activation_origin(1, 1)
+
+    assert {:ok, {:primary, reservation_ref}} =
+             ConnectionRegistry.reserve_activation(
+               registry,
+               first,
+               {:create, command_id, digest}
+             )
+
+    assert {:ok, {:primary, ^reservation_ref}} =
+             ConnectionRegistry.reserve_activation(
+               registry,
+               first,
+               {:create, command_id, digest}
+             )
+
+    assert {:ok, {:duplicate, ^first, ^reservation_ref}} =
+             ConnectionRegistry.reserve_activation(
+               registry,
+               duplicate,
+               {:create, command_id, digest}
+             )
+
+    assert {:error, :activation_conflict} =
+             ConnectionRegistry.reserve_activation(
+               registry,
+               activation_origin(2, 1),
+               {:create, command_id, :crypto.hash(:sha256, "options-b")}
+             )
+
+    assert {:error, :activation_conflict} =
+             ConnectionRegistry.reserve_activation(
+               registry,
+               first,
+               {:resume, "other-session", "resume-command"}
+             )
+
+    assert %{
+             active_sessions: 0,
+             activation_reservations: 1,
+             activations_used: 1,
+             activation_limit: 64
+           } = ConnectionRegistry.status(registry)
+
+    assert :ok =
+             ConnectionRegistry.resolve_activation(
+               registry,
+               reservation_ref,
+               :activated,
+               "created-session"
+             )
+
+    assert :ok =
+             ConnectionRegistry.resolve_activation(
+               registry,
+               reservation_ref,
+               :activated,
+               "created-session"
+             )
+
+    assert %{
+             active_sessions: 1,
+             activation_reservations: 0,
+             activations_used: 1
+           } = ConnectionRegistry.status(registry)
+
+    assert {:ok, :already_active} =
+             ConnectionRegistry.reserve_activation(
+               registry,
+               activation_origin(3, 1),
+               {:resume, "created-session", "resume-active"}
+             )
+  end
+
+  test "distinct dormant resume commands reserve independently while exact replay joins" do
+    registry = start_registry(5_000)
+    session_id = "dormant-session"
+    first = activation_origin(0, 1)
+    replay = activation_origin(1, 1)
+    second = activation_origin(2, 1)
+
+    assert {:ok, {:primary, first_ref}} =
+             ConnectionRegistry.reserve_activation(
+               registry,
+               first,
+               {:resume, session_id, "resume-one"}
+             )
+
+    assert {:ok, {:duplicate, ^first, ^first_ref}} =
+             ConnectionRegistry.reserve_activation(
+               registry,
+               replay,
+               {:resume, session_id, "resume-one"}
+             )
+
+    assert {:ok, {:primary, second_ref}} =
+             ConnectionRegistry.reserve_activation(
+               registry,
+               second,
+               {:resume, session_id, "resume-two"}
+             )
+
+    assert first_ref != second_ref
+
+    assert %{active_sessions: 0, activation_reservations: 2, activations_used: 2} =
+             ConnectionRegistry.status(registry)
+
+    assert {:error, :activation_resolution_invalid} =
+             ConnectionRegistry.resolve_activation(
+               registry,
+               first_ref,
+               :activated,
+               "wrong-session"
+             )
+
+    assert :ok =
+             ConnectionRegistry.resolve_activation(
+               registry,
+               first_ref,
+               :activated,
+               session_id
+             )
+
+    assert %{active_sessions: 1, activation_reservations: 1, activations_used: 2} =
+             ConnectionRegistry.status(registry)
+
+    assert {:ok, :already_active} =
+             ConnectionRegistry.reserve_activation(
+               registry,
+               activation_origin(3, 1),
+               {:resume, session_id, "resume-three"}
+             )
+
+    assert :ok =
+             ConnectionRegistry.resolve_activation(
+               registry,
+               second_ref,
+               :no_activation
+             )
+
+    assert %{active_sessions: 1, activation_reservations: 0, activations_used: 1} =
+             ConnectionRegistry.status(registry)
+  end
+
+  test "the serialized activation ledger admits only one call at sixty-three" do
+    registry = start_registry(5_000)
+
+    Enum.each(1..63, fn index ->
+      origin = activation_origin(rem(index, 32), index)
+      session_id = "active-#{index}"
+
+      assert {:ok, {:primary, reservation_ref}} =
+               ConnectionRegistry.reserve_activation(
+                 registry,
+                 origin,
+                 {:resume, session_id, "resume-#{index}"}
+               )
+
+      assert :ok =
+               ConnectionRegistry.resolve_activation(
+                 registry,
+                 reservation_ref,
+                 :activated,
+                 session_id
+               )
+    end)
+
+    contenders =
+      for index <- 64..65 do
+        Task.async(fn ->
+          ConnectionRegistry.reserve_activation(
+            registry,
+            activation_origin(rem(index, 32), index),
+            {:resume, "dormant-#{index}", "resume-#{index}"}
+          )
+        end)
+      end
+
+    results = Enum.map(contenders, &Task.await/1)
+
+    assert [{:error, :activation_ceiling_reached}, {:ok, {:primary, reservation_ref}}] =
+             Enum.sort(results)
+
+    assert %{active_sessions: 63, activation_reservations: 1, activations_used: 64} =
+             ConnectionRegistry.status(registry)
+
+    assert :ok =
+             ConnectionRegistry.resolve_activation(
+               registry,
+               reservation_ref,
+               :no_activation
+             )
+
+    assert %{active_sessions: 63, activation_reservations: 0, activations_used: 63} =
+             ConnectionRegistry.status(registry)
   end
 
   test "the transport cut freezes and reaps one exact uninitialized population" do
@@ -1009,4 +1215,7 @@ defmodule LoopexDaemon.ConnectionRegistryTest do
   end
 
   defp now_ms, do: System.monotonic_time(:millisecond)
+
+  defp activation_origin(slot, sequence),
+    do: {:crypto.hash(:md5, Integer.to_string(sequence)), slot, sequence}
 end
