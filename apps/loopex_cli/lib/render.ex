@@ -47,7 +47,8 @@ defmodule LoopexCli.Render do
   Blocks on the durable event stream and drains whatever transient progress has
   arrived alongside it. The durable stream decides when the run is over; progress
   never does, because progress can stop for reasons that have nothing to do with
-  the run. `:replay_through` names the last event sequence a daemon attachment
+  the run. A `:next_event` answering `:stop` ends the stream at once after
+  showing any held message. `:replay_through` names the last event sequence a daemon attachment
   replays: a run that finished at or before it is history being shown, not the
   end of this command.
   """
@@ -93,6 +94,12 @@ defmodule LoopexCli.Render do
     progress = drain_progress(progress)
 
     case next_event.(attachment) do
+      # Concept: a caller whose stream has nothing more to show ends it
+      # without a terminal event, and a held assistant message is still shown.
+      :stop ->
+        _progress = render_pending(pending, drain_progress(progress))
+        :ok
+
       {:ok, event} ->
         # The durable result is committed before its transient closure is sent.
         # An assistant event is therefore held until the next durable event. By

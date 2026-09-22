@@ -12,7 +12,8 @@ defmodule LoopexCli.DaemonClient do
   `connect/2` opens the Unix-domain socket, starts one linked reader that
   decodes each complete JSONL frame under the generation-two output ceiling and
   sends it to the caller as `{:loopex_daemon_record, reader, record}`, and
-  performs the initialize exchange. `request/4` sends one frame with a fresh
+  performs the initialize exchange within `:timeout` milliseconds, 30 000 by
+  default; any failure closes the socket. `request/4` sends one frame with a fresh
   request identity and selectively receives only the record correlated to it,
   leaving every other record in the mailbox. Transport loss arrives as
   `{:loopex_daemon_closed, reader}`. No request content is logged.
@@ -31,12 +32,12 @@ defmodule LoopexCli.DaemonClient do
 
   @doc false
   @spec connect(Path.t(), keyword()) :: {:ok, t()} | {:error, :daemon_unreachable}
-  def connect(path, _options \\ []) when is_binary(path) do
+  def connect(path, options \\ []) when is_binary(path) do
     case :socket.open(:local, :stream, :default) do
       {:ok, socket} ->
         case :socket.connect(socket, %{family: :local, path: path}) do
           :ok ->
-            initialize(socket)
+            initialize(socket, Keyword.get(options, :timeout, @initialize_timeout_ms))
 
           {:error, _reason} ->
             _ = :socket.close(socket)
@@ -50,7 +51,7 @@ defmodule LoopexCli.DaemonClient do
     end
   end
 
-  defp initialize(socket) do
+  defp initialize(socket, timeout) do
     owner = self()
     reader = spawn_link(fn -> read(socket, owner, "") end)
     :ok = :socket.setopt(socket, {:otp, :controlling_process}, reader)
@@ -60,7 +61,7 @@ defmodule LoopexCli.DaemonClient do
            client,
            "initialize",
            %{"generations" => [V2.generation()], "capabilities" => []},
-           @initialize_timeout_ms
+           timeout
          ) do
       {:ok, %{"type" => "initialized"}, client} ->
         Logger.debug("loopex live client initialized")

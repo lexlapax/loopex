@@ -203,6 +203,102 @@ defmodule LoopexCli.LiveDaemonTest do
     stop_daemon(daemon)
   end
 
+  @tag timeout: 120_000
+  test "a controller and an observer both survive a lost connection mid-run", context do
+    provider =
+      ProviderFixture.new(:delayed_entry,
+        credential: @credential,
+        response_bodies: [text_response("held answer", "msg_live_held")]
+      )
+
+    launch =
+      Keyword.drop(provider.options, [
+        :credential_token,
+        :credential_registry,
+        :tracing_capability
+      ])
+
+    daemon = start_daemon(context, launch)
+    socket = context.socket
+
+    controller =
+      Task.async(fn ->
+        capture_io(fn ->
+          send(self(), {:result, LoopexCli.dispatch(["run", "--daemon", socket, "go"])})
+        end)
+        |> then(fn output -> {receive(do: ({:result, result} -> result)), output} end)
+      end)
+
+    session_id = eventually(fn -> listed_session(socket) end)
+    eventually(fn -> ProviderFixture.reached?(provider, "pid") end)
+
+    observer =
+      Task.async(fn ->
+        capture_io(fn ->
+          send(self(), {:result, LoopexCli.dispatch(["attach", session_id, "--daemon", socket])})
+        end)
+        |> then(fn output -> {receive(do: ({:result, result} -> result)), output} end)
+      end)
+
+    eventually(fn -> daemon_status(socket)["attachments"] == 2 end)
+
+    connections = daemon_connections()
+    assert length(connections) >= 2
+    Enum.each(connections, &Process.exit(&1, :kill))
+
+    ProviderFixture.release(provider)
+
+    assert {:ok, controller_output} = Task.await(controller, 90_000) |> ok_output()
+    assert {:ok, observer_output} = Task.await(observer, 90_000) |> ok_output()
+
+    for output <- [controller_output, observer_output] do
+      assert length(String.split(output, "held answer")) == 2,
+             "expected the answer exactly once: #{inspect(output)}"
+    end
+
+    stop_daemon(daemon)
+  end
+
+  @tag timeout: 120_000
+  test "an operator stop ends a following command successfully, without recovery", context do
+    provider =
+      ProviderFixture.new(:delayed_entry,
+        credential: @credential,
+        response_bodies: [text_response("never shown", "msg_live_stopped")]
+      )
+
+    launch =
+      Keyword.drop(provider.options, [
+        :credential_token,
+        :credential_registry,
+        :tracing_capability
+      ])
+
+    daemon = start_daemon(context, launch)
+    socket = context.socket
+
+    controller =
+      Task.async(fn ->
+        capture_io(:stderr, fn ->
+          send(self(), {:result, LoopexCli.dispatch(["run", "--daemon", socket, "go"])})
+        end)
+        |> then(fn stderr -> {receive(do: ({:result, result} -> result)), stderr} end)
+      end)
+
+    eventually(fn -> ProviderFixture.reached?(provider, "pid") end)
+    eventually(fn -> daemon_status(socket)["attachments"] == 1 end)
+
+    send(daemon.sentinel, {:daemon_signal, daemon.owner_ref, :sigterm})
+    ProviderFixture.release(provider)
+
+    assert {:ok, stderr} = Task.await(controller, 60_000) |> ok_output()
+    # The orderly stop cancels the run, so its durable ending or the daemon's
+    # stop record ends the stream; either way the command succeeds.
+    assert stderr =~ "cancelled" or stderr =~ "the daemon stopped"
+    refute stderr =~ "recover"
+    assert Task.await(daemon.task, 60_000) == 0
+  end
+
   test "attach refuses a session this daemon lifetime has not activated", context do
     daemon = start_daemon(context, [])
     socket = context.socket
@@ -212,6 +308,61 @@ defmodule LoopexCli.LiveDaemonTest do
 
     assert message =~ "refused" or message =~ "dormant"
     stop_daemon(daemon)
+  end
+
+  defp ok_output({:ok, output}), do: {:ok, output}
+  defp ok_output({other, output}), do: flunk("command answered #{inspect(other)}: #{output}")
+
+  defp listed_session(socket) do
+    {:ok, client} = LoopexCli.DaemonClient.connect(socket)
+
+    try do
+      case LoopexCli.DaemonClient.request(client, "session.list", %{"limit" => 1}) do
+        {:ok, %{"result" => %{"entries" => [%{"session_id" => encoded}]}}, _client} ->
+          {:ok, session_id} = LoopexProtocol.Wire.identity(encoded)
+          session_id
+
+        _other ->
+          nil
+      end
+    after
+      LoopexCli.DaemonClient.close(client)
+    end
+  end
+
+  defp daemon_status(socket) do
+    {:ok, client} = LoopexCli.DaemonClient.connect(socket)
+
+    try do
+      {:ok, %{"result" => status}, _client} =
+        LoopexCli.DaemonClient.request(client, "daemon.status", %{})
+
+      status
+    after
+      LoopexCli.DaemonClient.close(client)
+    end
+  end
+
+  # Every daemon-side connection process, found by its proc_lib initial call.
+  defp daemon_connections do
+    for pid <- Process.list(),
+        {:dictionary, dictionary} <- [Process.info(pid, :dictionary)],
+        dictionary[:"$initial_call"] == {LoopexDaemon.SocketConnection, :init, 1},
+        do: pid
+  end
+
+  defp eventually(fun, attempts \\ 1_000) do
+    case fun.() do
+      falsy when falsy in [nil, false] and attempts > 0 ->
+        Process.sleep(20)
+        eventually(fun, attempts - 1)
+
+      falsy when falsy in [nil, false] ->
+        flunk("condition never held")
+
+      value ->
+        value
+    end
   end
 
   defp start_daemon(context, provider_options) do
