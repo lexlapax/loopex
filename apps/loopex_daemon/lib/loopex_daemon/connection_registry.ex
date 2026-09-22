@@ -40,7 +40,7 @@ defmodule LoopexDaemon.ConnectionRegistry do
   use GenServer
   require Logger
 
-  alias LoopexDaemon.{OutputBuffer, SocketConnection, SuccessionCapacity}
+  alias LoopexDaemon.{AdmissionRelay, OutputBuffer, SocketConnection, SuccessionCapacity}
   alias LoopexProtocol.Session.V2
 
   @connection_limit 512
@@ -198,6 +198,57 @@ defmodule LoopexDaemon.ConnectionRegistry do
   end
 
   @doc false
+  @spec bind_relay(pid(), pid(), binary()) ::
+          :ok | {:error, :invalid_relay | :owner_mismatch | :relay_conflict}
+  def bind_relay(registry, relay, relay_incarnation) do
+    GenServer.call(registry, {:bind_relay, relay, relay_incarnation})
+  end
+
+  @doc false
+  @spec promote_resume(
+          pid(),
+          origin_id(),
+          binary(),
+          binary(),
+          binary(),
+          :eligible | :ineligible,
+          boolean(),
+          map(),
+          map(),
+          (-> {:accepted | :admission_unknown | :refused, :activated | :no_activation, map()})
+        ) ::
+          {:ok, :admitted | :completed | {:waiting, origin_id()}}
+          | {:error,
+             :activation_conflict
+             | :daemon_stopping
+             | :invalid_activation
+             | :invalid_promotion
+             | :owner_unavailable
+             | :registry_unavailable
+             | :relay_unavailable
+             | :ticket_outstanding
+             | :ticket_unavailable}
+  def promote_resume(
+        registry,
+        origin_id,
+        session_id,
+        command_id,
+        owner_incarnation,
+        eligibility,
+        attached,
+        control_refusal,
+        capacity_refusal,
+        task_fun
+      ) do
+    GenServer.call(
+      registry,
+      {:promote_resume, origin_id, session_id, command_id, owner_incarnation, eligibility,
+       attached, control_refusal, capacity_refusal, task_fun},
+      :infinity
+    )
+  end
+
+  @doc false
   @spec abort_provisional(pid(), binary(), :peer_credential_unverified | :handoff_failed) ::
           :ok | {:error, :abort_unavailable}
   def abort_provisional(registry, rollback_token, reason) do
@@ -302,6 +353,9 @@ defmodule LoopexDaemon.ConnectionRegistry do
            activation_bindings: %{},
            activation_origins: %{},
            activation_create_commands: %{},
+           activation_promotions: %{},
+           activation_promotion_bindings: %{},
+           relay: nil,
            rows: %{},
            child_monitors: %{},
            listeners: %{},
@@ -675,6 +729,69 @@ defmodule LoopexDaemon.ConnectionRegistry do
   end
 
   def handle_call(
+        {:bind_relay, relay, relay_incarnation},
+        {caller, _tag},
+        %{owner: caller} = state
+      ) do
+    cond do
+      not is_pid(relay) or not valid_incarnation?(relay_incarnation) ->
+        {:reply, {:error, :invalid_relay}, state}
+
+      match?(%{pid: ^relay, incarnation: ^relay_incarnation}, state.relay) ->
+        {:reply, :ok, state}
+
+      not is_nil(state.relay) ->
+        {:reply, {:error, :relay_conflict}, state}
+
+      true ->
+        Logger.debug("loopex daemon connection registry relay bound")
+        {:reply, :ok, %{state | relay: %{pid: relay, incarnation: relay_incarnation}}}
+    end
+  end
+
+  def handle_call({:bind_relay, _relay, _relay_incarnation}, _from, state),
+    do: {:reply, {:error, :owner_mismatch}, state}
+
+  def handle_call(
+        {:promote_resume, origin_id, session_id, command_id, owner_incarnation, eligibility,
+         attached, control_refusal, capacity_refusal, task_fun},
+        {owner, _tag},
+        state
+      ) do
+    with :ok <-
+           validate_resume_promotion(
+             origin_id,
+             session_id,
+             command_id,
+             owner_incarnation,
+             eligibility,
+             attached,
+             control_refusal,
+             capacity_refusal,
+             task_fun
+           ),
+         {:ok, relay, relay_incarnation} <- bound_relay(state) do
+      promote_resume_call(
+        state,
+        relay,
+        relay_incarnation,
+        owner,
+        owner_incarnation,
+        origin_id,
+        session_id,
+        command_id,
+        eligibility,
+        attached,
+        control_refusal,
+        capacity_refusal,
+        task_fun
+      )
+    else
+      {:error, reason} -> {:reply, {:error, reason}, state}
+    end
+  end
+
+  def handle_call(
         {:abort_provisional, token, reason},
         {caller, _tag},
         state
@@ -868,6 +985,54 @@ defmodule LoopexDaemon.ConnectionRegistry do
 
       _other ->
         {:noreply, state}
+    end
+  end
+
+  def handle_info(
+        {:activation_resume_classified, classification_ref, settlement_ref, lease_disposition,
+         activation_disposition, result},
+        state
+      ) do
+    case Map.fetch(state.activation_promotions, settlement_ref) do
+      {:ok, %{classification_ref: ^classification_ref, classification: nil} = promotion}
+      when lease_disposition in [:accepted, :admission_unknown, :refused] and
+             activation_disposition in [:activated, :no_activation] and is_map(result) ->
+        classification = %{
+          lease_disposition: lease_disposition,
+          activation_disposition: activation_disposition,
+          result: result
+        }
+
+        promotion = %{promotion | classification: classification}
+        state = put_in(state, [:activation_promotions, settlement_ref], promotion)
+        {:noreply, settle_resume_promotion(state, settlement_ref)}
+
+      {:ok, %{classification_ref: ^classification_ref, classification: classification}}
+      when not is_nil(classification) ->
+        {:noreply, state}
+
+      _other ->
+        Logger.debug("loopex daemon activation classification invalid")
+        {:stop, :activation_settlement_invalid, state}
+    end
+  end
+
+  def handle_info(
+        {:relay_ticket_settlement, relay, origin_id, settlement_ref, result},
+        %{relay: %{pid: relay}} = state
+      ) do
+    case Map.fetch(state.activation_promotions, settlement_ref) do
+      {:ok, %{origin_id: ^origin_id, relay_result: nil} = promotion} when is_map(result) ->
+        promotion = %{promotion | relay_result: result}
+        state = put_in(state, [:activation_promotions, settlement_ref], promotion)
+        {:noreply, settle_resume_promotion(state, settlement_ref)}
+
+      {:ok, %{origin_id: ^origin_id, relay_result: ^result}} ->
+        {:noreply, state}
+
+      _other ->
+        Logger.debug("loopex daemon activation relay settlement invalid")
+        {:stop, :activation_settlement_invalid, state}
     end
   end
 
@@ -1316,14 +1481,14 @@ defmodule LoopexDaemon.ConnectionRegistry do
     do: {:error, :activation_resolution_invalid}
 
   defp normalize_activation_binding({:create, command_id, digest})
-       when is_binary(command_id) and byte_size(command_id) in 1..64 and is_binary(digest) and
+       when is_binary(command_id) and byte_size(command_id) in 1..256 and is_binary(digest) and
               byte_size(digest) == 32 do
     {:ok, {:create, command_id, digest}, nil, {command_id, digest}}
   end
 
   defp normalize_activation_binding({:resume, session_id, command_id})
        when is_binary(session_id) and byte_size(session_id) in 1..256 and is_binary(command_id) and
-              byte_size(command_id) in 1..64 do
+              byte_size(command_id) in 1..256 do
     {:ok, {:resume, session_id, command_id}, session_id, nil}
   end
 
@@ -1402,9 +1567,400 @@ defmodule LoopexDaemon.ConnectionRegistry do
     end
   end
 
+  defp validate_resume_promotion(
+         origin_id,
+         session_id,
+         command_id,
+         owner_incarnation,
+         eligibility,
+         attached,
+         control_refusal,
+         capacity_refusal,
+         task_fun
+       ) do
+    with :ok <- validate_activation_origin(origin_id),
+         {:ok, _key, _session_id, _create_command} <-
+           normalize_activation_binding({:resume, session_id, command_id}),
+         true <- valid_incarnation?(owner_incarnation),
+         true <- eligibility in [:eligible, :ineligible],
+         true <- is_boolean(attached),
+         true <- is_map(control_refusal) and not is_struct(control_refusal),
+         true <- is_map(capacity_refusal) and not is_struct(capacity_refusal),
+         true <- is_function(task_fun, 0) do
+      :ok
+    else
+      _invalid -> {:error, :invalid_activation}
+    end
+  end
+
+  defp bound_relay(%{relay: %{pid: relay, incarnation: incarnation}})
+       when is_pid(relay) and is_binary(incarnation),
+       do: {:ok, relay, incarnation}
+
+  defp bound_relay(_state), do: {:error, :relay_unavailable}
+
+  defp promote_resume_call(
+         state,
+         relay,
+         relay_incarnation,
+         owner,
+         owner_incarnation,
+         origin_id,
+         session_id,
+         command_id,
+         eligibility,
+         attached,
+         control_refusal,
+         capacity_refusal,
+         task_fun
+       ) do
+    key = {:resume, session_id, command_id}
+
+    case Map.fetch(state.activation_promotion_bindings, key) do
+      {:ok, %{primary_origin_id: primary_origin_id}} when primary_origin_id != origin_id ->
+        case AdmissionRelay.wait_for_ticket(
+               relay,
+               origin_id,
+               primary_origin_id,
+               relay_incarnation
+             ) do
+          {:ok, ^primary_origin_id} ->
+            Logger.debug("loopex daemon resume joined primary")
+            {:reply, {:ok, {:waiting, primary_origin_id}}, state}
+
+          {:error, reason} ->
+            {:reply, {:error, reason}, state}
+        end
+
+      {:ok, %{primary_origin_id: ^origin_id}} ->
+        {:reply, {:ok, :admitted}, state}
+
+      :error ->
+        reserve_and_promote_resume(
+          state,
+          relay,
+          relay_incarnation,
+          owner,
+          owner_incarnation,
+          origin_id,
+          session_id,
+          command_id,
+          eligibility,
+          attached,
+          control_refusal,
+          capacity_refusal,
+          task_fun
+        )
+    end
+  end
+
+  defp reserve_and_promote_resume(
+         state,
+         relay,
+         relay_incarnation,
+         owner,
+         owner_incarnation,
+         origin_id,
+         _session_id,
+         _command_id,
+         :ineligible,
+         _attached,
+         control_refusal,
+         _capacity_refusal,
+         _task_fun
+       ) do
+    refuse_resume(
+      state,
+      relay,
+      relay_incarnation,
+      owner,
+      owner_incarnation,
+      origin_id,
+      control_refusal
+    )
+  end
+
+  defp reserve_and_promote_resume(
+         state,
+         relay,
+         relay_incarnation,
+         owner,
+         owner_incarnation,
+         origin_id,
+         session_id,
+         command_id,
+         :eligible,
+         attached,
+         control_refusal,
+         capacity_refusal,
+         task_fun
+       ) do
+    case reserve_activation_binding(state, origin_id, {:resume, session_id, command_id}) do
+      {:ok, {:primary, reservation_ref}, state} ->
+        promote_resume_primary(
+          state,
+          relay,
+          relay_incarnation,
+          owner,
+          owner_incarnation,
+          origin_id,
+          session_id,
+          command_id,
+          reservation_ref,
+          task_fun
+        )
+
+      {:ok, {:duplicate, primary_origin_id, _reservation_ref}, state} ->
+        case AdmissionRelay.wait_for_ticket(
+               relay,
+               origin_id,
+               primary_origin_id,
+               relay_incarnation
+             ) do
+          {:ok, ^primary_origin_id} ->
+            {:reply, {:ok, {:waiting, primary_origin_id}}, state}
+
+          {:error, reason} ->
+            {:reply, {:error, reason}, state}
+        end
+
+      {:ok, :already_active, state} when attached ->
+        promote_resume_primary(
+          state,
+          relay,
+          relay_incarnation,
+          owner,
+          owner_incarnation,
+          origin_id,
+          session_id,
+          command_id,
+          nil,
+          task_fun
+        )
+
+      {:ok, :already_active, state} ->
+        refuse_resume(
+          state,
+          relay,
+          relay_incarnation,
+          owner,
+          owner_incarnation,
+          origin_id,
+          control_refusal
+        )
+
+      {:error, :activation_ceiling_reached} ->
+        refuse_resume(
+          state,
+          relay,
+          relay_incarnation,
+          owner,
+          owner_incarnation,
+          origin_id,
+          capacity_refusal
+        )
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
+  end
+
+  defp promote_resume_primary(
+         state,
+         relay,
+         relay_incarnation,
+         owner,
+         owner_incarnation,
+         origin_id,
+         session_id,
+         command_id,
+         reservation_ref,
+         task_fun
+       ) do
+    settlement_ref = reservation_ref || :crypto.strong_rand_bytes(16)
+    classification_ref = make_ref()
+    registry = self()
+
+    relay_task = fn ->
+      case task_fun.() do
+        {lease_disposition, activation_disposition, result}
+        when lease_disposition in [:accepted, :admission_unknown, :refused] and
+               activation_disposition in [:activated, :no_activation] and is_map(result) ->
+          send(
+            registry,
+            {:activation_resume_classified, classification_ref, settlement_ref, lease_disposition,
+             activation_disposition, result}
+          )
+
+          result
+
+        _invalid ->
+          exit(:invalid_activation_result)
+      end
+    end
+
+    key = {:resume, session_id, command_id}
+
+    promotion = %{
+      origin_id: origin_id,
+      key: key,
+      owner: owner,
+      owner_incarnation: owner_incarnation,
+      session_id: session_id,
+      reservation_ref: reservation_ref,
+      classification_ref: classification_ref,
+      classification: nil,
+      relay_result: nil
+    }
+
+    state =
+      state
+      |> put_in([:activation_promotions, settlement_ref], promotion)
+      |> put_in([:activation_promotion_bindings, key], %{
+        primary_origin_id: origin_id,
+        settlement_ref: settlement_ref
+      })
+
+    case AdmissionRelay.promote_resume_ticket(
+           relay,
+           origin_id,
+           relay_incarnation,
+           settlement_ref,
+           owner,
+           owner_incarnation,
+           relay_task
+         ) do
+      {:ok, ^origin_id} ->
+        Logger.debug("loopex daemon resume promoted")
+        {:reply, {:ok, :admitted}, state}
+
+      {:error, reason} ->
+        state = drop_resume_promotion(state, settlement_ref, promotion)
+
+        state =
+          if reservation_ref do
+            {:ok, state} =
+              resolve_activation_reservation(
+                state,
+                reservation_ref,
+                :no_activation,
+                nil
+              )
+
+            state
+          else
+            state
+          end
+
+        {:reply, {:error, reason}, state}
+    end
+  end
+
+  defp refuse_resume(
+         state,
+         relay,
+         relay_incarnation,
+         owner,
+         owner_incarnation,
+         origin_id,
+         result
+       ) do
+    case AdmissionRelay.refuse_resume_ticket(
+           relay,
+           origin_id,
+           relay_incarnation,
+           owner,
+           owner_incarnation,
+           result
+         ) do
+      {:ok, ^origin_id} -> {:reply, {:ok, :completed}, state}
+      {:error, reason} -> {:reply, {:error, reason}, state}
+    end
+  end
+
+  defp settle_resume_promotion(state, settlement_ref) do
+    case Map.fetch(state.activation_promotions, settlement_ref) do
+      {:ok,
+       %{
+         classification: %{
+           lease_disposition: lease_disposition,
+           activation_disposition: activation_disposition,
+           result: result
+         },
+         relay_result: result
+       } = promotion} ->
+        with {:ok, state} <- account_resume_promotion(state, promotion, activation_disposition),
+             :ok <-
+               AdmissionRelay.settle_ticket(
+                 state.relay.pid,
+                 promotion.origin_id,
+                 state.relay.incarnation,
+                 settlement_ref
+               ) do
+          state = drop_resume_promotion(state, settlement_ref, promotion)
+
+          send(
+            promotion.owner,
+            {:registry_resume_settled, self(), promotion.origin_id, promotion.owner_incarnation,
+             lease_disposition}
+          )
+
+          Logger.debug("loopex daemon resume activation settled")
+          state
+        else
+          _error -> exit(:activation_settlement_failed)
+        end
+
+      {:ok, %{classification: classification, relay_result: relay_result}}
+      when not is_nil(classification) and not is_nil(relay_result) ->
+        exit(:activation_settlement_invalid)
+
+      _other ->
+        state
+    end
+  end
+
+  defp account_resume_promotion(
+         state,
+         %{reservation_ref: nil, session_id: session_id},
+         disposition
+       ) do
+    if disposition == :no_activation or MapSet.member?(state.activation_set, session_id),
+      do: {:ok, state},
+      else: {:error, :activation_settlement_invalid}
+  end
+
+  defp account_resume_promotion(
+         state,
+         %{reservation_ref: reservation_ref, session_id: session_id},
+         :activated
+       ) do
+    resolve_activation_reservation(state, reservation_ref, :activated, session_id)
+  end
+
+  defp account_resume_promotion(
+         state,
+         %{reservation_ref: reservation_ref},
+         :no_activation
+       ) do
+    resolve_activation_reservation(state, reservation_ref, :no_activation, nil)
+  end
+
+  defp drop_resume_promotion(state, settlement_ref, promotion) do
+    %{
+      state
+      | activation_promotions: Map.delete(state.activation_promotions, settlement_ref),
+        activation_promotion_bindings:
+          Map.delete(state.activation_promotion_bindings, promotion.key)
+    }
+  end
+
   defp before_deadline?(row), do: now_ms() < row.initialize_deadline
 
   defp now_ms, do: System.monotonic_time(:millisecond)
+
+  defp valid_incarnation?(incarnation),
+    do: is_binary(incarnation) and byte_size(incarnation) == 16
 
   defp schedule_deadline(token, deadline, now) do
     Process.send_after(self(), {:initialize_deadline, token}, max(deadline - now, 0))

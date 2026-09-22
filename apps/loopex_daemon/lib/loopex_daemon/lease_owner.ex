@@ -31,7 +31,7 @@ defmodule LoopexDaemon.LeaseOwner do
   use GenServer
   require Logger
 
-  alias LoopexDaemon.{AdmissionRelay, WireRecords}
+  alias LoopexDaemon.{AdmissionRelay, ConnectionRegistry, WireRecords}
 
   @lease_term_ms 30_000
   @max_timer_ms 4_294_967_295
@@ -199,6 +199,46 @@ defmodule LoopexDaemon.LeaseOwner do
   end
 
   @doc false
+  @spec resume(
+          pid(),
+          permit_id(),
+          binary(),
+          binary(),
+          binary(),
+          binary(),
+          pid(),
+          (-> {:accepted | :admission_unknown | :refused, :activated | :no_activation, map()})
+        ) ::
+          {:ok, :admitted | :completed}
+          | {:error,
+             :activation_conflict
+             | :daemon_stopping
+             | :invalid_operation
+             | :invalid_promotion
+             | :owner_unavailable
+             | :registry_unavailable
+             | :relay_unavailable
+             | :ticket_outstanding
+             | :ticket_unavailable}
+  def resume(
+        owner,
+        origin_id,
+        request_id,
+        command_id,
+        connection_incarnation,
+        writer_epoch,
+        worker,
+        task_fun
+      ) do
+    GenServer.call(
+      owner,
+      {:resume, origin_id, request_id, command_id, connection_incarnation, writer_epoch, worker,
+       task_fun},
+      :infinity
+    )
+  end
+
+  @doc false
   @spec status(pid()) :: map()
   def status(owner), do: GenServer.call(owner, :status)
 
@@ -206,11 +246,12 @@ defmodule LoopexDaemon.LeaseOwner do
   def init(options) do
     daemon_owner = Keyword.fetch!(options, :daemon_owner)
     relay = Keyword.fetch!(options, :relay)
+    registry = Keyword.fetch!(options, :registry)
     session_id = Keyword.fetch!(options, :session_id)
     owner_incarnation = Keyword.fetch!(options, :owner_incarnation)
     lease_term_ms = Keyword.get(options, :lease_term_ms, @lease_term_ms)
 
-    if is_pid(daemon_owner) and is_pid(relay) and valid_session?(session_id) and
+    if is_pid(daemon_owner) and is_pid(relay) and is_pid(registry) and valid_session?(session_id) and
          valid_incarnation?(owner_incarnation) and valid_term?(lease_term_ms) do
       Process.link(daemon_owner)
       Logger.debug("loopex daemon lease owner start")
@@ -219,6 +260,7 @@ defmodule LoopexDaemon.LeaseOwner do
        %{
          daemon_owner: daemon_owner,
          relay: relay,
+         registry: registry,
          session_id: session_id,
          owner_incarnation: owner_incarnation,
          lease_term_ms: lease_term_ms,
@@ -431,6 +473,55 @@ defmodule LoopexDaemon.LeaseOwner do
     do: {:reply, {:error, :owner_unavailable}, state}
 
   def handle_call(
+        {:resume, origin_id, request_id, command_id, connection_incarnation, writer_epoch, worker,
+         task_fun},
+        from = {connection, _tag},
+        %{phase: :active} = state
+      ) do
+    with :ok <-
+           validate_resume(
+             origin_id,
+             request_id,
+             command_id,
+             connection,
+             connection_incarnation,
+             writer_epoch,
+             worker,
+             task_fun
+           ) do
+      descriptor = %{
+        origin_id: origin_id,
+        class: :session_resume,
+        request_id: request_id,
+        command_id: command_id,
+        connection: connection,
+        connection_incarnation: connection_incarnation,
+        writer_epoch: writer_epoch,
+        worker: worker,
+        worker_monitor: Process.monitor(worker),
+        task_fun: task_fun,
+        from: from
+      }
+
+      if in_flight_resume?(state, command_id) do
+        case promote_resume_mutation(state, descriptor) do
+          {:joined, state} -> {:noreply, state}
+          {:error, reason, state} -> {:reply, {:error, reason}, state}
+          {:ok, state} -> {:noreply, state}
+        end
+      else
+        state = enqueue_mutation(state, descriptor)
+        {:noreply, continue_session_work(state)}
+      end
+    else
+      {:error, reason} -> {:reply, {:error, reason}, state}
+    end
+  end
+
+  def handle_call({:resume, _, _, _, _, _, _, _}, _from, state),
+    do: {:reply, {:error, :owner_unavailable}, state}
+
+  def handle_call(
         {:resolve_grant, grant_ref, :granted, granted_at},
         {caller, _tag},
         %{daemon_owner: caller, transition: %{kind: :grant, ref: grant_ref} = transition} = state
@@ -633,6 +724,22 @@ defmodule LoopexDaemon.LeaseOwner do
     end
   end
 
+  def handle_info(
+        {:registry_resume_settled, registry, origin_id, owner_incarnation, disposition},
+        %{registry: registry, owner_incarnation: owner_incarnation} = state
+      )
+      when disposition in @mutation_dispositions do
+    case Map.fetch(state.in_flight, origin_id) do
+      {:ok, %{class: :session_resume, disposition: nil} = mutation} ->
+        mutation = %{mutation | disposition: disposition, relay_settled: true}
+        state = put_in(state, [:in_flight, origin_id], mutation)
+        {:noreply, settle_mutation_if_ready(state, origin_id)}
+
+      _other ->
+        {:noreply, state}
+    end
+  end
+
   def handle_info({:DOWN, monitor, :process, worker, _reason}, state) do
     case Enum.split_with(state.pending_operations, fn
            {:mutation, descriptor} -> descriptor.worker_monitor == monitor
@@ -712,6 +819,9 @@ defmodule LoopexDaemon.LeaseOwner do
       {:ok, state} ->
         state
 
+      {:joined, state} ->
+        continue_session_work(state)
+
       {:error, reason, state} ->
         GenServer.reply(descriptor.from, {:error, reason})
         continue_session_work(state)
@@ -777,6 +887,12 @@ defmodule LoopexDaemon.LeaseOwner do
   end
 
   defp promote_mutation(state, descriptor) do
+    if descriptor.class == :session_resume,
+      do: promote_resume_mutation(state, descriptor),
+      else: promote_direct_mutation(state, descriptor)
+  end
+
+  defp promote_direct_mutation(state, descriptor) do
     now = monotonic_ms()
 
     {candidate_deadline, task_fun} =
@@ -813,6 +929,8 @@ defmodule LoopexDaemon.LeaseOwner do
         Process.demonitor(descriptor.worker_monitor, [:flush])
 
         mutation = %{
+          class: descriptor.class,
+          command_id: nil,
           task_ref: task_ref,
           holder_pid: descriptor.connection,
           holder_incarnation: descriptor.connection_incarnation,
@@ -825,6 +943,65 @@ defmodule LoopexDaemon.LeaseOwner do
         GenServer.reply(descriptor.from, {:ok, :admitted})
         Logger.debug("loopex daemon lease mutation admitted")
         {:ok, put_in(state, [:in_flight, origin_id], mutation)}
+
+      {:error, reason} ->
+        Process.demonitor(descriptor.worker_monitor, [:flush])
+        {:error, reason, state}
+    end
+  end
+
+  defp promote_resume_mutation(state, descriptor) do
+    now = monotonic_ms()
+    eligibility = if resume_holder_gate?(state, descriptor, now), do: :eligible, else: :ineligible
+    attached = attached?(state, descriptor.connection, descriptor.connection_incarnation)
+    candidate_deadline = if eligibility == :eligible, do: now + state.lease_term_ms
+    control_refusal = WireRecords.request_error(descriptor.request_id, "control_not_held")
+
+    capacity_refusal =
+      WireRecords.request_error(descriptor.request_id, "activation_ceiling_reached")
+
+    case ConnectionRegistry.promote_resume(
+           state.registry,
+           descriptor.origin_id,
+           state.session_id,
+           descriptor.command_id,
+           state.owner_incarnation,
+           eligibility,
+           attached,
+           control_refusal,
+           capacity_refusal,
+           descriptor.task_fun
+         ) do
+      {:ok, :admitted} ->
+        Process.demonitor(descriptor.worker_monitor, [:flush])
+
+        mutation = %{
+          class: :session_resume,
+          command_id: descriptor.command_id,
+          task_ref: nil,
+          holder_pid: descriptor.connection,
+          holder_incarnation: descriptor.connection_incarnation,
+          writer_epoch: descriptor.writer_epoch,
+          candidate_deadline: candidate_deadline,
+          disposition: nil,
+          relay_settled: false
+        }
+
+        GenServer.reply(descriptor.from, {:ok, :admitted})
+        Logger.debug("loopex daemon resume mutation admitted")
+        {:ok, put_in(state, [:in_flight, descriptor.origin_id], mutation)}
+
+      {:ok, {:waiting, _primary_origin_id}} ->
+        Process.demonitor(descriptor.worker_monitor, [:flush])
+        GenServer.reply(descriptor.from, {:ok, :admitted})
+        Logger.debug("loopex daemon resume mutation joined")
+        {:joined, state}
+
+      {:ok, :completed} ->
+        Process.demonitor(descriptor.worker_monitor, [:flush])
+        GenServer.reply(descriptor.from, {:ok, :completed})
+        Logger.debug("loopex daemon resume mutation refused")
+        {:joined, state}
 
       {:error, reason} ->
         Process.demonitor(descriptor.worker_monitor, [:flush])
@@ -887,6 +1064,26 @@ defmodule LoopexDaemon.LeaseOwner do
   end
 
   defp mutation_gate?(_state, _descriptor, _now), do: false
+
+  defp resume_holder_gate?(
+         %{lease: %{status: :held} = lease},
+         descriptor,
+         now
+       ) do
+    lease.holder_pid == descriptor.connection and
+      lease.holder_incarnation == descriptor.connection_incarnation and
+      lease.writer_epoch == descriptor.writer_epoch and
+      now < lease.deadline
+  end
+
+  defp resume_holder_gate?(_state, _descriptor, _now), do: false
+
+  defp in_flight_resume?(state, command_id) do
+    Enum.any?(state.in_flight, fn
+      {_origin_id, %{class: :session_resume, command_id: ^command_id}} -> true
+      _other -> false
+    end)
+  end
 
   defp attached?(state, connection, connection_incarnation) do
     Enum.any?(state.attachments, fn
@@ -1161,6 +1358,25 @@ defmodule LoopexDaemon.LeaseOwner do
        do: :ok
 
   defp validate_mutation(_, _, _, _, _, _, _, _), do: {:error, :invalid_operation}
+
+  defp validate_resume(
+         {incarnation, slot, sequence},
+         request_id,
+         command_id,
+         connection,
+         connection_incarnation,
+         writer_epoch,
+         worker,
+         task_fun
+       )
+       when incarnation == connection_incarnation and slot in 0..31 and sequence > 0 and
+              is_binary(request_id) and byte_size(request_id) in 1..64 and
+              is_binary(command_id) and byte_size(command_id) in 1..256 and is_pid(connection) and
+              is_binary(writer_epoch) and byte_size(writer_epoch) in 1..64 and is_pid(worker) and
+              worker != connection and is_function(task_fun, 0),
+       do: :ok
+
+  defp validate_resume(_, _, _, _, _, _, _, _), do: {:error, :invalid_operation}
 
   defp schedule_expiry(state, deadline) do
     state = cancel_expiry_timer(state)

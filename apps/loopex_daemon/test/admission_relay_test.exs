@@ -1290,11 +1290,13 @@ defmodule LoopexDaemon.AdmissionRelayTest do
 
     assert {:error, :ticket_outstanding} =
              invoke(registry, fn ->
-               AdmissionRelay.promote_ticket(
+               AdmissionRelay.promote_resume_ticket(
                  relay,
                  resume,
                  registry_incarnation,
                  resume_settlement,
+                 owner,
+                 owner_incarnation,
                  fn -> %{"unexpected" => true} end
                )
              end)
@@ -1313,11 +1315,13 @@ defmodule LoopexDaemon.AdmissionRelayTest do
 
     assert {:ok, ^resume} =
              invoke(registry, fn ->
-               AdmissionRelay.promote_ticket(
+               AdmissionRelay.promote_resume_ticket(
                  relay,
                  resume,
                  registry_incarnation,
                  resume_settlement,
+                 owner,
+                 owner_incarnation,
                  fn -> resume_result end
                )
              end)
@@ -1535,11 +1539,13 @@ defmodule LoopexDaemon.AdmissionRelayTest do
 
     assert {:ok, ^origin} =
              invoke(registry, fn ->
-               AdmissionRelay.promote_ticket(
+               AdmissionRelay.promote_resume_ticket(
                  relay,
                  origin,
                  registry_incarnation,
                  settlement_ref,
+                 owner,
+                 owner_incarnation,
                  fn -> result end
                )
              end)

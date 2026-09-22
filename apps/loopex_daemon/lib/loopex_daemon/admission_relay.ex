@@ -366,6 +366,73 @@ defmodule LoopexDaemon.AdmissionRelay do
   end
 
   @doc false
+  @spec promote_resume_ticket(
+          pid(),
+          origin_id(),
+          binary(),
+          settlement_ref(),
+          pid(),
+          binary(),
+          (-> map())
+        ) ::
+          {:ok, origin_id()}
+          | {:error,
+             :daemon_stopping
+             | :invalid_promotion
+             | :owner_unavailable
+             | :registry_unavailable
+             | :ticket_outstanding
+             | :ticket_unavailable}
+  def promote_resume_ticket(
+        relay,
+        origin_id,
+        registry_incarnation,
+        settlement_ref,
+        owner,
+        owner_incarnation,
+        task_fun
+      ) do
+    GenServer.call(
+      relay,
+      {:promote_ticket, origin_id, registry_incarnation, settlement_ref, task_fun,
+       {owner, owner_incarnation}},
+      @control_timeout_ms
+    )
+  end
+
+  @doc false
+  @spec refuse_resume_ticket(
+          pid(),
+          origin_id(),
+          binary(),
+          pid(),
+          binary(),
+          map()
+        ) ::
+          {:ok, origin_id()}
+          | {:error,
+             :daemon_stopping
+             | :invalid_result
+             | :owner_unavailable
+             | :registry_unavailable
+             | :ticket_outstanding
+             | :ticket_unavailable}
+  def refuse_resume_ticket(
+        relay,
+        origin_id,
+        registry_incarnation,
+        owner,
+        owner_incarnation,
+        result
+      ) do
+    GenServer.call(
+      relay,
+      {:refuse_resume_ticket, origin_id, registry_incarnation, owner, owner_incarnation, result},
+      @control_timeout_ms
+    )
+  end
+
+  @doc false
   @spec wait_for_ticket(pid(), origin_id(), origin_id(), binary()) ::
           {:ok, origin_id()}
           | {:error,
@@ -1145,49 +1212,55 @@ defmodule LoopexDaemon.AdmissionRelay do
 
   def handle_call(
         {:promote_ticket, origin_id, registry_incarnation, settlement_ref, task_fun},
+        from,
+        state
+      ) do
+    handle_registry_promotion(
+      origin_id,
+      registry_incarnation,
+      settlement_ref,
+      task_fun,
+      nil,
+      from,
+      state
+    )
+  end
+
+  def handle_call(
+        {:promote_ticket, origin_id, registry_incarnation, settlement_ref, task_fun,
+         owner_binding},
+        from,
+        state
+      ) do
+    handle_registry_promotion(
+      origin_id,
+      registry_incarnation,
+      settlement_ref,
+      task_fun,
+      owner_binding,
+      from,
+      state
+    )
+  end
+
+  def handle_call(
+        {:refuse_resume_ticket, origin_id, registry_incarnation, owner, owner_incarnation,
+         result},
         from = {caller, _tag},
         state
       ) do
     state = expire_if_due(state)
 
-    case promotion_repetition(
-           state,
-           origin_id,
-           caller,
-           registry_incarnation,
-           settlement_ref
-         ) do
-      :complete ->
-        {:reply, {:ok, origin_id}, state}
-
-      {:waiting, ticket} ->
-        ticket = %{ticket | promotion_waiters: [from | ticket.promotion_waiters]}
-        {:noreply, put_in(state, [:tickets, origin_id], ticket)}
-
-      :conflict ->
-        {:reply, {:error, :invalid_promotion}, state}
-
-      :absent ->
-        with :ok <- promotion_admitted(state, origin_id),
-             :ok <- authenticate_registry(state, caller, registry_incarnation),
-             true <- is_function(task_fun, 0),
-             {:ok, ticket} <- promotable_ticket(state, origin_id),
-             true <- ticket.class in [:session_create, :session_resume, :session_attach],
-             :ok <- mutation_slot_available(state, ticket) do
-          start_ticket_promotion(
-            state,
-            ticket,
-            from,
-            caller,
-            registry_incarnation,
-            settlement_ref,
-            task_fun,
-            :registry
-          )
-        else
-          false -> {:reply, {:error, :invalid_promotion}, state}
-          {:error, reason} -> {:reply, {:error, reason}, state}
-        end
+    with :ok <- promotion_admitted(state, origin_id),
+         :ok <- authenticate_registry(state, caller, registry_incarnation),
+         true <- bounded_record?(result),
+         {:ok, %{class: :session_resume} = ticket} <- promotable_ticket(state, origin_id),
+         :ok <- authenticate_ticket_owner(state, ticket, owner, owner_incarnation),
+         :ok <- mutation_slot_available(state, ticket) do
+      select_registry_refusal(state, ticket, from, caller, registry_incarnation, result)
+    else
+      false -> {:reply, {:error, :invalid_result}, state}
+      {:error, reason} -> {:reply, {:error, reason}, state}
     end
   end
 
@@ -1801,6 +1874,111 @@ defmodule LoopexDaemon.AdmissionRelay do
 
   defp validate_lease_actor(_state, _class, _session_id, _actor, _incarnation, _start_op_ref),
     do: {:error, :invalid_actor}
+
+  defp handle_registry_promotion(
+         origin_id,
+         registry_incarnation,
+         settlement_ref,
+         task_fun,
+         owner_binding,
+         from = {caller, _tag},
+         state
+       ) do
+    state = expire_if_due(state)
+
+    case promotion_repetition(
+           state,
+           origin_id,
+           caller,
+           registry_incarnation,
+           settlement_ref
+         ) do
+      :complete ->
+        {:reply, {:ok, origin_id}, state}
+
+      {:waiting, ticket} ->
+        ticket = %{ticket | promotion_waiters: [from | ticket.promotion_waiters]}
+        {:noreply, put_in(state, [:tickets, origin_id], ticket)}
+
+      :conflict ->
+        {:reply, {:error, :invalid_promotion}, state}
+
+      :absent ->
+        with :ok <- promotion_admitted(state, origin_id),
+             :ok <- authenticate_registry(state, caller, registry_incarnation),
+             true <- is_function(task_fun, 0),
+             {:ok, ticket} <- promotable_ticket(state, origin_id),
+             :ok <- validate_registry_promotion(state, ticket, owner_binding),
+             :ok <- mutation_slot_available(state, ticket) do
+          start_ticket_promotion(
+            state,
+            ticket,
+            from,
+            caller,
+            registry_incarnation,
+            settlement_ref,
+            task_fun,
+            :registry
+          )
+        else
+          false -> {:reply, {:error, :invalid_promotion}, state}
+          {:error, reason} -> {:reply, {:error, reason}, state}
+        end
+    end
+  end
+
+  defp validate_registry_promotion(_state, %{class: class}, nil)
+       when class in [:session_create, :session_attach],
+       do: :ok
+
+  defp validate_registry_promotion(
+         state,
+         %{class: :session_resume} = ticket,
+         {owner, owner_incarnation}
+       ) do
+    authenticate_ticket_owner(state, ticket, owner, owner_incarnation)
+  end
+
+  defp validate_registry_promotion(_state, _ticket, _owner_binding),
+    do: {:error, :invalid_promotion}
+
+  defp select_registry_refusal(
+         state,
+         ticket,
+         from,
+         registry,
+         registry_incarnation,
+         result
+       ) do
+    ticket = %{
+      ticket
+      | phase: :settling,
+        disposition: :result,
+        promoter_pid: registry,
+        promoter_incarnation: registry_incarnation,
+        settlement_ref: :registry_refusal,
+        settlement_mode: :registry_refusal,
+        task_pid: nil,
+        task_incarnation: nil,
+        task_monitor: nil,
+        task_down: true,
+        result: result,
+        settlement_acked: true,
+        result_delivered: false,
+        promotion_waiters: if(is_pid(ticket.worker_pid), do: [from], else: [])
+    }
+
+    state = put_in(state, [:tickets, ticket.origin_id], ticket)
+    Logger.debug("loopex daemon admission relay resume refused")
+
+    if is_pid(ticket.worker_pid) do
+      if Process.alive?(ticket.worker_pid), do: Process.exit(ticket.worker_pid, :kill)
+      {:noreply, state}
+    else
+      state = deliver_ticket_result(state, ticket.origin_id)
+      {:reply, {:ok, ticket.origin_id}, state}
+    end
+  end
 
   defp valid_lease_worker(worker, worker_incarnation, connection, actor) do
     if is_pid(worker) and worker != connection and worker != actor and
@@ -2527,6 +2705,30 @@ defmodule LoopexDaemon.AdmissionRelay do
 
         Logger.debug("loopex daemon admission relay waiting worker retired")
         {:noreply, put_in(state, [:tickets, origin_id], ticket)}
+
+      {:ok,
+       %{
+         worker_pid: ^pid,
+         phase: :settling,
+         settlement_mode: :registry_refusal,
+         task_pid: nil
+       } = ticket} ->
+        Enum.each(ticket.promotion_waiters, fn from ->
+          GenServer.reply(from, {:ok, origin_id})
+        end)
+
+        ticket = %{
+          ticket
+          | worker_pid: nil,
+            worker_incarnation: nil,
+            worker_monitor: nil,
+            promotion_waiters: []
+        }
+
+        state = put_in(state, [:tickets, origin_id], ticket)
+        state = deliver_ticket_result(state, origin_id)
+        Logger.debug("loopex daemon admission relay refused resume worker retired")
+        {:noreply, state}
 
       {:ok, %{worker_pid: ^pid, phase: phase} = ticket}
       when phase in [:ticketed, :settling] and is_pid(ticket.task_pid) ->

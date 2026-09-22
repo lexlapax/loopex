@@ -3,7 +3,7 @@ defmodule LoopexDaemon.LeaseOwnerTest do
 
   import ExUnit.CaptureLog
 
-  alias LoopexDaemon.{AdmissionRelay, LeaseOwner, WireRecords}
+  alias LoopexDaemon.{AdmissionRelay, ConnectionRegistry, LeaseOwner, WireRecords}
   alias LoopexProtocol.Wire
 
   test "a first acquisition stays provisional until daemon settlement" do
@@ -1088,6 +1088,289 @@ defmodule LoopexDaemon.LeaseOwnerTest do
     stop_connection(holder, fixture.relay, holder_incarnation)
   end
 
+  test "a dormant resume may activate without an attachment and settles capacity before reply" do
+    fixture = start_fixture()
+    {holder, holder_incarnation, writer_epoch} = grant_first(fixture)
+    origin = {holder_incarnation, 1, 1}
+    worker = start_ticket_worker(holder)
+
+    assert {:ok, ^origin} =
+             open_mutation(fixture, holder, origin, :session_resume, worker)
+
+    parent = self()
+
+    result = %{
+      "type" => "result",
+      "method" => "session.resume",
+      "request_id" => "resume-dormant",
+      "result" => %{"session_id" => "session"}
+    }
+
+    assert {:ok, :admitted} =
+             invoke(holder, fn ->
+               LeaseOwner.resume(
+                 fixture.owner,
+                 origin,
+                 "resume-dormant",
+                 "resume-command",
+                 holder_incarnation,
+                 writer_epoch,
+                 worker,
+                 fn ->
+                   send(parent, :dormant_resume_called)
+                   {:accepted, :activated, result}
+                 end
+               )
+             end)
+
+    assert_receive :dormant_resume_called, 500
+
+    assert_receive {:connection_message, ^holder, {:relay_ticket_result, ^origin, ^result}},
+                   500
+
+    assert %{active_sessions: 1, activation_reservations: 0, activations_used: 1} =
+             ConnectionRegistry.status(fixture.registry)
+
+    eventually(fn -> LeaseOwner.status(fixture.owner).in_flight == 0 end)
+    stop_connection(holder, fixture.relay, holder_incarnation)
+  end
+
+  test "an active resume still requires attachment and starts no core call when absent" do
+    fixture = start_fixture()
+    {holder, holder_incarnation, writer_epoch} = grant_first(fixture)
+    count_activation(fixture.registry, fixture.session_id, 90)
+    origin = {holder_incarnation, 1, 1}
+    worker = start_ticket_worker(holder)
+
+    assert {:ok, ^origin} =
+             open_mutation(fixture, holder, origin, :session_resume, worker)
+
+    parent = self()
+
+    assert {:ok, :completed} =
+             invoke(holder, fn ->
+               LeaseOwner.resume(
+                 fixture.owner,
+                 origin,
+                 "resume-unattached",
+                 "resume-unattached-command",
+                 holder_incarnation,
+                 writer_epoch,
+                 worker,
+                 fn ->
+                   send(parent, :unexpected_active_resume)
+                   {:accepted, :no_activation, %{"unexpected" => true}}
+                 end
+               )
+             end)
+
+    refused = WireRecords.request_error("resume-unattached", "control_not_held")
+
+    assert_receive {:connection_message, ^holder, {:relay_ticket_result, ^origin, ^refused}},
+                   500
+
+    refute_receive :unexpected_active_resume, 40
+
+    assert %{active_sessions: 1, activation_reservations: 0} =
+             ConnectionRegistry.status(fixture.registry)
+
+    stop_connection(holder, fixture.relay, holder_incarnation)
+  end
+
+  test "an active attached resume proceeds at the full activation ceiling" do
+    fixture = start_fixture()
+    {holder, holder_incarnation, writer_epoch} = grant_first(fixture)
+
+    Enum.each(1..63, fn index ->
+      count_activation(fixture.registry, "other-session-#{index}", index)
+    end)
+
+    count_activation(fixture.registry, fixture.session_id, 90)
+
+    assert %{active_sessions: 64, activations_used: 64} =
+             ConnectionRegistry.status(fixture.registry)
+
+    assert :ok =
+             LeaseOwner.attachment_opened(
+               fixture.owner,
+               holder,
+               holder_incarnation,
+               "resume-attachment"
+             )
+
+    origin = {holder_incarnation, 1, 1}
+    worker = start_ticket_worker(holder)
+
+    assert {:ok, ^origin} =
+             open_mutation(fixture, holder, origin, :session_resume, worker)
+
+    result = %{
+      "type" => "result",
+      "method" => "session.resume",
+      "request_id" => "resume-active",
+      "result" => %{"session_id" => "session"}
+    }
+
+    parent = self()
+
+    assert {:ok, :admitted} =
+             invoke(holder, fn ->
+               LeaseOwner.resume(
+                 fixture.owner,
+                 origin,
+                 "resume-active",
+                 "resume-active-command",
+                 holder_incarnation,
+                 writer_epoch,
+                 worker,
+                 fn ->
+                   send(parent, :active_resume_called)
+                   {:accepted, :no_activation, result}
+                 end
+               )
+             end)
+
+    assert_receive :active_resume_called, 500
+
+    assert_receive {:connection_message, ^holder, {:relay_ticket_result, ^origin, ^result}},
+                   500
+
+    assert %{active_sessions: 64, activation_reservations: 0, activations_used: 64} =
+             ConnectionRegistry.status(fixture.registry)
+
+    eventually(fn -> LeaseOwner.status(fixture.owner).in_flight == 0 end)
+    stop_connection(holder, fixture.relay, holder_incarnation)
+  end
+
+  test "a dormant resume at the activation ceiling refuses before its core call" do
+    fixture = start_fixture()
+    {holder, holder_incarnation, writer_epoch} = grant_first(fixture)
+
+    Enum.each(1..64, fn index ->
+      count_activation(fixture.registry, "full-session-#{index}", index)
+    end)
+
+    origin = {holder_incarnation, 1, 1}
+    worker = start_ticket_worker(holder)
+
+    assert {:ok, ^origin} =
+             open_mutation(fixture, holder, origin, :session_resume, worker)
+
+    parent = self()
+
+    assert {:ok, :completed} =
+             invoke(holder, fn ->
+               LeaseOwner.resume(
+                 fixture.owner,
+                 origin,
+                 "resume-capacity",
+                 "resume-capacity-command",
+                 holder_incarnation,
+                 writer_epoch,
+                 worker,
+                 fn ->
+                   send(parent, :unexpected_capacity_resume)
+                   {:accepted, :activated, %{"unexpected" => true}}
+                 end
+               )
+             end)
+
+    refused = WireRecords.request_error("resume-capacity", "activation_ceiling_reached")
+
+    assert_receive {:connection_message, ^holder, {:relay_ticket_result, ^origin, ^refused}},
+                   500
+
+    refute_receive :unexpected_capacity_resume, 40
+
+    assert %{active_sessions: 64, activation_reservations: 0, activations_used: 64} =
+             ConnectionRegistry.status(fixture.registry)
+
+    stop_connection(holder, fixture.relay, holder_incarnation)
+  end
+
+  test "an exact dormant resume replay shares one reservation and one task" do
+    fixture = start_fixture()
+    {holder, holder_incarnation, writer_epoch} = grant_first(fixture)
+    first = {holder_incarnation, 1, 1}
+    duplicate = {holder_incarnation, 2, 1}
+    first_worker = start_ticket_worker(holder)
+    duplicate_worker = start_ticket_worker(holder)
+
+    for {origin, worker} <- [{first, first_worker}, {duplicate, duplicate_worker}] do
+      assert {:ok, ^origin} =
+               open_mutation(fixture, holder, origin, :session_resume, worker)
+    end
+
+    parent = self()
+    release = make_ref()
+
+    result = %{
+      "type" => "result",
+      "method" => "session.resume",
+      "request_id" => "resume-primary",
+      "result" => %{"session_id" => "session"}
+    }
+
+    assert {:ok, :admitted} =
+             invoke(holder, fn ->
+               LeaseOwner.resume(
+                 fixture.owner,
+                 first,
+                 "resume-primary",
+                 "same-resume-command",
+                 holder_incarnation,
+                 writer_epoch,
+                 first_worker,
+                 fn ->
+                   send(parent, {:resume_primary_task, self()})
+
+                   receive do
+                     ^release -> {:accepted, :activated, result}
+                   end
+                 end
+               )
+             end)
+
+    assert_receive {:resume_primary_task, task}, 500
+
+    assert {:ok, :admitted} =
+             invoke(holder, fn ->
+               LeaseOwner.resume(
+                 fixture.owner,
+                 duplicate,
+                 "resume-duplicate",
+                 "same-resume-command",
+                 holder_incarnation,
+                 writer_epoch,
+                 duplicate_worker,
+                 fn ->
+                   send(parent, :unexpected_duplicate_resume_task)
+                   {:accepted, :activated, %{"unexpected" => true}}
+                 end
+               )
+             end)
+
+    assert %{activation_reservations: 1, activations_used: 1} =
+             ConnectionRegistry.status(fixture.registry)
+
+    assert %{ticketed: 1, waiting: 1} = AdmissionRelay.status(fixture.relay)
+    refute_receive :unexpected_duplicate_resume_task, 40
+    send(task, release)
+
+    assert_receive {:connection_message, ^holder, {:relay_ticket_result, ^first, ^result}}, 500
+
+    assert_receive {:connection_message, ^holder, {:relay_ticket_result, ^duplicate, ^result}},
+                   500
+
+    refute_receive :unexpected_duplicate_resume_task, 40
+
+    assert %{active_sessions: 1, activation_reservations: 0, activations_used: 1} =
+             ConnectionRegistry.status(fixture.registry)
+
+    eventually(fn -> LeaseOwner.status(fixture.owner).in_flight == 0 end)
+    stop_connection(holder, fixture.relay, holder_incarnation)
+  end
+
   defp start_fixture(options \\ []) do
     daemon_incarnation = incarnation()
     session_id = Keyword.get(options, :session_id, "session")
@@ -1098,6 +1381,13 @@ defmodule LoopexDaemon.LeaseOwnerTest do
          owner: self(), owner_incarnation: daemon_incarnation, admission_wait_ms: 1_000}
       )
 
+    registry =
+      start_supervised!({ConnectionRegistry, owner: self(), initialize_deadline_ms: 1_000})
+
+    registry_incarnation = incarnation()
+    assert :ok = AdmissionRelay.register_registry(relay, registry, registry_incarnation)
+    assert :ok = ConnectionRegistry.bind_relay(registry, relay, registry_incarnation)
+
     owner_incarnation = incarnation()
 
     owner =
@@ -1105,6 +1395,7 @@ defmodule LoopexDaemon.LeaseOwnerTest do
         {LeaseOwner,
          daemon_owner: self(),
          relay: relay,
+         registry: registry,
          session_id: session_id,
          owner_incarnation: owner_incarnation,
          lease_term_ms: Keyword.get(options, :lease_term_ms, 30_000)}
@@ -1122,6 +1413,8 @@ defmodule LoopexDaemon.LeaseOwnerTest do
 
     %{
       relay: relay,
+      registry: registry,
+      registry_incarnation: registry_incarnation,
       owner: owner,
       daemon_incarnation: daemon_incarnation,
       owner_incarnation: owner_incarnation,
@@ -1392,6 +1685,25 @@ defmodule LoopexDaemon.LeaseOwnerTest do
     Process.exit(connection, :kill)
     assert_receive {:DOWN, ^monitor, :process, ^connection, :killed}, 500
     assert_receive {:relay_connection_retired, ^relay, ^incarnation}, 500
+  end
+
+  defp count_activation(registry, session_id, sequence) do
+    origin = {:crypto.hash(:md5, "activation-#{sequence}"), rem(sequence, 32), sequence + 1}
+
+    assert {:ok, {:primary, reservation_ref}} =
+             ConnectionRegistry.reserve_activation(
+               registry,
+               origin,
+               {:resume, session_id, "activation-command-#{sequence}"}
+             )
+
+    assert :ok =
+             ConnectionRegistry.resolve_activation(
+               registry,
+               reservation_ref,
+               :activated,
+               session_id
+             )
   end
 
   defp eventually(assertion, attempts \\ 50)

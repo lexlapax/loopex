@@ -31,6 +31,10 @@ defmodule LoopexDaemon.WireRecords do
     "control_pending" => "control pending."
   }
 
+  @request_messages Map.merge(@control_messages, %{
+                      "activation_ceiling_reached" => "activation ceiling reached."
+                    })
+
   @doc false
   @spec detached(binary(), non_neg_integer()) :: map()
   def detached(session_id, event_cursor)
@@ -123,11 +127,18 @@ defmodule LoopexDaemon.WireRecords do
   @spec control_error(binary(), binary()) :: map()
   def control_error(request_id, code)
       when is_binary(request_id) and is_map_key(@control_messages, code) do
+    request_error(request_id, code)
+  end
+
+  @doc false
+  @spec request_error(binary(), binary()) :: map()
+  def request_error(request_id, code)
+      when is_binary(request_id) and is_map_key(@request_messages, code) do
     %{
       "type" => "error",
       "request_id" => request_id,
       "code" => code,
-      "message" => Map.fetch!(@control_messages, code)
+      "message" => Map.fetch!(@request_messages, code)
     }
   end
 end
