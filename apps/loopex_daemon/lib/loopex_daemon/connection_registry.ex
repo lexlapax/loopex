@@ -566,6 +566,7 @@ defmodule LoopexDaemon.ConnectionRegistry do
            owner: owner,
            connection_module: Keyword.get(options, :connection_module, SocketConnection),
            connection_context: Keyword.get(options, :connection_context),
+           cleanup_monitors: %{},
            initialize_deadline_ms: deadline_ms,
            output_buffer_bytes: output_buffer_bytes,
            aggregate_output_bytes: aggregate_output_bytes,
@@ -1371,7 +1372,7 @@ defmodule LoopexDaemon.ConnectionRegistry do
        occupied: map_size(state.rows),
        provisional: Map.get(counts, :handing_off, 0) + Map.get(counts, :aborting, 0),
        live: Map.get(counts, :live, 0),
-       closing: Map.get(counts, :closing, 0),
+       closing: Map.get(counts, :closing, 0) + Map.get(counts, :retiring, 0),
        transport: state.transport,
        transport_marked: MapSet.size(state.transport_marked),
        output_bytes:
@@ -1556,6 +1557,45 @@ defmodule LoopexDaemon.ConnectionRegistry do
   def handle_info({:apply_mirror, _op_ref, _owner, _incarnation, _action, _row}, state) do
     Logger.debug("loopex daemon routing mirror request ignored")
     {:noreply, state}
+  end
+
+  def handle_info({:relay_connection_retired, _relay, incarnation}, state) do
+    case retiring_token(state, incarnation) do
+      nil -> {:noreply, state}
+      token -> {:noreply, retirement_step(state, token, &%{&1 | relay_retired: true})}
+    end
+  end
+
+  def handle_info({:holder_cleanup_result, cleanup_ref, token, result}, state) do
+    case Map.fetch(state.rows, token) do
+      {:ok, %{phase: :retiring, cleanup_ref: ^cleanup_ref}} when result == :ok ->
+        {:noreply, retirement_step(state, token, &%{&1 | holder_cleanup_acked: true})}
+
+      {:ok, %{phase: :retiring, cleanup_ref: ^cleanup_ref}} ->
+        report_runtime_lost(state)
+        {:noreply, state}
+
+      _stale ->
+        {:noreply, state}
+    end
+  end
+
+  def handle_info({:DOWN, monitor, :process, _pid, reason}, state)
+      when is_map_key(state.cleanup_monitors, monitor) do
+    {token, monitors} = Map.pop(state.cleanup_monitors, monitor)
+    state = %{state | cleanup_monitors: monitors}
+
+    case Map.fetch(state.rows, token) do
+      {:ok, %{phase: :retiring, holder_cleanup_acked: true}} when reason == :normal ->
+        {:noreply, retirement_step(state, token, &%{&1 | cleanup_worker_reaped: true})}
+
+      {:ok, %{phase: :retiring}} ->
+        report_runtime_lost(state)
+        {:noreply, state}
+
+      _stale ->
+        {:noreply, state}
+    end
   end
 
   def handle_info({:DOWN, monitor, :process, pid, _reason}, state) do
@@ -1768,10 +1808,17 @@ defmodule LoopexDaemon.ConnectionRegistry do
 
   defp connection_down(state, token) do
     case Map.fetch(state.rows, token) do
-      {:ok, %{phase: phase}} when phase in [:live, :closing] -> remove_row(state, token)
-      {:ok, %{phase: :handing_off}} -> request_abort(state, token, :connection_lost)
-      {:ok, %{phase: :aborting}} -> maybe_finish_abort(state, token)
-      _other -> state
+      {:ok, %{phase: phase} = row} when phase in [:live, :closing] ->
+        begin_retirement(state, token, row)
+
+      {:ok, %{phase: :handing_off}} ->
+        request_abort(state, token, :connection_lost)
+
+      {:ok, %{phase: :aborting}} ->
+        maybe_finish_abort(state, token)
+
+      _other ->
+        state
     end
   end
 
@@ -1794,6 +1841,99 @@ defmodule LoopexDaemon.ConnectionRegistry do
           acc
       end
     end)
+  end
+
+  # Concept: a closed connection's slot is freed only once nothing it started
+  # can still act: the relay has retired every row it opened and core has
+  # released every attachment and transfer it held.
+  #
+  # Technical depth: an initialized row moves to `:retiring` and keeps its slot
+  # and attachment charge. One monitored worker, never this process, calls
+  # `Loopex.Runtime.release_holder/2`, so a slow core cleanup cannot stall
+  # status, accept or buffer work. The relay is asked for the incarnation's
+  # retirement and answers at once for one it does not hold. The row is freed
+  # only when the relay has retired it, the worker's exact result was `:ok`
+  # and that worker's normal `DOWN` followed; any other result or exit is
+  # fatal `runtime_lost`. A row that never initialized, or a registry composed
+  # without a runtime, frees at once.
+  defp begin_retirement(state, token, row) do
+    context = state.connection_context || %{}
+    runtime = Map.get(context, :runtime)
+    relay = Map.get(context, :relay)
+
+    if row.initialized and is_pid(row.connection_pid) and runtime != nil and is_pid(relay) do
+      registry = self()
+      cleanup_ref = make_ref()
+      holder = row.connection_pid
+
+      {worker, monitor} =
+        spawn_monitor(fn ->
+          result =
+            try do
+              Loopex.Runtime.release_holder(runtime, holder)
+            catch
+              _kind, _reason -> {:error, :runtime_unavailable}
+            end
+
+          send(registry, {:holder_cleanup_result, cleanup_ref, token, result})
+        end)
+
+      send(relay, {:connection_retirement_query, row.connection_incarnation, registry})
+      Logger.debug("loopex daemon connection slot retiring")
+
+      row =
+        Map.merge(row, %{
+          phase: :retiring,
+          relay_retired: false,
+          holder_cleanup_acked: false,
+          cleanup_worker_reaped: false,
+          cleanup_ref: cleanup_ref,
+          cleanup_worker: worker
+        })
+
+      state
+      |> put_in([:rows, token], row)
+      |> Map.update!(:cleanup_monitors, &Map.put(&1, monitor, token))
+    else
+      remove_row(state, token)
+    end
+  end
+
+  defp retirement_step(state, token, update) do
+    case Map.fetch(state.rows, token) do
+      {:ok, %{phase: :retiring} = row} ->
+        row = update.(row)
+        state = put_in(state, [:rows, token], row)
+
+        if row.relay_retired and row.holder_cleanup_acked and row.cleanup_worker_reaped do
+          Logger.debug("loopex daemon connection slot freed")
+          remove_row(state, token)
+        else
+          state
+        end
+
+      _other ->
+        state
+    end
+  end
+
+  defp retiring_token(state, incarnation) do
+    Enum.find_value(state.rows, fn
+      {token, %{phase: :retiring, connection_incarnation: ^incarnation}} -> token
+      _other -> nil
+    end)
+  end
+
+  defp report_runtime_lost(state) do
+    case Map.get(state.connection_context || %{}, :fatal_recipient) do
+      recipient when is_pid(recipient) ->
+        send(recipient, {:daemon_component_fatal, self(), :runtime_lost})
+
+      _none ->
+        :ok
+    end
+
+    Logger.debug("loopex daemon holder cleanup failed")
   end
 
   defp remove_row(state, token) do

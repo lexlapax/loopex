@@ -370,6 +370,37 @@ defmodule LoopexDaemon.SocketTransportTest do
     assert {:ok, [_directory_entry]} = Loopex.list_sessions(state)
   end
 
+  test "a closed connection's slot frees only after the relay retires it and core releases its holder",
+       %{daemon: daemon, runtime: runtime} do
+    client = initialized_client(daemon)
+    session_id = create_session(client, "retire-create")
+    :ok = send_frame(client, attach("attach", session_id))
+    assert [%{"type" => "snapshot"}] = receive_records(client, 1)
+
+    [connection] = connection_pids(daemon)
+    {:ok, %{dispatcher: dispatcher}} = Loopex.Runtime.children(runtime)
+    assert Map.has_key?(:sys.get_state(dispatcher).holders, connection)
+
+    :ok = :socket.close(client)
+
+    eventually(fn -> ConnectionRegistry.status(daemon.registry).occupied == 0 end, 1_000)
+    refute Map.has_key?(:sys.get_state(dispatcher).holders, connection)
+    assert %{attachments: 0} = ConnectionRegistry.status(daemon.registry)
+    refute_received {:daemon_component_fatal, _registry, :runtime_lost}
+  end
+
+  test "a holder cleanup core cannot acknowledge is runtime_lost and never frees the slot",
+       %{daemon: daemon, runtime: runtime} do
+    client = initialized_client(daemon)
+    registry = daemon.registry
+    :ok = Loopex.stop(runtime)
+    :ok = :socket.close(client)
+
+    assert_receive {:daemon_component_fatal, ^registry, :runtime_lost}, 5_000
+    assert ConnectionRegistry.status(registry).occupied == 1
+    assert ConnectionRegistry.status(registry).closing == 1
+  end
+
   test "daemon.status reports bounded counts with reservations counted", %{daemon: daemon} do
     client = initialized_client(daemon)
     _session_id = create_session(client, "status-create")
@@ -399,6 +430,22 @@ defmodule LoopexDaemon.SocketTransportTest do
 
     assert {:ok, _uptime} = Wire.u64(uptime)
     assert is_binary(status["daemon_incarnation"])
+  end
+
+  # This daemon's connection processes, found by initial call and registry.
+  defp connection_pids(daemon) do
+    for pid <- Process.list(),
+        {:dictionary, dictionary} <- [Process.info(pid, :dictionary)],
+        dictionary[:"$initial_call"] == {LoopexDaemon.SocketConnection, :init, 1},
+        connection_registry(pid) == daemon.registry,
+        do: pid
+  end
+
+  # A connection of a concurrent case may exit between listing and reading.
+  defp connection_registry(pid) do
+    :sys.get_state(pid, 1_000).registry
+  catch
+    :exit, _gone -> nil
   end
 
   defp inspect_request(request_id, session_id) do

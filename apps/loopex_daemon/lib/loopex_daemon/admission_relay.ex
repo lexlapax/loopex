@@ -1836,6 +1836,17 @@ defmodule LoopexDaemon.AdmissionRelay do
   def handle_info({:relay_owner_loss_classification, _, _, _, _, _, _, _}, state),
     do: {:stop, :owner_loss_invalid, state}
 
+  # Concept: the registry learns an incarnation's retirement exactly once it
+  # holds no row here; an incarnation this relay never held, or already
+  # retired, is answered at once.
+  def handle_info({:connection_retirement_query, incarnation, recipient}, state)
+      when is_pid(recipient) do
+    unless Map.has_key?(state.connections, incarnation),
+      do: send(recipient, {:relay_connection_retired, self(), incarnation})
+
+    {:noreply, state}
+  end
+
   def handle_info({:EXIT, owner, _reason}, %{owner: owner} = state),
     do: {:stop, :owner_lost, state}
 
