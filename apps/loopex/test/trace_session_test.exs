@@ -66,6 +66,30 @@ defmodule Loopex.TraceSessionTest do
     end
   end
 
+  defmodule CanaryTrace do
+    @moduledoc false
+
+    @canary "loopex-private-trace-handle-canary"
+
+    def canary, do: @canary
+
+    def session_create(:loopex_trace, tracer, []) when is_pid(tracer) do
+      {{@canary, make_ref()}, {:loopex_trace, System.unique_integer([:positive])}}
+    end
+
+    def function({{@canary, reference}, {:loopex_trace, id}}, _mfa, _match_spec, _options)
+        when is_reference(reference) and is_integer(id),
+        do: 1
+
+    def process({{@canary, reference}, {:loopex_trace, id}}, pid, _enabled, _flags)
+        when is_reference(reference) and is_integer(id) and is_pid(pid),
+        do: 1
+
+    def session_destroy({{@canary, reference}, {:loopex_trace, id}})
+        when is_reference(reference) and is_integer(id),
+        do: true
+  end
+
   test "a runtime owned session traces only allowed modules and owned processes and leaves a second VM tracer unaffected" do
     runtime = fixture()
 
@@ -456,6 +480,42 @@ defmodule Loopex.TraceSessionTest do
     assert Map.take(restored, [:modules, :level, :limits, :sink]) == original
     provoke(runtime)
     assert %{"kind" => "trace_call"} = await_entry("trace_call")
+  end
+
+  test "a canary-bearing private trace handle is absent from crash reports and exit reasons" do
+    runtime = fixture(runtime_id: "trace-private-handle-crash", trace_module: CanaryTrace)
+
+    assert {:ok, original} =
+             Loopex.trace(runtime, %{modules: [ExclusionProbe], level: :calls})
+
+    {:ok, %{tracer: tracer}} = Runtime.children(runtime)
+    reference = Process.monitor(tracer)
+    parent = self()
+
+    log =
+      ExUnit.CaptureLog.capture_log(fn ->
+        call_exit = catch_exit(GenServer.call(tracer, :force_trace_crash))
+
+        assert_receive {:DOWN, ^reference, :process, ^tracer, reason}, 1_000
+        send(parent, {:trace_crash_evidence, call_exit, reason})
+        Logger.flush()
+      end)
+
+    assert_receive {:trace_crash_evidence, call_exit, reason}
+    assert log =~ "GenServer"
+    refute log =~ CanaryTrace.canary()
+    refute inspect(call_exit) =~ CanaryTrace.canary()
+    refute inspect(reason) =~ CanaryTrace.canary()
+
+    assert eventually(fn ->
+             case Runtime.children(runtime) do
+               {:ok, %{tracer: replacement}} -> replacement != tracer
+               _unavailable -> false
+             end
+           end)
+
+    assert {:ok, restored} = Loopex.trace_status(runtime)
+    assert Map.take(restored, [:modules, :level, :limits, :sink]) == original
   end
 
   test "no session command client content model output project resource or wire request starts changes or stops a session and stop releases every flag" do
