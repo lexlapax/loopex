@@ -70,6 +70,14 @@ artifact references and nested session options become bounded plain data
 before any daemon or runtime effect. Valid methods remain inert until their
 serving boundary lands.
 
+Add the daemon's lightweight admission-relay foundation. It authenticates and
+bounds connection-scoped request origins, orders worker dispatch after the
+executing transition, retains one selected result through worker reap, and
+turns the shutdown cut into one ref-tagged frozen set and absolute admission
+deadline. Connection loss reaps an executing request worker before the relay
+acknowledges that connection's retirement; fixed logs and process diagnostics
+contain no request data.
+
 Add the daemon's bounded connection-output foundation. The registry owns each
 complete encoded queue and the daemon-wide output commitment; the connection
 process advances only nonblocking socket sends and releases a frame charge only
