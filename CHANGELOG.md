@@ -92,6 +92,12 @@ loss, and retains the bounded result until the registry acknowledges its exact
 reservation or borrow settlement. Missing task results fail the relay closed;
 exact promotion retries start no second task.
 
+Coalesce exact repeated create and attach tickets onto the promoted primary.
+Each waiter keeps its own bounded origin and connection route, starts no second
+task, and receives the primary's internal result only after registry
+settlement. Losing a waiter connection removes only that waiter and leaves the
+primary task and reservation intact.
+
 Add the daemon's bounded connection-output foundation. The registry owns each
 complete encoded queue and the daemon-wide output commitment; the connection
 process advances only nonblocking socket sends and releases a frame charge only

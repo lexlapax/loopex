@@ -86,6 +86,7 @@ defmodule LoopexDaemon.AdmissionRelayTest do
         pending: 0,
         queued: 0,
         ticketed: 0,
+        waiting: 0,
         executing: 0,
         settling: 0,
         connection_limit: 512,
@@ -889,6 +890,203 @@ defmodule LoopexDaemon.AdmissionRelayTest do
 
     eventually(fn -> AdmissionRelay.status(relay).tickets == 0 end)
     stop_connection(connection, relay, incarnation)
+  end
+
+  test "an exact duplicate waits on one promoted task and receives its own origin result" do
+    relay = start_relay()
+    registry = start_registry()
+    registry_incarnation = incarnation()
+    assert :ok = AdmissionRelay.register_registry(relay, registry, registry_incarnation)
+
+    primary_incarnation = incarnation()
+    waiter_incarnation = incarnation()
+    primary_connection = start_connection(relay, primary_incarnation)
+    waiter_connection = start_connection(relay, waiter_incarnation)
+    primary = {primary_incarnation, 0, 1}
+    waiter = {waiter_incarnation, 0, 1}
+    settlement_ref = make_ref()
+    parent = self()
+
+    assert {:ok, ^primary} =
+             invoke(primary_connection, fn ->
+               AdmissionRelay.open_ticket(relay, primary, :session_create)
+             end)
+
+    result = %{"session_id" => "shared-session", "disposition" => "activated"}
+
+    assert {:ok, ^primary} =
+             invoke(registry, fn ->
+               AdmissionRelay.promote_ticket(
+                 relay,
+                 primary,
+                 registry_incarnation,
+                 settlement_ref,
+                 fn ->
+                   send(parent, {:primary_task_started, self()})
+
+                   receive do
+                     :complete -> result
+                   end
+                 end
+               )
+             end)
+
+    assert_receive {:primary_task_started, task}, 500
+
+    assert {:ok, ^waiter} =
+             invoke(waiter_connection, fn ->
+               AdmissionRelay.open_ticket(relay, waiter, :session_create)
+             end)
+
+    waiter_worker = start_ticket_worker(waiter_connection)
+    waiter_worker_monitor = Process.monitor(waiter_worker)
+
+    assert :ok =
+             invoke(waiter_connection, fn ->
+               AdmissionRelay.bind_ticket_worker(
+                 relay,
+                 waiter,
+                 waiter_worker,
+                 incarnation()
+               )
+             end)
+
+    assert {:ok, ^primary} =
+             invoke(registry, fn ->
+               AdmissionRelay.wait_for_ticket(
+                 relay,
+                 waiter,
+                 primary,
+                 registry_incarnation
+               )
+             end)
+
+    refute Process.alive?(waiter_worker)
+    assert_receive {:DOWN, ^waiter_worker_monitor, :process, ^waiter_worker, :killed}, 500
+
+    assert {:ok, ^primary} =
+             invoke(registry, fn ->
+               AdmissionRelay.wait_for_ticket(
+                 relay,
+                 waiter,
+                 primary,
+                 registry_incarnation
+               )
+             end)
+
+    assert %{ticketed: 1, waiting: 1, tickets: 2} = AdmissionRelay.status(relay)
+
+    send(task, :complete)
+
+    assert_receive {:registry_message, ^registry,
+                    {:relay_ticket_settlement, ^relay, ^primary, ^settlement_ref, ^result}},
+                   500
+
+    assert :ok =
+             invoke(registry, fn ->
+               AdmissionRelay.settle_ticket(
+                 relay,
+                 primary,
+                 registry_incarnation,
+                 settlement_ref
+               )
+             end)
+
+    assert_receive {:connection_message, ^primary_connection,
+                    {:relay_ticket_result, ^primary, ^result}},
+                   500
+
+    assert_receive {:connection_message, ^waiter_connection,
+                    {:relay_ticket_result, ^waiter, ^result}},
+                   500
+
+    eventually(fn -> AdmissionRelay.status(relay).tickets == 0 end)
+    stop_connection(primary_connection, relay, primary_incarnation)
+    stop_connection(waiter_connection, relay, waiter_incarnation)
+  end
+
+  test "a waiting connection can disappear without cancelling its primary" do
+    relay = start_relay()
+    registry = start_registry()
+    registry_incarnation = incarnation()
+    assert :ok = AdmissionRelay.register_registry(relay, registry, registry_incarnation)
+
+    primary_incarnation = incarnation()
+    waiter_incarnation = incarnation()
+    primary_connection = start_connection(relay, primary_incarnation)
+    waiter_connection = start_connection(relay, waiter_incarnation)
+    primary = {primary_incarnation, 0, 1}
+    waiter = {waiter_incarnation, 0, 1}
+    settlement_ref = make_ref()
+    parent = self()
+
+    assert {:ok, ^primary} =
+             invoke(primary_connection, fn ->
+               AdmissionRelay.open_ticket(relay, primary, :session_attach, "session")
+             end)
+
+    result = %{"attachment_id" => "attachment"}
+
+    assert {:ok, ^primary} =
+             invoke(registry, fn ->
+               AdmissionRelay.promote_ticket(
+                 relay,
+                 primary,
+                 registry_incarnation,
+                 settlement_ref,
+                 fn ->
+                   send(parent, {:primary_waiting, self()})
+
+                   receive do
+                     :complete -> result
+                   end
+                 end
+               )
+             end)
+
+    assert_receive {:primary_waiting, task}, 500
+
+    assert {:ok, ^waiter} =
+             invoke(waiter_connection, fn ->
+               AdmissionRelay.open_ticket(relay, waiter, :session_attach, "session")
+             end)
+
+    assert {:ok, ^primary} =
+             invoke(registry, fn ->
+               AdmissionRelay.wait_for_ticket(
+                 relay,
+                 waiter,
+                 primary,
+                 registry_incarnation
+               )
+             end)
+
+    Process.exit(waiter_connection, :kill)
+    assert_receive {:relay_connection_retired, ^relay, ^waiter_incarnation}, 500
+    assert %{ticketed: 1, waiting: 0, tickets: 1} = AdmissionRelay.status(relay)
+
+    send(task, :complete)
+
+    assert_receive {:registry_message, ^registry,
+                    {:relay_ticket_settlement, ^relay, ^primary, ^settlement_ref, ^result}},
+                   500
+
+    assert :ok =
+             invoke(registry, fn ->
+               AdmissionRelay.settle_ticket(
+                 relay,
+                 primary,
+                 registry_incarnation,
+                 settlement_ref
+               )
+             end)
+
+    assert_receive {:connection_message, ^primary_connection,
+                    {:relay_ticket_result, ^primary, ^result}},
+                   500
+
+    eventually(fn -> AdmissionRelay.status(relay).tickets == 0 end)
+    stop_connection(primary_connection, relay, primary_incarnation)
   end
 
   defp start_relay(options \\ []) do

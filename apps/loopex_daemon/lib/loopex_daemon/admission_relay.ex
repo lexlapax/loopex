@@ -212,6 +212,22 @@ defmodule LoopexDaemon.AdmissionRelay do
   end
 
   @doc false
+  @spec wait_for_ticket(pid(), origin_id(), origin_id(), binary()) ::
+          {:ok, origin_id()}
+          | {:error,
+             :daemon_stopping
+             | :invalid_waiter
+             | :registry_unavailable
+             | :ticket_unavailable}
+  def wait_for_ticket(relay, origin_id, primary_origin_id, registry_incarnation) do
+    GenServer.call(
+      relay,
+      {:wait_for_ticket, origin_id, primary_origin_id, registry_incarnation},
+      @control_timeout_ms
+    )
+  end
+
+  @doc false
   @spec settle_ticket(pid(), origin_id(), binary(), settlement_ref()) ::
           :ok | {:error, :registry_unavailable | :ticket_unavailable}
   def settle_ticket(relay, origin_id, registry_incarnation, settlement_ref) do
@@ -258,6 +274,7 @@ defmodule LoopexDaemon.AdmissionRelay do
           pending: non_neg_integer(),
           queued: non_neg_integer(),
           ticketed: non_neg_integer(),
+          waiting: non_neg_integer(),
           executing: non_neg_integer(),
           settling: non_neg_integer(),
           connection_limit: 512,
@@ -471,7 +488,9 @@ defmodule LoopexDaemon.AdmissionRelay do
             result: nil,
             settlement_acked: false,
             result_delivered: false,
-            promotion_waiters: []
+            promotion_waiters: [],
+            primary_origin_id: nil,
+            waiting_callers: []
           }
 
           connection = %{
@@ -595,6 +614,56 @@ defmodule LoopexDaemon.AdmissionRelay do
   end
 
   def handle_call(
+        {:wait_for_ticket, origin_id, primary_origin_id, registry_incarnation},
+        from = {caller, _tag},
+        state
+      ) do
+    state = expire_if_due(state)
+
+    case waiting_repetition(
+           state,
+           origin_id,
+           primary_origin_id,
+           caller,
+           registry_incarnation
+         ) do
+      :complete ->
+        {:reply, {:ok, primary_origin_id}, state}
+
+      {:waiting, ticket} ->
+        ticket = %{ticket | waiting_callers: [from | ticket.waiting_callers]}
+        {:noreply, put_in(state, [:tickets, origin_id], ticket)}
+
+      :conflict ->
+        {:reply, {:error, :invalid_waiter}, state}
+
+      :absent ->
+        with :ok <- promotion_admitted(state, origin_id),
+             :ok <- authenticate_registry(state, caller, registry_incarnation),
+             {:ok, ticket, primary} <- waiter_pair(state, origin_id, primary_origin_id) do
+          ticket = %{
+            ticket
+            | phase: :waiting,
+              primary_origin_id: primary_origin_id,
+              waiting_callers: if(is_pid(ticket.worker_pid), do: [from], else: [])
+          }
+
+          state = put_in(state, [:tickets, origin_id], ticket)
+          Logger.debug("loopex daemon admission relay ticket waiting")
+
+          if is_pid(ticket.worker_pid) do
+            if Process.alive?(ticket.worker_pid), do: Process.exit(ticket.worker_pid, :kill)
+            {:noreply, state}
+          else
+            {:reply, {:ok, primary.origin_id}, state}
+          end
+        else
+          {:error, reason} -> {:reply, {:error, reason}, state}
+        end
+    end
+  end
+
+  def handle_call(
         {:bind_worker, origin_id, worker, worker_incarnation},
         {caller, _tag},
         state
@@ -674,12 +743,17 @@ defmodule LoopexDaemon.AdmissionRelay do
       end)
 
     ticket_counts =
-      Enum.reduce(state.tickets, %{pending: 0, queued: 0, ticketed: 0, settling: 0}, fn
-        {_id, %{phase: :pending}}, counts -> Map.update!(counts, :pending, &(&1 + 1))
-        {_id, %{phase: :queued}}, counts -> Map.update!(counts, :queued, &(&1 + 1))
-        {_id, %{phase: :ticketed}}, counts -> Map.update!(counts, :ticketed, &(&1 + 1))
-        {_id, %{phase: :settling}}, counts -> Map.update!(counts, :settling, &(&1 + 1))
-      end)
+      Enum.reduce(
+        state.tickets,
+        %{pending: 0, queued: 0, ticketed: 0, waiting: 0, settling: 0},
+        fn
+          {_id, %{phase: :pending}}, counts -> Map.update!(counts, :pending, &(&1 + 1))
+          {_id, %{phase: :queued}}, counts -> Map.update!(counts, :queued, &(&1 + 1))
+          {_id, %{phase: :ticketed}}, counts -> Map.update!(counts, :ticketed, &(&1 + 1))
+          {_id, %{phase: :waiting}}, counts -> Map.update!(counts, :waiting, &(&1 + 1))
+          {_id, %{phase: :settling}}, counts -> Map.update!(counts, :settling, &(&1 + 1))
+        end
+      )
 
     {:reply,
      %{
@@ -690,6 +764,7 @@ defmodule LoopexDaemon.AdmissionRelay do
        pending: permit_counts.pending + ticket_counts.pending,
        queued: ticket_counts.queued,
        ticketed: ticket_counts.ticketed,
+       waiting: ticket_counts.waiting,
        executing: permit_counts.executing,
        settling: permit_counts.settling + ticket_counts.settling,
        connection_limit: @connection_limit,
@@ -1040,6 +1115,55 @@ defmodule LoopexDaemon.AdmissionRelay do
     end
   end
 
+  defp waiting_repetition(
+         state,
+         origin_id,
+         primary_origin_id,
+         registry,
+         registry_incarnation
+       ) do
+    case Map.fetch(state.tickets, origin_id) do
+      {:ok,
+       %{
+         phase: :waiting,
+         primary_origin_id: ^primary_origin_id,
+         worker_pid: worker
+       } = ticket} ->
+        case state.registry do
+          %{pid: ^registry, incarnation: ^registry_incarnation} ->
+            if(is_pid(worker), do: {:waiting, ticket}, else: :complete)
+
+          _other ->
+            :conflict
+        end
+
+      {:ok, %{phase: :waiting}} ->
+        :conflict
+
+      _other ->
+        :absent
+    end
+  end
+
+  defp waiter_pair(state, origin_id, primary_origin_id) when origin_id != primary_origin_id do
+    with {:ok, %{phase: phase} = ticket} when phase in [:pending, :queued] <-
+           Map.fetch(state.tickets, origin_id),
+         {:ok, %{phase: primary_phase} = primary}
+         when primary_phase in [:ticketed, :settling] <-
+           Map.fetch(state.tickets, primary_origin_id),
+         true <- primary.class in [:session_create, :session_attach],
+         true <- ticket.class == primary.class,
+         true <- ticket.session_id == primary.session_id,
+         true <- ticket.owner_binding == primary.owner_binding do
+      {:ok, ticket, primary}
+    else
+      _invalid -> {:error, :ticket_unavailable}
+    end
+  end
+
+  defp waiter_pair(_state, _origin_id, _primary_origin_id),
+    do: {:error, :invalid_waiter}
+
   defp start_registry_promotion(
          state,
          ticket,
@@ -1152,6 +1276,7 @@ defmodule LoopexDaemon.AdmissionRelay do
   defp frozen_phase(:settling), do: :settling
   defp frozen_phase(:queued), do: :queued
   defp frozen_phase(:ticketed), do: :ticketed
+  defp frozen_phase(:waiting), do: :waiting
 
   defp frozen_origin?(state, :permit, origin_id),
     do: MapSet.member?(state.frozen_permits, origin_id)
@@ -1253,6 +1378,15 @@ defmodule LoopexDaemon.AdmissionRelay do
       {:ok, %{phase: :pending}} ->
         remove_ticket(state, origin_id)
 
+      {:ok, %{phase: :waiting, worker_pid: nil}} ->
+        remove_ticket(state, origin_id)
+
+      {:ok, %{phase: :waiting, worker_pid: worker} = ticket} when is_pid(worker) ->
+        if Process.alive?(worker), do: Process.exit(worker, :kill)
+
+        ticket = %{ticket | phase: :settling, disposition: :connection_lost}
+        put_in(state, [:tickets, origin_id], ticket)
+
       {:ok, %{phase: :queued, worker_pid: worker} = ticket} when is_pid(worker) ->
         if Process.alive?(worker), do: Process.exit(worker, :kill)
 
@@ -1306,6 +1440,22 @@ defmodule LoopexDaemon.AdmissionRelay do
 
   defp ticket_worker_down(state, origin_id, pid) do
     case Map.fetch(state.tickets, origin_id) do
+      {:ok, %{worker_pid: ^pid, phase: :waiting} = ticket} ->
+        Enum.each(ticket.waiting_callers, fn from ->
+          GenServer.reply(from, {:ok, ticket.primary_origin_id})
+        end)
+
+        ticket = %{
+          ticket
+          | worker_pid: nil,
+            worker_incarnation: nil,
+            worker_monitor: nil,
+            waiting_callers: []
+        }
+
+        Logger.debug("loopex daemon admission relay waiting worker retired")
+        {:noreply, put_in(state, [:tickets, origin_id], ticket)}
+
       {:ok, %{worker_pid: ^pid, phase: phase} = ticket}
       when phase in [:ticketed, :settling] and is_pid(ticket.task_pid) ->
         Enum.each(ticket.promotion_waiters, fn from ->
@@ -1328,6 +1478,14 @@ defmodule LoopexDaemon.AdmissionRelay do
       {:ok, %{worker_pid: ^pid} = ticket} ->
         state =
           if ticket.disposition do
+            Enum.each(ticket.waiting_callers, fn from ->
+              GenServer.reply(from, {:error, :ticket_unavailable})
+            end)
+
+            Enum.each(ticket.promotion_waiters, fn from ->
+              GenServer.reply(from, {:error, :ticket_unavailable})
+            end)
+
             remove_ticket(state, origin_id)
           else
             if Process.alive?(ticket.connection_pid) do
@@ -1389,11 +1547,29 @@ defmodule LoopexDaemon.AdmissionRelay do
 
         ticket = %{ticket | result_delivered: true}
         state = put_in(state, [:tickets, origin_id], ticket)
+        state = deliver_waiting_results(state, origin_id, result)
         finalize_ticket_if_complete(state, origin_id)
 
       _other ->
         state
     end
+  end
+
+  defp deliver_waiting_results(state, primary_origin_id, result) do
+    state.tickets
+    |> Enum.filter(fn
+      {_origin_id, %{phase: :waiting, primary_origin_id: ^primary_origin_id}} -> true
+      _other -> false
+    end)
+    |> Enum.reduce(state, fn {origin_id, waiter}, acc ->
+      if Process.alive?(waiter.connection_pid) do
+        send(waiter.connection_pid, {:relay_ticket_result, origin_id, result})
+      end
+
+      acc
+      |> remove_ticket(origin_id)
+      |> maybe_retire_connection(waiter.connection_incarnation)
+    end)
   end
 
   defp finalize_ticket_if_complete(state, origin_id) do
