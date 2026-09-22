@@ -3,6 +3,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderConfiguration do
 
   alias Loopex.Executor
   alias Loopex.LLM.ReqLLM.{CredentialRegistry, CredentialToken}
+  alias Loopex.LLM.ReqLLM.TraceCapability.Direct
   alias Loopex.Trace.Capability
 
   @paths [:worker_path, :interpreter_path]
@@ -108,7 +109,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderConfiguration do
       @credential_keys ->
         with :ok <- CredentialToken.validate(Keyword.fetch!(options, :credential_token)),
              :ok <- CredentialRegistry.validate(Keyword.fetch!(options, :credential_registry)),
-             :ok <- Capability.validate(Keyword.fetch!(options, :tracing_capability)) do
+             :ok <- trace_capability(Keyword.fetch!(options, :tracing_capability)) do
           :ok
         else
           _invalid -> {:error, :invalid_provider_configuration}
@@ -118,6 +119,9 @@ defmodule Loopex.LLM.ReqLLM.ProviderConfiguration do
         {:error, :invalid_provider_configuration}
     end
   end
+
+  defp trace_capability(%Direct{} = direct), do: Direct.validate(direct)
+  defp trace_capability(capability), do: Capability.validate(capability)
 
   defp absolute_path?(value) when is_binary(value) and byte_size(value) > 0,
     do:

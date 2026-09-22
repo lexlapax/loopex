@@ -19,6 +19,9 @@ defmodule Loopex.LLM.ReqLLM.ProviderBridgeTest do
     ProviderPhaseDiagnostic
   }
 
+  alias Loopex.LLM.ReqLLM.CredentialCustody.Ref, as: CustodyRef
+  alias Loopex.LLM.ReqLLM.TraceCapability.Direct
+
   alias Loopex.M1RuntimeTestStore, as: TestStore
   alias Loopex.Trace.Capability
 
@@ -32,14 +35,54 @@ defmodule Loopex.LLM.ReqLLM.ProviderBridgeTest do
       Path.join(System.tmp_dir!(), "loopex-provider-bridge-#{System.unique_integer([:positive])}")
 
     File.mkdir!(root)
-    previous = System.get_env("LOOPEX_PROVIDER_API_KEY")
-    System.put_env("LOOPEX_PROVIDER_API_KEY", "synthetic-provider-credential")
+
+    {:ok, custody_pid} =
+      CredentialCustody.start_link(credential: "synthetic-provider-credential")
+
+    {:ok, custody} = CredentialCustody.reference(custody_pid)
+    {:ok, registry_pid} = CredentialRegistry.start_link()
+    {:ok, registry} = CredentialRegistry.handle(registry_pid)
+    token = CredentialToken.new()
+    assert :ok = CredentialRegistry.put(registry, token, custody)
+
+    direct_credentials = %{
+      credential_token: token,
+      credential_registry: registry,
+      tracing_capability: Direct.new()
+    }
+
+    {store_pid, store} = TestStore.start_store()
+
+    {:ok, runtime} =
+      Loopex.start_link(
+        runtime_id: "provider-bridge-#{System.unique_integer([:positive])}",
+        store: store,
+        context_token_budget: 8_192
+      )
+
+    {:ok, capability_pid} = Capability.start_link()
+    {:ok, capability} = Capability.handle(capability_pid)
+    assert :ok = Capability.bind(capability, runtime)
+    {:ok, workers} = Task.Supervisor.start_link()
+
+    starter =
+      Loopex.Runtime.ProviderLifetime.Starter.new(fn child ->
+        Task.Supervisor.start_child(workers, child,
+          restart: :temporary,
+          shutdown: :brutal_kill
+        )
+      end)
+
+    Process.put(:provider_bridge_direct_credentials, direct_credentials)
+    Process.put(:provider_bridge_managed_support, {starter, capability})
 
     on_exit(fn ->
-      if previous,
-        do: System.put_env("LOOPEX_PROVIDER_API_KEY", previous),
-        else: System.delete_env("LOOPEX_PROVIDER_API_KEY")
-
+      if Runtime.alive?(runtime), do: Loopex.stop(runtime)
+      stop_if_alive(workers)
+      stop_if_alive(capability_pid)
+      stop_if_alive(store_pid)
+      stop_if_alive(registry_pid)
+      stop_if_alive(custody_pid)
       File.rm_rf!(root)
     end)
 
@@ -49,7 +92,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderBridgeTest do
         deadline: System.system_time(:millisecond) + 10_000
       )
 
-    {:ok, root: root, request: request}
+    {:ok, root: root, request: request, direct_custody: custody}
   end
 
   test "an unmanaged reply returns only after real child cessation", %{
@@ -71,11 +114,61 @@ defmodule Loopex.LLM.ReqLLM.ProviderBridgeTest do
     refute File.exists?(File.read!(Path.join(root, "namespace")))
   end
 
+  test "a direct sender clears inherited named and legacy trace sessions", %{
+    root: root,
+    request: request
+  } do
+    canary = "synthetic-provider-credential"
+    test_pid = self()
+    session = :trace.session_create(:loopex_direct_credential_test, self(), [])
+
+    on_exit(fn ->
+      try do
+        :trace.session_destroy(session)
+      catch
+        _kind, _reason -> :ok
+      end
+
+      try do
+        :erlang.trace(test_pid, false, [:all])
+      catch
+        _kind, _reason -> :ok
+      end
+
+      :erlang.trace_pattern({:gen_tcp, :send, 2}, false, [:local])
+    end)
+
+    1 = :trace.function(session, {:gen_tcp, :send, 2}, true, [:local])
+    1 = :trace.process(session, self(), true, [:call, :set_on_spawn])
+    1 = :erlang.trace_pattern({:gen_tcp, :send, 2}, true, [:local])
+    1 = :erlang.trace(self(), true, [:call, :set_on_spawn])
+
+    {control, monitor} =
+      spawn_monitor(fn ->
+        try do
+          :gen_tcp.send(:not_a_socket, canary)
+        catch
+          _kind, _reason -> :ok
+        end
+      end)
+
+    assert_receive {:DOWN, ^monitor, :process, ^control, :normal}, 1_000
+    assert eventually(fn -> trace_mailbox_contains?(canary) end, 1_000)
+    drain_trace_mailbox()
+
+    assert {:ok, _reply} =
+             ProviderBridge.complete(request, worker(root, :reply), Model.discard_progress())
+
+    refute trace_mailbox_contains?(canary)
+  end
+
   test "a managed normal callback exit leaves the retainer in charge", %{
     root: root,
     request: request
   } do
     configuration = worker(root, :reply) |> Map.put(:cleanup_grace_ms, 1)
+    {starter, capability} = Process.get(:provider_bridge_managed_support)
+    configuration = Map.put(configuration, :tracing_capability, capability)
     parent = self()
 
     retainer =
@@ -93,6 +186,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderBridgeTest do
               send(parent, {:registered, guardian, stop_reference})
               {:managed, retainer, 2_000}
             end,
+            starter,
             fn -> ProviderBridge.complete(request, configuration, Model.discard_progress()) end
           )
 
@@ -317,13 +411,15 @@ defmodule Loopex.LLM.ReqLLM.ProviderBridgeTest do
     assert_receive {:unbound_trace_guardian, guardian, stop_reference}
     assert result == {:error, {:not_dispatched, "model_call_failed"}}
     refute File.exists?(Path.join(root, "credential-size"))
-    refute process_alive?(child_pid(root))
+    assert eventually(fn -> not process_alive?(child_pid(root)) end, 2_500)
     stop_registered(guardian, stop_reference)
     assert eventually(fn -> Task.Supervisor.children(workers) == [] end, 2_000)
   end
 
   test "retainer loss during bootstrap stops the real child", %{root: root, request: request} do
     configuration = worker(root, :stall_ready)
+    {starter, capability} = Process.get(:provider_bridge_managed_support)
+    configuration = Map.put(configuration, :tracing_capability, capability)
     parent = self()
 
     retainer =
@@ -340,6 +436,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderBridgeTest do
             send(parent, {:registered, guardian, stop_reference})
             {:managed, retainer, 2_000}
           end,
+          starter,
           fn -> ProviderBridge.complete(request, configuration, Model.discard_progress()) end
         )
       end)
@@ -432,10 +529,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderBridgeTest do
           {String.duplicate("x", 65_536), :sent},
           {String.duplicate("x", 65_537), :refused}
         ] do
-      case key do
-        nil -> System.delete_env("LOOPEX_PROVIDER_API_KEY")
-        value -> System.put_env("LOOPEX_PROVIDER_API_KEY", value)
-      end
+      custody_pid = install_adversarial_custody(key)
 
       case_root = Path.join(root, "case-#{System.unique_integer([:positive])}")
       File.mkdir!(case_root)
@@ -451,6 +545,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderBridgeTest do
       end
 
       refute process_alive?(child_pid(case_root))
+      Process.exit(custody_pid, :kill)
     end
   end
 
@@ -526,7 +621,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderBridgeTest do
     refute report["incomplete"]
   end
 
-  test "caller loss stops the EOF receiver and discards its provisional failure", %{root: root} do
+  test "callback loss leaves the retained guardian and its EOF receiver in charge", %{root: root} do
     configuration = worker(root, {:failure, :withheld_eof})
 
     report =
@@ -537,12 +632,14 @@ defmodule Loopex.LLM.ReqLLM.ProviderBridgeTest do
         receiver = eof_receiver(guardian)
         receiver_monitor = Process.monitor(receiver)
         Process.exit(caller, :kill)
+        refute_receive {:DOWN, ^receiver_monitor, :process, ^receiver, _reason}, 100
+        assert Process.alive?(guardian)
+        assert Process.alive?(receiver)
+        assert process_alive?(child_pid(root))
+        stop_registered(guardian, stop_reference)
         assert_receive {:DOWN, ^receiver_monitor, :process, ^receiver, :killed}, 2_500
         assert eventually(fn -> not process_alive?(child_pid(root)) end, 2_500)
         refute File.exists?(File.read!(Path.join(root, "namespace")))
-        # Cleanup ends the child; the managed retainer still owns the guardian.
-        assert Process.alive?(guardian)
-        stop_registered(guardian, stop_reference)
       end)
 
     assert report["counts"]["terminal_unknown"] >= 1
@@ -578,8 +675,9 @@ defmodule Loopex.LLM.ReqLLM.ProviderBridgeTest do
     report =
       failure_diagnostic(fn ->
         {caller, guardian, stop_reference} = registered_call(request, configuration)
-        # The phase collector remains the guardian's tracer. Its selective
-        # receive retains this extra arity-only call's scalar return untouched.
+        # Managed mode commits the deadline in the callback before either
+        # supervised child starts. The phase collector remains that callback's
+        # tracer and retains this extra arity-only scalar return untouched.
         {:tracer, tracer} = :erlang.trace_info(guardian, :tracer)
         assert is_pid(tracer)
         send(caller, :continue)
@@ -588,7 +686,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderBridgeTest do
         {:messages, trace_messages} = Process.info(tracer, :messages)
 
         deadlines =
-          for {:trace_ts, ^guardian, :return_from, {ProviderBridge, :invocation_deadline, 2},
+          for {:trace_ts, ^caller, :return_from, {ProviderBridge, :invocation_deadline, 2},
                deadline, _timestamp} <- trace_messages,
               is_integer(deadline),
               do: deadline
@@ -707,6 +805,8 @@ defmodule Loopex.LLM.ReqLLM.ProviderBridgeTest do
     request: request
   } do
     configuration = worker(root, :progress)
+    {starter, capability} = Process.get(:provider_bridge_managed_support)
+    configuration = Map.put(configuration, :tracing_capability, capability)
     parent = self()
 
     retainer =
@@ -724,6 +824,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderBridgeTest do
               send(parent, {:registered, guardian, stop_reference})
               {:managed, retainer, 2_000}
             end,
+            starter,
             fn ->
               ProviderBridge.complete(request, configuration, fn _delta ->
                 send(parent, :progress_blocked)
@@ -810,7 +911,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderBridgeTest do
 
     trace_fence(guardian)
     {:messages, messages} = Process.info(self(), :messages)
-    canary = System.fetch_env!("LOOPEX_PROVIDER_API_KEY")
+    canary = "synthetic-provider-credential"
 
     assert Enum.all?(messages, fn
              {:trace, ^guardian, :receive, message} ->
@@ -848,9 +949,10 @@ defmodule Loopex.LLM.ReqLLM.ProviderBridgeTest do
 
   test "the committed deadline kills a writer blocked by a child that never reads", %{
     root: root,
-    request: request
+    request: request,
+    direct_custody: custody
   } do
-    System.put_env("LOOPEX_PROVIDER_API_KEY", String.duplicate("w", 65_536))
+    assert :ok = CredentialCustody.rotate(custody, String.duplicate("w", 65_536))
     deadline = System.system_time(:millisecond) + 5_000
 
     {:ok, bounded_request} =
@@ -896,6 +998,8 @@ defmodule Loopex.LLM.ReqLLM.ProviderBridgeTest do
 
   defp registered_call(request, configuration) do
     parent = self()
+    {starter, capability} = Process.get(:provider_bridge_managed_support)
+    configuration = Map.put(configuration, :tracing_capability, capability)
 
     caller =
       spawn(fn ->
@@ -908,6 +1012,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderBridgeTest do
                 :continue -> {:managed, parent, 2_000}
               end
             end,
+            starter,
             fn -> ProviderBridge.complete(request, configuration, Model.discard_progress()) end
           )
 
@@ -915,7 +1020,78 @@ defmodule Loopex.LLM.ReqLLM.ProviderBridgeTest do
       end)
 
     assert_receive {:registered, guardian, stop_reference}, 1_000
+    inherit_diagnostic_trace(guardian)
     {caller, guardian, stop_reference}
+  end
+
+  defp inherit_diagnostic_trace(guardian) do
+    case :erlang.trace_info(self(), :tracer) do
+      {:tracer, tracer} when is_pid(tracer) ->
+        1 =
+          :erlang.trace(guardian, true, [
+            :call,
+            :arity,
+            :monotonic_timestamp,
+            :set_on_spawn,
+            {:tracer, tracer}
+          ])
+
+        :ok
+
+      _not_traced ->
+        :ok
+    end
+  end
+
+  defp trace_mailbox_contains?(canary) do
+    {:messages, messages} = Process.info(self(), :messages)
+
+    Enum.any?(messages, fn
+      {:trace, _pid, _event, _payload} = message ->
+        :binary.match(:erlang.term_to_binary(message), canary) != :nomatch
+
+      {:trace_ts, _pid, _event, _payload, _timestamp} = message ->
+        :binary.match(:erlang.term_to_binary(message), canary) != :nomatch
+
+      _other ->
+        false
+    end)
+  end
+
+  defp drain_trace_mailbox do
+    receive do
+      {:trace, _pid, _event, _payload} -> drain_trace_mailbox()
+      {:trace_ts, _pid, _event, _payload, _timestamp} -> drain_trace_mailbox()
+    after
+      0 -> :ok
+    end
+  end
+
+  defp install_adversarial_custody(credential) do
+    direct = Process.get(:provider_bridge_direct_credentials)
+    incarnation = :crypto.strong_rand_bytes(16)
+
+    response =
+      if is_nil(credential), do: {:error, :missing}, else: {:ok, %{credential: credential}}
+
+    custody_pid = spawn(fn -> adversarial_custody_loop(incarnation, response) end)
+    custody = %CustodyRef{pid: custody_pid, incarnation: incarnation}
+
+    assert :ok =
+             CredentialRegistry.put(direct.credential_registry, direct.credential_token, custody)
+
+    custody_pid
+  end
+
+  defp adversarial_custody_loop(incarnation, response) do
+    receive do
+      {:"$gen_call", {caller, tag}, {:resolve, ^incarnation}} ->
+        send(caller, {tag, response})
+        adversarial_custody_loop(incarnation, response)
+
+      _other ->
+        adversarial_custody_loop(incarnation, response)
+    end
   end
 
   # Concept: a spawned writer is not yet a blocked writer.
@@ -1084,13 +1260,19 @@ defmodule Loopex.LLM.ReqLLM.ProviderBridgeTest do
 
     {:ok, digest} = ProviderConfiguration.file_digest(script)
 
-    %{
-      worker_path: script,
-      interpreter_path: System.find_executable("escript"),
-      worker_sha256: digest,
-      build_manifest_sha256: String.duplicate("d", 64),
-      cleanup_grace_ms: 2_000
-    }
+    direct_credentials = Process.get(:provider_bridge_direct_credentials)
+    true = is_map(direct_credentials)
+
+    Map.merge(
+      %{
+        worker_path: script,
+        interpreter_path: System.find_executable("escript"),
+        worker_sha256: digest,
+        build_manifest_sha256: String.duplicate("d", 64),
+        cleanup_grace_ms: 2_000
+      },
+      direct_credentials
+    )
   end
 
   defp child_pid(root), do: root |> Path.join("pid") |> File.read!() |> String.to_integer()

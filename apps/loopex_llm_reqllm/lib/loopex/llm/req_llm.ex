@@ -9,9 +9,10 @@ defmodule Loopex.LLM.ReqLLM do
   application group leaders, or a shared ReqLLM supervisor.
 
   Hosts supply the trusted interpreter, worker artifact, and matching digests
-  explicitly. Missing configuration refuses before dispatch. The sole credential
-  source remains `LOOPEX_PROVIDER_API_KEY`; the launcher excludes it from the
-  first image, and a short-lived host sender reads it only after child readiness.
+  explicitly. Missing configuration refuses before dispatch. A host supplies an
+  opaque credential token and routing-registry handle; a short-lived sender
+  resolves them only after child readiness and writes the result to the private
+  channel. The adapter call path never reads a credential from the environment.
 
   A complete reply crosses as bounded plain data. Partial streams, lost replies,
   channel failures after possible request delivery, and unproved cleanup never
@@ -44,6 +45,7 @@ defmodule Loopex.LLM.ReqLLM do
   @behaviour Loopex.Model
 
   alias Loopex.LLM.ReqLLM.{ProviderBridge, ProviderConfiguration}
+  alias Loopex.LLM.ReqLLM.TraceCapability.Direct
   alias Loopex.Model
 
   @credential_variable "LOOPEX_PROVIDER_API_KEY"
@@ -138,13 +140,13 @@ defmodule Loopex.LLM.ReqLLM do
   @doc """
   ## Concept
 
-  The environment variable this adapter reads the provider credential from, and
-  the only one it will read.
+  The environment variable reference hosts consume when composing provider
+  credential custody.
 
   ## Technical depth
 
-  Exposed so the real-provider lane can name it in its own failure message
-  without restating the string and drifting from the value actually read.
+  Exposed so hosts and the real-provider lane can name the operator input
+  without restating the string. Adapter invocation code never reads it.
   """
   @spec credential_variable() :: String.t()
   def credential_variable, do: @credential_variable
@@ -214,19 +216,28 @@ defmodule Loopex.LLM.ReqLLM do
   ## Technical depth
 
   Standalone callers supply the same launch options as the Model callback and
-  an explicit cleanup period. The request uses a 64-token output allowance and
-  a 60-second deadline. A managed runtime instead supplies its own committed
-  request, deadline, and cleanup period through `complete/3`.
+  an explicit cleanup period, opaque credential token and routing-registry
+  handle. This helper adds the private no-runtime trace capability; callers
+  cannot select a runtime-bound capability here. The request uses a 64-token
+  output allowance and a 60-second deadline. A managed runtime instead supplies
+  its own committed request, deadline, and cleanup period through `complete/3`.
   """
   @spec complete_prompt(String.t(), String.t(), keyword()) ::
           {:ok, reply()} | {:error, {:not_dispatched | :dispatched_or_unknown, String.t()}}
   def complete_prompt(model_spec, prompt, options)
       when is_binary(model_spec) and is_binary(prompt) and is_list(options) do
-    case Model.request(model_spec, [%{"role" => "user", "content" => prompt}],
-           sampling: %{"max_tokens" => @max_tokens},
-           deadline: System.system_time(:millisecond) + 60_000
-         ) do
-      {:ok, request} -> complete(request, options, Model.discard_progress())
+    with false <- Keyword.has_key?(options, :tracing_capability),
+         {:ok, request} <-
+           Model.request(model_spec, [%{"role" => "user", "content" => prompt}],
+             sampling: %{"max_tokens" => @max_tokens},
+             deadline: System.system_time(:millisecond) + 60_000
+           ) do
+      complete(
+        request,
+        Keyword.put(options, :tracing_capability, Direct.new()),
+        Model.discard_progress()
+      )
+    else
       _refused -> {:error, {:not_dispatched, @call_failed}}
     end
   end
