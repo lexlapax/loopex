@@ -2,7 +2,14 @@ defmodule LoopexDaemon.ConnectionRegistryTest do
   use ExUnit.Case, async: true
   @moduletag capture_log: true
 
-  alias LoopexDaemon.{ConnectionRegistry, ListenerSocket, SocketConnection}
+  alias LoopexDaemon.{
+    ConnectionRegistry,
+    ListenerSocket,
+    SocketConnection,
+    SuccessionCapacity,
+    WireRecords
+  }
+
   alias LoopexProtocol.{Frame, Session.V2}
 
   defmodule ImmediateExitConnection do
@@ -83,6 +90,59 @@ defmodule LoopexDaemon.ConnectionRegistryTest do
               Keyword.fetch!(options, :registry),
               Keyword.fetch!(options, :connection_incarnation),
               frame_ref
+            )
+
+          send(caller, {:registry_result, reference, result})
+          loop(options, token)
+
+        {:registry_call, caller, reference, :reserve_succession} ->
+          result =
+            ConnectionRegistry.reserve_succession(
+              Keyword.fetch!(options, :registry),
+              Keyword.fetch!(options, :connection_incarnation)
+            )
+
+          send(caller, {:registry_result, reference, result})
+          loop(options, token)
+
+        {:registry_call, caller, reference, :release_succession} ->
+          result =
+            ConnectionRegistry.release_succession(
+              Keyword.fetch!(options, :registry),
+              Keyword.fetch!(options, :connection_incarnation)
+            )
+
+          send(caller, {:registry_result, reference, result})
+          loop(options, token)
+
+        {:registry_call, caller, reference, {:enqueue_succession_notice, bytes}} ->
+          result =
+            ConnectionRegistry.enqueue_succession_notice(
+              Keyword.fetch!(options, :registry),
+              Keyword.fetch!(options, :connection_incarnation),
+              bytes
+            )
+
+          send(caller, {:registry_result, reference, result})
+          loop(options, token)
+
+        {:registry_call, caller, reference, {:enqueue_succession_reply, bytes, mode}} ->
+          result =
+            ConnectionRegistry.enqueue_succession_reply(
+              Keyword.fetch!(options, :registry),
+              Keyword.fetch!(options, :connection_incarnation),
+              bytes,
+              mode
+            )
+
+          send(caller, {:registry_result, reference, result})
+          loop(options, token)
+
+        {:registry_call, caller, reference, :finish_succession} ->
+          result =
+            ConnectionRegistry.finish_succession(
+              Keyword.fetch!(options, :registry),
+              Keyword.fetch!(options, :connection_incarnation)
             )
 
           send(caller, {:registry_result, reference, result})
@@ -205,12 +265,168 @@ defmodule LoopexDaemon.ConnectionRegistryTest do
         output_bytes: 6,
         output_commitment: 6,
         output_commitment_limit: 10,
+        succession_reservations: 0,
         limit: 512
       }
     end)
 
     Process.exit(first.pid, :kill)
     eventually(fn -> ConnectionRegistry.status(registry).output_commitment == 0 end)
+  end
+
+  test "succession reserve is owner authenticated and aggregate charged through serial replies" do
+    registry =
+      start_registry(5_000,
+        connection_module: ManualConnection,
+        output_buffer_bytes: 100_000,
+        aggregate_output_bytes: 170_000
+      )
+
+    first = start_manual_connection(registry)
+    second = start_manual_connection(registry)
+    assert :ok = manual_registry_call(first.pid, :promote)
+    assert :ok = manual_registry_call(first.pid, :initialize_complete)
+    assert :ok = manual_registry_call(second.pid, :promote)
+    assert :ok = manual_registry_call(second.pid, :initialize_complete)
+
+    assert {:error, :reservation_unavailable} =
+             ConnectionRegistry.reserve_succession(registry, first.incarnation)
+
+    assert :ok = manual_registry_call(first.pid, :reserve_succession)
+
+    assert %{
+             output_bytes: 0,
+             output_commitment: 88_091,
+             succession_reservations: 1
+           } = ConnectionRegistry.status(registry)
+
+    assert {:error, :capacity_exceeded} =
+             manual_registry_call(second.pid, :reserve_succession)
+
+    assert Process.alive?(second.pid)
+    assert :ok = manual_registry_call(first.pid, :release_succession)
+    assert :ok = manual_registry_call(second.pid, :reserve_succession)
+
+    {:ok, notice} =
+      Frame.encode(
+        WireRecords.detached(
+          :binary.copy(<<255>>, 256),
+          18_446_744_073_709_551_615
+        )
+      )
+
+    notice = IO.iodata_to_binary(notice)
+
+    assert :ok =
+             manual_registry_call(second.pid, {:enqueue_succession_notice, notice})
+
+    assert {:ok, notice_ref, ^notice} = manual_registry_call(second.pid, :claim_output)
+    assert :ok = manual_registry_call(second.pid, {:output_emitted, notice_ref})
+
+    {reply_id, reply_record} =
+      SuccessionCapacity.reply_records()
+      |> Enum.max_by(fn {_id, record} ->
+        {:ok, encoded} = Frame.encode(record)
+        IO.iodata_length(encoded)
+      end)
+
+    assert reply_id == "session.respond_interaction/refused/invalid_interaction_answer"
+    {:ok, reply} = Frame.encode(reply_record)
+    reply = IO.iodata_to_binary(reply)
+
+    assert :ok =
+             manual_registry_call(
+               second.pid,
+               {:enqueue_succession_reply, reply, :after_notice}
+             )
+
+    assert {:ok, reply_ref, ^reply} = manual_registry_call(second.pid, :claim_output)
+    assert :ok = manual_registry_call(second.pid, {:output_emitted, reply_ref})
+
+    {:ok, short_reply} =
+      Frame.encode(WireRecords.succession_error(String.duplicate("~", 64), "control_not_held"))
+
+    short_reply = IO.iodata_to_binary(short_reply)
+
+    assert :ok =
+             manual_registry_call(
+               second.pid,
+               {:enqueue_succession_reply, short_reply, :after_notice}
+             )
+
+    assert {:ok, short_ref, ^short_reply} = manual_registry_call(second.pid, :claim_output)
+    assert :ok = manual_registry_call(second.pid, {:output_emitted, short_ref})
+    assert :ok = manual_registry_call(second.pid, :finish_succession)
+
+    assert %{
+             output_bytes: 0,
+             output_commitment: 0,
+             succession_reservations: 0
+           } = ConnectionRegistry.status(registry)
+  end
+
+  test "pending attachment conflict consumes the reply slot without a notice" do
+    registry =
+      start_registry(5_000,
+        connection_module: ManualConnection,
+        output_buffer_bytes: 100_000,
+        aggregate_output_bytes: 100_000
+      )
+
+    connection = start_manual_connection(registry)
+    assert :ok = manual_registry_call(connection.pid, :promote)
+    assert :ok = manual_registry_call(connection.pid, :initialize_complete)
+    assert :ok = manual_registry_call(connection.pid, :reserve_succession)
+
+    {:ok, reply} =
+      Frame.encode(WireRecords.succession_error(String.duplicate("~", 64), "attachment_conflict"))
+
+    reply = IO.iodata_to_binary(reply)
+
+    assert :ok =
+             manual_registry_call(
+               connection.pid,
+               {:enqueue_succession_reply, reply, :without_notice}
+             )
+
+    assert %{output_commitment: 87_595, succession_reservations: 1} =
+             ConnectionRegistry.status(registry)
+
+    assert {:ok, reply_ref, ^reply} = manual_registry_call(connection.pid, :claim_output)
+    assert :ok = manual_registry_call(connection.pid, {:output_emitted, reply_ref})
+    assert :ok = manual_registry_call(connection.pid, :finish_succession)
+
+    assert %{output_commitment: 0, succession_reservations: 0} =
+             ConnectionRegistry.status(registry)
+  end
+
+  test "a locally full connection refuses only the reserve and stays live" do
+    registry =
+      start_registry(5_000,
+        connection_module: ManualConnection,
+        output_buffer_bytes: 88_100,
+        aggregate_output_bytes: 100_000
+      )
+
+    connection = start_manual_connection(registry)
+    assert :ok = manual_registry_call(connection.pid, :promote)
+    assert :ok = manual_registry_call(connection.pid, :initialize_complete)
+    assert :ok = manual_registry_call(connection.pid, {:enqueue_output, "1234567890"})
+
+    assert {:error, :capacity_exceeded} =
+             manual_registry_call(connection.pid, :reserve_succession)
+
+    assert Process.alive?(connection.pid)
+
+    assert %{output_bytes: 10, output_commitment: 10, succession_reservations: 0} =
+             ConnectionRegistry.status(registry)
+
+    assert {:ok, frame_ref, "1234567890"} =
+             manual_registry_call(connection.pid, :claim_output)
+
+    assert :ok = manual_registry_call(connection.pid, {:output_emitted, frame_ref})
+    assert :ok = manual_registry_call(connection.pid, :reserve_succession)
+    assert :ok = manual_registry_call(connection.pid, :release_succession)
   end
 
   test "the transport cut freezes and reaps one exact uninitialized population" do

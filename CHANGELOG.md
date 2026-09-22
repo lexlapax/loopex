@@ -71,6 +71,9 @@ one serially reusable reply slot inside the same four MiB connection ceiling.
 The reserve is derived from the maximal detached record and all 37 maximal
 legal predecessor replies: 496 notice bytes plus an 87,595-byte reply slot,
 for 88,091 bytes total. Literal lengths and frame digests pin every candidate.
+The connection registry now owns the exact reserve, charges it to the daemon
+aggregate before attachment work, converts it through notice and serial reply
+frames, and releases it only at a valid terminal phase or connection reap.
 
 Add the daemon transport-closing barrier. Its owner-authenticated first phase
 freezes connection admission and the exact provisional and uninitialized

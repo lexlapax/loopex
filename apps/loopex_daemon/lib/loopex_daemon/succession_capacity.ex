@@ -83,6 +83,13 @@ defmodule LoopexDaemon.SuccessionCapacity do
         }
 
   @doc false
+  @spec limits() :: %{notice_bytes: pos_integer(), reply_bytes: pos_integer()}
+  def limits do
+    measurement = measure()
+    %{notice_bytes: measurement.notice_bytes, reply_bytes: measurement.reply_bytes}
+  end
+
+  @doc false
   @spec measure() :: measurement()
   def measure do
     notice =

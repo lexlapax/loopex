@@ -221,6 +221,11 @@ defmodule LoopexDaemon.OutputBuffer do
   @spec empty?(t()) :: boolean()
   def empty?(%__MODULE__{} = buffer), do: buffer.bytes == 0
 
+  @doc false
+  @spec succession?(t()) :: boolean()
+  def succession?(%__MODULE__{succession: :none}), do: false
+  def succession?(%__MODULE__{}), do: true
+
   defp ordinary_admissible(%__MODULE__{succession: :none} = buffer, size) do
     if buffer.bytes + size <= buffer.max_bytes,
       do: :ok,

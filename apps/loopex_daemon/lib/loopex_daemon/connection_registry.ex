@@ -20,16 +20,19 @@ defmodule LoopexDaemon.ConnectionRegistry do
   when every marked row is gone. It also owns each connection's bounded encoded
   output queue and the daemon-wide commitment count. A frame stays charged
   while the socket process advances a nonblocking send and is released only by
-  that exact process's complete-emission acknowledgement. Both barrier entries return OTP asynchronous
-  request identifiers so the daemon owner can classify other component exits
-  while it waits under one absolute deadline. Private pids, references and
-  tokens are redacted from formatted process status.
+  that exact process's complete-emission acknowledgement. For an initialized
+  connection, the same authenticated row owns the derived attachment-succession
+  reserve and its notice, serial-reply and terminal phases; unused reserve and
+  encoded bytes are one aggregate commitment throughout. Both barrier entries
+  return OTP asynchronous request identifiers so the daemon owner can classify
+  other component exits while it waits under one absolute deadline. Private
+  pids, references and tokens are redacted from formatted process status.
   """
 
   use GenServer
   require Logger
 
-  alias LoopexDaemon.{OutputBuffer, SocketConnection}
+  alias LoopexDaemon.{OutputBuffer, SocketConnection, SuccessionCapacity}
   alias LoopexProtocol.Session.V2
 
   @connection_limit 512
@@ -120,6 +123,47 @@ defmodule LoopexDaemon.ConnectionRegistry do
   end
 
   @doc false
+  @spec reserve_succession(pid(), binary()) ::
+          :ok | {:error, :capacity_exceeded | :reservation_unavailable}
+  def reserve_succession(registry, connection_incarnation) do
+    GenServer.call(registry, {:reserve_succession, connection_incarnation})
+  end
+
+  @doc false
+  @spec release_succession(pid(), binary()) :: :ok | {:error, :succession_unavailable}
+  def release_succession(registry, connection_incarnation) do
+    GenServer.call(registry, {:release_succession, connection_incarnation})
+  end
+
+  @doc false
+  @spec enqueue_succession_notice(pid(), binary(), iodata()) ::
+          :ok | {:error, :succession_unavailable}
+  def enqueue_succession_notice(registry, connection_incarnation, encoded) do
+    GenServer.call(registry, {:enqueue_succession_notice, connection_incarnation, encoded})
+  end
+
+  @doc false
+  @spec enqueue_succession_reply(pid(), binary(), iodata(), :after_notice | :without_notice) ::
+          :ok | {:error, :succession_unavailable}
+  def enqueue_succession_reply(
+        registry,
+        connection_incarnation,
+        encoded,
+        mode \\ :after_notice
+      ) do
+    GenServer.call(
+      registry,
+      {:enqueue_succession_reply, connection_incarnation, encoded, mode}
+    )
+  end
+
+  @doc false
+  @spec finish_succession(pid(), binary()) :: :ok | {:error, :succession_unavailable}
+  def finish_succession(registry, connection_incarnation) do
+    GenServer.call(registry, {:finish_succession, connection_incarnation})
+  end
+
+  @doc false
   @spec abort_provisional(pid(), binary(), :peer_credential_unverified | :handoff_failed) ::
           :ok | {:error, :abort_unavailable}
   def abort_provisional(registry, rollback_token, reason) do
@@ -159,6 +203,7 @@ defmodule LoopexDaemon.ConnectionRegistry do
           output_bytes: non_neg_integer(),
           output_commitment: non_neg_integer(),
           output_commitment_limit: pos_integer(),
+          succession_reservations: non_neg_integer(),
           limit: 512
         }
   def status(registry), do: GenServer.call(registry, :status)
@@ -181,6 +226,8 @@ defmodule LoopexDaemon.ConnectionRegistry do
 
     aggregate_output_bytes =
       Keyword.get(options, :aggregate_output_bytes, @aggregate_output_bytes)
+
+    succession_capacity = SuccessionCapacity.limits()
 
     deadline_valid =
       is_integer(deadline_ms) and deadline_ms > 0 and
@@ -209,6 +256,8 @@ defmodule LoopexDaemon.ConnectionRegistry do
            initialize_deadline_ms: deadline_ms,
            output_buffer_bytes: output_buffer_bytes,
            aggregate_output_bytes: aggregate_output_bytes,
+           succession_notice_bytes: succession_capacity.notice_bytes,
+           succession_reply_bytes: succession_capacity.reply_bytes,
            output_commitment: 0,
            rows: %{},
            child_monitors: %{},
@@ -475,6 +524,95 @@ defmodule LoopexDaemon.ConnectionRegistry do
     end
   end
 
+  def handle_call({:reserve_succession, incarnation}, {caller, _tag}, state) do
+    case initialized_connection_row(state, caller, incarnation) do
+      {token, row} ->
+        before = OutputBuffer.commitment(row.output)
+
+        case OutputBuffer.reserve_succession(
+               row.output,
+               state.succession_notice_bytes,
+               state.succession_reply_bytes
+             ) do
+          {:ok, output} ->
+            after_reserve = OutputBuffer.commitment(output)
+            commitment = state.output_commitment + after_reserve - before
+
+            if commitment <= state.aggregate_output_bytes do
+              Logger.debug("loopex daemon succession output reserved")
+              {:reply, :ok, put_output(state, token, row, output, commitment)}
+            else
+              Logger.debug("loopex daemon succession aggregate capacity reached")
+              {:reply, {:error, :capacity_exceeded}, state}
+            end
+
+          {:error, :capacity_exceeded} ->
+            Logger.debug("loopex daemon succession connection capacity reached")
+            {:reply, {:error, :capacity_exceeded}, state}
+
+          {:error, _reason} ->
+            {:reply, {:error, :reservation_unavailable}, state}
+        end
+
+      _other ->
+        {:reply, {:error, :reservation_unavailable}, state}
+    end
+  end
+
+  def handle_call({:release_succession, incarnation}, {caller, _tag}, state) do
+    update_succession(
+      state,
+      caller,
+      incarnation,
+      &OutputBuffer.release_succession/1,
+      "loopex daemon succession output released"
+    )
+  end
+
+  def handle_call(
+        {:enqueue_succession_notice, incarnation, encoded},
+        {caller, _tag},
+        state
+      ) do
+    enqueue_succession(
+      state,
+      caller,
+      incarnation,
+      &OutputBuffer.enqueue_succession_notice(&1, encoded),
+      "loopex daemon succession notice queued"
+    )
+  end
+
+  def handle_call(
+        {:enqueue_succession_reply, incarnation, encoded, mode},
+        {caller, _tag},
+        state
+      )
+      when mode in [:after_notice, :without_notice] do
+    options = if mode == :without_notice, do: [without_notice: true], else: []
+
+    enqueue_succession(
+      state,
+      caller,
+      incarnation,
+      &OutputBuffer.enqueue_succession_reply(&1, encoded, options),
+      "loopex daemon succession reply queued"
+    )
+  end
+
+  def handle_call({:enqueue_succession_reply, _incarnation, _encoded, _mode}, _from, state),
+    do: {:reply, {:error, :succession_unavailable}, state}
+
+  def handle_call({:finish_succession, incarnation}, {caller, _tag}, state) do
+    update_succession(
+      state,
+      caller,
+      incarnation,
+      &OutputBuffer.finish_succession/1,
+      "loopex daemon succession output complete"
+    )
+  end
+
   def handle_call(
         {:abort_provisional, token, reason},
         {caller, _tag},
@@ -640,6 +778,8 @@ defmodule LoopexDaemon.ConnectionRegistry do
          end),
        output_commitment: state.output_commitment,
        output_commitment_limit: state.aggregate_output_bytes,
+       succession_reservations:
+         Enum.count(state.rows, fn {_token, row} -> OutputBuffer.succession?(row.output) end),
        limit: @connection_limit
      }, state}
   end
@@ -957,6 +1097,63 @@ defmodule LoopexDaemon.ConnectionRegistry do
       if row.connection_pid == connection and row.connection_incarnation == incarnation,
         do: {token, row}
     end)
+  end
+
+  defp initialized_connection_row(state, connection, incarnation) do
+    case connection_row(state, connection, incarnation) do
+      {token, %{phase: :live, initialized: true} = row} -> {token, row}
+      _other -> nil
+    end
+  end
+
+  defp enqueue_succession(state, caller, incarnation, transition, message) do
+    case initialized_connection_row(state, caller, incarnation) do
+      {token, row} ->
+        wake_connection = OutputBuffer.empty?(row.output)
+
+        case transition.(row.output) do
+          {:ok, output} ->
+            state = put_output(state, token, row, output)
+            if wake_connection, do: send(caller, {:output_ready, incarnation})
+            Logger.debug(message)
+            {:reply, :ok, state}
+
+          {:error, _reason} ->
+            Logger.debug("loopex daemon succession output invariant refused")
+            {:reply, {:error, :succession_unavailable}, state}
+        end
+
+      _other ->
+        {:reply, {:error, :succession_unavailable}, state}
+    end
+  end
+
+  defp update_succession(state, caller, incarnation, transition, message) do
+    case initialized_connection_row(state, caller, incarnation) do
+      {token, row} ->
+        case transition.(row.output) do
+          {:ok, output} ->
+            Logger.debug(message)
+            {:reply, :ok, put_output(state, token, row, output)}
+
+          {:error, _reason} ->
+            {:reply, {:error, :succession_unavailable}, state}
+        end
+
+      _other ->
+        {:reply, {:error, :succession_unavailable}, state}
+    end
+  end
+
+  defp put_output(state, token, row, output) do
+    before = OutputBuffer.commitment(row.output)
+    commitment = state.output_commitment + OutputBuffer.commitment(output) - before
+    put_output(state, token, row, output, commitment)
+  end
+
+  defp put_output(state, token, row, output, commitment) do
+    row = %{row | output: output}
+    %{put_in(state, [:rows, token], row) | output_commitment: commitment}
   end
 
   defp update_row(state, token, function) do
