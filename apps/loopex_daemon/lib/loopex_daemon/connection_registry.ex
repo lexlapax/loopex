@@ -14,8 +14,13 @@ defmodule LoopexDaemon.ConnectionRegistry do
   before unlinking it, and retains `listener_owned`, `transferring`, or
   `connection_owned` until cleanup has exact evidence for the real owner. The
   accept-time initialization deadline is calculated once and its timer only
-  prompts a monotonic-clock check. Private pids, references and tokens are
-  redacted from formatted process status.
+  prompts a monotonic-clock check. Its owner-authenticated transport cut first
+  freezes a fixed provisional and uninitialized population, then closes that
+  population only after listener reap and acknowledges the exact cut reference
+  when every marked row is gone. Both barrier entries return OTP asynchronous
+  request identifiers so the daemon owner can classify other component exits
+  while it waits under one absolute deadline. Private pids, references and
+  tokens are redacted from formatted process status.
   """
 
   use GenServer
@@ -32,6 +37,9 @@ defmodule LoopexDaemon.ConnectionRegistry do
           initialize_deadline: integer()
         }
 
+  @typedoc false
+  @type request_id :: term()
+
   @doc false
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(options), do: GenServer.start_link(__MODULE__, options)
@@ -39,7 +47,11 @@ defmodule LoopexDaemon.ConnectionRegistry do
   @doc false
   @spec reserve(pid(), pid(), reference(), integer()) ::
           {:ok, reservation()}
-          | {:error, :capacity_exceeded | :initialize_deadline_expired | :reservation_unavailable}
+          | {:error,
+             :capacity_exceeded
+             | :initialize_deadline_expired
+             | :reservation_unavailable
+             | :transport_closing}
   def reserve(registry, listener, listener_incarnation, accepted_at) do
     GenServer.call(
       registry,
@@ -102,11 +114,23 @@ defmodule LoopexDaemon.ConnectionRegistry do
   end
 
   @doc false
+  @spec transport_closing(pid(), reference()) :: request_id()
+  def transport_closing(registry, cut_ref),
+    do: :gen_server.send_request(registry, {:transport_closing, cut_ref})
+
+  @doc false
+  @spec reap_uninitialized(pid(), reference()) :: request_id()
+  def reap_uninitialized(registry, cut_ref),
+    do: :gen_server.send_request(registry, {:reap_uninitialized, cut_ref})
+
+  @doc false
   @spec status(pid()) :: %{
           occupied: non_neg_integer(),
           provisional: non_neg_integer(),
           live: non_neg_integer(),
           closing: non_neg_integer(),
+          transport: :serving | :closing,
+          transport_marked: non_neg_integer(),
           limit: 512
         }
   def status(registry), do: GenServer.call(registry, :status)
@@ -135,7 +159,12 @@ defmodule LoopexDaemon.ConnectionRegistry do
          initialize_deadline_ms: deadline_ms,
          rows: %{},
          child_monitors: %{},
-         listeners: %{}
+         listeners: %{},
+         transport: :serving,
+         transport_cut_ref: nil,
+         transport_marked: MapSet.new(),
+         transport_sweep_started: false,
+         transport_sweep_acknowledged: false
        }}
     else
       {:stop, :invalid_initialize_deadline}
@@ -152,6 +181,9 @@ defmodule LoopexDaemon.ConnectionRegistry do
     deadline = accepted_at + state.initialize_deadline_ms
 
     cond do
+      state.transport != :serving ->
+        {:reply, {:error, :transport_closing}, state}
+
       map_size(state.rows) >= @connection_limit ->
         {:reply, {:error, :capacity_exceeded}, state}
 
@@ -205,7 +237,8 @@ defmodule LoopexDaemon.ConnectionRegistry do
 
   def handle_call({:start_connection, token}, {caller, _tag}, state) do
     case Map.fetch(state.rows, token) do
-      {:ok, %{phase: :handing_off, connection_pid: nil, listener: ^caller} = row} ->
+      {:ok, %{phase: :handing_off, connection_pid: nil, listener: ^caller} = row}
+      when state.transport == :serving ->
         if before_deadline?(row) do
           start_waiting_connection(state, row)
         else
@@ -226,7 +259,8 @@ defmodule LoopexDaemon.ConnectionRegistry do
          listener: ^caller,
          connection_incarnation: ^incarnation,
          transfer_disposition: :listener_owned
-       } = row} ->
+       } = row}
+      when state.transport == :serving ->
         if before_deadline?(row) do
           row = %{row | transfer_disposition: :transferring}
           {:reply, :ok, put_in(state, [:rows, token], row)}
@@ -263,7 +297,8 @@ defmodule LoopexDaemon.ConnectionRegistry do
          transfer_disposition: :connection_owned,
          connection_pid: ^caller,
          connection_incarnation: ^incarnation
-       } = row} ->
+       } = row}
+      when state.transport == :serving ->
         if before_deadline?(row) do
           row = %{row | phase: :live}
           state = put_in(state, [:rows, token], row)
@@ -275,7 +310,10 @@ defmodule LoopexDaemon.ConnectionRegistry do
         end
 
       _other ->
-        {:reply, {:error, :promotion_unavailable}, state}
+        reason =
+          if state.transport == :serving, do: :promotion_unavailable, else: :transport_closing
+
+        {:reply, {:error, reason}, state}
     end
   end
 
@@ -287,7 +325,8 @@ defmodule LoopexDaemon.ConnectionRegistry do
          initialized: false,
          connection_pid: ^caller,
          connection_incarnation: ^incarnation
-       } = row} ->
+       } = row}
+      when state.transport == :serving ->
         if before_deadline?(row) do
           cancel_timer(row.timer, token)
           row = %{row | initialized: true, timer: nil}
@@ -298,7 +337,10 @@ defmodule LoopexDaemon.ConnectionRegistry do
         end
 
       _other ->
-        {:reply, {:error, :initialize_unavailable}, state}
+        reason =
+          if state.transport == :serving, do: :initialize_unavailable, else: :transport_closing
+
+        {:reply, {:error, reason}, state}
     end
   end
 
@@ -363,6 +405,93 @@ defmodule LoopexDaemon.ConnectionRegistry do
     end
   end
 
+  def handle_call(
+        {:transport_closing, cut_ref},
+        {owner, _tag},
+        %{owner: owner, transport: :serving} = state
+      )
+      when is_reference(cut_ref) do
+    marked =
+      state.rows
+      |> Enum.filter(fn {_token, row} -> not row.initialized end)
+      |> Enum.map(&elem(&1, 0))
+      |> MapSet.new()
+
+    state = %{
+      state
+      | transport: :closing,
+        transport_cut_ref: cut_ref,
+        transport_marked: marked
+    }
+
+    Logger.debug("loopex daemon connection transport gate closed")
+    {:reply, {:ok, cut_ref}, state}
+  end
+
+  def handle_call(
+        {:transport_closing, cut_ref},
+        {owner, _tag},
+        %{owner: owner, transport: :closing, transport_cut_ref: cut_ref} = state
+      ),
+      do: {:reply, {:ok, cut_ref}, state}
+
+  def handle_call({:transport_closing, _cut_ref}, {owner, _tag}, %{owner: owner} = state),
+    do: {:reply, {:error, :transport_cut_mismatch}, state}
+
+  def handle_call({:transport_closing, _cut_ref}, _from, state),
+    do: {:reply, {:error, :owner_mismatch}, state}
+
+  def handle_call(
+        {:reap_uninitialized, cut_ref},
+        {owner, _tag},
+        %{
+          owner: owner,
+          transport: :closing,
+          transport_cut_ref: cut_ref,
+          transport_sweep_started: false
+        } = state
+      ) do
+    state = %{state | transport_sweep_started: true}
+    Logger.debug("loopex daemon uninitialized connection sweep start")
+
+    state =
+      Enum.reduce(state.transport_marked, state, fn token, acc ->
+        case Map.fetch(acc.rows, token) do
+          {:ok, %{phase: phase}} when phase in [:handing_off, :aborting] ->
+            request_abort(acc, token, :transport_closing)
+
+          {:ok, %{phase: phase}} when phase in [:live, :closing] ->
+            close_live(acc, token, :transport_closing)
+
+          :error ->
+            unmark_transport_row(acc, token)
+        end
+      end)
+      |> maybe_acknowledge_transport_sweep()
+
+    {:reply, :ok, state}
+  end
+
+  def handle_call(
+        {:reap_uninitialized, cut_ref},
+        {owner, _tag},
+        %{owner: owner, transport_cut_ref: cut_ref, transport_sweep_started: true} = state
+      ),
+      do: {:reply, {:error, :transport_sweep_already_started}, state}
+
+  def handle_call(
+        {:reap_uninitialized, _cut_ref},
+        {owner, _tag},
+        %{owner: owner, transport: :serving} = state
+      ),
+      do: {:reply, {:error, :transport_cut_unavailable}, state}
+
+  def handle_call({:reap_uninitialized, _cut_ref}, {owner, _tag}, %{owner: owner} = state),
+    do: {:reply, {:error, :transport_cut_mismatch}, state}
+
+  def handle_call({:reap_uninitialized, _cut_ref}, _from, state),
+    do: {:reply, {:error, :owner_mismatch}, state}
+
   def handle_call(:status, _from, state) do
     counts = Enum.frequencies_by(state.rows, fn {_token, row} -> row.phase end)
 
@@ -372,6 +501,8 @@ defmodule LoopexDaemon.ConnectionRegistry do
        provisional: Map.get(counts, :handing_off, 0) + Map.get(counts, :aborting, 0),
        live: Map.get(counts, :live, 0),
        closing: Map.get(counts, :closing, 0),
+       transport: state.transport,
+       transport_marked: MapSet.size(state.transport_marked),
        limit: @connection_limit
      }, state}
   end
@@ -629,7 +760,7 @@ defmodule LoopexDaemon.ConnectionRegistry do
 
         state = %{state | rows: rows, child_monitors: child_monitors}
         state = release_listener_token(state, row.listener_incarnation, token)
-        state
+        state |> unmark_transport_row(token) |> maybe_acknowledge_transport_sweep()
     end
   end
 
@@ -712,4 +843,30 @@ defmodule LoopexDaemon.ConnectionRegistry do
       0 -> :ok
     end
   end
+
+  defp unmark_transport_row(state, token) do
+    %{state | transport_marked: MapSet.delete(state.transport_marked, token)}
+  end
+
+  defp maybe_acknowledge_transport_sweep(
+         %{
+           transport_sweep_started: true,
+           transport_sweep_acknowledged: false,
+           transport_marked: marked
+         } = state
+       ) do
+    if MapSet.size(marked) == 0 do
+      send(
+        state.owner,
+        {:transport_uninitialized_empty, self(), state.transport_cut_ref}
+      )
+
+      Logger.debug("loopex daemon uninitialized connection sweep complete")
+      %{state | transport_sweep_acknowledged: true}
+    else
+      state
+    end
+  end
+
+  defp maybe_acknowledge_transport_sweep(state), do: state
 end

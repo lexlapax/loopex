@@ -189,6 +189,58 @@ defmodule LoopexDaemon.ListenerTest do
     assert :ok = :socket.close(client)
   end
 
+  test "the transport cut closes real uninitialized sockets and keeps initialized sockets" do
+    fixture = start_fixture(initialize_deadline_ms: 1_000)
+    assert :ok = Listener.begin_accept(fixture.listener, fixture.startup_ref)
+
+    initialized_client = connect(fixture.path)
+    assert :ok = send_frame(initialized_client, initialize())
+    assert [%{"type" => "initialized"}] = receive_records(initialized_client, 1)
+
+    uninitialized_client = connect(fixture.path)
+    eventually(fn -> ConnectionRegistry.status(fixture.registry).occupied == 2 end)
+
+    cut_ref = make_ref()
+
+    assert {:reply, {:ok, ^cut_ref}} =
+             fixture.registry
+             |> ConnectionRegistry.transport_closing(cut_ref)
+             |> :gen_server.receive_response(500)
+
+    late_client = connect(fixture.path)
+    assert {:error, :closed} = :socket.recv(late_client, 1, 500)
+
+    Process.unlink(fixture.listener)
+    listener_monitor = Process.monitor(fixture.listener)
+    Process.exit(fixture.listener, :kill)
+    assert_receive {:DOWN, ^listener_monitor, :process, _listener, :killed}, 500
+
+    assert {:reply, :ok} =
+             fixture.registry
+             |> ConnectionRegistry.reap_uninitialized(cut_ref)
+             |> :gen_server.receive_response(500)
+
+    assert_receive {:transport_uninitialized_empty, registry, ^cut_ref}, 500
+    assert registry == fixture.registry
+    assert {:error, :closed} = :socket.recv(uninitialized_client, 1, 500)
+
+    assert :ok =
+             send_frame(initialized_client, %{
+               "method" => "session.list",
+               "request_id" => "after-cut"
+             })
+
+    assert [%{"code" => "unsupported_method", "request_id" => "after-cut"}] =
+             receive_records(initialized_client, 1)
+
+    assert %{occupied: 1, live: 1, transport_marked: 0} =
+             ConnectionRegistry.status(fixture.registry)
+
+    assert :ok = :socket.close(initialized_client)
+    assert :ok = :socket.close(uninitialized_client)
+    assert :ok = :socket.close(late_client)
+  end
+
   defp start_fixture(options \\ []) do
     {initialize_deadline_ms, listener_options} =
       Keyword.pop(options, :initialize_deadline_ms, V2.limits()["initialize_deadline_ms"])

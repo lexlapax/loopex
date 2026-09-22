@@ -19,6 +19,52 @@ defmodule LoopexDaemon.ConnectionRegistryTest do
     end
   end
 
+  defmodule ManualConnection do
+    def start_link(options) do
+      listener = Keyword.fetch!(options, :listener)
+
+      pid =
+        spawn_link(fn ->
+          send(listener, {:manual_connection_started, self(), options})
+          loop(options, Keyword.fetch!(options, :rollback_token))
+        end)
+
+      {:ok, pid}
+    end
+
+    defp loop(options, token) do
+      receive do
+        {:registry_call, caller, reference, :promote} ->
+          result =
+            ConnectionRegistry.promote(
+              Keyword.fetch!(options, :registry),
+              Keyword.fetch!(options, :rollback_token),
+              Keyword.fetch!(options, :connection_incarnation)
+            )
+
+          send(caller, {:registry_result, reference, result})
+          loop(options, token)
+
+        {:registry_call, caller, reference, :initialize_complete} ->
+          result =
+            ConnectionRegistry.initialize_complete(
+              Keyword.fetch!(options, :registry),
+              Keyword.fetch!(options, :rollback_token),
+              Keyword.fetch!(options, :connection_incarnation)
+            )
+
+          send(caller, {:registry_result, reference, result})
+          loop(options, token)
+
+        {:connection_abort, ^token, _reason} ->
+          :ok
+
+        :stop ->
+          :ok
+      end
+    end
+  end
+
   test "a transferred socket becomes live only after registry promotion" do
     fixture = socket_fixture()
     registry = start_registry(1_000)
@@ -54,6 +100,118 @@ defmodule LoopexDaemon.ConnectionRegistryTest do
     Process.exit(connection, :kill)
     eventually(fn -> ConnectionRegistry.status(registry).occupied == 0 end)
     close_fixture(fixture)
+  end
+
+  test "the transport cut freezes and reaps one exact uninitialized population" do
+    registry = start_registry(5_000, connection_module: ManualConnection)
+
+    initialized = start_manual_connection(registry)
+    assert :ok = manual_registry_call(initialized.pid, :promote)
+    assert :ok = manual_registry_call(initialized.pid, :initialize_complete)
+
+    uninitialized = start_manual_connection(registry)
+    assert :ok = manual_registry_call(uninitialized.pid, :promote)
+
+    pending = start_manual_connection(registry)
+    transferring = start_manual_connection(registry, :transferring)
+
+    assert {:ok, %{rollback_token: listener_owned_token}} =
+             ConnectionRegistry.reserve(registry, self(), make_ref(), now_ms())
+
+    initialized_monitor = Process.monitor(initialized.pid)
+    uninitialized_monitor = Process.monitor(uninitialized.pid)
+    pending_monitor = Process.monitor(pending.pid)
+    transferring_monitor = Process.monitor(transferring.pid)
+    cut_ref = make_ref()
+
+    assert {:error, :owner_mismatch} =
+             Task.async(fn ->
+               registry
+               |> ConnectionRegistry.transport_closing(cut_ref)
+               |> registry_response()
+             end)
+             |> Task.await()
+             |> reply_value()
+
+    assert {:ok, ^cut_ref} =
+             registry |> ConnectionRegistry.transport_closing(cut_ref) |> reply_value()
+
+    assert {:ok, ^cut_ref} =
+             registry |> ConnectionRegistry.transport_closing(cut_ref) |> reply_value()
+
+    assert {:error, :transport_cut_mismatch} =
+             registry |> ConnectionRegistry.transport_closing(make_ref()) |> reply_value()
+
+    assert %{
+             occupied: 5,
+             live: 2,
+             provisional: 3,
+             transport: :closing,
+             transport_marked: 4
+           } = ConnectionRegistry.status(registry)
+
+    assert {:error, :transport_closing} =
+             ConnectionRegistry.reserve(registry, self(), make_ref(), now_ms())
+
+    assert {:error, :transport_closing} = manual_registry_call(pending.pid, :promote)
+
+    assert {:error, :transport_closing} =
+             manual_registry_call(uninitialized.pid, :initialize_complete)
+
+    assert {:error, :transport_cut_mismatch} =
+             registry |> ConnectionRegistry.reap_uninitialized(make_ref()) |> reply_value()
+
+    assert {:error, :owner_mismatch} =
+             Task.async(fn ->
+               registry
+               |> ConnectionRegistry.reap_uninitialized(cut_ref)
+               |> registry_response()
+             end)
+             |> Task.await()
+             |> reply_value()
+
+    assert :ok = registry |> ConnectionRegistry.reap_uninitialized(cut_ref) |> reply_value()
+
+    assert_receive {:close_accepted, ^listener_owned_token}, 500
+    assert :ok = ConnectionRegistry.listener_closed(registry, listener_owned_token)
+    refute_receive {:transport_uninitialized_empty, ^registry, ^cut_ref}, 20
+
+    assert :ok =
+             ConnectionRegistry.transfer_result(
+               registry,
+               transferring.token,
+               transferring.incarnation,
+               :ok
+             )
+
+    assert_receive {:DOWN, ^uninitialized_monitor, :process, uninitialized_pid, :normal}, 500
+    assert uninitialized_pid == uninitialized.pid
+    assert_receive {:DOWN, ^pending_monitor, :process, pending_pid, :normal}, 500
+    assert pending_pid == pending.pid
+
+    assert_receive {:DOWN, ^transferring_monitor, :process, transferring_pid, :normal}, 500
+    assert transferring_pid == transferring.pid
+
+    assert_receive {:transport_uninitialized_empty, ^registry, ^cut_ref}, 500
+    refute_receive {:transport_uninitialized_empty, ^registry, ^cut_ref}, 20
+
+    assert {:error, :transport_sweep_already_started} =
+             registry |> ConnectionRegistry.reap_uninitialized(cut_ref) |> reply_value()
+
+    assert %{
+             occupied: 1,
+             live: 1,
+             provisional: 0,
+             closing: 0,
+             transport: :closing,
+             transport_marked: 0
+           } = ConnectionRegistry.status(registry)
+
+    assert Process.alive?(initialized.pid)
+    Process.exit(initialized.pid, :kill)
+    assert_receive {:DOWN, ^initialized_monitor, :process, initialized_pid, :killed}, 500
+    assert initialized_pid == initialized.pid
+    eventually(fn -> ConnectionRegistry.status(registry).occupied == 0 end)
   end
 
   test "the unchanged accept-time deadline closes an uninitialized promoted connection" do
@@ -381,6 +539,41 @@ defmodule LoopexDaemon.ConnectionRegistryTest do
 
     registry
   end
+
+  defp start_manual_connection(registry, disposition \\ :connection_owned) do
+    listener_incarnation = make_ref()
+
+    assert {:ok, %{rollback_token: token}} =
+             ConnectionRegistry.reserve(registry, self(), listener_incarnation, now_ms())
+
+    assert {:ok, pid, incarnation} = ConnectionRegistry.start_connection(registry, token)
+    assert_receive {:manual_connection_started, ^pid, options}
+    assert Keyword.fetch!(options, :rollback_token) == token
+    assert Keyword.fetch!(options, :connection_incarnation) == incarnation
+    assert :ok = ConnectionRegistry.begin_transfer(registry, token, incarnation)
+
+    if disposition == :connection_owned,
+      do: assert(:ok = ConnectionRegistry.transfer_result(registry, token, incarnation, :ok))
+
+    %{pid: pid, token: token, incarnation: incarnation}
+  end
+
+  defp manual_registry_call(pid, operation) do
+    reference = make_ref()
+    send(pid, {:registry_call, self(), reference, operation})
+    assert_receive {:registry_result, ^reference, result}, 500
+    result
+  end
+
+  defp reply_value({:reply, reply}), do: reply
+
+  defp reply_value(request_id) do
+    assert {:reply, reply} = registry_response(request_id)
+    reply
+  end
+
+  defp registry_response(request_id),
+    do: :gen_server.receive_response(request_id, 500)
 
   defp socket_fixture do
     directory =

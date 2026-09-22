@@ -63,6 +63,12 @@ marks initialization complete only through the registry's unchanged
 accept-time deadline. Buffered client bytes and socket state are redacted from
 process diagnostics.
 
+Add the daemon transport-closing barrier. Its owner-authenticated first phase
+freezes connection admission and the exact provisional and uninitialized
+population; the post-listener phase closes and reaps only that population and
+emits one cut-reference acknowledgement. Initialized connections stay
+available for the later drain and stop record.
+
 Add the daemon session index's canonical bounded codec. It pins the exact JSONL
 header, sorted identity rows, SHA-256 trailer and all identity, row-count,
 line-size and file-size bounds without treating alternate JSON spellings as the
