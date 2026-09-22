@@ -101,6 +101,8 @@ defmodule Loopex.Trace do
        config: nil,
        admission: nil,
        calls: %{},
+       call_monitors: %{},
+       monitor_to_call_pid: %{},
        window: nil,
        emitted: 0,
        dropped: 0
@@ -120,6 +122,8 @@ defmodule Loopex.Trace do
           config: validated,
           admission: admission(state, validated),
           calls: %{},
+          call_monitors: %{},
+          monitor_to_call_pid: %{},
           window: nil,
           emitted: 0,
           dropped: 0
@@ -154,12 +158,39 @@ defmodule Loopex.Trace do
     if state.session, do: {:noreply, observe(state, message)}, else: {:noreply, state}
   end
 
+  def handle_info({:DOWN, reference, :process, pid, _reason}, state) do
+    case Map.pop(state.monitor_to_call_pid, reference) do
+      {^pid, monitor_to_call_pid} ->
+        calls = Map.reject(state.calls, fn {{call_pid, _, _, _}, _started} -> call_pid == pid end)
+
+        {:noreply,
+         %{
+           state
+           | calls: calls,
+             call_monitors: Map.delete(state.call_monitors, pid),
+             monitor_to_call_pid: monitor_to_call_pid
+         }}
+
+      {nil, _unchanged} ->
+        {:noreply, state}
+    end
+  end
+
   def handle_info(_message, state), do: {:noreply, state}
 
   @impl GenServer
   def terminate(_reason, state) do
     destroy_session(state)
     :ok
+  end
+
+  @impl GenServer
+  def format_status(status) do
+    status
+    |> Map.put(:state, :redacted_trace_state)
+    |> Map.put(:message, :redacted_trace_message)
+    |> Map.put(:reason, :redacted_trace_reason)
+    |> Map.put(:log, [])
   end
 
   # Concept: one observed trace message becomes at most one entry.
@@ -228,13 +259,68 @@ defmodule Loopex.Trace do
 
   defp rendered_return(_state, _value), do: nil
 
+  defp remember_call(%{config: %{level: :calls}} = state, _pid, _module, _function, _arity, _at),
+    do: state
+
   defp remember_call(state, pid, module, function, call_arity, timestamp) do
-    %{state | calls: Map.put(state.calls, {pid, module, function, call_arity}, timestamp)}
+    key = {pid, module, function, call_arity}
+    calls = Map.update(state.calls, key, [timestamp], &[timestamp | &1])
+
+    case Map.fetch(state.call_monitors, pid) do
+      {:ok, %{reference: reference, count: count}} ->
+        call_monitors =
+          Map.put(state.call_monitors, pid, %{reference: reference, count: count + 1})
+
+        %{state | calls: calls, call_monitors: call_monitors}
+
+      :error ->
+        reference = Process.monitor(pid)
+
+        %{
+          state
+          | calls: calls,
+            call_monitors: Map.put(state.call_monitors, pid, %{reference: reference, count: 1}),
+            monitor_to_call_pid: Map.put(state.monitor_to_call_pid, reference, pid)
+        }
+    end
   end
 
   defp take_call(state, pid, module, function, call_arity) do
-    {started, calls} = Map.pop(state.calls, {pid, module, function, call_arity})
-    {started, %{state | calls: calls}}
+    key = {pid, module, function, call_arity}
+
+    case Map.get(state.calls, key, []) do
+      [] ->
+        {nil, state}
+
+      [started] ->
+        {started, drop_call_monitor(%{state | calls: Map.delete(state.calls, key)}, pid)}
+
+      [started | rest] ->
+        {started, drop_call_monitor(%{state | calls: Map.put(state.calls, key, rest)}, pid)}
+    end
+  end
+
+  defp drop_call_monitor(state, pid) do
+    case Map.fetch(state.call_monitors, pid) do
+      {:ok, %{reference: reference, count: 1}} ->
+        Process.demonitor(reference, [:flush])
+
+        %{
+          state
+          | call_monitors: Map.delete(state.call_monitors, pid),
+            monitor_to_call_pid: Map.delete(state.monitor_to_call_pid, reference)
+        }
+
+      {:ok, %{reference: reference, count: count}} ->
+        %{
+          state
+          | call_monitors:
+              Map.put(state.call_monitors, pid, %{reference: reference, count: count - 1})
+        }
+
+      :error ->
+        state
+    end
   end
 
   # Concept: the ceilings are applied here, before a sink can see anything.
@@ -355,7 +441,22 @@ defmodule Loopex.Trace do
 
   defp destroy_session(state) do
     _destroyed = :trace.session_destroy(state.session)
-    %{state | session: nil, config: nil, admission: nil, calls: %{}, window: nil, emitted: 0}
+
+    Enum.each(state.call_monitors, fn {_pid, %{reference: reference}} ->
+      Process.demonitor(reference, [:flush])
+    end)
+
+    %{
+      state
+      | session: nil,
+        config: nil,
+        admission: nil,
+        calls: %{},
+        call_monitors: %{},
+        monitor_to_call_pid: %{},
+        window: nil,
+        emitted: 0
+    }
   end
 
   defp modules(config) do

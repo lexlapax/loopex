@@ -28,6 +28,15 @@ defmodule Loopex.TraceSessionTest do
 
   @control Loopex.Runtime.Control
 
+  defmodule PendingCall do
+    @moduledoc false
+
+    def block(parent) do
+      send(parent, {:pending_trace_call, self()})
+      receive do: (:finish -> :ok)
+    end
+  end
+
   test "a runtime owned session traces only allowed modules and owned processes and leaves a second VM tracer unaffected" do
     runtime = fixture()
 
@@ -116,6 +125,18 @@ defmodule Loopex.TraceSessionTest do
     assert rendered =~ "session-1"
     assert rendered =~ "redacted"
 
+    short_credential = "canary-under-sixty-four-bytes"
+
+    keyword_rendered =
+      Loopex.Trace.Entry.render(
+        [credential_token: short_credential, ordinary_option: short_credential],
+        4_096
+      )
+
+    refute keyword_rendered =~ "credential_token: \"#{short_credential}\""
+    assert keyword_rendered =~ "ordinary_option: \"#{short_credential}\""
+    assert keyword_rendered =~ "redacted"
+
     # An entry is bounded whatever the term was.
     assert byte_size(Loopex.Trace.Entry.render(Enum.to_list(1..1_000), 256)) <= 256
   end
@@ -161,6 +182,58 @@ defmodule Loopex.TraceSessionTest do
 
     assert {:error, :invalid_trace_limits} =
              Loopex.trace(runtime, %{limits: %{entry_bytes: 4_097}})
+  end
+
+  test "calls-only sessions retain no pending calls and return sessions purge pending calls when a process dies" do
+    calls = fixture(runtime_id: "trace-no-pending-calls")
+    assert {:ok, _status} = Loopex.trace(calls, %{modules: [PendingCall], level: :calls})
+    {:ok, %{tracer: calls_tracer, workers: calls_workers}} = Runtime.children(calls)
+    parent = self()
+
+    {:ok, calls_task} =
+      Task.Supervisor.start_child(calls_workers, fn -> PendingCall.block(parent) end)
+
+    assert_receive {:pending_trace_call, ^calls_task}
+    assert %{calls: %{}, call_monitors: %{}} = :sys.get_state(calls_tracer)
+    send(calls_task, :finish)
+
+    returns = fixture(runtime_id: "trace-pending-return")
+    assert {:ok, _status} = Loopex.trace(returns, %{modules: [PendingCall], level: :returns})
+    {:ok, %{tracer: returns_tracer, workers: returns_workers}} = Runtime.children(returns)
+
+    {:ok, returns_task} =
+      Task.Supervisor.start_child(returns_workers, fn -> PendingCall.block(parent) end)
+
+    assert_receive {:pending_trace_call, ^returns_task}
+
+    assert eventually(fn ->
+             state = :sys.get_state(returns_tracer)
+             map_size(state.calls) == 1 and map_size(state.call_monitors) == 1
+           end)
+
+    Process.exit(returns_task, :kill)
+
+    assert eventually(fn ->
+             state = :sys.get_state(returns_tracer)
+             state.calls == %{} and state.call_monitors == %{}
+           end)
+  end
+
+  test "trace status formatting exposes no process state message reason or log" do
+    secret = "credential-canary"
+
+    assert %{
+             state: :redacted_trace_state,
+             message: :redacted_trace_message,
+             reason: :redacted_trace_reason,
+             log: []
+           } =
+             Trace.format_status(%{
+               state: %{credential_token: secret},
+               message: {:credential_token, secret},
+               reason: {:credential_token, secret},
+               log: [secret]
+             })
   end
 
   test "no session command client content model output project resource or wire request starts changes or stops a session and stop releases every flag" do
@@ -282,4 +355,17 @@ defmodule Loopex.TraceSessionTest do
       50 -> Enum.reverse(collected)
     end
   end
+
+  defp eventually(fun, attempts \\ 100)
+
+  defp eventually(fun, attempts) when attempts > 0 do
+    if fun.() do
+      true
+    else
+      Process.sleep(10)
+      eventually(fun, attempts - 1)
+    end
+  end
+
+  defp eventually(_fun, 0), do: false
 end
