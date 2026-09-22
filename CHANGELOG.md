@@ -35,6 +35,12 @@ M5 requires. Its schema manifest pins every request, result, notification and
 error shape, and its literal vectors cover the new methods, every new refusal,
 both uncorrelated controller-loss forms and the generation-negotiation edges.
 
+Establish the daemon's Unix-domain listener boundary on OTP's `:socket`
+backend. It reclaims only a no-follow same-user Unix-socket pathname, binds a
+mode-`0600` listener without accepting clients, verifies the resulting owner,
+kind and permissions, and leaves the pathname in place when closed so only a
+later verified daemon owner can remove it.
+
 ## [0.1.0] — 2026-09-19
 
 M4's closed product baseline: the first numbered source version. It is a source
