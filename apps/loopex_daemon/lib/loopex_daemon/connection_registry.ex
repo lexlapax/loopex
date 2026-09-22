@@ -210,6 +210,58 @@ defmodule LoopexDaemon.ConnectionRegistry do
     )
   end
 
+  @doc """
+  ## Concept
+
+  Admits one `session.create` ticket against the daemon's per-lifetime
+  activation ceiling before core can start a coordinator.
+
+  ## Technical depth
+
+  A `:fresh` create reserves its exact `{command_id, options digest}`
+  activation binding first; an exact duplicate waits on the primary ticket, a
+  conflicting binding completes `conflict_refusal`, and a full ceiling
+  completes `ceiling_refusal`, neither calling core. A `:historical` replay
+  reserves nothing because core returns its retained session without starting
+  a coordinator. The relay task's classified disposition resolves the exact
+  reservation before the ticket settles.
+  """
+  @spec promote_create(
+          pid(),
+          origin_id(),
+          binary(),
+          binary(),
+          :fresh | :historical,
+          map(),
+          map(),
+          (-> {:activated | :no_activation, binary() | nil, map()})
+        ) ::
+          {:ok, :admitted | {:waiting, origin_id()}}
+          | {:error,
+             :daemon_stopping
+             | :invalid_activation
+             | :invalid_promotion
+             | :registry_unavailable
+             | :relay_unavailable
+             | :ticket_outstanding
+             | :ticket_unavailable}
+  def promote_create(
+        registry,
+        origin_id,
+        command_id,
+        digest,
+        mode,
+        ceiling_refusal,
+        conflict_refusal,
+        task_fun
+      ) do
+    GenServer.call(
+      registry,
+      {:promote_create, origin_id, command_id, digest, mode, ceiling_refusal, conflict_refusal,
+       task_fun}
+    )
+  end
+
   @doc false
   @spec bind_relay(pid(), pid(), binary()) ::
           :ok | {:error, :invalid_relay | :owner_mismatch | :relay_conflict}
@@ -425,6 +477,7 @@ defmodule LoopexDaemon.ConnectionRegistry do
            activation_preparations: %{},
            activation_preparation_monitors: %{},
            activation_promotions: %{},
+           anonymous_activations: 0,
            activation_promotion_bindings: %{},
            relay: nil,
            routing_mirrors: %{},
@@ -782,6 +835,33 @@ defmodule LoopexDaemon.ConnectionRegistry do
     )
   end
 
+  def handle_call(
+        {:promote_create, origin_id, command_id, digest, mode, ceiling_refusal, conflict_refusal,
+         task_fun},
+        _from,
+        state
+      ) do
+    with {:ok, relay, relay_incarnation} <- bound_relay(state),
+         true <- mode in [:fresh, :historical] and is_function(task_fun, 0),
+         true <- is_map(ceiling_refusal) and is_map(conflict_refusal) do
+      promote_create_call(
+        state,
+        relay,
+        relay_incarnation,
+        origin_id,
+        command_id,
+        digest,
+        mode,
+        ceiling_refusal,
+        conflict_refusal,
+        task_fun
+      )
+    else
+      {:error, reason} -> {:reply, {:error, reason}, state}
+      false -> {:reply, {:error, :invalid_activation}, state}
+    end
+  end
+
   def handle_call({:reserve_activation, origin_id, binding}, _from, state) do
     case reserve_activation_binding(state, origin_id, binding) do
       {:ok, reply, state} -> {:reply, {:ok, reply}, state}
@@ -1092,7 +1172,8 @@ defmodule LoopexDaemon.ConnectionRegistry do
        activation_reservations: map_size(state.activation_reservations),
        activation_preparations: map_size(state.activation_preparations),
        activations_used:
-         MapSet.size(state.activation_set) + map_size(state.activation_reservations),
+         MapSet.size(state.activation_set) + map_size(state.activation_reservations) +
+           state.anonymous_activations,
        activation_limit: @activation_limit,
        routing_mirrors: map_size(state.routing_mirrors),
        provisional_routing_mirrors: Map.get(mirror_counts, :provisional, 0),
@@ -1152,6 +1233,28 @@ defmodule LoopexDaemon.ConnectionRegistry do
   end
 
   def handle_info(
+        {:activation_create_classified, classification_ref, settlement_ref, disposition,
+         session_id, result},
+        state
+      ) do
+    case Map.fetch(state.activation_promotions, settlement_ref) do
+      {:ok,
+       %{kind: :create, classification_ref: ^classification_ref, classification: nil} =
+           promotion}
+      when disposition in [:activated, :no_activation] and is_map(result) and
+             (is_nil(session_id) or is_binary(session_id)) ->
+        classification = %{disposition: disposition, session_id: session_id, result: result}
+        promotion = %{promotion | classification: classification}
+        state = put_in(state, [:activation_promotions, settlement_ref], promotion)
+        {:noreply, settle_create_promotion(state, settlement_ref)}
+
+      _other ->
+        Logger.debug("loopex daemon create classification invalid")
+        {:stop, :activation_settlement_invalid, state}
+    end
+  end
+
+  def handle_info(
         {:relay_ticket_settlement, relay, origin_id, settlement_ref, result},
         %{relay: %{pid: relay}} = state
       ) do
@@ -1159,7 +1262,7 @@ defmodule LoopexDaemon.ConnectionRegistry do
       {:ok, %{origin_id: ^origin_id, relay_result: nil} = promotion} when is_map(result) ->
         promotion = %{promotion | relay_result: result}
         state = put_in(state, [:activation_promotions, settlement_ref], promotion)
-        {:noreply, settle_resume_promotion(state, settlement_ref)}
+        {:noreply, settle_promotion(state, settlement_ref, promotion)}
 
       {:ok, %{origin_id: ^origin_id, relay_result: ^result}} ->
         {:noreply, state}
@@ -1781,8 +1884,8 @@ defmodule LoopexDaemon.ConnectionRegistry do
               Logger.debug("loopex daemon activation already counted")
               {:ok, :already_active, state}
 
-            MapSet.size(state.activation_set) + map_size(state.activation_reservations) >=
-                @activation_limit ->
+            MapSet.size(state.activation_set) + map_size(state.activation_reservations) +
+              state.anonymous_activations >= @activation_limit ->
               Logger.debug("loopex daemon activation capacity reached")
               {:error, :activation_ceiling_reached}
 
@@ -2459,6 +2562,213 @@ defmodule LoopexDaemon.ConnectionRegistry do
       {:error, reason} -> {:reply, {:error, reason}, state}
     end
   end
+
+  defp settle_promotion(state, settlement_ref, %{kind: :create}),
+    do: settle_create_promotion(state, settlement_ref)
+
+  defp settle_promotion(state, settlement_ref, _promotion),
+    do: settle_resume_promotion(state, settlement_ref)
+
+  defp promote_create_call(
+         state,
+         relay,
+         relay_incarnation,
+         origin_id,
+         _command_id,
+         _digest,
+         :historical,
+         _ceiling_refusal,
+         _conflict_refusal,
+         task_fun
+       ) do
+    promote_create_primary(state, relay, relay_incarnation, origin_id, nil, task_fun)
+  end
+
+  defp promote_create_call(
+         state,
+         relay,
+         relay_incarnation,
+         origin_id,
+         command_id,
+         digest,
+         :fresh,
+         ceiling_refusal,
+         conflict_refusal,
+         task_fun
+       ) do
+    case reserve_activation_binding(state, origin_id, {:create, command_id, digest}) do
+      {:ok, {:primary, reservation_ref}, state} ->
+        promote_create_primary(
+          state,
+          relay,
+          relay_incarnation,
+          origin_id,
+          reservation_ref,
+          task_fun
+        )
+
+      {:ok, {:duplicate, primary_origin_id, _reservation_ref}, state} ->
+        case AdmissionRelay.wait_for_ticket(
+               relay,
+               origin_id,
+               primary_origin_id,
+               relay_incarnation
+             ) do
+          {:ok, ^primary_origin_id} -> {:reply, {:ok, {:waiting, primary_origin_id}}, state}
+          {:error, reason} -> {:reply, {:error, reason}, state}
+        end
+
+      {:error, :activation_ceiling_reached} ->
+        refusal = fn -> {:no_activation, nil, ceiling_refusal} end
+        promote_create_primary(state, relay, relay_incarnation, origin_id, nil, refusal)
+
+      {:error, :activation_conflict} ->
+        refusal = fn -> {:no_activation, nil, conflict_refusal} end
+        promote_create_primary(state, relay, relay_incarnation, origin_id, nil, refusal)
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
+  end
+
+  # Concept: the create ticket's task is started by the relay before this
+  # promotion is acknowledged, and its classified disposition settles the
+  # exact reservation before the client can learn the result.
+  defp promote_create_primary(
+         state,
+         relay,
+         relay_incarnation,
+         origin_id,
+         reservation_ref,
+         task_fun
+       ) do
+    settlement_ref = reservation_ref || :crypto.strong_rand_bytes(16)
+    classification_ref = make_ref()
+    registry = self()
+
+    relay_task = fn ->
+      case task_fun.() do
+        {disposition, session_id, result}
+        when disposition in [:activated, :no_activation] and is_map(result) and
+               (is_nil(session_id) or is_binary(session_id)) ->
+          send(
+            registry,
+            {:activation_create_classified, classification_ref, settlement_ref, disposition,
+             session_id, result}
+          )
+
+          result
+
+        _invalid ->
+          exit(:invalid_activation_result)
+      end
+    end
+
+    promotion = %{
+      kind: :create,
+      origin_id: origin_id,
+      reservation_ref: reservation_ref,
+      classification_ref: classification_ref,
+      classification: nil,
+      relay_result: nil
+    }
+
+    state = put_in(state, [:activation_promotions, settlement_ref], promotion)
+
+    case AdmissionRelay.promote_ticket(
+           relay,
+           origin_id,
+           relay_incarnation,
+           settlement_ref,
+           relay_task
+         ) do
+      {:ok, ^origin_id} ->
+        Logger.debug("loopex daemon create promoted")
+        {:reply, {:ok, :admitted}, state}
+
+      {:error, reason} ->
+        state = update_in(state.activation_promotions, &Map.delete(&1, settlement_ref))
+
+        state =
+          if reservation_ref do
+            {:ok, state} =
+              resolve_activation_reservation(state, reservation_ref, :no_activation, nil)
+
+            state
+          else
+            state
+          end
+
+        {:reply, {:error, reason}, state}
+    end
+  end
+
+  defp settle_create_promotion(state, settlement_ref) do
+    case Map.fetch(state.activation_promotions, settlement_ref) do
+      {:ok,
+       %{classification: %{result: result} = classification, relay_result: result} = promotion} ->
+        with {:ok, state} <- account_create_promotion(state, promotion, classification),
+             :ok <-
+               AdmissionRelay.settle_ticket(
+                 state.relay.pid,
+                 promotion.origin_id,
+                 state.relay.incarnation,
+                 settlement_ref
+               ) do
+          Logger.debug("loopex daemon create activation settled")
+          update_in(state.activation_promotions, &Map.delete(&1, settlement_ref))
+        else
+          _error -> exit(:activation_settlement_failed)
+        end
+
+      {:ok, %{classification: classification, relay_result: relay_result}}
+      when not is_nil(classification) and not is_nil(relay_result) ->
+        exit(:activation_settlement_invalid)
+
+      _other ->
+        state
+    end
+  end
+
+  # Concept: every coordinator core starts counts against the ceiling, even
+  # one whose create answered an error without naming its session.
+  defp account_create_promotion(state, %{reservation_ref: nil}, %{disposition: :no_activation}),
+    do: {:ok, state}
+
+  defp account_create_promotion(
+         state,
+         %{reservation_ref: nil},
+         %{disposition: :activated, session_id: session_id}
+       ) do
+    if is_binary(session_id),
+      do: {:ok, update_in(state.activation_set, &MapSet.put(&1, session_id))},
+      else: {:ok, update_in(state.anonymous_activations, &(&1 + 1))}
+  end
+
+  defp account_create_promotion(
+         state,
+         %{reservation_ref: reservation_ref},
+         %{disposition: :activated, session_id: session_id}
+       )
+       when is_binary(session_id),
+       do: resolve_activation_reservation(state, reservation_ref, :activated, session_id)
+
+  defp account_create_promotion(
+         state,
+         %{reservation_ref: reservation_ref},
+         %{disposition: :activated}
+       ) do
+    with {:ok, state} <-
+           resolve_activation_reservation(state, reservation_ref, :no_activation, nil),
+         do: {:ok, update_in(state.anonymous_activations, &(&1 + 1))}
+  end
+
+  defp account_create_promotion(
+         state,
+         %{reservation_ref: reservation_ref},
+         %{disposition: :no_activation}
+       ),
+       do: resolve_activation_reservation(state, reservation_ref, :no_activation, nil)
 
   defp settle_resume_promotion(state, settlement_ref) do
     case Map.fetch(state.activation_promotions, settlement_ref) do

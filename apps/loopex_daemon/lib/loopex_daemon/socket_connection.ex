@@ -445,8 +445,79 @@ defmodule LoopexDaemon.SocketConnection do
     end
   end
 
+  # Concept: a create is ticketed so the admission cut accounts for it, and
+  # its read-only history lookup decides whether it may spend an activation.
+  #
+  # Technical depth: the ticket exists before the worker is bound, and the
+  # worker's lookup precedes the registry's activation decision, so an exact
+  # historical replay is answered even at the activation ceiling.
+  defp serve(state, %Request{operation: :session_create} = request) do
+    %{command_id: command_id, session_options: options} = request.fields
+    runtime = state.context.runtime
+
+    entry = %{
+      operation: :session_create,
+      fields: request.fields,
+      worker: nil,
+      worker_monitor: nil,
+      worker_incarnation: nil
+    }
+
+    case RequestLedger.begin(state.ledger, request.request_id, entry) do
+      {:ok, origin, ledger} ->
+        case AdmissionRelay.open_ticket(state.context.relay, origin, :session_create) do
+          {:ok, ^origin} ->
+            state = %{state | ledger: ledger}
+
+            {worker, monitor, incarnation} =
+              RequestWorker.start(origin, fn ->
+                Loopex.Runtime.lookup_create_result(runtime, command_id, options)
+              end)
+
+            ledger =
+              RequestLedger.update(state.ledger, origin, fn entry ->
+                %{
+                  entry
+                  | worker: worker,
+                    worker_monitor: monitor,
+                    worker_incarnation: incarnation
+                }
+              end)
+
+            state = %{state | ledger: ledger, workers: Map.put(state.workers, monitor, origin)}
+
+            case AdmissionRelay.bind_ticket_worker(
+                   state.context.relay,
+                   origin,
+                   worker,
+                   incarnation
+                 ) do
+              :ok ->
+                {:ok, state}
+
+              {:error, reason} ->
+                {:noreply, state} = settle_locally(state, origin, ticket_refusal(reason))
+                {:ok, state}
+            end
+
+          {:error, reason} ->
+            reply(state, WireRecords.request_error(request.request_id, ticket_refusal(reason)))
+        end
+
+      {:error, :duplicate_request} ->
+        reply(state, WireRecords.invalid_request(request.request_id, "duplicate_request"))
+
+      {:error, :capacity_exceeded} ->
+        reply(state, WireRecords.request_error(request.request_id, "capacity_exceeded"))
+    end
+  end
+
   defp serve(state, request),
     do: reply(state, WireRecords.request_error(request.request_id, "unsupported_method"))
+
+  defp ticket_refusal(:daemon_stopping), do: "daemon_stopping"
+  defp ticket_refusal(:capacity_exceeded), do: "capacity_exceeded"
+  defp ticket_refusal(_reason), do: "internal_failure"
 
   # Concept: the request identity and the in-flight ceiling are checked before
   # any worker starts, and a refused request leaves no reservation behind.
@@ -544,6 +615,110 @@ defmodule LoopexDaemon.SocketConnection do
     end)
   end
 
+  defp dispatch_prepared(state, origin, %{operation: :session_create} = entry, lookup) do
+    %{command_id: command_id, session_options: options} = entry.fields
+    request_id = entry.request_id
+
+    {mode, task} =
+      case lookup do
+        {:ok, {:historical, session_id}} ->
+          record = create_admission(request_id, command_id, :accepted, session_id)
+          {:historical, fn -> {:no_activation, nil, record} end}
+
+        {:ok, :absent} ->
+          {:fresh, create_task(state.context, request_id, command_id, options)}
+
+        {:ok, :conflict} ->
+          record = create_admission(request_id, command_id, {:refused, :runtime_command_conflict})
+          {:historical, fn -> {:no_activation, nil, record} end}
+
+        {:ok, :store_unavailable} ->
+          record = WireRecords.request_error(request_id, "store_unavailable")
+          {:historical, fn -> {:no_activation, nil, record} end}
+
+        {:error, :runtime_unavailable} ->
+          report_fatal(state, :runtime_lost)
+          record = WireRecords.request_error(request_id, "internal_failure")
+          {:historical, fn -> {:no_activation, nil, record} end}
+
+        _unexpected ->
+          record = WireRecords.request_error(request_id, "internal_failure")
+          {:historical, fn -> {:no_activation, nil, record} end}
+      end
+
+    ceiling = WireRecords.request_error(request_id, "activation_ceiling_reached")
+    conflict = create_admission(request_id, command_id, {:refused, :runtime_command_conflict})
+
+    case safe_call(fn ->
+           ConnectionRegistry.promote_create(
+             state.registry,
+             origin,
+             command_id,
+             options_digest(options),
+             mode,
+             ceiling,
+             conflict,
+             task
+           )
+         end) do
+      {:ok, _promotion} ->
+        {:noreply, relay_owns_worker(state, origin, entry)}
+
+      {:error, reason} ->
+        settle_locally(state, origin, ticket_refusal(reason))
+    end
+  end
+
+  # Concept: the relay task, not the connection, makes the activating call,
+  # and it classifies exactly what core started.
+  defp create_task(context, request_id, command_id, options) do
+    runtime = context.runtime
+    fatal_recipient = Map.get(context, :fatal_recipient)
+
+    fn ->
+      case Loopex.Runtime.create_session_detailed(runtime, command_id, options) do
+        {:ok, %{session_id: session_id, disposition: disposition}} ->
+          {disposition, session_id,
+           create_admission(request_id, command_id, :accepted, session_id)}
+
+        {:error, :runtime_unavailable} ->
+          if is_pid(fatal_recipient),
+            do: send(fatal_recipient, {:daemon_component_fatal, self(), :runtime_lost})
+
+          {:no_activation, nil, WireRecords.request_error(request_id, "internal_failure")}
+
+        {:error, reason, %{disposition: disposition}} ->
+          {disposition, nil, create_admission(request_id, command_id, {:refused, reason})}
+
+        _unexpected ->
+          {:no_activation, nil, WireRecords.request_error(request_id, "internal_failure")}
+      end
+    end
+  end
+
+  defp create_admission(request_id, command_id, :accepted, session_id),
+    do: WireRecords.admission(request_id, "session.create", command_id, :accepted, session_id)
+
+  defp create_admission(request_id, command_id, {:refused, reason}) do
+    word =
+      if is_atom(reason) and not is_nil(reason),
+        do: Atom.to_string(reason),
+        else: "internal_failure"
+
+    WireRecords.admission(request_id, "session.create", command_id, {:refused, word})
+  end
+
+  defp options_digest(options),
+    do: options |> LoopexProtocol.Canonical.digest() |> Base.decode16!(case: :lower)
+
+  # Concept: promotion retires the waiting worker; the relay reaps it, so its
+  # exit is not this request's failure.
+  defp relay_owns_worker(state, origin, entry) do
+    Process.demonitor(entry.worker_monitor, [:flush])
+    ledger = RequestLedger.update(state.ledger, origin, &%{&1 | worker_monitor: nil})
+    %{state | ledger: ledger, workers: Map.delete(state.workers, entry.worker_monitor)}
+  end
+
   # Concept: once the daemon owner accepts a lease operation, the relay owns
   # the worker's accounting and delivers the one answer.
   #
@@ -553,13 +728,7 @@ defmodule LoopexDaemon.SocketConnection do
   defp hand_to_relay(state, origin, entry, call) do
     case safe_call(call) do
       {:ok, _disposition, _actor, _actor_incarnation} ->
-        Process.demonitor(entry.worker_monitor, [:flush])
-
-        ledger =
-          RequestLedger.update(state.ledger, origin, &%{&1 | worker_monitor: nil})
-
-        {:noreply,
-         %{state | ledger: ledger, workers: Map.delete(state.workers, entry.worker_monitor)}}
+        {:noreply, relay_owns_worker(state, origin, entry)}
 
       {:error, reason} ->
         settle_locally(state, origin, lease_refusal(reason))
