@@ -285,10 +285,12 @@ defmodule Loopex.RuntimeQuiesceTest do
               unsettled: [],
               absent: [],
               budget_ms: 0,
-              drain_id: drain_id
+              drain_id: drain_id,
+              termination_entries: [%{coordinator: coordinator}]
             }} = Quiesce.prepare(fixture.runtime.supervisor, fixture.runtime.token)
 
     assert is_binary(drain_id) and byte_size(drain_id) == 32
+    refute Process.alive?(coordinator)
     assert {:trap_exit, ^caller_flag} = Process.info(self(), :trap_exit)
   end
 
@@ -310,10 +312,51 @@ defmodule Loopex.RuntimeQuiesceTest do
               unsettled: [],
               absent: [],
               budget_ms: budget_ms,
-              release_results: %{^session_id => :ok}
+              release_results: %{^session_id => :ok},
+              termination_entries: [%{coordinator: coordinator}]
             }} = Quiesce.prepare(fixture.runtime.supervisor, fixture.runtime.token)
 
     assert is_integer(budget_ms) and budget_ms >= 10_000
+    refute Process.alive?(coordinator)
+  end
+
+  test "concurrent private owners produce one drain and one refusal" do
+    fixture = fixture("quiesce-private-owner-race")
+    session_id = create_session(fixture.runtime, "create")
+    parent = self()
+    release = make_ref()
+
+    calls =
+      for _index <- 1..2 do
+        Task.async(fn ->
+          send(parent, {:quiesce_ready, self()})
+
+          receive do
+            {:release_quiesce, ^release} -> :ok
+          end
+
+          Quiesce.prepare(fixture.runtime.supervisor, fixture.runtime.token)
+        end)
+      end
+
+    assert_receive {:quiesce_ready, _first}
+    assert_receive {:quiesce_ready, _second}
+    Enum.each(calls, &send(&1.pid, {:release_quiesce, release}))
+
+    results = calls |> Enum.map(&Task.await(&1, 5_000)) |> Enum.sort()
+
+    assert [
+             {:error, :runtime_unavailable},
+             {:ok, %{settled: [^session_id], unsettled: [], absent: []}}
+           ] = results
+
+    {:ok, records} = M1RuntimeTestStore.load_records(fixture.store_pid, session_id, 0, 1_024)
+
+    assert 1 ==
+             Enum.count(records, fn record ->
+               record.payload[:kind] == "command_admitted" and
+                 record.payload["command_type"] == "abort"
+             end)
   end
 
   defp fixture(runtime_id) do

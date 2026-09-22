@@ -13,6 +13,8 @@ defmodule Loopex.Runtime.Quiesce do
   @worker_reap_ms 5_000
   @status_census_ms 10_000
   @status_work_ms 5_000
+  @coordinator_termination_ms 330_000
+  @termination_projection_ms 5_000
 
   @type prepared :: %{
           drain_id: binary(),
@@ -77,7 +79,15 @@ defmodule Loopex.Runtime.Quiesce do
            {:ok, release} <- release_cleanups(context, entries, admissions, drain_id),
            :ok <- await_released_terminals(context, release, drain_id),
            {:ok, classification} <-
-             classify_sessions(context, entries, admissions, release, drain_id) do
+             classify_sessions(context, entries, admissions, release, drain_id),
+           {:ok, termination_entries} <-
+             terminate_coordinators(
+               context,
+               token,
+               drain_id,
+               entries,
+               Map.fetch!(children, :sessions)
+             ) do
         {:ok,
          Map.merge(classification, %{
            drain_id: drain_id,
@@ -85,7 +95,8 @@ defmodule Loopex.Runtime.Quiesce do
            admissions: admissions,
            budget_ms: release.budget_ms,
            control: control,
-           session_supervisor: Map.fetch!(children, :sessions)
+           session_supervisor: Map.fetch!(children, :sessions),
+           termination_entries: termination_entries
          })}
       else
         _failure -> {:error, :runtime_unavailable}
@@ -365,6 +376,258 @@ defmodule Loopex.Runtime.Quiesce do
   end
 
   defp classify_status(_unavailable, _run_id), do: :unsettled
+
+  # Concept: no fence may race an ordinary session writer, including a writer
+  # whose run already settled.
+  #
+  # Technical depth: the second projection reads the same frozen writer-domain
+  # keys from the captured Control. Every current coordinator is monitored
+  # before all DynamicSupervisor termination calls are issued together. At the
+  # shared work cutoff, direct untrappable kills end both surviving coordinators
+  # and workers blocked in the serialized supervisor. The final reserve admits
+  # only their exact DOWN/EXIT signals.
+  defp terminate_coordinators(context, token, drain_id, first_entries, session_supervisor) do
+    started_at = now_ms()
+    outer_deadline = started_at + @coordinator_termination_ms
+    projection_deadline = started_at + @termination_projection_ms
+
+    with {:ok, entries} <-
+           run_one_worker(
+             fn ->
+               Control.quiesce_projection(
+                 context.control,
+                 token,
+                 drain_id,
+                 remaining_ms(projection_deadline)
+               )
+             end,
+             context,
+             projection_deadline
+           ),
+         true <- projection_keys(entries) == projection_keys(first_entries),
+         :ok <-
+           terminate_projected_coordinators(
+             context,
+             entries,
+             session_supervisor,
+             outer_deadline - @worker_reap_ms,
+             outer_deadline
+           ) do
+      {:ok, entries}
+    else
+      _failure -> {:error, :runtime_unavailable}
+    end
+  end
+
+  defp projection_keys(entries), do: entries |> Enum.map(& &1.session_id) |> Enum.sort()
+
+  defp terminate_projected_coordinators(
+         context,
+         entries,
+         session_supervisor,
+         work_deadline,
+         outer_deadline
+       ) do
+    coordinators =
+      entries
+      |> Enum.flat_map(fn
+        %{coordinator: coordinator} when is_pid(coordinator) -> [coordinator]
+        _without_coordinator -> []
+      end)
+      |> Enum.uniq()
+
+    monitors =
+      Map.new(coordinators, fn coordinator ->
+        {Process.monitor(coordinator), coordinator}
+      end)
+
+    workers =
+      Map.new(coordinators, fn coordinator ->
+        worker =
+          result_worker(coordinator, fn ->
+            safe_terminate_child(session_supervisor, coordinator)
+          end)
+
+        {worker, coordinator}
+      end)
+
+    await_termination(
+      context,
+      coordinators,
+      monitors,
+      workers,
+      work_deadline,
+      outer_deadline,
+      false
+    )
+  end
+
+  defp safe_terminate_child(session_supervisor, coordinator) do
+    try do
+      DynamicSupervisor.terminate_child(session_supervisor, coordinator)
+    catch
+      :exit, _reason -> {:error, :runtime_unavailable}
+    end
+  end
+
+  defp await_termination(
+         _context,
+         _coordinators,
+         monitors,
+         workers,
+         _work_deadline,
+         _outer_deadline,
+         _cutoff?
+       )
+       when map_size(monitors) == 0 and map_size(workers) == 0,
+       do: :ok
+
+  defp await_termination(
+         context,
+         coordinators,
+         monitors,
+         workers,
+         work_deadline,
+         outer_deadline,
+         cutoff?
+       ) do
+    deadline = if cutoff?, do: outer_deadline, else: work_deadline
+
+    receive do
+      {:DOWN, monitor, :process, coordinator, _reason} ->
+        case Map.pop(monitors, monitor) do
+          {^coordinator, remaining} ->
+            await_termination(
+              context,
+              coordinators,
+              remaining,
+              workers,
+              work_deadline,
+              outer_deadline,
+              cutoff?
+            )
+
+          {nil, _same} ->
+            termination_control_down(
+              context,
+              monitor,
+              coordinator,
+              coordinators,
+              monitors,
+              workers,
+              work_deadline,
+              outer_deadline,
+              cutoff?
+            )
+        end
+
+      {:EXIT, worker, {:loopex_quiesce_worker_result, _operation_ref, coordinator, _result}} ->
+        case Map.pop(workers, worker) do
+          {^coordinator, remaining} ->
+            await_termination(
+              context,
+              coordinators,
+              monitors,
+              remaining,
+              work_deadline,
+              outer_deadline,
+              cutoff?
+            )
+
+          {nil, _same} ->
+            await_termination(
+              context,
+              coordinators,
+              monitors,
+              workers,
+              work_deadline,
+              outer_deadline,
+              cutoff?
+            )
+        end
+
+      {:EXIT, worker, _reason} ->
+        case Map.pop(workers, worker) do
+          {nil, _same} ->
+            await_termination(
+              context,
+              coordinators,
+              monitors,
+              workers,
+              work_deadline,
+              outer_deadline,
+              cutoff?
+            )
+
+          {_coordinator, remaining} ->
+            await_termination(
+              context,
+              coordinators,
+              monitors,
+              remaining,
+              work_deadline,
+              outer_deadline,
+              cutoff?
+            )
+        end
+    after
+      remaining_ms(deadline) ->
+        if cutoff? do
+          {:error, :runtime_unavailable}
+        else
+          Enum.each(coordinators, fn coordinator ->
+            if Process.alive?(coordinator), do: Process.exit(coordinator, :kill)
+          end)
+
+          kill_workers(workers)
+
+          await_termination(
+            context,
+            coordinators,
+            monitors,
+            workers,
+            work_deadline,
+            outer_deadline,
+            true
+          )
+        end
+    end
+  end
+
+  defp termination_control_down(
+         context,
+         monitor,
+         pid,
+         coordinators,
+         monitors,
+         workers,
+         work_deadline,
+         outer_deadline,
+         cutoff?
+       ) do
+    cond do
+      monitor == context.caller_monitor and pid == context.caller ->
+        kill_workers(workers)
+        Enum.each(coordinators, &Process.exit(&1, :kill))
+        exit(:caller_lost)
+
+      monitor == context.control_monitor and pid == context.control ->
+        kill_workers(workers)
+        Enum.each(coordinators, &Process.exit(&1, :kill))
+        {:error, :runtime_unavailable}
+
+      true ->
+        await_termination(
+          context,
+          coordinators,
+          monitors,
+          workers,
+          work_deadline,
+          outer_deadline,
+          cutoff?
+        )
+    end
+  end
 
   defp ids_with(results, disposition) do
     results
