@@ -17,7 +17,10 @@ defmodule LoopexDaemon.ConnectionRegistry do
   prompts a monotonic-clock check. Its owner-authenticated transport cut first
   freezes a fixed provisional and uninitialized population, then closes that
   population only after listener reap and acknowledges the exact cut reference
-  when every marked row is gone. Both barrier entries return OTP asynchronous
+  when every marked row is gone. It also owns each connection's bounded encoded
+  output queue and the daemon-wide commitment count. A frame stays charged
+  while the socket process advances a nonblocking send and is released only by
+  that exact process's complete-emission acknowledgement. Both barrier entries return OTP asynchronous
   request identifiers so the daemon owner can classify other component exits
   while it waits under one absolute deadline. Private pids, references and
   tokens are redacted from formatted process status.
@@ -26,10 +29,11 @@ defmodule LoopexDaemon.ConnectionRegistry do
   use GenServer
   require Logger
 
-  alias LoopexDaemon.SocketConnection
+  alias LoopexDaemon.{OutputBuffer, SocketConnection}
   alias LoopexProtocol.Session.V2
 
   @connection_limit 512
+  @aggregate_output_bytes 536_870_912
 
   @typedoc false
   @type reservation :: %{
@@ -95,6 +99,27 @@ defmodule LoopexDaemon.ConnectionRegistry do
   end
 
   @doc false
+  @spec enqueue_output(pid(), binary(), iodata()) ::
+          :ok | {:error, :capacity_exceeded | :output_unavailable}
+  def enqueue_output(registry, connection_incarnation, encoded) do
+    GenServer.call(registry, {:enqueue_output, connection_incarnation, encoded})
+  end
+
+  @doc false
+  @spec claim_output(pid(), binary()) ::
+          {:ok, reference(), binary()} | :empty | {:error, :output_unavailable}
+  def claim_output(registry, connection_incarnation) do
+    GenServer.call(registry, {:claim_output, connection_incarnation})
+  end
+
+  @doc false
+  @spec output_emitted(pid(), binary(), reference()) ::
+          :ok | {:error, :output_unavailable}
+  def output_emitted(registry, connection_incarnation, frame_ref) do
+    GenServer.call(registry, {:output_emitted, connection_incarnation, frame_ref})
+  end
+
+  @doc false
   @spec abort_provisional(pid(), binary(), :peer_credential_unverified | :handoff_failed) ::
           :ok | {:error, :abort_unavailable}
   def abort_provisional(registry, rollback_token, reason) do
@@ -131,6 +156,9 @@ defmodule LoopexDaemon.ConnectionRegistry do
           closing: non_neg_integer(),
           transport: :serving | :closing,
           transport_marked: non_neg_integer(),
+          output_bytes: non_neg_integer(),
+          output_commitment: non_neg_integer(),
+          output_commitment_limit: pos_integer(),
           limit: 512
         }
   def status(registry), do: GenServer.call(registry, :status)
@@ -148,26 +176,49 @@ defmodule LoopexDaemon.ConnectionRegistry do
         Map.fetch!(V2.limits(), "initialize_deadline_ms")
       )
 
-    if is_integer(deadline_ms) and deadline_ms > 0 and
-         deadline_ms <= Map.fetch!(V2.limits(), "initialize_deadline_ms") do
-      Logger.debug("loopex daemon connection registry start")
+    output_buffer_bytes =
+      Keyword.get(options, :output_buffer_bytes, Map.fetch!(V2.limits(), "durable_queue_bytes"))
 
-      {:ok,
-       %{
-         owner: owner,
-         connection_module: Keyword.get(options, :connection_module, SocketConnection),
-         initialize_deadline_ms: deadline_ms,
-         rows: %{},
-         child_monitors: %{},
-         listeners: %{},
-         transport: :serving,
-         transport_cut_ref: nil,
-         transport_marked: MapSet.new(),
-         transport_sweep_started: false,
-         transport_sweep_acknowledged: false
-       }}
-    else
-      {:stop, :invalid_initialize_deadline}
+    aggregate_output_bytes =
+      Keyword.get(options, :aggregate_output_bytes, @aggregate_output_bytes)
+
+    deadline_valid =
+      is_integer(deadline_ms) and deadline_ms > 0 and
+        deadline_ms <= Map.fetch!(V2.limits(), "initialize_deadline_ms")
+
+    output_valid =
+      is_integer(output_buffer_bytes) and output_buffer_bytes > 0 and
+        output_buffer_bytes <= Map.fetch!(V2.limits(), "durable_queue_bytes") and
+        is_integer(aggregate_output_bytes) and aggregate_output_bytes >= output_buffer_bytes and
+        aggregate_output_bytes <= @aggregate_output_bytes
+
+    cond do
+      not deadline_valid ->
+        {:stop, :invalid_initialize_deadline}
+
+      not output_valid ->
+        {:stop, :invalid_output_limit}
+
+      true ->
+        Logger.debug("loopex daemon connection registry start")
+
+        {:ok,
+         %{
+           owner: owner,
+           connection_module: Keyword.get(options, :connection_module, SocketConnection),
+           initialize_deadline_ms: deadline_ms,
+           output_buffer_bytes: output_buffer_bytes,
+           aggregate_output_bytes: aggregate_output_bytes,
+           output_commitment: 0,
+           rows: %{},
+           child_monitors: %{},
+           listeners: %{},
+           transport: :serving,
+           transport_cut_ref: nil,
+           transport_marked: MapSet.new(),
+           transport_sweep_started: false,
+           transport_sweep_acknowledged: false
+         }}
     end
   end
 
@@ -218,7 +269,8 @@ defmodule LoopexDaemon.ConnectionRegistry do
             connection_down: false,
             initialized: false,
             listener_close_requested: false,
-            connection_abort_requested: false
+            connection_abort_requested: false,
+            output: OutputBuffer.new(state.output_buffer_bytes)
           }
 
           state =
@@ -341,6 +393,85 @@ defmodule LoopexDaemon.ConnectionRegistry do
           if state.transport == :serving, do: :initialize_unavailable, else: :transport_closing
 
         {:reply, {:error, reason}, state}
+    end
+  end
+
+  def handle_call({:enqueue_output, incarnation, encoded}, {caller, _tag}, state) do
+    case connection_row(state, caller, incarnation) do
+      {token, %{phase: phase} = row} when phase in [:live, :closing] ->
+        before = OutputBuffer.commitment(row.output)
+        wake_connection = OutputBuffer.empty?(row.output)
+
+        case OutputBuffer.enqueue(row.output, encoded) do
+          {:ok, output} ->
+            after_enqueue = OutputBuffer.commitment(output)
+            commitment = state.output_commitment + after_enqueue - before
+
+            if commitment <= state.aggregate_output_bytes do
+              row = %{row | output: output}
+              state = %{put_in(state, [:rows, token], row) | output_commitment: commitment}
+              if wake_connection, do: send(caller, {:output_ready, incarnation})
+              {:reply, :ok, state}
+            else
+              Logger.debug("loopex daemon aggregate output capacity reached")
+              {:reply, {:error, :capacity_exceeded}, close_live(state, token, :output_capacity)}
+            end
+
+          {:error, _reason} ->
+            Logger.debug("loopex daemon connection output capacity reached")
+            {:reply, {:error, :capacity_exceeded}, close_live(state, token, :output_capacity)}
+        end
+
+      _other ->
+        {:reply, {:error, :output_unavailable}, state}
+    end
+  end
+
+  def handle_call({:claim_output, incarnation}, {caller, _tag}, state) do
+    case connection_row(state, caller, incarnation) do
+      {token, %{phase: phase} = row} when phase in [:live, :closing] ->
+        case OutputBuffer.claim(row.output) do
+          {:ok, frame_ref, bytes, output} ->
+            row = %{row | output: output}
+            {:reply, {:ok, frame_ref, bytes}, put_in(state, [:rows, token], row)}
+
+          {:empty, output} ->
+            row = %{row | output: output}
+            {:reply, :empty, put_in(state, [:rows, token], row)}
+
+          {:error, :claimed} ->
+            {:reply, {:error, :output_unavailable}, state}
+        end
+
+      _other ->
+        {:reply, {:error, :output_unavailable}, state}
+    end
+  end
+
+  def handle_call({:output_emitted, incarnation, frame_ref}, {caller, _tag}, state) do
+    case connection_row(state, caller, incarnation) do
+      {token, %{phase: phase} = row} when phase in [:live, :closing] ->
+        before = OutputBuffer.commitment(row.output)
+
+        case OutputBuffer.emitted(row.output, frame_ref) do
+          {:ok, output} ->
+            after_emit = OutputBuffer.commitment(output)
+            row = %{row | output: output}
+
+            state =
+              %{
+                put_in(state, [:rows, token], row)
+                | output_commitment: state.output_commitment + after_emit - before
+              }
+
+            {:reply, :ok, state}
+
+          {:error, :claim_mismatch} ->
+            {:reply, {:error, :output_unavailable}, state}
+        end
+
+      _other ->
+        {:reply, {:error, :output_unavailable}, state}
     end
   end
 
@@ -503,6 +634,12 @@ defmodule LoopexDaemon.ConnectionRegistry do
        closing: Map.get(counts, :closing, 0),
        transport: state.transport,
        transport_marked: MapSet.size(state.transport_marked),
+       output_bytes:
+         Enum.reduce(state.rows, 0, fn {_token, row}, total ->
+           total + OutputBuffer.bytes(row.output)
+         end),
+       output_commitment: state.output_commitment,
+       output_commitment_limit: state.aggregate_output_bytes,
        limit: @connection_limit
      }, state}
   end
@@ -758,7 +895,13 @@ defmodule LoopexDaemon.ConnectionRegistry do
             do: Map.delete(state.child_monitors, row.connection_monitor),
             else: state.child_monitors
 
-        state = %{state | rows: rows, child_monitors: child_monitors}
+        state = %{
+          state
+          | rows: rows,
+            child_monitors: child_monitors,
+            output_commitment: state.output_commitment - OutputBuffer.commitment(row.output)
+        }
+
         state = release_listener_token(state, row.listener_incarnation, token)
         state |> unmark_transport_row(token) |> maybe_acknowledge_transport_sweep()
     end
@@ -808,6 +951,13 @@ defmodule LoopexDaemon.ConnectionRegistry do
 
   defp tracked_connection_pid?(state, pid),
     do: Enum.any?(state.rows, fn {_token, row} -> row.connection_pid == pid end)
+
+  defp connection_row(state, connection, incarnation) do
+    Enum.find_value(state.rows, fn {token, row} ->
+      if row.connection_pid == connection and row.connection_incarnation == incarnation,
+        do: {token, row}
+    end)
+  end
 
   defp update_row(state, token, function) do
     case Map.fetch(state.rows, token) do

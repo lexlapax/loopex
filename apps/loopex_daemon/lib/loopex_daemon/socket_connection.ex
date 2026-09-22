@@ -15,7 +15,11 @@ defmodule LoopexDaemon.SocketConnection do
   drops the listener monitor and reports `promotion_complete`. Registry loss,
   pre-promotion listener loss, abort, or deadline refusal closes the socket.
   Once promoted, nonblocking socket receives feed the shared strict JSONL frame
-  decoder. The generation-two negotiation becomes visible only after the
+  decoder, while complete encoded replies enter the registry-owned bounded
+  output queue. This process claims one exact frame and advances a nonblocking
+  socket send until the kernel has accepted all of it; only then does it
+  acknowledge emission so the registry can release the charge. The
+  generation-two negotiation becomes visible only after the
   registry consumes the final initialize compare-and-set before its unchanged
   accept-time deadline. Partial input is bounded, and fixed protocol refusals
   contain no received bytes. The socket, buffered bytes and monitor handles are
@@ -51,7 +55,9 @@ defmodule LoopexDaemon.SocketConnection do
       protocol: ConnectionProtocol.new(),
       input_buffer: "",
       discarding_oversize: false,
-      receive_select: nil
+      receive_select: nil,
+      send_select: nil,
+      output_claim: nil
     }
 
     Logger.debug("loopex daemon socket connection waiting")
@@ -107,6 +113,11 @@ defmodule LoopexDaemon.SocketConnection do
       when phase in [:live, :initialized],
       do: arm_receive(state)
 
+  def handle_info({:output_ready, incarnation}, %{incarnation: incarnation} = state),
+    do: output_step(state)
+
+  def handle_info(:flush_output, state), do: output_step(state)
+
   def handle_info(
         {:"$socket", socket, :select, handle},
         %{
@@ -126,6 +137,29 @@ defmodule LoopexDaemon.SocketConnection do
         %{socket: socket, receive_select: {:select_info, :recv, handle}} = state
       ),
       do: {:stop, :normal, %{state | receive_select: nil}}
+
+  def handle_info(
+        {:"$socket", socket, :select, handle},
+        %{
+          socket: socket,
+          send_select: {:select_info, :send, handle} = continuation,
+          output_claim: output_claim
+        } = state
+      )
+      when not is_nil(output_claim) do
+    state
+    |> Map.put(:send_select, nil)
+    |> attempt_output(continuation)
+    |> output_result()
+  end
+
+  def handle_info(
+        {:"$socket", socket, :abort, {handle, _reason}},
+        %{socket: socket, send_select: {:select_info, :send, handle}} = state
+      ) do
+    Logger.debug("loopex daemon socket send aborted")
+    {:stop, :normal, %{state | send_select: nil}}
+  end
 
   def handle_info(
         {:DOWN, monitor, :process, registry, _reason},
@@ -292,14 +326,85 @@ defmodule LoopexDaemon.SocketConnection do
 
   defp send_record(state, record) do
     with {:ok, encoded} <- Frame.encode(record),
-         :ok <- :socket.send(state.socket, encoded, V2.limits()["reply_wait_ms"]) do
+         :ok <- ConnectionRegistry.enqueue_output(state.registry, state.incarnation, encoded) do
       :ok
     else
       _other ->
-        Logger.debug("loopex daemon socket send failed")
+        Logger.debug("loopex daemon socket output enqueue failed")
         {:error, :send_failed}
     end
   end
+
+  defp output_step(%{output_claim: nil} = state) do
+    case ConnectionRegistry.claim_output(state.registry, state.incarnation) do
+      {:ok, frame_ref, bytes} ->
+        state
+        |> Map.put(:output_claim, %{frame_ref: frame_ref, remaining: bytes})
+        |> attempt_output(nil)
+        |> output_result()
+
+      :empty ->
+        {:noreply, state}
+
+      {:error, _reason} ->
+        {:stop, :normal, state}
+    end
+  end
+
+  defp output_step(%{send_select: nil} = state) do
+    state
+    |> attempt_output(nil)
+    |> output_result()
+  end
+
+  defp output_step(state), do: {:noreply, state}
+
+  defp attempt_output(%{output_claim: %{remaining: bytes}} = state, continuation) do
+    result =
+      if is_nil(continuation),
+        do: :socket.send(state.socket, bytes, [], :nowait),
+        else: :socket.send(state.socket, bytes, continuation, :nowait)
+
+    case result do
+      :ok ->
+        complete_output(state)
+
+      {:ok, rest} when is_binary(rest) and byte_size(rest) > 0 ->
+        send(self(), :flush_output)
+        {:ok, put_in(state, [:output_claim, :remaining], rest)}
+
+      {:select, {select_info, rest}} when is_binary(rest) and byte_size(rest) > 0 ->
+        {:ok,
+         state
+         |> Map.put(:send_select, select_info)
+         |> put_in([:output_claim, :remaining], rest)}
+
+      {:select, select_info} ->
+        {:ok, %{state | send_select: select_info}}
+
+      {:error, _reason} ->
+        Logger.debug("loopex daemon socket send failed")
+        {:stop, state}
+
+      _other ->
+        Logger.debug("loopex daemon socket send returned an unsupported disposition")
+        {:stop, state}
+    end
+  end
+
+  defp complete_output(%{output_claim: %{frame_ref: frame_ref}} = state) do
+    case ConnectionRegistry.output_emitted(state.registry, state.incarnation, frame_ref) do
+      :ok ->
+        send(self(), :flush_output)
+        {:ok, %{state | output_claim: nil, send_select: nil}}
+
+      {:error, _reason} ->
+        {:stop, state}
+    end
+  end
+
+  defp output_result({:ok, state}), do: {:noreply, state}
+  defp output_result({:stop, state}), do: {:stop, :normal, state}
 
   defp frame_ceiling(protocol) do
     limits = V2.limits()

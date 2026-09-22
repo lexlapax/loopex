@@ -56,6 +56,38 @@ defmodule LoopexDaemon.ConnectionRegistryTest do
           send(caller, {:registry_result, reference, result})
           loop(options, token)
 
+        {:registry_call, caller, reference, {:enqueue_output, bytes}} ->
+          result =
+            ConnectionRegistry.enqueue_output(
+              Keyword.fetch!(options, :registry),
+              Keyword.fetch!(options, :connection_incarnation),
+              bytes
+            )
+
+          send(caller, {:registry_result, reference, result})
+          loop(options, token)
+
+        {:registry_call, caller, reference, :claim_output} ->
+          result =
+            ConnectionRegistry.claim_output(
+              Keyword.fetch!(options, :registry),
+              Keyword.fetch!(options, :connection_incarnation)
+            )
+
+          send(caller, {:registry_result, reference, result})
+          loop(options, token)
+
+        {:registry_call, caller, reference, {:output_emitted, frame_ref}} ->
+          result =
+            ConnectionRegistry.output_emitted(
+              Keyword.fetch!(options, :registry),
+              Keyword.fetch!(options, :connection_incarnation),
+              frame_ref
+            )
+
+          send(caller, {:registry_result, reference, result})
+          loop(options, token)
+
         {:connection_abort, ^token, _reason} ->
           :ok
 
@@ -100,6 +132,85 @@ defmodule LoopexDaemon.ConnectionRegistryTest do
     Process.exit(connection, :kill)
     eventually(fn -> ConnectionRegistry.status(registry).occupied == 0 end)
     close_fixture(fixture)
+  end
+
+  test "the registry owns output charges until exact emission and reclaims them on close" do
+    registry =
+      start_registry(5_000,
+        connection_module: ManualConnection,
+        output_buffer_bytes: 10,
+        aggregate_output_bytes: 10
+      )
+
+    connection = start_manual_connection(registry)
+    assert :ok = manual_registry_call(connection.pid, :promote)
+    assert :ok = manual_registry_call(connection.pid, :initialize_complete)
+
+    assert :ok = manual_registry_call(connection.pid, {:enqueue_output, "1234567890"})
+
+    assert %{
+             output_bytes: 10,
+             output_commitment: 10,
+             output_commitment_limit: 10
+           } = ConnectionRegistry.status(registry)
+
+    assert {:ok, frame_ref, "1234567890"} =
+             manual_registry_call(connection.pid, :claim_output)
+
+    assert %{output_bytes: 10, output_commitment: 10} = ConnectionRegistry.status(registry)
+    assert :ok = manual_registry_call(connection.pid, {:output_emitted, frame_ref})
+    assert %{output_bytes: 0, output_commitment: 0} = ConnectionRegistry.status(registry)
+
+    assert :ok = manual_registry_call(connection.pid, {:enqueue_output, "1234567890"})
+    monitor = Process.monitor(connection.pid)
+
+    assert {:error, :capacity_exceeded} =
+             manual_registry_call(connection.pid, {:enqueue_output, "x"})
+
+    assert_receive {:DOWN, ^monitor, :process, connection_pid, :normal}, 500
+    assert connection_pid == connection.pid
+    eventually(fn -> ConnectionRegistry.status(registry).output_commitment == 0 end)
+  end
+
+  test "aggregate output admission cannot exceed the daemon commitment" do
+    registry =
+      start_registry(5_000,
+        connection_module: ManualConnection,
+        output_buffer_bytes: 8,
+        aggregate_output_bytes: 10
+      )
+
+    first = start_manual_connection(registry)
+    second = start_manual_connection(registry)
+    assert :ok = manual_registry_call(first.pid, :promote)
+    assert :ok = manual_registry_call(second.pid, :promote)
+
+    assert :ok = manual_registry_call(first.pid, {:enqueue_output, "123456"})
+    second_monitor = Process.monitor(second.pid)
+
+    assert {:error, :capacity_exceeded} =
+             manual_registry_call(second.pid, {:enqueue_output, "12345"})
+
+    assert_receive {:DOWN, ^second_monitor, :process, second_pid, :normal}, 500
+    assert second_pid == second.pid
+
+    eventually(fn ->
+      ConnectionRegistry.status(registry) == %{
+        occupied: 1,
+        provisional: 0,
+        live: 1,
+        closing: 0,
+        transport: :serving,
+        transport_marked: 0,
+        output_bytes: 6,
+        output_commitment: 6,
+        output_commitment_limit: 10,
+        limit: 512
+      }
+    end)
+
+    Process.exit(first.pid, :kill)
+    eventually(fn -> ConnectionRegistry.status(registry).output_commitment == 0 end)
   end
 
   test "the transport cut freezes and reaps one exact uninitialized population" do

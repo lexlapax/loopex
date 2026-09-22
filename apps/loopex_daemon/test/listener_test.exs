@@ -2,7 +2,7 @@ defmodule LoopexDaemon.ListenerTest do
   use ExUnit.Case, async: true
   @moduletag capture_log: true
 
-  alias LoopexDaemon.{ConnectionRegistry, Listener, ListenerSocket}
+  alias LoopexDaemon.{ConnectionRegistry, Listener, ListenerSocket, OutputBuffer}
   alias LoopexProtocol.{Frame, Session.V2}
 
   defmodule RejectPeer do
@@ -170,6 +170,66 @@ defmodule LoopexDaemon.ListenerTest do
     assert missing_method["code"] == "invalid_request"
     assert missing_method["request_id"] == "missing"
     assert :ok = :socket.close(client)
+  end
+
+  test "registry-owned output uses nonblocking socket progress under peer backpressure" do
+    fixture = start_fixture(initialize_deadline_ms: 1_000)
+    assert :ok = Listener.begin_accept(fixture.listener, fixture.startup_ref)
+    client = connect(fixture.path)
+
+    assert :ok = send_frame(client, initialize())
+    assert [%{"type" => "initialized"}] = receive_records(client, 1)
+    eventually(fn -> ConnectionRegistry.status(fixture.registry).output_bytes == 0 end)
+
+    registry_state = :sys.get_state(fixture.registry)
+    [{token, row}] = Map.to_list(registry_state.rows)
+    connection = row.connection_pid
+    incarnation = row.connection_incarnation
+    :ok = :sys.suspend(connection)
+
+    {:ok, encoded} =
+      Frame.encode(%{
+        "type" => "error",
+        "code" => "internal_failure",
+        "message" => String.duplicate("m", 120_000)
+      })
+
+    encoded = IO.iodata_to_binary(encoded)
+
+    :sys.replace_state(fixture.registry, fn state ->
+      row = Map.fetch!(state.rows, token)
+
+      output =
+        Enum.reduce(1..34, row.output, fn _index, output ->
+          {:ok, output} = OutputBuffer.enqueue(output, encoded)
+          output
+        end)
+
+      commitment = OutputBuffer.commitment(output)
+
+      state
+      |> put_in([:rows, token, :output], output)
+      |> Map.put(:output_commitment, commitment)
+    end)
+
+    send(connection, {:output_ready, incarnation})
+    :ok = :sys.resume(connection)
+
+    eventually(fn ->
+      state = :sys.get_state(connection)
+      not is_nil(state.send_select) and not is_nil(state.output_claim)
+    end)
+
+    assert %{occupied: 1, output_bytes: queued, output_commitment: queued} =
+             ConnectionRegistry.status(fixture.registry)
+
+    assert queued > 0
+    assert Process.alive?(fixture.registry)
+    assert Process.alive?(connection)
+
+    assert :ok = :socket.close(client)
+    eventually(fn -> ConnectionRegistry.status(fixture.registry).occupied == 0 end)
+    assert %{output_bytes: 0, output_commitment: 0} = ConnectionRegistry.status(fixture.registry)
   end
 
   test "an oversized partial frame is discarded only through its newline" do

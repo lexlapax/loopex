@@ -63,6 +63,12 @@ marks initialization complete only through the registry's unchanged
 accept-time deadline. Buffered client bytes and socket state are redacted from
 process diagnostics.
 
+Add the daemon's bounded connection-output foundation. The registry owns each
+complete encoded queue and the daemon-wide output commitment; the connection
+process advances only nonblocking socket sends and releases a frame charge only
+after complete emission. Attachment succession reserves notice capacity plus
+one serially reusable reply slot inside the same four MiB connection ceiling.
+
 Add the daemon transport-closing barrier. Its owner-authenticated first phase
 freezes connection admission and the exact provisional and uninitialized
 population; the post-listener phase closes and reaps only that population and
