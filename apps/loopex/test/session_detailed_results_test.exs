@@ -170,10 +170,20 @@ defmodule Loopex.SessionDetailedResultsTest do
       end)
 
     assert_eventually(fn ->
-      match?(
-        {:message_queue_len, length} when length > 0,
-        Process.info(control, :message_queue_len)
-      )
+      case Process.info(control, :messages) do
+        {:messages, messages} ->
+          Enum.any?(messages, fn
+            {:"$gen_call", {caller_pid, _tag},
+             {:create_session, _token, "lost-control", %{}, :detailed}} ->
+              caller_pid == caller.pid
+
+            _other ->
+              false
+          end)
+
+        nil ->
+          false
+      end
     end)
 
     monitor = Process.monitor(control)
