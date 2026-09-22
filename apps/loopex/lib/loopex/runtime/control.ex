@@ -244,6 +244,9 @@ defmodule Loopex.Runtime.Control do
        lane: OwnerLane.new(Keyword.fetch!(options, :store)),
        sessions: %{},
        monitor_to_session: %{},
+       attachment_holders: %{},
+       attachment_monitor_to_holder: %{},
+       pending_attachments: %{},
        # Concept: the unresolved attempt identities this runtime has authorized,
        # and the one worker and reference each was bound to.
        #
@@ -370,7 +373,7 @@ defmodule Loopex.Runtime.Control do
       with true <- token == state.token,
            {:ok, %{status: :active, coordinator: coordinator, owner: owner} = entry} <-
              Map.fetch(state.sessions, session_id),
-           :ok <- current_attachment?(entry.attachment, attachment_id, incarnation_id),
+           :ok <- current_attachment?(entry.attachments, attachment_id, incarnation_id),
            true <- Process.alive?(coordinator),
            {:ok, %{dispatcher: dispatcher}} <- RuntimeSupervisor.children(state.root),
            :ok <-
@@ -513,21 +516,37 @@ defmodule Loopex.Runtime.Control do
     {:reply, reply, state}
   end
 
-  def handle_call({:begin_attach, token, session_id, options}, _from, state) do
+  def handle_call({:begin_attach, token, session_id, holder, options}, _from, state) do
     if token == state.token do
-      begin_attach(state, session_id, options)
+      begin_attach(state, session_id, holder, options)
     else
       {:reply, {:error, :runtime_unavailable}, state}
     end
   end
 
   def handle_call(
-        {:finish_attach, token, session_id, generation, options, attachment},
+        {:finish_attach, token, session_id, generation, holder, attach_ref, options, attachment},
         _from,
         state
       ) do
     if token == state.token do
-      finish_attach(state, session_id, generation, options, attachment)
+      finish_attach(
+        state,
+        session_id,
+        generation,
+        holder,
+        attach_ref,
+        options,
+        attachment
+      )
+    else
+      {:reply, {:error, :runtime_unavailable}, state}
+    end
+  end
+
+  def handle_call({:release_holder, token, holder}, _from, state) do
+    if token == state.token and is_pid(holder) do
+      {:reply, :ok, release_control_holder(state, holder)}
     else
       {:reply, {:error, :runtime_unavailable}, state}
     end
@@ -580,17 +599,34 @@ defmodule Loopex.Runtime.Control do
   # dispatcher's invalidation; every other succession keeps invalidating exactly
   # as before. Activation and abandonment stay fenced by the capability, which is
   # what an attachment is not and never becomes.
-  defp carried_attachment(%{prepared: prepared}, %{attachment: attachment})
-       when is_map(prepared),
-       do: attachment
+  defp prepare_owner_attachments(state, %{prepared: prepared}, previous, _session_id)
+       when is_map(prepared) do
+    {state, Map.get(previous || %{}, :attachments, %{})}
+  end
 
-  defp carried_attachment(_entry, _previous), do: nil
+  defp prepare_owner_attachments(state, _entry, previous, session_id) do
+    removed =
+      case RuntimeSupervisor.children(state.root) do
+        {:ok, %{dispatcher: dispatcher}} ->
+          case EventDispatcher.invalidate_session(dispatcher, session_id) do
+            {:ok, removed} -> removed
+            {:error, :dispatcher_unavailable} -> []
+          end
 
-  defp invalidate_attachments(%{prepared: prepared}, _root, _session_id) when is_map(prepared),
-    do: :ok
+        _other ->
+          []
+      end
 
-  defp invalidate_attachments(_entry, root, session_id),
-    do: EventDispatcher.invalidate(root, session_id)
+    Enum.each(removed, fn attachment ->
+      send(
+        attachment.holder,
+        {:loopex_attachment_invalidated, session_id, attachment.attachment_id,
+         attachment.attachment_incarnation, attachment.cursor}
+      )
+    end)
+
+    {drop_session_attachments(state, previous, session_id), %{}}
+  end
 
   @impl GenServer
   def handle_cast({:owner_ready, coordinator, owner, durable}, state) do
@@ -602,6 +638,9 @@ defmodule Loopex.Runtime.Control do
         previous: previous
       } = entry
       when generation == owner.generation ->
+        {state, attachments} =
+          prepare_owner_attachments(state, entry, previous, durable.session_id)
+
         active =
           entry
           |> Map.drop([:generation, :previous, :durable, :waiting, :prepared])
@@ -610,12 +649,11 @@ defmodule Loopex.Runtime.Control do
             owner: owner,
             journal_version: durable.journal_version,
             event_sequence: durable.event_sequence,
-            attachment: carried_attachment(entry, previous)
+            attachments: attachments
           })
 
         next = %{state | sessions: Map.put(state.sessions, durable.session_id, active)}
         notify_superseded(previous, owner.generation)
-        invalidate_attachments(entry, state.root, durable.session_id)
         EventDispatcher.acknowledge(state.root, durable.session_id, durable.event_sequence)
         reply_waiting(entry, owner_ready_reply(entry, coordinator, owner, durable))
         {:noreply, next}
@@ -834,6 +872,21 @@ defmodule Loopex.Runtime.Control do
 
   @impl GenServer
   def handle_info({:DOWN, reference, :process, pid, _reason}, state) do
+    case Map.pop(state.attachment_monitor_to_holder, reference) do
+      {^pid, monitors} ->
+        next =
+          state
+          |> Map.put(:attachment_monitor_to_holder, monitors)
+          |> release_control_holder(pid)
+
+        {:noreply, next}
+
+      {nil, _monitors} ->
+        handle_session_monitor_down(reference, pid, state)
+    end
+  end
+
+  defp handle_session_monitor_down(reference, pid, state) do
     case Map.pop(state.monitor_to_session, reference) do
       {nil, _monitors} ->
         {:noreply, state}
@@ -1286,12 +1339,20 @@ defmodule Loopex.Runtime.Control do
 
   defp notify_superseded(_old, _generation), do: :ok
 
-  defp begin_attach(state, session_id, options) when is_list(options) do
+  defp begin_attach(state, session_id, holder, options)
+       when is_pid(holder) and is_list(options) do
     with {:ok, entry} <- Map.fetch(state.sessions, session_id),
          true <- entry.status == :active,
+         :ok <- holder_available(holder),
          {:ok, attach_options} <- validate_attach_options(options),
-         :new <- attachment_repetition(state, session_id, entry, attach_options) do
-      {:reply, {:new, entry.owner.generation, attach_options}, state}
+         :ok <- replacement_target(entry.attachments, holder, attach_options),
+         :new <- attachment_repetition(state, session_id, entry, holder, attach_options) do
+      attach_ref = make_ref()
+
+      next =
+        register_control_pending(state, session_id, entry, holder, attach_ref, attach_options)
+
+      {:reply, {:new, entry.owner.generation, attach_ref, attach_options}, next}
     else
       {:same, response} -> {:reply, {:ok, response}, state}
       :conflict -> {:reply, {:error, :attachment_request_conflict}, state}
@@ -1301,20 +1362,32 @@ defmodule Loopex.Runtime.Control do
     end
   end
 
-  defp begin_attach(state, _session_id, _options),
+  defp begin_attach(state, _session_id, _holder, _options),
     do: {:reply, {:error, :invalid_attachment_options}, state}
 
   defp finish_attach(
          state,
          session_id,
          generation,
+         holder,
+         attach_ref,
          options,
          %{id: id, incarnation_id: incarnation_id, snapshot: snapshot} = attachment
        )
-       when is_binary(id) and is_binary(incarnation_id) and is_map(snapshot) do
+       when is_pid(holder) and is_reference(attach_ref) and is_binary(id) and
+              is_binary(incarnation_id) and is_map(snapshot) do
     with {:ok, %{status: :active, owner: %{generation: ^generation}} = entry} <-
            Map.fetch(state.sessions, session_id),
          {:ok, attach_options} <- validate_attach_options(options),
+         %{
+           session_id: ^session_id,
+           generation: ^generation,
+           holder: ^holder,
+           options: ^attach_options
+         } <-
+           Map.get(state.pending_attachments, attach_ref),
+         true <- Process.alive?(holder),
+         :ok <- replacement_target(entry.attachments, holder, attach_options),
          {:ok, %{dispatcher: dispatcher}} <- RuntimeSupervisor.children(state.root),
          :ok <-
            EventDispatcher.validate(
@@ -1328,59 +1401,92 @@ defmodule Loopex.Runtime.Control do
         status: :active,
         id: id,
         incarnation_id: incarnation_id,
+        holder: holder,
         request_id: attach_options[:request_id],
         binding: attachment_binding(attach_options),
         response: attachment
       }
 
-      next_entry = %{entry | attachment: current_attachment}
-      next = %{state | sessions: Map.put(state.sessions, session_id, next_entry)}
+      attachments =
+        entry.attachments
+        |> Map.delete(attach_options[:replace_attachment_id])
+        |> Map.put(id, current_attachment)
+
+      next_entry = %{entry | attachments: attachments}
+
+      next =
+        state
+        |> complete_control_attachment(
+          holder,
+          attach_ref,
+          id,
+          attach_options[:replace_attachment_id]
+        )
+        |> Map.put(:sessions, Map.put(state.sessions, session_id, next_entry))
+
       {:reply, {:ok, attachment}, next}
     else
-      _other -> {:reply, {:error, :attachment_superseded}, state}
+      _other ->
+        {:reply, {:error, :attachment_superseded},
+         drop_control_pending(state, holder, attach_ref)}
     end
   end
 
-  defp finish_attach(state, _session_id, _generation, _options, _attachment),
-    do: {:reply, {:error, :invalid_attachment}, state}
+  defp finish_attach(
+         state,
+         _session_id,
+         _generation,
+         holder,
+         attach_ref,
+         _options,
+         _attachment
+       ),
+       do:
+         {:reply, {:error, :invalid_attachment}, drop_control_pending(state, holder, attach_ref)}
 
   defp validate_attach_options(options) do
     defaults = [
       after_event_sequence: nil,
       request_id: nil,
       client_id: nil,
-      attachment_key: nil
+      attachment_key: nil,
+      replace_attachment_id: nil
     ]
 
     with {:ok, validated} <- Keyword.validate(options, defaults),
          :ok <- validate_optional_cursor(validated[:after_event_sequence]),
          :ok <- validate_optional_identifier(validated[:request_id]),
          :ok <- validate_optional_identifier(validated[:client_id]),
-         :ok <- validate_optional_identifier(validated[:attachment_key]) do
+         :ok <- validate_optional_identifier(validated[:attachment_key]),
+         :ok <- validate_optional_identifier(validated[:replace_attachment_id]) do
       {:ok, validated}
     else
       _other -> {:error, :invalid_attachment_options}
     end
   end
 
-  defp attachment_repetition(_state, _session_id, %{attachment: nil}, _options), do: :new
-
-  defp attachment_repetition(state, session_id, %{attachment: current}, options) do
+  defp attachment_repetition(state, session_id, %{attachments: attachments}, holder, options) do
     request_id = options[:request_id]
     binding = attachment_binding(options)
+
+    current =
+      Enum.find_value(attachments, fn {_id, attachment} ->
+        if attachment.holder == holder and attachment.request_id == request_id,
+          do: attachment
+      end)
 
     cond do
       is_nil(request_id) ->
         :new
 
-      current.request_id == request_id and current.binding == binding ->
+      is_map(current) and current.binding == binding ->
         if live_attachment?(state, session_id, current) do
           {:same, current.response}
         else
           :new
         end
 
-      current.request_id == request_id ->
+      is_map(current) ->
         :conflict
 
       true ->
@@ -1409,8 +1515,204 @@ defmodule Loopex.Runtime.Control do
       options[:request_id],
       options[:client_id],
       options[:attachment_key],
-      options[:after_event_sequence]
+      options[:after_event_sequence],
+      options[:replace_attachment_id]
     }
+  end
+
+  defp replacement_target(attachments, holder, options) do
+    case options[:replace_attachment_id] do
+      nil ->
+        :ok
+
+      target ->
+        case Map.get(attachments, target) do
+          %{holder: ^holder} -> :ok
+          _other -> {:error, :stale_attachment}
+        end
+    end
+  end
+
+  defp holder_available(holder) do
+    if Process.alive?(holder), do: :ok, else: {:error, :holder_unavailable}
+  end
+
+  defp register_control_pending(state, session_id, entry, holder, attach_ref, options) do
+    state = ensure_control_holder(state, holder)
+
+    holder_entry = Map.fetch!(state.attachment_holders, holder)
+    holder_entry = %{holder_entry | pending: MapSet.put(holder_entry.pending, attach_ref)}
+
+    pending = %{
+      session_id: session_id,
+      generation: entry.owner.generation,
+      holder: holder,
+      options: options
+    }
+
+    %{
+      state
+      | attachment_holders: Map.put(state.attachment_holders, holder, holder_entry),
+        pending_attachments: Map.put(state.pending_attachments, attach_ref, pending)
+    }
+  end
+
+  defp ensure_control_holder(state, holder) do
+    case Map.get(state.attachment_holders, holder) do
+      nil ->
+        monitor = Process.monitor(holder)
+
+        entry = %{
+          monitor: monitor,
+          pending: MapSet.new(),
+          attachments: MapSet.new()
+        }
+
+        %{
+          state
+          | attachment_holders: Map.put(state.attachment_holders, holder, entry),
+            attachment_monitor_to_holder:
+              Map.put(state.attachment_monitor_to_holder, monitor, holder)
+        }
+
+      _entry ->
+        state
+    end
+  end
+
+  defp complete_control_attachment(state, holder, attach_ref, attachment_id, replaced_id) do
+    state = %{state | pending_attachments: Map.delete(state.pending_attachments, attach_ref)}
+
+    update_control_holder(state, holder, fn entry ->
+      %{
+        entry
+        | pending: MapSet.delete(entry.pending, attach_ref),
+          attachments:
+            entry.attachments
+            |> MapSet.delete(replaced_id)
+            |> MapSet.put(attachment_id)
+      }
+    end)
+  end
+
+  defp drop_control_pending(state, holder, attach_ref)
+       when is_pid(holder) and is_reference(attach_ref) do
+    state = %{state | pending_attachments: Map.delete(state.pending_attachments, attach_ref)}
+
+    update_control_holder(state, holder, fn entry ->
+      %{entry | pending: MapSet.delete(entry.pending, attach_ref)}
+    end)
+  end
+
+  defp drop_control_pending(state, _holder, _attach_ref), do: state
+
+  defp update_control_holder(state, holder, update) do
+    case Map.get(state.attachment_holders, holder) do
+      nil ->
+        state
+
+      entry ->
+        updated = update.(entry)
+
+        if MapSet.size(updated.pending) == 0 and MapSet.size(updated.attachments) == 0 do
+          Process.demonitor(updated.monitor, [:flush])
+
+          %{
+            state
+            | attachment_holders: Map.delete(state.attachment_holders, holder),
+              attachment_monitor_to_holder:
+                Map.delete(state.attachment_monitor_to_holder, updated.monitor)
+          }
+        else
+          %{state | attachment_holders: Map.put(state.attachment_holders, holder, updated)}
+        end
+    end
+  end
+
+  defp release_control_holder(state, holder) do
+    case Map.get(state.attachment_holders, holder) do
+      nil ->
+        state
+
+      entry ->
+        sessions =
+          Map.new(state.sessions, fn {session_id, session_entry} ->
+            {session_id, remove_holder_from_session_entry(session_entry, holder)}
+          end)
+
+        pending = Map.drop(state.pending_attachments, MapSet.to_list(entry.pending))
+        Process.demonitor(entry.monitor, [:flush])
+
+        %{
+          state
+          | sessions: sessions,
+            pending_attachments: pending,
+            attachment_holders: Map.delete(state.attachment_holders, holder),
+            attachment_monitor_to_holder:
+              Map.delete(state.attachment_monitor_to_holder, entry.monitor)
+        }
+    end
+  end
+
+  defp remove_holder_from_session_entry(entry, holder) when is_map(entry) do
+    entry =
+      case Map.fetch(entry, :attachments) do
+        {:ok, attachments} ->
+          retained =
+            attachments
+            |> Enum.reject(fn {_id, attachment} -> attachment.holder == holder end)
+            |> Map.new()
+
+          Map.put(entry, :attachments, retained)
+
+        :error ->
+          entry
+      end
+
+    case Map.get(entry, :previous) do
+      previous when is_map(previous) ->
+        Map.put(entry, :previous, remove_holder_from_session_entry(previous, holder))
+
+      _other ->
+        entry
+    end
+  end
+
+  defp remove_holder_from_session_entry(entry, _holder), do: entry
+
+  defp drop_session_attachments(state, previous, session_id) do
+    attachment_ids = previous |> then(&Map.get(&1 || %{}, :attachments, %{})) |> Map.keys()
+
+    state =
+      Enum.reduce(attachment_ids, state, fn attachment_id, current ->
+        drop_control_attachment_from_holders(current, attachment_id)
+      end)
+
+    pending_refs =
+      state.pending_attachments
+      |> Enum.filter(fn {_ref, pending} -> pending.session_id == session_id end)
+      |> Enum.map(&elem(&1, 0))
+
+    Enum.reduce(pending_refs, state, fn attach_ref, current ->
+      case Map.get(current.pending_attachments, attach_ref) do
+        %{holder: holder} -> drop_control_pending(current, holder, attach_ref)
+        _other -> current
+      end
+    end)
+  end
+
+  defp drop_control_attachment_from_holders(state, attachment_id) do
+    case Enum.find(state.attachment_holders, fn {_holder, entry} ->
+           MapSet.member?(entry.attachments, attachment_id)
+         end) do
+      {holder, _entry} ->
+        update_control_holder(state, holder, fn entry ->
+          %{entry | attachments: MapSet.delete(entry.attachments, attachment_id)}
+        end)
+
+      nil ->
+        state
+    end
   end
 
   # Concept: the identity Control spends is the identity Control checked.
@@ -1701,14 +2003,15 @@ defmodule Loopex.Runtime.Control do
   end
 
   defp current_attachment?(
-         %{status: :active, id: attachment_id, incarnation_id: incarnation_id},
+         attachments,
          attachment_id,
          incarnation_id
-       ),
-       do: :ok
-
-  defp current_attachment?(_attachment, _attachment_id, _incarnation_id),
-    do: {:error, :stale_attachment}
+       ) do
+    case Map.get(attachments, attachment_id) do
+      %{status: :active, incarnation_id: ^incarnation_id} -> :ok
+      _other -> {:error, :stale_attachment}
+    end
+  end
 
   defp valid_post_commit?(
          %{journal_version: journal, event_sequence: event},

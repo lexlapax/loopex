@@ -61,9 +61,15 @@ defmodule Loopex.Runtime.EventDispatcher do
   def start_link(options) when is_list(options), do: GenServer.start_link(__MODULE__, options)
 
   @doc false
-  @spec attach(pid(), reference(), binary(), keyword()) :: {:ok, map()} | {:error, term()}
-  def attach(dispatcher, token, session_id, options),
-    do: GenServer.call(dispatcher, {:attach, token, session_id, options}, :infinity)
+  @spec attach(pid(), reference(), binary(), pid(), reference(), keyword()) ::
+          {:ok, map()} | {:error, term()}
+  def attach(dispatcher, token, session_id, holder, attach_ref, options),
+    do:
+      GenServer.call(
+        dispatcher,
+        {:attach, token, session_id, holder, attach_ref, options},
+        :infinity
+      )
 
   @doc false
   @spec validate(pid(), reference(), binary(), binary(), binary()) :: :ok | {:error, term()}
@@ -84,6 +90,42 @@ defmodule Loopex.Runtime.EventDispatcher do
     case RuntimeSupervisor.children(root) do
       {:ok, %{dispatcher: dispatcher}} -> GenServer.cast(dispatcher, {:invalidate, session_id})
       _other -> :ok
+    end
+  end
+
+  @doc false
+  @spec invalidate_session(pid(), binary()) :: {:ok, [map()]} | {:error, :dispatcher_unavailable}
+  def invalidate_session(dispatcher, session_id)
+      when is_pid(dispatcher) and is_binary(session_id) do
+    try do
+      GenServer.call(dispatcher, {:invalidate_session, session_id}, :infinity)
+    catch
+      :exit, _reason -> {:error, :dispatcher_unavailable}
+    end
+  end
+
+  @doc false
+  @spec release_attachment(pid(), binary(), binary()) :: :ok
+  def release_attachment(dispatcher, attachment_id, incarnation_id)
+      when is_pid(dispatcher) and is_binary(attachment_id) and is_binary(incarnation_id) do
+    try do
+      GenServer.call(
+        dispatcher,
+        {:release_attachment, attachment_id, incarnation_id},
+        :infinity
+      )
+    catch
+      :exit, _reason -> :ok
+    end
+  end
+
+  @doc false
+  @spec release_holder(pid(), pid()) :: :ok
+  def release_holder(dispatcher, holder) when is_pid(dispatcher) and is_pid(holder) do
+    try do
+      GenServer.call(dispatcher, {:release_holder, holder}, :infinity)
+    catch
+      :exit, _reason -> :ok
     end
   end
 
@@ -152,6 +194,8 @@ defmodule Loopex.Runtime.EventDispatcher do
        progress_to: Keyword.fetch!(options, :progress_to),
        diagnostics_to: Keyword.fetch!(options, :diagnostics_to),
        attachments: %{},
+       holders: %{},
+       holder_monitors: %{},
        pending_scans: %{},
        pending_reads: %{},
        read_monitors: %{},
@@ -166,13 +210,16 @@ defmodule Loopex.Runtime.EventDispatcher do
   end
 
   @impl GenServer
-  def handle_call({:attach, token, session_id, options}, from, state) do
+  def handle_call({:attach, token, session_id, holder, attach_ref, options}, from, state) do
     with true <- token == state.token,
-         true <- is_binary(session_id) do
+         true <- is_binary(session_id),
+         true <- is_pid(holder),
+         true <- is_reference(attach_ref) do
       scan_id = make_ref()
       parent = self()
       store = state.store
       bound = scan_bound(state, session_id)
+      state = register_holder_pending(state, holder, attach_ref)
 
       worker =
         spawn_link(fn ->
@@ -188,6 +235,8 @@ defmodule Loopex.Runtime.EventDispatcher do
         worker: worker,
         caller_monitor: Process.monitor(elem(from, 0)),
         session_id: session_id,
+        holder: holder,
+        attach_ref: attach_ref,
         options: options
       }
 
@@ -196,6 +245,25 @@ defmodule Loopex.Runtime.EventDispatcher do
     else
       false -> {:reply, {:error, :invalid_attachment}, state}
     end
+  end
+
+  def handle_call({:invalidate_session, session_id}, _from, state) do
+    {removed, next} = invalidate_session_state(state, session_id)
+    {:reply, {:ok, removed}, next}
+  end
+
+  def handle_call({:release_attachment, attachment_id, incarnation_id}, _from, state) do
+    next =
+      case Map.get(state.attachments, attachment_id) do
+        %{incarnation_id: ^incarnation_id} -> drop_attachment(state, attachment_id)
+        _other -> state
+      end
+
+    {:reply, :ok, next}
+  end
+
+  def handle_call({:release_holder, holder}, _from, state) do
+    {:reply, :ok, drop_holder(state, holder, :holder_released)}
   end
 
   def handle_call(
@@ -420,29 +488,8 @@ defmodule Loopex.Runtime.EventDispatcher do
     do: {:noreply, %{state | acknowledged: Map.delete(state.acknowledged, session_id)}}
 
   def handle_cast({:invalidate, session_id}, state) do
-    retained =
-      state.attachments
-      |> Enum.reject(fn {_id, attachment} -> attachment.session_id == session_id end)
-      |> Map.new()
-
-    {cancelled, pending_scans} =
-      Enum.reduce(state.pending_scans, {[], %{}}, fn {scan_id, pending},
-                                                     {cancelled, retained_scans} ->
-        if pending.session_id == session_id do
-          {[pending | cancelled], retained_scans}
-        else
-          {cancelled, Map.put(retained_scans, scan_id, pending)}
-        end
-      end)
-
-    Enum.each(cancelled, fn pending ->
-      Process.demonitor(pending.caller_monitor, [:flush])
-      Process.exit(pending.worker, :kill)
-      GenServer.reply(pending.from, {:error, :attachment_superseded})
-    end)
-
-    next = cancel_session_reads(state, session_id)
-    {:noreply, %{next | attachments: retained, pending_scans: pending_scans}}
+    {_removed, next} = invalidate_session_state(state, session_id)
+    {:noreply, next}
   end
 
   @impl GenServer
@@ -510,6 +557,14 @@ defmodule Loopex.Runtime.EventDispatcher do
     end
   end
 
+  def handle_info({:DOWN, monitor, :process, holder, _reason}, state)
+      when is_map_key(state.holder_monitors, monitor) do
+    case Map.get(state.holder_monitors, monitor) do
+      ^holder -> {:noreply, drop_holder(state, holder, :holder_unavailable)}
+      _other -> {:noreply, state}
+    end
+  end
+
   def handle_info({:DOWN, monitor, :process, _pid, _reason}, state) do
     case Enum.find(state.pending_scans, fn {_scan_id, pending} ->
            pending.caller_monitor == monitor
@@ -519,7 +574,13 @@ defmodule Loopex.Runtime.EventDispatcher do
 
       {scan_id, pending} ->
         Process.exit(pending.worker, :kill)
-        {:noreply, %{state | pending_scans: Map.delete(state.pending_scans, scan_id)}}
+
+        next =
+          state
+          |> Map.put(:pending_scans, Map.delete(state.pending_scans, scan_id))
+          |> drop_holder_pending(pending.holder, pending.attach_ref)
+
+        {:noreply, next}
     end
   end
 
@@ -540,7 +601,13 @@ defmodule Loopex.Runtime.EventDispatcher do
       {scan_id, pending} ->
         Process.demonitor(pending.caller_monitor, [:flush])
         GenServer.reply(pending.from, {:error, :store_unavailable})
-        {:noreply, %{state | pending_scans: Map.delete(state.pending_scans, scan_id)}}
+
+        next =
+          state
+          |> Map.put(:pending_scans, Map.delete(state.pending_scans, scan_id))
+          |> drop_holder_pending(pending.holder, pending.attach_ref)
+
+        {:noreply, next}
     end
   end
 
@@ -688,18 +755,6 @@ defmodule Loopex.Runtime.EventDispatcher do
     }
   end
 
-  defp cancel_session_reads(state, session_id) do
-    Enum.reduce(state.pending_reads, state, fn {id, pending}, current ->
-      if pending.session_id == session_id do
-        Process.exit(pending.worker, :kill)
-        reply_read(pending.current, {:error, :stale_attachment})
-        remove_read(current, id, pending)
-      else
-        current
-      end
-    end)
-  end
-
   defp cancel_read_caller(state, monitor) do
     case Map.fetch(state.read_monitors, monitor) do
       {:ok, id} ->
@@ -771,7 +826,7 @@ defmodule Loopex.Runtime.EventDispatcher do
           } = result}
        )
        when session_id == pending.session_id and is_integer(tail) and tail >= anchor do
-    if is_integer(anchor) and anchor >= 0 do
+    if is_integer(anchor) and anchor >= 0 and holder_pending?(state, pending) do
       counter = state.counter + 1
       attachment_id = fresh_id("attachment", pending.session_id, counter)
       incarnation_id = fresh_id("incarnation", pending.session_id, counter)
@@ -779,6 +834,7 @@ defmodule Loopex.Runtime.EventDispatcher do
       attachment = %{
         id: attachment_id,
         incarnation_id: incarnation_id,
+        holder: pending.holder,
         open_interaction: Map.get(result, :open_interaction),
         session_id: pending.session_id,
         cursor: anchor,
@@ -802,37 +858,30 @@ defmodule Loopex.Runtime.EventDispatcher do
         transfer_progress: %{}
       }
 
-      # Concept: a replaced attachment's transfers end with it.
-      #
-      # Technical depth: accepted ADR 0028 releases every transfer the
-      # attachment opened when it goes away, and a replacement is one of the
-      # ways it goes away. Releasing here rather than waiting for the lifetime
-      # timer is what keeps a reconnecting caller from holding descriptors it
-      # can no longer read through.
-      {superseded, kept} =
-        Enum.split_with(state.attachments, fn {_id, existing} ->
-          existing.session_id == pending.session_id
-        end)
+      with {:ok, prepared} <- prepare_replacement(state, pending) do
+        next =
+          prepared
+          |> Map.put(:counter, counter)
+          |> Map.put(:attachments, Map.put(prepared.attachments, attachment_id, attachment))
+          |> finish_holder_pending(pending.holder, pending.attach_ref, attachment_id)
 
-      Enum.each(superseded, fn {_id, existing} -> release_transfers(state, existing) end)
-      retained = Map.new(kept)
+        reply = %{
+          id: attachment_id,
+          incarnation_id: incarnation_id,
+          snapshot: snapshot,
+          open_interaction: Map.get(result, :open_interaction)
+        }
 
-      next = %{
-        cancel_session_reads(state, pending.session_id)
-        | counter: counter,
-          attachments: Map.put(retained, attachment_id, attachment)
-      }
-
-      reply = %{
-        id: attachment_id,
-        incarnation_id: incarnation_id,
-        snapshot: snapshot,
-        open_interaction: Map.get(result, :open_interaction)
-      }
-
-      {{:ok, reply}, next}
+        {{:ok, reply}, next}
+      else
+        {:error, reason} ->
+          {{:error, reason}, drop_holder_pending(state, pending.holder, pending.attach_ref)}
+      end
     else
-      {{:error, :invalid_store_page}, state}
+      reason =
+        if holder_pending?(state, pending), do: :invalid_store_page, else: :holder_unavailable
+
+      {{:error, reason}, drop_holder_pending(state, pending.holder, pending.attach_ref)}
     end
   end
 
@@ -844,6 +893,206 @@ defmodule Loopex.Runtime.EventDispatcher do
 
   defp install_attachment(state, _pending, _result),
     do: {{:error, :invalid_store_page}, state}
+
+  defp register_holder_pending(state, holder, attach_ref) do
+    case Map.get(state.holders, holder) do
+      nil ->
+        monitor = Process.monitor(holder)
+
+        entry = %{
+          monitor: monitor,
+          pending: MapSet.new([attach_ref]),
+          attachments: MapSet.new()
+        }
+
+        %{
+          state
+          | holders: Map.put(state.holders, holder, entry),
+            holder_monitors: Map.put(state.holder_monitors, monitor, holder)
+        }
+
+      entry ->
+        updated = %{entry | pending: MapSet.put(entry.pending, attach_ref)}
+        %{state | holders: Map.put(state.holders, holder, updated)}
+    end
+  end
+
+  defp holder_pending?(state, pending) do
+    case Map.get(state.holders, pending.holder) do
+      %{pending: refs} -> MapSet.member?(refs, pending.attach_ref)
+      _other -> false
+    end
+  end
+
+  defp finish_holder_pending(state, holder, attach_ref, attachment_id) do
+    case Map.get(state.holders, holder) do
+      nil ->
+        state
+
+      entry ->
+        updated = %{
+          entry
+          | pending: MapSet.delete(entry.pending, attach_ref),
+            attachments: MapSet.put(entry.attachments, attachment_id)
+        }
+
+        %{state | holders: Map.put(state.holders, holder, updated)}
+    end
+  end
+
+  defp drop_holder_pending(state, holder, attach_ref) do
+    update_holder(state, holder, fn entry ->
+      %{entry | pending: MapSet.delete(entry.pending, attach_ref)}
+    end)
+  end
+
+  defp drop_holder_attachment(state, holder, attachment_id) do
+    update_holder(state, holder, fn entry ->
+      %{entry | attachments: MapSet.delete(entry.attachments, attachment_id)}
+    end)
+  end
+
+  defp update_holder(state, holder, update) do
+    case Map.get(state.holders, holder) do
+      nil ->
+        state
+
+      entry ->
+        updated = update.(entry)
+
+        if MapSet.size(updated.pending) == 0 and MapSet.size(updated.attachments) == 0 do
+          Process.demonitor(updated.monitor, [:flush])
+
+          %{
+            state
+            | holders: Map.delete(state.holders, holder),
+              holder_monitors: Map.delete(state.holder_monitors, updated.monitor)
+          }
+        else
+          %{state | holders: Map.put(state.holders, holder, updated)}
+        end
+    end
+  end
+
+  defp prepare_replacement(state, %{options: options, holder: holder, session_id: session_id}) do
+    case options[:replace_attachment_id] do
+      nil ->
+        {:ok, state}
+
+      attachment_id ->
+        case Map.get(state.attachments, attachment_id) do
+          %{holder: ^holder, session_id: ^session_id} ->
+            {:ok, drop_attachment(state, attachment_id)}
+
+          _other ->
+            {:error, :stale_attachment}
+        end
+    end
+  end
+
+  defp invalidate_session_state(state, session_id) do
+    pending_ids =
+      state.pending_scans
+      |> Enum.filter(fn {_scan_id, pending} -> pending.session_id == session_id end)
+      |> Enum.map(&elem(&1, 0))
+
+    state =
+      Enum.reduce(pending_ids, state, fn scan_id, current ->
+        cancel_pending_scan(current, scan_id, :attachment_superseded)
+      end)
+
+    removed =
+      state.attachments
+      |> Enum.filter(fn {_id, attachment} -> attachment.session_id == session_id end)
+      |> Enum.map(fn {id, attachment} ->
+        %{
+          attachment_id: id,
+          attachment_incarnation: attachment.incarnation_id,
+          holder: attachment.holder,
+          cursor: attachment.cursor
+        }
+      end)
+
+    next =
+      Enum.reduce(removed, state, fn removed_attachment, current ->
+        drop_attachment(current, removed_attachment.attachment_id)
+      end)
+
+    {removed, next}
+  end
+
+  defp cancel_pending_scan(state, scan_id, reason) do
+    case Map.pop(state.pending_scans, scan_id) do
+      {nil, _pending} ->
+        state
+
+      {pending, retained} ->
+        Process.demonitor(pending.caller_monitor, [:flush])
+        Process.exit(pending.worker, :kill)
+        GenServer.reply(pending.from, {:error, reason})
+
+        state
+        |> Map.put(:pending_scans, retained)
+        |> drop_holder_pending(pending.holder, pending.attach_ref)
+    end
+  end
+
+  defp drop_holder(state, holder, reason) do
+    case Map.get(state.holders, holder) do
+      nil ->
+        state
+
+      entry ->
+        pending_ids =
+          state.pending_scans
+          |> Enum.filter(fn {_scan_id, pending} -> pending.holder == holder end)
+          |> Enum.map(&elem(&1, 0))
+
+        state =
+          Enum.reduce(pending_ids, state, fn scan_id, current ->
+            cancel_pending_scan(current, scan_id, reason)
+          end)
+
+        attachment_ids = MapSet.to_list(entry.attachments)
+
+        state =
+          Enum.reduce(attachment_ids, state, fn attachment_id, current ->
+            drop_attachment(current, attachment_id)
+          end)
+
+        Process.demonitor(entry.monitor, [:flush])
+
+        %{
+          state
+          | holders: Map.delete(state.holders, holder),
+            holder_monitors: Map.delete(state.holder_monitors, entry.monitor)
+        }
+    end
+  end
+
+  defp drop_attachment(state, attachment_id) do
+    case Map.pop(state.attachments, attachment_id) do
+      {nil, _attachments} ->
+        state
+
+      {attachment, attachments} ->
+        state = cancel_attachment_read(%{state | attachments: attachments}, attachment_id)
+        release_transfers(state, attachment)
+        drop_holder_attachment(state, attachment.holder, attachment_id)
+    end
+  end
+
+  defp cancel_attachment_read(state, attachment_id) do
+    case Map.get(state.pending_reads, attachment_id) do
+      nil ->
+        state
+
+      pending ->
+        Process.exit(pending.worker, :kill)
+        reply_read(pending.current, {:error, :stale_attachment})
+        remove_read(state, attachment_id, pending)
+    end
+  end
 
   defp enqueue_events(attachment, events) do
     Enum.reduce_while(events, {attachment, :complete}, fn event, {current, _disposition} ->

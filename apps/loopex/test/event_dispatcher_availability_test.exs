@@ -14,7 +14,7 @@ defmodule Loopex.EventDispatcherAvailabilityTest do
       {session_b, attachment_b} = session(fixture, "b")
       prompt(attachment_a, "prompt-a")
 
-      {reader, waiter} = held_read(fixture, session_a, attachment_a, entry)
+      {reader, waiter} = held_read(fixture, session_a, attachment_a, entry, self())
 
       # The Store reply remains withheld until after the other command has
       # returned and its exact durable row has crossed the publication fence.
@@ -102,8 +102,18 @@ defmodule Loopex.EventDispatcherAvailabilityTest do
             assert after_succession.owner.owner_epoch == before.owner.owner_epoch + 1
           end
 
+          attach_options =
+            if replacement_kind == :replacement do
+              [
+                after_event_sequence: 0,
+                replace_attachment_id: attachment.attachment_id
+              ]
+            else
+              [after_event_sequence: 0]
+            end
+
           assert {:ok, replacement} =
-                   Loopex.attach(fixture.runtime, session_id, after_event_sequence: 0)
+                   Loopex.attach(fixture.runtime, session_id, attach_options)
 
           assert {:error, :stale_attachment} = Task.await(reader)
           assert_receive {:DOWN, ^worker_monitor, :process, _, :killed}, 2_000
@@ -304,15 +314,28 @@ defmodule Loopex.EventDispatcherAvailabilityTest do
              Loopex.command(attachment, %{type: :prompt, command_id: id, content: "content"})
   end
 
-  defp held_read(fixture, session_id, attachment, entry) do
+  defp held_read(fixture, session_id, attachment, entry, attach_holder \\ :caller) do
     TestStore.block_next_event_read(fixture.store, self())
 
     reader =
       Task.async(fn ->
         case entry do
-          :next_event -> Loopex.next_event(attachment)
-          :attachment_status -> Loopex.attachment_status(attachment)
-          _attach -> Loopex.attach(fixture.runtime, session_id, after_event_sequence: 0)
+          :next_event ->
+            Loopex.next_event(attachment)
+
+          :attachment_status ->
+            Loopex.attachment_status(attachment)
+
+          _attach when is_pid(attach_holder) ->
+            Runtime.attach_for_holder(
+              fixture.runtime,
+              session_id,
+              attach_holder,
+              after_event_sequence: 0
+            )
+
+          _attach ->
+            Loopex.attach(fixture.runtime, session_id, after_event_sequence: 0)
         end
       end)
 

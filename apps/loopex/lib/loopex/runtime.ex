@@ -24,6 +24,7 @@ defmodule Loopex.Runtime do
   alias Loopex.Attachment
   alias Loopex.Executor
   alias Loopex.Runtime.DiagnosticsAdmission
+  alias Loopex.Runtime.EventDispatcher
   alias Loopex.Runtime.SessionCoordinator
   alias Loopex.Runtime.Supervisor, as: RuntimeSupervisor
   alias Loopex.Store
@@ -249,19 +250,54 @@ defmodule Loopex.Runtime do
   @doc false
   @spec attach(t(), binary(), keyword()) :: {:ok, Attachment.t()} | {:error, term()}
   def attach(%__MODULE__{} = runtime, session_id, options) when is_list(options) do
-    case control_call(runtime, {:begin_attach, runtime.token, session_id, options}) do
+    attach_for_holder(runtime, session_id, self(), options)
+  end
+
+  def attach(_runtime, _session_id, _options), do: {:error, :runtime_reference_required}
+
+  @doc false
+  @spec attach_for_holder(t(), binary(), pid(), keyword()) ::
+          {:ok, Attachment.t()} | {:error, term()}
+  def attach_for_holder(%__MODULE__{} = runtime, session_id, holder, options)
+      when is_pid(holder) and is_list(options) do
+    case control_call(
+           runtime,
+           {:begin_attach, runtime.token, session_id, holder, options}
+         ) do
       {:ok, attachment} ->
         build_attachment(runtime, session_id, attachment)
 
-      {:new, generation, validated_options} ->
-        finish_attachment(runtime, session_id, generation, validated_options)
+      {:new, generation, attach_ref, validated_options} ->
+        finish_attachment(
+          runtime,
+          session_id,
+          generation,
+          holder,
+          attach_ref,
+          validated_options
+        )
 
       {:error, reason} ->
         {:error, reason}
     end
   end
 
-  def attach(_runtime, _session_id, _options), do: {:error, :runtime_reference_required}
+  def attach_for_holder(_runtime, _session_id, _holder, _options),
+    do: {:error, :runtime_reference_required}
+
+  @doc false
+  @spec release_holder(t(), pid()) :: :ok | {:error, :runtime_unavailable}
+  def release_holder(%__MODULE__{} = runtime, holder) when is_pid(holder) do
+    with {:ok, %{control: control, dispatcher: dispatcher}} <-
+           RuntimeSupervisor.children(runtime.supervisor) do
+      :ok = EventDispatcher.release_holder(dispatcher, holder)
+      safe_call(control, {:release_holder, runtime.token, holder}, :infinity)
+    else
+      _other -> {:error, :runtime_unavailable}
+    end
+  end
+
+  def release_holder(_runtime, _holder), do: {:error, :runtime_unavailable}
 
   @doc false
   @spec command(Attachment.t(), map()) :: {:accepted, binary()} | {:error, term()}
@@ -589,8 +625,12 @@ defmodule Loopex.Runtime do
     end
   end
 
-  defp finish_attachment(runtime, session_id, generation, options) do
-    case dispatcher_call(runtime, {:attach, runtime.token, session_id, options}, :infinity) do
+  defp finish_attachment(runtime, session_id, generation, holder, attach_ref, options) do
+    case dispatcher_call(
+           runtime,
+           {:attach, runtime.token, session_id, holder, attach_ref, options},
+           :infinity
+         ) do
       {:ok, attachment} ->
         # Concept: attachment registration answers with its actual outcome.
         # Technical depth: Dispatcher has already created the attachment, and
@@ -598,11 +638,25 @@ defmodule Loopex.Runtime do
         # either mutation or truthfully report that the attachment failed.
         case control_call(
                runtime,
-               {:finish_attach, runtime.token, session_id, generation, options, attachment},
+               {:finish_attach, runtime.token, session_id, generation, holder, attach_ref,
+                options, attachment},
                :infinity
              ) do
-          {:ok, installed} -> build_attachment(runtime, session_id, installed)
-          {:error, reason} -> {:error, reason}
+          {:ok, installed} ->
+            build_attachment(runtime, session_id, installed)
+
+          {:error, reason} ->
+            with {:ok, %{dispatcher: dispatcher}} <-
+                   RuntimeSupervisor.children(runtime.supervisor) do
+              :ok =
+                EventDispatcher.release_attachment(
+                  dispatcher,
+                  attachment.id,
+                  attachment.incarnation_id
+                )
+            end
+
+            {:error, reason}
         end
 
       {:error, reason} ->

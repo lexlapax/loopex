@@ -170,11 +170,14 @@ defmodule Loopex.EmbeddedApiTest do
 
     :ok = M1RuntimeTestStore.block_next_event_read(fixture.store_pid, self())
 
+    holder = self()
+
     attaching =
       Task.async(fn ->
-        Loopex.attach(fixture.runtime, session_id,
+        Runtime.attach_for_holder(fixture.runtime, session_id, holder,
           request_id: "snapshot-race",
-          after_event_sequence: 3
+          after_event_sequence: 3,
+          replace_attachment_id: original.attachment_id
         )
       end)
 
