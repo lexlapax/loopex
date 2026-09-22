@@ -990,7 +990,7 @@ diagnostics are transient, are not fenced, and are never durable truth.
 
 - `mix test` — one application's credential-free suite; the test helpers
   exclude the `real_provider` and `long_bound` tags.
-- `mix loopex.deps_budget` — ten-application inventory, roles including
+- `mix loopex.deps_budget` — eleven-application inventory, roles including
   `:composition`, the admitted external dependencies, and direction.
 - `mix loopex.core_only` — core has no adapter resolution or environment-held
   runtime state.

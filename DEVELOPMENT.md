@@ -150,7 +150,7 @@ vision's dependency doctrine admits by name; store, model, executor and
 telemetry edges depend in production on core and may also depend on protocol;
 a client depends in production on core and the contract and composes concrete
 edges only in tests. `mix loopex.deps_budget` reads the literal dependency
-declarations of all ten applications and rejects any other edge, alternate
+declarations of all eleven applications and rejects any other edge, alternate
 path or source-control dependency, or added external package.
 
 An OTP application is not a dependency in that sense, but it must still be

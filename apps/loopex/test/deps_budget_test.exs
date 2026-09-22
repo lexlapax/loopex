@@ -337,9 +337,9 @@ defmodule Mix.Tasks.Loopex.DepsBudgetTest do
     assert Enum.any?(reasons, &String.contains?(&1, "loopex.status"))
   end
 
-  test "M1 planned applications accept only their declared dependency shapes", %{dir: dir} do
+  test "planned applications accept only their declared dependency shapes", %{dir: dir} do
     positive = Path.join(dir, "positive")
-    write_m1_inventory(positive)
+    write_repository_inventory(positive)
     track!(positive)
     assert Budget.check_repository(positive) == :ok
 
@@ -387,13 +387,13 @@ defmodule Mix.Tasks.Loopex.DepsBudgetTest do
            {:loopex_composition, [in_umbrella: true]}
          ])
        end},
-      {"extra-extension", "outside the exact M1 planned inventory",
+      {"extra-extension", "outside the exact planned inventory",
        fn root ->
          write_child(root, "loopex_probe_extension", :extension, [
            {:loopex_protocol, [in_umbrella: true]}
          ])
        end},
-      {"extra-edge", "outside the exact M1 planned inventory",
+      {"extra-edge", "outside the exact planned inventory",
        fn root ->
          write_child(root, "loopex_other_edge", :edge, [{:loopex, [in_umbrella: true]}])
        end},
@@ -438,7 +438,7 @@ defmodule Mix.Tasks.Loopex.DepsBudgetTest do
 
     for {name, expected_reason, mutate} <- negative_cases do
       root = Path.join(dir, name)
-      write_m1_inventory(root)
+      write_repository_inventory(root)
       mutate.(root)
       track!(root)
 
@@ -447,10 +447,10 @@ defmodule Mix.Tasks.Loopex.DepsBudgetTest do
     end
   end
 
-  test "the M2 planned inventory admits exactly eight applications with their declared roles",
+  test "the planned inventory admits exactly eleven applications with their declared roles",
        %{dir: dir} do
     positive = Path.join(dir, "m2-positive")
-    write_m1_inventory(positive)
+    write_repository_inventory(positive)
     track!(positive)
     assert Budget.check_repository(positive) == :ok
 
@@ -458,7 +458,7 @@ defmodule Mix.Tasks.Loopex.DepsBudgetTest do
     # name is refused, and one it does name cannot be dropped or re-roled. A
     # count alone would admit a swap.
     negative_cases = [
-      {"ninth-app", "outside the exact M1 planned inventory",
+      {"twelfth-app", "outside the exact planned inventory",
        fn root ->
          write_child(root, "loopex_extra_client", :client, [{:loopex, [in_umbrella: true]}])
        end},
@@ -472,12 +472,19 @@ defmodule Mix.Tasks.Loopex.DepsBudgetTest do
            {:loopex, [in_umbrella: true]},
            {:loopex_store_local, [in_umbrella: true]}
          ])
+       end},
+      {"daemon-as-composition", "must declare role :client",
+       fn root ->
+         write_child(root, "loopex_daemon", :composition, [
+           {:loopex, [in_umbrella: true]},
+           {:loopex_composition, [in_umbrella: true]}
+         ])
        end}
     ]
 
     for {name, expected_reason, mutate} <- negative_cases do
       root = Path.join(dir, name)
-      write_m1_inventory(root)
+      write_repository_inventory(root)
       mutate.(root)
       track!(root)
 
@@ -530,7 +537,7 @@ defmodule Mix.Tasks.Loopex.DepsBudgetTest do
 
     for {name, expected_reason, mutate} <- negative_cases do
       root = Path.join(dir, name)
-      write_m1_inventory(root)
+      write_repository_inventory(root)
       mutate.(root)
       track!(root)
 
@@ -579,7 +586,7 @@ defmodule Mix.Tasks.Loopex.DepsBudgetTest do
 
     for {name, expected_reason, mutate} <- negative_cases do
       root = Path.join(dir, name)
-      write_m1_inventory(root)
+      write_repository_inventory(root)
       mutate.(root)
       track!(root)
 
@@ -1158,7 +1165,7 @@ defmodule Mix.Tasks.Loopex.DepsBudgetTest do
     write_lock!(root, [{:telemetry, "1.3.0"}])
   end
 
-  defp write_m1_inventory(root) do
+  defp write_repository_inventory(root) do
     write_inventory(root)
 
     write_child(root, "loopex_store_local", :edge, [
@@ -1195,9 +1202,9 @@ defmodule Mix.Tasks.Loopex.DepsBudgetTest do
       {:loopex_executor_local, [in_umbrella: true, only: :test]}
     ])
 
-    # The ninth and tenth applications accepted ADR 0030 and ADR 0023 add: a
-    # client that speaks the wire and names the contract it speaks, and the edge
-    # that owns the only Loopex-attached telemetry handler.
+    # The later applications accepted by ADR 0030, ADR 0023 and M5 add the edge
+    # that owns the only Loopex-attached telemetry handler and the two clients
+    # that speak the public protocol.
     write_child(root, "loopex_app_server", :client, [
       {:loopex, [in_umbrella: true]},
       {:loopex_protocol, [in_umbrella: true]},
@@ -1207,6 +1214,12 @@ defmodule Mix.Tasks.Loopex.DepsBudgetTest do
     write_child(root, "loopex_telemetry", :edge, [
       {:loopex, [in_umbrella: true]},
       {:telemetry, @telemetry_requirement}
+    ])
+
+    write_child(root, "loopex_daemon", :client, [
+      {:loopex, [in_umbrella: true]},
+      {:loopex_protocol, [in_umbrella: true]},
+      {:loopex_composition, [in_umbrella: true]}
     ])
 
     write_lock!(root, [{:req_llm, "1.24.0"}, {:telemetry, "1.3.0"}])
@@ -1342,7 +1355,7 @@ defmodule Mix.Tasks.Loopex.DepsBudgetTest do
   end
 
   defp write_materializer_fixture!(root, cache, packages) do
-    write_m1_inventory(root)
+    write_repository_inventory(root)
     lock_entries = Enum.map(packages, &write_package_archive!(root, cache, &1))
     File.write!(Path.join(root, "mix.lock"), "%{\n#{Enum.join(lock_entries, ",\n")}\n}\n")
     track!(root)

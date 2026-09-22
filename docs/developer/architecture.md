@@ -23,9 +23,9 @@ describes the system as it stands and cites the accepted decision behind each
 boundary; where the two differ, the vision and the accepted decisions lead.
 
 <a id="concept-arch-applications"></a>
-## The Ten Applications and One Direction
+## The Eleven Applications and One Direction
 
-Loopex is a single Elixir umbrella. Ten applications carry five roles today,
+Loopex is a single Elixir umbrella. Eleven applications carry five roles today,
 and the role is what fixes which dependencies an application may declare.
 
 | Application | Role | What it holds |
@@ -40,6 +40,7 @@ and the role is what fixes which dependencies an application may declare.
 | `loopex_reference_client` | client | A thin embedded client over the public facade. |
 | `loopex_cli` | client | `loopex`, the command an operator runs. |
 | `loopex_app_server` | client | The foreground server that speaks the experimental session protocol over standard input and output. |
+| `loopex_daemon` | client | The durable local service that owns one state root and serves independent clients over a Unix-domain socket. |
 
 Every arrow points inward. `loopex_protocol` depends on nothing, so a contributor
 can compile against the contract without acquiring the runtime. `loopex` depends
@@ -51,12 +52,12 @@ an empty core dependency list. The kernel still builds and runs with no adapter
 present, and it attaches no telemetry handler of its own. Every edge and client
 depends on `loopex`; nothing depends outward from it.
 
-`loopex_app_server` is the one client that also names the contract application
-directly, because the schema it speaks lives there under
+`loopex_app_server` and `loopex_daemon` also name the contract application
+directly, because the schemas they speak live there under
 [ADR 0023](../adr/0023-experimental-public-session-protocol.md#concept);
 declaring that edge makes what a client speaks visible in its own project file
-rather than hiding it behind core. It reaches a session only through the public
-facade, so it is a peer of the CLI rather than a second runtime. `loopex_composition` is the one production application
+rather than hiding it behind core. They reach sessions only through the public
+facade, so they are peers of the CLI rather than second runtimes. `loopex_composition` is the one production application
 that names concrete Store, Model, Executor, and ArtifactStore implementations,
 which is exactly what makes the direction checkable — a second place that named
 a Store would be a second place to audit. The one boundary it deliberately does
@@ -71,6 +72,7 @@ flowchart TB
       CLI["loopex_cli"]
       REF["loopex_reference_client"]
       APPS["loopex_app_server"]
+      DAEMON["loopex_daemon"]
     end
 
     COMP["loopex_composition (composition role)"]
@@ -96,6 +98,9 @@ flowchart TB
     APPS --> COMP
     APPS --> RUNTIME
     APPS --> PROTO
+    DAEMON --> COMP
+    DAEMON --> RUNTIME
+    DAEMON --> PROTO
     COMP --> RUNTIME
     COMP --> STORE
     COMP --> LLM
@@ -121,6 +126,10 @@ an operation that raises propagates after cleanup. The existing `start/1`
 behavior remains. Prepared CLI recovery uses this helper to inspect the saved session before
 opening the final runtime with its
 exact retained resource snapshot and trusted launch configuration.
+
+M5 adds `loopex_daemon` as another peer client and host of the same reference
+composition. It owns service lifetime, socket transport, collaboration and
+residency policy while core remains the only owner of session truth.
 
 Technical depth: [Exact inventory and temporary stack ownership](architecture-technical.md#technical-arch-applications).
 

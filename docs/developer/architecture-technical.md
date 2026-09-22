@@ -12,7 +12,7 @@ adapter joins a port, and the repository commands that hold the shape.
 <a id="technical-arch-applications"></a>
 ## Exact Inventory and the Checks That Hold It
 
-Concept: [The ten applications and one direction](architecture.md#concept-arch-applications).
+Concept: [The eleven applications and one direction](architecture.md#concept-arch-applications).
 
 `LoopexComposition.with_runtime/2` brackets a caller operation with startup and
 confirmed cleanup of the reference runtime, Store, workspace lease and executor.
@@ -50,6 +50,7 @@ The umbrella's declared dependencies are the whole of the direction claim:
 | `loopex_reference_client` | `:client` | `loopex`; the three edges `only: :test` |
 | `loopex_cli` | `:client` | `loopex`, `loopex_composition` |
 | `loopex_app_server` | `:client` | `loopex`, `loopex_protocol`, `loopex_composition` |
+| `loopex_daemon` | `:client` | `loopex`, `loopex_protocol`, `loopex_composition` |
 
 `Loopex.Checks.DepsBudget` is the one parser authority for both the direct
 pre-Mix entrypoint and `mix loopex.deps_budget`. It requires the physical project set to equal
@@ -78,12 +79,13 @@ application declaring one of those names, a widened requirement, or any third
 name refuses. `:telemetry` is a pure-Erlang library with no dependencies of its
 own, admitted by [ADR 0030](../adr/0030-observability-tracing-and-telemetry.md#concept)
 and the recorded vision change, and it is resolved through the canonical
-`mix.lock` like ReqLLM. The client-to-contract production edge is what lets
-`loopex_app_server` declare the schema application it speaks, under
-[ADR 0023](../adr/0023-experimental-public-session-protocol.md#concept); the
-app server itself adds no external production dependency, and its only route
-to a session remains the `Loopex` facade. The role
-enumeration also declares `:extension`, which no application in the repository
+`mix.lock` like ReqLLM. The client-to-contract production edge lets
+`loopex_app_server` and `loopex_daemon` declare the schema application they
+speak, under
+[ADR 0023](../adr/0023-experimental-public-session-protocol.md#concept). Both
+protocol-serving clients add no external production dependency and reach
+sessions only through the `Loopex` facade. The role enumeration also declares
+`:extension`, which no application in the repository
 carries today; a standalone extension retains the protocol-only shape
 [ADR 0003](../adr/0003-extension-contract-boundary.md#concept) fixed for it.
 
@@ -645,7 +647,7 @@ by [ADR 0019](../adr/0019-host-owned-provider-protection.md#concept).
 | Telemetry spans, trace sessions, and bounded diagnostics admission | `apps/loopex/lib/loopex/instrumentation.ex`, `apps/loopex/lib/loopex/trace.ex`, `apps/loopex/lib/loopex/trace/`, `apps/loopex/lib/loopex/runtime/diagnostics_admission.ex` |
 | Canonical encoding, tool definitions, and the public session schema | `apps/loopex_protocol/lib/loopex_protocol/`, `apps/loopex_protocol/priv/` |
 | Edge implementations | `apps/loopex_store_local/lib/`, `apps/loopex_llm_reqllm/lib/`, `apps/loopex_executor_local/lib/`, `apps/loopex_telemetry/lib/` |
-| Reference stack and surfaces | `apps/loopex_composition/lib/`, `apps/loopex_cli/lib/`, `apps/loopex_reference_client/lib/`, `apps/loopex_app_server/lib/` |
+| Reference stack and surfaces | `apps/loopex_composition/lib/`, `apps/loopex_cli/lib/`, `apps/loopex_reference_client/lib/`, `apps/loopex_app_server/lib/`, `apps/loopex_daemon/lib/` |
 | Independent wire consumer | `clients/node/` |
 | Repository checks | `apps/loopex/lib/mix/tasks/` |
 
@@ -664,7 +666,7 @@ same commands and never redefines or waives one.
 | Command | What it holds |
 | --- | --- |
 | `mix test --exclude real_provider` | The complete credential-free suite. |
-| `mix loopex.deps_budget` | The ten-application inventory, roles, the admitted external dependencies, and inward direction. |
+| `mix loopex.deps_budget` | The eleven-application inventory, roles, the admitted external dependencies, and inward direction. |
 | `mix loopex.core_only` | Core in a separate virtual machine, no adapter resolvable, no per-runtime state in application environment. |
 | `mix loopex.docs_check` | Compiled documentation read through `Code.fetch_docs/1` orders the depth sections on covered public code. |
 | `mix loopex.status` | Governance rows, index chains, link grammar, paired documents, and bound artifacts at every reachable revision. |
