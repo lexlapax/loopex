@@ -85,6 +85,7 @@ defmodule LoopexDaemon.AdmissionRelayTest do
         tickets: 0,
         pending: 0,
         queued: 0,
+        ticketed: 0,
         executing: 0,
         settling: 0,
         connection_limit: 512,
@@ -561,6 +562,335 @@ defmodule LoopexDaemon.AdmissionRelayTest do
     assert %{connections: 0, tickets: 0} = AdmissionRelay.status(relay)
   end
 
+  test "registry promotion starts the task before acknowledgement and settles its result" do
+    relay = start_relay()
+    registry = start_registry()
+    registry_incarnation = incarnation()
+    assert :ok = AdmissionRelay.register_registry(relay, registry, registry_incarnation)
+
+    incarnation = incarnation()
+    connection = start_connection(relay, incarnation)
+    origin = {incarnation, 0, 1}
+    settlement_ref = make_ref()
+
+    assert {:ok, ^origin} =
+             invoke(connection, fn ->
+               AdmissionRelay.open_ticket(relay, origin, :session_create)
+             end)
+
+    worker = start_ticket_worker(connection)
+    worker_monitor = Process.monitor(worker)
+
+    assert :ok =
+             invoke(connection, fn ->
+               AdmissionRelay.bind_ticket_worker(relay, origin, worker, incarnation())
+             end)
+
+    parent = self()
+    task_release = make_ref()
+
+    result = %{
+      "type" => "result",
+      "method" => "session.create",
+      "request_id" => "r-ticket-1",
+      "result" => %{"session_id" => "session"}
+    }
+
+    promotion_ref = make_ref()
+
+    send(
+      registry,
+      {:invoke, self(), promotion_ref,
+       fn ->
+         AdmissionRelay.promote_ticket(
+           relay,
+           origin,
+           registry_incarnation,
+           settlement_ref,
+           fn ->
+             send(parent, {:ticket_task_started, self()})
+
+             receive do
+               ^task_release -> result
+             end
+           end
+         )
+       end}
+    )
+
+    assert_receive {:ticket_task_started, task}, 500
+    assert_receive {:invoked, ^promotion_ref, {:ok, ^origin}}, 500
+    assert Process.alive?(task)
+    refute Process.alive?(worker)
+    assert_receive {:DOWN, ^worker_monitor, :process, ^worker, :killed}, 500
+
+    assert {:ok, ^origin} =
+             invoke(registry, fn ->
+               AdmissionRelay.promote_ticket(
+                 relay,
+                 origin,
+                 registry_incarnation,
+                 settlement_ref,
+                 fn ->
+                   send(parent, :duplicate_task_started)
+                   result
+                 end
+               )
+             end)
+
+    refute_receive :duplicate_task_started, 40
+
+    assert {:error, :invalid_promotion} =
+             invoke(registry, fn ->
+               AdmissionRelay.promote_ticket(
+                 relay,
+                 origin,
+                 registry_incarnation,
+                 make_ref(),
+                 fn -> result end
+               )
+             end)
+
+    send(task, task_release)
+
+    assert_receive {:registry_message, ^registry,
+                    {:relay_ticket_settlement, ^relay, ^origin, ^settlement_ref, ^result}},
+                   500
+
+    assert :ok =
+             invoke(registry, fn ->
+               AdmissionRelay.settle_ticket(
+                 relay,
+                 origin,
+                 registry_incarnation,
+                 settlement_ref
+               )
+             end)
+
+    assert_receive {:connection_message, ^connection, {:relay_ticket_result, ^origin, ^result}},
+                   500
+
+    eventually(fn -> AdmissionRelay.status(relay).tickets == 0 end)
+    stop_connection(connection, relay, incarnation)
+  end
+
+  test "only the registered registry can promote and its exact identity is fixed" do
+    relay = start_relay()
+    registry = start_registry()
+    registry_incarnation = incarnation()
+
+    assert {:error, :invalid_registry} =
+             invoke(registry, fn ->
+               AdmissionRelay.register_registry(relay, registry, registry_incarnation)
+             end)
+
+    assert :ok = AdmissionRelay.register_registry(relay, registry, registry_incarnation)
+    assert :ok = AdmissionRelay.register_registry(relay, registry, registry_incarnation)
+
+    assert {:error, :registry_conflict} =
+             AdmissionRelay.register_registry(relay, start_registry(), incarnation())
+
+    incarnation = incarnation()
+    connection = start_connection(relay, incarnation)
+    origin = {incarnation, 0, 1}
+
+    assert {:ok, ^origin} =
+             invoke(connection, fn ->
+               AdmissionRelay.open_ticket(relay, origin, :session_create)
+             end)
+
+    assert {:error, :registry_unavailable} =
+             AdmissionRelay.promote_ticket(
+               relay,
+               origin,
+               registry_incarnation,
+               make_ref(),
+               fn -> %{} end
+             )
+
+    assert {:error, :registry_unavailable} =
+             invoke(registry, fn ->
+               AdmissionRelay.promote_ticket(
+                 relay,
+                 origin,
+                 incarnation(),
+                 make_ref(),
+                 fn -> %{} end
+               )
+             end)
+
+    stop_connection(connection, relay, incarnation)
+  end
+
+  test "a promoted task lost before a result fails the relay closed" do
+    Process.flag(:trap_exit, true)
+    relay = start_relay()
+    relay_monitor = Process.monitor(relay)
+    registry = start_registry()
+    registry_incarnation = incarnation()
+    assert :ok = AdmissionRelay.register_registry(relay, registry, registry_incarnation)
+
+    incarnation = incarnation()
+    connection = start_connection(relay, incarnation)
+    origin = {incarnation, 0, 1}
+
+    assert {:ok, ^origin} =
+             invoke(connection, fn ->
+               AdmissionRelay.open_ticket(relay, origin, :session_create)
+             end)
+
+    assert {:ok, ^origin} =
+             invoke(registry, fn ->
+               AdmissionRelay.promote_ticket(
+                 relay,
+                 origin,
+                 registry_incarnation,
+                 make_ref(),
+                 fn -> exit(:task_canary_reason) end
+               )
+             end)
+
+    assert_receive {:DOWN, ^relay_monitor, :process, ^relay, :relay_task_lost}, 500
+    assert_receive {:EXIT, ^relay, :relay_task_lost}, 500
+  end
+
+  test "a promoted task outlives its connection and retirement waits for settlement" do
+    relay = start_relay()
+    registry = start_registry()
+    registry_incarnation = incarnation()
+    assert :ok = AdmissionRelay.register_registry(relay, registry, registry_incarnation)
+
+    incarnation = incarnation()
+    connection = start_connection(relay, incarnation)
+    origin = {incarnation, 0, 1}
+    settlement_ref = make_ref()
+    parent = self()
+
+    assert {:ok, ^origin} =
+             invoke(connection, fn ->
+               AdmissionRelay.open_ticket(relay, origin, :session_attach, "session")
+             end)
+
+    result = %{
+      "type" => "result",
+      "method" => "session.attach",
+      "request_id" => "r-ticket-2",
+      "result" => %{"attachment_id" => "attachment"}
+    }
+
+    assert {:ok, ^origin} =
+             invoke(registry, fn ->
+               AdmissionRelay.promote_ticket(
+                 relay,
+                 origin,
+                 registry_incarnation,
+                 settlement_ref,
+                 fn ->
+                   send(parent, {:promoted_task_waiting, self()})
+
+                   receive do
+                     :finish -> result
+                   end
+                 end
+               )
+             end)
+
+    assert_receive {:promoted_task_waiting, task}, 500
+    Process.exit(connection, :kill)
+    refute_receive {:relay_connection_retired, ^relay, ^incarnation}, 40
+
+    send(task, :finish)
+
+    assert_receive {:registry_message, ^registry,
+                    {:relay_ticket_settlement, ^relay, ^origin, ^settlement_ref, ^result}},
+                   500
+
+    assert :ok =
+             invoke(registry, fn ->
+               AdmissionRelay.settle_ticket(
+                 relay,
+                 origin,
+                 registry_incarnation,
+                 settlement_ref
+               )
+             end)
+
+    assert_receive {:relay_connection_retired, ^relay, ^incarnation}, 500
+    refute_receive {:connection_message, ^connection, _message}, 40
+  end
+
+  test "only a frozen pre-cut ticket can promote before the admission deadline" do
+    relay = start_relay(admission_wait_ms: 200)
+    registry = start_registry()
+    registry_incarnation = incarnation()
+    assert :ok = AdmissionRelay.register_registry(relay, registry, registry_incarnation)
+
+    incarnation = incarnation()
+    connection = start_connection(relay, incarnation)
+    admitted = {incarnation, 0, 1}
+    expires = {incarnation, 1, 1}
+
+    for origin <- [admitted, expires] do
+      assert {:ok, ^origin} =
+               invoke(connection, fn ->
+                 AdmissionRelay.open_ticket(relay, origin, :session_create)
+               end)
+    end
+
+    cut_ref = make_ref()
+    send(relay, {:relay_barrier, cut_ref, :cut})
+    assert_receive {:relay_barrier_ack, ^cut_ref, :cut, _payload}, 500
+
+    settlement_ref = make_ref()
+    result = %{"type" => "result", "method" => "session.create", "request_id" => "cut"}
+
+    assert {:ok, ^admitted} =
+             invoke(registry, fn ->
+               AdmissionRelay.promote_ticket(
+                 relay,
+                 admitted,
+                 registry_incarnation,
+                 settlement_ref,
+                 fn -> result end
+               )
+             end)
+
+    assert_receive {:registry_message, ^registry,
+                    {:relay_ticket_settlement, ^relay, ^admitted, ^settlement_ref, ^result}},
+                   500
+
+    assert :ok =
+             invoke(registry, fn ->
+               AdmissionRelay.settle_ticket(
+                 relay,
+                 admitted,
+                 registry_incarnation,
+                 settlement_ref
+               )
+             end)
+
+    assert_receive {:connection_message, ^connection, {:relay_ticket_result, ^admitted, ^result}},
+                   500
+
+    assert_receive {:connection_message, ^connection,
+                    {:relay_ticket_cancelled, ^expires, :daemon_stopping}},
+                   500
+
+    assert {:error, :daemon_stopping} =
+             invoke(registry, fn ->
+               AdmissionRelay.promote_ticket(
+                 relay,
+                 expires,
+                 registry_incarnation,
+                 make_ref(),
+                 fn -> result end
+               )
+             end)
+
+    eventually(fn -> AdmissionRelay.status(relay).tickets == 0 end)
+    stop_connection(connection, relay, incarnation)
+  end
+
   defp start_relay(options \\ []) do
     options = Keyword.merge([owner: self(), admission_wait_ms: 1_000], options)
     start_supervised!({AdmissionRelay, options})
@@ -578,6 +908,23 @@ defmodule LoopexDaemon.AdmissionRelayTest do
 
     assert_receive {:connection_registered, ^connection, :ok}, 500
     connection
+  end
+
+  defp start_registry do
+    parent = self()
+    spawn_link(fn -> registry_loop(parent) end)
+  end
+
+  defp registry_loop(parent) do
+    receive do
+      {:invoke, caller, reference, operation} ->
+        send(caller, {:invoked, reference, operation.()})
+        registry_loop(parent)
+
+      message ->
+        send(parent, {:registry_message, self(), message})
+        registry_loop(parent)
+    end
   end
 
   defp connection_loop(parent) do

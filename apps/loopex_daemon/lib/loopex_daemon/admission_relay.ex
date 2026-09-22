@@ -99,6 +99,9 @@ defmodule LoopexDaemon.AdmissionRelay do
   @typedoc false
   @type owner_binding :: {pid(), binary()} | nil
 
+  @typedoc false
+  @type settlement_ref :: term()
+
   @doc false
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(options), do: GenServer.start_link(__MODULE__, options)
@@ -115,6 +118,17 @@ defmodule LoopexDaemon.AdmissionRelay do
     GenServer.call(
       relay,
       {:register_connection, incarnation, retirement_recipient},
+      @control_timeout_ms
+    )
+  end
+
+  @doc false
+  @spec register_registry(pid(), pid(), binary()) ::
+          :ok | {:error, :invalid_registry | :registry_conflict}
+  def register_registry(relay, registry, registry_incarnation) do
+    GenServer.call(
+      relay,
+      {:register_registry, registry, registry_incarnation},
       @control_timeout_ms
     )
   end
@@ -170,6 +184,45 @@ defmodule LoopexDaemon.AdmissionRelay do
   end
 
   @doc false
+  @spec promote_ticket(
+          pid(),
+          origin_id(),
+          binary(),
+          settlement_ref(),
+          (-> map())
+        ) ::
+          {:ok, origin_id()}
+          | {:error,
+             :daemon_stopping
+             | :invalid_promotion
+             | :registry_unavailable
+             | :ticket_unavailable}
+  def promote_ticket(
+        relay,
+        origin_id,
+        registry_incarnation,
+        settlement_ref,
+        task_fun
+      ) do
+    GenServer.call(
+      relay,
+      {:promote_ticket, origin_id, registry_incarnation, settlement_ref, task_fun},
+      @control_timeout_ms
+    )
+  end
+
+  @doc false
+  @spec settle_ticket(pid(), origin_id(), binary(), settlement_ref()) ::
+          :ok | {:error, :registry_unavailable | :ticket_unavailable}
+  def settle_ticket(relay, origin_id, registry_incarnation, settlement_ref) do
+    GenServer.call(
+      relay,
+      {:settle_ticket, origin_id, registry_incarnation, settlement_ref},
+      @control_timeout_ms
+    )
+  end
+
+  @doc false
   @spec bind_worker(pid(), origin_id(), pid(), binary()) ::
           :ok
           | {:error,
@@ -204,6 +257,7 @@ defmodule LoopexDaemon.AdmissionRelay do
           tickets: non_neg_integer(),
           pending: non_neg_integer(),
           queued: non_neg_integer(),
+          ticketed: non_neg_integer(),
           executing: non_neg_integer(),
           settling: non_neg_integer(),
           connection_limit: 512,
@@ -239,7 +293,10 @@ defmodule LoopexDaemon.AdmissionRelay do
          connection_monitors: %{},
          permits: %{},
          tickets: %{},
-         worker_monitors: %{}
+         worker_monitors: %{},
+         ticket_task_monitors: %{},
+         registry: nil,
+         registry_monitor: nil
        }}
     else
       {:stop, :invalid_admission_relay_options}
@@ -247,6 +304,38 @@ defmodule LoopexDaemon.AdmissionRelay do
   end
 
   @impl true
+  def handle_call(
+        {:register_registry, registry, registry_incarnation},
+        {caller, _tag},
+        %{owner: caller} = state
+      ) do
+    cond do
+      not is_pid(registry) or not valid_incarnation?(registry_incarnation) ->
+        {:reply, {:error, :invalid_registry}, state}
+
+      match?(%{pid: ^registry, incarnation: ^registry_incarnation}, state.registry) ->
+        {:reply, :ok, state}
+
+      not is_nil(state.registry) ->
+        {:reply, {:error, :registry_conflict}, state}
+
+      true ->
+        monitor = Process.monitor(registry)
+
+        state = %{
+          state
+          | registry: %{pid: registry, incarnation: registry_incarnation},
+            registry_monitor: monitor
+        }
+
+        Logger.debug("loopex daemon admission relay registry registered")
+        {:reply, :ok, state}
+    end
+  end
+
+  def handle_call({:register_registry, _registry, _incarnation}, _from, state),
+    do: {:reply, {:error, :invalid_registry}, state}
+
   def handle_call(
         {:register_connection, incarnation, retirement_recipient},
         {caller, _tag},
@@ -371,7 +460,18 @@ defmodule LoopexDaemon.AdmissionRelay do
             worker_pid: nil,
             worker_incarnation: nil,
             worker_monitor: nil,
-            disposition: nil
+            disposition: nil,
+            promoter_pid: nil,
+            promoter_incarnation: nil,
+            settlement_ref: nil,
+            task_pid: nil,
+            task_incarnation: nil,
+            task_monitor: nil,
+            task_down: false,
+            result: nil,
+            settlement_acked: false,
+            result_delivered: false,
+            promotion_waiters: []
           }
 
           connection = %{
@@ -428,6 +528,69 @@ defmodule LoopexDaemon.AdmissionRelay do
       else
         {:error, reason} -> {:reply, {:error, reason}, state}
       end
+    end
+  end
+
+  def handle_call(
+        {:promote_ticket, origin_id, registry_incarnation, settlement_ref, task_fun},
+        from = {caller, _tag},
+        state
+      ) do
+    state = expire_if_due(state)
+
+    case promotion_repetition(
+           state,
+           origin_id,
+           caller,
+           registry_incarnation,
+           settlement_ref
+         ) do
+      :complete ->
+        {:reply, {:ok, origin_id}, state}
+
+      {:waiting, ticket} ->
+        ticket = %{ticket | promotion_waiters: [from | ticket.promotion_waiters]}
+        {:noreply, put_in(state, [:tickets, origin_id], ticket)}
+
+      :conflict ->
+        {:reply, {:error, :invalid_promotion}, state}
+
+      :absent ->
+        with :ok <- promotion_admitted(state, origin_id),
+             :ok <- authenticate_registry(state, caller, registry_incarnation),
+             true <- is_function(task_fun, 0),
+             {:ok, ticket} <- promotable_ticket(state, origin_id),
+             true <- ticket.class in [:session_create, :session_attach] do
+          start_registry_promotion(
+            state,
+            ticket,
+            from,
+            caller,
+            registry_incarnation,
+            settlement_ref,
+            task_fun
+          )
+        else
+          false -> {:reply, {:error, :invalid_promotion}, state}
+          {:error, reason} -> {:reply, {:error, reason}, state}
+        end
+    end
+  end
+
+  def handle_call(
+        {:settle_ticket, origin_id, registry_incarnation, settlement_ref},
+        {caller, _tag},
+        state
+      ) do
+    with :ok <- authenticate_registry(state, caller, registry_incarnation),
+         {:ok, ticket} <- selected_ticket(state, origin_id, caller, settlement_ref) do
+      ticket = %{ticket | settlement_acked: true}
+      state = put_in(state, [:tickets, origin_id], ticket)
+      state = deliver_ticket_result(state, origin_id)
+      Logger.debug("loopex daemon admission relay ticket settled")
+      {:reply, :ok, state}
+    else
+      {:error, reason} -> {:reply, {:error, reason}, state}
     end
   end
 
@@ -511,9 +674,10 @@ defmodule LoopexDaemon.AdmissionRelay do
       end)
 
     ticket_counts =
-      Enum.reduce(state.tickets, %{pending: 0, queued: 0, settling: 0}, fn
+      Enum.reduce(state.tickets, %{pending: 0, queued: 0, ticketed: 0, settling: 0}, fn
         {_id, %{phase: :pending}}, counts -> Map.update!(counts, :pending, &(&1 + 1))
         {_id, %{phase: :queued}}, counts -> Map.update!(counts, :queued, &(&1 + 1))
+        {_id, %{phase: :ticketed}}, counts -> Map.update!(counts, :ticketed, &(&1 + 1))
         {_id, %{phase: :settling}}, counts -> Map.update!(counts, :settling, &(&1 + 1))
       end)
 
@@ -525,6 +689,7 @@ defmodule LoopexDaemon.AdmissionRelay do
        tickets: map_size(state.tickets),
        pending: permit_counts.pending + ticket_counts.pending,
        queued: ticket_counts.queued,
+       ticketed: ticket_counts.ticketed,
        executing: permit_counts.executing,
        settling: permit_counts.settling + ticket_counts.settling,
        connection_limit: @connection_limit,
@@ -594,16 +759,55 @@ defmodule LoopexDaemon.AdmissionRelay do
   def handle_info({:admission_deadline, _barrier_ref}, state), do: {:noreply, state}
 
   def handle_info(
+        {:relay_ticket_result, task, origin_id, task_incarnation, result},
+        state
+      ) do
+    case Map.fetch(state.tickets, origin_id) do
+      {:ok,
+       %{
+         phase: :ticketed,
+         task_pid: ^task,
+         task_incarnation: ^task_incarnation,
+         result: nil
+       } = ticket} ->
+        if bounded_record?(result) do
+          ticket = %{ticket | phase: :settling, disposition: :result, result: result}
+          state = put_in(state, [:tickets, origin_id], ticket)
+
+          send(
+            ticket.promoter_pid,
+            {:relay_ticket_settlement, self(), origin_id, ticket.settlement_ref, result}
+          )
+
+          Logger.debug("loopex daemon admission relay ticket result selected")
+          {:noreply, state}
+        else
+          {:stop, :relay_task_lost, state}
+        end
+
+      _other ->
+        {:noreply, state}
+    end
+  end
+
+  def handle_info(
         {:DOWN, monitor, :process, pid, reason},
         %{connection_monitors: connection_monitors} = state
       ) do
-    case Map.fetch(connection_monitors, monitor) do
-      {:ok, incarnation} ->
+    cond do
+      Map.has_key?(connection_monitors, monitor) ->
+        incarnation = Map.fetch!(connection_monitors, monitor)
         state = connection_down(state, incarnation, pid)
         Logger.debug("loopex daemon admission relay connection retiring")
         {:noreply, state}
 
-      :error ->
+      state.registry_monitor == monitor ->
+        {:stop, :registry_lost, state}
+
+      Map.has_key?(state.ticket_task_monitors, monitor) ->
+        ticket_task_down(state, monitor, pid, reason)
+
+      true ->
         worker_down(state, monitor, pid, reason)
     end
   end
@@ -621,8 +825,9 @@ defmodule LoopexDaemon.AdmissionRelay do
     end)
 
     Enum.each(state.tickets, fn
-      {_origin, %{worker_pid: worker}} when is_pid(worker) -> Process.exit(worker, :kill)
-      _other -> :ok
+      {_origin, ticket} ->
+        if is_pid(ticket.worker_pid), do: Process.exit(ticket.worker_pid, :kill)
+        if is_pid(ticket.task_pid), do: Process.exit(ticket.task_pid, :kill)
     end)
 
     Logger.debug("loopex daemon admission relay stop")
@@ -761,12 +966,132 @@ defmodule LoopexDaemon.AdmissionRelay do
     end
   end
 
+  defp promotable_ticket(state, origin_id) do
+    case Map.fetch(state.tickets, origin_id) do
+      {:ok, %{phase: phase} = ticket} when phase in [:pending, :queued] -> {:ok, ticket}
+      _other -> {:error, :ticket_unavailable}
+    end
+  end
+
+  defp selected_ticket(state, origin_id, registry, settlement_ref) do
+    case Map.fetch(state.tickets, origin_id) do
+      {:ok,
+       %{
+         phase: :settling,
+         disposition: :result,
+         promoter_pid: ^registry,
+         settlement_ref: ^settlement_ref
+       } = ticket} ->
+        {:ok, ticket}
+
+      _other ->
+        {:error, :ticket_unavailable}
+    end
+  end
+
+  defp authenticate_registry(state, registry, registry_incarnation) do
+    case state.registry do
+      %{pid: ^registry, incarnation: ^registry_incarnation} -> :ok
+      _other -> {:error, :registry_unavailable}
+    end
+  end
+
+  defp promotion_admitted(%{phase: :serving}, _origin_id), do: :ok
+
+  defp promotion_admitted(%{phase: :draining} = state, origin_id) do
+    if monotonic_ms() < state.admission_deadline and
+         frozen_origin?(state, :ticket, origin_id),
+       do: :ok,
+       else: {:error, :daemon_stopping}
+  end
+
   defp bind_admitted(%{phase: :serving}, _origin_id, _kind), do: :ok
 
   defp bind_admitted(%{phase: :draining} = state, origin_id, kind) do
     if monotonic_ms() < state.admission_deadline and frozen_origin?(state, kind, origin_id),
       do: :ok,
       else: {:error, :daemon_stopping}
+  end
+
+  defp promotion_repetition(
+         state,
+         origin_id,
+         registry,
+         registry_incarnation,
+         settlement_ref
+       ) do
+    case Map.fetch(state.tickets, origin_id) do
+      {:ok,
+       %{
+         phase: phase,
+         promoter_pid: ^registry,
+         promoter_incarnation: ^registry_incarnation,
+         settlement_ref: ^settlement_ref,
+         worker_pid: worker
+       } = ticket}
+      when phase in [:ticketed, :settling] ->
+        if is_pid(worker), do: {:waiting, ticket}, else: :complete
+
+      {:ok, %{phase: phase}} when phase in [:ticketed, :settling] ->
+        :conflict
+
+      _other ->
+        :absent
+    end
+  end
+
+  defp start_registry_promotion(
+         state,
+         ticket,
+         from,
+         registry,
+         registry_incarnation,
+         settlement_ref,
+         task_fun
+       ) do
+    origin_id = ticket.origin_id
+    task_incarnation = random_incarnation()
+    relay = self()
+
+    {task, task_monitor} =
+      spawn_monitor(fn ->
+        receive do
+          {:relay_ticket_go, ^relay, ^origin_id, ^task_incarnation} ->
+            result = task_fun.()
+            send(relay, {:relay_ticket_result, self(), origin_id, task_incarnation, result})
+        end
+      end)
+
+    ticket = %{
+      ticket
+      | phase: :ticketed,
+        promoter_pid: registry,
+        promoter_incarnation: registry_incarnation,
+        settlement_ref: settlement_ref,
+        task_pid: task,
+        task_incarnation: task_incarnation,
+        task_monitor: task_monitor,
+        task_down: false,
+        result: nil,
+        settlement_acked: false,
+        result_delivered: false,
+        promotion_waiters: if(is_pid(ticket.worker_pid), do: [from], else: [])
+    }
+
+    state =
+      state
+      |> put_in([:tickets, origin_id], ticket)
+      |> put_in([:ticket_task_monitors, task_monitor], origin_id)
+
+    send(task, {:relay_ticket_go, relay, origin_id, task_incarnation})
+    Logger.debug("loopex daemon admission relay ticket promoted")
+
+    if is_pid(ticket.worker_pid) do
+      if Process.alive?(ticket.worker_pid), do: Process.exit(ticket.worker_pid, :kill)
+      {:noreply, state}
+    else
+      {:reply, {:ok, origin_id}, state}
+    end
   end
 
   defp valid_worker(worker, worker_incarnation, caller) do
@@ -826,6 +1151,7 @@ defmodule LoopexDaemon.AdmissionRelay do
   defp frozen_phase(:executing), do: :executing
   defp frozen_phase(:settling), do: :settling
   defp frozen_phase(:queued), do: :queued
+  defp frozen_phase(:ticketed), do: :ticketed
 
   defp frozen_origin?(state, :permit, origin_id),
     do: MapSet.member?(state.frozen_permits, origin_id)
@@ -980,6 +1306,25 @@ defmodule LoopexDaemon.AdmissionRelay do
 
   defp ticket_worker_down(state, origin_id, pid) do
     case Map.fetch(state.tickets, origin_id) do
+      {:ok, %{worker_pid: ^pid, phase: phase} = ticket}
+      when phase in [:ticketed, :settling] and is_pid(ticket.task_pid) ->
+        Enum.each(ticket.promotion_waiters, fn from ->
+          GenServer.reply(from, {:ok, origin_id})
+        end)
+
+        ticket = %{
+          ticket
+          | worker_pid: nil,
+            worker_incarnation: nil,
+            worker_monitor: nil,
+            promotion_waiters: []
+        }
+
+        state = put_in(state, [:tickets, origin_id], ticket)
+        state = finalize_ticket_if_complete(state, origin_id)
+        Logger.debug("loopex daemon admission relay ticket worker retired")
+        {:noreply, state}
+
       {:ok, %{worker_pid: ^pid} = ticket} ->
         state =
           if ticket.disposition do
@@ -1000,6 +1345,72 @@ defmodule LoopexDaemon.AdmissionRelay do
 
       _other ->
         {:noreply, state}
+    end
+  end
+
+  defp ticket_task_down(state, monitor, pid, _reason) do
+    {origin_id, task_monitors} = Map.pop(state.ticket_task_monitors, monitor)
+    state = %{state | ticket_task_monitors: task_monitors}
+
+    case Map.fetch(state.tickets, origin_id) do
+      {:ok, %{task_pid: ^pid, result: nil} = ticket} ->
+        if state.phase == :serving do
+          {:stop, :relay_task_lost, state}
+        else
+          ticket = %{ticket | task_down: true}
+          Logger.debug("loopex daemon admission relay ticket task unresolved")
+          {:noreply, put_in(state, [:tickets, origin_id], ticket)}
+        end
+
+      {:ok, %{task_pid: ^pid} = ticket} ->
+        ticket = %{ticket | task_down: true}
+        state = put_in(state, [:tickets, origin_id], ticket)
+        state = finalize_ticket_if_complete(state, origin_id)
+        Logger.debug("loopex daemon admission relay ticket task reaped")
+        {:noreply, state}
+
+      _other ->
+        {:noreply, state}
+    end
+  end
+
+  defp deliver_ticket_result(state, origin_id) do
+    case Map.fetch(state.tickets, origin_id) do
+      {:ok,
+       %{
+         settlement_acked: true,
+         result_delivered: false,
+         disposition: :result,
+         result: result
+       } = ticket} ->
+        if Process.alive?(ticket.connection_pid) do
+          send(ticket.connection_pid, {:relay_ticket_result, origin_id, result})
+        end
+
+        ticket = %{ticket | result_delivered: true}
+        state = put_in(state, [:tickets, origin_id], ticket)
+        finalize_ticket_if_complete(state, origin_id)
+
+      _other ->
+        state
+    end
+  end
+
+  defp finalize_ticket_if_complete(state, origin_id) do
+    case Map.fetch(state.tickets, origin_id) do
+      {:ok,
+       %{
+         task_down: true,
+         result_delivered: true,
+         worker_pid: nil,
+         connection_incarnation: incarnation
+       }} ->
+        state
+        |> remove_ticket(origin_id)
+        |> maybe_retire_connection(incarnation)
+
+      _other ->
+        state
     end
   end
 
@@ -1064,4 +1475,5 @@ defmodule LoopexDaemon.AdmissionRelay do
   end
 
   defp monotonic_ms, do: System.monotonic_time(:millisecond)
+  defp random_incarnation, do: :crypto.strong_rand_bytes(16)
 end

@@ -85,6 +85,13 @@ the waiting request worker without dispatching core work. Shutdown or
 connection loss kills and reaps a queued worker before the origin and accepted
 connection can retire.
 
+Add authenticated registry promotion for create and attach tickets. The relay
+starts and monitors the core task before it acknowledges promotion, reaps the
+queued request worker before returning, keeps promoted work across connection
+loss, and retains the bounded result until the registry acknowledges its exact
+reservation or borrow settlement. Missing task results fail the relay closed;
+exact promotion retries start no second task.
+
 Add the daemon's bounded connection-output foundation. The registry owns each
 complete encoded queue and the daemon-wide output commitment; the connection
 process advances only nonblocking socket sends and releases a frame charge only
