@@ -134,6 +134,31 @@ defmodule LoopexDaemon.Owner do
     GenServer.call(owner, {:release_retirement_pop, session_id})
   end
 
+  @doc """
+  ## Concept
+
+  Closes admission at the start of an orderly stop: the relay refuses every
+  later request and the registry admits no later initialization.
+
+  ## Technical depth
+
+  The relay's ref-tagged cut acknowledgement is consumed here, then the
+  registry's owner-authenticated transport gate is closed with the same
+  reference. Both answers are bounded by the relay control timeout.
+  """
+  @spec cut_admission(pid()) :: {:ok, reference()} | {:error, atom()}
+  def cut_admission(owner), do: GenServer.call(owner, :cut_admission, 15_000)
+
+  @doc false
+  @spec reap_uninitialized(pid(), reference()) :: :ok | {:error, atom()}
+  def reap_uninitialized(owner, cut_ref),
+    do: GenServer.call(owner, {:reap_uninitialized, cut_ref}, 15_000)
+
+  @doc false
+  @spec close_connections(pid(), map(), integer()) :: :ok | {:ok, :forced} | {:error, atom()}
+  def close_connections(owner, record, deadline),
+    do: GenServer.call(owner, {:close_connections, record, deadline}, :infinity)
+
   @doc false
   @spec owner_loss_connection_closed(pid(), reference(), binary()) :: :ok
   def owner_loss_connection_closed(owner, close_ref, connection_incarnation) do
@@ -195,7 +220,8 @@ defmodule LoopexDaemon.Owner do
            mirror_operations: %{},
            pending_dispositions: %{},
            routes: %{},
-           attachments: %{}
+           attachments: %{},
+           stop: nil
          }}
       else
         _error -> {:stop, :component_start_failed}
@@ -283,6 +309,38 @@ defmodule LoopexDaemon.Owner do
 
   def handle_call({:release_retirement_pop, _session_id}, _from, state),
     do: {:reply, {:error, :invalid_operation}, state}
+
+  def handle_call(:cut_admission, from, %{stop: nil} = state) do
+    cut_ref = make_ref()
+    send(state.relay, {:relay_barrier, cut_ref, :cut})
+    Logger.debug("loopex daemon owner admission cut requested")
+    {:noreply, %{state | stop: %{phase: :cutting, cut_ref: cut_ref, from: from, swept: false}}}
+  end
+
+  def handle_call(:cut_admission, _from, %{stop: %{cut_ref: cut_ref}} = state),
+    do: {:reply, {:ok, cut_ref}, state}
+
+  def handle_call({:reap_uninitialized, cut_ref}, from, %{stop: %{cut_ref: cut_ref}} = stop_state) do
+    request = ConnectionRegistry.reap_uninitialized(stop_state.registry, cut_ref)
+
+    case :gen_server.receive_response(request, 5_000) do
+      {:reply, :ok} ->
+        if stop_state.stop.swept,
+          do: {:reply, :ok, stop_state},
+          else: {:noreply, put_in(stop_state, [:stop, :from], from)}
+
+      _other ->
+        {:reply, {:error, :transport_sweep_failed}, stop_state}
+    end
+  end
+
+  def handle_call({:reap_uninitialized, _cut_ref}, _from, state),
+    do: {:reply, {:error, :transport_cut_unavailable}, state}
+
+  def handle_call({:close_connections, record, deadline}, _from, state) do
+    result = ConnectionRegistry.close_all(state.registry, record, deadline)
+    {:reply, result, state}
+  end
 
   def handle_call(:status, _from, state) do
     live = Enum.count(state.owners, fn {_session_id, row} -> row.phase == :live end)
@@ -601,6 +659,32 @@ defmodule LoopexDaemon.Owner do
 
     Logger.debug("loopex daemon session attachment recorded")
     {:noreply, %{state | attachments: attachments}}
+  end
+
+  def handle_info(
+        {:relay_barrier_ack, cut_ref, :cut, _payload},
+        %{stop: %{phase: :cutting, cut_ref: cut_ref, from: from}} = state
+      ) do
+    reply =
+      case :gen_server.receive_response(
+             ConnectionRegistry.transport_closing(state.registry, cut_ref),
+             5_000
+           ) do
+        {:reply, {:ok, ^cut_ref}} -> {:ok, cut_ref}
+        _other -> {:error, :transport_gate_failed}
+      end
+
+    GenServer.reply(from, reply)
+    Logger.debug("loopex daemon owner admission cut complete")
+    {:noreply, %{state | stop: %{state.stop | phase: :cut, from: nil}}}
+  end
+
+  def handle_info(
+        {:transport_uninitialized_empty, registry, cut_ref},
+        %{registry: registry, stop: %{cut_ref: cut_ref}} = state
+      ) do
+    if state.stop.from, do: GenServer.reply(state.stop.from, :ok)
+    {:noreply, %{state | stop: %{state.stop | swept: true, from: nil}}}
   end
 
   def handle_info({:mirror_deadline, operation_ref, deadline}, state) do
@@ -1296,40 +1380,74 @@ defmodule LoopexDaemon.Owner do
     end
   end
 
+  # Concept: a lost owner can leave more than one operation waiting on it — a
+  # lease owner proposes a queued successor's grant before it acknowledges the
+  # expiry that freed the lease — so every such operation is resolved, not the
+  # first one found.
   defp continue_lost_owner_operation(state, session_id, predecessor) do
-    case owner_mirror_operation(state, predecessor.pid, predecessor.incarnation) do
-      {operation_ref, %{kind: :grant, step: :resolve_owner_grant} = operation} ->
-        route =
-          operation.row |> Map.drop([:permit_id, :start_op_ref]) |> Map.put(:phase, :granted)
-
-        state =
-          state
-          |> put_in([:routes, session_id], route)
-          |> put_in(
-            [:mirror_operations, operation_ref, :step],
-            :settle_result_after_owner_loss
-          )
-
-        request_relay_result_settlement(state, operation_ref, operation)
-        {:noreply, state}
-
-      {operation_ref, %{kind: :release, step: :resolve_owner_release} = operation} ->
-        state = update_in(state.routes, &Map.delete(&1, session_id))
-        complete_operation_after_owner_loss(state, operation_ref, operation)
-
-      {operation_ref, %{kind: :expiry, step: :resolve_owner_expiry} = operation} ->
-        state = update_in(state.routes, &Map.delete(&1, session_id))
-        complete_operation_after_owner_loss(state, operation_ref, operation)
-
-      {operation_ref, %{step: :resolve_owner_cancel} = operation} ->
-        settle_cancelled_disposition(state, operation_ref, operation)
-
-      {_operation_ref, _operation} ->
-        {:noreply, state}
-
-      nil ->
+    case owner_mirror_operations(state, predecessor.pid, predecessor.incarnation) do
+      [] ->
         maybe_start_owner_loss_pop(state, session_id, predecessor.pid, predecessor.incarnation)
+
+      operations ->
+        Enum.reduce(operations, {:noreply, state}, fn
+          {operation_ref, operation}, {:noreply, acc} ->
+            if Map.has_key?(acc.mirror_operations, operation_ref),
+              do: resolve_lost_owner_operation(acc, session_id, operation_ref, operation),
+              else: {:noreply, acc}
+
+          _operation, stop ->
+            stop
+        end)
     end
+  end
+
+  defp resolve_lost_owner_operation(
+         state,
+         session_id,
+         operation_ref,
+         %{kind: :grant, step: :resolve_owner_grant} = operation
+       ) do
+    route = operation.row |> Map.drop([:permit_id, :start_op_ref]) |> Map.put(:phase, :granted)
+
+    state =
+      state
+      |> put_in([:routes, session_id], route)
+      |> put_in([:mirror_operations, operation_ref, :step], :settle_result_after_owner_loss)
+
+    request_relay_result_settlement(state, operation_ref, operation)
+    {:noreply, state}
+  end
+
+  defp resolve_lost_owner_operation(
+         state,
+         session_id,
+         operation_ref,
+         %{kind: kind, step: step} = operation
+       )
+       when {kind, step} in [release: :resolve_owner_release, expiry: :resolve_owner_expiry] do
+    state = update_in(state.routes, &Map.delete(&1, session_id))
+    complete_operation_after_owner_loss(state, operation_ref, operation)
+  end
+
+  defp resolve_lost_owner_operation(
+         state,
+         _session_id,
+         operation_ref,
+         %{step: :resolve_owner_cancel} = operation
+       ),
+       do: settle_cancelled_disposition(state, operation_ref, operation)
+
+  defp resolve_lost_owner_operation(state, _session_id, _operation_ref, _operation),
+    do: {:noreply, state}
+
+  defp owner_mirror_operations(state, owner, owner_incarnation) do
+    state.mirror_operations
+    |> Enum.filter(fn {_operation_ref, operation} ->
+      operation.owner_pid == owner and operation.owner_incarnation == owner_incarnation and
+        operation.kind != :owner_loss
+    end)
+    |> Enum.sort_by(fn {_operation_ref, operation} -> operation.deadline end)
   end
 
   # Concept: a fresh child's first acquire names the daemon as its actor, so

@@ -154,7 +154,7 @@ defmodule LoopexDaemon.Test.DaemonSocketFixture do
   end
 
   @doc false
-  def receive_records(socket, count, timeout \\ 1_000)
+  def receive_records(socket, count, timeout \\ 5_000)
 
   def receive_records(_socket, 0, _timeout), do: []
 

@@ -1,0 +1,198 @@
+Code.require_file("support/daemon_socket_fixture.exs", __DIR__)
+
+defmodule LoopexDaemon.ServiceLifecycleTest do
+  use ExUnit.Case, async: false
+  @moduletag capture_log: true
+
+  import LoopexDaemon.Test.DaemonSocketFixture, only: [send_frame: 2, receive_records: 2]
+
+  alias LoopexComposition.Placement
+  alias LoopexDaemon.Sentinel
+  alias LoopexProtocol.{Session.V2, Wire}
+
+  defmodule DenyPolicy do
+    @moduledoc false
+    @behaviour Loopex.Policy
+
+    @impl Loopex.Policy
+    def decide(_request), do: {:deny, :policy_denied}
+  end
+
+  setup do
+    root = Path.join(System.tmp_dir!(), "ldl-#{System.unique_integer([:positive])}")
+    workspace = Path.join(root, "w")
+    File.mkdir_p!(workspace)
+    on_exit(fn -> File.rm_rf(root) end)
+    state_root = Path.join(root, "s")
+
+    options = [
+      state_root: state_root,
+      socket_path: Path.join([state_root, "daemon", "d.sock"]),
+      workspace: workspace,
+      policy: DenyPolicy,
+      credential: "service-lifecycle-placeholder",
+      admission_wait_ms: 200
+    ]
+
+    %{options: options, state_root: state_root}
+  end
+
+  test "a ready daemon serves a client and an orderly stop releases every exclusion",
+       %{options: options, state_root: state_root} do
+    daemon = start_daemon(options)
+    ready = await_ready(daemon.output)
+
+    assert ready["record"] == "daemon_ready"
+    assert ready["root"] == state_root
+    assert ready["socket"] == options[:socket_path]
+    assert ready["version"] == "0.2.0"
+
+    client = initialized(options[:socket_path])
+
+    :ok =
+      send_frame(client, %{
+        "method" => "session.create",
+        "request_id" => "create",
+        "command_id" => Wire.encode_identity("lifecycle-create"),
+        "session_options" => %{"purpose" => "lifecycle"}
+      })
+
+    assert [%{"status" => "accepted", "session_id" => encoded}] = receive_records(client, 1)
+    {:ok, session_id} = Wire.identity(encoded)
+
+    send(daemon.sentinel, {:daemon_signal, daemon.owner_ref, :sigterm})
+
+    assert [%{"type" => "daemon.stopping", "reason" => "operator_stop"}] =
+             receive_records(client, 1)
+
+    assert Task.await(daemon.task, 30_000) == 0
+    assert {:ok, %File.Stat{type: :other}} = File.lstat(options[:socket_path])
+    assert Placement.live_owner(state_root) == :none
+
+    {:ok, adapter} = Loopex.Store.Local.start_link(path: Path.join(state_root, "store.log"))
+    {:ok, store} = Loopex.Store.new(Loopex.Store.Local, adapter)
+    {:ok, placement} = Loopex.runtime_placement_id(state_root)
+
+    {:ok, runtime} =
+      Loopex.start_link(runtime_id: placement, store: store, context_token_budget: 8_192)
+
+    assert {:ok, :present} = Loopex.Runtime.session_existence(runtime, session_id)
+    :ok = Loopex.stop(runtime)
+    :ok = GenServer.stop(adapter)
+  end
+
+  test "a second daemon on a held root loses at the placement lock",
+       %{options: options} do
+    first = start_daemon(options)
+    _ready = await_ready(first.output)
+    {:ok, before} = File.lstat(options[:socket_path])
+
+    {:ok, placement_active} = LoopexDaemon.ExitStatus.fetch(:placement_active)
+    {:ok, output} = StringIO.open("")
+    assert Sentinel.run(options, output: output, install_signals: false) == placement_active
+    assert StringIO.contents(output) == {"", ""}
+    assert {:ok, ^before} = File.lstat(options[:socket_path])
+
+    send(first.sentinel, {:daemon_signal, first.owner_ref, :sigterm})
+    assert Task.await(first.task, 30_000) == 0
+  end
+
+  test "a stop before readiness exits zero holding nothing", %{
+    options: options,
+    state_root: state_root
+  } do
+    {:ok, output} = StringIO.open("")
+    test = self()
+
+    task =
+      Task.async(fn ->
+        Sentinel.run(options,
+          output: output,
+          install_signals: false,
+          notify: test
+        )
+      end)
+
+    assert_receive {:loopex_daemon_sentinel, sentinel, owner_ref, _owner}, 1_000
+    send(sentinel, {:daemon_signal, owner_ref, :sigterm})
+
+    status = Task.await(task, 30_000)
+    assert status == 0
+    assert Placement.live_owner(state_root) == :none
+  end
+
+  test "losing the Store fail-stops with its class and tells the client",
+       %{options: options} do
+    daemon = start_daemon(options)
+    _ready = await_ready(daemon.output)
+    client = initialized(options[:socket_path])
+
+    store = :sys.get_state(daemon.owner).pids.store
+    Process.exit(store, :kill)
+
+    assert [%{"type" => "daemon.stopping", "reason" => "store_lost"}] =
+             receive_records(client, 1)
+
+    {:ok, store_lost} = LoopexDaemon.ExitStatus.fetch(:store_lost)
+    assert Task.await(daemon.task, 40_000) == store_lost
+  end
+
+  defp start_daemon(options) do
+    {:ok, output} = StringIO.open("")
+    test = self()
+
+    task =
+      Task.async(fn ->
+        Sentinel.run(options, output: output, install_signals: false, notify: test)
+      end)
+
+    assert_receive {:loopex_daemon_sentinel, sentinel, owner_ref, owner}, 1_000
+    %{task: task, sentinel: sentinel, owner_ref: owner_ref, owner: owner, output: output}
+  end
+
+  defp await_ready(output, attempts \\ 500)
+
+  defp await_ready(output, attempts) when attempts > 0 do
+    case StringIO.contents(output) do
+      {"", line} when byte_size(line) > 0 ->
+        assert String.ends_with?(line, "\n")
+        JSON.decode!(line)
+
+      _empty ->
+        Process.sleep(10)
+        await_ready(output, attempts - 1)
+    end
+  end
+
+  defp await_ready(_output, 0), do: flunk("daemon never announced readiness")
+
+  defp initialized(path) do
+    {:ok, socket} = :socket.open(:local, :stream, :default)
+    :ok = await_connect(socket, path, 100)
+
+    :ok =
+      send_frame(socket, %{
+        "method" => "initialize",
+        "request_id" => "init",
+        "generations" => [V2.generation()],
+        "capabilities" => []
+      })
+
+    assert [%{"type" => "initialized"}] = receive_records(socket, 1)
+    socket
+  end
+
+  defp await_connect(socket, path, attempts) do
+    case :socket.connect(socket, %{family: :local, path: path}) do
+      :ok ->
+        :ok
+
+      {:error, _reason} when attempts > 0 ->
+        Process.sleep(10)
+        await_connect(socket, path, attempts - 1)
+
+      {:error, reason} ->
+        flunk("could not connect: #{inspect(reason)}")
+    end
+  end
+end

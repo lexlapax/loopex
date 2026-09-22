@@ -476,6 +476,26 @@ defmodule LoopexDaemon.ConnectionRegistry do
   def reap_uninitialized(registry, cut_ref),
     do: :gen_server.send_request(registry, {:reap_uninitialized, cut_ref})
 
+  @doc """
+  ## Concept
+
+  Ends every remaining connection at the end of an orderly or fatal stop,
+  telling each initialized client why where its transport accepts one record.
+
+  ## Technical depth
+
+  Only the registry owner may ask. Each initialized live connection receives
+  the exact encoded `daemon.stopping` record to write once before it closes;
+  every other row is aborted or closed without a record. The call answers
+  `:ok` once every row is gone, or `{:ok, :forced}` after killing the
+  survivors at the absolute deadline, so a stalled peer cannot extend the stop.
+  """
+  @spec close_all(pid(), map(), integer()) :: :ok | {:ok, :forced} | {:error, :owner_mismatch}
+  def close_all(registry, record, deadline)
+      when is_map(record) and is_integer(deadline) do
+    GenServer.call(registry, {:close_all, record, deadline}, :infinity)
+  end
+
   @doc false
   @spec status(pid()) :: %{
           occupied: non_neg_integer(),
@@ -562,6 +582,7 @@ defmodule LoopexDaemon.ConnectionRegistry do
            activation_promotions: %{},
            anonymous_activations: 0,
            attachments: %{},
+           close_all: nil,
            activation_promotion_bindings: %{},
            relay: nil,
            routing_mirrors: %{},
@@ -1309,6 +1330,36 @@ defmodule LoopexDaemon.ConnectionRegistry do
   def handle_call({:reap_uninitialized, _cut_ref}, _from, state),
     do: {:reply, {:error, :owner_mismatch}, state}
 
+  def handle_call({:close_all, record, deadline}, from, %{owner: owner} = state)
+      when elem(from, 0) == owner do
+    state =
+      Enum.reduce(state.rows, %{state | transport: :stopping}, fn {token, row}, acc ->
+        cond do
+          row.phase in [:live, :closing] and row.initialized and is_pid(row.connection_pid) ->
+            send(row.connection_pid, {:daemon_stopping, record})
+            update_row(acc, token, &%{&1 | phase: :closing})
+
+          row.phase in [:live, :closing] ->
+            close_live(acc, token, :daemon_stopping)
+
+          row.phase in [:handing_off, :aborting] ->
+            request_abort(acc, token, :daemon_stopping)
+
+          true ->
+            acc
+        end
+      end)
+
+    timer =
+      Process.send_after(self(), {:close_all_deadline, deadline}, max(deadline - now_ms(), 0))
+
+    Logger.debug("loopex daemon connection close-all start")
+    {:noreply, maybe_finish_close_all(%{state | close_all: %{from: from, timer: timer}})}
+  end
+
+  def handle_call({:close_all, _record, _deadline}, _from, state),
+    do: {:reply, {:error, :owner_mismatch}, state}
+
   def handle_call(:status, _from, state) do
     counts = Enum.frequencies_by(state.rows, fn {_token, row} -> row.phase end)
 
@@ -1347,6 +1398,23 @@ defmodule LoopexDaemon.ConnectionRegistry do
   end
 
   @impl true
+  def handle_info({:close_all_deadline, deadline}, %{close_all: %{from: from}} = state) do
+    if now_ms() >= deadline do
+      Enum.each(state.rows, fn {_token, row} ->
+        if is_pid(row.connection_pid), do: Process.exit(row.connection_pid, :kill)
+      end)
+
+      GenServer.reply(from, {:ok, :forced})
+      Logger.debug("loopex daemon connection close-all forced at deadline")
+      {:noreply, %{state | close_all: nil}}
+    else
+      timer = Process.send_after(self(), {:close_all_deadline, deadline}, deadline - now_ms())
+      {:noreply, put_in(state, [:close_all, :timer], timer)}
+    end
+  end
+
+  def handle_info({:close_all_deadline, _deadline}, state), do: {:noreply, state}
+
   def handle_info({:initialize_deadline, token}, state) do
     case Map.fetch(state.rows, token) do
       {:ok, %{initialized: false} = row} ->
@@ -1688,6 +1756,16 @@ defmodule LoopexDaemon.ConnectionRegistry do
     end
   end
 
+  defp maybe_finish_close_all(%{close_all: %{from: from, timer: timer}} = state)
+       when map_size(state.rows) == 0 do
+    _ = Process.cancel_timer(timer)
+    GenServer.reply(from, :ok)
+    Logger.debug("loopex daemon connection close-all complete")
+    %{state | close_all: nil}
+  end
+
+  defp maybe_finish_close_all(state), do: state
+
   defp connection_down(state, token) do
     case Map.fetch(state.rows, token) do
       {:ok, %{phase: phase}} when phase in [:live, :closing] -> remove_row(state, token)
@@ -1740,7 +1818,11 @@ defmodule LoopexDaemon.ConnectionRegistry do
         }
 
         state = release_listener_token(state, row.listener_incarnation, token)
-        state |> unmark_transport_row(token) |> maybe_acknowledge_transport_sweep()
+
+        state
+        |> unmark_transport_row(token)
+        |> maybe_acknowledge_transport_sweep()
+        |> maybe_finish_close_all()
     end
   end
 

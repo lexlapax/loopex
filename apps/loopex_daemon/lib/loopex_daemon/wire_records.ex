@@ -482,4 +482,25 @@ defmodule LoopexDaemon.WireRecords do
       "message" => "the session could not be recorded in the daemon index"
     }
   end
+
+  @doc """
+  ## Concept
+
+  The one uncorrelated record every initialized client is sent when the
+  daemon ends, naming why.
+
+  ## Technical depth
+
+  `reason` is `operator_stop`, `store_lost`, `store_capacity_exceeded` or
+  `fatal:<class>` for a live-registry fatal class; the message is fixed text
+  and never carries a path, credential or exception.
+  """
+  @spec daemon_stopping(binary()) :: map()
+  def daemon_stopping(reason) when is_binary(reason) do
+    %{
+      "type" => "daemon.stopping",
+      "reason" => reason,
+      "message" => "the daemon is stopping; reconnect after it restarts"
+    }
+  end
 end

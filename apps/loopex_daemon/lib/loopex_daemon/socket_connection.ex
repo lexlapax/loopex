@@ -248,6 +248,9 @@ defmodule LoopexDaemon.SocketConnection do
       ),
       do: finish_owner_loss_close(state)
 
+  def handle_info({:daemon_stopping, record}, %{closing: nil} = state) when is_map(record),
+    do: begin_final_close(stop_pump(state), record)
+
   def handle_info({:daemon_notice, record}, %{closing: nil} = state),
     do: noreply_record(state, record)
 
@@ -972,12 +975,18 @@ defmodule LoopexDaemon.SocketConnection do
   defp begin_detach_close(%{attachment: attached} = state) do
     state = stop_pump(state)
     cursor = attached.emitted_cursor || attached.snapshot_cursor
+    Logger.debug("loopex daemon attachment detached")
+    begin_final_close(state, WireRecords.detached(attached.session_id, cursor))
+  end
+
+  # Concept: a connection the daemon ends writes one final record where its
+  # transport accepts it and then closes, within a fixed bound.
+  defp begin_final_close(state, record) do
     close_ref = make_ref()
     Process.send_after(self(), {:owner_loss_close_deadline, close_ref}, @owner_loss_close_ms)
     state = %{state | closing: %{owner: nil, close_ref: close_ref}}
-    Logger.debug("loopex daemon attachment detached")
 
-    case send_record(state, WireRecords.detached(attached.session_id, cursor)) do
+    case send_record(state, record) do
       {:ok, state} -> {:noreply, state}
       {:error, state} -> finish_owner_loss_close(state)
     end

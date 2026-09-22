@@ -1102,11 +1102,12 @@ defmodule LoopexDaemon.AdmissionRelay do
 
   def handle_call(
         {:settle_lease_result, origin_id, settlement_ref},
-        {caller, _tag},
+        {caller, _tag} = from,
         %{owner: caller} = state
       ) do
-    {reply, state} = do_settle_lease_result(state, origin_id, settlement_ref)
-    {:reply, reply, state}
+    state
+    |> do_settle_lease_result(origin_id, settlement_ref)
+    |> reply_or_defer(from, origin_id, :settle_result, {origin_id, settlement_ref})
   end
 
   def handle_call({:settle_lease_result, _, _}, _from, state),
@@ -1114,14 +1115,18 @@ defmodule LoopexDaemon.AdmissionRelay do
 
   def handle_call(
         {:settle_lease_disposition, origin_id, disposition, settlement_ref},
-        {caller, _tag},
+        {caller, _tag} = from,
         %{owner: caller} = state
       )
       when disposition in [:connection_lost, :owner_lost] do
-    {reply, state} =
-      do_settle_lease_disposition(state, origin_id, disposition, settlement_ref)
-
-    {:reply, reply, state}
+    state
+    |> do_settle_lease_disposition(origin_id, disposition, settlement_ref)
+    |> reply_or_defer(
+      from,
+      origin_id,
+      :settle_disposition,
+      {origin_id, disposition, settlement_ref}
+    )
   end
 
   def handle_call({:settle_lease_disposition, _, _, _}, _from, state),
@@ -1532,14 +1537,30 @@ defmodule LoopexDaemon.AdmissionRelay do
         %{owner: owner, owner_incarnation: owner_incarnation} = state
       )
       when is_reference(operation_ref) do
-    {reply, state} = apply_owner_lease_operation(state, action, payload)
+    case apply_owner_lease_operation(state, action, payload) do
+      {{:error, :worker_unsettled}, state} when action in [:settle_result, :settle_disposition] ->
+        # Concept: a settlement that arrives before its request worker has
+        # been reaped waits for that exact `DOWN` rather than failing.
+        origin_id = elem(payload, 0)
 
-    send(
-      owner,
-      {:relay_lease_operation_ack, operation_ref, self(), owner_incarnation, action, reply}
-    )
+        state =
+          update_in(
+            state,
+            [:permits, origin_id],
+            &Map.put(&1, :pending_settlement, {:message, operation_ref, action, payload})
+          )
 
-    {:noreply, state}
+        Logger.debug("loopex daemon admission relay lease settlement awaits worker")
+        {:noreply, state}
+
+      {reply, state} ->
+        send(
+          owner,
+          {:relay_lease_operation_ack, operation_ref, self(), owner_incarnation, action, reply}
+        )
+
+        {:noreply, state}
+    end
   end
 
   def handle_info(
@@ -3005,9 +3026,10 @@ defmodule LoopexDaemon.AdmissionRelay do
 
       {:ok, %{kind: :lease, worker_pid: ^pid, phase: phase} = permit}
       when phase in [:executing, :settling] ->
-        permit = clear_permit_worker(permit)
+        {pending, permit} = Map.pop(clear_permit_worker(permit), :pending_settlement)
         Logger.debug("loopex daemon admission relay lease request worker reaped")
-        {:noreply, put_in(state, [:permits, origin_id], permit)}
+        state = put_in(state, [:permits, origin_id], permit)
+        {:noreply, resume_pending_settlement(state, pending)}
 
       {:ok, %{kind: :lease, worker_pid: ^pid, phase: :pending} = permit} ->
         if Process.alive?(permit.connection_pid) do
@@ -3063,6 +3085,42 @@ defmodule LoopexDaemon.AdmissionRelay do
       _other ->
         {:noreply, state}
     end
+  end
+
+  # Concept: a settlement that arrives before its request worker has been
+  # reaped waits for that exact `DOWN` rather than failing.
+  defp reply_or_defer({{:error, :worker_unsettled}, state}, from, origin_id, action, payload) do
+    state =
+      update_in(
+        state,
+        [:permits, origin_id],
+        &Map.put(&1, :pending_settlement, {:call, from, action, payload})
+      )
+
+    Logger.debug("loopex daemon admission relay lease settlement awaits worker")
+    {:noreply, state}
+  end
+
+  defp reply_or_defer({reply, state}, _from, _origin_id, _action, _payload),
+    do: {:reply, reply, state}
+
+  defp resume_pending_settlement(state, nil), do: state
+
+  defp resume_pending_settlement(state, {:message, operation_ref, action, payload}) do
+    {reply, state} = apply_owner_lease_operation(state, action, payload)
+
+    send(
+      state.owner,
+      {:relay_lease_operation_ack, operation_ref, self(), state.owner_incarnation, action, reply}
+    )
+
+    state
+  end
+
+  defp resume_pending_settlement(state, {:call, from, action, payload}) do
+    {reply, state} = apply_owner_lease_operation(state, action, payload)
+    GenServer.reply(from, reply)
+    state
   end
 
   defp clear_permit_worker(permit) do

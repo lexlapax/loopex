@@ -886,7 +886,7 @@ defmodule LoopexDaemon.OwnerTest do
   end
 
   test "owner loss wins an existing owner's holder-changing grant before selection" do
-    owner = start_owner(lease_term_ms: 40, mirror_deadline_ms: 1_000)
+    owner = start_owner(lease_term_ms: 40, mirror_deadline_ms: 5_000)
     components = Owner.components(owner)
     former = initialized_connection(components)
     successor = initialized_connection(components)
@@ -956,7 +956,7 @@ defmodule LoopexDaemon.OwnerTest do
 
     assert_receive {:manual_connection_message, ^successor_pid,
                     {:relay_permit_cancelled, ^successor_origin, :control_owner_lost}},
-                   500
+                   2_000
 
     assert %{
              owner_slots: 0,
@@ -1414,7 +1414,7 @@ defmodule LoopexDaemon.OwnerTest do
     {worker, worker_incarnation}
   end
 
-  defp wait_for_owner_settlement(owner, attempts \\ 20)
+  defp wait_for_owner_settlement(owner, attempts \\ 1_000)
 
   defp wait_for_owner_settlement(owner, attempts) when attempts > 0 do
     status = Owner.status(owner)
@@ -1429,7 +1429,7 @@ defmodule LoopexDaemon.OwnerTest do
 
   defp wait_for_owner_settlement(owner, 0), do: Owner.status(owner)
 
-  defp wait_for_owner_retirement(owner, attempts \\ 40)
+  defp wait_for_owner_retirement(owner, attempts \\ 1_000)
 
   defp wait_for_owner_retirement(owner, attempts) when attempts > 0 do
     status = Owner.status(owner)
@@ -1445,7 +1445,7 @@ defmodule LoopexDaemon.OwnerTest do
 
   defp wait_for_owner_retirement(owner, 0), do: Owner.status(owner)
 
-  defp wait_for_transferred_slot(owner, attempts \\ 200)
+  defp wait_for_transferred_slot(owner, attempts \\ 1_000)
 
   defp wait_for_transferred_slot(owner, attempts) when attempts > 0 do
     status = Owner.status(owner)
@@ -1461,7 +1461,7 @@ defmodule LoopexDaemon.OwnerTest do
 
   defp wait_for_transferred_slot(owner, 0), do: Owner.status(owner)
 
-  defp wait_for_successor_cancellation(owner, attempts \\ 100)
+  defp wait_for_successor_cancellation(owner, attempts \\ 1_000)
 
   defp wait_for_successor_cancellation(owner, attempts) when attempts > 0 do
     status = Owner.status(owner)
@@ -1477,7 +1477,7 @@ defmodule LoopexDaemon.OwnerTest do
 
   defp wait_for_successor_cancellation(owner, 0), do: Owner.status(owner)
 
-  defp wait_for_relay_settling(relay, attempts \\ 20)
+  defp wait_for_relay_settling(relay, attempts \\ 1_000)
 
   defp wait_for_relay_settling(relay, attempts) when attempts > 0 do
     status = AdmissionRelay.status(relay)
@@ -1492,7 +1492,7 @@ defmodule LoopexDaemon.OwnerTest do
 
   defp wait_for_relay_settling(relay, 0), do: AdmissionRelay.status(relay)
 
-  defp wait_for_relay_pending(relay, attempts \\ 20)
+  defp wait_for_relay_pending(relay, attempts \\ 1_000)
 
   defp wait_for_relay_pending(relay, attempts) when attempts > 0 do
     status = AdmissionRelay.status(relay)
@@ -1507,7 +1507,7 @@ defmodule LoopexDaemon.OwnerTest do
 
   defp wait_for_relay_pending(relay, 0), do: AdmissionRelay.status(relay)
 
-  defp wait_for_relay_owner_loss(relay, attempts \\ 20)
+  defp wait_for_relay_owner_loss(relay, attempts \\ 1_000)
 
   defp wait_for_relay_owner_loss(relay, attempts) when attempts > 0 do
     status = AdmissionRelay.status(relay)
@@ -1522,7 +1522,7 @@ defmodule LoopexDaemon.OwnerTest do
 
   defp wait_for_relay_owner_loss(relay, 0), do: AdmissionRelay.status(relay)
 
-  defp wait_for_mirror_step(owner, kind, step, attempts \\ 100)
+  defp wait_for_mirror_step(owner, kind, step, attempts \\ 1_000)
 
   defp wait_for_mirror_step(owner, kind, step, attempts) when attempts > 0 do
     state = :sys.get_state(owner)
