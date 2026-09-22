@@ -389,7 +389,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
   end
 
   @impl GenServer
-  def handle_continue(:acquire_owner, state), do: advance_acquisition(state)
+  def handle_continue(:acquire_owner, state), do: acquisition_result(advance_acquisition(state))
 
   def handle_continue({:reply_prepared_transfer, from, reply}, state) do
     GenServer.reply(from, reply)
@@ -700,7 +700,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
   @impl GenServer
   def handle_info(:retry_owner, %{phase: phase} = state)
       when phase in [:discovering, :acquiring, :recovering] do
-    advance_acquisition(state)
+    acquisition_result(advance_acquisition(state))
   end
 
   def handle_info(:advance_work, state), do: advance_work(state)
@@ -1500,6 +1500,17 @@ defmodule Loopex.Runtime.SessionCoordinator do
       {:noreply, %{state | acquisition_retries: retries}}
     end
   end
+
+  defp acquisition_result({:stop, :runtime_placement_mismatch, state}) do
+    GenServer.cast(
+      state.control,
+      {:owner_unavailable, self(), state.session_id, :runtime_placement_mismatch}
+    )
+
+    {:stop, :normal, state}
+  end
+
+  defp acquisition_result(result), do: result
 
   # Technical depth: doubling from the first delay, clamped at the ceiling.
   defp retry_delay(retries),

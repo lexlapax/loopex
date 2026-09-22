@@ -209,28 +209,66 @@ defmodule Loopex.Runtime do
   @doc false
   @spec create_session(t(), binary(), map()) :: {:ok, binary()} | {:error, term()}
   def create_session(%__MODULE__{} = runtime, command_id, session_options) do
-    control_call(
-      runtime,
-      {:create_session, runtime.token, command_id, session_options},
-      :infinity
-    )
+    runtime
+    |> create_session_detailed(command_id, session_options)
+    |> project_detailed_session_result()
   end
 
   def create_session(_runtime, _command_id, _session_options),
     do: {:error, :runtime_reference_required}
 
   @doc false
-  @spec resume_session(t(), binary(), binary()) :: {:ok, binary()} | {:error, term()}
-  def resume_session(%__MODULE__{} = runtime, session_id, command_id) do
+  @spec create_session_detailed(t(), binary(), map()) ::
+          {:ok,
+           %{
+             session_id: binary(),
+             disposition: :activated | :no_activation,
+             control_entry: :active | :acquiring | :dormant
+           }}
+          | {:error, term(), %{disposition: :activated | :no_activation, control_entry: atom()}}
+          | {:error, :runtime_unavailable}
+  def create_session_detailed(%__MODULE__{} = runtime, command_id, session_options) do
     control_call(
       runtime,
-      {:resume_session, runtime.token, session_id, command_id, :ordinary},
+      {:create_session, runtime.token, command_id, session_options, :detailed},
       :infinity
     )
   end
 
+  def create_session_detailed(_runtime, _command_id, _session_options),
+    do: {:error, :runtime_unavailable}
+
+  @doc false
+  @spec resume_session(t(), binary(), binary()) :: {:ok, binary()} | {:error, term()}
+  def resume_session(%__MODULE__{} = runtime, session_id, command_id) do
+    runtime
+    |> resume_session_detailed(session_id, command_id)
+    |> project_detailed_session_result()
+  end
+
   def resume_session(_runtime, _session_id, _command_id),
     do: {:error, :runtime_reference_required}
+
+  @doc false
+  @spec resume_session_detailed(t(), binary(), binary()) ::
+          {:ok,
+           %{
+             session_id: binary(),
+             disposition: :activated | :no_activation,
+             control_entry: :active | :acquiring | :dormant
+           }}
+          | {:error, term(), %{disposition: :activated | :no_activation, control_entry: atom()}}
+          | {:error, :runtime_unavailable}
+  def resume_session_detailed(%__MODULE__{} = runtime, session_id, command_id) do
+    control_call(
+      runtime,
+      {:resume_session, runtime.token, session_id, command_id, :detailed},
+      :infinity
+    )
+  end
+
+  def resume_session_detailed(_runtime, _session_id, _command_id),
+    do: {:error, :runtime_unavailable}
 
   @doc false
   @spec prepare_resume_session(t(), binary(), binary()) ::
@@ -619,6 +657,15 @@ defmodule Loopex.Runtime do
     match?({:ok, %{control: ^control}}, RuntimeSupervisor.children(supervisor)) and
       Process.alive?(control)
   end
+
+  defp project_detailed_session_result({:ok, %{session_id: session_id}}),
+    do: {:ok, session_id}
+
+  defp project_detailed_session_result({:error, :runtime_placement_mismatch, _metadata}),
+    do: {:error, :owner_recovery_failed}
+
+  defp project_detailed_session_result({:error, reason, _metadata}), do: {:error, reason}
+  defp project_detailed_session_result({:error, :runtime_unavailable} = error), do: error
 
   defp dispatcher_call(%__MODULE__{supervisor: supervisor}, message, timeout \\ 5_000) do
     with {:ok, %{dispatcher: dispatcher}} <- RuntimeSupervisor.children(supervisor) do
