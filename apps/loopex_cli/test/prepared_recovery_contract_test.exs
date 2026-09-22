@@ -12,7 +12,7 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
   alias Loopex.M1RuntimeTestStore
   alias Loopex.Executor.Local
   alias LoopexCli.Interrupt
-  alias LoopexCli.Placement
+  alias LoopexComposition.Placement
   alias LoopexCli.Render
 
   @grace 7_311

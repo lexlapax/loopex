@@ -1,9 +1,9 @@
-defmodule LoopexCli.PlacementProbeTest do
+defmodule LoopexComposition.PlacementProbeTest do
   @moduledoc false
 
   use ExUnit.Case, async: true
 
-  alias LoopexCli.Placement
+  alias LoopexComposition.Placement
 
   # Concept: the placement lock reads a helper that could not inspect the owner
   # as an owner it cannot examine, never as a dead one.

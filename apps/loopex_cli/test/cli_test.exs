@@ -21,7 +21,7 @@ defmodule LoopexCliTest do
   alias Loopex.AgentLoopFixture
   alias LoopexCli.Demonstration
   alias LoopexCli.Interrupt
-  alias LoopexCli.Placement
+  alias LoopexComposition.Placement
   alias LoopexCli.Policy.AllowAll
   alias LoopexCli.Policy.ShellAllowlist
   alias LoopexCli.ProgressConsumer

@@ -1,4 +1,4 @@
-defmodule LoopexCli.Placement do
+defmodule LoopexComposition.Placement do
   @moduledoc """
   ## Concept
 
