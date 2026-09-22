@@ -2043,8 +2043,8 @@ defmodule LoopexDaemon.AdmissionRelayTest do
     stop_connection(connection, relay, connection_incarnation)
 
     owner_monitor = Process.monitor(owner)
-    Process.exit(owner, :kill)
-    assert_receive {:DOWN, ^owner_monitor, :process, ^owner, :killed}, 500
+    send(owner, :stop_normal)
+    assert_receive {:DOWN, ^owner_monitor, :process, ^owner, :normal}, 500
 
     assert_receive {:relay_owner_retirement_complete, ^relay, "retiring-session", ^owner,
                     ^owner_incarnation},
@@ -2110,7 +2110,7 @@ defmodule LoopexDaemon.AdmissionRelayTest do
                )
              end)
 
-    Process.exit(owner, :kill)
+    send(owner, :stop_normal)
 
     assert_receive {:relay_owner_retirement_complete, ^relay, "busy-session", ^owner,
                     ^owner_incarnation},
@@ -2276,6 +2276,9 @@ defmodule LoopexDaemon.AdmissionRelayTest do
 
   defp registry_loop(parent) do
     receive do
+      :stop_normal ->
+        :ok
+
       {:invoke, caller, reference, operation} ->
         send(caller, {:invoked, reference, operation.()})
         registry_loop(parent)

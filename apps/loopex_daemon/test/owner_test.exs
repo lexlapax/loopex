@@ -52,6 +52,31 @@ defmodule LoopexDaemon.OwnerTest do
           send(caller, {:manual_result, reference, result})
           loop(parent, options)
 
+        {:manual_call, caller, reference,
+         {:owner_loss_closed, owner, close_ref, connection_incarnation}} ->
+          result =
+            LoopexDaemon.Owner.owner_loss_connection_closed(
+              owner,
+              close_ref,
+              connection_incarnation
+            )
+
+          send(caller, {:manual_result, reference, result})
+
+        {:manual_call, caller, reference,
+         {:open_ticket, relay, origin, class, session_id, owner_binding}} ->
+          result =
+            LoopexDaemon.AdmissionRelay.open_ticket(
+              relay,
+              origin,
+              class,
+              session_id,
+              owner_binding
+            )
+
+          send(caller, {:manual_result, reference, result})
+          loop(parent, options)
+
         {:connection_abort, _token, _reason} ->
           :ok
 
@@ -470,6 +495,128 @@ defmodule LoopexDaemon.OwnerTest do
 
     assert %{owner_slots: 0, waiting_owner_starts: 0} = wait_for_owner_retirement(owner)
     assert %{permits: 0, settling: 0, lease_owners: 0} = AdmissionRelay.status(components.relay)
+  end
+
+  test "unexpected held-owner loss is session-scoped and gates its fresh successor" do
+    owner = start_owner()
+    components = Owner.components(owner)
+    holder = initialized_connection(components)
+    observer = initialized_connection(components)
+    successor = initialized_connection(components)
+    holder_pid = holder.pid
+    observer_pid = observer.pid
+    successor_pid = successor.pid
+    acquire_origin = {holder.incarnation, 0, 1}
+    {acquire_worker, acquire_worker_incarnation} = start_worker(holder.pid, acquire_origin)
+
+    assert {:ok, :proposed, predecessor, predecessor_incarnation} =
+             Owner.acquire_control(
+               owner,
+               acquire_origin,
+               "owner-loss-acquire",
+               "owner-loss-session",
+               holder.pid,
+               holder.incarnation,
+               acquire_worker,
+               acquire_worker_incarnation,
+               now_ms() + 1_000
+             )
+
+    assert_receive {:worker_go, ^acquire_worker, ^acquire_origin}, 500
+
+    assert_receive {:manual_connection_message, _,
+                    {:relay_permit_result, ^acquire_origin, acquire_result}},
+                   500
+
+    predecessor_epoch =
+      Base.url_decode64!(acquire_result["result"]["writer_epoch"], padding: false)
+
+    observer_origin = {observer.incarnation, 0, 1}
+
+    assert {:ok, ^observer_origin} =
+             manual_call(
+               observer.pid,
+               {:open_ticket, components.relay, observer_origin, :session_prompt,
+                "owner-loss-session", {predecessor, predecessor_incarnation}}
+             )
+
+    predecessor_monitor = Process.monitor(predecessor)
+    :ok = GenServer.stop(predecessor, :normal)
+    assert_receive {:DOWN, ^predecessor_monitor, :process, ^predecessor, :normal}, 500
+
+    assert_receive {:manual_connection_message, ^observer_pid,
+                    {:relay_ticket_cancelled, ^observer_origin, :control_owner_lost}},
+                   500
+
+    assert_receive {:manual_connection_message, ^holder_pid,
+                    {:daemon_control_owner_lost, ^owner, close_ref, "owner-loss-session",
+                     holder_incarnation}},
+                   500
+
+    assert holder_incarnation == holder.incarnation
+    assert Process.alive?(owner)
+    assert Process.alive?(observer.pid)
+
+    successor_origin = {successor.incarnation, 0, 1}
+
+    {successor_worker, successor_worker_incarnation} =
+      start_worker(successor.pid, successor_origin)
+
+    assert {:ok, :queued, ^owner, _daemon_incarnation} =
+             Owner.acquire_control(
+               owner,
+               successor_origin,
+               "owner-loss-successor",
+               "owner-loss-session",
+               successor.pid,
+               successor.incarnation,
+               successor_worker,
+               successor_worker_incarnation,
+               now_ms() + 1_000
+             )
+
+    assert_receive {:worker_go, ^successor_worker, ^successor_origin}, 500
+
+    refute_receive {:manual_connection_message, ^successor_pid,
+                    {:relay_permit_result, ^successor_origin, _result}},
+                   40
+
+    assert %{
+             owner_slots: 1,
+             live_owners: 0,
+             lost_owners: 1,
+             waiting_owner_starts: 1,
+             mirror_operations: 1
+           } = Owner.status(owner)
+
+    holder_monitor = Process.monitor(holder.pid)
+
+    assert :ok =
+             manual_call(
+               holder.pid,
+               {:owner_loss_closed, owner, close_ref, holder.incarnation}
+             )
+
+    assert_receive {:DOWN, ^holder_monitor, :process, ^holder_pid, :normal}, 500
+
+    assert_receive {:manual_connection_message, ^successor_pid,
+                    {:relay_permit_result, ^successor_origin, successor_result}},
+                   500
+
+    successor_epoch =
+      Base.url_decode64!(successor_result["result"]["writer_epoch"], padding: false)
+
+    refute successor_epoch == predecessor_epoch
+
+    assert %{owner_slots: 1, live_owners: 1, lost_owners: 0, waiting_owner_starts: 0} =
+             wait_for_owner_settlement(owner)
+
+    assert Process.alive?(observer.pid)
+
+    assert %{owner_losses: 0, tickets: 0, lease_owners: 1} =
+             AdmissionRelay.status(components.relay)
+
+    assert %{routing_mirrors: 1} = ConnectionRegistry.status(components.registry)
   end
 
   test "a suspended registry cannot extend the mirror deadline" do

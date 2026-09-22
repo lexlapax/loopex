@@ -134,6 +134,17 @@ defmodule LoopexDaemon.Owner do
     GenServer.call(owner, {:release_retirement_pop, session_id})
   end
 
+  @doc false
+  @spec owner_loss_connection_closed(pid(), reference(), binary()) :: :ok
+  def owner_loss_connection_closed(owner, close_ref, connection_incarnation) do
+    send(
+      owner,
+      {:owner_loss_connection_closed, close_ref, self(), connection_incarnation}
+    )
+
+    :ok
+  end
+
   @impl true
   def init(options) do
     Process.flag(:trap_exit, true)
@@ -454,6 +465,76 @@ defmodule LoopexDaemon.Owner do
     end
   end
 
+  def handle_info(
+        {:relay_owner_lost, relay, session_id, owner, owner_incarnation, origins},
+        %{relay: relay} = state
+      )
+      when is_list(origins) do
+    case Map.get(state.owners, session_id) do
+      %{pid: ^owner, incarnation: ^owner_incarnation, loss_origins: nil} = row ->
+        if MapSet.size(MapSet.new(origins)) == length(origins) do
+          row = %{row | relay_loss_seen: true, loss_origins: origins}
+          Logger.debug("loopex daemon lease owner loss retained")
+          {:noreply, put_in(state, [:owners, session_id], row)}
+        else
+          {:stop, :relay_lost, state}
+        end
+
+      %{pid: ^owner, incarnation: ^owner_incarnation, loss_origins: ^origins} ->
+        {:noreply, state}
+
+      _other ->
+        {:stop, :relay_lost, state}
+    end
+  end
+
+  def handle_info(
+        {:relay_owner_loss_ready, relay, owner, owner_incarnation},
+        %{relay: relay} = state
+      ) do
+    case Map.get(state.owner_pids, owner) do
+      session_id when is_binary(session_id) ->
+        retain_owner_loss_ready(state, session_id, owner, owner_incarnation)
+
+      nil ->
+        case Enum.find(state.owners, fn {_session_id, row} ->
+               row.pid == owner and row.incarnation == owner_incarnation
+             end) do
+          {session_id, _row} ->
+            retain_owner_loss_ready(state, session_id, owner, owner_incarnation)
+
+          nil ->
+            {:stop, :relay_lost, state}
+        end
+    end
+  end
+
+  def handle_info(
+        {:relay_owner_loss_classified_ack, relay, classification_ref, session_id, owner,
+         owner_incarnation},
+        %{relay: relay} = state
+      ) do
+    continue_owner_loss_classification(
+      state,
+      classification_ref,
+      session_id,
+      owner,
+      owner_incarnation
+    )
+  end
+
+  def handle_info(
+        {:owner_loss_connection_closed, close_ref, connection, connection_incarnation},
+        state
+      ) do
+    continue_owner_loss_close(
+      state,
+      close_ref,
+      connection,
+      connection_incarnation
+    )
+  end
+
   def handle_info({:mirror_deadline, operation_ref, deadline}, state) do
     case Map.get(state.mirror_operations, operation_ref) do
       %{deadline: ^deadline} ->
@@ -506,11 +587,24 @@ defmodule LoopexDaemon.Owner do
             Logger.debug("loopex daemon lease owner retirement exit consumed")
             start_retirement_pop(state, session_id, row)
 
-          _row ->
-            state = put_in(state, [:owners, session_id, :phase], :lost)
+          %{pid: ^owner} = row ->
+            slot_charged = not is_nil(row.successor)
+
+            row = %{
+              row
+              | phase: :lost,
+                exit_consumed: true,
+                slot_charged: slot_charged
+            }
+
+            state =
+              state
+              |> put_in([:owners, session_id], row)
+              |> update_in([:owner_pids], &Map.delete(&1, owner))
+
             Logger.debug("loopex daemon lease owner exit retained")
             _ = reason
-            {:noreply, state}
+            start_owner_loss_pop(state, session_id, row)
         end
 
       :error ->
@@ -625,7 +719,7 @@ defmodule LoopexDaemon.Owner do
             dispatch_existing_acquire(state, request, owner_row)
 
           %{phase: phase} = owner_row
-          when phase in [:retirement_pending, :retiring, :starting_waiting_pop] ->
+          when phase in [:retirement_pending, :retiring, :starting_waiting_pop, :lost] ->
             dispatch_waiting_owner_acquire(state, request, owner_row)
 
           nil ->
@@ -680,7 +774,11 @@ defmodule LoopexDaemon.Owner do
             phase: :waiting_owner
           }
 
-          phase = if owner_row.exit_consumed, do: :starting_waiting_pop, else: owner_row.phase
+          phase =
+            if owner_row.exit_consumed and owner_row.phase != :lost,
+              do: :starting_waiting_pop,
+              else: owner_row.phase
+
           owner_row = %{owner_row | phase: phase, slot_charged: true, successor: permit_id}
 
           state =
@@ -1029,6 +1127,43 @@ defmodule LoopexDaemon.Owner do
     )
   end
 
+  defp start_owner_loss_pop(state, session_id, predecessor) do
+    operation_ref = make_ref()
+    classification_ref = make_ref()
+    deadline = monotonic_ms() + state.mirror_deadline_ms
+
+    operation = %{
+      kind: :owner_loss,
+      step: :pop_owner,
+      permit_id: nil,
+      owner_pid: predecessor.pid,
+      owner_incarnation: predecessor.incarnation,
+      classification_ref: classification_ref,
+      close_ref: nil,
+      holder: nil,
+      row: %{
+        session_id: session_id,
+        owner_pid: predecessor.pid,
+        owner_incarnation: predecessor.incarnation
+      },
+      deadline: deadline,
+      timer: schedule_deadline(operation_ref, deadline)
+    }
+
+    state = put_in(state, [:mirror_operations, operation_ref], operation)
+
+    ConnectionRegistry.apply_mirror(
+      state.registry,
+      operation_ref,
+      state.routing_incarnation,
+      :pop_owner_mirror,
+      operation.row
+    )
+
+    Logger.debug("loopex daemon lost owner mirror pop start")
+    {:noreply, state}
+  end
+
   defp continue_registry_operation(state, operation_ref, result) do
     case Map.get(state.mirror_operations, operation_ref) do
       nil ->
@@ -1155,6 +1290,46 @@ defmodule LoopexDaemon.Owner do
   defp apply_registry_result(
          state,
          operation_ref,
+         %{kind: :owner_loss, step: :pop_owner} = operation,
+         {:ok, :absent}
+       ) do
+    case Map.get(state.routes, operation.row.session_id) do
+      nil ->
+        begin_owner_loss_classification(state, operation_ref, operation, nil)
+
+      _route ->
+        fail_connections(state)
+    end
+  end
+
+  defp apply_registry_result(
+         state,
+         operation_ref,
+         %{kind: :owner_loss, step: :pop_owner} = operation,
+         {:ok, {:holder, holder}}
+       ) do
+    case Map.get(state.routes, operation.row.session_id) do
+      %{
+        owner_pid: owner,
+        owner_incarnation: owner_incarnation,
+        holder_pid: holder_pid,
+        holder_incarnation: holder_incarnation,
+        writer_epoch: writer_epoch
+      }
+      when owner == operation.owner_pid and owner_incarnation == operation.owner_incarnation and
+             holder_pid == holder.holder_pid and
+             holder_incarnation == holder.holder_incarnation and
+             writer_epoch == holder.writer_epoch ->
+        begin_owner_loss_classification(state, operation_ref, operation, holder)
+
+      _route ->
+        fail_connections(state)
+    end
+  end
+
+  defp apply_registry_result(
+         state,
+         operation_ref,
          %{kind: :retirement, step: :pop_owner} = operation,
          {:ok, :absent}
        ) do
@@ -1180,6 +1355,31 @@ defmodule LoopexDaemon.Owner do
 
   defp apply_registry_result(state, _operation_ref, _operation, _result),
     do: fail_connections(state)
+
+  defp begin_owner_loss_classification(state, operation_ref, operation, holder) do
+    holder_incarnation = if holder, do: holder.holder_incarnation, else: nil
+
+    state =
+      state
+      |> put_in([:mirror_operations, operation_ref, :step], :await_classification)
+      |> put_in([:mirror_operations, operation_ref, :holder], holder)
+      |> put_in([:owners, operation.row.session_id, :mirror_complete], true)
+      |> update_in([:routes], &Map.delete(&1, operation.row.session_id))
+
+    :ok =
+      AdmissionRelay.classify_owner_loss(
+        state.relay,
+        operation.classification_ref,
+        state.daemon_incarnation,
+        operation.row.session_id,
+        operation.owner_pid,
+        operation.owner_incarnation,
+        holder_incarnation
+      )
+
+    Logger.debug("loopex daemon lost owner classification start")
+    {:noreply, state}
+  end
 
   defp continue_relay_operation(state, operation_ref, action, result) do
     case Map.get(state.mirror_operations, operation_ref) do
@@ -1659,6 +1859,146 @@ defmodule LoopexDaemon.Owner do
     end
   end
 
+  defp retain_owner_loss_ready(state, session_id, owner, owner_incarnation) do
+    case Map.get(state.owners, session_id) do
+      %{pid: ^owner, incarnation: ^owner_incarnation, relay_loss_seen: true} = row ->
+        Logger.debug("loopex daemon lease owner loss workers reaped")
+        {:noreply, put_in(state, [:owners, session_id], %{row | relay_loss_ready: true})}
+
+      %{pid: ^owner, incarnation: ^owner_incarnation, relay_loss_ready: true} ->
+        {:noreply, state}
+
+      _other ->
+        {:stop, :relay_lost, state}
+    end
+  end
+
+  defp continue_owner_loss_classification(
+         state,
+         classification_ref,
+         session_id,
+         owner,
+         owner_incarnation
+       ) do
+    case Enum.find(state.mirror_operations, fn {_operation_ref, operation} ->
+           operation.kind == :owner_loss and operation.step == :await_classification and
+             operation.classification_ref == classification_ref and
+             operation.row.session_id == session_id and operation.owner_pid == owner and
+             operation.owner_incarnation == owner_incarnation
+         end) do
+      {operation_ref, operation} ->
+        if deadline_reached?(operation) do
+          fail_connections(state)
+        else
+          case Map.get(state.owners, session_id) do
+            %{
+              pid: ^owner,
+              incarnation: ^owner_incarnation,
+              relay_loss_seen: true,
+              relay_loss_ready: true,
+              mirror_complete: true
+            } = row ->
+              row = %{row | classification_complete: true}
+              state = put_in(state, [:owners, session_id], row)
+              continue_owner_loss_notification(state, operation_ref, operation)
+
+            _other ->
+              {:stop, :relay_lost, state}
+          end
+        end
+
+      nil ->
+        {:stop, :relay_lost, state}
+    end
+  end
+
+  defp continue_owner_loss_notification(state, operation_ref, %{holder: nil} = operation) do
+    complete_owner_loss_notification(state, operation_ref, operation)
+  end
+
+  defp continue_owner_loss_notification(
+         state,
+         operation_ref,
+         %{holder: holder} = operation
+       ) do
+    if Process.alive?(holder.holder_pid) do
+      close_ref = make_ref()
+
+      send(
+        holder.holder_pid,
+        {:daemon_control_owner_lost, self(), close_ref, operation.row.session_id,
+         holder.holder_incarnation}
+      )
+
+      state =
+        state
+        |> put_in([:mirror_operations, operation_ref, :step], :await_holder_close)
+        |> put_in([:mirror_operations, operation_ref, :close_ref], close_ref)
+
+      Logger.debug("loopex daemon lost owner holder close start")
+      {:noreply, state}
+    else
+      complete_owner_loss_notification(state, operation_ref, operation)
+    end
+  end
+
+  defp continue_owner_loss_close(state, close_ref, connection, connection_incarnation) do
+    case Enum.find(state.mirror_operations, fn {_operation_ref, operation} ->
+           operation.kind == :owner_loss and operation.step == :await_holder_close and
+             operation.close_ref == close_ref and operation.holder.holder_pid == connection and
+             operation.holder.holder_incarnation == connection_incarnation
+         end) do
+      {operation_ref, operation} ->
+        if deadline_reached?(operation) do
+          fail_connections(state)
+        else
+          complete_owner_loss_notification(state, operation_ref, operation)
+        end
+
+      nil ->
+        {:noreply, state}
+    end
+  end
+
+  defp complete_owner_loss_notification(state, operation_ref, operation) do
+    cancel_timer(operation.timer, operation_ref)
+
+    state =
+      state
+      |> update_in([:mirror_operations], &Map.delete(&1, operation_ref))
+      |> put_in([:owners, operation.row.session_id, :notification_complete], true)
+
+    Logger.debug("loopex daemon lease owner loss notification complete")
+    finish_owner_loss(state, operation.row.session_id)
+  end
+
+  defp finish_owner_loss(state, session_id) do
+    case Map.get(state.owners, session_id) do
+      %{
+        exit_consumed: true,
+        mirror_complete: true,
+        classification_complete: true,
+        notification_complete: true,
+        successor: nil
+      } ->
+        Logger.debug("loopex daemon lease owner loss complete")
+        {:noreply, update_in(state.owners, &Map.delete(&1, session_id))}
+
+      %{
+        exit_consumed: true,
+        mirror_complete: true,
+        classification_complete: true,
+        notification_complete: true,
+        successor: permit_id
+      } = row
+      when not is_nil(permit_id) ->
+        start_waiting_successor(state, session_id, row, permit_id)
+
+      _other ->
+        {:noreply, state}
+    end
+  end
+
   defp finish_owner_retirement(state, session_id) do
     case Map.get(state.owners, session_id) do
       %{
@@ -1812,10 +2152,22 @@ defmodule LoopexDaemon.Owner do
     case Map.get(state.owners, session_id) do
       %{successor: ^permit_id} = row ->
         slot_charged = not row.exit_consumed
-        phase = if row.exit_consumed, do: :retiring, else: row.phase
+
+        phase =
+          if row.exit_consumed and row.phase != :lost,
+            do: :retiring,
+            else: row.phase
+
         row = %{row | phase: phase, successor: nil, slot_charged: slot_charged}
 
-        if row.exit_consumed and row.relay_complete and row.mirror_complete do
+        retired =
+          row.phase != :lost and row.exit_consumed and row.relay_complete and row.mirror_complete
+
+        lost =
+          row.phase == :lost and row.exit_consumed and row.mirror_complete and
+            row.classification_complete and row.notification_complete
+
+        if retired or lost do
           update_in(state.owners, &Map.delete(&1, session_id))
         else
           put_in(state, [:owners, session_id], row)
@@ -1838,7 +2190,12 @@ defmodule LoopexDaemon.Owner do
       retirement_ref: nil,
       exit_consumed: false,
       relay_complete: false,
-      mirror_complete: false
+      mirror_complete: false,
+      relay_loss_seen: false,
+      relay_loss_ready: false,
+      loss_origins: nil,
+      classification_complete: false,
+      notification_complete: false
     }
   end
 

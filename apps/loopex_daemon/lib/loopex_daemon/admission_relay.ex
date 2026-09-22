@@ -2666,7 +2666,7 @@ defmodule LoopexDaemon.AdmissionRelay do
     end
   end
 
-  defp lease_owner_down(state, monitor, pid, _reason) do
+  defp lease_owner_down(state, monitor, pid, reason) do
     {{session_id, {^pid, owner_incarnation} = binding}, owner_monitors} =
       Map.pop(state.lease_owner_monitors, monitor)
 
@@ -2688,7 +2688,7 @@ defmodule LoopexDaemon.AdmissionRelay do
         lease_owners: lease_owners
     }
 
-    if owner_phase == :retiring do
+    if owner_phase == :retiring and reason == :normal do
       send(
         state.owner,
         {:relay_owner_retirement_complete, self(), session_id, pid, owner_incarnation}
