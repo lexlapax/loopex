@@ -181,10 +181,15 @@ defmodule Loopex.Runtime.SessionCoordinator do
   end
 
   @doc false
-  @spec release_quiesce_cleanup(pid(), owner(), binary()) :: :ok | {:error, term()}
-  def release_quiesce_cleanup(coordinator, owner, drain_id)
-      when is_pid(coordinator) and is_map(owner) and is_binary(drain_id) do
-    safe_call(coordinator, {:release_quiesce_cleanup, owner, drain_id}, :infinity)
+  @spec release_quiesce_cleanup(pid(), owner(), binary(), pid()) :: :ok | {:error, term()}
+  def release_quiesce_cleanup(coordinator, owner, drain_id, phase_owner)
+      when is_pid(coordinator) and is_map(owner) and is_binary(drain_id) and
+             is_pid(phase_owner) do
+    safe_call(
+      coordinator,
+      {:release_quiesce_cleanup, owner, drain_id, phase_owner},
+      :infinity
+    )
   end
 
   # Concept: status is the one session question that may give up on an owner
@@ -512,14 +517,14 @@ defmodule Loopex.Runtime.SessionCoordinator do
   end
 
   def handle_call(
-        {:release_quiesce_cleanup, supplied_owner, drain_id},
-        {caller, _tag},
+        {:release_quiesce_cleanup, supplied_owner, drain_id, supplied_phase_owner},
+        _from,
         state
       ) do
     case state.drain do
       %{
         id: ^drain_id,
-        phase_owner: ^caller,
+        phase_owner: ^supplied_phase_owner,
         status: :paused,
         run_id: run_id
       }
@@ -534,7 +539,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
             {:reply, {:error, reason}, %{state | drain: drain}}
         end
 
-      %{id: ^drain_id, phase_owner: ^caller, status: :already_admitted}
+      %{id: ^drain_id, phase_owner: ^supplied_phase_owner, status: :already_admitted}
       when supplied_owner == state.owner ->
         {:reply, :ok, state}
 
@@ -2884,9 +2889,38 @@ defmodule Loopex.Runtime.SessionCoordinator do
       # A run that has ended is no longer this owner's to adopt, and a session
       # that runs for a long time should not accumulate one identifier per run
       # it has finished.
-      {:noreply, %{next | adopted: MapSet.delete(next.adopted, run_id)}}
+      next = %{next | adopted: MapSet.delete(next.adopted, run_id)}
+      notify_quiesce_terminal(next, run_id)
+      {:noreply, next}
     else
       {:error, reason} -> {:stop, {:run_terminal_failed, reason}, state}
+    end
+  end
+
+  # Concept: the private drain owner may advance as soon as every released run
+  # has a committed terminal fact instead of sleeping through the full cleanup
+  # allowance.
+  #
+  # Technical depth: this is a transient hint, not durable truth. The phase
+  # owner validates the exact drain, session, coordinator, and run before using
+  # it, and the later status census still reads the committed cursor. No result,
+  # content, credential, or cleanup detail crosses this message.
+  defp notify_quiesce_terminal(state, run_id) do
+    case state.drain do
+      %{
+        id: drain_id,
+        phase_owner: phase_owner,
+        status: :released,
+        run_id: ^run_id
+      }
+      when is_pid(phase_owner) ->
+        send(
+          phase_owner,
+          {:loopex_quiesce_terminal, drain_id, state.session_id, run_id, self()}
+        )
+
+      _not_released ->
+        :ok
     end
   end
 

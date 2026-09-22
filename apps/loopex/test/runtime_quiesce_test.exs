@@ -20,6 +20,7 @@ defmodule Loopex.RuntimeQuiesceTest do
   alias Loopex.M1RuntimeTestStore
   alias Loopex.Runtime
   alias Loopex.Runtime.Control
+  alias Loopex.Runtime.Quiesce
   alias Loopex.Runtime.SessionCoordinator
   alias Loopex.Runtime.SessionState
 
@@ -200,12 +201,19 @@ defmodule Loopex.RuntimeQuiesceTest do
                content: "must not pass the coordinator cut"
              })
 
-    assert :ok =
-             SessionCoordinator.release_quiesce_cleanup(
-               coordinator,
-               owner,
-               "active-drain"
-             )
+    phase_owner = self()
+
+    release =
+      Task.async(fn ->
+        SessionCoordinator.release_quiesce_cleanup(
+          coordinator,
+          owner,
+          "active-drain",
+          phase_owner
+        )
+      end)
+
+    assert :ok = Task.await(release)
 
     assert_eventually(fn ->
       case SessionCoordinator.session_status(coordinator, owner) do
@@ -261,8 +269,51 @@ defmodule Loopex.RuntimeQuiesceTest do
              SessionCoordinator.release_quiesce_cleanup(
                coordinator,
                owner,
-               "unknown-drain"
+               "unknown-drain",
+               self()
              )
+  end
+
+  test "the private phase owner drains an idle session without changing caller flags" do
+    fixture = fixture("quiesce-private-owner-idle")
+    session_id = create_session(fixture.runtime, "create")
+    {:trap_exit, caller_flag} = Process.info(self(), :trap_exit)
+
+    assert {:ok,
+            %{
+              settled: [^session_id],
+              unsettled: [],
+              absent: [],
+              budget_ms: 0,
+              drain_id: drain_id
+            }} = Quiesce.prepare(fixture.runtime.supervisor, fixture.runtime.token)
+
+    assert is_binary(drain_id) and byte_size(drain_id) == 32
+    assert {:trap_exit, ^caller_flag} = Process.info(self(), :trap_exit)
+  end
+
+  test "the private phase owner releases one active cleanup and reads its terminal cursor" do
+    fixture = fixture("quiesce-private-owner-active")
+    session_id = create_session(fixture.runtime, "create")
+    {:ok, attachment} = Loopex.attach(fixture.runtime, session_id)
+
+    assert {:accepted, "prompt"} =
+             Loopex.command(attachment, %{
+               type: :prompt,
+               command_id: "prompt",
+               content: "drain through the private owner"
+             })
+
+    assert {:ok,
+            %{
+              settled: [^session_id],
+              unsettled: [],
+              absent: [],
+              budget_ms: budget_ms,
+              release_results: %{^session_id => :ok}
+            }} = Quiesce.prepare(fixture.runtime.supervisor, fixture.runtime.token)
+
+    assert is_integer(budget_ms) and budget_ms >= 10_000
   end
 
   defp fixture(runtime_id) do
