@@ -4,9 +4,9 @@ defmodule LoopexDaemon.LeaseOwner do
 
   One process serializes controller authority for one daemon session. It keeps
   the lease outside durable session truth, grants at most one connection at a
-  time, renews only the current holder, preserves an explicit release until its
-  daemon-owned mirror settlement is known, and makes takeover eligible on the
-  daemon's monotonic clock.
+  time, admits one controller mutation at a time through the complete holder
+  gate, renews only the current holder, preserves wire order through explicit
+  release, and makes takeover eligible on the daemon's monotonic clock.
 
   ## Technical depth
 
@@ -18,10 +18,14 @@ defmodule LoopexDaemon.LeaseOwner do
   are proposals: this process exposes no epoch or state transition until the
   daemon owner acknowledges the corresponding routing-mirror settlement.
 
-  Writer epochs are fresh 128-bit opaque values. Lease and request deadlines
-  use monotonic milliseconds; timer messages only prompt a live deadline check.
-  Process status is fully redacted and lifecycle logs contain no session,
-  connection, epoch, request or permit data.
+  A mutation records a candidate renewal at its gate instant. Only the joined
+  relay settlement and core disposition commit that deadline, and only for an
+  accepted or admission-unknown call; refusal discards it. Expiry, a later
+  mutation and explicit release wait for that join. Writer epochs are fresh
+  128-bit opaque values. Lease and request deadlines use monotonic milliseconds;
+  timer messages only prompt a live deadline check. Process status is fully
+  redacted and lifecycle logs contain no session, connection, epoch, request or
+  permit data.
   """
 
   use GenServer
@@ -33,6 +37,18 @@ defmodule LoopexDaemon.LeaseOwner do
   @max_timer_ms 4_294_967_295
   @incarnation_bytes 16
   @max_session_bytes 256
+
+  @direct_mutation_classes [
+    :session_prompt,
+    :session_steer,
+    :session_follow_up,
+    :session_abort,
+    :session_respond_interaction,
+    :session_admit_resources,
+    :session_activate_skill
+  ]
+
+  @mutation_dispositions [:accepted, :admission_unknown, :refused]
 
   @typedoc false
   @type permit_id :: AdmissionRelay.origin_id()
@@ -90,7 +106,7 @@ defmodule LoopexDaemon.LeaseOwner do
 
   @doc false
   @spec release(pid(), permit_id(), binary(), pid(), binary(), binary()) ::
-          {:ok, :completed | :proposed}
+          {:ok, :completed | :proposed | :queued}
           | {:error, :daemon_stopping | :invalid_actor | :invalid_operation | :permit_unavailable}
   def release(
         owner,
@@ -147,6 +163,42 @@ defmodule LoopexDaemon.LeaseOwner do
   end
 
   @doc false
+  @spec mutate(
+          pid(),
+          permit_id(),
+          atom(),
+          binary(),
+          binary(),
+          binary(),
+          pid(),
+          (-> {:accepted | :admission_unknown | :refused, map()})
+        ) ::
+          {:ok, :admitted}
+          | {:error,
+             :daemon_stopping
+             | :invalid_operation
+             | :owner_unavailable
+             | :ticket_outstanding
+             | :ticket_unavailable}
+  def mutate(
+        owner,
+        origin_id,
+        class,
+        request_id,
+        connection_incarnation,
+        writer_epoch,
+        worker,
+        task_fun
+      ) do
+    GenServer.call(
+      owner,
+      {:mutate, origin_id, class, request_id, connection_incarnation, writer_epoch, worker,
+       task_fun},
+      :infinity
+    )
+  end
+
+  @doc false
   @spec status(pid()) :: map()
   def status(owner), do: GenServer.call(owner, :status)
 
@@ -179,7 +231,8 @@ defmodule LoopexDaemon.LeaseOwner do
          waiters: [],
          waiter_timers: %{},
          attachments: MapSet.new(),
-         in_flight: %{}
+         in_flight: %{},
+         pending_operations: []
        }}
     else
       {:stop, :invalid_lease_owner_options}
@@ -298,8 +351,6 @@ defmodule LoopexDaemon.LeaseOwner do
         {caller, _tag},
         %{daemon_owner: caller, phase: :active} = state
       ) do
-    now = monotonic_ms()
-
     with :ok <-
            validate_release(
              permit_id,
@@ -314,43 +365,21 @@ defmodule LoopexDaemon.LeaseOwner do
              permit_id,
              state.owner_incarnation
            ) do
-      case release_gate(state, connection, connection_incarnation, writer_epoch, now) do
-        {:ok, lease} ->
-          release_ref = make_ref()
+      descriptor = %{
+        permit_id: permit_id,
+        request_id: request_id,
+        connection: connection,
+        connection_incarnation: connection_incarnation,
+        writer_epoch: writer_epoch
+      }
 
-          transition = %{
-            kind: :release,
-            ref: release_ref,
-            permit_id: permit_id,
-            request_id: request_id,
-            lease: lease
-          }
-
-          send(
-            state.daemon_owner,
-            {:release_proposed, release_ref, permit_id, self(), state.owner_incarnation,
-             connection_incarnation}
-          )
-
-          Logger.debug("loopex daemon lease release proposed")
-          {:reply, {:ok, :proposed}, %{state | transition: transition}}
-
-        :error ->
-          result = WireRecords.control_error(request_id, "control_not_held")
-
-          case AdmissionRelay.complete_lease_permit(
-                 state.relay,
-                 permit_id,
-                 state.owner_incarnation,
-                 result
-               ) do
-            :ok ->
-              Logger.debug("loopex daemon lease release refused")
-              {:reply, {:ok, :completed}, state}
-
-            {:error, reason} ->
-              {:reply, {:error, reason}, state}
-          end
+      if operation_blocked?(state) do
+        state = update_in(state.pending_operations, &(&1 ++ [{:release, descriptor}]))
+        Logger.debug("loopex daemon lease release queued")
+        {:reply, {:ok, :queued}, state}
+      else
+        {reply, state} = perform_release(state, descriptor)
+        {:reply, reply, state}
       end
     else
       {:error, :invalid_operation} -> {:reply, {:error, :invalid_operation}, state}
@@ -360,6 +389,46 @@ defmodule LoopexDaemon.LeaseOwner do
 
   def handle_call({:release, _, _, _, _, _}, _from, state),
     do: {:reply, {:error, :invalid_operation}, state}
+
+  def handle_call(
+        {:mutate, origin_id, class, request_id, connection_incarnation, writer_epoch, worker,
+         task_fun},
+        from = {connection, _tag},
+        %{phase: :active} = state
+      ) do
+    with :ok <-
+           validate_mutation(
+             origin_id,
+             class,
+             request_id,
+             connection,
+             connection_incarnation,
+             writer_epoch,
+             worker,
+             task_fun
+           ) do
+      descriptor = %{
+        origin_id: origin_id,
+        class: class,
+        request_id: request_id,
+        connection: connection,
+        connection_incarnation: connection_incarnation,
+        writer_epoch: writer_epoch,
+        worker: worker,
+        worker_monitor: Process.monitor(worker),
+        task_fun: task_fun,
+        from: from
+      }
+
+      state = enqueue_mutation(state, descriptor)
+      {:noreply, continue_session_work(state)}
+    else
+      {:error, reason} -> {:reply, {:error, reason}, state}
+    end
+  end
+
+  def handle_call({:mutate, _, _, _, _, _, _, _}, _from, state),
+    do: {:reply, {:error, :owner_unavailable}, state}
 
   def handle_call(
         {:resolve_grant, grant_ref, :granted, granted_at},
@@ -384,7 +453,7 @@ defmodule LoopexDaemon.LeaseOwner do
       |> Map.put(:lease, lease)
       |> Map.put(:transition, nil)
       |> schedule_expiry(deadline)
-      |> process_waiters()
+      |> continue_session_work()
 
     Logger.debug("loopex daemon lease grant committed")
     {:reply, :ok, state}
@@ -400,7 +469,7 @@ defmodule LoopexDaemon.LeaseOwner do
       |> cancel_waiter_timer(transition.permit_id)
       |> Map.put(:lease, transition.previous_lease)
       |> Map.put(:transition, nil)
-      |> process_waiters()
+      |> continue_session_work()
 
     Logger.debug("loopex daemon lease grant cancelled")
     {:reply, :ok, state}
@@ -431,7 +500,7 @@ defmodule LoopexDaemon.LeaseOwner do
           %{state | lease: lease}
       end
 
-    state = state |> ensure_expiry_transition() |> process_waiters()
+    state = continue_session_work(state)
 
     Logger.debug("loopex daemon lease release resolved")
     {:reply, :ok, state}
@@ -453,7 +522,7 @@ defmodule LoopexDaemon.LeaseOwner do
       |> cancel_expiry_timer()
       |> Map.put(:lease, %{lease | status: :expired})
       |> Map.put(:transition, nil)
-      |> process_waiters()
+      |> continue_session_work()
 
     Logger.debug("loopex daemon lease expiry resolved")
     {:reply, :ok, state}
@@ -495,6 +564,7 @@ defmodule LoopexDaemon.LeaseOwner do
        held: match?(%{status: :held}, state.lease),
        attachments: MapSet.size(state.attachments),
        in_flight: map_size(state.in_flight),
+       queued_operations: length(state.pending_operations),
        waiting_acquires: length(state.waiters),
        lease_term_ms: state.lease_term_ms,
        first_acquire_available: state.first_acquire_available
@@ -532,12 +602,64 @@ defmodule LoopexDaemon.LeaseOwner do
     end
   end
 
+  def handle_info(
+        {:lease_mutation_classified, task_ref, origin_id, disposition},
+        state
+      )
+      when disposition in @mutation_dispositions do
+    case Map.fetch(state.in_flight, origin_id) do
+      {:ok, %{task_ref: ^task_ref, disposition: nil} = mutation} ->
+        mutation = %{mutation | disposition: disposition}
+        state = put_in(state, [:in_flight, origin_id], mutation)
+        {:noreply, settle_mutation_if_ready(state, origin_id)}
+
+      _other ->
+        {:noreply, state}
+    end
+  end
+
+  def handle_info(
+        {:relay_lease_ticket_settled, relay, origin_id, owner_incarnation},
+        %{relay: relay, owner_incarnation: owner_incarnation} = state
+      ) do
+    case Map.fetch(state.in_flight, origin_id) do
+      {:ok, %{relay_settled: false} = mutation} ->
+        mutation = %{mutation | relay_settled: true}
+        state = put_in(state, [:in_flight, origin_id], mutation)
+        {:noreply, settle_mutation_if_ready(state, origin_id)}
+
+      _other ->
+        {:noreply, state}
+    end
+  end
+
+  def handle_info({:DOWN, monitor, :process, worker, _reason}, state) do
+    case Enum.split_with(state.pending_operations, fn
+           {:mutation, descriptor} -> descriptor.worker_monitor == monitor
+           _operation -> false
+         end) do
+      {[{:mutation, %{worker: ^worker} = descriptor}], remaining} ->
+        GenServer.reply(descriptor.from, {:error, :ticket_unavailable})
+        Logger.debug("loopex daemon queued mutation worker lost")
+        {:noreply, continue_session_work(%{state | pending_operations: remaining})}
+
+      _other ->
+        {:noreply, state}
+    end
+  end
+
   def handle_info(_message, state), do: {:noreply, state}
 
   @impl true
   def terminate(_reason, state) do
     cancel_expiry_timer(state)
     Enum.each(state.waiter_timers, fn {_permit_id, timer} -> cancel_timer(timer) end)
+
+    Enum.each(state.pending_operations, fn
+      {:mutation, descriptor} -> Process.demonitor(descriptor.worker_monitor, [:flush])
+      {:release, _descriptor} -> :ok
+    end)
+
     Logger.debug("loopex daemon lease owner stop")
     :ok
   end
@@ -551,6 +673,228 @@ defmodule LoopexDaemon.LeaseOwner do
     |> Map.put(:log, [])
   end
 
+  defp enqueue_mutation(state, descriptor) do
+    update_in(state.pending_operations, &(&1 ++ [{:mutation, descriptor}]))
+  end
+
+  defp operation_blocked?(state) do
+    not is_nil(state.transition) or map_size(state.in_flight) > 0 or
+      state.pending_operations != []
+  end
+
+  defp continue_session_work(state) do
+    cond do
+      map_size(state.in_flight) > 0 ->
+        state
+
+      match?(%{kind: :expiry}, state.transition) and state.pending_operations != [] ->
+        process_next_operation(state)
+
+      not is_nil(state.transition) ->
+        state
+
+      state.pending_operations != [] ->
+        process_next_operation(state)
+
+      true ->
+        state
+        |> ensure_expiry_transition()
+        |> process_waiters()
+    end
+  end
+
+  defp process_next_operation(
+         %{pending_operations: [{:mutation, descriptor} | remaining]} = state
+       ) do
+    state = %{state | pending_operations: remaining}
+
+    case promote_mutation(state, descriptor) do
+      {:ok, state} ->
+        state
+
+      {:error, reason, state} ->
+        GenServer.reply(descriptor.from, {:error, reason})
+        continue_session_work(state)
+    end
+  end
+
+  defp process_next_operation(%{pending_operations: [{:release, descriptor} | remaining]} = state) do
+    state = %{state | pending_operations: remaining}
+    {reply, state} = perform_release(state, descriptor)
+
+    if match?({:error, _reason}, reply) do
+      Logger.debug("loopex daemon queued lease release settlement unavailable")
+    end
+
+    continue_session_work(state)
+  end
+
+  defp perform_release(state, descriptor) do
+    case release_gate(
+           state,
+           descriptor.connection,
+           descriptor.connection_incarnation,
+           descriptor.writer_epoch,
+           monotonic_ms()
+         ) do
+      {:ok, lease} ->
+        release_ref = make_ref()
+
+        transition = %{
+          kind: :release,
+          ref: release_ref,
+          permit_id: descriptor.permit_id,
+          request_id: descriptor.request_id,
+          lease: lease
+        }
+
+        send(
+          state.daemon_owner,
+          {:release_proposed, release_ref, descriptor.permit_id, self(), state.owner_incarnation,
+           descriptor.connection_incarnation}
+        )
+
+        Logger.debug("loopex daemon lease release proposed")
+        {{:ok, :proposed}, %{state | transition: transition}}
+
+      :error ->
+        result = WireRecords.control_error(descriptor.request_id, "control_not_held")
+
+        case AdmissionRelay.complete_lease_permit(
+               state.relay,
+               descriptor.permit_id,
+               state.owner_incarnation,
+               result
+             ) do
+          :ok ->
+            Logger.debug("loopex daemon lease release refused")
+            {{:ok, :completed}, state}
+
+          {:error, reason} ->
+            {{:error, reason}, state}
+        end
+    end
+  end
+
+  defp promote_mutation(state, descriptor) do
+    now = monotonic_ms()
+
+    {candidate_deadline, task_fun} =
+      if mutation_gate?(state, descriptor, now) do
+        {now + state.lease_term_ms, descriptor.task_fun}
+      else
+        result = WireRecords.control_error(descriptor.request_id, "control_not_held")
+        {nil, fn -> {:refused, result} end}
+      end
+
+    task_ref = make_ref()
+    owner = self()
+    origin_id = descriptor.origin_id
+
+    relay_task = fn ->
+      case task_fun.() do
+        {disposition, result}
+        when disposition in @mutation_dispositions and is_map(result) ->
+          send(owner, {:lease_mutation_classified, task_ref, origin_id, disposition})
+          result
+
+        _invalid ->
+          exit(:invalid_mutation_result)
+      end
+    end
+
+    case AdmissionRelay.promote_lease_ticket(
+           state.relay,
+           origin_id,
+           state.owner_incarnation,
+           relay_task
+         ) do
+      {:ok, ^origin_id} ->
+        Process.demonitor(descriptor.worker_monitor, [:flush])
+
+        mutation = %{
+          task_ref: task_ref,
+          holder_pid: descriptor.connection,
+          holder_incarnation: descriptor.connection_incarnation,
+          writer_epoch: descriptor.writer_epoch,
+          candidate_deadline: candidate_deadline,
+          disposition: nil,
+          relay_settled: false
+        }
+
+        GenServer.reply(descriptor.from, {:ok, :admitted})
+        Logger.debug("loopex daemon lease mutation admitted")
+        {:ok, put_in(state, [:in_flight, origin_id], mutation)}
+
+      {:error, reason} ->
+        Process.demonitor(descriptor.worker_monitor, [:flush])
+        {:error, reason, state}
+    end
+  end
+
+  defp settle_mutation_if_ready(state, origin_id) do
+    case Map.fetch(state.in_flight, origin_id) do
+      {:ok, %{disposition: disposition, relay_settled: true} = mutation}
+      when disposition in @mutation_dispositions ->
+        state =
+          if disposition in [:accepted, :admission_unknown] do
+            commit_candidate_deadline(state, mutation)
+          else
+            state
+          end
+
+        state = update_in(state.in_flight, &Map.delete(&1, origin_id))
+        Logger.debug("loopex daemon lease mutation settled")
+        continue_session_work(state)
+
+      _other ->
+        state
+    end
+  end
+
+  defp commit_candidate_deadline(
+         %{lease: %{status: :held} = lease} = state,
+         %{
+           holder_pid: holder_pid,
+           holder_incarnation: holder_incarnation,
+           writer_epoch: writer_epoch,
+           candidate_deadline: candidate_deadline
+         }
+       )
+       when is_integer(candidate_deadline) do
+    if lease.holder_pid == holder_pid and
+         lease.holder_incarnation == holder_incarnation and
+         lease.writer_epoch == writer_epoch do
+      lease = %{lease | deadline: candidate_deadline}
+      state |> Map.put(:lease, lease) |> schedule_expiry(candidate_deadline)
+    else
+      state
+    end
+  end
+
+  defp commit_candidate_deadline(state, _mutation), do: state
+
+  defp mutation_gate?(
+         %{lease: %{status: :held} = lease} = state,
+         descriptor,
+         now
+       ) do
+    lease.holder_pid == descriptor.connection and
+      lease.holder_incarnation == descriptor.connection_incarnation and
+      lease.writer_epoch == descriptor.writer_epoch and
+      now < lease.deadline and
+      attached?(state, descriptor.connection, descriptor.connection_incarnation)
+  end
+
+  defp mutation_gate?(_state, _descriptor, _now), do: false
+
+  defp attached?(state, connection, connection_incarnation) do
+    Enum.any?(state.attachments, fn
+      {^connection, ^connection_incarnation, _attachment_id} -> true
+      _other -> false
+    end)
+  end
+
   defp handle_acquisition(state, acquisition, now) do
     cond do
       now >= acquisition.request_deadline ->
@@ -558,6 +902,9 @@ defmodule LoopexDaemon.LeaseOwner do
         {{:ok, :completed}, state}
 
       not is_nil(state.transition) ->
+        {{:ok, :queued}, queue_acquisition(state, acquisition)}
+
+      map_size(state.in_flight) > 0 and same_holder?(state.lease, acquisition) ->
         {{:ok, :queued}, queue_acquisition(state, acquisition)}
 
       match?(%{status: :held}, state.lease) and state.lease.deadline <= now ->
@@ -687,7 +1034,8 @@ defmodule LoopexDaemon.LeaseOwner do
     do: state
 
   defp ensure_expiry_transition(%{lease: %{status: :held} = lease} = state) do
-    if monotonic_ms() >= lease.deadline and map_size(state.in_flight) == 0 do
+    if monotonic_ms() >= lease.deadline and map_size(state.in_flight) == 0 and
+         state.pending_operations == [] do
       expiry_ref = make_ref()
 
       transition = %{
@@ -794,6 +1142,25 @@ defmodule LoopexDaemon.LeaseOwner do
        do: :ok
 
   defp validate_release(_, _, _, _, _), do: {:error, :invalid_operation}
+
+  defp validate_mutation(
+         {incarnation, slot, sequence},
+         class,
+         request_id,
+         connection,
+         connection_incarnation,
+         writer_epoch,
+         worker,
+         task_fun
+       )
+       when incarnation == connection_incarnation and slot in 0..31 and sequence > 0 and
+              class in @direct_mutation_classes and is_binary(request_id) and
+              byte_size(request_id) in 1..64 and is_pid(connection) and
+              is_binary(writer_epoch) and byte_size(writer_epoch) in 1..64 and is_pid(worker) and
+              worker != connection and is_function(task_fun, 0),
+       do: :ok
+
+  defp validate_mutation(_, _, _, _, _, _, _, _), do: {:error, :invalid_operation}
 
   defp schedule_expiry(state, deadline) do
     state = cancel_expiry_timer(state)
