@@ -25,7 +25,10 @@ defmodule LoopexDaemon.LeaseOwner do
   128-bit opaque values. Lease and request deadlines use monotonic milliseconds;
   timer messages only prompt a live deadline check. Process status is fully
   redacted and lifecycle logs contain no session, connection, epoch, request or
-  permit data.
+  permit data. Once the daemon requests retirement from a free idle owner, the
+  owner waits for the relay's exact session rows to clear, marks its binding
+  retiring there, sends a pre-exit intent to the daemon, and exits normally only
+  after the daemon acknowledges that exact intent.
   """
 
   use GenServer
@@ -60,6 +63,18 @@ defmodule LoopexDaemon.LeaseOwner do
   @doc false
   @spec activate(pid()) :: :ok | {:error, :invalid_owner | :owner_unavailable}
   def activate(owner), do: GenServer.call(owner, :activate)
+
+  @doc false
+  @spec retire_if_idle(pid()) ::
+          {:ok, :retiring | :waiting}
+          | {:error, :daemon_stopping | :not_idle | :owner_unavailable}
+  def retire_if_idle(owner), do: GenServer.call(owner, :retire_if_idle)
+
+  @doc false
+  @spec complete_retirement(pid(), reference()) :: :ok | {:error, :invalid_operation}
+  def complete_retirement(owner, retirement_ref) do
+    GenServer.call(owner, {:complete_retirement, retirement_ref})
+  end
 
   @doc false
   @spec first_acquire(
@@ -270,6 +285,8 @@ defmodule LoopexDaemon.LeaseOwner do
          transition: nil,
          expiry_timer: nil,
          expiry_token: nil,
+         retirement_requested: false,
+         retirement_ref: nil,
          waiters: [],
          waiter_timers: %{},
          attachments: MapSet.new(),
@@ -295,6 +312,39 @@ defmodule LoopexDaemon.LeaseOwner do
     do: {:reply, :ok, state}
 
   def handle_call(:activate, _from, state), do: {:reply, {:error, :invalid_owner}, state}
+
+  def handle_call(
+        :retire_if_idle,
+        {caller, _tag},
+        %{daemon_owner: caller, phase: :active} = state
+      ) do
+    if retirement_eligible?(state) do
+      {reply, state} = begin_retirement(%{state | retirement_requested: true})
+      {:reply, reply, state}
+    else
+      {:reply, {:error, :not_idle}, state}
+    end
+  end
+
+  def handle_call(:retire_if_idle, _from, state),
+    do: {:reply, {:error, :owner_unavailable}, state}
+
+  def handle_call(
+        {:complete_retirement, retirement_ref},
+        {caller, _tag},
+        %{
+          daemon_owner: caller,
+          phase: :retiring,
+          retirement_ref: retirement_ref
+        } = state
+      )
+      when is_reference(retirement_ref) do
+    Logger.debug("loopex daemon lease owner retirement acknowledged")
+    {:stop, :normal, :ok, state}
+  end
+
+  def handle_call({:complete_retirement, _retirement_ref}, _from, state),
+    do: {:reply, {:error, :invalid_operation}, state}
 
   def handle_call(
         {:first_acquire, permit_id, request_id, connection, connection_incarnation,
@@ -678,6 +728,7 @@ defmodule LoopexDaemon.LeaseOwner do
        queued_operations: length(state.pending_operations),
        waiting_acquires: length(state.waiters),
        lease_term_ms: state.lease_term_ms,
+       retirement_requested: state.retirement_requested,
        first_acquire_available: state.first_acquire_available
      }, state}
   end
@@ -693,6 +744,19 @@ defmodule LoopexDaemon.LeaseOwner do
   end
 
   def handle_info({:lease_expiry, _token, _deadline}, state), do: {:noreply, state}
+
+  def handle_info(
+        {:relay_owner_idle, relay, owner_incarnation},
+        %{
+          relay: relay,
+          owner_incarnation: owner_incarnation,
+          phase: :active,
+          retirement_requested: true
+        } = state
+      ) do
+    {_reply, state} = begin_retirement(state)
+    {:noreply, state}
+  end
 
   def handle_info({:acquire_deadline, permit_id, deadline}, state) do
     case Enum.split_with(state.waiters, &(&1.permit_id == permit_id)) do
@@ -829,6 +893,55 @@ defmodule LoopexDaemon.LeaseOwner do
         |> ensure_expiry_transition()
         |> process_waiters()
     end
+  end
+
+  defp begin_retirement(state) do
+    if retirement_eligible?(state) do
+      begin_eligible_retirement(state)
+    else
+      {{:error, :not_idle}, state}
+    end
+  end
+
+  defp begin_eligible_retirement(state) do
+    case AdmissionRelay.prepare_lease_owner_retirement(
+           state.relay,
+           state.session_id,
+           state.owner_incarnation
+         ) do
+      :ok ->
+        retirement_ref = make_ref()
+
+        send(
+          state.daemon_owner,
+          {:lease_owner_retirement_intent, retirement_ref, self(), state.owner_incarnation,
+           state.session_id}
+        )
+
+        Logger.debug("loopex daemon lease owner retirement proposed")
+
+        {{:ok, :retiring},
+         %{state | phase: :retiring, retirement_requested: true, retirement_ref: retirement_ref}}
+
+      {:error, :owner_busy} ->
+        {{:ok, :waiting}, %{state | retirement_requested: true}}
+
+      {:error, :daemon_stopping} ->
+        {{:error, :daemon_stopping}, state}
+
+      {:error, _reason} ->
+        {{:error, :owner_unavailable}, state}
+    end
+  end
+
+  defp retirement_eligible?(state) do
+    free? =
+      state.lease == :free or
+        match?(%{status: status} when status in [:released, :expired], state.lease)
+
+    state.phase == :active and not state.first_acquire_available and free? and
+      is_nil(state.transition) and state.waiters == [] and state.pending_operations == [] and
+      map_size(state.in_flight) == 0
   end
 
   defp process_next_operation(
@@ -1437,6 +1550,7 @@ defmodule LoopexDaemon.LeaseOwner do
   end
 
   defp public_phase(%{phase: :starting}), do: :starting
+  defp public_phase(%{phase: :retiring}), do: :retiring
   defp public_phase(%{transition: %{kind: :grant}}), do: :grant_pending
   defp public_phase(%{transition: %{kind: :release}}), do: :release_pending
   defp public_phase(%{transition: %{kind: :expiry}}), do: :expiry_pending

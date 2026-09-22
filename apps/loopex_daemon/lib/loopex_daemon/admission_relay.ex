@@ -28,6 +28,9 @@ defmodule LoopexDaemon.AdmissionRelay do
   acknowledgement, retains the distinct request worker, and moves to execution
   only through the exact actor's compare-and-set. Result, connection loss and
   owner loss remain selected here until their owning coordinator settles them.
+  An idle lease owner moves to retiring only when no permit or ticket remains
+  for its session; its actual monitored `DOWN` then reports retirement
+  completion without being reclassified as owner loss.
   """
 
   use GenServer
@@ -148,6 +151,18 @@ defmodule LoopexDaemon.AdmissionRelay do
     GenServer.call(
       relay,
       {:register_lease_owner, session_id, owner, owner_incarnation},
+      @control_timeout_ms
+    )
+  end
+
+  @doc false
+  @spec prepare_lease_owner_retirement(pid(), binary(), binary()) ::
+          :ok
+          | {:error, :daemon_stopping | :owner_busy | :owner_unavailable | :invalid_owner}
+  def prepare_lease_owner_retirement(relay, session_id, owner_incarnation) do
+    GenServer.call(
+      relay,
+      {:prepare_lease_owner_retirement, session_id, owner_incarnation},
       @control_timeout_ms
     )
   end
@@ -541,6 +556,7 @@ defmodule LoopexDaemon.AdmissionRelay do
           origin_limit: 16_384,
           admission_deadline_set: boolean(),
           lease_owners: non_neg_integer(),
+          retiring_lease_owners: non_neg_integer(),
           owner_losses: non_neg_integer()
         }
   def status(relay), do: GenServer.call(relay, :status, @control_timeout_ms)
@@ -645,7 +661,7 @@ defmodule LoopexDaemon.AdmissionRelay do
 
       true ->
         monitor = Process.monitor(owner)
-        row = %{binding: binding, monitor: monitor}
+        row = %{binding: binding, monitor: monitor, phase: :live}
 
         state = %{
           state
@@ -660,6 +676,41 @@ defmodule LoopexDaemon.AdmissionRelay do
   end
 
   def handle_call({:register_lease_owner, _session, _owner, _incarnation}, _from, state),
+    do: {:reply, {:error, :invalid_owner}, state}
+
+  def handle_call(
+        {:prepare_lease_owner_retirement, session_id, owner_incarnation},
+        {owner, _tag},
+        state
+      ) do
+    binding = {owner, owner_incarnation}
+
+    case Map.fetch(state.lease_owners, session_id) do
+      {:ok, %{binding: ^binding, phase: :retiring}} ->
+        {:reply, :ok, state}
+
+      {:ok, %{binding: ^binding, phase: :live} = row} ->
+        cond do
+          state.phase != :serving ->
+            {:reply, {:error, :daemon_stopping}, state}
+
+          lease_session_busy?(state, session_id) ->
+            {:reply, {:error, :owner_busy}, state}
+
+          true ->
+            Logger.debug("loopex daemon admission relay lease owner retiring")
+            {:reply, :ok, put_in(state, [:lease_owners, session_id], %{row | phase: :retiring})}
+        end
+
+      {:ok, _other} ->
+        {:reply, {:error, :owner_unavailable}, state}
+
+      :error ->
+        {:reply, {:error, :owner_unavailable}, state}
+    end
+  end
+
+  def handle_call({:prepare_lease_owner_retirement, _, _}, _from, state),
     do: {:reply, {:error, :invalid_owner}, state}
 
   def handle_call(
@@ -1520,6 +1571,8 @@ defmodule LoopexDaemon.AdmissionRelay do
        origin_limit: @origin_limit,
        admission_deadline_set: not is_nil(state.admission_deadline),
        lease_owners: map_size(state.lease_owners),
+       retiring_lease_owners:
+         Enum.count(state.lease_owners, fn {_session_id, row} -> row.phase == :retiring end),
        owner_losses: map_size(state.owner_losses)
      }, state}
   end
@@ -1734,7 +1787,7 @@ defmodule LoopexDaemon.AdmissionRelay do
   defp validate_ticket_owner(state, class, session_id, owner_binding)
        when class in @lease_ticket_classes do
     case Map.get(state.lease_owners, session_id) do
-      %{binding: ^owner_binding} -> :ok
+      %{binding: ^owner_binding, phase: :live} -> :ok
       _other -> {:error, :invalid_origin}
     end
   end
@@ -1873,7 +1926,7 @@ defmodule LoopexDaemon.AdmissionRelay do
     binding = {owner, owner_incarnation}
 
     case Map.get(state.lease_owners, ticket.session_id) do
-      %{binding: ^binding} when ticket.owner_binding == binding -> :ok
+      %{binding: ^binding, phase: :live} when ticket.owner_binding == binding -> :ok
       _other -> {:error, :owner_unavailable}
     end
   end
@@ -1906,7 +1959,7 @@ defmodule LoopexDaemon.AdmissionRelay do
        )
        when class in @lease_permit_classes do
     case Map.get(state.lease_owners, session_id) do
-      %{binding: {^actor, ^actor_incarnation}} -> :ok
+      %{binding: {^actor, ^actor_incarnation}, phase: :live} -> :ok
       _other -> {:error, :invalid_actor}
     end
   end
@@ -2457,6 +2510,12 @@ defmodule LoopexDaemon.AdmissionRelay do
     {{session_id, {^pid, owner_incarnation} = binding}, owner_monitors} =
       Map.pop(state.lease_owner_monitors, monitor)
 
+    owner_phase =
+      case Map.get(state.lease_owners, session_id) do
+        %{binding: ^binding, phase: phase} -> phase
+        _other -> :lost
+      end
+
     lease_owners =
       case Map.get(state.lease_owners, session_id) do
         %{binding: ^binding} -> Map.delete(state.lease_owners, session_id)
@@ -2469,6 +2528,20 @@ defmodule LoopexDaemon.AdmissionRelay do
         lease_owners: lease_owners
     }
 
+    if owner_phase == :retiring do
+      send(
+        state.owner,
+        {:relay_owner_retirement_complete, self(), session_id, pid, owner_incarnation}
+      )
+
+      Logger.debug("loopex daemon admission relay lease owner retired")
+      {:noreply, state}
+    else
+      classify_lease_owner_loss(state, session_id, pid, owner_incarnation, binding)
+    end
+  end
+
+  defp classify_lease_owner_loss(state, session_id, pid, owner_incarnation, binding) do
     affected_tickets =
       state.tickets
       |> Enum.filter(fn
@@ -2927,6 +3000,7 @@ defmodule LoopexDaemon.AdmissionRelay do
           end
 
         %{state | permits: permits, connections: connections}
+        |> maybe_notify_lease_owner_idle(permit.session_id)
     end
   end
 
@@ -2947,7 +3021,29 @@ defmodule LoopexDaemon.AdmissionRelay do
           end
 
         %{state | tickets: tickets, connections: connections}
+        |> maybe_notify_lease_owner_idle(ticket.session_id)
     end
+  end
+
+  defp maybe_notify_lease_owner_idle(state, nil), do: state
+
+  defp maybe_notify_lease_owner_idle(state, session_id) do
+    case Map.get(state.lease_owners, session_id) do
+      %{binding: {owner, owner_incarnation}, phase: :live} ->
+        unless lease_session_busy?(state, session_id) do
+          send(owner, {:relay_owner_idle, self(), owner_incarnation})
+        end
+
+        state
+
+      _other ->
+        state
+    end
+  end
+
+  defp lease_session_busy?(state, session_id) do
+    Enum.any?(state.permits, fn {_origin_id, permit} -> permit.session_id == session_id end) or
+      Enum.any?(state.tickets, fn {_origin_id, ticket} -> ticket.session_id == session_id end)
   end
 
   defp maybe_retire_connection(state, incarnation) do

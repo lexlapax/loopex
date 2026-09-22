@@ -1965,6 +1965,86 @@ defmodule LoopexDaemon.LeaseOwnerTest do
     stop_connection(holder, fixture.relay, holder_incarnation)
   end
 
+  test "released owner waits for the final relay row before acknowledged retirement" do
+    fixture = start_fixture(unmanaged_owner: true)
+    {holder, holder_incarnation, writer_epoch} = grant_first(fixture)
+    release_origin = {holder_incarnation, 1, 1}
+    {worker, worker_incarnation} = start_worker(holder, release_origin)
+    worker_monitor = Process.monitor(worker)
+
+    assert {:ok, ^release_origin} =
+             open_release(
+               fixture,
+               holder,
+               holder_incarnation,
+               release_origin,
+               worker,
+               worker_incarnation
+             )
+
+    assert {:ok, :proposed} =
+             LeaseOwner.release(
+               fixture.owner,
+               release_origin,
+               "retire-release",
+               holder,
+               holder_incarnation,
+               writer_epoch
+             )
+
+    assert_receive {:release_proposed, release_ref, ^release_origin, _, _, ^holder_incarnation},
+                   500
+
+    assert_receive {:lease_request_go, ^worker, ^release_origin}, 500
+    assert_receive {:DOWN, ^worker_monitor, :process, ^worker, :normal}, 500
+
+    settlement_ref = make_ref()
+    result = WireRecords.control_released("retire-release")
+
+    assert :ok =
+             AdmissionRelay.select_lease_result(
+               fixture.relay,
+               release_origin,
+               fixture.owner,
+               fixture.owner_incarnation,
+               settlement_ref,
+               result
+             )
+
+    assert :ok = LeaseOwner.resolve_release(fixture.owner, release_ref, :released)
+    assert {:ok, :waiting} = LeaseOwner.retire_if_idle(fixture.owner)
+
+    assert %{phase: :released, retirement_requested: true} =
+             LeaseOwner.status(fixture.owner)
+
+    assert :ok =
+             AdmissionRelay.settle_lease_result(
+               fixture.relay,
+               release_origin,
+               settlement_ref
+             )
+
+    assert_receive {:lease_owner_retirement_intent, retirement_ref, owner, owner_incarnation,
+                    session_id},
+                   500
+
+    assert owner == fixture.owner
+    assert owner_incarnation == fixture.owner_incarnation
+    assert session_id == fixture.session_id
+    assert %{phase: :retiring, retirement_requested: true} = LeaseOwner.status(fixture.owner)
+
+    owner_monitor = Process.monitor(fixture.owner)
+    assert :ok = LeaseOwner.complete_retirement(fixture.owner, retirement_ref)
+    assert_receive {:DOWN, ^owner_monitor, :process, ^owner, :normal}, 500
+
+    assert_receive {:relay_owner_retirement_complete, relay, ^session_id, ^owner,
+                    ^owner_incarnation},
+                   500
+
+    assert relay == fixture.relay
+    stop_connection(holder, fixture.relay, holder_incarnation)
+  end
+
   defp start_fixture(options \\ []) do
     daemon_incarnation = incarnation()
     session_id = Keyword.get(options, :session_id, "session")
@@ -1986,16 +2066,31 @@ defmodule LoopexDaemon.LeaseOwnerTest do
 
     owner_incarnation = incarnation()
 
+    owner_options = [
+      daemon_owner: self(),
+      relay: relay,
+      registry: registry,
+      session_id: session_id,
+      owner_incarnation: owner_incarnation,
+      lease_term_ms: Keyword.get(options, :lease_term_ms, 30_000)
+    ]
+
     owner =
-      start_supervised!(
-        {LeaseOwner,
-         daemon_owner: self(),
-         relay: relay,
-         registry: registry,
-         session_id: session_id,
-         owner_incarnation: owner_incarnation,
-         lease_term_ms: Keyword.get(options, :lease_term_ms, 30_000)}
-      )
+      if Keyword.get(options, :unmanaged_owner, false) do
+        {:ok, owner} = LeaseOwner.start_link(owner_options)
+
+        on_exit(fn ->
+          try do
+            if Process.alive?(owner), do: GenServer.stop(owner)
+          catch
+            :exit, _reason -> :ok
+          end
+        end)
+
+        owner
+      else
+        start_supervised!({LeaseOwner, owner_options})
+      end
 
     assert :ok =
              AdmissionRelay.register_lease_owner(

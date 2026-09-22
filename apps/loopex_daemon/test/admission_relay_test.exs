@@ -93,6 +93,7 @@ defmodule LoopexDaemon.AdmissionRelayTest do
         origin_limit: 16_384,
         admission_deadline_set: false,
         lease_owners: 0,
+        retiring_lease_owners: 0,
         owner_losses: 0
       }
     end)
@@ -1865,6 +1866,137 @@ defmodule LoopexDaemon.AdmissionRelayTest do
 
     assert %{owner_losses: 0, permits: 0, tickets: 0} = AdmissionRelay.status(relay)
     stop_connection(connection, relay, connection_incarnation)
+  end
+
+  test "an idle lease owner retires through its exact monitored down" do
+    relay = start_relay()
+    owner = start_actor()
+    owner_incarnation = incarnation()
+
+    assert :ok =
+             AdmissionRelay.register_lease_owner(
+               relay,
+               "retiring-session",
+               owner,
+               owner_incarnation
+             )
+
+    assert :ok =
+             invoke(owner, fn ->
+               AdmissionRelay.prepare_lease_owner_retirement(
+                 relay,
+                 "retiring-session",
+                 owner_incarnation
+               )
+             end)
+
+    assert %{lease_owners: 1, retiring_lease_owners: 1, owner_losses: 0} =
+             AdmissionRelay.status(relay)
+
+    connection_incarnation = incarnation()
+    connection = start_connection(relay, connection_incarnation)
+    origin = {connection_incarnation, 0, 1}
+    {worker, worker_incarnation} = start_lease_worker(connection, origin)
+
+    assert {:error, :invalid_actor} =
+             AdmissionRelay.open_lease_permit(
+               relay,
+               connection,
+               origin,
+               :session_acquire_control,
+               "retiring-session",
+               owner,
+               owner_incarnation,
+               worker,
+               worker_incarnation
+             )
+
+    assert {:error, :invalid_origin} =
+             invoke(connection, fn ->
+               AdmissionRelay.open_ticket(
+                 relay,
+                 origin,
+                 :session_prompt,
+                 "retiring-session",
+                 {owner, owner_incarnation}
+               )
+             end)
+
+    stop_connection(connection, relay, connection_incarnation)
+
+    owner_monitor = Process.monitor(owner)
+    Process.exit(owner, :kill)
+    assert_receive {:DOWN, ^owner_monitor, :process, ^owner, :killed}, 500
+
+    assert_receive {:relay_owner_retirement_complete, ^relay, "retiring-session", ^owner,
+                    ^owner_incarnation},
+                   500
+
+    refute_receive {:relay_owner_lost, ^relay, _, ^owner, ^owner_incarnation, _}, 40
+
+    assert %{lease_owners: 0, retiring_lease_owners: 0, owner_losses: 0} =
+             AdmissionRelay.status(relay)
+  end
+
+  test "retirement waits for the session's final relay row and then wakes the owner" do
+    relay = start_relay()
+    owner = start_actor()
+    owner_incarnation = incarnation()
+
+    assert :ok =
+             AdmissionRelay.register_lease_owner(
+               relay,
+               "busy-session",
+               owner,
+               owner_incarnation
+             )
+
+    connection_incarnation = incarnation()
+    connection = start_connection(relay, connection_incarnation)
+    origin = {connection_incarnation, 0, 1}
+
+    assert {:ok, ^origin} =
+             invoke(connection, fn ->
+               AdmissionRelay.open_ticket(
+                 relay,
+                 origin,
+                 :session_prompt,
+                 "busy-session",
+                 {owner, owner_incarnation}
+               )
+             end)
+
+    assert {:error, :owner_busy} =
+             invoke(owner, fn ->
+               AdmissionRelay.prepare_lease_owner_retirement(
+                 relay,
+                 "busy-session",
+                 owner_incarnation
+               )
+             end)
+
+    connection_monitor = Process.monitor(connection)
+    Process.exit(connection, :kill)
+    assert_receive {:DOWN, ^connection_monitor, :process, ^connection, :killed}, 500
+    assert_receive {:relay_connection_retired, ^relay, ^connection_incarnation}, 500
+
+    assert_receive {:registry_message, ^owner, {:relay_owner_idle, ^relay, ^owner_incarnation}},
+                   500
+
+    assert :ok =
+             invoke(owner, fn ->
+               AdmissionRelay.prepare_lease_owner_retirement(
+                 relay,
+                 "busy-session",
+                 owner_incarnation
+               )
+             end)
+
+    Process.exit(owner, :kill)
+
+    assert_receive {:relay_owner_retirement_complete, ^relay, "busy-session", ^owner,
+                    ^owner_incarnation},
+                   500
   end
 
   test "a daemon-selected lease result wins a later connection loss" do
