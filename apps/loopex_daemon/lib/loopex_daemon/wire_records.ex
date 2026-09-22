@@ -33,6 +33,7 @@ defmodule LoopexDaemon.WireRecords do
 
   @request_messages Map.merge(@control_messages, %{
                       "activation_ceiling_reached" => "activation ceiling reached.",
+                      "attachment_conflict" => "another attachment holds this session",
                       "capacity_exceeded" => "too many requests are in flight on this connection",
                       "composition_mismatch" =>
                         "session cannot be activated by this daemon composition",
@@ -198,4 +199,68 @@ defmodule LoopexDaemon.WireRecords do
       do: record,
       else: Map.put(record, "event_cursor", Wire.encode_u64(event_cursor))
   end
+
+  @doc """
+  ## Concept
+
+  An attachment's authoritative snapshot at its own cursor, in the same shape
+  the foreground server emits for the same session.
+
+  ## Technical depth
+
+  The cursor and the snapshot's event sequence are one number reported twice;
+  the open interaction is projected at that same cursor by core.
+  """
+  @spec snapshot(binary(), map(), map() | nil) :: map()
+  def snapshot(request_id, snapshot, open_interaction)
+      when is_binary(request_id) and is_map(snapshot) do
+    cursor = Map.get(snapshot, :event_sequence, 0)
+    session_id = Map.fetch!(snapshot, :session_id)
+
+    %{
+      "type" => "snapshot",
+      "request_id" => request_id,
+      "session_id" => Wire.encode_identity(session_id),
+      "event_cursor" => Wire.encode_u64(cursor),
+      "snapshot" => %{
+        "snapshot_revision" => Map.fetch!(snapshot, :snapshot_revision),
+        "session_id" => Wire.encode_identity(session_id),
+        "event_sequence" => Wire.encode_u64(cursor),
+        "active_run_id" => optional_identity(Map.get(snapshot, :active_run_id)),
+        "active_run_phase" => optional_word(Map.get(snapshot, :active_run_phase))
+      },
+      "open_interaction" => open_interaction
+    }
+  end
+
+  @doc """
+  ## Concept
+
+  One durable event, with only the members its kind carries.
+
+  ## Technical depth
+
+  The event's identity and sequence move into the envelope and everything else
+  stays in `data` exactly as core published it.
+  """
+  @spec event(binary(), map()) :: map()
+  def event(session_id, event) when is_binary(session_id) and is_map(event) do
+    %{
+      "type" => "event",
+      "session_id" => Wire.encode_identity(session_id),
+      "event" => %{
+        "kind" => Map.fetch!(event, :kind),
+        "event_id" => Wire.encode_identity(Map.fetch!(event, :event_id)),
+        "event_sequence" => Wire.encode_u64(Map.fetch!(event, :event_sequence)),
+        "data" => Map.drop(event, [:kind, :event_id, :event_sequence])
+      }
+    }
+  end
+
+  defp optional_identity(nil), do: nil
+  defp optional_identity(value) when is_binary(value), do: Wire.encode_identity(value)
+
+  defp optional_word(nil), do: nil
+  defp optional_word(value) when is_atom(value), do: Atom.to_string(value)
+  defp optional_word(value) when is_binary(value), do: value
 end

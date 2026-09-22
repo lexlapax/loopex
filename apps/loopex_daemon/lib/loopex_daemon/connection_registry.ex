@@ -50,6 +50,7 @@ defmodule LoopexDaemon.ConnectionRegistry do
   alias LoopexProtocol.Session.V2
 
   @connection_limit 512
+  @attachments_per_session 64
   @activation_limit 64
   @aggregate_output_bytes 536_870_912
 
@@ -259,6 +260,57 @@ defmodule LoopexDaemon.ConnectionRegistry do
       registry,
       {:promote_create, origin_id, command_id, digest, mode, ceiling_refusal, conflict_refusal,
        task_fun}
+    )
+  end
+
+  @doc """
+  ## Concept
+
+  Admits one connection's `session.attach` ticket only for a session this
+  daemon lifetime has activated and only within the per-session and
+  per-daemon attachment ceilings.
+
+  ## Technical depth
+
+  The caller is the initialized connection itself. A dormant session or a
+  full ceiling completes the supplied refusal through the relay without a core
+  call. Otherwise the relay starts the monitored task whose classified result
+  either installs the connection's one attachment, which the daemon owner
+  records for the session's mutation gate before the snapshot settles, or
+  restores the connection's previous attachment state.
+  """
+  @spec promote_attach(
+          pid(),
+          origin_id(),
+          binary(),
+          binary(),
+          map(),
+          map(),
+          (-> {:installed, binary(), map()} | {:refused, map()})
+        ) ::
+          {:ok, :admitted}
+          | {:error,
+             :attachment_pending
+             | :daemon_stopping
+             | :invalid_promotion
+             | :registry_unavailable
+             | :relay_unavailable
+             | :reservation_unavailable
+             | :ticket_outstanding
+             | :ticket_unavailable}
+  def promote_attach(
+        registry,
+        origin_id,
+        connection_incarnation,
+        session_id,
+        dormant_refusal,
+        capacity_refusal,
+        task_fun
+      ) do
+    GenServer.call(
+      registry,
+      {:promote_attach, origin_id, connection_incarnation, session_id, dormant_refusal,
+       capacity_refusal, task_fun}
     )
   end
 
@@ -478,6 +530,7 @@ defmodule LoopexDaemon.ConnectionRegistry do
            activation_preparation_monitors: %{},
            activation_promotions: %{},
            anonymous_activations: 0,
+           attachments: %{},
            activation_promotion_bindings: %{},
            relay: nil,
            routing_mirrors: %{},
@@ -859,6 +912,63 @@ defmodule LoopexDaemon.ConnectionRegistry do
     else
       {:error, reason} -> {:reply, {:error, reason}, state}
       false -> {:reply, {:error, :invalid_activation}, state}
+    end
+  end
+
+  def handle_call(
+        {:promote_attach, origin_id, incarnation, session_id, dormant_refusal, capacity_refusal,
+         task_fun},
+        {caller, _tag},
+        state
+      ) do
+    with {:ok, relay, relay_incarnation} <- bound_relay(state),
+         {_token, _row} <- initialized_connection_row(state, caller, incarnation),
+         true <- is_binary(session_id) and byte_size(session_id) in 1..256,
+         true <- is_map(dormant_refusal) and is_map(capacity_refusal),
+         true <- is_function(task_fun, 0),
+         :ok <- attachment_not_pending(state, incarnation) do
+      previous = Map.get(state.attachments, incarnation)
+
+      cond do
+        not MapSet.member?(state.activation_set, session_id) ->
+          Logger.debug("loopex daemon attach refused for dormant session")
+
+          promote_attach_refusal(
+            state,
+            relay,
+            relay_incarnation,
+            origin_id,
+            dormant_refusal
+          )
+
+        not attachment_capacity?(state, session_id, previous) ->
+          Logger.debug("loopex daemon attach capacity reached")
+
+          promote_attach_refusal(
+            state,
+            relay,
+            relay_incarnation,
+            origin_id,
+            capacity_refusal
+          )
+
+        true ->
+          promote_attach_primary(
+            state,
+            relay,
+            relay_incarnation,
+            origin_id,
+            caller,
+            incarnation,
+            session_id,
+            previous,
+            task_fun
+          )
+      end
+    else
+      {:error, reason} -> {:reply, {:error, reason}, state}
+      nil -> {:reply, {:error, :reservation_unavailable}, state}
+      false -> {:reply, {:error, :invalid_promotion}, state}
     end
   end
 
@@ -1255,6 +1365,39 @@ defmodule LoopexDaemon.ConnectionRegistry do
   end
 
   def handle_info(
+        {:attachment_classified, classification_ref, settlement_ref, classification},
+        state
+      ) do
+    case Map.fetch(state.activation_promotions, settlement_ref) do
+      {:ok,
+       %{kind: :attach, classification_ref: ^classification_ref, classification: nil} =
+           promotion} ->
+        promotion = %{promotion | classification: classification}
+        state = put_in(state, [:activation_promotions, settlement_ref], promotion)
+        {:noreply, settle_attach_promotion(state, settlement_ref)}
+
+      _other ->
+        Logger.debug("loopex daemon attach classification invalid")
+        {:stop, :attachment_settlement_invalid, state}
+    end
+  end
+
+  def handle_info({:owner_attachment_recorded, owner, record_ref}, %{owner: owner} = state)
+      when is_reference(record_ref) do
+    case Enum.find(state.activation_promotions, fn {_settlement_ref, promotion} ->
+           Map.get(promotion, :record_ref) == record_ref
+         end) do
+      {settlement_ref, promotion} ->
+        promotion = %{promotion | owner_acked: true}
+        state = put_in(state, [:activation_promotions, settlement_ref], promotion)
+        {:noreply, settle_attach_promotion(state, settlement_ref)}
+
+      nil ->
+        {:noreply, state}
+    end
+  end
+
+  def handle_info(
         {:relay_ticket_settlement, relay, origin_id, settlement_ref, result},
         %{relay: %{pid: relay}} = state
       ) do
@@ -1528,6 +1671,7 @@ defmodule LoopexDaemon.ConnectionRegistry do
 
       {row, rows} ->
         cancel_timer(row.timer, token)
+        state = release_row_attachment(state, row.connection_incarnation)
 
         child_monitors =
           if row.connection_monitor,
@@ -2566,8 +2710,240 @@ defmodule LoopexDaemon.ConnectionRegistry do
   defp settle_promotion(state, settlement_ref, %{kind: :create}),
     do: settle_create_promotion(state, settlement_ref)
 
+  defp settle_promotion(state, settlement_ref, %{kind: :attach}),
+    do: settle_attach_promotion(state, settlement_ref)
+
   defp settle_promotion(state, settlement_ref, _promotion),
     do: settle_resume_promotion(state, settlement_ref)
+
+  defp attachment_not_pending(state, incarnation) do
+    case Map.get(state.attachments, incarnation) do
+      %{phase: :pending} -> {:error, :attachment_pending}
+      _other -> :ok
+    end
+  end
+
+  # Concept: a replacement keeps the connection's one counted attachment;
+  # every other attach must fit both ceilings.
+  defp attachment_capacity?(state, session_id, previous) do
+    replacing = match?(%{phase: :installed, session_id: ^session_id}, previous)
+
+    per_session =
+      Enum.count(state.attachments, fn {_incarnation, attachment} ->
+        attachment.session_id == session_id
+      end)
+
+    replacing or
+      (per_session < @attachments_per_session and
+         map_size(state.attachments) < @connection_limit)
+  end
+
+  defp promote_attach_refusal(state, relay, relay_incarnation, origin_id, refusal) do
+    promote_attach_ticket(
+      state,
+      relay,
+      relay_incarnation,
+      origin_id,
+      %{refusal: true, incarnation: nil, session_id: nil, previous: nil},
+      fn -> {:refused, refusal} end
+    )
+  end
+
+  defp promote_attach_primary(
+         state,
+         relay,
+         relay_incarnation,
+         origin_id,
+         connection,
+         incarnation,
+         session_id,
+         previous,
+         task_fun
+       ) do
+    pending = %{
+      phase: :pending,
+      session_id: session_id,
+      connection: connection,
+      attachment_id: nil
+    }
+
+    state = put_in(state, [:attachments, incarnation], pending)
+
+    promote_attach_ticket(
+      state,
+      relay,
+      relay_incarnation,
+      origin_id,
+      %{refusal: false, incarnation: incarnation, session_id: session_id, previous: previous},
+      task_fun
+    )
+  end
+
+  defp promote_attach_ticket(state, relay, relay_incarnation, origin_id, binding, task_fun) do
+    settlement_ref = :crypto.strong_rand_bytes(16)
+    classification_ref = make_ref()
+    registry = self()
+
+    relay_task = fn ->
+      case task_fun.() do
+        {:installed, attachment_id, result} = classification
+        when is_binary(attachment_id) and is_map(result) ->
+          send(
+            registry,
+            {:attachment_classified, classification_ref, settlement_ref, classification}
+          )
+
+          result
+
+        {:refused, result} = classification when is_map(result) ->
+          send(
+            registry,
+            {:attachment_classified, classification_ref, settlement_ref, classification}
+          )
+
+          result
+
+        _invalid ->
+          exit(:invalid_attachment_result)
+      end
+    end
+
+    promotion =
+      Map.merge(binding, %{
+        kind: :attach,
+        origin_id: origin_id,
+        classification_ref: classification_ref,
+        classification: nil,
+        relay_result: nil,
+        record_ref: nil,
+        owner_acked: false
+      })
+
+    state = put_in(state, [:activation_promotions, settlement_ref], promotion)
+
+    case AdmissionRelay.promote_ticket(
+           relay,
+           origin_id,
+           relay_incarnation,
+           settlement_ref,
+           relay_task
+         ) do
+      {:ok, ^origin_id} ->
+        Logger.debug("loopex daemon attach promoted")
+        {:reply, {:ok, :admitted}, state}
+
+      {:error, reason} ->
+        state =
+          state
+          |> update_in([:activation_promotions], &Map.delete(&1, settlement_ref))
+          |> restore_attachment(promotion)
+
+        {:reply, {:error, reason}, state}
+    end
+  end
+
+  defp restore_attachment(state, %{refusal: true}), do: state
+
+  defp restore_attachment(state, %{incarnation: incarnation, previous: previous}) do
+    case {Map.get(state.attachments, incarnation), previous} do
+      {%{phase: :pending}, nil} -> update_in(state.attachments, &Map.delete(&1, incarnation))
+      {%{phase: :pending}, previous} -> put_in(state, [:attachments, incarnation], previous)
+      _other -> state
+    end
+  end
+
+  # Concept: a successful attach becomes visible to its client only after the
+  # daemon owner has recorded it for the session's mutation gate.
+  defp settle_attach_promotion(state, settlement_ref) do
+    case Map.fetch(state.activation_promotions, settlement_ref) do
+      {:ok,
+       %{classification: {:installed, attachment_id, result}, relay_result: result} = promotion} ->
+        cond do
+          promotion.owner_acked ->
+            finish_attach_promotion(state, settlement_ref, promotion)
+
+          not is_nil(promotion.record_ref) ->
+            state
+
+          true ->
+            record_attachment(state, settlement_ref, promotion, attachment_id)
+        end
+
+      {:ok, %{classification: {:refused, result}, relay_result: result} = promotion} ->
+        state
+        |> restore_attachment(promotion)
+        |> finish_attach_promotion(settlement_ref, promotion)
+
+      {:ok, %{classification: classification, relay_result: relay_result}}
+      when not is_nil(classification) and not is_nil(relay_result) ->
+        exit(:attachment_settlement_invalid)
+
+      _other ->
+        state
+    end
+  end
+
+  defp record_attachment(state, settlement_ref, promotion, attachment_id) do
+    case Map.get(state.attachments, promotion.incarnation) do
+      %{phase: :pending, connection: connection} = pending ->
+        record_ref = make_ref()
+        installed = %{pending | phase: :installed, attachment_id: attachment_id}
+
+        case promotion.previous do
+          %{phase: :installed, attachment_id: previous_id} = previous
+          when previous_id != attachment_id ->
+            notify_attachment(state, :closed, previous, promotion.incarnation, nil)
+
+          _other ->
+            :ok
+        end
+
+        notify_attachment(state, :opened, installed, promotion.incarnation, record_ref)
+        Logger.debug("loopex daemon attachment recorded")
+
+        state
+        |> put_in([:attachments, promotion.incarnation], %{installed | connection: connection})
+        |> put_in([:activation_promotions, settlement_ref], %{promotion | record_ref: record_ref})
+
+      _connection_gone ->
+        finish_attach_promotion(state, settlement_ref, promotion)
+    end
+  end
+
+  defp notify_attachment(state, action, attachment, incarnation, record_ref) do
+    send(
+      state.owner,
+      {:registry_attachment, self(), record_ref, action, attachment.session_id,
+       attachment.connection, incarnation, attachment.attachment_id}
+    )
+  end
+
+  defp finish_attach_promotion(state, settlement_ref, promotion) do
+    case AdmissionRelay.settle_ticket(
+           state.relay.pid,
+           promotion.origin_id,
+           state.relay.incarnation,
+           settlement_ref
+         ) do
+      :ok ->
+        Logger.debug("loopex daemon attach settled")
+        update_in(state.activation_promotions, &Map.delete(&1, settlement_ref))
+
+      {:error, _reason} ->
+        exit(:attachment_settlement_failed)
+    end
+  end
+
+  defp release_row_attachment(state, incarnation) do
+    case Map.pop(state.attachments, incarnation) do
+      {%{phase: :installed} = attachment, attachments} ->
+        notify_attachment(state, :closed, attachment, incarnation, nil)
+        %{state | attachments: attachments}
+
+      {_pending_or_nil, attachments} ->
+        %{state | attachments: attachments}
+    end
+  end
 
   defp promote_create_call(
          state,

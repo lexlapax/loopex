@@ -335,8 +335,10 @@ defmodule LoopexDaemon.LeaseOwner do
     owner_incarnation = Keyword.fetch!(options, :owner_incarnation)
     lease_term_ms = Keyword.get(options, :lease_term_ms, @lease_term_ms)
     retirement_exit_gate = Keyword.get(options, :retirement_exit_gate)
+    attachments = Keyword.get(options, :attachments, MapSet.new())
 
-    if is_pid(daemon_owner) and is_pid(relay) and is_pid(registry) and valid_session?(session_id) and
+    if is_struct(attachments, MapSet) and is_pid(daemon_owner) and is_pid(relay) and
+         is_pid(registry) and valid_session?(session_id) and
          valid_incarnation?(owner_incarnation) and valid_term?(lease_term_ms) and
          (is_nil(retirement_exit_gate) or is_pid(retirement_exit_gate)) do
       Process.link(daemon_owner)
@@ -362,7 +364,7 @@ defmodule LoopexDaemon.LeaseOwner do
          retirement_exit_blocked: false,
          waiters: [],
          waiter_timers: %{},
-         attachments: MapSet.new(),
+         attachments: attachments,
          in_flight: %{},
          pending_operations: []
        }}

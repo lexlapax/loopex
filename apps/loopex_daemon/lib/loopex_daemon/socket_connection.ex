@@ -85,7 +85,9 @@ defmodule LoopexDaemon.SocketConnection do
       context: Keyword.get(options, :context),
       ledger: RequestLedger.new(Keyword.fetch!(options, :connection_incarnation)),
       workers: %{},
-      closing: nil
+      closing: nil,
+      attachment: nil,
+      output_cursors: :queue.new()
     }
 
     Logger.debug("loopex daemon socket connection waiting")
@@ -224,6 +226,32 @@ defmodule LoopexDaemon.SocketConnection do
       ),
       do: finish_owner_loss_close(state)
 
+  def handle_info({:daemon_attachment, origin, attachment}, state) do
+    ledger = RequestLedger.update(state.ledger, origin, &Map.put(&1, :attachment, attachment))
+    {:noreply, %{state | ledger: ledger}}
+  end
+
+  def handle_info(
+        {:attachment_event, pump, event},
+        %{attachment: %{pump: pump}, closing: nil} = state
+      ),
+      do: deliver_event(state, event)
+
+  def handle_info(
+        {:attachment_disconnected, pump, _cursor},
+        %{attachment: %{pump: pump}, closing: nil} = state
+      ),
+      do: begin_detach_close(state)
+
+  def handle_info({:attachment_failed, pump}, %{attachment: %{pump: pump}, closing: nil} = state),
+    do: begin_detach_close(state)
+
+  def handle_info(
+        {:DOWN, monitor, :process, pump, _reason},
+        %{attachment: %{pump: pump, pump_monitor: monitor}, closing: nil} = state
+      ),
+      do: begin_detach_close(state)
+
   def handle_info(
         {:DOWN, monitor, :process, registry, _reason},
         %{registry: registry, registry_monitor: monitor} = state
@@ -332,11 +360,11 @@ defmodule LoopexDaemon.SocketConnection do
   defp retain_partial(state, partial) do
     if byte_size(partial) > frame_ceiling(state.protocol) do
       case send_record(state, invalid_frame(:frame_too_large)) do
-        :ok ->
+        {:ok, state} ->
           Logger.debug("loopex daemon protocol frame refused")
           {:ok, %{state | input_buffer: "", discarding_oversize: true}}
 
-        {:error, _reason} ->
+        {:error, state} ->
           {:stop, state}
       end
     else
@@ -351,11 +379,11 @@ defmodule LoopexDaemon.SocketConnection do
 
       {:error, reason} ->
         case send_record(state, invalid_frame(reason)) do
-          :ok ->
+          {:ok, state} ->
             Logger.debug("loopex daemon protocol frame refused")
             {:ok, state}
 
-          {:error, _send_reason} ->
+          {:error, state} ->
             {:stop, state}
         end
     end
@@ -368,8 +396,8 @@ defmodule LoopexDaemon.SocketConnection do
 
       {_kind, record, protocol, :none} ->
         case send_record(state, record) do
-          :ok -> {:ok, %{state | protocol: protocol}}
-          {:error, _reason} -> {:stop, state}
+          {:ok, state} -> {:ok, %{state | protocol: protocol}}
+          {:error, state} -> {:stop, state}
         end
 
       {:ok, record, protocol, :initialized} ->
@@ -380,7 +408,7 @@ defmodule LoopexDaemon.SocketConnection do
              ) do
           :ok ->
             with :ok <- register_relay(state),
-                 :ok <- send_record(state, record) do
+                 {:ok, state} <- send_record(state, record) do
               Logger.debug("loopex daemon socket connection initialized")
               {:ok, %{state | protocol: protocol, phase: :initialized}}
             else
@@ -455,42 +483,58 @@ defmodule LoopexDaemon.SocketConnection do
     %{command_id: command_id, session_options: options} = request.fields
     runtime = state.context.runtime
 
-    entry = %{
-      operation: :session_create,
-      fields: request.fields,
-      worker: nil,
-      worker_monitor: nil,
-      worker_incarnation: nil
-    }
+    begin_ticket(state, state.ledger, request, :session_create, nil, fn ->
+      Loopex.Runtime.lookup_create_result(runtime, command_id, options)
+    end)
+  end
 
-    case RequestLedger.begin(state.ledger, request.request_id, entry) do
+  # Concept: attach reserves the connection's one session first, then its
+  # ticket; only a session this daemon lifetime activated can be attached.
+  #
+  # Technical depth: a connection holds at most one attachment, so a second
+  # attach without `replace` is refused locally with ADR 0023's
+  # `attachment_conflict` before any gate, and `replace: true` names the
+  # connection's exact current attachment to core.
+  defp serve(state, %Request{operation: :session_attach} = request) do
+    session_id = request.fields.session_id
+
+    case RequestLedger.reserve(
+           state.ledger,
+           session_id,
+           request.request_id,
+           {request.operation, request.fields}
+         ) do
+      :coalesced ->
+        {:ok, state}
+
+      {:error, :session_conflict} ->
+        reply(state, WireRecords.invalid_request(request.request_id, "session_conflict"))
+
+      {:ok, reserved} ->
+        if state.attachment && request.fields.replace != true do
+          reply(state, WireRecords.request_error(request.request_id, "attachment_conflict"))
+        else
+          begin_ticket(state, reserved, request, :session_attach, session_id, fn -> :ok end)
+        end
+    end
+  end
+
+  defp serve(state, request),
+    do: reply(state, WireRecords.request_error(request.request_id, "unsupported_method"))
+
+  defp begin_ticket(state, ledger, request, class, session_id, fun) do
+    case RequestLedger.begin(ledger, request.request_id, new_entry(request)) do
       {:ok, origin, ledger} ->
-        case AdmissionRelay.open_ticket(state.context.relay, origin, :session_create) do
+        case AdmissionRelay.open_ticket(state.context.relay, origin, class, session_id) do
           {:ok, ^origin} ->
-            state = %{state | ledger: ledger}
-
-            {worker, monitor, incarnation} =
-              RequestWorker.start(origin, fn ->
-                Loopex.Runtime.lookup_create_result(runtime, command_id, options)
-              end)
-
-            ledger =
-              RequestLedger.update(state.ledger, origin, fn entry ->
-                %{
-                  entry
-                  | worker: worker,
-                    worker_monitor: monitor,
-                    worker_incarnation: incarnation
-                }
-              end)
-
-            state = %{state | ledger: ledger, workers: Map.put(state.workers, monitor, origin)}
+            state = start_request_worker(%{state | ledger: ledger}, origin, fun)
+            {:ok, entry} = RequestLedger.fetch(state.ledger, origin)
 
             case AdmissionRelay.bind_ticket_worker(
                    state.context.relay,
                    origin,
-                   worker,
-                   incarnation
+                   entry.worker,
+                   entry.worker_incarnation
                  ) do
               :ok ->
                 {:ok, state}
@@ -512,8 +556,26 @@ defmodule LoopexDaemon.SocketConnection do
     end
   end
 
-  defp serve(state, request),
-    do: reply(state, WireRecords.request_error(request.request_id, "unsupported_method"))
+  defp new_entry(request) do
+    %{
+      operation: request.operation,
+      fields: request.fields,
+      worker: nil,
+      worker_monitor: nil,
+      worker_incarnation: nil
+    }
+  end
+
+  defp start_request_worker(state, origin, fun) do
+    {worker, monitor, incarnation} = RequestWorker.start(origin, fun)
+
+    ledger =
+      RequestLedger.update(state.ledger, origin, fn entry ->
+        %{entry | worker: worker, worker_monitor: monitor, worker_incarnation: incarnation}
+      end)
+
+    %{state | ledger: ledger, workers: Map.put(state.workers, monitor, origin)}
+  end
 
   defp ticket_refusal(:daemon_stopping), do: "daemon_stopping"
   defp ticket_refusal(:capacity_exceeded), do: "capacity_exceeded"
@@ -522,29 +584,9 @@ defmodule LoopexDaemon.SocketConnection do
   # Concept: the request identity and the in-flight ceiling are checked before
   # any worker starts, and a refused request leaves no reservation behind.
   defp begin_worker(state, ledger, request, fun) do
-    entry = %{
-      operation: request.operation,
-      fields: request.fields,
-      worker: nil,
-      worker_monitor: nil,
-      worker_incarnation: nil
-    }
-
-    case RequestLedger.begin(ledger, request.request_id, entry) do
+    case RequestLedger.begin(ledger, request.request_id, new_entry(request)) do
       {:ok, origin, ledger} ->
-        {worker, monitor, incarnation} = RequestWorker.start(origin, fun)
-
-        ledger =
-          RequestLedger.update(ledger, origin, fn entry ->
-            %{
-              entry
-              | worker: worker,
-                worker_monitor: monitor,
-                worker_incarnation: incarnation
-            }
-          end)
-
-        {:ok, %{state | ledger: ledger, workers: Map.put(state.workers, monitor, origin)}}
+        {:ok, start_request_worker(%{state | ledger: ledger}, origin, fun)}
 
       {:error, :duplicate_request} ->
         reply(state, WireRecords.invalid_request(request.request_id, "duplicate_request"))
@@ -669,6 +711,174 @@ defmodule LoopexDaemon.SocketConnection do
     end
   end
 
+  # Concept: the attach task installs the connection itself as the holder, so
+  # the connection's exit releases every attachment it owns.
+  #
+  # Technical depth: an unattached connection first takes its succession
+  # delivery reserve; a replacement transfers the one it holds. The task hands
+  # the core attachment to this process before its snapshot record settles.
+  defp dispatch_prepared(state, origin, %{operation: :session_attach} = entry, :ok) do
+    %{session_id: session_id, after_event_sequence: after_sequence, replace: replace} =
+      entry.fields
+
+    request_id = entry.request_id
+    reserve = if state.attachment, do: :ok, else: reserve_succession(state)
+
+    case reserve do
+      :ok ->
+        options =
+          [after_event_sequence: after_sequence] ++
+            if replace == true and state.attachment,
+              do: [replace_attachment_id: state.attachment.attachment_id],
+              else: []
+
+        task = attach_task(state.context, origin, request_id, session_id, options)
+
+        case safe_call(fn ->
+               ConnectionRegistry.promote_attach(
+                 state.registry,
+                 origin,
+                 state.incarnation,
+                 session_id,
+                 WireRecords.request_error(request_id, "session_dormant"),
+                 WireRecords.request_error(request_id, "capacity_exceeded"),
+                 task
+               )
+             end) do
+          {:ok, :admitted} ->
+            {:noreply, relay_owns_worker(state, origin, entry)}
+
+          {:error, reason} ->
+            state = release_unused_succession(state)
+            settle_locally(state, origin, ticket_refusal(reason))
+        end
+
+      {:error, _reason} ->
+        settle_locally(state, origin, "capacity_exceeded")
+    end
+  end
+
+  defp attach_task(context, origin, request_id, session_id, options) do
+    runtime = context.runtime
+    connection = self()
+    fatal_recipient = Map.get(context, :fatal_recipient)
+
+    fn ->
+      case Loopex.Runtime.attach_for_holder(runtime, session_id, connection, options) do
+        {:ok, attachment} ->
+          {:ok, _runtime, _session_id, attachment_id, _incarnation} =
+            Loopex.Attachment.routing(attachment)
+
+          send(connection, {:daemon_attachment, origin, attachment})
+
+          {:installed, attachment_id,
+           WireRecords.snapshot(
+             request_id,
+             Loopex.Attachment.snapshot(attachment),
+             Loopex.Attachment.open_interaction(attachment)
+           )}
+
+        {:error, :runtime_unavailable} ->
+          if is_pid(fatal_recipient),
+            do: send(fatal_recipient, {:daemon_component_fatal, self(), :runtime_lost})
+
+          {:refused, WireRecords.request_error(request_id, "internal_failure")}
+
+        {:error, reason} ->
+          {:refused, WireRecords.request_error(request_id, attach_refusal(reason))}
+      end
+    end
+  end
+
+  defp attach_refusal(reason)
+       when reason in [:attachment_superseded, :attachment_conflict, :attachment_request_conflict],
+       do: "attachment_conflict"
+
+  defp attach_refusal(:capacity_exceeded), do: "capacity_exceeded"
+  defp attach_refusal(:session_unavailable), do: "session_unavailable"
+  defp attach_refusal(_reason), do: "internal_failure"
+
+  defp reserve_succession(state) do
+    case ConnectionRegistry.reserve_succession(state.registry, state.incarnation) do
+      :ok -> :ok
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp release_unused_succession(%{attachment: nil} = state) do
+    _result = ConnectionRegistry.release_succession(state.registry, state.incarnation)
+    state
+  end
+
+  defp release_unused_succession(state), do: state
+
+  # Concept: delivery starts only after the snapshot is queued, so a client
+  # never receives an event for a cursor it has not been told about.
+  defp install_attachment(state, entry, record) do
+    case Map.get(entry, :attachment) do
+      %Loopex.Attachment{} = attachment ->
+        {:ok, _runtime, session_id, attachment_id, _incarnation} =
+          Loopex.Attachment.routing(attachment)
+
+        state = stop_pump(state)
+        {pump, monitor} = LoopexDaemon.AttachmentPump.start(attachment)
+        cursor = Map.get(Loopex.Attachment.snapshot(attachment), :event_sequence, 0)
+
+        attached = %{
+          attachment: attachment,
+          attachment_id: attachment_id,
+          session_id: session_id,
+          pump: pump,
+          pump_monitor: monitor,
+          snapshot_cursor: cursor,
+          emitted_cursor: nil
+        }
+
+        Logger.debug("loopex daemon connection attachment installed")
+        {%{state | attachment: attached}, cursor, record}
+
+      _missing ->
+        {state, nil, record}
+    end
+  end
+
+  defp stop_pump(%{attachment: %{pump: pump, pump_monitor: monitor}} = state) do
+    Process.demonitor(monitor, [:flush])
+    Process.exit(pump, :kill)
+    state
+  end
+
+  defp stop_pump(state), do: state
+
+  defp deliver_event(%{attachment: attached} = state, event) do
+    record = WireRecords.event(attached.session_id, event)
+
+    case send_record(state, record, Map.fetch!(event, :event_sequence)) do
+      {:ok, state} ->
+        LoopexDaemon.AttachmentPump.continue(attached.pump)
+        {:noreply, state}
+
+      {:error, state} ->
+        begin_detach_close(state)
+    end
+  end
+
+  # Concept: an attachment that cannot keep up is detached at the last
+  # cursor this connection completely emitted, and the connection closes.
+  defp begin_detach_close(%{attachment: attached} = state) do
+    state = stop_pump(state)
+    cursor = attached.emitted_cursor || attached.snapshot_cursor
+    close_ref = make_ref()
+    Process.send_after(self(), {:owner_loss_close_deadline, close_ref}, @owner_loss_close_ms)
+    state = %{state | closing: %{owner: nil, close_ref: close_ref}}
+    Logger.debug("loopex daemon attachment detached")
+
+    case send_record(state, WireRecords.detached(attached.session_id, cursor)) do
+      {:ok, state} -> {:noreply, state}
+      {:error, state} -> finish_owner_loss_close(state)
+    end
+  end
+
   # Concept: the relay task, not the connection, makes the activating call,
   # and it classifies exactly what core started.
   defp create_task(context, request_id, command_id, options) do
@@ -790,12 +1000,22 @@ defmodule LoopexDaemon.SocketConnection do
       {entry, ledger} ->
         state = %{state | ledger: ledger}
 
-        state =
-          if record["type"] == "result",
-            do: bind_session(state, entry),
-            else: release_reservation(state, entry)
+        case {entry.operation, record["type"]} do
+          {:session_attach, "snapshot"} ->
+            state = bind_attached_session(state, entry)
+            {state, cursor, record} = install_attachment(state, entry, record)
+            noreply_record(state, record, cursor)
 
-        noreply_record(state, record)
+          {:session_attach, _refused} ->
+            state = state |> release_reservation(entry) |> release_unused_succession()
+            noreply_record(state, record)
+
+          {_operation, "result"} ->
+            noreply_record(bind_session(state, entry), record)
+
+          {_operation, _other} ->
+            noreply_record(release_reservation(state, entry), record)
+        end
     end
   end
 
@@ -817,6 +1037,11 @@ defmodule LoopexDaemon.SocketConnection do
 
   defp bind_session(state, _entry), do: state
 
+  defp bind_attached_session(state, entry) do
+    ledger = RequestLedger.bind(state.ledger, entry.fields.session_id, entry.request_id)
+    %{state | ledger: ledger}
+  end
+
   defp release_reservation(state, %{request_id: request_id}),
     do: %{state | ledger: RequestLedger.clear_reservation(state.ledger, request_id)}
 
@@ -828,23 +1053,29 @@ defmodule LoopexDaemon.SocketConnection do
   # timer caps the flush so a stalled peer cannot hold the daemon owner past
   # its mirror deadline. The acknowledgement follows the close.
   defp begin_owner_loss_close(state, owner, close_ref, session_id) do
-    record = WireRecords.owner_lost_close(session_id, nil)
+    state = stop_pump(state)
+    record = WireRecords.owner_lost_close(session_id, emitted_cursor(state))
     Process.send_after(self(), {:owner_loss_close_deadline, close_ref}, @owner_loss_close_ms)
     state = %{state | closing: %{owner: owner, close_ref: close_ref}}
     Logger.debug("loopex daemon holder close for lost owner")
 
     case send_record(state, record) do
-      :ok -> {:noreply, state}
-      {:error, _reason} -> finish_owner_loss_close(state)
+      {:ok, state} -> {:noreply, state}
+      {:error, state} -> finish_owner_loss_close(state)
     end
   end
 
   defp finish_owner_loss_close(%{closing: %{owner: owner, close_ref: close_ref}} = state) do
     if state.socket, do: :socket.close(state.socket)
-    Owner.owner_loss_connection_closed(owner, close_ref, state.incarnation)
-    Logger.debug("loopex daemon holder close acknowledged")
+    if owner, do: Owner.owner_loss_connection_closed(owner, close_ref, state.incarnation)
+    Logger.debug("loopex daemon connection close completed")
     {:stop, :normal, %{state | socket: nil}}
   end
+
+  defp emitted_cursor(%{attachment: %{emitted_cursor: cursor, snapshot_cursor: snapshot}}),
+    do: cursor || snapshot
+
+  defp emitted_cursor(_state), do: nil
 
   defp report_fatal(%{context: %{fatal_recipient: recipient}}, class) when is_pid(recipient) do
     send(recipient, {:daemon_component_fatal, self(), class})
@@ -858,26 +1089,28 @@ defmodule LoopexDaemon.SocketConnection do
 
   defp reply(state, record) do
     case send_record(state, record) do
-      :ok -> {:ok, state}
-      {:error, _reason} -> {:stop, state}
+      {:ok, state} -> {:ok, state}
+      {:error, state} -> {:stop, state}
     end
   end
 
-  defp noreply_record(state, record) do
-    case send_record(state, record) do
-      :ok -> {:noreply, state}
-      {:error, _reason} -> {:stop, :normal, state}
+  defp noreply_record(state, record, cursor \\ nil) do
+    case send_record(state, record, cursor) do
+      {:ok, state} -> {:noreply, state}
+      {:error, state} -> {:stop, :normal, state}
     end
   end
 
-  defp send_record(state, record) do
+  # Concept: every queued frame is remembered in emission order, so the last
+  # completely emitted event cursor is known exactly.
+  defp send_record(state, record, cursor \\ nil) do
     with {:ok, encoded} <- Frame.encode(record),
          :ok <- ConnectionRegistry.enqueue_output(state.registry, state.incarnation, encoded) do
-      :ok
+      {:ok, %{state | output_cursors: :queue.in(cursor, state.output_cursors)}}
     else
       _other ->
         Logger.debug("loopex daemon socket output enqueue failed")
-        {:error, :send_failed}
+        {:error, state}
     end
   end
 
@@ -942,10 +1175,25 @@ defmodule LoopexDaemon.SocketConnection do
     case ConnectionRegistry.output_emitted(state.registry, state.incarnation, frame_ref) do
       :ok ->
         send(self(), :flush_output)
-        {:ok, %{state | output_claim: nil, send_select: nil}}
+        state = %{state | output_claim: nil, send_select: nil}
+        {:ok, advance_emitted_cursor(state)}
 
       {:error, _reason} ->
         {:stop, state}
+    end
+  end
+
+  defp advance_emitted_cursor(state) do
+    case :queue.out(state.output_cursors) do
+      {{:value, cursor}, cursors} when is_integer(cursor) and not is_nil(state.attachment) ->
+        attachment = %{state.attachment | emitted_cursor: cursor}
+        %{state | output_cursors: cursors, attachment: attachment}
+
+      {{:value, _cursor}, cursors} ->
+        %{state | output_cursors: cursors}
+
+      {:empty, _cursors} ->
+        state
     end
   end
 

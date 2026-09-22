@@ -194,7 +194,8 @@ defmodule LoopexDaemon.Owner do
            operations: %{},
            mirror_operations: %{},
            pending_dispositions: %{},
-           routes: %{}
+           routes: %{},
+           attachments: %{}
          }}
       else
         _error -> {:stop, :component_start_failed}
@@ -544,6 +545,64 @@ defmodule LoopexDaemon.Owner do
     )
   end
 
+  # Concept: an attachment becomes part of its session's mutation gate before
+  # the attaching client can see its snapshot.
+  #
+  # Technical depth: the registry waits for this exact acknowledgement before
+  # settling the attach ticket. A live lease owner receives the change now; a
+  # later lease owner is seeded from the retained set when it starts.
+  def handle_info(
+        {:registry_attachment, registry, record_ref, action, session_id, connection,
+         connection_incarnation, attachment_id},
+        %{registry: registry} = state
+      )
+      when action in [:opened, :closed] do
+    key = {connection, connection_incarnation, attachment_id}
+
+    attachments =
+      Map.update(state.attachments, session_id, MapSet.new([key]), fn keys ->
+        if action == :opened, do: MapSet.put(keys, key), else: MapSet.delete(keys, key)
+      end)
+
+    attachments =
+      if MapSet.size(Map.get(attachments, session_id)) == 0,
+        do: Map.delete(attachments, session_id),
+        else: attachments
+
+    case Map.get(state.owners, session_id) do
+      %{phase: :live, pid: owner} ->
+        _result =
+          lease_owner_call(fn ->
+            case action do
+              :opened ->
+                LeaseOwner.attachment_opened(
+                  owner,
+                  connection,
+                  connection_incarnation,
+                  attachment_id
+                )
+
+              :closed ->
+                LeaseOwner.attachment_closed(
+                  owner,
+                  connection,
+                  connection_incarnation,
+                  attachment_id
+                )
+            end
+          end)
+
+      _other ->
+        :ok
+    end
+
+    if is_reference(record_ref),
+      do: send(registry, {:owner_attachment_recorded, self(), record_ref})
+
+    Logger.debug("loopex daemon session attachment recorded")
+    {:noreply, %{state | attachments: attachments}}
+  end
+
   def handle_info({:mirror_deadline, operation_ref, deadline}, state) do
     case Map.get(state.mirror_operations, operation_ref) do
       %{deadline: ^deadline} ->
@@ -688,7 +747,8 @@ defmodule LoopexDaemon.Owner do
                session_id: session_id,
                owner_incarnation: owner_incarnation,
                lease_term_ms: state.lease_term_ms,
-               retirement_exit_gate: state.retirement_exit_gate
+               retirement_exit_gate: state.retirement_exit_gate,
+               attachments: Map.get(state.attachments, session_id, MapSet.new())
              ) do
           {:ok, owner} ->
             case AdmissionRelay.register_lease_owner(
@@ -2375,7 +2435,8 @@ defmodule LoopexDaemon.Owner do
            session_id: session_id,
            owner_incarnation: owner_incarnation,
            lease_term_ms: state.lease_term_ms,
-           retirement_exit_gate: state.retirement_exit_gate
+           retirement_exit_gate: state.retirement_exit_gate,
+           attachments: Map.get(state.attachments, session_id, MapSet.new())
          ) do
       {:ok, owner} ->
         case AdmissionRelay.register_lease_owner(

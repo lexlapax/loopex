@@ -6,7 +6,7 @@ defmodule LoopexDaemon.SocketTransportTest do
 
   import LoopexDaemon.Test.DaemonSocketFixture
 
-  alias LoopexDaemon.{AdmissionRelay, ConnectionRegistry}
+  alias LoopexDaemon.{AdmissionRelay, ConnectionRegistry, LeaseOwner}
   alias LoopexProtocol.Wire
 
   setup do
@@ -94,6 +94,134 @@ defmodule LoopexDaemon.SocketTransportTest do
              receive_records(client, 1)
 
     assert %{activations_used: 64} = ConnectionRegistry.status(daemon.registry)
+  end
+
+  test "attach delivers the snapshot and then every later durable event in order",
+       %{daemon: daemon, runtime: runtime} do
+    client = initialized_client(daemon)
+    session_id = create_session(client, "attach-create")
+
+    :ok = send_frame(client, attach("a1", session_id, after: 0))
+
+    assert [
+             %{
+               "type" => "snapshot",
+               "request_id" => "a1",
+               "event_cursor" => "0",
+               "snapshot" => %{"event_sequence" => "0"}
+             }
+           ] = receive_records(client, 1)
+
+    {:ok, embedded} = Loopex.attach(runtime, session_id)
+
+    assert {:accepted, "p1"} =
+             Loopex.command(embedded, %{type: :prompt, command_id: "p1", content: "hello"})
+
+    assert [
+             %{
+               "type" => "event",
+               "session_id" => encoded,
+               "event" => %{"event_sequence" => "1", "kind" => "user.message_appended"}
+             }
+           ] = receive_records(client, 1)
+
+    assert encoded == Wire.encode_identity(session_id)
+    assert %{succession_reservations: 1} = ConnectionRegistry.status(daemon.registry)
+  end
+
+  test "attach refuses a session this daemon lifetime has not activated",
+       %{daemon: daemon, runtime: runtime} do
+    {:ok, dormant} =
+      Loopex.create_session(runtime, %{"purpose" => "embedded"}, command_id: "embedded")
+
+    client = initialized_client(daemon)
+    :ok = send_frame(client, attach("dormant", dormant))
+
+    assert [%{"request_id" => "dormant", "code" => "session_dormant"}] =
+             receive_records(client, 1)
+
+    assert %{succession_reservations: 0} = ConnectionRegistry.status(daemon.registry)
+
+    active = create_session(client, "after-dormant")
+    :ok = send_frame(client, attach("active", active))
+    assert [%{"request_id" => "active", "type" => "snapshot"}] = receive_records(client, 1)
+  end
+
+  test "a connection holds one attachment and replaces it only when asked",
+       %{daemon: daemon} do
+    client = initialized_client(daemon)
+    session_id = create_session(client, "replace-create")
+
+    :ok = send_frame(client, attach("first", session_id))
+    assert [%{"request_id" => "first", "type" => "snapshot"}] = receive_records(client, 1)
+
+    :ok = send_frame(client, attach("second", session_id))
+
+    assert [
+             %{
+               "request_id" => "second",
+               "code" => "attachment_conflict",
+               "message" => "another attachment holds this session"
+             }
+           ] = receive_records(client, 1)
+
+    :ok = send_frame(client, attach("replace", session_id, replace: true))
+    assert [%{"request_id" => "replace", "type" => "snapshot"}] = receive_records(client, 1)
+    assert %{succession_reservations: 1} = ConnectionRegistry.status(daemon.registry)
+  end
+
+  test "the session's mutation gate sees an attachment before its snapshot and forgets it on close",
+       %{daemon: daemon} do
+    client = initialized_client(daemon)
+    session_id = create_session(client, "gate-create")
+
+    :ok = send_frame(client, acquire("acquire", session_id))
+    assert [%{"request_id" => "acquire", "type" => "result"}] = receive_records(client, 1)
+    [lease_owner] = lease_owner_pids(daemon)
+    assert %{attachments: 0} = LeaseOwner.status(lease_owner)
+
+    :ok = send_frame(client, attach("attach", session_id))
+    assert [%{"request_id" => "attach", "type" => "snapshot"}] = receive_records(client, 1)
+    assert %{attachments: 1} = LeaseOwner.status(lease_owner)
+
+    :ok = :socket.close(client)
+    eventually(fn -> LeaseOwner.status(lease_owner).attachments == 0 end)
+    eventually(fn -> ConnectionRegistry.status(daemon.registry).succession_reservations == 0 end)
+  end
+
+  defp create_session(client, command_id) do
+    :ok = send_frame(client, create(command_id, command_id, %{"purpose" => command_id}))
+    assert [%{"status" => "accepted", "session_id" => encoded}] = receive_records(client, 1)
+    {:ok, session_id} = Wire.identity(encoded)
+    session_id
+  end
+
+  defp attach(request_id, session_id, options \\ []) do
+    %{
+      "method" => "session.attach",
+      "request_id" => request_id,
+      "session_id" => Wire.encode_identity(session_id)
+    }
+    |> maybe_put("after_event_sequence", options[:after] && Integer.to_string(options[:after]))
+    |> maybe_put("replace", options[:replace])
+  end
+
+  defp acquire(request_id, session_id) do
+    %{
+      "method" => "session.acquire_control",
+      "request_id" => request_id,
+      "session_id" => Wire.encode_identity(session_id)
+    }
+  end
+
+  defp maybe_put(map, _key, nil), do: map
+  defp maybe_put(map, key, value), do: Map.put(map, key, value)
+
+  defp lease_owner_pids(daemon) do
+    daemon.owner
+    |> :sys.get_state()
+    |> Map.fetch!(:owners)
+    |> Enum.map(fn {_id, row} -> row.pid end)
   end
 
   defp create(request_id, command_id, options) do
