@@ -199,6 +199,127 @@ defmodule LoopexDaemon.OwnerTest do
     refute Process.alive?(components.registry)
   end
 
+  test "connection loss cancels a grant whose provisional mirror is still installing" do
+    owner = start_owner(mirror_deadline_ms: 1_000)
+    components = Owner.components(owner)
+    connection = initialized_connection(components)
+    origin = {connection.incarnation, 0, 1}
+    {worker, worker_incarnation} = start_worker(connection.pid, origin)
+
+    :sys.suspend(components.registry)
+
+    assert {:ok, :proposed, lease_owner, _owner_incarnation} =
+             Owner.acquire_control(
+               owner,
+               origin,
+               "lost-acquire",
+               "lost-session",
+               connection.pid,
+               connection.incarnation,
+               worker,
+               worker_incarnation,
+               now_ms() + 2_000
+             )
+
+    assert_receive {:worker_go, ^worker, ^origin}, 500
+    Process.exit(connection.pid, :kill)
+    assert %{settling: 1} = wait_for_relay_settling(components.relay)
+
+    :sys.resume(components.registry)
+
+    assert %{
+             granted_routes: 0,
+             lease_operations: 0,
+             mirror_operations: 0,
+             pending_dispositions: 0
+           } = wait_for_owner_settlement(owner)
+
+    assert Process.alive?(owner)
+    assert %{phase: :free, held: false} = LeaseOwner.status(lease_owner)
+    assert %{routing_mirrors: 0} = ConnectionRegistry.status(components.registry)
+    assert %{permits: 0, settling: 0} = AdmissionRelay.status(components.relay)
+  end
+
+  test "connection loss cancels release and preserves the granted route" do
+    owner = start_owner(mirror_deadline_ms: 1_000)
+    components = Owner.components(owner)
+    connection = initialized_connection(components)
+    acquire_origin = {connection.incarnation, 0, 1}
+
+    {acquire_worker, acquire_worker_incarnation} =
+      start_worker(connection.pid, acquire_origin)
+
+    assert {:ok, :proposed, lease_owner, owner_incarnation} =
+             Owner.acquire_control(
+               owner,
+               acquire_origin,
+               "release-loss-acquire",
+               "release-loss-session",
+               connection.pid,
+               connection.incarnation,
+               acquire_worker,
+               acquire_worker_incarnation,
+               now_ms() + 2_000
+             )
+
+    assert_receive {:worker_go, ^acquire_worker, ^acquire_origin}, 500
+
+    assert_receive {:manual_connection_message, _,
+                    {:relay_permit_result, ^acquire_origin, acquire_result}},
+                   500
+
+    writer_epoch = Base.url_decode64!(acquire_result["result"]["writer_epoch"], padding: false)
+    assert %{granted_routes: 1} = wait_for_owner_settlement(owner)
+
+    release_origin = {connection.incarnation, 1, 1}
+    {release_worker, release_worker_incarnation} = start_worker(connection.pid, release_origin)
+
+    :sys.suspend(lease_owner)
+
+    release_task =
+      Task.async(fn ->
+        Owner.release_control(
+          owner,
+          release_origin,
+          "lost-release",
+          "release-loss-session",
+          connection.pid,
+          connection.incarnation,
+          release_worker,
+          release_worker_incarnation,
+          writer_epoch,
+          now_ms() + 2_000
+        )
+      end)
+
+    assert %{pending: 1} = wait_for_relay_pending(components.relay)
+    suspend_task = Task.async(fn -> :sys.suspend(owner) end)
+    :sys.resume(lease_owner)
+
+    assert {:ok, :proposed, ^lease_owner, ^owner_incarnation} = Task.await(release_task, 500)
+    assert :ok = Task.await(suspend_task, 500)
+    assert_receive {:worker_go, ^release_worker, ^release_origin}, 500
+
+    Process.exit(connection.pid, :kill)
+    assert %{settling: 1} = wait_for_relay_settling(components.relay)
+    :sys.resume(owner)
+
+    assert %{
+             granted_routes: 1,
+             lease_operations: 0,
+             mirror_operations: 0,
+             pending_dispositions: 0
+           } = wait_for_owner_settlement(owner)
+
+    assert Process.alive?(owner)
+    assert %{phase: :held, held: true} = LeaseOwner.status(lease_owner)
+
+    assert %{granted_routing_mirrors: 1, provisional_routing_mirrors: 0} =
+             ConnectionRegistry.status(components.registry)
+
+    assert %{permits: 0, settling: 0} = AdmissionRelay.status(components.relay)
+  end
+
   test "expiry clears the granted route before the lease becomes expired" do
     owner = start_owner(lease_term_ms: 30)
     components = Owner.components(owner)
@@ -302,6 +423,36 @@ defmodule LoopexDaemon.OwnerTest do
   end
 
   defp wait_for_owner_settlement(owner, 0), do: Owner.status(owner)
+
+  defp wait_for_relay_settling(relay, attempts \\ 20)
+
+  defp wait_for_relay_settling(relay, attempts) when attempts > 0 do
+    status = AdmissionRelay.status(relay)
+
+    if status.settling == 1 do
+      status
+    else
+      Process.sleep(5)
+      wait_for_relay_settling(relay, attempts - 1)
+    end
+  end
+
+  defp wait_for_relay_settling(relay, 0), do: AdmissionRelay.status(relay)
+
+  defp wait_for_relay_pending(relay, attempts \\ 20)
+
+  defp wait_for_relay_pending(relay, attempts) when attempts > 0 do
+    status = AdmissionRelay.status(relay)
+
+    if status.pending == 1 do
+      status
+    else
+      Process.sleep(5)
+      wait_for_relay_pending(relay, attempts - 1)
+    end
+  end
+
+  defp wait_for_relay_pending(relay, 0), do: AdmissionRelay.status(relay)
 
   defp wait_for_expiry(owner, lease_owner, attempts \\ 40)
 

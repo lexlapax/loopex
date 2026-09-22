@@ -119,6 +119,7 @@ defmodule LoopexDaemon.Owner do
           lost_owners: non_neg_integer(),
           lease_operations: non_neg_integer(),
           mirror_operations: non_neg_integer(),
+          pending_dispositions: non_neg_integer(),
           granted_routes: non_neg_integer(),
           owner_limit: 512,
           mirror_deadline_ms: pos_integer()
@@ -167,6 +168,7 @@ defmodule LoopexDaemon.Owner do
            owner_pids: %{},
            operations: %{},
            mirror_operations: %{},
+           pending_dispositions: %{},
            routes: %{}
          }}
       else
@@ -246,6 +248,7 @@ defmodule LoopexDaemon.Owner do
        lost_owners: lost,
        lease_operations: map_size(state.operations),
        mirror_operations: map_size(state.mirror_operations),
+       pending_dispositions: map_size(state.pending_dispositions),
        granted_routes: map_size(state.routes),
        owner_limit: @owner_limit,
        mirror_deadline_ms: state.mirror_deadline_ms
@@ -349,11 +352,20 @@ defmodule LoopexDaemon.Owner do
   end
 
   def handle_info(
-        {:relay_lease_disposition, relay, permit_id, :connection_lost, settlement_ref, _class,
-         _session_id, _actor, _actor_incarnation, _start_op_ref},
+        {:relay_lease_disposition, relay, permit_id, :connection_lost, settlement_ref, class,
+         session_id, actor, actor_incarnation, start_op_ref},
         %{relay: relay} = state
       ) do
-    continue_connection_loss(state, permit_id, settlement_ref)
+    retain_connection_loss(
+      state,
+      permit_id,
+      settlement_ref,
+      class,
+      session_id,
+      actor,
+      actor_incarnation,
+      start_op_ref
+    )
   end
 
   def handle_info({:mirror_deadline, operation_ref, deadline}, state) do
@@ -642,6 +654,7 @@ defmodule LoopexDaemon.Owner do
   defp start_grant_operation(state, operation, grant_ref, writer_epoch, _request_deadline) do
     operation_ref = make_ref()
     deadline = monotonic_ms() + state.mirror_deadline_ms
+    pending_loss = Map.get(state.pending_dispositions, operation.request.permit_id)
 
     row = %{
       permit_id: operation.request.permit_id,
@@ -656,7 +669,7 @@ defmodule LoopexDaemon.Owner do
 
     mirror_operation = %{
       kind: :grant,
-      step: :install,
+      step: if(pending_loss, do: :install_connection_lost, else: :install),
       permit_id: operation.request.permit_id,
       owner_pid: operation.owner_pid,
       owner_incarnation: operation.owner_incarnation,
@@ -666,13 +679,14 @@ defmodule LoopexDaemon.Owner do
       row: row,
       deadline: deadline,
       timer: schedule_deadline(operation_ref, deadline),
-      loss_ref: nil
+      loss_ref: if(pending_loss, do: pending_loss.settlement_ref, else: nil)
     }
 
     state =
       state
       |> put_in([:operations, operation.request.permit_id, :phase], :settling)
       |> put_in([:mirror_operations, operation_ref], mirror_operation)
+      |> update_in([:pending_dispositions], &Map.delete(&1, operation.request.permit_id))
 
     ConnectionRegistry.apply_mirror(
       state.registry,
@@ -702,10 +716,11 @@ defmodule LoopexDaemon.Owner do
         operation_ref = make_ref()
 
         deadline = monotonic_ms() + state.mirror_deadline_ms
+        pending_loss = Map.get(state.pending_dispositions, operation.request.permit_id)
 
         mirror_operation = %{
           kind: :release,
-          step: :select_result,
+          step: if(pending_loss, do: :resolve_owner_cancel, else: :select_result),
           permit_id: operation.request.permit_id,
           owner_pid: operation.owner_pid,
           owner_incarnation: operation.owner_incarnation,
@@ -715,15 +730,27 @@ defmodule LoopexDaemon.Owner do
           row: route,
           deadline: deadline,
           timer: schedule_deadline(operation_ref, deadline),
-          loss_ref: nil
+          loss_ref: if(pending_loss, do: pending_loss.settlement_ref, else: nil)
         }
 
         state =
           state
           |> put_in([:operations, operation.request.permit_id, :phase], :settling)
           |> put_in([:mirror_operations, operation_ref], mirror_operation)
+          |> update_in([:pending_dispositions], &Map.delete(&1, operation.request.permit_id))
 
-        request_relay_selection(state, operation_ref, mirror_operation)
+        if pending_loss do
+          LeaseOwner.request_release_resolution(
+            operation.owner_pid,
+            operation_ref,
+            operation.owner_incarnation,
+            release_ref,
+            :cancelled
+          )
+        else
+          request_relay_selection(state, operation_ref, mirror_operation)
+        end
+
         Logger.debug("loopex daemon release mirror settlement start")
         {:noreply, state}
 
@@ -791,8 +818,28 @@ defmodule LoopexDaemon.Owner do
   defp apply_registry_result(
          state,
          operation_ref,
+         %{kind: :grant, step: :install_connection_lost, row: row},
+         result
+       )
+       when result == :ok or result == {:error, :connection_not_live} do
+    state = put_in(state, [:mirror_operations, operation_ref, :step], :resolve_cancelled)
+
+    ConnectionRegistry.apply_mirror(
+      state.registry,
+      operation_ref,
+      state.routing_incarnation,
+      {:resolve_provisional, :cancelled},
+      row
+    )
+
+    {:noreply, state}
+  end
+
+  defp apply_registry_result(
+         state,
+         operation_ref,
          %{kind: :grant, step: :install},
-         {:error, :connection_unavailable}
+         {:error, :connection_not_live}
        ) do
     state = put_in(state, [:mirror_operations, operation_ref, :step], :await_connection_loss)
     {:noreply, state}
@@ -1078,13 +1125,56 @@ defmodule LoopexDaemon.Owner do
   defp apply_owner_result(state, _operation_ref, _operation, _action, _result),
     do: {:stop, :lease_operation_invalid, state}
 
-  defp continue_connection_loss(state, permit_id, settlement_ref) do
-    case Enum.find(state.mirror_operations, fn {_ref, operation} ->
-           operation.permit_id == permit_id and
-             operation.step in [:await_connection_loss, :select_result]
+  defp retain_connection_loss(
+         state,
+         permit_id,
+         settlement_ref,
+         class,
+         session_id,
+         actor,
+         actor_incarnation,
+         start_op_ref
+       ) do
+    loss = %{
+      settlement_ref: settlement_ref,
+      class: class,
+      session_id: session_id,
+      actor_pid: actor,
+      actor_incarnation: actor_incarnation,
+      start_op_ref: start_op_ref
+    }
+
+    case Map.fetch(state.operations, permit_id) do
+      {:ok, operation} ->
+        if valid_connection_loss?(operation, loss) do
+          continue_connection_loss(state, permit_id, loss)
+        else
+          {:stop, :relay_lost, state}
+        end
+
+      :error ->
+        {:stop, :relay_lost, state}
+    end
+  end
+
+  defp continue_connection_loss(state, permit_id, loss) do
+    case Enum.filter(state.mirror_operations, fn {_ref, operation} ->
+           operation.permit_id == permit_id
          end) do
-      {operation_ref, %{kind: :grant, row: row} = operation} ->
-        operation = %{operation | step: :resolve_cancelled, loss_ref: settlement_ref}
+      [] ->
+        retain_pending_connection_loss(state, permit_id, loss)
+
+      [{operation_ref, %{kind: :grant, step: :install} = operation}] ->
+        operation = %{operation | step: :install_connection_lost, loss_ref: loss.settlement_ref}
+        {:noreply, put_in(state, [:mirror_operations, operation_ref], operation)}
+
+      [{_operation_ref, %{step: :install_connection_lost, loss_ref: loss_ref}}]
+      when loss_ref == loss.settlement_ref ->
+        {:noreply, state}
+
+      [{operation_ref, %{kind: :grant, step: step, row: row} = operation}]
+      when step in [:await_connection_loss, :select_result] ->
+        operation = %{operation | step: :resolve_cancelled, loss_ref: loss.settlement_ref}
         state = put_in(state, [:mirror_operations, operation_ref], operation)
 
         ConnectionRegistry.apply_mirror(
@@ -1097,8 +1187,9 @@ defmodule LoopexDaemon.Owner do
 
         {:noreply, state}
 
-      {operation_ref, %{kind: :release} = operation} ->
-        operation = %{operation | step: :resolve_owner_cancel, loss_ref: settlement_ref}
+      [{operation_ref, %{kind: :release, step: step} = operation}]
+      when step in [:await_connection_loss, :select_result] ->
+        operation = %{operation | step: :resolve_owner_cancel, loss_ref: loss.settlement_ref}
         state = put_in(state, [:mirror_operations, operation_ref], operation)
 
         LeaseOwner.request_release_resolution(
@@ -1111,9 +1202,35 @@ defmodule LoopexDaemon.Owner do
 
         {:noreply, state}
 
-      nil ->
+      [{_operation_ref, %{step: step, loss_ref: loss_ref}}]
+      when step in [:resolve_cancelled, :resolve_owner_cancel, :settle_disposition] and
+             loss_ref == loss.settlement_ref ->
         {:noreply, state}
+
+      _other ->
+        {:stop, :relay_lost, state}
     end
+  end
+
+  defp retain_pending_connection_loss(state, permit_id, loss) do
+    case Map.fetch(state.pending_dispositions, permit_id) do
+      :error ->
+        Logger.debug("loopex daemon connection loss retained")
+        {:noreply, put_in(state, [:pending_dispositions, permit_id], loss)}
+
+      {:ok, ^loss} ->
+        {:noreply, state}
+
+      {:ok, _other} ->
+        {:stop, :relay_lost, state}
+    end
+  end
+
+  defp valid_connection_loss?(operation, loss) do
+    is_reference(loss.settlement_ref) and operation.request.class == loss.class and
+      operation.request.session_id == loss.session_id and operation.actor_pid == loss.actor_pid and
+      operation.actor_incarnation == loss.actor_incarnation and
+      operation.start_op_ref == loss.start_op_ref
   end
 
   defp request_relay_selection(state, operation_ref, operation) do
@@ -1184,6 +1301,11 @@ defmodule LoopexDaemon.Owner do
           if(operation.permit_id,
             do: Map.delete(state.operations, operation.permit_id),
             else: state.operations
+          ),
+        pending_dispositions:
+          if(operation.permit_id,
+            do: Map.delete(state.pending_dispositions, operation.permit_id),
+            else: state.pending_dispositions
           )
     }
 
@@ -1191,8 +1313,11 @@ defmodule LoopexDaemon.Owner do
     {:noreply, state}
   end
 
-  defp maybe_complete_direct_operation(state, permit_id, :completed),
-    do: update_in(state.operations, &Map.delete(&1, permit_id))
+  defp maybe_complete_direct_operation(state, permit_id, :completed) do
+    state
+    |> update_in([:operations], &Map.delete(&1, permit_id))
+    |> update_in([:pending_dispositions], &Map.delete(&1, permit_id))
+  end
 
   defp maybe_complete_direct_operation(state, _permit_id, disposition)
        when disposition in [:proposed, :queued],
