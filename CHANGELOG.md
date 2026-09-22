@@ -56,6 +56,13 @@ released; accepted sockets then reserve capacity, pass the same-user peer check,
 and transfer through the registry-owned handoff before becoming live. Listener
 death keeps the socket pathname for the next verified owner.
 
+Add the generation-two socket initialization boundary. The connection reads
+raw bytes without line normalization, bounds unterminated fragments, reuses the
+strict protocol frame decoder, refuses generation one without downgrade, and
+marks initialization complete only through the registry's unchanged
+accept-time deadline. Buffered client bytes and socket state are redacted from
+process diagnostics.
+
 Add the daemon session index's canonical bounded codec. It pins the exact JSONL
 header, sorted identity rows, SHA-256 trailer and all identity, row-count,
 line-size and file-size bounds without treating alternate JSON spellings as the

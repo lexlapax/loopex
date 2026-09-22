@@ -3,6 +3,7 @@ defmodule LoopexDaemon.ListenerTest do
   @moduletag capture_log: true
 
   alias LoopexDaemon.{ConnectionRegistry, Listener, ListenerSocket}
+  alias LoopexProtocol.{Frame, Session.V2}
 
   defmodule RejectPeer do
     def authorize(_socket, _daemon_uid), do: {:error, :peer_credential_unverified}
@@ -99,12 +100,104 @@ defmodule LoopexDaemon.ListenerTest do
     end)
   end
 
+  test "generation two initializes before the accept-time deadline and cancels it" do
+    fixture = start_fixture(initialize_deadline_ms: 300)
+    assert :ok = Listener.begin_accept(fixture.listener, fixture.startup_ref)
+    client = connect(fixture.path)
+
+    assert :ok = send_frame(client, initialize())
+    [initialized] = receive_records(client, 1)
+    assert initialized["type"] == "initialized"
+    assert initialized["request_id"] == "r1"
+    assert initialized["selected_generation"] == V2.generation()
+    assert initialized["exact_schema_sha256"] == V2.schema_digest()
+
+    Process.sleep(330)
+    assert %{occupied: 1, live: 1} = ConnectionRegistry.status(fixture.registry)
+
+    assert :ok =
+             send_frame(client, %{"method" => "session.list", "request_id" => "r2"})
+
+    [inert] = receive_records(client, 1)
+    assert inert["code"] == "unsupported_method"
+    assert inert["request_id"] == "r2"
+    assert :ok = :socket.close(client)
+  end
+
+  test "a generation-one offer is refused once and then expires" do
+    fixture = start_fixture(initialize_deadline_ms: 250)
+    assert :ok = Listener.begin_accept(fixture.listener, fixture.startup_ref)
+    client = connect(fixture.path)
+
+    assert :ok = send_frame(client, initialize("r1", ["loopex.experimental/1"]))
+    [unsupported] = receive_records(client, 1)
+    assert unsupported["code"] == "unsupported_generation"
+
+    assert :ok = send_frame(client, initialize("r2", [V2.generation()]))
+    [spent] = receive_records(client, 1)
+    assert spent["code"] == "already_initialized"
+    assert spent["request_id"] == "r2"
+
+    eventually(fn -> ConnectionRegistry.status(fixture.registry).occupied == 0 end)
+    assert {:error, :closed} = :socket.recv(client, 1, 500)
+    assert :ok = :socket.close(client)
+  end
+
+  test "fragmented and multiple frames preserve order across initialization" do
+    fixture = start_fixture(initialize_deadline_ms: 1_000)
+    assert :ok = Listener.begin_accept(fixture.listener, fixture.startup_ref)
+    client = connect(fixture.path)
+    {:ok, encoded_initialize} = Frame.encode(initialize())
+    initialize_bytes = IO.iodata_to_binary(encoded_initialize)
+    split = div(byte_size(initialize_bytes), 2)
+    <<first::binary-size(^split), second::binary>> = initialize_bytes
+
+    before =
+      frame_bytes(%{"method" => "session.list", "request_id" => "before"})
+
+    assert :ok = :socket.send(client, [before, first])
+    [not_initialized] = receive_records(client, 1)
+    assert not_initialized["code"] == "not_initialized"
+    assert not_initialized["request_id"] == "before"
+
+    assert :ok = :socket.send(client, second)
+    [initialized] = receive_records(client, 1)
+    assert initialized["type"] == "initialized"
+
+    assert :ok = :socket.send(client, ["{}\r\n", frame_bytes(%{"request_id" => "missing"})])
+    [crlf, missing_method] = receive_records(client, 2)
+    assert crlf["code"] == "invalid_frame"
+    assert missing_method["code"] == "invalid_request"
+    assert missing_method["request_id"] == "missing"
+    assert :ok = :socket.close(client)
+  end
+
+  test "an oversized partial frame is discarded only through its newline" do
+    fixture = start_fixture(initialize_deadline_ms: 1_000)
+    assert :ok = Listener.begin_accept(fixture.listener, fixture.startup_ref)
+    client = connect(fixture.path)
+    ceiling = V2.limits()["frame_bytes_before_initialization"]
+
+    assert :ok = :socket.send(client, String.duplicate("x", ceiling + 1))
+    [oversized] = receive_records(client, 1)
+    assert oversized["code"] == "invalid_frame"
+    assert oversized["message"] == "the frame exceeds the ceiling in force"
+
+    assert :ok = :socket.send(client, ["\n", frame_bytes(initialize())])
+    [initialized] = receive_records(client, 1)
+    assert initialized["type"] == "initialized"
+    assert :ok = :socket.close(client)
+  end
+
   defp start_fixture(options \\ []) do
+    {initialize_deadline_ms, listener_options} =
+      Keyword.pop(options, :initialize_deadline_ms, V2.limits()["initialize_deadline_ms"])
+
     directory = temporary_directory()
     path = Path.join(directory, "daemon.sock")
     uid = File.stat!(directory).uid
     {:ok, socket} = ListenerSocket.open_parked(path, uid)
-    registry = start_registry()
+    registry = start_registry(initialize_deadline_ms)
     startup_ref = make_ref()
 
     {:ok, listener} =
@@ -117,7 +210,7 @@ defmodule LoopexDaemon.ListenerTest do
             daemon_uid: uid,
             startup_ref: startup_ref
           ],
-          options
+          listener_options
         )
       )
 
@@ -139,8 +232,12 @@ defmodule LoopexDaemon.ListenerTest do
     }
   end
 
-  defp start_registry do
-    {:ok, registry} = ConnectionRegistry.start_link(owner: self())
+  defp start_registry(initialize_deadline_ms \\ V2.limits()["initialize_deadline_ms"]) do
+    {:ok, registry} =
+      ConnectionRegistry.start_link(
+        owner: self(),
+        initialize_deadline_ms: initialize_deadline_ms
+      )
 
     on_exit(fn ->
       stop(registry)
@@ -153,6 +250,40 @@ defmodule LoopexDaemon.ListenerTest do
     {:ok, socket} = :socket.open(:local, :stream, :default)
     :ok = :socket.connect(socket, %{family: :local, path: path})
     socket
+  end
+
+  defp initialize(request_id \\ "r1", generations \\ [V2.generation()]) do
+    %{
+      "method" => "initialize",
+      "request_id" => request_id,
+      "generations" => generations,
+      "capabilities" => []
+    }
+  end
+
+  defp send_frame(socket, record), do: :socket.send(socket, frame_bytes(record))
+
+  defp frame_bytes(record) do
+    {:ok, encoded} = Frame.encode(record)
+    IO.iodata_to_binary(encoded)
+  end
+
+  defp receive_records(socket, count), do: receive_records(socket, count, "")
+
+  defp receive_records(socket, count, buffered) do
+    parts = :binary.split(buffered, "\n", [:global])
+
+    if length(parts) > count do
+      {payloads, _rest} = Enum.split(parts, count)
+
+      Enum.map(payloads, fn payload ->
+        {:ok, record} = Frame.decode(payload, Frame.output_record_bytes())
+        record
+      end)
+    else
+      {:ok, bytes} = :socket.recv(socket, 0, 1_000)
+      receive_records(socket, count, buffered <> bytes)
+    end
   end
 
   defp temporary_directory do

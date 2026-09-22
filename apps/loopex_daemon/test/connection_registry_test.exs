@@ -3,6 +3,7 @@ defmodule LoopexDaemon.ConnectionRegistryTest do
   @moduletag capture_log: true
 
   alias LoopexDaemon.{ConnectionRegistry, ListenerSocket, SocketConnection}
+  alias LoopexProtocol.{Frame, Session.V2}
 
   defmodule ImmediateExitConnection do
     def start_link(_options) do
@@ -44,8 +45,10 @@ defmodule LoopexDaemon.ConnectionRegistryTest do
     assert_receive {:promotion_complete, ^token, ^incarnation, ^connection}
     assert %{occupied: 1, provisional: 0, live: 1} = ConnectionRegistry.status(registry)
 
-    assert :ok = SocketConnection.initialized(connection)
-    Process.sleep(20)
+    assert :ok = client_send(fixture.client, initialize_frame())
+    assert {:ok, initialized_bytes} = client_recv(fixture.client)
+    [initialized_payload, ""] = :binary.split(initialized_bytes, "\n", [:global])
+    assert {:ok, %{"type" => "initialized"}} = Frame.decode(initialized_payload, 2_097_152)
     assert %{occupied: 1, live: 1} = ConnectionRegistry.status(registry)
 
     Process.exit(connection, :kill)
@@ -240,7 +243,7 @@ defmodule LoopexDaemon.ConnectionRegistryTest do
 
     :ok = :sys.suspend(registry)
     monitor = Process.monitor(connection)
-    SocketConnection.initialized(connection)
+    assert :ok = client_send(fixture.client, initialize_frame())
     Process.sleep(170)
     :ok = :sys.resume(registry)
 
@@ -397,12 +400,7 @@ defmodule LoopexDaemon.ConnectionRegistryTest do
         {:ok, socket} = :socket.open(:local, :stream, :default)
         :ok = :socket.connect(socket, %{family: :local, path: path})
         send(parent, {:client_ready, self()})
-
-        receive do
-          :close -> :ok
-        end
-
-        :socket.close(socket)
+        client_loop(socket, "")
       end)
 
     assert_receive {:client_ready, client_pid} when client_pid == client.pid
@@ -417,6 +415,64 @@ defmodule LoopexDaemon.ConnectionRegistryTest do
     assert :ok = ListenerSocket.close(fixture.listener)
     File.rm!(fixture.path)
     File.rmdir!(fixture.directory)
+  end
+
+  defp client_loop(socket, buffer) do
+    receive do
+      {:send, caller, reference, bytes} ->
+        send(caller, {:client_result, reference, :socket.send(socket, bytes)})
+        client_loop(socket, buffer)
+
+      {:recv, caller, reference} ->
+        {result, buffer} = read_frame(socket, buffer)
+        send(caller, {:client_result, reference, result})
+        client_loop(socket, buffer)
+
+      :close ->
+        :socket.close(socket)
+    end
+  end
+
+  defp read_frame(socket, buffer) do
+    case :binary.match(buffer, "\n") do
+      {offset, 1} ->
+        frame_bytes = offset + 1
+        frame = binary_part(buffer, 0, frame_bytes)
+        rest = binary_part(buffer, frame_bytes, byte_size(buffer) - frame_bytes)
+        {{:ok, frame}, rest}
+
+      :nomatch ->
+        case :socket.recv(socket, 0, 1_000) do
+          {:ok, bytes} -> read_frame(socket, buffer <> bytes)
+          {:error, _reason} = error -> {error, buffer}
+        end
+    end
+  end
+
+  defp client_send(client, bytes) do
+    reference = make_ref()
+    send(client.pid, {:send, self(), reference, bytes})
+    assert_receive {:client_result, ^reference, result}, 1_000
+    result
+  end
+
+  defp client_recv(client) do
+    reference = make_ref()
+    send(client.pid, {:recv, self(), reference})
+    assert_receive {:client_result, ^reference, result}, 1_000
+    result
+  end
+
+  defp initialize_frame do
+    {:ok, encoded} =
+      Frame.encode(%{
+        "method" => "initialize",
+        "request_id" => "registry-test",
+        "generations" => [V2.generation()],
+        "capabilities" => []
+      })
+
+    encoded
   end
 
   defp eventually(predicate, attempts \\ 50)
