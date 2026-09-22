@@ -303,6 +303,12 @@ defmodule LoopexDaemon.ConnectionRegistryTest do
     assert {:ok, %{rollback_token: token}} =
              ConnectionRegistry.reserve(registry, self(), listener_incarnation, now_ms())
 
+    assert {:error, :abort_unavailable} =
+             Task.async(fn ->
+               ConnectionRegistry.abort_provisional(registry, token, :handoff_failed)
+             end)
+             |> Task.await()
+
     assert {:error, :reservation_unavailable} =
              Task.async(fn -> ConnectionRegistry.start_connection(registry, token) end)
              |> Task.await()

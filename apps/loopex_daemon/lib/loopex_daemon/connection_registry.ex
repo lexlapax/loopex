@@ -83,6 +83,13 @@ defmodule LoopexDaemon.ConnectionRegistry do
   end
 
   @doc false
+  @spec abort_provisional(pid(), binary(), :peer_credential_unverified | :handoff_failed) ::
+          :ok | {:error, :abort_unavailable}
+  def abort_provisional(registry, rollback_token, reason) do
+    GenServer.call(registry, {:abort_provisional, rollback_token, reason})
+  end
+
+  @doc false
   @spec listener_closed(pid(), binary()) :: :ok | {:error, :close_acknowledgement_unavailable}
   def listener_closed(registry, rollback_token) do
     GenServer.call(registry, {:listener_closed, rollback_token})
@@ -294,6 +301,27 @@ defmodule LoopexDaemon.ConnectionRegistry do
         {:reply, {:error, :initialize_unavailable}, state}
     end
   end
+
+  def handle_call(
+        {:abort_provisional, token, reason},
+        {caller, _tag},
+        state
+      )
+      when reason in [:peer_credential_unverified, :handoff_failed] do
+    case Map.fetch(state.rows, token) do
+      {:ok, %{listener: ^caller, phase: phase}} when phase in [:handing_off, :aborting] ->
+        {:reply, :ok, request_abort(state, token, reason)}
+
+      :error ->
+        {:reply, :ok, state}
+
+      _other ->
+        {:reply, {:error, :abort_unavailable}, state}
+    end
+  end
+
+  def handle_call({:abort_provisional, _token, _reason}, _from, state),
+    do: {:reply, {:error, :abort_unavailable}, state}
 
   def handle_call(
         {:abort_provisional_for, listener_incarnation},

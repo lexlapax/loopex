@@ -50,6 +50,12 @@ listener-to-connection socket transfer disposition, and releases capacity only
 after the real socket owner and child have been reaped. Fixed redacted lifecycle
 logs cover the registry and connection processes.
 
+Add the parked listener's readiness gate and nonblocking accept loop. Connected
+clients remain only in the kernel backlog until the exact startup reference is
+released; accepted sockets then reserve capacity, pass the same-user peer check,
+and transfer through the registry-owned handoff before becoming live. Listener
+death keeps the socket pathname for the next verified owner.
+
 Add the daemon session index's canonical bounded codec. It pins the exact JSONL
 header, sorted identity rows, SHA-256 trailer and all identity, row-count,
 line-size and file-size bounds without treating alternate JSON spellings as the
