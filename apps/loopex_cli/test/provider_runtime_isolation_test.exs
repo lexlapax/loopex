@@ -210,6 +210,12 @@ defmodule LoopexCli.ProviderRuntimeIsolationTest do
     executor = AgentLoopTestExecutor.start()
     definition = AgentLoopFixture.tool_definition()
 
+    # A managed runtime refuses the no-runtime trace capability, so the
+    # provider runs under a capability bound to this runtime, as a host binds it.
+    {:ok, capability_pid} = Loopex.Trace.Capability.start_link()
+    {:ok, capability} = Loopex.Trace.Capability.handle(capability_pid)
+    options = Keyword.put(provider.options, :tracing_capability, capability)
+
     {:ok, runtime} =
       Loopex.start_link(
         context_token_budget: 8_192,
@@ -217,7 +223,7 @@ defmodule LoopexCli.ProviderRuntimeIsolationTest do
         store: store,
         cleanup_grace_ms: 2_000,
         sampling: %{"max_tokens" => 64},
-        model: %{module: Adapter, model: Adapter.default_model(), options: provider.options},
+        model: %{module: Adapter, model: Adapter.default_model(), options: options},
         executor: %{
           module: AgentLoopTestExecutor,
           reference: executor,
@@ -234,6 +240,8 @@ defmodule LoopexCli.ProviderRuntimeIsolationTest do
         grant_decision: {:host_policy, :allow},
         bounds: %{max_turns: 2, token_budget: 256, deadline_ms: 30_000}
       )
+
+    :ok = Loopex.Trace.Capability.bind(capability, runtime)
 
     {:ok, %{control: control}} = Runtime.children(runtime)
     fixture = %{runtime: runtime, store_pid: store_pid, executor: executor, control: control}

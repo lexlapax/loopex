@@ -989,9 +989,11 @@ defmodule LoopexCli do
         bracket
 
       :error ->
-        &LoopexComposition.with_runtime/2
+        &with_hosted_runtime/2
     end
   end
+
+  @credential_host :"$loopex_cli_credential_host"
 
   @store_unreadable "its state store could not be opened or read"
 
@@ -1415,9 +1417,60 @@ defmodule LoopexCli do
 
   defp start_configured_runtime(composition_options, options) do
     options
-    |> Keyword.get(:runtime_starter, &LoopexComposition.start/1)
+    |> Keyword.get(:runtime_starter, &start_hosted/1)
     |> then(& &1.(composition_options))
     |> started()
+  end
+
+  # Concept: this command is the credential's host, so every runtime it
+  # composes borrows one custody instead of consuming the variable again.
+  #
+  # Technical depth: recovery composes twice, an inspection bracket and then
+  # the resumed runtime, while the variable exists only until the first read.
+  # The host is opened once per command process and each composition gets its
+  # own trace capability, which binds exactly one runtime.
+  defp start_hosted(composition_options) do
+    with {:ok, plane} <- hosted_plane() do
+      case LoopexComposition.start(Keyword.put(composition_options, :credential_plane, plane)) do
+        {:ok, runtime} ->
+          {:ok, runtime}
+
+        failure ->
+          LoopexComposition.CredentialHost.release_plane(plane)
+          failure
+      end
+    end
+  end
+
+  defp with_hosted_runtime(composition_options, function) do
+    with {:ok, plane} <- hosted_plane() do
+      try do
+        LoopexComposition.with_runtime(
+          Keyword.put(composition_options, :credential_plane, plane),
+          function
+        )
+      after
+        LoopexComposition.CredentialHost.release_plane(plane)
+      end
+    end
+  end
+
+  defp hosted_plane do
+    with {:ok, host} <- credential_host(),
+         do: LoopexComposition.CredentialHost.plane(host)
+  end
+
+  defp credential_host do
+    case Process.get(@credential_host) do
+      nil ->
+        with {:ok, host} <- LoopexComposition.CredentialHost.open() do
+          Process.put(@credential_host, host)
+          {:ok, host}
+        end
+
+      host ->
+        {:ok, host}
+    end
   end
 
   @store_writer_refusal "another process is already writing this state root's store; " <>
@@ -1434,6 +1487,12 @@ defmodule LoopexCli do
   # contract says never happens. Every other start-up refusal is left exactly as
   # it was written.
   defp started({:error, {:store_writer_active, _path}}), do: {:error, @store_writer_refusal}
+
+  # Concept: a missing credential is refused in words that name the remedy.
+  defp started({:error, :provider_credential_required}),
+    do:
+      {:error,
+       "set LOOPEX_PROVIDER_API_KEY to the provider credential; it is read once and removed"}
 
   # Concept: a marker the store could not verify is not a live writer, and the
   # operator is told the difference and the remedy.

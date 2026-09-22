@@ -38,6 +38,12 @@ defmodule LoopexCliTest do
   # loop cases use and hide the drift behind a passing test.
 
   setup do
+    # The shipped composition consumes the provider credential from the
+    # environment once per start and deletes it, as a real process start does.
+    # Each case begins as a fresh terminal would, with a placeholder present.
+    System.put_env(Loopex.LLM.ReqLLM.credential_variable(), "cli-test-placeholder")
+    on_exit(fn -> System.delete_env(Loopex.LLM.ReqLLM.credential_variable()) end)
+
     :persistent_term.erase({AllowAll, :announced})
     :persistent_term.erase({ShellAllowlist, :notice})
     on_exit(&LoopexCli.release_placement/0)
