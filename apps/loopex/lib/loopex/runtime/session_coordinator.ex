@@ -162,6 +162,31 @@ defmodule Loopex.Runtime.SessionCoordinator do
     end
   end
 
+  @doc false
+  @spec admit_quiesce_abort(pid(), owner(), binary(), pid()) ::
+          {:admitted,
+           %{
+             command_id: binary(),
+             run_id: binary(),
+             cleanup_grace_ms: pos_integer(),
+             owner_epoch: non_neg_integer()
+           }}
+          | :rejected_no_active_run
+          | {:unknown, %{command_id: binary(), head: map()}}
+          | {:error, term()}
+  def admit_quiesce_abort(coordinator, owner, drain_id, phase_owner)
+      when is_pid(coordinator) and is_map(owner) and is_binary(drain_id) and
+             is_pid(phase_owner) do
+    safe_call(coordinator, {:admit_quiesce_abort, owner, drain_id, phase_owner}, :infinity)
+  end
+
+  @doc false
+  @spec release_quiesce_cleanup(pid(), owner(), binary()) :: :ok | {:error, term()}
+  def release_quiesce_cleanup(coordinator, owner, drain_id)
+      when is_pid(coordinator) and is_map(owner) and is_binary(drain_id) do
+    safe_call(coordinator, {:release_quiesce_cleanup, owner, drain_id}, :infinity)
+  end
+
   # Concept: status is the one session question that may give up on an owner
   # that is not answering, because asking it changes nothing.
   #
@@ -367,6 +392,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
        activation_reconciliation: nil,
        owner: nil,
        durable: nil,
+       drain: nil,
        # Concept: whether this owner is allowed to schedule the work it
        # recovered, and who may decide that.
        #
@@ -402,6 +428,9 @@ defmodule Loopex.Runtime.SessionCoordinator do
   @impl GenServer
   def handle_call({:command, supplied_owner, command}, _from, state) do
     cond do
+      not is_nil(state.drain) ->
+        {:reply, {:error, :runtime_unavailable}, state}
+
       state.phase != :ready ->
         {:reply, {:error, :owner_acquiring}, state}
 
@@ -427,6 +456,9 @@ defmodule Loopex.Runtime.SessionCoordinator do
 
   def handle_call({:command_detailed, supplied_owner, command}, _from, state) do
     cond do
+      not is_nil(state.drain) ->
+        {:reply, {:error, :runtime_unavailable}, state}
+
       state.phase != :ready ->
         {:reply, {:error, :superseded_before_admission}, state}
 
@@ -450,6 +482,64 @@ defmodule Loopex.Runtime.SessionCoordinator do
           {:error, :runtime_unavailable} = error ->
             {:reply, error, state}
         end
+    end
+  end
+
+  def handle_call(
+        {:admit_quiesce_abort, supplied_owner, drain_id, phase_owner},
+        _from,
+        state
+      ) do
+    cond do
+      not is_nil(state.drain) ->
+        {:reply, {:error, :runtime_unavailable}, state}
+
+      state.phase != :ready or supplied_owner != state.owner or state.superseded ->
+        drain = %{id: drain_id, phase_owner: phase_owner, status: :refused}
+        {:reply, {:error, :runtime_unavailable}, %{state | drain: drain}}
+
+      true ->
+        state = %{
+          state
+          | drain: %{id: drain_id, phase_owner: phase_owner, status: :admitting}
+        }
+
+        case Control.current_owner(state.control, state.session_id, state.owner) do
+          :ok -> admit_quiesce_abort_once(state)
+          {:error, reason} -> drain_refusal(state, reason)
+        end
+    end
+  end
+
+  def handle_call(
+        {:release_quiesce_cleanup, supplied_owner, drain_id},
+        {caller, _tag},
+        state
+      ) do
+    case state.drain do
+      %{
+        id: ^drain_id,
+        phase_owner: ^caller,
+        status: :paused,
+        run_id: run_id
+      }
+      when supplied_owner == state.owner ->
+        case begin_cleanup(state, run_id, :abort) do
+          {:ok, next} ->
+            drain = %{next.drain | status: :released}
+            {:reply, :ok, %{next | drain: drain}}
+
+          {:error, reason} ->
+            drain = %{state.drain | status: {:error, reason}}
+            {:reply, {:error, reason}, %{state | drain: drain}}
+        end
+
+      %{id: ^drain_id, phase_owner: ^caller, status: :already_admitted}
+      when supplied_owner == state.owner ->
+        {:reply, :ok, state}
+
+      _other ->
+        {:reply, {:error, :runtime_unavailable}, state}
     end
   end
 
@@ -1757,6 +1847,174 @@ defmodule Loopex.Runtime.SessionCoordinator do
     end
   end
 
+  # Concept: orderly shutdown durably admits the same abort an operator can
+  # submit, but holds cleanup until every session's admission is known.
+  #
+  # Technical depth: the deterministic command identity comes from durable
+  # owner state. The Store transaction is presented exactly once; an ambiguous
+  # answer is retained for the later fence phase instead of being re-presented
+  # through the ordinary command helper. A committed abort updates Control and
+  # pauses at the existing cleanup split.
+  defp admit_quiesce_abort_once(state) do
+    command_id =
+      SessionState.drain_abort_command_id(state.session_id, state.owner.owner_epoch)
+
+    command = %{type: :abort, command_id: command_id}
+    state = fence_prepared_resume(state, command)
+
+    Instrumentation.span(
+      [:command, :admit],
+      %{session_id: state.session_id, command_id: command_id, type: :abort},
+      fn ->
+        case SessionState.propose(state.durable, command) do
+          {:ok, proposal} -> commit_quiesce_abort(state, proposal, command_id)
+          {:replayed, reply} -> replayed_quiesce_abort(state, command_id, reply)
+          {:error, reason} -> drain_refusal(state, reason)
+        end
+      end,
+      &admission_category/1
+    )
+  end
+
+  defp commit_quiesce_abort(state, proposal, command_id) do
+    head = drain_head(state)
+
+    with {:ok, transaction} <-
+           Store.session_commit(
+             state.session_id,
+             @mutation_domain,
+             proposal.tx_id,
+             state.owner.owner_epoch,
+             state.owner.owner_incarnation_id,
+             state.durable.journal_version,
+             proposal.records,
+             proposal.events
+           ) do
+      {outcome, lane} = resolve_quiesce_transaction(state.lane, transaction)
+      state = %{state | lane: lane}
+
+      case outcome do
+        {:committed, ^command_id, receipt} ->
+          finish_quiesce_abort_commit(state, proposal, receipt, command_id)
+
+        {:not_committed, reason} ->
+          drain_refusal(state, reason)
+
+        {:commit_unknown, ^command_id} ->
+          drain_unknown(state, command_id, head)
+
+        {:fenced, :commit_unknown} ->
+          drain_unknown(state, command_id, head)
+
+        _other ->
+          drain_refusal(state, :runtime_unavailable)
+      end
+    else
+      {:error, reason} -> drain_refusal(state, reason)
+    end
+  end
+
+  defp finish_quiesce_abort_commit(state, proposal, receipt, command_id) do
+    with {:ok, next} <- SessionState.commit_proposal(proposal, receipt),
+         :ok <-
+           Control.post_commit(
+             state.control,
+             state.session_id,
+             state.owner,
+             %{
+               journal_version: next.journal_version,
+               event_sequence: next.event_sequence
+             },
+             receipt
+           ) do
+      state = %{state | durable: next}
+
+      case {proposal.reply, SessionState.aborting_run(next)} do
+        {{:accepted, ^command_id}, run_id} when is_binary(run_id) ->
+          result = %{
+            command_id: command_id,
+            run_id: run_id,
+            cleanup_grace_ms: next.cleanup_grace_ms,
+            owner_epoch: state.owner.owner_epoch
+          }
+
+          drain = Map.merge(state.drain, %{status: :paused, run_id: run_id, result: result})
+          {:reply, {:admitted, result}, %{state | drain: drain}}
+
+        {{:error, :no_active_run}, nil} ->
+          drain =
+            Map.merge(state.drain, %{status: :no_active_run, result: :rejected_no_active_run})
+
+          {:reply, :rejected_no_active_run, %{state | drain: drain}}
+
+        _other ->
+          drain_refusal(state, :runtime_unavailable)
+      end
+    else
+      {:error, reason} -> drain_refusal(state, reason)
+    end
+  end
+
+  defp replayed_quiesce_abort(state, command_id, {:accepted, accepted_command_id})
+       when accepted_command_id == command_id do
+    case SessionState.aborting_run(state.durable) do
+      run_id when is_binary(run_id) ->
+        result = %{
+          command_id: command_id,
+          run_id: run_id,
+          cleanup_grace_ms: state.durable.cleanup_grace_ms,
+          owner_epoch: state.owner.owner_epoch
+        }
+
+        drain =
+          Map.merge(state.drain, %{status: :already_admitted, run_id: run_id, result: result})
+
+        {:reply, {:admitted, result}, %{state | drain: drain}}
+
+      _other ->
+        drain_refusal(state, :runtime_unavailable)
+    end
+  end
+
+  defp replayed_quiesce_abort(state, _command_id, {:error, :no_active_run}) do
+    drain = Map.merge(state.drain, %{status: :no_active_run, result: :rejected_no_active_run})
+    {:reply, :rejected_no_active_run, %{state | drain: drain}}
+  end
+
+  defp replayed_quiesce_abort(state, _command_id, _reply),
+    do: drain_refusal(state, :idempotency_conflict)
+
+  defp resolve_quiesce_transaction(lane, transaction) do
+    Instrumentation.span(
+      [:commit],
+      %{
+        session_id: Map.get(transaction, :session_id),
+        kind: Map.get(transaction, :type),
+        mutation_domain: Map.get(transaction, :mutation_domain)
+      },
+      fn -> OwnerLane.transact(lane, transaction) end,
+      &commit_category/1
+    )
+  end
+
+  defp drain_unknown(state, command_id, head) do
+    result = %{command_id: command_id, head: head}
+    drain = Map.merge(state.drain, %{status: {:unknown, head}, result: result})
+    {:reply, {:unknown, result}, %{state | drain: drain}}
+  end
+
+  defp drain_refusal(state, reason) do
+    drain = Map.merge(state.drain, %{status: {:error, reason}})
+    {:reply, {:error, reason}, %{state | drain: drain}}
+  end
+
+  defp drain_head(state) do
+    %{
+      owner_epoch: state.owner.owner_epoch,
+      journal_version: state.durable.journal_version
+    }
+  end
+
   defp apply_transaction(state, transaction, proposal) do
     {outcome, lane} = resolve_transaction(state.lane, transaction)
     state = %{state | lane: lane}
@@ -1886,7 +2144,10 @@ defmodule Loopex.Runtime.SessionCoordinator do
             end
 
           run_id ->
-            resume_aborting_run(state, run_id)
+            case state.drain do
+              %{status: :paused, run_id: ^run_id} -> {:noreply, state}
+              _ordinary_or_released -> resume_aborting_run(state, run_id)
+            end
         end
 
       {:error, :superseded_owner} ->

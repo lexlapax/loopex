@@ -20,6 +20,8 @@ defmodule Loopex.RuntimeQuiesceTest do
   alias Loopex.M1RuntimeTestStore
   alias Loopex.Runtime
   alias Loopex.Runtime.Control
+  alias Loopex.Runtime.SessionCoordinator
+  alias Loopex.Runtime.SessionState
 
   test "the first gate freezes writer domains and later admission refuses before Store access" do
     fixture = fixture("quiesce-gate")
@@ -113,6 +115,156 @@ defmodule Loopex.RuntimeQuiesceTest do
     assert state.sessions == %{}
   end
 
+  test "an idle drain refusal closes ordinary coordinator admission" do
+    fixture = fixture("quiesce-idle-admission")
+    session_id = create_session(fixture.runtime, "create")
+    {:ok, %{control: control}} = Runtime.children(fixture.runtime)
+
+    assert {:ok, [%{coordinator: coordinator, owner: owner}]} =
+             Control.begin_quiesce(control, fixture.runtime.token, "idle-drain", 5_000)
+
+    assert :rejected_no_active_run =
+             SessionCoordinator.admit_quiesce_abort(
+               coordinator,
+               owner,
+               "idle-drain",
+               self()
+             )
+
+    assert {:error, :runtime_unavailable} =
+             SessionCoordinator.command(coordinator, owner, %{
+               type: :prompt,
+               command_id: "late-prompt",
+               content: "must remain outside the journal"
+             })
+
+    command_id = SessionState.drain_abort_command_id(session_id, owner.owner_epoch)
+    assert command_id == SessionState.drain_abort_command_id(session_id, owner.owner_epoch)
+    refute command_id == SessionState.drain_abort_command_id(session_id, owner.owner_epoch + 1)
+
+    {:ok, records} = M1RuntimeTestStore.load_records(fixture.store_pid, session_id, 0, 1_024)
+    command_records = Enum.filter(records, &(&1.payload[:kind] == "command_admitted"))
+
+    assert [%{payload: rejected}] = command_records
+    assert rejected["command_id"] == command_id
+    assert rejected["command_type"] == "abort"
+    assert rejected["admission"] == "rejected_no_active_run"
+  end
+
+  test "an active drain abort pauses cleanup until the phase owner releases it" do
+    fixture = fixture("quiesce-paused-cleanup")
+    session_id = create_session(fixture.runtime, "create")
+    {:ok, attachment} = Loopex.attach(fixture.runtime, session_id)
+
+    assert {:accepted, "prompt"} =
+             Loopex.command(attachment, %{
+               type: :prompt,
+               command_id: "prompt",
+               content: "remain active until drain release"
+             })
+
+    {:ok, %{control: control}} = Runtime.children(fixture.runtime)
+
+    assert {:ok, [%{coordinator: coordinator, owner: owner}]} =
+             Control.begin_quiesce(control, fixture.runtime.token, "active-drain", 5_000)
+
+    assert {:admitted,
+            %{
+              command_id: command_id,
+              run_id: run_id,
+              cleanup_grace_ms: cleanup_grace_ms,
+              owner_epoch: owner_epoch
+            }} =
+             SessionCoordinator.admit_quiesce_abort(
+               coordinator,
+               owner,
+               "active-drain",
+               self()
+             )
+
+    assert command_id == SessionState.drain_abort_command_id(session_id, owner.owner_epoch)
+    assert owner_epoch == owner.owner_epoch
+    assert is_binary(run_id)
+    assert is_integer(cleanup_grace_ms) and cleanup_grace_ms > 0
+
+    paused = :sys.get_state(coordinator)
+    assert paused.drain.status == :paused
+    assert paused.drain.run_id == run_id
+    assert paused.pending_cleanup == %{}
+    assert paused.executor_reserves == %{}
+
+    assert {:error, :runtime_unavailable} =
+             SessionCoordinator.command(coordinator, owner, %{
+               type: :prompt,
+               command_id: "after-drain",
+               content: "must not pass the coordinator cut"
+             })
+
+    assert :ok =
+             SessionCoordinator.release_quiesce_cleanup(
+               coordinator,
+               owner,
+               "active-drain"
+             )
+
+    assert_eventually(fn ->
+      case SessionCoordinator.session_status(coordinator, owner) do
+        {:ok, %{active_run_id: nil, pending_work_ids: []}} -> true
+        _other -> false
+      end
+    end)
+  end
+
+  test "an ambiguous drain abort is presented once and releases no cleanup" do
+    fixture = fixture("quiesce-ambiguous-admission")
+    session_id = create_session(fixture.runtime, "create")
+    {:ok, attachment} = Loopex.attach(fixture.runtime, session_id)
+
+    assert {:accepted, "prompt"} =
+             Loopex.command(attachment, %{
+               type: :prompt,
+               command_id: "prompt",
+               content: "hold for an ambiguous drain"
+             })
+
+    after_linearization = {:session_journal_commit, :after_linearization_before_result}
+    recovery_representation = {:session_journal_commit, :recovery_representation}
+    :ok = M1RuntimeTestStore.inject(fixture.store_pid, after_linearization)
+    :ok = M1RuntimeTestStore.inject(fixture.store_pid, recovery_representation)
+
+    {:ok, %{control: control}} = Runtime.children(fixture.runtime)
+
+    assert {:ok, [%{coordinator: coordinator, owner: owner}]} =
+             Control.begin_quiesce(control, fixture.runtime.token, "unknown-drain", 5_000)
+
+    assert {:unknown, %{command_id: command_id, head: head}} =
+             SessionCoordinator.admit_quiesce_abort(
+               coordinator,
+               owner,
+               "unknown-drain",
+               self()
+             )
+
+    assert command_id == SessionState.drain_abort_command_id(session_id, owner.owner_epoch)
+    assert head.owner_epoch == owner.owner_epoch
+    assert is_integer(head.journal_version)
+
+    observed = M1RuntimeTestStore.observed(fixture.store_pid)
+    assert MapSet.member?(observed, after_linearization)
+    refute MapSet.member?(observed, recovery_representation)
+
+    state = :sys.get_state(coordinator)
+    assert state.drain.status == {:unknown, head}
+    assert state.pending_cleanup == %{}
+
+    assert {:error, :runtime_unavailable} =
+             SessionCoordinator.release_quiesce_cleanup(
+               coordinator,
+               owner,
+               "unknown-drain"
+             )
+  end
+
   defp fixture(runtime_id) do
     {store_pid, store} = M1RuntimeTestStore.start_store(label: runtime_id)
 
@@ -134,5 +286,17 @@ defmodule Loopex.RuntimeQuiesceTest do
   defp create_session(runtime, command_id) do
     assert {:ok, session_id} = Runtime.create_session(runtime, command_id, %{})
     session_id
+  end
+
+  defp assert_eventually(assertion, attempts \\ 200)
+  defp assert_eventually(_assertion, 0), do: flunk("condition did not become true")
+
+  defp assert_eventually(assertion, attempts) do
+    if assertion.() do
+      :ok
+    else
+      Process.sleep(5)
+      assert_eventually(assertion, attempts - 1)
+    end
   end
 end

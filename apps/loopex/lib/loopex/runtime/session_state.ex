@@ -332,6 +332,13 @@ defmodule Loopex.Runtime.SessionState do
   def propose(_state, _command, _resolved), do: {:error, :invalid_command}
 
   @doc false
+  @spec drain_abort_command_id(binary(), non_neg_integer()) :: binary()
+  def drain_abort_command_id(session_id, owner_epoch)
+      when is_binary(session_id) and is_integer(owner_epoch) and owner_epoch >= 0 do
+    stable_id("drain_abort", session_id, owner_epoch)
+  end
+
+  @doc false
   @spec prepare_resource_command(t(), map()) ::
           {:new, map()} | {:replayed, term()} | {:error, term()}
   def prepare_resource_command(%__MODULE__{} = state, command) do
