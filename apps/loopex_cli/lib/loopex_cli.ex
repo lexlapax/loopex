@@ -50,6 +50,8 @@ defmodule LoopexCli do
   wrapping this command can tell success from failure.
   """
   @spec main([binary()]) :: no_return()
+  def main(["daemon" | arguments]), do: LoopexCli.Daemon.main(arguments)
+
   def main(argv) do
     result = dispatch(argv)
     release_placement()

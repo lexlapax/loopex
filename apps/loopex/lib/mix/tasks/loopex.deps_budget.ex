@@ -32,7 +32,7 @@ defmodule Loopex.Checks.DepsBudget do
 
   @contract_app :loopex_protocol
   @runtime_app :loopex
-  @roles [:contract, :core, :edge, :composition, :client, :extension]
+  @roles [:contract, :core, :edge, :composition, :host, :client, :extension]
   @planned_roles %{
     loopex_protocol: :contract,
     loopex: :core,
@@ -44,7 +44,7 @@ defmodule Loopex.Checks.DepsBudget do
     loopex_cli: :client,
     loopex_app_server: :client,
     loopex_telemetry: :edge,
-    loopex_daemon: :client
+    loopex_daemon: :host
   }
   # Concept: the one external dependency core may carry, named here rather than
   # implied by a count.
@@ -1685,6 +1685,15 @@ defmodule Loopex.Checks.DepsBudget do
 
   defp record_reasons(%{role: :client} = record, roles), do: client_reasons(record, roles)
 
+  # Concept: a host is a long-lived owner of the reference composition that a
+  # client may start, and it obeys every client rule except that it may not
+  # itself depend on a host.
+  #
+  # Technical depth: the maintainer's decision of 2026-09-22 introduced the role
+  # so the reference CLI can start the daemon without admitting any
+  # client-to-client dependency; a host depends on no client and no host.
+  defp record_reasons(%{role: :host} = record, roles), do: client_reasons(record, roles, :host)
+
   defp record_reasons(record, _roles),
     do: ["#{record.path}: application has no valid dependency role"]
 
@@ -1815,8 +1824,9 @@ defmodule Loopex.Checks.DepsBudget do
     end
   end
 
-  defp client_reasons(record, roles) do
+  defp client_reasons(record, roles, role \\ :client) do
     {known, unknown} = split_internal(record.dependencies, roles)
+    hosts = Enum.filter(known, &(target_role(roles, elem(&1, 0)) == :host))
     core = Enum.filter(known, &(elem(&1, 0) == @runtime_app))
     compositions = Enum.filter(known, &(target_role(roles, elem(&1, 0)) == :composition))
     # The grouping is load-bearing. `--` is right-associative in Elixir, so
@@ -1832,7 +1842,7 @@ defmodule Loopex.Checks.DepsBudget do
     # hidden behind a transitive dependency; it is still one production
     # in-umbrella dependency on the contract and nothing else.
     contracts = Enum.filter(known, &(target_role(roles, elem(&1, 0)) == :contract))
-    other = ((known -- core) -- compositions) -- contracts
+    other = (((known -- core) -- compositions) -- contracts) -- hosts
 
     external =
       Enum.reject(record.dependencies, fn {name, _requirement, options} ->
@@ -1862,6 +1872,17 @@ defmodule Loopex.Checks.DepsBudget do
 
       length(contracts) > 1 ->
         ["#{record.path}: clients may depend on at most one contract application"]
+
+      role == :host and hosts != [] ->
+        ["#{record.path}: a host may not depend on another host"]
+
+      length(hosts) > 1 ->
+        ["#{record.path}: clients may depend on at most one host"]
+
+      not Enum.all?(hosts, fn {_name, _requirement, options} ->
+        production_internal?(options)
+      end) ->
+        ["#{record.path}: a client's host dependency must be production and in-umbrella"]
 
       not Enum.all?(contracts, fn {_name, _requirement, options} ->
         production_internal?(options)

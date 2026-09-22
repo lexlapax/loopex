@@ -6,7 +6,7 @@ defmodule LoopexDaemon.MixProject do
   def project do
     [
       app: :loopex_daemon,
-      loopex_role: :client,
+      loopex_role: :host,
       version: @version,
       build_path: "../../_build",
       config_path: "../../config/config.exs",
@@ -20,8 +20,9 @@ defmodule LoopexDaemon.MixProject do
 
   def application, do: [extra_applications: [:crypto]]
 
-  # Concept: the daemon is a peer client of the runtime and a host of the
-  # reference composition. It owns neither a second loop nor a concrete edge.
+  # Concept: the daemon is the host role: a long-lived owner of the reference
+  # composition that the reference CLI starts. It owns neither a second loop
+  # nor a concrete edge.
   #
   # Technical depth: the protocol dependency names the generation it serves,
   # while the composition remains the single production application that names

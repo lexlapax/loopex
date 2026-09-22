@@ -473,7 +473,7 @@ defmodule Mix.Tasks.Loopex.DepsBudgetTest do
            {:loopex_store_local, [in_umbrella: true]}
          ])
        end},
-      {"daemon-as-composition", "must declare role :client",
+      {"daemon-as-composition", "must declare role :host",
        fn root ->
          write_child(root, "loopex_daemon", :composition, [
            {:loopex, [in_umbrella: true]},
@@ -580,6 +580,59 @@ defmodule Mix.Tasks.Loopex.DepsBudgetTest do
          write_child(root, "loopex_cli", :client, [
            {:loopex, [in_umbrella: true]},
            {:loopex_composition, [in_umbrella: true, only: :test]}
+         ])
+       end}
+    ]
+
+    for {name, expected_reason, mutate} <- negative_cases do
+      root = Path.join(dir, name)
+      write_repository_inventory(root)
+      mutate.(root)
+      track!(root)
+
+      assert {:error, reasons} = Budget.check_repository(root)
+
+      assert Enum.any?(reasons, &String.contains?(&1, expected_reason)),
+             "#{name}: expected #{inspect(expected_reason)}, got #{inspect(reasons)}"
+    end
+  end
+
+  test "a host is started by a client and depends on no client or host", %{dir: dir} do
+    # The maintainer's decision of 2026-09-22: the reference CLI starts the
+    # daemon through one production dependency on the host application, while
+    # the general prohibition on client-to-client dependencies stays closed.
+    negative_cases = [
+      {"host-on-client", "may compose only edge applications",
+       fn root ->
+         write_child(root, "loopex_daemon", :host, [
+           {:loopex, [in_umbrella: true]},
+           {:loopex_composition, [in_umbrella: true]},
+           {:loopex_cli, [in_umbrella: true]}
+         ])
+       end},
+      {"client-test-only-host", "host dependency must be production",
+       fn root ->
+         write_child(root, "loopex_cli", :client, [
+           {:loopex, [in_umbrella: true]},
+           {:loopex_composition, [in_umbrella: true]},
+           {:loopex_daemon, [in_umbrella: true, only: :test]}
+         ])
+       end},
+      {"edge-on-host", "only on core and protocol",
+       fn root ->
+         write_child(root, "loopex_store_local", :edge, [
+           {:loopex, [in_umbrella: true]},
+           {:loopex_daemon, [in_umbrella: true]}
+         ])
+       end},
+      {"composition-on-host", "",
+       fn root ->
+         write_child(root, "loopex_composition", :composition, [
+           {:loopex, [in_umbrella: true]},
+           {:loopex_store_local, [in_umbrella: true]},
+           {:loopex_llm_reqllm, [in_umbrella: true]},
+           {:loopex_executor_local, [in_umbrella: true]},
+           {:loopex_daemon, [in_umbrella: true]}
          ])
        end}
     ]
@@ -1192,7 +1245,8 @@ defmodule Mix.Tasks.Loopex.DepsBudgetTest do
 
     write_child(root, "loopex_cli", :client, [
       {:loopex, [in_umbrella: true]},
-      {:loopex_composition, [in_umbrella: true]}
+      {:loopex_composition, [in_umbrella: true]},
+      {:loopex_daemon, [in_umbrella: true]}
     ])
 
     write_child(root, "loopex_reference_client", :client, [
@@ -1216,7 +1270,7 @@ defmodule Mix.Tasks.Loopex.DepsBudgetTest do
       {:telemetry, @telemetry_requirement}
     ])
 
-    write_child(root, "loopex_daemon", :client, [
+    write_child(root, "loopex_daemon", :host, [
       {:loopex, [in_umbrella: true]},
       {:loopex_protocol, [in_umbrella: true]},
       {:loopex_composition, [in_umbrella: true]}

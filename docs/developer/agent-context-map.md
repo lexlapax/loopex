@@ -5591,3 +5591,22 @@ only the register row and the two supplied status blocks, the M5 Acceptance
 row, the four ADRs' Concept status lines and Acceptance rows, the ADR index's
 status cells and prose, and this disposition. It moves `M5` to `Accepted` and
 grants no closure, merge, tag, release or publication.
+
+<a id="disposition-m5-host-role-2026-09-22"></a>
+### M5 host application role — 2026-09-22
+
+The accepted M5 plan puts `loopex daemon` — its readiness line, signal routing
+and exit classes — in the reference CLI and the daemon's process and socket
+lifetime in `loopex_daemon`, but the dependency oracle forbade any client
+application from depending on another, for the reason its own test records: a
+client could otherwise inherit another client's permissive policy. On
+2026-09-22 the maintainer chose, from three presented options (a named
+single-pair exception, a new role, or a separate daemon escript), a new
+`:host` role. `loopex_daemon` is now `:host`: it obeys every client rule and
+may depend on no client and no host. A client may depend in production on at
+most one host, and every other role still refuses a host dependency. The
+reference CLI declares that one production dependency and starts the daemon
+from `loopex daemon`. The general prohibition on client-to-client
+dependencies is unchanged. This changes what `mix loopex.deps_budget`
+enforces; its cases in `apps/loopex/test/deps_budget_test.exs` pin the new
+role in both directions.

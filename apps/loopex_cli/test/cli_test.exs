@@ -3652,7 +3652,7 @@ defmodule LoopexCliTest do
   end
 
   test "argument parsing and terminal output use only the standard library" do
-    assert Enum.sort(declared_dependencies()) == [:loopex, :loopex_composition]
+    assert Enum.sort(declared_dependencies()) == [:loopex, :loopex_composition, :loopex_daemon]
 
     for {path, source} <- command_sources() do
       refute source =~ "Jason", "#{path} uses an external encoder"

@@ -1,0 +1,199 @@
+defmodule LoopexCli.DaemonCommandTest do
+  use ExUnit.Case, async: false
+  @moduletag capture_log: true
+
+  alias LoopexDaemon.ExitStatus
+  alias LoopexProtocol.{Frame, Session.V2}
+
+  setup do
+    root = Path.join(System.tmp_dir!(), "lcd-#{System.unique_integer([:positive])}")
+    workspace = Path.join(root, "w")
+    File.mkdir_p!(workspace)
+    launch = Path.join(root, "launch.config")
+    File.write!(launch, "[].\n")
+    on_exit(fn -> File.rm_rf(root) end)
+
+    %{
+      root: root,
+      state_root: Path.join(root, "s"),
+      workspace: workspace,
+      launch: launch
+    }
+  end
+
+  test "grammar refusals are status one and touch nothing", %{state_root: state_root} do
+    for arguments <- [
+          ["--unknown", "x"],
+          ["--state-root"],
+          ["--state-root", ""],
+          ["--state-root", state_root, "--state-root", state_root],
+          ["positional"],
+          ["--", "word"]
+        ] do
+      assert LoopexCli.Daemon.run(arguments, env: fn _ -> nil end, credential: "c") == 1
+    end
+
+    refute File.exists?(state_root)
+  end
+
+  test "each missing or invalid input refuses with its own class before any effect", context do
+    base = %{
+      "LOOPEX_HOME" => context.state_root,
+      "LOOPEX_WORKSPACE" => context.workspace,
+      "LOOPEX_PROVIDER_LAUNCH" => context.launch,
+      "LOOPEX_POLICY" => "allow-all"
+    }
+
+    cases = [
+      {:state_root_required, Map.delete(base, "LOOPEX_HOME"), [], "c"},
+      {:state_root_required, Map.put(base, "LOOPEX_HOME", ""), [], "c"},
+      {:workspace_required, Map.delete(base, "LOOPEX_WORKSPACE"), [], "c"},
+      {:workspace_unusable, Map.put(base, "LOOPEX_WORKSPACE", Path.join(context.root, "none")),
+       [], "c"},
+      {:provider_launch_required, Map.delete(base, "LOOPEX_PROVIDER_LAUNCH"), [], "c"},
+      {:provider_launch_invalid,
+       Map.put(base, "LOOPEX_PROVIDER_LAUNCH", Path.join(context.root, "missing")), [], "c"},
+      {:policy_required, Map.delete(base, "LOOPEX_POLICY"), [], "c"},
+      {:policy_unknown, Map.put(base, "LOOPEX_POLICY", "ask"), [], "c"},
+      {:provider_credential_required, base, [], ""},
+      {:cleanup_grace_invalid, base, ["--cleanup-grace-ms", "0"], "c"},
+      {:invalid_socket_path, base, ["--socket", Path.join(context.root, "outside.sock")], "c"}
+    ]
+
+    for {class, env, arguments, credential} <- cases do
+      {:ok, expected} = ExitStatus.fetch(class)
+
+      assert LoopexCli.Daemon.run(arguments,
+               env: &Map.get(env, &1),
+               credential: credential
+             ) == expected,
+             "expected #{class}"
+    end
+
+    refute File.exists?(Path.join(context.state_root, "daemon"))
+  end
+
+  test "a real daemon process announces readiness once and stops orderly on SIGTERM", context do
+    socket = Path.join([context.state_root, "daemon", "d.sock"])
+
+    arguments = [
+      "--state-root",
+      context.state_root,
+      "--workspace",
+      context.workspace,
+      "--provider-launch",
+      context.launch,
+      "--policy",
+      "allow-all",
+      "--socket",
+      socket
+    ]
+
+    {port, os_pid} = start_daemon_process(arguments)
+    line = await_line(port, 60_000)
+
+    assert %{
+             "record" => "daemon_ready",
+             "root" => root,
+             "socket" => ^socket,
+             "version" => "0.2.0"
+           } = JSON.decode!(line)
+
+    assert root == context.state_root
+
+    client = connect(socket)
+    :ok = send_frame(client, initialize())
+    assert [%{"type" => "initialized"}] = receive_records(client, 1)
+
+    {_output, 0} = System.cmd("/bin/kill", ["-TERM", Integer.to_string(os_pid)])
+
+    assert [%{"type" => "daemon.stopping", "reason" => "operator_stop"}] =
+             receive_records(client, 1)
+
+    assert await_exit(port, 60_000) == 0
+    refute_received {^port, {:data, _more}}
+    assert {:ok, %File.Stat{type: :other}} = File.lstat(socket)
+  end
+
+  defp start_daemon_process(arguments) do
+    executable = System.find_executable("elixir") || raise "elixir executable unavailable"
+    code = "LoopexCli.main(#{inspect(["daemon" | arguments])})"
+
+    port =
+      Port.open(
+        {:spawn_executable, String.to_charlist(executable)},
+        [
+          :binary,
+          :exit_status,
+          :use_stdio,
+          :hide,
+          {:line, 65_536},
+          env: [{~c"LOOPEX_PROVIDER_API_KEY", ~c"daemon-command-placeholder"}],
+          args:
+            Enum.flat_map(:code.get_path(), fn dir -> ["-pa", List.to_string(dir)] end) ++
+              ["-e", code]
+        ]
+      )
+
+    {:os_pid, os_pid} = Port.info(port, :os_pid)
+
+    on_exit(fn ->
+      System.cmd("/bin/kill", ["-KILL", Integer.to_string(os_pid)], stderr_to_stdout: true)
+    end)
+
+    {port, os_pid}
+  end
+
+  defp await_line(port, bound) do
+    receive do
+      {^port, {:data, {:eol, line}}} -> line
+      {^port, {:exit_status, status}} -> flunk("the daemon exited #{status} before readiness")
+    after
+      bound -> flunk("the daemon never announced readiness")
+    end
+  end
+
+  defp await_exit(port, bound) do
+    receive do
+      {^port, {:exit_status, status}} -> status
+    after
+      bound -> flunk("the daemon never exited")
+    end
+  end
+
+  defp connect(path) do
+    {:ok, socket} = :socket.open(:local, :stream, :default)
+    :ok = :socket.connect(socket, %{family: :local, path: path})
+    socket
+  end
+
+  defp initialize do
+    %{
+      "method" => "initialize",
+      "request_id" => "init",
+      "generations" => [V2.generation()],
+      "capabilities" => []
+    }
+  end
+
+  defp send_frame(socket, record) do
+    {:ok, encoded} = Frame.encode(record)
+    :socket.send(socket, IO.iodata_to_binary(encoded))
+  end
+
+  defp receive_records(socket, count, buffered \\ "") do
+    parts = :binary.split(buffered, "\n", [:global])
+
+    if length(parts) > count do
+      parts
+      |> Enum.take(count)
+      |> Enum.map(fn payload ->
+        {:ok, record} = Frame.decode(payload, Frame.output_record_bytes())
+        record
+      end)
+    else
+      {:ok, bytes} = :socket.recv(socket, 0, 30_000)
+      receive_records(socket, count, buffered <> bytes)
+    end
+  end
+end
