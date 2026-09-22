@@ -43,6 +43,13 @@ later verified daemon owner can remove it. Accepted sockets use Darwin
 `LOCAL_PEERCRED` or Linux `SO_PEERCRED`; missing, malformed or mismatched peer
 credentials are refused before protocol input.
 
+Add the daemon's bounded provisional connection handoff. The connection
+registry charges a slot at accept time, owns the unchanged initialization
+deadline, starts and monitors an inert connection child, records the exact
+listener-to-connection socket transfer disposition, and releases capacity only
+after the real socket owner and child have been reaped. Fixed redacted lifecycle
+logs cover the registry and connection processes.
+
 Add the daemon session index's canonical bounded codec. It pins the exact JSONL
 header, sorted identity rows, SHA-256 trailer and all identity, row-count,
 line-size and file-size bounds without treating alternate JSON spellings as the
