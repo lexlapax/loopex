@@ -35,8 +35,7 @@ defmodule LoopexComposition do
   alias Loopex.{Executor.Local, LLM.ReqLLM, Store}
   alias Loopex.Executor.Local.{CodingTools, WorkspaceLease}
   alias Loopex.Store.Local.{Artifacts, Transfers}
-  alias Loopex.Trace.Capability
-  alias LoopexComposition.{CredentialPlane, RuntimeOwner, WorkspaceIdentity}
+  alias LoopexComposition.{Edges, RuntimeOwner, WorkspaceIdentity}
 
   require Logger
 
@@ -105,6 +104,25 @@ defmodule LoopexComposition do
   end
 
   def with_runtime(_options, _function), do: {:error, :invalid_composition_options}
+
+  @doc """
+  ## Concept
+
+  Starts the reference edges in the caller's own process for a long-lived
+  host, which then owns their links and their stop order.
+
+  ## Technical depth
+
+  `options` is `start/1`'s host option set plus the host-started
+  `:credential_plane` map carrying `:capability` and the credential
+  `:model_options`. `lifecycle` accepts only `:interrupt`, a zero-arity
+  function evaluated before each of the Store, optional transfers, workspace
+  lease, executor and runtime; `{:stop, reason}` starts nothing further.
+  Returns `{:ok, edges}` or `{:error, reason, partial_edges}` naming exactly
+  the edges started, as `LoopexComposition.Edges` describes.
+  """
+  @spec start_edges(keyword(), keyword()) :: {:ok, map()} | {:error, term(), map()}
+  def start_edges(options, cycle \\ []), do: Edges.start(options, cycle, &validate/1, &compose/1)
 
   @doc """
   ## Concept
@@ -184,7 +202,7 @@ defmodule LoopexComposition do
          :ok <- start_applications(),
          :ok <- File.mkdir_p(root),
          {:ok, options} <- LoopexComposition.ResourcePacks.retain_launch_option(options, root),
-         {:ok, credential_plane} <- CredentialPlane.open(&start_edge/2),
+         {:ok, credential_plane} <- Edges.credential_plane(options, &start_edge/2),
          {:ok, adapter} <- start_edge(Store.Local, store_options(root, options)),
          {:ok, store} <- Store.new(Store.Local, adapter),
          {:ok, spill} <- artifact_placement(root, options),
@@ -216,7 +234,7 @@ defmodule LoopexComposition do
                  served_artifacts(options, spill) ++
                  Keyword.take(options, @host_supplied)
              ),
-           :ok <- Capability.bind(credential_plane.capability, runtime) do
+           :ok <- Loopex.Trace.Capability.bind(credential_plane.capability, runtime) do
         Logger.debug("reference composition trace capability bound")
         {:ok, runtime}
       end
