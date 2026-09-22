@@ -48,6 +48,11 @@ header, sorted identity rows, SHA-256 trailer and all identity, row-count,
 line-size and file-size bounds without treating alternate JSON spellings as the
 same persisted image.
 
+Add the index filesystem foundation: verified owner-only directory and file
+modes, identity-stable bounded reads, fixed temporary recovery, and complete
+file-sync, close, rename and directory-sync publication with explicit retryable,
+poisoned and post-rename outcomes.
+
 ## [0.1.0] — 2026-09-19
 
 M4's closed product baseline: the first numbered source version. It is a source
