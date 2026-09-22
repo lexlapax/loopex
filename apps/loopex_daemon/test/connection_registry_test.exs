@@ -271,6 +271,9 @@ defmodule LoopexDaemon.ConnectionRegistryTest do
         activation_preparations: 0,
         activations_used: 0,
         activation_limit: 64,
+        routing_mirrors: 0,
+        provisional_routing_mirrors: 0,
+        granted_routing_mirrors: 0,
         limit: 512
       }
     end)
@@ -432,6 +435,218 @@ defmodule LoopexDaemon.ConnectionRegistryTest do
     assert :ok = manual_registry_call(connection.pid, {:output_emitted, frame_ref})
     assert :ok = manual_registry_call(connection.pid, :reserve_succession)
     assert :ok = manual_registry_call(connection.pid, :release_succession)
+  end
+
+  test "routing mirror promotes after holder loss and exact pop is idempotent" do
+    registry = start_registry(5_000, connection_module: ManualConnection)
+    registry_incarnation = :crypto.strong_rand_bytes(16)
+    assert :ok = ConnectionRegistry.bind_relay(registry, self(), registry_incarnation)
+
+    holder = start_manual_connection(registry)
+    assert :ok = manual_registry_call(holder.pid, :promote)
+    assert :ok = manual_registry_call(holder.pid, :initialize_complete)
+
+    owner_incarnation = :crypto.strong_rand_bytes(16)
+    writer_epoch = :crypto.strong_rand_bytes(16)
+
+    provisional = %{
+      permit_id: {holder.incarnation, 0, 1},
+      start_op_ref: make_ref(),
+      session_id: "mirror-session",
+      owner_pid: self(),
+      owner_incarnation: owner_incarnation,
+      holder_pid: holder.pid,
+      holder_incarnation: holder.incarnation,
+      writer_epoch: writer_epoch
+    }
+
+    stale_ref = make_ref()
+
+    assert :ok =
+             ConnectionRegistry.apply_mirror(
+               registry,
+               stale_ref,
+               :crypto.strong_rand_bytes(16),
+               :install_provisional,
+               provisional
+             )
+
+    refute_receive {:mirror_applied, ^stale_ref, _, _, _}, 30
+
+    assert :ok = apply_mirror(registry, registry_incarnation, :install_provisional, provisional)
+    assert :ok = apply_mirror(registry, registry_incarnation, :install_provisional, provisional)
+
+    assert %{
+             routing_mirrors: 1,
+             provisional_routing_mirrors: 1,
+             granted_routing_mirrors: 0
+           } = ConnectionRegistry.status(registry)
+
+    holder_monitor = Process.monitor(holder.pid)
+    Process.exit(holder.pid, :kill)
+    assert_receive {:DOWN, ^holder_monitor, :process, _, :killed}, 500
+    eventually(fn -> ConnectionRegistry.status(registry).occupied == 0 end)
+
+    assert :ok =
+             apply_mirror(
+               registry,
+               registry_incarnation,
+               {:resolve_provisional, :granted},
+               provisional
+             )
+
+    assert %{
+             routing_mirrors: 1,
+             provisional_routing_mirrors: 0,
+             granted_routing_mirrors: 1
+           } = ConnectionRegistry.status(registry)
+
+    owner = %{
+      session_id: provisional.session_id,
+      owner_pid: provisional.owner_pid,
+      owner_incarnation: provisional.owner_incarnation
+    }
+
+    assert {:ok,
+            {:holder,
+             %{
+               holder_pid: holder_pid,
+               holder_incarnation: holder_incarnation,
+               writer_epoch: ^writer_epoch
+             }}} = apply_mirror(registry, registry_incarnation, :pop_owner_mirror, owner)
+
+    assert holder_pid == holder.pid
+    assert holder_incarnation == holder.incarnation
+
+    assert {:ok, :absent} =
+             apply_mirror(registry, registry_incarnation, :pop_owner_mirror, owner)
+
+    assert %{routing_mirrors: 0} = ConnectionRegistry.status(registry)
+  end
+
+  test "routing mirror cancellation and stale owner operations preserve a successor" do
+    registry = start_registry(5_000, connection_module: ManualConnection)
+    registry_incarnation = :crypto.strong_rand_bytes(16)
+    assert :ok = ConnectionRegistry.bind_relay(registry, self(), registry_incarnation)
+
+    first = initialized_manual_connection(registry)
+    second = initialized_manual_connection(registry)
+    session_id = "successor-session"
+
+    predecessor =
+      provisional_mirror(first, session_id, self(), :crypto.strong_rand_bytes(16), 1)
+
+    assert :ok = apply_mirror(registry, registry_incarnation, :install_provisional, predecessor)
+
+    assert :ok =
+             apply_mirror(
+               registry,
+               registry_incarnation,
+               {:resolve_provisional, :cancelled},
+               predecessor
+             )
+
+    assert :ok =
+             apply_mirror(
+               registry,
+               registry_incarnation,
+               {:resolve_provisional, :cancelled},
+               predecessor
+             )
+
+    successor_owner = spawn(fn -> Process.sleep(:infinity) end)
+    on_exit(fn -> Process.exit(successor_owner, :kill) end)
+
+    successor =
+      provisional_mirror(
+        second,
+        session_id,
+        successor_owner,
+        :crypto.strong_rand_bytes(16),
+        2
+      )
+
+    assert :ok = apply_mirror(registry, registry_incarnation, :install_provisional, successor)
+
+    predecessor_granted = granted_mirror(predecessor)
+
+    assert {:error, :mirror_conflict} =
+             apply_mirror(
+               registry,
+               registry_incarnation,
+               :clear_granted,
+               predecessor_granted
+             )
+
+    assert {:ok, :absent} =
+             apply_mirror(
+               registry,
+               registry_incarnation,
+               :pop_owner_mirror,
+               Map.take(predecessor, [:session_id, :owner_pid, :owner_incarnation])
+             )
+
+    assert %{routing_mirrors: 1, provisional_routing_mirrors: 1} =
+             ConnectionRegistry.status(registry)
+
+    assert :ok =
+             apply_mirror(
+               registry,
+               registry_incarnation,
+               {:resolve_provisional, :granted},
+               successor
+             )
+
+    successor_granted = granted_mirror(successor)
+    assert :ok = apply_mirror(registry, registry_incarnation, :clear_granted, successor_granted)
+    assert :ok = apply_mirror(registry, registry_incarnation, :clear_granted, successor_granted)
+    assert %{routing_mirrors: 0} = ConnectionRegistry.status(registry)
+
+    Process.exit(first.pid, :kill)
+    Process.exit(second.pid, :kill)
+  end
+
+  test "routing mirror install requires the exact initialized live connection" do
+    registry = start_registry(5_000, connection_module: ManualConnection)
+    registry_incarnation = :crypto.strong_rand_bytes(16)
+    assert :ok = ConnectionRegistry.bind_relay(registry, self(), registry_incarnation)
+
+    holder = start_manual_connection(registry)
+
+    provisional =
+      provisional_mirror(
+        holder,
+        "not-live-session",
+        self(),
+        :crypto.strong_rand_bytes(16),
+        1
+      )
+
+    assert {:error, :connection_not_live} =
+             apply_mirror(registry, registry_incarnation, :install_provisional, provisional)
+
+    assert :ok = manual_registry_call(holder.pid, :promote)
+    assert :ok = manual_registry_call(holder.pid, :initialize_complete)
+
+    assert {:error, :invalid_mirror} =
+             apply_mirror(
+               registry,
+               registry_incarnation,
+               :install_provisional,
+               Map.put(provisional, :unexpected, true)
+             )
+
+    assert :ok = apply_mirror(registry, registry_incarnation, :install_provisional, provisional)
+
+    assert {:error, :mirror_provisional} =
+             apply_mirror(
+               registry,
+               registry_incarnation,
+               :pop_owner_mirror,
+               Map.take(provisional, [:session_id, :owner_pid, :owner_incarnation])
+             )
+
+    Process.exit(holder.pid, :kill)
   end
 
   test "activation reservations coalesce exact commands and reject conflicting bindings" do
@@ -1097,6 +1312,48 @@ defmodule LoopexDaemon.ConnectionRegistryTest do
     send(pid, {:registry_call, self(), reference, operation})
     assert_receive {:registry_result, ^reference, result}, 500
     result
+  end
+
+  defp initialized_manual_connection(registry) do
+    connection = start_manual_connection(registry)
+    assert :ok = manual_registry_call(connection.pid, :promote)
+    assert :ok = manual_registry_call(connection.pid, :initialize_complete)
+    connection
+  end
+
+  defp apply_mirror(registry, registry_incarnation, action, exact_row) do
+    op_ref = make_ref()
+
+    assert :ok =
+             ConnectionRegistry.apply_mirror(
+               registry,
+               op_ref,
+               registry_incarnation,
+               action,
+               exact_row
+             )
+
+    assert_receive {:mirror_applied, ^op_ref, ^registry, ^registry_incarnation, result}, 500
+    result
+  end
+
+  defp provisional_mirror(connection, session_id, owner_pid, owner_incarnation, sequence) do
+    %{
+      permit_id: {connection.incarnation, 0, sequence},
+      start_op_ref: make_ref(),
+      session_id: session_id,
+      owner_pid: owner_pid,
+      owner_incarnation: owner_incarnation,
+      holder_pid: connection.pid,
+      holder_incarnation: connection.incarnation,
+      writer_epoch: :crypto.strong_rand_bytes(16)
+    }
+  end
+
+  defp granted_mirror(provisional) do
+    provisional
+    |> Map.drop([:permit_id, :start_op_ref])
+    |> Map.put(:phase, :granted)
   end
 
   defp reply_value({:reply, reply}), do: reply

@@ -35,6 +35,12 @@ defmodule LoopexDaemon.ConnectionRegistry do
   a reservation removes its exact binding before optionally adding the session
   to the monotonic activation set; a repeated resolution of an absent reference
   is an idempotent no-op.
+
+  The registry also owns the bounded lease-routing mirror. The daemon owner
+  publishes exact asynchronous operations against the registry incarnation;
+  provisional rows install only for an initialized live connection, promotion
+  may finish after that connection begins closing, and exact clears or owner
+  pops cannot erase a successor row. Status reports only phase counts.
   """
 
   use GenServer
@@ -62,6 +68,13 @@ defmodule LoopexDaemon.ConnectionRegistry do
   @typedoc false
   @type activation_binding ::
           {:create, binary(), binary()} | {:resume, binary(), binary()}
+
+  @typedoc false
+  @type mirror_action ::
+          :install_provisional
+          | {:resolve_provisional, :granted | :cancelled}
+          | :clear_granted
+          | :pop_owner_mirror
 
   @doc false
   @spec start_link(keyword()) :: GenServer.on_start()
@@ -205,6 +218,17 @@ defmodule LoopexDaemon.ConnectionRegistry do
   end
 
   @doc false
+  @spec apply_mirror(pid(), reference(), binary(), mirror_action(), map()) :: :ok
+  def apply_mirror(registry, op_ref, registry_incarnation, action, exact_row) do
+    send(
+      registry,
+      {:apply_mirror, op_ref, self(), registry_incarnation, action, exact_row}
+    )
+
+    :ok
+  end
+
+  @doc false
   @spec prepare_resume(
           pid(),
           origin_id(),
@@ -331,8 +355,12 @@ defmodule LoopexDaemon.ConnectionRegistry do
           succession_reservations: non_neg_integer(),
           active_sessions: non_neg_integer(),
           activation_reservations: non_neg_integer(),
+          activation_preparations: non_neg_integer(),
           activations_used: non_neg_integer(),
           activation_limit: 64,
+          routing_mirrors: non_neg_integer(),
+          provisional_routing_mirrors: non_neg_integer(),
+          granted_routing_mirrors: non_neg_integer(),
           limit: 512
         }
   def status(registry), do: GenServer.call(registry, :status)
@@ -398,6 +426,7 @@ defmodule LoopexDaemon.ConnectionRegistry do
            activation_promotions: %{},
            activation_promotion_bindings: %{},
            relay: nil,
+           routing_mirrors: %{},
            rows: %{},
            child_monitors: %{},
            listeners: %{},
@@ -1039,6 +1068,9 @@ defmodule LoopexDaemon.ConnectionRegistry do
   def handle_call(:status, _from, state) do
     counts = Enum.frequencies_by(state.rows, fn {_token, row} -> row.phase end)
 
+    mirror_counts =
+      Enum.frequencies_by(state.routing_mirrors, fn {_session_id, row} -> row.phase end)
+
     {:reply,
      %{
        occupied: map_size(state.rows),
@@ -1061,6 +1093,9 @@ defmodule LoopexDaemon.ConnectionRegistry do
        activations_used:
          MapSet.size(state.activation_set) + map_size(state.activation_reservations),
        activation_limit: @activation_limit,
+       routing_mirrors: map_size(state.routing_mirrors),
+       provisional_routing_mirrors: Map.get(mirror_counts, :provisional, 0),
+       granted_routing_mirrors: Map.get(mirror_counts, :granted, 0),
        limit: @connection_limit
      }, state}
   end
@@ -1132,6 +1167,26 @@ defmodule LoopexDaemon.ConnectionRegistry do
         Logger.debug("loopex daemon activation relay settlement invalid")
         {:stop, :activation_settlement_invalid, state}
     end
+  end
+
+  def handle_info(
+        {:apply_mirror, op_ref, owner, registry_incarnation, action, exact_row},
+        %{owner: owner, relay: %{incarnation: registry_incarnation}} = state
+      )
+      when is_reference(op_ref) do
+    {result, state} = apply_routing_mirror(state, action, exact_row)
+
+    send(
+      owner,
+      {:mirror_applied, op_ref, self(), registry_incarnation, result}
+    )
+
+    {:noreply, state}
+  end
+
+  def handle_info({:apply_mirror, _op_ref, _owner, _incarnation, _action, _row}, state) do
+    Logger.debug("loopex daemon routing mirror request ignored")
+    {:noreply, state}
   end
 
   def handle_info({:DOWN, monitor, :process, pid, _reason}, state) do
@@ -1500,6 +1555,206 @@ defmodule LoopexDaemon.ConnectionRegistry do
       {:ok, row} -> put_in(state, [:rows, token], function.(row))
       :error -> state
     end
+  end
+
+  defp apply_routing_mirror(state, :install_provisional, exact_row) do
+    with {:ok, row} <- validate_provisional_mirror(exact_row),
+         :ok <- mirror_connection_live(state, row),
+         :ok <- mirror_slot_available(state, row) do
+      case Map.fetch(state.routing_mirrors, row.session_id) do
+        {:ok, ^row} ->
+          {:ok, state}
+
+        {:ok, _other} ->
+          {{:error, :mirror_conflict}, state}
+
+        :error ->
+          Logger.debug("loopex daemon provisional routing mirror installed")
+          {:ok, put_in(state, [:routing_mirrors, row.session_id], row)}
+      end
+    else
+      {:error, reason} -> {{:error, reason}, state}
+    end
+  end
+
+  defp apply_routing_mirror(state, {:resolve_provisional, :granted}, exact_row) do
+    with {:ok, provisional} <- validate_provisional_mirror(exact_row) do
+      granted = granted_mirror(provisional)
+
+      case Map.fetch(state.routing_mirrors, provisional.session_id) do
+        {:ok, ^provisional} ->
+          Logger.debug("loopex daemon routing mirror granted")
+          {:ok, put_in(state, [:routing_mirrors, provisional.session_id], granted)}
+
+        {:ok, ^granted} ->
+          {:ok, state}
+
+        _other ->
+          {{:error, :mirror_conflict}, state}
+      end
+    else
+      {:error, reason} -> {{:error, reason}, state}
+    end
+  end
+
+  defp apply_routing_mirror(state, {:resolve_provisional, :cancelled}, exact_row) do
+    with {:ok, provisional} <- validate_provisional_mirror(exact_row) do
+      case Map.fetch(state.routing_mirrors, provisional.session_id) do
+        {:ok, ^provisional} ->
+          Logger.debug("loopex daemon provisional routing mirror cancelled")
+          {:ok, update_in(state.routing_mirrors, &Map.delete(&1, provisional.session_id))}
+
+        :error ->
+          {:ok, state}
+
+        {:ok, _other} ->
+          {{:error, :mirror_conflict}, state}
+      end
+    else
+      {:error, reason} -> {{:error, reason}, state}
+    end
+  end
+
+  defp apply_routing_mirror(state, :clear_granted, exact_row) do
+    with {:ok, granted} <- validate_granted_mirror(exact_row) do
+      case Map.fetch(state.routing_mirrors, granted.session_id) do
+        {:ok, ^granted} ->
+          Logger.debug("loopex daemon granted routing mirror cleared")
+          {:ok, update_in(state.routing_mirrors, &Map.delete(&1, granted.session_id))}
+
+        :error ->
+          {:ok, state}
+
+        {:ok, _other} ->
+          {{:error, :mirror_conflict}, state}
+      end
+    else
+      {:error, reason} -> {{:error, reason}, state}
+    end
+  end
+
+  defp apply_routing_mirror(state, :pop_owner_mirror, exact_row) do
+    with {:ok, owner} <- validate_mirror_owner(exact_row) do
+      case Map.fetch(state.routing_mirrors, owner.session_id) do
+        {:ok,
+         %{
+           phase: :granted,
+           owner_pid: owner_pid,
+           owner_incarnation: owner_incarnation
+         } = mirror}
+        when owner_pid == owner.owner_pid and owner_incarnation == owner.owner_incarnation ->
+          route = %{
+            holder_pid: mirror.holder_pid,
+            holder_incarnation: mirror.holder_incarnation,
+            writer_epoch: mirror.writer_epoch
+          }
+
+          Logger.debug("loopex daemon owner routing mirror popped")
+
+          {{:ok, {:holder, route}},
+           update_in(state.routing_mirrors, &Map.delete(&1, owner.session_id))}
+
+        {:ok,
+         %{
+           phase: :provisional,
+           owner_pid: owner_pid,
+           owner_incarnation: owner_incarnation
+         }}
+        when owner_pid == owner.owner_pid and owner_incarnation == owner.owner_incarnation ->
+          {{:error, :mirror_provisional}, state}
+
+        _absent_or_successor ->
+          {{:ok, :absent}, state}
+      end
+    else
+      {:error, reason} -> {{:error, reason}, state}
+    end
+  end
+
+  defp apply_routing_mirror(state, _action, _exact_row),
+    do: {{:error, :invalid_mirror}, state}
+
+  defp validate_provisional_mirror(
+         %{
+           permit_id: {permit_incarnation, _slot, _sequence} = permit_id,
+           start_op_ref: start_op_ref,
+           session_id: session_id,
+           owner_pid: owner_pid,
+           owner_incarnation: owner_incarnation,
+           holder_pid: holder_pid,
+           holder_incarnation: holder_incarnation,
+           writer_epoch: writer_epoch
+         } = row
+       )
+       when map_size(row) == 8 and is_pid(owner_pid) and is_pid(holder_pid) and
+              (is_nil(start_op_ref) or is_reference(start_op_ref)) and is_binary(session_id) and
+              byte_size(session_id) in 1..256 and is_binary(owner_incarnation) and
+              byte_size(owner_incarnation) == 16 and is_binary(holder_incarnation) and
+              byte_size(holder_incarnation) == 16 and permit_incarnation == holder_incarnation and
+              is_binary(writer_epoch) and
+              byte_size(writer_epoch) in 1..64 do
+    case validate_activation_origin(permit_id) do
+      :ok -> {:ok, Map.put(row, :phase, :provisional)}
+      {:error, _reason} -> {:error, :invalid_mirror}
+    end
+  end
+
+  defp validate_provisional_mirror(_row), do: {:error, :invalid_mirror}
+
+  defp validate_granted_mirror(
+         %{
+           phase: :granted,
+           session_id: session_id,
+           owner_pid: owner_pid,
+           owner_incarnation: owner_incarnation,
+           holder_pid: holder_pid,
+           holder_incarnation: holder_incarnation,
+           writer_epoch: writer_epoch
+         } = row
+       )
+       when map_size(row) == 7 and is_pid(owner_pid) and is_pid(holder_pid) and
+              is_binary(session_id) and byte_size(session_id) in 1..256 and
+              is_binary(owner_incarnation) and byte_size(owner_incarnation) == 16 and
+              is_binary(holder_incarnation) and byte_size(holder_incarnation) == 16 and
+              is_binary(writer_epoch) and byte_size(writer_epoch) in 1..64,
+       do: {:ok, row}
+
+  defp validate_granted_mirror(_row), do: {:error, :invalid_mirror}
+
+  defp validate_mirror_owner(
+         %{
+           session_id: session_id,
+           owner_pid: owner_pid,
+           owner_incarnation: owner_incarnation
+         } = owner
+       )
+       when map_size(owner) == 3 and is_pid(owner_pid) and is_binary(session_id) and
+              byte_size(session_id) in 1..256 and is_binary(owner_incarnation) and
+              byte_size(owner_incarnation) == 16,
+       do: {:ok, owner}
+
+  defp validate_mirror_owner(_owner), do: {:error, :invalid_mirror}
+
+  defp granted_mirror(provisional) do
+    provisional
+    |> Map.drop([:permit_id, :start_op_ref])
+    |> Map.put(:phase, :granted)
+  end
+
+  defp mirror_connection_live(state, mirror) do
+    if Enum.any?(state.rows, fn {_token, row} ->
+         row.phase == :live and row.initialized and row.connection_pid == mirror.holder_pid and
+           row.connection_incarnation == mirror.holder_incarnation
+       end),
+       do: :ok,
+       else: {:error, :connection_not_live}
+  end
+
+  defp mirror_slot_available(state, mirror) do
+    if Map.has_key?(state.routing_mirrors, mirror.session_id) or
+         map_size(state.routing_mirrors) < @connection_limit,
+       do: :ok,
+       else: {:error, :mirror_capacity_reached}
   end
 
   defp reserve_activation_binding(state, origin_id, binding) do
