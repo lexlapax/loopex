@@ -1372,7 +1372,8 @@ defmodule LoopexDaemon.AdmissionRelayTest do
   end
 
   test "lease owner loss claims pending and queued mutations for exact settlement" do
-    relay = start_relay()
+    daemon_incarnation = incarnation()
+    relay = start_relay(owner_incarnation: daemon_incarnation)
     owner = start_actor()
     owner_incarnation = incarnation()
     binding = {owner, owner_incarnation}
@@ -1419,21 +1420,104 @@ defmodule LoopexDaemon.AdmissionRelayTest do
     assert %{lease_owners: 0, owner_losses: 1, tickets: 2, settling: 2} =
              AdmissionRelay.status(relay)
 
+    classification_ref = make_ref()
+
     assert :ok =
-             AdmissionRelay.settle_owner_loss(
+             AdmissionRelay.classify_owner_loss(
                relay,
+               classification_ref,
+               daemon_incarnation,
                "session",
                owner,
                owner_incarnation,
-               origins
+               nil
              )
+
+    assert_receive {:connection_message, ^connection,
+                    {:relay_ticket_cancelled, ^pending, :control_owner_lost}},
+                   500
+
+    assert_receive {:connection_message, ^connection,
+                    {:relay_ticket_cancelled, ^queued, :control_owner_lost}},
+                   500
+
+    assert_receive {:relay_owner_loss_classified_ack, ^relay, ^classification_ref, "session",
+                    ^owner, ^owner_incarnation},
+                   500
 
     assert %{owner_losses: 0, tickets: 0} = AdmissionRelay.status(relay)
     stop_connection(connection, relay, incarnation)
   end
 
+  test "an early owner-loss classification joins exact down and suppresses a holder refusal" do
+    daemon_incarnation = incarnation()
+    relay = start_relay(owner_incarnation: daemon_incarnation)
+    owner = start_actor()
+    owner_incarnation = incarnation()
+    binding = {owner, owner_incarnation}
+
+    assert :ok =
+             AdmissionRelay.register_lease_owner(
+               relay,
+               "early-session",
+               owner,
+               owner_incarnation
+             )
+
+    connection_incarnation = incarnation()
+    connection = start_connection(relay, connection_incarnation)
+    origin = {connection_incarnation, 0, 1}
+
+    assert {:ok, ^origin} =
+             invoke(connection, fn ->
+               AdmissionRelay.open_ticket(
+                 relay,
+                 origin,
+                 :session_prompt,
+                 "early-session",
+                 binding
+               )
+             end)
+
+    classification_ref = make_ref()
+
+    assert :ok =
+             AdmissionRelay.classify_owner_loss(
+               relay,
+               classification_ref,
+               daemon_incarnation,
+               "early-session",
+               owner,
+               owner_incarnation,
+               connection_incarnation
+             )
+
+    eventually(fn -> AdmissionRelay.status(relay).owner_losses == 1 end)
+
+    refute_receive {:relay_owner_loss_classified_ack, ^relay, ^classification_ref, _, _, _}, 40
+    Process.exit(owner, :kill)
+
+    assert_receive {:relay_owner_lost, ^relay, "early-session", ^owner, ^owner_incarnation,
+                    [^origin]},
+                   500
+
+    assert_receive {:relay_owner_loss_ready, ^relay, ^owner, ^owner_incarnation}, 500
+
+    assert_receive {:relay_owner_loss_classified_ack, ^relay, ^classification_ref,
+                    "early-session", ^owner, ^owner_incarnation},
+                   500
+
+    refute_receive {:connection_message, ^connection,
+                    {:relay_ticket_cancelled, ^origin, :control_owner_lost}},
+                   40
+
+    assert %{owner_losses: 0, tickets: 0} = AdmissionRelay.status(relay)
+    stop_connection(connection, relay, connection_incarnation)
+  end
+
   test "an already promoted mutation keeps its real result after owner loss" do
-    relay = start_relay()
+    daemon_incarnation = incarnation()
+    relay = start_relay(owner_incarnation: daemon_incarnation)
     owner = start_actor()
     owner_incarnation = incarnation()
 
@@ -1485,14 +1569,22 @@ defmodule LoopexDaemon.AdmissionRelayTest do
     assert_receive {:relay_owner_lost, ^relay, "session", ^owner, ^owner_incarnation, []}, 500
     assert_receive {:relay_owner_loss_ready, ^relay, ^owner, ^owner_incarnation}, 500
 
+    classification_ref = make_ref()
+
     assert :ok =
-             AdmissionRelay.settle_owner_loss(
+             AdmissionRelay.classify_owner_loss(
                relay,
+               classification_ref,
+               daemon_incarnation,
                "session",
                owner,
                owner_incarnation,
-               []
+               nil
              )
+
+    assert_receive {:relay_owner_loss_classified_ack, ^relay, ^classification_ref, "session",
+                    ^owner, ^owner_incarnation},
+                   500
 
     assert %{ticketed: 1, tickets: 1, owner_losses: 0} = AdmissionRelay.status(relay)
     send(task, :complete)
@@ -1811,7 +1903,8 @@ defmodule LoopexDaemon.AdmissionRelayTest do
   end
 
   test "lease owner loss claims actor-bound permits with mutation origins" do
-    relay = start_relay()
+    daemon_incarnation = incarnation()
+    relay = start_relay(owner_incarnation: daemon_incarnation)
     owner = start_actor()
     owner_incarnation = incarnation()
     binding = {owner, owner_incarnation}
@@ -1864,14 +1957,30 @@ defmodule LoopexDaemon.AdmissionRelayTest do
     assert_receive {:DOWN, ^worker_monitor, :process, ^worker, :killed}, 500
     assert_receive {:relay_owner_loss_ready, ^relay, ^owner, ^owner_incarnation}, 500
 
+    classification_ref = make_ref()
+
     assert :ok =
-             AdmissionRelay.settle_owner_loss(
+             AdmissionRelay.classify_owner_loss(
                relay,
+               classification_ref,
+               daemon_incarnation,
                "session",
                owner,
                owner_incarnation,
-               origins
+               nil
              )
+
+    assert_receive {:connection_message, ^connection,
+                    {:relay_permit_cancelled, ^permit_origin, :control_owner_lost}},
+                   500
+
+    assert_receive {:connection_message, ^connection,
+                    {:relay_ticket_cancelled, ^ticket_origin, :control_owner_lost}},
+                   500
+
+    assert_receive {:relay_owner_loss_classified_ack, ^relay, ^classification_ref, "session",
+                    ^owner, ^owner_incarnation},
+                   500
 
     assert %{owner_losses: 0, permits: 0, tickets: 0} = AdmissionRelay.status(relay)
     stop_connection(connection, relay, connection_incarnation)

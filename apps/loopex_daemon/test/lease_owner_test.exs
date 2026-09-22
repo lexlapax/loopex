@@ -1741,14 +1741,27 @@ defmodule LoopexDaemon.LeaseOwnerTest do
       )
     end)
 
+    classification_ref = make_ref()
+
     assert :ok =
-             AdmissionRelay.settle_owner_loss(
+             AdmissionRelay.classify_owner_loss(
                fixture.relay,
+               classification_ref,
+               fixture.daemon_incarnation,
                fixture.session_id,
                fixture.owner,
                fixture.owner_incarnation,
-               [queued]
+               holder_incarnation
              )
+
+    assert_receive {:relay_owner_loss_classified_ack, ack_relay, ^classification_ref,
+                    ack_session_id, ack_owner, ack_owner_incarnation},
+                   500
+
+    assert ack_relay == fixture.relay
+    assert ack_session_id == fixture.session_id
+    assert ack_owner == fixture.owner
+    assert ack_owner_incarnation == fixture.owner_incarnation
 
     assert_receive {:invoked, ^queued_invoke, _result}, 500
     refute_receive {:connection_message, ^holder, {:relay_ticket_failed, ^queued, _reason}}, 40

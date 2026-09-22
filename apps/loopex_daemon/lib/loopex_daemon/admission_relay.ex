@@ -170,14 +170,31 @@ defmodule LoopexDaemon.AdmissionRelay do
   end
 
   @doc false
-  @spec settle_owner_loss(pid(), binary(), pid(), binary(), [origin_id()]) ::
-          :ok | {:error, :owner_loss_unavailable | :owner_loss_unsettled}
-  def settle_owner_loss(relay, session_id, owner, owner_incarnation, origins) do
-    GenServer.call(
+  @spec classify_owner_loss(
+          pid(),
+          reference(),
+          binary(),
+          binary(),
+          pid(),
+          binary(),
+          binary() | nil
+        ) :: :ok
+  def classify_owner_loss(
+        relay,
+        classification_ref,
+        daemon_incarnation,
+        session_id,
+        owner,
+        owner_incarnation,
+        holder_connection_incarnation
+      ) do
+    send(
       relay,
-      {:settle_owner_loss, session_id, owner, owner_incarnation, origins},
-      @control_timeout_ms
+      {:relay_owner_loss_classification, self(), daemon_incarnation, classification_ref,
+       session_id, owner, owner_incarnation, holder_connection_incarnation}
     )
+
+    :ok
   end
 
   @doc false
@@ -794,65 +811,6 @@ defmodule LoopexDaemon.AdmissionRelay do
 
   def handle_call({:prepare_lease_owner_retirement, _, _}, _from, state),
     do: {:reply, {:error, :invalid_owner}, state}
-
-  def handle_call(
-        {:settle_owner_loss, session_id, owner, owner_incarnation, origins},
-        {caller, _tag},
-        %{owner: caller} = state
-      ) do
-    binding = {owner, owner_incarnation}
-
-    case Map.fetch(state.owner_losses, binding) do
-      {:ok, %{session_id: ^session_id, origins: retained_origins}}
-      when is_list(origins) ->
-        supplied = MapSet.new(origins)
-
-        cond do
-          MapSet.size(supplied) != length(origins) or supplied != retained_origins ->
-            {:reply, {:error, :owner_loss_unavailable}, state}
-
-          Enum.any?(retained_origins, &owner_loss_worker_live?(state, &1)) ->
-            {:reply, {:error, :owner_loss_unsettled}, state}
-
-          true ->
-            state =
-              Enum.reduce(retained_origins, state, fn origin_id, acc ->
-                cond do
-                  Map.has_key?(acc.tickets, origin_id) ->
-                    ticket = Map.fetch!(acc.tickets, origin_id)
-
-                    acc
-                    |> remove_ticket(origin_id)
-                    |> maybe_retire_connection(ticket.connection_incarnation)
-
-                  Map.has_key?(acc.permits, origin_id) ->
-                    permit = Map.fetch!(acc.permits, origin_id)
-
-                    acc
-                    |> remove_permit(origin_id)
-                    |> maybe_retire_connection(permit.connection_incarnation)
-
-                  true ->
-                    acc
-                end
-              end)
-
-            state = update_in(state.owner_losses, &Map.delete(&1, binding))
-            Logger.debug("loopex daemon admission relay owner loss settled")
-            {:reply, :ok, state}
-        end
-
-      _other ->
-        {:reply, {:error, :owner_loss_unavailable}, state}
-    end
-  end
-
-  def handle_call(
-        {:settle_owner_loss, _session, _owner, _incarnation, _origins},
-        _from,
-        state
-      ),
-      do: {:reply, {:error, :owner_loss_unavailable}, state}
 
   def handle_call(
         {:register_connection, incarnation, retirement_recipient},
@@ -1718,6 +1676,35 @@ defmodule LoopexDaemon.AdmissionRelay do
         worker_down(state, monitor, pid, reason)
     end
   end
+
+  def handle_info(
+        {:relay_owner_loss_classification, owner, daemon_incarnation, classification_ref,
+         session_id, lease_owner, lease_owner_incarnation, holder_connection_incarnation},
+        %{owner: owner, owner_incarnation: daemon_incarnation} = state
+      )
+      when is_reference(classification_ref) and is_pid(lease_owner) and
+             is_binary(lease_owner_incarnation) and byte_size(lease_owner_incarnation) == 16 and
+             (is_nil(holder_connection_incarnation) or
+                (is_binary(holder_connection_incarnation) and
+                   byte_size(holder_connection_incarnation) == 16)) do
+    case validate_ticket_session(session_id) do
+      :ok ->
+        retain_owner_loss_classification(
+          state,
+          classification_ref,
+          session_id,
+          lease_owner,
+          lease_owner_incarnation,
+          holder_connection_incarnation
+        )
+
+      {:error, :invalid_origin} ->
+        {:stop, :owner_loss_invalid, state}
+    end
+  end
+
+  def handle_info({:relay_owner_loss_classification, _, _, _, _, _, _, _}, state),
+    do: {:stop, :owner_loss_invalid, state}
 
   def handle_info({:EXIT, owner, _reason}, %{owner: owner} = state),
     do: {:stop, :owner_lost, state}
@@ -2779,21 +2766,167 @@ defmodule LoopexDaemon.AdmissionRelay do
         end
       end)
 
-    loss = %{session_id: session_id, origins: affected}
-    state = put_in(state, [:owner_losses, binding], loss)
+    loss =
+      case Map.get(state.owner_losses, binding) do
+        %{session_id: ^session_id, classification: classification, down: false} ->
+          %{
+            session_id: session_id,
+            origins: affected,
+            classification: classification,
+            down: true
+          }
 
-    send(
-      state.owner,
-      {:relay_owner_lost, self(), session_id, pid, owner_incarnation,
-       affected |> MapSet.to_list() |> Enum.sort()}
-    )
+        nil ->
+          %{
+            session_id: session_id,
+            origins: affected,
+            classification: nil,
+            down: true
+          }
 
-    if Enum.all?(affected, &(not owner_loss_worker_live?(state, &1))) do
-      send(state.owner, {:relay_owner_loss_ready, self(), pid, owner_incarnation})
+        _other ->
+          :invalid
+      end
+
+    if loss == :invalid do
+      {:stop, :owner_loss_invalid, state}
+    else
+      state = put_in(state, [:owner_losses, binding], loss)
+
+      send(
+        state.owner,
+        {:relay_owner_lost, self(), session_id, pid, owner_incarnation,
+         affected |> MapSet.to_list() |> Enum.sort()}
+      )
+
+      if Enum.all?(affected, &(not owner_loss_worker_live?(state, &1))) do
+        send(state.owner, {:relay_owner_loss_ready, self(), pid, owner_incarnation})
+      end
+
+      Logger.debug("loopex daemon admission relay lease owner lost")
+      maybe_finish_owner_loss(state, binding)
     end
+  end
 
-    Logger.debug("loopex daemon admission relay lease owner lost")
-    {:noreply, state}
+  defp retain_owner_loss_classification(
+         state,
+         classification_ref,
+         session_id,
+         owner,
+         owner_incarnation,
+         holder_connection_incarnation
+       ) do
+    binding = {owner, owner_incarnation}
+
+    classification = %{
+      ref: classification_ref,
+      holder_connection_incarnation: holder_connection_incarnation
+    }
+
+    case Map.get(state.owner_losses, binding) do
+      %{session_id: ^session_id, classification: nil} = loss ->
+        state = put_in(state, [:owner_losses, binding], %{loss | classification: classification})
+        Logger.debug("loopex daemon admission relay owner loss classification retained")
+        maybe_finish_owner_loss(state, binding)
+
+      %{session_id: ^session_id, classification: ^classification} ->
+        maybe_finish_owner_loss(state, binding)
+
+      nil ->
+        case Map.get(state.lease_owners, session_id) do
+          %{binding: ^binding} ->
+            loss = %{
+              session_id: session_id,
+              origins: nil,
+              classification: classification,
+              down: false
+            }
+
+            Logger.debug("loopex daemon admission relay early owner loss classification retained")
+            {:noreply, put_in(state, [:owner_losses, binding], loss)}
+
+          _other ->
+            {:stop, :owner_loss_invalid, state}
+        end
+
+      _other ->
+        {:stop, :owner_loss_invalid, state}
+    end
+  end
+
+  defp maybe_finish_owner_loss(state, binding) do
+    case Map.get(state.owner_losses, binding) do
+      %{
+        session_id: session_id,
+        origins: %MapSet{} = origins,
+        classification: %{ref: classification_ref} = classification,
+        down: true
+      } ->
+        if Enum.any?(origins, &owner_loss_worker_live?(state, &1)) do
+          {:noreply, state}
+        else
+          state =
+            origins
+            |> Enum.sort()
+            |> Enum.reduce(state, fn origin_id, acc ->
+              finish_owner_loss_origin(acc, origin_id, classification)
+            end)
+            |> update_in([:owner_losses], &Map.delete(&1, binding))
+
+          {owner, owner_incarnation} = binding
+
+          send(
+            state.owner,
+            {:relay_owner_loss_classified_ack, self(), classification_ref, session_id, owner,
+             owner_incarnation}
+          )
+
+          Logger.debug("loopex daemon admission relay owner loss classified")
+          {:noreply, state}
+        end
+
+      _other ->
+        {:noreply, state}
+    end
+  end
+
+  defp finish_owner_loss_origin(state, origin_id, classification) do
+    cond do
+      Map.has_key?(state.tickets, origin_id) ->
+        ticket = Map.fetch!(state.tickets, origin_id)
+        maybe_send_owner_loss_refusal(ticket, origin_id, classification)
+
+        state
+        |> remove_ticket(origin_id)
+        |> maybe_retire_connection(ticket.connection_incarnation)
+
+      Map.has_key?(state.permits, origin_id) ->
+        permit = Map.fetch!(state.permits, origin_id)
+        maybe_send_owner_loss_refusal(permit, origin_id, classification)
+
+        state
+        |> remove_permit(origin_id)
+        |> maybe_retire_connection(permit.connection_incarnation)
+
+      true ->
+        state
+    end
+  end
+
+  defp maybe_send_owner_loss_refusal(
+         %{connection_incarnation: holder},
+         _origin_id,
+         %{holder_connection_incarnation: holder}
+       )
+       when not is_nil(holder),
+       do: :ok
+
+  defp maybe_send_owner_loss_refusal(%{kind: :lease} = permit, origin_id, _classification) do
+    send(permit.connection_pid, {:relay_permit_cancelled, origin_id, :control_owner_lost})
+  end
+
+  defp maybe_send_owner_loss_refusal(ticket, origin_id, _classification) do
+    send(ticket.connection_pid, {:relay_ticket_cancelled, origin_id, :control_owner_lost})
   end
 
   defp owner_loss_worker_live?(state, origin_id) do
@@ -2841,7 +2974,7 @@ defmodule LoopexDaemon.AdmissionRelay do
         end
 
         Logger.debug("loopex daemon admission relay lease owner-loss worker reaped")
-        {:noreply, state}
+        maybe_finish_owner_loss(state, {owner, owner_incarnation})
 
       {:ok,
        %{
@@ -2973,7 +3106,7 @@ defmodule LoopexDaemon.AdmissionRelay do
         end
 
         Logger.debug("loopex daemon admission relay owner-loss worker reaped")
-        {:noreply, state}
+        maybe_finish_owner_loss(state, {owner, owner_incarnation})
 
       {:ok, %{worker_pid: ^pid, phase: :waiting} = ticket} ->
         Enum.each(ticket.waiting_callers, fn from ->
