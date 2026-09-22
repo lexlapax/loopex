@@ -55,7 +55,7 @@ defmodule Loopex.Checks.DepsBudget do
   # version range is a visible change to this oracle rather than a silent one in
   # a project file.
   @core_external %{telemetry: "~> 1.3"}
-  @reqllm_requirement "~> 1.17.1"
+  @reqllm_requirement "~> 1.24.0"
   @floor_elixir_version Version.parse!("1.18.5")
 
   @locked_aliases [

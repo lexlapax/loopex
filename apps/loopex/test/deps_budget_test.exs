@@ -5,7 +5,7 @@ defmodule Mix.Tasks.Loopex.DepsBudgetTest do
   alias Mix.Tasks.Loopex.DepsBudget
 
   @fixture "scripts/fixtures/deps-budget-invalid/mix.exs"
-  @reqllm_requirement "~> 1.17.1"
+  @reqllm_requirement "~> 1.24.0"
   # The one external dependency accepted ADR 0030 admits for core and for the
   # telemetry edge, pinned here exactly as the oracle pins it.
   @telemetry_requirement "~> 1.3"
@@ -13,7 +13,8 @@ defmodule Mix.Tasks.Loopex.DepsBudgetTest do
   defp repo_root, do: Path.expand("../../..", __DIR__)
 
   setup do
-    dir = Path.join(System.tmp_dir!(), "deps-budget-#{System.unique_integer([:positive])}")
+    run_id = "#{System.system_time(:nanosecond)}-#{System.unique_integer([:positive])}"
+    dir = Path.join(System.tmp_dir!(), "deps-budget-#{run_id}")
     File.mkdir_p!(dir)
     on_exit(fn -> File.rm_rf(dir) end)
     {:ok, dir: dir}
@@ -601,7 +602,7 @@ defmodule Mix.Tasks.Loopex.DepsBudgetTest do
 
     # The lock names every external dependency the repository declares, which
     # now includes core's own.
-    write_lock!(dir, [{:req_llm, "1.17.1"}, {:telemetry, "1.3.0"}])
+    write_lock!(dir, [{:req_llm, "1.24.0"}, {:telemetry, "1.3.0"}])
     core = Path.join(dir, "apps/loopex/mix.exs")
 
     File.write!(
@@ -872,7 +873,7 @@ defmodule Mix.Tasks.Loopex.DepsBudgetTest do
     assert {"", 0} = System.cmd("elixir", materialize_args, cd: dir, stderr_to_stdout: true)
     assert File.read!(Path.join(destination, "req_llm/lib/probe.ex")) =~ "defmodule Probe"
 
-    archive = Path.join([cache, "hexpm", "req_llm-1.17.1.tar"])
+    archive = Path.join([cache, "hexpm", "req_llm-1.24.0.tar"])
     protected_fixture = Path.join(dir, "protected-fixture.tar")
     File.ln!(archive, protected_fixture)
     stat = File.lstat!(protected_fixture)
@@ -1208,7 +1209,7 @@ defmodule Mix.Tasks.Loopex.DepsBudgetTest do
       {:telemetry, @telemetry_requirement}
     ])
 
-    write_lock!(root, [{:req_llm, "1.17.1"}, {:telemetry, "1.3.0"}])
+    write_lock!(root, [{:req_llm, "1.24.0"}, {:telemetry, "1.3.0"}])
   end
 
   defp write_child(root, directory, role, dependencies) do
@@ -1263,13 +1264,13 @@ defmodule Mix.Tasks.Loopex.DepsBudgetTest do
     :ok = :erl_tar.create(String.to_charlist(contents_path), tar_entries, [:compressed])
     contents = File.read!(contents_path)
     checksum = String.duplicate("a", 64)
-    archive_path = Path.join([cache, "hexpm", "req_llm-1.17.1.tar"])
+    archive_path = Path.join([cache, "hexpm", "req_llm-1.24.0.tar"])
     File.mkdir_p!(Path.dirname(archive_path))
 
     metadata =
       [
         {"name", "req_llm"},
-        {"version", "1.17.1"},
+        {"version", "1.24.0"},
         {"elixir", "~> 1.17"},
         {"requirements", []},
         {"build_tools", ["mix"]}
@@ -1293,7 +1294,7 @@ defmodule Mix.Tasks.Loopex.DepsBudgetTest do
 
     File.write!(Path.join(root, "mix.lock"), """
     %{
-      "req_llm": {:hex, :req_llm, "1.17.1", "#{checksum}", [:mix], [], "hexpm", "#{archive_sha}"}
+      "req_llm": {:hex, :req_llm, "1.24.0", "#{checksum}", [:mix], [], "hexpm", "#{archive_sha}"}
     }
     """)
 
@@ -1307,7 +1308,7 @@ defmodule Mix.Tasks.Loopex.DepsBudgetTest do
 
   defp materializer_packages do
     [
-      package("req_llm", "1.17.1", [:mix], "~> 1.17", [
+      package("req_llm", "1.24.0", [:mix], "~> 1.17", [
         lock_dependency("bridge", "~> 2.0")
       ]),
       package("bridge", "2.0.0", [:mix], ">= 1.17.0", [

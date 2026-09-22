@@ -44,7 +44,7 @@ The umbrella's declared dependencies are the whole of the direction claim:
 | `loopex` | `:core` | `loopex_protocol`, `telemetry ~> 1.3` |
 | `loopex_store_local` | `:edge` | `loopex` |
 | `loopex_executor_local` | `:edge` | `loopex` |
-| `loopex_llm_reqllm` | `:edge` | `req_llm ~> 1.17.1`, `loopex`, `loopex_protocol` |
+| `loopex_llm_reqllm` | `:edge` | `req_llm ~> 1.24.0`, `loopex`, `loopex_protocol` |
 | `loopex_telemetry` | `:edge` | `loopex`, `telemetry ~> 1.3` |
 | `loopex_composition` | `:composition` | `loopex`, `loopex_store_local`, `loopex_llm_reqllm`, `loopex_executor_local` |
 | `loopex_reference_client` | `:client` | `loopex`; the three edges `only: :test` |
@@ -72,7 +72,7 @@ The rules it applies per role, as the module states them:
 | `:extension` | Depends inward only on the production contract application. |
 
 External dependencies are compared as an exact set rather than counted. The
-admitted set is `{:req_llm, "~> 1.17.1"}` in `loopex_llm_reqllm` and
+admitted set is `{:req_llm, "~> 1.24.0"}` in `loopex_llm_reqllm` and
 `{:telemetry, "~> 1.3"}` in `loopex` and in `loopex_telemetry`; a different
 application declaring one of those names, a widened requirement, or any third
 name refuses. `:telemetry` is a pure-Erlang library with no dependencies of its
