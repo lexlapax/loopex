@@ -118,15 +118,31 @@ defmodule LoopexCli.LiveDaemonTest do
     listing =
       capture_io(fn -> assert :ok = LoopexCli.dispatch(["sessions", "--daemon", socket]) end)
 
-    assert [session_id] = String.split(listing, "\n", trim: true)
+    assert String.ends_with?(listing, "}\n") and length(String.split(listing, "\n")) == 2
+
+    assert %{
+             "sessions" => [
+               %{"session_id" => session_id, "residency" => "active", "controlled" => false}
+             ],
+             "next_after_session_id" => nil,
+             "index_full" => false
+           } = JSON.decode!(listing)
+
+    assert key_order(listing) ==
+             ~w(sessions session_id placement_identity residency controlled next_after_session_id index_full)
 
     status =
       capture_io(fn ->
         assert :ok = LoopexCli.dispatch(["sessions", "--daemon", socket, "--status"])
       end)
 
-    assert status =~ "active_sessions 1"
-    assert status =~ "attachments 0"
+    assert %{"active_sessions" => 1, "attachments" => 0, "socket_path" => ^socket} =
+             JSON.decode!(status)
+
+    assert key_order(status) ==
+             ~w(placement_identity daemon_incarnation socket_path connections connection_limit
+                attachments attachment_limit active_sessions activation_limit activations_used
+                index_entries index_limit index_full uptime_ms)
 
     # An idle session shows its history and ends; the finished run is history.
     observed =
@@ -366,6 +382,16 @@ defmodule LoopexCli.LiveDaemonTest do
     stop_daemon(daemon)
   end
 
+  test "an empty live listing is exactly the fixed compact record", context do
+    daemon = start_daemon(context, [])
+
+    assert capture_io(fn ->
+             assert :ok = LoopexCli.dispatch(["sessions", "--daemon", context.socket])
+           end) == ~s({"sessions":[],"next_after_session_id":null,"index_full":false}\n)
+
+    stop_daemon(daemon)
+  end
+
   test "attach refuses a session this daemon lifetime has not activated", context do
     daemon = start_daemon(context, [])
     socket = context.socket
@@ -384,6 +410,11 @@ defmodule LoopexCli.LiveDaemonTest do
 
       output =~ text
     end)
+  end
+
+  # The object keys of one compact record, in the order they were written.
+  defp key_order(record) do
+    Regex.scan(~r/"([a-z_]+)":/, record, capture: :all_but_first) |> List.flatten()
   end
 
   defp ok_output({:ok, output}), do: {:ok, output}

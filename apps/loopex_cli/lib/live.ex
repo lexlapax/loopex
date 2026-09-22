@@ -266,18 +266,47 @@ defmodule LoopexCli.Live do
     {"session.list", fields}
   end
 
-  defp render_query(%{status: true}, %{"type" => "result", "result" => status}) do
-    for key <- ~w(connections attachments active_sessions activations_used index_entries) do
-      IO.puts("#{key} #{Map.fetch!(status, key)}")
-    end
+  @status_keys ~w(placement_identity daemon_incarnation socket_path connections connection_limit
+                  attachments attachment_limit active_sessions activation_limit activations_used
+                  index_entries index_limit index_full uptime_ms)
 
-    :ok
+  # Concept: a live query prints one compact JSON object and one LF, keys in
+  # a fixed order, so its output is byte-testable and machine-readable; a full
+  # index is a warning on standard error, never part of the record.
+  #
+  # Technical depth: status values keep their wire types. A listing prints the
+  # session and placement identities as the text an operator types back to
+  # `resume`, `attach` or `--after`, keeping the wire form for bytes that are
+  # not UTF-8; the absent continuation is `null` and the absent `index_full`
+  # is `false`.
+  defp render_query(%{status: true}, %{"type" => "result", "result" => status}) do
+    IO.write([ordered(Enum.map(@status_keys, &{&1, Map.get(status, &1)})), "\n"])
+    warn_if_full(Map.get(status, "index_full"))
   end
 
-  defp render_query(_flags, %{"type" => "result", "result" => %{"entries" => entries}}) do
-    entries
-    |> Enum.map(&%{session_id: decode_identity(&1["session_id"])})
-    |> Render.sessions()
+  defp render_query(_flags, %{"type" => "result", "result" => %{"entries" => entries} = page}) do
+    sessions =
+      Enum.map(entries, fn entry ->
+        ordered([
+          {"session_id", readable(entry["session_id"])},
+          {"placement_identity", readable(entry["placement_identity"])},
+          {"residency", entry["residency"]},
+          {"controlled", entry["controlled"]}
+        ])
+      end)
+
+    full = Map.get(page, "index_full", false)
+
+    IO.write([
+      ordered([
+        {"sessions", {:raw, ["[", Enum.intersperse(sessions, ","), "]"]}},
+        {"next_after_session_id", readable(Map.get(page, "next_after_session_id"))},
+        {"index_full", full}
+      ]),
+      "\n"
+    ])
+
+    warn_if_full(full)
   end
 
   defp render_query(_flags, record), do: {:error, refusal_text(record)}
@@ -947,6 +976,36 @@ defmodule LoopexCli.Live do
 
   defp refusal_text(%{"type" => "error", "code" => code}), do: "the daemon refused: #{code}"
   defp refusal_text(_record), do: "the daemon answered unexpectedly"
+
+  defp ordered(pairs) do
+    body =
+      Enum.map_intersperse(pairs, ",", fn
+        {key, {:raw, iodata}} -> [JSON.encode!(key), ":", iodata]
+        {key, value} -> [JSON.encode!(key), ":", JSON.encode!(value)]
+      end)
+
+    ["{", body, "}"]
+  end
+
+  defp readable(nil), do: nil
+
+  defp readable(encoded) do
+    case Wire.identity(encoded) do
+      {:ok, bytes} -> if String.valid?(bytes), do: bytes, else: encoded
+      :error -> encoded
+    end
+  end
+
+  defp warn_if_full(true) do
+    IO.puts(
+      :stderr,
+      "loopex: the daemon's index is full, so this listing may omit sessions this root contains"
+    )
+
+    :ok
+  end
+
+  defp warn_if_full(_not_full), do: :ok
 
   defp decode_identity(encoded) do
     {:ok, value} = Wire.identity(encoded)
