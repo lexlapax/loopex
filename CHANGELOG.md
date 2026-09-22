@@ -68,6 +68,9 @@ complete encoded queue and the daemon-wide output commitment; the connection
 process advances only nonblocking socket sends and releases a frame charge only
 after complete emission. Attachment succession reserves notice capacity plus
 one serially reusable reply slot inside the same four MiB connection ceiling.
+The reserve is derived from the maximal detached record and all 37 maximal
+legal predecessor replies: 496 notice bytes plus an 87,595-byte reply slot,
+for 88,091 bytes total. Literal lengths and frame digests pin every candidate.
 
 Add the daemon transport-closing barrier. Its owner-authenticated first phase
 freezes connection admission and the exact provisional and uninitialized
