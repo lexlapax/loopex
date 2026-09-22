@@ -503,15 +503,35 @@ defmodule LoopexDaemon.LeaseOwner do
         from: from
       }
 
-      if in_flight_resume?(state, command_id) do
-        case promote_resume_mutation(state, descriptor) do
-          {:joined, state} -> {:noreply, state}
-          {:error, reason, state} -> {:reply, {:error, reason}, state}
-          {:ok, state} -> {:noreply, state}
-        end
-      else
-        state = enqueue_mutation(state, descriptor)
-        {:noreply, continue_session_work(state)}
+      eligibility =
+        if resume_holder_gate?(state, descriptor, monotonic_ms()),
+          do: :eligible,
+          else: :ineligible
+
+      case ConnectionRegistry.prepare_resume(
+             state.registry,
+             origin_id,
+             state.session_id,
+             command_id,
+             state.owner_incarnation,
+             eligibility
+           ) do
+        {:ok, {:waiting, _primary_origin_id}} ->
+          Process.demonitor(descriptor.worker_monitor, [:flush])
+          Logger.debug("loopex daemon queued resume joined primary")
+          {:reply, {:ok, :admitted}, state}
+
+        {:ok, preparation} when preparation in [:prepared, :unreserved] ->
+          state = enqueue_mutation(state, descriptor)
+          {:noreply, continue_session_work(state)}
+
+        {:error, :activation_ceiling_reached} ->
+          state = enqueue_mutation(state, descriptor)
+          {:noreply, continue_session_work(state)}
+
+        {:error, reason} ->
+          Process.demonitor(descriptor.worker_monitor, [:flush])
+          {:reply, {:error, reason}, state}
       end
     else
       {:error, reason} -> {:reply, {:error, reason}, state}
@@ -746,6 +766,7 @@ defmodule LoopexDaemon.LeaseOwner do
            _operation -> false
          end) do
       {[{:mutation, %{worker: ^worker} = descriptor}], remaining} ->
+        cancel_prepared_resume(state, descriptor)
         GenServer.reply(descriptor.from, {:error, :ticket_unavailable})
         Logger.debug("loopex daemon queued mutation worker lost")
         {:noreply, continue_session_work(%{state | pending_operations: remaining})}
@@ -1078,12 +1099,18 @@ defmodule LoopexDaemon.LeaseOwner do
 
   defp resume_holder_gate?(_state, _descriptor, _now), do: false
 
-  defp in_flight_resume?(state, command_id) do
-    Enum.any?(state.in_flight, fn
-      {_origin_id, %{class: :session_resume, command_id: ^command_id}} -> true
-      _other -> false
-    end)
+  defp cancel_prepared_resume(state, %{class: :session_resume, origin_id: origin_id}) do
+    case ConnectionRegistry.cancel_prepared_resume(
+           state.registry,
+           origin_id,
+           state.owner_incarnation
+         ) do
+      :ok -> :ok
+      {:error, _reason} -> Logger.debug("loopex daemon prepared resume cleanup unavailable")
+    end
   end
+
+  defp cancel_prepared_resume(_state, _descriptor), do: :ok
 
   defp attached?(state, connection, connection_incarnation) do
     Enum.any?(state.attachments, fn

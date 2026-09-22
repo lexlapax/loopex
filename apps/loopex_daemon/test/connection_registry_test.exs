@@ -268,6 +268,7 @@ defmodule LoopexDaemon.ConnectionRegistryTest do
         succession_reservations: 0,
         active_sessions: 0,
         activation_reservations: 0,
+        activation_preparations: 0,
         activations_used: 0,
         activation_limit: 64,
         limit: 512

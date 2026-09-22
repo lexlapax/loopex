@@ -205,6 +205,46 @@ defmodule LoopexDaemon.ConnectionRegistry do
   end
 
   @doc false
+  @spec prepare_resume(
+          pid(),
+          origin_id(),
+          binary(),
+          binary(),
+          binary(),
+          :eligible | :ineligible
+        ) ::
+          {:ok, :prepared | :unreserved | {:waiting, origin_id()}}
+          | {:error,
+             :activation_ceiling_reached
+             | :activation_conflict
+             | :daemon_stopping
+             | :invalid_activation
+             | :owner_unavailable
+             | :registry_unavailable
+             | :relay_unavailable
+             | :ticket_unavailable}
+  def prepare_resume(
+        registry,
+        origin_id,
+        session_id,
+        command_id,
+        owner_incarnation,
+        eligibility
+      ) do
+    GenServer.call(
+      registry,
+      {:prepare_resume, origin_id, session_id, command_id, owner_incarnation, eligibility}
+    )
+  end
+
+  @doc false
+  @spec cancel_prepared_resume(pid(), origin_id(), binary()) ::
+          :ok | {:error, :owner_unavailable}
+  def cancel_prepared_resume(registry, origin_id, owner_incarnation) do
+    GenServer.call(registry, {:cancel_prepared_resume, origin_id, owner_incarnation})
+  end
+
+  @doc false
   @spec promote_resume(
           pid(),
           origin_id(),
@@ -353,6 +393,8 @@ defmodule LoopexDaemon.ConnectionRegistry do
            activation_bindings: %{},
            activation_origins: %{},
            activation_create_commands: %{},
+           activation_preparations: %{},
+           activation_preparation_monitors: %{},
            activation_promotions: %{},
            activation_promotion_bindings: %{},
            relay: nil,
@@ -753,6 +795,61 @@ defmodule LoopexDaemon.ConnectionRegistry do
     do: {:reply, {:error, :owner_mismatch}, state}
 
   def handle_call(
+        {:prepare_resume, origin_id, session_id, command_id, owner_incarnation, eligibility},
+        {owner, _tag},
+        state
+      ) do
+    with :ok <-
+           validate_resume_identity(
+             origin_id,
+             session_id,
+             command_id,
+             owner_incarnation,
+             eligibility
+           ),
+         {:ok, relay, relay_incarnation} <- bound_relay(state),
+         :ok <-
+           AdmissionRelay.authorize_resume_ticket(
+             relay,
+             origin_id,
+             relay_incarnation,
+             owner,
+             owner_incarnation
+           ) do
+      prepare_resume_call(
+        state,
+        relay,
+        relay_incarnation,
+        owner,
+        owner_incarnation,
+        origin_id,
+        session_id,
+        command_id,
+        eligibility
+      )
+    else
+      {:error, reason} -> {:reply, {:error, reason}, state}
+    end
+  end
+
+  def handle_call(
+        {:cancel_prepared_resume, origin_id, owner_incarnation},
+        {owner, _tag},
+        state
+      ) do
+    case Map.fetch(state.activation_preparations, origin_id) do
+      {:ok, %{owner: ^owner, owner_incarnation: ^owner_incarnation}} ->
+        {:reply, :ok, release_resume_preparation(state, origin_id)}
+
+      :error ->
+        {:reply, :ok, state}
+
+      _other ->
+        {:reply, {:error, :owner_unavailable}, state}
+    end
+  end
+
+  def handle_call(
         {:promote_resume, origin_id, session_id, command_id, owner_incarnation, eligibility,
          attached, control_refusal, capacity_refusal, task_fun},
         {owner, _tag},
@@ -960,6 +1057,7 @@ defmodule LoopexDaemon.ConnectionRegistry do
          Enum.count(state.rows, fn {_token, row} -> OutputBuffer.succession?(row.output) end),
        active_sessions: MapSet.size(state.activation_set),
        activation_reservations: map_size(state.activation_reservations),
+       activation_preparations: map_size(state.activation_preparations),
        activations_used:
          MapSet.size(state.activation_set) + map_size(state.activation_reservations),
        activation_limit: @activation_limit,
@@ -1038,6 +1136,16 @@ defmodule LoopexDaemon.ConnectionRegistry do
 
   def handle_info({:DOWN, monitor, :process, pid, _reason}, state) do
     cond do
+      origin_id = Map.get(state.activation_preparation_monitors, monitor) ->
+        case Map.get(state.activation_preparations, origin_id) do
+          %{owner: ^pid, owner_monitor: ^monitor} ->
+            Logger.debug("loopex daemon prepared resume owner lost")
+            {:noreply, release_resume_preparation(state, origin_id, false)}
+
+          _other ->
+            {:noreply, state}
+        end
+
       Map.has_key?(state.child_monitors, monitor) ->
         token = Map.fetch!(state.child_monitors, monitor)
         state = %{state | child_monitors: Map.delete(state.child_monitors, monitor)}
@@ -1567,6 +1675,203 @@ defmodule LoopexDaemon.ConnectionRegistry do
     end
   end
 
+  defp validate_resume_identity(
+         origin_id,
+         session_id,
+         command_id,
+         owner_incarnation,
+         eligibility
+       ) do
+    with :ok <- validate_activation_origin(origin_id),
+         {:ok, _key, _session_id, _create_command} <-
+           normalize_activation_binding({:resume, session_id, command_id}),
+         true <- valid_incarnation?(owner_incarnation),
+         true <- eligibility in [:eligible, :ineligible] do
+      :ok
+    else
+      _invalid -> {:error, :invalid_activation}
+    end
+  end
+
+  defp prepare_resume_call(
+         state,
+         _relay,
+         _relay_incarnation,
+         _owner,
+         _owner_incarnation,
+         _origin_id,
+         _session_id,
+         _command_id,
+         :ineligible
+       ),
+       do: {:reply, {:ok, :unreserved}, state}
+
+  defp prepare_resume_call(
+         state,
+         relay,
+         relay_incarnation,
+         owner,
+         owner_incarnation,
+         origin_id,
+         session_id,
+         command_id,
+         :eligible
+       ) do
+    case reserve_activation_binding(state, origin_id, {:resume, session_id, command_id}) do
+      {:ok, {:primary, reservation_ref}, state} ->
+        case retain_resume_preparation(
+               state,
+               owner,
+               owner_incarnation,
+               origin_id,
+               session_id,
+               command_id,
+               reservation_ref
+             ) do
+          {:ok, state} -> {:reply, {:ok, :prepared}, state}
+          {:error, reason} -> {:reply, {:error, reason}, state}
+        end
+
+      {:ok, {:duplicate, primary_origin_id, _reservation_ref}, state} ->
+        case AdmissionRelay.wait_for_ticket(
+               relay,
+               origin_id,
+               primary_origin_id,
+               relay_incarnation
+             ) do
+          {:ok, ^primary_origin_id} ->
+            Logger.debug("loopex daemon prepared resume joined primary")
+            {:reply, {:ok, {:waiting, primary_origin_id}}, state}
+
+          {:error, reason} ->
+            {:reply, {:error, reason}, state}
+        end
+
+      {:ok, :already_active, state} ->
+        {:reply, {:ok, :unreserved}, state}
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
+  end
+
+  defp retain_resume_preparation(
+         state,
+         owner,
+         owner_incarnation,
+         origin_id,
+         session_id,
+         command_id,
+         reservation_ref
+       ) do
+    case Map.fetch(state.activation_preparations, origin_id) do
+      {:ok,
+       %{
+         owner: ^owner,
+         owner_incarnation: ^owner_incarnation,
+         session_id: ^session_id,
+         command_id: ^command_id,
+         reservation_ref: ^reservation_ref
+       }} ->
+        {:ok, state}
+
+      {:ok, _other} ->
+        {:error, :activation_conflict}
+
+      :error ->
+        owner_monitor = Process.monitor(owner)
+
+        preparation = %{
+          owner: owner,
+          owner_incarnation: owner_incarnation,
+          owner_monitor: owner_monitor,
+          session_id: session_id,
+          command_id: command_id,
+          reservation_ref: reservation_ref
+        }
+
+        state =
+          state
+          |> put_in([:activation_preparations, origin_id], preparation)
+          |> put_in([:activation_preparation_monitors, owner_monitor], origin_id)
+
+        Logger.debug("loopex daemon resume activation prepared")
+        {:ok, state}
+    end
+  end
+
+  defp claim_resume_preparation(
+         state,
+         owner,
+         owner_incarnation,
+         origin_id,
+         session_id,
+         command_id,
+         reservation_ref
+       ) do
+    case Map.fetch(state.activation_preparations, origin_id) do
+      {:ok,
+       %{
+         owner: ^owner,
+         owner_incarnation: ^owner_incarnation,
+         session_id: ^session_id,
+         command_id: ^command_id,
+         reservation_ref: ^reservation_ref
+       } = preparation} ->
+        {:ok, drop_resume_preparation(state, origin_id, preparation, true)}
+
+      :error ->
+        {:ok, state}
+
+      _other ->
+        {:error, :owner_unavailable}
+    end
+  end
+
+  defp release_owned_resume_preparation(state, origin_id, owner, owner_incarnation) do
+    case Map.fetch(state.activation_preparations, origin_id) do
+      {:ok, %{owner: ^owner, owner_incarnation: ^owner_incarnation}} ->
+        {:ok, release_resume_preparation(state, origin_id)}
+
+      :error ->
+        {:ok, state}
+
+      _other ->
+        {:error, :owner_unavailable}
+    end
+  end
+
+  defp release_resume_preparation(state, origin_id, demonitor? \\ true) do
+    case Map.fetch(state.activation_preparations, origin_id) do
+      {:ok, preparation} ->
+        state = drop_resume_preparation(state, origin_id, preparation, demonitor?)
+
+        {:ok, state} =
+          resolve_activation_reservation(
+            state,
+            preparation.reservation_ref,
+            :no_activation,
+            nil
+          )
+
+        state
+
+      :error ->
+        state
+    end
+  end
+
+  defp drop_resume_preparation(state, origin_id, preparation, demonitor?) do
+    if demonitor?, do: Process.demonitor(preparation.owner_monitor, [:flush])
+
+    %{
+      state
+      | activation_preparations: Map.delete(state.activation_preparations, origin_id),
+        activation_preparation_monitors:
+          Map.delete(state.activation_preparation_monitors, preparation.owner_monitor)
+    }
+  end
+
   defp validate_resume_promotion(
          origin_id,
          session_id,
@@ -1669,15 +1974,21 @@ defmodule LoopexDaemon.ConnectionRegistry do
          _capacity_refusal,
          _task_fun
        ) do
-    refuse_resume(
-      state,
-      relay,
-      relay_incarnation,
-      owner,
-      owner_incarnation,
-      origin_id,
-      control_refusal
-    )
+    case release_owned_resume_preparation(state, origin_id, owner, owner_incarnation) do
+      {:ok, state} ->
+        refuse_resume(
+          state,
+          relay,
+          relay_incarnation,
+          owner,
+          owner_incarnation,
+          origin_id,
+          control_refusal
+        )
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
   end
 
   defp reserve_and_promote_resume(
@@ -1697,18 +2008,32 @@ defmodule LoopexDaemon.ConnectionRegistry do
        ) do
     case reserve_activation_binding(state, origin_id, {:resume, session_id, command_id}) do
       {:ok, {:primary, reservation_ref}, state} ->
-        promote_resume_primary(
-          state,
-          relay,
-          relay_incarnation,
-          owner,
-          owner_incarnation,
-          origin_id,
-          session_id,
-          command_id,
-          reservation_ref,
-          task_fun
-        )
+        case claim_resume_preparation(
+               state,
+               owner,
+               owner_incarnation,
+               origin_id,
+               session_id,
+               command_id,
+               reservation_ref
+             ) do
+          {:ok, state} ->
+            promote_resume_primary(
+              state,
+              relay,
+              relay_incarnation,
+              owner,
+              owner_incarnation,
+              origin_id,
+              session_id,
+              command_id,
+              reservation_ref,
+              task_fun
+            )
+
+          {:error, reason} ->
+            {:reply, {:error, reason}, state}
+        end
 
       {:ok, {:duplicate, primary_origin_id, _reservation_ref}, state} ->
         case AdmissionRelay.wait_for_ticket(

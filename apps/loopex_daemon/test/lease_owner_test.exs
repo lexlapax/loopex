@@ -1371,6 +1371,600 @@ defmodule LoopexDaemon.LeaseOwnerTest do
     stop_connection(holder, fixture.relay, holder_incarnation)
   end
 
+  test "distinct dormant resumes hold independent reservations while promotion is serial" do
+    fixture = start_fixture()
+    {holder, holder_incarnation, writer_epoch} = grant_first(fixture)
+    first = {holder_incarnation, 1, 1}
+    second = {holder_incarnation, 2, 1}
+    first_worker = start_ticket_worker(holder)
+    second_worker = start_ticket_worker(holder)
+
+    for {origin, worker} <- [{first, first_worker}, {second, second_worker}] do
+      assert {:ok, ^origin} =
+               open_mutation(fixture, holder, origin, :session_resume, worker)
+    end
+
+    parent = self()
+    first_release = make_ref()
+    second_release = make_ref()
+
+    first_result = %{
+      "type" => "result",
+      "method" => "session.resume",
+      "request_id" => "resume-distinct-first",
+      "result" => %{"session_id" => "session"}
+    }
+
+    second_result = %{
+      "type" => "result",
+      "method" => "session.resume",
+      "request_id" => "resume-distinct-second",
+      "result" => %{"session_id" => "session"}
+    }
+
+    assert {:ok, :admitted} =
+             invoke(holder, fn ->
+               LeaseOwner.resume(
+                 fixture.owner,
+                 first,
+                 "resume-distinct-first",
+                 "resume-distinct-command-one",
+                 holder_incarnation,
+                 writer_epoch,
+                 first_worker,
+                 fn ->
+                   send(parent, {:distinct_resume_task, :first, self()})
+
+                   receive do
+                     ^first_release -> {:accepted, :activated, first_result}
+                   end
+                 end
+               )
+             end)
+
+    assert_receive {:distinct_resume_task, :first, first_task}, 500
+    second_invoke = make_ref()
+
+    send(
+      holder,
+      {:invoke, self(), second_invoke,
+       fn ->
+         LeaseOwner.resume(
+           fixture.owner,
+           second,
+           "resume-distinct-second",
+           "resume-distinct-command-two",
+           holder_incarnation,
+           writer_epoch,
+           second_worker,
+           fn ->
+             send(parent, {:distinct_resume_task, :second, self()})
+
+             receive do
+               ^second_release -> {:accepted, :no_activation, second_result}
+             end
+           end
+         )
+       end}
+    )
+
+    eventually(fn -> ConnectionRegistry.status(fixture.registry).activation_preparations == 1 end)
+
+    assert %{
+             active_sessions: 0,
+             activation_reservations: 2,
+             activation_preparations: 1,
+             activations_used: 2
+           } = ConnectionRegistry.status(fixture.registry)
+
+    attacker =
+      Task.async(fn ->
+        ConnectionRegistry.promote_resume(
+          fixture.registry,
+          second,
+          fixture.session_id,
+          "resume-distinct-command-two",
+          fixture.owner_incarnation,
+          :ineligible,
+          false,
+          WireRecords.request_error("resume-distinct-second", "control_not_held"),
+          WireRecords.request_error("resume-distinct-second", "activation_ceiling_reached"),
+          fn -> {:refused, :no_activation, second_result} end
+        )
+      end)
+
+    assert {:error, :owner_unavailable} = Task.await(attacker)
+
+    assert %{activation_reservations: 2, activation_preparations: 1} =
+             ConnectionRegistry.status(fixture.registry)
+
+    assert %{in_flight: 1, queued_operations: 1} = LeaseOwner.status(fixture.owner)
+    refute_receive {:distinct_resume_task, :second, _task}, 40
+    refute_receive {:invoked, ^second_invoke, _result}, 40
+    send(first_task, first_release)
+
+    assert_receive {:connection_message, ^holder, {:relay_ticket_result, ^first, ^first_result}},
+                   500
+
+    assert_receive {:distinct_resume_task, :second, second_task}, 500
+    assert_receive {:invoked, ^second_invoke, {:ok, :admitted}}, 500
+
+    assert %{
+             active_sessions: 1,
+             activation_reservations: 1,
+             activation_preparations: 0,
+             activations_used: 2
+           } = ConnectionRegistry.status(fixture.registry)
+
+    send(second_task, second_release)
+
+    assert_receive {:connection_message, ^holder,
+                    {:relay_ticket_result, ^second, ^second_result}},
+                   500
+
+    assert %{active_sessions: 1, activation_reservations: 0, activations_used: 1} =
+             ConnectionRegistry.status(fixture.registry)
+
+    eventually(fn -> LeaseOwner.status(fixture.owner).in_flight == 0 end)
+    stop_connection(holder, fixture.relay, holder_incarnation)
+  end
+
+  test "queued resume worker loss releases only its prepared reservation" do
+    fixture = start_fixture()
+    {holder, holder_incarnation, writer_epoch} = grant_first(fixture)
+    first = {holder_incarnation, 1, 1}
+    queued = {holder_incarnation, 2, 1}
+    first_worker = start_ticket_worker(holder)
+    queued_worker = start_ticket_worker(holder)
+
+    for {origin, worker} <- [{first, first_worker}, {queued, queued_worker}] do
+      assert {:ok, ^origin} =
+               open_mutation(fixture, holder, origin, :session_resume, worker)
+    end
+
+    parent = self()
+    release = make_ref()
+    first_result = %{"operation" => "resume", "status" => "accepted"}
+
+    assert {:ok, :admitted} =
+             invoke(holder, fn ->
+               LeaseOwner.resume(
+                 fixture.owner,
+                 first,
+                 "resume-worker-primary",
+                 "resume-worker-command-one",
+                 holder_incarnation,
+                 writer_epoch,
+                 first_worker,
+                 fn ->
+                   send(parent, {:resume_worker_primary, self()})
+
+                   receive do
+                     ^release -> {:accepted, :activated, first_result}
+                   end
+                 end
+               )
+             end)
+
+    assert_receive {:resume_worker_primary, first_task}, 500
+    queued_invoke = make_ref()
+
+    send(
+      holder,
+      {:invoke, self(), queued_invoke,
+       fn ->
+         LeaseOwner.resume(
+           fixture.owner,
+           queued,
+           "resume-worker-queued",
+           "resume-worker-command-two",
+           holder_incarnation,
+           writer_epoch,
+           queued_worker,
+           fn ->
+             send(parent, :unexpected_queued_resume_task)
+             {:accepted, :no_activation, %{"unexpected" => true}}
+           end
+         )
+       end}
+    )
+
+    eventually(fn -> ConnectionRegistry.status(fixture.registry).activation_preparations == 1 end)
+
+    assert %{activation_reservations: 2, activation_preparations: 1} =
+             ConnectionRegistry.status(fixture.registry)
+
+    queued_worker_monitor = Process.monitor(queued_worker)
+    Process.exit(queued_worker, :kill)
+    assert_receive {:DOWN, ^queued_worker_monitor, :process, ^queued_worker, :killed}, 500
+    assert_receive {:invoked, ^queued_invoke, {:error, :ticket_unavailable}}, 500
+
+    eventually(fn ->
+      match?(
+        %{activation_reservations: 1, activation_preparations: 0},
+        ConnectionRegistry.status(fixture.registry)
+      )
+    end)
+
+    assert_receive {:connection_message, ^holder, {:relay_ticket_failed, ^queued, :worker_lost}},
+                   500
+
+    refute_receive :unexpected_queued_resume_task, 40
+    send(first_task, release)
+
+    assert_receive {:connection_message, ^holder, {:relay_ticket_result, ^first, ^first_result}},
+                   500
+
+    eventually(fn -> ConnectionRegistry.status(fixture.registry).activation_reservations == 0 end)
+    stop_connection(holder, fixture.relay, holder_incarnation)
+  end
+
+  test "lease-owner loss releases queued resume preparations without disturbing promotion" do
+    fixture = start_fixture()
+    {holder, holder_incarnation, writer_epoch} = grant_first(fixture)
+    first = {holder_incarnation, 1, 1}
+    queued = {holder_incarnation, 2, 1}
+    first_worker = start_ticket_worker(holder)
+    queued_worker = start_ticket_worker(holder)
+
+    for {origin, worker} <- [{first, first_worker}, {queued, queued_worker}] do
+      assert {:ok, ^origin} =
+               open_mutation(fixture, holder, origin, :session_resume, worker)
+    end
+
+    parent = self()
+    release = make_ref()
+    first_result = %{"operation" => "resume", "status" => "accepted"}
+
+    assert {:ok, :admitted} =
+             invoke(holder, fn ->
+               LeaseOwner.resume(
+                 fixture.owner,
+                 first,
+                 "resume-owner-primary",
+                 "resume-owner-command-one",
+                 holder_incarnation,
+                 writer_epoch,
+                 first_worker,
+                 fn ->
+                   send(parent, {:resume_owner_primary, self()})
+
+                   receive do
+                     ^release -> {:accepted, :activated, first_result}
+                   end
+                 end
+               )
+             end)
+
+    assert_receive {:resume_owner_primary, first_task}, 500
+    queued_invoke = make_ref()
+
+    send(
+      holder,
+      {:invoke, self(), queued_invoke,
+       fn ->
+         catch_exit(
+           LeaseOwner.resume(
+             fixture.owner,
+             queued,
+             "resume-owner-queued",
+             "resume-owner-command-two",
+             holder_incarnation,
+             writer_epoch,
+             queued_worker,
+             fn ->
+               send(parent, :unexpected_owner_loss_resume_task)
+               {:accepted, :no_activation, %{"unexpected" => true}}
+             end
+           )
+         )
+       end}
+    )
+
+    eventually(fn -> ConnectionRegistry.status(fixture.registry).activation_preparations == 1 end)
+
+    assert %{activation_reservations: 2, activation_preparations: 1} =
+             ConnectionRegistry.status(fixture.registry)
+
+    stop_supervised!(LeaseOwner)
+
+    assert_receive {:relay_owner_lost, relay, session_id, owner, owner_incarnation, [^queued]},
+                   500
+
+    assert relay == fixture.relay
+    assert session_id == fixture.session_id
+    assert owner == fixture.owner
+    assert owner_incarnation == fixture.owner_incarnation
+
+    assert_receive {:relay_owner_loss_ready, ^relay, ^owner, ^owner_incarnation}, 500
+
+    eventually(fn ->
+      match?(
+        %{activation_reservations: 1, activation_preparations: 0},
+        ConnectionRegistry.status(fixture.registry)
+      )
+    end)
+
+    assert :ok =
+             AdmissionRelay.settle_owner_loss(
+               fixture.relay,
+               fixture.session_id,
+               fixture.owner,
+               fixture.owner_incarnation,
+               [queued]
+             )
+
+    assert_receive {:invoked, ^queued_invoke, _result}, 500
+    refute_receive {:connection_message, ^holder, {:relay_ticket_failed, ^queued, _reason}}, 40
+    assert %{tickets: 1, owner_losses: 0} = AdmissionRelay.status(fixture.relay)
+    refute_receive :unexpected_owner_loss_resume_task, 40
+
+    send(first_task, release)
+
+    assert_receive {:connection_message, ^holder, {:relay_ticket_result, ^first, ^first_result}},
+                   500
+
+    eventually(fn -> ConnectionRegistry.status(fixture.registry).activation_reservations == 0 end)
+    stop_connection(holder, fixture.relay, holder_incarnation)
+  end
+
+  test "the admission deadline releases a queued resume preparation" do
+    fixture = start_fixture(admission_wait_ms: 20)
+    {holder, holder_incarnation, writer_epoch} = grant_first(fixture)
+    first = {holder_incarnation, 1, 1}
+    queued = {holder_incarnation, 2, 1}
+    first_worker = start_ticket_worker(holder)
+    queued_worker = start_ticket_worker(holder)
+
+    for {origin, worker} <- [{first, first_worker}, {queued, queued_worker}] do
+      assert {:ok, ^origin} =
+               open_mutation(fixture, holder, origin, :session_resume, worker)
+    end
+
+    parent = self()
+    release = make_ref()
+    first_result = %{"operation" => "resume", "status" => "accepted"}
+
+    assert {:ok, :admitted} =
+             invoke(holder, fn ->
+               LeaseOwner.resume(
+                 fixture.owner,
+                 first,
+                 "resume-cut-primary",
+                 "resume-cut-command-one",
+                 holder_incarnation,
+                 writer_epoch,
+                 first_worker,
+                 fn ->
+                   send(parent, {:resume_cut_primary, self()})
+
+                   receive do
+                     ^release -> {:accepted, :activated, first_result}
+                   end
+                 end
+               )
+             end)
+
+    assert_receive {:resume_cut_primary, first_task}, 500
+    queued_invoke = make_ref()
+
+    send(
+      holder,
+      {:invoke, self(), queued_invoke,
+       fn ->
+         LeaseOwner.resume(
+           fixture.owner,
+           queued,
+           "resume-cut-queued",
+           "resume-cut-command-two",
+           holder_incarnation,
+           writer_epoch,
+           queued_worker,
+           fn ->
+             send(parent, :unexpected_cut_resume_task)
+             {:accepted, :no_activation, %{"unexpected" => true}}
+           end
+         )
+       end}
+    )
+
+    eventually(fn -> ConnectionRegistry.status(fixture.registry).activation_preparations == 1 end)
+    cut_ref = make_ref()
+    send(fixture.relay, {:relay_barrier, cut_ref, :cut})
+    assert_receive {:relay_barrier_ack, ^cut_ref, :cut, _payload}, 500
+
+    assert_receive {:invoked, ^queued_invoke, {:error, :ticket_unavailable}}, 500
+
+    assert_receive {:connection_message, ^holder,
+                    {:relay_ticket_cancelled, ^queued, :daemon_stopping}},
+                   500
+
+    eventually(fn ->
+      match?(
+        %{activation_reservations: 1, activation_preparations: 0},
+        ConnectionRegistry.status(fixture.registry)
+      )
+    end)
+
+    refute_receive :unexpected_cut_resume_task, 40
+    send(first_task, release)
+
+    assert_receive {:connection_message, ^holder, {:relay_ticket_result, ^first, ^first_result}},
+                   500
+
+    eventually(fn -> ConnectionRegistry.status(fixture.registry).activation_reservations == 0 end)
+    stop_connection(holder, fixture.relay, holder_incarnation)
+  end
+
+  test "connection loss releases a queued resume preparation and retains promoted accounting" do
+    fixture = start_fixture()
+    relay = fixture.relay
+    {holder, holder_incarnation, writer_epoch} = grant_first(fixture)
+    first = {holder_incarnation, 1, 1}
+    queued = {holder_incarnation, 2, 1}
+    first_worker = start_ticket_worker(holder)
+    queued_worker = start_ticket_worker(holder)
+
+    for {origin, worker} <- [{first, first_worker}, {queued, queued_worker}] do
+      assert {:ok, ^origin} =
+               open_mutation(fixture, holder, origin, :session_resume, worker)
+    end
+
+    parent = self()
+    release = make_ref()
+    first_result = %{"operation" => "resume", "status" => "accepted"}
+
+    assert {:ok, :admitted} =
+             invoke(holder, fn ->
+               LeaseOwner.resume(
+                 fixture.owner,
+                 first,
+                 "resume-connection-primary",
+                 "resume-connection-command-one",
+                 holder_incarnation,
+                 writer_epoch,
+                 first_worker,
+                 fn ->
+                   send(parent, {:resume_connection_primary, self()})
+
+                   receive do
+                     ^release -> {:accepted, :activated, first_result}
+                   end
+                 end
+               )
+             end)
+
+    assert_receive {:resume_connection_primary, first_task}, 500
+
+    send(
+      holder,
+      {:invoke, self(), make_ref(),
+       fn ->
+         LeaseOwner.resume(
+           fixture.owner,
+           queued,
+           "resume-connection-queued",
+           "resume-connection-command-two",
+           holder_incarnation,
+           writer_epoch,
+           queued_worker,
+           fn ->
+             send(parent, :unexpected_connection_loss_resume_task)
+             {:accepted, :no_activation, %{"unexpected" => true}}
+           end
+         )
+       end}
+    )
+
+    eventually(fn -> ConnectionRegistry.status(fixture.registry).activation_preparations == 1 end)
+    holder_monitor = Process.monitor(holder)
+    Process.exit(holder, :kill)
+    assert_receive {:DOWN, ^holder_monitor, :process, ^holder, :killed}, 500
+
+    eventually(fn ->
+      match?(
+        %{activation_reservations: 1, activation_preparations: 0},
+        ConnectionRegistry.status(fixture.registry)
+      )
+    end)
+
+    refute_receive :unexpected_connection_loss_resume_task, 40
+    refute_receive {:relay_connection_retired, ^relay, ^holder_incarnation}, 40
+    send(first_task, release)
+
+    eventually(fn -> ConnectionRegistry.status(fixture.registry).activation_reservations == 0 end)
+    assert_receive {:relay_connection_retired, ^relay, ^holder_incarnation}, 500
+  end
+
+  test "queued resume rechecks an expired lease before using its reservation" do
+    fixture = start_fixture(lease_term_ms: 80)
+    {holder, holder_incarnation, writer_epoch} = grant_first(fixture, 80)
+    first = {holder_incarnation, 1, 1}
+    queued = {holder_incarnation, 2, 1}
+    first_worker = start_ticket_worker(holder)
+    queued_worker = start_ticket_worker(holder)
+
+    for {origin, worker} <- [{first, first_worker}, {queued, queued_worker}] do
+      assert {:ok, ^origin} =
+               open_mutation(fixture, holder, origin, :session_resume, worker)
+    end
+
+    parent = self()
+    release = make_ref()
+    first_result = %{"operation" => "resume", "status" => "refused"}
+
+    assert {:ok, :admitted} =
+             invoke(holder, fn ->
+               LeaseOwner.resume(
+                 fixture.owner,
+                 first,
+                 "resume-expiry-primary",
+                 "resume-expiry-command-one",
+                 holder_incarnation,
+                 writer_epoch,
+                 first_worker,
+                 fn ->
+                   send(parent, {:resume_expiry_primary, self()})
+
+                   receive do
+                     ^release -> {:refused, :no_activation, first_result}
+                   end
+                 end
+               )
+             end)
+
+    assert_receive {:resume_expiry_primary, first_task}, 500
+    queued_invoke = make_ref()
+
+    send(
+      holder,
+      {:invoke, self(), queued_invoke,
+       fn ->
+         LeaseOwner.resume(
+           fixture.owner,
+           queued,
+           "resume-expiry-queued",
+           "resume-expiry-command-two",
+           holder_incarnation,
+           writer_epoch,
+           queued_worker,
+           fn ->
+             send(parent, :unexpected_expired_resume_task)
+             {:accepted, :activated, %{"unexpected" => true}}
+           end
+         )
+       end}
+    )
+
+    eventually(fn -> ConnectionRegistry.status(fixture.registry).activation_preparations == 1 end)
+
+    assert %{activation_reservations: 2, activation_preparations: 1} =
+             ConnectionRegistry.status(fixture.registry)
+
+    Process.sleep(90)
+    send(first_task, release)
+
+    assert_receive {:connection_message, ^holder, {:relay_ticket_result, ^first, ^first_result}},
+                   500
+
+    assert_receive {:invoked, ^queued_invoke, {:ok, :completed}}, 500
+    refused = WireRecords.request_error("resume-expiry-queued", "control_not_held")
+
+    assert_receive {:connection_message, ^holder, {:relay_ticket_result, ^queued, ^refused}},
+                   500
+
+    refute_receive :unexpected_expired_resume_task, 40
+
+    assert %{
+             active_sessions: 0,
+             activation_reservations: 0,
+             activation_preparations: 0,
+             activations_used: 0
+           } = ConnectionRegistry.status(fixture.registry)
+
+    stop_connection(holder, fixture.relay, holder_incarnation)
+  end
+
   defp start_fixture(options \\ []) do
     daemon_incarnation = incarnation()
     session_id = Keyword.get(options, :session_id, "session")
@@ -1378,7 +1972,9 @@ defmodule LoopexDaemon.LeaseOwnerTest do
     relay =
       start_supervised!(
         {AdmissionRelay,
-         owner: self(), owner_incarnation: daemon_incarnation, admission_wait_ms: 1_000}
+         owner: self(),
+         owner_incarnation: daemon_incarnation,
+         admission_wait_ms: Keyword.get(options, :admission_wait_ms, 1_000)}
       )
 
     registry =

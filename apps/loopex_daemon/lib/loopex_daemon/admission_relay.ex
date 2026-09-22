@@ -401,6 +401,28 @@ defmodule LoopexDaemon.AdmissionRelay do
   end
 
   @doc false
+  @spec authorize_resume_ticket(pid(), origin_id(), binary(), pid(), binary()) ::
+          :ok
+          | {:error,
+             :daemon_stopping
+             | :owner_unavailable
+             | :registry_unavailable
+             | :ticket_unavailable}
+  def authorize_resume_ticket(
+        relay,
+        origin_id,
+        registry_incarnation,
+        owner,
+        owner_incarnation
+      ) do
+    GenServer.call(
+      relay,
+      {:authorize_resume_ticket, origin_id, registry_incarnation, owner, owner_incarnation},
+      @control_timeout_ms
+    )
+  end
+
+  @doc false
   @spec refuse_resume_ticket(
           pid(),
           origin_id(),
@@ -1260,6 +1282,23 @@ defmodule LoopexDaemon.AdmissionRelay do
       select_registry_refusal(state, ticket, from, caller, registry_incarnation, result)
     else
       false -> {:reply, {:error, :invalid_result}, state}
+      {:error, reason} -> {:reply, {:error, reason}, state}
+    end
+  end
+
+  def handle_call(
+        {:authorize_resume_ticket, origin_id, registry_incarnation, owner, owner_incarnation},
+        {caller, _tag},
+        state
+      ) do
+    state = expire_if_due(state)
+
+    with :ok <- promotion_admitted(state, origin_id),
+         :ok <- authenticate_registry(state, caller, registry_incarnation),
+         {:ok, %{class: :session_resume} = ticket} <- promotable_ticket(state, origin_id),
+         :ok <- authenticate_ticket_owner(state, ticket, owner, owner_incarnation) do
+      {:reply, :ok, state}
+    else
       {:error, reason} -> {:reply, {:error, reason}, state}
     end
   end

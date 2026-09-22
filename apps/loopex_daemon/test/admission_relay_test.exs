@@ -1537,6 +1537,39 @@ defmodule LoopexDaemon.AdmissionRelayTest do
                )
              end)
 
+    assert {:error, :owner_unavailable} =
+             invoke(registry, fn ->
+               AdmissionRelay.authorize_resume_ticket(
+                 relay,
+                 origin,
+                 registry_incarnation,
+                 owner,
+                 incarnation()
+               )
+             end)
+
+    assert {:error, :registry_unavailable} =
+             invoke(owner, fn ->
+               AdmissionRelay.authorize_resume_ticket(
+                 relay,
+                 origin,
+                 registry_incarnation,
+                 owner,
+                 owner_incarnation
+               )
+             end)
+
+    assert :ok =
+             invoke(registry, fn ->
+               AdmissionRelay.authorize_resume_ticket(
+                 relay,
+                 origin,
+                 registry_incarnation,
+                 owner,
+                 owner_incarnation
+               )
+             end)
+
     assert {:ok, ^origin} =
              invoke(registry, fn ->
                AdmissionRelay.promote_resume_ticket(
