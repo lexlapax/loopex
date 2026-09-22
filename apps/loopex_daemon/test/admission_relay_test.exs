@@ -1411,8 +1411,341 @@ defmodule LoopexDaemon.AdmissionRelayTest do
     stop_connection(connection, relay, incarnation)
   end
 
+  test "an actor-bound lease permit dispatches only to its exact owner" do
+    relay = start_relay()
+    owner = start_actor()
+    owner_incarnation = incarnation()
+
+    assert :ok =
+             AdmissionRelay.register_lease_owner(
+               relay,
+               "session",
+               owner,
+               owner_incarnation
+             )
+
+    connection_incarnation = incarnation()
+    connection = start_connection(relay, connection_incarnation)
+    origin = {connection_incarnation, 0, 1}
+    {worker, worker_incarnation} = start_lease_worker(connection, origin)
+    worker_monitor = Process.monitor(worker)
+
+    assert {:ok, ^origin} =
+             AdmissionRelay.open_lease_permit(
+               relay,
+               connection,
+               origin,
+               :session_acquire_control,
+               "session",
+               owner,
+               owner_incarnation,
+               worker,
+               worker_incarnation
+             )
+
+    assert {:error, :invalid_actor} =
+             AdmissionRelay.claim_lease_permit(relay, origin, owner_incarnation)
+
+    assert :ok =
+             invoke(owner, fn ->
+               AdmissionRelay.claim_lease_permit(relay, origin, owner_incarnation)
+             end)
+
+    assert_receive {:lease_worker_go, ^worker, ^origin}, 500
+    assert_receive {:DOWN, ^worker_monitor, :process, ^worker, :normal}, 500
+
+    result = %{"writer_epoch" => "epoch", "expires_in_ms" => 30_000, "renewed" => true}
+
+    assert :ok =
+             invoke(owner, fn ->
+               AdmissionRelay.complete_lease_permit(
+                 relay,
+                 origin,
+                 owner_incarnation,
+                 result
+               )
+             end)
+
+    assert_receive {:connection_message, ^connection, {:relay_permit_result, ^origin, ^result}},
+                   500
+
+    eventually(fn -> AdmissionRelay.status(relay).permits == 0 end)
+    stop_connection(connection, relay, connection_incarnation)
+  end
+
+  test "a fresh acquisition is bound to the daemon actor and start reference" do
+    daemon_incarnation = incarnation()
+    relay = start_relay(owner_incarnation: daemon_incarnation)
+    connection_incarnation = incarnation()
+    connection = start_connection(relay, connection_incarnation)
+    origin = {connection_incarnation, 0, 1}
+    start_op_ref = make_ref()
+    {worker, worker_incarnation} = start_lease_worker(connection, origin)
+
+    assert {:error, :invalid_actor} =
+             AdmissionRelay.open_lease_permit(
+               relay,
+               connection,
+               origin,
+               :session_acquire_control,
+               "session",
+               self(),
+               incarnation(),
+               worker,
+               worker_incarnation,
+               make_ref()
+             )
+
+    assert {:ok, ^origin} =
+             AdmissionRelay.open_lease_permit(
+               relay,
+               connection,
+               origin,
+               :session_acquire_control,
+               "session",
+               self(),
+               daemon_incarnation,
+               worker,
+               worker_incarnation,
+               start_op_ref
+             )
+
+    assert {:error, :invalid_actor} =
+             AdmissionRelay.claim_lease_permit(
+               relay,
+               origin,
+               daemon_incarnation,
+               make_ref()
+             )
+
+    assert :ok =
+             AdmissionRelay.claim_lease_permit(
+               relay,
+               origin,
+               daemon_incarnation,
+               start_op_ref
+             )
+
+    assert_receive {:lease_worker_go, ^worker, ^origin}, 500
+
+    result = %{"writer_epoch" => "fresh", "expires_in_ms" => 30_000}
+
+    assert :ok =
+             AdmissionRelay.complete_lease_permit(
+               relay,
+               origin,
+               daemon_incarnation,
+               result
+             )
+
+    assert_receive {:connection_message, ^connection, {:relay_permit_result, ^origin, ^result}},
+                   500
+
+    eventually(fn -> AdmissionRelay.status(relay).permits == 0 end)
+    stop_connection(connection, relay, connection_incarnation)
+  end
+
+  test "connection loss selects one retained lease disposition" do
+    relay = start_relay()
+    owner = start_actor()
+    owner_incarnation = incarnation()
+
+    assert :ok =
+             AdmissionRelay.register_lease_owner(
+               relay,
+               "session",
+               owner,
+               owner_incarnation
+             )
+
+    connection_incarnation = incarnation()
+    connection = start_connection(relay, connection_incarnation)
+    origin = {connection_incarnation, 0, 1}
+    {worker, worker_incarnation} = start_lease_worker(connection, origin, :hold)
+    worker_monitor = Process.monitor(worker)
+
+    assert {:ok, ^origin} =
+             AdmissionRelay.open_lease_permit(
+               relay,
+               connection,
+               origin,
+               :session_release_control,
+               "session",
+               owner,
+               owner_incarnation,
+               worker,
+               worker_incarnation
+             )
+
+    connection_monitor = Process.monitor(connection)
+    Process.exit(connection, :kill)
+    assert_receive {:DOWN, ^connection_monitor, :process, ^connection, :killed}, 500
+
+    assert_receive {:relay_lease_disposition, ^relay, ^origin, :connection_lost, settlement_ref,
+                    :session_release_control, "session", ^owner, ^owner_incarnation, nil},
+                   500
+
+    assert_receive {:DOWN, ^worker_monitor, :process, ^worker, worker_reason}, 500
+    assert worker_reason in [:normal, :killed]
+
+    assert {:error, :permit_unavailable} =
+             AdmissionRelay.settle_lease_disposition(
+               relay,
+               origin,
+               :connection_lost,
+               make_ref()
+             )
+
+    assert :ok =
+             AdmissionRelay.settle_lease_disposition(
+               relay,
+               origin,
+               :connection_lost,
+               settlement_ref
+             )
+
+    assert_receive {:relay_connection_retired, ^relay, ^connection_incarnation}, 500
+  end
+
+  test "lease owner loss claims actor-bound permits with mutation origins" do
+    relay = start_relay()
+    owner = start_actor()
+    owner_incarnation = incarnation()
+    binding = {owner, owner_incarnation}
+
+    assert :ok =
+             AdmissionRelay.register_lease_owner(
+               relay,
+               "session",
+               owner,
+               owner_incarnation
+             )
+
+    connection_incarnation = incarnation()
+    connection = start_connection(relay, connection_incarnation)
+    permit_origin = {connection_incarnation, 0, 1}
+    ticket_origin = {connection_incarnation, 1, 1}
+    {worker, worker_incarnation} = start_lease_worker(connection, permit_origin, :hold)
+    worker_monitor = Process.monitor(worker)
+
+    assert {:ok, ^permit_origin} =
+             AdmissionRelay.open_lease_permit(
+               relay,
+               connection,
+               permit_origin,
+               :session_release_control,
+               "session",
+               owner,
+               owner_incarnation,
+               worker,
+               worker_incarnation
+             )
+
+    assert {:ok, ^ticket_origin} =
+             invoke(connection, fn ->
+               AdmissionRelay.open_ticket(
+                 relay,
+                 ticket_origin,
+                 :session_prompt,
+                 "session",
+                 binding
+               )
+             end)
+
+    Process.exit(owner, :kill)
+
+    assert_receive {:relay_owner_lost, ^relay, "session", ^owner, ^owner_incarnation, origins},
+                   500
+
+    assert origins == [permit_origin, ticket_origin]
+    assert_receive {:DOWN, ^worker_monitor, :process, ^worker, :killed}, 500
+    assert_receive {:relay_owner_loss_ready, ^relay, ^owner, ^owner_incarnation}, 500
+
+    assert :ok =
+             AdmissionRelay.settle_owner_loss(
+               relay,
+               "session",
+               owner,
+               owner_incarnation,
+               origins
+             )
+
+    assert %{owner_losses: 0, permits: 0, tickets: 0} = AdmissionRelay.status(relay)
+    stop_connection(connection, relay, connection_incarnation)
+  end
+
+  test "a daemon-selected lease result wins a later connection loss" do
+    relay = start_relay()
+    owner = start_actor()
+    owner_incarnation = incarnation()
+
+    assert :ok =
+             AdmissionRelay.register_lease_owner(
+               relay,
+               "session",
+               owner,
+               owner_incarnation
+             )
+
+    connection_incarnation = incarnation()
+    connection = start_connection(relay, connection_incarnation)
+    origin = {connection_incarnation, 0, 1}
+    {worker, worker_incarnation} = start_lease_worker(connection, origin)
+    worker_monitor = Process.monitor(worker)
+
+    assert {:ok, ^origin} =
+             AdmissionRelay.open_lease_permit(
+               relay,
+               connection,
+               origin,
+               :session_release_control,
+               "session",
+               owner,
+               owner_incarnation,
+               worker,
+               worker_incarnation
+             )
+
+    assert :ok =
+             invoke(owner, fn ->
+               AdmissionRelay.claim_lease_permit(relay, origin, owner_incarnation)
+             end)
+
+    assert_receive {:lease_worker_go, ^worker, ^origin}, 500
+    assert_receive {:DOWN, ^worker_monitor, :process, ^worker, :normal}, 500
+
+    settlement_ref = make_ref()
+    result = %{"released" => true}
+
+    assert :ok =
+             AdmissionRelay.select_lease_result(
+               relay,
+               origin,
+               owner,
+               owner_incarnation,
+               settlement_ref,
+               result
+             )
+
+    connection_monitor = Process.monitor(connection)
+    Process.exit(connection, :kill)
+    assert_receive {:DOWN, ^connection_monitor, :process, ^connection, :killed}, 500
+
+    refute_receive {:relay_lease_disposition, ^relay, ^origin, :connection_lost, _, _, _, _, _,
+                    _},
+                   40
+
+    assert :ok = AdmissionRelay.settle_lease_result(relay, origin, settlement_ref)
+    assert_receive {:relay_connection_retired, ^relay, ^connection_incarnation}, 500
+  end
+
   defp start_relay(options \\ []) do
-    options = Keyword.merge([owner: self(), admission_wait_ms: 1_000], options)
+    options =
+      Keyword.merge(
+        [owner: self(), owner_incarnation: incarnation(), admission_wait_ms: 1_000],
+        options
+      )
+
     start_supervised!({AdmissionRelay, options})
   end
 
@@ -1510,6 +1843,34 @@ defmodule LoopexDaemon.AdmissionRelayTest do
 
     assert_receive {:ticket_worker_ready, ^worker}, 500
     worker
+  end
+
+  defp start_lease_worker(connection, origin, mode \\ :exit) do
+    parent = self()
+    worker_incarnation = incarnation()
+
+    worker =
+      spawn(fn ->
+        connection_monitor = Process.monitor(connection)
+        send(parent, {:lease_worker_ready, self()})
+
+        receive do
+          {:relay_go, ^origin, ^worker_incarnation} ->
+            send(parent, {:lease_worker_go, self(), origin})
+
+            if mode == :hold do
+              receive do
+                :finish -> :ok
+              end
+            end
+
+          {:DOWN, ^connection_monitor, :process, ^connection, _reason} ->
+            :ok
+        end
+      end)
+
+    assert_receive {:lease_worker_ready, ^worker}, 500
+    {worker, worker_incarnation}
   end
 
   defp ticket_worker_loop(parent, connection, connection_monitor) do
