@@ -16,16 +16,16 @@ its last `Closed` row identifies the last closed product baseline.
 <!-- loopex:current-status:start -->
 ## Current Status
 
-**Revision status:** Closed milestone product baseline; active milestone `M5` is accepted; no next candidate is recorded.
+**Revision status:** Closed milestone product baseline; active milestone `M5` is accepted; next candidate `M6` is open.
 
 | Field | Value |
 | --- | --- |
 | Integrated phase | Closed milestone product baseline |
 | Last closed product checkpoint | `M4` — 2026-09-19 |
-| Blockers | None; `M5` is accepted and implementation may proceed |
-| Authorized work | Implementation inside the accepted `M5` plan pair, landing on `main` in small reviewed changes |
-| Next maintainer decision | None until `M5` is ready for independent review |
-| Next transition | Move `M5` to In progress and implement the accepted outcomes with `bash scripts/check.sh` green; the completed tested commit then moves it to In review |
+| Blockers | None for `M5` delivery; `M6` cannot be accepted or implemented until `M5` closes; `M6` waits on ADR 0036, ADR 0037, and ADR 0038 before the outcomes that depend on them |
+| Authorized work | Implementation inside the accepted `M5` plan pair, landing on `main` in small reviewed changes; planning and review for Open `M6`, with no `M6` product implementation |
+| Next maintainer decision | None until `M5` is ready for independent review; `M6` cannot be accepted before `M5` closes; disposition [ADR 0036](../adr/0036-daemon-grade-store-engine-and-migration.md#concept), [ADR 0037](../adr/0037-host-configuration-and-path-discovery.md#concept), and [ADR 0038](../adr/0038-installed-distribution-and-release-artifact.md#concept) |
+| Next transition | Complete `M5`, move it to In progress, then make its tested candidate by moving it to In review; run the closure matrix and independent review, close it, then accept or reject `M6` |
 | Validation | `bash scripts/check-bootstrap.sh` |
 <!-- loopex:current-status:end -->
 
@@ -138,6 +138,7 @@ representable.
 | `M3` | Closed | [concept](M3.md) | [technical depth](M3-technical.md) | [gate](M3-gate.md) |
 | `M4` | Closed | [concept](M4.md) | [technical depth](M4-technical.md) | [gate](M4-gate.md) |
 | `M5` | Accepted | [concept](M5.md) | [technical depth](M5-technical.md) | — |
+| `M6` | Open | [concept](M6.md) | [technical depth](M6-technical.md) | — |
 <!-- loopex:milestone-register:end -->
 
 When a plan exists, the Concept and Technical depth columns link their exact

@@ -81,6 +81,9 @@ pairing, link, review, code-documentation, and enforcement contracts.
 | 0033 — collaboration: controller lease and takeover | [Decision](adr/0033-collaboration-controller-lease-and-takeover.md#concept) | [Technical depth](adr/0033-collaboration-controller-lease-and-takeover-technical.md#technical-depth) |
 | 0034 — provider credential handoff over the bootstrap channel | [Decision](adr/0034-provider-credential-handoff-over-bootstrap-channel.md#concept) | [Technical depth](adr/0034-provider-credential-handoff-over-bootstrap-channel-technical.md#technical-depth) |
 | 0035 — typed decision models as policy inputs | [Decision](adr/0035-typed-decision-models-as-policy-inputs.md#concept) | [Technical depth](adr/0035-typed-decision-models-as-policy-inputs-technical.md#technical-depth) |
+| 0036 — daemon-grade store engine and migration | [Decision](adr/0036-daemon-grade-store-engine-and-migration.md#concept) | [Technical depth](adr/0036-daemon-grade-store-engine-and-migration-technical.md#technical-depth) |
+| 0037 — host configuration and path discovery | [Decision](adr/0037-host-configuration-and-path-discovery.md#concept) | [Technical depth](adr/0037-host-configuration-and-path-discovery-technical.md#technical-depth) |
+| 0038 — installed distribution and release artifact | [Decision](adr/0038-installed-distribution-and-release-artifact.md#concept) | [Technical depth](adr/0038-installed-distribution-and-release-artifact-technical.md#technical-depth) |
 
 An ADR pair is one decision. Its status and governance record live in the
 Concept file and bind both files when accepted.
@@ -94,6 +97,7 @@ whose path or explicit fragment does not resolve.
 - [M3 foundations](plans/M3.md#concept) and [technical plan](plans/M3-technical.md#technical-depth) — project skills and core repairs; Closed with retained evidence in the plan.
 - [M4 headless external consumption](plans/M4.md#concept) and [technical plan](plans/M4-technical.md#technical-depth) — durable interactions, artifact transfers, the floor refresh, observability, and the experimental session protocol driven by an independent Node consumer in plain JavaScript; Closed, with its runs in [M4 closure runs](evidence/M4-closure-runs.md).
 - [M5 durable service](plans/M5.md#concept) and [technical plan](plans/M5-technical.md#technical-depth) — daemon-owned session lifetime on the ADR-selected local store within its documented limits, generation-2-only Unix-domain-socket transport, in-memory controller lease with observers and takeover, and at-least-once replay with residency limits over M4. The [plans register](plans/README.md) carries its current state.
+- [M6 installed durable operator](plans/M6.md#concept) and [technical plan](plans/M6-technical.md#technical-depth) — the `0.3.0` candidate: one platform-specific release archive with the runtime bundled, saved and validated host configuration under a default home, a daemon-grade store with explicit migration, backup and restore, and the operator lifecycle commands, all proved from an installed artifact; Open beside the accepted M5 and not acceptable before M5 closes.
 
 - [Development contract](../AGENTS.md) — canonical tool-neutral authority,
   autonomy, documentation, milestone, and enforcement rules.

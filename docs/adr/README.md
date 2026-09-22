@@ -45,6 +45,9 @@ a decision adds a new record rather than rewriting the old one.
 | 0033 | Collaboration: controller lease and takeover | Accepted | [Decision](0033-collaboration-controller-lease-and-takeover.md#concept) | [Technical depth](0033-collaboration-controller-lease-and-takeover-technical.md#technical-depth) |
 | 0034 | Provider credential handoff over the bootstrap channel | Accepted | [Decision](0034-provider-credential-handoff-over-bootstrap-channel.md#concept) | [Technical depth](0034-provider-credential-handoff-over-bootstrap-channel-technical.md#technical-depth) |
 | 0035 | Typed decision models as policy inputs | Proposed | [Decision](0035-typed-decision-models-as-policy-inputs.md#concept) | [Technical depth](0035-typed-decision-models-as-policy-inputs-technical.md#technical-depth) |
+| 0036 | Daemon-grade store engine and migration | Proposed | [Decision](0036-daemon-grade-store-engine-and-migration.md#concept) | [Technical depth](0036-daemon-grade-store-engine-and-migration-technical.md#technical-depth) |
+| 0037 | Host configuration and path discovery | Proposed | [Decision](0037-host-configuration-and-path-discovery.md#concept) | [Technical depth](0037-host-configuration-and-path-discovery-technical.md#technical-depth) |
+| 0038 | Installed distribution and release artifact | Proposed | [Decision](0038-installed-distribution-and-release-artifact.md#concept) | [Technical depth](0038-installed-distribution-and-release-artifact-technical.md#technical-depth) |
 
 0001 and 0002 were the prerequisites that unblocked the first milestone
 candidate; the [plans register](../plans/README.md) records current status.
@@ -189,3 +192,15 @@ and on a prerequisite amendment to it, because a second provider needs one
 credential token per provider where 0034 fixes one per **composed model
 configuration** — bound at composition, resolved per call. No part of it
 runs inside M5.
+
+0036 to 0038 are the three Proposed M6 prerequisites, proposed with the Open
+M6 plan on 2026-09-21: the daemon-grade store engine and its explicit `0.2`
+migration, backup and restore, which supersedes 0031's selection once
+accepted and fills its engine cell from a retained measured experiment
+first; host configuration and path discovery, with the default home
+resolved by the reference host's launcher and configuration layer only, as
+a narrow amendment to 0003; and the installed distribution, one
+platform-specific OTP release archive with the runtime system bundled and
+the existing launcher promoted. They accept nothing, each is accepted
+before the M6 outcome that depends on it, and none can be accepted before
+M5 closes.
