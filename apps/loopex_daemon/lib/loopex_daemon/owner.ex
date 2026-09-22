@@ -474,8 +474,17 @@ defmodule LoopexDaemon.Owner do
       %{pid: ^owner, incarnation: ^owner_incarnation, loss_origins: nil} = row ->
         if MapSet.size(MapSet.new(origins)) == length(origins) do
           row = %{row | relay_loss_seen: true, loss_origins: origins}
+          state = put_in(state, [:owners, session_id], row)
+
+          state =
+            if row.exit_consumed do
+              discard_claimed_owner_operations(state, owner, owner_incarnation, origins)
+            else
+              state
+            end
+
           Logger.debug("loopex daemon lease owner loss retained")
-          {:noreply, put_in(state, [:owners, session_id], row)}
+          maybe_start_owner_loss_pop(state, session_id, owner, owner_incarnation)
         else
           {:stop, :relay_lost, state}
         end
@@ -604,7 +613,7 @@ defmodule LoopexDaemon.Owner do
 
             Logger.debug("loopex daemon lease owner exit retained")
             _ = reason
-            start_owner_loss_pop(state, session_id, row)
+            continue_lost_owner_exit(state, session_id, row)
         end
 
       :error ->
@@ -1150,7 +1159,10 @@ defmodule LoopexDaemon.Owner do
       timer: schedule_deadline(operation_ref, deadline)
     }
 
-    state = put_in(state, [:mirror_operations, operation_ref], operation)
+    state =
+      state
+      |> put_in([:mirror_operations, operation_ref], operation)
+      |> put_in([:owners, session_id, :loss_pop_started], true)
 
     ConnectionRegistry.apply_mirror(
       state.registry,
@@ -1162,6 +1174,103 @@ defmodule LoopexDaemon.Owner do
 
     Logger.debug("loopex daemon lost owner mirror pop start")
     {:noreply, state}
+  end
+
+  defp continue_lost_owner_exit(state, session_id, predecessor) do
+    state =
+      if predecessor.loss_origins do
+        discard_claimed_owner_operations(
+          state,
+          predecessor.pid,
+          predecessor.incarnation,
+          predecessor.loss_origins
+        )
+      else
+        state
+      end
+
+    case owner_mirror_operation(state, predecessor.pid, predecessor.incarnation) do
+      {operation_ref, %{kind: :grant, step: :resolve_owner_grant} = operation} ->
+        route =
+          operation.row |> Map.drop([:permit_id, :start_op_ref]) |> Map.put(:phase, :granted)
+
+        state =
+          state
+          |> put_in([:routes, session_id], route)
+          |> put_in(
+            [:mirror_operations, operation_ref, :step],
+            :settle_result_after_owner_loss
+          )
+
+        request_relay_result_settlement(state, operation_ref, operation)
+        {:noreply, state}
+
+      {operation_ref, %{kind: :release, step: :resolve_owner_release} = operation} ->
+        state = update_in(state.routes, &Map.delete(&1, session_id))
+        complete_operation_after_owner_loss(state, operation_ref, operation)
+
+      {operation_ref, %{kind: :expiry, step: :resolve_owner_expiry} = operation} ->
+        state = update_in(state.routes, &Map.delete(&1, session_id))
+        complete_operation_after_owner_loss(state, operation_ref, operation)
+
+      {_operation_ref, _operation} ->
+        {:noreply, state}
+
+      nil ->
+        maybe_start_owner_loss_pop(state, session_id, predecessor.pid, predecessor.incarnation)
+    end
+  end
+
+  defp owner_mirror_operation(state, owner, owner_incarnation) do
+    Enum.find(state.mirror_operations, fn {_operation_ref, operation} ->
+      operation.owner_pid == owner and operation.owner_incarnation == owner_incarnation and
+        operation.kind != :owner_loss
+    end)
+  end
+
+  defp discard_claimed_owner_operations(state, owner, owner_incarnation, origins) do
+    claimed = MapSet.new(origins)
+
+    mirrored =
+      state.mirror_operations
+      |> Enum.map(fn {_operation_ref, operation} -> operation.permit_id end)
+      |> Enum.reject(&is_nil/1)
+      |> MapSet.new()
+
+    operations =
+      Enum.reduce(state.operations, state.operations, fn {permit_id, operation}, acc ->
+        if operation.owner_pid == owner and operation.owner_incarnation == owner_incarnation and
+             MapSet.member?(claimed, permit_id) and not MapSet.member?(mirrored, permit_id) do
+          Map.delete(acc, permit_id)
+        else
+          acc
+        end
+      end)
+
+    %{state | operations: operations}
+  end
+
+  defp maybe_start_owner_loss_pop(state, session_id, owner, owner_incarnation) do
+    row = Map.get(state.owners, session_id)
+
+    owner_operation? =
+      Enum.any?(state.operations, fn {_permit_id, operation} ->
+        operation.owner_pid == owner and operation.owner_incarnation == owner_incarnation
+      end)
+
+    cond do
+      not match?(%{pid: ^owner, incarnation: ^owner_incarnation, phase: :lost}, row) ->
+        {:noreply, state}
+
+      row.loss_pop_started ->
+        {:noreply, state}
+
+      owner_mirror_operation(state, owner, owner_incarnation) != nil or owner_operation? ->
+        {:noreply, state}
+
+      true ->
+        start_owner_loss_pop(state, session_id, row)
+    end
   end
 
   defp continue_registry_operation(state, operation_ref, result) do
@@ -1225,18 +1334,33 @@ defmodule LoopexDaemon.Owner do
          %{kind: :grant, step: :resolve_granted} = operation,
          :ok
        ) do
-    state = put_in(state, [:mirror_operations, operation_ref, :step], :resolve_owner_grant)
+    if lost_owner?(state, operation) do
+      route = operation.row |> Map.drop([:permit_id, :start_op_ref]) |> Map.put(:phase, :granted)
 
-    LeaseOwner.request_grant_resolution(
-      operation.owner_pid,
-      operation_ref,
-      operation.owner_incarnation,
-      operation.transition_ref,
-      :granted,
-      monotonic_ms()
-    )
+      state =
+        state
+        |> put_in([:routes, route.session_id], route)
+        |> put_in(
+          [:mirror_operations, operation_ref, :step],
+          :settle_result_after_owner_loss
+        )
 
-    {:noreply, state}
+      request_relay_result_settlement(state, operation_ref, operation)
+      {:noreply, state}
+    else
+      state = put_in(state, [:mirror_operations, operation_ref, :step], :resolve_owner_grant)
+
+      LeaseOwner.request_grant_resolution(
+        operation.owner_pid,
+        operation_ref,
+        operation.owner_incarnation,
+        operation.transition_ref,
+        :granted,
+        monotonic_ms()
+      )
+
+      {:noreply, state}
+    end
   end
 
   defp apply_registry_result(
@@ -1261,6 +1385,14 @@ defmodule LoopexDaemon.Owner do
   defp apply_registry_result(
          state,
          operation_ref,
+         %{kind: :grant, step: :resolve_owner_lost} = operation,
+         :ok
+       ),
+       do: complete_operation_after_owner_loss(state, operation_ref, operation)
+
+  defp apply_registry_result(
+         state,
+         operation_ref,
          %{kind: :release, step: :clear} = operation,
          :ok
        ) do
@@ -1275,16 +1407,21 @@ defmodule LoopexDaemon.Owner do
          %{kind: :expiry, step: :clear} = operation,
          :ok
        ) do
-    state = put_in(state, [:mirror_operations, operation_ref, :step], :resolve_owner_expiry)
+    if lost_owner?(state, operation) do
+      state = update_in(state.routes, &Map.delete(&1, operation.row.session_id))
+      complete_operation_after_owner_loss(state, operation_ref, operation)
+    else
+      state = put_in(state, [:mirror_operations, operation_ref, :step], :resolve_owner_expiry)
 
-    LeaseOwner.request_expiry_resolution(
-      operation.owner_pid,
-      operation_ref,
-      operation.owner_incarnation,
-      operation.transition_ref
-    )
+      LeaseOwner.request_expiry_resolution(
+        operation.owner_pid,
+        operation_ref,
+        operation.owner_incarnation,
+        operation.transition_ref
+      )
 
-    {:noreply, state}
+      {:noreply, state}
+    end
   end
 
   defp apply_registry_result(
@@ -1418,6 +1555,26 @@ defmodule LoopexDaemon.Owner do
   defp apply_relay_result(
          state,
          operation_ref,
+         %{kind: :grant, step: :select_result, row: row},
+         :select_result,
+         {:error, :owner_lost}
+       ) do
+    state = put_in(state, [:mirror_operations, operation_ref, :step], :resolve_owner_lost)
+
+    ConnectionRegistry.apply_mirror(
+      state.registry,
+      operation_ref,
+      state.routing_incarnation,
+      {:resolve_provisional, :cancelled},
+      row
+    )
+
+    {:noreply, state}
+  end
+
+  defp apply_relay_result(
+         state,
+         operation_ref,
          %{kind: :grant, step: :select_result},
          :select_result,
          {:error, :connection_lost}
@@ -1448,6 +1605,15 @@ defmodule LoopexDaemon.Owner do
   defp apply_relay_result(
          state,
          operation_ref,
+         %{kind: :release, step: :select_result} = operation,
+         :select_result,
+         {:error, :owner_lost}
+       ),
+       do: complete_operation_after_owner_loss(state, operation_ref, operation)
+
+  defp apply_relay_result(
+         state,
+         operation_ref,
          %{kind: :release, step: :select_result},
          :select_result,
          {:error, :connection_lost}
@@ -1468,11 +1634,23 @@ defmodule LoopexDaemon.Owner do
   defp apply_relay_result(
          state,
          operation_ref,
-         %{kind: :grant, step: :settle_result} = operation,
+         %{kind: :grant, step: :settle_result_after_owner_loss} = operation,
          :settle_result,
          :ok
        ),
-       do: complete_grant(state, operation_ref, operation)
+       do: complete_operation_after_owner_loss(state, operation_ref, operation)
+
+  defp apply_relay_result(
+         state,
+         operation_ref,
+         %{kind: :grant, step: :settle_result} = operation,
+         :settle_result,
+         :ok
+       ) do
+    if lost_owner?(state, operation),
+      do: complete_operation_after_owner_loss(state, operation_ref, operation),
+      else: complete_grant(state, operation_ref, operation)
+  end
 
   defp apply_relay_result(
          state,
@@ -1481,17 +1659,22 @@ defmodule LoopexDaemon.Owner do
          :settle_result,
          :ok
        ) do
-    state = put_in(state, [:mirror_operations, operation_ref, :step], :resolve_owner_release)
+    if lost_owner?(state, operation) do
+      state = update_in(state.routes, &Map.delete(&1, operation.row.session_id))
+      complete_operation_after_owner_loss(state, operation_ref, operation)
+    else
+      state = put_in(state, [:mirror_operations, operation_ref, :step], :resolve_owner_release)
 
-    LeaseOwner.request_release_resolution(
-      operation.owner_pid,
-      operation_ref,
-      operation.owner_incarnation,
-      operation.transition_ref,
-      :released
-    )
+      LeaseOwner.request_release_resolution(
+        operation.owner_pid,
+        operation_ref,
+        operation.owner_incarnation,
+        operation.transition_ref,
+        :released
+      )
 
-    {:noreply, state}
+      {:noreply, state}
+    end
   end
 
   defp apply_relay_result(
@@ -1800,6 +1983,19 @@ defmodule LoopexDaemon.Owner do
   defp complete_operation_and_retire(state, operation_ref, operation) do
     {:noreply, state} = complete_operation(state, operation_ref, operation)
     request_owner_retirement(state, operation.owner_pid, operation.row.session_id)
+  end
+
+  defp complete_operation_after_owner_loss(state, operation_ref, operation) do
+    {:noreply, state} = complete_operation(state, operation_ref, operation)
+
+    Logger.debug("loopex daemon lost owner operation settlement complete")
+
+    maybe_start_owner_loss_pop(
+      state,
+      operation.row.session_id,
+      operation.owner_pid,
+      operation.owner_incarnation
+    )
   end
 
   defp complete_operation(state, operation_ref, operation) do
@@ -2195,7 +2391,8 @@ defmodule LoopexDaemon.Owner do
       relay_loss_ready: false,
       loss_origins: nil,
       classification_complete: false,
-      notification_complete: false
+      notification_complete: false,
+      loss_pop_started: false
     }
   end
 
@@ -2211,6 +2408,21 @@ defmodule LoopexDaemon.Owner do
 
   defp operation_request_id(state, permit_id) do
     state.operations |> Map.fetch!(permit_id) |> get_in([:request, :request_id])
+  end
+
+  defp lost_owner?(state, operation) do
+    case Map.get(state.owners, operation.row.session_id) do
+      %{
+        pid: owner,
+        incarnation: owner_incarnation,
+        phase: :lost
+      }
+      when owner == operation.owner_pid and owner_incarnation == operation.owner_incarnation ->
+        true
+
+      _other ->
+        false
+    end
   end
 
   defp live_owner(state, session_id) do
