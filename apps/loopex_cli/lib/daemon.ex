@@ -65,9 +65,8 @@ defmodule LoopexCli.Daemon do
       {:ok, {:start, flags}} ->
         start(flags, options)
 
-      {:ok, {:prepare_index, _flags}} ->
-        diagnostic("prepare-index is not available in this build")
-        ExitStatus.parser_refusal()
+      {:ok, {:prepare_index, flags}} ->
+        prepare_index(flags, options)
 
       {:error, :invalid_daemon_arguments} ->
         diagnostic(usage())
@@ -105,6 +104,29 @@ defmodule LoopexCli.Daemon do
     else
       {:error, class} ->
         diagnostic("loopex daemon refused to start: #{class}")
+        {:ok, status} = ExitStatus.fetch(class)
+        status
+    end
+  end
+
+  # Concept: the offline import needs only the state root, and says what it
+  # recorded or why it refused on standard error.
+  defp prepare_index(flags, options) do
+    env = Keyword.get(options, :env, &System.get_env/1)
+
+    result =
+      with {:ok, root} <- input(flags, env, "state-root", "LOOPEX_HOME", :state_root_required),
+           {:ok, root} <- LoopexDaemon.Paths.state_root(root) do
+        LoopexDaemon.PrepareIndex.run(root, Keyword.take(options, [:install_signals, :notify]))
+      end
+
+    case result do
+      {:ok, count} ->
+        diagnostic("loopex daemon prepare-index recorded #{count} sessions")
+        ExitStatus.success()
+
+      {:error, class} ->
+        diagnostic("loopex daemon prepare-index refused: #{class}")
         {:ok, status} = ExitStatus.fetch(class)
         status
     end

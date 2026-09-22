@@ -36,6 +36,45 @@ defmodule LoopexCli.DaemonCommandTest do
     refute File.exists?(state_root)
   end
 
+  test "prepare-index refuses every other input and imports a legacy root", context do
+    for arguments <- [
+          ["prepare-index", "--socket", "x"],
+          ["prepare-index", "--workspace", "x"],
+          ["prepare-index", "extra"],
+          ["prepare-index", "--state-root"],
+          ["prepare-index", "--state-root", ""],
+          [
+            "prepare-index",
+            "--state-root",
+            context.state_root,
+            "--state-root",
+            context.state_root
+          ],
+          ["prepare-index", "--", "word"],
+          ["--state-root", context.state_root, "prepare-index"]
+        ] do
+      assert LoopexCli.Daemon.run(arguments, env: fn _ -> nil end, install_signals: false) == 1,
+             inspect(arguments)
+    end
+
+    refute File.exists?(context.state_root)
+
+    {:ok, required} = ExitStatus.fetch(:state_root_required)
+
+    assert LoopexCli.Daemon.run(["prepare-index"], env: fn _ -> nil end, install_signals: false) ==
+             required
+
+    File.mkdir_p!(context.state_root)
+    :ok = Loopex.track_session(context.state_root, "s-legacy", "legacy-placement")
+
+    assert LoopexCli.Daemon.run(["prepare-index"],
+             env: &%{"LOOPEX_HOME" => context.state_root}[&1],
+             install_signals: false
+           ) == 0
+
+    assert File.regular?(Path.join([context.state_root, "daemon", "session-index-v1"]))
+  end
+
   test "each missing or invalid input refuses with its own class before any effect", context do
     base = %{
       "LOOPEX_HOME" => context.state_root,
