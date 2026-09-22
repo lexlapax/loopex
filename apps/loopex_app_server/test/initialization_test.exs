@@ -34,7 +34,7 @@ defmodule Loopex.AppServer.InitializationTest do
   end
 
   test "initializing on a shared generation settles the connection and returns the contract" do
-    assert {:ok, reply, connection} = initialize(["loopex.session.v1-experimental"])
+    assert {:ok, reply, connection} = initialize(["loopex.experimental/1"])
 
     assert reply["type"] == "initialized"
     assert reply["request_id"] == "r1"
@@ -232,7 +232,7 @@ defmodule Loopex.AppServer.InitializationTest do
     assert {:ok, request} = Frame.decode(String.trim_trailing(frame, "\n"), @frame_limit)
     assert {:ok, reply, connection} = Connection.initialize(Connection.new(), request)
 
-    assert reply["selected_generation"] == "loopex.session.v1-experimental"
+    assert reply["selected_generation"] == "loopex.experimental/1"
     assert reply["exact_schema_sha256"] == Session.schema_digest()
     assert reply["limits"] == Session.limits()
 

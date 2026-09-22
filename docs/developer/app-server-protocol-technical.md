@@ -13,7 +13,7 @@ exact limits, and where the schema, the vectors and the evidence live.
 ## Generation and Negotiation
 
 ```
-loopex.session.v1-experimental
+loopex.experimental/1
 ```
 
 Initialization happens exactly once per connection; a second attempt is refused

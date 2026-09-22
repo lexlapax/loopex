@@ -14,7 +14,7 @@ process ends, the connection ends, and the durable session stays where it was.
 Nothing listens on a socket, nothing runs in the background, and a second
 process cannot take a session over from the first.
 
-The protocol generation is named `loopex.session.v1-experimental`. The word is
+The protocol generation is named `loopex.experimental/1`. The word is
 part of the name so that no client can read it as a released contract and no
 version comparison can round it up to one. It may change in any later
 milestone without a migration path.

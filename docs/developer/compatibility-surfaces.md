@@ -50,7 +50,7 @@ migration for this repair.
 
 M4 adds the first surface that is not an Elixir API, and labels it in its own
 name. The app-server wire protocol is one exact generation,
-`loopex.session.v1-experimental`: a client offers an ordered list of
+`loopex.experimental/1`: a client offers an ordered list of
 generations and the server selects one it knows, with no partial match, no
 nearest neighbour and no version comparison that could round the word
 `experimental` up to a released contract. A generation has schemas, vectors and
@@ -86,7 +86,7 @@ belongs to under
 | Policy port | `Loopex.Policy` behaviour, request, context, refusal categories | 2, public protocol semantics | Unstable |
 | Artifact-store port | `Loopex.ArtifactStore` object/use behaviour and eight-member `artifact_reference` | 6, artifact formats | Unstable |
 | Artifact transfer capability | optional `open_transfer/4`, `read_transfer/3`, `close_transfer/2` on `Loopex.ArtifactStore`, and `Loopex.open_artifact_transfer/2`, `read_artifact_chunk/3`, `close_artifact_transfer/2` on the facade | 6, artifact formats, and 5, embedded Elixir API | Experimental, new in M4 |
-| App-server wire protocol | the `loopex.session.v1-experimental` generation: methods, records, error codes, identities and limits | 2, public protocol semantics | Experimental, new in M4; exact generation agreement only |
+| App-server wire protocol | the `loopex.experimental/1` generation: methods, records, error codes, identities and limits | 2, public protocol semantics | Experimental, new in M4; exact generation agreement only |
 | Public protocol schema and vectors | `apps/loopex_protocol/priv/schema/loopex-experimental-1.json` and `priv/vectors/loopex-experimental-1.json`, reported as a schema digest at initialization | 2, public protocol semantics | Experimental, new in M4 |
 | Durable interaction records | `interaction_requested_v1`, `interaction_answer_admitted_v1`, `interaction_resolved_v1`, and the `interaction_answer` command | 1, private journal and store schema | Experimental, new in M4; refused by older readers |
 | Telemetry events | the bound `[:loopex, …]` span inventory, and `Loopex.Telemetry.attach/1` and `detach/1` | not yet a listed surface; transient diagnostics | Experimental, new in M4 |
@@ -612,7 +612,7 @@ the set of accepted names is part of the surface, so adding one is observable
 and removing one is breaking.
 
 **App-server wire protocol.** One generation string,
-`loopex.session.v1-experimental`, sixteen methods, seven record families,
+`loopex.experimental/1`, sixteen methods, seven record families,
 fifteen error codes, and the exact framing and limits in
 [the protocol technical reference](app-server-protocol-technical.md#technical-depth).
 Agreement is by exact generation: a client offers an ordered list, the server

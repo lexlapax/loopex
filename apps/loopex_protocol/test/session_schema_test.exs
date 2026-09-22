@@ -21,7 +21,7 @@ defmodule LoopexProtocol.SessionTest do
   alias LoopexProtocol.Session
 
   test "the generation names itself experimental and is the only one offered" do
-    assert Session.generation() == "loopex.session.v1-experimental"
+    assert Session.generation() == "loopex.experimental/1"
   end
 
   test "the sixteen methods are exactly these, in this order" do
@@ -61,47 +61,49 @@ defmodule LoopexProtocol.SessionTest do
   end
 
   test "the error code set is closed and contains no code a method could invent" do
-    codes = Session.error_codes()
-
-    assert length(codes) == 15
-    assert Enum.uniq(codes) == codes
-
-    for code <- [
-          "invalid_frame",
-          "invalid_request",
-          "not_initialized",
-          "already_initialized",
-          "unsupported_generation",
-          "unsupported_method",
-          "admission_unknown",
-          "detached",
-          "internal_failure"
-        ] do
-      assert code in codes
-    end
-
-    refute "unknown" in codes
-    refute "ok" in codes
+    assert Session.error_codes() == [
+             "invalid_frame",
+             "invalid_request",
+             "not_initialized",
+             "already_initialized",
+             "unsupported_generation",
+             "unsupported_method",
+             "not_attached",
+             "attachment_conflict",
+             "capacity_exceeded",
+             "facade_unavailable",
+             "recovery_required",
+             "admission_unknown",
+             "transfer_refused",
+             "detached",
+             "internal_failure"
+           ]
   end
 
   test "the schema maxima are the exact numbers the decision states" do
-    limits = Session.limits()
-
-    assert limits["frame_bytes_before_initialization"] == 65_536
-    assert limits["frame_bytes"] == 1_048_576
-    assert limits["output_record_bytes"] == 2_097_152
-    assert limits["max_depth"] == 16
-    assert limits["max_members"] == 1_024
-    assert limits["max_string_bytes"] == 131_072
-    assert limits["max_session_identity_bytes"] == 256
-    assert limits["max_requests_in_flight"] == 32
-    assert limits["reply_wait_ms"] == 30_000
-    assert limits["writer_detach_ms"] == 5_000
-
-    # The integer interval is the IEEE-754-safe one, stated on both sides, so a
-    # client cannot send a number it can hold but cannot round-trip.
-    assert limits["integer_max"] == 9_007_199_254_740_991
-    assert limits["integer_min"] == -9_007_199_254_740_991
+    assert Session.limits() == %{
+             "frame_bytes_before_initialization" => 65_536,
+             "frame_bytes" => 1_048_576,
+             "output_record_bytes" => 2_097_152,
+             "max_depth" => 16,
+             "max_members" => 1_024,
+             "max_string_bytes" => 131_072,
+             "max_identity_bytes" => 65_536,
+             "max_identity_wire_bytes" => 87_382,
+             "max_session_identity_bytes" => 256,
+             "integer_min" => -9_007_199_254_740_991,
+             "integer_max" => 9_007_199_254_740_991,
+             "max_requests_in_flight" => 32,
+             "durable_queue_records" => 64,
+             "durable_queue_bytes" => 4_194_304,
+             "progress_queue_records" => 32,
+             "progress_queue_bytes" => 524_288,
+             "diagnostics_lines" => 64,
+             "diagnostics_bytes" => 65_536,
+             "raw_chunk_bytes" => 32_768,
+             "reply_wait_ms" => 30_000,
+             "writer_detach_ms" => 5_000
+           }
   end
 
   test "the digest names the whole contract and is stable across builds" do
@@ -113,7 +115,7 @@ defmodule LoopexProtocol.SessionTest do
 
     # The vector. A change to any method, family, code or maximum changes this
     # and must be a deliberate change to the contract.
-    assert digest == "3a1723e370bf392e2a6e9d2709c22735577d8cfbf946d63ac22e12a8fa1708f4"
+    assert digest == "3c0e34a99cd0178095de0d75843340128d26143798e517daae26b44cbf9a884f"
 
     assert Session.schema_digest() == digest
   end

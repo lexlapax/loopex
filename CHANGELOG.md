@@ -20,7 +20,19 @@ courtesy — see [AGENTS.md](AGENTS.md) § Milestones and Checks and the
 
 ## [Unreleased]
 
-Nothing since the `0.1.0` source version.
+Rename the exact foreground protocol generation from
+`loopex.session.v1-experimental` to `loopex.experimental/1`, matching the
+generation-one schema and vector manifests that shipped in `0.1.0`. The rename
+changes generation one's schema digest while leaving its methods, record
+families, error codes, limits, schema manifest and vector bytes unchanged. The
+foreground server and independent Node client now offer the same exact name.
+
+Add `LoopexProtocol.Session.V2` as the daemon's distinct
+`loopex.experimental/2` metadata and negotiation contract. It retains the
+generation-one inventories and adds the four daemon methods, two daemon record
+families, twelve daemon refusal codes and seven advertised daemon limits that
+M5 requires. Generation-two schema and literal vector files land with the
+socket mapping that makes those shapes executable.
 
 ## [0.1.0] — 2026-09-19
 

@@ -21,7 +21,7 @@
 
 import { spawn } from "node:child_process";
 
-const GENERATION = "loopex.session.v1-experimental";
+const GENERATION = "loopex.experimental/1";
 
 // Concept: the connection to one server process.
 //

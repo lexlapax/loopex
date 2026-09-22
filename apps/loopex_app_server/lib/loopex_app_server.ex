@@ -34,5 +34,5 @@ defmodule Loopex.AppServer do
   whatever schema happens to be on disk.
   """
   @spec generation() :: binary()
-  def generation, do: "loopex.session.v1-experimental"
+  def generation, do: "loopex.experimental/1"
 end

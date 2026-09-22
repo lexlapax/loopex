@@ -45,11 +45,11 @@ defmodule LoopexProtocol.PublicSchemaConformanceTest do
   # agree with each other, which is not what an independent implementation needs
   # to check itself against.
   @admitted [
-    {~s({"method":"initialize","request_id":"r1","generations":["loopex.session.v1-experimental"],"capabilities":[]}),
+    {~s({"method":"initialize","request_id":"r1","generations":["loopex.experimental/1"],"capabilities":[]}),
      %{
        "method" => "initialize",
        "request_id" => "r1",
-       "generations" => ["loopex.session.v1-experimental"],
+       "generations" => ["loopex.experimental/1"],
        "capabilities" => []
      }},
     {~s({"a":0}), %{"a" => 0}},
@@ -279,7 +279,7 @@ defmodule LoopexProtocol.PublicSchemaConformanceTest do
     # agreement with a contract it had not actually met.
 
     # The schema identity the vectors belong to.
-    assert Session.generation() == "loopex.session.v1-experimental"
+    assert Session.generation() == "loopex.experimental/1"
     assert String.match?(Session.schema_digest(), ~r/\A[0-9a-f]{64}\z/)
 
     # The schema digest names the contract, not the file: it covers the
@@ -288,7 +288,7 @@ defmodule LoopexProtocol.PublicSchemaConformanceTest do
     # here rather than recomputed, and a change to any of those five fails here
     # rather than silently renaming what clients are agreeing to.
     assert Session.schema_digest() ==
-             "3a1723e370bf392e2a6e9d2709c22735577d8cfbf946d63ac22e12a8fa1708f4"
+             "3c0e34a99cd0178095de0d75843340128d26143798e517daae26b44cbf9a884f"
 
     # The schema and vector files an independent client reads are identified by
     # their own bytes, which are the digests the gate binds. A conformance
@@ -306,8 +306,10 @@ defmodule LoopexProtocol.PublicSchemaConformanceTest do
 
       assert File.exists?(path), "the #{directory} file is missing"
 
-      measured = :sha256 |> :crypto.hash(File.read!(path)) |> Base.encode16(case: :lower)
+      bytes = File.read!(path)
+      measured = :sha256 |> :crypto.hash(bytes) |> Base.encode16(case: :lower)
       assert measured == expected, "the #{directory} file is #{measured}"
+      assert JSON.decode!(bytes)["generation"] == Session.generation()
     end
 
     vectors_digest = "a7f2dc36f9206dc48d258bc7b49a8d390ec3a0e93c51ed5a35f45153052e1951"
@@ -348,7 +350,7 @@ defmodule LoopexProtocol.PublicSchemaConformanceTest do
 
   test "the schema digest is the value an independent implementation checks against" do
     assert Session.schema_digest() ==
-             "3a1723e370bf392e2a6e9d2709c22735577d8cfbf946d63ac22e12a8fa1708f4"
+             "3c0e34a99cd0178095de0d75843340128d26143798e517daae26b44cbf9a884f"
   end
 
   test "an encoded record is the exact bytes an independent implementation expects" do

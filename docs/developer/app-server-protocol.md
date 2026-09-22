@@ -12,7 +12,7 @@ constraints a change to it must respect.
 
 The founding decision is accepted
 [ADR 0023](../adr/0023-experimental-public-session-protocol.md#concept). The
-generation is named `loopex.session.v1-experimental`.
+generation is named `loopex.experimental/1`.
 
 <a id="concept-protocol-one-contract"></a>
 ## One Contract, Not a Second Loop

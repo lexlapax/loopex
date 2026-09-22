@@ -20,7 +20,7 @@ defmodule Loopex.AppServerTest do
   alias Loopex.AppServer
 
   test "the declared generation is the experimental session protocol, named exactly" do
-    assert AppServer.generation() == "loopex.session.v1-experimental"
+    assert AppServer.generation() == "loopex.experimental/1"
   end
 
   test "the generation is a bounded plain binary, which is what a caller negotiates against" do
