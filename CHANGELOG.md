@@ -43,6 +43,11 @@ later verified daemon owner can remove it. Accepted sockets use Darwin
 `LOCAL_PEERCRED` or Linux `SO_PEERCRED`; missing, malformed or mismatched peer
 credentials are refused before protocol input.
 
+Add the daemon session index's canonical bounded codec. It pins the exact JSONL
+header, sorted identity rows, SHA-256 trailer and all identity, row-count,
+line-size and file-size bounds without treating alternate JSON spellings as the
+same persisted image.
+
 ## [0.1.0] — 2026-09-19
 
 M4's closed product baseline: the first numbered source version. It is a source
