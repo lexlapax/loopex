@@ -73,9 +73,15 @@ defmodule LoopexDaemon.LeaseOwner do
   def retire_if_idle(owner), do: GenServer.call(owner, :retire_if_idle)
 
   @doc false
-  @spec complete_retirement(pid(), reference()) :: :ok | {:error, :invalid_operation}
+  @spec complete_retirement(pid(), reference()) :: :ok
   def complete_retirement(owner, retirement_ref) do
-    GenServer.call(owner, {:complete_retirement, retirement_ref})
+    GenServer.cast(owner, {:complete_retirement, self(), retirement_ref})
+  end
+
+  @doc false
+  @spec release_retirement_exit(pid(), reference()) :: :ok
+  def release_retirement_exit(owner, retirement_ref) do
+    GenServer.cast(owner, {:release_retirement_exit, self(), retirement_ref})
   end
 
   @doc false
@@ -328,9 +334,11 @@ defmodule LoopexDaemon.LeaseOwner do
     session_id = Keyword.fetch!(options, :session_id)
     owner_incarnation = Keyword.fetch!(options, :owner_incarnation)
     lease_term_ms = Keyword.get(options, :lease_term_ms, @lease_term_ms)
+    retirement_exit_gate = Keyword.get(options, :retirement_exit_gate)
 
     if is_pid(daemon_owner) and is_pid(relay) and is_pid(registry) and valid_session?(session_id) and
-         valid_incarnation?(owner_incarnation) and valid_term?(lease_term_ms) do
+         valid_incarnation?(owner_incarnation) and valid_term?(lease_term_ms) and
+         (is_nil(retirement_exit_gate) or is_pid(retirement_exit_gate)) do
       Process.link(daemon_owner)
       Logger.debug("loopex daemon lease owner start")
 
@@ -350,6 +358,8 @@ defmodule LoopexDaemon.LeaseOwner do
          expiry_token: nil,
          retirement_requested: false,
          retirement_ref: nil,
+         retirement_exit_gate: retirement_exit_gate,
+         retirement_exit_blocked: false,
          waiters: [],
          waiter_timers: %{},
          attachments: MapSet.new(),
@@ -391,23 +401,6 @@ defmodule LoopexDaemon.LeaseOwner do
 
   def handle_call(:retire_if_idle, _from, state),
     do: {:reply, {:error, :owner_unavailable}, state}
-
-  def handle_call(
-        {:complete_retirement, retirement_ref},
-        {caller, _tag},
-        %{
-          daemon_owner: caller,
-          phase: :retiring,
-          retirement_ref: retirement_ref
-        } = state
-      )
-      when is_reference(retirement_ref) do
-    Logger.debug("loopex daemon lease owner retirement acknowledged")
-    {:stop, :normal, :ok, state}
-  end
-
-  def handle_call({:complete_retirement, _retirement_ref}, _from, state),
-    do: {:reply, {:error, :invalid_operation}, state}
 
   def handle_call(
         {:first_acquire, permit_id, request_id, connection, connection_incarnation,
@@ -746,6 +739,55 @@ defmodule LoopexDaemon.LeaseOwner do
        retirement_requested: state.retirement_requested,
        first_acquire_available: state.first_acquire_available
      }, state}
+  end
+
+  @impl true
+  def handle_cast(
+        {:complete_retirement, caller, retirement_ref},
+        %{
+          daemon_owner: caller,
+          phase: :retiring,
+          retirement_ref: retirement_ref,
+          retirement_exit_blocked: false
+        } = state
+      )
+      when is_reference(retirement_ref) do
+    if is_pid(state.retirement_exit_gate) do
+      send(
+        state.retirement_exit_gate,
+        {:retirement_exit_blocked, self(), state.owner_incarnation, retirement_ref}
+      )
+
+      Logger.debug("loopex daemon lease owner retirement exit blocked")
+      {:noreply, %{state | retirement_exit_blocked: true}}
+    else
+      Logger.debug("loopex daemon lease owner retirement acknowledged")
+      {:stop, :normal, state}
+    end
+  end
+
+  def handle_cast({:complete_retirement, _caller, _retirement_ref}, state) do
+    Logger.debug("loopex daemon lease owner retirement acknowledgement ignored")
+    {:noreply, state}
+  end
+
+  def handle_cast(
+        {:release_retirement_exit, caller, retirement_ref},
+        %{
+          retirement_exit_gate: caller,
+          phase: :retiring,
+          retirement_ref: retirement_ref,
+          retirement_exit_blocked: true
+        } = state
+      )
+      when is_reference(retirement_ref) do
+    Logger.debug("loopex daemon lease owner retirement exit released")
+    {:stop, :normal, state}
+  end
+
+  def handle_cast({:release_retirement_exit, _caller, _retirement_ref}, state) do
+    Logger.debug("loopex daemon lease owner retirement exit release ignored")
+    {:noreply, state}
   end
 
   @impl true

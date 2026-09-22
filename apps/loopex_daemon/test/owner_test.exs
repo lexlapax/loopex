@@ -211,6 +211,267 @@ defmodule LoopexDaemon.OwnerTest do
              wait_for_owner_settlement(owner)
   end
 
+  @tag timeout: 120_000
+  test "a same-session successor inherits a freed slot while an unrelated 513th owner is refused" do
+    owner = start_owner(retirement_pop_gate: self(), retirement_exit_gate: self())
+    components = Owner.components(owner)
+    connection = initialized_connection(components)
+
+    owners =
+      for sequence <- 1..512 do
+        origin = {connection.incarnation, 0, sequence}
+        session_id = "capacity-#{sequence}"
+        {worker, worker_incarnation} = start_worker(connection.pid, origin)
+
+        assert {:ok, :proposed, lease_owner, owner_incarnation} =
+                 Owner.acquire_control(
+                   owner,
+                   origin,
+                   "acquire-#{sequence}",
+                   session_id,
+                   connection.pid,
+                   connection.incarnation,
+                   worker,
+                   worker_incarnation,
+                   now_ms() + 5_000
+                 )
+
+        assert_receive {:worker_go, ^worker, ^origin}, 500
+
+        assert_receive {:manual_connection_message, _, {:relay_permit_result, ^origin, result}},
+                       500
+
+        epoch = Base.url_decode64!(result["result"]["writer_epoch"], padding: false)
+        {session_id, lease_owner, owner_incarnation, epoch}
+      end
+
+    assert %{owner_slots: 512, live_owners: 512, waiting_owner_starts: 0} =
+             wait_for_owner_settlement(owner, 200)
+
+    [{session_id, predecessor, predecessor_incarnation, predecessor_epoch} | _rest] = owners
+    release_origin = {connection.incarnation, 0, 513}
+    {release_worker, release_worker_incarnation} = start_worker(connection.pid, release_origin)
+
+    assert {:ok, :proposed, ^predecessor, ^predecessor_incarnation} =
+             Owner.release_control(
+               owner,
+               release_origin,
+               "release-capacity-1",
+               session_id,
+               connection.pid,
+               connection.incarnation,
+               release_worker,
+               release_worker_incarnation,
+               predecessor_epoch,
+               now_ms() + 5_000
+             )
+
+    assert_receive {:worker_go, ^release_worker, ^release_origin}, 500
+
+    assert_receive {:manual_connection_message, _,
+                    {:relay_permit_result, ^release_origin, _release_result}},
+                   500
+
+    assert_receive {:retirement_exit_blocked, ^predecessor, ^predecessor_incarnation,
+                    retirement_ref},
+                   500
+
+    assert %{
+             owner_slots: 512,
+             live_owners: 511,
+             retiring_owners: 1,
+             waiting_owner_starts: 0,
+             mirror_operations: 0
+           } = Owner.status(owner)
+
+    assert Process.alive?(predecessor)
+
+    successor_origin = {connection.incarnation, 0, 514}
+
+    {successor_worker, successor_worker_incarnation} =
+      start_worker(connection.pid, successor_origin)
+
+    successor_deadline = now_ms() + 5_000
+
+    assert {:ok, :queued, ^owner, _daemon_incarnation} =
+             Owner.acquire_control(
+               owner,
+               successor_origin,
+               "acquire-successor",
+               session_id,
+               connection.pid,
+               connection.incarnation,
+               successor_worker,
+               successor_worker_incarnation,
+               successor_deadline
+             )
+
+    assert_receive {:worker_go, ^successor_worker, ^successor_origin}, 500
+
+    assert {:ok, :queued, ^owner, _daemon_incarnation} =
+             Owner.acquire_control(
+               owner,
+               successor_origin,
+               "acquire-successor",
+               session_id,
+               connection.pid,
+               connection.incarnation,
+               successor_worker,
+               successor_worker_incarnation,
+               successor_deadline
+             )
+
+    assert %{
+             owner_slots: 512,
+             live_owners: 511,
+             retiring_owners: 1,
+             waiting_owner_starts: 1
+           } = Owner.status(owner)
+
+    unrelated_origin = {connection.incarnation, 0, 515}
+
+    {unrelated_worker, unrelated_worker_incarnation} =
+      start_worker(connection.pid, unrelated_origin)
+
+    assert {:error, :control_capacity_reached} =
+             Owner.acquire_control(
+               owner,
+               unrelated_origin,
+               "acquire-unrelated",
+               "capacity-513",
+               connection.pid,
+               connection.incarnation,
+               unrelated_worker,
+               unrelated_worker_incarnation,
+               now_ms() + 5_000
+             )
+
+    refute_receive {:worker_go, ^unrelated_worker, ^unrelated_origin}, 20
+
+    refute_receive {:manual_connection_message, _, {:relay_permit_result, ^successor_origin, _}},
+                   20
+
+    assert :ok = LeaseOwner.release_retirement_exit(predecessor, retirement_ref)
+    assert_receive {:retirement_pop_blocked, ^owner, ^session_id}, 500
+
+    assert %{
+             owner_slots: 512,
+             live_owners: 511,
+             retiring_owners: 0,
+             waiting_owner_starts: 1,
+             mirror_operations: 1
+           } = wait_for_transferred_slot(owner)
+
+    refute Process.alive?(predecessor)
+
+    assert :ok = Owner.release_retirement_pop(owner, session_id)
+
+    assert_receive {:manual_connection_message, _,
+                    {:relay_permit_result, ^successor_origin, successor_result}},
+                   1_000
+
+    successor_epoch =
+      Base.url_decode64!(successor_result["result"]["writer_epoch"], padding: false)
+
+    refute successor_epoch == predecessor_epoch
+
+    assert %{owner_slots: 512, live_owners: 512, waiting_owner_starts: 0} =
+             wait_for_owner_settlement(owner, 200)
+  end
+
+  test "connection loss cancels a queued successor without retaining its transferred slot" do
+    owner = start_owner(retirement_pop_gate: self(), retirement_exit_gate: self())
+    components = Owner.components(owner)
+    holder = initialized_connection(components)
+    successor = initialized_connection(components)
+    acquire_origin = {holder.incarnation, 0, 1}
+    {acquire_worker, acquire_worker_incarnation} = start_worker(holder.pid, acquire_origin)
+
+    assert {:ok, :proposed, predecessor, predecessor_incarnation} =
+             Owner.acquire_control(
+               owner,
+               acquire_origin,
+               "acquire-held",
+               "cancelled-successor",
+               holder.pid,
+               holder.incarnation,
+               acquire_worker,
+               acquire_worker_incarnation,
+               now_ms() + 1_000
+             )
+
+    assert_receive {:worker_go, ^acquire_worker, ^acquire_origin}, 500
+
+    assert_receive {:manual_connection_message, _,
+                    {:relay_permit_result, ^acquire_origin, result}},
+                   500
+
+    writer_epoch = Base.url_decode64!(result["result"]["writer_epoch"], padding: false)
+    release_origin = {holder.incarnation, 0, 2}
+    {release_worker, release_worker_incarnation} = start_worker(holder.pid, release_origin)
+
+    assert {:ok, :proposed, ^predecessor, ^predecessor_incarnation} =
+             Owner.release_control(
+               owner,
+               release_origin,
+               "release-held",
+               "cancelled-successor",
+               holder.pid,
+               holder.incarnation,
+               release_worker,
+               release_worker_incarnation,
+               writer_epoch,
+               now_ms() + 1_000
+             )
+
+    assert_receive {:worker_go, ^release_worker, ^release_origin}, 500
+
+    assert_receive {:manual_connection_message, _, {:relay_permit_result, ^release_origin, _}},
+                   500
+
+    assert_receive {:retirement_exit_blocked, ^predecessor, ^predecessor_incarnation,
+                    retirement_ref},
+                   500
+
+    successor_origin = {successor.incarnation, 0, 1}
+
+    {successor_worker, successor_worker_incarnation} =
+      start_worker(successor.pid, successor_origin)
+
+    assert {:ok, :queued, ^owner, _daemon_incarnation} =
+             Owner.acquire_control(
+               owner,
+               successor_origin,
+               "acquire-cancelled",
+               "cancelled-successor",
+               successor.pid,
+               successor.incarnation,
+               successor_worker,
+               successor_worker_incarnation,
+               now_ms() + 1_000
+             )
+
+    assert_receive {:worker_go, ^successor_worker, ^successor_origin}, 500
+
+    Process.exit(successor.pid, :kill)
+
+    assert %{
+             owner_slots: 1,
+             waiting_owner_starts: 0,
+             lease_operations: 0,
+             mirror_operations: 0,
+             pending_dispositions: 0
+           } = wait_for_successor_cancellation(owner)
+
+    assert Process.alive?(predecessor)
+    assert :ok = LeaseOwner.release_retirement_exit(predecessor, retirement_ref)
+    assert_receive {:retirement_pop_blocked, ^owner, "cancelled-successor"}, 500
+    assert :ok = Owner.release_retirement_pop(owner, "cancelled-successor")
+
+    assert %{owner_slots: 0, waiting_owner_starts: 0} = wait_for_owner_retirement(owner)
+    assert %{permits: 0, settling: 0, lease_owners: 0} = AdmissionRelay.status(components.relay)
+  end
+
   test "a suspended registry cannot extend the mirror deadline" do
     owner = start_owner(mirror_deadline_ms: 30)
     components = Owner.components(owner)
@@ -487,6 +748,38 @@ defmodule LoopexDaemon.OwnerTest do
   end
 
   defp wait_for_owner_retirement(owner, 0), do: Owner.status(owner)
+
+  defp wait_for_transferred_slot(owner, attempts \\ 200)
+
+  defp wait_for_transferred_slot(owner, attempts) when attempts > 0 do
+    status = Owner.status(owner)
+
+    if status.owner_slots == 512 and status.retiring_owners == 0 and
+         status.waiting_owner_starts == 1 and status.mirror_operations == 1 do
+      status
+    else
+      Process.sleep(5)
+      wait_for_transferred_slot(owner, attempts - 1)
+    end
+  end
+
+  defp wait_for_transferred_slot(owner, 0), do: Owner.status(owner)
+
+  defp wait_for_successor_cancellation(owner, attempts \\ 100)
+
+  defp wait_for_successor_cancellation(owner, attempts) when attempts > 0 do
+    status = Owner.status(owner)
+
+    if status.waiting_owner_starts == 0 and status.lease_operations == 0 and
+         status.mirror_operations == 0 and status.pending_dispositions == 0 do
+      status
+    else
+      Process.sleep(5)
+      wait_for_successor_cancellation(owner, attempts - 1)
+    end
+  end
+
+  defp wait_for_successor_cancellation(owner, 0), do: Owner.status(owner)
 
   defp wait_for_relay_settling(relay, attempts \\ 20)
 

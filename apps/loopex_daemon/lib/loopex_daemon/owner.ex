@@ -118,6 +118,7 @@ defmodule LoopexDaemon.Owner do
           live_owners: non_neg_integer(),
           retiring_owners: non_neg_integer(),
           lost_owners: non_neg_integer(),
+          waiting_owner_starts: non_neg_integer(),
           lease_operations: non_neg_integer(),
           mirror_operations: non_neg_integer(),
           pending_dispositions: non_neg_integer(),
@@ -126,6 +127,12 @@ defmodule LoopexDaemon.Owner do
           mirror_deadline_ms: pos_integer()
         }
   def status(owner), do: GenServer.call(owner, :status)
+
+  @doc false
+  @spec release_retirement_pop(pid(), binary()) :: :ok | {:error, :invalid_operation}
+  def release_retirement_pop(owner, session_id) do
+    GenServer.call(owner, {:release_retirement_pop, session_id})
+  end
 
   @impl true
   def init(options) do
@@ -136,13 +143,17 @@ defmodule LoopexDaemon.Owner do
     admission_wait_ms = Keyword.fetch!(options, :admission_wait_ms)
     mirror_deadline_ms = Keyword.get(options, :mirror_deadline_ms, @mirror_deadline_ms)
     lease_term_ms = Keyword.get(options, :lease_term_ms, @lease_term_ms)
+    retirement_pop_gate = Keyword.get(options, :retirement_pop_gate)
+    retirement_exit_gate = Keyword.get(options, :retirement_exit_gate)
 
     if valid_options?(
          daemon_incarnation,
          routing_incarnation,
          admission_wait_ms,
          mirror_deadline_ms,
-         lease_term_ms
+         lease_term_ms,
+         retirement_pop_gate,
+         retirement_exit_gate
        ) do
       with {:ok, relay} <-
              AdmissionRelay.start_link(
@@ -165,6 +176,8 @@ defmodule LoopexDaemon.Owner do
            registry: registry,
            mirror_deadline_ms: mirror_deadline_ms,
            lease_term_ms: lease_term_ms,
+           retirement_pop_gate: retirement_pop_gate,
+           retirement_exit_gate: retirement_exit_gate,
            owners: %{},
            owner_pids: %{},
            operations: %{},
@@ -237,6 +250,28 @@ defmodule LoopexDaemon.Owner do
     dispatch_release(state, requested)
   end
 
+  def handle_call(
+        {:release_retirement_pop, session_id},
+        {caller, _tag},
+        %{retirement_pop_gate: caller} = state
+      ) do
+    case Enum.find(state.mirror_operations, fn {_operation_ref, operation} ->
+           operation.kind == :retirement and operation.step == :pop_owner_blocked and
+             operation.row.session_id == session_id
+         end) do
+      {operation_ref, operation} ->
+        state = put_in(state, [:mirror_operations, operation_ref, :step], :pop_owner)
+        request_retirement_pop(state, operation_ref, operation)
+        {:reply, :ok, state}
+
+      nil ->
+        {:reply, {:error, :invalid_operation}, state}
+    end
+  end
+
+  def handle_call({:release_retirement_pop, _session_id}, _from, state),
+    do: {:reply, {:error, :invalid_operation}, state}
+
   def handle_call(:status, _from, state) do
     live = Enum.count(state.owners, fn {_session_id, row} -> row.phase == :live end)
 
@@ -247,6 +282,9 @@ defmodule LoopexDaemon.Owner do
 
     lost = Enum.count(state.owners, fn {_session_id, row} -> row.phase == :lost end)
 
+    waiting =
+      Enum.count(state.owners, fn {_session_id, row} -> not is_nil(Map.get(row, :successor)) end)
+
     {:reply,
      %{
        phase: state.phase,
@@ -254,6 +292,7 @@ defmodule LoopexDaemon.Owner do
        live_owners: live,
        retiring_owners: retiring,
        lost_owners: lost,
+       waiting_owner_starts: waiting,
        lease_operations: map_size(state.operations),
        mirror_operations: map_size(state.mirror_operations),
        pending_dispositions: map_size(state.pending_dispositions),
@@ -391,14 +430,9 @@ defmodule LoopexDaemon.Owner do
         row = %{row | phase: :retiring, retirement_ref: retirement_ref}
         state = put_in(state, [:owners, session_id], row)
 
-        case LeaseOwner.complete_retirement(owner, retirement_ref) do
-          :ok ->
-            Logger.debug("loopex daemon lease owner retirement acknowledged")
-            {:noreply, state}
-
-          {:error, :invalid_operation} ->
-            {:stop, :lease_operation_invalid, state}
-        end
+        :ok = LeaseOwner.complete_retirement(owner, retirement_ref)
+        Logger.debug("loopex daemon lease owner retirement acknowledged")
+        {:noreply, state}
 
       _other ->
         {:stop, :lease_operation_invalid, state}
@@ -410,7 +444,8 @@ defmodule LoopexDaemon.Owner do
         %{relay: relay} = state
       ) do
     case Map.get(state.owners, session_id) do
-      %{pid: ^owner, incarnation: ^owner_incarnation, phase: :retiring} = row ->
+      %{pid: ^owner, incarnation: ^owner_incarnation, phase: phase} = row
+      when phase in [:retiring, :starting_waiting_pop] ->
         state = put_in(state, [:owners, session_id], %{row | relay_complete: true})
         finish_owner_retirement(state, session_id)
 
@@ -452,20 +487,24 @@ defmodule LoopexDaemon.Owner do
         case Map.fetch!(state.owners, session_id) do
           %{pid: ^owner, phase: :retiring, retirement_ref: retirement_ref} = row
           when is_reference(retirement_ref) and reason == :normal ->
+            slot_charged = not is_nil(row.successor)
+            phase = if slot_charged, do: :starting_waiting_pop, else: :retiring
+
             state =
               state
               |> put_in(
                 [:owners, session_id],
                 %{
                   row
-                  | exit_consumed: true,
-                    slot_charged: false
+                  | phase: phase,
+                    exit_consumed: true,
+                    slot_charged: slot_charged
                 }
               )
               |> update_in([:owner_pids], &Map.delete(&1, owner))
 
             Logger.debug("loopex daemon lease owner retirement exit consumed")
-            finish_owner_retirement(state, session_id)
+            start_retirement_pop(state, session_id, row)
 
           _row ->
             state = put_in(state, [:owners, session_id, :phase], :lost)
@@ -534,7 +573,8 @@ defmodule LoopexDaemon.Owner do
                registry: state.registry,
                session_id: session_id,
                owner_incarnation: owner_incarnation,
-               lease_term_ms: state.lease_term_ms
+               lease_term_ms: state.lease_term_ms,
+               retirement_exit_gate: state.retirement_exit_gate
              ) do
           {:ok, owner} ->
             with :ok <-
@@ -569,6 +609,10 @@ defmodule LoopexDaemon.Owner do
 
   defp dispatch_acquire(state, request) do
     case Map.fetch(state.operations, request.permit_id) do
+      {:ok, %{request: ^request, phase: phase}}
+      when phase in [:waiting_owner, :settling] ->
+        {:reply, {:ok, :queued, self(), state.daemon_incarnation}, state}
+
       {:ok, %{request: ^request, owner_pid: pid, owner_incarnation: owner_incarnation}} ->
         {:reply, {:ok, :completed, pid, owner_incarnation}, state}
 
@@ -580,6 +624,10 @@ defmodule LoopexDaemon.Owner do
           %{phase: :live} = owner_row ->
             dispatch_existing_acquire(state, request, owner_row)
 
+          %{phase: phase} = owner_row
+          when phase in [:retirement_pending, :retiring, :starting_waiting_pop] ->
+            dispatch_waiting_owner_acquire(state, request, owner_row)
+
           nil ->
             dispatch_first_acquire(state, request)
 
@@ -589,7 +637,75 @@ defmodule LoopexDaemon.Owner do
     end
   end
 
+  defp dispatch_waiting_owner_acquire(state, request, owner_row) do
+    cond do
+      not is_nil(owner_row.successor) ->
+        {:reply, {:error, :owner_unavailable}, state}
+
+      not owner_row.slot_charged and owner_slot_count(state) >= @owner_limit ->
+        {:reply, {:error, :control_capacity_reached}, state}
+
+      true ->
+        permit_id = request.permit_id
+        start_op_ref = make_ref()
+
+        with true <- valid_request?(request),
+             {:ok, ^permit_id} <-
+               AdmissionRelay.open_lease_permit(
+                 state.relay,
+                 request.connection,
+                 permit_id,
+                 request.class,
+                 request.session_id,
+                 self(),
+                 state.daemon_incarnation,
+                 request.worker,
+                 request.worker_incarnation,
+                 start_op_ref
+               ),
+             :ok <-
+               AdmissionRelay.claim_lease_permit(
+                 state.relay,
+                 permit_id,
+                 state.daemon_incarnation,
+                 start_op_ref
+               ) do
+          operation = %{
+            request: request,
+            owner_pid: nil,
+            owner_incarnation: nil,
+            actor_pid: self(),
+            actor_incarnation: state.daemon_incarnation,
+            start_op_ref: start_op_ref,
+            phase: :waiting_owner
+          }
+
+          phase = if owner_row.exit_consumed, do: :starting_waiting_pop, else: owner_row.phase
+          owner_row = %{owner_row | phase: phase, slot_charged: true, successor: permit_id}
+
+          state =
+            state
+            |> put_in([:owners, request.session_id], owner_row)
+            |> put_in([:operations, permit_id], operation)
+
+          Logger.debug("loopex daemon successor owner start retained")
+          {:reply, {:ok, :queued, self(), state.daemon_incarnation}, state}
+        else
+          false -> {:reply, {:error, :invalid_operation}, state}
+          {:error, reason} -> {:reply, {:error, reason}, state}
+        end
+    end
+  end
+
   defp dispatch_first_acquire(state, request) do
+    if owner_slot_count(state) >= @owner_limit do
+      {:reply, {:error, :control_capacity_reached}, state}
+    else
+      open_first_acquire(state, request)
+    end
+  end
+
+  defp open_first_acquire(state, request) do
     permit_id = request.permit_id
     start_op_ref = make_ref()
 
@@ -867,6 +983,52 @@ defmodule LoopexDaemon.Owner do
     {:noreply, state}
   end
 
+  defp start_retirement_pop(state, session_id, predecessor) do
+    operation_ref = make_ref()
+    deadline = monotonic_ms() + state.mirror_deadline_ms
+
+    step = if is_pid(state.retirement_pop_gate), do: :pop_owner_blocked, else: :pop_owner
+
+    operation = %{
+      kind: :retirement,
+      step: step,
+      permit_id: nil,
+      owner_pid: predecessor.pid,
+      owner_incarnation: predecessor.incarnation,
+      row: %{
+        session_id: session_id,
+        owner_pid: predecessor.pid,
+        owner_incarnation: predecessor.incarnation
+      },
+      deadline: deadline,
+      timer: schedule_deadline(operation_ref, deadline)
+    }
+
+    state = put_in(state, [:mirror_operations, operation_ref], operation)
+
+    if step == :pop_owner_blocked do
+      send(
+        state.retirement_pop_gate,
+        {:retirement_pop_blocked, self(), session_id}
+      )
+    else
+      request_retirement_pop(state, operation_ref, operation)
+    end
+
+    Logger.debug("loopex daemon retired owner mirror pop start")
+    {:noreply, state}
+  end
+
+  defp request_retirement_pop(state, operation_ref, operation) do
+    ConnectionRegistry.apply_mirror(
+      state.registry,
+      operation_ref,
+      state.routing_incarnation,
+      :pop_owner_mirror,
+      operation.row
+    )
+  end
+
   defp continue_registry_operation(state, operation_ref, result) do
     case Map.get(state.mirror_operations, operation_ref) do
       nil ->
@@ -988,6 +1150,32 @@ defmodule LoopexDaemon.Owner do
     )
 
     {:noreply, state}
+  end
+
+  defp apply_registry_result(
+         state,
+         operation_ref,
+         %{kind: :retirement, step: :pop_owner} = operation,
+         {:ok, :absent}
+       ) do
+    cancel_timer(operation.timer, operation_ref)
+
+    state = update_in(state.mirror_operations, &Map.delete(&1, operation_ref))
+
+    case Map.get(state.owners, operation.row.session_id) do
+      %{
+        pid: owner,
+        incarnation: owner_incarnation,
+        exit_consumed: true
+      } = row
+      when owner == operation.owner_pid and owner_incarnation == operation.owner_incarnation ->
+        state = put_in(state, [:owners, operation.row.session_id], %{row | mirror_complete: true})
+        Logger.debug("loopex daemon retired owner mirror pop complete")
+        finish_owner_retirement(state, operation.row.session_id)
+
+      _other ->
+        fail_connections(state)
+    end
   end
 
   defp apply_registry_result(state, _operation_ref, _operation, _result),
@@ -1239,7 +1427,13 @@ defmodule LoopexDaemon.Owner do
            operation.permit_id == permit_id
          end) do
       [] ->
-        retain_pending_connection_loss(state, permit_id, loss)
+        case Map.fetch!(state.operations, permit_id) do
+          %{phase: :waiting_owner} = operation ->
+            start_waiting_owner_loss_settlement(state, permit_id, operation, loss)
+
+          _operation ->
+            retain_pending_connection_loss(state, permit_id, loss)
+        end
 
       [{operation_ref, %{kind: :grant, step: :install} = operation}] ->
         operation = %{operation | step: :install_connection_lost, loss_ref: loss.settlement_ref}
@@ -1301,6 +1495,35 @@ defmodule LoopexDaemon.Owner do
       {:ok, _other} ->
         {:stop, :relay_lost, state}
     end
+  end
+
+  defp start_waiting_owner_loss_settlement(state, permit_id, operation, loss) do
+    operation_ref = make_ref()
+    deadline = monotonic_ms() + state.mirror_deadline_ms
+
+    settlement = %{
+      kind: :queued_grant,
+      step: :settle_disposition,
+      permit_id: permit_id,
+      owner_pid: nil,
+      owner_incarnation: nil,
+      actor_pid: operation.actor_pid,
+      actor_incarnation: operation.actor_incarnation,
+      transition_ref: nil,
+      row: %{session_id: operation.request.session_id},
+      deadline: deadline,
+      timer: schedule_deadline(operation_ref, deadline),
+      loss_ref: loss.settlement_ref
+    }
+
+    state =
+      state
+      |> put_in([:operations, permit_id, :phase], :settling)
+      |> put_in([:mirror_operations, operation_ref], settlement)
+
+    request_relay_disposition_settlement(state, operation_ref, settlement)
+    Logger.debug("loopex daemon queued successor connection loss settlement start")
+    {:noreply, state}
   end
 
   defp valid_connection_loss?(operation, loss) do
@@ -1397,6 +1620,8 @@ defmodule LoopexDaemon.Owner do
           )
     }
 
+    state = release_successor_reservation(state, operation)
+
     Logger.debug("loopex daemon mirror settlement complete")
     {:noreply, state}
   end
@@ -1436,14 +1661,172 @@ defmodule LoopexDaemon.Owner do
 
   defp finish_owner_retirement(state, session_id) do
     case Map.get(state.owners, session_id) do
-      %{exit_consumed: true, relay_complete: true} ->
+      %{
+        exit_consumed: true,
+        relay_complete: true,
+        mirror_complete: true,
+        successor: nil
+      } ->
         Logger.debug("loopex daemon lease owner retirement complete")
         {:noreply, update_in(state.owners, &Map.delete(&1, session_id))}
+
+      %{
+        exit_consumed: true,
+        relay_complete: true,
+        mirror_complete: true,
+        successor: permit_id
+      } = row
+      when not is_nil(permit_id) ->
+        start_waiting_successor(state, session_id, row, permit_id)
 
       _other ->
         {:noreply, state}
     end
   end
+
+  defp start_waiting_successor(state, session_id, predecessor, permit_id) do
+    case Map.get(state.operations, permit_id) do
+      %{phase: :waiting_owner, request: %{session_id: ^session_id} = request} = operation ->
+        if request.request_deadline <= monotonic_ms() do
+          complete_waiting_successor(
+            state,
+            session_id,
+            predecessor,
+            operation,
+            "control_pending"
+          )
+        else
+          materialize_waiting_successor(state, session_id, predecessor, operation)
+        end
+
+      _other ->
+        {:stop, :lease_operation_invalid, state}
+    end
+  end
+
+  defp materialize_waiting_successor(state, session_id, predecessor, operation) do
+    owner_incarnation = incarnation()
+
+    case LeaseOwner.start_link(
+           daemon_owner: self(),
+           relay: state.relay,
+           registry: state.registry,
+           session_id: session_id,
+           owner_incarnation: owner_incarnation,
+           lease_term_ms: state.lease_term_ms,
+           retirement_exit_gate: state.retirement_exit_gate
+         ) do
+      {:ok, owner} ->
+        with :ok <-
+               AdmissionRelay.register_lease_owner(
+                 state.relay,
+                 session_id,
+                 owner,
+                 owner_incarnation
+               ),
+             :ok <- LeaseOwner.activate(owner) do
+          permit_id = operation.request.permit_id
+          row = owner_row(owner, owner_incarnation)
+
+          operation = %{
+            operation
+            | owner_pid: owner,
+              owner_incarnation: owner_incarnation,
+              phase: :opened
+          }
+
+          state =
+            state
+            |> put_in([:owners, session_id], row)
+            |> put_in([:owner_pids, owner], session_id)
+            |> put_in([:operations, permit_id], operation)
+
+          case LeaseOwner.first_acquire(
+                 owner,
+                 permit_id,
+                 operation.request.request_id,
+                 operation.request.connection,
+                 operation.request.connection_incarnation,
+                 operation.request.request_deadline
+               ) do
+            {:ok, :proposed} ->
+              Logger.debug("loopex daemon successor lease owner installed")
+              {:noreply, state}
+
+            {:error, :invalid_operation} ->
+              {:stop, :lease_operation_invalid, state}
+          end
+        else
+          _error ->
+            if Process.alive?(owner), do: Process.exit(owner, :kill)
+            {:stop, :lease_operation_invalid, state}
+        end
+
+      _error ->
+        complete_waiting_successor(
+          state,
+          session_id,
+          predecessor,
+          operation,
+          "control_pending"
+        )
+    end
+  end
+
+  defp complete_waiting_successor(state, session_id, predecessor, operation, code) do
+    result = WireRecords.control_error(operation.request.request_id, code)
+
+    case AdmissionRelay.complete_lease_permit(
+           state.relay,
+           operation.request.permit_id,
+           state.daemon_incarnation,
+           result
+         ) do
+      :ok ->
+        state =
+          state
+          |> update_in([:operations], &Map.delete(&1, operation.request.permit_id))
+          |> update_in([:pending_dispositions], &Map.delete(&1, operation.request.permit_id))
+
+        state =
+          case Map.get(state.owners, session_id) do
+            ^predecessor -> update_in(state.owners, &Map.delete(&1, session_id))
+            _other -> state
+          end
+
+        Logger.debug("loopex daemon successor owner start refused")
+        {:noreply, state}
+
+      {:error, :connection_lost} ->
+        {:noreply, state}
+
+      {:error, _reason} ->
+        {:stop, :relay_lost, state}
+    end
+  end
+
+  defp release_successor_reservation(
+         state,
+         %{kind: :queued_grant, permit_id: permit_id, row: %{session_id: session_id}}
+       ) do
+    case Map.get(state.owners, session_id) do
+      %{successor: ^permit_id} = row ->
+        slot_charged = not row.exit_consumed
+        phase = if row.exit_consumed, do: :retiring, else: row.phase
+        row = %{row | phase: phase, successor: nil, slot_charged: slot_charged}
+
+        if row.exit_consumed and row.relay_complete and row.mirror_complete do
+          update_in(state.owners, &Map.delete(&1, session_id))
+        else
+          put_in(state, [:owners, session_id], row)
+        end
+
+      _other ->
+        state
+    end
+  end
+
+  defp release_successor_reservation(state, _operation), do: state
 
   defp owner_row(owner, owner_incarnation) do
     %{
@@ -1451,9 +1834,11 @@ defmodule LoopexDaemon.Owner do
       incarnation: owner_incarnation,
       phase: :live,
       slot_charged: true,
+      successor: nil,
       retirement_ref: nil,
       exit_consumed: false,
-      relay_complete: false
+      relay_complete: false,
+      mirror_complete: false
     }
   end
 
@@ -1492,13 +1877,16 @@ defmodule LoopexDaemon.Owner do
          routing_incarnation,
          admission_wait_ms,
          mirror_deadline_ms,
-         lease_term_ms
+         lease_term_ms,
+         retirement_pop_gate,
+         retirement_exit_gate
        ) do
     valid_incarnation?(daemon_incarnation) and valid_incarnation?(routing_incarnation) and
       is_integer(admission_wait_ms) and admission_wait_ms > 0 and
       is_integer(mirror_deadline_ms) and mirror_deadline_ms > 0 and
       mirror_deadline_ms <= @mirror_deadline_ms and is_integer(lease_term_ms) and
-      lease_term_ms > 0
+      lease_term_ms > 0 and (is_nil(retirement_pop_gate) or is_pid(retirement_pop_gate)) and
+      (is_nil(retirement_exit_gate) or is_pid(retirement_exit_gate))
   end
 
   defp valid_session?(session_id),
