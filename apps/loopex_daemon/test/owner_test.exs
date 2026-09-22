@@ -103,7 +103,33 @@ defmodule LoopexDaemon.OwnerTest do
     assert %{granted_routing_mirrors: 1, provisional_routing_mirrors: 0} =
              ConnectionRegistry.status(components.registry)
 
-    release_origin = {connection.incarnation, 1, 1}
+    refused_origin = {connection.incarnation, 1, 1}
+
+    {refused_worker, refused_worker_incarnation} =
+      start_worker(connection.pid, refused_origin)
+
+    assert {:ok, :completed, ^lease_owner, ^owner_incarnation} =
+             Owner.release_control(
+               owner,
+               refused_origin,
+               "release-refused",
+               "session",
+               connection.pid,
+               connection.incarnation,
+               refused_worker,
+               refused_worker_incarnation,
+               incarnation(),
+               now_ms() + 1_000
+             )
+
+    assert_receive {:manual_connection_message, ^connection_pid,
+                    {:relay_permit_result, ^refused_origin, refused_result}},
+                   500
+
+    assert refused_result["code"] == "control_not_held"
+    assert %{phase: :held, held: true} = LeaseOwner.status(lease_owner)
+
+    release_origin = {connection.incarnation, 2, 1}
 
     {release_worker, release_worker_incarnation} =
       start_worker(connection.pid, release_origin)
@@ -135,37 +161,54 @@ defmodule LoopexDaemon.OwnerTest do
              "type" => "result"
            }
 
-    assert %{granted_routes: 0, lease_operations: 0, mirror_operations: 0} =
-             wait_for_owner_settlement(owner)
+    assert %{
+             granted_routes: 0,
+             lease_operations: 0,
+             mirror_operations: 0,
+             owner_slots: 0,
+             retiring_owners: 0
+           } =
+             wait_for_owner_retirement(owner)
 
-    assert %{phase: :released, held: false} = LeaseOwner.status(lease_owner)
+    refute Process.alive?(lease_owner)
     assert %{routing_mirrors: 0} = ConnectionRegistry.status(components.registry)
 
-    refused_origin = {connection.incarnation, 2, 1}
+    assert %{lease_owners: 0, retiring_lease_owners: 0} =
+             AdmissionRelay.status(components.relay)
 
-    {refused_worker, refused_worker_incarnation} =
-      start_worker(connection.pid, refused_origin)
+    successor_origin = {connection.incarnation, 3, 1}
 
-    assert {:ok, :completed, ^lease_owner, ^owner_incarnation} =
-             Owner.release_control(
+    {successor_worker, successor_worker_incarnation} =
+      start_worker(connection.pid, successor_origin)
+
+    assert {:ok, :proposed, successor, successor_incarnation} =
+             Owner.acquire_control(
                owner,
-               refused_origin,
-               "release-refused",
+               successor_origin,
+               "acquire-2",
                "session",
                connection.pid,
                connection.incarnation,
-               refused_worker,
-               refused_worker_incarnation,
-               writer_epoch,
+               successor_worker,
+               successor_worker_incarnation,
                now_ms() + 1_000
              )
 
+    refute successor == lease_owner
+    refute successor_incarnation == owner_incarnation
+    assert_receive {:worker_go, ^successor_worker, ^successor_origin}, 500
+
     assert_receive {:manual_connection_message, ^connection_pid,
-                    {:relay_permit_result, ^refused_origin, refused_result}},
+                    {:relay_permit_result, ^successor_origin, successor_result}},
                    500
 
-    assert refused_result["code"] == "control_not_held"
-    assert %{lease_operations: 0, mirror_operations: 0} = Owner.status(owner)
+    successor_epoch =
+      Base.url_decode64!(successor_result["result"]["writer_epoch"], padding: false)
+
+    refute successor_epoch == writer_epoch
+
+    assert %{owner_slots: 1, live_owners: 1, granted_routes: 1} =
+             wait_for_owner_settlement(owner)
   end
 
   test "a suspended registry cannot extend the mirror deadline" do
@@ -234,8 +277,9 @@ defmodule LoopexDaemon.OwnerTest do
              pending_dispositions: 0
            } = wait_for_owner_settlement(owner)
 
+    assert %{owner_slots: 0} = wait_for_owner_retirement(owner)
     assert Process.alive?(owner)
-    assert %{phase: :free, held: false} = LeaseOwner.status(lease_owner)
+    refute Process.alive?(lease_owner)
     assert %{routing_mirrors: 0} = ConnectionRegistry.status(components.registry)
     assert %{permits: 0, settling: 0} = AdmissionRelay.status(components.relay)
   end
@@ -341,7 +385,11 @@ defmodule LoopexDaemon.OwnerTest do
              )
 
     assert_receive {:manual_connection_message, _, {:relay_permit_result, ^origin, _result}}, 500
-    assert %{phase: :expired, held: false} = wait_for_expiry(owner, lease_owner)
+
+    assert %{granted_routes: 0, mirror_operations: 0, owner_slots: 0} =
+             wait_for_owner_retirement(owner)
+
+    refute Process.alive?(lease_owner)
     assert %{routing_mirrors: 0} = ConnectionRegistry.status(components.registry)
   end
 
@@ -424,6 +472,22 @@ defmodule LoopexDaemon.OwnerTest do
 
   defp wait_for_owner_settlement(owner, 0), do: Owner.status(owner)
 
+  defp wait_for_owner_retirement(owner, attempts \\ 40)
+
+  defp wait_for_owner_retirement(owner, attempts) when attempts > 0 do
+    status = Owner.status(owner)
+
+    if status.owner_slots == 0 and status.retiring_owners == 0 and
+         status.lease_operations == 0 and status.mirror_operations == 0 do
+      status
+    else
+      Process.sleep(5)
+      wait_for_owner_retirement(owner, attempts - 1)
+    end
+  end
+
+  defp wait_for_owner_retirement(owner, 0), do: Owner.status(owner)
+
   defp wait_for_relay_settling(relay, attempts \\ 20)
 
   defp wait_for_relay_settling(relay, attempts) when attempts > 0 do
@@ -453,23 +517,6 @@ defmodule LoopexDaemon.OwnerTest do
   end
 
   defp wait_for_relay_pending(relay, 0), do: AdmissionRelay.status(relay)
-
-  defp wait_for_expiry(owner, lease_owner, attempts \\ 40)
-
-  defp wait_for_expiry(owner, lease_owner, attempts) when attempts > 0 do
-    lease_status = LeaseOwner.status(lease_owner)
-    owner_status = Owner.status(owner)
-
-    if lease_status.phase == :expired and owner_status.granted_routes == 0 and
-         owner_status.mirror_operations == 0 do
-      lease_status
-    else
-      Process.sleep(5)
-      wait_for_expiry(owner, lease_owner, attempts - 1)
-    end
-  end
-
-  defp wait_for_expiry(_owner, lease_owner, 0), do: LeaseOwner.status(lease_owner)
 
   defp incarnation, do: :crypto.strong_rand_bytes(16)
   defp now_ms, do: System.monotonic_time(:millisecond)
