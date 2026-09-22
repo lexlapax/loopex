@@ -271,6 +271,7 @@ defmodule LoopexDaemon.ConnectionRegistryTest do
         activation_preparations: 0,
         activations_used: 0,
         activation_limit: 64,
+        attachments: 0,
         routing_mirrors: 0,
         provisional_routing_mirrors: 0,
         granted_routing_mirrors: 0,

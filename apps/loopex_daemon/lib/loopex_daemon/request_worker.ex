@@ -33,6 +33,43 @@ defmodule LoopexDaemon.RequestWorker do
     {pid, monitor, incarnation}
   end
 
+  @doc """
+  ## Concept
+
+  Starts a worker for a lightweight relay permit, whose work begins only
+  after the relay admits it.
+
+  ## Technical depth
+
+  The worker waits for the relay's exact `go`, runs its bounded function and
+  completes the permit with the rendered record under its own incarnation. A
+  permit cancelled before `go` never runs its function.
+  """
+  @spec start_permit(term(), pid(), (-> map())) :: {pid(), reference(), binary()}
+  def start_permit(origin, relay, fun) when is_pid(relay) and is_function(fun, 0) do
+    connection = self()
+    incarnation = :crypto.strong_rand_bytes(@incarnation_bytes)
+
+    {pid, monitor} =
+      spawn_monitor(fn -> run_permit(connection, relay, origin, incarnation, fun) end)
+
+    {pid, monitor, incarnation}
+  end
+
+  defp run_permit(connection, relay, origin, incarnation, fun) do
+    connection_monitor = Process.monitor(connection)
+
+    receive do
+      {:relay_go, ^origin, ^incarnation} ->
+        record = fun.()
+        _result = LoopexDaemon.AdmissionRelay.complete_permit(relay, origin, incarnation, record)
+        Logger.debug("loopex daemon permit worker completed")
+
+      {:DOWN, ^connection_monitor, :process, ^connection, _reason} ->
+        :ok
+    end
+  end
+
   defp run(connection, origin, incarnation, fun) do
     connection_monitor = Process.monitor(connection)
     result = fun.()

@@ -322,6 +322,24 @@ defmodule LoopexDaemon.LeaseOwner do
     )
   end
 
+  @doc """
+  ## Concept
+
+  Sends one connection's mutation or resume descriptor without blocking the
+  connection's socket loop while the lease owner serializes it.
+
+  ## Technical depth
+
+  The request originates from the calling connection, which the lease owner
+  authenticates as the caller. The reply is collected through the returned
+  `:gen_server` request-identifier collection labelled with the origin.
+  """
+  @spec send_descriptor(pid(), tuple(), term(), term()) :: term()
+  def send_descriptor(owner, descriptor, label, collection)
+      when elem(descriptor, 0) in [:mutate, :resume] do
+    :gen_server.send_request(owner, descriptor, label, collection)
+  end
+
   @doc false
   @spec status(pid()) :: map()
   def status(owner), do: GenServer.call(owner, :status)

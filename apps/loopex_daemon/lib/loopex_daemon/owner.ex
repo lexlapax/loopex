@@ -712,7 +712,12 @@ defmodule LoopexDaemon.Owner do
       relay: relay,
       daemon_incarnation: daemon_incarnation,
       runtime: Keyword.get(options, :runtime),
-      fatal_recipient: Keyword.get(options, :fatal_recipient)
+      fatal_recipient: Keyword.get(options, :fatal_recipient),
+      index: Keyword.get(options, :index),
+      placement_identity: Keyword.get(options, :placement_identity),
+      socket_path: Keyword.get(options, :socket_path),
+      state_root: Keyword.get(options, :state_root),
+      started_at: System.monotonic_time(:millisecond)
     }
 
     registry_options = [owner: self(), connection_context: context]

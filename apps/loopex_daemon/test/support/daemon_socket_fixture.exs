@@ -18,7 +18,7 @@ defmodule LoopexDaemon.Test.DaemonSocketFixture do
   end
 
   @doc false
-  def start_runtime(root) do
+  def start_runtime(root, runtime_id \\ nil) do
     state = Path.join(root, "state")
     File.mkdir_p!(state)
 
@@ -29,7 +29,7 @@ defmodule LoopexDaemon.Test.DaemonSocketFixture do
 
     {:ok, runtime} =
       Loopex.start_link(
-        runtime_id: "daemon-test-#{System.unique_integer([:positive])}",
+        runtime_id: runtime_id || "daemon-test-#{System.unique_integer([:positive])}",
         store: store,
         context_token_budget: 8_192
       )
@@ -38,20 +38,69 @@ defmodule LoopexDaemon.Test.DaemonSocketFixture do
   end
 
   @doc false
+  def start_runtime_with_dormant(root, count) do
+    sessions = seed_dormant(root, count, "daemon-placement")
+    {start_runtime(root, "daemon-placement"), sessions}
+  end
+
+  @doc false
+  def seed_dormant(root, count, runtime_id) do
+    state = Path.join(root, "state")
+    File.mkdir_p!(state)
+    path = Path.join(state, "store.log")
+
+    {:ok, adapter} = Loopex.Store.Local.start_link(path: path)
+    {:ok, store} = Loopex.Store.new(Loopex.Store.Local, adapter)
+
+    {:ok, previous} =
+      Loopex.start_link(runtime_id: runtime_id, store: store, context_token_budget: 8_192)
+
+    sessions =
+      for index <- 1..count do
+        {:ok, session_id} =
+          Loopex.create_session(previous, %{"previous" => index}, command_id: "previous-#{index}")
+
+        session_id
+      end
+
+    :ok = Loopex.stop(previous)
+    :ok = GenServer.stop(adapter)
+    sessions
+  end
+
+  @doc false
   def start_daemon(runtime, options \\ []) do
     directory = temporary_directory("loopex-daemon-socket")
     path = Path.join(directory, "d.sock")
     uid = File.stat!(directory).uid
 
-    owner =
-      start_supervised!(
-        {Owner,
-         Keyword.merge(
-           [admission_wait_ms: 1_000, runtime: runtime, fatal_recipient: self()],
-           options
-         )},
-        restart: :temporary
+    {index_root, options} = Keyword.pop(options, :index_root)
+
+    index_options =
+      if index_root do
+        {:ok, index} =
+          LoopexDaemon.SessionIndex.start_link(
+            state_root: index_root,
+            daemon_uid: File.stat!(index_root).uid
+          )
+
+        [index: index, state_root: index_root]
+      else
+        []
+      end
+
+    owner_options =
+      Keyword.merge(
+        [admission_wait_ms: 1_000, runtime: runtime, fatal_recipient: self()] ++ index_options,
+        options
       )
+
+    owner =
+      start_supervised!(%{
+        id: make_ref(),
+        start: {Owner, :start_link, [owner_options]},
+        restart: :temporary
+      })
 
     components = Owner.components(owner)
     {:ok, socket} = ListenerSocket.open_parked(path, uid)
@@ -68,7 +117,10 @@ defmodule LoopexDaemon.Test.DaemonSocketFixture do
 
     assert_receive {:listener_parked, ^startup_ref, ^listener}
     assert :ok = Listener.begin_accept(listener, startup_ref)
-    Map.merge(components, %{owner: owner, listener: listener, path: path})
+
+    components
+    |> Map.merge(%{owner: owner, listener: listener, path: path})
+    |> Map.merge(Map.new(index_options))
   end
 
   @doc false

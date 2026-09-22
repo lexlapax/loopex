@@ -45,6 +45,7 @@ defmodule LoopexDaemon.SocketConnection do
     AdmissionRelay,
     ConnectionProtocol,
     ConnectionRegistry,
+    LeaseOwner,
     Owner,
     Request,
     RequestLedger,
@@ -55,6 +56,26 @@ defmodule LoopexDaemon.SocketConnection do
   alias LoopexProtocol.{Frame, Session.V2}
 
   @owner_loss_close_ms 1_000
+
+  @mutation_operations [
+    :session_prompt,
+    :session_steer,
+    :session_follow_up,
+    :session_abort,
+    :session_respond_interaction,
+    :session_admit_resources,
+    :session_activate_skill
+  ]
+
+  @lease_ticket_operations [:session_resume | @mutation_operations]
+
+  @session_queries [:session_inspect, :resources_catalog, :resources_read]
+
+  @transfer_operations [
+    :artifact_open_transfer,
+    :artifact_read_chunk,
+    :artifact_close_transfer
+  ]
 
   @doc false
   @spec start_link(keyword()) :: GenServer.on_start()
@@ -87,7 +108,8 @@ defmodule LoopexDaemon.SocketConnection do
       workers: %{},
       closing: nil,
       attachment: nil,
-      output_cursors: :queue.new()
+      output_cursors: :queue.new(),
+      calls: :gen_server.reqids_new()
     }
 
     Logger.debug("loopex daemon socket connection waiting")
@@ -226,6 +248,9 @@ defmodule LoopexDaemon.SocketConnection do
       ),
       do: finish_owner_loss_close(state)
 
+  def handle_info({:daemon_notice, record}, %{closing: nil} = state),
+    do: noreply_record(state, record)
+
   def handle_info({:daemon_attachment, origin, attachment}, state) do
     ledger = RequestLedger.update(state.ledger, origin, &Map.put(&1, :attachment, attachment))
     {:noreply, %{state | ledger: ledger}}
@@ -268,7 +293,7 @@ defmodule LoopexDaemon.SocketConnection do
       ),
       do: {:stop, :normal, state}
 
-  def handle_info(_message, state), do: {:noreply, state}
+  def handle_info(message, state), do: collect_descriptor_reply(state, message)
 
   @impl true
   def terminate(_reason, state) do
@@ -519,13 +544,87 @@ defmodule LoopexDaemon.SocketConnection do
     end
   end
 
+  # Concept: an existing-session mutation is admitted only through the lease
+  # owner of the one session this connection serves.
+  #
+  # Technical depth: the connection sends each descriptor to that owner in
+  # wire order, immediately after its relay ticket binds a worker, so the
+  # owner's queue preserves pipelined arrival order. A session with no
+  # granted lease has no route and refuses `control_not_held` before any
+  # ticket, exactly as a failed gate would.
+  defp serve(state, %Request{operation: operation} = request)
+       when operation in @mutation_operations do
+    case RequestLedger.bound_session(state.ledger) do
+      nil -> reply(state, WireRecords.request_error(request.request_id, "control_not_held"))
+      session_id -> serve_lease_ticket(state, request, session_id)
+    end
+  end
+
+  defp serve(state, %Request{operation: :session_resume} = request) do
+    case RequestLedger.admit_session(state.ledger, request.fields.session_id) do
+      :ok ->
+        serve_lease_ticket(state, request, request.fields.session_id)
+
+      {:error, :session_conflict} ->
+        reply(state, WireRecords.invalid_request(request.request_id, "session_conflict"))
+    end
+  end
+
+  # Concept: queries, reads and transfers take lightweight relay permits whose
+  # work starts only after the relay admits them, so a query arriving after
+  # the admission cut is refused without touching core.
+  defp serve(state, %Request{operation: operation} = request)
+       when operation in @session_queries do
+    session_id = request.fields.session_id
+
+    case RequestLedger.admit_session(state.ledger, session_id) do
+      :ok ->
+        begin_permit(state, request, operation, session_id, query_fun(state.context, request))
+
+      {:error, :session_conflict} ->
+        reply(state, WireRecords.invalid_request(request.request_id, "session_conflict"))
+    end
+  end
+
+  defp serve(state, %Request{operation: operation} = request)
+       when operation in @transfer_operations do
+    case state.attachment do
+      nil ->
+        reply(state, WireRecords.not_attached(request.request_id))
+
+      %{attachment: attachment} ->
+        begin_permit(state, request, operation, nil, transfer_fun(attachment, request))
+    end
+  end
+
+  defp serve(state, %Request{operation: :session_list} = request),
+    do: begin_permit(state, request, :session_list, nil, list_fun(state, request))
+
+  defp serve(state, %Request{operation: :daemon_status} = request),
+    do: begin_permit(state, request, :daemon_status, nil, status_fun(state, request))
+
   defp serve(state, request),
     do: reply(state, WireRecords.request_error(request.request_id, "unsupported_method"))
 
-  defp begin_ticket(state, ledger, request, class, session_id, fun) do
+  defp begin_ticket(
+         state,
+         ledger,
+         request,
+         class,
+         session_id,
+         fun,
+         owner_binding \\ nil,
+         after_bind \\ fn state, _origin -> {:ok, state} end
+       ) do
     case RequestLedger.begin(ledger, request.request_id, new_entry(request)) do
       {:ok, origin, ledger} ->
-        case AdmissionRelay.open_ticket(state.context.relay, origin, class, session_id) do
+        case AdmissionRelay.open_ticket(
+               state.context.relay,
+               origin,
+               class,
+               session_id,
+               owner_binding
+             ) do
           {:ok, ^origin} ->
             state = start_request_worker(%{state | ledger: ledger}, origin, fun)
             {:ok, entry} = RequestLedger.fetch(state.ledger, origin)
@@ -537,7 +636,7 @@ defmodule LoopexDaemon.SocketConnection do
                    entry.worker_incarnation
                  ) do
               :ok ->
-                {:ok, state}
+                after_bind.(state, origin)
 
               {:error, reason} ->
                 {:noreply, state} = settle_locally(state, origin, ticket_refusal(reason))
@@ -558,6 +657,7 @@ defmodule LoopexDaemon.SocketConnection do
 
   defp new_entry(request) do
     %{
+      method: request.method,
       operation: request.operation,
       fields: request.fields,
       worker: nil,
@@ -656,6 +756,10 @@ defmodule LoopexDaemon.SocketConnection do
       )
     end)
   end
+
+  defp dispatch_prepared(state, _origin, %{operation: operation}, _result)
+       when operation in @lease_ticket_operations,
+       do: {:noreply, state}
 
   defp dispatch_prepared(state, origin, %{operation: :session_create} = entry, lookup) do
     %{command_id: command_id, session_options: options} = entry.fields
@@ -885,9 +989,13 @@ defmodule LoopexDaemon.SocketConnection do
     runtime = context.runtime
     fatal_recipient = Map.get(context, :fatal_recipient)
 
+    connection = self()
+
     fn ->
       case Loopex.Runtime.create_session_detailed(runtime, command_id, options) do
         {:ok, %{session_id: session_id, disposition: disposition}} ->
+          publish_session(context, connection, session_id)
+
           {disposition, session_id,
            create_admission(request_id, command_id, :accepted, session_id)}
 
@@ -967,6 +1075,10 @@ defmodule LoopexDaemon.SocketConnection do
           Process.demonitor(monitor, [:flush])
           Process.exit(worker, :kill)
           %{state | workers: Map.delete(state.workers, monitor)}
+
+        %{worker: worker} when is_pid(worker) ->
+          Process.exit(worker, :kill)
+          state
 
         _other ->
           state
@@ -1228,4 +1340,466 @@ defmodule LoopexDaemon.SocketConnection do
   defp frame_reason(:integer_out_of_range), do: "an integer is outside the admitted range"
   defp frame_reason(:number_not_an_integer), do: "a number is not an integer"
   defp frame_reason(_reason), do: "the frame is malformed"
+
+  defp serve_lease_ticket(state, request, session_id) do
+    case safe_call(fn -> ConnectionRegistry.lease_route(state.registry, session_id) end) do
+      {:ok, owner, owner_incarnation} ->
+        begin_ticket(
+          state,
+          state.ledger,
+          request,
+          request.operation,
+          session_id,
+          fn -> :ok end,
+          {owner, owner_incarnation},
+          fn state, origin -> send_lease_descriptor(state, origin, owner) end
+        )
+
+      _no_route ->
+        reply(state, WireRecords.request_error(request.request_id, "control_not_held"))
+    end
+  end
+
+  # Concept: the relay owns a lease ticket's worker from binding onward, and
+  # the connection learns the lease owner's disposition asynchronously.
+  defp send_lease_descriptor(state, origin, owner) do
+    {:ok, entry} = RequestLedger.fetch(state.ledger, origin)
+    state = relay_owns_worker(state, origin, entry)
+    descriptor = lease_descriptor(state, origin, entry)
+    calls = LeaseOwner.send_descriptor(owner, descriptor, origin, state.calls)
+    {:ok, %{state | calls: calls}}
+  end
+
+  defp lease_descriptor(state, origin, %{operation: :session_resume} = entry) do
+    %{session_id: session_id, command_id: command_id, writer_epoch: epoch} = entry.fields
+
+    {:resume, origin, entry.request_id, command_id, state.incarnation, epoch, entry.worker,
+     resume_task(state.context, entry.request_id, session_id, command_id)}
+  end
+
+  defp lease_descriptor(state, origin, entry) do
+    {:mutate, origin, entry.operation, entry.request_id, state.incarnation,
+     entry.fields.writer_epoch, entry.worker, mutation_task(state, entry)}
+  end
+
+  defp collect_descriptor_reply(state, message) do
+    case :gen_server.check_response(message, state.calls, true) do
+      {{:reply, reply}, origin, calls} ->
+        descriptor_answered(%{state | calls: calls}, origin, reply)
+
+      {{:error, {_reason, _server}}, _origin, calls} ->
+        {:noreply, %{state | calls: calls}}
+
+      _not_a_descriptor_reply ->
+        {:noreply, state}
+    end
+  end
+
+  defp descriptor_answered(state, _origin, {:ok, disposition})
+       when disposition in [:admitted, :completed],
+       do: {:noreply, state}
+
+  defp descriptor_answered(state, origin, {:error, reason}) do
+    case RequestLedger.fetch(state.ledger, origin) do
+      {:ok, _entry} -> settle_locally(state, origin, descriptor_refusal(reason))
+      :error -> {:noreply, state}
+    end
+  end
+
+  defp descriptor_answered(state, _origin, _reply), do: {:noreply, state}
+
+  defp descriptor_refusal(:daemon_stopping), do: "daemon_stopping"
+  defp descriptor_refusal(:owner_unavailable), do: "control_not_held"
+  defp descriptor_refusal(_reason), do: "internal_failure"
+
+  # Concept: the mutation's core call runs in the relay task and is
+  # classified into exactly one wire answer; `writer_epoch` authorized it and
+  # never reaches core.
+  defp mutation_task(state, entry) do
+    attachment = state.attachment && state.attachment.attachment
+    command = command_for(entry.operation, entry.fields)
+    request_id = entry.request_id
+    method = entry.method
+    fatal_recipient = Map.get(state.context, :fatal_recipient)
+    fn -> run_mutation(attachment, command, request_id, method, fatal_recipient) end
+  end
+
+  defp run_mutation(nil, _command, request_id, _method, _fatal_recipient),
+    do: {:refused, WireRecords.request_error(request_id, "control_not_held")}
+
+  defp run_mutation(attachment, command, request_id, method, fatal_recipient) do
+    case Loopex.Runtime.command_for_daemon(attachment, command) do
+      {:routed, _route, {:accepted, accepted_id}} ->
+        {:accepted, WireRecords.admission(request_id, method, accepted_id, :accepted)}
+
+      {:routed, _route, {:error, :commit_unknown}} ->
+        {:admission_unknown, WireRecords.succession_error(request_id, "admission_unknown")}
+
+      {:routed, _route, {:error, reason}} ->
+        refused = {:refused, reason_word(reason)}
+        {:refused, WireRecords.admission(request_id, method, command.command_id, refused)}
+
+      {:error, {:admission_unknown, _route}} ->
+        {:admission_unknown, WireRecords.succession_error(request_id, "admission_unknown")}
+
+      {:error, {:superseded_before_admission, _route}} ->
+        {:refused, WireRecords.request_error(request_id, "control_not_held")}
+
+      {:error, {:attachment_route_invalidated, _attachment_id, _incarnation}} ->
+        {:refused, WireRecords.request_error(request_id, "control_not_held")}
+
+      {:error, :session_unavailable} ->
+        {:refused, WireRecords.request_error(request_id, "session_unavailable")}
+
+      {:error, :runtime_unavailable} ->
+        if is_pid(fatal_recipient),
+          do: send(fatal_recipient, {:daemon_component_fatal, self(), :runtime_lost})
+
+        {:admission_unknown, WireRecords.succession_error(request_id, "admission_unknown")}
+
+      _unexpected ->
+        {:refused, WireRecords.request_error(request_id, "internal_failure")}
+    end
+  end
+
+  defp command_for(:session_prompt, fields),
+    do: %{type: :prompt, command_id: fields.command_id, content: fields.content}
+
+  defp command_for(:session_follow_up, fields),
+    do: %{type: :follow_up, command_id: fields.command_id, content: fields.content}
+
+  defp command_for(:session_steer, fields) do
+    %{
+      type: :steer,
+      command_id: fields.command_id,
+      content: fields.content,
+      run_id: fields.run_id
+    }
+  end
+
+  defp command_for(:session_abort, fields), do: %{type: :abort, command_id: fields.command_id}
+
+  defp command_for(:session_respond_interaction, fields) do
+    %{
+      type: :interaction_answer,
+      command_id: fields.command_id,
+      interaction_id: fields.interaction_id,
+      choice_id: fields.choice_id
+    }
+  end
+
+  defp command_for(:session_admit_resources, fields) do
+    %{
+      type: :admit_resources,
+      command_id: fields.command_id,
+      manifest_digest: fields.manifest_digest,
+      decision: fields.decision
+    }
+  end
+
+  defp command_for(:session_activate_skill, fields) do
+    %{
+      type: :activate_skill,
+      command_id: fields.command_id,
+      manifest_digest: fields.manifest_digest,
+      pack_digest: fields.pack_digest,
+      source_id: fields.source_id,
+      name: fields.name,
+      supporting_labels: fields.supporting_labels
+    }
+  end
+
+  # Concept: a governed resume activates through the relay task, which
+  # classifies both the lease disposition and whether core started a
+  # coordinator.
+  defp resume_task(context, request_id, session_id, command_id) do
+    runtime = context.runtime
+    fatal_recipient = Map.get(context, :fatal_recipient)
+    connection = self()
+
+    fn ->
+      case Loopex.Runtime.resume_session_detailed(runtime, session_id, command_id) do
+        {:ok, %{session_id: resumed, disposition: disposition}} ->
+          publish_session(context, connection, resumed)
+
+          {:accepted, disposition,
+           WireRecords.admission(request_id, "session.resume", command_id, :accepted, resumed)}
+
+        {:error, :runtime_placement_mismatch, %{disposition: disposition}} ->
+          {:refused, disposition, WireRecords.request_error(request_id, "composition_mismatch")}
+
+        {:error, :commit_unknown, %{disposition: disposition}} ->
+          {:admission_unknown, disposition,
+           WireRecords.succession_error(request_id, "admission_unknown")}
+
+        {:error, :recovery_required, %{disposition: disposition}} ->
+          {:refused, disposition, WireRecords.request_error(request_id, "recovery_required")}
+
+        {:error, reason, %{disposition: disposition}} ->
+          refused = {:refused, reason_word(reason)}
+
+          {:refused, disposition,
+           WireRecords.admission(request_id, "session.resume", command_id, refused)}
+
+        {:error, :runtime_unavailable} ->
+          if is_pid(fatal_recipient),
+            do: send(fatal_recipient, {:daemon_component_fatal, self(), :runtime_lost})
+
+          {:admission_unknown, :no_activation,
+           WireRecords.succession_error(request_id, "admission_unknown")}
+
+        _unexpected ->
+          {:refused, :no_activation, WireRecords.request_error(request_id, "internal_failure")}
+      end
+    end
+  end
+
+  # Concept: a session reached through the daemon becomes discoverable, but a
+  # failure to record it never makes it unusable.
+  #
+  # Technical depth: the index row is written through its one owner; a write
+  # failure tells the causing client with `daemon.notice`. The compatibility
+  # directory entry is best effort with a fixed, identity-free warning.
+  defp publish_session(context, connection, session_id) do
+    case Map.get(context, :index) do
+      nil ->
+        :ok
+
+      index ->
+        case safe_index_record(index, session_id, Map.get(context, :placement_identity)) do
+          {:error, :index_write_failed} ->
+            send(connection, {:daemon_notice, WireRecords.index_write_failed(session_id)})
+
+          _recorded_or_full ->
+            :ok
+        end
+    end
+
+    case {Map.get(context, :state_root), Map.get(context, :placement_identity)} do
+      {root, placement} when is_binary(root) and is_binary(placement) ->
+        case Loopex.track_session(root, session_id, placement) do
+          :ok ->
+            :ok
+
+          {:error, _reason} ->
+            Logger.warning("loopex daemon compatibility session entry not written")
+        end
+
+      _unconfigured ->
+        :ok
+    end
+  end
+
+  defp safe_index_record(index, session_id, placement) when is_binary(placement) do
+    LoopexDaemon.SessionIndex.record(index, session_id, placement)
+  catch
+    :exit, _reason -> {:error, :index_write_failed}
+  end
+
+  defp safe_index_record(_index, _session_id, _placement), do: :ok
+
+  defp reason_word(reason) when is_atom(reason) and not is_nil(reason),
+    do: Atom.to_string(reason)
+
+  defp reason_word(_reason), do: "internal_failure"
+
+  defp begin_permit(state, request, class, session_id, fun) do
+    relay = state.context.relay
+
+    case RequestLedger.begin(state.ledger, request.request_id, new_entry(request)) do
+      {:ok, origin, ledger} ->
+        case AdmissionRelay.open_permit(relay, origin, class, session_id) do
+          {:ok, ^origin} ->
+            {worker, monitor, incarnation} = RequestWorker.start_permit(origin, relay, fun)
+
+            ledger =
+              RequestLedger.update(ledger, origin, fn entry ->
+                %{
+                  entry
+                  | worker: worker,
+                    worker_monitor: monitor,
+                    worker_incarnation: incarnation
+                }
+              end)
+
+            state = %{state | ledger: ledger, workers: Map.put(state.workers, monitor, origin)}
+
+            case AdmissionRelay.bind_worker(relay, origin, worker, incarnation) do
+              :ok ->
+                {:ok, entry} = RequestLedger.fetch(state.ledger, origin)
+                {:ok, relay_owns_worker(state, origin, entry)}
+
+              {:error, reason} ->
+                {:noreply, state} = settle_locally(state, origin, ticket_refusal(reason))
+                {:ok, state}
+            end
+
+          {:error, reason} ->
+            reply(state, WireRecords.request_error(request.request_id, ticket_refusal(reason)))
+        end
+
+      {:error, :duplicate_request} ->
+        reply(state, WireRecords.invalid_request(request.request_id, "duplicate_request"))
+
+      {:error, :capacity_exceeded} ->
+        reply(state, WireRecords.request_error(request.request_id, "capacity_exceeded"))
+    end
+  end
+
+  defp query_fun(context, %Request{operation: :session_inspect} = request) do
+    runtime = context.runtime
+    %{request_id: request_id, method: method, fields: %{session_id: session_id}} = request
+
+    fn ->
+      case runtime_call(fn -> Loopex.Runtime.session_status(runtime, session_id) end) do
+        {:ok, status} ->
+          WireRecords.result(request_id, method, WireRecords.session_status(status))
+
+        {:error, reason} ->
+          query_refusal(request_id, reason)
+      end
+    end
+  end
+
+  defp query_fun(context, %Request{operation: :resources_catalog} = request) do
+    runtime = context.runtime
+    %{request_id: request_id, method: method, fields: %{session_id: session_id}} = request
+
+    fn ->
+      case runtime_call(fn -> Loopex.Runtime.resource_catalog(runtime, session_id) end) do
+        {:ok, catalog} -> WireRecords.result(request_id, method, catalog)
+        {:error, reason} -> query_refusal(request_id, reason)
+      end
+    end
+  end
+
+  defp query_fun(context, %Request{operation: :resources_read} = request) do
+    runtime = context.runtime
+    %{request_id: request_id, method: method, fields: fields} = request
+    read = Map.take(fields, [:manifest_digest, :source_id, :name, :label])
+
+    fn ->
+      case runtime_call(fn -> Loopex.Runtime.read_resource(runtime, fields.session_id, read) end) do
+        {:ok, resource} ->
+          WireRecords.result(request_id, method, WireRecords.resource_read(resource))
+
+        {:error, reason} ->
+          query_refusal(request_id, reason)
+      end
+    end
+  end
+
+  defp query_refusal(request_id, :session_unavailable),
+    do: WireRecords.request_error(request_id, "session_unavailable")
+
+  defp query_refusal(request_id, :runtime_unavailable),
+    do: WireRecords.request_error(request_id, "internal_failure")
+
+  defp query_refusal(request_id, reason), do: WireRecords.facade_unavailable(request_id, reason)
+
+  defp transfer_fun(attachment, %Request{operation: :artifact_open_transfer} = request) do
+    %{request_id: request_id, method: method, fields: fields} = request
+    reference = fields.reference
+
+    open =
+      %{
+        object: %{digest: reference.digest, size: reference.size, locator: reference.locator},
+        use_locator: reference.use_locator,
+        start: fields.start_offset
+      }
+      |> then(fn open ->
+        if fields.window_length, do: Map.put(open, :length, fields.window_length), else: open
+      end)
+
+    fn ->
+      case runtime_call(fn -> Loopex.Runtime.open_artifact_transfer(attachment, open) end) do
+        {:ok, transfer} ->
+          WireRecords.result(request_id, method, WireRecords.transfer_opened(transfer))
+
+        {:error, reason} ->
+          WireRecords.transfer_refused(request_id, reason)
+      end
+    end
+  end
+
+  defp transfer_fun(attachment, %Request{operation: :artifact_read_chunk} = request) do
+    %{request_id: request_id, method: method, fields: fields} = request
+
+    fn ->
+      case runtime_call(fn ->
+             Loopex.Runtime.read_artifact_chunk(attachment, fields.transfer_ref, fields.length)
+           end) do
+        {:ok, chunk} -> WireRecords.result(request_id, method, WireRecords.transfer_chunk(chunk))
+        {:error, reason} -> WireRecords.transfer_refused(request_id, reason)
+      end
+    end
+  end
+
+  defp transfer_fun(attachment, %Request{operation: :artifact_close_transfer} = request) do
+    %{request_id: request_id, method: method, fields: fields} = request
+
+    fn ->
+      case runtime_call(fn ->
+             Loopex.Runtime.close_artifact_transfer(attachment, fields.transfer_ref)
+           end) do
+        :ok -> WireRecords.result(request_id, method, %{"closed" => true})
+        {:error, reason} -> WireRecords.transfer_refused(request_id, reason)
+      end
+    end
+  end
+
+  # Concept: the listing says what the daemon index records and what this
+  # daemon knows about each row, and never reads the Store to say more.
+  defp list_fun(state, request) do
+    %{request_id: request_id, method: method, fields: fields} = request
+    index = Map.get(state.context, :index)
+    registry = state.registry
+
+    fn ->
+      page =
+        if is_nil(index),
+          do: {:ok, %{entries: [], index_full: false}},
+          else: LoopexDaemon.SessionIndex.page(index, fields.after_session_id, fields.limit)
+
+      case page do
+        {:ok, page} ->
+          ids = Enum.map(page.entries, & &1.session_id)
+          facts = ConnectionRegistry.session_facts(registry, ids)
+          WireRecords.result(request_id, method, WireRecords.session_page(page, facts))
+
+        {:error, _reason} ->
+          WireRecords.request_error(request_id, "internal_failure")
+      end
+    end
+  end
+
+  defp status_fun(state, request) do
+    %{request_id: request_id, method: method} = request
+    context = state.context
+    registry = state.registry
+
+    fn ->
+      registry_status = ConnectionRegistry.status(registry)
+
+      index_status =
+        case Map.get(context, :index) do
+          nil -> %{entries: 0, limit: 4_096, full: false}
+          index -> LoopexDaemon.SessionIndex.status(index)
+        end
+
+      WireRecords.result(
+        request_id,
+        method,
+        WireRecords.daemon_status(context, registry_status, index_status)
+      )
+    end
+  end
+
+  # Concept: a core call made from a request worker reports core loss as a
+  # plain result instead of exiting the worker.
+  defp runtime_call(fun) do
+    fun.()
+  catch
+    :exit, _reason -> {:error, :runtime_unavailable}
+  end
 end

@@ -314,6 +314,37 @@ defmodule LoopexDaemon.ConnectionRegistry do
     )
   end
 
+  @doc """
+  ## Concept
+
+  Names the lease owner currently routing a session's granted lease.
+
+  ## Technical depth
+
+  The mirror is routing, not authority: the named owner still decides every
+  admission. Only a granted row routes; a session with no granted lease has
+  no mutation route.
+  """
+  @spec lease_route(pid(), binary()) :: {:ok, pid(), binary()} | :none
+  def lease_route(registry, session_id), do: GenServer.call(registry, {:lease_route, session_id})
+
+  @doc """
+  ## Concept
+
+  Reports, for each named session, whether this daemon lifetime activated it
+  and whether a controller lease currently routes it.
+
+  ## Technical depth
+
+  These are daemon facts from the one-way activation set and the granted
+  routing mirror; neither reads core or the Store.
+  """
+  @spec session_facts(pid(), [binary()]) :: %{
+          binary() => %{active: boolean(), controlled: boolean()}
+        }
+  def session_facts(registry, session_ids) when is_list(session_ids),
+    do: GenServer.call(registry, {:session_facts, session_ids})
+
   @doc false
   @spec bind_relay(pid(), pid(), binary()) ::
           :ok | {:error, :invalid_relay | :owner_mismatch | :relay_conflict}
@@ -972,6 +1003,28 @@ defmodule LoopexDaemon.ConnectionRegistry do
     end
   end
 
+  def handle_call({:session_facts, session_ids}, _from, state) do
+    facts =
+      Map.new(session_ids, fn session_id ->
+        controlled = match?(%{phase: :granted}, Map.get(state.routing_mirrors, session_id))
+
+        {session_id,
+         %{active: MapSet.member?(state.activation_set, session_id), controlled: controlled}}
+      end)
+
+    {:reply, facts, state}
+  end
+
+  def handle_call({:lease_route, session_id}, _from, state) do
+    case Map.get(state.routing_mirrors, session_id) do
+      %{phase: :granted, owner_pid: owner, owner_incarnation: owner_incarnation} ->
+        {:reply, {:ok, owner, owner_incarnation}, state}
+
+      _other ->
+        {:reply, :none, state}
+    end
+  end
+
   def handle_call({:reserve_activation, origin_id, binding}, _from, state) do
     case reserve_activation_binding(state, origin_id, binding) do
       {:ok, reply, state} -> {:reply, {:ok, reply}, state}
@@ -1285,6 +1338,7 @@ defmodule LoopexDaemon.ConnectionRegistry do
          MapSet.size(state.activation_set) + map_size(state.activation_reservations) +
            state.anonymous_activations,
        activation_limit: @activation_limit,
+       attachments: map_size(state.attachments),
        routing_mirrors: map_size(state.routing_mirrors),
        provisional_routing_mirrors: Map.get(mirror_counts, :provisional, 0),
        granted_routing_mirrors: Map.get(mirror_counts, :granted, 0),

@@ -41,6 +41,7 @@ defmodule LoopexDaemon.WireRecords do
                       "control_owner_lost" => "the session's control owner was lost",
                       "daemon_stopping" => "the daemon is stopping",
                       "internal_failure" => "the daemon could not complete this request",
+                      "recovery_required" => "this session cannot be resumed without recovery",
                       "session_dormant" => "session is dormant in this daemon lifetime",
                       "session_unavailable" => "session unavailable.",
                       "session_unknown" => "session unknown.",
@@ -263,4 +264,222 @@ defmodule LoopexDaemon.WireRecords do
   defp optional_word(nil), do: nil
   defp optional_word(value) when is_atom(value), do: Atom.to_string(value)
   defp optional_word(value) when is_binary(value), do: value
+
+  @doc false
+  @spec result(binary(), binary(), map()) :: map()
+  def result(request_id, method, body)
+      when is_binary(request_id) and is_binary(method) and is_map(body) do
+    %{"type" => "result", "method" => method, "request_id" => request_id, "result" => body}
+  end
+
+  @doc """
+  ## Concept
+
+  The public session status projection, and only it.
+
+  ## Technical depth
+
+  ADR 0023 names the exact members; owner epoch, journal version, handles and
+  attachment state never cross.
+  """
+  @spec session_status(map()) :: map()
+  def session_status(status) when is_map(status) do
+    %{
+      "status" => to_string(Map.get(status, :status)),
+      "event_sequence" => Wire.encode_u64(Map.get(status, :event_sequence, 0)),
+      "active_run_id" => optional_identity(Map.get(status, :active_run_id)),
+      "cleanup_grace_ms" => Wire.encode_u64(Map.get(status, :cleanup_grace_ms, 0)),
+      "active_context_token_budget" =>
+        optional_u64(Map.get(status, :active_context_token_budget)),
+      "pending_work_ids" =>
+        status |> Map.get(:pending_work_ids, []) |> Enum.map(&Wire.encode_identity/1),
+      "open_interaction" => Map.get(status, :open_interaction)
+    }
+  end
+
+  @doc false
+  @spec facade_unavailable(binary(), term()) :: map()
+  def facade_unavailable(request_id, reason) when is_binary(request_id) do
+    message =
+      if is_atom(reason) and not is_nil(reason),
+        do: Atom.to_string(reason),
+        else: "the request could not be answered"
+
+    %{
+      "type" => "error",
+      "request_id" => request_id,
+      "code" => "facade_unavailable",
+      "message" => message
+    }
+  end
+
+  @doc false
+  @spec not_attached(binary()) :: map()
+  def not_attached(request_id) when is_binary(request_id) do
+    %{
+      "type" => "error",
+      "request_id" => request_id,
+      "code" => "not_attached",
+      "message" => "this connection holds no attachment"
+    }
+  end
+
+  @doc """
+  ## Concept
+
+  A refused artifact transfer, named by the closed cause core reported.
+
+  ## Technical depth
+
+  A reason outside core's closed atom set collapses to `internal_failure`
+  rather than serializing an arbitrary term.
+  """
+  @spec transfer_refused(binary(), term()) :: map()
+  def transfer_refused(request_id, reason) when is_binary(request_id) and is_atom(reason) do
+    %{
+      "type" => "error",
+      "request_id" => request_id,
+      "code" => "transfer_refused",
+      "reason" => Atom.to_string(reason),
+      "message" => "the transfer was refused"
+    }
+  end
+
+  def transfer_refused(request_id, _reason), do: request_error(request_id, "internal_failure")
+
+  @doc false
+  @spec transfer_opened(map()) :: map()
+  def transfer_opened(transfer) when is_map(transfer) do
+    %{
+      "transfer_ref" => Wire.encode_identity(Map.fetch!(transfer, :transfer_ref)),
+      "total_size" => Wire.encode_u64(Map.fetch!(transfer, :total_size)),
+      "window_start" => Wire.encode_u64(Map.fetch!(transfer, :window_start)),
+      "window_end_exclusive" =>
+        Wire.encode_u64(
+          Map.fetch!(transfer, :window_start) + Map.fetch!(transfer, :window_length)
+        ),
+      "object_digest" => Map.fetch!(transfer, :object_digest)
+    }
+  end
+
+  @doc false
+  @spec transfer_chunk(:complete | map()) :: map()
+  def transfer_chunk(:complete), do: %{"eof" => true}
+
+  def transfer_chunk(chunk) when is_map(chunk) do
+    %{
+      "offset" => Wire.encode_u64(Map.fetch!(chunk, :offset)),
+      "bytes_b64" => Wire.encode_bytes(Map.fetch!(chunk, :bytes)),
+      "chunk_digest" => Map.fetch!(chunk, :chunk_digest),
+      "eof" => false
+    }
+  end
+
+  @doc false
+  @spec resource_read(map()) :: map()
+  def resource_read(%{digest: digest, size: size, content: content}) do
+    %{
+      "digest" => digest,
+      "size" => Wire.encode_u64(size),
+      "content_b64" => Wire.encode_bytes(content)
+    }
+  end
+
+  def resource_read(resource) when is_map(resource), do: resource
+
+  defp optional_u64(nil), do: nil
+  defp optional_u64(value) when is_integer(value), do: Wire.encode_u64(value)
+
+  @doc """
+  ## Concept
+
+  One `session.list` page: what the daemon index records and what this daemon
+  knows about each row.
+
+  ## Technical depth
+
+  `residency` is the one-way activation fact of this daemon lifetime and
+  `controlled` is whether a granted lease routes the session; lineage,
+  lifecycle state and committed sequence never appear. The continuation and
+  `index_full` are present exactly when true.
+  """
+  @spec session_page(map(), map()) :: map()
+  def session_page(page, facts) when is_map(page) and is_map(facts) do
+    entries =
+      Enum.map(page.entries, fn row ->
+        fact = Map.get(facts, row.session_id, %{active: false, controlled: false})
+
+        %{
+          "session_id" => Wire.encode_identity(row.session_id),
+          "placement_identity" => Wire.encode_identity(row.placement_identity),
+          "residency" => if(fact.active, do: "active", else: "dormant"),
+          "controlled" => fact.controlled
+        }
+      end)
+
+    body = %{"entries" => entries}
+
+    body =
+      case Map.get(page, :next_after_session_id) do
+        nil -> body
+        next -> Map.put(body, "next_after_session_id", Wire.encode_identity(next))
+      end
+
+    if page.index_full, do: Map.put(body, "index_full", true), else: body
+  end
+
+  @doc """
+  ## Concept
+
+  The exact `daemon.status` projection: identities, bounded counts and their
+  limits, with every reservation in flight counted.
+
+  ## Technical depth
+
+  Counts come from the registry and index owners at one instant each; no
+  path beyond the socket the client already reached, no credential and no
+  process identity crosses.
+  """
+  @spec daemon_status(map(), map(), map()) :: map()
+  def daemon_status(context, registry, index) do
+    started_at = Map.get(context, :started_at) || System.monotonic_time(:millisecond)
+
+    %{
+      "placement_identity" => Wire.encode_identity(Map.get(context, :placement_identity) || ""),
+      "daemon_incarnation" => Wire.encode_identity(Map.fetch!(context, :daemon_incarnation)),
+      "socket_path" => Map.get(context, :socket_path) || "",
+      "connections" => registry.occupied,
+      "connection_limit" => registry.limit,
+      "attachments" => registry.attachments,
+      "attachment_limit" => registry.limit,
+      "active_sessions" => registry.active_sessions,
+      "activation_limit" => registry.activation_limit,
+      "activations_used" => registry.activations_used,
+      "index_entries" => index.entries,
+      "index_limit" => index.limit,
+      "index_full" => index.full,
+      "uptime_ms" => Wire.encode_u64(max(System.monotonic_time(:millisecond) - started_at, 0))
+    }
+  end
+
+  @doc """
+  ## Concept
+
+  Tells the one client whose command reached a session that the daemon could
+  not record it in the listing index; the session remains usable by ID.
+
+  ## Technical depth
+
+  An uncorrelated `daemon.notice` record with the closed code
+  `index_write_failed`, the session identity and a fixed message.
+  """
+  @spec index_write_failed(binary()) :: map()
+  def index_write_failed(session_id) when is_binary(session_id) do
+    %{
+      "type" => "daemon.notice",
+      "code" => "index_write_failed",
+      "session_id" => Wire.encode_identity(session_id),
+      "message" => "the session could not be recorded in the daemon index"
+    }
+  end
 end

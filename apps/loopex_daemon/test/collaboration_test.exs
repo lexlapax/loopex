@@ -158,6 +158,137 @@ defmodule LoopexDaemon.CollaborationTest do
     eventually(fn -> ConnectionRegistry.status(daemon.registry).live == 1 end)
   end
 
+  test "only the attached holder of a held lease with its current epoch may prompt",
+       %{daemon: daemon} do
+    controller = initialized_client(daemon)
+    observer = initialized_client(daemon)
+    session_id = create_on(controller, "mutation-create")
+
+    :ok = send_frame(controller, acquire("acquire", session_id))
+    assert [%{"request_id" => "acquire", "result" => granted}] = receive_records(controller, 1)
+    {:ok, epoch} = Wire.identity(granted["writer_epoch"])
+
+    :ok = send_frame(controller, prompt("unattached", "p0", epoch))
+
+    assert [%{"request_id" => "unattached", "code" => "control_not_held"}] =
+             receive_records(controller, 1)
+
+    :ok = send_frame(controller, attach("attach", session_id))
+    assert [%{"request_id" => "attach", "type" => "snapshot"}] = receive_records(controller, 1)
+
+    :ok = send_frame(controller, prompt("stale", "p1", :crypto.strong_rand_bytes(16)))
+
+    assert [%{"request_id" => "stale", "code" => "control_not_held"} = stale] =
+             receive_records(controller, 1)
+
+    assert stale["message"] == "control is not held by this connection"
+
+    :ok = send_frame(observer, attach("observer-attach", session_id))
+    assert [%{"type" => "snapshot"}] = receive_records(observer, 1)
+    :ok = send_frame(observer, prompt("observer-prompt", "p2", epoch))
+
+    assert [%{"request_id" => "observer-prompt", "code" => "control_not_held"}] =
+             receive_records(observer, 1)
+
+    :ok = send_frame(controller, prompt("prompt", "p3", epoch))
+
+    records = receive_records(controller, 2)
+
+    assert %{
+             "type" => "admission",
+             "request_id" => "prompt",
+             "method" => "session.prompt",
+             "status" => "accepted"
+           } = Enum.find(records, &(&1["type"] == "admission"))
+
+    assert %{"event" => %{"kind" => "user.message_appended", "event_sequence" => "1"}} =
+             Enum.find(records, &(&1["type"] == "event"))
+
+    assert [%{"type" => "event", "event" => %{"event_sequence" => "1"}}] =
+             receive_records(observer, 1)
+  end
+
+  test "a held lease resumes a dormant session, which then attaches and accepts a prompt",
+       %{} do
+    root = temporary_directory("loopex-collaboration-dormant")
+    {runtime, [dormant]} = start_runtime_with_dormant(root, 1)
+    daemon = start_daemon(runtime)
+    client = initialized_client(daemon)
+
+    :ok = send_frame(client, acquire("acquire", dormant))
+    assert [%{"request_id" => "acquire", "result" => granted}] = receive_records(client, 1)
+    {:ok, epoch} = Wire.identity(granted["writer_epoch"])
+
+    :ok = send_frame(client, attach("dormant-attach", dormant))
+
+    assert [%{"request_id" => "dormant-attach", "code" => "session_dormant"}] =
+             receive_records(client, 1)
+
+    :ok = send_frame(client, resume("resume", dormant, "resume-1", epoch))
+
+    assert [
+             %{
+               "type" => "admission",
+               "request_id" => "resume",
+               "method" => "session.resume",
+               "status" => "accepted",
+               "session_id" => encoded
+             }
+           ] = receive_records(client, 1)
+
+    assert encoded == Wire.encode_identity(dormant)
+    assert %{active_sessions: 1} = ConnectionRegistry.status(daemon.registry)
+
+    :ok = send_frame(client, attach("attach", dormant))
+    assert [%{"request_id" => "attach", "type" => "snapshot"}] = receive_records(client, 1)
+
+    :ok = send_frame(client, prompt("prompt", "after-resume", epoch))
+    records = receive_records(client, 2)
+    assert Enum.any?(records, &(&1["type"] == "admission" and &1["status"] == "accepted"))
+  end
+
+  defp create_on(client, command_id) do
+    :ok =
+      send_frame(client, %{
+        "method" => "session.create",
+        "request_id" => command_id,
+        "command_id" => Wire.encode_identity(command_id),
+        "session_options" => %{"purpose" => command_id}
+      })
+
+    assert [%{"status" => "accepted", "session_id" => encoded}] = receive_records(client, 1)
+    {:ok, session_id} = Wire.identity(encoded)
+    session_id
+  end
+
+  defp attach(request_id, session_id) do
+    %{
+      "method" => "session.attach",
+      "request_id" => request_id,
+      "session_id" => Wire.encode_identity(session_id)
+    }
+  end
+
+  defp prompt(request_id, command_id, epoch) do
+    %{
+      "method" => "session.prompt",
+      "request_id" => request_id,
+      "command_id" => Wire.encode_identity(command_id),
+      "content_b64" => Wire.encode_bytes("hello"),
+      "writer_epoch" => Wire.encode_identity(epoch)
+    }
+  end
+
+  defp resume(request_id, session_id, command_id, epoch) do
+    %{
+      "method" => "session.resume",
+      "request_id" => request_id,
+      "session_id" => Wire.encode_identity(session_id),
+      "command_id" => Wire.encode_identity(command_id),
+      "writer_epoch" => Wire.encode_identity(epoch)
+    }
+  end
+
   defp acquire(request_id, session_id) do
     %{
       "method" => "session.acquire_control",

@@ -189,6 +189,175 @@ defmodule LoopexDaemon.SocketTransportTest do
     eventually(fn -> ConnectionRegistry.status(daemon.registry).succession_reservations == 0 end)
   end
 
+  test "a recorded session this composition cannot serve refuses at resume by name" do
+    root = temporary_directory("loopex-socket-mismatch")
+    [recorded] = seed_dormant(root, 1, "recorded-placement")
+    mismatched = start_runtime(root, "another-placement")
+    daemon = start_daemon(mismatched)
+    client = initialized_client(daemon)
+
+    :ok = send_frame(client, acquire("acquire", recorded))
+    assert [%{"request_id" => "acquire", "result" => granted}] = receive_records(client, 1)
+    {:ok, epoch} = Wire.identity(granted["writer_epoch"])
+
+    :ok =
+      send_frame(client, %{
+        "method" => "session.resume",
+        "request_id" => "resume",
+        "session_id" => Wire.encode_identity(recorded),
+        "command_id" => Wire.encode_identity("resume-mismatch"),
+        "writer_epoch" => Wire.encode_identity(epoch)
+      })
+
+    assert [
+             %{
+               "type" => "error",
+               "request_id" => "resume",
+               "code" => "composition_mismatch",
+               "message" => "session cannot be activated by this daemon composition"
+             }
+           ] = receive_records(client, 1)
+
+    assert %{activations_used: 0, active_sessions: 0} = ConnectionRegistry.status(daemon.registry)
+  end
+
+  test "inspect answers an active session's public status and refuses an inactive one" do
+    root = temporary_directory("loopex-socket-inspect")
+    [dormant] = seed_dormant(root, 1, "inspect-placement")
+    daemon = start_daemon(start_runtime(root, "inspect-placement"))
+    client = initialized_client(daemon)
+    session_id = create_session(client, "inspect-create")
+
+    :ok = send_frame(client, inspect_request("inspect", session_id))
+
+    assert [
+             %{
+               "type" => "result",
+               "request_id" => "inspect",
+               "method" => "session.inspect",
+               "result" => %{"event_sequence" => "0", "pending_work_ids" => []} = status
+             }
+           ] = receive_records(client, 1)
+
+    refute Map.has_key?(status, "owner_epoch")
+
+    other_client = initialized_client(daemon)
+    :ok = send_frame(other_client, inspect_request("dormant", dormant))
+
+    assert [%{"request_id" => "dormant", "code" => "session_unavailable"}] =
+             receive_records(other_client, 1)
+  end
+
+  test "session.list pages recorded sessions with residency and control" do
+    root = temporary_directory("loopex-socket-list")
+    [dormant] = seed_dormant(root, 1, "list-placement")
+    runtime = start_runtime(root, "list-placement")
+    state = Path.join(root, "state")
+    daemon = start_daemon(runtime, index_root: state, placement_identity: "list-placement")
+    client = initialized_client(daemon)
+
+    :ok = send_frame(client, list("empty", 10))
+
+    assert [%{"request_id" => "empty", "result" => %{"entries" => []} = empty}] =
+             receive_records(client, 1)
+
+    refute Map.has_key?(empty, "next_after_session_id")
+    refute Map.has_key?(empty, "index_full")
+
+    first = create_session(client, "list-a")
+    second = create_session(client, "list-b")
+    [low, high] = Enum.sort([first, second])
+
+    :ok = send_frame(client, acquire("acquire", high))
+    assert [%{"request_id" => "acquire", "type" => "result"}] = receive_records(client, 1)
+
+    :ok = send_frame(client, list("page-1", 1))
+
+    assert [
+             %{
+               "request_id" => "page-1",
+               "method" => "session.list",
+               "result" => %{
+                 "entries" => [
+                   %{
+                     "session_id" => low_encoded,
+                     "placement_identity" => placement,
+                     "residency" => "active",
+                     "controlled" => false
+                   }
+                 ],
+                 "next_after_session_id" => next
+               }
+             }
+           ] = receive_records(client, 1)
+
+    assert low_encoded == Wire.encode_identity(low)
+    assert placement == Wire.encode_identity("list-placement")
+    {:ok, after_id} = Wire.identity(next)
+
+    :ok =
+      send_frame(client, %{
+        "method" => "session.list",
+        "request_id" => "page-2",
+        "limit" => 1,
+        "after_session_id" => Wire.encode_identity(after_id)
+      })
+
+    assert [
+             %{
+               "request_id" => "page-2",
+               "result" => %{
+                 "entries" => [%{"residency" => "active", "controlled" => true} = entry]
+               }
+             }
+           ] = receive_records(client, 1)
+
+    assert entry["session_id"] == Wire.encode_identity(high)
+    refute Enum.member?([low, high], dormant)
+  end
+
+  test "daemon.status reports bounded counts with reservations counted", %{daemon: daemon} do
+    client = initialized_client(daemon)
+    _session_id = create_session(client, "status-create")
+
+    :ok = send_frame(client, %{"method" => "daemon.status", "request_id" => "status"})
+
+    assert [
+             %{
+               "type" => "result",
+               "request_id" => "status",
+               "method" => "daemon.status",
+               "result" =>
+                 %{
+                   "connections" => 1,
+                   "connection_limit" => 512,
+                   "attachments" => 0,
+                   "attachment_limit" => 512,
+                   "active_sessions" => 1,
+                   "activation_limit" => 64,
+                   "activations_used" => 1,
+                   "index_limit" => 4096,
+                   "index_full" => false,
+                   "uptime_ms" => uptime
+                 } = status
+             }
+           ] = receive_records(client, 1)
+
+    assert {:ok, _uptime} = Wire.u64(uptime)
+    assert is_binary(status["daemon_incarnation"])
+  end
+
+  defp inspect_request(request_id, session_id) do
+    %{
+      "method" => "session.inspect",
+      "request_id" => request_id,
+      "session_id" => Wire.encode_identity(session_id)
+    }
+  end
+
+  defp list(request_id, limit),
+    do: %{"method" => "session.list", "request_id" => request_id, "limit" => limit}
+
   defp create_session(client, command_id) do
     :ok = send_frame(client, create(command_id, command_id, %{"purpose" => command_id}))
     assert [%{"status" => "accepted", "session_id" => encoded}] = receive_records(client, 1)
