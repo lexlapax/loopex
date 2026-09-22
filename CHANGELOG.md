@@ -69,6 +69,11 @@ population; the post-listener phase closes and reaps only that population and
 emits one cut-reference acknowledgement. Initialized connections stay
 available for the later drain and stop record.
 
+Add the daemon's exact readiness-record encoder. It emits only the five
+ordered `daemon_ready` string fields as compact UTF-8 JSON, applies ordinary
+JSON escaping to paths and identifiers, and guarantees that its terminating LF
+is the line's only literal newline.
+
 Add the daemon session index's canonical bounded codec. It pins the exact JSONL
 header, sorted identity rows, SHA-256 trailer and all identity, row-count,
 line-size and file-size bounds without treating alternate JSON spellings as the
