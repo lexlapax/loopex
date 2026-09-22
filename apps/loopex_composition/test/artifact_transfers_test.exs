@@ -29,7 +29,7 @@ defmodule LoopexComposition.ArtifactTransfersTest do
     {state_root, workspace} = roots()
     observe()
 
-    assert {:ok, runtime} = LoopexComposition.start(options(state_root, workspace))
+    assert {:ok, runtime} = LoopexComposition.TestHost.start(options(state_root, workspace))
     stop_later(runtime)
 
     assert_receive {:composed_runtime, launch}, 5_000
@@ -46,7 +46,7 @@ defmodule LoopexComposition.ArtifactTransfersTest do
     observe()
 
     result =
-      LoopexComposition.with_runtime(
+      LoopexComposition.TestHost.with_runtime(
         options(state_root, workspace) ++ [artifact_transfers: true],
         fn runtime ->
           assert is_map(runtime)
@@ -76,7 +76,9 @@ defmodule LoopexComposition.ArtifactTransfersTest do
     observe()
 
     assert {:ok, runtime} =
-             LoopexComposition.start(options(state_root, workspace) ++ [artifact_transfers: true])
+             LoopexComposition.TestHost.start(
+               options(state_root, workspace) ++ [artifact_transfers: true]
+             )
 
     stop_later(runtime)
 
@@ -89,12 +91,14 @@ defmodule LoopexComposition.ArtifactTransfersTest do
     {state_root, workspace} = roots()
 
     assert {:error, {:invalid_composition_option, :artifact_transfers}} =
-             LoopexComposition.start(
+             LoopexComposition.TestHost.start(
                options(state_root, workspace) ++ [artifact_transfers: "true"]
              )
 
     assert {:error, {:invalid_composition_option, :artifact_transfers}} =
-             LoopexComposition.start(options(state_root, workspace) ++ [artifact_transfers: nil])
+             LoopexComposition.TestHost.start(
+               options(state_root, workspace) ++ [artifact_transfers: nil]
+             )
   end
 
   defp options(state_root, workspace),

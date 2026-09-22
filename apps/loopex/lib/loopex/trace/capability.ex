@@ -21,6 +21,8 @@ defmodule Loopex.Trace.Capability do
   alias Loopex.Runtime.Supervisor, as: RuntimeSupervisor
   alias Loopex.Trace.Capability.Handle
 
+  require Logger
+
   @doc false
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(options \\ []) when is_list(options),
@@ -78,6 +80,7 @@ defmodule Loopex.Trace.Capability do
   @impl GenServer
   def init(_options) do
     incarnation = :crypto.strong_rand_bytes(16)
+    Logger.debug("runtime trace capability started")
     {:ok, %{incarnation: incarnation, binding: nil}}
   end
 
@@ -90,14 +93,21 @@ defmodule Loopex.Trace.Capability do
     case state.binding do
       nil ->
         case RuntimeSupervisor.control(runtime.supervisor) do
-          {:ok, _control} -> {:reply, :ok, %{state | binding: runtime}}
-          {:error, _reason} -> {:reply, {:error, :runtime_unavailable}, state}
+          {:ok, _control} ->
+            Logger.debug("runtime trace capability bound")
+            {:reply, :ok, %{state | binding: runtime}}
+
+          {:error, _reason} ->
+            Logger.debug("runtime trace capability bind refused")
+            {:reply, {:error, :runtime_unavailable}, state}
         end
 
       ^runtime ->
+        Logger.debug("runtime trace capability binding retained")
         {:reply, :ok, state}
 
       %Runtime{} ->
+        Logger.debug("runtime trace capability bind refused")
         {:reply, {:error, :capability_already_bound}, state}
     end
   end
@@ -113,10 +123,12 @@ defmodule Loopex.Trace.Capability do
       ) do
     case RuntimeSupervisor.control(runtime.supervisor) do
       {:ok, control} ->
+        Logger.debug("runtime trace exclusion requested")
         Control.exclude_trace_process(control, runtime.token, caller, functions, from)
         {:noreply, state}
 
       {:error, _reason} ->
+        Logger.debug("runtime trace exclusion refused")
         {:reply, {:error, :unavailable}, state}
     end
   end

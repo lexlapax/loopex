@@ -44,7 +44,7 @@ defmodule LoopexComposition.RuntimeOwnerFailureTest do
           observe_edges(test)
 
           result =
-            LoopexComposition.with_runtime(options, fn _runtime ->
+            LoopexComposition.TestHost.with_runtime(options, fn _runtime ->
               send(test, {:callback, self()})
               receive do: (:finish -> :callback_result)
             end)
@@ -72,7 +72,7 @@ defmodule LoopexComposition.RuntimeOwnerFailureTest do
       # Technical depth: only the explicit stale-writer recovery option permits
       # reopening after a kill; cleanup must not claim an orderly Store exit.
       assert :reopened =
-               LoopexComposition.with_runtime(
+               LoopexComposition.TestHost.with_runtime(
                  Keyword.put(
                    options,
                    :recover_stale_writer,
@@ -95,7 +95,7 @@ defmodule LoopexComposition.RuntimeOwnerFailureTest do
 
     try do
       assert {:error, {:composition_cleanup_unconfirmed, failures}} =
-               LoopexComposition.with_runtime(options, fn _ -> :callback_result end)
+               LoopexComposition.TestHost.with_runtime(options, fn _ -> :callback_result end)
 
       assert [{:runtime_stop_unconfirmed, {:error, :runtime_unavailable}}] = failures
       acquired = acquired_edges()
@@ -109,7 +109,7 @@ defmodule LoopexComposition.RuntimeOwnerFailureTest do
       Process.delete(@effect)
     end
 
-    assert :reopened = LoopexComposition.with_runtime(options, fn _ -> :reopened end)
+    assert :reopened = LoopexComposition.TestHost.with_runtime(options, fn _ -> :reopened end)
   end
 
   defp observe_edges(test) do
@@ -121,7 +121,7 @@ defmodule LoopexComposition.RuntimeOwnerFailureTest do
   end
 
   defp acquired_edges do
-    for _ <- 1..4 do
+    for _ <- 1..7 do
       assert_receive {:acquired, owner, module, {:ok, owned}}, 1_000
       {owner, module, owned}
     end

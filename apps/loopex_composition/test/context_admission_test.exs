@@ -36,7 +36,7 @@ defmodule LoopexComposition.ContextAdmissionTest do
       root = roots("invalid-#{label}")
 
       assert {:error, :invalid_context_token_budget} =
-               LoopexComposition.start(
+               LoopexComposition.TestHost.start(
                  runtime_id: "context-invalid-#{label}",
                  state_root: root.state,
                  workspace: root.workspace,
@@ -50,7 +50,7 @@ defmodule LoopexComposition.ContextAdmissionTest do
     root = roots(label)
 
     assert {:ok, runtime} =
-             LoopexComposition.start(
+             LoopexComposition.TestHost.start(
                [
                  runtime_id: "context-#{label}",
                  state_root: root.state,
