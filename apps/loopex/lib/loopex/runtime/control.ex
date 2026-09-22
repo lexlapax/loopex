@@ -37,9 +37,11 @@ defmodule Loopex.Runtime.Control do
   alias Loopex.Owner
   alias Loopex.Store
   alias Loopex.Store.OwnerLane
+  alias Loopex.Trace.Config, as: TraceConfig
 
   @max_identifier_bytes 256
   @attachment_transaction_limit 512
+  @trace_exclusion_function_limit 64
 
   # Technical depth: this is Control's private responsiveness bound for the
   # Store evidence that rebuilds a provider binding or closes one receipt range.
@@ -88,6 +90,40 @@ defmodule Loopex.Runtime.Control do
   # scheduling latency. With no bound, `:runtime_unavailable` means control is
   # genuinely gone, and a caller that cannot reach control does nothing rather
   # than deciding anything.
+  @doc false
+  @spec trace_start(pid(), reference(), term()) :: {:ok, map()} | {:error, term()}
+  def trace_start(control, token, config) when is_pid(control) do
+    control_call(control, {:trace_start, token, config})
+  end
+
+  @doc false
+  @spec trace_stop(pid(), reference()) :: :ok | {:error, term()}
+  def trace_stop(control, token) when is_pid(control) do
+    control_call(control, {:trace_stop, token})
+  end
+
+  @doc false
+  @spec trace_status(pid(), reference()) :: {:ok, map()} | {:error, term()}
+  def trace_status(control, token) when is_pid(control) do
+    control_call(control, {:trace_status, token})
+  end
+
+  @doc false
+  @spec exclude_trace_process(pid(), reference(), pid(), list(), GenServer.from()) :: :ok
+  def exclude_trace_process(control, token, caller, functions, reply_to)
+      when is_pid(control) and is_pid(caller) and is_list(functions) do
+    send(control, {:trace_exclude, token, caller, functions, reply_to})
+    :ok
+  end
+
+  defp control_call(control, message) do
+    try do
+      GenServer.call(control, message, :infinity)
+    catch
+      :exit, _reason -> {:error, :runtime_unavailable}
+    end
+  end
+
   @doc false
   @spec current_owner(pid(), binary(), SessionCoordinator.owner()) ::
           :ok | {:error, :superseded_owner} | {:error, :runtime_unavailable}
@@ -262,7 +298,15 @@ defmodule Loopex.Runtime.Control do
        # authorization domain. A missing entry never grants a permit: the current
        # owner, journal position and exact attempt-open row remain mandatory.
        spent_attempts: %{},
-       generation_counter: 0
+       generation_counter: 0,
+       trace: nil,
+       trace_session: nil,
+       trace_version: 0,
+       trace_excluded: %{},
+       trace_exclusion_monitors: %{},
+       trace_mfa_counts: %{},
+       trace_pending: %{},
+       trace_waiting: :queue.new()
      }}
   end
 
@@ -288,6 +332,33 @@ defmodule Loopex.Runtime.Control do
   end
 
   @impl GenServer
+  def handle_call({:trace_start, token, config}, from, state) do
+    if token == state.token do
+      case TraceConfig.validate(config) do
+        {:ok, validated} -> enqueue_trace_operation(state, {:start, validated}, from)
+        {:error, reason} -> {:reply, {:error, reason}, state}
+      end
+    else
+      {:reply, {:error, :runtime_unavailable}, state}
+    end
+  end
+
+  def handle_call({:trace_stop, token}, from, state) do
+    if token == state.token do
+      enqueue_trace_operation(state, :stop, from)
+    else
+      {:reply, {:error, :runtime_unavailable}, state}
+    end
+  end
+
+  def handle_call({:trace_status, token}, from, state) do
+    if token == state.token do
+      enqueue_trace_operation(state, :status, from)
+    else
+      {:reply, {:error, :runtime_unavailable}, state}
+    end
+  end
+
   def handle_call({:configuration, token}, _from, state) do
     if token == state.token do
       configuration = %{
@@ -1044,6 +1115,62 @@ defmodule Loopex.Runtime.Control do
   defp record_kind(_record), do: nil
 
   @impl GenServer
+  def handle_info({:trace_hello, tracer, incarnation}, state)
+      when is_pid(tracer) and is_binary(incarnation) and byte_size(incarnation) == 16 do
+    {:noreply, register_tracer(state, tracer, incarnation)}
+  end
+
+  def handle_info(
+        {:trace_reply, tracer, incarnation, request_ref, result, metadata, applied_version},
+        %{trace: %{pid: tracer, incarnation: incarnation}} = state
+      ) do
+    case Map.pop(state.trace_pending, request_ref) do
+      {nil, _pending} ->
+        {:noreply, state}
+
+      {item, pending} ->
+        state = %{state | trace_pending: pending}
+
+        if result in [:ok] or match?({:ok, _}, result) do
+          if applied_version == state.trace_version do
+            {:noreply, finish_trace_operation(state, item, result, metadata)}
+          else
+            {:noreply, dispatch_trace_sync(state, item, result, metadata)}
+          end
+        else
+          {:noreply, finish_trace_operation(state, item, result, metadata)}
+        end
+    end
+  end
+
+  def handle_info(
+        {:trace_reply, _tracer, _incarnation, _request_ref, _result, _metadata, _applied_version},
+        state
+      ) do
+    {:noreply, state}
+  end
+
+  def handle_info({:trace_exclude, token, caller, functions, reply_to}, state) do
+    cond do
+      token != state.token ->
+        GenServer.reply(reply_to, {:error, :unavailable})
+        {:noreply, state}
+
+      not Process.alive?(caller) ->
+        GenServer.reply(reply_to, {:error, :unavailable})
+        {:noreply, state}
+
+      not valid_trace_functions?(functions) ->
+        GenServer.reply(reply_to, {:error, :unavailable})
+        {:noreply, state}
+
+      true ->
+        functions = functions |> Enum.uniq() |> MapSet.new()
+        state = register_trace_exclusion(state, caller, functions)
+        {:noreply, queue_trace_operation(state, {:exclude, caller}, reply_to)}
+    end
+  end
+
   def handle_info(
         {:dispatcher_ready, dispatcher, incarnation, registration_ref, ready_token},
         state
@@ -1282,7 +1409,30 @@ defmodule Loopex.Runtime.Control do
     {:noreply, %{clear_attachment_generation(state) | dispatcher: nil}}
   end
 
+  def handle_info(
+        {:DOWN, monitor, :process, tracer, _reason},
+        %{trace: %{pid: tracer, monitor: monitor}} = state
+      ) do
+    {:noreply, trace_process_down(state)}
+  end
+
   def handle_info({:DOWN, reference, :process, pid, _reason}, state) do
+    case Map.pop(state.trace_exclusion_monitors, reference) do
+      {^pid, monitors} ->
+        next =
+          state
+          |> Map.put(:trace_exclusion_monitors, monitors)
+          |> remove_trace_exclusion(pid)
+          |> sync_trace_membership()
+
+        {:noreply, next}
+
+      {nil, _trace_monitors} ->
+        handle_non_trace_down(reference, pid, state)
+    end
+  end
+
+  defp handle_non_trace_down(reference, pid, state) do
     case Map.pop(state.attachment_monitor_to_holder, reference) do
       {^pid, monitors} ->
         next =
@@ -1305,6 +1455,282 @@ defmodule Loopex.Runtime.Control do
         end
     end
   end
+
+  defp enqueue_trace_operation(state, operation, from) do
+    {:noreply, queue_trace_operation(state, operation, from)}
+  end
+
+  defp queue_trace_operation(
+         %{trace: %{status: :ready}, trace_pending: pending} = state,
+         operation,
+         from
+       )
+       when map_size(pending) == 0 do
+    dispatch_trace_operation(state, operation, %{kind: :caller, from: from, operation: operation})
+  end
+
+  defp queue_trace_operation(state, operation, from) do
+    %{state | trace_waiting: :queue.in({operation, from}, state.trace_waiting)}
+  end
+
+  defp dispatch_trace_operation(state, operation, item) do
+    request_ref = make_ref()
+    %{pid: tracer, incarnation: incarnation} = state.trace
+
+    send(
+      tracer,
+      {:trace_operation, self(), incarnation, request_ref, operation, trace_snapshot(state)}
+    )
+
+    %{state | trace_pending: Map.put(state.trace_pending, request_ref, item)}
+  end
+
+  defp dispatch_trace_sync(state, item, result, metadata) do
+    dispatch_trace_operation(
+      state,
+      :sync,
+      %{kind: :after_sync, original: item, result: result, metadata: metadata}
+    )
+  end
+
+  defp finish_trace_operation(state, %{kind: :registration}, :ok, metadata) do
+    trace = %{state.trace | status: :ready}
+    state = %{state | trace: trace, trace_session: metadata}
+    drain_trace_waiting(state)
+  end
+
+  defp finish_trace_operation(state, %{kind: :registration}, _error, _metadata) do
+    %{state | trace: %{state.trace | status: :ready}, trace_session: nil}
+    |> drain_trace_waiting()
+  end
+
+  defp finish_trace_operation(
+         state,
+         %{kind: :after_sync, original: original, result: result, metadata: metadata},
+         :ok,
+         sync_metadata
+       ) do
+    metadata = sync_metadata || metadata
+    finish_trace_operation(state, original, result, metadata)
+  end
+
+  defp finish_trace_operation(state, %{kind: :after_sync, original: original}, error, _metadata) do
+    finish_trace_operation(state, original, error, nil)
+  end
+
+  defp finish_trace_operation(state, %{kind: :internal_sync}, _result, _metadata),
+    do: drain_trace_waiting(state)
+
+  defp finish_trace_operation(
+         state,
+         %{kind: :caller, from: from, operation: operation},
+         result,
+         metadata
+       ) do
+    state = update_trace_session(state, operation, result, metadata)
+
+    state =
+      if match?({:exclude, _pid}, operation) and result != :ok do
+        {:exclude, pid} = operation
+        GenServer.reply(from, {:error, :unavailable})
+        state |> remove_trace_exclusion(pid) |> sync_trace_membership()
+      else
+        GenServer.reply(from, result)
+        state
+      end
+
+    drain_trace_waiting(state)
+  end
+
+  defp update_trace_session(state, {:start, _config}, {:ok, _description}, metadata),
+    do: %{state | trace_session: metadata}
+
+  defp update_trace_session(state, :stop, :ok, _metadata),
+    do: %{state | trace_session: nil}
+
+  defp update_trace_session(state, _operation, _result, _metadata), do: state
+
+  defp register_tracer(state, tracer, incarnation) do
+    state =
+      case state.trace do
+        %{pid: ^tracer, incarnation: ^incarnation} ->
+          state
+
+        %{pid: old, monitor: monitor} when is_pid(old) ->
+          if Process.alive?(old) do
+            state
+          else
+            Process.demonitor(monitor, [:flush])
+            trace_process_down(state)
+          end
+
+        _none ->
+          state
+      end
+
+    case state.trace do
+      %{pid: ^tracer, incarnation: ^incarnation} ->
+        state
+
+      nil ->
+        monitor = Process.monitor(tracer)
+        trace = %{pid: tracer, incarnation: incarnation, monitor: monitor, status: :pending}
+        state = %{state | trace: trace}
+
+        dispatch_trace_operation(
+          state,
+          {:reconcile, state.trace_session},
+          %{kind: :registration}
+        )
+
+      _other ->
+        state
+    end
+  end
+
+  defp trace_process_down(state) do
+    waiting =
+      Enum.reduce(state.trace_pending, state.trace_waiting, fn
+        {_ref, %{kind: :caller, operation: operation, from: from}}, queue ->
+          :queue.in({operation, from}, queue)
+
+        {_ref, %{kind: :after_sync, original: %{kind: :caller} = original}}, queue ->
+          :queue.in({original.operation, original.from}, queue)
+
+        _internal, queue ->
+          queue
+      end)
+
+    %{state | trace: nil, trace_pending: %{}, trace_waiting: waiting}
+  end
+
+  defp drain_trace_waiting(%{trace: %{status: :ready}} = state) do
+    if map_size(state.trace_pending) == 0 do
+      case :queue.out(state.trace_waiting) do
+        {{:value, {operation, :internal}}, waiting} ->
+          state
+          |> Map.put(:trace_waiting, waiting)
+          |> dispatch_trace_operation(operation, %{kind: :internal_sync})
+
+        {{:value, {operation, from}}, waiting} ->
+          state
+          |> Map.put(:trace_waiting, waiting)
+          |> dispatch_trace_operation(operation, %{
+            kind: :caller,
+            from: from,
+            operation: operation
+          })
+
+        {:empty, _queue} ->
+          state
+      end
+    else
+      state
+    end
+  end
+
+  defp drain_trace_waiting(state), do: state
+
+  defp register_trace_exclusion(state, pid, functions) do
+    case Map.fetch(state.trace_excluded, pid) do
+      {:ok, %{functions: existing}} ->
+        added = MapSet.difference(functions, existing)
+        entry = Map.fetch!(state.trace_excluded, pid)
+
+        %{
+          state
+          | trace_excluded:
+              Map.put(state.trace_excluded, pid, %{
+                entry
+                | functions: MapSet.union(existing, functions)
+              }),
+            trace_mfa_counts: increment_trace_mfas(state.trace_mfa_counts, added),
+            trace_version: state.trace_version + if(MapSet.size(added) > 0, do: 1, else: 0)
+        }
+
+      :error ->
+        monitor = Process.monitor(pid)
+
+        %{
+          state
+          | trace_excluded:
+              Map.put(state.trace_excluded, pid, %{monitor: monitor, functions: functions}),
+            trace_exclusion_monitors: Map.put(state.trace_exclusion_monitors, monitor, pid),
+            trace_mfa_counts: increment_trace_mfas(state.trace_mfa_counts, functions),
+            trace_version: state.trace_version + 1
+        }
+    end
+  end
+
+  defp remove_trace_exclusion(state, pid) do
+    case Map.pop(state.trace_excluded, pid) do
+      {nil, _excluded} ->
+        state
+
+      {%{monitor: monitor, functions: functions}, excluded} ->
+        Process.demonitor(monitor, [:flush])
+
+        %{
+          state
+          | trace_excluded: excluded,
+            trace_exclusion_monitors: Map.delete(state.trace_exclusion_monitors, monitor),
+            trace_mfa_counts: decrement_trace_mfas(state.trace_mfa_counts, functions),
+            trace_version: state.trace_version + 1
+        }
+    end
+  end
+
+  defp increment_trace_mfas(counts, functions) do
+    Enum.reduce(functions, counts, fn mfa, acc -> Map.update(acc, mfa, 1, &(&1 + 1)) end)
+  end
+
+  defp decrement_trace_mfas(counts, functions) do
+    Enum.reduce(functions, counts, fn mfa, acc ->
+      case Map.get(acc, mfa) do
+        1 -> Map.delete(acc, mfa)
+        count when is_integer(count) and count > 1 -> Map.put(acc, mfa, count - 1)
+        _absent -> acc
+      end
+    end)
+  end
+
+  defp sync_trace_membership(%{trace: %{status: :ready}, trace_pending: pending} = state)
+       when map_size(pending) == 0 do
+    dispatch_trace_operation(state, :sync, %{kind: :internal_sync})
+  end
+
+  defp sync_trace_membership(%{trace: %{status: :ready}} = state) do
+    %{state | trace_waiting: :queue.in({:sync, :internal}, state.trace_waiting)}
+  end
+
+  defp sync_trace_membership(state), do: state
+
+  defp trace_snapshot(state) do
+    %{
+      version: state.trace_version,
+      excluded_pids: state.trace_excluded |> Map.keys() |> MapSet.new(),
+      excluded_mfas: state.trace_mfa_counts |> Map.keys() |> MapSet.new()
+    }
+  end
+
+  defp valid_trace_functions?(functions) do
+    valid_trace_functions?(functions, 0)
+  end
+
+  defp valid_trace_functions?([], count), do: count <= @trace_exclusion_function_limit
+
+  defp valid_trace_functions?([_function | _rest], count)
+       when count >= @trace_exclusion_function_limit,
+       do: false
+
+  defp valid_trace_functions?(
+         [{module, function, arity} | rest],
+         count
+       )
+       when is_atom(module) and is_atom(function) and is_integer(arity) and arity >= 0,
+       do: valid_trace_functions?(rest, count + 1)
+
+  defp valid_trace_functions?(_invalid, _count), do: false
 
   defp handle_session_monitor_down(reference, pid, state) do
     case Map.pop(state.monitor_to_session, reference) do

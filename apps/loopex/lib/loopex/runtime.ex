@@ -24,12 +24,12 @@ defmodule Loopex.Runtime do
   alias Loopex.Attachment
   alias Loopex.Executor
   alias Loopex.Runtime.DiagnosticsAdmission
+  alias Loopex.Runtime.Control
   alias Loopex.Runtime.DaemonRoute
   alias Loopex.Runtime.EventDispatcher
   alias Loopex.Runtime.SessionCoordinator
   alias Loopex.Runtime.Supervisor, as: RuntimeSupervisor
   alias Loopex.Store
-  alias Loopex.Trace
 
   @max_identifier_bytes 256
   @max_attachment_capacity 65_536
@@ -520,8 +520,8 @@ defmodule Loopex.Runtime do
   @doc false
   @spec trace(t(), term()) :: {:ok, map()} | {:error, term()}
   def trace(%__MODULE__{supervisor: supervisor, token: token}, config) do
-    case RuntimeSupervisor.children(supervisor) do
-      {:ok, %{tracer: tracer}} -> Trace.start_session(tracer, token, config)
+    case RuntimeSupervisor.control(supervisor) do
+      {:ok, control} -> Control.trace_start(control, token, config)
       _unavailable -> {:error, :runtime_unavailable}
     end
   end
@@ -531,8 +531,8 @@ defmodule Loopex.Runtime do
   @doc false
   @spec trace_stop(t()) :: :ok | {:error, term()}
   def trace_stop(%__MODULE__{supervisor: supervisor, token: token}) do
-    case RuntimeSupervisor.children(supervisor) do
-      {:ok, %{tracer: tracer}} -> Trace.stop_session(tracer, token)
+    case RuntimeSupervisor.control(supervisor) do
+      {:ok, control} -> Control.trace_stop(control, token)
       _unavailable -> {:error, :runtime_unavailable}
     end
   end
@@ -542,8 +542,8 @@ defmodule Loopex.Runtime do
   @doc false
   @spec trace_status(t()) :: {:ok, map()} | {:error, term()}
   def trace_status(%__MODULE__{supervisor: supervisor, token: token}) do
-    case RuntimeSupervisor.children(supervisor) do
-      {:ok, %{tracer: tracer}} -> Trace.status(tracer, token)
+    case RuntimeSupervisor.control(supervisor) do
+      {:ok, control} -> Control.trace_status(control, token)
       _unavailable -> {:error, :runtime_unavailable}
     end
   end
