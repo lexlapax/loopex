@@ -39,7 +39,9 @@ Establish the daemon's Unix-domain listener boundary on OTP's `:socket`
 backend. It reclaims only a no-follow same-user Unix-socket pathname, binds a
 mode-`0600` listener without accepting clients, verifies the resulting owner,
 kind and permissions, and leaves the pathname in place when closed so only a
-later verified daemon owner can remove it.
+later verified daemon owner can remove it. Accepted sockets use Darwin
+`LOCAL_PEERCRED` or Linux `SO_PEERCRED`; missing, malformed or mismatched peer
+credentials are refused before protocol input.
 
 ## [0.1.0] — 2026-09-19
 
