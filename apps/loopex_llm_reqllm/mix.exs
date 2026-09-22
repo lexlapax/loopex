@@ -60,7 +60,7 @@ defmodule Loopex.LLM.ReqLLM.MixProject do
   # in the core lane.
   defp deps do
     [
-      {:req_llm, "~> 1.17.1"},
+      {:req_llm, "~> 1.24.0"},
       {:loopex, in_umbrella: true},
       {:loopex_protocol, in_umbrella: true}
     ]
