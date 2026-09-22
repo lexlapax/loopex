@@ -46,7 +46,7 @@ The umbrella's declared dependencies are the whole of the direction claim:
 | `loopex_executor_local` | `:edge` | `loopex` |
 | `loopex_llm_reqllm` | `:edge` | `req_llm ~> 1.24.0`, `loopex`, `loopex_protocol` |
 | `loopex_telemetry` | `:edge` | `loopex`, `telemetry ~> 1.3` |
-| `loopex_composition` | `:composition` | `loopex`, `loopex_store_local`, `loopex_llm_reqllm`, `loopex_executor_local` |
+| `loopex_composition` | `:composition` | `loopex`, `loopex_protocol`, `loopex_store_local`, `loopex_llm_reqllm`, `loopex_executor_local` |
 | `loopex_reference_client` | `:client` | `loopex`; the three edges `only: :test` |
 | `loopex_cli` | `:client` | `loopex`, `loopex_composition` |
 | `loopex_app_server` | `:client` | `loopex`, `loopex_protocol`, `loopex_composition` |

@@ -715,7 +715,7 @@ defmodule LoopexCli.FoundationWorkflowTest do
     full = String.duplicate("artifact-byte-sequence\n", CodingTools.limits().read_bytes)
     File.write!(Path.join(workspace, "large.txt"), full)
     File.mkdir_p!(state_root)
-    {:ok, workspace_ref} = LoopexCli.ProjectResources.workspace_reference(workspace)
+    {:ok, workspace_ref} = LoopexComposition.ProjectResources.workspace_reference(workspace)
 
     {:ok, manifest} =
       LoopexComposition.ResourcePacks.discover(workspace,

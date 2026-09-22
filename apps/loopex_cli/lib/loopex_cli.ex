@@ -35,7 +35,7 @@ defmodule LoopexCli do
   alias LoopexCli.Policy.ShellAllowlist
   alias LoopexCli.Interrupt
   alias LoopexComposition.Placement
-  alias LoopexCli.ProjectResources
+  alias LoopexComposition.ProjectResources
   alias LoopexCli.Render
 
   @doc """

@@ -61,7 +61,7 @@ defmodule LoopexCli.FoundationWorkflowRealTest do
       )
 
     assert import_output =~ "installed"
-    {:ok, workspace_ref} = LoopexCli.ProjectResources.workspace_reference(workspace)
+    {:ok, workspace_ref} = LoopexComposition.ProjectResources.workspace_reference(workspace)
 
     assert {:ok, manifest} =
              ResourcePacks.discover(workspace,

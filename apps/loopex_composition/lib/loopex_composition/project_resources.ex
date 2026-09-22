@@ -1,4 +1,4 @@
-defmodule LoopexCli.ProjectResources do
+defmodule LoopexComposition.ProjectResources do
   @moduledoc """
   ## Concept
 
@@ -14,7 +14,8 @@ defmodule LoopexCli.ProjectResources do
 
   Discovery is the host's job, not the kernel's: `Loopex.ProjectResource`
   validates a manifest and binds a decision to it, and never goes looking for
-  one. The command is the host here, so the looking lives here.
+  one. The foreground command and daemon are both reference hosts, so their
+  shared looking lives in composition rather than either surface.
 
   It is deliberately shallow — one label, at the root of the workspace, with no
   recursion and no globbing — because a discovery rule an operator cannot predict
@@ -515,7 +516,7 @@ defmodule LoopexCli.ProjectResources do
     def read_contained(path, root, limit, opener)
         when is_binary(path) and is_binary(root) and is_integer(limit) and limit >= 0 and
                is_function(opener, 1) do
-      with {:ok, root_identity} <- LoopexCli.ProjectResources.directory_identity(root) do
+      with {:ok, root_identity} <- LoopexComposition.ProjectResources.directory_identity(root) do
         read_contained(path, root, root_identity, limit, opener)
       else
         _changed -> {:refused, :replaced}
@@ -585,9 +586,9 @@ defmodule LoopexCli.ProjectResources do
     end
 
     defp validate_contained_open(path, root, root_identity, opened_identity) do
-      with {:ok, ^root} <- LoopexCli.ProjectResources.resolve_path(root),
-           {:ok, ^root_identity} <- LoopexCli.ProjectResources.directory_identity(root),
-           {:ok, current} <- LoopexCli.ProjectResources.resolve_path(path),
+      with {:ok, ^root} <- LoopexComposition.ProjectResources.resolve_path(root),
+           {:ok, ^root_identity} <- LoopexComposition.ProjectResources.directory_identity(root),
+           {:ok, current} <- LoopexComposition.ProjectResources.resolve_path(path),
            true <- contained?(current, root),
            {:ok, ^opened_identity} <- regular_identity(current) do
         :ok

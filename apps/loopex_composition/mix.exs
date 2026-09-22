@@ -23,13 +23,14 @@ defmodule LoopexComposition.MixProject do
   # Concept: the one application permitted to name concrete adapters.
   #
   # Technical depth: a composition exists to wire a stack, so it depends on the
-  # edges it composes. That is exactly what an `:edge` may not do and exactly
-  # what a `:client` may not be depended on for, which is why the role exists
-  # rather than either rule being widened. It declares no external dependency and
-  # depends on no client and no other composition.
+  # protocol contract and edges it composes. That is exactly what an `:edge` may
+  # not do and exactly what a `:client` may not be depended on for, which is why
+  # the role exists rather than either rule being widened. It declares no
+  # external dependency and depends on no client and no other composition.
   defp deps do
     [
       {:loopex, in_umbrella: true},
+      {:loopex_protocol, in_umbrella: true},
       {:loopex_store_local, in_umbrella: true},
       {:loopex_llm_reqllm, in_umbrella: true},
       {:loopex_executor_local, in_umbrella: true}
