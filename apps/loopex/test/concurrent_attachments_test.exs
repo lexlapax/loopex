@@ -304,6 +304,198 @@ defmodule Loopex.ConcurrentAttachmentTest do
     assert_maps_agree(fixture.runtime, session_id, 1)
   end
 
+  test "daemon routing binds a real result to an exact live attachment", fixture do
+    session_id = create_session(fixture.runtime, "daemon-route")
+    stable_holder = holder(self())
+    {:ok, attachment} = attach(fixture.runtime, session_id, stable_holder, "daemon-route")
+
+    assert {:routed, route, {:accepted, "routed-command"}} =
+             Runtime.command_for_daemon(attachment, %{
+               type: :prompt,
+               command_id: "routed-command",
+               content: "one routed command"
+             })
+
+    assert :before_succession_cut = Runtime.classify_daemon_result(fixture.runtime, route)
+    assert {:ok, %{kind: "user.message_appended"}} = Loopex.next_event(attachment)
+  end
+
+  test "non-prepared succession cuts routes before the successor starts", fixture do
+    session_id = create_session(fixture.runtime, "succession-cut")
+    stable_holder = holder(self())
+    {:ok, attachment} = attach(fixture.runtime, session_id, stable_holder, "succession-cut")
+
+    assert {:routed, route, {:accepted, "before-cut"}} =
+             Runtime.command_for_daemon(attachment, %{
+               type: :prompt,
+               command_id: "before-cut",
+               content: "classified after the cut"
+             })
+
+    assert {:ok, ^session_id} =
+             Loopex.resume_session(fixture.runtime, session_id, command_id: "ordinary-successor")
+
+    assert {:after_succession_cut, attachment_id, attachment_incarnation} =
+             Runtime.classify_daemon_result(fixture.runtime, route)
+
+    assert attachment_id == attachment.attachment_id
+    assert attachment_incarnation == attachment.incarnation_id
+
+    assert {:error, {:attachment_route_invalidated, ^attachment_id, ^attachment_incarnation}} =
+             Runtime.command_for_daemon(attachment, %{
+               type: :prompt,
+               command_id: "after-cut",
+               content: "must not reach the successor"
+             })
+
+    assert_receive {:holder_message, ^stable_holder,
+                    {:loopex_attachment_invalidated, ^session_id, ^attachment_id,
+                     ^attachment_incarnation, _cursor}},
+                   2_000
+  end
+
+  test "prepared succession carries the route across its owner generation", fixture do
+    session_id = create_session(fixture.runtime, "prepared-carry")
+    stable_holder = holder(self())
+    {:ok, attachment} = attach(fixture.runtime, session_id, stable_holder, "prepared-carry")
+
+    assert {:routed, route, {:accepted, "before-prepared"}} =
+             Runtime.command_for_daemon(attachment, %{
+               type: :prompt,
+               command_id: "before-prepared",
+               content: "the attachment is carried"
+             })
+
+    assert {:ok, {:prepared, activation}} =
+             Loopex.prepare_resume_session(fixture.runtime, session_id, "prepared-successor")
+
+    assert :before_succession_cut = Runtime.classify_daemon_result(fixture.runtime, route)
+    assert {:ok, %{kind: "user.message_appended"}} = Loopex.next_event(attachment)
+    assert :ok = Loopex.abandon_resume(activation)
+    refute_receive {:holder_message, ^stable_holder, {:loopex_attachment_invalidated, _, _, _, _}}
+  end
+
+  test "coordinator loss before and after routing has distinct dispositions", fixture do
+    before_session = create_session(fixture.runtime, "coordinator-before-route")
+    stable_holder = holder(self())
+
+    {:ok, before_attachment} =
+      attach(fixture.runtime, before_session, stable_holder, "coordinator-before-route")
+
+    {:ok, %{control: control}} = Runtime.children(fixture.runtime)
+    before_coordinator = :sys.get_state(control).sessions[before_session].coordinator
+    before_monitor = Process.monitor(before_coordinator)
+    Process.exit(before_coordinator, :kill)
+    assert_receive {:DOWN, ^before_monitor, :process, ^before_coordinator, :killed}, 2_000
+
+    assert {:error, :session_unavailable} =
+             Runtime.command_for_daemon(before_attachment, %{
+               type: :prompt,
+               command_id: "never-called",
+               content: "the route proves no call began"
+             })
+
+    after_session = create_session(fixture.runtime, "coordinator-after-route")
+
+    {:ok, after_attachment} =
+      attach(fixture.runtime, after_session, stable_holder, "coordinator-after-route")
+
+    after_coordinator = :sys.get_state(control).sessions[after_session].coordinator
+    :ok = :sys.suspend(after_coordinator)
+
+    caller =
+      Task.async(fn ->
+        Runtime.command_for_daemon(after_attachment, %{
+          type: :prompt,
+          command_id: "reply-lost",
+          content: "the route succeeded before coordinator loss"
+        })
+      end)
+
+    assert_eventually(fn ->
+      match?(
+        {:message_queue_len, length} when length > 0,
+        Process.info(after_coordinator, :message_queue_len)
+      )
+    end)
+
+    after_monitor = Process.monitor(after_coordinator)
+    Process.exit(after_coordinator, :kill)
+    assert_receive {:DOWN, ^after_monitor, :process, ^after_coordinator, :killed}, 2_000
+    assert {:error, {:admission_unknown, route}} = Task.await(caller)
+    assert :before_succession_cut = Runtime.classify_daemon_result(fixture.runtime, route)
+  end
+
+  test "a routed command that loses the nested owner fence proves no admission", fixture do
+    session_id = create_session(fixture.runtime, "nested-fence")
+    stable_holder = holder(self())
+    {:ok, attachment} = attach(fixture.runtime, session_id, stable_holder, "nested-fence")
+    {:ok, %{control: control}} = Runtime.children(fixture.runtime)
+    predecessor = :sys.get_state(control).sessions[session_id].coordinator
+    :ok = :sys.suspend(predecessor)
+
+    on_exit(fn ->
+      if Process.alive?(predecessor) do
+        try do
+          :sys.resume(predecessor)
+        catch
+          :exit, _reason -> :ok
+        end
+      end
+    end)
+
+    command =
+      Task.async(fn ->
+        Runtime.command_for_daemon(attachment, %{
+          type: :prompt,
+          command_id: "lost-fence",
+          content: "must not commit"
+        })
+      end)
+
+    assert_eventually(fn ->
+      match?(
+        {:message_queue_len, length} when length > 0,
+        Process.info(predecessor, :message_queue_len)
+      )
+    end)
+
+    assert {:ok, ^session_id} =
+             Loopex.resume_session(fixture.runtime, session_id, command_id: "fence-successor")
+
+    :ok = :sys.resume(predecessor)
+    assert {:error, {:superseded_before_admission, route}} = Task.await(command)
+
+    assert {:after_succession_cut, attachment_id, attachment_incarnation} =
+             Runtime.classify_daemon_result(fixture.runtime, route)
+
+    assert attachment_id == attachment.attachment_id
+    assert attachment_incarnation == attachment.incarnation_id
+  end
+
+  test "classification fails closed when the exact Control is lost", fixture do
+    session_id = create_session(fixture.runtime, "classification-control-loss")
+    stable_holder = holder(self())
+
+    {:ok, attachment} =
+      attach(fixture.runtime, session_id, stable_holder, "classification-control-loss")
+
+    assert {:routed, route, {:accepted, "classified-before-loss"}} =
+             Runtime.command_for_daemon(attachment, %{
+               type: :prompt,
+               command_id: "classified-before-loss",
+               content: "the exact Control owns classification"
+             })
+
+    {:ok, %{control: control}} = Runtime.children(fixture.runtime)
+    monitor = Process.monitor(control)
+    Process.exit(control, :kill)
+    assert_receive {:DOWN, ^monitor, :process, ^control, :killed}, 2_000
+
+    assert {:error, :runtime_unavailable} =
+             Runtime.classify_daemon_result(fixture.runtime, route)
+  end
+
   defp create_session(runtime, command_id) do
     assert {:ok, session_id} = Loopex.create_session(runtime, %{}, command_id: command_id)
     session_id

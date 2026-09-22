@@ -27,6 +27,7 @@ defmodule Loopex.Runtime.Control do
 
   alias Loopex.Instrumentation
   alias Loopex.ResumeActivation
+  alias Loopex.Runtime.DaemonRoute
   alias Loopex.Runtime.EventDispatcher
   alias Loopex.Runtime.OwnerGroup
   alias Loopex.Runtime.ProviderAttempt
@@ -398,6 +399,75 @@ defmodule Loopex.Runtime.Control do
     {:reply, reply, state}
   end
 
+  def handle_call(
+        {:route_command_for_daemon, token, session_id, attachment_id, incarnation_id},
+        _from,
+        state
+      ) do
+    reply =
+      cond do
+        token != state.token ->
+          {:error, :runtime_unavailable}
+
+        true ->
+          entry = Map.get(state.sessions, session_id)
+
+          cond do
+            not attachment_live_in_entry?(entry, attachment_id, incarnation_id) ->
+              {:error, {:attachment_route_invalidated, attachment_id, incarnation_id}}
+
+            not match?(%{status: :active}, entry) ->
+              {:error, :session_unavailable}
+
+            not Process.alive?(entry.coordinator) ->
+              {:error, :session_unavailable}
+
+            true ->
+              route =
+                DaemonRoute.new(
+                  self(),
+                  state.token,
+                  session_id,
+                  attachment_id,
+                  incarnation_id,
+                  entry.coordinator,
+                  entry.owner.generation
+                )
+
+              {:ok, entry.coordinator, entry.owner, route}
+          end
+      end
+
+    {:reply, reply, state}
+  end
+
+  def handle_call(
+        {:classify_daemon_result, token, session_id, attachment_id, incarnation_id, coordinator,
+         owner_generation},
+        _from,
+        state
+      ) do
+    reply =
+      if token == state.token do
+        entry = Map.get(state.sessions, session_id)
+
+        cond do
+          attachment_live_in_entry?(entry, attachment_id, incarnation_id) ->
+            :before_succession_cut
+
+          owner_generation_advanced?(entry, coordinator, owner_generation) ->
+            {:after_succession_cut, attachment_id, incarnation_id}
+
+          true ->
+            {:error, :runtime_unavailable}
+        end
+      else
+        {:error, :runtime_unavailable}
+      end
+
+    {:reply, reply, state}
+  end
+
   def handle_call({:current_owner, session_id, owner}, _from, state) do
     {:reply, current_owner_post_commit_fence(state, session_id, owner), state}
   end
@@ -661,34 +731,12 @@ defmodule Loopex.Runtime.Control do
   # dispatcher's invalidation; every other succession keeps invalidating exactly
   # as before. Activation and abandonment stay fenced by the capability, which is
   # what an attachment is not and never becomes.
-  defp prepare_owner_attachments(state, %{prepared: prepared}, previous, _session_id)
+  defp carried_owner_attachments(state, %{prepared: prepared}, previous)
        when is_map(prepared) do
     {state, Map.get(previous || %{}, :attachments, %{})}
   end
 
-  defp prepare_owner_attachments(state, _entry, previous, session_id) do
-    removed =
-      case RuntimeSupervisor.children(state.root) do
-        {:ok, %{dispatcher: dispatcher}} ->
-          case EventDispatcher.invalidate_session(dispatcher, session_id) do
-            {:ok, removed} -> removed
-            {:error, :dispatcher_unavailable} -> []
-          end
-
-        _other ->
-          []
-      end
-
-    Enum.each(removed, fn attachment ->
-      send(
-        attachment.holder,
-        {:loopex_attachment_invalidated, session_id, attachment.attachment_id,
-         attachment.attachment_incarnation, attachment.cursor}
-      )
-    end)
-
-    {drop_session_attachments(state, previous, session_id), %{}}
-  end
+  defp carried_owner_attachments(state, _entry, _previous), do: {state, %{}}
 
   @impl GenServer
   def handle_cast({:owner_ready, coordinator, owner, durable}, state) do
@@ -700,8 +748,7 @@ defmodule Loopex.Runtime.Control do
         previous: previous
       } = entry
       when generation == owner.generation ->
-        {state, attachments} =
-          prepare_owner_attachments(state, entry, previous, durable.session_id)
+        {state, attachments} = carried_owner_attachments(state, entry, previous)
 
         active =
           entry
@@ -1456,24 +1503,73 @@ defmodule Loopex.Runtime.Control do
       %{status: :awaiting_owner_barrier} ->
         {:error, :owner_acquiring, state}
 
-      %{coordinator: coordinator, owner_group: owner_group} = entry
-      when is_pid(coordinator) and is_pid(owner_group) ->
-        if not Process.alive?(coordinator) and Process.alive?(owner_group) do
-          waiting =
-            entry
-            |> Map.put(:status, :awaiting_owner_barrier)
-            |> Map.put(:succession_id, succession_id)
-            |> Map.put(:owner_command, owner_command)
-            |> Map.put(:prepared, prepared)
-            |> Map.put(:waiting, [from])
-
-          {:waiting, %{state | sessions: Map.put(state.sessions, session_id, waiting)}}
-        else
-          do_start_owner(state, session_id, succession_id, [from], owner_command, prepared)
-        end
-
       _other ->
-        do_start_owner(state, session_id, succession_id, [from], owner_command, prepared)
+        begin_new_owner(state, session_id, succession_id, from, owner_command, prepared)
+    end
+  end
+
+  defp begin_new_owner(state, session_id, succession_id, from, owner_command, prepared) do
+    with {:ok, state} <- begin_owner_succession(state, session_id, prepared) do
+      case Map.get(state.sessions, session_id) do
+        %{coordinator: coordinator, owner_group: owner_group} = entry
+        when is_pid(coordinator) and is_pid(owner_group) ->
+          if not Process.alive?(coordinator) and Process.alive?(owner_group) do
+            waiting =
+              entry
+              |> Map.put(:status, :awaiting_owner_barrier)
+              |> Map.put(:succession_id, succession_id)
+              |> Map.put(:owner_command, owner_command)
+              |> Map.put(:prepared, prepared)
+              |> Map.put(:waiting, [from])
+
+            {:waiting, %{state | sessions: Map.put(state.sessions, session_id, waiting)}}
+          else
+            do_start_owner(state, session_id, succession_id, [from], owner_command, prepared)
+          end
+
+        _other ->
+          do_start_owner(state, session_id, succession_id, [from], owner_command, prepared)
+      end
+    else
+      {:error, reason, next} -> {:error, reason, next}
+    end
+  end
+
+  defp begin_owner_succession(state, _session_id, prepared) when is_map(prepared),
+    do: {:ok, state}
+
+  defp begin_owner_succession(state, session_id, _ordinary) do
+    case Map.get(state.sessions, session_id) do
+      nil ->
+        {:ok, state}
+
+      previous ->
+        cleared_entry = clear_entry_attachments(previous)
+        routes_cleared = %{state | sessions: Map.put(state.sessions, session_id, cleared_entry)}
+
+        case current_dispatcher(state) do
+          {:ok, dispatcher} ->
+            case EventDispatcher.invalidate_session(dispatcher.pid, session_id) do
+              {:ok, removed} ->
+                next = drop_session_attachments(routes_cleared, previous, session_id)
+
+                Enum.each(removed, fn attachment ->
+                  send(
+                    attachment.holder,
+                    {:loopex_attachment_invalidated, session_id, attachment.attachment_id,
+                     attachment.attachment_incarnation, attachment.cursor}
+                  )
+                end)
+
+                {:ok, next}
+
+              {:error, :dispatcher_unavailable} ->
+                {:error, :runtime_unavailable, routes_cleared}
+            end
+
+          {:error, :runtime_unavailable} ->
+            {:error, :runtime_unavailable, routes_cleared}
+        end
     end
   end
 
@@ -1547,23 +1643,23 @@ defmodule Loopex.Runtime.Control do
               {:error, reason} ->
                 _ = DynamicSupervisor.terminate_child(session_supervisor, coordinator)
                 _ = DynamicSupervisor.terminate_child(owner_groups, owner_group)
-                unavailable_owner(state, session_id, counter, reason)
+                unavailable_owner(state, session_id, generation, counter, reason)
             end
 
           {:error, reason} ->
             _ = DynamicSupervisor.terminate_child(owner_groups, owner_group)
-            unavailable_owner(state, session_id, counter, reason)
+            unavailable_owner(state, session_id, generation, counter, reason)
         end
       else
-        {:error, reason} -> unavailable_owner(state, session_id, counter, reason)
+        {:error, reason} -> unavailable_owner(state, session_id, generation, counter, reason)
       end
     else
       _other -> {:error, :runtime_unavailable, state}
     end
   end
 
-  defp unavailable_owner(state, session_id, counter, reason) do
-    unavailable = %{status: :unavailable, durable: nil}
+  defp unavailable_owner(state, session_id, generation, counter, reason) do
+    unavailable = %{status: :unavailable, durable: nil, generation: generation}
 
     next = %{
       state
@@ -2536,6 +2632,40 @@ defmodule Loopex.Runtime.Control do
       _other -> {:error, :stale_attachment}
     end
   end
+
+  defp attachment_live_in_entry?(entry, attachment_id, incarnation_id) when is_map(entry) do
+    attachments = Map.get(entry, :attachments, %{})
+
+    case current_attachment?(attachments, attachment_id, incarnation_id) do
+      :ok ->
+        true
+
+      {:error, :stale_attachment} ->
+        case {Map.get(entry, :prepared), Map.get(entry, :previous)} do
+          {prepared, previous} when is_map(prepared) and is_map(previous) ->
+            attachment_live_in_entry?(previous, attachment_id, incarnation_id)
+
+          _other ->
+            false
+        end
+    end
+  end
+
+  defp attachment_live_in_entry?(_entry, _attachment_id, _incarnation_id), do: false
+
+  defp owner_generation_advanced?(entry, coordinator, owner_generation) when is_map(entry) do
+    current_generation =
+      case entry do
+        %{status: :active, owner: %{generation: generation}} -> generation
+        %{generation: generation} -> generation
+        _other -> nil
+      end
+
+    is_binary(current_generation) and
+      (current_generation != owner_generation or Map.get(entry, :coordinator) != coordinator)
+  end
+
+  defp owner_generation_advanced?(_entry, _coordinator, _owner_generation), do: false
 
   defp valid_post_commit?(
          %{journal_version: journal, event_sequence: event},

@@ -24,6 +24,7 @@ defmodule Loopex.Runtime do
   alias Loopex.Attachment
   alias Loopex.Executor
   alias Loopex.Runtime.DiagnosticsAdmission
+  alias Loopex.Runtime.DaemonRoute
   alias Loopex.Runtime.EventDispatcher
   alias Loopex.Runtime.SessionCoordinator
   alias Loopex.Runtime.Supervisor, as: RuntimeSupervisor
@@ -306,6 +307,70 @@ defmodule Loopex.Runtime do
   def command(_attachment, _command), do: {:error, :attachment_required}
 
   @doc false
+  @spec command_for_daemon(Attachment.t(), map()) ::
+          {:routed, DaemonRoute.t(), {:accepted, binary()} | {:error, term()}}
+          | {:error, {:superseded_before_admission, DaemonRoute.t()}}
+          | {:error, {:admission_unknown, DaemonRoute.t()}}
+          | {:error, {:attachment_route_invalidated, binary(), binary()}}
+          | {:error, :session_unavailable | :runtime_unavailable | :attachment_required}
+  def command_for_daemon(%Attachment{} = attachment, command) when is_map(command) do
+    with {:ok, runtime, session_id, attachment_id, incarnation_id} <-
+           Attachment.routing(attachment),
+         {:ok, %{control: control}} <- RuntimeSupervisor.children(runtime.supervisor),
+         {:ok, coordinator, owner, route} <-
+           safe_call(
+             control,
+             {:route_command_for_daemon, runtime.token, session_id, attachment_id,
+              incarnation_id},
+             :infinity
+           ) do
+      case SessionCoordinator.command_detailed(coordinator, owner, command) do
+        {:result, reply} ->
+          {:routed, route, reply}
+
+        {:error, :superseded_before_admission} ->
+          {:error, {:superseded_before_admission, route}}
+
+        {:error, :runtime_unavailable} ->
+          {:error, :runtime_unavailable}
+
+        {:error, :coordinator_unavailable} ->
+          if exact_control_current?(runtime, control),
+            do: {:error, {:admission_unknown, route}},
+            else: {:error, :runtime_unavailable}
+      end
+    else
+      {:error, reason} -> {:error, reason}
+      _other -> {:error, :runtime_unavailable}
+    end
+  end
+
+  def command_for_daemon(_attachment, _command), do: {:error, :attachment_required}
+
+  @doc false
+  @spec classify_daemon_result(t(), DaemonRoute.t()) ::
+          :before_succession_cut
+          | {:after_succession_cut, binary(), binary()}
+          | {:error, :runtime_unavailable}
+  def classify_daemon_result(%__MODULE__{} = runtime, %DaemonRoute{} = route) do
+    with {:ok, control, runtime_token, session_id, attachment_id, attachment_incarnation,
+          coordinator, owner_generation} <- DaemonRoute.routing(route),
+         true <- runtime.token == runtime_token,
+         {:ok, %{control: ^control}} <- RuntimeSupervisor.children(runtime.supervisor) do
+      safe_call(
+        control,
+        {:classify_daemon_result, runtime_token, session_id, attachment_id,
+         attachment_incarnation, coordinator, owner_generation},
+        :infinity
+      )
+    else
+      _other -> {:error, :runtime_unavailable}
+    end
+  end
+
+  def classify_daemon_result(_runtime, _route), do: {:error, :runtime_unavailable}
+
+  @doc false
   @spec next_event(Attachment.t()) ::
           {:ok, Store.outbox_event()} | {:disconnected, non_neg_integer()} | {:error, term()}
   def next_event(%Attachment{} = attachment) do
@@ -548,6 +613,11 @@ defmodule Loopex.Runtime do
     else
       _other -> {:error, :runtime_unavailable}
     end
+  end
+
+  defp exact_control_current?(%__MODULE__{supervisor: supervisor}, control) do
+    match?({:ok, %{control: ^control}}, RuntimeSupervisor.children(supervisor)) and
+      Process.alive?(control)
   end
 
   defp dispatcher_call(%__MODULE__{supervisor: supervisor}, message, timeout \\ 5_000) do

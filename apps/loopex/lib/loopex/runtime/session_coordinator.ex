@@ -148,6 +148,20 @@ defmodule Loopex.Runtime.SessionCoordinator do
     safe_call(coordinator, {:command, owner, command}, :infinity)
   end
 
+  @doc false
+  @spec command_detailed(pid(), owner(), map()) ::
+          {:result, {:accepted, binary()} | {:error, term()}}
+          | {:error, :superseded_before_admission}
+          | {:error, :runtime_unavailable | :coordinator_unavailable}
+  def command_detailed(coordinator, owner, command)
+      when is_pid(coordinator) and is_map(owner) and is_map(command) do
+    try do
+      GenServer.call(coordinator, {:command_detailed, owner, command}, :infinity)
+    catch
+      :exit, _reason -> {:error, :coordinator_unavailable}
+    end
+  end
+
   # Concept: status is the one session question that may give up on an owner
   # that is not answering, because asking it changes nothing.
   #
@@ -404,6 +418,34 @@ defmodule Loopex.Runtime.SessionCoordinator do
 
           {:error, :superseded_owner} ->
             {:reply, {:error, :superseded_owner}, superseded_owner(state)}
+
+          {:error, :runtime_unavailable} = error ->
+            {:reply, error, state}
+        end
+    end
+  end
+
+  def handle_call({:command_detailed, supplied_owner, command}, _from, state) do
+    cond do
+      state.phase != :ready ->
+        {:reply, {:error, :superseded_before_admission}, state}
+
+      supplied_owner != state.owner ->
+        {:reply, {:error, :superseded_before_admission}, state}
+
+      state.superseded ->
+        {:reply, {:error, :superseded_before_admission}, state}
+
+      true ->
+        case Control.current_owner(state.control, state.session_id, state.owner) do
+          :ok ->
+            state
+            |> fence_prepared_resume(command)
+            |> commit_command(command)
+            |> detailed_command_reply()
+
+          {:error, :superseded_owner} ->
+            {:reply, {:error, :superseded_before_admission}, superseded_owner(state)}
 
           {:error, :runtime_unavailable} = error ->
             {:reply, error, state}
@@ -1571,6 +1613,12 @@ defmodule Loopex.Runtime.SessionCoordinator do
   end
 
   defp answered_interaction(_state, _type, admit), do: admit.()
+
+  defp detailed_command_reply({:reply, reply, state}),
+    do: {:reply, {:result, reply}, state}
+
+  defp detailed_command_reply({:stop, reason, reply, state}),
+    do: {:stop, reason, {:result, reply}, state}
 
   defp command_field(command, key) do
     case Map.get(command, key, Map.get(command, Atom.to_string(key))) do
