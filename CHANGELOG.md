@@ -98,6 +98,12 @@ task, and receives the primary's internal result only after registry
 settlement. Losing a waiter connection removes only that waiter and leaves the
 primary task and reservation intact.
 
+Authenticate existing-session mutation tickets against one relay-registered
+lease-owner incarnation. Ordinary lease mutations promote only through that
+owner, while resume remains registry-promoted for activation accounting. Owner
+loss claims pending and queued mutations for exact daemon classification but
+leaves an already promoted task to return its real result.
+
 Add the daemon's bounded connection-output foundation. The registry owns each
 complete encoded queue and the daemon-wide output commitment; the connection
 process advances only nonblocking socket sends and releases a frame charge only

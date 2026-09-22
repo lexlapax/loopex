@@ -68,6 +68,7 @@ defmodule LoopexDaemon.AdmissionRelay do
 
   @session_ticket_classes @ticket_classes -- [:session_create]
   @lease_ticket_classes @session_ticket_classes -- [:session_attach]
+  @direct_lease_ticket_classes @lease_ticket_classes -- [:session_resume]
 
   @typedoc false
   @type origin_id :: {binary(), 0..31, pos_integer()}
@@ -129,6 +130,28 @@ defmodule LoopexDaemon.AdmissionRelay do
     GenServer.call(
       relay,
       {:register_registry, registry, registry_incarnation},
+      @control_timeout_ms
+    )
+  end
+
+  @doc false
+  @spec register_lease_owner(pid(), binary(), pid(), binary()) ::
+          :ok | {:error, :daemon_stopping | :invalid_owner | :owner_conflict}
+  def register_lease_owner(relay, session_id, owner, owner_incarnation) do
+    GenServer.call(
+      relay,
+      {:register_lease_owner, session_id, owner, owner_incarnation},
+      @control_timeout_ms
+    )
+  end
+
+  @doc false
+  @spec settle_owner_loss(pid(), binary(), pid(), binary(), [origin_id()]) ::
+          :ok | {:error, :owner_loss_unavailable | :owner_loss_unsettled}
+  def settle_owner_loss(relay, session_id, owner, owner_incarnation, origins) do
+    GenServer.call(
+      relay,
+      {:settle_owner_loss, session_id, owner, owner_incarnation, origins},
       @control_timeout_ms
     )
   end
@@ -228,6 +251,22 @@ defmodule LoopexDaemon.AdmissionRelay do
   end
 
   @doc false
+  @spec promote_lease_ticket(pid(), origin_id(), binary(), (-> map())) ::
+          {:ok, origin_id()}
+          | {:error,
+             :daemon_stopping
+             | :invalid_promotion
+             | :owner_unavailable
+             | :ticket_unavailable}
+  def promote_lease_ticket(relay, origin_id, owner_incarnation, task_fun) do
+    GenServer.call(
+      relay,
+      {:promote_lease_ticket, origin_id, owner_incarnation, task_fun},
+      @control_timeout_ms
+    )
+  end
+
+  @doc false
   @spec settle_ticket(pid(), origin_id(), binary(), settlement_ref()) ::
           :ok | {:error, :registry_unavailable | :ticket_unavailable}
   def settle_ticket(relay, origin_id, registry_incarnation, settlement_ref) do
@@ -279,7 +318,9 @@ defmodule LoopexDaemon.AdmissionRelay do
           settling: non_neg_integer(),
           connection_limit: 512,
           origin_limit: 16_384,
-          admission_deadline_set: boolean()
+          admission_deadline_set: boolean(),
+          lease_owners: non_neg_integer(),
+          owner_losses: non_neg_integer()
         }
   def status(relay), do: GenServer.call(relay, :status, @control_timeout_ms)
 
@@ -313,7 +354,10 @@ defmodule LoopexDaemon.AdmissionRelay do
          worker_monitors: %{},
          ticket_task_monitors: %{},
          registry: nil,
-         registry_monitor: nil
+         registry_monitor: nil,
+         lease_owners: %{},
+         lease_owner_monitors: %{},
+         owner_losses: %{}
        }}
     else
       {:stop, :invalid_admission_relay_options}
@@ -352,6 +396,97 @@ defmodule LoopexDaemon.AdmissionRelay do
 
   def handle_call({:register_registry, _registry, _incarnation}, _from, state),
     do: {:reply, {:error, :invalid_registry}, state}
+
+  def handle_call(
+        {:register_lease_owner, session_id, owner, owner_incarnation},
+        {caller, _tag},
+        %{owner: caller} = state
+      ) do
+    binding = {owner, owner_incarnation}
+
+    cond do
+      validate_ticket_session(session_id) != :ok or not is_pid(owner) or
+          not valid_incarnation?(owner_incarnation) ->
+        {:reply, {:error, :invalid_owner}, state}
+
+      match?(%{binding: ^binding}, Map.get(state.lease_owners, session_id)) ->
+        {:reply, :ok, state}
+
+      state.phase != :serving ->
+        {:reply, {:error, :daemon_stopping}, state}
+
+      Map.has_key?(state.lease_owners, session_id) or
+          Enum.any?(state.lease_owners, fn {_session, row} -> elem(row.binding, 0) == owner end) ->
+        {:reply, {:error, :owner_conflict}, state}
+
+      true ->
+        monitor = Process.monitor(owner)
+        row = %{binding: binding, monitor: monitor}
+
+        state = %{
+          state
+          | lease_owners: Map.put(state.lease_owners, session_id, row),
+            lease_owner_monitors:
+              Map.put(state.lease_owner_monitors, monitor, {session_id, binding})
+        }
+
+        Logger.debug("loopex daemon admission relay lease owner registered")
+        {:reply, :ok, state}
+    end
+  end
+
+  def handle_call({:register_lease_owner, _session, _owner, _incarnation}, _from, state),
+    do: {:reply, {:error, :invalid_owner}, state}
+
+  def handle_call(
+        {:settle_owner_loss, session_id, owner, owner_incarnation, origins},
+        {caller, _tag},
+        %{owner: caller} = state
+      ) do
+    binding = {owner, owner_incarnation}
+
+    case Map.fetch(state.owner_losses, binding) do
+      {:ok, %{session_id: ^session_id, origins: retained_origins}}
+      when is_list(origins) ->
+        supplied = MapSet.new(origins)
+
+        cond do
+          MapSet.size(supplied) != length(origins) or supplied != retained_origins ->
+            {:reply, {:error, :owner_loss_unavailable}, state}
+
+          Enum.any?(retained_origins, &owner_loss_worker_live?(state, &1)) ->
+            {:reply, {:error, :owner_loss_unsettled}, state}
+
+          true ->
+            state =
+              Enum.reduce(retained_origins, state, fn origin_id, acc ->
+                case Map.fetch(acc.tickets, origin_id) do
+                  {:ok, ticket} ->
+                    acc
+                    |> remove_ticket(origin_id)
+                    |> maybe_retire_connection(ticket.connection_incarnation)
+
+                  :error ->
+                    acc
+                end
+              end)
+
+            state = update_in(state.owner_losses, &Map.delete(&1, binding))
+            Logger.debug("loopex daemon admission relay owner loss settled")
+            {:reply, :ok, state}
+        end
+
+      _other ->
+        {:reply, {:error, :owner_loss_unavailable}, state}
+    end
+  end
+
+  def handle_call(
+        {:settle_owner_loss, _session, _owner, _incarnation, _origins},
+        _from,
+        state
+      ),
+      do: {:reply, {:error, :owner_loss_unavailable}, state}
 
   def handle_call(
         {:register_connection, incarnation, retirement_recipient},
@@ -464,6 +599,7 @@ defmodule LoopexDaemon.AdmissionRelay do
              {:ok, incarnation, slot, sequence} <- validate_origin(origin_id),
              {:ok, connection} <- caller_connection(state, incarnation, caller),
              :ok <- validate_ticket_class(class, session_id, owner_binding),
+             :ok <- validate_ticket_owner(state, class, session_id, owner_binding),
              :ok <- origin_capacity(state, connection),
              :ok <- sequence_available(connection, slot, sequence) do
           ticket = %{
@@ -481,6 +617,7 @@ defmodule LoopexDaemon.AdmissionRelay do
             promoter_pid: nil,
             promoter_incarnation: nil,
             settlement_ref: nil,
+            settlement_mode: nil,
             task_pid: nil,
             task_incarnation: nil,
             task_monitor: nil,
@@ -579,15 +716,16 @@ defmodule LoopexDaemon.AdmissionRelay do
              :ok <- authenticate_registry(state, caller, registry_incarnation),
              true <- is_function(task_fun, 0),
              {:ok, ticket} <- promotable_ticket(state, origin_id),
-             true <- ticket.class in [:session_create, :session_attach] do
-          start_registry_promotion(
+             true <- ticket.class in [:session_create, :session_resume, :session_attach] do
+          start_ticket_promotion(
             state,
             ticket,
             from,
             caller,
             registry_incarnation,
             settlement_ref,
-            task_fun
+            task_fun,
+            :registry
           )
         else
           false -> {:reply, {:error, :invalid_promotion}, state}
@@ -610,6 +748,47 @@ defmodule LoopexDaemon.AdmissionRelay do
       {:reply, :ok, state}
     else
       {:error, reason} -> {:reply, {:error, reason}, state}
+    end
+  end
+
+  def handle_call(
+        {:promote_lease_ticket, origin_id, owner_incarnation, task_fun},
+        from = {caller, _tag},
+        state
+      ) do
+    state = expire_if_due(state)
+
+    case promotion_repetition(state, origin_id, caller, owner_incarnation, :direct) do
+      :complete ->
+        {:reply, {:ok, origin_id}, state}
+
+      {:waiting, ticket} ->
+        ticket = %{ticket | promotion_waiters: [from | ticket.promotion_waiters]}
+        {:noreply, put_in(state, [:tickets, origin_id], ticket)}
+
+      :conflict ->
+        {:reply, {:error, :invalid_promotion}, state}
+
+      :absent ->
+        with :ok <- promotion_admitted(state, origin_id),
+             true <- is_function(task_fun, 0),
+             {:ok, ticket} <- promotable_ticket(state, origin_id),
+             true <- ticket.class in @direct_lease_ticket_classes,
+             :ok <- authenticate_ticket_owner(state, ticket, caller, owner_incarnation) do
+          start_ticket_promotion(
+            state,
+            ticket,
+            from,
+            caller,
+            owner_incarnation,
+            :direct,
+            task_fun,
+            :direct
+          )
+        else
+          false -> {:reply, {:error, :invalid_promotion}, state}
+          {:error, reason} -> {:reply, {:error, reason}, state}
+        end
     end
   end
 
@@ -769,7 +948,9 @@ defmodule LoopexDaemon.AdmissionRelay do
        settling: permit_counts.settling + ticket_counts.settling,
        connection_limit: @connection_limit,
        origin_limit: @origin_limit,
-       admission_deadline_set: not is_nil(state.admission_deadline)
+       admission_deadline_set: not is_nil(state.admission_deadline),
+       lease_owners: map_size(state.lease_owners),
+       owner_losses: map_size(state.owner_losses)
      }, state}
   end
 
@@ -849,10 +1030,21 @@ defmodule LoopexDaemon.AdmissionRelay do
           ticket = %{ticket | phase: :settling, disposition: :result, result: result}
           state = put_in(state, [:tickets, origin_id], ticket)
 
-          send(
-            ticket.promoter_pid,
-            {:relay_ticket_settlement, self(), origin_id, ticket.settlement_ref, result}
-          )
+          state =
+            case ticket.settlement_mode do
+              :registry ->
+                send(
+                  ticket.promoter_pid,
+                  {:relay_ticket_settlement, self(), origin_id, ticket.settlement_ref, result}
+                )
+
+                state
+
+              :direct ->
+                state
+                |> put_in([:tickets, origin_id, :settlement_acked], true)
+                |> deliver_ticket_result(origin_id)
+            end
 
           Logger.debug("loopex daemon admission relay ticket result selected")
           {:noreply, state}
@@ -878,6 +1070,9 @@ defmodule LoopexDaemon.AdmissionRelay do
 
       state.registry_monitor == monitor ->
         {:stop, :registry_lost, state}
+
+      Map.has_key?(state.lease_owner_monitors, monitor) ->
+        lease_owner_down(state, monitor, pid, reason)
 
       Map.has_key?(state.ticket_task_monitors, monitor) ->
         ticket_task_down(state, monitor, pid, reason)
@@ -961,6 +1156,21 @@ defmodule LoopexDaemon.AdmissionRelay do
       do: :ok,
       else: {:error, :invalid_origin}
   end
+
+  defp validate_ticket_owner(_state, class, _session_id, nil)
+       when class in [:session_create, :session_attach],
+       do: :ok
+
+  defp validate_ticket_owner(state, class, session_id, owner_binding)
+       when class in @lease_ticket_classes do
+    case Map.get(state.lease_owners, session_id) do
+      %{binding: ^owner_binding} -> :ok
+      _other -> {:error, :invalid_origin}
+    end
+  end
+
+  defp validate_ticket_owner(_state, _class, _session_id, _owner_binding),
+    do: {:error, :invalid_origin}
 
   defp origin_capacity(state, connection) do
     cond do
@@ -1071,6 +1281,15 @@ defmodule LoopexDaemon.AdmissionRelay do
     end
   end
 
+  defp authenticate_ticket_owner(state, ticket, owner, owner_incarnation) do
+    binding = {owner, owner_incarnation}
+
+    case Map.get(state.lease_owners, ticket.session_id) do
+      %{binding: ^binding} when ticket.owner_binding == binding -> :ok
+      _other -> {:error, :owner_unavailable}
+    end
+  end
+
   defp promotion_admitted(%{phase: :serving}, _origin_id), do: :ok
 
   defp promotion_admitted(%{phase: :draining} = state, origin_id) do
@@ -1151,7 +1370,7 @@ defmodule LoopexDaemon.AdmissionRelay do
          {:ok, %{phase: primary_phase} = primary}
          when primary_phase in [:ticketed, :settling] <-
            Map.fetch(state.tickets, primary_origin_id),
-         true <- primary.class in [:session_create, :session_attach],
+         true <- primary.class in [:session_create, :session_resume, :session_attach],
          true <- ticket.class == primary.class,
          true <- ticket.session_id == primary.session_id,
          true <- ticket.owner_binding == primary.owner_binding do
@@ -1164,14 +1383,15 @@ defmodule LoopexDaemon.AdmissionRelay do
   defp waiter_pair(_state, _origin_id, _primary_origin_id),
     do: {:error, :invalid_waiter}
 
-  defp start_registry_promotion(
+  defp start_ticket_promotion(
          state,
          ticket,
          from,
          registry,
          registry_incarnation,
          settlement_ref,
-         task_fun
+         task_fun,
+         settlement_mode
        ) do
     origin_id = ticket.origin_id
     task_incarnation = random_incarnation()
@@ -1192,6 +1412,7 @@ defmodule LoopexDaemon.AdmissionRelay do
         promoter_pid: registry,
         promoter_incarnation: registry_incarnation,
         settlement_ref: settlement_ref,
+        settlement_mode: settlement_mode,
         task_pid: task,
         task_incarnation: task_incarnation,
         task_monitor: task_monitor,
@@ -1398,6 +1619,67 @@ defmodule LoopexDaemon.AdmissionRelay do
     end
   end
 
+  defp lease_owner_down(state, monitor, pid, _reason) do
+    {{session_id, {^pid, owner_incarnation} = binding}, owner_monitors} =
+      Map.pop(state.lease_owner_monitors, monitor)
+
+    lease_owners =
+      case Map.get(state.lease_owners, session_id) do
+        %{binding: ^binding} -> Map.delete(state.lease_owners, session_id)
+        _other -> state.lease_owners
+      end
+
+    state = %{
+      state
+      | lease_owner_monitors: owner_monitors,
+        lease_owners: lease_owners
+    }
+
+    affected =
+      state.tickets
+      |> Enum.filter(fn
+        {_origin_id, %{owner_binding: ^binding, phase: phase}}
+        when phase in [:pending, :queued] ->
+          true
+
+        _other ->
+          false
+      end)
+      |> Enum.map(&elem(&1, 0))
+      |> MapSet.new()
+
+    state =
+      Enum.reduce(affected, state, fn origin_id, acc ->
+        ticket = Map.fetch!(acc.tickets, origin_id)
+
+        if is_pid(ticket.worker_pid) and Process.alive?(ticket.worker_pid),
+          do: Process.exit(ticket.worker_pid, :kill)
+
+        ticket = %{ticket | phase: :settling, disposition: :owner_lost}
+        put_in(acc, [:tickets, origin_id], ticket)
+      end)
+
+    loss = %{session_id: session_id, origins: affected}
+    state = put_in(state, [:owner_losses, binding], loss)
+
+    send(
+      state.owner,
+      {:relay_owner_lost, self(), session_id, pid, owner_incarnation,
+       affected |> MapSet.to_list() |> Enum.sort()}
+    )
+
+    if Enum.all?(affected, &(not owner_loss_worker_live?(state, &1))) do
+      send(state.owner, {:relay_owner_loss_ready, self(), pid, owner_incarnation})
+    end
+
+    Logger.debug("loopex daemon admission relay lease owner lost")
+    {:noreply, state}
+  end
+
+  defp owner_loss_worker_live?(state, origin_id) do
+    match?(%{worker_pid: worker} when is_pid(worker), Map.get(state.tickets, origin_id))
+  end
+
   defp worker_down(state, monitor, pid, _reason) do
     case Map.pop(state.worker_monitors, monitor) do
       {nil, _worker_monitors} ->
@@ -1440,6 +1722,38 @@ defmodule LoopexDaemon.AdmissionRelay do
 
   defp ticket_worker_down(state, origin_id, pid) do
     case Map.fetch(state.tickets, origin_id) do
+      {:ok,
+       %{
+         worker_pid: ^pid,
+         phase: :settling,
+         disposition: :owner_lost,
+         owner_binding: {owner, owner_incarnation}
+       } = ticket} ->
+        ticket = %{
+          ticket
+          | worker_pid: nil,
+            worker_incarnation: nil,
+            worker_monitor: nil
+        }
+
+        state = put_in(state, [:tickets, origin_id], ticket)
+
+        case Map.get(state.owner_losses, {owner, owner_incarnation}) do
+          %{origins: origins} ->
+            if Enum.all?(origins, &(not owner_loss_worker_live?(state, &1))) do
+              send(
+                state.owner,
+                {:relay_owner_loss_ready, self(), owner, owner_incarnation}
+              )
+            end
+
+          _other ->
+            :ok
+        end
+
+        Logger.debug("loopex daemon admission relay owner-loss worker reaped")
+        {:noreply, state}
+
       {:ok, %{worker_pid: ^pid, phase: :waiting} = ticket} ->
         Enum.each(ticket.waiting_callers, fn from ->
           GenServer.reply(from, {:ok, ticket.primary_origin_id})
