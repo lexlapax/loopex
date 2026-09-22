@@ -11,9 +11,9 @@ defmodule LoopexDaemon.StartupArbiter do
 
   `arbitrate/7` runs in the command process after the owner has supplied one
   exact readiness request. It starts one monitored whole-line writer, applies
-  one absolute deadline, and serializes writer completion, the installed
-  signal handler, owner failure, owner authorization and owner loss. Only the
-  matching authorization sends the listener's `begin_accept` message.
+  one absolute deadline, and serializes writer completion, the owner's exact
+  signal reference, owner failure, owner authorization and owner loss. Only
+  the matching authorization sends the listener's `begin_accept` message.
   """
 
   require Logger
@@ -41,10 +41,10 @@ defmodule LoopexDaemon.StartupArbiter do
   ## Technical depth
 
   `owner_monitor` is the monitor the command process installed immediately
-  after starting the unlinked owner. `signal_ref` authenticates the handler
-  installation that can request an orderly stop. Tests may select a shorter
-  positive deadline and another IO device; production uses five seconds and
-  standard output.
+  after starting the unlinked owner. The same `owner_ref` authenticates the
+  installed handler's orderly-stop message. Tests may select a shorter positive
+  deadline and another IO device; production uses five seconds and standard
+  output.
   """
   @spec arbitrate(pid(), reference(), reference(), reference(), pid(), binary(), keyword()) ::
           result()
@@ -61,10 +61,9 @@ defmodule LoopexDaemon.StartupArbiter do
              is_reference(startup_ref) and is_pid(listener_pid) and is_binary(line) and
              is_list(options) do
     output = Keyword.get(options, :output, :stdio)
-    signal_ref = Keyword.fetch!(options, :signal_ref)
     deadline_ms = Keyword.get(options, :deadline_ms, @output_deadline_ms)
 
-    if is_reference(signal_ref) and is_integer(deadline_ms) and deadline_ms > 0 do
+    if is_integer(deadline_ms) and deadline_ms > 0 do
       parent = self()
       writer_tag = make_ref()
       deadline = monotonic_ms() + deadline_ms
@@ -80,7 +79,6 @@ defmodule LoopexDaemon.StartupArbiter do
         owner_ref: owner_ref,
         startup_ref: startup_ref,
         listener_pid: listener_pid,
-        signal_ref: signal_ref,
         writer: writer,
         writer_monitor: writer_monitor,
         writer_tag: writer_tag,
@@ -125,8 +123,7 @@ defmodule LoopexDaemon.StartupArbiter do
             do: fatal_wins(%{state | writer: nil, writer_monitor: nil}, :readiness_write_failed),
             else: deadline_wins(%{state | writer: nil, writer_monitor: nil})
 
-        {LoopexDaemon.SignalHandler, signal_ref, :sigterm}
-        when signal_ref == state.signal_ref ->
+        {:daemon_signal, owner_ref, :sigterm} when owner_ref == state.owner_ref ->
           if before_deadline?(state), do: stop_wins(state), else: deadline_wins(state)
 
         {:readiness_startup_fatal, owner_ref, startup_ref, owner_pid, listener_pid, class, status}
@@ -164,8 +161,7 @@ defmodule LoopexDaemon.StartupArbiter do
             true -> await_authorization(state)
           end
 
-        {LoopexDaemon.SignalHandler, signal_ref, :sigterm}
-        when signal_ref == state.signal_ref ->
+        {:daemon_signal, owner_ref, :sigterm} when owner_ref == state.owner_ref ->
           if before_deadline?(state), do: stop_wins(state), else: deadline_wins(state)
 
         {:DOWN, monitor, :process, owner_pid, _reason}

@@ -75,7 +75,9 @@ JSON escaping to paths and identifiers, and guarantees that its terminating LF
 is the line's only literal newline. Its startup arbiter performs the whole-line
 write in a monitored helper under one absolute deadline and releases the parked
 listener only after the exact owner authorization wins over stop, owner loss or
-startup failure.
+startup failure. The daemon signal handler replaces OTP's default handler,
+routes only bare or tuple `SIGTERM` to that arbiter through the exact owner
+reference, and leaves every other event ignored without removing itself.
 
 Add the daemon session index's canonical bounded codec. It pins the exact JSONL
 header, sorted identity rows, SHA-256 trailer and all identity, row-count,

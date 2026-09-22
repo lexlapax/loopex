@@ -31,7 +31,7 @@ defmodule LoopexDaemon.StartupArbiterTest do
     context = start_arbiter(output: output)
 
     assert_receive {:readiness_output_succeeded, owner_ref, startup_ref, sentinel}
-    send(sentinel, {LoopexDaemon.SignalHandler, context.signal_ref, :sigterm})
+    send(sentinel, {:daemon_signal, context.owner_ref, :sigterm})
 
     assert_receive {:readiness_disposition, ^owner_ref, ^startup_ref, :operator_stop}
     assert_receive {:arbiter_result, {:disposition, :operator_stop}}
@@ -60,12 +60,12 @@ defmodule LoopexDaemon.StartupArbiterTest do
 
   test "stale signal and malformed owner status cannot release or fail startup" do
     {:ok, output} = StringIO.open("")
-    context = start_arbiter(output: output)
+    _context = start_arbiter(output: output)
 
     assert_receive {:readiness_output_succeeded, owner_ref, startup_ref, sentinel}
     {:ok, wrong_status} = ExitStatus.fetch(:owner_lost)
 
-    send(sentinel, {LoopexDaemon.SignalHandler, make_ref(), :sigterm})
+    send(sentinel, {:daemon_signal, make_ref(), :sigterm})
 
     send(
       sentinel,
@@ -84,7 +84,6 @@ defmodule LoopexDaemon.StartupArbiterTest do
     assert_receive {:begin_accept, ^startup_ref}
     assert_receive {:readiness_disposition, ^owner_ref, ^startup_ref, :running}
     assert_receive {:arbiter_result, {:disposition, :running}}
-    assert is_reference(context.signal_ref)
   end
 
   test "an output deadline is a hard-halt disposition" do
@@ -125,7 +124,6 @@ defmodule LoopexDaemon.StartupArbiterTest do
     deadline_ms = Keyword.get(options, :deadline_ms, 1_000)
     owner_ref = make_ref()
     startup_ref = make_ref()
-    signal_ref = make_ref()
     test = self()
 
     {sentinel, sentinel_monitor} =
@@ -141,8 +139,7 @@ defmodule LoopexDaemon.StartupArbiterTest do
             listener,
             "readiness-line\n",
             output: output,
-            deadline_ms: deadline_ms,
-            signal_ref: signal_ref
+            deadline_ms: deadline_ms
           )
 
         send(test, {:arbiter_result, result})
@@ -151,7 +148,6 @@ defmodule LoopexDaemon.StartupArbiterTest do
     %{
       owner_ref: owner_ref,
       startup_ref: startup_ref,
-      signal_ref: signal_ref,
       sentinel: sentinel,
       sentinel_monitor: sentinel_monitor,
       output: output
