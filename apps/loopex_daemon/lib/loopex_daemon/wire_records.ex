@@ -32,8 +32,25 @@ defmodule LoopexDaemon.WireRecords do
   }
 
   @request_messages Map.merge(@control_messages, %{
-                      "activation_ceiling_reached" => "activation ceiling reached."
+                      "activation_ceiling_reached" => "activation ceiling reached.",
+                      "capacity_exceeded" => "too many requests are in flight on this connection",
+                      "composition_mismatch" =>
+                        "session cannot be activated by this daemon composition",
+                      "control_capacity_reached" => "control capacity reached.",
+                      "control_owner_lost" => "the session's control owner was lost",
+                      "daemon_stopping" => "the daemon is stopping",
+                      "internal_failure" => "the daemon could not complete this request",
+                      "session_dormant" => "session is dormant in this daemon lifetime",
+                      "session_unavailable" => "session unavailable.",
+                      "session_unknown" => "session unknown.",
+                      "store_unavailable" => "store unavailable.",
+                      "unsupported_method" => "this build does not yet answer that method"
                     })
+
+  @refusals %{
+    "duplicate_request" => "this request identity is already in flight on this connection",
+    "session_conflict" => "this connection serves another session"
+  }
 
   @doc false
   @spec detached(binary(), non_neg_integer()) :: map()
@@ -140,5 +157,45 @@ defmodule LoopexDaemon.WireRecords do
       "code" => code,
       "message" => Map.fetch!(@request_messages, code)
     }
+  end
+
+  @doc false
+  @spec invalid_request(binary(), binary()) :: map()
+  def invalid_request(request_id, refusal)
+      when is_binary(request_id) and is_map_key(@refusals, refusal) do
+    %{
+      "type" => "error",
+      "request_id" => request_id,
+      "code" => "invalid_request",
+      "message" => Map.fetch!(@refusals, refusal)
+    }
+  end
+
+  @doc """
+  ## Concept
+
+  The one uncorrelated record a granted holder receives when its session's
+  control owner is lost, immediately before the daemon closes it.
+
+  ## Technical depth
+
+  It carries `session_id` instead of `request_id`, so a client can never
+  confuse it with a correlated refusal. `event_cursor` is present exactly
+  when the connection held an attachment whose emitted cursor it can name.
+  """
+  @spec owner_lost_close(binary(), non_neg_integer() | nil) :: map()
+  def owner_lost_close(session_id, event_cursor)
+      when is_binary(session_id) and
+             (is_nil(event_cursor) or (is_integer(event_cursor) and event_cursor >= 0)) do
+    record = %{
+      "type" => "error",
+      "code" => "control_owner_lost",
+      "message" => Map.fetch!(@request_messages, "control_owner_lost"),
+      "session_id" => Wire.encode_identity(session_id)
+    }
+
+    if is_nil(event_cursor),
+      do: record,
+      else: Map.put(record, "event_cursor", Wire.encode_u64(event_cursor))
   end
 end

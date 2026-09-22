@@ -12,10 +12,9 @@ defmodule LoopexDaemon.ConnectionProtocol do
   retaining ADR 0023's request-identity, generation-list and capability-list
   validation. A well-formed unsupported offer spends the negotiation attempt;
   a malformed request does not. After negotiation, `LoopexDaemon.Request`
-  enforces and decodes every named method's exact generation-two request shape.
-  Until serving lands, a valid request returns the fixed build-level
-  `unsupported_method` refusal, which is safe because no host or runtime effect
-  occurs.
+  enforces and decodes every named method's exact generation-two request shape;
+  a valid request is returned to the connection as plain decoded data for
+  serving, and nothing here performs a host or runtime effect.
   """
 
   alias LoopexDaemon.Request
@@ -43,7 +42,7 @@ defmodule LoopexDaemon.ConnectionProtocol do
 
   @doc false
   @spec handle(t(), map()) ::
-          {:ok | :error, map(), t(), disposition()}
+          {:ok | :error, map(), t(), disposition()} | {:request, Request.t(), t()}
   def handle(%__MODULE__{} = protocol, request) when is_map(request) do
     case Map.get(request, "method") do
       "initialize" -> initialize(protocol, request)
@@ -96,13 +95,8 @@ defmodule LoopexDaemon.ConnectionProtocol do
     request_id = safe_request_id(request)
 
     case Request.parse(request) do
-      {:ok, _parsed} ->
-        {:error,
-         error(
-           "unsupported_method",
-           "this build does not yet answer that method",
-           request_id
-         ), protocol, :none}
+      {:ok, parsed} ->
+        {:request, parsed, protocol}
 
       {:error, :unsupported_method} ->
         {:error, error("unsupported_method", "no such method in this generation", request_id),

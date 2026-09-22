@@ -77,14 +77,14 @@ defmodule LoopexDaemon.ConnectionProtocolTest do
     assert {:ok, _reply, initialized, :initialized} =
              ConnectionProtocol.handle(protocol, initialize())
 
-    assert {:error, named, ^initialized, :none} =
+    assert {:request, named, ^initialized} =
              ConnectionProtocol.handle(initialized, %{
                "method" => "session.list",
                "request_id" => "r2",
                "limit" => 1
              })
 
-    assert named["code"] == "unsupported_method"
+    assert %LoopexDaemon.Request{operation: :session_list, request_id: "r2"} = named
 
     assert {:error, unknown, ^initialized, :none} =
              ConnectionProtocol.handle(initialized, %{
@@ -95,7 +95,7 @@ defmodule LoopexDaemon.ConnectionProtocolTest do
     assert unknown["code"] == "unsupported_method"
   end
 
-  test "named methods cross strict generation-two parsing before remaining inert" do
+  test "named methods cross strict generation-two parsing before serving" do
     assert {:ok, _reply, initialized, :initialized} =
              ConnectionProtocol.handle(ConnectionProtocol.new(), initialize())
 
@@ -105,11 +105,9 @@ defmodule LoopexDaemon.ConnectionProtocolTest do
       "limit" => 1
     }
 
-    assert {:error, unsupported, ^initialized, :none} =
-             ConnectionProtocol.handle(initialized, valid)
-
-    assert unsupported["code"] == "unsupported_method"
-    assert unsupported["request_id"] == "valid"
+    assert {:request, parsed, ^initialized} = ConnectionProtocol.handle(initialized, valid)
+    assert %LoopexDaemon.Request{operation: :session_list, request_id: "valid"} = parsed
+    assert parsed.fields == %{limit: 1, after_session_id: nil}
 
     for malformed <- [
           Map.delete(valid, "limit"),

@@ -410,6 +410,7 @@ defmodule LoopexDaemon.ConnectionRegistry do
          %{
            owner: owner,
            connection_module: Keyword.get(options, :connection_module, SocketConnection),
+           connection_context: Keyword.get(options, :connection_context),
            initialize_deadline_ms: deadline_ms,
            output_buffer_bytes: output_buffer_bytes,
            aggregate_output_bytes: aggregate_output_bytes,
@@ -1256,7 +1257,8 @@ defmodule LoopexDaemon.ConnectionRegistry do
       listener: row.listener,
       rollback_token: row.token,
       connection_incarnation: incarnation,
-      initialize_deadline: row.initialize_deadline
+      initialize_deadline: row.initialize_deadline,
+      context: state.connection_context
     ]
 
     result =

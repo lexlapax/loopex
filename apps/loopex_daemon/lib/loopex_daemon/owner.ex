@@ -172,7 +172,7 @@ defmodule LoopexDaemon.Owner do
                owner_incarnation: daemon_incarnation,
                admission_wait_ms: admission_wait_ms
              ),
-           {:ok, registry} <- start_registry(options),
+           {:ok, registry} <- start_registry(options, relay, daemon_incarnation),
            :ok <-
              AdmissionRelay.register_registry(relay, registry, routing_incarnation),
            :ok <- ConnectionRegistry.bind_relay(registry, relay, routing_incarnation) do
@@ -644,8 +644,19 @@ defmodule LoopexDaemon.Owner do
     |> Map.put(:log, [])
   end
 
-  defp start_registry(options) do
-    registry_options = [owner: self()]
+  # Concept: every connection the registry starts serves through this daemon
+  # owner and its relay. Technical depth: the context is plain process and
+  # runtime references; the runtime is absent only in component tests.
+  defp start_registry(options, relay, daemon_incarnation) do
+    context = %{
+      owner: self(),
+      relay: relay,
+      daemon_incarnation: daemon_incarnation,
+      runtime: Keyword.get(options, :runtime),
+      fatal_recipient: Keyword.get(options, :fatal_recipient)
+    }
+
+    registry_options = [owner: self(), connection_context: context]
 
     registry_options =
       case Keyword.fetch(options, :connection_module) do

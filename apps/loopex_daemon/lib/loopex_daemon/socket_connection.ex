@@ -24,13 +24,37 @@ defmodule LoopexDaemon.SocketConnection do
   accept-time deadline. Partial input is bounded, and fixed protocol refusals
   contain no received bytes. The socket, buffered bytes and monitor handles are
   redacted from formatted process status.
+
+  After initialization a connection composed with a daemon context registers
+  its incarnation with the admission relay and serves requests through a
+  `LoopexDaemon.RequestLedger`: every admitted request occupies one sequenced
+  relay origin until exactly one answer is rendered. Blocking work runs in a
+  monitored `LoopexDaemon.RequestWorker`; the relay, the daemon owner and the
+  lease owners deliver results, cancellations and failures back to this
+  process, which renders each as one correlated record. When the daemon owner
+  reports the loss of this connection's granted session owner, the connection
+  writes the one uncorrelated `control_owner_lost` record, stops reading,
+  attempts to flush within a fixed bound, closes and only then acknowledges
+  the exact close reference.
   """
 
   use GenServer
   require Logger
 
-  alias LoopexDaemon.{ConnectionProtocol, ConnectionRegistry}
+  alias LoopexDaemon.{
+    AdmissionRelay,
+    ConnectionProtocol,
+    ConnectionRegistry,
+    Owner,
+    Request,
+    RequestLedger,
+    RequestWorker,
+    WireRecords
+  }
+
   alias LoopexProtocol.{Frame, Session.V2}
+
+  @owner_loss_close_ms 1_000
 
   @doc false
   @spec start_link(keyword()) :: GenServer.on_start()
@@ -57,7 +81,11 @@ defmodule LoopexDaemon.SocketConnection do
       discarding_oversize: false,
       receive_select: nil,
       send_select: nil,
-      output_claim: nil
+      output_claim: nil,
+      context: Keyword.get(options, :context),
+      ledger: RequestLedger.new(Keyword.fetch!(options, :connection_incarnation)),
+      workers: %{},
+      closing: nil
     }
 
     Logger.debug("loopex daemon socket connection waiting")
@@ -109,7 +137,7 @@ defmodule LoopexDaemon.SocketConnection do
   def handle_info({:connection_abort, token, _reason}, %{rollback_token: token} = state),
     do: {:stop, :normal, state}
 
-  def handle_info(:receive_next, %{phase: phase, receive_select: nil} = state)
+  def handle_info(:receive_next, %{phase: phase, receive_select: nil, closing: nil} = state)
       when phase in [:live, :initialized],
       do: arm_receive(state)
 
@@ -127,9 +155,8 @@ defmodule LoopexDaemon.SocketConnection do
         } = state
       )
       when phase in [:live, :initialized] do
-    state
-    |> Map.put(:receive_select, nil)
-    |> arm_receive()
+    state = Map.put(state, :receive_select, nil)
+    if state.closing, do: {:noreply, state}, else: arm_receive(state)
   end
 
   def handle_info(
@@ -161,11 +188,51 @@ defmodule LoopexDaemon.SocketConnection do
     {:stop, :normal, %{state | send_select: nil}}
   end
 
+  def handle_info({:request_worker_result, origin, incarnation, result}, state),
+    do: continue_worker(state, origin, incarnation, result)
+
+  def handle_info({:relay_permit_result, origin, record}, state),
+    do: render_result(state, origin, record)
+
+  def handle_info({:relay_ticket_result, origin, record}, state),
+    do: render_result(state, origin, record)
+
+  def handle_info({:relay_permit_cancelled, origin, reason}, state)
+      when reason in [:control_owner_lost, :daemon_stopping],
+      do: render_refusal(state, origin, Atom.to_string(reason))
+
+  def handle_info({:relay_ticket_cancelled, origin, reason}, state)
+      when reason in [:control_owner_lost, :daemon_stopping],
+      do: render_refusal(state, origin, Atom.to_string(reason))
+
+  def handle_info({:relay_permit_failed, origin, _reason}, state),
+    do: render_refusal(state, origin, "internal_failure")
+
+  def handle_info({:relay_ticket_failed, origin, _reason}, state),
+    do: render_refusal(state, origin, "internal_failure")
+
+  def handle_info(
+        {:daemon_control_owner_lost, owner, close_ref, session_id, incarnation},
+        %{incarnation: incarnation, context: %{owner: owner}, closing: nil} = state
+      )
+      when is_reference(close_ref) and is_binary(session_id),
+      do: begin_owner_loss_close(state, owner, close_ref, session_id)
+
+  def handle_info(
+        {:owner_loss_close_deadline, close_ref},
+        %{closing: %{close_ref: close_ref}} = state
+      ),
+      do: finish_owner_loss_close(state)
+
   def handle_info(
         {:DOWN, monitor, :process, registry, _reason},
         %{registry: registry, registry_monitor: monitor} = state
       ),
       do: {:stop, :registry_lost, state}
+
+  def handle_info({:DOWN, monitor, :process, _worker, _reason}, state)
+      when is_map_key(state.workers, monitor),
+      do: worker_lost(state, monitor)
 
   def handle_info(
         {:DOWN, monitor, :process, listener, _reason},
@@ -296,6 +363,9 @@ defmodule LoopexDaemon.SocketConnection do
 
   defp handle_request(state, request) do
     case ConnectionProtocol.handle(state.protocol, request) do
+      {:request, parsed, protocol} ->
+        serve(%{state | protocol: protocol}, parsed)
+
       {_kind, record, protocol, :none} ->
         case send_record(state, record) do
           :ok -> {:ok, %{state | protocol: protocol}}
@@ -309,18 +379,325 @@ defmodule LoopexDaemon.SocketConnection do
                state.incarnation
              ) do
           :ok ->
-            case send_record(state, record) do
-              :ok ->
-                Logger.debug("loopex daemon socket connection initialized")
-                {:ok, %{state | protocol: protocol, phase: :initialized}}
-
-              {:error, _reason} ->
-                {:stop, state}
+            with :ok <- register_relay(state),
+                 :ok <- send_record(state, record) do
+              Logger.debug("loopex daemon socket connection initialized")
+              {:ok, %{state | protocol: protocol, phase: :initialized}}
+            else
+              {:error, _reason} -> {:stop, state}
             end
 
           {:error, _reason} ->
             {:stop, state}
         end
+    end
+  end
+
+  defp register_relay(%{context: nil}), do: :ok
+
+  defp register_relay(%{context: %{relay: relay}} = state) do
+    case AdmissionRelay.register_connection(relay, state.incarnation, state.registry) do
+      :ok ->
+        :ok
+
+      {:error, _reason} ->
+        Logger.debug("loopex daemon socket connection relay registration refused")
+        {:error, :relay_registration_refused}
+    end
+  end
+
+  # Concept: a request is served only by a connection composed with the daemon
+  # context, and only for the methods this build answers.
+  defp serve(%{context: nil} = state, request),
+    do: reply(state, WireRecords.request_error(request.request_id, "unsupported_method"))
+
+  defp serve(state, %Request{operation: :session_acquire_control} = request) do
+    session_id = request.fields.session_id
+
+    case RequestLedger.reserve(
+           state.ledger,
+           session_id,
+           request.request_id,
+           {request.operation, request.fields}
+         ) do
+      :coalesced ->
+        {:ok, state}
+
+      {:error, :session_conflict} ->
+        reply(state, WireRecords.invalid_request(request.request_id, "session_conflict"))
+
+      {:ok, reserved} ->
+        runtime = state.context.runtime
+
+        begin_worker(state, reserved, request, fn ->
+          Loopex.Runtime.session_existence(runtime, session_id)
+        end)
+    end
+  end
+
+  defp serve(state, %Request{operation: :session_release_control} = request) do
+    case RequestLedger.admit_session(state.ledger, request.fields.session_id) do
+      :ok ->
+        begin_worker(state, state.ledger, request, fn -> :ok end)
+
+      {:error, :session_conflict} ->
+        reply(state, WireRecords.invalid_request(request.request_id, "session_conflict"))
+    end
+  end
+
+  defp serve(state, request),
+    do: reply(state, WireRecords.request_error(request.request_id, "unsupported_method"))
+
+  # Concept: the request identity and the in-flight ceiling are checked before
+  # any worker starts, and a refused request leaves no reservation behind.
+  defp begin_worker(state, ledger, request, fun) do
+    entry = %{
+      operation: request.operation,
+      fields: request.fields,
+      worker: nil,
+      worker_monitor: nil,
+      worker_incarnation: nil
+    }
+
+    case RequestLedger.begin(ledger, request.request_id, entry) do
+      {:ok, origin, ledger} ->
+        {worker, monitor, incarnation} = RequestWorker.start(origin, fun)
+
+        ledger =
+          RequestLedger.update(ledger, origin, fn entry ->
+            %{
+              entry
+              | worker: worker,
+                worker_monitor: monitor,
+                worker_incarnation: incarnation
+            }
+          end)
+
+        {:ok, %{state | ledger: ledger, workers: Map.put(state.workers, monitor, origin)}}
+
+      {:error, :duplicate_request} ->
+        reply(state, WireRecords.invalid_request(request.request_id, "duplicate_request"))
+
+      {:error, :capacity_exceeded} ->
+        reply(state, WireRecords.request_error(request.request_id, "capacity_exceeded"))
+    end
+  end
+
+  defp continue_worker(state, origin, incarnation, result) do
+    case RequestLedger.fetch(state.ledger, origin) do
+      {:ok, %{worker_incarnation: ^incarnation, worker_monitor: monitor} = entry}
+      when is_reference(monitor) ->
+        dispatch_prepared(state, origin, entry, result)
+
+      _other ->
+        {:noreply, state}
+    end
+  end
+
+  defp dispatch_prepared(state, origin, %{operation: :session_acquire_control} = entry, result) do
+    case result do
+      {:ok, :present} ->
+        state
+        |> hand_to_relay(origin, entry, fn ->
+          Owner.acquire_control(
+            state.context.owner,
+            origin,
+            entry.request_id,
+            entry.fields.session_id,
+            self(),
+            state.incarnation,
+            entry.worker,
+            entry.worker_incarnation,
+            request_deadline()
+          )
+        end)
+
+      {:ok, :absent} ->
+        settle_locally(state, origin, "session_unknown")
+
+      {:ok, :store_unavailable} ->
+        settle_locally(state, origin, "store_unavailable")
+
+      {:ok, :invalid_id} ->
+        settle_locally(state, origin, "internal_failure")
+
+      {:error, :runtime_unavailable} ->
+        report_fatal(state, :runtime_lost)
+        settle_locally(state, origin, "internal_failure")
+    end
+  end
+
+  defp dispatch_prepared(state, origin, %{operation: :session_release_control} = entry, :ok) do
+    hand_to_relay(state, origin, entry, fn ->
+      Owner.release_control(
+        state.context.owner,
+        origin,
+        entry.request_id,
+        entry.fields.session_id,
+        self(),
+        state.incarnation,
+        entry.worker,
+        entry.worker_incarnation,
+        entry.fields.writer_epoch,
+        request_deadline()
+      )
+    end)
+  end
+
+  # Concept: once the daemon owner accepts a lease operation, the relay owns
+  # the worker's accounting and delivers the one answer.
+  #
+  # Technical depth: the connection stops monitoring the worker so the
+  # worker's normal exit after `go` is not mistaken for its loss. A refused
+  # hand-off kills the worker and settles the request here.
+  defp hand_to_relay(state, origin, entry, call) do
+    case safe_call(call) do
+      {:ok, _disposition, _actor, _actor_incarnation} ->
+        Process.demonitor(entry.worker_monitor, [:flush])
+
+        ledger =
+          RequestLedger.update(state.ledger, origin, &%{&1 | worker_monitor: nil})
+
+        {:noreply,
+         %{state | ledger: ledger, workers: Map.delete(state.workers, entry.worker_monitor)}}
+
+      {:error, reason} ->
+        settle_locally(state, origin, lease_refusal(reason))
+    end
+  end
+
+  defp lease_refusal(:daemon_stopping), do: "daemon_stopping"
+  defp lease_refusal(:control_capacity_reached), do: "control_capacity_reached"
+  defp lease_refusal(:owner_unavailable), do: "control_pending"
+  defp lease_refusal(:capacity_exceeded), do: "capacity_exceeded"
+  defp lease_refusal(_reason), do: "internal_failure"
+
+  defp safe_call(call) do
+    call.()
+  catch
+    :exit, _reason -> {:error, :owner_unavailable}
+  end
+
+  defp settle_locally(state, origin, code) do
+    {entry, ledger} = RequestLedger.complete(state.ledger, origin)
+    state = %{state | ledger: ledger}
+
+    state =
+      case entry do
+        %{worker_monitor: monitor, worker: worker} when is_reference(monitor) ->
+          Process.demonitor(monitor, [:flush])
+          Process.exit(worker, :kill)
+          %{state | workers: Map.delete(state.workers, monitor)}
+
+        _other ->
+          state
+      end
+
+    state = release_reservation(state, entry)
+    noreply_record(state, WireRecords.request_error(entry.request_id, code))
+  end
+
+  defp worker_lost(state, monitor) do
+    {origin, workers} = Map.pop(state.workers, monitor)
+    state = %{state | workers: workers}
+
+    case RequestLedger.fetch(state.ledger, origin) do
+      {:ok, entry} ->
+        {_entry, ledger} = RequestLedger.complete(state.ledger, origin)
+        state = release_reservation(%{state | ledger: ledger}, entry)
+        Logger.debug("loopex daemon request worker lost")
+        noreply_record(state, WireRecords.request_error(entry.request_id, "internal_failure"))
+
+      :error ->
+        {:noreply, state}
+    end
+  end
+
+  defp render_result(state, origin, record) do
+    case RequestLedger.complete(state.ledger, origin) do
+      {nil, _ledger} ->
+        {:noreply, state}
+
+      {entry, ledger} ->
+        state = %{state | ledger: ledger}
+
+        state =
+          if record["type"] == "result",
+            do: bind_session(state, entry),
+            else: release_reservation(state, entry)
+
+        noreply_record(state, record)
+    end
+  end
+
+  defp render_refusal(state, origin, code) do
+    case RequestLedger.complete(state.ledger, origin) do
+      {nil, _ledger} ->
+        {:noreply, state}
+
+      {entry, ledger} ->
+        state = release_reservation(%{state | ledger: ledger}, entry)
+        noreply_record(state, WireRecords.request_error(entry.request_id, code))
+    end
+  end
+
+  defp bind_session(state, %{operation: :session_acquire_control} = entry) do
+    ledger = RequestLedger.bind(state.ledger, entry.fields.session_id, entry.request_id)
+    %{state | ledger: ledger}
+  end
+
+  defp bind_session(state, _entry), do: state
+
+  defp release_reservation(state, %{request_id: request_id}),
+    do: %{state | ledger: RequestLedger.clear_reservation(state.ledger, request_id)}
+
+  defp release_reservation(state, nil), do: state
+
+  # Concept: the holder of a lost session owner learns it once and is closed.
+  #
+  # Technical depth: the record is queued before reading stops; a bounded
+  # timer caps the flush so a stalled peer cannot hold the daemon owner past
+  # its mirror deadline. The acknowledgement follows the close.
+  defp begin_owner_loss_close(state, owner, close_ref, session_id) do
+    record = WireRecords.owner_lost_close(session_id, nil)
+    Process.send_after(self(), {:owner_loss_close_deadline, close_ref}, @owner_loss_close_ms)
+    state = %{state | closing: %{owner: owner, close_ref: close_ref}}
+    Logger.debug("loopex daemon holder close for lost owner")
+
+    case send_record(state, record) do
+      :ok -> {:noreply, state}
+      {:error, _reason} -> finish_owner_loss_close(state)
+    end
+  end
+
+  defp finish_owner_loss_close(%{closing: %{owner: owner, close_ref: close_ref}} = state) do
+    if state.socket, do: :socket.close(state.socket)
+    Owner.owner_loss_connection_closed(owner, close_ref, state.incarnation)
+    Logger.debug("loopex daemon holder close acknowledged")
+    {:stop, :normal, %{state | socket: nil}}
+  end
+
+  defp report_fatal(%{context: %{fatal_recipient: recipient}}, class) when is_pid(recipient) do
+    send(recipient, {:daemon_component_fatal, self(), class})
+    :ok
+  end
+
+  defp report_fatal(_state, _class), do: :ok
+
+  defp request_deadline,
+    do: System.monotonic_time(:millisecond) + Map.fetch!(V2.limits(), "reply_wait_ms")
+
+  defp reply(state, record) do
+    case send_record(state, record) do
+      :ok -> {:ok, state}
+      {:error, _reason} -> {:stop, state}
+    end
+  end
+
+  defp noreply_record(state, record) do
+    case send_record(state, record) do
+      :ok -> {:noreply, state}
+      {:error, _reason} -> {:stop, :normal, state}
     end
   end
 
@@ -344,7 +721,7 @@ defmodule LoopexDaemon.SocketConnection do
         |> output_result()
 
       :empty ->
-        {:noreply, state}
+        if state.closing, do: finish_owner_loss_close(state), else: {:noreply, state}
 
       {:error, _reason} ->
         {:stop, :normal, state}
