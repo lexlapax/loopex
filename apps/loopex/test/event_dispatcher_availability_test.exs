@@ -161,10 +161,7 @@ defmodule Loopex.EventDispatcherAvailabilityTest do
       state = :sys.get_state(fixture.dispatcher)
 
       pending =
-        case entry do
-          :attach_scan -> state.pending_scans
-          :attach_prefetch -> state.pending_reads
-        end
+        state.staged_attachments
         |> Map.values()
 
       assert [%{worker: worker}] = pending
@@ -174,7 +171,7 @@ defmodule Loopex.EventDispatcherAvailabilityTest do
       assert_receive {:DOWN, ^monitor, :process, ^worker, :killed}, 2_000
 
       state = :sys.get_state(fixture.dispatcher)
-      assert state.pending_scans == %{}
+      assert state.staged_attachments == %{}
       assert state.pending_reads == %{}
       assert state.read_monitors == %{}
       TestStore.release(waiter)
@@ -339,17 +336,23 @@ defmodule Loopex.EventDispatcherAvailabilityTest do
         end
       end)
 
-    assert_receive {:event_history_read, waiter, _, ^session_id, _}, 2_000
+    assert_receive {:event_history_read, waiter, _, ^session_id, _first_rows}, 2_000
 
     if entry == :attach_prefetch do
-      [pending] = Map.values(:sys.get_state(fixture.dispatcher).pending_scans)
-      monitor = Process.monitor(pending.worker)
+      [pending] = Map.values(:sys.get_state(fixture.dispatcher).staged_attachments)
       :ok = :sys.suspend(fixture.dispatcher)
-      TestStore.release(waiter)
-      assert_receive {:DOWN, ^monitor, :process, _, :normal}, 2_000
+
       TestStore.block_next_event_read(fixture.store, self())
+      TestStore.release(waiter)
+      assert_receive {:event_history_read, scan_tail_waiter, _, ^session_id, []}, 2_000
+
+      TestStore.block_next_event_read(fixture.store, self())
+      TestStore.release(scan_tail_waiter)
+
+      assert_receive {:event_history_read, prefetch_waiter, _, ^session_id, [_event]}, 2_000
       :ok = :sys.resume(fixture.dispatcher)
-      assert_receive {:event_history_read, prefetch_waiter, _, ^session_id, _}, 2_000
+
+      assert Process.alive?(pending.worker)
       {reader, prefetch_waiter}
     else
       {reader, waiter}

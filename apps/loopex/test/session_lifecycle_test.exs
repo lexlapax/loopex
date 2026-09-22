@@ -65,8 +65,8 @@ defmodule Loopex.SessionLifecycleTest do
                {:messages, messages} = Process.info(dispatcher, :messages)
 
                Enum.any?(messages, fn
-                 {:"$gen_call", _from,
-                  {:attach, _token, ^session_id, ^holder, _attach_ref, _options}} ->
+                 {:stage_attachment, ^control, _attach_ref,
+                  %{session_id: ^session_id, holder: ^holder}} ->
                    true
 
                  _other ->
@@ -83,9 +83,8 @@ defmodule Loopex.SessionLifecycleTest do
                {:messages, messages} = Process.info(control, :messages)
 
                Enum.any?(messages, fn
-                 {:"$gen_call", _from,
-                  {:finish_attach, _token, ^session_id, _generation, ^holder, _attach_ref,
-                   _options, _attachment}} ->
+                 {:attachment_staged, ^dispatcher, _dispatcher_incarnation, _attach_ref, _id,
+                  _incarnation_id, _attachment} ->
                    true
 
                  _other ->

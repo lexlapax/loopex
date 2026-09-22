@@ -21,7 +21,7 @@ defmodule Loopex.ConcurrentAttachmentTest do
       if Process.alive?(store_pid), do: GenServer.stop(store_pid)
     end)
 
-    %{runtime: runtime}
+    %{runtime: runtime, store: store_pid}
   end
 
   test "one holder owns several attachments while another holder remains independent", fixture do
@@ -141,6 +141,166 @@ defmodule Loopex.ConcurrentAttachmentTest do
     end)
 
     assert {:error, :empty} = Loopex.next_event(live)
+    assert_maps_agree(fixture.runtime, session_id, 1)
+  end
+
+  test "an exact concurrent repetition joins one pending transaction", fixture do
+    session_id = create_session(fixture.runtime, "pending-repetition")
+    stable_holder = holder(self())
+    M1RuntimeTestStore.block_next_event_read(fixture.store, self())
+
+    first =
+      Task.async(fn ->
+        attach(fixture.runtime, session_id, stable_holder, "same-request")
+      end)
+
+    assert_receive {:event_history_read, waiter, _, ^session_id, _}, 2_000
+
+    second =
+      Task.async(fn ->
+        attach(fixture.runtime, session_id, stable_holder, "same-request")
+      end)
+
+    assert_eventually(fn ->
+      {:ok, %{control: control, dispatcher: dispatcher}} = Runtime.children(fixture.runtime)
+      control_state = :sys.get_state(control)
+      dispatcher_state = :sys.get_state(dispatcher)
+
+      map_size(control_state.pending_attachments) == 1 and
+        map_size(dispatcher_state.staged_attachments) == 1 and
+        control_state.pending_attachments
+        |> Map.values()
+        |> hd()
+        |> then(&(map_size(&1.callers) == 2))
+    end)
+
+    assert {:error, :attachment_request_conflict} =
+             Runtime.attach_for_holder(fixture.runtime, session_id, stable_holder,
+               request_id: "same-request",
+               after_event_sequence: 1
+             )
+
+    M1RuntimeTestStore.release(waiter)
+    assert {:ok, first_attachment} = Task.await(first)
+    assert {:ok, second_attachment} = Task.await(second)
+    assert first_attachment == second_attachment
+    assert_maps_agree(fixture.runtime, session_id, 1)
+  end
+
+  test "initiating caller loss drops only its reply route", fixture do
+    session_id = create_session(fixture.runtime, "caller-loss")
+    stable_holder = holder(self())
+    M1RuntimeTestStore.block_next_event_read(fixture.store, self())
+
+    caller =
+      Task.async(fn ->
+        attach(fixture.runtime, session_id, stable_holder, "caller-loss")
+      end)
+
+    assert_receive {:event_history_read, waiter, _, ^session_id, _}, 2_000
+    Task.shutdown(caller, :brutal_kill)
+    M1RuntimeTestStore.release(waiter)
+
+    assert_eventually(fn ->
+      {:ok, %{control: control, dispatcher: dispatcher}} = Runtime.children(fixture.runtime)
+      control_state = :sys.get_state(control)
+      dispatcher_state = :sys.get_state(dispatcher)
+
+      map_size(control_state.pending_attachments) == 0 and
+        map_size(dispatcher_state.staged_attachments) == 0 and
+        map_size(control_state.sessions[session_id].attachments) == 1 and
+        map_size(dispatcher_state.attachments) == 1
+    end)
+
+    assert :ok = Runtime.release_holder(fixture.runtime, stable_holder)
+    assert_maps_agree(fixture.runtime, session_id, 0)
+  end
+
+  test "holder loss before publication cleans both owners before replying", fixture do
+    session_id = create_session(fixture.runtime, "holder-loss-before-publication")
+    stable_holder = holder(self())
+    M1RuntimeTestStore.block_next_event_read(fixture.store, self())
+
+    caller =
+      Task.async(fn ->
+        attach(fixture.runtime, session_id, stable_holder, "holder-loss")
+      end)
+
+    assert_receive {:event_history_read, waiter, _, ^session_id, _}, 2_000
+    send(stable_holder, :stop)
+
+    assert {:error, :holder_unavailable} = Task.await(caller)
+    M1RuntimeTestStore.release(waiter)
+
+    assert_eventually(fn ->
+      {:ok, %{control: control, dispatcher: dispatcher}} = Runtime.children(fixture.runtime)
+      control_state = :sys.get_state(control)
+      dispatcher_state = :sys.get_state(dispatcher)
+
+      control_state.pending_attachments == %{} and
+        dispatcher_state.staged_attachments == %{} and
+        control_state.sessions[session_id].attachments == %{} and
+        dispatcher_state.attachments == %{}
+    end)
+  end
+
+  test "concurrent replacements cannot borrow the same target", fixture do
+    session_id = create_session(fixture.runtime, "replacement-exclusion")
+    stable_holder = holder(self())
+    {:ok, target} = attach(fixture.runtime, session_id, stable_holder, "target")
+    M1RuntimeTestStore.block_next_event_read(fixture.store, self())
+
+    first =
+      Task.async(fn ->
+        Runtime.attach_for_holder(fixture.runtime, session_id, stable_holder,
+          request_id: "replacement-one",
+          replace_attachment_id: target.attachment_id
+        )
+      end)
+
+    assert_receive {:event_history_read, waiter, _, ^session_id, _}, 2_000
+
+    assert {:error, :attachment_request_conflict} =
+             Runtime.attach_for_holder(fixture.runtime, session_id, stable_holder,
+               request_id: "replacement-two",
+               replace_attachment_id: target.attachment_id
+             )
+
+    M1RuntimeTestStore.release(waiter)
+    assert {:ok, replacement} = Task.await(first)
+    assert {:error, :stale_attachment} = Loopex.next_event(target)
+    assert {:error, :empty} = Loopex.next_event(replacement)
+    assert_maps_agree(fixture.runtime, session_id, 1)
+  end
+
+  test "dispatcher replacement resolves a pending attachment and admits a fresh one", fixture do
+    session_id = create_session(fixture.runtime, "dispatcher-replacement")
+    stable_holder = holder(self())
+    M1RuntimeTestStore.block_next_event_read(fixture.store, self())
+
+    caller =
+      Task.async(fn ->
+        attach(fixture.runtime, session_id, stable_holder, "predecessor")
+      end)
+
+    assert_receive {:event_history_read, waiter, _, ^session_id, _}, 2_000
+    {:ok, %{dispatcher: predecessor}} = Runtime.children(fixture.runtime)
+    Process.exit(predecessor, :kill)
+
+    assert {:error, :attachment_superseded} = Task.await(caller)
+    M1RuntimeTestStore.release(waiter)
+
+    assert_eventually(fn ->
+      match?(
+        {:ok, %{dispatcher: successor}} when successor != predecessor,
+        Runtime.children(fixture.runtime)
+      )
+    end)
+
+    assert {:ok, successor_attachment} =
+             attach(fixture.runtime, session_id, stable_holder, "successor")
+
+    assert {:error, :empty} = Loopex.next_event(successor_attachment)
     assert_maps_agree(fixture.runtime, session_id, 1)
   end
 

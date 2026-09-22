@@ -260,22 +260,9 @@ defmodule Loopex.Runtime do
           {:ok, Attachment.t()} | {:error, term()}
   def attach_for_holder(%__MODULE__{} = runtime, session_id, holder, options)
       when is_pid(holder) and is_list(options) do
-    case control_call(
-           runtime,
-           {:begin_attach, runtime.token, session_id, holder, options}
-         ) do
+    case control_call(runtime, {:attach, runtime.token, session_id, holder, options}, :infinity) do
       {:ok, attachment} ->
         build_attachment(runtime, session_id, attachment)
-
-      {:new, generation, attach_ref, validated_options} ->
-        finish_attachment(
-          runtime,
-          session_id,
-          generation,
-          holder,
-          attach_ref,
-          validated_options
-        )
 
       {:error, reason} ->
         {:error, reason}
@@ -622,45 +609,6 @@ defmodule Loopex.Runtime do
       GenServer.call(server, message, timeout)
     catch
       :exit, _reason -> {:error, :runtime_unavailable}
-    end
-  end
-
-  defp finish_attachment(runtime, session_id, generation, holder, attach_ref, options) do
-    case dispatcher_call(
-           runtime,
-           {:attach, runtime.token, session_id, holder, attach_ref, options},
-           :infinity
-         ) do
-      {:ok, attachment} ->
-        # Concept: attachment registration answers with its actual outcome.
-        # Technical depth: Dispatcher has already created the attachment, and
-        # this Control call installs its routing. A caller timeout cannot revoke
-        # either mutation or truthfully report that the attachment failed.
-        case control_call(
-               runtime,
-               {:finish_attach, runtime.token, session_id, generation, holder, attach_ref,
-                options, attachment},
-               :infinity
-             ) do
-          {:ok, installed} ->
-            build_attachment(runtime, session_id, installed)
-
-          {:error, reason} ->
-            with {:ok, %{dispatcher: dispatcher}} <-
-                   RuntimeSupervisor.children(runtime.supervisor) do
-              :ok =
-                EventDispatcher.release_attachment(
-                  dispatcher,
-                  attachment.id,
-                  attachment.incarnation_id
-                )
-            end
-
-            {:error, reason}
-        end
-
-      {:error, reason} ->
-        {:error, reason}
     end
   end
 
