@@ -3,24 +3,11 @@ Code.require_file("support/provider_isolation_fixture.exs", __DIR__)
 defmodule Loopex.LLM.ReqLLM.ProviderBackpressureTest do
   use ExUnit.Case, async: false
 
-  alias Loopex.LLM.ReqLLM, as: Adapter
   alias Loopex.LLM.ReqLLM.ProviderBridge
   alias Loopex.LLM.ReqLLM.ProviderIsolationFixture, as: Fixture
 
   @head_bytes 32_768
   @tail_count 512
-
-  setup do
-    variable = Adapter.credential_variable()
-    previous = System.get_env(variable)
-    System.put_env(variable, "synthetic-backpressure-credential")
-
-    on_exit(fn ->
-      if previous, do: System.put_env(variable, previous), else: System.delete_env(variable)
-    end)
-
-    :ok
-  end
 
   test "a blocked actual child writer retains a bounded backlog and the producer's complete reply count" do
     {fixture, request, call, receiver, _socket} = start_blocked()
@@ -103,11 +90,12 @@ defmodule Loopex.LLM.ReqLLM.ProviderBackpressureTest do
     # default is what the child reliably reaches its witnesses under.
     {fixture, request, call, receiver, _socket} = start_blocked(Fixture.request(), true)
 
+    caller = call.caller
     guardian = call.guardian
-    delivered = :erlang.trace_delivered(guardian)
-    assert_receive {:trace_delivered, ^guardian, ^delivered}, remaining(request)
+    delivered = :erlang.trace_delivered(caller)
+    assert_receive {:trace_delivered, ^caller, ^delivered}, remaining(request)
 
-    assert_receive {:trace, ^guardian, :return_from, {:erlang, :time_offset, 1}, offset}, 0
+    assert_receive {:trace, ^caller, :return_from, {:erlang, :time_offset, 1}, offset}, 0
 
     assert_receive {:trace, ^guardian, :call,
                     {ProviderBridge, :launch, [%{deadline: invocation_deadline}]}},
@@ -120,7 +108,6 @@ defmodule Loopex.LLM.ReqLLM.ProviderBackpressureTest do
     receiver_monitor = Process.monitor(receiver)
     cooperative = System.monotonic_time(:millisecond) + remaining(request) + 2_000
     observation = cooperative + 100
-    caller = call.caller
     expected_error = {:error, {:dispatched_or_unknown, "model_call_failed"}}
 
     # The suffix stays unreleased: neither HTTP completion nor private-socket

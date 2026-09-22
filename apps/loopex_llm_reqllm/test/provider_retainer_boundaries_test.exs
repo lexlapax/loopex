@@ -3,24 +3,15 @@ Code.require_file("support/provider_isolation_fixture.exs", __DIR__)
 defmodule Loopex.LLM.ReqLLM.ProviderRetainerBoundariesTest do
   use ExUnit.Case, async: false
 
-  alias Loopex.LLM.ReqLLM, as: Adapter
   alias Loopex.LLM.ReqLLM.ProviderIsolationFixture, as: Fixture
 
-  setup do
-    variable = Adapter.credential_variable()
-    previous = System.get_env(variable)
-    System.put_env(variable, "synthetic-retainer-boundary-credential")
-
-    on_exit(fn ->
-      if previous, do: System.put_env(variable, previous), else: System.delete_env(variable)
-    end)
-
-    :ok
-  end
-
   test "retainer death during actual credential delivery stops the busy owned writer and child" do
-    System.put_env(Adapter.credential_variable(), String.duplicate("k", 65_536))
-    fixture = Fixture.new(:credential_transfer, paused: true)
+    fixture =
+      Fixture.new(:credential_transfer,
+        paused: true,
+        credential: String.duplicate("k", 65_536)
+      )
+
     request = Fixture.request()
     {retainer, retainer_monitor} = spawn_monitor(fn -> receive do: (:stop -> :ok) end)
     call = Fixture.managed(fixture, request, retainer)
@@ -56,6 +47,13 @@ defmodule Loopex.LLM.ReqLLM.ProviderRetainerBoundariesTest do
 
       assert Fixture.eventually(fn -> queued_ready(guardian) != nil end, remaining(request))
       {receiver, binding} = queued_ready(guardian)
+
+      [credential_sender] =
+        fixture.workers
+        |> Task.Supervisor.children()
+        |> Enum.reject(&(&1 == guardian))
+
+      credential_sender_monitor = Process.monitor(credential_sender)
       assert Enum.sort(Map.keys(binding)) == ["build_manifest_sha256", "nonce", "version"]
       assert binding["version"] == 2
       assert binding["build_manifest_sha256"] == fixture.options[:build_manifest_sha256]
@@ -93,14 +91,19 @@ defmodule Loopex.LLM.ReqLLM.ProviderRetainerBoundariesTest do
       assert kind in [:credential, :invocation]
       writer_monitor = Process.monitor(writer)
 
-      # A successful send may enqueue bytes without the child consuming them.
-      # If that happened, the invocation writer is the next blocked helper;
-      # do not mislabel it as the credential sender. The actual child remains
-      # suspended before consuming its credential frame in either schedule.
+      # A successful credential send may enqueue all bytes without the child
+      # consuming them. In that schedule the separately supervised credential
+      # sender exits normally before the invocation writer becomes the blocked
+      # helper. Otherwise the blocked helper is that exact credential sender.
+      # The child remains suspended before consuming its credential frame in
+      # either schedule.
       if kind == :invocation do
-        assert_receive {:trace, ^guardian, :receive,
-                        {:provider_sent, _credential_sender, :credential, :ok}},
+        assert writer != credential_sender
+
+        assert_receive {:DOWN, ^credential_sender_monitor, :process, ^credential_sender, :normal},
                        remaining(request)
+      else
+        assert writer == credential_sender
       end
 
       assert Fixture.alive?(Fixture.pid(fixture))
@@ -117,6 +120,12 @@ defmodule Loopex.LLM.ReqLLM.ProviderRetainerBoundariesTest do
                      until(cooperative)
 
       assert_receive {:DOWN, ^writer_monitor, :process, ^writer, :killed}, until(cooperative)
+
+      if kind == :credential do
+        assert_receive {:DOWN, ^credential_sender_monitor, :process, ^credential_sender, :killed},
+                       until(cooperative)
+      end
+
       assert_receive {:DOWN, ^receiver_monitor, :process, ^receiver, :killed}, until(cooperative)
 
       assert_receive {:completed, ^caller,
