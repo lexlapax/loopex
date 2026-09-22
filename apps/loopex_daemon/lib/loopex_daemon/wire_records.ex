@@ -25,6 +25,12 @@ defmodule LoopexDaemon.WireRecords do
     "session_unavailable" => "session unavailable."
   }
 
+  @control_messages %{
+    "control_held" => "control held.",
+    "control_not_held" => "control is not held by this connection",
+    "control_pending" => "control pending."
+  }
+
   @doc false
   @spec detached(binary(), non_neg_integer()) :: map()
   def detached(session_id, event_cursor)
@@ -78,6 +84,50 @@ defmodule LoopexDaemon.WireRecords do
       "request_id" => request_id,
       "code" => code,
       "message" => Map.fetch!(@succession_messages, code)
+    }
+  end
+
+  @doc false
+  @spec control_acquired(binary(), binary(), non_neg_integer(), boolean()) :: map()
+  def control_acquired(request_id, writer_epoch, expires_in_ms, renewed)
+      when is_binary(request_id) and is_binary(writer_epoch) and byte_size(writer_epoch) >= 1 and
+             byte_size(writer_epoch) <= 64 and is_integer(expires_in_ms) and expires_in_ms >= 0 and
+             is_boolean(renewed) do
+    result = %{
+      "writer_epoch" => Wire.encode_identity(writer_epoch),
+      "expires_in_ms" => Wire.encode_u64(expires_in_ms)
+    }
+
+    result = if renewed, do: Map.put(result, "renewed", true), else: result
+
+    %{
+      "type" => "result",
+      "request_id" => request_id,
+      "method" => "session.acquire_control",
+      "result" => result
+    }
+  end
+
+  @doc false
+  @spec control_released(binary()) :: map()
+  def control_released(request_id) when is_binary(request_id) do
+    %{
+      "type" => "result",
+      "request_id" => request_id,
+      "method" => "session.release_control",
+      "result" => %{"released" => true}
+    }
+  end
+
+  @doc false
+  @spec control_error(binary(), binary()) :: map()
+  def control_error(request_id, code)
+      when is_binary(request_id) and is_map_key(@control_messages, code) do
+    %{
+      "type" => "error",
+      "request_id" => request_id,
+      "code" => code,
+      "message" => Map.fetch!(@control_messages, code)
     }
   end
 end
