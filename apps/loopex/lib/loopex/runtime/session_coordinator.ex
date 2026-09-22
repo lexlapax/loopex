@@ -2890,9 +2890,11 @@ defmodule Loopex.Runtime.SessionCoordinator do
       provider: inspect(module)
     }
 
+    owner_workers = state.owner_workers
+
     {:ok, guard} =
-      Task.Supervisor.start_child(state.owner_workers, fn ->
-        guard_provider_call(coordinator, provider_reference, cleanup_grace_ms)
+      Task.Supervisor.start_child(owner_workers, fn ->
+        guard_provider_call(coordinator, provider_reference, cleanup_grace_ms, owner_workers)
       end)
 
     task =
@@ -3164,7 +3166,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
     end
   end
 
-  defp guard_provider_call(coordinator, reference, cleanup_grace_ms) do
+  defp guard_provider_call(coordinator, reference, cleanup_grace_ms, owner_workers) do
     Process.flag(:trap_exit, true)
     coordinator_monitor = Process.monitor(coordinator)
 
@@ -3178,7 +3180,8 @@ defmodule Loopex.Runtime.SessionCoordinator do
           coordinator,
           coordinator_monitor,
           reference,
-          cleanup_grace_ms
+          cleanup_grace_ms,
+          owner_workers
         )
 
       {:DOWN, ^coordinator_monitor, :process, ^coordinator, _reason} ->
@@ -3195,7 +3198,8 @@ defmodule Loopex.Runtime.SessionCoordinator do
          coordinator,
          coordinator_monitor,
          reference,
-         cleanup_grace_ms
+         cleanup_grace_ms,
+         owner_workers
        ) do
     receive do
       {:loopex_provider_guard_start, ^reference, ^owner, module, request, options, progress,
@@ -3217,7 +3221,8 @@ defmodule Loopex.Runtime.SessionCoordinator do
                       options,
                       progress,
                       cleanup_grace_ms,
-                      identities
+                      identities,
+                      owner_workers
                     )
 
                   send(guard, {:loopex_provider_callback_result, reference, self(), result})
@@ -3268,9 +3273,18 @@ defmodule Loopex.Runtime.SessionCoordinator do
          options,
          progress,
          cleanup_grace_ms,
-         identities
+         identities,
+         owner_workers
        ) do
     callback = self()
+
+    starter =
+      Loopex.Runtime.ProviderLifetime.Starter.new(fn child ->
+        Task.Supervisor.start_child(owner_workers, child,
+          restart: :temporary,
+          shutdown: :brutal_kill
+        )
+      end)
 
     ProviderLifetime.scoped(
       fn resource, stop_reference ->
@@ -3284,6 +3298,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
           cleanup_grace_ms
         )
       end,
+      starter,
       fn ->
         Instrumentation.span([:model, :complete], identities, fn ->
           try do
