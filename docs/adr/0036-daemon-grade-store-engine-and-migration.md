@@ -10,8 +10,10 @@ Technical depth: [Selection procedure, migration contract and candidate evidence
   for the store selection only, once this pair is accepted; ADR 0031's local
   adapter, its documented ceilings and its root-retirement procedure remain
   the `0.2` record and the `0.3` migration source
-- **Prerequisite for:** M6 outcomes 3 and 6, accepted before any adapter,
-  migration or backup code is written
+- **Prerequisite for:** M6 outcomes 3 and 6, accepted before any format
+  marker, reader boundary, backup or restore code is written; the engine
+  adapter, the migration and the capacity refusal it fixes are implemented by
+  the successor milestone under this same decision
 
 <a id="concept-adr-0036-decision"></a>
 ### Context and Decision
@@ -53,8 +55,11 @@ measurement would repeat the mistake ADR 0031 corrected.
 3. **Every `0.2` root migrates forward, once, explicitly.** Migration is an
    operator command, never a side effect of opening a root. It converges when
    interrupted, it never destroys the source until the target verifies, and
-   the oldest reader of a migrated root is the `0.3.0` release. A `0.2` binary
-   refuses a `0.3` root with a named reason; it does not corrupt it.
+   the oldest reader of a migrated root is the release that ships the engine.
+   A format marker is written into every root from `0.3.0` on, so that a
+   binary refuses a root whose format it does not know with a named reason
+   rather than corrupting it; `0.3.0` writes the marker and enforces the
+   boundary, and the successor's migration starts from it.
 4. **Backup and restore are operator commands on a closed root** that produce
    and consume one verifiable archive, and restore is the rollback procedure:
    a previous binary is not a rollback plan when storage has changed, so the
@@ -72,14 +77,16 @@ measurement would repeat the mistake ADR 0031 corrected.
 
 Technical depth: [Migration and interrupted-import contract](0036-daemon-grade-store-engine-and-migration-technical.md#technical-adr-0036-migration).
 
-An operator on `0.3.0` opens a root and it opens in bounded time whatever its
-history length, because replay is bounded by the index rather than by the log.
-The 256 MiB retirement procedure disappears for migrated roots. `loopex store
-migrate`, `loopex store backup` and `loopex store restore` exist, refuse a
-live root, print what they will do before they do it, and are the only writers
-of the new format outside the daemon. `loopex doctor` reports the root's format
-version and whether a migration is pending. A `0.2` daemon pointed at a `0.3`
-root exits with a named class rather than serving it.
+From `0.3.0`, `loopex store backup` and `loopex store restore` exist, refuse a
+live root, print what they will do before they do it, and `loopex doctor`
+reports the root's format marker. From the release that ships the engine, an
+operator opens a root and it opens in bounded time whatever its history
+length, because replay is bounded by the index rather than by the log; the
+256 MiB retirement procedure disappears for migrated roots; `loopex store
+migrate` exists under the same rules and is, with the daemon, the only writer
+of the new format; `doctor` reports whether a migration is pending; and a
+`0.3` daemon pointed at a migrated root exits with a named class rather than
+serving it.
 
 What does not change: session identity, command identity, the journal's
 public event schema and every generation-2 wire record, the placement lock and
@@ -92,13 +99,15 @@ migrated itself.
 
 Technical depth: [Compatibility and rollback mechanics](0036-daemon-grade-store-engine-and-migration-technical.md#technical-adr-0036-compatibility).
 
-This is the first durable migration milestone, so the vision's list applies in
-full: supported source and target versions (`0.2` roots to `0.3`), forward
-migration, interrupted-migration detection and recovery, backup and restore as
-the downgrade policy, the previous-binary reopening boundary (`0.2` refuses
-`0.3`), and an exact packaged rollback procedure. The private journal schema is
-surface 1 in the vision's list and freezes nothing here; the public protocol is
-untouched. Rejected alternatives and the reasons are in the companion.
+The release that ships the engine is the first durable migration milestone,
+so the vision's list applies to it in full: supported source and target
+versions, forward migration, interrupted-migration detection and recovery,
+backup and restore as the downgrade policy, the previous-binary reopening
+boundary, and an exact packaged rollback procedure. `0.3.0` changes no format
+and discharges the items that apply to an unchanged one: the format marker,
+the reader boundary, and backup and restore. The private journal schema is
+surface 1 in the vision's list and freezes nothing here; the public protocol
+is untouched. Rejected alternatives and the reasons are in the companion.
 
 ## Governance Record
 

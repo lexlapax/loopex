@@ -25,10 +25,24 @@ and an explicit embedded start take the same path from that point.
 | `paths` | `state_root`, `socket`, `diagnostics` | Absolute paths after expansion; `socket` defaults inside the daemon's `daemon/` subdirectory of the root as ADR 0032 fixes, and a value outside the root is refused as ADR 0032 already requires |
 | `daemon` | `drain_budget_ms`, `attachments_per_session`, `attachments_per_daemon` | Integers within the bounds ADR 0032 names; each defaults to the accepted M5 value |
 | `runtime` | `context_budget`, `cleanup_grace_ms` | Integers within the bounds the runtime already validates |
-| `providers` | A map of profile name to `{adapter, model, endpoint, credential, options}` | `adapter` is a closed enumeration of the adapters in the release; `credential` is a reference of the form `{"env": "NAME"}` and nothing else in `0.3.0`; `options` is the adapter's own closed keyword set, never an open bag |
+| `providers` | A map of profile name to `{adapter, model, roles, endpoint, credential, options}` | `adapter` is a closed enumeration of the adapters in the release; `model` is the profile's default model string; `roles` is an optional map from a role name in the closed set the CLI documents (`fast`, `capable`, `thinking`) to a model string, validated and selectable by `--role`; `credential` is exactly one of `{"env": "NAME"}` or `{"file": "PATH"}`; `options` is the adapter's own closed keyword set, never an open bag |
 | `policy` | `profile`, `options` | `profile` is a closed enumeration of the host policies the release ships; absent means no policy and every run refuses until one is chosen |
 | `diagnostics` | `trace`, `limits` | Boolean and the bounded limits ADR 0030 names |
-| `selected` | `provider`, `policy` | The names in effect when no flag or environment override is present |
+| `selected` | `provider`, `policy` | The names in effect when no flag or environment override is present; `--provider NAME` overrides the provider for one invocation |
+
+**Credential references.** An `env` reference names a process environment
+variable the sender reads per invocation, as ADR 0034 fixes. A `file`
+reference names an absolute path to a regular file, not a symbolic link,
+owned by the invoking user, with no group or other permission bits, of at
+most 65,536 bytes, whose trimmed content is the credential; the sender
+re-reads it per invocation, so replacing the file rotates the key under a
+running daemon. Either reference is resolved only by the sender ADR 0034
+names and only after the provider child is ready; neither is resolved for
+`config show`, `paths` or `doctor`, which report only whether resolution
+would succeed. A `command` reference, which would run an operator-authored
+program at composition time and is how the OS keychain is reached without
+Loopex learning keychains, is a separate trust decision and is not in the
+schema.
 
 Unknown keys refuse with the JSON pointer of the offending member. Every
 refusal is one line on standard error with a stable class and the path.
@@ -36,7 +50,8 @@ refusal is one line on standard error with a stable class and the path.
 **Precedence, applied per value.**
 
 ```text
---flag value          origin: flag
+--flag value          origin: flag     (--provider and --role select a profile
+                                        and a role for this invocation)
 LOOPEX_<DOMAIN>_<KEY> origin: env      (the closed set the companion lists)
 config.json           origin: file <path>#<pointer>
 documented default    origin: default  (never for policy or a credential)
@@ -87,12 +102,13 @@ root is the store adapter's and follows ADR 0036.
 
 | Command | Effect |
 | --- | --- |
-| `loopex init [--home DIR]` | Creates the home `0700`, writes a minimal valid `config.json` with no provider and no policy selected, prints the path; refuses an existing file |
+| `loopex init [--home DIR] [--provider ADAPTER:MODEL] [--credential env:NAME\|file:PATH] [--policy PROFILE]` | Creates the home `0700`, writes a minimal valid `config.json` with no provider and no policy selected, or with the one profile named `default`, its credential reference and the policy the flags name, in one validated write; prints the path; refuses an existing file. There is no wizard |
 | `loopex config show [--effective]` | Prints the authored file, or every effective value with its origin; credential references print as references |
 | `loopex config set <pointer> <value>` | Validates the whole resulting document before writing; atomic replacement under a lock file beside `config.json` |
 | `loopex config validate [FILE]` | Exit `0` or one refusal line per error |
 | `loopex paths` | Every resolved path and its origin |
-| `loopex doctor` | The M6 diagnostic: home, file validity, selected profiles, credential reference resolvable or not, store format and pending migration, daemon status, release version and platform |
+| `loopex doctor` | The M6 diagnostic: home, file validity, selected profiles, credential reference resolvable or not, store format marker and whether the format is known, daemon status, release version, platform and minimum base |
+| `loopex daemon status \| stop \| logs` | The M5 status record; the M5 drain then exit; the bounded redacted log the daemon writes under `logs/` |
 
 **Atomic write.** Write to `config.json.<random>` in the same directory, `fsync`,
 rename over the target, `fsync` the directory. The lock is an exclusive
@@ -133,7 +149,18 @@ flag-and-environment behaviour. No durable session truth lives in the file.
   one closed schema and one rule are smaller.
 - *Persisting credential bytes* is excluded by the vision's credential rule; a
   future OS-backed secret store is its own trust decision.
-- *Project-local configuration* waits on a project-trust rule.
+- *A command-form credential reference*, which pi, Hermes Agent and OpenClaw
+  each offer, runs an operator-authored program inside the host at
+  composition time. It is the right way to reach an OS keychain without
+  Loopex learning keychains, and for that reason it is a trust decision of
+  its own, recorded as open rather than admitted with the two passive forms.
+- *Environment-only references* were the first draft; they make the operator
+  export a variable before every daemon start and turn key rotation into a
+  restart, which is not "configure once".
+- *Project-local configuration* waits on a project-trust rule; the M3
+  project-resource decision is its intended basis.
+- *A setup wizard* was rejected for a line-oriented CLI; `init` takes flags
+  and the demonstration configures a host in one command.
 - *Hot reload* adds a mutable path into a running composition for no M6
   outcome.
 - *XDG base directories* add a search path and a second answer to "where is my

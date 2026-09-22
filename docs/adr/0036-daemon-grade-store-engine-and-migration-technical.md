@@ -99,11 +99,13 @@ under the previous release, and the plan proves it.
 
 Concept: [Compatibility and rollback](0036-daemon-grade-store-engine-and-migration.md#concept-adr-0036-compatibility).
 
-The vision's migration list is discharged item by item in M6's technical plan:
-source and target versions, forward migration, interrupted detection and
-recovery, backup/restore as downgrade policy, the previous-binary boundary, and
-the packaged rollback procedure. Extension-state fixtures do not apply; no
-extension state exists.
+The vision's migration list is discharged item by item in the technical plan
+of the milestone that ships the engine: source and target versions, forward
+migration, interrupted detection and recovery, backup/restore as downgrade
+policy, the previous-binary boundary, and the packaged rollback procedure.
+M6's technical plan discharges the items that apply to `0.3.0`'s unchanged
+format and marks the rest not applicable until then. Extension-state fixtures
+do not apply; no extension state exists.
 
 **Alternatives rejected.**
 

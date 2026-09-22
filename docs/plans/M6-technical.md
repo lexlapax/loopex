@@ -21,9 +21,9 @@ section, so a decision named only in prose declares nothing.
 
 | Decision | Acceptance point | What its acceptance settles |
 | --- | --- | --- |
-| [ADR 0036](../adr/0036-daemon-grade-store-engine-and-migration.md#concept) | Before any adapter, migration, backup or restore code is written; its engine cell is filled from the retained experiment record first | Outcomes 3 and 6: the engine, the migration contract, the reader boundary, backup and restore, the definite capacity refusal |
-| [ADR 0037](../adr/0037-host-configuration-and-path-discovery.md#concept) | Before the configuration layer, the default home or any lifecycle command is written | Outcomes 2 and 4: the schema, precedence, provenance, writes, the ADR 0003 amendment |
-| [ADR 0038](../adr/0038-installed-distribution-and-release-artifact.md#concept) | Before any release build, manifest, launcher change or install lane is written | Outcomes 1 and 5: the archive, the launcher promotion, the companion placement, the manifest, the platforms, the install and rollback contract |
+| [ADR 0036](../adr/0036-daemon-grade-store-engine-and-migration.md#concept) | Before any format marker, reader boundary, backup or restore code is written; its engine cell is filled from the retained experiment record first, so the experiment harness is workstream C's first task and is not adapter code | Outcomes 3 and 6: the engine the successor builds, the marker, the reader boundary, backup and restore; the migration contract and the definite capacity refusal as the successor's obligations |
+| [ADR 0037](../adr/0037-host-configuration-and-path-discovery.md#concept) | Before the configuration layer, the default home or any lifecycle command is written | Outcomes 2 and 4: the schema, profiles and roles, the two credential reference forms, precedence, provenance, writes, the ADR 0003 amendment |
+| [ADR 0038](../adr/0038-installed-distribution-and-release-artifact.md#concept) | Before any release build, manifest, launcher change or install lane is written; its build-environment section is filled with the retained toolchain build recipe and the allowed base-library set per platform first | Outcomes 1 and 5: the archive, the build environment, the launcher promotion, the companion placement, the manifest, the platforms and their minimum base, the install and rollback contract |
 
 **The closure prerequisite.** M5 must close first: the register admits M6 as
 an `Open` successor beside an `Accepted` M5 and refuses to accept M6 before M5
@@ -43,9 +43,9 @@ Concept: [Scope](M6.md#concept-plan-scope).
 
 | Workstream | Owns | Depends on | Rejoin order |
 | --- | --- | --- | --- |
-| A. Distribution | `mix.exs` release configuration, `apps/loopex_cli/bin/loopex` release branch, the provider build task's relative paths and `ProviderConfiguration` resolution, `MANIFEST.json` and checksum production, `loopex version` | ADR 0038 | First: the artifact is what every later lane runs |
-| B. Configuration and lifecycle | The configuration module family in `apps/loopex_cli`, `init`, `config`, `paths`, `doctor`, `daemon status`, exit classes | ADR 0037 | Second: `doctor` and `store` commands report the adapter's facts, so B lands its grammar before C fills the store rows |
-| C. Store adapter and migration | The new adapter application, the format version, `store migrate`, `backup`, `restore`, the definite capacity refusal on both adapters, the listing-index rebuild | ADR 0036 with its engine cell filled | Third |
+| A. Distribution | The release toolchain build recipes and build-environment definitions under `scripts/release/`, `mix.exs` release configuration, `apps/loopex_cli/bin/loopex` release branch, the provider build task's relative paths and `ProviderConfiguration` resolution, `MANIFEST.json` and checksum production, the linkage assertion, `loopex version` | ADR 0038 | First: the artifact is what every later lane runs |
+| B. Configuration and lifecycle | The configuration module family in `apps/loopex_cli`, `init`, `config`, `paths`, `doctor`, `daemon status`, `daemon stop`, `daemon logs`, start-on-demand in the session commands, exit classes | ADR 0037 | Second: `doctor` and `store` commands report the store's facts, so B lands its grammar before C fills the store rows |
+| C. Store readiness | The ADR 0036 experiment harness and retained record, the format marker, the reader boundary, `store backup`, `store restore`, all in `apps/loopex_store_local` and `apps/loopex_cli`; no new application | ADR 0036 with its engine cell filled | Third |
 | D. Documentation | The operator guide from a downloaded archive, the developer pages M6 changes, the closure evidence scaffold | A, B, C as they land | Last |
 
 One integrator owns rejoin, conflicts and post-rejoin verification. Parallel
@@ -62,12 +62,12 @@ Concept: [How each outcome is verified](M6.md#concept-plan-verification).
 
 | # | Witness files | What they prove | Lane |
 | --- | --- | --- | --- |
-| 1 | `apps/loopex_cli/test/launcher_release_test.exs` (new), `apps/loopex_cli/test/release_manifest_test.exs` (new), `apps/loopex_llm_reqllm/test/provider_relocation_test.exs` (new); `scripts/check-release.sh` installed-artifact lanes | The launcher's release branch preserves the interrupt contract and the checkout branch; the manifest lists every file with a digest that `version --verify` recomputes; the companion launches from a relocated release root and refuses a digest mismatch; a toolchain-free host runs the archive | fast; release |
-| 2 | `apps/loopex_cli/test/config_schema_test.exs` (new), `apps/loopex_cli/test/config_precedence_test.exs` (new), `apps/loopex_cli/test/config_write_test.exs` (new) | Closed schema with exact-path refusals and version refusal; precedence per value with origin; atomic replacement, lock reclaim and prior-file preservation under a forced failed write; the effective view redacts references; the same effective configuration after restart | fast |
-| 3 | The shared Store conformance suite and fault matrix run on the new adapter; `apps/<adapter>/test/open_replay_bounds_test.exs` (new), `apps/<adapter>/test/capacity_refusal_test.exs` (new) on both adapters, `apps/<adapter>/test/migration_test.exs` (new) with the interrupted-migration matrix, `apps/<adapter>/test/backup_restore_test.exs` (new) | Conformance and fault answers identical to the local adapter; open and replay within the stated bounds on the largest fixture; the definite refusal is definite on every adapter under every injection; convergence from every forced cut; restore verifies every digest and refuses a non-empty target | fast; the largest fixture in the release check's long-duration lane |
-| 4 | `apps/loopex_cli/test/lifecycle_commands_test.exs` (new), the exit-status map cases in the M5 daemon suite extended | Each command's grammar, output and exit class; every diagnosis named in the outcome is produced from the command output alone | fast |
+| 1 | `apps/loopex_cli/test/launcher_release_test.exs` (new), `apps/loopex_cli/test/release_manifest_test.exs` (new), `apps/loopex_llm_reqllm/test/provider_relocation_test.exs` (new), `scripts/release/assert-linkage.sh` (new) with its fixture test; `scripts/check-release.sh` installed-artifact lanes | The launcher's release branch preserves the interrupt contract and the checkout branch; the manifest lists every file with a digest that `version --verify` recomputes; the companion launches from a relocated release root and refuses a digest mismatch; every shared object and the emulator in the archive resolve only inside the archive or to the platform's allowed base set; a host with no toolchain and no third-party OpenSSL runs the archive through a real provider call | fast; release |
+| 2 | `apps/loopex_cli/test/config_schema_test.exs` (new), `apps/loopex_cli/test/config_precedence_test.exs` (new), `apps/loopex_cli/test/config_write_test.exs` (new), `apps/loopex_cli/test/config_credential_test.exs` (new) | Closed schema with exact-path refusals and version refusal; profiles with a default model and role aliases; precedence per value with origin, `--provider` and `--role` included; atomic replacement, lock reclaim and prior-file preservation under a forced failed write; the effective view redacts references; a file reference refuses a wrong mode, owner, size or a symbolic link and is re-read per invocation; the same effective configuration after restart | fast |
+| 3 | `apps/loopex_store_local/test/format_marker_test.exs` (new), `apps/loopex_store_local/test/backup_restore_test.exs` (new); the ADR 0036 experiment harness under `apps/loopex_store_local/experiments/` with its retained record referenced from the ADR | The marker is written last on first `0.3` open and never rewritten; a root without a marker is a `0.2` root; backup produces one archive whose manifest lists every file with size and SHA-256; restore verifies every digest and refuses a non-empty or live target; the experiment record carries the measurements ADR 0036 names on both toolchain pairs | fast; the experiment once per pair before ADR 0036 acceptance |
+| 4 | `apps/loopex_cli/test/lifecycle_commands_test.exs` (new), `apps/loopex_cli/test/daemon_on_demand_test.exs` (new), the exit-status map cases in the M5 daemon suite extended | Each command's grammar, output and exit class; every diagnosis named in the outcome is produced from the command output alone; two clients starting the daemon at once yield one daemon and both proceed; a client whose start loses the placement lock attaches to the winner; `daemon stop` performs the M5 drain and `daemon logs` prints only the bounded redacted log | fast |
 | 5 | `scripts/check-release.sh` installed-artifact lanes on both platforms | The M5 workflow through the installed command with the real provider, detach, observer attach, takeover, restart, list, resume, completion | release |
-| 6 | `apps/<adapter>/test/reader_boundary_test.exs` (new); the installed-artifact lane's migrate, run, restore-under-previous-release, run sequence | The `0.2` reader refuses `0.3` by name and writes nothing; the `0.3` reader opens `0.2` read-only for `doctor` and listing; the pre-migration backup serves its sessions under the previous release | fast; release |
+| 6 | `apps/loopex_store_local/test/reader_boundary_test.exs` (new); the installed-artifact lane's backup, switch to the previous release, restore, run sequence | The `0.3` reader refuses a marker naming an unknown format with `store_format_unsupported` and writes nothing; the `0.2` binary opens a root `0.3` has written; a backup taken under `0.3` restores under the previous release and serves its sessions | fast; release |
 
 **Evidence rules.** Every derived number in this plan, the open and replay
 bounds, the fixture sizes and the exit-class values, has an executed witness
@@ -83,7 +83,7 @@ Concept: [Rollout and compatibility](M6.md#concept-plan-rollout).
 
 | Surface | M6 change | Label |
 | --- | --- | --- |
-| Private journal and store schema | New container format with a format version; record content and public event families unchanged | Private; migrated explicitly |
+| Private journal and store schema | Unchanged; a format marker file is added beside the log and ignored by `0.2` | Private; unchanged |
 | Public session protocol | None; generation 2 served unchanged | Experimental, unchanged |
 | Executor protocol | None | Unchanged |
 | Embedded Elixir API | None; the composition's required options and refusals are unchanged | Unchanged |
@@ -104,27 +104,34 @@ The vision's migration list, discharged:
 
 | Item | M6 answer |
 | --- | --- |
-| Supported source and target versions | `0.2` roots to `0.3` roots, one direction |
-| Forward migration | `loopex store migrate`, explicit, offline, idempotent, verified before publish, source retained |
-| Interrupted-migration detection and recovery | A marker written first and removed last; every forced cut converges on the next run; the matrix in ADR 0036 |
-| Backup and restore or downgrade policy | `store backup` and `store restore`; restore is the downgrade |
-| Previous-binary reopening boundary | `0.2` refuses `0.3` with `store_format_unsupported` and writes nothing |
+| Supported source and target versions | `0.2` roots open unchanged under `0.3`; there is no `0.3` root format |
+| Forward migration | None in `0.3.0`; the marker names the current format so the successor's `store migrate` has a boundary to start from |
+| Interrupted-migration detection and recovery | Not applicable in `0.3.0`; the successor's contract is ADR 0036's marker-first, remove-last rule and its matrix |
+| Backup and restore or downgrade policy | `store backup` and `store restore` on the closed root; a backup restores under either release |
+| Previous-binary reopening boundary | `0.2` opens a root `0.3` has written because the format is unchanged; `0.3` refuses a marker naming a format it does not know with `store_format_unsupported` and writes nothing |
 | Extension-state fixtures | Not applicable; no extension state exists |
-| Exact packaged rollback procedure | Switch back to the previous release directory and restore the pre-migration backup; proved in the installed-artifact lane in that order |
+| Exact packaged rollback procedure | Switch back to the previous release directory; if the root was damaged, restore the backup; proved in the installed-artifact lane in that order |
 
 <a id="technical-plan-packaging"></a>
 ### Packaging
 
 Concept: [Rollout and compatibility](M6.md#concept-plan-rollout).
 
-Add exactly one application, the store adapter ADR 0036 names, with role
-`:store`, depending inward on core only; the dependency budget's inventory and
-cases change in the same reviewed change. If ADR 0036 selects SQLite, the
-native dependency enters that application alone and the release build for
-each platform compiles it on that platform; core's dependency list stays
-`:telemetry` alone either way. Add the `mix release` configuration at the
-umbrella root, with ERTS included and the application list drawn from the
-role table. `VERSION` moves to `0.3.0`. The M5 source archive, its
+No new application and no new dependency in any application: the marker,
+the reader boundary, backup and restore live in `apps/loopex_store_local` and
+the commands in `apps/loopex_cli`. If the maintainer pulls the ADR 0036
+adapter into M6 at acceptance, exactly one application is added with role
+`:store`, depending inward on core only, and the dependency budget's
+inventory and cases change in the same reviewed change; if that adapter is
+SQLite, the native dependency enters that application alone and each
+platform's release build compiles it on that platform. Core's dependency list
+stays `:telemetry` alone either way. Add the `mix release` configuration at
+the umbrella root, with ERTS included and the application list drawn from the
+role table. The release toolchain is built by retained recipes under
+`scripts/release/`, one per platform, each producing an OTP whose crypto and
+SSL link statically and whose emulator needs no terminal library, inside the
+build environment ADR 0038 fixes; the ordinary development toolchain is not a
+release toolchain. `VERSION` moves to `0.3.0`. The M5 source archive, its
 `SOURCE_IDENTITY` and `scripts/source-archive-manifest.sh` are reused
 unchanged; the release build runs only from such an extraction.
 
@@ -132,4 +139,5 @@ unchanged; the release build runs only from such an extraction.
 contract it serves. No configuration framework, no schema library, no packer
 and no service layer enters the tree; the schema is one closed map validated
 by direct code, the manifest is one JSON document produced by one script,
+the build recipes are shell scripts that invoke the toolchain's own build,
 and the launcher change is one branch in an existing shell script.
