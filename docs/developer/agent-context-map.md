@@ -5546,3 +5546,48 @@ manifests to have identical ordered projections. The
 single executable rule is in the
 [milestone technical guide](milestones-technical.md#technical-milestones-archive-extraction).
 This correction grants no acceptance, closure, tag, release or publication.
+
+<a id="disposition-m5-acceptance-2026-09-21"></a>
+### M5 plan pair and ADR 0031–0034 acceptance — 2026-09-21
+
+On 2026-09-21 the maintainer accepted the exact Proposed
+[M5 Concept](../plans/M5.md#concept) and
+[Technical depth](../plans/M5-technical.md#technical-depth) pair at pushed
+`m5` SHA `1e1b33bfbf83953463e6abcdaebd52dc12735d8f`, with Concept SHA-256
+`da103858306770ddcc46063c5c289829796cbacea0a384afa83460fc15fe3f23` and Technical SHA-256
+`9863caf20a9c2cd6aa11f38840b398ff83f83dffda40ccc6450b2116e5435a9b`, together with the four
+Proposed ADRs at the same candidate:
+[ADR 0031](../adr/0031-daemon-grade-store-selection-and-migration.md#concept)
+(Concept `efbc55e1607d0f98b63875da0310fdd84d7c6fbad1a7c3849d69f4dcef5d94f8`,
+Technical `b5a44cc706e9dbeb97556a914ae70fbc8602d8db75a4a62623a27c7ba9f93749`),
+[ADR 0032](../adr/0032-daemon-attachment-residency-and-replay.md#concept)
+(Concept `7d0fb8b8b095f0e843b19b3160aefb9ed1600262fc7bc0b4cac95076598b47c3`,
+Technical `51a2bb5d938c4f409fb6d0480d0cad503ddb60ed2b38e210c9f2bae5757a4a02`),
+[ADR 0033](../adr/0033-collaboration-controller-lease-and-takeover.md#concept)
+(Concept `920d2dff8dbf37f1f341ef6885ff19fb85f430f2908d2b99af0d7c6681482018`,
+Technical `08aa94e95e15ac1a83a54b353a79fb71722599f9abf03db3522b4067daad1ed3`) and
+[ADR 0034](../adr/0034-provider-credential-handoff-over-bootstrap-channel.md#concept)
+(Concept `521a423dfbe97b6fed105ec3fa284f96053fa13f1284c23f5ee0d543c237a93c`,
+Technical `bb698dd8b7c51e8eb39d9579e5e5227187477cef3a1ddddd34b7e5e600df533a`).
+The maintainer is the accepting authority; the auditor transcribed the record
+and accepted nothing.
+
+The candidate is the remediation of the second external audit of the planning
+set, whose report is retained outside the repository as
+`audit-report-m5-5b0fd474.md`. That audit found every finding of the first
+audit repaired and raised new findings in the signal section and at the
+succession and closure boundaries. The auditor confirmed at this candidate
+that both blocking findings are repaired and that `bash scripts/check.sh
+--docs` passes. The maintainer then decided to end the planning review cycles
+rather than commission a third audit: a residual planning defect found during
+implementation is fixed as an ordinary reviewed change to the pair and
+recorded in the plan's progress section, under the Develop step's rule for
+changing an accepted plan. This decision changes what no check proves; it
+settles only where the remaining review effort is spent.
+
+Under ADR 0034's supersession clause, the ADR index now annotates ADR 0019 as
+partially superseded by 0029 and 0034. This administrative transition changes
+only the register row and the two supplied status blocks, the M5 Acceptance
+row, the four ADRs' Concept status lines and Acceptance rows, the ADR index's
+status cells and prose, and this disposition. It moves `M5` to `Accepted` and
+grants no closure, merge, tag, release or publication.

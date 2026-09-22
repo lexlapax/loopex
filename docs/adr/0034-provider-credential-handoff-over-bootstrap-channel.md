@@ -3,7 +3,7 @@
 
 Technical depth: [Credential handoff mechanics](0034-provider-credential-handoff-over-bootstrap-channel-technical.md#technical-depth).
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-09-19
 - **Decision owner:** Maintainer
 - **Supersedes:** ADR 0019 only where it says the environment variable is the
@@ -531,4 +531,4 @@ Technical depth: [Compatibility mechanics](0034-provider-credential-handoff-over
 
 | Decision | Authority | Authority evidence | Bound bytes |
 | --- | --- | --- | --- |
-| Acceptance | — | — | — |
+| Acceptance | Maintainer | [disposition](../developer/agent-context-map.md#disposition-m5-acceptance-2026-09-21) | candidate `1e1b33bfbf83953463e6abcdaebd52dc12735d8f`; concept `sha256:521a423dfbe97b6fed105ec3fa284f96053fa13f1284c23f5ee0d543c237a93c`; technical `sha256:bb698dd8b7c51e8eb39d9579e5e5227187477cef3a1ddddd34b7e5e600df533a` |

@@ -16,16 +16,16 @@ its last `Closed` row identifies the last closed product baseline.
 <!-- loopex:current-status:start -->
 ## Current Status
 
-**Revision status:** Closed milestone product baseline; active milestone `M5` is open; no next candidate is recorded.
+**Revision status:** Closed milestone product baseline; active milestone `M5` is accepted; no next candidate is recorded.
 
 | Field | Value |
 | --- | --- |
 | Integrated phase | Closed milestone product baseline |
 | Last closed product checkpoint | `M4` — 2026-09-19 |
-| Blockers | `M5` is open and not accepted; the maintainer must accept its plan pair; `M5` waits on ADR 0031, ADR 0032, ADR 0033, and ADR 0034 before the outcomes that depend on them |
-| Authorized work | Explicitly authorized planning, ADR, bootstrap, and review work only; no product implementation |
-| Next maintainer decision | Accept or reject the `M5` plan pair; disposition [ADR 0031](../adr/0031-daemon-grade-store-selection-and-migration.md#concept), [ADR 0032](../adr/0032-daemon-attachment-residency-and-replay.md#concept), [ADR 0033](../adr/0033-collaboration-controller-lease-and-takeover.md#concept), and [ADR 0034](../adr/0034-provider-credential-handoff-over-bootstrap-channel.md#concept) |
-| Next transition | Record the acceptance governance row and move `M5` to Accepted |
+| Blockers | None; `M5` is accepted and implementation may proceed |
+| Authorized work | Implementation inside the accepted `M5` plan pair, landing on `main` in small reviewed changes |
+| Next maintainer decision | None until `M5` is ready for independent review |
+| Next transition | Move `M5` to In progress and implement the accepted outcomes with `bash scripts/check.sh` green; the completed tested commit then moves it to In review |
 | Validation | `bash scripts/check-bootstrap.sh` |
 <!-- loopex:current-status:end -->
 
@@ -137,7 +137,7 @@ representable.
 | `M2` | Closed | [concept](M2.md) | [technical depth](M2-technical.md) | [gate](M2-gate.md) |
 | `M3` | Closed | [concept](M3.md) | [technical depth](M3-technical.md) | [gate](M3-gate.md) |
 | `M4` | Closed | [concept](M4.md) | [technical depth](M4-technical.md) | [gate](M4-gate.md) |
-| `M5` | Open | [concept](M5.md) | [technical depth](M5-technical.md) | — |
+| `M5` | Accepted | [concept](M5.md) | [technical depth](M5-technical.md) | — |
 <!-- loopex:milestone-register:end -->
 
 When a plan exists, the Concept and Technical depth columns link their exact

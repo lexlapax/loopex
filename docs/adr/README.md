@@ -28,7 +28,7 @@ a decision adds a new record rather than rewriting the old one.
 | 0016 | Configured cancellation observation | Accepted | [Decision](0016-configured-cancellation-observation.md#concept) | [Technical depth](0016-configured-cancellation-observation-technical.md#technical-depth) |
 | 0017 | Durable context and record admission budgets | Accepted (partially superseded by 0025) | [Decision](0017-durable-context-admission-budget.md#concept) | [Technical depth](0017-durable-context-admission-budget-technical.md#technical-depth) |
 | 0018 | Provider attempt authority and recovery | Accepted (partially superseded by 0021 and 0027) | [Decision](0018-provider-attempt-authority-and-recovery.md#concept) | [Technical depth](0018-provider-attempt-authority-and-recovery-technical.md#technical-depth) |
-| 0019 | Host-owned provider protection | Accepted (partially superseded by 0029) | [Decision](0019-host-owned-provider-protection.md#concept) | [Technical depth](0019-host-owned-provider-protection-technical.md#technical-depth) |
+| 0019 | Host-owned provider protection | Accepted (partially superseded by 0029 and 0034) | [Decision](0019-host-owned-provider-protection.md#concept) | [Technical depth](0019-host-owned-provider-protection-technical.md#technical-depth) |
 | 0020 | Explicit prepared handoff | Accepted | [Decision](0020-explicit-prepared-handoff.md#concept) | [Technical depth](0020-explicit-prepared-handoff-technical.md#technical-depth) |
 | 0021 | Compacted provider-accounting provenance | Accepted | [Decision](0021-compacted-provider-accounting-provenance.md#concept) | [Technical depth](0021-compacted-provider-accounting-provenance-technical.md#technical-depth) |
 | 0022 | Local executor supervision shell | Accepted | [Decision](0022-local-executor-supervision-shell.md#concept) | [Technical depth](0022-local-executor-supervision-shell-technical.md#technical-depth) |
@@ -40,10 +40,10 @@ a decision adds a new record rather than rewriting the old one.
 | 0028 | Bounded artifact retrieval | Accepted | [Decision](0028-bounded-artifact-retrieval.md#concept) | [Technical depth](0028-bounded-artifact-retrieval-technical.md#technical-depth) |
 | 0029 | Bounded provider failure diagnostics | Accepted | [Decision](0029-bounded-provider-failure-diagnostics.md#concept) | [Technical depth](0029-bounded-provider-failure-diagnostics-technical.md#technical-depth) |
 | 0030 | Observability: tracing and telemetry | Accepted | [Decision](0030-observability-tracing-and-telemetry.md#concept) | [Technical depth](0030-observability-tracing-and-telemetry-technical.md#technical-depth) |
-| 0031 | Daemon store selection for `0.2.0` | Proposed | [Decision](0031-daemon-grade-store-selection-and-migration.md#concept) | [Technical depth](0031-daemon-grade-store-selection-and-migration-technical.md#technical-depth) |
-| 0032 | Daemon attachment residency and replay | Proposed | [Decision](0032-daemon-attachment-residency-and-replay.md#concept) | [Technical depth](0032-daemon-attachment-residency-and-replay-technical.md#technical-depth) |
-| 0033 | Collaboration: controller lease and takeover | Proposed | [Decision](0033-collaboration-controller-lease-and-takeover.md#concept) | [Technical depth](0033-collaboration-controller-lease-and-takeover-technical.md#technical-depth) |
-| 0034 | Provider credential handoff over the bootstrap channel | Proposed | [Decision](0034-provider-credential-handoff-over-bootstrap-channel.md#concept) | [Technical depth](0034-provider-credential-handoff-over-bootstrap-channel-technical.md#technical-depth) |
+| 0031 | Daemon store selection for `0.2.0` | Accepted | [Decision](0031-daemon-grade-store-selection-and-migration.md#concept) | [Technical depth](0031-daemon-grade-store-selection-and-migration-technical.md#technical-depth) |
+| 0032 | Daemon attachment residency and replay | Accepted | [Decision](0032-daemon-attachment-residency-and-replay.md#concept) | [Technical depth](0032-daemon-attachment-residency-and-replay-technical.md#technical-depth) |
+| 0033 | Collaboration: controller lease and takeover | Accepted | [Decision](0033-collaboration-controller-lease-and-takeover.md#concept) | [Technical depth](0033-collaboration-controller-lease-and-takeover-technical.md#technical-depth) |
+| 0034 | Provider credential handoff over the bootstrap channel | Accepted | [Decision](0034-provider-credential-handoff-over-bootstrap-channel.md#concept) | [Technical depth](0034-provider-credential-handoff-over-bootstrap-channel-technical.md#technical-depth) |
 | 0035 | Typed decision models as policy inputs | Proposed | [Decision](0035-typed-decision-models-as-policy-inputs.md#concept) | [Technical depth](0035-typed-decision-models-as-policy-inputs-technical.md#technical-depth) |
 
 0001 and 0002 were the prerequisites that unblocked the first milestone
@@ -162,7 +162,7 @@ gate record and does not accept the M4 plan pair or gate.
 The protocol/interaction proposals were renumbered from the old draft's 0019/0020
 because those numbers are now accepted M2 decisions.
 
-0031 to 0034 are the four Proposed M5 prerequisites: the daemon's store
+0031 to 0034 are the four accepted M5 prerequisites: the daemon's store
 selection for `0.2.0`, which is the existing local adapter with its documented
 limits, its capacity-as-store-loss consequence and its retirement procedure,
 leaving a daemon-grade adapter and its Store/journal-format migration open for
@@ -176,8 +176,10 @@ parent VM's process-wide environment to a composition-bound opaque token and
 host-owned custody before the sender writes the bytes over the unchanged
 per-invocation private channel the launcher already opens. The first three were proposed with the Open M5
 plan on 2026-09-14 and revised twice that day on independent review; 0034
-follows the maintainer's outcome of 2026-09-19. They accept nothing, and each
-must be accepted before the outcome that depends on it is implemented.
+follows the maintainer's outcome of 2026-09-19. The maintainer accepted all
+four with the M5 plan pair on 2026-09-21 at candidate `1e1b33bfbf83953463e6abcdaebd52dc12735d8f`;
+the [disposition](../developer/agent-context-map.md#disposition-m5-acceptance-2026-09-21)
+records it.
 
 0035 is Proposed for the milestone after M5 and is not an M5 prerequisite: it
 decides that a typed decision model — one that returns probabilities and

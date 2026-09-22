@@ -3,7 +3,7 @@
 
 Technical depth: [Collaboration mechanics](0033-collaboration-controller-lease-and-takeover-technical.md#technical-depth).
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-09-14
 - **Decision owner:** Maintainer
 - **Supersedes:** nothing; the core keeps the vision §11.6 rule that it mandates no controller lease
@@ -232,4 +232,4 @@ Technical depth: [Compatibility mechanics](0033-collaboration-controller-lease-a
 
 | Decision | Authority | Authority evidence | Bound bytes |
 | --- | --- | --- | --- |
-| Acceptance | — | — | — |
+| Acceptance | Maintainer | [disposition](../developer/agent-context-map.md#disposition-m5-acceptance-2026-09-21) | candidate `1e1b33bfbf83953463e6abcdaebd52dc12735d8f`; concept `sha256:920d2dff8dbf37f1f341ef6885ff19fb85f430f2908d2b99af0d7c6681482018`; technical `sha256:08aa94e95e15ac1a83a54b353a79fb71722599f9abf03db3522b4067daad1ed3` |

@@ -3,7 +3,7 @@
 
 Technical depth: [Local adapter limits and what stays open](0031-daemon-grade-store-selection-and-migration-technical.md#technical-depth).
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-09-14
 - **Decision owner:** Maintainer
 - **Supersedes:** nothing; refines the store posture in vision §12.2
@@ -200,4 +200,4 @@ Technical depth: [Compatibility mechanics](0031-daemon-grade-store-selection-and
 
 | Decision | Authority | Authority evidence | Bound bytes |
 | --- | --- | --- | --- |
-| Acceptance | — | — | — |
+| Acceptance | Maintainer | [disposition](../developer/agent-context-map.md#disposition-m5-acceptance-2026-09-21) | candidate `1e1b33bfbf83953463e6abcdaebd52dc12735d8f`; concept `sha256:efbc55e1607d0f98b63875da0310fdd84d7c6fbad1a7c3849d69f4dcef5d94f8`; technical `sha256:b5a44cc706e9dbeb97556a914ae70fbc8602d8db75a4a62623a27c7ba9f93749` |
