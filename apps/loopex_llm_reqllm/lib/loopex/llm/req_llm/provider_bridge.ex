@@ -173,19 +173,22 @@ defmodule Loopex.LLM.ReqLLM.ProviderBridge do
                )
              end),
            :ok <- adopt_sender(sender, sender_monitor, sender_ref, caller, guardian) do
+        result_monitor = Process.monitor(guardian)
+
         send(
           guardian,
           {:initialize, guardian_ref, caller, request, configuration, progress_slot, deadline}
         )
 
-        await_result(guardian, guardian_monitor, guardian_ref, progress_slot, progress)
+        await_result(guardian, result_monitor, guardian_ref, progress_slot, progress)
       else
         _unavailable -> :setup_failed
       end
 
     case result do
       :setup_failed ->
-        stop_managed_guardian(guardian, guardian_monitor, stop_reference)
+        Process.demonitor(guardian_monitor, [:flush])
+        stop_managed_guardian(guardian, Process.monitor(guardian), stop_reference)
         @not_dispatched
 
       provider_result ->
@@ -427,6 +430,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderBridge do
 
     receive do
       {:guardian_authorized, ^guardian_ref, ^guardian} ->
+        Process.demonitor(monitor, [:flush])
         Logger.debug("provider credential guardian authorized")
         :ok
 
