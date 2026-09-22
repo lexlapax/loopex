@@ -63,6 +63,13 @@ marks initialization complete only through the registry's unchanged
 accept-time deadline. Buffered client bytes and socket state are redacted from
 process diagnostics.
 
+Add strict generation-two request decoding for all twenty methods. Every
+method has one exact outer field set, optional `null` is refused unless the
+contract admits it, and identities, cursors, bytes, digests, resource inputs,
+artifact references and nested session options become bounded plain data
+before any daemon or runtime effect. Valid methods remain inert until their
+serving boundary lands.
+
 Add the daemon's bounded connection-output foundation. The registry owns each
 complete encoded queue and the daemon-wide output commitment; the connection
 process advances only nonblocking socket sends and releases a frame charge only

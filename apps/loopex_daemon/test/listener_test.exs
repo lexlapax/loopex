@@ -116,11 +116,32 @@ defmodule LoopexDaemon.ListenerTest do
     assert %{occupied: 1, live: 1} = ConnectionRegistry.status(fixture.registry)
 
     assert :ok =
-             send_frame(client, %{"method" => "session.list", "request_id" => "r2"})
+             send_frame(client, %{
+               "method" => "session.list",
+               "request_id" => "r2",
+               "limit" => 1
+             })
 
     [inert] = receive_records(client, 1)
     assert inert["code"] == "unsupported_method"
     assert inert["request_id"] == "r2"
+
+    assert :ok =
+             send_frame(client, %{
+               "method" => "session.list",
+               "request_id" => "r3",
+               "limit" => nil
+             })
+
+    [malformed] = receive_records(client, 1)
+
+    assert malformed == %{
+             "type" => "error",
+             "code" => "invalid_request",
+             "message" => "request does not match the generation-two contract",
+             "request_id" => "r3"
+           }
+
     assert :ok = :socket.close(client)
   end
 
@@ -287,7 +308,8 @@ defmodule LoopexDaemon.ListenerTest do
     assert :ok =
              send_frame(initialized_client, %{
                "method" => "session.list",
-               "request_id" => "after-cut"
+               "request_id" => "after-cut",
+               "limit" => 1
              })
 
     assert [%{"code" => "unsupported_method", "request_id" => "after-cut"}] =

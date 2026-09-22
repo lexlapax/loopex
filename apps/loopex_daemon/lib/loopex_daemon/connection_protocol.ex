@@ -11,11 +11,14 @@ defmodule LoopexDaemon.ConnectionProtocol do
   This pure state machine reuses generation two's contract metadata while
   retaining ADR 0023's request-identity, generation-list and capability-list
   validation. A well-formed unsupported offer spends the negotiation attempt;
-  a malformed request does not. Until method mapping lands, every named
-  post-initialize method returns the fixed build-level `unsupported_method`
-  refusal, which is safe because no host or runtime effect occurs.
+  a malformed request does not. After negotiation, `LoopexDaemon.Request`
+  enforces and decodes every named method's exact generation-two request shape.
+  Until serving lands, a valid request returns the fixed build-level
+  `unsupported_method` refusal, which is safe because no host or runtime effect
+  occurs.
   """
 
+  alias LoopexDaemon.Request
   alias LoopexProtocol.Session.V2
 
   @enforce_keys [:state]
@@ -92,22 +95,26 @@ defmodule LoopexDaemon.ConnectionProtocol do
   defp dispatch(%__MODULE__{state: :initialized} = protocol, request) do
     request_id = safe_request_id(request)
 
-    case Map.get(request, "method") do
-      method when is_binary(method) ->
-        if method in V2.methods() do
-          {:error,
-           error(
-             "unsupported_method",
-             "this build does not yet answer that method",
-             request_id
-           ), protocol, :none}
-        else
-          {:error, error("unsupported_method", "no such method in this generation", request_id),
-           protocol, :none}
-        end
+    case Request.parse(request) do
+      {:ok, _parsed} ->
+        {:error,
+         error(
+           "unsupported_method",
+           "this build does not yet answer that method",
+           request_id
+         ), protocol, :none}
 
-      _absent ->
-        {:error, error("invalid_request", "method must be a string", request_id), protocol, :none}
+      {:error, :unsupported_method} ->
+        {:error, error("unsupported_method", "no such method in this generation", request_id),
+         protocol, :none}
+
+      {:error, :invalid_request} ->
+        {:error,
+         error(
+           "invalid_request",
+           "request does not match the generation-two contract",
+           request_id
+         ), protocol, :none}
     end
   end
 
@@ -148,12 +155,7 @@ defmodule LoopexDaemon.ConnectionProtocol do
   end
 
   defp valid_request_id?(id) do
-    byte_size(id) in 1..64 and
-      id |> :binary.bin_to_list() |> Enum.all?(&admitted_request_id_byte?/1)
-  end
-
-  defp admitted_request_id_byte?(byte) do
-    byte in ?A..?Z or byte in ?a..?z or byte in ?0..?9 or byte in [?., ?_, ?~, ?-]
+    Request.valid_request_id?(id)
   end
 
   defp generations(request) do
