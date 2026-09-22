@@ -72,7 +72,10 @@ available for the later drain and stop record.
 Add the daemon's exact readiness-record encoder. It emits only the five
 ordered `daemon_ready` string fields as compact UTF-8 JSON, applies ordinary
 JSON escaping to paths and identifiers, and guarantees that its terminating LF
-is the line's only literal newline.
+is the line's only literal newline. Its startup arbiter performs the whole-line
+write in a monitored helper under one absolute deadline and releases the parked
+listener only after the exact owner authorization wins over stop, owner loss or
+startup failure.
 
 Add the daemon session index's canonical bounded codec. It pins the exact JSONL
 header, sorted identity rows, SHA-256 trailer and all identity, row-count,
