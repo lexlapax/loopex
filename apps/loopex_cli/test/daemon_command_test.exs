@@ -115,9 +115,11 @@ defmodule LoopexCli.DaemonCommandTest do
     assert {:ok, %File.Stat{type: :other}} = File.lstat(socket)
   end
 
-  defp start_daemon_process(arguments) do
+  defp start_daemon_process(arguments), do: start_cli_process(["daemon" | arguments])
+
+  defp start_cli_process(argv, extra \\ []) do
     executable = System.find_executable("elixir") || raise "elixir executable unavailable"
-    code = "LoopexCli.main(#{inspect(["daemon" | arguments])})"
+    code = "LoopexCli.main(#{inspect(argv)})"
 
     port =
       Port.open(
@@ -128,11 +130,14 @@ defmodule LoopexCli.DaemonCommandTest do
           :use_stdio,
           :hide,
           {:line, 65_536},
-          env: [{~c"LOOPEX_PROVIDER_API_KEY", ~c"daemon-command-placeholder"}],
-          args:
-            Enum.flat_map(:code.get_path(), fn dir -> ["-pa", List.to_string(dir)] end) ++
-              ["-e", code]
-        ]
+          env: [{~c"LOOPEX_PROVIDER_API_KEY", ~c"daemon-command-placeholder"}]
+        ] ++
+          extra ++
+          [
+            args:
+              Enum.flat_map(:code.get_path(), fn dir -> ["-pa", List.to_string(dir)] end) ++
+                ["-e", code]
+          ]
       )
 
     {:os_pid, os_pid} = Port.info(port, :os_pid)
@@ -142,6 +147,97 @@ defmodule LoopexCli.DaemonCommandTest do
     end)
 
     {port, os_pid}
+  end
+
+  test "a real SIGTERM detaches a waiting live take-over with status zero", context do
+    socket = Path.join([context.state_root, "daemon", "d.sock"])
+
+    {daemon, daemon_pid} =
+      start_daemon_process([
+        "--state-root",
+        context.state_root,
+        "--workspace",
+        context.workspace,
+        "--provider-launch",
+        context.launch,
+        "--policy",
+        "allow-all",
+        "--socket",
+        socket
+      ])
+
+    _ready = await_line(daemon, 60_000)
+
+    # This test's own client creates the session and holds its lease, so the
+    # take-over below waits for it without bound.
+    holder = connect(socket)
+    :ok = send_frame(holder, initialize())
+    assert [%{"type" => "initialized"}] = receive_records(holder, 1)
+
+    :ok =
+      send_frame(holder, %{
+        "method" => "session.create",
+        "request_id" => "create",
+        "command_id" => LoopexProtocol.Wire.encode_identity("signal-create"),
+        "session_options" => %{}
+      })
+
+    assert [%{"status" => "accepted", "session_id" => encoded}] = receive_records(holder, 1)
+    {:ok, session_id} = LoopexProtocol.Wire.identity(encoded)
+
+    :ok =
+      send_frame(holder, %{
+        "method" => "session.acquire_control",
+        "request_id" => "hold",
+        "session_id" => encoded
+      })
+
+    assert [%{"request_id" => "hold", "type" => "result"}] = receive_records(holder, 1)
+
+    {client, client_pid} =
+      start_cli_process(
+        ["attach", session_id, "--daemon", socket, "--take-over"],
+        [:stderr_to_stdout]
+      )
+
+    # The command installs its handler before it dials, so once the daemon
+    # counts the client's connection the signal can only reach that handler.
+    wait_for_connections(holder, 2)
+    {_output, 0} = System.cmd("/bin/kill", ["-TERM", Integer.to_string(client_pid)])
+
+    {status, lines} = await_exit_lines(client, 30_000, [])
+    assert status == 0
+    assert Enum.any?(lines, &(&1 =~ "detached; the session continues in the daemon"))
+    {_output, 0} = System.cmd("/bin/kill", ["-TERM", Integer.to_string(daemon_pid)])
+    assert await_exit(daemon, 60_000) == 0
+  end
+
+  defp wait_for_connections(holder, count, attempts \\ 500) do
+    :ok =
+      send_frame(holder, %{"method" => "daemon.status", "request_id" => "status-#{attempts}"})
+
+    [%{"result" => %{"connections" => connections}}] = receive_records(holder, 1)
+
+    cond do
+      connections >= count ->
+        :ok
+
+      attempts > 0 ->
+        Process.sleep(20)
+        wait_for_connections(holder, count, attempts - 1)
+
+      true ->
+        flunk("the live client never connected")
+    end
+  end
+
+  defp await_exit_lines(port, bound, lines) do
+    receive do
+      {^port, {:data, {_flag, line}}} -> await_exit_lines(port, bound, [line | lines])
+      {^port, {:exit_status, status}} -> {status, Enum.reverse(lines)}
+    after
+      bound -> flunk("the client never exited")
+    end
   end
 
   defp await_line(port, bound) do

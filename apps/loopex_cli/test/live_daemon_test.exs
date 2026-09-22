@@ -299,6 +299,73 @@ defmodule LoopexCli.LiveDaemonTest do
     assert Task.await(daemon.task, 60_000) == 0
   end
 
+  @tag timeout: 120_000
+  test "a signal detaches a live controller, releases its lease and leaves the run running",
+       context do
+    provider =
+      ProviderFixture.new(:delayed_entry,
+        credential: @credential,
+        response_bodies: [text_response("finished after detach", "msg_live_detach")]
+      )
+
+    launch =
+      Keyword.drop(provider.options, [
+        :credential_token,
+        :credential_registry,
+        :tracing_capability
+      ])
+
+    daemon = start_daemon(context, launch)
+    socket = context.socket
+    on_exit(&LoopexCli.LiveSignal.uninstall/0)
+
+    controller =
+      Task.async(fn ->
+        capture_io(:stderr, fn ->
+          result =
+            LoopexCli.dispatch(["run", "--daemon", socket, "go"], install_live_signals: true)
+
+          send(self(), {:result, result})
+        end)
+        |> then(fn stderr -> {receive(do: ({:result, result} -> result)), stderr} end)
+      end)
+
+    session_id = eventually(fn -> listed_session(socket) end)
+    eventually(fn -> ProviderFixture.reached?(provider, "pid") end)
+    eventually(fn -> daemon_status(socket)["attachments"] == 1 end)
+
+    :gen_event.notify(:erl_signal_server, :sigterm)
+
+    assert {{:detached, 0}, stderr} = Task.await(controller, 30_000)
+    assert stderr =~ "detached"
+
+    # The lease was released, not left to expire: another controller is
+    # granted at once, and the admitted run still finishes in the daemon.
+    {:ok, client} = LoopexCli.DaemonClient.connect(socket)
+
+    assert {:ok, %{"type" => "result"}, _client} =
+             LoopexCli.DaemonClient.request(client, "session.acquire_control", %{
+               "session_id" => LoopexProtocol.Wire.encode_identity(session_id)
+             })
+
+    LoopexCli.DaemonClient.close(client)
+    ProviderFixture.release(provider)
+
+    eventually(fn -> daemon_status(socket)["attachments"] == 0 end)
+
+    assert eventually_observed(socket, session_id, "finished after detach")
+
+    stop_daemon(daemon)
+  end
+
+  test "a signal cancels a live query with status 130", context do
+    daemon = start_daemon(context, [])
+    send(self(), {:loopex_live_signal, :sigterm})
+
+    assert LoopexCli.dispatch(["sessions", "--daemon", context.socket]) == {:detached, 130}
+    stop_daemon(daemon)
+  end
+
   test "attach refuses a session this daemon lifetime has not activated", context do
     daemon = start_daemon(context, [])
     socket = context.socket
@@ -308,6 +375,15 @@ defmodule LoopexCli.LiveDaemonTest do
 
     assert message =~ "refused" or message =~ "dormant"
     stop_daemon(daemon)
+  end
+
+  defp eventually_observed(socket, session_id, text) do
+    eventually(fn ->
+      output =
+        capture_io(fn -> :ok = LoopexCli.dispatch(["attach", session_id, "--daemon", socket]) end)
+
+      output =~ text
+    end)
   end
 
   defp ok_output({:ok, output}), do: {:ok, output}

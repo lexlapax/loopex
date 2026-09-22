@@ -81,10 +81,14 @@ defmodule LoopexCli.Live do
 
   Grammar refusals return before any socket is opened.
   """
-  @spec command(binary(), [binary()]) :: :ok | {:error, binary()}
-  def command(form, arguments) do
+  @spec command(binary(), [binary()], keyword()) ::
+          :ok | {:error, binary()} | {:detached, non_neg_integer()}
+  def command(form, arguments, options \\ []) do
     with {:ok, flags, words} <- parse(form, arguments),
          :ok <- validate(form, flags, words) do
+      if Keyword.get(options, :install_signals, false),
+        do: :ok = LoopexCli.LiveSignal.install(self())
+
       drive(form, flags, words)
     end
   end
@@ -220,6 +224,7 @@ defmodule LoopexCli.Live do
 
           case DaemonClient.request(client, method, fields, wait) do
             {:ok, record, _client} -> {:answered, record}
+            {:error, :signalled, _client} -> :signalled
             {:error, _reason, _client} -> :lost
           end
         after
@@ -227,6 +232,7 @@ defmodule LoopexCli.Live do
         end
       else
         false -> :lost
+        {:error, :signalled} -> :signalled
         {:error, :daemon_unreachable} -> if retry?, do: :lost, else: :unreachable
       end
 
@@ -236,6 +242,10 @@ defmodule LoopexCli.Live do
 
       :unreachable ->
         {:error, "cannot reach a daemon at that socket"}
+
+      :signalled ->
+        Logger.debug("loopex live client query cancelled by a signal")
+        {:detached, 130}
 
       :lost when not retry? ->
         Logger.debug("loopex live client repeating a lost query")
@@ -333,6 +343,23 @@ defmodule LoopexCli.Live do
       {:done, result, state} -> finish(state, result)
       {:fail, message, state} -> finish(state, {:error, message})
       {:lost, state} -> recover(state)
+      {:signalled, state} -> detach(state)
+    end
+  end
+
+  # Concept: a signal detaches this window; admitted work stays the daemon's.
+  defp detach(state) do
+    Logger.debug("loopex live client detaching on a signal")
+    IO.puts(:stderr, "loopex: detached; the session continues in the daemon")
+    finish(state, {:detached, 0})
+  end
+
+  # Concept: every wait in a live command yields to an operator's signal.
+  defp pause(milliseconds) do
+    receive do
+      {:loopex_live_signal, _signal} -> :signalled
+    after
+      milliseconds -> :ok
     end
   end
 
@@ -360,8 +387,11 @@ defmodule LoopexCli.Live do
       {:error, unresolved("the daemon connection was lost and did not recover in time", state)}
     else
       Logger.debug("loopex live client recovering a lost connection")
-      Process.sleep(min(@reconnect_delay_ms, remaining))
-      stream_command(state)
+
+      case pause(min(@reconnect_delay_ms, remaining)) do
+        :ok -> stream_command(state)
+        :signalled -> detach(state)
+      end
     end
   end
 
@@ -381,6 +411,9 @@ defmodule LoopexCli.Live do
       {:ok, client} ->
         {:ok, %{state | client: client}}
 
+      {:error, :signalled} ->
+        {:signalled, state}
+
       {:error, :daemon_unreachable} ->
         if state.first_loss,
           do: {:lost, state},
@@ -391,6 +424,7 @@ defmodule LoopexCli.Live do
   defp request(state, method, fields) do
     case DaemonClient.request(state.client, method, fields, bound(state)) do
       {:ok, record, client} -> {:ok, record, %{state | client: client}}
+      {:error, :signalled, client} -> {:signalled, %{state | client: client}}
       {:error, _reason, client} -> {:lost, %{state | client: client}}
     end
   end
@@ -439,15 +473,16 @@ defmodule LoopexCli.Live do
       {:ok, %{"code" => code} = record, state} when code in ["control_held", "control_pending"] ->
         cond do
           state.first_loss == nil and state.form == :attach ->
-            Process.sleep(@takeover_retry_ms)
-            ensure_control(state)
+            retry_control(state, @takeover_retry_ms)
 
           state.first_loss == nil ->
             {:fail, refusal_text(record), state}
 
           now_ms() < recovery_limit(state) ->
-            Process.sleep(min(@reconnect_delay_ms, max(recovery_limit(state) - now_ms(), 0)))
-            ensure_control(state)
+            retry_control(
+              state,
+              min(@reconnect_delay_ms, max(recovery_limit(state) - now_ms(), 0))
+            )
 
           true ->
             {:fail, "another client now controls this session", state}
@@ -458,6 +493,13 @@ defmodule LoopexCli.Live do
 
       lost ->
         lost
+    end
+  end
+
+  defp retry_control(state, wait) do
+    case pause(wait) do
+      :ok -> ensure_control(state)
+      :signalled -> {:signalled, state}
     end
   end
 
@@ -665,6 +707,7 @@ defmodule LoopexCli.Live do
 
   defp conclude({:rendered, result}, state), do: {:done, result, state}
   defp conclude(:lost, state), do: {:lost, state}
+  defp conclude(:signalled, state), do: {:signalled, state}
   defp conclude(:detached, state), do: reattach(state)
   defp conclude({:fail, message}, state), do: {:fail, message, state}
 
@@ -746,6 +789,9 @@ defmodule LoopexCli.Live do
 
         {:loopex_daemon_closed, ^reader} ->
           throw({@live, :lost})
+
+        {:loopex_live_signal, _signal} ->
+          throw({@live, :signalled})
       after
         0 -> {:error, :empty}
       end

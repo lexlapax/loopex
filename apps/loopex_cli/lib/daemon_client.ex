@@ -16,7 +16,9 @@ defmodule LoopexCli.DaemonClient do
   default; any failure closes the socket. `request/4` sends one frame with a fresh
   request identity and selectively receives only the record correlated to it,
   leaving every other record in the mailbox. Transport loss arrives as
-  `{:loopex_daemon_closed, reader}`. No request content is logged.
+  `{:loopex_daemon_closed, reader}`. A `{:loopex_live_signal, signal}` message
+  ends any wait with `:signalled`, so an operator's detach is never held
+  behind a reply. No request content is logged.
   """
 
   require Logger
@@ -31,7 +33,7 @@ defmodule LoopexCli.DaemonClient do
   @initialize_timeout_ms 30_000
 
   @doc false
-  @spec connect(Path.t(), keyword()) :: {:ok, t()} | {:error, :daemon_unreachable}
+  @spec connect(Path.t(), keyword()) :: {:ok, t()} | {:error, :daemon_unreachable | :signalled}
   def connect(path, options \\ []) when is_binary(path) do
     case :socket.open(:local, :stream, :default) do
       {:ok, socket} ->
@@ -67,6 +69,10 @@ defmodule LoopexCli.DaemonClient do
         Logger.debug("loopex live client initialized")
         {:ok, client}
 
+      {:error, :signalled, client} ->
+        close(client)
+        {:error, :signalled}
+
       _refused ->
         Logger.debug("loopex live client initialize refused")
         close(client)
@@ -76,7 +82,7 @@ defmodule LoopexCli.DaemonClient do
 
   @doc false
   @spec request(t(), binary(), map(), timeout()) ::
-          {:ok, map(), t()} | {:error, :closed | :timeout, t()}
+          {:ok, map(), t()} | {:error, :closed | :timeout | :signalled, t()}
   def request(client, method, fields, timeout \\ 30_000) do
     {request_id, client} = next_request_id(client)
     frame = Map.merge(fields, %{"method" => method, "request_id" => request_id})
@@ -101,7 +107,8 @@ defmodule LoopexCli.DaemonClient do
   end
 
   @doc false
-  @spec await(t(), binary(), timeout()) :: {:ok, map(), t()} | {:error, :closed | :timeout, t()}
+  @spec await(t(), binary(), timeout()) ::
+          {:ok, map(), t()} | {:error, :closed | :timeout | :signalled, t()}
   def await(%__MODULE__{reader: reader} = client, request_id, timeout) do
     receive do
       {:loopex_daemon_record, ^reader, %{"request_id" => ^request_id} = record} ->
@@ -109,6 +116,9 @@ defmodule LoopexCli.DaemonClient do
 
       {:loopex_daemon_closed, ^reader} ->
         {:error, :closed, client}
+
+      {:loopex_live_signal, _signal} ->
+        {:error, :signalled, client}
     after
       timeout -> {:error, :timeout, client}
     end

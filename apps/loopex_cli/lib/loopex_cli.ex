@@ -53,7 +53,7 @@ defmodule LoopexCli do
   def main(["daemon" | arguments]), do: LoopexCli.Daemon.main(arguments)
 
   def main(argv) do
-    result = dispatch(argv)
+    result = dispatch(argv, install_live_signals: true)
     release_placement()
     halt(result)
   end
@@ -70,18 +70,24 @@ defmodule LoopexCli do
   process to observe a flag would be testing the escript wrapper, not the
   behaviour the outcome names.
   """
-  @spec dispatch([binary()]) :: :ok | {:error, binary()}
+  @spec dispatch([binary()]) :: :ok | {:error, binary()} | {:detached, non_neg_integer()}
   def dispatch(argv), do: dispatch(argv, [])
 
   @doc false
-  @spec dispatch([binary()], keyword()) :: :ok | {:error, binary()}
-  def dispatch(["run" | rest], options), do: offline_or_live("run", rest, &run(&1, options))
-  def dispatch(["sessions" | rest], _options), do: offline_or_live("sessions", rest, &sessions/1)
+  @spec dispatch([binary()], keyword()) ::
+          :ok | {:error, binary()} | {:detached, non_neg_integer()}
+  def dispatch(["run" | rest], options),
+    do: offline_or_live("run", rest, options, &run(&1, options))
+
+  def dispatch(["sessions" | rest], options),
+    do: offline_or_live("sessions", rest, options, &sessions/1)
 
   def dispatch(["resume" | rest], options),
-    do: offline_or_live("resume", rest, &resume(&1, options))
+    do: offline_or_live("resume", rest, options, &resume(&1, options))
 
-  def dispatch(["attach" | rest], _options), do: LoopexCli.Live.command("attach", rest)
+  def dispatch(["attach" | rest], options),
+    do: LoopexCli.Live.command("attach", rest, live_options(options))
+
   def dispatch(["cancel" | rest], options), do: admitted("cancel", rest, &cancel(&1, options))
   def dispatch(["artifact" | rest], _options), do: admitted("artifact", rest, &artifact/1)
   def dispatch(["skill" | rest], options), do: admitted("skill", rest, &skill(&1, options))
@@ -97,11 +103,15 @@ defmodule LoopexCli do
 
   # Concept: `--daemon` selects the live grammar before any offline flag is
   # admitted, so the offline forms keep their released grammar untouched.
-  defp offline_or_live(name, arguments, command) do
+  defp offline_or_live(name, arguments, options, command) do
     if LoopexCli.Live.daemon_form?(arguments),
-      do: LoopexCli.Live.command(name, arguments),
+      do: LoopexCli.Live.command(name, arguments, live_options(options)),
       else: admitted(name, arguments, command)
   end
+
+  # Concept: only the operating-system entry point owns the process's signals.
+  defp live_options(options),
+    do: [install_signals: Keyword.get(options, :install_live_signals, false)]
 
   @command_flags %{
     "run" =>
@@ -1702,6 +1712,7 @@ defmodule LoopexCli do
   end
 
   defp halt(:ok), do: System.halt(0)
+  defp halt({:detached, status}), do: System.halt(status)
 
   defp halt({:error, message}) do
     IO.puts(:stderr, "loopex: #{terminal_message(message)}")
