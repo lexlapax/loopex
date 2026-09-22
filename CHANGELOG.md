@@ -78,6 +78,13 @@ deadline. Connection loss reaps an executing request worker before the relay
 acknowledges that connection's retirement; fixed logs and process diagnostics
 contain no request data.
 
+Extend that ledger with pending and queued origins for all ten ticketed core
+mutations. Ticket rows share the connection and daemon origin ceilings, retain
+the session and lease-owner binding shape required by their class, and monitor
+the waiting request worker without dispatching core work. Shutdown or
+connection loss kills and reaps a queued worker before the origin and accepted
+connection can retire.
+
 Add the daemon's bounded connection-output foundation. The registry owns each
 complete encoded queue and the daemon-wide output commitment; the connection
 process advances only nonblocking socket sends and releases a frame charge only

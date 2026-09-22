@@ -82,7 +82,9 @@ defmodule LoopexDaemon.AdmissionRelayTest do
         phase: :serving,
         connections: 0,
         permits: 0,
+        tickets: 0,
         pending: 0,
+        queued: 0,
         executing: 0,
         settling: 0,
         connection_limit: 512,
@@ -379,6 +381,186 @@ defmodule LoopexDaemon.AdmissionRelayTest do
     stop_connection(connection, relay, incarnation)
   end
 
+  test "ticket origins cover the ten mutation classes and share the connection bound" do
+    relay = start_relay()
+    incarnation = incarnation()
+    connection = start_connection(relay, incarnation)
+    owner_binding = {self(), incarnation()}
+
+    classes = [
+      {:session_create, nil, nil},
+      {:session_resume, "session", owner_binding},
+      {:session_attach, "session", nil},
+      {:session_prompt, "session", owner_binding},
+      {:session_steer, "session", owner_binding},
+      {:session_follow_up, "session", owner_binding},
+      {:session_abort, "session", owner_binding},
+      {:session_respond_interaction, "session", owner_binding},
+      {:session_admit_resources, "session", owner_binding},
+      {:session_activate_skill, "session", owner_binding}
+    ]
+
+    Enum.with_index(classes, fn {class, session_id, binding}, slot ->
+      origin = {incarnation, slot, 1}
+
+      assert {:ok, ^origin} =
+               invoke(connection, fn ->
+                 AdmissionRelay.open_ticket(relay, origin, class, session_id, binding)
+               end)
+
+      assert {:ok, ^origin} =
+               invoke(connection, fn ->
+                 AdmissionRelay.open_ticket(relay, origin, class, session_id, binding)
+               end)
+    end)
+
+    conflict = {incarnation, 0, 1}
+
+    assert {:error, :permit_conflict} =
+             invoke(connection, fn ->
+               AdmissionRelay.open_permit(relay, conflict, :daemon_status)
+             end)
+
+    assert {:error, :ticket_conflict} =
+             invoke(connection, fn ->
+               AdmissionRelay.open_ticket(relay, conflict, :session_attach, "session")
+             end)
+
+    assert {:error, :invalid_origin} =
+             invoke(connection, fn ->
+               AdmissionRelay.open_ticket(
+                 relay,
+                 {incarnation, 10, 1},
+                 :session_prompt,
+                 "session"
+               )
+             end)
+
+    for slot <- 10..31 do
+      origin = {incarnation, slot, 1}
+
+      assert {:ok, ^origin} =
+               invoke(connection, fn ->
+                 AdmissionRelay.open_permit(relay, origin, :daemon_status)
+               end)
+    end
+
+    assert {:error, :capacity_exceeded} =
+             invoke(connection, fn ->
+               AdmissionRelay.open_ticket(
+                 relay,
+                 {incarnation, 0, 2},
+                 :session_create
+               )
+             end)
+
+    assert %{permits: 22, tickets: 10, pending: 32, queued: 0} =
+             AdmissionRelay.status(relay)
+
+    stop_connection(connection, relay, incarnation)
+  end
+
+  test "a queued ticket worker is monitored without dispatch and loss terminalizes it" do
+    relay = start_relay()
+    incarnation = incarnation()
+    connection = start_connection(relay, incarnation)
+    origin = {incarnation, 0, 1}
+
+    assert {:ok, ^origin} =
+             invoke(connection, fn ->
+               AdmissionRelay.open_ticket(relay, origin, :session_create)
+             end)
+
+    worker = start_ticket_worker(connection)
+
+    assert :ok =
+             invoke(connection, fn ->
+               AdmissionRelay.bind_ticket_worker(relay, origin, worker, incarnation())
+             end)
+
+    refute_receive {:ticket_worker_message, ^worker, _message}, 40
+    assert %{tickets: 1, pending: 0, queued: 1} = AdmissionRelay.status(relay)
+
+    Process.exit(worker, :kill)
+
+    assert_receive {:connection_message, ^connection,
+                    {:relay_ticket_failed, ^origin, :worker_lost}},
+                   500
+
+    eventually(fn -> AdmissionRelay.status(relay).tickets == 0 end)
+    stop_connection(connection, relay, incarnation)
+  end
+
+  test "the cut freezes pending and queued tickets and the deadline reaps both" do
+    relay = start_relay(admission_wait_ms: 20)
+    incarnation = incarnation()
+    connection = start_connection(relay, incarnation)
+    pending = {incarnation, 0, 1}
+    queued = {incarnation, 1, 1}
+
+    for origin <- [pending, queued] do
+      assert {:ok, ^origin} =
+               invoke(connection, fn ->
+                 AdmissionRelay.open_ticket(relay, origin, :session_attach, "session")
+               end)
+    end
+
+    worker = start_ticket_worker(connection)
+    worker_monitor = Process.monitor(worker)
+
+    assert :ok =
+             invoke(connection, fn ->
+               AdmissionRelay.bind_ticket_worker(relay, queued, worker, incarnation())
+             end)
+
+    cut_ref = make_ref()
+    send(relay, {:relay_barrier, cut_ref, :cut})
+
+    assert_receive {:relay_barrier_ack, ^cut_ref, :cut, payload}, 500
+    assert payload.permits == []
+    assert payload.tickets == [{pending, :pending}, {queued, :queued}]
+
+    assert_receive {:connection_message, ^connection,
+                    {:relay_ticket_cancelled, ^pending, :daemon_stopping}},
+                   500
+
+    assert_receive {:connection_message, ^connection,
+                    {:relay_ticket_cancelled, ^queued, :daemon_stopping}},
+                   500
+
+    assert_receive {:DOWN, ^worker_monitor, :process, ^worker, :killed}, 500
+    eventually(fn -> AdmissionRelay.status(relay).tickets == 0 end)
+    stop_connection(connection, relay, incarnation)
+  end
+
+  test "connection loss reaps a queued ticket worker before relay retirement" do
+    relay = start_relay()
+    incarnation = incarnation()
+    connection = start_connection(relay, incarnation)
+    origin = {incarnation, 0, 1}
+
+    assert {:ok, ^origin} =
+             invoke(connection, fn ->
+               AdmissionRelay.open_ticket(relay, origin, :session_create)
+             end)
+
+    worker = start_ticket_worker(connection)
+    worker_monitor = Process.monitor(worker)
+
+    assert :ok =
+             invoke(connection, fn ->
+               AdmissionRelay.bind_ticket_worker(relay, origin, worker, incarnation())
+             end)
+
+    connection_monitor = Process.monitor(connection)
+    Process.exit(connection, :kill)
+    assert_receive {:DOWN, ^connection_monitor, :process, ^connection, :killed}, 500
+    assert_receive {:relay_connection_retired, ^relay, ^incarnation}, 500
+    refute Process.alive?(worker)
+    assert_receive {:DOWN, ^worker_monitor, :process, ^worker, _reason}, 500
+    assert %{connections: 0, tickets: 0} = AdmissionRelay.status(relay)
+  end
+
   defp start_relay(options \\ []) do
     options = Keyword.merge([owner: self(), admission_wait_ms: 1_000], options)
     start_supervised!({AdmissionRelay, options})
@@ -442,6 +624,31 @@ defmodule LoopexDaemon.AdmissionRelayTest do
 
     assert_receive {:worker_ready, ^worker, _monitor}, 500
     {worker, worker_incarnation}
+  end
+
+  defp start_ticket_worker(connection) do
+    parent = self()
+
+    worker =
+      spawn(fn ->
+        connection_monitor = Process.monitor(connection)
+        send(parent, {:ticket_worker_ready, self()})
+        ticket_worker_loop(parent, connection, connection_monitor)
+      end)
+
+    assert_receive {:ticket_worker_ready, ^worker}, 500
+    worker
+  end
+
+  defp ticket_worker_loop(parent, connection, connection_monitor) do
+    receive do
+      {:DOWN, ^connection_monitor, :process, ^connection, _reason} ->
+        :ok
+
+      message ->
+        send(parent, {:ticket_worker_message, self(), message})
+        ticket_worker_loop(parent, connection, connection_monitor)
+    end
   end
 
   defp worker_completion_loop(parent, relay, origin, worker_incarnation, mode) do

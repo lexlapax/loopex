@@ -9,8 +9,9 @@ defmodule LoopexDaemon.AdmissionRelay do
 
   ## Technical depth
 
-  This first relay surface owns the lightweight query, read and artifact
-  permit path. A registered connection may hold at most 32 origin rows, each
+  This relay surface owns the lightweight query, read and artifact permit path
+  plus the pending and queued origin states for ticketed core mutations. A
+  registered connection may hold at most 32 origin rows, each
   named by its 128-bit connection incarnation, local slot and strictly
   increasing sequence. A worker is monitored and receives `go` only after the
   relay has atomically changed its row from pending to executing. Result,
@@ -23,7 +24,8 @@ defmodule LoopexDaemon.AdmissionRelay do
   deadline are cancelled without dispatch. Executing non-lease work remains
   tracked for its real result or connection retirement, as the accepted M5
   shutdown order requires. Ticketed calls and lease-operation permits extend
-  this same bounded ledger in later slices.
+  this same bounded ledger in later slices. Ticket promotion and settlement
+  extend the queued rows without changing their origin or worker ownership.
   """
 
   use GenServer
@@ -51,6 +53,22 @@ defmodule LoopexDaemon.AdmissionRelay do
 
   @session_classes [:session_inspect, :resources_catalog, :resources_read]
 
+  @ticket_classes [
+    :session_create,
+    :session_resume,
+    :session_attach,
+    :session_prompt,
+    :session_steer,
+    :session_follow_up,
+    :session_abort,
+    :session_respond_interaction,
+    :session_admit_resources,
+    :session_activate_skill
+  ]
+
+  @session_ticket_classes @ticket_classes -- [:session_create]
+  @lease_ticket_classes @session_ticket_classes -- [:session_attach]
+
   @typedoc false
   @type origin_id :: {binary(), 0..31, pos_integer()}
 
@@ -64,6 +82,22 @@ defmodule LoopexDaemon.AdmissionRelay do
           | :artifact_close_transfer
           | :session_list
           | :daemon_status
+
+  @typedoc false
+  @type ticket_class ::
+          :session_create
+          | :session_resume
+          | :session_attach
+          | :session_prompt
+          | :session_steer
+          | :session_follow_up
+          | :session_abort
+          | :session_respond_interaction
+          | :session_admit_resources
+          | :session_activate_skill
+
+  @typedoc false
+  @type owner_binding :: {pid(), binary()} | nil
 
   @doc false
   @spec start_link(keyword()) :: GenServer.on_start()
@@ -103,6 +137,39 @@ defmodule LoopexDaemon.AdmissionRelay do
   end
 
   @doc false
+  @spec open_ticket(pid(), origin_id(), ticket_class(), binary() | nil, owner_binding()) ::
+          {:ok, origin_id()}
+          | {:error,
+             :capacity_exceeded
+             | :connection_unavailable
+             | :daemon_stopping
+             | :invalid_origin
+             | :ticket_conflict}
+  def open_ticket(relay, origin_id, class, session_id \\ nil, owner_binding \\ nil) do
+    GenServer.call(
+      relay,
+      {:open_ticket, origin_id, class, session_id, owner_binding},
+      @control_timeout_ms
+    )
+  end
+
+  @doc false
+  @spec bind_ticket_worker(pid(), origin_id(), pid(), binary()) ::
+          :ok
+          | {:error,
+             :connection_unavailable
+             | :daemon_stopping
+             | :invalid_worker
+             | :ticket_unavailable}
+  def bind_ticket_worker(relay, origin_id, worker, worker_incarnation) do
+    GenServer.call(
+      relay,
+      {:bind_ticket_worker, origin_id, worker, worker_incarnation},
+      @control_timeout_ms
+    )
+  end
+
+  @doc false
   @spec bind_worker(pid(), origin_id(), pid(), binary()) ::
           :ok
           | {:error,
@@ -134,7 +201,9 @@ defmodule LoopexDaemon.AdmissionRelay do
           phase: :serving | :draining,
           connections: non_neg_integer(),
           permits: non_neg_integer(),
+          tickets: non_neg_integer(),
           pending: non_neg_integer(),
+          queued: non_neg_integer(),
           executing: non_neg_integer(),
           settling: non_neg_integer(),
           connection_limit: 512,
@@ -162,12 +231,14 @@ defmodule LoopexDaemon.AdmissionRelay do
          cut_ref: nil,
          cut_payload: nil,
          frozen_permits: MapSet.new(),
+         frozen_tickets: MapSet.new(),
          admission_deadline: nil,
          deadline_timer: nil,
          connections: %{},
          connection_pids: %{},
          connection_monitors: %{},
          permits: %{},
+         tickets: %{},
          worker_monitors: %{}
        }}
     else
@@ -271,6 +342,96 @@ defmodule LoopexDaemon.AdmissionRelay do
   end
 
   def handle_call(
+        {:open_ticket, origin_id, class, session_id, owner_binding},
+        {caller, _tag},
+        state
+      ) do
+    case existing_ticket(state, origin_id, class, session_id, owner_binding, caller) do
+      :exact ->
+        {:reply, {:ok, origin_id}, state}
+
+      :conflict ->
+        {:reply, {:error, :ticket_conflict}, state}
+
+      :absent ->
+        with :ok <- serving(state),
+             {:ok, incarnation, slot, sequence} <- validate_origin(origin_id),
+             {:ok, connection} <- caller_connection(state, incarnation, caller),
+             :ok <- validate_ticket_class(class, session_id, owner_binding),
+             :ok <- origin_capacity(state, connection),
+             :ok <- sequence_available(connection, slot, sequence) do
+          ticket = %{
+            origin_id: origin_id,
+            class: class,
+            session_id: session_id,
+            owner_binding: owner_binding,
+            connection_incarnation: incarnation,
+            connection_pid: caller,
+            phase: :pending,
+            worker_pid: nil,
+            worker_incarnation: nil,
+            worker_monitor: nil,
+            disposition: nil
+          }
+
+          connection = %{
+            connection
+            | origins: MapSet.put(connection.origins, origin_id),
+              sequence_by_slot: Map.put(connection.sequence_by_slot, slot, sequence)
+          }
+
+          state =
+            state
+            |> put_in([:connections, incarnation], connection)
+            |> put_in([:tickets, origin_id], ticket)
+
+          Logger.debug("loopex daemon admission relay ticket opened")
+          {:reply, {:ok, origin_id}, state}
+        else
+          {:error, reason} -> {:reply, {:error, reason}, state}
+        end
+    end
+  end
+
+  def handle_call(
+        {:bind_ticket_worker, origin_id, worker, worker_incarnation},
+        {caller, _tag},
+        state
+      ) do
+    state = expire_if_due(state)
+
+    if admission_expired?(state) do
+      {:reply, {:error, :daemon_stopping}, state}
+    else
+      with {:ok, ticket} <- pending_ticket(state, origin_id),
+           {:ok, _connection} <-
+             caller_connection(state, ticket.connection_incarnation, caller),
+           :ok <- bind_admitted(state, origin_id, :ticket),
+           :ok <- valid_worker(worker, worker_incarnation, caller) do
+        monitor = Process.monitor(worker)
+
+        ticket = %{
+          ticket
+          | phase: :queued,
+            worker_pid: worker,
+            worker_incarnation: worker_incarnation,
+            worker_monitor: monitor
+        }
+
+        state =
+          state
+          |> put_in([:tickets, origin_id], ticket)
+          |> put_in([:worker_monitors, monitor], {:ticket, origin_id})
+
+        Logger.debug("loopex daemon admission relay ticket queued")
+        {:reply, :ok, state}
+      else
+        {:error, reason} -> {:reply, {:error, reason}, state}
+      end
+    end
+  end
+
+  def handle_call(
         {:bind_worker, origin_id, worker, worker_incarnation},
         {caller, _tag},
         state
@@ -283,7 +444,7 @@ defmodule LoopexDaemon.AdmissionRelay do
       with {:ok, permit} <- pending_permit(state, origin_id),
            {:ok, _connection} <-
              caller_connection(state, permit.connection_incarnation, caller),
-           :ok <- bind_admitted(state, origin_id),
+           :ok <- bind_admitted(state, origin_id, :permit),
            :ok <- valid_worker(worker, worker_incarnation, caller) do
         monitor = Process.monitor(worker)
 
@@ -298,7 +459,7 @@ defmodule LoopexDaemon.AdmissionRelay do
         state =
           state
           |> put_in([:permits, origin_id], permit)
-          |> put_in([:worker_monitors, monitor], origin_id)
+          |> put_in([:worker_monitors, monitor], {:permit, origin_id})
 
         send(worker, {:relay_go, origin_id, worker_incarnation})
         Logger.debug("loopex daemon admission relay permit executing")
@@ -342,10 +503,17 @@ defmodule LoopexDaemon.AdmissionRelay do
   end
 
   def handle_call(:status, _from, state) do
-    counts =
+    permit_counts =
       Enum.reduce(state.permits, %{pending: 0, executing: 0, settling: 0}, fn
         {_id, %{phase: :pending}}, counts -> Map.update!(counts, :pending, &(&1 + 1))
         {_id, %{phase: :executing}}, counts -> Map.update!(counts, :executing, &(&1 + 1))
+        {_id, %{phase: :settling}}, counts -> Map.update!(counts, :settling, &(&1 + 1))
+      end)
+
+    ticket_counts =
+      Enum.reduce(state.tickets, %{pending: 0, queued: 0, settling: 0}, fn
+        {_id, %{phase: :pending}}, counts -> Map.update!(counts, :pending, &(&1 + 1))
+        {_id, %{phase: :queued}}, counts -> Map.update!(counts, :queued, &(&1 + 1))
         {_id, %{phase: :settling}}, counts -> Map.update!(counts, :settling, &(&1 + 1))
       end)
 
@@ -354,9 +522,11 @@ defmodule LoopexDaemon.AdmissionRelay do
        phase: state.phase,
        connections: map_size(state.connections),
        permits: map_size(state.permits),
-       pending: counts.pending,
-       executing: counts.executing,
-       settling: counts.settling,
+       tickets: map_size(state.tickets),
+       pending: permit_counts.pending + ticket_counts.pending,
+       queued: ticket_counts.queued,
+       executing: permit_counts.executing,
+       settling: permit_counts.settling + ticket_counts.settling,
        connection_limit: @connection_limit,
        origin_limit: @origin_limit,
        admission_deadline_set: not is_nil(state.admission_deadline)
@@ -370,6 +540,7 @@ defmodule LoopexDaemon.AdmissionRelay do
     deadline = now + state.admission_wait_ms
     payload = cut_payload(state, deadline)
     frozen_permits = payload.permits |> Enum.map(&elem(&1, 0)) |> MapSet.new()
+    frozen_tickets = payload.tickets |> Enum.map(&elem(&1, 0)) |> MapSet.new()
 
     timer =
       Process.send_after(self(), {:admission_deadline, barrier_ref}, state.admission_wait_ms)
@@ -380,6 +551,7 @@ defmodule LoopexDaemon.AdmissionRelay do
         cut_ref: barrier_ref,
         cut_payload: payload,
         frozen_permits: frozen_permits,
+        frozen_tickets: frozen_tickets,
         admission_deadline: deadline,
         deadline_timer: timer
     }
@@ -448,6 +620,11 @@ defmodule LoopexDaemon.AdmissionRelay do
       _other -> :ok
     end)
 
+    Enum.each(state.tickets, fn
+      {_origin, %{worker_pid: worker}} when is_pid(worker) -> Process.exit(worker, :kill)
+      _other -> :ok
+    end)
+
     Logger.debug("loopex daemon admission relay stop")
     :ok
   end
@@ -481,12 +658,36 @@ defmodule LoopexDaemon.AdmissionRelay do
   defp validate_class(class, nil) when class in @permit_classes, do: :ok
   defp validate_class(_class, _session_id), do: {:error, :invalid_origin}
 
+  defp validate_ticket_class(:session_create, nil, nil), do: :ok
+
+  defp validate_ticket_class(:session_attach, session_id, nil),
+    do: validate_ticket_session(session_id)
+
+  defp validate_ticket_class(class, session_id, {owner, owner_incarnation})
+       when class in @lease_ticket_classes and is_pid(owner) do
+    with :ok <- validate_ticket_session(session_id),
+         true <- valid_incarnation?(owner_incarnation) do
+      :ok
+    else
+      _invalid -> {:error, :invalid_origin}
+    end
+  end
+
+  defp validate_ticket_class(_class, _session_id, _owner_binding),
+    do: {:error, :invalid_origin}
+
+  defp validate_ticket_session(session_id) do
+    if is_binary(session_id) and byte_size(session_id) in 1..256,
+      do: :ok,
+      else: {:error, :invalid_origin}
+  end
+
   defp origin_capacity(state, connection) do
     cond do
       MapSet.size(connection.origins) >= @origins_per_connection ->
         {:error, :capacity_exceeded}
 
-      map_size(state.permits) >= @origin_limit ->
+      map_size(state.permits) + map_size(state.tickets) >= @origin_limit ->
         {:error, :capacity_exceeded}
 
       true ->
@@ -503,10 +704,46 @@ defmodule LoopexDaemon.AdmissionRelay do
   end
 
   defp existing_permit(state, origin_id, class, session_id, caller) do
-    case Map.fetch(state.permits, origin_id) do
-      {:ok, %{class: ^class, session_id: ^session_id, connection_pid: ^caller}} -> :exact
-      {:ok, _other} -> :conflict
-      :error -> :absent
+    cond do
+      Map.has_key?(state.tickets, origin_id) ->
+        :conflict
+
+      true ->
+        case Map.fetch(state.permits, origin_id) do
+          {:ok, %{class: ^class, session_id: ^session_id, connection_pid: ^caller}} ->
+            :exact
+
+          {:ok, _other} ->
+            :conflict
+
+          :error ->
+            :absent
+        end
+    end
+  end
+
+  defp existing_ticket(state, origin_id, class, session_id, owner_binding, caller) do
+    cond do
+      Map.has_key?(state.permits, origin_id) ->
+        :conflict
+
+      true ->
+        case Map.fetch(state.tickets, origin_id) do
+          {:ok,
+           %{
+             class: ^class,
+             session_id: ^session_id,
+             owner_binding: ^owner_binding,
+             connection_pid: ^caller
+           }} ->
+            :exact
+
+          {:ok, _other} ->
+            :conflict
+
+          :error ->
+            :absent
+        end
     end
   end
 
@@ -517,10 +754,17 @@ defmodule LoopexDaemon.AdmissionRelay do
     end
   end
 
-  defp bind_admitted(%{phase: :serving}, _origin_id), do: :ok
+  defp pending_ticket(state, origin_id) do
+    case Map.fetch(state.tickets, origin_id) do
+      {:ok, %{phase: :pending} = ticket} -> {:ok, ticket}
+      _other -> {:error, :ticket_unavailable}
+    end
+  end
 
-  defp bind_admitted(%{phase: :draining} = state, origin_id) do
-    if monotonic_ms() < state.admission_deadline and frozen_permit?(state, origin_id),
+  defp bind_admitted(%{phase: :serving}, _origin_id, _kind), do: :ok
+
+  defp bind_admitted(%{phase: :draining} = state, origin_id, kind) do
+    if monotonic_ms() < state.admission_deadline and frozen_origin?(state, kind, origin_id),
       do: :ok,
       else: {:error, :daemon_stopping}
   end
@@ -566,9 +810,14 @@ defmodule LoopexDaemon.AdmissionRelay do
       |> Enum.map(fn {origin_id, permit} -> {origin_id, frozen_phase(permit.phase)} end)
       |> Enum.sort()
 
+    tickets =
+      state.tickets
+      |> Enum.map(fn {origin_id, ticket} -> {origin_id, frozen_phase(ticket.phase)} end)
+      |> Enum.sort()
+
     %{
       admission_deadline: deadline,
-      tickets: [],
+      tickets: tickets,
       permits: permits
     }
   end
@@ -576,10 +825,13 @@ defmodule LoopexDaemon.AdmissionRelay do
   defp frozen_phase(:pending), do: :pending
   defp frozen_phase(:executing), do: :executing
   defp frozen_phase(:settling), do: :settling
+  defp frozen_phase(:queued), do: :queued
 
-  defp frozen_permit?(state, origin_id) do
-    MapSet.member?(state.frozen_permits, origin_id)
-  end
+  defp frozen_origin?(state, :permit, origin_id),
+    do: MapSet.member?(state.frozen_permits, origin_id)
+
+  defp frozen_origin?(state, :ticket, origin_id),
+    do: MapSet.member?(state.frozen_tickets, origin_id)
 
   defp expire_if_due(%{phase: :draining} = state) do
     if monotonic_ms() >= state.admission_deadline, do: expire_pending(state), else: state
@@ -593,11 +845,34 @@ defmodule LoopexDaemon.AdmissionRelay do
   defp admission_expired?(_state), do: false
 
   defp expire_pending(state) do
-    state.permits
-    |> Enum.filter(fn {_origin, permit} -> permit.phase == :pending end)
-    |> Enum.reduce(state, fn {origin_id, permit}, acc ->
-      send(permit.connection_pid, {:relay_permit_cancelled, origin_id, :daemon_stopping})
-      remove_permit(acc, origin_id)
+    state =
+      state.permits
+      |> Enum.filter(fn {_origin, permit} -> permit.phase == :pending end)
+      |> Enum.reduce(state, fn {origin_id, permit}, acc ->
+        send(permit.connection_pid, {:relay_permit_cancelled, origin_id, :daemon_stopping})
+        remove_permit(acc, origin_id)
+      end)
+
+    state.tickets
+    |> Enum.filter(fn {_origin, ticket} -> ticket.phase in [:pending, :queued] end)
+    |> Enum.reduce(state, fn {origin_id, ticket}, acc ->
+      send(ticket.connection_pid, {:relay_ticket_cancelled, origin_id, :daemon_stopping})
+
+      case ticket do
+        %{phase: :queued, worker_pid: worker} when is_pid(worker) ->
+          if Process.alive?(worker), do: Process.exit(worker, :kill)
+
+          ticket = %{
+            ticket
+            | phase: :settling,
+              disposition: :shutdown_cancelled
+          }
+
+          put_in(acc, [:tickets, origin_id], ticket)
+
+        %{phase: :pending} ->
+          remove_ticket(acc, origin_id)
+      end
     end)
   end
 
@@ -613,12 +888,20 @@ defmodule LoopexDaemon.AdmissionRelay do
           |> update_in([:connection_monitors], &Map.delete(&1, connection.monitor))
 
         Enum.reduce(connection.origins, state, fn origin_id, acc ->
-          lose_connection_permit(acc, origin_id)
+          lose_connection_origin(acc, origin_id)
         end)
         |> maybe_retire_connection(incarnation)
 
       _other ->
         state
+    end
+  end
+
+  defp lose_connection_origin(state, origin_id) do
+    cond do
+      Map.has_key?(state.permits, origin_id) -> lose_connection_permit(state, origin_id)
+      Map.has_key?(state.tickets, origin_id) -> lose_connection_ticket(state, origin_id)
+      true -> state
     end
   end
 
@@ -639,36 +922,84 @@ defmodule LoopexDaemon.AdmissionRelay do
     end
   end
 
+  defp lose_connection_ticket(state, origin_id) do
+    case Map.fetch(state.tickets, origin_id) do
+      {:ok, %{phase: :pending}} ->
+        remove_ticket(state, origin_id)
+
+      {:ok, %{phase: :queued, worker_pid: worker} = ticket} when is_pid(worker) ->
+        if Process.alive?(worker), do: Process.exit(worker, :kill)
+
+        ticket = %{ticket | phase: :settling, disposition: :connection_lost}
+        put_in(state, [:tickets, origin_id], ticket)
+
+      _other ->
+        state
+    end
+  end
+
   defp worker_down(state, monitor, pid, _reason) do
     case Map.pop(state.worker_monitors, monitor) do
       {nil, _worker_monitors} ->
         {:noreply, state}
 
-      {origin_id, worker_monitors} ->
+      {{:permit, origin_id}, worker_monitors} ->
         state = %{state | worker_monitors: worker_monitors}
+        permit_worker_down(state, origin_id, pid)
 
-        case Map.fetch(state.permits, origin_id) do
-          {:ok, %{worker_pid: ^pid} = permit} ->
-            state =
-              if permit.disposition do
-                remove_permit(state, origin_id)
-              else
-                if Process.alive?(permit.connection_pid) do
-                  send(
-                    permit.connection_pid,
-                    {:relay_permit_failed, origin_id, :worker_lost}
-                  )
-                end
+      {{:ticket, origin_id}, worker_monitors} ->
+        state = %{state | worker_monitors: worker_monitors}
+        ticket_worker_down(state, origin_id, pid)
+    end
+  end
 
-                remove_permit(state, origin_id)
-              end
+  defp permit_worker_down(state, origin_id, pid) do
+    case Map.fetch(state.permits, origin_id) do
+      {:ok, %{worker_pid: ^pid} = permit} ->
+        state =
+          if permit.disposition do
+            remove_permit(state, origin_id)
+          else
+            if Process.alive?(permit.connection_pid) do
+              send(
+                permit.connection_pid,
+                {:relay_permit_failed, origin_id, :worker_lost}
+              )
+            end
 
-            Logger.debug("loopex daemon admission relay worker reaped")
-            {:noreply, maybe_retire_connection(state, permit.connection_incarnation)}
+            remove_permit(state, origin_id)
+          end
 
-          _other ->
-            {:noreply, state}
-        end
+        Logger.debug("loopex daemon admission relay permit worker reaped")
+        {:noreply, maybe_retire_connection(state, permit.connection_incarnation)}
+
+      _other ->
+        {:noreply, state}
+    end
+  end
+
+  defp ticket_worker_down(state, origin_id, pid) do
+    case Map.fetch(state.tickets, origin_id) do
+      {:ok, %{worker_pid: ^pid} = ticket} ->
+        state =
+          if ticket.disposition do
+            remove_ticket(state, origin_id)
+          else
+            if Process.alive?(ticket.connection_pid) do
+              send(
+                ticket.connection_pid,
+                {:relay_ticket_failed, origin_id, :worker_lost}
+              )
+            end
+
+            remove_ticket(state, origin_id)
+          end
+
+        Logger.debug("loopex daemon admission relay ticket worker reaped")
+        {:noreply, maybe_retire_connection(state, ticket.connection_incarnation)}
+
+      _other ->
+        {:noreply, state}
     end
   end
 
@@ -689,6 +1020,26 @@ defmodule LoopexDaemon.AdmissionRelay do
           end
 
         %{state | permits: permits, connections: connections}
+    end
+  end
+
+  defp remove_ticket(state, origin_id) do
+    case Map.pop(state.tickets, origin_id) do
+      {nil, _tickets} ->
+        state
+
+      {ticket, tickets} ->
+        connections =
+          case Map.fetch(state.connections, ticket.connection_incarnation) do
+            {:ok, connection} ->
+              connection = %{connection | origins: MapSet.delete(connection.origins, origin_id)}
+              Map.put(state.connections, ticket.connection_incarnation, connection)
+
+            :error ->
+              state.connections
+          end
+
+        %{state | tickets: tickets, connections: connections}
     end
   end
 
