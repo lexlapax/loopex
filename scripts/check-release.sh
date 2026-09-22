@@ -26,7 +26,7 @@ printf 'check-release: candidate %s on %s %s\n' "$(git rev-parse HEAD)" "$(uname
 # that a tag refactor cannot drop one silently; each must execute at least one
 # test, because a run that executed nothing is not a pass. Each runs in its own
 # VM so no test can reach the applications after it.
-release_apps="loopex_app_server loopex_cli loopex_llm_reqllm loopex_protocol loopex_reference_client"
+release_apps="loopex_app_server loopex_cli loopex_daemon loopex_llm_reqllm loopex_protocol loopex_reference_client"
 logs=$(mktemp -d "${TMPDIR:-/tmp}/loopex-release.XXXXXX")
 trap 'rm -rf "$logs"' EXIT
 for app in $release_apps; do

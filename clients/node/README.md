@@ -16,6 +16,8 @@ imports anything outside Node's own standard library.
 | `loopex-client.mjs` | The connection, the request correlation, and the four wire representations |
 | `workflow.mjs` | The integrated workflow: negotiate, create, attach, prompt, follow events, inspect, leave |
 | `interaction-workflow.mjs` | The chain: find and select an admitted skill, submit a task, answer the host policy's question, watch the tool run, read the artifact it kept |
+| `daemon-client.mjs` | The generation-2 connection to a running daemon over its Unix-domain socket, sharing the wire helpers above |
+| `daemon-takeover.mjs` | The cross-process takeover: observe a session another client controls, wait for that controller's lease to lapse, take control with a fresh epoch, abort the running work and release |
 
 ## Running it
 
@@ -77,3 +79,18 @@ source archive with a real provider behind it. That case is excluded from
 ordinary runs, because it spends a provider key.
 
 Back to [clients](../README.md).
+
+## Against a daemon
+
+`daemon-takeover.mjs` connects to a daemon that is already running rather than
+starting a server of its own:
+
+```bash
+node clients/node/daemon-takeover.mjs "$LOOPEX_HOME/daemon/d.sock" <session-id>
+```
+
+It prints `{"attached":true}` once it observes the session, then one summary
+line after it has taken over and aborted. It never forces a live holder off:
+while another client holds the lease it keeps asking, once a second, for up to
+ninety seconds. `apps/loopex_daemon/test/external_socket_workflow_test.exs`
+runs it against a killed controller.
