@@ -349,6 +349,7 @@ defmodule LoopexDaemon.AdmissionRelay do
              :daemon_stopping
              | :invalid_promotion
              | :registry_unavailable
+             | :ticket_outstanding
              | :ticket_unavailable}
   def promote_ticket(
         relay,
@@ -387,6 +388,7 @@ defmodule LoopexDaemon.AdmissionRelay do
              :daemon_stopping
              | :invalid_promotion
              | :owner_unavailable
+             | :ticket_outstanding
              | :ticket_unavailable}
   def promote_lease_ticket(relay, origin_id, owner_incarnation, task_fun) do
     GenServer.call(
@@ -1170,7 +1172,8 @@ defmodule LoopexDaemon.AdmissionRelay do
              :ok <- authenticate_registry(state, caller, registry_incarnation),
              true <- is_function(task_fun, 0),
              {:ok, ticket} <- promotable_ticket(state, origin_id),
-             true <- ticket.class in [:session_create, :session_resume, :session_attach] do
+             true <- ticket.class in [:session_create, :session_resume, :session_attach],
+             :ok <- mutation_slot_available(state, ticket) do
           start_ticket_promotion(
             state,
             ticket,
@@ -1228,7 +1231,8 @@ defmodule LoopexDaemon.AdmissionRelay do
              true <- is_function(task_fun, 0),
              {:ok, ticket} <- promotable_ticket(state, origin_id),
              true <- ticket.class in @direct_lease_ticket_classes,
-             :ok <- authenticate_ticket_owner(state, ticket, caller, owner_incarnation) do
+             :ok <- authenticate_ticket_owner(state, ticket, caller, owner_incarnation),
+             :ok <- mutation_slot_available(state, ticket) do
           start_ticket_promotion(
             state,
             ticket,
@@ -1897,6 +1901,30 @@ defmodule LoopexDaemon.AdmissionRelay do
 
   defp waiter_pair(_state, _origin_id, _primary_origin_id),
     do: {:error, :invalid_waiter}
+
+  defp mutation_slot_available(state, %{
+         class: class,
+         session_id: session_id,
+         origin_id: origin_id
+       })
+       when class in @lease_ticket_classes do
+    occupied? =
+      Enum.any?(state.tickets, fn
+        {^origin_id, _ticket} ->
+          false
+
+        {_other_origin, %{class: other_class, session_id: ^session_id, phase: phase}}
+        when other_class in @lease_ticket_classes and phase in [:ticketed, :settling] ->
+          true
+
+        _other ->
+          false
+      end)
+
+    if occupied?, do: {:error, :ticket_outstanding}, else: :ok
+  end
+
+  defp mutation_slot_available(_state, _ticket), do: :ok
 
   defp start_ticket_promotion(
          state,
@@ -2624,7 +2652,14 @@ defmodule LoopexDaemon.AdmissionRelay do
          result_delivered: true,
          worker_pid: nil,
          connection_incarnation: incarnation
-       }} ->
+       } = ticket} ->
+        if ticket.settlement_mode == :direct do
+          send(
+            ticket.promoter_pid,
+            {:relay_lease_ticket_settled, self(), origin_id, ticket.promoter_incarnation}
+          )
+        end
+
         state
         |> remove_ticket(origin_id)
         |> maybe_retire_connection(incarnation)

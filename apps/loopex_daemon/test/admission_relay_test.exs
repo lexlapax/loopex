@@ -1212,6 +1212,160 @@ defmodule LoopexDaemon.AdmissionRelayTest do
     stop_connection(connection, relay, incarnation)
   end
 
+  test "one unresolved mutation per session spans direct and resume promotion" do
+    relay = start_relay()
+    owner = start_actor()
+    owner_incarnation = incarnation()
+    registry = start_registry()
+    registry_incarnation = incarnation()
+
+    assert :ok =
+             AdmissionRelay.register_lease_owner(
+               relay,
+               "session",
+               owner,
+               owner_incarnation
+             )
+
+    assert :ok =
+             AdmissionRelay.register_registry(relay, registry, registry_incarnation)
+
+    connection_incarnation = incarnation()
+    connection = start_connection(relay, connection_incarnation)
+    first = {connection_incarnation, 0, 1}
+    second = {connection_incarnation, 1, 1}
+    resume = {connection_incarnation, 2, 1}
+    binding = {owner, owner_incarnation}
+
+    for {origin, class} <- [
+          {first, :session_prompt},
+          {second, :session_abort},
+          {resume, :session_resume}
+        ] do
+      assert {:ok, ^origin} =
+               invoke(connection, fn ->
+                 AdmissionRelay.open_ticket(relay, origin, class, "session", binding)
+               end)
+
+      worker = start_ticket_worker(connection)
+
+      assert :ok =
+               invoke(connection, fn ->
+                 AdmissionRelay.bind_ticket_worker(relay, origin, worker, incarnation())
+               end)
+    end
+
+    parent = self()
+    first_result = %{"operation" => "first", "status" => "accepted"}
+
+    assert {:ok, ^first} =
+             invoke(owner, fn ->
+               AdmissionRelay.promote_lease_ticket(
+                 relay,
+                 first,
+                 owner_incarnation,
+                 fn ->
+                   send(parent, {:one_mutation_task, self()})
+
+                   receive do
+                     :complete -> first_result
+                   end
+                 end
+               )
+             end)
+
+    assert_receive {:one_mutation_task, first_task}, 500
+
+    assert {:error, :ticket_outstanding} =
+             invoke(owner, fn ->
+               AdmissionRelay.promote_lease_ticket(
+                 relay,
+                 second,
+                 owner_incarnation,
+                 fn -> %{"unexpected" => true} end
+               )
+             end)
+
+    resume_settlement = make_ref()
+
+    assert {:error, :ticket_outstanding} =
+             invoke(registry, fn ->
+               AdmissionRelay.promote_ticket(
+                 relay,
+                 resume,
+                 registry_incarnation,
+                 resume_settlement,
+                 fn -> %{"unexpected" => true} end
+               )
+             end)
+
+    send(first_task, :complete)
+
+    assert_receive {:connection_message, ^connection,
+                    {:relay_ticket_result, ^first, ^first_result}},
+                   500
+
+    assert_receive {:registry_message, ^owner,
+                    {:relay_lease_ticket_settled, ^relay, ^first, ^owner_incarnation}},
+                   500
+
+    resume_result = %{"operation" => "resume", "status" => "accepted"}
+
+    assert {:ok, ^resume} =
+             invoke(registry, fn ->
+               AdmissionRelay.promote_ticket(
+                 relay,
+                 resume,
+                 registry_incarnation,
+                 resume_settlement,
+                 fn -> resume_result end
+               )
+             end)
+
+    assert_receive {:registry_message, ^registry,
+                    {:relay_ticket_settlement, ^relay, ^resume, ^resume_settlement,
+                     ^resume_result}},
+                   500
+
+    assert :ok =
+             invoke(registry, fn ->
+               AdmissionRelay.settle_ticket(
+                 relay,
+                 resume,
+                 registry_incarnation,
+                 resume_settlement
+               )
+             end)
+
+    assert_receive {:connection_message, ^connection,
+                    {:relay_ticket_result, ^resume, ^resume_result}},
+                   500
+
+    eventually(fn -> AdmissionRelay.status(relay).tickets == 1 end)
+    second_result = %{"operation" => "second", "status" => "accepted"}
+
+    assert {:ok, ^second} =
+             invoke(owner, fn ->
+               AdmissionRelay.promote_lease_ticket(
+                 relay,
+                 second,
+                 owner_incarnation,
+                 fn -> second_result end
+               )
+             end)
+
+    assert_receive {:connection_message, ^connection,
+                    {:relay_ticket_result, ^second, ^second_result}},
+                   500
+
+    assert_receive {:registry_message, ^owner,
+                    {:relay_lease_ticket_settled, ^relay, ^second, ^owner_incarnation}},
+                   500
+
+    eventually(fn -> AdmissionRelay.status(relay).tickets == 0 end)
+    stop_connection(connection, relay, connection_incarnation)
+  end
+
   test "lease owner loss claims pending and queued mutations for exact settlement" do
     relay = start_relay()
     owner = start_actor()
