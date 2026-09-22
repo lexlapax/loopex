@@ -817,6 +817,277 @@ defmodule Loopex.RuntimeQuiesceTest do
     refute contains_process_term?(result)
   end
 
+  test "the production phase bounds are fixed and invalid injected sets refuse" do
+    assert Quiesce.bounds() == %{
+             admission_ms: 70_000,
+             initial_gate_ms: 5_000,
+             worker_reap_ms: 5_000,
+             status_census_ms: 10_000,
+             status_work_ms: 5_000,
+             coordinator_termination_ms: 330_000,
+             termination_projection_ms: 5_000,
+             fence_budget_ms: 130_000,
+             fence_reap_ms: 5_000
+           }
+
+    fixture = fixture("quiesce-invalid-bounds")
+
+    assert {:error, :runtime_unavailable} =
+             Quiesce.run(
+               fixture.runtime.supervisor,
+               fixture.runtime.token,
+               Map.delete(Quiesce.bounds(), :fence_reap_ms)
+             )
+
+    assert {:error, :runtime_unavailable} =
+             Quiesce.run(
+               fixture.runtime.supervisor,
+               fixture.runtime.token,
+               %{Quiesce.bounds() | admission_ms: 5_000, worker_reap_ms: 5_000}
+             )
+
+    assert {:error, :runtime_unavailable} =
+             Quiesce.run(
+               fixture.runtime.supervisor,
+               fixture.runtime.token,
+               %{Quiesce.bounds() | admission_ms: 70_001}
+             )
+  end
+
+  test "sixty-four blocked admissions share one injected work cutoff" do
+    fixture = fixture("quiesce-admission-population-bound")
+
+    {_control, session_ids, coordinators} =
+      install_probe_entries(fixture.runtime, 64, :block_admission)
+
+    bounds = fast_bounds(%{admission_ms: 500, worker_reap_ms: 100})
+    started_at = System.monotonic_time(:millisecond)
+
+    assert {:ok, result} =
+             Quiesce.run(fixture.runtime.supervisor, fixture.runtime.token, bounds)
+
+    elapsed_ms = System.monotonic_time(:millisecond) - started_at
+    calls = receive_probe_calls(:admit, session_ids)
+
+    assert Map.keys(calls) |> Enum.sort() == session_ids
+    assert result.unsettled == session_ids
+    assert result.settled == []
+    assert result.absent == []
+    assert elapsed_ms >= bounds.admission_ms - bounds.worker_reap_ms
+    assert elapsed_ms < 3_000
+    assert Enum.all?(coordinators, &(not Process.alive?(&1)))
+  end
+
+  @tag :long_bound
+  @tag timeout: 80_000
+  test "production admission cuts sixty-four blocked calls at sixty-five seconds" do
+    fixture = fixture("quiesce-admission-production-bound")
+
+    {control, session_ids, _coordinators} =
+      install_probe_entries(fixture.runtime, 64, :block_admission)
+
+    started_at = System.monotonic_time(:millisecond)
+    quiesce = Task.async(fn -> Quiesce.run(fixture.runtime.supervisor, fixture.runtime.token) end)
+    calls = receive_probe_calls(:admit, session_ids)
+    :ok = await_pids_down(Map.values(calls), 70_000)
+    elapsed_ms = System.monotonic_time(:millisecond) - started_at
+
+    assert elapsed_ms >= 65_000
+    assert elapsed_ms <= 70_000
+
+    Process.exit(control, :kill)
+    assert {:error, :runtime_unavailable} = Task.await(quiesce, 10_000)
+  end
+
+  test "sixty-four status reads share one injected census cutoff" do
+    fixture = fixture("quiesce-status-population-bound")
+
+    {_control, session_ids, coordinators} =
+      install_probe_entries(fixture.runtime, 64, :block_status)
+
+    bounds =
+      fast_bounds(%{
+        status_census_ms: 400,
+        status_work_ms: 300
+      })
+
+    started_at = System.monotonic_time(:millisecond)
+
+    assert {:ok, result} =
+             Quiesce.run(fixture.runtime.supervisor, fixture.runtime.token, bounds)
+
+    elapsed_ms = System.monotonic_time(:millisecond) - started_at
+    assert Map.keys(receive_probe_calls(:admit, session_ids)) |> Enum.sort() == session_ids
+    assert Map.keys(receive_probe_calls(:release, session_ids)) |> Enum.sort() == session_ids
+    assert Map.keys(receive_probe_calls(:status, session_ids)) |> Enum.sort() == session_ids
+    assert result.unsettled == session_ids
+    assert result.settled == []
+    assert result.absent == []
+    assert elapsed_ms >= bounds.status_work_ms
+    assert elapsed_ms < 3_000
+    assert Enum.all?(coordinators, &(not Process.alive?(&1)))
+  end
+
+  @tag :long_bound
+  @tag timeout: 20_000
+  test "production status census gives sixty-four unanswered reads one five-second cutoff" do
+    fixture = fixture("quiesce-status-production-bound")
+
+    {control, session_ids, _coordinators} =
+      install_probe_entries(fixture.runtime, 64, :block_status)
+
+    started_at = System.monotonic_time(:millisecond)
+    quiesce = Task.async(fn -> Quiesce.run(fixture.runtime.supervisor, fixture.runtime.token) end)
+    _admissions = receive_probe_calls(:admit, session_ids)
+    _releases = receive_probe_calls(:release, session_ids)
+    calls = receive_probe_calls(:status, session_ids)
+    :ok = await_pids_down(Map.values(calls), 10_000)
+    elapsed_ms = System.monotonic_time(:millisecond) - started_at
+
+    assert elapsed_ms >= 5_000
+    assert elapsed_ms <= 10_000
+
+    Process.exit(control, :kill)
+    assert {:error, :runtime_unavailable} = Task.await(quiesce, 10_000)
+  end
+
+  test "sixty-four coordinators share one injected termination cutoff" do
+    fixture = fixture("quiesce-termination-population-bound")
+
+    {_control, session_ids, coordinators} =
+      install_probe_entries(fixture.runtime, 64, :settled_status)
+
+    bounds =
+      fast_bounds(%{
+        coordinator_termination_ms: 500,
+        termination_projection_ms: 50,
+        worker_reap_ms: 100
+      })
+
+    started_at = System.monotonic_time(:millisecond)
+
+    assert {:ok, result} =
+             Quiesce.run(fixture.runtime.supervisor, fixture.runtime.token, bounds)
+
+    elapsed_ms = System.monotonic_time(:millisecond) - started_at
+    assert Map.keys(receive_probe_calls(:admit, session_ids)) |> Enum.sort() == session_ids
+    assert Map.keys(receive_probe_calls(:release, session_ids)) |> Enum.sort() == session_ids
+    assert Map.keys(receive_probe_calls(:status, session_ids)) |> Enum.sort() == session_ids
+    assert result.unsettled == session_ids
+    assert elapsed_ms >= bounds.coordinator_termination_ms - bounds.worker_reap_ms
+    assert elapsed_ms < 3_000
+    assert Enum.all?(coordinators, &(not Process.alive?(&1)))
+  end
+
+  @tag :long_bound
+  @tag timeout: 345_000
+  test "production termination kills sixty-four surviving coordinators at its work cutoff" do
+    fixture = fixture("quiesce-termination-production-bound")
+
+    {_control, session_ids, coordinators} =
+      install_probe_entries(fixture.runtime, 64, :settled_status)
+
+    started_at = System.monotonic_time(:millisecond)
+    quiesce = Task.async(fn -> Quiesce.run(fixture.runtime.supervisor, fixture.runtime.token) end)
+    _admissions = receive_probe_calls(:admit, session_ids)
+    _releases = receive_probe_calls(:release, session_ids)
+    _statuses = receive_probe_calls(:status, session_ids)
+    :ok = await_pids_down(coordinators, 330_000)
+    elapsed_ms = System.monotonic_time(:millisecond) - started_at
+
+    assert elapsed_ms >= 325_000
+    assert elapsed_ms <= 330_000
+    assert {:ok, %{unsettled: ^session_ids}} = Task.await(quiesce, 10_000)
+  end
+
+  test "sixty-three blocked fences share one cutoff while one sibling completes" do
+    fixture = fixture("quiesce-fence-population-bound")
+
+    session_ids =
+      Enum.map(1..64, fn index ->
+        create_session(fixture.runtime, "create-fence-bound-#{index}")
+      end)
+      |> Enum.sort()
+
+    {blocked_ids, [sibling_id]} = Enum.split(session_ids, 63)
+
+    :ok =
+      M1RuntimeTestStore.delay_ownership_heads(
+        fixture.store_pid,
+        blocked_ids,
+        self()
+      )
+
+    bounds =
+      fast_bounds(%{
+        admission_ms: 2_000,
+        coordinator_termination_ms: 2_000,
+        fence_budget_ms: 500,
+        fence_reap_ms: 100
+      })
+
+    started_at = System.monotonic_time(:millisecond)
+
+    assert {:ok, result} =
+             Quiesce.run(fixture.runtime.supervisor, fixture.runtime.token, bounds)
+
+    elapsed_ms = System.monotonic_time(:millisecond) - started_at
+    delayed = receive_ownership_head_delays(blocked_ids)
+    Enum.each(delayed, fn {_session_id, %{waiter: waiter}} -> Process.exit(waiter, :kill) end)
+
+    assert result.settled == [sibling_id]
+    assert result.unsettled == blocked_ids
+    assert result.absent == []
+    assert result.fences[sibling_id] == :committed
+
+    assert Enum.all?(blocked_ids, fn session_id ->
+             result.fences[session_id] == {:unknown, :no_head}
+           end)
+
+    assert elapsed_ms >= bounds.fence_budget_ms - bounds.fence_reap_ms
+    assert elapsed_ms < 3_000
+    assert Enum.all?(delayed, fn {_id, %{caller: caller}} -> not Process.alive?(caller) end)
+
+    {:ok, %{control: control}} = Runtime.children(fixture.runtime)
+    assert :sys.get_state(control).quiesce_fences == %{}
+  end
+
+  @tag :long_bound
+  @tag timeout: 145_000
+  test "production fence cutoff reaps sixty-three blocked paths and permits one sibling" do
+    fixture = fixture("quiesce-fence-production-bound")
+
+    session_ids =
+      Enum.map(1..64, fn index ->
+        create_session(fixture.runtime, "create-production-fence-bound-#{index}")
+      end)
+      |> Enum.sort()
+
+    {blocked_ids, [sibling_id]} = Enum.split(session_ids, 63)
+
+    :ok =
+      M1RuntimeTestStore.delay_ownership_heads(
+        fixture.store_pid,
+        blocked_ids,
+        self()
+      )
+
+    started_at = System.monotonic_time(:millisecond)
+    quiesce = Task.async(fn -> Quiesce.run(fixture.runtime.supervisor, fixture.runtime.token) end)
+    delayed = receive_ownership_head_delays(blocked_ids)
+    :ok = await_pids_down(Enum.map(delayed, fn {_id, row} -> row.caller end), 130_000)
+    assert {:ok, result} = Task.await(quiesce, 10_000)
+    elapsed_ms = System.monotonic_time(:millisecond) - started_at
+
+    Enum.each(delayed, fn {_session_id, %{waiter: waiter}} -> Process.exit(waiter, :kill) end)
+
+    assert elapsed_ms >= 125_000
+    assert elapsed_ms <= 130_000
+    assert result.settled == [sibling_id]
+    assert result.unsettled == blocked_ids
+    assert result.fences[sibling_id] == :committed
+  end
+
   test "a commit-unknown fence is re-presented once under its exact binding" do
     fixture = fixture("quiesce-fence-represent")
     session_id = create_session(fixture.runtime, "create")
@@ -1047,6 +1318,143 @@ defmodule Loopex.RuntimeQuiesceTest do
   defp create_session(runtime, command_id) do
     assert {:ok, session_id} = Runtime.create_session(runtime, command_id, %{})
     session_id
+  end
+
+  defp fast_bounds(overrides) do
+    Quiesce.bounds()
+    |> Map.merge(%{
+      admission_ms: 300,
+      initial_gate_ms: 50,
+      worker_reap_ms: 50,
+      status_census_ms: 200,
+      status_work_ms: 100,
+      coordinator_termination_ms: 150,
+      termination_projection_ms: 50,
+      fence_budget_ms: 150,
+      fence_reap_ms: 50
+    })
+    |> Map.merge(overrides)
+  end
+
+  defp install_probe_entries(runtime, count, mode) do
+    {:ok, %{control: control}} = Runtime.children(runtime)
+    observer = self()
+
+    rows =
+      Map.new(1..count, fn index ->
+        suffix = index |> Integer.to_string() |> String.pad_leading(2, "0")
+        session_id = "bound-#{mode}-#{suffix}"
+        coordinator = spawn(fn -> quiesce_probe(observer, session_id, mode) end)
+        on_exit(fn -> if Process.alive?(coordinator), do: Process.exit(coordinator, :kill) end)
+
+        owner = %{
+          owner_epoch: 1,
+          owner_incarnation_id: "probe-owner-#{index}"
+        }
+
+        {session_id, %{status: :active, coordinator: coordinator, owner: owner}}
+      end)
+
+    :sys.replace_state(control, fn state ->
+      %{
+        state
+        | sessions: Map.merge(state.sessions, rows),
+          writer_domains: rows |> Map.keys() |> MapSet.new()
+      }
+    end)
+
+    session_ids = rows |> Map.keys() |> Enum.sort()
+    coordinators = Enum.map(session_ids, &rows[&1].coordinator)
+    {control, session_ids, coordinators}
+  end
+
+  defp quiesce_probe(observer, session_id, mode) do
+    receive do
+      {:"$gen_call", from, {:admit_quiesce_abort, _owner, drain_id, phase_owner}} ->
+        send(observer, {:quiesce_probe_call, :admit, session_id, elem(from, 0)})
+
+        unless mode == :block_admission do
+          GenServer.reply(
+            from,
+            {:admitted,
+             %{
+               command_id: "abort-#{session_id}",
+               run_id: "run-#{session_id}",
+               cleanup_grace_ms: 1,
+               owner_epoch: 1
+             }}
+          )
+        end
+
+        quiesce_probe(observer, session_id, mode, drain_id, phase_owner)
+    end
+  end
+
+  defp quiesce_probe(observer, session_id, mode, drain_id, phase_owner) do
+    receive do
+      {:"$gen_call", from, {:release_quiesce_cleanup, _owner, ^drain_id, ^phase_owner}} ->
+        send(observer, {:quiesce_probe_call, :release, session_id, elem(from, 0)})
+        GenServer.reply(from, :ok)
+
+        send(
+          phase_owner,
+          {:loopex_quiesce_terminal, drain_id, session_id, "run-#{session_id}", self()}
+        )
+
+        quiesce_probe(observer, session_id, mode, drain_id, phase_owner)
+
+      {:"$gen_call", from, {:session_status, _owner}} ->
+        send(observer, {:quiesce_probe_call, :status, session_id, elem(from, 0)})
+
+        unless mode == :block_status do
+          GenServer.reply(from, {:ok, %{active_run_id: nil, pending_work_ids: []}})
+        end
+
+        quiesce_probe(observer, session_id, mode, drain_id, phase_owner)
+    end
+  end
+
+  defp receive_probe_calls(phase, session_ids) do
+    Map.new(session_ids, fn expected_id ->
+      receive do
+        {:quiesce_probe_call, ^phase, session_id, caller} ->
+          {session_id, caller}
+      after
+        5_000 -> flunk("missing #{phase} call for #{expected_id}")
+      end
+    end)
+  end
+
+  defp receive_ownership_head_delays(session_ids) do
+    Map.new(session_ids, fn expected_id ->
+      receive do
+        {:ownership_head_delayed, waiter, caller, _store, session_id} ->
+          {session_id, %{waiter: waiter, caller: caller}}
+      after
+        5_000 -> flunk("missing delayed ownership-head read for #{expected_id}")
+      end
+    end)
+  end
+
+  defp await_pids_down(pids, timeout_ms) do
+    monitors = Map.new(pids, &{Process.monitor(&1), &1})
+    deadline = System.monotonic_time(:millisecond) + timeout_ms
+    await_monitors_down(monitors, deadline)
+  end
+
+  defp await_monitors_down(monitors, _deadline) when map_size(monitors) == 0, do: :ok
+
+  defp await_monitors_down(monitors, deadline) do
+    receive do
+      {:DOWN, monitor, :process, pid, _reason} ->
+        case Map.pop(monitors, monitor) do
+          {^pid, remaining} -> await_monitors_down(remaining, deadline)
+          {nil, _same} -> await_monitors_down(monitors, deadline)
+        end
+    after
+      max(deadline - System.monotonic_time(:millisecond), 0) ->
+        flunk("#{map_size(monitors)} processes survived the shared deadline")
+    end
   end
 
   defp assert_eventually(assertion, attempts \\ 200)

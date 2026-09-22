@@ -53,6 +53,10 @@ defmodule Loopex.M1RuntimeTestStore do
   def block_next_event_read(pid, observer) when is_pid(observer),
     do: GenServer.call(pid, {:block_next_event_read, observer})
 
+  def delay_ownership_heads(pid, session_ids, observer)
+      when is_list(session_ids) and is_pid(observer),
+      do: GenServer.call(pid, {:delay_ownership_heads, session_ids, observer})
+
   def release(waiter) when is_pid(waiter), do: send(waiter, :release)
 
   def inspect_state(pid), do: GenServer.call(pid, :inspect_state)
@@ -115,6 +119,7 @@ defmodule Loopex.M1RuntimeTestStore do
        held_before_transitions: %{},
        pending_transactions: %{},
        event_read_block: nil,
+       delayed_ownership_heads: %{},
        fail_reads: false,
        refuse_records: MapSet.new()
      }}
@@ -165,6 +170,11 @@ defmodule Loopex.M1RuntimeTestStore do
     {:reply, :ok, %{state | event_read_block: observer}}
   end
 
+  def handle_call({:delay_ownership_heads, session_ids, observer}, _from, state) do
+    delayed = Map.new(session_ids, &{&1, observer})
+    {:reply, :ok, %{state | delayed_ownership_heads: delayed}}
+  end
+
   def handle_call({:fail_reads, enabled}, _from, state) do
     {:reply, :ok, %{state | fail_reads: enabled == true}}
   end
@@ -185,7 +195,8 @@ defmodule Loopex.M1RuntimeTestStore do
         :held_before_records,
         :held_before_transitions,
         :pending_transactions,
-        :event_read_block
+        :event_read_block,
+        :delayed_ownership_heads
       ])
 
     {:reply, visible, state}
@@ -213,7 +224,7 @@ defmodule Loopex.M1RuntimeTestStore do
   def handle_call({:ownership_head, _session_id}, _from, %{fail_reads: true} = state),
     do: {:reply, :unavailable, state}
 
-  def handle_call({:ownership_head, session_id}, _from, state) do
+  def handle_call({:ownership_head, session_id}, from, state) do
     result =
       case Map.get(state.sessions, session_id) do
         nil ->
@@ -227,7 +238,16 @@ defmodule Loopex.M1RuntimeTestStore do
            }}
       end
 
-    {:reply, result, state}
+    case Map.pop(state.delayed_ownership_heads, session_id) do
+      {observer, delayed} when is_pid(observer) ->
+        caller = elem(from, 0)
+        waiter = delayed_reply(from, result)
+        send(observer, {:ownership_head_delayed, waiter, caller, self(), session_id})
+        {:noreply, %{state | delayed_ownership_heads: delayed}}
+
+      {nil, _same} ->
+        {:reply, result, state}
+    end
   end
 
   def handle_call({:runtime_command, command}, _from, state) do

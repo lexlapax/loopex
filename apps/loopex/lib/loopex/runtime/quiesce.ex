@@ -8,15 +8,18 @@ defmodule Loopex.Runtime.Quiesce do
   alias Loopex.Runtime.SessionCoordinator
   alias Loopex.Runtime.Supervisor, as: RuntimeSupervisor
 
-  @admission_ms 70_000
-  @initial_gate_ms 5_000
-  @worker_reap_ms 5_000
-  @status_census_ms 10_000
-  @status_work_ms 5_000
-  @coordinator_termination_ms 330_000
-  @termination_projection_ms 5_000
-  @fence_budget_ms 130_000
-  @fence_reap_ms 5_000
+  @default_bounds %{
+    admission_ms: 70_000,
+    initial_gate_ms: 5_000,
+    worker_reap_ms: 5_000,
+    status_census_ms: 10_000,
+    status_work_ms: 5_000,
+    coordinator_termination_ms: 330_000,
+    termination_projection_ms: 5_000,
+    fence_budget_ms: 130_000,
+    fence_reap_ms: 5_000
+  }
+  @bound_keys @default_bounds |> Map.keys() |> Enum.sort()
 
   @type result :: %{
           drain_id: binary(),
@@ -32,13 +35,40 @@ defmodule Loopex.Runtime.Quiesce do
 
   @doc false
   @spec run(pid(), reference()) :: {:ok, result()} | {:error, :runtime_unavailable}
-  def run(root, token) when is_pid(root) and is_reference(token) do
+  def run(root, token), do: run(root, token, @default_bounds)
+
+  @doc false
+  @spec bounds() :: %{required(atom()) => pos_integer()}
+  def bounds, do: @default_bounds
+
+  # Concept: production owns fixed phase ceilings while tests can exercise the
+  # same deadline machinery without waiting for each maximum wall-clock bound.
+  #
+  # Technical depth: the three-argument form is internal to core. It accepts the
+  # complete bound set and preserves every ordering relationship; the public
+  # runtime path always calls `run/2`, which supplies the compile-time defaults.
+  # Tests assert those defaults separately and inject only shorter durations at
+  # the point each production deadline is armed.
+  @doc false
+  @spec run(pid(), reference(), map()) :: {:ok, result()} | {:error, :runtime_unavailable}
+  def run(root, token, bounds)
+      when is_pid(root) and is_reference(token) and is_map(bounds) do
+    if valid_bounds?(bounds) do
+      run_with_bounds(root, token, bounds)
+    else
+      {:error, :runtime_unavailable}
+    end
+  end
+
+  def run(_root, _token, _bounds), do: {:error, :runtime_unavailable}
+
+  defp run_with_bounds(root, token, bounds) do
     caller = self()
     call_ref = make_ref()
 
     {owner, monitor} =
       spawn_monitor(fn ->
-        phase_owner(caller, call_ref, root, token)
+        phase_owner(caller, call_ref, root, token, bounds)
       end)
 
     receive do
@@ -52,30 +82,29 @@ defmodule Loopex.Runtime.Quiesce do
     end
   end
 
-  def run(_root, _token), do: {:error, :runtime_unavailable}
-
-  defp phase_owner(caller, call_ref, root, token) do
+  defp phase_owner(caller, call_ref, root, token, bounds) do
     Process.flag(:trap_exit, true)
     caller_monitor = Process.monitor(caller)
     started_at = now_ms()
-    admission_deadline = started_at + @admission_ms
+    admission_deadline = started_at + bounds.admission_ms
     drain_id = new_drain_id()
 
     Logger.debug("runtime quiesce phase owner started")
 
     result =
       with {:ok, children} <-
-             resolve_children(root, caller, caller_monitor, started_at + @initial_gate_ms),
+             resolve_children(root, caller, caller_monitor, started_at + bounds.initial_gate_ms),
            control = Map.fetch!(children, :control),
            control_monitor = Process.monitor(control),
            context = %{
              caller: caller,
              caller_monitor: caller_monitor,
              control: control,
-             control_monitor: control_monitor
+             control_monitor: control_monitor,
+             bounds: bounds
            },
            {:ok, entries} <-
-             install_gate(context, token, drain_id, started_at + @initial_gate_ms),
+             install_gate(context, token, drain_id, started_at + bounds.initial_gate_ms),
            {:ok, admission_results} <-
              admit_aborts(context, entries, drain_id, admission_deadline),
            admissions =
@@ -113,7 +142,7 @@ defmodule Loopex.Runtime.Quiesce do
            session_supervisor: Map.fetch!(children, :sessions),
            termination_entries: termination_entries,
            fences: fences,
-           fence_budget_ms: @fence_budget_ms
+           fence_budget_ms: bounds.fence_budget_ms
          })}
       else
         _failure -> {:error, :runtime_unavailable}
@@ -129,7 +158,7 @@ defmodule Loopex.Runtime.Quiesce do
       {:loopex_quiesce_prepared_ack, ^call_ref, ^caller} -> :ok
       {:DOWN, ^caller_monitor, :process, ^caller, _reason} -> exit(:caller_lost)
     after
-      @initial_gate_ms -> :ok
+      bounds.initial_gate_ms -> :ok
     end
 
     # A non-normal phase-owner exit is the final ownership barrier: any linked
@@ -166,7 +195,7 @@ defmodule Loopex.Runtime.Quiesce do
   end
 
   defp admit_aborts(context, entries, drain_id, admission_deadline) do
-    work_deadline = admission_deadline - @worker_reap_ms
+    work_deadline = admission_deadline - context.bounds.worker_reap_ms
     phase_owner = self()
 
     {workers, initial} =
@@ -294,7 +323,7 @@ defmodule Loopex.Runtime.Quiesce do
           {pid, entry.session_id}
         end)
 
-      outer_deadline = max(deadline, now_ms() + @worker_reap_ms)
+      outer_deadline = max(deadline, now_ms() + context.bounds.worker_reap_ms)
 
       case collect_workers(context, workers, %{}, deadline, outer_deadline) do
         {:ok, releases} ->
@@ -418,8 +447,8 @@ defmodule Loopex.Runtime.Quiesce do
         context,
         workers,
         initial,
-        started_at + @status_work_ms,
-        started_at + @status_census_ms
+        started_at + context.bounds.status_work_ms,
+        started_at + context.bounds.status_census_ms
       )
 
     case result do
@@ -459,8 +488,8 @@ defmodule Loopex.Runtime.Quiesce do
   # only their exact DOWN/EXIT signals.
   defp terminate_coordinators(context, token, drain_id, first_entries, session_supervisor) do
     started_at = now_ms()
-    outer_deadline = started_at + @coordinator_termination_ms
-    projection_deadline = started_at + @termination_projection_ms
+    outer_deadline = started_at + context.bounds.coordinator_termination_ms
+    projection_deadline = started_at + context.bounds.termination_projection_ms
 
     with {:ok, entries} <-
            run_one_worker(
@@ -481,7 +510,7 @@ defmodule Loopex.Runtime.Quiesce do
              context,
              entries,
              session_supervisor,
-             outer_deadline - @worker_reap_ms,
+             outer_deadline - context.bounds.worker_reap_ms,
              outer_deadline
            ) do
       {:ok, entries}
@@ -702,8 +731,8 @@ defmodule Loopex.Runtime.Quiesce do
 
   defp fence_writer_domains(context, token, drain_id, entries, admissions) do
     started_at = now_ms()
-    outer_deadline = started_at + @fence_budget_ms
-    work_deadline = outer_deadline - @fence_reap_ms
+    outer_deadline = started_at + context.bounds.fence_budget_ms
+    work_deadline = outer_deadline - context.bounds.fence_reap_ms
     phase_owner = self()
 
     operations =
@@ -1217,6 +1246,20 @@ defmodule Loopex.Runtime.Quiesce do
     Enum.each(workers, fn {pid, _session_id} ->
       if Process.alive?(pid), do: Process.exit(pid, :kill)
     end)
+  end
+
+  defp valid_bounds?(bounds) do
+    Map.keys(bounds) |> Enum.sort() == @bound_keys and
+      Enum.all?(bounds, fn {key, value} ->
+        is_integer(value) and value > 0 and value <= Map.fetch!(@default_bounds, key)
+      end) and
+      bounds.worker_reap_ms < bounds.admission_ms and
+      bounds.initial_gate_ms <= bounds.admission_ms - bounds.worker_reap_ms and
+      bounds.status_work_ms < bounds.status_census_ms and
+      bounds.worker_reap_ms < bounds.coordinator_termination_ms and
+      bounds.termination_projection_ms <=
+        bounds.coordinator_termination_ms - bounds.worker_reap_ms and
+      bounds.fence_reap_ms < bounds.fence_budget_ms
   end
 
   defp new_drain_id do
