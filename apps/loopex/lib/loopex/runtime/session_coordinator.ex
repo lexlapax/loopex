@@ -361,6 +361,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
        # The journal prefix the owner-discovery scan already read. Recovery
        # continues from its tail instead of reading the same rows a second time.
        recovery_records: [],
+       recovery_events: nil,
        attempt: 1,
        # Technical depth: one counter for the whole acquisition, never reset. A
        # counter reset by succession contention would multiply the budget by
@@ -1343,11 +1344,16 @@ defmodule Loopex.Runtime.SessionCoordinator do
   defp discover_and_advance_owner(%{owner_command: owner_command} = state)
        when is_map(owner_command) do
     with {:ok, prior_tx_id, scanned} <- discover_prior_tx_id(state),
+         {:ok, durable, events} <- replay_acquisition_history(state, scanned),
          :ok <- prior_transaction_resolved(state, prior_tx_id),
          {:ok, head} <- ownership_head(state),
+         :ok <- recovery_head_matches(durable, head),
+         :ok <- recover_drain_identities(state, scanned, durable, head),
+         {:ok, confirmed_head} <- ownership_head(state),
+         :ok <- recovery_head_matches(durable, confirmed_head),
          {:ok, attempt_generation, expected_generation} <- owner_attempt_generation(state),
          {:ok, transaction, incarnation} <-
-           build_command_owner_candidate(state, head, attempt_generation),
+           build_command_owner_candidate(state, confirmed_head, attempt_generation),
          {:ok, stage} <-
            Store.stage_owner_attempt(
              Map.put(owner_command, :attempt_generation, attempt_generation),
@@ -1361,6 +1367,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
           | phase: :acquiring,
             prior_tx_id: prior_tx_id,
             recovery_records: scanned,
+            recovery_events: events,
             transaction: transaction,
             incarnation: incarnation
         },
@@ -1374,14 +1381,20 @@ defmodule Loopex.Runtime.SessionCoordinator do
 
   defp discover_and_advance_owner(state) do
     with {:ok, prior_tx_id, scanned} <- discover_prior_tx_id(state),
+         {:ok, durable, events} <- replay_acquisition_history(state, scanned),
          :ok <- prior_transaction_resolved(state, prior_tx_id),
          {:ok, head} <- ownership_head(state),
-         {:ok, transaction, incarnation} <- build_owner_candidate(state, head) do
+         :ok <- recovery_head_matches(durable, head),
+         :ok <- recover_drain_identities(state, scanned, durable, head),
+         {:ok, confirmed_head} <- ownership_head(state),
+         :ok <- recovery_head_matches(durable, confirmed_head),
+         {:ok, transaction, incarnation} <- build_owner_candidate(state, confirmed_head) do
       transact_owner(%{
         state
         | phase: :acquiring,
           prior_tx_id: prior_tx_id,
           recovery_records: scanned,
+          recovery_events: events,
           transaction: transaction,
           incarnation: incarnation
       })
@@ -1474,19 +1487,22 @@ defmodule Loopex.Runtime.SessionCoordinator do
     end
   end
 
-  # Concept: a resume reads its session's journal once, not twice.
+  # Concept: acquisition replays the session before it chooses a successor.
   #
-  # Technical depth: discovery needs the last `owner_advanced` transaction id and
-  # recovery needs every row, and both used to scan from version zero. On a long
-  # session that doubled the read cost of every resume, and it made the rows
-  # between the two scans arrive twice for no benefit. Discovery now hands back
-  # the prefix it read and recovery continues from its tail. The prefix is a
-  # contiguous scan from the journal head, and the reducer still checks that each
-  # applied row is exactly one version past the last, so a prefix that is not
-  # contiguous with what follows is refused as invalid history rather than
-  # silently stitched.
-  defp discover_prior_tx_id(%{prior_tx_id: prior_tx_id}) when is_binary(prior_tx_id),
-    do: {:ok, prior_tx_id, []}
+  # Technical depth: acquisition needs both the last `owner_advanced`
+  # transaction id and the complete durable state. A retained prior transaction
+  # avoids deriving that identity again, but it cannot bypass replay: restart
+  # recovery must inspect the exact committed drain identities before ordinary
+  # succession. The one contiguous record scan therefore feeds both identity
+  # discovery and recovery, and the reducer refuses a missing or reordered row.
+  defp discover_prior_tx_id(%{prior_tx_id: prior_tx_id} = state) when is_binary(prior_tx_id) do
+    case load_all_records(state.store, state.session_id) do
+      {:ok, records} -> {:ok, prior_tx_id, records}
+      {:error, :store_unavailable} -> :retry
+      :unavailable -> :retry
+      {:error, reason} -> {:error, reason}
+    end
+  end
 
   defp discover_prior_tx_id(state) do
     case load_all_records(state.store, state.session_id) do
@@ -1522,6 +1538,203 @@ defmodule Loopex.Runtime.SessionCoordinator do
       :unavailable -> :retry
     end
   end
+
+  # Concept: an interrupted orderly stop is recovered before a replacement owner
+  # may write.
+  #
+  # Technical depth: the deterministic abort and fence identities occupy the
+  # current or immediately preceding owner epoch. Status alone cannot attribute a
+  # committed identity, so each terminal commit is matched against the replayed
+  # command binding or the exact `owner_advanced` record. A collision is not a
+  # drain result and leaves normal succession available; unavailable or
+  # incomplete durable evidence retries without advancing ownership. The second
+  # ownership-head read closes a concurrent change between attribution and the
+  # successor transaction.
+  defp replay_acquisition_history(state, records) do
+    case load_all_events(state.store, state.session_id) do
+      {:ok, events} ->
+        case SessionState.recover(state.session_id, records, events) do
+          {:ok, durable} -> {:ok, durable, events}
+          {:error, reason} -> {:error, reason}
+        end
+
+      {:error, :store_unavailable} ->
+        :retry
+
+      :unavailable ->
+        :retry
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp recovery_head_matches(durable, head) do
+    if durable.owner_epoch == head.owner_epoch and
+         durable.journal_version == head.journal_version,
+       do: :ok,
+       else: :retry
+  end
+
+  defp recover_drain_identities(_state, _records, _durable, %{owner_epoch: 0}), do: :ok
+
+  defp recover_drain_identities(state, records, durable, head) do
+    with :ok <- recover_drain_abort_identities(state, records, durable, head.owner_epoch),
+         :ok <- recover_drain_fence_identities(state, records, durable, head) do
+      :ok
+    end
+  end
+
+  defp recover_drain_abort_identities(state, records, durable, owner_epoch) do
+    case recover_drain_abort_identity(state, records, durable, owner_epoch) do
+      :next when owner_epoch > 0 ->
+        recover_drain_abort_identity(state, records, durable, owner_epoch - 1)
+        |> finish_drain_identity_search()
+
+      result ->
+        finish_drain_identity_search(result)
+    end
+  end
+
+  defp recover_drain_abort_identity(state, records, durable, owner_epoch) do
+    command_id = SessionState.drain_abort_command_id(state.session_id, owner_epoch)
+
+    case Store.transaction_status(state.store, state.session_id, @mutation_domain, command_id) do
+      :absent ->
+        :next
+
+      {:terminal, {:not_committed, _reason}} ->
+        :resolved
+
+      {:terminal, :committed} ->
+        case drain_abort_recovery_binding(records, durable, command_id, owner_epoch) do
+          :match -> :resolved
+          :collision -> :next
+          :missing -> :retry
+        end
+
+      :unavailable ->
+        :retry
+    end
+  end
+
+  defp drain_abort_recovery_binding(records, durable, command_id, owner_epoch) do
+    case SessionState.drain_abort_binding(durable, command_id) do
+      :match ->
+        case Enum.find(records, &record_command_id?(&1, command_id)) do
+          %{owner_epoch: ^owner_epoch} -> :match
+          _wrong_epoch_or_missing -> :collision
+        end
+
+      :collision ->
+        :collision
+
+      :absent ->
+        :missing
+    end
+  end
+
+  defp recover_drain_fence_identities(state, records, durable, head) do
+    case recover_drain_fence_identity(state, records, durable, head, head.owner_epoch) do
+      :next when head.owner_epoch > 0 ->
+        recover_drain_fence_identity(state, records, durable, head, head.owner_epoch - 1)
+        |> finish_drain_identity_search()
+
+      result ->
+        finish_drain_identity_search(result)
+    end
+  end
+
+  defp recover_drain_fence_identity(state, records, durable, head, owner_epoch) do
+    tx_id = drain_fence_transaction_id(state.session_id, owner_epoch)
+
+    case Store.transaction_status(state.store, state.session_id, @mutation_domain, tx_id) do
+      :absent ->
+        :next
+
+      {:terminal, {:not_committed, _reason}} ->
+        :resolved
+
+      {:terminal, :committed} ->
+        case drain_fence_recovery_binding(
+               records,
+               durable,
+               state.session_id,
+               tx_id,
+               owner_epoch
+             ) do
+          :match when head.owner_epoch == owner_epoch + 1 -> :resolved
+          :match -> :retry
+          :collision -> :next
+          :missing -> :retry
+        end
+
+      :unavailable ->
+        :retry
+    end
+  end
+
+  defp drain_fence_recovery_binding(records, durable, session_id, tx_id, owner_epoch) do
+    case Enum.find(records, &owner_transaction_id?(&1, tx_id)) do
+      nil ->
+        if SessionState.drain_abort_binding(durable, tx_id) == :absent,
+          do: :missing,
+          else: :collision
+
+      record ->
+        if drain_fence_record?(record, session_id, tx_id, owner_epoch),
+          do: :match,
+          else: :collision
+    end
+  end
+
+  defp drain_fence_record?(
+         %{
+           journal_version: journal_version,
+           owner_epoch: next_epoch,
+           owner_incarnation_id: incarnation,
+           payload:
+             %{
+               :kind => "owner_advanced",
+               "prior_owner_epoch" => owner_epoch,
+               "owner_epoch" => next_epoch,
+               "owner_incarnation_id" => incarnation,
+               "owner_transaction_id" => tx_id
+             } = payload
+         } = record,
+         session_id,
+         tx_id,
+         owner_epoch
+       )
+       when is_integer(journal_version) and journal_version > 1 and next_epoch == owner_epoch + 1,
+       do:
+         Map.keys(record) |> Enum.sort() ==
+           [:journal_version, :owner_epoch, :owner_incarnation_id, :payload] and
+           Map.keys(payload) |> Enum.sort() ==
+             [
+               :kind,
+               "owner_epoch",
+               "owner_incarnation_id",
+               "owner_transaction_id",
+               "prior_owner_epoch"
+             ] and
+           incarnation == drain_fence_incarnation_id(session_id, owner_epoch)
+
+  defp drain_fence_record?(_record, _session_id, _tx_id, _owner_epoch), do: false
+
+  defp finish_drain_identity_search(:resolved), do: :ok
+  defp finish_drain_identity_search(:next), do: :ok
+  defp finish_drain_identity_search(:retry), do: :retry
+
+  defp record_command_id?(%{payload: payload}, command_id) when is_map(payload),
+    do: Map.get(payload, "command_id") == command_id
+
+  defp record_command_id?(_record, _command_id), do: false
+
+  defp owner_transaction_id?(%{payload: payload}, tx_id) when is_map(payload),
+    do: Map.get(payload, "owner_transaction_id") == tx_id
+
+  defp owner_transaction_id?(_record, _tx_id), do: false
 
   defp ownership_head(state) do
     case Store.ownership_head(state.store, state.session_id, @mutation_domain) do
@@ -1586,7 +1799,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
   defp recover_committed_owner(state) do
     with {:ok, records} <-
            load_all_records(state.store, state.session_id, state.recovery_records),
-         {:ok, events} <- load_all_events(state.store, state.session_id),
+         {:ok, events} <- recovery_events(state),
          {:ok, durable} <- SessionState.recover(state.session_id, records, events),
          true <- durable.owner_epoch == state.owner.owner_epoch,
          true <- durable.owner_incarnation_id == state.owner.owner_incarnation_id,
@@ -1598,6 +1811,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
           transaction: nil,
           incarnation: nil,
           recovery_records: [],
+          recovery_events: nil,
           prepared: recovered_runs(state.prepared, durable)
       }
 
@@ -1621,6 +1835,9 @@ defmodule Loopex.Runtime.SessionCoordinator do
       _other -> {:stop, :owner_recovery_failed, state}
     end
   end
+
+  defp recovery_events(%{recovery_events: events}) when is_list(events), do: {:ok, events}
+  defp recovery_events(state), do: load_all_events(state.store, state.session_id)
 
   # Concept: retrying is bounded, and running out of retries is an answer the
   # caller receives rather than a silence it waits through.

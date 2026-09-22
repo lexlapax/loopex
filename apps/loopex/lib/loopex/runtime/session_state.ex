@@ -370,6 +370,19 @@ defmodule Loopex.Runtime.SessionState do
   def drain_abort_record?(_record, _command_id, _head, _run_id), do: false
 
   @doc false
+  @spec drain_abort_binding(t(), binary()) :: :match | :collision | :absent
+  def drain_abort_binding(%__MODULE__{} = state, command_id) when is_binary(command_id) do
+    {:ok, digest} = command_digest(%{type: :abort, command_id: command_id})
+
+    case Map.get(state.commands, command_id) do
+      %{digest: ^digest, reply: {:accepted, ^command_id}} -> :match
+      %{digest: ^digest, reply: {:error, :no_active_run}} -> :match
+      nil -> :absent
+      _other -> :collision
+    end
+  end
+
+  @doc false
   @spec prepare_resource_command(t(), map()) ::
           {:new, map()} | {:replayed, term()} | {:error, term()}
   def prepare_resource_command(%__MODULE__{} = state, command) do

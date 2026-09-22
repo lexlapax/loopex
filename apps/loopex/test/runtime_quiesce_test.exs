@@ -117,6 +117,79 @@ defmodule Loopex.RuntimeQuiesceTest do
     assert state.sessions == %{}
   end
 
+  test "quiescing consumes an awaiting owner barrier without starting a successor" do
+    fixture = fixture("quiesce-owner-barrier")
+    session_id = create_session(fixture.runtime, "create")
+    {:ok, %{control: control, sessions: session_supervisor}} = Runtime.children(fixture.runtime)
+    entry = :sys.get_state(control).sessions[session_id]
+    coordinator_monitor = Process.monitor(entry.coordinator)
+    :ok = :sys.suspend(entry.owner_group)
+
+    Process.exit(entry.coordinator, :kill)
+    assert_receive {:DOWN, ^coordinator_monitor, :process, _coordinator, :killed}, 5_000
+    assert Process.alive?(entry.owner_group)
+
+    waiter_pid = self()
+    waiter_tag = make_ref()
+
+    :sys.replace_state(control, fn state ->
+      current = state.sessions[session_id]
+
+      awaiting =
+        current
+        |> Map.put(:status, :awaiting_owner_barrier)
+        |> Map.put(:succession_id, "quiesce-owner-barrier-succession")
+        |> Map.put(:owner_command, nil)
+        |> Map.put(:prepared, nil)
+        |> Map.put(:waiting, [
+          %{
+            from: {waiter_pid, waiter_tag},
+            mode: :detailed,
+            disposition: :activated
+          }
+        ])
+
+      %{state | sessions: Map.put(state.sessions, session_id, awaiting)}
+    end)
+
+    assert {:ok, [%{session_id: ^session_id, status: :awaiting_owner_barrier}]} =
+             Control.begin_quiesce(
+               control,
+               fixture.runtime.token,
+               "owner-barrier-drain",
+               5_000
+             )
+
+    owner_group_monitor = Process.monitor(entry.owner_group)
+    Process.exit(entry.owner_group, :kill)
+    assert_receive {:DOWN, ^owner_group_monitor, :process, _owner_group, :killed}, 5_000
+
+    assert_receive {^waiter_tag,
+                    {:error, :runtime_unavailable,
+                     %{disposition: :activated, control_entry: :dormant}}},
+                   5_000
+
+    assert_eventually(fn ->
+      :sys.get_state(control).sessions[session_id].status == :unavailable
+    end)
+
+    assert {:ok, [%{session_id: ^session_id, status: :unavailable}]} =
+             Control.quiesce_projection(
+               control,
+               fixture.runtime.token,
+               "owner-barrier-drain",
+               5_000
+             )
+
+    refute Enum.any?(DynamicSupervisor.which_children(session_supervisor), fn
+             {_id, pid, _type, modules} ->
+               is_pid(pid) and Loopex.Runtime.SessionCoordinator in modules
+
+             _other ->
+               false
+           end)
+  end
+
   test "an idle drain refusal closes ordinary coordinator admission" do
     fixture = fixture("quiesce-idle-admission")
     session_id = create_session(fixture.runtime, "create")
@@ -428,6 +501,215 @@ defmodule Loopex.RuntimeQuiesceTest do
 
     refute SessionCoordinator.drain_fence_transaction_id(session_id, before_head.owner_epoch) ==
              SessionCoordinator.drain_fence_incarnation_id(session_id, before_head.owner_epoch)
+  end
+
+  test "replacement activation resolves bounded drain identities before ordinary succession" do
+    fixture = fixture("quiesce-restart-recovery")
+    session_id = create_session(fixture.runtime, "create")
+
+    refute Enum.any?(
+             M1RuntimeTestStore.inspect_state(fixture.store_pid).status_queries,
+             fn {_session_id, _domain, tx_id} ->
+               String.starts_with?(tx_id, "drain_ab") or
+                 String.starts_with?(tx_id, "drain_fence")
+             end
+           )
+
+    assert {:ok, %{fences: %{^session_id => :committed}}} =
+             Runtime.quiesce(fixture.runtime)
+
+    assert {:ok, drained_head} = Store.ownership_head(fixture.store, session_id, "session")
+    before_queries = M1RuntimeTestStore.inspect_state(fixture.store_pid).status_queries
+    :ok = Loopex.stop(fixture.runtime)
+
+    {:ok, restarted} =
+      Loopex.start_link(
+        context_token_budget: 8_192,
+        runtime_id: fixture.runtime_id,
+        store: fixture.store
+      )
+
+    on_exit(fn -> if Runtime.alive?(restarted), do: Loopex.stop(restarted) end)
+
+    assert {:ok, ^session_id} =
+             Runtime.resume_session(restarted, session_id, "resume-after-drain")
+
+    recovery_queries =
+      M1RuntimeTestStore.inspect_state(fixture.store_pid).status_queries
+      |> Enum.drop(length(before_queries))
+
+    current_epoch = drained_head.owner_epoch
+    predecessor_epoch = current_epoch - 1
+
+    assert [
+             {^session_id, "session", prior_owner_tx},
+             {^session_id, "session", current_abort},
+             {^session_id, "session", predecessor_abort},
+             {^session_id, "session", current_fence},
+             {^session_id, "session", predecessor_fence}
+           ] = recovery_queries
+
+    assert prior_owner_tx ==
+             SessionCoordinator.drain_fence_transaction_id(session_id, predecessor_epoch)
+
+    assert current_abort == SessionState.drain_abort_command_id(session_id, current_epoch)
+
+    assert predecessor_abort ==
+             SessionState.drain_abort_command_id(session_id, predecessor_epoch)
+
+    assert current_fence ==
+             SessionCoordinator.drain_fence_transaction_id(session_id, current_epoch)
+
+    assert predecessor_fence ==
+             SessionCoordinator.drain_fence_transaction_id(session_id, predecessor_epoch)
+
+    assert {:ok, resumed_head} = Store.ownership_head(fixture.store, session_id, "session")
+    assert resumed_head.owner_epoch == current_epoch + 1
+  end
+
+  test "replacement activation attributes a fence whose reply died with the runtime" do
+    fixture = fixture("quiesce-lost-fence-reply")
+    session_id = create_session(fixture.runtime, "create")
+
+    :ok =
+      M1RuntimeTestStore.delay_after_commit(
+        fixture.store_pid,
+        :session_journal_advance_owner,
+        self()
+      )
+
+    quiesce = Task.async(fn -> Runtime.quiesce(fixture.runtime) end)
+
+    assert_receive {:transaction_linearized, waiter, _store, :session_journal_advance_owner,
+                    {:committed, fence_tx_id, fence_receipt}},
+                   5_000
+
+    assert fence_tx_id ==
+             SessionCoordinator.drain_fence_transaction_id(
+               session_id,
+               fence_receipt.owner_epoch - 1
+             )
+
+    Process.unlink(fixture.runtime.supervisor)
+    root_monitor = Process.monitor(fixture.runtime.supervisor)
+    Process.exit(fixture.runtime.supervisor, :kill)
+    assert_receive {:DOWN, ^root_monitor, :process, _root, :killed}, 5_000
+    M1RuntimeTestStore.release(waiter)
+    assert {:error, :runtime_unavailable} = Task.await(quiesce, 5_000)
+
+    {:ok, restarted} =
+      Loopex.start_link(
+        context_token_budget: 8_192,
+        runtime_id: fixture.runtime_id,
+        store: fixture.store
+      )
+
+    on_exit(fn -> if Runtime.alive?(restarted), do: Loopex.stop(restarted) end)
+
+    assert {:ok, ^session_id} =
+             Runtime.resume_session(restarted, session_id, "resume-lost-fence")
+
+    assert {:ok, resumed_head} = Store.ownership_head(fixture.store, session_id, "session")
+    assert resumed_head.owner_epoch == fence_receipt.owner_epoch + 1
+  end
+
+  test "replacement activation attributes an abort whose reply died with the runtime" do
+    fixture = fixture("quiesce-lost-abort-reply")
+    session_id = create_session(fixture.runtime, "create")
+    assert {:ok, before_head} = Store.ownership_head(fixture.store, session_id, "session")
+
+    :ok =
+      M1RuntimeTestStore.delay_after_commit(
+        fixture.store_pid,
+        :session_journal_commit,
+        self()
+      )
+
+    quiesce = Task.async(fn -> Runtime.quiesce(fixture.runtime) end)
+
+    assert_receive {:transaction_linearized, waiter, _store, :session_journal_commit,
+                    {:committed, abort_tx_id, _abort_receipt}},
+                   5_000
+
+    assert abort_tx_id ==
+             SessionState.drain_abort_command_id(session_id, before_head.owner_epoch)
+
+    Process.unlink(fixture.runtime.supervisor)
+    root_monitor = Process.monitor(fixture.runtime.supervisor)
+    Process.exit(fixture.runtime.supervisor, :kill)
+    assert_receive {:DOWN, ^root_monitor, :process, _root, :killed}, 5_000
+    M1RuntimeTestStore.release(waiter)
+    assert {:error, :runtime_unavailable} = Task.await(quiesce, 5_000)
+
+    {:ok, restarted} =
+      Loopex.start_link(
+        context_token_budget: 8_192,
+        runtime_id: fixture.runtime_id,
+        store: fixture.store
+      )
+
+    on_exit(fn -> if Runtime.alive?(restarted), do: Loopex.stop(restarted) end)
+
+    assert {:ok, ^session_id} =
+             Runtime.resume_session(restarted, session_id, "resume-lost-abort")
+
+    {:ok, records} = M1RuntimeTestStore.load_records(fixture.store_pid, session_id, 0, 1_024)
+
+    assert 1 ==
+             Enum.count(records, fn record ->
+               record.payload[:kind] == "command_admitted" and
+                 record.payload["command_id"] == abort_tx_id
+             end)
+
+    assert {:ok, resumed_head} = Store.ownership_head(fixture.store, session_id, "session")
+    assert resumed_head.owner_epoch == before_head.owner_epoch + 1
+  end
+
+  test "replacement activation distinguishes command collisions under both drain identities" do
+    fixture = fixture("quiesce-drain-identity-collisions")
+    abort_session = create_session(fixture.runtime, "create-abort-collision")
+    fence_session = create_session(fixture.runtime, "create-fence-collision")
+
+    assert {:ok, abort_head} = Store.ownership_head(fixture.store, abort_session, "session")
+    assert {:ok, fence_head} = Store.ownership_head(fixture.store, fence_session, "session")
+    {:ok, abort_attachment} = Loopex.attach(fixture.runtime, abort_session)
+    {:ok, fence_attachment} = Loopex.attach(fixture.runtime, fence_session)
+
+    abort_collision =
+      SessionState.drain_abort_command_id(abort_session, abort_head.owner_epoch)
+
+    fence_collision =
+      SessionCoordinator.drain_fence_transaction_id(fence_session, fence_head.owner_epoch)
+
+    assert {:accepted, ^abort_collision} =
+             Loopex.command(abort_attachment, %{
+               type: :prompt,
+               command_id: abort_collision,
+               content: "bind the drain-abort identity to a different command"
+             })
+
+    assert {:error, :no_active_run} =
+             Loopex.command(fence_attachment, %{
+               type: :abort,
+               command_id: fence_collision
+             })
+
+    :ok = Loopex.stop(fixture.runtime)
+
+    {:ok, restarted} =
+      Loopex.start_link(
+        context_token_budget: 8_192,
+        runtime_id: fixture.runtime_id,
+        store: fixture.store
+      )
+
+    on_exit(fn -> if Runtime.alive?(restarted), do: Loopex.stop(restarted) end)
+
+    assert {:ok, ^abort_session} =
+             Runtime.resume_session(restarted, abort_session, "resume-abort-collision")
+
+    assert {:ok, ^fence_session} =
+             Runtime.resume_session(restarted, fence_session, "resume-fence-collision")
   end
 
   test "an ambiguous committed abort is reloaded exactly and remains unsettled before fencing" do
@@ -759,7 +1041,7 @@ defmodule Loopex.RuntimeQuiesceTest do
       if Process.alive?(store_pid), do: GenServer.stop(store_pid)
     end)
 
-    %{runtime: runtime, store: store, store_pid: store_pid}
+    %{runtime: runtime, runtime_id: runtime_id, store: store, store_pid: store_pid}
   end
 
   defp create_session(runtime, command_id) do
