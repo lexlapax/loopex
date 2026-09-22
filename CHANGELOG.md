@@ -53,6 +53,11 @@ modes, identity-stable bounded reads, fixed temporary recovery, and complete
 file-sync, close, rename and directory-sync publication with explicit retryable,
 poisoned and post-rename outcomes.
 
+Add the live session-index owner. It initializes only fresh roots, requires an
+explicit import for legacy roots, serializes durable monotonic rows, preserves
+placement binding, exposes bounded raw-byte cursor pages, reports the 4,096-row
+ceiling, and retains publication poison state without hiding existing rows.
+
 ## [0.1.0] — 2026-09-19
 
 M4's closed product baseline: the first numbered source version. It is a source
