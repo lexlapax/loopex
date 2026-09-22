@@ -47,15 +47,18 @@ defmodule LoopexCli.Render do
   Blocks on the durable event stream and drains whatever transient progress has
   arrived alongside it. The durable stream decides when the run is over; progress
   never does, because progress can stop for reasons that have nothing to do with
-  the run.
+  the run. `:replay_through` names the last event sequence a daemon attachment
+  replays: a run that finished at or before it is history being shown, not the
+  end of this command.
   """
-  @spec stream(Loopex.Attachment.t(), keyword()) :: :ok | {:error, binary()}
+  @spec stream(Loopex.Attachment.t() | nil, keyword()) :: :ok | {:error, binary()}
   def stream(attachment, options \\ []) do
     follow(
       attachment,
       0,
       Keyword.get(options, :on_run_started, fn _run_id -> :ok end),
-      Keyword.get(options, :idle_limit_ms, @idle_limit_ms),
+      {Keyword.get(options, :idle_limit_ms, @idle_limit_ms),
+       Keyword.get(options, :replay_through, -1)},
       Keyword.get(options, :next_event, &Loopex.next_event/1),
       ProgressConsumer.new(),
       nil
@@ -86,7 +89,7 @@ defmodule LoopexCli.Render do
     :ok
   end
 
-  defp follow(attachment, waited, on_run_started, limit, next_event, progress, pending) do
+  defp follow(attachment, waited, on_run_started, bounds, next_event, progress, pending) do
     progress = drain_progress(progress)
 
     case next_event.(attachment) do
@@ -108,21 +111,21 @@ defmodule LoopexCli.Render do
 
         announce(event, on_run_started)
 
-        if terminal?(event) do
+        if terminal?(event) and event.event_sequence > elem(bounds, 1) do
           _progress = render_pending(pending, drain_progress(progress))
           :ok
         else
-          follow(attachment, 0, on_run_started, limit, next_event, progress, pending)
+          follow(attachment, 0, on_run_started, bounds, next_event, progress, pending)
         end
 
-      _absent when waited < limit ->
+      _absent when waited < elem(bounds, 0) ->
         Process.sleep(@poll_ms)
 
         follow(
           attachment,
           waited + @poll_ms,
           on_run_started,
-          limit,
+          bounds,
           next_event,
           progress,
           pending

@@ -3137,7 +3137,8 @@ defmodule LoopexCliTest do
   end
 
   # Concept: preserve the original commands while allowing M3's approved skill
-  # extension. The test name below remains the historical locked selector identity.
+  # extension and M5's live `attach`, which the M5 plan's live grammar adds.
+  # The test name below remains the historical locked selector identity.
   #
   # Technical depth: the explicit scoped override is recorded at
   # docs/developer/agent-context-map.md#override-disposition-m3-cli-extension-ratification-2026-09-10.
@@ -3150,7 +3151,7 @@ defmodule LoopexCliTest do
     surface = dispatch_surface(ast)
 
     required = MapSet.new(~w(artifact cancel resume run sessions))
-    permitted_extensions = MapSet.new(~w(skill))
+    permitted_extensions = MapSet.new(~w(attach skill))
 
     assert surface.dynamic_guarded_heads == [],
            "guarded dispatch/2 heads must name a literal command: #{inspect(surface.dynamic_guarded_heads)}"
@@ -3652,7 +3653,8 @@ defmodule LoopexCliTest do
   end
 
   test "argument parsing and terminal output use only the standard library" do
-    assert Enum.sort(declared_dependencies()) == [:loopex, :loopex_composition, :loopex_daemon]
+    assert Enum.sort(declared_dependencies()) ==
+             [:loopex, :loopex_composition, :loopex_daemon, :loopex_protocol]
 
     for {path, source} <- command_sources() do
       refute source =~ "Jason", "#{path} uses an external encoder"

@@ -316,6 +316,60 @@ defmodule LoopexDaemon.SocketTransportTest do
     refute Enum.member?([low, high], dormant)
   end
 
+  @tag timeout: 120_000
+  test "only a resume that activates publishes; a completed replay records nothing" do
+    root = temporary_directory("loopex-socket-publish")
+    [session_id] = seed_dormant(root, 1, "publish-placement")
+
+    # A previous lifetime completed resume command `resume-seen`.
+    {:ok, adapter} = Loopex.Store.Local.start_link(path: Path.join([root, "state", "store.log"]))
+    {:ok, store} = Loopex.Store.new(Loopex.Store.Local, adapter)
+
+    {:ok, previous} =
+      Loopex.start_link(
+        runtime_id: "publish-placement",
+        store: store,
+        context_token_budget: 8_192
+      )
+
+    {:ok, ^session_id} = Loopex.resume_session(previous, session_id, command_id: "resume-seen")
+    :ok = Loopex.stop(previous)
+    :ok = GenServer.stop(adapter)
+
+    runtime = start_runtime(root, "publish-placement")
+    state = Path.join(root, "state")
+    daemon = start_daemon(runtime, index_root: state, placement_identity: "publish-placement")
+    client = initialized_client(daemon)
+
+    :ok = send_frame(client, acquire("acquire", session_id))
+    assert [%{"request_id" => "acquire", "result" => granted}] = receive_records(client, 1)
+    {:ok, epoch} = Wire.identity(granted["writer_epoch"])
+
+    :ok = send_frame(client, resume("replayed", session_id, "resume-seen", epoch))
+
+    assert [%{"request_id" => "replayed", "status" => "accepted"}] =
+             receive_records(client, 1)
+
+    assert %{activations_used: 0} = ConnectionRegistry.status(daemon.registry)
+    :ok = send_frame(client, list("after-replay", 10))
+
+    assert [%{"request_id" => "after-replay", "result" => %{"entries" => []}}] =
+             receive_records(client, 1)
+
+    assert {:ok, []} = Loopex.list_sessions(state)
+
+    :ok = send_frame(client, resume("fresh", session_id, "resume-fresh", epoch))
+    assert [%{"request_id" => "fresh", "status" => "accepted"}] = receive_records(client, 1)
+    assert %{activations_used: 1} = ConnectionRegistry.status(daemon.registry)
+    :ok = send_frame(client, list("after-fresh", 10))
+
+    assert [%{"request_id" => "after-fresh", "result" => %{"entries" => [entry]}}] =
+             receive_records(client, 1)
+
+    assert entry["session_id"] == Wire.encode_identity(session_id)
+    assert {:ok, [_directory_entry]} = Loopex.list_sessions(state)
+  end
+
   test "daemon.status reports bounded counts with reservations counted", %{daemon: daemon} do
     client = initialized_client(daemon)
     _session_id = create_session(client, "status-create")
@@ -373,6 +427,16 @@ defmodule LoopexDaemon.SocketTransportTest do
     }
     |> maybe_put("after_event_sequence", options[:after] && Integer.to_string(options[:after]))
     |> maybe_put("replace", options[:replace])
+  end
+
+  defp resume(request_id, session_id, command_id, epoch) do
+    %{
+      "method" => "session.resume",
+      "request_id" => request_id,
+      "session_id" => Wire.encode_identity(session_id),
+      "command_id" => Wire.encode_identity(command_id),
+      "writer_epoch" => Wire.encode_identity(epoch)
+    }
   end
 
   defp acquire(request_id, session_id) do

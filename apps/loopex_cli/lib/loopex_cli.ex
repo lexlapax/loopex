@@ -75,9 +75,13 @@ defmodule LoopexCli do
 
   @doc false
   @spec dispatch([binary()], keyword()) :: :ok | {:error, binary()}
-  def dispatch(["run" | rest], options), do: admitted("run", rest, &run(&1, options))
-  def dispatch(["sessions" | rest], _options), do: admitted("sessions", rest, &sessions/1)
-  def dispatch(["resume" | rest], options), do: admitted("resume", rest, &resume(&1, options))
+  def dispatch(["run" | rest], options), do: offline_or_live("run", rest, &run(&1, options))
+  def dispatch(["sessions" | rest], _options), do: offline_or_live("sessions", rest, &sessions/1)
+
+  def dispatch(["resume" | rest], options),
+    do: offline_or_live("resume", rest, &resume(&1, options))
+
+  def dispatch(["attach" | rest], _options), do: LoopexCli.Live.command("attach", rest)
   def dispatch(["cancel" | rest], options), do: admitted("cancel", rest, &cancel(&1, options))
   def dispatch(["artifact" | rest], _options), do: admitted("artifact", rest, &artifact/1)
   def dispatch(["skill" | rest], options), do: admitted("skill", rest, &skill(&1, options))
@@ -85,10 +89,19 @@ defmodule LoopexCli do
   def dispatch([], _options),
     do:
       {:error,
-       "choose one command: run, sessions, resume, cancel, artifact, or skill\n\n" <> usage()}
+       "choose one command: run, sessions, resume, attach, cancel, artifact, or skill\n\n" <>
+         usage()}
 
   def dispatch([unknown | _rest], _options),
     do: {:error, "unknown command #{unknown}\n\n" <> usage()}
+
+  # Concept: `--daemon` selects the live grammar before any offline flag is
+  # admitted, so the offline forms keep their released grammar untouched.
+  defp offline_or_live(name, arguments, command) do
+    if LoopexCli.Live.daemon_form?(arguments),
+      do: LoopexCli.Live.command(name, arguments),
+      else: admitted(name, arguments, command)
+  end
 
   @command_flags %{
     "run" =>
@@ -1615,6 +1628,11 @@ defmodule LoopexCli do
       loopex skill add <git-source> --rev <commit> --path <directory>
       loopex skill list
       loopex skill show <source-qualified-name>
+      loopex daemon [--state-root <directory>] [--socket <path>] ...
+      loopex run --daemon <socket> "describe the change"
+      loopex resume --daemon <socket> <session>
+      loopex sessions --daemon <socket> [--status | --limit <n> --after <session>]
+      loopex attach --daemon <socket> <session> [--observe | --take-over [--prompt <text>]]
 
     --policy is required for anything that runs tools. There is no default.
 

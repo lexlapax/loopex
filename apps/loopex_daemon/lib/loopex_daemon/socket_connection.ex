@@ -1003,7 +1003,7 @@ defmodule LoopexDaemon.SocketConnection do
     fn ->
       case Loopex.Runtime.create_session_detailed(runtime, command_id, options) do
         {:ok, %{session_id: session_id, disposition: disposition}} ->
-          publish_session(context, connection, session_id)
+          if disposition == :activated, do: publish_session(context, connection, session_id)
 
           {disposition, session_id,
            create_admission(request_id, command_id, :accepted, session_id)}
@@ -1529,7 +1529,7 @@ defmodule LoopexDaemon.SocketConnection do
     fn ->
       case Loopex.Runtime.resume_session_detailed(runtime, session_id, command_id) do
         {:ok, %{session_id: resumed, disposition: disposition}} ->
-          publish_session(context, connection, resumed)
+          if disposition == :activated, do: publish_session(context, connection, resumed)
 
           {:accepted, disposition,
            WireRecords.admission(request_id, "session.resume", command_id, :accepted, resumed)}
@@ -1563,8 +1563,11 @@ defmodule LoopexDaemon.SocketConnection do
     end
   end
 
-  # Concept: a session reached through the daemon becomes discoverable, but a
-  # failure to record it never makes it unusable.
+  # Concept: a session this daemon activated becomes discoverable, but a
+  # failure to record it never makes it unusable. Only an invocation that
+  # started the coordinator proves this daemon's placement for the session, so
+  # a replay, an already-active answer or a concurrent activation publishes
+  # nothing.
   #
   # Technical depth: the index row is written through its one owner; a write
   # failure tells the causing client with `daemon.notice`. The compatibility

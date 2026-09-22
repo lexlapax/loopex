@@ -95,12 +95,14 @@ defmodule LoopexCli.MixProject do
   #
   # Technical depth: it owns no loop, no durable session truth, no cursor truth,
   # no Store access, and no authority decision. It depends on the runtime for the
-  # public facade, on exactly one composition for wiring, and on the one host
-  # application whose daemon `loopex daemon` starts, which is the whole of what a
-  # client may declare in production.
+  # public facade, on the protocol contract its live forms speak, on exactly one
+  # composition for wiring, and on the one host application whose daemon
+  # `loopex daemon` starts, which is the whole of what a client may declare in
+  # production.
   defp deps do
     [
       {:loopex, in_umbrella: true},
+      {:loopex_protocol, in_umbrella: true},
       {:loopex_composition, in_umbrella: true},
       {:loopex_daemon, in_umbrella: true}
     ]
