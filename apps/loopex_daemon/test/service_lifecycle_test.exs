@@ -121,6 +121,31 @@ defmodule LoopexDaemon.ServiceLifecycleTest do
     assert Placement.live_owner(state_root) == :none
   end
 
+  @tag timeout: 90_000
+  test "a relay that stops answering stop barriers ends the stop as relay_lost",
+       %{options: options} do
+    daemon = start_daemon(options)
+    _ready = await_ready(daemon.output)
+    client = initialized(options[:socket_path])
+
+    collaboration = :sys.get_state(daemon.owner).pids.collaboration
+    relay = LoopexDaemon.Owner.components(collaboration).relay
+    :ok = :sys.suspend(relay)
+
+    started = System.monotonic_time(:millisecond)
+    send(daemon.sentinel, {:daemon_signal, daemon.owner_ref, :sigterm})
+
+    {:ok, relay_lost} = LoopexDaemon.ExitStatus.fetch(:relay_lost)
+    assert Task.await(daemon.task, 60_000) == relay_lost
+    assert System.monotonic_time(:millisecond) - started < 45_000
+
+    # The client learns why, or at least sees its socket close.
+    case receive_records_or_closed(client) do
+      :closed -> :ok
+      [%{"type" => "daemon.stopping", "reason" => reason}] -> assert reason =~ "relay_lost"
+    end
+  end
+
   test "losing the Store fail-stops with its class and tells the client",
        %{options: options} do
     daemon = start_daemon(options)
@@ -135,6 +160,14 @@ defmodule LoopexDaemon.ServiceLifecycleTest do
 
     {:ok, store_lost} = LoopexDaemon.ExitStatus.fetch(:store_lost)
     assert Task.await(daemon.task, 40_000) == store_lost
+  end
+
+  defp receive_records_or_closed(socket) do
+    receive_records(socket, 1)
+  rescue
+    _closed -> :closed
+  catch
+    _kind, _closed -> :closed
   end
 
   defp start_daemon(options) do

@@ -694,6 +694,91 @@ defmodule LoopexDaemon.AdmissionRelayTest do
     stop_connection(connection, relay, incarnation)
   end
 
+  test "shutdown barriers run in order, repeat idempotently and seal an unresolved task" do
+    relay = start_relay()
+    registry = start_registry()
+    registry_incarnation = incarnation()
+    assert :ok = AdmissionRelay.register_registry(relay, registry, registry_incarnation)
+
+    incarnation = incarnation()
+    connection = start_connection(relay, incarnation)
+    origin = {incarnation, 0, 1}
+
+    assert {:ok, ^origin} =
+             invoke(connection, fn ->
+               AdmissionRelay.open_ticket(relay, origin, :session_create)
+             end)
+
+    worker = start_ticket_worker(connection)
+
+    assert :ok =
+             invoke(connection, fn ->
+               AdmissionRelay.bind_ticket_worker(relay, origin, worker, incarnation())
+             end)
+
+    parent = self()
+
+    assert {:ok, ^origin} =
+             invoke(registry, fn ->
+               AdmissionRelay.promote_ticket(
+                 relay,
+                 origin,
+                 registry_incarnation,
+                 make_ref(),
+                 fn ->
+                   send(parent, {:ticket_task_started, self()})
+                   Process.sleep(:infinity)
+                 end
+               )
+             end)
+
+    assert_receive {:ticket_task_started, task}, 500
+    task_monitor = Process.monitor(task)
+
+    # A later barrier sent before its predecessor is ignored.
+    early = make_ref()
+    send(relay, {:relay_barrier, early, {:quiescing, make_ref()}})
+    refute_receive {:relay_barrier_ack, ^early, _name, _payload}, 40
+
+    cut_ref = make_ref()
+    send(relay, {:relay_barrier, cut_ref, :cut})
+    assert_receive {:relay_barrier_ack, ^cut_ref, :cut, _payload}, 500
+
+    freeze = make_ref()
+    send(relay, {:relay_barrier, freeze, {:freeze_lease_ops, 0}})
+    assert_receive {:relay_barrier_ack, ^freeze, :freeze_lease_ops, []}, 500
+    send(relay, {:relay_barrier, freeze, {:freeze_lease_ops, 0}})
+    assert_receive {:relay_barrier_ack, ^freeze, :freeze_lease_ops, []}, 500
+    assert AdmissionRelay.status(relay).phase == :lease_ops_frozen
+
+    # Nothing new is admitted once lease operations are frozen.
+    assert {:error, :daemon_stopping} =
+             invoke(connection, fn ->
+               AdmissionRelay.open_ticket(relay, {incarnation, 1, 2}, :session_create)
+             end)
+
+    drain_id = make_ref()
+    quiescing = make_ref()
+    send(relay, {:relay_barrier, quiescing, {:quiescing, drain_id}})
+    assert_receive {:relay_barrier_ack, ^quiescing, :quiescing, ^drain_id}, 500
+
+    seal = make_ref()
+    deadline = System.monotonic_time(:millisecond) + 2_000
+    send(relay, {:relay_barrier, seal, {:seal_after_quiesce, drain_id, deadline}})
+
+    assert_receive {:relay_barrier_ack, ^seal, :seal_after_quiesce,
+                    %{results: [], unresolved: [^origin]}},
+                   2_500
+
+    assert_receive {:DOWN, ^task_monitor, :process, ^task, :killed}, 500
+    assert AdmissionRelay.status(relay).tickets == 0
+
+    teardown = make_ref()
+    send(relay, {:relay_barrier, teardown, :tearing_down})
+    assert_receive {:relay_barrier_ack, ^teardown, :tearing_down, []}, 500
+    assert AdmissionRelay.status(relay).phase == :tearing_down
+  end
+
   test "only the registered registry can promote and its exact identity is fixed" do
     relay = start_relay()
     registry = start_registry()

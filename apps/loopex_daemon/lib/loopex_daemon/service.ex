@@ -26,10 +26,18 @@ defmodule LoopexDaemon.Service do
   sends either release authorization or the startup fatal it observed; only
   the sentinel opens the parked listener. While running, a linked component's
   exit is classified into its fixed fatal class and ends in fail-stop; a
-  forwarded `SIGTERM` runs the orderly stop: admission cut, transport gate,
-  listener stop, bounded admission wait, core quiesce, one `daemon.stopping`
-  record per connection, the collaboration owner, runtime and edges in
-  reverse order, the Store last and the bounded placement release. Every
+  forwarded `SIGTERM` runs the orderly stop: the admission cut and transport
+  gate within `transport_cut_deadline_ms: 5_000`, listener stop, the bounded
+  admission wait, the relay's `freeze_lease_ops` barrier with every executing
+  lease row finished inside `relay_control_timeout_ms: 5_000`, a fresh 5 s
+  `quiescing` barrier, core quiesce on core's own clock, then one shared
+  `teardown_ms` deadline (provisionally 30 s until the closure measurement)
+  over `seal_after_quiesce`, one `daemon.stopping` record per connection and
+  the `tearing_down` barrier, before the collaboration owner, runtime and
+  edges stop in reverse order, the Store last and the bounded placement
+  release. A barrier the relay does not acknowledge in time ends the stop as
+  `relay_lost` fail-stop without calling quiesce; an unavailable census is
+  `drain_failed`. Every
   lifecycle log line is fixed and identity-free; formatted status is redacted.
   """
 
@@ -57,6 +65,10 @@ defmodule LoopexDaemon.Service do
   @placement_release_ms 5_000
   @close_connections_ms 5_000
   @default_admission_wait_ms 5_000
+  @relay_control_timeout_ms 5_000
+  @transport_cut_deadline_ms 5_000
+  # Provisional until the closure run measures the maximum-population teardown.
+  @default_teardown_ms 30_000
   @version "0.2.0"
 
   @running_classes %{
@@ -513,45 +525,107 @@ defmodule LoopexDaemon.Service do
     collaboration = state.pids.collaboration
     components = Owner.components(collaboration)
 
-    cut =
-      case Owner.cut_admission(collaboration) do
-        {:ok, cut_ref} -> cut_ref
-        _error -> nil
-      end
+    case Owner.cut_admission(collaboration, @transport_cut_deadline_ms) do
+      {:ok, cut} ->
+        state = stop_component(state, :listener)
+        _ = Owner.reap_uninitialized(collaboration, cut)
+        admitted_stop(state, collaboration, components)
 
-    state = stop_component(state, :listener)
-    if cut, do: _ = Owner.reap_uninitialized(collaboration, cut)
+      _unacknowledged ->
+        fail_stop(state, :relay_lost)
+    end
+  end
 
+  defp admitted_stop(state, collaboration, components) do
     await_admission(
       components.relay,
       Keyword.get(state.options, :admission_wait_ms, @default_admission_wait_ms)
     )
 
-    status =
-      case Loopex.Runtime.quiesce(state.edges.runtime) do
-        {:ok, _result} ->
-          Logger.debug("loopex daemon quiesce complete")
-          ExitStatus.success()
+    drain_id = make_ref()
 
-        {:error, :runtime_unavailable} ->
-          Logger.debug("loopex daemon quiesce unavailable")
-          status!(:drain_failed)
-      end
-
-    reason = if status == 0, do: "operator_stop", else: "fatal:drain_failed"
-
-    _ =
-      Owner.close_connections(
-        collaboration,
-        WireRecords.daemon_stopping(reason),
-        monotonic_ms() + @close_connections_ms
-      )
-
-    teardown(state)
-    release_placement(state)
-    report_exit(state, status)
-    {:stop, :normal, %{state | phase: :stopped}}
+    with :ok <- freeze_lease_ops(collaboration, components.relay),
+         {:ok, ^drain_id} <-
+           Owner.barrier(collaboration, {:quiescing, drain_id}, relay_control_deadline()) do
+      drain(state, collaboration, drain_id)
+    else
+      _missing_acknowledgement -> fail_stop(state, :relay_lost)
+    end
   end
+
+  # Concept: at the admission bound lease operations freeze, and the ones
+  # already executing must finish inside one fixed relay-control deadline.
+  defp freeze_lease_ops(collaboration, relay) do
+    deadline = relay_control_deadline()
+
+    case Owner.barrier(collaboration, {:freeze_lease_ops, deadline}, deadline) do
+      {:ok, descriptors} when is_list(descriptors) ->
+        await_frozen_rows(relay, descriptors, deadline)
+
+      _missing ->
+        {:error, :relay_lost}
+    end
+  end
+
+  defp await_frozen_rows(_relay, [], _deadline), do: :ok
+
+  defp await_frozen_rows(relay, descriptors, deadline) do
+    case safe(fn -> LoopexDaemon.AdmissionRelay.pending_origins(relay, descriptors) end) do
+      0 ->
+        :ok
+
+      count when is_integer(count) ->
+        if monotonic_ms() >= deadline do
+          {:error, :relay_lost}
+        else
+          Process.sleep(10)
+          await_frozen_rows(relay, descriptors, deadline)
+        end
+
+      _unavailable ->
+        {:error, :relay_lost}
+    end
+  end
+
+  # Concept: core owns the drain clock; everything after it shares one
+  # teardown deadline, and a relay that misses a barrier inside it ends the
+  # stop as `relay_lost`.
+  defp drain(state, collaboration, drain_id) do
+    case Loopex.Runtime.quiesce(state.edges.runtime) do
+      {:ok, _result} ->
+        Logger.debug("loopex daemon quiesce complete")
+        teardown_deadline = monotonic_ms() + teardown_ms(state)
+
+        with {:ok, %{results: _results, unresolved: _unresolved}} <-
+               Owner.barrier(
+                 collaboration,
+                 {:seal_after_quiesce, drain_id, teardown_deadline},
+                 teardown_deadline
+               ),
+             _closed =
+               Owner.close_connections(
+                 collaboration,
+                 WireRecords.daemon_stopping("operator_stop"),
+                 min(monotonic_ms() + @close_connections_ms, teardown_deadline)
+               ),
+             {:ok, _owners} <- Owner.barrier(collaboration, :tearing_down, teardown_deadline) do
+          teardown(state)
+          release_placement(state)
+          report_exit(state, ExitStatus.success())
+          {:stop, :normal, %{state | phase: :stopped}}
+        else
+          _missing_acknowledgement -> fail_stop(state, :relay_lost)
+        end
+
+      {:error, :runtime_unavailable} ->
+        Logger.debug("loopex daemon quiesce unavailable")
+        fail_stop(state, :drain_failed)
+    end
+  end
+
+  defp relay_control_deadline, do: monotonic_ms() + @relay_control_timeout_ms
+
+  defp teardown_ms(state), do: Keyword.get(state.options, :teardown_ms, @default_teardown_ms)
 
   # Concept: a component failure ends the daemon without draining, but still
   # stops the executor and a live Store so their own cleanup is attempted.

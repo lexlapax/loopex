@@ -146,13 +146,44 @@ defmodule LoopexDaemon.Owner do
   registry's owner-authenticated transport gate is closed with the same
   reference. Both answers are bounded by the relay control timeout.
   """
-  @spec cut_admission(pid()) :: {:ok, reference()} | {:error, atom()}
-  def cut_admission(owner), do: GenServer.call(owner, :cut_admission, 15_000)
+  @spec cut_admission(pid(), timeout()) :: {:ok, reference()} | {:error, atom()}
+  def cut_admission(owner, timeout \\ 15_000) do
+    GenServer.call(owner, :cut_admission, timeout)
+  catch
+    :exit, _timeout -> {:error, :relay_barrier_timeout}
+  end
 
   @doc false
   @spec reap_uninitialized(pid(), reference()) :: :ok | {:error, atom()}
   def reap_uninitialized(owner, cut_ref),
     do: GenServer.call(owner, {:reap_uninitialized, cut_ref}, 15_000)
+
+  @doc """
+  ## Concept
+
+  Moves the admission relay through one ordered shutdown barrier and returns
+  its exact acknowledgement, or refuses when the relay does not answer in
+  time.
+
+  ## Technical depth
+
+  `kind` is `{:freeze_lease_ops, admission_deadline}`, `{:quiescing,
+  drain_id}`, `{:seal_after_quiesce, drain_id, deadline}` or
+  `:tearing_down`. The owner sends one fresh ref-tagged barrier and replies
+  only with the acknowledgement carrying that reference and kind. `deadline`
+  is an absolute monotonic instant; a missing acknowledgement is
+  `{:error, :relay_barrier_timeout}`, which the daemon treats as `relay_lost`.
+  """
+  @spec barrier(pid(), term(), integer()) :: {:ok, term()} | {:error, atom()}
+  def barrier(owner, kind, deadline) when is_integer(deadline) do
+    wait = max(deadline - System.monotonic_time(:millisecond), 0)
+
+    try do
+      GenServer.call(owner, {:relay_barrier, kind, deadline}, wait + 1_000)
+    catch
+      :exit, _timeout -> {:error, :relay_barrier_timeout}
+    end
+  end
 
   @doc false
   @spec close_connections(pid(), map(), integer()) :: :ok | {:ok, :forced} | {:error, atom()}
@@ -309,6 +340,19 @@ defmodule LoopexDaemon.Owner do
 
   def handle_call({:release_retirement_pop, _session_id}, _from, state),
     do: {:reply, {:error, :invalid_operation}, state}
+
+  def handle_call({:relay_barrier, kind, deadline}, from, %{stop: %{}} = state) do
+    ref = make_ref()
+    send(state.relay, {:relay_barrier, ref, kind})
+    wait = max(deadline - monotonic_ms(), 0)
+    timer = Process.send_after(self(), {:relay_barrier_deadline, ref}, wait)
+    Logger.debug("loopex daemon owner relay barrier requested")
+    barrier = %{ref: ref, name: barrier_name(kind), from: from, timer: timer}
+    {:noreply, put_in(state, [:stop, :barrier], barrier)}
+  end
+
+  def handle_call({:relay_barrier, _kind, _deadline}, _from, state),
+    do: {:reply, {:error, :relay_barrier_unavailable}, state}
 
   def handle_call(:cut_admission, from, %{stop: nil} = state) do
     cut_ref = make_ref()
@@ -678,6 +722,28 @@ defmodule LoopexDaemon.Owner do
     Logger.debug("loopex daemon owner admission cut complete")
     {:noreply, %{state | stop: %{state.stop | phase: :cut, from: nil}}}
   end
+
+  def handle_info(
+        {:relay_barrier_ack, ref, name, payload},
+        %{stop: %{barrier: %{ref: ref, name: name, from: from, timer: timer}}} = state
+      )
+      when name != :cut do
+    Process.cancel_timer(timer)
+    GenServer.reply(from, {:ok, payload})
+    Logger.debug("loopex daemon owner relay barrier acknowledged")
+    {:noreply, put_in(state, [:stop, :barrier], nil)}
+  end
+
+  def handle_info(
+        {:relay_barrier_deadline, ref},
+        %{stop: %{barrier: %{ref: ref, from: from}}} = state
+      ) do
+    GenServer.reply(from, {:error, :relay_barrier_timeout})
+    Logger.debug("loopex daemon owner relay barrier deadline reached")
+    {:noreply, put_in(state, [:stop, :barrier], nil)}
+  end
+
+  def handle_info({:relay_barrier_deadline, _ref}, state), do: {:noreply, state}
 
   def handle_info(
         {:transport_uninitialized_empty, registry, cut_ref},
@@ -2828,5 +2894,9 @@ defmodule LoopexDaemon.Owner do
   end
 
   defp incarnation, do: :crypto.strong_rand_bytes(@incarnation_bytes)
+  defp barrier_name({name, _detail}), do: name
+  defp barrier_name({name, _detail, _deadline}), do: name
+  defp barrier_name(name) when is_atom(name), do: name
+
   defp monotonic_ms, do: System.monotonic_time(:millisecond)
 end

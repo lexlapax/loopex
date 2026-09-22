@@ -641,7 +641,7 @@ defmodule LoopexDaemon.AdmissionRelay do
 
   @doc false
   @spec status(pid()) :: %{
-          phase: :serving | :draining,
+          phase: :serving | :draining | :lease_ops_frozen | :quiescing | :sealed | :tearing_down,
           connections: non_neg_integer(),
           permits: non_neg_integer(),
           tickets: non_neg_integer(),
@@ -659,6 +659,11 @@ defmodule LoopexDaemon.AdmissionRelay do
           owner_losses: non_neg_integer()
         }
   def status(relay), do: GenServer.call(relay, :status, @control_timeout_ms)
+
+  @doc false
+  @spec pending_origins(pid(), [binary()]) :: non_neg_integer()
+  def pending_origins(relay, origin_ids) when is_list(origin_ids),
+    do: GenServer.call(relay, {:pending_origins, origin_ids}, @control_timeout_ms)
 
   @impl true
   def init(options) do
@@ -679,6 +684,7 @@ defmodule LoopexDaemon.AdmissionRelay do
          owner_incarnation: owner_incarnation,
          admission_wait_ms: admission_wait_ms,
          phase: :serving,
+         barrier: nil,
          cut_ref: nil,
          cut_payload: nil,
          frozen_permits: MapSet.new(),
@@ -1488,6 +1494,9 @@ defmodule LoopexDaemon.AdmissionRelay do
     end
   end
 
+  def handle_call({:pending_origins, origin_ids}, _from, state),
+    do: {:reply, Enum.count(origin_ids, &Map.has_key?(state.permits, &1)), state}
+
   def handle_call(:status, _from, state) do
     permit_counts =
       Enum.reduce(state.permits, %{pending: 0, executing: 0, settling: 0}, fn
@@ -1608,6 +1617,106 @@ defmodule LoopexDaemon.AdmissionRelay do
 
   def handle_info({:relay_barrier, _barrier_ref, :cut}, state) do
     Logger.debug("loopex daemon admission relay stale barrier ignored")
+    {:noreply, state}
+  end
+
+  # Concept: after the admission cut, stopping moves through four more
+  # ordered barriers, each acknowledged once per reference and repeated
+  # idempotently: lease operations freeze, the drain begins, tickets are
+  # sealed after the drain, and the lease-owner set is frozen for teardown.
+  #
+  # Technical depth: `freeze_lease_ops` ends admission at once, cancels every
+  # pending row as the deadline would, and returns the executing and settling
+  # lease rows the owner must see finish inside its freeze deadline; no claim,
+  # promotion or owner registration is admitted from here on. `quiescing`
+  # records the drain identity. `seal_after_quiesce` kills every remaining
+  # ticket task, lets a queued real result win its `DOWN` until the given
+  # absolute deadline, and returns the real-result and unresolved ticket sets,
+  # abandoning the unresolved ones for this shutdown without calling them
+  # settled. `tearing_down` returns the exact remaining lease-owner set.
+  def handle_info(
+        {:relay_barrier, ref, {:freeze_lease_ops, _deadline}},
+        %{phase: :draining} = state
+      )
+      when is_reference(ref) do
+    if state.deadline_timer, do: Process.cancel_timer(state.deadline_timer)
+    now = monotonic_ms()
+
+    state =
+      expire_pending(%{
+        state
+        | deadline_timer: nil,
+          admission_deadline: min(state.admission_deadline, now)
+      })
+
+    descriptors =
+      state.permits
+      |> Enum.filter(fn {_origin, permit} ->
+        permit.kind == :lease and permit.phase in [:executing, :settling]
+      end)
+      |> Enum.map(&elem(&1, 0))
+      |> Enum.sort()
+
+    state = %{state | phase: :lease_ops_frozen, barrier: {:freeze_lease_ops, ref, descriptors}}
+    send(state.owner, {:relay_barrier_ack, ref, :freeze_lease_ops, descriptors})
+    Logger.debug("loopex daemon admission relay lease operations frozen")
+    {:noreply, state}
+  end
+
+  def handle_info(
+        {:relay_barrier, ref, {:quiescing, drain_id}},
+        %{phase: :lease_ops_frozen} = state
+      )
+      when is_reference(ref) do
+    state = %{state | phase: :quiescing, barrier: {:quiescing, ref, drain_id}}
+    send(state.owner, {:relay_barrier_ack, ref, :quiescing, drain_id})
+    Logger.debug("loopex daemon admission relay quiescing")
+    {:noreply, state}
+  end
+
+  def handle_info(
+        {:relay_barrier, ref, {:seal_after_quiesce, drain_id, deadline}},
+        %{phase: :quiescing, barrier: {:quiescing, _ref, drain_id}} = state
+      )
+      when is_reference(ref) and is_integer(deadline) do
+    state = state |> kill_ticket_tasks() |> await_ticket_tasks(deadline)
+
+    {real, unresolved} =
+      Enum.split_with(state.tickets, fn {_origin, ticket} -> ticket.result != nil end)
+
+    unresolved_ids = unresolved |> Enum.map(&elem(&1, 0)) |> Enum.sort()
+    real_ids = real |> Enum.map(&elem(&1, 0)) |> Enum.sort()
+    state = Enum.reduce(unresolved_ids, state, &abandon_ticket(&2, &1))
+    payload = %{results: real_ids, unresolved: unresolved_ids}
+    state = %{state | phase: :sealed, barrier: {:seal_after_quiesce, ref, payload}}
+    send(state.owner, {:relay_barrier_ack, ref, :seal_after_quiesce, payload})
+    Logger.debug("loopex daemon admission relay sealed")
+    {:noreply, state}
+  end
+
+  def handle_info({:relay_barrier, ref, :tearing_down}, %{phase: :sealed} = state)
+      when is_reference(ref) do
+    owners =
+      state.lease_owners
+      |> Enum.map(fn {session_id, row} -> {session_id, row.binding} end)
+      |> Enum.sort()
+
+    state = %{state | phase: :tearing_down, barrier: {:tearing_down, ref, owners}}
+    send(state.owner, {:relay_barrier_ack, ref, :tearing_down, owners})
+    Logger.debug("loopex daemon admission relay tearing down")
+    {:noreply, state}
+  end
+
+  def handle_info({:relay_barrier, ref, kind}, %{barrier: {name, ref, payload}} = state)
+      when is_reference(ref) and kind != :cut do
+    if barrier_name(kind) == name,
+      do: send(state.owner, {:relay_barrier_ack, ref, name, payload})
+
+    {:noreply, state}
+  end
+
+  def handle_info({:relay_barrier, _ref, kind}, state) when kind != :cut do
+    Logger.debug("loopex daemon admission relay out-of-order barrier ignored")
     {:noreply, state}
   end
 
@@ -2110,6 +2219,8 @@ defmodule LoopexDaemon.AdmissionRelay do
        else: {:error, :daemon_stopping}
   end
 
+  defp promotion_admitted(_stopping, _origin_id), do: {:error, :daemon_stopping}
+
   defp bind_admitted(%{phase: :serving}, _origin_id, _kind), do: :ok
 
   defp bind_admitted(%{phase: :draining} = state, origin_id, kind) do
@@ -2117,6 +2228,8 @@ defmodule LoopexDaemon.AdmissionRelay do
       do: :ok,
       else: {:error, :daemon_stopping}
   end
+
+  defp bind_admitted(_stopping, _origin_id, _kind), do: {:error, :daemon_stopping}
 
   defp promotion_repetition(
          state,
@@ -2340,6 +2453,63 @@ defmodule LoopexDaemon.AdmissionRelay do
     end
   end
 
+  defp barrier_name({name, _detail}) when is_atom(name), do: name
+  defp barrier_name({name, _detail, _deadline}) when is_atom(name), do: name
+  defp barrier_name(name) when is_atom(name), do: name
+
+  defp kill_ticket_tasks(state) do
+    Enum.each(state.tickets, fn
+      {_origin, %{task_pid: task, result: nil}} when is_pid(task) -> Process.exit(task, :kill)
+      _other -> :ok
+    end)
+
+    state
+  end
+
+  # A queued real result wins the task's later `DOWN`; waiting stops at the
+  # absolute deadline whatever remains.
+  defp await_ticket_tasks(state, deadline) do
+    open =
+      Enum.any?(state.tickets, fn {_origin, ticket} ->
+        is_pid(ticket.task_pid) and ticket.result == nil and not ticket.task_down
+      end)
+
+    if open do
+      receive do
+        {:relay_ticket_result, task, origin_id, task_incarnation, result} ->
+          case Map.fetch(state.tickets, origin_id) do
+            {:ok, %{task_pid: ^task, task_incarnation: ^task_incarnation, result: nil} = ticket} ->
+              ticket = %{ticket | disposition: :result, result: result}
+              await_ticket_tasks(put_in(state, [:tickets, origin_id], ticket), deadline)
+
+            _other ->
+              await_ticket_tasks(state, deadline)
+          end
+
+        {:DOWN, monitor, :process, _pid, _reason}
+        when is_map_key(state.ticket_task_monitors, monitor) ->
+          {origin_id, monitors} = Map.pop(state.ticket_task_monitors, monitor)
+          state = %{state | ticket_task_monitors: monitors}
+
+          state =
+            if Map.has_key?(state.tickets, origin_id),
+              do: put_in(state, [:tickets, origin_id, :task_down], true),
+              else: state
+
+          await_ticket_tasks(state, deadline)
+      after
+        max(deadline - monotonic_ms(), 0) -> state
+      end
+    else
+      state
+    end
+  end
+
+  defp abandon_ticket(state, origin_id) do
+    Logger.debug("loopex daemon admission relay ticket abandoned for shutdown")
+    remove_ticket(state, origin_id)
+  end
+
   defp cut_payload(state, deadline) do
     permits =
       state.permits
@@ -2380,7 +2550,8 @@ defmodule LoopexDaemon.AdmissionRelay do
   defp admission_expired?(%{phase: :draining} = state),
     do: monotonic_ms() >= state.admission_deadline
 
-  defp admission_expired?(_state), do: false
+  defp admission_expired?(%{phase: :serving}), do: false
+  defp admission_expired?(_stopping), do: true
 
   defp expire_pending(state) do
     state =
