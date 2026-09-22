@@ -39,8 +39,11 @@ defmodule Loopex.Runtime.Control do
   alias Loopex.Store.OwnerLane
   alias Loopex.Trace.Config, as: TraceConfig
 
+  require Logger
+
   @max_identifier_bytes 256
   @attachment_transaction_limit 512
+  @max_quiesce_writer_domains 64
 
   # Technical depth: this is Control's private responsiveness bound for the
   # Store evidence that rebuilds a provider binding or closes one receipt range.
@@ -108,6 +111,22 @@ defmodule Loopex.Runtime.Control do
   end
 
   @doc false
+  @spec begin_quiesce(pid(), reference(), binary(), timeout()) ::
+          {:ok, [map()]} | {:error, :runtime_unavailable}
+  def begin_quiesce(control, token, drain_id, timeout)
+      when is_pid(control) and is_binary(drain_id) do
+    bounded_control_call(control, {:begin_quiesce, token, drain_id}, timeout)
+  end
+
+  @doc false
+  @spec quiesce_projection(pid(), reference(), binary(), timeout()) ::
+          {:ok, [map()]} | {:error, :runtime_unavailable}
+  def quiesce_projection(control, token, drain_id, timeout)
+      when is_pid(control) and is_binary(drain_id) do
+    bounded_control_call(control, {:quiesce_projection, token, drain_id}, timeout)
+  end
+
+  @doc false
   @spec exclude_trace_process(pid(), reference(), pid(), list(), GenServer.from()) :: :ok
   def exclude_trace_process(control, token, caller, functions, reply_to)
       when is_pid(control) and is_pid(caller) and is_list(functions) do
@@ -118,6 +137,14 @@ defmodule Loopex.Runtime.Control do
   defp control_call(control, message) do
     try do
       GenServer.call(control, message, :infinity)
+    catch
+      :exit, _reason -> {:error, :runtime_unavailable}
+    end
+  end
+
+  defp bounded_control_call(control, message, timeout) do
+    try do
+      GenServer.call(control, message, timeout)
     catch
       :exit, _reason -> {:error, :runtime_unavailable}
     end
@@ -280,6 +307,9 @@ defmodule Loopex.Runtime.Control do
        wall_clock: fn -> System.system_time(:millisecond) end,
        lane: OwnerLane.new(Keyword.fetch!(options, :store)),
        sessions: %{},
+       writer_domains: MapSet.new(),
+       quiescing: nil,
+       quiesce_writer_domains: nil,
        monitor_to_session: %{},
        attachment_holders: %{},
        attachment_monitor_to_holder: %{},
@@ -375,11 +405,57 @@ defmodule Loopex.Runtime.Control do
     end
   end
 
+  def handle_call({:begin_quiesce, token, drain_id}, _from, state) do
+    cond do
+      token != state.token or not valid_identifier?(drain_id) ->
+        {:reply, {:error, :runtime_unavailable}, state}
+
+      not is_nil(state.quiescing) ->
+        Logger.debug("runtime quiesce gate refused")
+        {:reply, {:error, :runtime_unavailable}, state}
+
+      true ->
+        next =
+          state
+          |> Map.put(:quiescing, drain_id)
+          |> Map.put(:quiesce_writer_domains, state.writer_domains)
+          |> refuse_dispatcher_waiting_attaches()
+
+        Logger.debug("runtime quiesce gate installed",
+          writer_domains: MapSet.size(next.writer_domains)
+        )
+
+        if MapSet.size(next.writer_domains) <= @max_quiesce_writer_domains do
+          {:reply, {:ok, quiesce_projection(next)}, next}
+        else
+          {:reply, {:error, :runtime_unavailable}, next}
+        end
+    end
+  end
+
+  def handle_call({:quiesce_projection, token, drain_id}, _from, state) do
+    reply =
+      if token == state.token and state.quiescing == drain_id and
+           state.writer_domains == state.quiesce_writer_domains and
+           MapSet.size(state.quiesce_writer_domains) <= @max_quiesce_writer_domains do
+        {:ok, quiesce_projection(state)}
+      else
+        {:error, :runtime_unavailable}
+      end
+
+    {:reply, reply, state}
+  end
+
   def handle_call({:create_session, token, command_id, session_options, mode}, from, state) do
-    if token == state.token do
-      create_session(state, command_id, session_options, from, mode)
-    else
-      {:reply, {:error, :runtime_unavailable}, state}
+    cond do
+      token != state.token ->
+        {:reply, {:error, :runtime_unavailable}, state}
+
+      not is_nil(state.quiescing) ->
+        {:reply, {:error, :runtime_unavailable}, state}
+
+      true ->
+        create_session(state, command_id, session_options, from, mode)
     end
   end
 
@@ -414,7 +490,8 @@ defmodule Loopex.Runtime.Control do
   end
 
   def handle_call({:resume_session, token, session_id, command_id, mode}, from, state) do
-    if token == state.token and valid_identifier?(session_id) and valid_identifier?(command_id) do
+    if token == state.token and is_nil(state.quiescing) and valid_identifier?(session_id) and
+         valid_identifier?(command_id) do
       command = resume_command(state.runtime_id, session_id, command_id)
 
       case Store.runtime_command(state.store, command) do
@@ -465,16 +542,20 @@ defmodule Loopex.Runtime.Control do
           {:reply, reply, state}
       end
     else
-      reply =
-        detailed_session_reply(
-          {:error, :invalid_session_id},
-          mode,
-          :no_activation,
-          state,
-          session_id
-        )
+      if not is_nil(state.quiescing) do
+        {:reply, {:error, :runtime_unavailable}, state}
+      else
+        reply =
+          detailed_session_reply(
+            {:error, :invalid_session_id},
+            mode,
+            :no_activation,
+            state,
+            session_id
+          )
 
-      {:reply, reply, state}
+        {:reply, reply, state}
+      end
     end
   end
 
@@ -484,7 +565,7 @@ defmodule Loopex.Runtime.Control do
         state
       ) do
     reply =
-      with true <- token == state.token,
+      with true <- token == state.token and is_nil(state.quiescing),
            {:ok, %{status: :active, coordinator: coordinator, owner: owner} = entry} <-
              Map.fetch(state.sessions, session_id),
            :ok <- current_attachment?(entry.attachments, attachment_id, incarnation_id),
@@ -500,6 +581,7 @@ defmodule Loopex.Runtime.Control do
              ) do
         {:ok, coordinator, owner}
       else
+        _other when not is_nil(state.quiescing) -> {:error, :runtime_unavailable}
         _other -> {:error, :session_unavailable}
       end
 
@@ -514,6 +596,9 @@ defmodule Loopex.Runtime.Control do
     reply =
       cond do
         token != state.token ->
+          {:error, :runtime_unavailable}
+
+        not is_nil(state.quiescing) ->
           {:error, :runtime_unavailable}
 
         true ->
@@ -688,11 +773,12 @@ defmodule Loopex.Runtime.Control do
   # and calls the coordinator from the caller's own process; this does the same.
   def handle_call({:session_status, token, session_id}, _from, state) do
     reply =
-      with true <- token == state.token,
+      with true <- token == state.token and is_nil(state.quiescing),
            {:ok, %{status: :active, coordinator: coordinator, owner: owner}} <-
              Map.fetch(state.sessions, session_id) do
         {:ok, coordinator, owner}
       else
+        _other when not is_nil(state.quiescing) -> {:error, :runtime_unavailable}
         _other -> {:error, :session_unavailable}
       end
 
@@ -700,7 +786,7 @@ defmodule Loopex.Runtime.Control do
   end
 
   def handle_call({:attach, token, session_id, holder, options}, from, state) do
-    if token == state.token do
+    if token == state.token and is_nil(state.quiescing) do
       case state.dispatcher do
         %{status: :ready} ->
           begin_attach(state, session_id, holder, options, from)
@@ -922,7 +1008,7 @@ defmodule Loopex.Runtime.Control do
         answered = %{entry | status: :unavailable, waiting: nil}
 
         sessions =
-          if reason == :runtime_placement_mismatch,
+          if reason == :runtime_placement_mismatch and is_nil(state.quiescing),
             do: Map.delete(state.sessions, session_id),
             else: Map.put(state.sessions, session_id, answered)
 
@@ -940,9 +1026,15 @@ defmodule Loopex.Runtime.Control do
       {:ok, %{status: :acquiring, coordinator: ^coordinator} = entry} ->
         EventDispatcher.release_fence(state.root, session_id)
 
+        answered = %{entry | status: :unavailable, waiting: nil}
+
         next = %{
           state
-          | sessions: Map.delete(state.sessions, session_id),
+          | sessions:
+              if(is_nil(state.quiescing),
+                do: Map.delete(state.sessions, session_id),
+                else: Map.put(state.sessions, session_id, answered)
+              ),
             spent_attempts: forget_spent_attempts(state.spent_attempts, session_id)
         }
 
@@ -1756,30 +1848,45 @@ defmodule Loopex.Runtime.Control do
              waiting: waiting,
              owner_command: owner_command,
              prepared: prepared
-           }} ->
-            cleared = %{state | sessions: Map.delete(state.sessions, session_id)}
+           } = entry} ->
+            if is_nil(state.quiescing) do
+              cleared = %{state | sessions: Map.delete(state.sessions, session_id)}
 
-            case do_start_owner(
-                   cleared,
-                   session_id,
-                   succession_id,
-                   waiting,
-                   owner_command,
-                   prepared
-                 ) do
-              {:waiting, next} ->
-                {:noreply, next}
+              case do_start_owner(
+                     cleared,
+                     session_id,
+                     succession_id,
+                     waiting,
+                     owner_command,
+                     prepared
+                   ) do
+                {:waiting, next} ->
+                  {:noreply, next}
 
-              {:error, reason, next, disposition} ->
-                reply_session_waiters(
-                  waiting,
-                  {:error, reason},
-                  next,
-                  session_id,
-                  disposition
-                )
+                {:error, reason, next, disposition} ->
+                  reply_session_waiters(
+                    waiting,
+                    {:error, reason},
+                    next,
+                    session_id,
+                    disposition
+                  )
 
-                {:noreply, next}
+                  {:noreply, next}
+              end
+            else
+              unavailable = entry |> Map.put(:status, :unavailable) |> Map.put(:waiting, nil)
+              next = %{state | sessions: Map.put(state.sessions, session_id, unavailable)}
+
+              reply_session_waiters(
+                waiting,
+                {:error, :runtime_unavailable},
+                next,
+                session_id,
+                :no_activation
+              )
+
+              {:noreply, next}
             end
 
           {:ok, %{status: :active, owner_group: ^pid} = entry} ->
@@ -2052,6 +2159,17 @@ defmodule Loopex.Runtime.Control do
     do: item |> :erlang.term_to_binary([:deterministic]) |> byte_size()
 
   defp start_owner(
+         %{quiescing: quiescing} = state,
+         _session_id,
+         _succession_id,
+         _from,
+         _owner_command,
+         _mode
+       )
+       when not is_nil(quiescing),
+       do: {:error, :runtime_unavailable, state, :no_activation}
+
+  defp start_owner(
          state,
          session_id,
          succession_id,
@@ -2222,6 +2340,8 @@ defmodule Loopex.Runtime.Control do
 
         case DynamicSupervisor.start_child(session_supervisor, {SessionCoordinator, options}) do
           {:ok, coordinator} ->
+            state = record_writer_domain(state, session_id)
+
             case OwnerGroup.attach(owner_group, coordinator) do
               :ok ->
                 await_owner(
@@ -2349,6 +2469,17 @@ defmodule Loopex.Runtime.Control do
     }
 
     {:waiting, next}
+  end
+
+  # Concept: the shutdown census covers every session for which this runtime
+  # ever started a serial writer, including one that failed before readiness.
+  #
+  # Technical depth: membership is recorded in the same Control callback that
+  # receives `DynamicSupervisor.start_child/2` success and is never removed.
+  # `begin_quiesce/1` therefore freezes a monotonic writer-domain set without
+  # inferring writer history from an entry's later status.
+  defp record_writer_domain(state, session_id) do
+    %{state | writer_domains: MapSet.put(state.writer_domains, session_id)}
   end
 
   # Concept: every invocation learns whether it started the shared owner it
@@ -2639,6 +2770,42 @@ defmodule Loopex.Runtime.Control do
 
         drain_dispatcher_waiting_attaches(next)
     end
+  end
+
+  defp refuse_dispatcher_waiting_attaches(state) do
+    state.dispatcher_waiting_attaches
+    |> :queue.to_list()
+    |> Enum.each(fn {from, _session_id, _holder, _options} ->
+      GenServer.reply(from, {:error, :runtime_unavailable})
+    end)
+
+    %{state | dispatcher_waiting_attaches: :queue.new()}
+  end
+
+  defp quiesce_projection(state) do
+    (state.quiesce_writer_domains || state.writer_domains)
+    |> Enum.sort()
+    |> Enum.map(fn session_id ->
+      case Map.get(state.sessions, session_id) do
+        nil ->
+          %{
+            session_id: session_id,
+            status: :absent,
+            coordinator: nil,
+            owner: nil,
+            writer_started?: true
+          }
+
+        entry ->
+          %{
+            session_id: session_id,
+            status: Map.get(entry, :status, :unavailable),
+            coordinator: Map.get(entry, :coordinator),
+            owner: Map.get(entry, :owner),
+            writer_started?: true
+          }
+      end
+    end)
   end
 
   defp clear_attachment_generation(state) do
