@@ -1,0 +1,1269 @@
+defmodule LoopexDaemon.Owner do
+  @moduledoc """
+  ## Concept
+
+  One fixed daemon owner composes collaboration processes for a daemon
+  lifetime. It keeps client-visible controller results behind the matching
+  routing state, so a connection never receives an epoch the registry and
+  per-session lease owner have not both committed.
+
+  ## Technical depth
+
+  The owner starts and links the admission relay and connection registry,
+  binds their shared incarnation, and starts bounded per-session lease owners.
+  Each holder-changing grant, release, or expiry is one retained operation with
+  one absolute deadline. Registry, relay, and lease-owner steps use exact
+  ref-tagged acknowledgements; stale replies are ignored. A missed mirror
+  deadline kills the exact registry and stops the daemon owner with
+  `:connections_lost`. Status and formatted state expose counts only, and every
+  lifecycle log is fixed and identity-free.
+  """
+
+  use GenServer
+  require Logger
+
+  alias LoopexDaemon.{AdmissionRelay, ConnectionRegistry, LeaseOwner, WireRecords}
+
+  @owner_limit 512
+  @mirror_deadline_ms 5_000
+  @lease_term_ms 30_000
+  @incarnation_bytes 16
+
+  @typedoc false
+  @type origin_id :: AdmissionRelay.origin_id()
+
+  @doc false
+  @spec start_link(keyword()) :: GenServer.on_start()
+  def start_link(options), do: GenServer.start_link(__MODULE__, options)
+
+  @doc false
+  @spec components(pid()) :: %{
+          relay: pid(),
+          registry: pid(),
+          daemon_incarnation: binary(),
+          routing_incarnation: binary()
+        }
+  def components(owner), do: GenServer.call(owner, :components)
+
+  @doc false
+  @spec acquire_control(
+          pid(),
+          origin_id(),
+          binary(),
+          binary(),
+          pid(),
+          binary(),
+          pid(),
+          binary(),
+          integer()
+        ) ::
+          {:ok, :completed | :proposed | :queued, pid(), binary()}
+          | {:error, atom()}
+  def acquire_control(
+        owner,
+        permit_id,
+        request_id,
+        session_id,
+        connection,
+        connection_incarnation,
+        worker,
+        worker_incarnation,
+        request_deadline
+      ) do
+    GenServer.call(
+      owner,
+      {:acquire_control, permit_id, request_id, session_id, connection, connection_incarnation,
+       worker, worker_incarnation, request_deadline}
+    )
+  end
+
+  @doc false
+  @spec release_control(
+          pid(),
+          origin_id(),
+          binary(),
+          binary(),
+          pid(),
+          binary(),
+          pid(),
+          binary(),
+          binary(),
+          integer()
+        ) ::
+          {:ok, :completed | :proposed | :queued, pid(), binary()}
+          | {:error, atom()}
+  def release_control(
+        owner,
+        permit_id,
+        request_id,
+        session_id,
+        connection,
+        connection_incarnation,
+        worker,
+        worker_incarnation,
+        writer_epoch,
+        request_deadline
+      ) do
+    GenServer.call(
+      owner,
+      {:release_control, permit_id, request_id, session_id, connection, connection_incarnation,
+       worker, worker_incarnation, writer_epoch, request_deadline}
+    )
+  end
+
+  @doc false
+  @spec status(pid()) :: %{
+          phase: :serving,
+          owner_slots: non_neg_integer(),
+          live_owners: non_neg_integer(),
+          lost_owners: non_neg_integer(),
+          lease_operations: non_neg_integer(),
+          mirror_operations: non_neg_integer(),
+          granted_routes: non_neg_integer(),
+          owner_limit: 512,
+          mirror_deadline_ms: pos_integer()
+        }
+  def status(owner), do: GenServer.call(owner, :status)
+
+  @impl true
+  def init(options) do
+    Process.flag(:trap_exit, true)
+
+    daemon_incarnation = Keyword.get_lazy(options, :daemon_incarnation, &incarnation/0)
+    routing_incarnation = Keyword.get_lazy(options, :routing_incarnation, &incarnation/0)
+    admission_wait_ms = Keyword.fetch!(options, :admission_wait_ms)
+    mirror_deadline_ms = Keyword.get(options, :mirror_deadline_ms, @mirror_deadline_ms)
+    lease_term_ms = Keyword.get(options, :lease_term_ms, @lease_term_ms)
+
+    if valid_options?(
+         daemon_incarnation,
+         routing_incarnation,
+         admission_wait_ms,
+         mirror_deadline_ms,
+         lease_term_ms
+       ) do
+      with {:ok, relay} <-
+             AdmissionRelay.start_link(
+               owner: self(),
+               owner_incarnation: daemon_incarnation,
+               admission_wait_ms: admission_wait_ms
+             ),
+           {:ok, registry} <- start_registry(options),
+           :ok <-
+             AdmissionRelay.register_registry(relay, registry, routing_incarnation),
+           :ok <- ConnectionRegistry.bind_relay(registry, relay, routing_incarnation) do
+        Logger.debug("loopex daemon owner start")
+
+        {:ok,
+         %{
+           phase: :serving,
+           daemon_incarnation: daemon_incarnation,
+           routing_incarnation: routing_incarnation,
+           relay: relay,
+           registry: registry,
+           mirror_deadline_ms: mirror_deadline_ms,
+           lease_term_ms: lease_term_ms,
+           owners: %{},
+           owner_pids: %{},
+           operations: %{},
+           mirror_operations: %{},
+           routes: %{}
+         }}
+      else
+        _error -> {:stop, :component_start_failed}
+      end
+    else
+      {:stop, :invalid_owner_options}
+    end
+  end
+
+  @impl true
+  def handle_call(:components, _from, state) do
+    {:reply,
+     %{
+       relay: state.relay,
+       registry: state.registry,
+       daemon_incarnation: state.daemon_incarnation,
+       routing_incarnation: state.routing_incarnation
+     }, state}
+  end
+
+  def handle_call(
+        {:acquire_control, permit_id, request_id, session_id, connection, connection_incarnation,
+         worker, worker_incarnation, request_deadline},
+        _from,
+        state
+      ) do
+    requested = %{
+      class: :session_acquire_control,
+      permit_id: permit_id,
+      request_id: request_id,
+      session_id: session_id,
+      connection: connection,
+      connection_incarnation: connection_incarnation,
+      worker: worker,
+      worker_incarnation: worker_incarnation,
+      request_deadline: request_deadline,
+      writer_epoch: nil,
+      phase: :opened
+    }
+
+    dispatch_acquire(state, requested)
+  end
+
+  def handle_call(
+        {:release_control, permit_id, request_id, session_id, connection, connection_incarnation,
+         worker, worker_incarnation, writer_epoch, request_deadline},
+        _from,
+        state
+      ) do
+    requested = %{
+      class: :session_release_control,
+      permit_id: permit_id,
+      request_id: request_id,
+      session_id: session_id,
+      connection: connection,
+      connection_incarnation: connection_incarnation,
+      worker: worker,
+      worker_incarnation: worker_incarnation,
+      request_deadline: request_deadline,
+      writer_epoch: writer_epoch,
+      phase: :opened
+    }
+
+    dispatch_release(state, requested)
+  end
+
+  def handle_call(:status, _from, state) do
+    live = Enum.count(state.owners, fn {_session_id, row} -> row.phase == :live end)
+    lost = Enum.count(state.owners, fn {_session_id, row} -> row.phase == :lost end)
+
+    {:reply,
+     %{
+       phase: state.phase,
+       owner_slots: map_size(state.owners),
+       live_owners: live,
+       lost_owners: lost,
+       lease_operations: map_size(state.operations),
+       mirror_operations: map_size(state.mirror_operations),
+       granted_routes: map_size(state.routes),
+       owner_limit: @owner_limit,
+       mirror_deadline_ms: state.mirror_deadline_ms
+     }, state}
+  end
+
+  @impl true
+  def handle_info(
+        {:lease_grant_proposed, grant_ref, permit_id, owner, owner_incarnation, session_id,
+         connection, connection_incarnation, writer_epoch, request_deadline},
+        state
+      ) do
+    case Map.fetch(state.operations, permit_id) do
+      {:ok,
+       %{
+         request: %{
+           class: :session_acquire_control,
+           session_id: ^session_id,
+           connection: ^connection,
+           connection_incarnation: ^connection_incarnation,
+           request_deadline: ^request_deadline
+         },
+         owner_pid: ^owner,
+         owner_incarnation: ^owner_incarnation,
+         phase: :opened
+       } = operation} ->
+        start_grant_operation(
+          state,
+          operation,
+          grant_ref,
+          writer_epoch,
+          request_deadline
+        )
+
+      _other ->
+        {:stop, :lease_operation_invalid, state}
+    end
+  end
+
+  def handle_info(
+        {:release_proposed, release_ref, permit_id, owner, owner_incarnation, holder_incarnation},
+        state
+      ) do
+    case Map.fetch(state.operations, permit_id) do
+      {:ok,
+       %{
+         request: %{
+           class: :session_release_control,
+           connection_incarnation: ^holder_incarnation
+         },
+         owner_pid: ^owner,
+         owner_incarnation: ^owner_incarnation,
+         phase: :opened
+       } = operation} ->
+        start_release_operation(state, operation, release_ref)
+
+      _other ->
+        {:stop, :lease_operation_invalid, state}
+    end
+  end
+
+  def handle_info(
+        {:lease_expiry_proposed, expiry_ref, owner, owner_incarnation, session_id, holder,
+         holder_incarnation, writer_epoch},
+        state
+      ) do
+    case Map.get(state.routes, session_id) do
+      %{
+        owner_pid: ^owner,
+        owner_incarnation: ^owner_incarnation,
+        holder_pid: ^holder,
+        holder_incarnation: ^holder_incarnation,
+        writer_epoch: ^writer_epoch
+      } = route ->
+        start_expiry_operation(state, expiry_ref, route)
+
+      _other ->
+        {:stop, :lease_operation_invalid, state}
+    end
+  end
+
+  def handle_info(
+        {:mirror_applied, operation_ref, registry, routing_incarnation, result},
+        %{registry: registry, routing_incarnation: routing_incarnation} = state
+      ) do
+    continue_registry_operation(state, operation_ref, result)
+  end
+
+  def handle_info(
+        {:relay_lease_operation_ack, operation_ref, relay, daemon_incarnation, action, result},
+        %{relay: relay, daemon_incarnation: daemon_incarnation} = state
+      ) do
+    continue_relay_operation(state, operation_ref, action, result)
+  end
+
+  def handle_info(
+        {:lease_owner_resolution_ack, operation_ref, owner, owner_incarnation, action, result},
+        state
+      ) do
+    continue_owner_operation(state, operation_ref, owner, owner_incarnation, action, result)
+  end
+
+  def handle_info(
+        {:relay_lease_disposition, relay, permit_id, :connection_lost, settlement_ref, _class,
+         _session_id, _actor, _actor_incarnation, _start_op_ref},
+        %{relay: relay} = state
+      ) do
+    continue_connection_loss(state, permit_id, settlement_ref)
+  end
+
+  def handle_info({:mirror_deadline, operation_ref, deadline}, state) do
+    case Map.get(state.mirror_operations, operation_ref) do
+      %{deadline: ^deadline} ->
+        if monotonic_ms() >= deadline do
+          fail_connections(state)
+        else
+          timer =
+            Process.send_after(
+              self(),
+              {:mirror_deadline, operation_ref, deadline},
+              max(deadline - monotonic_ms(), 0)
+            )
+
+          {:noreply, put_in(state, [:mirror_operations, operation_ref, :timer], timer)}
+        end
+
+      _other ->
+        {:noreply, state}
+    end
+  end
+
+  def handle_info({:EXIT, registry, _reason}, %{registry: registry} = state),
+    do: {:stop, :connections_lost, state}
+
+  def handle_info({:EXIT, relay, _reason}, %{relay: relay} = state),
+    do: {:stop, :relay_lost, state}
+
+  def handle_info({:EXIT, owner, reason}, state) do
+    case Map.fetch(state.owner_pids, owner) do
+      {:ok, session_id} ->
+        state = put_in(state, [:owners, session_id, :phase], :lost)
+        Logger.debug("loopex daemon lease owner exit retained")
+        _ = reason
+        {:noreply, state}
+
+      :error ->
+        {:stop, :unexpected_linked_exit, state}
+    end
+  end
+
+  def handle_info(_message, state), do: {:noreply, state}
+
+  @impl true
+  def terminate(_reason, state) do
+    Enum.each(state.owners, fn {_session_id, row} ->
+      if Process.alive?(row.pid), do: Process.exit(row.pid, :kill)
+    end)
+
+    if Process.alive?(state.registry), do: Process.exit(state.registry, :kill)
+    if Process.alive?(state.relay), do: Process.exit(state.relay, :kill)
+    Logger.debug("loopex daemon owner stop")
+    :ok
+  end
+
+  @impl GenServer
+  def format_status(status) do
+    status
+    |> Map.put(:state, :redacted_daemon_owner_state)
+    |> Map.put(:message, :redacted_daemon_owner_message)
+    |> Map.put(:reason, :redacted_daemon_owner_reason)
+    |> Map.put(:log, [])
+  end
+
+  defp start_registry(options) do
+    registry_options = [owner: self()]
+
+    registry_options =
+      case Keyword.fetch(options, :connection_module) do
+        {:ok, module} -> Keyword.put(registry_options, :connection_module, module)
+        :error -> registry_options
+      end
+
+    ConnectionRegistry.start_link(registry_options)
+  end
+
+  defp install_session_owner(state, session_id) do
+    cond do
+      not valid_session?(session_id) ->
+        {:error, :invalid_session}
+
+      Map.has_key?(state.owners, session_id) ->
+        {:error, :owner_conflict}
+
+      map_size(state.owners) >= @owner_limit ->
+        {:error, :control_capacity_reached}
+
+      true ->
+        owner_incarnation = incarnation()
+
+        case LeaseOwner.start_link(
+               daemon_owner: self(),
+               relay: state.relay,
+               registry: state.registry,
+               session_id: session_id,
+               owner_incarnation: owner_incarnation,
+               lease_term_ms: state.lease_term_ms
+             ) do
+          {:ok, owner} ->
+            with :ok <-
+                   AdmissionRelay.register_lease_owner(
+                     state.relay,
+                     session_id,
+                     owner,
+                     owner_incarnation
+                   ),
+                 :ok <- LeaseOwner.activate(owner) do
+              row = %{pid: owner, incarnation: owner_incarnation, phase: :live}
+
+              state =
+                state
+                |> put_in([:owners, session_id], row)
+                |> put_in([:owner_pids, owner], session_id)
+
+              Logger.debug("loopex daemon lease owner installed")
+              {:ok, state, row}
+            else
+              _error ->
+                Process.unlink(owner)
+                Process.exit(owner, :kill)
+                {:error, :owner_conflict}
+            end
+
+          _error ->
+            {:error, :owner_conflict}
+        end
+    end
+  end
+
+  defp dispatch_acquire(state, request) do
+    case Map.fetch(state.operations, request.permit_id) do
+      {:ok, %{request: ^request, owner_pid: pid, owner_incarnation: owner_incarnation}} ->
+        {:reply, {:ok, :completed, pid, owner_incarnation}, state}
+
+      {:ok, _other} ->
+        {:reply, {:error, :permit_conflict}, state}
+
+      :error ->
+        case live_owner(state, request.session_id) do
+          {:ok, owner_row} -> dispatch_existing_acquire(state, request, owner_row)
+          {:error, :owner_unavailable} -> dispatch_first_acquire(state, request)
+        end
+    end
+  end
+
+  defp dispatch_first_acquire(state, request) do
+    permit_id = request.permit_id
+    start_op_ref = make_ref()
+
+    with true <- valid_request?(request),
+         {:ok, ^permit_id} <-
+           AdmissionRelay.open_lease_permit(
+             state.relay,
+             request.connection,
+             permit_id,
+             request.class,
+             request.session_id,
+             self(),
+             state.daemon_incarnation,
+             request.worker,
+             request.worker_incarnation,
+             start_op_ref
+           ),
+         :ok <-
+           AdmissionRelay.claim_lease_permit(
+             state.relay,
+             permit_id,
+             state.daemon_incarnation,
+             start_op_ref
+           ),
+         {:ok, state, owner_row} <- install_session_owner(state, request.session_id),
+         operation =
+           lease_operation(
+             request,
+             owner_row,
+             self(),
+             state.daemon_incarnation,
+             start_op_ref
+           ),
+         state = put_in(state, [:operations, permit_id], operation),
+         {:ok, disposition} <-
+           LeaseOwner.first_acquire(
+             owner_row.pid,
+             permit_id,
+             request.request_id,
+             request.connection,
+             request.connection_incarnation,
+             request.request_deadline
+           ) do
+      {:reply, {:ok, disposition, owner_row.pid, owner_row.incarnation}, state}
+    else
+      false -> {:reply, {:error, :invalid_operation}, state}
+      {:error, reason} -> {:reply, {:error, reason}, state}
+    end
+  end
+
+  defp dispatch_existing_acquire(state, request, owner_row) do
+    with {:ok, state, operation} <- open_existing_permit(state, request, owner_row),
+         {:ok, disposition} <-
+           LeaseOwner.acquire(
+             owner_row.pid,
+             request.permit_id,
+             request.request_id,
+             request.connection,
+             request.connection_incarnation,
+             request.request_deadline
+           ) do
+      state = maybe_complete_direct_operation(state, request.permit_id, disposition)
+      {:reply, {:ok, disposition, operation.owner_pid, operation.owner_incarnation}, state}
+    else
+      {:error, reason} -> {:reply, {:error, reason}, state}
+    end
+  end
+
+  defp dispatch_release(state, request) do
+    case Map.fetch(state.operations, request.permit_id) do
+      {:ok, %{request: ^request, owner_pid: pid, owner_incarnation: owner_incarnation}} ->
+        {:reply, {:ok, :completed, pid, owner_incarnation}, state}
+
+      {:ok, _other} ->
+        {:reply, {:error, :permit_conflict}, state}
+
+      :error ->
+        with {:ok, owner_row} <- live_owner(state, request.session_id),
+             {:ok, state, operation} <- open_existing_permit(state, request, owner_row),
+             {:ok, disposition} <-
+               LeaseOwner.release(
+                 owner_row.pid,
+                 request.permit_id,
+                 request.request_id,
+                 request.connection,
+                 request.connection_incarnation,
+                 request.writer_epoch
+               ) do
+          state = maybe_complete_direct_operation(state, request.permit_id, disposition)
+          {:reply, {:ok, disposition, operation.owner_pid, operation.owner_incarnation}, state}
+        else
+          {:error, reason} -> {:reply, {:error, reason}, state}
+        end
+    end
+  end
+
+  defp open_existing_permit(state, request, owner_row) do
+    permit_id = request.permit_id
+
+    with true <- valid_request?(request),
+         {:ok, ^permit_id} <-
+           AdmissionRelay.open_lease_permit(
+             state.relay,
+             request.connection,
+             permit_id,
+             request.class,
+             request.session_id,
+             owner_row.pid,
+             owner_row.incarnation,
+             request.worker,
+             request.worker_incarnation
+           ) do
+      operation = lease_operation(request, owner_row, owner_row.pid, owner_row.incarnation)
+      {:ok, put_in(state, [:operations, permit_id], operation), operation}
+    else
+      false -> {:error, :invalid_operation}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp lease_operation(
+         request,
+         owner_row,
+         actor_pid,
+         actor_incarnation,
+         start_op_ref \\ nil
+       ) do
+    %{
+      request: request,
+      owner_pid: owner_row.pid,
+      owner_incarnation: owner_row.incarnation,
+      actor_pid: actor_pid,
+      actor_incarnation: actor_incarnation,
+      start_op_ref: start_op_ref,
+      phase: :opened
+    }
+  end
+
+  defp start_grant_operation(state, operation, grant_ref, writer_epoch, _request_deadline) do
+    operation_ref = make_ref()
+    deadline = monotonic_ms() + state.mirror_deadline_ms
+
+    row = %{
+      permit_id: operation.request.permit_id,
+      start_op_ref: operation.start_op_ref,
+      session_id: operation.request.session_id,
+      owner_pid: operation.owner_pid,
+      owner_incarnation: operation.owner_incarnation,
+      holder_pid: operation.request.connection,
+      holder_incarnation: operation.request.connection_incarnation,
+      writer_epoch: writer_epoch
+    }
+
+    mirror_operation = %{
+      kind: :grant,
+      step: :install,
+      permit_id: operation.request.permit_id,
+      owner_pid: operation.owner_pid,
+      owner_incarnation: operation.owner_incarnation,
+      actor_pid: operation.actor_pid,
+      actor_incarnation: operation.actor_incarnation,
+      transition_ref: grant_ref,
+      row: row,
+      deadline: deadline,
+      timer: schedule_deadline(operation_ref, deadline),
+      loss_ref: nil
+    }
+
+    state =
+      state
+      |> put_in([:operations, operation.request.permit_id, :phase], :settling)
+      |> put_in([:mirror_operations, operation_ref], mirror_operation)
+
+    ConnectionRegistry.apply_mirror(
+      state.registry,
+      operation_ref,
+      state.routing_incarnation,
+      :install_provisional,
+      row
+    )
+
+    Logger.debug("loopex daemon grant mirror settlement start")
+    {:noreply, state}
+  end
+
+  defp start_release_operation(state, operation, release_ref) do
+    case Map.fetch(state.routes, operation.request.session_id) do
+      {:ok,
+       %{
+         owner_pid: owner_pid,
+         owner_incarnation: owner_incarnation,
+         holder_pid: holder,
+         holder_incarnation: holder_incarnation
+       } = route}
+      when owner_pid == operation.owner_pid and
+             owner_incarnation == operation.owner_incarnation and
+             holder == operation.request.connection and
+             holder_incarnation == operation.request.connection_incarnation ->
+        operation_ref = make_ref()
+
+        deadline = monotonic_ms() + state.mirror_deadline_ms
+
+        mirror_operation = %{
+          kind: :release,
+          step: :select_result,
+          permit_id: operation.request.permit_id,
+          owner_pid: operation.owner_pid,
+          owner_incarnation: operation.owner_incarnation,
+          actor_pid: operation.actor_pid,
+          actor_incarnation: operation.actor_incarnation,
+          transition_ref: release_ref,
+          row: route,
+          deadline: deadline,
+          timer: schedule_deadline(operation_ref, deadline),
+          loss_ref: nil
+        }
+
+        state =
+          state
+          |> put_in([:operations, operation.request.permit_id, :phase], :settling)
+          |> put_in([:mirror_operations, operation_ref], mirror_operation)
+
+        request_relay_selection(state, operation_ref, mirror_operation)
+        Logger.debug("loopex daemon release mirror settlement start")
+        {:noreply, state}
+
+      _other ->
+        {:stop, :lease_operation_invalid, state}
+    end
+  end
+
+  defp start_expiry_operation(state, expiry_ref, route) do
+    operation_ref = make_ref()
+    deadline = monotonic_ms() + state.mirror_deadline_ms
+
+    mirror_operation = %{
+      kind: :expiry,
+      step: :clear,
+      permit_id: nil,
+      owner_pid: route.owner_pid,
+      owner_incarnation: route.owner_incarnation,
+      transition_ref: expiry_ref,
+      row: route,
+      deadline: deadline,
+      timer: schedule_deadline(operation_ref, deadline),
+      loss_ref: nil
+    }
+
+    state = put_in(state, [:mirror_operations, operation_ref], mirror_operation)
+
+    ConnectionRegistry.apply_mirror(
+      state.registry,
+      operation_ref,
+      state.routing_incarnation,
+      :clear_granted,
+      route
+    )
+
+    Logger.debug("loopex daemon expiry mirror settlement start")
+    {:noreply, state}
+  end
+
+  defp continue_registry_operation(state, operation_ref, result) do
+    case Map.get(state.mirror_operations, operation_ref) do
+      nil ->
+        {:noreply, state}
+
+      operation ->
+        if deadline_reached?(operation) do
+          fail_connections(state)
+        else
+          apply_registry_result(state, operation_ref, operation, result)
+        end
+    end
+  end
+
+  defp apply_registry_result(
+         state,
+         operation_ref,
+         %{kind: :grant, step: :install} = operation,
+         :ok
+       ) do
+    state = put_in(state, [:mirror_operations, operation_ref, :step], :select_result)
+    request_relay_selection(state, operation_ref, operation)
+    {:noreply, state}
+  end
+
+  defp apply_registry_result(
+         state,
+         operation_ref,
+         %{kind: :grant, step: :install},
+         {:error, :connection_unavailable}
+       ) do
+    state = put_in(state, [:mirror_operations, operation_ref, :step], :await_connection_loss)
+    {:noreply, state}
+  end
+
+  defp apply_registry_result(
+         state,
+         operation_ref,
+         %{kind: :grant, step: :resolve_granted} = operation,
+         :ok
+       ) do
+    state = put_in(state, [:mirror_operations, operation_ref, :step], :resolve_owner_grant)
+
+    LeaseOwner.request_grant_resolution(
+      operation.owner_pid,
+      operation_ref,
+      operation.owner_incarnation,
+      operation.transition_ref,
+      :granted,
+      monotonic_ms()
+    )
+
+    {:noreply, state}
+  end
+
+  defp apply_registry_result(
+         state,
+         operation_ref,
+         %{kind: :grant, step: :resolve_cancelled} = operation,
+         :ok
+       ) do
+    state = put_in(state, [:mirror_operations, operation_ref, :step], :resolve_owner_cancel)
+
+    LeaseOwner.request_grant_resolution(
+      operation.owner_pid,
+      operation_ref,
+      operation.owner_incarnation,
+      operation.transition_ref,
+      :cancelled
+    )
+
+    {:noreply, state}
+  end
+
+  defp apply_registry_result(
+         state,
+         operation_ref,
+         %{kind: :release, step: :clear} = operation,
+         :ok
+       ) do
+    state = put_in(state, [:mirror_operations, operation_ref, :step], :settle_result)
+    request_relay_result_settlement(state, operation_ref, operation)
+    {:noreply, state}
+  end
+
+  defp apply_registry_result(
+         state,
+         operation_ref,
+         %{kind: :expiry, step: :clear} = operation,
+         :ok
+       ) do
+    state = put_in(state, [:mirror_operations, operation_ref, :step], :resolve_owner_expiry)
+
+    LeaseOwner.request_expiry_resolution(
+      operation.owner_pid,
+      operation_ref,
+      operation.owner_incarnation,
+      operation.transition_ref
+    )
+
+    {:noreply, state}
+  end
+
+  defp apply_registry_result(state, _operation_ref, _operation, _result),
+    do: fail_connections(state)
+
+  defp continue_relay_operation(state, operation_ref, action, result) do
+    case Map.get(state.mirror_operations, operation_ref) do
+      nil ->
+        {:noreply, state}
+
+      operation ->
+        if deadline_reached?(operation) do
+          fail_connections(state)
+        else
+          apply_relay_result(state, operation_ref, operation, action, result)
+        end
+    end
+  end
+
+  defp apply_relay_result(
+         state,
+         operation_ref,
+         %{kind: :grant, step: :select_result, row: row},
+         :select_result,
+         :ok
+       ) do
+    state = put_in(state, [:mirror_operations, operation_ref, :step], :resolve_granted)
+
+    ConnectionRegistry.apply_mirror(
+      state.registry,
+      operation_ref,
+      state.routing_incarnation,
+      {:resolve_provisional, :granted},
+      row
+    )
+
+    {:noreply, state}
+  end
+
+  defp apply_relay_result(
+         state,
+         operation_ref,
+         %{kind: :grant, step: :select_result},
+         :select_result,
+         {:error, :connection_lost}
+       ) do
+    {:noreply, put_in(state, [:mirror_operations, operation_ref, :step], :await_connection_loss)}
+  end
+
+  defp apply_relay_result(
+         state,
+         operation_ref,
+         %{kind: :release, step: :select_result, row: row},
+         :select_result,
+         :ok
+       ) do
+    state = put_in(state, [:mirror_operations, operation_ref, :step], :clear)
+
+    ConnectionRegistry.apply_mirror(
+      state.registry,
+      operation_ref,
+      state.routing_incarnation,
+      :clear_granted,
+      row
+    )
+
+    {:noreply, state}
+  end
+
+  defp apply_relay_result(
+         state,
+         operation_ref,
+         %{kind: :release, step: :select_result},
+         :select_result,
+         {:error, :connection_lost}
+       ) do
+    {:noreply, put_in(state, [:mirror_operations, operation_ref, :step], :await_connection_loss)}
+  end
+
+  defp apply_relay_result(
+         state,
+         _operation_ref,
+         %{step: step},
+         :select_result,
+         {:error, :connection_lost}
+       )
+       when step in [:resolve_cancelled, :resolve_owner_cancel, :settle_disposition],
+       do: {:noreply, state}
+
+  defp apply_relay_result(
+         state,
+         operation_ref,
+         %{kind: :grant, step: :settle_result} = operation,
+         :settle_result,
+         :ok
+       ),
+       do: complete_grant(state, operation_ref, operation)
+
+  defp apply_relay_result(
+         state,
+         operation_ref,
+         %{kind: :release, step: :settle_result} = operation,
+         :settle_result,
+         :ok
+       ) do
+    state = put_in(state, [:mirror_operations, operation_ref, :step], :resolve_owner_release)
+
+    LeaseOwner.request_release_resolution(
+      operation.owner_pid,
+      operation_ref,
+      operation.owner_incarnation,
+      operation.transition_ref,
+      :released
+    )
+
+    {:noreply, state}
+  end
+
+  defp apply_relay_result(
+         state,
+         operation_ref,
+         %{step: :settle_disposition} = operation,
+         :settle_disposition,
+         :ok
+       ),
+       do: complete_cancelled_operation(state, operation_ref, operation)
+
+  defp apply_relay_result(state, _operation_ref, _operation, _action, _result),
+    do: {:stop, :relay_lost, state}
+
+  defp continue_owner_operation(
+         state,
+         operation_ref,
+         owner,
+         owner_incarnation,
+         action,
+         result
+       ) do
+    case Map.get(state.mirror_operations, operation_ref) do
+      %{owner_pid: ^owner, owner_incarnation: ^owner_incarnation} = operation ->
+        if deadline_reached?(operation) do
+          fail_connections(state)
+        else
+          apply_owner_result(state, operation_ref, operation, action, result)
+        end
+
+      _other ->
+        {:noreply, state}
+    end
+  end
+
+  defp apply_owner_result(
+         state,
+         operation_ref,
+         %{kind: :grant, step: :resolve_owner_grant} = operation,
+         :grant,
+         :ok
+       ) do
+    route = operation.row |> Map.drop([:permit_id, :start_op_ref]) |> Map.put(:phase, :granted)
+    state = put_in(state, [:routes, route.session_id], route)
+    state = put_in(state, [:mirror_operations, operation_ref, :step], :settle_result)
+    request_relay_result_settlement(state, operation_ref, operation)
+    {:noreply, state}
+  end
+
+  defp apply_owner_result(
+         state,
+         operation_ref,
+         %{kind: :grant, step: :resolve_owner_cancel} = operation,
+         :grant,
+         :ok
+       ) do
+    state = put_in(state, [:mirror_operations, operation_ref, :step], :settle_disposition)
+    request_relay_disposition_settlement(state, operation_ref, operation)
+    {:noreply, state}
+  end
+
+  defp apply_owner_result(
+         state,
+         operation_ref,
+         %{kind: :release, step: :resolve_owner_cancel} = operation,
+         :release,
+         :ok
+       ) do
+    state = put_in(state, [:mirror_operations, operation_ref, :step], :settle_disposition)
+    request_relay_disposition_settlement(state, operation_ref, operation)
+    {:noreply, state}
+  end
+
+  defp apply_owner_result(
+         state,
+         operation_ref,
+         %{kind: :release, step: :resolve_owner_release} = operation,
+         :release,
+         :ok
+       ) do
+    state = update_in(state.routes, &Map.delete(&1, operation.row.session_id))
+    complete_operation(state, operation_ref, operation)
+  end
+
+  defp apply_owner_result(
+         state,
+         operation_ref,
+         %{kind: :expiry, step: :resolve_owner_expiry} = operation,
+         :expiry,
+         :ok
+       ) do
+    state = update_in(state.routes, &Map.delete(&1, operation.row.session_id))
+    complete_operation(state, operation_ref, operation)
+  end
+
+  defp apply_owner_result(state, _operation_ref, _operation, _action, _result),
+    do: {:stop, :lease_operation_invalid, state}
+
+  defp continue_connection_loss(state, permit_id, settlement_ref) do
+    case Enum.find(state.mirror_operations, fn {_ref, operation} ->
+           operation.permit_id == permit_id and
+             operation.step in [:await_connection_loss, :select_result]
+         end) do
+      {operation_ref, %{kind: :grant, row: row} = operation} ->
+        operation = %{operation | step: :resolve_cancelled, loss_ref: settlement_ref}
+        state = put_in(state, [:mirror_operations, operation_ref], operation)
+
+        ConnectionRegistry.apply_mirror(
+          state.registry,
+          operation_ref,
+          state.routing_incarnation,
+          {:resolve_provisional, :cancelled},
+          row
+        )
+
+        {:noreply, state}
+
+      {operation_ref, %{kind: :release} = operation} ->
+        operation = %{operation | step: :resolve_owner_cancel, loss_ref: settlement_ref}
+        state = put_in(state, [:mirror_operations, operation_ref], operation)
+
+        LeaseOwner.request_release_resolution(
+          operation.owner_pid,
+          operation_ref,
+          operation.owner_incarnation,
+          operation.transition_ref,
+          :cancelled
+        )
+
+        {:noreply, state}
+
+      nil ->
+        {:noreply, state}
+    end
+  end
+
+  defp request_relay_selection(state, operation_ref, operation) do
+    request_id = operation_request_id(state, operation.permit_id)
+
+    result =
+      case operation.kind do
+        :grant ->
+          WireRecords.control_acquired(
+            request_id,
+            operation.row.writer_epoch,
+            state.lease_term_ms,
+            false
+          )
+
+        :release ->
+          WireRecords.control_released(request_id)
+      end
+
+    AdmissionRelay.request_lease_result_selection(
+      state.relay,
+      operation_ref,
+      state.daemon_incarnation,
+      operation.permit_id,
+      operation.actor_pid,
+      operation.actor_incarnation,
+      operation.transition_ref,
+      result
+    )
+  end
+
+  defp request_relay_result_settlement(state, operation_ref, operation) do
+    AdmissionRelay.request_lease_result_settlement(
+      state.relay,
+      operation_ref,
+      state.daemon_incarnation,
+      operation.permit_id,
+      operation.transition_ref
+    )
+  end
+
+  defp request_relay_disposition_settlement(state, operation_ref, operation) do
+    AdmissionRelay.request_lease_disposition_settlement(
+      state.relay,
+      operation_ref,
+      state.daemon_incarnation,
+      operation.permit_id,
+      :connection_lost,
+      operation.loss_ref
+    )
+  end
+
+  defp complete_grant(state, operation_ref, operation) do
+    complete_operation(state, operation_ref, operation)
+  end
+
+  defp complete_cancelled_operation(state, operation_ref, operation) do
+    complete_operation(state, operation_ref, operation)
+  end
+
+  defp complete_operation(state, operation_ref, operation) do
+    cancel_timer(operation.timer, operation_ref)
+
+    state = %{
+      state
+      | mirror_operations: Map.delete(state.mirror_operations, operation_ref),
+        operations:
+          if(operation.permit_id,
+            do: Map.delete(state.operations, operation.permit_id),
+            else: state.operations
+          )
+    }
+
+    Logger.debug("loopex daemon mirror settlement complete")
+    {:noreply, state}
+  end
+
+  defp maybe_complete_direct_operation(state, permit_id, :completed),
+    do: update_in(state.operations, &Map.delete(&1, permit_id))
+
+  defp maybe_complete_direct_operation(state, _permit_id, disposition)
+       when disposition in [:proposed, :queued],
+       do: state
+
+  defp fail_connections(state) do
+    if Process.alive?(state.registry), do: Process.exit(state.registry, :kill)
+    Logger.debug("loopex daemon mirror settlement deadline reached")
+    {:stop, :connections_lost, state}
+  end
+
+  defp operation_request_id(state, permit_id) do
+    state.operations |> Map.fetch!(permit_id) |> get_in([:request, :request_id])
+  end
+
+  defp live_owner(state, session_id) do
+    case Map.get(state.owners, session_id) do
+      %{phase: :live} = row -> {:ok, row}
+      _other -> {:error, :owner_unavailable}
+    end
+  end
+
+  defp valid_request?(request) do
+    request.class in [:session_acquire_control, :session_release_control] and
+      is_binary(request.request_id) and byte_size(request.request_id) in 1..256 and
+      valid_session?(request.session_id) and is_pid(request.connection) and
+      valid_incarnation?(request.connection_incarnation) and is_pid(request.worker) and
+      valid_incarnation?(request.worker_incarnation) and is_integer(request.request_deadline) and
+      request.request_deadline > monotonic_ms()
+  end
+
+  defp valid_options?(
+         daemon_incarnation,
+         routing_incarnation,
+         admission_wait_ms,
+         mirror_deadline_ms,
+         lease_term_ms
+       ) do
+    valid_incarnation?(daemon_incarnation) and valid_incarnation?(routing_incarnation) and
+      is_integer(admission_wait_ms) and admission_wait_ms > 0 and
+      is_integer(mirror_deadline_ms) and mirror_deadline_ms > 0 and
+      mirror_deadline_ms <= @mirror_deadline_ms and is_integer(lease_term_ms) and
+      lease_term_ms > 0
+  end
+
+  defp valid_session?(session_id),
+    do: is_binary(session_id) and byte_size(session_id) in 1..256
+
+  defp valid_incarnation?(value),
+    do: is_binary(value) and byte_size(value) == @incarnation_bytes
+
+  defp deadline_reached?(operation), do: monotonic_ms() >= operation.deadline
+
+  defp schedule_deadline(operation_ref, deadline) do
+    Process.send_after(
+      self(),
+      {:mirror_deadline, operation_ref, deadline},
+      max(deadline - monotonic_ms(), 0)
+    )
+  end
+
+  defp cancel_timer(timer, operation_ref) do
+    _ = Process.cancel_timer(timer, async: false, info: false)
+
+    receive do
+      {:mirror_deadline, ^operation_ref, _deadline} -> :ok
+    after
+      0 -> :ok
+    end
+  end
+
+  defp incarnation, do: :crypto.strong_rand_bytes(@incarnation_bytes)
+  defp monotonic_ms, do: System.monotonic_time(:millisecond)
+end
