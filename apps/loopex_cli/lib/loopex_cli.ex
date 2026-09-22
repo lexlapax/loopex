@@ -887,6 +887,12 @@ defmodule LoopexCli do
          "a live loopex process (pid #{owner}) owns this state root; " <>
            "cancel from that terminal, or stop it first"}
 
+      {:error, {:placement_unverifiable, _reason} = refusal} ->
+        {:error, placement_message(refusal)}
+
+      {:error, {:placement_lock_failed, _reason} = refusal} ->
+        {:error, placement_message(refusal)}
+
       # Concept: a refusal keeps the words it was refused in.
       #
       # Technical depth: the recovery pipeline reports configuration conflicts
@@ -1280,9 +1286,23 @@ defmodule LoopexCli do
         :persistent_term.put(@placement_key, lock)
         :ok
 
-      {:error, reason} ->
-        {:error, reason}
+      {:error, refusal} ->
+        {:error, placement_message(refusal)}
     end
+  end
+
+  defp placement_message({:placement_active, owner}) do
+    "another loopex process (pid #{owner}) is using this state root; " <>
+      "stop it, or pass --state-root to work somewhere else"
+  end
+
+  defp placement_message({:placement_unverifiable, reason}) do
+    "the placement owner could not be verified (#{probe_reason(reason)}); " <>
+      "establish that the recorded process is gone before changing the lock"
+  end
+
+  defp placement_message({:placement_lock_failed, reason}) do
+    "the placement lock could not be taken: #{inspect(reason, printable_limit: 256, limit: 64)}"
   end
 
   @doc """

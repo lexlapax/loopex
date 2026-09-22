@@ -2322,9 +2322,7 @@ defmodule LoopexCliTest do
     File.write!(lock_path, foreign_record)
 
     assert {:ok, ^pid} = Placement.live_owner(state_root)
-    assert {:error, refused} = Placement.acquire(state_root)
-    assert refused =~ "cannot read the record"
-    assert refused =~ pid
+    assert {:error, {:placement_active, ^pid}} = Placement.acquire(state_root)
     assert File.read!(lock_path) == foreign_record
 
     # A record this version cannot read that names a process which is gone is
@@ -2348,8 +2346,9 @@ defmodule LoopexCliTest do
     # Bytes naming no process at all attribute the lock to nobody, and deciding
     # is what removing a live owner's lock would require.
     File.write!(lock_path, "not a placement record at all\n")
-    assert {:error, unattributed} = Placement.acquire(state_root, probe)
-    assert unattributed =~ "could not be verified"
+
+    assert {:error, {:placement_unverifiable, :unattributable_owner_record}} =
+             Placement.acquire(state_root, probe)
   end
 
   test "placement refuses rather than reclaiming when process identity cannot be inspected" do
@@ -2371,10 +2370,14 @@ defmodule LoopexCliTest do
       ^foreign_pid -> {:error, :process_probe_failed}
     end
 
-    assert {:error, unavailable} = Placement.live_owner(state_root, probe)
-    assert unavailable =~ "could not be verified"
-    assert {:error, refused} = Placement.acquire(state_root, probe)
-    assert refused =~ "could not be verified"
+    assert {:error,
+            {:placement_unverifiable, {:process_incarnation_unavailable, :process_probe_failed}}} =
+             Placement.live_owner(state_root, probe)
+
+    assert {:error,
+            {:placement_unverifiable, {:process_incarnation_unavailable, :process_probe_failed}}} =
+             Placement.acquire(state_root, probe)
+
     assert File.read!(lock_path) == foreign_record
   end
 

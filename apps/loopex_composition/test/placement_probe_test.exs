@@ -39,8 +39,11 @@ defmodule LoopexComposition.PlacementProbeTest do
     bytes = File.read!(handle)
 
     failing = fn _pid -> {:error, {:process_probe_failed, {:exit_status, 2}}} end
-    assert {:error, message} = Placement.acquire(root, failing)
-    assert message =~ "could not be taken" and message =~ "process_probe_failed"
+
+    assert {:error, {:placement_lock_failed, {:guard_failed, reason}}} =
+             Placement.acquire(root, failing)
+
+    assert inspect(reason) =~ "process_probe_failed"
     assert File.read!(handle) == bytes, "a failed probe let the lock be rewritten"
     assert :ok = Placement.release(handle)
   end
