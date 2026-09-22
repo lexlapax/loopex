@@ -16,6 +16,7 @@ defmodule LoopexProtocol.Session.V2Test do
 
   use ExUnit.Case, async: true
 
+  alias LoopexProtocol.Frame
   alias LoopexProtocol.Session
   alias LoopexProtocol.Session.V2
 
@@ -149,5 +150,110 @@ defmodule LoopexProtocol.Session.V2Test do
 
     assert {:error, :unsupported_generation} =
              V2.negotiate(["loopex.session.v1-experimental"], [])
+  end
+
+  test "the generation-two manifest carries the module's exact inventories" do
+    manifest = contract_file("schema")
+
+    assert manifest["generation"] == V2.generation()
+    assert manifest["methods_declared"] == V2.methods()
+    assert manifest["server_record_type_enum"] == V2.record_families()
+    assert manifest["server_records"]["error"]["code_enum"] == V2.error_codes()
+
+    additions = manifest["initialize_limits"]["generation_two_additions"]
+    assert Map.take(V2.limits(), Map.keys(additions)) == additions
+
+    writer_methods = [
+      "session.resume",
+      "session.prompt",
+      "session.steer",
+      "session.follow_up",
+      "session.abort",
+      "session.respond_interaction",
+      "session.admit_resources",
+      "session.activate_skill",
+      "session.release_control"
+    ]
+
+    request_methods = manifest["request_contract"]["methods"]
+
+    for method <- writer_methods do
+      assert request_methods[method]["required"]["writer_epoch"] ==
+               "identity_original_max_64_bytes"
+    end
+
+    for method <- V2.methods() -- writer_methods do
+      refute Map.has_key?(request_methods[method]["required"], "writer_epoch")
+    end
+  end
+
+  test "literal vectors cover every generation-two addition and both owner-loss shapes" do
+    vectors = contract_file("vectors")
+    assert vectors["generation"] == V2.generation()
+
+    cases = vectors["cases"]
+    ids = Enum.map(cases, & &1["id"])
+    assert length(ids) == length(Enum.uniq(ids))
+
+    for method <- [
+          "session.list",
+          "daemon.status",
+          "session.acquire_control",
+          "session.release_control"
+        ] do
+      assert Enum.any?(cases, &(decoded_method(&1) == method)), "missing vector for #{method}"
+    end
+
+    for code <- V2.error_codes() -- Session.error_codes() do
+      assert "error_#{code}" in ids, "missing literal vector for #{code}"
+    end
+
+    without_cursor = vector!(cases, "control_owner_lost_without_cursor")
+    with_cursor = vector!(cases, "control_owner_lost_with_cursor")
+
+    refute Map.has_key?(without_cursor, "request_id")
+    refute Map.has_key?(without_cursor, "event_cursor")
+    assert with_cursor["event_cursor"] == "42"
+    refute Map.has_key?(with_cursor, "request_id")
+
+    assert vector!(cases, "error_control_not_held")["message"] ==
+             "control is not held by this connection"
+
+    assert vector!(cases, "error_composition_mismatch")["message"] ==
+             "session cannot be activated by this daemon composition"
+  end
+
+  defp contract_file(directory) do
+    :loopex_protocol
+    |> Application.app_dir(Path.join(["priv", directory, "loopex-experimental-2.json"]))
+    |> File.read!()
+    |> JSON.decode!()
+  end
+
+  defp decoded_method(%{"raw_hex" => hex}) do
+    bytes = Base.decode16!(hex, case: :lower)
+
+    with true <- String.ends_with?(bytes, "\n"),
+         frame <- binary_part(bytes, 0, byte_size(bytes) - 1),
+         {:ok, decoded} <- Frame.decode(frame, 1_048_576) do
+      Map.get(decoded, "method")
+    else
+      _refused -> nil
+    end
+  end
+
+  defp vector!(cases, id) do
+    cases
+    |> Enum.find(&(&1["id"] == id))
+    |> decode_vector()
+  end
+
+  defp decode_vector(%{"raw_hex" => hex}) do
+    bytes = Base.decode16!(hex, case: :lower)
+    assert String.ends_with?(bytes, "\n")
+
+    frame = binary_part(bytes, 0, byte_size(bytes) - 1)
+    assert {:ok, decoded} = Frame.decode(frame, 1_048_576)
+    decoded
   end
 end

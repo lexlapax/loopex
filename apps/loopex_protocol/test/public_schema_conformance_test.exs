@@ -25,6 +25,7 @@ defmodule LoopexProtocol.PublicSchemaConformanceTest do
 
   alias LoopexProtocol.Frame
   alias LoopexProtocol.Session
+  alias LoopexProtocol.Session.V2
   alias LoopexProtocol.Wire
 
   @frame_limit 65_536
@@ -167,15 +168,21 @@ defmodule LoopexProtocol.PublicSchemaConformanceTest do
       flunk("Node is required for the independent client and was not found")
     end
 
+    executor = Path.join([repository_root(), "clients", "node", "vectors.mjs"])
+    assert File.exists?(executor)
+
+    for generation <- [1, 2] do
+      assert_vector_clients_agree(node_executable, executor, generation)
+    end
+  end
+
+  defp assert_vector_clients_agree(node_executable, executor, generation) do
     vectors_path =
       Path.join([
         Application.app_dir(:loopex_protocol, "priv"),
         "vectors",
-        "loopex-experimental-1.json"
+        "loopex-experimental-#{generation}.json"
       ])
-
-    executor = Path.join([repository_root(), "clients", "node", "vectors.mjs"])
-    assert File.exists?(executor)
 
     {output, status} =
       System.cmd(node_executable, [executor, vectors_path], stderr_to_stdout: false)
@@ -186,7 +193,9 @@ defmodule LoopexProtocol.PublicSchemaConformanceTest do
     assert reported["format"] == "loopex.experimental.hex-vectors/1"
 
     results = reported["results"]
-    assert length(results) >= 30, "only #{length(results)} vectors were executed"
+
+    assert length(results) >= 30,
+           "generation #{generation} executed only #{length(results)} vectors"
 
     # The Elixir side reads the same file and decides the same question with its
     # own decoder. Neither client uses the other's: what makes this conformance
@@ -351,6 +360,25 @@ defmodule LoopexProtocol.PublicSchemaConformanceTest do
   test "the schema digest is the value an independent implementation checks against" do
     assert Session.schema_digest() ==
              "3c0e34a99cd0178095de0d75843340128d26143798e517daae26b44cbf9a884f"
+  end
+
+  test "generation-two schema and vector files have pinned identities" do
+    for {directory, expected} <- [
+          {"schema", "83751e744bdebc2164162d61a717aad7a1e6364465763a5d1697ddcf8b122381"},
+          {"vectors", "09f1f1ecace1ab2e1e5bbba6002b4b162f7ee64e72e53e2d2499926a3c030684"}
+        ] do
+      path =
+        Path.join([
+          Application.app_dir(:loopex_protocol, "priv"),
+          directory,
+          "loopex-experimental-2.json"
+        ])
+
+      bytes = File.read!(path)
+      measured = :sha256 |> :crypto.hash(bytes) |> Base.encode16(case: :lower)
+      assert measured == expected, "the generation-two #{directory} file is #{measured}"
+      assert JSON.decode!(bytes)["generation"] == V2.generation()
+    end
   end
 
   test "an encoded record is the exact bytes an independent implementation expects" do

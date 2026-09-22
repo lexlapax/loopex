@@ -31,8 +31,9 @@ Add `LoopexProtocol.Session.V2` as the daemon's distinct
 `loopex.experimental/2` metadata and negotiation contract. It retains the
 generation-one inventories and adds the four daemon methods, two daemon record
 families, twelve daemon refusal codes and seven advertised daemon limits that
-M5 requires. Generation-two schema and literal vector files land with the
-socket mapping that makes those shapes executable.
+M5 requires. Its schema manifest pins every request, result, notification and
+error shape, and its literal vectors cover the new methods, every new refusal,
+both uncorrelated controller-loss forms and the generation-negotiation edges.
 
 ## [0.1.0] — 2026-09-19
 
