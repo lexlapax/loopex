@@ -142,6 +142,52 @@ defmodule Loopex.Runtime.SessionCoordinator do
   end
 
   @doc false
+  @spec start_quiesce_fence(
+          pid(),
+          Store.t(),
+          binary(),
+          reference(),
+          pid(),
+          integer(),
+          term()
+        ) :: {pid(), reference()}
+  def start_quiesce_fence(
+        control,
+        store,
+        session_id,
+        operation_ref,
+        phase_owner,
+        deadline,
+        abort_resolution
+      )
+      when is_pid(control) and is_binary(session_id) and is_reference(operation_ref) and
+             is_pid(phase_owner) and is_integer(deadline) do
+    spawn_monitor(fn ->
+      run_quiesce_fence(
+        control,
+        store,
+        session_id,
+        operation_ref,
+        phase_owner,
+        deadline,
+        abort_resolution
+      )
+    end)
+  end
+
+  @doc false
+  @spec drain_fence_transaction_id(binary(), non_neg_integer()) :: binary()
+  def drain_fence_transaction_id(session_id, owner_epoch)
+      when is_binary(session_id) and is_integer(owner_epoch) and owner_epoch >= 0,
+      do: owner_identity("drain_fence", session_id, owner_epoch)
+
+  @doc false
+  @spec drain_fence_incarnation_id(binary(), non_neg_integer()) :: binary()
+  def drain_fence_incarnation_id(session_id, owner_epoch)
+      when is_binary(session_id) and is_integer(owner_epoch) and owner_epoch >= 0,
+      do: owner_identity("drain_fence_incarnation", session_id, owner_epoch)
+
+  @doc false
   @spec command(pid(), owner(), map()) :: {:accepted, binary()} | {:error, term()}
   def command(coordinator, owner, command)
       when is_pid(coordinator) and is_map(owner) and is_map(command) do
@@ -172,7 +218,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
              owner_epoch: non_neg_integer()
            }}
           | :rejected_no_active_run
-          | {:unknown, %{command_id: binary(), head: map()}}
+          | {:unknown, %{command_id: binary(), head: map(), run_id: binary() | nil}}
           | {:error, term()}
   def admit_quiesce_abort(coordinator, owner, drain_id, phase_owner)
       when is_pid(coordinator) and is_map(owner) and is_binary(drain_id) and
@@ -501,7 +547,10 @@ defmodule Loopex.Runtime.SessionCoordinator do
 
       state.phase != :ready or supplied_owner != state.owner or state.superseded ->
         drain = %{id: drain_id, phase_owner: phase_owner, status: :refused}
-        {:reply, {:error, :runtime_unavailable}, %{state | drain: drain}}
+
+        notify_quiesce_admission(
+          {:reply, {:error, :runtime_unavailable}, %{state | drain: drain}}
+        )
 
       true ->
         state = %{
@@ -509,10 +558,13 @@ defmodule Loopex.Runtime.SessionCoordinator do
           | drain: %{id: drain_id, phase_owner: phase_owner, status: :admitting}
         }
 
-        case Control.current_owner(state.control, state.session_id, state.owner) do
-          :ok -> admit_quiesce_abort_once(state)
-          {:error, reason} -> drain_refusal(state, reason)
-        end
+        result =
+          case Control.current_owner(state.control, state.session_id, state.owner) do
+            :ok -> admit_quiesce_abort_once(state)
+            {:error, reason} -> drain_refusal(state, reason)
+          end
+
+        notify_quiesce_admission(result)
     end
   end
 
@@ -1635,6 +1687,247 @@ defmodule Loopex.Runtime.SessionCoordinator do
     }
   end
 
+  # Concept: a shutdown fence is a one-shot serial session owner whose only
+  # authority is to resolve the drain abort and move the durable owner epoch.
+  #
+  # Technical depth: it links to the private phase owner before handshaking,
+  # waits for Control's explicit authorization, checks the shared work deadline
+  # before every Store operation, and exits after one closed disposition. It
+  # owns its Store handle inside core; the phase owner sees only the pid, durable
+  # head projections, and the final disposition.
+  defp run_quiesce_fence(
+         control,
+         store,
+         session_id,
+         operation_ref,
+         phase_owner,
+         deadline,
+         abort_resolution
+       ) do
+    Process.link(phase_owner)
+    send(control, {:quiesce_fence_waiting, operation_ref, self()})
+
+    receive do
+      {:loopex_quiesce_fence_go, ^operation_ref, ^deadline} ->
+        if before_fence_deadline?(deadline) do
+          result =
+            try do
+              execute_quiesce_fence(
+                control,
+                store,
+                session_id,
+                operation_ref,
+                deadline,
+                abort_resolution
+              )
+            catch
+              _kind, _reason -> {:unknown, :no_head}
+            end
+
+          send(control, {:quiesce_fence_result, operation_ref, self(), result})
+        end
+    after
+      max(deadline - System.monotonic_time(:millisecond), 0) -> :ok
+    end
+  end
+
+  defp execute_quiesce_fence(
+         control,
+         store,
+         session_id,
+         operation_ref,
+         deadline,
+         abort_resolution
+       ) do
+    case resolve_quiesce_abort(store, session_id, deadline, abort_resolution) do
+      :proceed ->
+        fence_current_head(control, store, session_id, operation_ref, deadline)
+
+      disposition ->
+        disposition
+    end
+  end
+
+  defp resolve_quiesce_abort(_store, _session_id, _deadline, :known), do: :proceed
+
+  defp resolve_quiesce_abort(
+         store,
+         session_id,
+         deadline,
+         {:unknown,
+          %{
+            command_id: command_id,
+            head: head,
+            run_id: run_id
+          }}
+       ) do
+    if before_fence_deadline?(deadline) do
+      case Store.transaction_status(store, session_id, @mutation_domain, command_id) do
+        {:terminal, :committed} ->
+          reload_exact_drain_abort(store, session_id, command_id, head, run_id, deadline)
+
+        {:terminal, {:not_committed, _reason}} ->
+          :proceed
+
+        :absent ->
+          :proceed
+
+        :unavailable ->
+          {:unknown, :abort, head}
+      end
+    else
+      {:unknown, :abort, head}
+    end
+  end
+
+  defp resolve_quiesce_abort(_store, _session_id, _deadline, _unresolved),
+    do: {:unknown, :no_head}
+
+  defp reload_exact_drain_abort(store, session_id, command_id, head, run_id, deadline) do
+    if before_fence_deadline?(deadline) do
+      case Store.load_records(store, session_id, head.journal_version, 1) do
+        {:ok, [record]} ->
+          if SessionState.drain_abort_record?(record, command_id, head, run_id),
+            do: :proceed,
+            else: {:unknown, :abort, head}
+
+        _unavailable ->
+          {:unknown, :abort, head}
+      end
+    else
+      {:unknown, :abort, head}
+    end
+  end
+
+  defp fence_current_head(control, store, session_id, operation_ref, deadline) do
+    if before_fence_deadline?(deadline) do
+      case Store.ownership_head(store, session_id, @mutation_domain) do
+        {:ok, head} ->
+          send(control, {:quiesce_fence_head, operation_ref, self(), head})
+          present_quiesce_fence(store, session_id, head, deadline)
+
+        _unavailable ->
+          {:unknown, :no_head}
+      end
+    else
+      {:unknown, :no_head}
+    end
+  end
+
+  defp present_quiesce_fence(store, session_id, head, deadline) do
+    tx_id = drain_fence_transaction_id(session_id, head.owner_epoch)
+    incarnation = drain_fence_incarnation_id(session_id, head.owner_epoch)
+
+    with true <- before_fence_deadline?(deadline),
+         {:ok, transaction} <-
+           Store.advance_owner(
+             session_id,
+             @mutation_domain,
+             tx_id,
+             head.owner_epoch,
+             head.journal_version,
+             incarnation
+           ) do
+      lane = OwnerLane.new(store)
+      {outcome, lane} = OwnerLane.transact(lane, transaction)
+      resolve_quiesce_fence_outcome(outcome, lane, transaction, head, incarnation, deadline)
+    else
+      _unavailable -> {:unknown, :fence, head}
+    end
+  end
+
+  defp resolve_quiesce_fence_outcome(
+         {:committed, tx_id, receipt},
+         _lane,
+         %{tx_id: tx_id},
+         head,
+         incarnation,
+         _deadline
+       ) do
+    if valid_quiesce_fence_receipt?(receipt, incarnation),
+      do: :committed,
+      else: {:unknown, :fence, head}
+  end
+
+  defp resolve_quiesce_fence_outcome(
+         {:not_committed, reason},
+         _lane,
+         _transaction,
+         _head,
+         _incarnation,
+         _deadline
+       )
+       when reason in [:stale_owner_epoch, :stale_journal_version],
+       do: :superseded
+
+  defp resolve_quiesce_fence_outcome(
+         {:commit_unknown, tx_id},
+         lane,
+         %{tx_id: tx_id} = transaction,
+         head,
+         incarnation,
+         deadline
+       ) do
+    if before_fence_deadline?(deadline) do
+      {resolution, _lane} = OwnerLane.transact(lane, transaction)
+
+      resolve_quiesce_fence_replay(resolution, transaction, head, incarnation)
+    else
+      {:unknown, :fence, head}
+    end
+  end
+
+  defp resolve_quiesce_fence_outcome(
+         _outcome,
+         _lane,
+         _transaction,
+         head,
+         _incarnation,
+         _deadline
+       ),
+       do: {:unknown, :fence, head}
+
+  defp resolve_quiesce_fence_replay(
+         {:committed, tx_id, receipt},
+         %{tx_id: tx_id},
+         head,
+         incarnation
+       ) do
+    if valid_quiesce_fence_receipt?(receipt, incarnation),
+      do: :committed,
+      else: {:unknown, :fence, head}
+  end
+
+  defp resolve_quiesce_fence_replay(
+         {:not_committed, reason},
+         _transaction,
+         _head,
+         _incarnation
+       )
+       when reason in [:stale_owner_epoch, :stale_journal_version],
+       do: :superseded
+
+  defp resolve_quiesce_fence_replay(_resolution, _transaction, head, _incarnation),
+    do: {:unknown, :fence, head}
+
+  defp valid_quiesce_fence_receipt?(
+         %{
+           type: :advance_owner,
+           owner_incarnation_id: incarnation,
+           owner_epoch: owner_epoch,
+           journal_version: journal_version
+         },
+         incarnation
+       ),
+       do:
+         is_integer(owner_epoch) and owner_epoch > 0 and is_integer(journal_version) and
+           journal_version > 1
+
+  defp valid_quiesce_fence_receipt?(_receipt, _incarnation), do: false
+
+  defp before_fence_deadline?(deadline),
+    do: System.monotonic_time(:millisecond) < deadline
+
   defp owner_identity(namespace, succession_id, attempt) do
     bytes =
       :erlang.term_to_binary(["loopex_owner_identity_v1", namespace, succession_id, attempt], [
@@ -1883,6 +2176,8 @@ defmodule Loopex.Runtime.SessionCoordinator do
 
   defp commit_quiesce_abort(state, proposal, command_id) do
     head = drain_head(state)
+    candidate = drain_abort_candidate(state, proposal.reply, command_id, head)
+    notify_quiesce_candidate(state, candidate)
 
     with {:ok, transaction} <-
            Store.session_commit(
@@ -1906,10 +2201,10 @@ defmodule Loopex.Runtime.SessionCoordinator do
           drain_refusal(state, reason)
 
         {:commit_unknown, ^command_id} ->
-          drain_unknown(state, command_id, head)
+          drain_unknown(state, command_id, head, proposal.reply)
 
         {:fenced, :commit_unknown} ->
-          drain_unknown(state, command_id, head)
+          drain_unknown(state, command_id, head, proposal.reply)
 
         _other ->
           drain_refusal(state, :runtime_unavailable)
@@ -2002,10 +2297,20 @@ defmodule Loopex.Runtime.SessionCoordinator do
     )
   end
 
-  defp drain_unknown(state, command_id, head) do
-    result = %{command_id: command_id, head: head}
+  defp drain_unknown(state, command_id, head, reply) do
+    result = drain_abort_candidate(state, reply, command_id, head)
     drain = Map.merge(state.drain, %{status: {:unknown, head}, result: result})
     {:reply, {:unknown, result}, %{state | drain: drain}}
+  end
+
+  defp drain_abort_candidate(state, reply, command_id, head) do
+    run_id =
+      case reply do
+        {:accepted, ^command_id} -> state.durable.active_run_id
+        {:error, :no_active_run} -> nil
+      end
+
+    %{command_id: command_id, head: head, run_id: run_id}
   end
 
   defp drain_refusal(state, reason) do
@@ -2018,6 +2323,34 @@ defmodule Loopex.Runtime.SessionCoordinator do
       owner_epoch: state.owner.owner_epoch,
       journal_version: state.durable.journal_version
     }
+  end
+
+  defp notify_quiesce_admission({:reply, reply, state} = result) do
+    case state.drain do
+      %{id: drain_id, phase_owner: phase_owner} when is_pid(phase_owner) ->
+        send(
+          phase_owner,
+          {:loopex_quiesce_admission, drain_id, state.session_id, self(), reply}
+        )
+
+      _not_owned ->
+        :ok
+    end
+
+    result
+  end
+
+  defp notify_quiesce_candidate(state, candidate) do
+    case state.drain do
+      %{id: drain_id, phase_owner: phase_owner} when is_pid(phase_owner) ->
+        send(
+          phase_owner,
+          {:loopex_quiesce_candidate, drain_id, state.session_id, self(), candidate}
+        )
+
+      _not_owned ->
+        :ok
+    end
   end
 
   defp apply_transaction(state, transaction, proposal) do

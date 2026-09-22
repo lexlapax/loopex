@@ -127,6 +127,68 @@ defmodule Loopex.Runtime.Control do
   end
 
   @doc false
+  @spec start_quiesce_fence(
+          pid(),
+          reference(),
+          binary(),
+          reference(),
+          pid(),
+          binary(),
+          integer(),
+          term()
+        ) :: :ok
+  def start_quiesce_fence(
+        control,
+        token,
+        drain_id,
+        operation_ref,
+        phase_owner,
+        session_id,
+        deadline,
+        abort_resolution
+      )
+      when is_pid(control) and is_reference(operation_ref) and is_pid(phase_owner) and
+             is_binary(drain_id) and is_binary(session_id) and is_integer(deadline) do
+    send(
+      control,
+      {:start_quiesce_fence, token, drain_id, operation_ref, phase_owner, session_id, deadline,
+       abort_resolution}
+    )
+
+    :ok
+  end
+
+  @doc false
+  @spec authorize_quiesce_fence(pid(), reference(), binary(), reference(), pid(), integer()) ::
+          :ok
+  def authorize_quiesce_fence(
+        control,
+        token,
+        drain_id,
+        operation_ref,
+        phase_owner,
+        deadline
+      ) do
+    send(
+      control,
+      {:authorize_quiesce_fence, token, drain_id, operation_ref, phase_owner, deadline}
+    )
+
+    :ok
+  end
+
+  @doc false
+  @spec cancel_quiesce_fence(pid(), reference(), binary(), reference(), pid()) :: :ok
+  def cancel_quiesce_fence(control, token, drain_id, operation_ref, phase_owner) do
+    send(
+      control,
+      {:cancel_quiesce_fence, token, drain_id, operation_ref, phase_owner}
+    )
+
+    :ok
+  end
+
+  @doc false
   @spec exclude_trace_process(pid(), reference(), pid(), list(), GenServer.from()) :: :ok
   def exclude_trace_process(control, token, caller, functions, reply_to)
       when is_pid(control) and is_pid(caller) and is_list(functions) do
@@ -310,6 +372,8 @@ defmodule Loopex.Runtime.Control do
        writer_domains: MapSet.new(),
        quiescing: nil,
        quiesce_writer_domains: nil,
+       quiesce_fences: %{},
+       quiesce_fence_monitors: %{},
        monitor_to_session: %{},
        attachment_holders: %{},
        attachment_monitor_to_holder: %{},
@@ -1206,6 +1270,151 @@ defmodule Loopex.Runtime.Control do
   defp record_kind(_record), do: nil
 
   @impl GenServer
+  def handle_info(
+        {:start_quiesce_fence, token, drain_id, operation_ref, phase_owner, session_id, deadline,
+         abort_resolution},
+        state
+      ) do
+    valid? =
+      token == state.token and state.quiescing == drain_id and
+        match?(%MapSet{}, state.quiesce_writer_domains) and
+        MapSet.member?(state.quiesce_writer_domains, session_id) and
+        deadline > System.monotonic_time(:millisecond) and Process.alive?(phase_owner) and
+        not Map.has_key?(state.quiesce_fences, operation_ref) and
+        not Enum.any?(state.quiesce_fences, fn {_ref, fence} ->
+          fence.session_id == session_id
+        end)
+
+    if valid? do
+      {pid, monitor} =
+        SessionCoordinator.start_quiesce_fence(
+          self(),
+          state.store,
+          session_id,
+          operation_ref,
+          phase_owner,
+          deadline,
+          abort_resolution
+        )
+
+      fence = %{
+        pid: pid,
+        monitor: monitor,
+        phase_owner: phase_owner,
+        session_id: session_id,
+        drain_id: drain_id,
+        deadline: deadline,
+        status: :starting,
+        result: nil
+      }
+
+      Logger.debug("runtime quiesce fence started")
+
+      {:noreply,
+       %{
+         state
+         | quiesce_fences: Map.put(state.quiesce_fences, operation_ref, fence),
+           quiesce_fence_monitors: Map.put(state.quiesce_fence_monitors, monitor, operation_ref)
+       }}
+    else
+      send(phase_owner, {:loopex_quiesce_fence_refused, operation_ref, session_id})
+      {:noreply, state}
+    end
+  end
+
+  def handle_info({:quiesce_fence_waiting, operation_ref, pid}, state) do
+    case Map.get(state.quiesce_fences, operation_ref) do
+      %{pid: ^pid, status: :starting, phase_owner: phase_owner, session_id: session_id} = fence ->
+        send(phase_owner, {:loopex_quiesce_fence_started, operation_ref, session_id, pid})
+
+        {:noreply, put_in(state.quiesce_fences[operation_ref], %{fence | status: :waiting})}
+
+      _other ->
+        if Process.alive?(pid), do: Process.exit(pid, :kill)
+        {:noreply, state}
+    end
+  end
+
+  def handle_info(
+        {:authorize_quiesce_fence, token, drain_id, operation_ref, phase_owner, deadline},
+        state
+      ) do
+    case Map.get(state.quiesce_fences, operation_ref) do
+      %{
+        phase_owner: ^phase_owner,
+        drain_id: ^drain_id,
+        deadline: ^deadline,
+        status: :waiting,
+        pid: pid
+      } = fence
+      when token == state.token ->
+        if deadline > System.monotonic_time(:millisecond) do
+          send(pid, {:loopex_quiesce_fence_go, operation_ref, deadline})
+
+          {:noreply, put_in(state.quiesce_fences[operation_ref], %{fence | status: :authorized})}
+        else
+          Process.exit(pid, :kill)
+
+          {:noreply, put_in(state.quiesce_fences[operation_ref], %{fence | status: :cancelling})}
+        end
+
+      _other ->
+        {:noreply, state}
+    end
+  end
+
+  def handle_info(
+        {:cancel_quiesce_fence, token, drain_id, operation_ref, phase_owner},
+        state
+      ) do
+    case Map.get(state.quiesce_fences, operation_ref) do
+      %{phase_owner: ^phase_owner, drain_id: ^drain_id, pid: pid} = fence
+      when token == state.token ->
+        if Process.alive?(pid), do: Process.exit(pid, :kill)
+
+        {:noreply, put_in(state.quiesce_fences[operation_ref], %{fence | status: :cancelling})}
+
+      _other ->
+        if token == state.token and state.quiescing == drain_id do
+          send(phase_owner, {:loopex_quiesce_fence_cancelled, operation_ref})
+        end
+
+        {:noreply, state}
+    end
+  end
+
+  def handle_info(
+        {:quiesce_fence_head, operation_ref, pid, head},
+        state
+      ) do
+    case Map.get(state.quiesce_fences, operation_ref) do
+      %{pid: ^pid, phase_owner: phase_owner, session_id: session_id}
+      when is_map(head) ->
+        send(phase_owner, {:loopex_quiesce_fence_head, operation_ref, session_id, pid, head})
+        {:noreply, state}
+
+      _other ->
+        {:noreply, state}
+    end
+  end
+
+  def handle_info(
+        {:quiesce_fence_result, operation_ref, pid, result},
+        state
+      ) do
+    case Map.get(state.quiesce_fences, operation_ref) do
+      %{pid: ^pid, phase_owner: phase_owner, session_id: session_id} = fence ->
+        Logger.debug("runtime quiesce fence completed")
+        send(phase_owner, {:loopex_quiesce_fence_result, operation_ref, session_id, pid, result})
+
+        {:noreply,
+         put_in(state.quiesce_fences[operation_ref], %{fence | result: result, status: :done})}
+
+      _other ->
+        {:noreply, state}
+    end
+  end
+
   def handle_info({:trace_hello, tracer, incarnation}, state)
       when is_pid(tracer) and is_binary(incarnation) and byte_size(incarnation) == 16 do
     {:noreply, register_tracer(state, tracer, incarnation)}
@@ -1505,6 +1714,30 @@ defmodule Loopex.Runtime.Control do
         %{trace: %{pid: tracer, monitor: monitor}} = state
       ) do
     {:noreply, trace_process_down(state)}
+  end
+
+  def handle_info({:DOWN, monitor, :process, pid, _reason}, state)
+      when is_map_key(state.quiesce_fence_monitors, monitor) do
+    {operation_ref, monitor_index} = Map.pop(state.quiesce_fence_monitors, monitor)
+    {fence, fences} = Map.pop(state.quiesce_fences, operation_ref)
+
+    if is_map(fence) and fence.pid == pid do
+      case fence.status do
+        :cancelling ->
+          send(fence.phase_owner, {:loopex_quiesce_fence_cancelled, operation_ref})
+
+        :done ->
+          send(fence.phase_owner, {:loopex_quiesce_fence_closed, operation_ref})
+
+        _failed ->
+          send(
+            fence.phase_owner,
+            {:loopex_quiesce_fence_failed, operation_ref, fence.session_id}
+          )
+      end
+    end
+
+    {:noreply, %{state | quiesce_fences: fences, quiesce_fence_monitors: monitor_index}}
   end
 
   def handle_info({:DOWN, reference, :process, pid, _reason}, state) do

@@ -27,6 +27,7 @@ defmodule Loopex.Runtime do
   alias Loopex.Runtime.Control
   alias Loopex.Runtime.DaemonRoute
   alias Loopex.Runtime.EventDispatcher
+  alias Loopex.Runtime.Quiesce
   alias Loopex.Runtime.SessionCoordinator
   alias Loopex.Runtime.Supervisor, as: RuntimeSupervisor
   alias Loopex.Store
@@ -123,6 +124,47 @@ defmodule Loopex.Runtime do
   end
 
   def stop(_runtime), do: {:error, :runtime_unavailable}
+
+  @doc false
+  @spec quiesce(t()) ::
+          {:ok,
+           %{
+             settled: [binary()],
+             unsettled: [binary()],
+             absent: [binary()],
+             budget_ms: non_neg_integer(),
+             fence_budget_ms: 130_000,
+             drain_id: binary(),
+             fences: %{
+               binary() =>
+                 :committed
+                 | :superseded
+                 | {:unknown, :no_head}
+                 | {:unknown, :abort, map()}
+                 | {:unknown, :fence, map()}
+             }
+           }}
+          | {:error, :runtime_unavailable}
+  def quiesce(%__MODULE__{supervisor: supervisor, token: token}) do
+    case Quiesce.run(supervisor, token) do
+      {:ok, result} ->
+        {:ok,
+         Map.take(result, [
+           :settled,
+           :unsettled,
+           :absent,
+           :budget_ms,
+           :fence_budget_ms,
+           :drain_id,
+           :fences
+         ])}
+
+      {:error, :runtime_unavailable} = error ->
+        error
+    end
+  end
+
+  def quiesce(_runtime), do: {:error, :runtime_unavailable}
 
   @doc """
   ## Concept

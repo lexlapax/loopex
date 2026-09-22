@@ -46,6 +46,10 @@ defmodule Loopex.M1RuntimeTestStore do
       when is_binary(kind) and is_pid(observer),
       do: GenServer.call(pid, {:hold_next_record_before_linearization, kind, observer})
 
+  def hold_next_transition_before_linearization(pid, transition, observer)
+      when is_atom(transition) and is_pid(observer),
+      do: GenServer.call(pid, {:hold_next_transition_before_linearization, transition, observer})
+
   def block_next_event_read(pid, observer) when is_pid(observer),
     do: GenServer.call(pid, {:block_next_event_read, observer})
 
@@ -108,6 +112,7 @@ defmodule Loopex.M1RuntimeTestStore do
        delayed: %{},
        delayed_records: %{},
        held_before_records: %{},
+       held_before_transitions: %{},
        pending_transactions: %{},
        event_read_block: nil,
        fail_reads: false,
@@ -144,6 +149,18 @@ defmodule Loopex.M1RuntimeTestStore do
      %{state | held_before_records: Map.put(state.held_before_records, kind, observer)}}
   end
 
+  def handle_call(
+        {:hold_next_transition_before_linearization, transition, observer},
+        _from,
+        state
+      ) do
+    {:reply, :ok,
+     %{
+       state
+       | held_before_transitions: Map.put(state.held_before_transitions, transition, observer)
+     }}
+  end
+
   def handle_call({:block_next_event_read, observer}, _from, state) do
     {:reply, :ok, %{state | event_read_block: observer}}
   end
@@ -166,6 +183,7 @@ defmodule Loopex.M1RuntimeTestStore do
         :delayed,
         :delayed_records,
         :held_before_records,
+        :held_before_transitions,
         :pending_transactions,
         :event_read_block
       ])
@@ -326,20 +344,32 @@ defmodule Loopex.M1RuntimeTestStore do
     end
   end
 
-  defp held_before_record(%{held_before_records: held}, transaction) do
-    transaction
-    |> Map.get(:records, [])
-    |> Enum.find_value(fn record ->
-      kind = record_kind(record)
+  defp held_before_record(state, transaction) do
+    case Transitions.id(transaction) do
+      {:ok, transition} ->
+        case Map.fetch(state.held_before_transitions, transition) do
+          {:ok, observer} ->
+            {{:transition, transition}, observer}
 
-      case Map.fetch(held, kind) do
-        {:ok, observer} -> {kind, observer}
-        :error -> nil
-      end
-    end)
+          :error ->
+            transaction
+            |> Map.get(:records, [])
+            |> Enum.find_value(fn record ->
+              kind = record_kind(record)
+
+              case Map.fetch(state.held_before_records, kind) do
+                {:ok, observer} -> {{:record, kind}, observer}
+                :error -> nil
+              end
+            end)
+        end
+
+      {:error, _reason} ->
+        nil
+    end
   end
 
-  defp hold_before_linearization(state, from, transaction, kind, observer) do
+  defp hold_before_linearization(state, from, transaction, hold_key, observer) do
     token = make_ref()
     server = self()
 
@@ -350,13 +380,25 @@ defmodule Loopex.M1RuntimeTestStore do
         end
       end)
 
-    send(observer, {:record_held_before_linearization, waiter, self(), kind, transaction})
+    held_name = elem(hold_key, 1)
+    send(observer, {:record_held_before_linearization, waiter, self(), held_name, transaction})
+
+    state =
+      case hold_key do
+        {:record, kind} ->
+          %{state | held_before_records: Map.delete(state.held_before_records, kind)}
+
+        {:transition, transition} ->
+          %{
+            state
+            | held_before_transitions: Map.delete(state.held_before_transitions, transition)
+          }
+      end
 
     {:noreply,
      %{
        state
-       | held_before_records: Map.delete(state.held_before_records, kind),
-         pending_transactions: Map.put(state.pending_transactions, token, {from, transaction})
+       | pending_transactions: Map.put(state.pending_transactions, token, {from, transaction})
      }}
   end
 

@@ -15,8 +15,10 @@ defmodule Loopex.Runtime.Quiesce do
   @status_work_ms 5_000
   @coordinator_termination_ms 330_000
   @termination_projection_ms 5_000
+  @fence_budget_ms 130_000
+  @fence_reap_ms 5_000
 
-  @type prepared :: %{
+  @type result :: %{
           drain_id: binary(),
           entries: [map()],
           admissions: %{binary() => term()},
@@ -29,8 +31,8 @@ defmodule Loopex.Runtime.Quiesce do
         }
 
   @doc false
-  @spec prepare(pid(), reference()) :: {:ok, prepared()} | {:error, :runtime_unavailable}
-  def prepare(root, token) when is_pid(root) and is_reference(token) do
+  @spec run(pid(), reference()) :: {:ok, result()} | {:error, :runtime_unavailable}
+  def run(root, token) when is_pid(root) and is_reference(token) do
     caller = self()
     call_ref = make_ref()
 
@@ -50,7 +52,7 @@ defmodule Loopex.Runtime.Quiesce do
     end
   end
 
-  def prepare(_root, _token), do: {:error, :runtime_unavailable}
+  def run(_root, _token), do: {:error, :runtime_unavailable}
 
   defp phase_owner(caller, call_ref, root, token) do
     Process.flag(:trap_exit, true)
@@ -74,8 +76,10 @@ defmodule Loopex.Runtime.Quiesce do
            },
            {:ok, entries} <-
              install_gate(context, token, drain_id, started_at + @initial_gate_ms),
-           {:ok, admissions} <-
+           {:ok, admission_results} <-
              admit_aborts(context, entries, drain_id, admission_deadline),
+           admissions =
+             collect_admission_notices(admission_results, entries, drain_id),
            {:ok, release} <- release_cleanups(context, entries, admissions, drain_id),
            :ok <- await_released_terminals(context, release, drain_id),
            {:ok, classification} <-
@@ -87,16 +91,29 @@ defmodule Loopex.Runtime.Quiesce do
                drain_id,
                entries,
                Map.fetch!(children, :sessions)
-             ) do
+             ),
+           fence_admissions =
+             collect_admission_notices(admissions, entries, drain_id),
+           {:ok, fences} <-
+             fence_writer_domains(
+               context,
+               token,
+               drain_id,
+               termination_entries,
+               fence_admissions
+             ),
+           classification = apply_fence_classification(classification, fences) do
         {:ok,
          Map.merge(classification, %{
            drain_id: drain_id,
            entries: entries,
-           admissions: admissions,
+           admissions: fence_admissions,
            budget_ms: release.budget_ms,
            control: control,
            session_supervisor: Map.fetch!(children, :sessions),
-           termination_entries: termination_entries
+           termination_entries: termination_entries,
+           fences: fences,
+           fence_budget_ms: @fence_budget_ms
          })}
       else
         _failure -> {:error, :runtime_unavailable}
@@ -187,6 +204,60 @@ defmodule Loopex.Runtime.Quiesce do
     do: :unsettled
 
   defp admission_target(_entry), do: :absent
+
+  defp collect_admission_notices(admissions, entries, drain_id) do
+    entries = Map.new(entries, &{&1.session_id, &1})
+    collect_admission_notices(admissions, entries, drain_id, 0)
+  end
+
+  defp collect_admission_notices(admissions, entries, drain_id, wait_ms) do
+    receive do
+      {:loopex_quiesce_candidate, ^drain_id, session_id, coordinator, candidate} ->
+        admissions =
+          merge_admission_message(
+            admissions,
+            entries,
+            session_id,
+            coordinator,
+            {:candidate, candidate}
+          )
+
+        collect_admission_notices(admissions, entries, drain_id, 0)
+
+      {:loopex_quiesce_admission, ^drain_id, session_id, coordinator, reply} ->
+        admissions = merge_admission_message(admissions, entries, session_id, coordinator, reply)
+
+        collect_admission_notices(admissions, entries, drain_id, 0)
+    after
+      wait_ms -> admissions
+    end
+  end
+
+  defp merge_admission_message(admissions, entries, session_id, coordinator, reply) do
+    case Map.get(entries, session_id) do
+      %{coordinator: ^coordinator} ->
+        Map.update(admissions, session_id, reply, fn current ->
+          merge_admission_notice(current, reply)
+        end)
+
+      _other ->
+        admissions
+    end
+  end
+
+  defp merge_admission_notice(current, reply) do
+    cond do
+      definitive_admission?(current) -> current
+      definitive_admission?(reply) -> reply
+      match?({:candidate, _candidate}, reply) -> reply
+      true -> current
+    end
+  end
+
+  defp definitive_admission?({:admitted, _result}), do: true
+  defp definitive_admission?(:rejected_no_active_run), do: true
+  defp definitive_admission?({:unknown, _result}), do: true
+  defp definitive_admission?(_result), do: false
 
   defp release_cleanups(context, entries, admissions, drain_id) do
     admitted =
@@ -627,6 +698,394 @@ defmodule Loopex.Runtime.Quiesce do
           cutoff?
         )
     end
+  end
+
+  defp fence_writer_domains(context, token, drain_id, entries, admissions) do
+    started_at = now_ms()
+    outer_deadline = started_at + @fence_budget_ms
+    work_deadline = outer_deadline - @fence_reap_ms
+    phase_owner = self()
+
+    operations =
+      Map.new(entries, fn entry ->
+        operation_ref = make_ref()
+
+        abort_resolution =
+          case Map.get(admissions, entry.session_id) do
+            {:unknown, result} -> {:unknown, result}
+            {:candidate, result} -> {:unknown, result}
+            {:error, _reason} -> :unresolved
+            _known -> :known
+          end
+
+        :ok =
+          Control.start_quiesce_fence(
+            context.control,
+            token,
+            drain_id,
+            operation_ref,
+            phase_owner,
+            entry.session_id,
+            work_deadline,
+            abort_resolution
+          )
+
+        {operation_ref,
+         %{
+           session_id: entry.session_id,
+           pid: nil,
+           monitor: nil,
+           head: nil,
+           result: nil,
+           down: false,
+           closed: false
+         }}
+      end)
+
+    await_fences(
+      context,
+      token,
+      drain_id,
+      operations,
+      work_deadline,
+      outer_deadline,
+      false
+    )
+  end
+
+  defp await_fences(
+         _context,
+         _token,
+         _drain_id,
+         operations,
+         _work_deadline,
+         _outer_deadline,
+         _cutoff?
+       )
+       when map_size(operations) == 0,
+       do: {:ok, %{}}
+
+  defp await_fences(context, token, drain_id, operations, work_deadline, outer_deadline, cutoff?) do
+    if fences_complete?(operations) do
+      {:ok,
+       Map.new(operations, fn {_operation_ref, operation} ->
+         {operation.session_id, operation.result}
+       end)}
+    else
+      deadline = if cutoff?, do: outer_deadline, else: work_deadline
+
+      receive do
+        {:loopex_quiesce_fence_started, operation_ref, session_id, pid} ->
+          operations =
+            update_fence_operation(operations, operation_ref, session_id, fn operation ->
+              monitor = Process.monitor(pid)
+
+              if now_ms() < work_deadline do
+                Control.authorize_quiesce_fence(
+                  context.control,
+                  token,
+                  drain_id,
+                  operation_ref,
+                  self(),
+                  work_deadline
+                )
+              else
+                if Process.alive?(pid), do: Process.exit(pid, :kill)
+
+                Control.cancel_quiesce_fence(
+                  context.control,
+                  token,
+                  drain_id,
+                  operation_ref,
+                  self()
+                )
+              end
+
+              %{operation | pid: pid, monitor: monitor}
+            end)
+
+          await_fences(
+            context,
+            token,
+            drain_id,
+            operations,
+            work_deadline,
+            outer_deadline,
+            cutoff?
+          )
+
+        {:loopex_quiesce_fence_head, operation_ref, session_id, pid, head} ->
+          operations =
+            update_fence_operation(operations, operation_ref, session_id, fn
+              %{pid: ^pid} = operation -> %{operation | head: head}
+              operation -> operation
+            end)
+
+          await_fences(
+            context,
+            token,
+            drain_id,
+            operations,
+            work_deadline,
+            outer_deadline,
+            cutoff?
+          )
+
+        {:loopex_quiesce_fence_result, operation_ref, session_id, pid, result} ->
+          operations =
+            update_fence_operation(operations, operation_ref, session_id, fn
+              %{pid: ^pid} = operation -> %{operation | result: result}
+              operation -> operation
+            end)
+
+          await_fences(
+            context,
+            token,
+            drain_id,
+            operations,
+            work_deadline,
+            outer_deadline,
+            cutoff?
+          )
+
+        {:loopex_quiesce_fence_closed, operation_ref} ->
+          operations = mark_fence_closed(operations, operation_ref)
+
+          await_fences(
+            context,
+            token,
+            drain_id,
+            operations,
+            work_deadline,
+            outer_deadline,
+            cutoff?
+          )
+
+        {:loopex_quiesce_fence_cancelled, operation_ref} ->
+          operations =
+            operations
+            |> ensure_cutoff_fence_result(operation_ref)
+            |> mark_fence_closed(operation_ref)
+
+          await_fences(
+            context,
+            token,
+            drain_id,
+            operations,
+            work_deadline,
+            outer_deadline,
+            cutoff?
+          )
+
+        {:loopex_quiesce_fence_refused, operation_ref, session_id} ->
+          operations =
+            update_fence_operation(operations, operation_ref, session_id, fn operation ->
+              %{operation | result: fence_unknown(operation), down: true, closed: true}
+            end)
+
+          await_fences(
+            context,
+            token,
+            drain_id,
+            operations,
+            work_deadline,
+            outer_deadline,
+            cutoff?
+          )
+
+        {:loopex_quiesce_fence_failed, operation_ref, session_id} ->
+          operations =
+            update_fence_operation(operations, operation_ref, session_id, fn operation ->
+              %{operation | result: fence_unknown(operation), closed: true}
+            end)
+
+          await_fences(
+            context,
+            token,
+            drain_id,
+            operations,
+            work_deadline,
+            outer_deadline,
+            cutoff?
+          )
+
+        {:DOWN, monitor, :process, pid, _reason} ->
+          case fence_down(operations, monitor, pid) do
+            {:ok, operations} ->
+              await_fences(
+                context,
+                token,
+                drain_id,
+                operations,
+                work_deadline,
+                outer_deadline,
+                cutoff?
+              )
+
+            :not_a_fence ->
+              fence_control_down(
+                context,
+                token,
+                drain_id,
+                operations,
+                work_deadline,
+                outer_deadline,
+                cutoff?,
+                monitor,
+                pid
+              )
+          end
+
+        {:EXIT, _pid, _reason} ->
+          await_fences(
+            context,
+            token,
+            drain_id,
+            operations,
+            work_deadline,
+            outer_deadline,
+            cutoff?
+          )
+      after
+        remaining_ms(deadline) ->
+          if cutoff? do
+            {:error, :runtime_unavailable}
+          else
+            operations = cancel_fences(context, token, drain_id, operations)
+
+            await_fences(
+              context,
+              token,
+              drain_id,
+              operations,
+              work_deadline,
+              outer_deadline,
+              true
+            )
+          end
+      end
+    end
+  end
+
+  defp fences_complete?(operations) do
+    Enum.all?(operations, fn {_operation_ref, operation} ->
+      not is_nil(operation.result) and operation.down and operation.closed
+    end)
+  end
+
+  defp update_fence_operation(operations, operation_ref, session_id, update) do
+    case Map.get(operations, operation_ref) do
+      %{session_id: ^session_id} = operation ->
+        Map.put(operations, operation_ref, update.(operation))
+
+      _other ->
+        operations
+    end
+  end
+
+  defp mark_fence_closed(operations, operation_ref) do
+    case Map.get(operations, operation_ref) do
+      nil -> operations
+      operation -> Map.put(operations, operation_ref, %{operation | closed: true})
+    end
+  end
+
+  defp ensure_cutoff_fence_result(operations, operation_ref) do
+    case Map.get(operations, operation_ref) do
+      nil ->
+        operations
+
+      %{result: nil} = operation ->
+        Map.put(operations, operation_ref, %{operation | result: fence_unknown(operation)})
+
+      _already_resolved ->
+        operations
+    end
+  end
+
+  defp fence_unknown(%{head: nil}), do: {:unknown, :no_head}
+  defp fence_unknown(%{head: head}), do: {:unknown, :fence, head}
+
+  defp fence_down(operations, monitor, pid) do
+    case Enum.find(operations, fn {_operation_ref, operation} ->
+           operation.monitor == monitor and operation.pid == pid
+         end) do
+      {operation_ref, operation} ->
+        {:ok, Map.put(operations, operation_ref, %{operation | down: true})}
+
+      nil ->
+        :not_a_fence
+    end
+  end
+
+  defp fence_control_down(
+         context,
+         token,
+         drain_id,
+         operations,
+         work_deadline,
+         outer_deadline,
+         cutoff?,
+         monitor,
+         pid
+       ) do
+    cond do
+      monitor == context.caller_monitor and pid == context.caller ->
+        _operations = cancel_fences(context, token, drain_id, operations)
+        exit(:caller_lost)
+
+      monitor == context.control_monitor and pid == context.control ->
+        _operations = cancel_fences(context, token, drain_id, operations)
+        {:error, :runtime_unavailable}
+
+      true ->
+        await_fences(
+          context,
+          token,
+          drain_id,
+          operations,
+          work_deadline,
+          outer_deadline,
+          cutoff?
+        )
+    end
+  end
+
+  defp cancel_fences(context, token, drain_id, operations) do
+    Map.new(operations, fn {operation_ref, operation} ->
+      if is_pid(operation.pid) and Process.alive?(operation.pid),
+        do: Process.exit(operation.pid, :kill)
+
+      Control.cancel_quiesce_fence(
+        context.control,
+        token,
+        drain_id,
+        operation_ref,
+        self()
+      )
+
+      result = operation.result || fence_unknown(operation)
+      {operation_ref, %{operation | result: result}}
+    end)
+  end
+
+  defp apply_fence_classification(classification, fences) do
+    unsettled_by_fence =
+      fences
+      |> Enum.reject(fn {_session_id, disposition} -> disposition == :committed end)
+      |> Enum.map(&elem(&1, 0))
+      |> MapSet.new()
+
+    settled = Enum.reject(classification.settled, &MapSet.member?(unsettled_by_fence, &1))
+    absent = Enum.reject(classification.absent, &MapSet.member?(unsettled_by_fence, &1))
+
+    unsettled =
+      classification.unsettled
+      |> MapSet.new()
+      |> MapSet.union(unsettled_by_fence)
+      |> Enum.sort()
+
+    %{classification | settled: settled, absent: absent, unsettled: unsettled}
   end
 
   defp ids_with(results, disposition) do
