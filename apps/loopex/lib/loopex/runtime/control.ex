@@ -41,7 +41,6 @@ defmodule Loopex.Runtime.Control do
 
   @max_identifier_bytes 256
   @attachment_transaction_limit 512
-  @trace_exclusion_function_limit 64
 
   # Technical depth: this is Control's private responsiveness bound for the
   # Store evidence that rebuilds a provider binding or closes one receipt range.
@@ -1713,24 +1712,13 @@ defmodule Loopex.Runtime.Control do
     }
   end
 
-  defp valid_trace_functions?(functions) do
-    valid_trace_functions?(functions, 0)
-  end
+  defp valid_trace_functions?([]), do: true
 
-  defp valid_trace_functions?([], count), do: count <= @trace_exclusion_function_limit
-
-  defp valid_trace_functions?([_function | _rest], count)
-       when count >= @trace_exclusion_function_limit,
-       do: false
-
-  defp valid_trace_functions?(
-         [{module, function, arity} | rest],
-         count
-       )
+  defp valid_trace_functions?([{module, function, arity} | rest])
        when is_atom(module) and is_atom(function) and is_integer(arity) and arity >= 0,
-       do: valid_trace_functions?(rest, count + 1)
+       do: valid_trace_functions?(rest)
 
-  defp valid_trace_functions?(_invalid, _count), do: false
+  defp valid_trace_functions?(_invalid), do: false
 
   defp handle_session_monitor_down(reference, pid, state) do
     case Map.pop(state.monitor_to_session, reference) do

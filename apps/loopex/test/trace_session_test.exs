@@ -388,6 +388,51 @@ defmodule Loopex.TraceSessionTest do
     assert {:error, :unavailable} = Trace.exclude_self(malformed, functions: [])
   end
 
+  test "trace exclusions grow with live senders instead of refusing an artificial MFA ceiling" do
+    runtime = fixture(runtime_id: "trace-proportional-exclusion")
+    {:ok, capability_pid} = Capability.start_link()
+    {:ok, capability} = Capability.handle(capability_pid)
+    assert :ok = Capability.bind(capability, runtime)
+
+    assert {:ok, _status} =
+             Loopex.trace(runtime, %{modules: [ExclusionProbe], level: :calls})
+
+    {:ok, %{workers: workers, control: control}} = Runtime.children(runtime)
+    functions = Enum.map(0..64, &{ExclusionProbe, :proportional_probe, &1})
+    parent = self()
+
+    {:ok, sender} =
+      Task.Supervisor.start_child(workers, fn ->
+        send(
+          parent,
+          {:proportional_exclusion, self(), Trace.exclude_self(capability, functions: functions)}
+        )
+
+        receive do: (:finish -> :ok)
+      end)
+
+    assert_receive {:proportional_exclusion, ^sender, :ok}, 1_000
+
+    assert eventually(fn ->
+             state = :sys.get_state(control)
+
+             case state.trace_excluded do
+               %{^sender => %{functions: retained}} ->
+                 MapSet.size(retained) == 65 and map_size(state.trace_mfa_counts) == 65
+
+               _not_registered ->
+                 false
+             end
+           end)
+
+    send(sender, :finish)
+
+    assert eventually(fn ->
+             state = :sys.get_state(control)
+             state.trace_excluded == %{} and state.trace_mfa_counts == %{}
+           end)
+  end
+
   test "Trace owns the only full session handle in private ETS and restores an active session after restart" do
     runtime = fixture(runtime_id: "trace-private-handle")
     assert {:ok, original} = Loopex.trace(runtime, %{modules: [@control], level: :calls})
