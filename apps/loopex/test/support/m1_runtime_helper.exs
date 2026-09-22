@@ -218,6 +218,12 @@ defmodule Loopex.M1RuntimeTestStore do
         nil ->
           :absent
 
+        %{binding: binding, outcome: {:committed, _command_id, _receipt}, session_id: session_id}
+        when command.command_kind == :create ->
+          if create_command_matches?(command, binding),
+            do: {:completed, %{result: session_id}},
+            else: {:error, :runtime_command_conflict}
+
         %{command: ^command, status: status, generation: generation, candidate: candidate} =
             entry ->
           details = %{attempt_generation: generation, candidate_tx_id: candidate.tx_id}
@@ -847,6 +853,13 @@ defmodule Loopex.M1RuntimeTestStore do
         :release -> GenServer.reply(from, reply)
       end
     end)
+  end
+
+  defp create_command_matches?(command, binding) do
+    command.runtime_id == binding.runtime_id and
+      command.command_id == binding.command_id and
+      command.canonical_command_bytes == binding.canonical_record_bytes and
+      command.canonical_command_digest == binding.canonical_mutation_digest
   end
 
   defp empty_session do

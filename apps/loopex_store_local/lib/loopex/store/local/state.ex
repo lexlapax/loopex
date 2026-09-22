@@ -81,6 +81,12 @@ defmodule Loopex.Store.Local.State do
       :absent ->
         :absent
 
+      {:ok, %{binding: binding, resolution: %{status: :committed}, session_id: session_id}}
+      when command.command_kind == :create ->
+        if create_command_matches?(command, binding),
+          do: {:completed, %{result: session_id}},
+          else: {:error, :runtime_command_conflict}
+
       {:ok, %{command: ^command, status: :open, generation: generation, candidate: candidate}} ->
         {:open, %{attempt_generation: generation, candidate_tx_id: candidate.tx_id}}
 
@@ -98,6 +104,13 @@ defmodule Loopex.Store.Local.State do
       {:ok, _changed_binding} ->
         {:error, :runtime_command_conflict}
     end
+  end
+
+  defp create_command_matches?(command, binding) do
+    command.runtime_id == binding.runtime_id and
+      command.command_id == binding.command_id and
+      command.canonical_command_bytes == binding.canonical_record_bytes and
+      command.canonical_command_digest == binding.canonical_mutation_digest
   end
 
   @spec load_records(map(), binary(), non_neg_integer(), pos_integer()) ::

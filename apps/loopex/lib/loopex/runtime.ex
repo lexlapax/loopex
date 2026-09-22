@@ -152,6 +152,58 @@ defmodule Loopex.Runtime do
 
   def configuration(_runtime), do: {:error, :runtime_unavailable}
 
+  @doc """
+  ## Concept
+
+  Reports whether durable truth contains one session identifier without
+  starting, resuming, or attaching to that session.
+
+  ## Technical depth
+
+  Identifier validation happens before the runtime is contacted. A valid query
+  is serialized through the exact current Control process and maps only the
+  Store ownership-head classes. Losing that Control process remains a runtime
+  failure rather than being reported as Store absence or unavailability.
+  """
+  @spec session_existence(t(), binary()) ::
+          {:ok, :present | :absent | :invalid_id | :store_unavailable}
+          | {:error, :runtime_unavailable}
+  def session_existence(%__MODULE__{} = runtime, session_id) do
+    if valid_identifier?(session_id) do
+      control_call(runtime, {:session_existence, runtime.token, session_id})
+    else
+      {:ok, :invalid_id}
+    end
+  end
+
+  def session_existence(_runtime, _session_id), do: {:error, :runtime_unavailable}
+
+  @doc """
+  ## Concept
+
+  Looks up the durable historical result of one create command without
+  creating a coordinator or changing Store state.
+
+  ## Technical depth
+
+  Control rebuilds the canonical create transaction from the supplied session
+  options and this runtime's creation configuration. The Store compares that
+  exact binding with the retained command row, so changed options and reuse by
+  another command kind are conflicts rather than historical success.
+  """
+  @spec lookup_create_result(t(), binary(), map()) ::
+          {:ok, {:historical, binary()} | :absent | :conflict | :store_unavailable | :unexpected}
+          | {:error, :runtime_unavailable}
+  def lookup_create_result(%__MODULE__{} = runtime, command_id, session_options) do
+    control_call(
+      runtime,
+      {:lookup_create_result, runtime.token, command_id, session_options}
+    )
+  end
+
+  def lookup_create_result(_runtime, _command_id, _session_options),
+    do: {:error, :runtime_unavailable}
+
   @doc false
   @spec create_session(t(), binary(), map()) :: {:ok, binary()} | {:error, term()}
   def create_session(%__MODULE__{} = runtime, command_id, session_options) do
@@ -525,6 +577,9 @@ defmodule Loopex.Runtime do
   defp remaining_call_time(:infinity), do: :infinity
   defp remaining_call_time(deadline), do: max(deadline - monotonic_now(), 0)
   defp monotonic_now, do: System.monotonic_time(:millisecond)
+
+  defp valid_identifier?(value),
+    do: is_binary(value) and byte_size(value) > 0 and byte_size(value) <= @max_identifier_bytes
 
   defp safe_call(server, message, timeout) do
     try do

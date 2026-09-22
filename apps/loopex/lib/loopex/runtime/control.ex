@@ -303,6 +303,36 @@ defmodule Loopex.Runtime.Control do
     end
   end
 
+  def handle_call({:session_existence, token, session_id}, _from, state) do
+    reply =
+      if token == state.token and valid_identifier?(session_id) do
+        case Store.ownership_head(state.store, session_id, "session") do
+          {:ok, _head} -> {:ok, :present}
+          :absent -> {:ok, :absent}
+          :unavailable -> {:ok, :store_unavailable}
+        end
+      else
+        {:error, :runtime_unavailable}
+      end
+
+    {:reply, reply, state}
+  end
+
+  def handle_call(
+        {:lookup_create_result, token, command_id, session_options},
+        _from,
+        state
+      ) do
+    reply =
+      if token == state.token do
+        {:ok, lookup_create_result(state, command_id, session_options)}
+      else
+        {:error, :runtime_unavailable}
+      end
+
+    {:reply, reply, state}
+  end
+
   def handle_call({:resume_session, token, session_id, command_id, mode}, from, state) do
     if token == state.token and valid_identifier?(session_id) and valid_identifier?(command_id) do
       command = resume_command(state.runtime_id, session_id, command_id)
@@ -892,8 +922,8 @@ defmodule Loopex.Runtime.Control do
   defp create_session(state, command_id, session_options, from) do
     with true <- valid_identifier?(command_id),
          {:ok, genesis} <- session_genesis(session_options, state.cleanup_grace_ms),
-         {:ok, fresh?} <- create_command_absent?(state, command_id),
-         {:ok, transaction} <- Store.create_session(state.runtime_id, command_id, genesis) do
+         {:ok, transaction} <- Store.create_session(state.runtime_id, command_id, genesis),
+         {:ok, fresh?} <- create_command_absent?(state, command_id, transaction) do
       {outcome, lane} = resolve_transaction(state.lane, transaction)
       state = %{state | lane: lane}
 
@@ -956,30 +986,54 @@ defmodule Loopex.Runtime.Control do
   # the freshness cannot be proved, so the command is answered from its durable
   # result and starts nothing. `:unavailable` decides nothing at all and commits
   # nothing.
-  defp create_command_absent?(state, command_id) do
-    case Store.runtime_command(state.store, create_command(state.runtime_id, command_id)) do
+  defp create_command_absent?(state, command_id, transaction) do
+    case Store.runtime_command(
+           state.store,
+           create_command(state.runtime_id, command_id, transaction)
+         ) do
       :absent -> {:ok, true}
       :unavailable -> {:error, :store_unavailable}
       _retained -> {:ok, false}
     end
   end
 
-  defp create_command(runtime_id, command_id) do
-    canonical =
-      :erlang.term_to_binary(
-        ["loopex_runtime_command_v1", runtime_id, command_id, :create, "session"],
-        [:deterministic]
-      )
-
+  defp create_command(runtime_id, command_id, transaction) do
     %{
       runtime_id: runtime_id,
       command_id: command_id,
       command_kind: :create,
       mutation_domain: "session",
       succession_id: succession_id(runtime_id, "create", "", command_id),
-      canonical_command_bytes: canonical,
-      canonical_command_digest: :crypto.hash(:sha256, canonical)
+      canonical_command_bytes: transaction.canonical_record_bytes,
+      canonical_command_digest: transaction.canonical_mutation_digest
     }
+  end
+
+  defp lookup_create_result(state, command_id, session_options) do
+    with true <- valid_identifier?(command_id),
+         {:ok, genesis} <- session_genesis(session_options, state.cleanup_grace_ms),
+         {:ok, transaction} <- Store.create_session(state.runtime_id, command_id, genesis) do
+      command = create_command(state.runtime_id, command_id, transaction)
+
+      case Store.runtime_command(state.store, command) do
+        {:completed, %{result: session_id}} when is_binary(session_id) ->
+          {:historical, session_id}
+
+        :absent ->
+          :absent
+
+        {:error, :runtime_command_conflict} ->
+          :conflict
+
+        :unavailable ->
+          :store_unavailable
+
+        _other ->
+          :unexpected
+      end
+    else
+      _invalid -> :unexpected
+    end
   end
 
   @genesis_item_bytes 65_536
