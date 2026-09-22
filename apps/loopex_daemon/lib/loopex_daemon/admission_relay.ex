@@ -30,7 +30,9 @@ defmodule LoopexDaemon.AdmissionRelay do
   owner loss remain selected here until their owning coordinator settles them.
   An idle lease owner moves to retiring only when no permit or ticket remains
   for its session; its actual monitored `DOWN` then reports retirement
-  completion without being reclassified as owner loss.
+  completion without being reclassified as owner loss. Daemon-owner result
+  selection and settlement use exact ref-tagged messages, so the owner can keep
+  classifying component exits while the relay serializes those transitions.
   """
 
   use GenServer
@@ -316,6 +318,86 @@ defmodule LoopexDaemon.AdmissionRelay do
       {:settle_lease_disposition, origin_id, disposition, settlement_ref},
       @control_timeout_ms
     )
+  end
+
+  @doc false
+  @spec request_lease_result_selection(
+          pid(),
+          reference(),
+          binary(),
+          origin_id(),
+          pid(),
+          binary(),
+          reference(),
+          map()
+        ) :: :ok
+  def request_lease_result_selection(
+        relay,
+        operation_ref,
+        owner_incarnation,
+        origin_id,
+        actor,
+        actor_incarnation,
+        settlement_ref,
+        result
+      ) do
+    send(
+      relay,
+      {:relay_lease_operation, operation_ref, self(), owner_incarnation, :select_result,
+       {origin_id, actor, actor_incarnation, settlement_ref, result}}
+    )
+
+    :ok
+  end
+
+  @doc false
+  @spec request_lease_result_settlement(
+          pid(),
+          reference(),
+          binary(),
+          origin_id(),
+          reference()
+        ) :: :ok
+  def request_lease_result_settlement(
+        relay,
+        operation_ref,
+        owner_incarnation,
+        origin_id,
+        settlement_ref
+      ) do
+    send(
+      relay,
+      {:relay_lease_operation, operation_ref, self(), owner_incarnation, :settle_result,
+       {origin_id, settlement_ref}}
+    )
+
+    :ok
+  end
+
+  @doc false
+  @spec request_lease_disposition_settlement(
+          pid(),
+          reference(),
+          binary(),
+          origin_id(),
+          :connection_lost | :owner_lost,
+          reference()
+        ) :: :ok
+  def request_lease_disposition_settlement(
+        relay,
+        operation_ref,
+        owner_incarnation,
+        origin_id,
+        disposition,
+        settlement_ref
+      ) do
+    send(
+      relay,
+      {:relay_lease_operation, operation_ref, self(), owner_incarnation, :settle_disposition,
+       {origin_id, disposition, settlement_ref}}
+    )
+
+    :ok
   end
 
   @doc false
@@ -1044,57 +1126,17 @@ defmodule LoopexDaemon.AdmissionRelay do
         {caller, _tag},
         %{owner: caller} = state
       ) do
-    binding = {actor, actor_incarnation}
+    {reply, state} =
+      do_select_lease_result(
+        state,
+        origin_id,
+        actor,
+        actor_incarnation,
+        settlement_ref,
+        result
+      )
 
-    case Map.fetch(state.permits, origin_id) do
-      {:ok,
-       %{
-         kind: :lease,
-         phase: :executing,
-         actor_pid: ^actor,
-         actor_incarnation: ^actor_incarnation,
-         disposition: nil
-       } = permit} ->
-        cond do
-          not is_reference(settlement_ref) ->
-            {:reply, {:error, :invalid_actor}, state}
-
-          not bounded_record?(result) ->
-            {:reply, {:error, :invalid_result}, state}
-
-          true ->
-            permit = %{
-              permit
-              | phase: :settling,
-                disposition: :result,
-                settlement_ref: settlement_ref,
-                result: result
-            }
-
-            Logger.debug("loopex daemon admission relay lease result selected")
-            {:reply, :ok, put_in(state, [:permits, origin_id], permit)}
-        end
-
-      {:ok,
-       %{
-         kind: :lease,
-         phase: :settling,
-         disposition: :result,
-         actor_pid: actor,
-         actor_incarnation: actor_incarnation,
-         settlement_ref: ^settlement_ref,
-         result: ^result
-       }}
-      when {actor, actor_incarnation} == binding ->
-        {:reply, :ok, state}
-
-      {:ok, %{kind: :lease, disposition: disposition}}
-      when disposition in [:connection_lost, :owner_lost] ->
-        {:reply, {:error, disposition}, state}
-
-      _other ->
-        {:reply, {:error, :permit_unavailable}, state}
-    end
+    {:reply, reply, state}
   end
 
   def handle_call({:select_lease_result, _, _, _, _, _}, _from, state),
@@ -1105,34 +1147,8 @@ defmodule LoopexDaemon.AdmissionRelay do
         {caller, _tag},
         %{owner: caller} = state
       ) do
-    case Map.fetch(state.permits, origin_id) do
-      {:ok,
-       %{
-         kind: :lease,
-         phase: :settling,
-         disposition: :result,
-         settlement_ref: ^settlement_ref,
-         worker_pid: nil,
-         result: result
-       } = permit} ->
-        if Process.alive?(permit.connection_pid) do
-          send(permit.connection_pid, {:relay_permit_result, origin_id, result})
-        end
-
-        state =
-          state
-          |> remove_permit(origin_id)
-          |> maybe_retire_connection(permit.connection_incarnation)
-
-        Logger.debug("loopex daemon admission relay lease result settled")
-        {:reply, :ok, state}
-
-      {:ok, %{kind: :lease, phase: :settling, disposition: :result}} ->
-        {:reply, {:error, :worker_unsettled}, state}
-
-      _other ->
-        {:reply, {:error, :permit_unavailable}, state}
-    end
+    {reply, state} = do_settle_lease_result(state, origin_id, settlement_ref)
+    {:reply, reply, state}
   end
 
   def handle_call({:settle_lease_result, _, _}, _from, state),
@@ -1144,35 +1160,10 @@ defmodule LoopexDaemon.AdmissionRelay do
         %{owner: caller} = state
       )
       when disposition in [:connection_lost, :owner_lost] do
-    case Map.fetch(state.permits, origin_id) do
-      {:ok,
-       %{
-         kind: :lease,
-         phase: :settling,
-         disposition: ^disposition,
-         settlement_ref: ^settlement_ref,
-         worker_pid: nil
-       } = permit} ->
-        state =
-          state
-          |> remove_permit(origin_id)
-          |> maybe_retire_connection(permit.connection_incarnation)
+    {reply, state} =
+      do_settle_lease_disposition(state, origin_id, disposition, settlement_ref)
 
-        Logger.debug("loopex daemon admission relay lease disposition settled")
-        {:reply, :ok, state}
-
-      {:ok,
-       %{
-         kind: :lease,
-         phase: :settling,
-         disposition: ^disposition,
-         settlement_ref: ^settlement_ref
-       }} ->
-        {:reply, {:error, :worker_unsettled}, state}
-
-      _other ->
-        {:reply, {:error, :permit_unavailable}, state}
-    end
+    {:reply, reply, state}
   end
 
   def handle_call({:settle_lease_disposition, _, _, _}, _from, state),
@@ -1578,6 +1569,29 @@ defmodule LoopexDaemon.AdmissionRelay do
   end
 
   @impl true
+  def handle_info(
+        {:relay_lease_operation, operation_ref, owner, owner_incarnation, action, payload},
+        %{owner: owner, owner_incarnation: owner_incarnation} = state
+      )
+      when is_reference(operation_ref) do
+    {reply, state} = apply_owner_lease_operation(state, action, payload)
+
+    send(
+      owner,
+      {:relay_lease_operation_ack, operation_ref, self(), owner_incarnation, action, reply}
+    )
+
+    {:noreply, state}
+  end
+
+  def handle_info(
+        {:relay_lease_operation, _operation_ref, _owner, _owner_incarnation, _action, _payload},
+        state
+      ) do
+    Logger.debug("loopex daemon admission relay lease operation ignored")
+    {:noreply, state}
+  end
+
   def handle_info({:relay_barrier, barrier_ref, :cut}, %{phase: :serving} = state)
       when is_reference(barrier_ref) do
     now = monotonic_ms()
@@ -2406,6 +2420,165 @@ defmodule LoopexDaemon.AdmissionRelay do
           remove_ticket(acc, origin_id)
       end
     end)
+  end
+
+  defp apply_owner_lease_operation(
+         state,
+         :select_result,
+         {origin_id, actor, actor_incarnation, settlement_ref, result}
+       ) do
+    do_select_lease_result(
+      state,
+      origin_id,
+      actor,
+      actor_incarnation,
+      settlement_ref,
+      result
+    )
+  end
+
+  defp apply_owner_lease_operation(
+         state,
+         :settle_result,
+         {origin_id, settlement_ref}
+       ) do
+    do_settle_lease_result(state, origin_id, settlement_ref)
+  end
+
+  defp apply_owner_lease_operation(
+         state,
+         :settle_disposition,
+         {origin_id, disposition, settlement_ref}
+       )
+       when disposition in [:connection_lost, :owner_lost] do
+    do_settle_lease_disposition(state, origin_id, disposition, settlement_ref)
+  end
+
+  defp apply_owner_lease_operation(state, _action, _payload),
+    do: {{:error, :permit_unavailable}, state}
+
+  defp do_select_lease_result(
+         state,
+         origin_id,
+         actor,
+         actor_incarnation,
+         settlement_ref,
+         result
+       ) do
+    binding = {actor, actor_incarnation}
+
+    case Map.fetch(state.permits, origin_id) do
+      {:ok,
+       %{
+         kind: :lease,
+         phase: :executing,
+         actor_pid: ^actor,
+         actor_incarnation: ^actor_incarnation,
+         disposition: nil
+       } = permit} ->
+        cond do
+          not is_reference(settlement_ref) ->
+            {{:error, :invalid_actor}, state}
+
+          not bounded_record?(result) ->
+            {{:error, :invalid_result}, state}
+
+          true ->
+            permit = %{
+              permit
+              | phase: :settling,
+                disposition: :result,
+                settlement_ref: settlement_ref,
+                result: result
+            }
+
+            Logger.debug("loopex daemon admission relay lease result selected")
+            {:ok, put_in(state, [:permits, origin_id], permit)}
+        end
+
+      {:ok,
+       %{
+         kind: :lease,
+         phase: :settling,
+         disposition: :result,
+         actor_pid: actor,
+         actor_incarnation: actor_incarnation,
+         settlement_ref: ^settlement_ref,
+         result: ^result
+       }}
+      when {actor, actor_incarnation} == binding ->
+        {:ok, state}
+
+      {:ok, %{kind: :lease, disposition: disposition}}
+      when disposition in [:connection_lost, :owner_lost] ->
+        {{:error, disposition}, state}
+
+      _other ->
+        {{:error, :permit_unavailable}, state}
+    end
+  end
+
+  defp do_settle_lease_result(state, origin_id, settlement_ref) do
+    case Map.fetch(state.permits, origin_id) do
+      {:ok,
+       %{
+         kind: :lease,
+         phase: :settling,
+         disposition: :result,
+         settlement_ref: ^settlement_ref,
+         worker_pid: nil,
+         result: result
+       } = permit} ->
+        if Process.alive?(permit.connection_pid) do
+          send(permit.connection_pid, {:relay_permit_result, origin_id, result})
+        end
+
+        state =
+          state
+          |> remove_permit(origin_id)
+          |> maybe_retire_connection(permit.connection_incarnation)
+
+        Logger.debug("loopex daemon admission relay lease result settled")
+        {:ok, state}
+
+      {:ok, %{kind: :lease, phase: :settling, disposition: :result}} ->
+        {{:error, :worker_unsettled}, state}
+
+      _other ->
+        {{:error, :permit_unavailable}, state}
+    end
+  end
+
+  defp do_settle_lease_disposition(state, origin_id, disposition, settlement_ref) do
+    case Map.fetch(state.permits, origin_id) do
+      {:ok,
+       %{
+         kind: :lease,
+         phase: :settling,
+         disposition: ^disposition,
+         settlement_ref: ^settlement_ref,
+         worker_pid: nil
+       } = permit} ->
+        state =
+          state
+          |> remove_permit(origin_id)
+          |> maybe_retire_connection(permit.connection_incarnation)
+
+        Logger.debug("loopex daemon admission relay lease disposition settled")
+        {:ok, state}
+
+      {:ok,
+       %{
+         kind: :lease,
+         phase: :settling,
+         disposition: ^disposition,
+         settlement_ref: ^settlement_ref
+       }} ->
+        {{:error, :worker_unsettled}, state}
+
+      _other ->
+        {{:error, :permit_unavailable}, state}
+    end
   end
 
   defp connection_down(state, incarnation, pid) do

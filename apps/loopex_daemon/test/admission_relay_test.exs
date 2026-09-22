@@ -1740,7 +1740,8 @@ defmodule LoopexDaemon.AdmissionRelayTest do
   end
 
   test "connection loss selects one retained lease disposition" do
-    relay = start_relay()
+    daemon_incarnation = incarnation()
+    relay = start_relay(owner_incarnation: daemon_incarnation)
     owner = start_actor()
     owner_incarnation = incarnation()
 
@@ -1790,13 +1791,21 @@ defmodule LoopexDaemon.AdmissionRelayTest do
                make_ref()
              )
 
+    operation_ref = make_ref()
+
     assert :ok =
-             AdmissionRelay.settle_lease_disposition(
+             AdmissionRelay.request_lease_disposition_settlement(
                relay,
+               operation_ref,
+               daemon_incarnation,
                origin,
                :connection_lost,
                settlement_ref
              )
+
+    assert_receive {:relay_lease_operation_ack, ^operation_ref, ^relay, ^daemon_incarnation,
+                    :settle_disposition, :ok},
+                   500
 
     assert_receive {:relay_connection_retired, ^relay, ^connection_incarnation}, 500
   end
@@ -1999,8 +2008,9 @@ defmodule LoopexDaemon.AdmissionRelayTest do
                    500
   end
 
-  test "a daemon-selected lease result wins a later connection loss" do
-    relay = start_relay()
+  test "an authenticated asynchronous lease result wins a later connection loss" do
+    daemon_incarnation = incarnation()
+    relay = start_relay(owner_incarnation: daemon_incarnation)
     owner = start_actor()
     owner_incarnation = incarnation()
 
@@ -2041,16 +2051,59 @@ defmodule LoopexDaemon.AdmissionRelayTest do
 
     settlement_ref = make_ref()
     result = %{"released" => true}
+    stale_ref = make_ref()
 
     assert :ok =
-             AdmissionRelay.select_lease_result(
+             AdmissionRelay.request_lease_result_selection(
                relay,
+               stale_ref,
+               incarnation(),
                origin,
                owner,
                owner_incarnation,
                settlement_ref,
                result
              )
+
+    refute_receive {:relay_lease_operation_ack, ^stale_ref, _, _, _, _}, 40
+
+    foreign_ref = make_ref()
+
+    assert :ok =
+             invoke(owner, fn ->
+               AdmissionRelay.request_lease_result_selection(
+                 relay,
+                 foreign_ref,
+                 daemon_incarnation,
+                 origin,
+                 owner,
+                 owner_incarnation,
+                 settlement_ref,
+                 result
+               )
+             end)
+
+    refute_receive {:registry_message, ^owner,
+                    {:relay_lease_operation_ack, ^foreign_ref, _, _, _, _}},
+                   40
+
+    selection_ref = make_ref()
+
+    assert :ok =
+             AdmissionRelay.request_lease_result_selection(
+               relay,
+               selection_ref,
+               daemon_incarnation,
+               origin,
+               owner,
+               owner_incarnation,
+               settlement_ref,
+               result
+             )
+
+    assert_receive {:relay_lease_operation_ack, ^selection_ref, ^relay, ^daemon_incarnation,
+                    :select_result, :ok},
+                   500
 
     connection_monitor = Process.monitor(connection)
     Process.exit(connection, :kill)
@@ -2060,7 +2113,21 @@ defmodule LoopexDaemon.AdmissionRelayTest do
                     _},
                    40
 
-    assert :ok = AdmissionRelay.settle_lease_result(relay, origin, settlement_ref)
+    settle_ref = make_ref()
+
+    assert :ok =
+             AdmissionRelay.request_lease_result_settlement(
+               relay,
+               settle_ref,
+               daemon_incarnation,
+               origin,
+               settlement_ref
+             )
+
+    assert_receive {:relay_lease_operation_ack, ^settle_ref, ^relay, ^daemon_incarnation,
+                    :settle_result, :ok},
+                   500
+
     assert_receive {:relay_connection_retired, ^relay, ^connection_incarnation}, 500
   end
 
