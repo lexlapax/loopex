@@ -77,7 +77,37 @@ defmodule LoopexDaemon.LeaseOwnerTest do
                result
              )
 
-    assert :ok = LeaseOwner.resolve_grant(fixture.owner, grant_ref, :granted, now_ms())
+    stale_ref = make_ref()
+
+    assert :ok =
+             LeaseOwner.request_grant_resolution(
+               fixture.owner,
+               stale_ref,
+               incarnation(),
+               grant_ref,
+               :granted,
+               now_ms()
+             )
+
+    refute_receive {:lease_owner_resolution_ack, ^stale_ref, _, _, _, _}, 40
+    assert %{phase: :grant_pending, held: false} = LeaseOwner.status(fixture.owner)
+
+    operation_ref = make_ref()
+
+    assert :ok =
+             LeaseOwner.request_grant_resolution(
+               fixture.owner,
+               operation_ref,
+               fixture.owner_incarnation,
+               grant_ref,
+               :granted,
+               now_ms()
+             )
+
+    assert_receive {:lease_owner_resolution_ack, ^operation_ref, ^owner, ^owner_incarnation,
+                    :grant, :ok},
+                   500
+
     assert %{phase: :held, held: true} = LeaseOwner.status(fixture.owner)
     assert :ok = AdmissionRelay.settle_lease_result(fixture.relay, origin, settlement_ref)
 
@@ -201,7 +231,19 @@ defmodule LoopexDaemon.LeaseOwnerTest do
              )
 
     assert %{waiting_acquires: 1, phase: :expiry_pending} = LeaseOwner.status(fixture.owner)
-    assert :ok = LeaseOwner.resolve_expiry(fixture.owner, expiry_ref)
+    resolution_ref = make_ref()
+
+    assert :ok =
+             LeaseOwner.request_expiry_resolution(
+               fixture.owner,
+               resolution_ref,
+               fixture.owner_incarnation,
+               expiry_ref
+             )
+
+    assert_receive {:lease_owner_resolution_ack, ^resolution_ref, ^owner, ^owner_incarnation,
+                    :expiry, :ok},
+                   500
 
     assert_receive {:lease_grant_proposed, grant_ref, ^successor_origin, ^owner,
                     ^owner_incarnation, ^session_id, ^successor, ^successor_incarnation,
@@ -285,7 +327,21 @@ defmodule LoopexDaemon.LeaseOwnerTest do
     assert relay == fixture.relay
     assert session_id == fixture.session_id
 
-    assert :ok = LeaseOwner.resolve_release(fixture.owner, release_ref, :cancelled)
+    resolution_ref = make_ref()
+
+    assert :ok =
+             LeaseOwner.request_release_resolution(
+               fixture.owner,
+               resolution_ref,
+               fixture.owner_incarnation,
+               release_ref,
+               :cancelled
+             )
+
+    assert_receive {:lease_owner_resolution_ack, ^resolution_ref, ^owner, ^owner_incarnation,
+                    :release, :ok},
+                   500
+
     assert %{phase: :held, held: true} = LeaseOwner.status(fixture.owner)
 
     assert :ok =

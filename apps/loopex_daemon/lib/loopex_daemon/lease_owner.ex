@@ -28,7 +28,9 @@ defmodule LoopexDaemon.LeaseOwner do
   permit data. Once the daemon requests retirement from a free idle owner, the
   owner waits for the relay's exact session rows to clear, marks its binding
   retiring there, sends a pre-exit intent to the daemon, and exits normally only
-  after the daemon acknowledges that exact intent.
+  after the daemon acknowledges that exact intent. Daemon-owned grant, release
+  and expiry resolutions also use authenticated ref-tagged messages so the
+  fixed owner never blocks while this process commits the selected transition.
   """
 
   use GenServer
@@ -155,6 +157,67 @@ defmodule LoopexDaemon.LeaseOwner do
   @spec resolve_expiry(pid(), reference()) :: :ok | {:error, :invalid_operation}
   def resolve_expiry(owner, expiry_ref) do
     GenServer.call(owner, {:resolve_expiry, expiry_ref})
+  end
+
+  @doc false
+  @spec request_grant_resolution(
+          pid(),
+          reference(),
+          binary(),
+          reference(),
+          :granted | :cancelled,
+          integer() | nil
+        ) :: :ok
+  def request_grant_resolution(
+        owner,
+        operation_ref,
+        owner_incarnation,
+        grant_ref,
+        disposition,
+        granted_at \\ nil
+      ) do
+    send(
+      owner,
+      {:daemon_lease_resolution, operation_ref, self(), owner_incarnation, :grant,
+       {grant_ref, disposition, granted_at}}
+    )
+
+    :ok
+  end
+
+  @doc false
+  @spec request_release_resolution(
+          pid(),
+          reference(),
+          binary(),
+          reference(),
+          :released | :cancelled
+        ) :: :ok
+  def request_release_resolution(
+        owner,
+        operation_ref,
+        owner_incarnation,
+        release_ref,
+        disposition
+      ) do
+    send(
+      owner,
+      {:daemon_lease_resolution, operation_ref, self(), owner_incarnation, :release,
+       {release_ref, disposition}}
+    )
+
+    :ok
+  end
+
+  @doc false
+  @spec request_expiry_resolution(pid(), reference(), binary(), reference()) :: :ok
+  def request_expiry_resolution(owner, operation_ref, owner_incarnation, expiry_ref) do
+    send(
+      owner,
+      {:daemon_lease_resolution, operation_ref, self(), owner_incarnation, :expiry, expiry_ref}
+    )
+
+    :ok
   end
 
   @doc false
@@ -597,26 +660,7 @@ defmodule LoopexDaemon.LeaseOwner do
         %{daemon_owner: caller, transition: %{kind: :grant, ref: grant_ref} = transition} = state
       )
       when is_integer(granted_at) do
-    deadline = granted_at + state.lease_term_ms
-
-    lease = %{
-      status: :held,
-      holder_pid: transition.connection,
-      holder_incarnation: transition.connection_incarnation,
-      writer_epoch: transition.writer_epoch,
-      granted_at: granted_at,
-      deadline: deadline
-    }
-
-    state =
-      state
-      |> cancel_waiter_timer(transition.permit_id)
-      |> Map.put(:lease, lease)
-      |> Map.put(:transition, nil)
-      |> schedule_expiry(deadline)
-      |> continue_session_work()
-
-    Logger.debug("loopex daemon lease grant committed")
+    {:ok, state} = resolve_grant_transition(state, transition, :granted, granted_at)
     {:reply, :ok, state}
   end
 
@@ -625,14 +669,7 @@ defmodule LoopexDaemon.LeaseOwner do
         {caller, _tag},
         %{daemon_owner: caller, transition: %{kind: :grant, ref: grant_ref} = transition} = state
       ) do
-    state =
-      state
-      |> cancel_waiter_timer(transition.permit_id)
-      |> Map.put(:lease, transition.previous_lease)
-      |> Map.put(:transition, nil)
-      |> continue_session_work()
-
-    Logger.debug("loopex daemon lease grant cancelled")
+    {:ok, state} = resolve_grant_transition(state, transition, :cancelled, nil)
     {:reply, :ok, state}
   end
 
@@ -648,22 +685,7 @@ defmodule LoopexDaemon.LeaseOwner do
         } = state
       )
       when disposition in [:released, :cancelled] do
-    state = %{state | transition: nil}
-
-    state =
-      case disposition do
-        :released ->
-          state
-          |> cancel_expiry_timer()
-          |> Map.put(:lease, %{lease | status: :released})
-
-        :cancelled ->
-          %{state | lease: lease}
-      end
-
-    state = continue_session_work(state)
-
-    Logger.debug("loopex daemon lease release resolved")
+    {:ok, state} = resolve_release_transition(state, lease, disposition)
     {:reply, :ok, state}
   end
 
@@ -678,14 +700,7 @@ defmodule LoopexDaemon.LeaseOwner do
           transition: %{kind: :expiry, ref: expiry_ref, lease: lease}
         } = state
       ) do
-    state =
-      state
-      |> cancel_expiry_timer()
-      |> Map.put(:lease, %{lease | status: :expired})
-      |> Map.put(:transition, nil)
-      |> continue_session_work()
-
-    Logger.debug("loopex daemon lease expiry resolved")
+    {:ok, state} = resolve_expiry_transition(state, lease)
     {:reply, :ok, state}
   end
 
@@ -734,6 +749,31 @@ defmodule LoopexDaemon.LeaseOwner do
   end
 
   @impl true
+  def handle_info(
+        {:daemon_lease_resolution, operation_ref, daemon_owner, owner_incarnation, action,
+         payload},
+        %{daemon_owner: daemon_owner, owner_incarnation: owner_incarnation} = state
+      )
+      when is_reference(operation_ref) do
+    {reply, state} = apply_daemon_resolution(state, action, payload)
+
+    send(
+      daemon_owner,
+      {:lease_owner_resolution_ack, operation_ref, self(), owner_incarnation, action, reply}
+    )
+
+    {:noreply, state}
+  end
+
+  def handle_info(
+        {:daemon_lease_resolution, _operation_ref, _daemon_owner, _owner_incarnation, _action,
+         _payload},
+        state
+      ) do
+    Logger.debug("loopex daemon lease owner resolution ignored")
+    {:noreply, state}
+  end
+
   def handle_info({:lease_expiry, token, deadline}, %{expiry_token: token} = state) do
     if monotonic_ms() >= deadline do
       state = %{state | expiry_timer: nil, expiry_token: nil}
@@ -901,6 +941,111 @@ defmodule LoopexDaemon.LeaseOwner do
     else
       {{:error, :not_idle}, state}
     end
+  end
+
+  defp apply_daemon_resolution(
+         %{transition: %{kind: :grant, ref: grant_ref} = transition} = state,
+         :grant,
+         {grant_ref, :granted, granted_at}
+       )
+       when is_integer(granted_at) do
+    resolve_grant_transition(state, transition, :granted, granted_at)
+  end
+
+  defp apply_daemon_resolution(
+         %{transition: %{kind: :grant, ref: grant_ref} = transition} = state,
+         :grant,
+         {grant_ref, :cancelled, nil}
+       ) do
+    resolve_grant_transition(state, transition, :cancelled, nil)
+  end
+
+  defp apply_daemon_resolution(
+         %{transition: %{kind: :release, ref: release_ref, lease: lease}} = state,
+         :release,
+         {release_ref, disposition}
+       )
+       when disposition in [:released, :cancelled] do
+    resolve_release_transition(state, lease, disposition)
+  end
+
+  defp apply_daemon_resolution(
+         %{transition: %{kind: :expiry, ref: expiry_ref, lease: lease}} = state,
+         :expiry,
+         expiry_ref
+       ) do
+    resolve_expiry_transition(state, lease)
+  end
+
+  defp apply_daemon_resolution(state, _action, _payload),
+    do: {{:error, :invalid_operation}, state}
+
+  defp resolve_grant_transition(state, transition, :granted, granted_at) do
+    deadline = granted_at + state.lease_term_ms
+
+    lease = %{
+      status: :held,
+      holder_pid: transition.connection,
+      holder_incarnation: transition.connection_incarnation,
+      writer_epoch: transition.writer_epoch,
+      granted_at: granted_at,
+      deadline: deadline
+    }
+
+    state =
+      state
+      |> cancel_waiter_timer(transition.permit_id)
+      |> Map.put(:lease, lease)
+      |> Map.put(:transition, nil)
+      |> schedule_expiry(deadline)
+      |> continue_session_work()
+
+    Logger.debug("loopex daemon lease grant committed")
+    {:ok, state}
+  end
+
+  defp resolve_grant_transition(state, transition, :cancelled, nil) do
+    state =
+      state
+      |> cancel_waiter_timer(transition.permit_id)
+      |> Map.put(:lease, transition.previous_lease)
+      |> Map.put(:transition, nil)
+      |> continue_session_work()
+
+    Logger.debug("loopex daemon lease grant cancelled")
+    {:ok, state}
+  end
+
+  defp resolve_release_transition(state, lease, disposition) do
+    state = %{state | transition: nil}
+
+    state =
+      case disposition do
+        :released ->
+          state
+          |> cancel_expiry_timer()
+          |> Map.put(:lease, %{lease | status: :released})
+
+        :cancelled ->
+          %{state | lease: lease}
+      end
+
+    state = continue_session_work(state)
+
+    Logger.debug("loopex daemon lease release resolved")
+    {:ok, state}
+  end
+
+  defp resolve_expiry_transition(state, lease) do
+    state =
+      state
+      |> cancel_expiry_timer()
+      |> Map.put(:lease, %{lease | status: :expired})
+      |> Map.put(:transition, nil)
+      |> continue_session_work()
+
+    Logger.debug("loopex daemon lease expiry resolved")
+    {:ok, state}
   end
 
   defp begin_eligible_retirement(state) do
