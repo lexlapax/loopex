@@ -885,6 +885,238 @@ defmodule LoopexDaemon.OwnerTest do
              AdmissionRelay.status(components.relay)
   end
 
+  test "owner loss wins an existing owner's holder-changing grant before selection" do
+    owner = start_owner(lease_term_ms: 40, mirror_deadline_ms: 1_000)
+    components = Owner.components(owner)
+    former = initialized_connection(components)
+    successor = initialized_connection(components)
+    former_pid = former.pid
+    successor_pid = successor.pid
+    former_origin = {former.incarnation, 0, 1}
+    {former_worker, former_worker_incarnation} = start_worker(former.pid, former_origin)
+
+    assert {:ok, :proposed, lease_owner, owner_incarnation} =
+             Owner.acquire_control(
+               owner,
+               former_origin,
+               "existing-grant-former",
+               "existing-grant-session",
+               former.pid,
+               former.incarnation,
+               former_worker,
+               former_worker_incarnation,
+               now_ms() + 2_000
+             )
+
+    assert_receive {:worker_go, ^former_worker, ^former_origin}, 500
+
+    assert_receive {:manual_connection_message, ^former_pid,
+                    {:relay_permit_result, ^former_origin, _former_result}},
+                   500
+
+    :sys.suspend(components.registry)
+    assert :ok = wait_for_mirror_step(owner, :expiry, :clear)
+
+    successor_origin = {successor.incarnation, 0, 1}
+
+    {successor_worker, successor_worker_incarnation} =
+      start_worker(successor.pid, successor_origin)
+
+    assert {:ok, :queued, ^lease_owner, ^owner_incarnation} =
+             Owner.acquire_control(
+               owner,
+               successor_origin,
+               "existing-grant-successor",
+               "existing-grant-session",
+               successor.pid,
+               successor.incarnation,
+               successor_worker,
+               successor_worker_incarnation,
+               now_ms() + 2_000
+             )
+
+    assert_receive {:worker_go, ^successor_worker, ^successor_origin}, 500
+
+    # Concept: the lease owner proposes the successor grant before it
+    # acknowledges the expiry, so its death can precede the daemon's retirement
+    # request. Technical depth: the registry holds the grant at install while
+    # the killed owner's queued acknowledgement is still undelivered.
+    :sys.suspend(lease_owner)
+    :sys.resume(components.registry)
+    assert :ok = wait_for_mirror_step(owner, :expiry, :resolve_owner_expiry)
+    :sys.suspend(components.registry)
+    :sys.resume(lease_owner)
+    assert :ok = wait_for_mirror_step(owner, :grant, :install)
+
+    lease_owner_monitor = Process.monitor(lease_owner)
+    Process.exit(lease_owner, :kill)
+    assert_receive {:DOWN, ^lease_owner_monitor, :process, ^lease_owner, :killed}, 500
+    assert %{owner_losses: 1} = wait_for_relay_owner_loss(components.relay)
+    :sys.resume(components.registry)
+
+    assert_receive {:manual_connection_message, ^successor_pid,
+                    {:relay_permit_cancelled, ^successor_origin, :control_owner_lost}},
+                   500
+
+    assert %{
+             owner_slots: 0,
+             lost_owners: 0,
+             granted_routes: 0,
+             lease_operations: 0,
+             mirror_operations: 0
+           } = wait_for_owner_retirement(owner)
+
+    refute_receive {:manual_connection_message, ^successor_pid,
+                    {:relay_permit_result, ^successor_origin, _result}},
+                   40
+
+    refute_receive {:manual_connection_message, _holder,
+                    {:daemon_control_owner_lost, ^owner, _close_ref, "existing-grant-session",
+                     _holder_incarnation}},
+                   40
+
+    assert Process.alive?(owner)
+    assert Process.alive?(former_pid)
+    assert Process.alive?(successor_pid)
+    assert %{routing_mirrors: 0} = ConnectionRegistry.status(components.registry)
+
+    assert %{permits: 0, settling: 0, owner_losses: 0, lease_owners: 0} =
+             AdmissionRelay.status(components.relay)
+  end
+
+  test "owner loss during a cancelled grant settles the connection loss without the owner" do
+    owner = start_owner(mirror_deadline_ms: 1_000)
+    components = Owner.components(owner)
+    holder = initialized_connection(components)
+    origin = {holder.incarnation, 0, 1}
+    {worker, worker_incarnation} = start_worker(holder.pid, origin)
+    :sys.suspend(components.registry)
+
+    assert {:ok, :proposed, lease_owner, _owner_incarnation} =
+             Owner.acquire_control(
+               owner,
+               origin,
+               "cancelled-grant-owner-loss",
+               "cancelled-grant-session",
+               holder.pid,
+               holder.incarnation,
+               worker,
+               worker_incarnation,
+               now_ms() + 2_000
+             )
+
+    assert_receive {:worker_go, ^worker, ^origin}, 500
+    assert :ok = wait_for_mirror_step(owner, :grant, :install)
+
+    holder_monitor = Process.monitor(holder.pid)
+    Process.exit(holder.pid, :kill)
+    assert_receive {:DOWN, ^holder_monitor, :process, _holder, :killed}, 500
+    assert :ok = wait_for_mirror_step(owner, :grant, :install_connection_lost)
+
+    :sys.suspend(lease_owner)
+    :sys.resume(components.registry)
+    assert :ok = wait_for_mirror_step(owner, :grant, :resolve_owner_cancel)
+
+    lease_owner_monitor = Process.monitor(lease_owner)
+    Process.exit(lease_owner, :kill)
+    assert_receive {:DOWN, ^lease_owner_monitor, :process, ^lease_owner, :killed}, 500
+
+    assert %{
+             owner_slots: 0,
+             lost_owners: 0,
+             granted_routes: 0,
+             lease_operations: 0,
+             mirror_operations: 0,
+             pending_dispositions: 0
+           } = wait_for_owner_retirement(owner)
+
+    assert Process.alive?(owner)
+    assert %{routing_mirrors: 0} = ConnectionRegistry.status(components.registry)
+
+    assert %{permits: 0, settling: 0, owner_losses: 0, lease_owners: 0} =
+             AdmissionRelay.status(components.relay)
+  end
+
+  test "a fresh child lost before it proposes refuses its first acquire" do
+    owner = start_owner(mirror_deadline_ms: 1_000)
+    components = Owner.components(owner)
+    holder = initialized_connection(components)
+    holder_pid = holder.pid
+    origin = {holder.incarnation, 0, 1}
+    {worker, worker_incarnation} = start_worker(holder.pid, origin)
+    test_pid = self()
+
+    # Concept: the relay's registration call parks the daemon owner after the
+    # child starts. Technical depth: a relay debug hook holds that exact call;
+    # the child is then released for exactly its activation and killed before
+    # its first acquire can arrive.
+    :ok =
+      :sys.install(
+        components.relay,
+        {fn
+           :waiting,
+           {:in, {:"$gen_call", _from, {:register_lease_owner, "unproposed-session", child, _}}},
+           _proc_state ->
+             send(test_pid, {:registering, child})
+
+             receive do
+               :continue_registration -> :done
+             end
+
+           :waiting, _event, _proc_state ->
+             :waiting
+         end, :waiting}
+      )
+
+    acquire =
+      Task.async(fn ->
+        Owner.acquire_control(
+          owner,
+          origin,
+          "unproposed-first-acquire",
+          "unproposed-session",
+          holder.pid,
+          holder.incarnation,
+          worker,
+          worker_incarnation,
+          now_ms() + 2_000
+        )
+      end)
+
+    assert_receive {:registering, child}, 500
+    :sys.suspend(child)
+    send(components.relay, :continue_registration)
+    assert :ok = wait_for_queued_message(child)
+    :sys.resume(child)
+    :sys.suspend(child)
+
+    child_monitor = Process.monitor(child)
+    Process.exit(child, :kill)
+    assert_receive {:DOWN, ^child_monitor, :process, ^child, :killed}, 500
+    assert {:ok, :queued, ^child, _owner_incarnation} = Task.await(acquire, 1_000)
+    assert_receive {:worker_go, ^worker, ^origin}, 500
+
+    assert_receive {:manual_connection_message, ^holder_pid,
+                    {:relay_permit_result, ^origin, result}},
+                   500
+
+    assert result["code"] == "control_pending"
+
+    assert %{
+             owner_slots: 0,
+             lost_owners: 0,
+             granted_routes: 0,
+             lease_operations: 0,
+             mirror_operations: 0
+           } = wait_for_owner_retirement(owner)
+
+    assert Process.alive?(owner)
+    assert %{routing_mirrors: 0} = ConnectionRegistry.status(components.registry)
+
+    assert %{permits: 0, settling: 0, owner_losses: 0, lease_owners: 0} =
+             AdmissionRelay.status(components.relay)
+  end
+
   test "a suspended registry cannot extend the mirror deadline" do
     owner = start_owner(mirror_deadline_ms: 30)
     components = Owner.components(owner)
@@ -1306,6 +1538,21 @@ defmodule LoopexDaemon.OwnerTest do
   end
 
   defp wait_for_mirror_step(_owner, _kind, _step, 0), do: {:error, :not_reached}
+
+  defp wait_for_queued_message(pid, attempts \\ 100)
+
+  defp wait_for_queued_message(pid, attempts) when attempts > 0 do
+    case Process.info(pid, :message_queue_len) do
+      {:message_queue_len, length} when length > 0 ->
+        :ok
+
+      _other ->
+        Process.sleep(5)
+        wait_for_queued_message(pid, attempts - 1)
+    end
+  end
+
+  defp wait_for_queued_message(_pid, 0), do: {:error, :not_queued}
 
   defp incarnation, do: :crypto.strong_rand_bytes(16)
   defp now_ms, do: System.monotonic_time(:millisecond)
