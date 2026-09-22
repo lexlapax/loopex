@@ -69,6 +69,16 @@ defmodule Loopex.AppServer.Host do
   """
   @spec serve() :: :ok
   def serve do
+    case route_default_logger_to_standard_error() do
+      :ok ->
+        serve_with_routed_diagnostics()
+
+      {:error, reason} ->
+        refuse("the diagnostic logger could not be routed to standard error: #{inspect(reason)}")
+    end
+  end
+
+  defp serve_with_routed_diagnostics do
     case launch() do
       {:ok, options} ->
         announce(options)
@@ -89,6 +99,35 @@ defmodule Loopex.AppServer.Host do
 
       {:error, message} ->
         refuse(message)
+    end
+  end
+
+  # Concept: standard output belongs exclusively to the wire protocol.
+  #
+  # Technical depth: the standalone host starts with OTP's default
+  # `:logger_std_h` handler targeting `:standard_io`. Its type cannot be changed
+  # in place, so preserve its formatter, filters and overload configuration
+  # while replacing it before any runtime component can log. Refuse if either
+  # half fails: continuing would make a diagnostic line a malformed protocol
+  # frame. A host that already targets another sink needs no change.
+  defp route_default_logger_to_standard_error do
+    case :logger.get_handler_config(:default) do
+      {:ok, %{module: :logger_std_h, config: %{type: :standard_io}} = handler} ->
+        options =
+          handler
+          |> Map.drop([:id, :module])
+          |> put_in([:config, :type], :standard_error)
+
+        with :ok <- :logger.remove_handler(:default),
+             :ok <- :logger.add_handler(:default, :logger_std_h, options) do
+          :ok
+        end
+
+      {:ok, _other_sink} ->
+        :ok
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
