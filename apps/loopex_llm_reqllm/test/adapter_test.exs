@@ -17,7 +17,7 @@ defmodule Loopex.LLM.ReqLLM.AdapterTest do
   returns before dispatch.
   """
 
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
   alias Loopex.LLM.ReqLLM, as: Adapter
   alias Loopex.LLM.ReqLLM.ProviderIsolationFixture, as: Fixture

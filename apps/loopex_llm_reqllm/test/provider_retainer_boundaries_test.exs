@@ -1,7 +1,7 @@
 Code.require_file("support/provider_isolation_fixture.exs", __DIR__)
 
 defmodule Loopex.LLM.ReqLLM.ProviderRetainerBoundariesTest do
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
   alias Loopex.LLM.ReqLLM.ProviderIsolationFixture, as: Fixture
 

@@ -1,7 +1,7 @@
 Code.require_file("support/provider_isolation_fixture.exs", __DIR__)
 
 defmodule Loopex.LLM.ReqLLM.RealModelLaneTest do
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
   alias Loopex.LLM.ReqLLM
   alias Loopex.LLM.ReqLLM.CredentialCustody

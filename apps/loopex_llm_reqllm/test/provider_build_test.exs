@@ -1,4 +1,6 @@
 defmodule Loopex.LLM.ReqLLM.ProviderBuildTest do
+  # Build isolation is expressed through VM-global Mix build-path environment
+  # names, so this module remains serial.
   use ExUnit.Case, async: false
 
   alias Mix.Tasks.Loopex.Provider.Build

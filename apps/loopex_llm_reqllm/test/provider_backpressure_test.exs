@@ -1,6 +1,8 @@
 Code.require_file("support/provider_isolation_fixture.exs", __DIR__)
 
 defmodule Loopex.LLM.ReqLLM.ProviderBackpressureTest do
+  # The deadline witness installs VM-global call trace patterns for the bridge
+  # and Erlang clock conversion, so this module remains serial.
   use ExUnit.Case, async: false
 
   alias Loopex.LLM.ReqLLM.ProviderBridge

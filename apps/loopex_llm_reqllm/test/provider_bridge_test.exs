@@ -2,6 +2,8 @@ Code.require_file("support/provider_phase_diagnostic.exs", __DIR__)
 Code.require_file("../../loopex/test/support/m1_runtime_helper.exs", __DIR__)
 
 defmodule Loopex.LLM.ReqLLM.ProviderBridgeTest do
+  # Direct trace-leak and deadline witnesses install VM-global call trace
+  # patterns, so this module remains serial.
   use ExUnit.Case, async: false
 
   import ExUnit.CaptureIO

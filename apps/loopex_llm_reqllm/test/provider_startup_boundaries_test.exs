@@ -1,6 +1,8 @@
 Code.require_file("support/provider_isolation_fixture.exs", __DIR__)
 
 defmodule Loopex.LLM.ReqLLM.ProviderStartupBoundariesTest do
+  # The no-fallback witness installs a VM-global trace pattern on
+  # System.get_env/1 and captures Logger output, so this module remains serial.
   use ExUnit.Case, async: false
   import ExUnit.CaptureIO
   import ExUnit.CaptureLog

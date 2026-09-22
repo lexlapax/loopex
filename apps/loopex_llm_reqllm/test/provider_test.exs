@@ -17,6 +17,8 @@ defmodule Loopex.LLM.ReqLLM.ProviderTest do
   `adapter_test.exs`.
   """
 
+  # The explicitly selected release lane owns one external provider request and
+  # its staged build fixture, so it remains serial.
   use ExUnit.Case, async: false
 
   alias Loopex.LLM.ReqLLM, as: Adapter

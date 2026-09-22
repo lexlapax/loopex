@@ -1,19 +1,10 @@
 Code.require_file("support/provider_isolation_fixture.exs", __DIR__)
 
 defmodule Loopex.LLM.ReqLLM.ProviderBackpressureObserverTest do
-  use ExUnit.Case, async: false
-  alias Loopex.LLM.ReqLLM, as: Adapter
+  use ExUnit.Case, async: true
   alias Loopex.LLM.ReqLLM.ProviderIsolationFixture, as: Fixture
 
   test "barrier-drained real writer calls remain counted on the next observer iteration" do
-    variable = Adapter.credential_variable()
-    previous = System.get_env(variable)
-    System.put_env(variable, "synthetic-observer-regression")
-
-    on_exit(fn ->
-      if previous, do: System.put_env(variable, previous), else: System.delete_env(variable)
-    end)
-
     request = Fixture.request()
 
     fixture =

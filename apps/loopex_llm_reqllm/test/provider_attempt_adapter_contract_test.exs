@@ -2,6 +2,9 @@ Code.require_file("support/provider_isolation_fixture.exs", __DIR__)
 
 defmodule Loopex.LLM.ReqLLM.ProviderAttemptAdapterContractTest do
   @moduledoc false
+  # The host-diagnostics witness temporarily captures the named ReqLLM task
+  # supervisor's IO and compares VM-global application/logger state, so this
+  # module remains serial.
   use ExUnit.Case, async: false
   import ExUnit.CaptureIO
   alias Loopex.LLM.ReqLLM.CredentialCustody

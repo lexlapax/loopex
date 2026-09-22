@@ -21,6 +21,8 @@ defmodule Loopex.LLM.ReqLLM.CredentialPlaneTest do
   mechanism names; the C01–C24 preservation map retains every original name.
   """
 
+  # C04 deliberately restarts the named ReqLLM supervisor, so this module
+  # remains serial even though every credential is now fixture-local.
   use ExUnit.Case, async: false
   import ExUnit.CaptureIO
   import ExUnit.CaptureLog
@@ -36,16 +38,8 @@ defmodule Loopex.LLM.ReqLLM.CredentialPlaneTest do
   @refused {:error, {:not_dispatched, "model_call_failed"}}
 
   setup do
-    variable = Adapter.credential_variable()
-    previous = System.get_env(variable)
-    System.put_env(variable, @sentinel)
     {:ok, _} = Application.ensure_all_started(:req_llm)
-
-    on_exit(fn ->
-      if previous, do: System.put_env(variable, previous), else: System.delete_env(variable)
-    end)
-
-    %{variable: variable}
+    :ok
   end
 
   test "actual companion seals a finite local failure without changing the public result" do
@@ -289,25 +283,19 @@ defmodule Loopex.LLM.ReqLLM.CredentialPlaneTest do
 
   describe "the credential in a returned reason" do
     # C03: fixed private status replaces ambient-key-dependent redacted text.
-    test "a provider error echoing the key is substituted before it is returned", %{
-      variable: variable
-    } do
-      for ambient <- [@sentinel, "rotated-host-credential", nil] do
-        if ambient, do: System.put_env(variable, ambient), else: System.delete_env(variable)
+    test "a provider error echoing the key is substituted before it is returned" do
+      assert {:error, {:stream_interrupted, reason}} =
+               Adapter.reply_from_stream(
+                 stream_response(echoing_stream()),
+                 request(),
+                 identity(),
+                 Model.discard_progress()
+               )
 
-        assert {:error, {:stream_interrupted, reason}} =
-                 Adapter.reply_from_stream(
-                   stream_response(echoing_stream()),
-                   request(),
-                   identity(),
-                   Model.discard_progress()
-                 )
-
-        refute reason =~ @sentinel
-        assert is_binary(reason)
-        assert byte_size(reason) <= 4_096
-        assert reason == "model_call_failed"
-      end
+      refute reason =~ @sentinel
+      assert is_binary(reason)
+      assert byte_size(reason) <= 4_096
+      assert reason == "model_call_failed"
     end
   end
 
@@ -439,11 +427,9 @@ defmodule Loopex.LLM.ReqLLM.CredentialPlaneTest do
     test "one child diagnostic containing two concurrently live synthetic keys cannot escape" do
       second_key = @sentinel <> "-second"
       first_key = @sentinel <> "-first"
-      System.put_env(Adapter.credential_variable(), second_key)
       second = Fixture.new(:diagnostics, credential: second_key)
       second_call = Fixture.managed(second)
       await_reply(second_call)
-      System.put_env(Adapter.credential_variable(), first_key)
       first = Fixture.new(:credential_overlap, credential: first_key)
 
       assert_private(
@@ -755,11 +741,9 @@ defmodule Loopex.LLM.ReqLLM.CredentialPlaneTest do
   defp two_live_children do
     first_key = @sentinel <> "-first"
     second_key = @sentinel <> "-second"
-    System.put_env(Adapter.credential_variable(), first_key)
     first = Fixture.new(:diagnostics, credential: first_key)
     first_call = Fixture.managed(first)
     await_reply(first_call)
-    System.put_env(Adapter.credential_variable(), second_key)
     second = Fixture.new(:diagnostics, credential: second_key)
     second_call = Fixture.managed(second)
     await_reply(second_call)

@@ -5,21 +5,14 @@ defmodule Loopex.LLM.ReqLLM.ProviderEntryTest do
   import ExUnit.CaptureIO
   import ExUnit.CaptureLog
   require Logger
-  alias Loopex.LLM.ReqLLM, as: Adapter
   alias Loopex.LLM.ReqLLM.ProviderIsolationFixture, as: Fixture
   alias Loopex.LLM.ReqLLM.ProviderCodec
 
   # Supplemental process evidence only. No retained selector is removed or
   # substituted by this file; package and live-provider lanes remain separate.
+  # The module stays serial because it captures VM-wide Logger output and
+  # inspects the named ReqLLM supervisors while doing so.
   setup do
-    variable = Adapter.credential_variable()
-    previous = System.get_env(variable)
-    System.put_env(variable, "synthetic-entry-credential-canary")
-
-    on_exit(fn ->
-      if previous, do: System.put_env(variable, previous), else: System.delete_env(variable)
-    end)
-
     {:ok, _started} = Application.ensure_all_started(:req_llm)
     :ok
   end
@@ -131,7 +124,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderEntryTest do
         Logger.error("parent-diagnostics-still-usable")
       end)
 
-    refute log =~ "synthetic-entry-credential-canary"
+    refute log =~ Fixture.credential(fixture)
     assert log =~ "parent-diagnostics-still-usable"
     assert :logger.get_primary_config() == logger_before
 
@@ -199,7 +192,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderEntryTest do
         Logger.error("parent-after-malformed-return")
       end)
 
-    refute log =~ "synthetic-entry-credential-canary"
+    refute log =~ Fixture.credential(fixture)
     assert log =~ "parent-after-malformed-return"
     assert :logger.get_primary_config() == logger_before
     assert Fixture.canaries(fixture) == 1
