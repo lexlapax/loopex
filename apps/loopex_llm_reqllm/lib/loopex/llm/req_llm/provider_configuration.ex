@@ -2,10 +2,13 @@ defmodule Loopex.LLM.ReqLLM.ProviderConfiguration do
   @moduledoc false
 
   alias Loopex.Executor
+  alias Loopex.LLM.ReqLLM.{CredentialRegistry, CredentialToken}
+  alias Loopex.Trace.Capability
 
   @paths [:worker_path, :interpreter_path]
   @digests [:worker_sha256, :build_manifest_sha256]
-  @keys @paths ++ @digests ++ [:cleanup_grace_ms]
+  @credential_keys [:credential_token, :credential_registry, :tracing_capability]
+  @keys @paths ++ @digests ++ [:cleanup_grace_ms] ++ @credential_keys
 
   # Concept: provider execution is host-configured, never discovered through a
   # workspace or an ambient search path.
@@ -20,6 +23,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderConfiguration do
          true <- Enum.all?(keys, &(&1 in @keys)),
          true <- Enum.all?(@paths, &absolute_path?(Keyword.get(options, &1))),
          true <- Enum.all?(@digests, &digest?(Keyword.get(options, &1))),
+         :ok <- credential_inputs(options),
          :ok <- optional_cleanup(options) do
       {:ok, Map.new(options)}
     else
@@ -91,6 +95,27 @@ defmodule Loopex.LLM.ReqLLM.ProviderConfiguration do
           {:ok, _bounds} -> :ok
           _refused -> :error
         end
+    end
+  end
+
+  defp credential_inputs(options) do
+    present = Enum.filter(@credential_keys, &Keyword.has_key?(options, &1))
+
+    case present do
+      [] ->
+        :ok
+
+      @credential_keys ->
+        with :ok <- CredentialToken.validate(Keyword.fetch!(options, :credential_token)),
+             :ok <- CredentialRegistry.validate(Keyword.fetch!(options, :credential_registry)),
+             :ok <- Capability.validate(Keyword.fetch!(options, :tracing_capability)) do
+          :ok
+        else
+          _invalid -> {:error, :invalid_provider_configuration}
+        end
+
+      _partial ->
+        {:error, :invalid_provider_configuration}
     end
   end
 

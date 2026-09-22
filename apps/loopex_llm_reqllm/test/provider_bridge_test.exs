@@ -1,4 +1,5 @@
 Code.require_file("support/provider_phase_diagnostic.exs", __DIR__)
+Code.require_file("../../loopex/test/support/m1_runtime_helper.exs", __DIR__)
 
 defmodule Loopex.LLM.ReqLLM.ProviderBridgeTest do
   use ExUnit.Case, async: false
@@ -6,8 +7,20 @@ defmodule Loopex.LLM.ReqLLM.ProviderBridgeTest do
   import ExUnit.CaptureIO
 
   alias Loopex.Model
+  alias Loopex.Runtime
   alias Loopex.Runtime.ProviderLifetime
-  alias Loopex.LLM.ReqLLM.{ProviderBridge, ProviderConfiguration, ProviderPhaseDiagnostic}
+
+  alias Loopex.LLM.ReqLLM.{
+    CredentialCustody,
+    CredentialRegistry,
+    CredentialToken,
+    ProviderBridge,
+    ProviderConfiguration,
+    ProviderPhaseDiagnostic
+  }
+
+  alias Loopex.M1RuntimeTestStore, as: TestStore
+  alias Loopex.Trace.Capability
 
   setup_all do
     {:ok, _apps} = Application.ensure_all_started(:crypto)
@@ -104,6 +117,209 @@ defmodule Loopex.LLM.ReqLLM.ProviderBridgeTest do
     assert_receive {:DOWN, ^guardian_monitor, :process, ^guardian, :normal}, 500
     refute process_alive?(child_pid(root))
     send(retainer, :stop)
+  end
+
+  test "a managed credential sender resolves custody only after Core trace exclusion", %{
+    root: root,
+    request: request
+  } do
+    {store_pid, store} = TestStore.start_store()
+
+    {:ok, runtime} =
+      Loopex.start_link(
+        runtime_id: "managed-provider-bridge",
+        store: store,
+        context_token_budget: 8_192
+      )
+
+    {:ok, capability_pid} = Capability.start_link()
+    {:ok, capability} = Capability.handle(capability_pid)
+    assert :ok = Capability.bind(capability, runtime)
+
+    {:ok, custody_pid} =
+      CredentialCustody.start_link(credential: "synthetic-provider-credential")
+
+    {:ok, custody} = CredentialCustody.reference(custody_pid)
+    {:ok, registry_pid} = CredentialRegistry.start_link()
+    {:ok, registry} = CredentialRegistry.handle(registry_pid)
+    token = CredentialToken.new()
+    assert :ok = CredentialRegistry.put(registry, token, custody)
+
+    {:ok, workers} = Task.Supervisor.start_link()
+    parent = self()
+
+    on_exit(fn ->
+      if Runtime.alive?(runtime), do: Loopex.stop(runtime)
+      stop_if_alive(workers)
+      stop_if_alive(registry_pid)
+      stop_if_alive(custody_pid)
+      stop_if_alive(capability_pid)
+      stop_if_alive(store_pid)
+    end)
+
+    starter =
+      Loopex.Runtime.ProviderLifetime.Starter.new(fn child ->
+        Task.Supervisor.start_child(workers, child,
+          restart: :temporary,
+          shutdown: :brutal_kill
+        )
+      end)
+
+    configuration =
+      worker(root, :reply)
+      |> Map.merge(%{
+        credential_token: token,
+        credential_registry: registry,
+        tracing_capability: capability
+      })
+
+    result =
+      ProviderLifetime.scoped(
+        fn guardian, stop_reference ->
+          send(parent, {:managed_credential_guardian, guardian, stop_reference})
+          {:managed, parent, 2_000}
+        end,
+        starter,
+        fn -> ProviderBridge.complete(request, configuration, Model.discard_progress()) end
+      )
+
+    assert_receive {:managed_credential_guardian, guardian, stop_reference}
+    assert {:ok, reply} = result
+    assert reply.text == "answer"
+    assert Process.alive?(guardian)
+
+    stop = make_ref()
+    cooperative = System.monotonic_time(:millisecond) + 2_000
+
+    send(
+      guardian,
+      {:loopex_provider_resource_stop, stop_reference, stop, self(), cooperative,
+       cooperative + 100}
+    )
+
+    assert_receive {:loopex_provider_resource_stopped, ^stop, ^guardian}, 2_000
+    assert eventually(fn -> Task.Supervisor.children(workers) == [] end, 2_000)
+
+    Loopex.stop(runtime)
+    stop_if_alive(store_pid)
+    stop_if_alive(workers)
+    stop_if_alive(registry_pid)
+    stop_if_alive(custody_pid)
+    stop_if_alive(capability_pid)
+  end
+
+  test "a refused managed sender start synchronously reaps the authorized guardian", %{
+    root: root,
+    request: request
+  } do
+    {:ok, registry_pid} = CredentialRegistry.start_link()
+    {:ok, registry} = CredentialRegistry.handle(registry_pid)
+    {:ok, capability_pid} = Capability.start_link()
+    {:ok, capability} = Capability.handle(capability_pid)
+    {:ok, workers} = Task.Supervisor.start_link()
+    starts = :atomics.new(1, [])
+    parent = self()
+
+    on_exit(fn ->
+      stop_if_alive(workers)
+      stop_if_alive(registry_pid)
+      stop_if_alive(capability_pid)
+    end)
+
+    starter =
+      Loopex.Runtime.ProviderLifetime.Starter.new(fn child ->
+        case :atomics.add_get(starts, 1, 1) do
+          1 ->
+            Task.Supervisor.start_child(workers, child,
+              restart: :temporary,
+              shutdown: :brutal_kill
+            )
+
+          2 ->
+            {:error, :sender_start_refused}
+        end
+      end)
+
+    configuration =
+      worker(root, :reply)
+      |> Map.merge(%{
+        credential_token: CredentialToken.new(),
+        credential_registry: registry,
+        tracing_capability: capability
+      })
+
+    result =
+      ProviderLifetime.scoped(
+        fn guardian, stop_reference ->
+          send(parent, {:refused_sender_guardian, guardian, stop_reference})
+          {:managed, parent, 2_000}
+        end,
+        starter,
+        fn -> ProviderBridge.complete(request, configuration, Model.discard_progress()) end
+      )
+
+    assert_receive {:refused_sender_guardian, guardian, _stop_reference}
+    guardian_monitor = Process.monitor(guardian)
+    assert result == {:error, {:not_dispatched, "model_call_failed"}}
+    refute File.exists?(Path.join(root, "pid"))
+    assert_receive {:DOWN, ^guardian_monitor, :process, ^guardian, :noproc}, 1_000
+    assert Task.Supervisor.children(workers) == []
+  end
+
+  test "an unavailable trace exclusion refuses before credential routing", %{
+    root: root,
+    request: request
+  } do
+    {:ok, custody_pid} = CredentialCustody.start_link(credential: "must-not-be-routed")
+    {:ok, custody} = CredentialCustody.reference(custody_pid)
+    {:ok, registry_pid} = CredentialRegistry.start_link()
+    {:ok, registry} = CredentialRegistry.handle(registry_pid)
+    token = CredentialToken.new()
+    assert :ok = CredentialRegistry.put(registry, token, custody)
+    {:ok, capability_pid} = Capability.start_link()
+    {:ok, capability} = Capability.handle(capability_pid)
+    {:ok, workers} = Task.Supervisor.start_link()
+    parent = self()
+
+    on_exit(fn ->
+      stop_if_alive(workers)
+      stop_if_alive(registry_pid)
+      stop_if_alive(custody_pid)
+      stop_if_alive(capability_pid)
+    end)
+
+    starter =
+      Loopex.Runtime.ProviderLifetime.Starter.new(fn child ->
+        Task.Supervisor.start_child(workers, child,
+          restart: :temporary,
+          shutdown: :brutal_kill
+        )
+      end)
+
+    configuration =
+      worker(root, :reply)
+      |> Map.merge(%{
+        credential_token: token,
+        credential_registry: registry,
+        tracing_capability: capability
+      })
+
+    result =
+      ProviderLifetime.scoped(
+        fn guardian, stop_reference ->
+          send(parent, {:unbound_trace_guardian, guardian, stop_reference})
+          {:managed, parent, 2_000}
+        end,
+        starter,
+        fn -> ProviderBridge.complete(request, configuration, Model.discard_progress()) end
+      )
+
+    assert_receive {:unbound_trace_guardian, guardian, stop_reference}
+    assert result == {:error, {:not_dispatched, "model_call_failed"}}
+    refute File.exists?(Path.join(root, "credential-size"))
+    refute process_alive?(child_pid(root))
+    stop_registered(guardian, stop_reference)
+    assert eventually(fn -> Task.Supervisor.children(workers) == [] end, 2_000)
   end
 
   test "retainer loss during bootstrap stops the real child", %{root: root, request: request} do
@@ -731,6 +947,12 @@ defmodule Loopex.LLM.ReqLLM.ProviderBridgeTest do
 
     assert_receive {:loopex_provider_resource_stopped, ^stop, ^guardian}, 2_000
     assert_receive {:DOWN, ^monitor, :process, ^guardian, :normal}, 500
+  end
+
+  defp stop_if_alive(pid) when is_pid(pid) do
+    if Process.alive?(pid), do: GenServer.stop(pid)
+  catch
+    :exit, _reason -> :ok
   end
 
   defp trace_fence(guardian) do
