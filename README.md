@@ -25,13 +25,16 @@ while the session lives; a session "brain" can coordinate local or remote
 <!-- loopex:readme-status:start -->
 ## Where Things Stand
 
-**Revision status:** Closed milestone product baseline; active milestone `M5` is accepted; no next candidate is recorded.
+**Revision status:** Closed milestone product baseline; active milestone `M5` is in progress; no next candidate is recorded.
 
 [Canonical milestone status and plan records](docs/plans/)
 <!-- loopex:readme-status:end -->
 
-M0 through M4 are closed and integrated. The capsule above, derived from the
-canonical register, carries the current M5 state. M1 delivered the durability kernel:
+M0 through M4 are closed and integrated. M5, the durable-service milestone, is
+accepted and in progress: the maintainer accepted its plan pair and ADRs 0031
+to 0034 on 2026-09-21, and implementation runs against them on the `m5`
+branch. M6 is next; it is not yet registered as a candidate, so the capsule
+above, validated against the canonical register, records none. M1 delivered the durability kernel:
 an explicit embedded runtime, durable local Store, canonical model boundary, trusted-local
 executor, thin reference client, durable events, and receipt reconciliation
 across a real runtime-process crash. What it deliberately did not deliver is a

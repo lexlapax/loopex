@@ -16,16 +16,16 @@ its last `Closed` row identifies the last closed product baseline.
 <!-- loopex:current-status:start -->
 ## Current Status
 
-**Revision status:** Closed milestone product baseline; active milestone `M5` is accepted; no next candidate is recorded.
+**Revision status:** Closed milestone product baseline; active milestone `M5` is in progress; no next candidate is recorded.
 
 | Field | Value |
 | --- | --- |
 | Integrated phase | Closed milestone product baseline |
 | Last closed product checkpoint | `M4` — 2026-09-19 |
-| Blockers | None; `M5` is accepted and implementation may proceed |
+| Blockers | None; `M5` is in progress against its accepted plan pair |
 | Authorized work | Implementation inside the accepted `M5` plan pair, landing on `main` in small reviewed changes |
 | Next maintainer decision | None until `M5` is ready for independent review |
-| Next transition | Move `M5` to In progress and implement the accepted outcomes with `bash scripts/check.sh` green; the completed tested commit then moves it to In review |
+| Next transition | Create and index `docs/evidence/M5-closure-runs.md` as a scaffold, map every outcome to evidence, then make the tested implementation commit by moving `M5` to In review; run the closure matrix and independent review from that exact SHA |
 | Validation | `bash scripts/check-bootstrap.sh` |
 <!-- loopex:current-status:end -->
 
@@ -137,7 +137,7 @@ representable.
 | `M2` | Closed | [concept](M2.md) | [technical depth](M2-technical.md) | [gate](M2-gate.md) |
 | `M3` | Closed | [concept](M3.md) | [technical depth](M3-technical.md) | [gate](M3-gate.md) |
 | `M4` | Closed | [concept](M4.md) | [technical depth](M4-technical.md) | [gate](M4-gate.md) |
-| `M5` | Accepted | [concept](M5.md) | [technical depth](M5-technical.md) | — |
+| `M5` | In progress | [concept](M5.md) | [technical depth](M5-technical.md) | — |
 <!-- loopex:milestone-register:end -->
 
 When a plan exists, the Concept and Technical depth columns link their exact
