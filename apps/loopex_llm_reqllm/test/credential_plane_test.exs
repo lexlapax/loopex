@@ -457,6 +457,54 @@ defmodule Loopex.LLM.ReqLLM.CredentialPlaneTest do
       end
     end
 
+    # Concept: during an invocation the credential travels between BEAM
+    # processes exactly once, from custody to the sender that writes it to the
+    # child, and no process that existed before the call ever sends it on.
+    #
+    # Technical depth: an OTP trace session of its own records every message
+    # sent by every process that existed before one managed invocation with a
+    # unique synthetic key — custody and the registry included. Exactly one
+    # traced message contains the key, and custody sent it. The invocation's own
+    # guardian and sender are created by the call; the sender excludes itself
+    # from tracing before it receives the credential, and its write to the
+    # child is a port command, not a message.
+    test "the custody reply is the sole credential-bearing BEAM message" do
+      key = @sentinel <> "-sole-message"
+      fixture = Fixture.new(:reply, credential: key)
+
+      {result, carriers} =
+        census(key, :existing, fn ->
+          call = Fixture.managed(fixture)
+          result = completion(call)
+          Fixture.stop(call)
+          result
+        end)
+
+      assert {:ok, %{text: "loopex"}} = result
+      assert [{from, _to}] = carriers
+      assert from == fixture.custody_pid
+      assert_post(fixture)
+      Fixture.assert_gone(fixture)
+    end
+
+    # Concept: an invocation that could be observed by a foreign trace session
+    # over every process refuses before its credential moves at all.
+    test "a foreign all-process trace session refuses the call before the credential moves" do
+      key = @sentinel <> "-observed"
+      fixture = Fixture.new(:reply, credential: key)
+
+      {result, carriers} =
+        census(key, :all, fn ->
+          call = Fixture.managed(fixture)
+          result = completion(call)
+          Fixture.stop(call)
+          result
+        end)
+
+      assert result == {:error, {:not_dispatched, "model_call_failed"}}
+      assert carriers == []
+    end
+
     test "one child diagnostic containing two concurrently live synthetic keys cannot escape" do
       second_key = @sentinel <> "-second"
       first_key = @sentinel <> "-first"
@@ -797,6 +845,56 @@ defmodule Loopex.LLM.ReqLLM.CredentialPlaneTest do
       assert System.system_time(:millisecond) < request.deadline
     after
       if Process.alive?(call.guardian), do: :erlang.resume_process(call.guardian)
+    end
+  end
+
+  # Runs `work` under an OTP trace session of its own that records, for every
+  # traced process, each sent message containing `key`.
+  defp census(key, processes, work) do
+    parent = self()
+
+    tracer =
+      spawn_link(fn ->
+        collect = fn collect, seen ->
+          receive do
+            {:trace, from, :send, message, to} ->
+              seen =
+                if :binary.match(:erlang.term_to_binary(message), key) != :nomatch,
+                  do: [{from, to} | seen],
+                  else: seen
+
+              collect.(collect, seen)
+
+            {:report, caller} ->
+              send(caller, {:carriers, Enum.reverse(seen)})
+          end
+        end
+
+        collect.(collect, [])
+      end)
+
+    session = :trace.session_create(:credential_message_census, tracer, [])
+
+    result =
+      try do
+        :trace.process(session, processes, true, [:send])
+        work.()
+      after
+        :trace.session_destroy(session)
+      end
+
+    send(tracer, {:report, parent})
+    assert_receive {:carriers, carriers}, 5_000
+    {result, carriers}
+  end
+
+  defp completion(call) do
+    caller = call.caller
+
+    receive do
+      {:completed, ^caller, result} -> result
+    after
+      Fixture.until_settled(call) -> flunk("the invocation did not complete")
     end
   end
 
