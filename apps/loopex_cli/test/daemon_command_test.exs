@@ -284,6 +284,99 @@ defmodule LoopexCli.DaemonCommandTest do
     refute File.exists?(marker)
   end
 
+  # Concept: once the daemon's handler is installed, only `SIGTERM` is an
+  # orderly stop. `SIGQUIT` is ignored while the daemon keeps serving, and
+  # `SIGHUP` is the operating system's own termination: status 129, no orderly
+  # record, and residue the next daemon recovers.
+  #
+  # Technical depth: both are real signals to a real daemon process. After
+  # `SIGQUIT` a new client still initializes and a later `SIGTERM` still ends
+  # with `daemon.stopping` and status 0. After `SIGHUP` the connected client
+  # sees its socket close with no `daemon.stopping`, the Store marker stays, and
+  # a successor reaches readiness.
+  test "after installation SIGQUIT is ignored and SIGHUP ends the daemon with status 129",
+       context do
+    arguments = [
+      "daemon",
+      "--state-root",
+      context.state_root,
+      "--workspace",
+      context.workspace,
+      "--provider-launch",
+      context.launch,
+      "--policy",
+      "allow-all"
+    ]
+
+    socket = Path.join([context.state_root, "daemon", "daemon.sock"])
+    marker = Path.join(context.state_root, "store.log.writer")
+
+    {quitting, quitting_pid} = start_cli_process(arguments, [:stream])
+    assert await_raw(quitting, "", 60_000) =~ ~s("record":"daemon_ready")
+    {_output, 0} = System.cmd("/bin/kill", ["-QUIT", Integer.to_string(quitting_pid)])
+    Process.sleep(500)
+
+    client = connect(socket)
+    :ok = send_frame(client, initialize())
+    assert [%{"type" => "initialized"}] = receive_records(client, 1)
+
+    {_output, 0} = System.cmd("/bin/kill", ["-TERM", Integer.to_string(quitting_pid)])
+
+    assert [%{"type" => "daemon.stopping", "reason" => "operator_stop"}] =
+             receive_records(client, 1)
+
+    assert {"", 0} = drain_raw(quitting, "", 60_000)
+
+    {hanging, hanging_pid} = start_cli_process(arguments, [:stream])
+    assert await_raw(hanging, "", 60_000) =~ ~s("record":"daemon_ready")
+    watcher = connect(socket)
+    :ok = send_frame(watcher, initialize())
+    assert [%{"type" => "initialized"}] = receive_records(watcher, 1)
+
+    {_output, 0} = System.cmd("/bin/kill", ["-HUP", Integer.to_string(hanging_pid)])
+    assert {"", 129} = drain_raw(hanging, "", 30_000)
+    assert {:error, _closed} = :socket.recv(watcher, 0, 5_000)
+    assert File.regular?(marker), "an abrupt stop left no marker for its successor"
+
+    {successor, successor_pid} = start_cli_process(arguments, [:stream])
+    assert await_raw(successor, "", 60_000) =~ ~s("record":"daemon_ready")
+    {_output, 0} = System.cmd("/bin/kill", ["-TERM", Integer.to_string(successor_pid)])
+    assert {"", 0} = drain_raw(successor, "", 60_000)
+  end
+
+  # Concept: a Store log larger than the Store will read refuses the daemon
+  # with its own class before any socket exists, and leaves the log alone.
+  #
+  # Technical depth: the log is a sparse file one byte over the 256 MiB read
+  # ceiling, so the refusal is decided from its size, as the Store decides it.
+  test "a real daemon refuses an oversized Store log as store_log_too_large", context do
+    File.mkdir_p!(context.state_root)
+    log = Path.join(context.state_root, "store.log")
+    {:ok, file} = :file.open(log, [:write, :raw, :binary])
+    {:ok, _position} = :file.position(file, 256 * 1_048_576)
+    :ok = :file.write(file, "x")
+    :ok = :file.close(file)
+
+    {:ok, too_large} = ExitStatus.fetch(:store_log_too_large)
+
+    assert {"", ^too_large} =
+             run_raw([
+               "daemon",
+               "--state-root",
+               context.state_root,
+               "--workspace",
+               context.workspace,
+               "--provider-launch",
+               context.launch,
+               "--policy",
+               "allow-all"
+             ])
+
+    assert File.stat!(log).size == 256 * 1_048_576 + 1
+    refute File.exists?(Path.join([context.state_root, "daemon", "daemon.sock"]))
+    refute File.exists?(log <> ".writer")
+  end
+
   defp run_raw(arguments) do
     {port, _os_pid} = start_cli_process(arguments, [:stream])
     drain_raw(port, "", 60_000)
