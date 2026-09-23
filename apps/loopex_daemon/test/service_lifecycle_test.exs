@@ -111,6 +111,33 @@ defmodule LoopexDaemon.ServiceLifecycleTest do
   # Technical depth: the listener the service started is killed while an
   # initialized client is connected. The client receives `daemon.stopping`
   # with `fatal:listener_lost` and the sentinel exits `listener_lost` (107).
+  # Concept: a Store that stops because its journal reached capacity ends the
+  # daemon with that class, telling every client why, distinct from any other
+  # Store loss.
+  #
+  # Technical depth: the Store stops with `{:store_capacity_exceeded, max}`,
+  # the reason its append-failure branch stops with when the log refuses an
+  # append past its ceiling, which `log_capacity_test.exs` proves. A connected
+  # client receives `daemon.stopping` with `store_capacity_exceeded` and the
+  # sentinel exits `store_capacity_exceeded`.
+  test "a Store stopped at capacity fail-stops with store_capacity_exceeded",
+       %{options: options} do
+    daemon = start_daemon(options)
+    _ready = await_ready(daemon.output)
+    client = initialized(options[:socket_path])
+
+    store = :sys.get_state(daemon.owner).pids.store
+    # The Store traps exits, so it is stopped with the reason itself, as its
+    # append path's `{:stop, reason, ...}` does.
+    spawn(fn -> GenServer.stop(store, {:store_capacity_exceeded, 268_435_456}, 5_000) end)
+
+    assert [%{"type" => "daemon.stopping", "reason" => "store_capacity_exceeded"}] =
+             receive_records(client, 1)
+
+    {:ok, capacity} = LoopexDaemon.ExitStatus.fetch(:store_capacity_exceeded)
+    assert Task.await(daemon.task, 40_000) == capacity
+  end
+
   test "losing the listener after readiness fail-stops with listener_lost",
        %{options: options, state_root: state_root} do
     daemon = start_daemon(options)
