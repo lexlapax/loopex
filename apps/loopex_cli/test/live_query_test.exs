@@ -132,6 +132,129 @@ defmodule LoopexCli.LiveQueryTest do
     stop_daemon(daemon)
   end
 
+  # Concept: a controller whose command fails after it acquired the lease
+  # still releases it while its transport is writable, so another client is
+  # granted control at once rather than after the term.
+  #
+  # Technical depth: the proxy turns the daemon's `session.inspect` answer into
+  # a `session_unavailable` refusal. The take-over command then fails with the
+  # restart-then-resume remedy, its request sequence ends with
+  # `session.release_control`, and a direct client is granted control
+  # immediately.
+  test "a controller that fails after acquiring releases its lease", context do
+    state_root = Path.join(context.base, "s")
+    socket = Path.join([state_root, "daemon", "d.sock"])
+    daemon = start_daemon(context.workspace, state_root, socket)
+    session_id = create(socket, "failing-controller")
+
+    refuse_inspect = fn bytes ->
+      bytes
+      |> String.split("\n")
+      |> Enum.map_join("\n", fn line ->
+        if line =~ ~s("method":"session.inspect") and line =~ ~s("type":"result") do
+          [_whole, request_id] = Regex.run(~r/"request_id":"([^"]+)"/, line)
+
+          ~s({"code":"session_unavailable","message":"session unavailable","request_id":"#{request_id}","type":"error"})
+        else
+          line
+        end
+      end)
+    end
+
+    proxy = DaemonProxy.start(socket, [], refuse_inspect)
+
+    _stderr =
+      capture_io(:stderr, fn ->
+        result =
+          LoopexCli.dispatch([
+            "attach",
+            session_id,
+            "--daemon",
+            proxy.path,
+            "--take-over",
+            "--prompt",
+            "more"
+          ])
+
+        send(self(), {:result, result})
+      end)
+
+    assert_received {:result, {:error, message}}
+    assert message =~ "unavailable in this daemon"
+
+    assert DaemonProxy.seen(proxy) == [
+             "initialize",
+             "session.acquire_control",
+             "session.attach",
+             "session.inspect",
+             "session.release_control"
+           ]
+
+    {:ok, client} = DaemonClient.connect(socket)
+
+    assert {:ok, %{"type" => "result"}, _client} =
+             DaemonClient.request(client, "session.acquire_control", %{
+               "session_id" => Wire.encode_identity(session_id)
+             })
+
+    DaemonClient.close(client)
+    stop_daemon(daemon)
+  end
+
+  # Concept: a killed controller sends nothing, so its lease is not released
+  # and waits out its term; ADR 0033 fixes that difference.
+  #
+  # Technical depth: the proxy withholds the daemon's `session.inspect` answer,
+  # so the take-over command holds its lease while it waits. The command's
+  # process is killed there; the proxy saw no `session.release_control`, and a
+  # direct client is refused `control_held` rather than granted.
+  test "a killed controller releases nothing and its lease stays held", context do
+    state_root = Path.join(context.base, "s")
+    socket = Path.join([state_root, "daemon", "d.sock"])
+    daemon = start_daemon(context.workspace, state_root, socket)
+    session_id = create(socket, "killed-controller")
+
+    withhold_inspect = fn bytes ->
+      bytes
+      |> String.split("\n")
+      |> Enum.reject(&(&1 =~ ~s("method":"session.inspect") and &1 =~ ~s("type":"result")))
+      |> Enum.join("\n")
+    end
+
+    proxy = DaemonProxy.start(socket, [], withhold_inspect)
+    argv = ["attach", session_id, "--daemon", proxy.path, "--take-over", "--prompt", "more"]
+
+    {:ok, controller} =
+      Task.start(fn -> capture_io(:stderr, fn -> LoopexCli.dispatch(argv) end) end)
+
+    assert eventually(fn -> "session.inspect" in DaemonProxy.seen(proxy) end)
+    Process.exit(controller, :kill)
+    Process.sleep(200)
+    refute "session.release_control" in DaemonProxy.seen(proxy)
+
+    {:ok, client} = DaemonClient.connect(socket)
+
+    assert {:ok, %{"type" => "error", "code" => "control_held"}, _client} =
+             DaemonClient.request(client, "session.acquire_control", %{
+               "session_id" => Wire.encode_identity(session_id)
+             })
+
+    DaemonClient.close(client)
+    stop_daemon(daemon)
+  end
+
+  defp eventually(check, attempts \\ 300)
+  defp eventually(_check, 0), do: false
+
+  defp eventually(check, attempts) do
+    if check.() do
+      true
+    else
+      Process.sleep(10)
+      eventually(check, attempts - 1)
+    end
+  end
+
   defp create(socket, label) do
     {:ok, client} = DaemonClient.connect(socket)
 
