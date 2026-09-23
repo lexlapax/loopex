@@ -203,16 +203,40 @@ defmodule Loopex.LLM.ReqLLM.ProviderBuildFixture do
   # build records: a clean checkout's commit, or, in a `git archive`
   # extraction with no `.git`, the archive-carried `SOURCE_IDENTITY` and its
   # manifest digest. The release check runs every lane inside an extraction.
+  #
+  # Technical depth: in a checkout the Git children run with the scrubbed
+  # environment the M0 child-environment conformance case pins; an extraction
+  # has no Git to run and resolves through `Mix.LoopexSourceIdentity`.
   defp clean_source! do
+    if File.exists?(Path.join(@source_root, ".git")),
+      do: checkout_source!(),
+      else: archive_source!()
+  end
+
+  defp checkout_source! do
+    environment =
+      empty_environment()
+      |> Map.merge(%{"PATH" => "/usr/bin:/bin", "GIT_OPTIONAL_LOCKS" => "0"})
+      |> Map.to_list()
+
+    {status, 0} =
+      System.cmd("git", ["status", "--porcelain=v1", "--untracked-files=all"],
+        cd: @source_root,
+        env: environment
+      )
+
+    unless status == "", do: raise("provider fixture requires a clean source checkout")
+    {source, 0} = System.cmd("git", ["rev-parse", "HEAD"], cd: @source_root, env: environment)
+    %{commit: String.trim(source), source_digest: nil}
+  end
+
+  defp archive_source! do
     case Mix.LoopexSourceIdentity.resolve(@source_root) do
-      {:ok, %{commit: commit, source_digest: digest}} ->
+      {:ok, %{mode: :archive, commit: commit, source_digest: digest}} ->
         %{commit: commit, source_digest: digest}
 
-      {:error, :source_checkout_dirty} ->
-        raise("provider fixture requires a clean source checkout")
-
       {:error, reason} ->
-        raise("provider fixture cannot identify its source: #{inspect(reason)}")
+        raise("provider fixture cannot identify its archive source: #{inspect(reason)}")
     end
   end
 
