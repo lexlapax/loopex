@@ -444,6 +444,88 @@ defmodule LoopexCli.DaemonCommandTest do
     refute File.exists?(log <> ".writer")
   end
 
+  # Concept: a daemon killed outright takes nothing with it but its lifetime:
+  # its successor activates no session until a client asks, lists the killed
+  # daemon's active session as dormant, and a resume then activates it once.
+  test "after an abrupt kill nothing activates until a client asks", context do
+    arguments = [
+      "daemon",
+      "--state-root",
+      context.state_root,
+      "--workspace",
+      context.workspace,
+      "--provider-launch",
+      context.launch,
+      "--policy",
+      "allow-all"
+    ]
+
+    socket = Path.join([context.state_root, "daemon", "daemon.sock"])
+    {first, first_pid} = start_cli_process(arguments, [:stream])
+    assert await_raw(first, "", 60_000) =~ ~s("record":"daemon_ready")
+
+    client = connect(socket)
+    :ok = send_frame(client, initialize())
+    assert [%{"type" => "initialized"}] = receive_records(client, 1)
+
+    :ok =
+      send_frame(client, %{
+        "method" => "session.create",
+        "request_id" => "create",
+        "command_id" => LoopexProtocol.Wire.encode_identity("abrupt-create"),
+        "session_options" => %{}
+      })
+
+    assert [%{"status" => "accepted", "session_id" => encoded}] = receive_records(client, 1)
+    {_output, 0} = System.cmd("/bin/kill", ["-KILL", Integer.to_string(first_pid)])
+    assert {_rest, status} = drain_raw(first, "", 30_000)
+    assert status != 0
+
+    {second, second_pid} = start_cli_process(arguments, [:stream])
+    assert await_raw(second, "", 60_000) =~ ~s("record":"daemon_ready")
+    client = connect(socket)
+    :ok = send_frame(client, initialize())
+    assert [%{"type" => "initialized"}] = receive_records(client, 1)
+
+    :ok = send_frame(client, %{"method" => "daemon.status", "request_id" => "status"})
+    assert [%{"result" => %{"activations_used" => 0}}] = receive_records(client, 1)
+
+    :ok =
+      send_frame(client, %{"method" => "session.list", "request_id" => "list", "limit" => 8})
+
+    assert [
+             %{
+               "result" => %{"entries" => [%{"session_id" => ^encoded, "residency" => "dormant"}]}
+             }
+           ] =
+             receive_records(client, 1)
+
+    :ok =
+      send_frame(client, %{
+        "method" => "session.acquire_control",
+        "request_id" => "acquire",
+        "session_id" => encoded
+      })
+
+    assert [%{"result" => %{"writer_epoch" => epoch}}] = receive_records(client, 1)
+
+    :ok =
+      send_frame(client, %{
+        "method" => "session.resume",
+        "request_id" => "resume",
+        "session_id" => encoded,
+        "command_id" => LoopexProtocol.Wire.encode_identity("abrupt-resume"),
+        "writer_epoch" => epoch
+      })
+
+    assert [%{"request_id" => "resume", "status" => "accepted"}] = receive_records(client, 1)
+    :ok = send_frame(client, %{"method" => "daemon.status", "request_id" => "again"})
+    assert [%{"result" => %{"activations_used" => 1}}] = receive_records(client, 1)
+
+    {_output, 0} = System.cmd("/bin/kill", ["-TERM", Integer.to_string(second_pid)])
+    assert {_rest, 0} = drain_raw(second, "", 60_000)
+  end
+
   defp run_raw(arguments) do
     {port, _os_pid} = start_cli_process(arguments, [:stream])
     drain_raw(port, "", 60_000)
