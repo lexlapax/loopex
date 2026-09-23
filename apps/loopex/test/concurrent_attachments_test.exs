@@ -82,6 +82,18 @@ defmodule Loopex.ConcurrentAttachmentTest do
                request_id: "foreign-replacement",
                replace_attachment_id: survivor.attachment_id
              )
+
+    # A target that names no attachment at all is refused the same way, and
+    # nothing the holder already has is disturbed.
+    assert {:error, :stale_attachment} =
+             Runtime.attach_for_holder(fixture.runtime, session_id, holder,
+               request_id: "unknown-replacement",
+               replace_attachment_id: "attachment-that-never-existed"
+             )
+
+    assert {:error, :empty} = Loopex.next_event(survivor)
+    assert {:error, :empty} = Loopex.next_event(replacement)
+    assert_maps_agree(fixture.runtime, session_id, 3)
   end
 
   test "a relay can attach for a stable holder without becoming the owner", fixture do
