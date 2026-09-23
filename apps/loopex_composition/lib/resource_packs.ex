@@ -1172,7 +1172,7 @@ defmodule LoopexComposition.ResourcePacks do
              "--verify",
              config.rev <> "^{commit}"
            ]),
-         true <- first_line(commit) == config.rev,
+         {:check, _commit, true} <- {:check, "commit", first_line(commit) == config.rev},
          {:ok, context, tree_output} <-
            git_job(context, config, "tree", [
              "-C",
@@ -1181,20 +1181,23 @@ defmodule LoopexComposition.ResourcePacks do
              config.rev <> ":" <> config.path
            ]),
          tree = first_line(tree_output),
-         true <- matching_git_ids?(config.rev, tree),
+         {:check, _tree, true} <- {:check, "tree identity", matching_git_ids?(config.rev, tree)},
          {:ok, context, tree_type} <-
            git_job(context, config, "tree-type", ["-C", repo, "cat-file", "-t", tree]),
-         true <- first_line(tree_type) == "tree",
+         {:check, _type, true} <- {:check, "tree type", first_line(tree_type) == "tree"},
          {:ok, context, tree_files_output} <-
            git_job(context, config, "tree-files", ["-C", repo, "ls-tree", "-r", "-l", "-z", tree]),
-         true <- tree_files_output == "" or String.ends_with?(tree_files_output, <<0>>),
+         {:check, _listing, true} <-
+           {:check, "tree listing terminator",
+            tree_files_output == "" or String.ends_with?(tree_files_output, <<0>>)},
          {:ok, tree_files} <- git_tree_files(tree_files_output),
          {:ok, repo_root} <- fixed_directory(repo, staging_root),
          {:ok, selected_root} <- create_export_directory(export_root, config.path),
          :ok <- export_git_blobs(context, config, repo_root, selected_root, tree_files),
          selected = selected_root.path,
          {:ok, metadata_name} <- frontmatter_name(selected_root),
-         true <- metadata_name == Path.basename(selected),
+         {:check, _name, true} <-
+           {:check, "skill name", metadata_name == Path.basename(selected)},
          identity = %{
            "source_id" => "git:" <> Canonical.digest_bytes(config.origin),
            "origin" => config.origin,
@@ -1202,9 +1205,15 @@ defmodule LoopexComposition.ResourcePacks do
            "tree_digest" => tree
          },
          {:ok, pack} <- read_pack(selected_root, metadata_name, identity),
-         true <- matching_git_files?(pack["files"], tree_files) do
+         {:check, _files, true} <-
+           {:check, "exported file set", matching_git_files?(pack["files"], tree_files)} do
       {:ok, pack, selected_root}
     else
+      # Technical depth: each identity check names itself, in fixed text, so a
+      # refusal says which comparison failed without echoing repository data.
+      {:check, check, false} ->
+        error(:git_identity_mismatch, "Git #{check} did not match")
+
       false ->
         error(
           :git_identity_mismatch,

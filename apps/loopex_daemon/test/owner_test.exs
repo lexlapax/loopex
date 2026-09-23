@@ -2091,8 +2091,10 @@ defmodule LoopexDaemon.OwnerTest do
                    now_ms() + 5_000
                  )
 
+        # Each grant carries its own 5 s deadline; its result is awaited for
+        # that long, since 512 grants on a loaded machine are not instant.
         assert_receive {:manual_connection_message, _, {:relay_permit_result, ^origin, _result}},
-                       500
+                       5_000
 
         lease_owner
       end
