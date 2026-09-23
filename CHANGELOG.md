@@ -236,6 +236,20 @@ warning Git or a platform wrapper printed had been read as data and refused a
 legitimate import. `clone` keeps the previous job shape. A host policy that
 matches the job's argument vector sees the new shape.
 
+Make the daemon's orderly transport cut one absolute five-second deadline,
+begun before the relay cut, covering the relay acknowledgement, the connection
+registry's gate, the listener's exact exit and the sweep of connections that
+never initialized. A missing acknowledgement fail-stops as `relay_lost`,
+`connections_lost` or `listener_lost` instead of starting a fresh wait or
+continuing into the drain with the sweep unproved.
+
+Add the running daemon exit class `session_index_lost`, status `111`. Losing
+the session index now fail-stops the daemon and tells initialized clients
+`daemon.stopping` with `fatal:session_index_lost`, where the daemon previously
+stayed ready while create, list and status requests failed. The generation-two
+`daemon.stopping` reason set gains that value; the negotiated schema digest is
+unchanged.
+
 ## [0.1.0] — 2026-09-19
 
 M4's closed product baseline: the first numbered source version. It is a source

@@ -9,7 +9,7 @@ defmodule LoopexDaemon.ExitStatus do
   ## Technical depth
 
   Parser refusal is the ordinary command status `1`. The daemon's typed classes
-  occupy every integer from 65 through 110 exactly once. Status `0` is reserved
+  occupy every integer from 65 through 111 exactly once. Status `0` is reserved
   for successful import or an operator-requested stop whose cleanup completes.
   """
 
@@ -62,7 +62,8 @@ defmodule LoopexDaemon.ExitStatus do
     listener_lost: 107,
     drain_failed: 108,
     owner_lost: 109,
-    prepare_index_interrupted: 110
+    prepare_index_interrupted: 110,
+    session_index_lost: 111
   }
 
   @typedoc false
@@ -78,11 +79,11 @@ defmodule LoopexDaemon.ExitStatus do
   def parser_refusal, do: @parser_refusal
 
   @doc false
-  @spec fetch(failure_class()) :: {:ok, 65..110} | :error
+  @spec fetch(failure_class()) :: {:ok, 65..111} | :error
   def fetch(class), do: Map.fetch(@statuses, class)
 
   @doc false
-  @spec classes() :: %{required(failure_class()) => 65..110}
+  @spec classes() :: %{required(failure_class()) => 65..111}
   def classes, do: @statuses
 
   @own_classes [:store_writer_active, :store_writer_unverifiable, :store_log_too_large]

@@ -3139,6 +3139,74 @@ defmodule LoopexDaemon.OwnerTest do
     status
   end
 
+  # Concept: the collaboration owner decides the transport cut at its one
+  # deadline and names the component that missed it.
+  #
+  # Technical depth: each case suspends the component under test, so only the
+  # owner's own deadline can end the wait. Elapsed times are bounded below by
+  # the deadline and above by well under the caller's verdict margin.
+  test "a relay silent past the cut deadline answers relay_lost and its late acknowledgement changes nothing" do
+    owner = start_owner()
+    components = Owner.components(owner)
+    :ok = :sys.suspend(components.relay)
+
+    started = now_ms()
+    assert {:error, :relay_lost} = Owner.cut_admission(owner, 300)
+    elapsed = now_ms() - started
+    assert elapsed >= 290
+    assert elapsed < 900
+
+    :ok = :sys.resume(components.relay)
+    assert %{} = AdmissionRelay.status(components.relay)
+    assert Process.alive?(owner)
+    assert {:error, :transport_cut_unavailable} = Owner.cut_admission(owner, 300)
+  end
+
+  test "a registry gate silent past the cut deadline answers connections_lost and stops the owner" do
+    owner = start_owner()
+    components = Owner.components(owner)
+    owner_monitor = Process.monitor(owner)
+    registry_monitor = Process.monitor(components.registry)
+    :ok = :sys.suspend(components.registry)
+
+    started = now_ms()
+    assert {:error, :connections_lost} = Owner.cut_admission(owner, 300)
+    elapsed = now_ms() - started
+    assert elapsed >= 290
+    assert elapsed < 900
+
+    assert_receive {:DOWN, ^registry_monitor, :process, _registry, :killed}, 1_000
+    assert_receive {:DOWN, ^owner_monitor, :process, ^owner, :connections_lost}, 1_000
+  end
+
+  test "an uninitialized peer the sweep cannot close answers connections_lost at the cut deadline" do
+    owner = start_owner()
+    components = Owner.components(owner)
+    peer = uninitialized_connection(components)
+    owner_monitor = Process.monitor(owner)
+
+    deadline = now_ms() + 600
+    assert {:ok, cut_ref} = Owner.cut_admission(owner, deadline - now_ms())
+    # The manual connection is a plain process, so the VM suspends it.
+    true = :erlang.suspend_process(peer)
+
+    assert {:error, :connections_lost} = Owner.reap_uninitialized(owner, cut_ref, deadline)
+    assert now_ms() >= deadline - 10
+    assert now_ms() < deadline + 600
+    assert_receive {:DOWN, ^owner_monitor, :process, ^owner, :connections_lost}, 1_000
+  end
+
+  test "an empty uninitialized sweep answers at once inside the cut deadline" do
+    owner = start_owner()
+    components = Owner.components(owner)
+    _initialized = initialized_connection(components)
+
+    deadline = now_ms() + 2_000
+    assert {:ok, cut_ref} = Owner.cut_admission(owner, deadline - now_ms())
+    assert :ok = Owner.reap_uninitialized(owner, cut_ref, deadline)
+    assert now_ms() < deadline
+  end
+
   defp start_owner(options \\ []) do
     options =
       Keyword.merge(
@@ -3147,6 +3215,20 @@ defmodule LoopexDaemon.OwnerTest do
       )
 
     start_supervised!({Owner, options}, restart: :temporary)
+  end
+
+  defp uninitialized_connection(components) do
+    assert {:ok, %{rollback_token: token}} =
+             ConnectionRegistry.reserve(components.registry, self(), make_ref(), now_ms())
+
+    assert {:ok, pid, incarnation} =
+             ConnectionRegistry.start_connection(components.registry, token)
+
+    assert_receive {:manual_connection_started, ^pid, _options}, 500
+    assert :ok = ConnectionRegistry.begin_transfer(components.registry, token, incarnation)
+    assert :ok = ConnectionRegistry.transfer_result(components.registry, token, incarnation, :ok)
+    assert :ok = manual_call(pid, :promote)
+    pid
   end
 
   defp initialized_connection(components) do

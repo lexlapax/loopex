@@ -31,6 +31,9 @@ defmodule LoopexDaemon.Owner do
 
   @owner_limit 512
   @mirror_deadline_ms 5_000
+  # Concept: the transport cut is decided at its deadline; this only lets the
+  # decision made at that instant reach the waiting stop.
+  @verdict_margin_ms 1_000
   @lease_term_ms 30_000
   @incarnation_bytes 16
 
@@ -149,23 +152,51 @@ defmodule LoopexDaemon.Owner do
 
   The relay's ref-tagged cut acknowledgement is consumed here, then the
   registry's owner-authenticated transport gate is closed with the same
-  reference. Both answers are bounded by `timeout`, whose absolute instant is
-  the transport-cut deadline. Consuming the cut makes every serving-private
-  owner-loss and release clock cleanup-only: an owner-loss operation still in
-  progress is rebound to that instant, and later dead-owner and mirror-pop
-  facts join the stop barriers instead of starting a clock of their own.
+  reference. `timeout` fixes the one absolute transport-cut deadline, which
+  `reap_uninitialized/3` reuses: a relay that has not acknowledged by that
+  instant answers `{:error, :relay_lost}`, and a registry gate that has not
+  answered by it answers `{:error, :connections_lost}` after the registry is
+  killed. This owner decides at the deadline; the call waits
+  `@verdict_margin_ms` longer only for that verdict to arrive. Consuming the
+  cut makes every serving-private owner-loss and release clock cleanup-only:
+  an owner-loss operation still in progress is rebound to that instant, and
+  later dead-owner and mirror-pop facts join the stop barriers instead of
+  starting a clock of their own.
   """
   @spec cut_admission(pid(), timeout()) :: {:ok, reference()} | {:error, atom()}
   def cut_admission(owner, timeout \\ 15_000) do
-    GenServer.call(owner, {:cut_admission, monotonic_ms() + timeout}, timeout)
+    GenServer.call(
+      owner,
+      {:cut_admission, monotonic_ms() + timeout},
+      timeout + @verdict_margin_ms
+    )
   catch
     :exit, _timeout -> {:error, :relay_barrier_timeout}
   end
 
-  @doc false
-  @spec reap_uninitialized(pid(), reference()) :: :ok | {:error, atom()}
-  def reap_uninitialized(owner, cut_ref),
-    do: GenServer.call(owner, {:reap_uninitialized, cut_ref}, 15_000)
+  @doc """
+  ## Concept
+
+  Sweeps the uninitialized connections the transport gate marked, once the
+  listener is gone, and answers only when the registry reports them all
+  closed.
+
+  ## Technical depth
+
+  `deadline` is the transport-cut instant `cut_admission/2` began. A registry
+  that has not acknowledged the empty sweep by then answers
+  `{:error, :connections_lost}` after the registry is killed.
+  """
+  @spec reap_uninitialized(pid(), reference(), integer()) :: :ok | {:error, atom()}
+  def reap_uninitialized(owner, cut_ref, deadline) do
+    GenServer.call(
+      owner,
+      {:reap_uninitialized, cut_ref, deadline},
+      max(deadline - monotonic_ms(), 0) + @verdict_margin_ms
+    )
+  catch
+    :exit, _timeout -> {:error, :relay_barrier_timeout}
+  end
 
   @doc """
   ## Concept
@@ -369,9 +400,18 @@ defmodule LoopexDaemon.Owner do
     send(state.relay, {:relay_barrier, cut_ref, :cut})
     Logger.debug("loopex daemon owner admission cut requested")
 
+    timer =
+      Process.send_after(
+        self(),
+        {:transport_cut_deadline, cut_ref},
+        max(cut_deadline - monotonic_ms(), 0)
+      )
+
     stop = %{
       phase: :cutting,
       cut_ref: cut_ref,
+      cut_deadline: cut_deadline,
+      cut_timer: timer,
       from: from,
       swept: false,
       tombstones: %{},
@@ -382,24 +422,44 @@ defmodule LoopexDaemon.Owner do
     {:noreply, %{state | stop: stop}}
   end
 
-  def handle_call({:cut_admission, _cut_deadline}, _from, %{stop: %{cut_ref: cut_ref}} = state),
-    do: {:reply, {:ok, cut_ref}, state}
+  def handle_call(
+        {:cut_admission, _cut_deadline},
+        _from,
+        %{stop: %{cut_ref: cut_ref, phase: :cut}} = state
+      ),
+      do: {:reply, {:ok, cut_ref}, state}
 
-  def handle_call({:reap_uninitialized, cut_ref}, from, %{stop: %{cut_ref: cut_ref}} = stop_state) do
+  def handle_call({:cut_admission, _cut_deadline}, _from, state),
+    do: {:reply, {:error, :transport_cut_unavailable}, state}
+
+  def handle_call(
+        {:reap_uninitialized, cut_ref, deadline},
+        from,
+        %{stop: %{cut_ref: cut_ref, phase: :cut}} = stop_state
+      ) do
     request = ConnectionRegistry.reap_uninitialized(stop_state.registry, cut_ref)
 
-    case :gen_server.receive_response(request, 5_000) do
+    case :gen_server.receive_response(request, max(deadline - monotonic_ms(), 0)) do
       {:reply, :ok} ->
-        if stop_state.stop.swept,
-          do: {:reply, :ok, stop_state},
-          else: {:noreply, put_in(stop_state, [:stop, :from], from)}
+        if stop_state.stop.swept do
+          {:reply, :ok, stop_state}
+        else
+          timer =
+            Process.send_after(
+              self(),
+              {:transport_sweep_deadline, cut_ref},
+              max(deadline - monotonic_ms(), 0)
+            )
 
-      _other ->
-        {:reply, {:error, :transport_sweep_failed}, stop_state}
+          {:noreply, %{stop_state | stop: %{stop_state.stop | from: from, cut_timer: timer}}}
+        end
+
+      _missing ->
+        {:reply, {:error, :connections_lost}, registry_lost(stop_state)}
     end
   end
 
-  def handle_call({:reap_uninitialized, _cut_ref}, _from, state),
+  def handle_call({:reap_uninitialized, _cut_ref, _deadline}, _from, state),
     do: {:reply, {:error, :transport_cut_unavailable}, state}
 
   def handle_call({:close_connections, record, deadline}, _from, state) do
@@ -754,22 +814,52 @@ defmodule LoopexDaemon.Owner do
     {:noreply, %{state | attachments: attachments}}
   end
 
+  # Concept: the relay acknowledgement and the registry gate share the one
+  # transport-cut instant. An acknowledgement consumed at or after it is late,
+  # so the relay, not the registry, is what failed.
   def handle_info(
         {:relay_barrier_ack, cut_ref, :cut, _payload},
-        %{stop: %{phase: :cutting, cut_ref: cut_ref, from: from}} = state
+        %{stop: %{phase: :cutting, cut_ref: cut_ref, from: from} = stop} = state
       ) do
-    reply =
-      case :gen_server.receive_response(
-             ConnectionRegistry.transport_closing(state.registry, cut_ref),
-             5_000
-           ) do
-        {:reply, {:ok, ^cut_ref}} -> {:ok, cut_ref}
-        _other -> {:error, :transport_gate_failed}
+    Process.cancel_timer(stop.cut_timer)
+    remaining = stop.cut_deadline - monotonic_ms()
+
+    {reply, state} =
+      if remaining <= 0 do
+        {{:error, :relay_lost}, state}
+      else
+        case :gen_server.receive_response(
+               ConnectionRegistry.transport_closing(state.registry, cut_ref),
+               remaining
+             ) do
+          {:reply, {:ok, ^cut_ref}} -> {{:ok, cut_ref}, state}
+          _missing -> {{:error, :connections_lost}, registry_lost(state)}
+        end
       end
 
     GenServer.reply(from, reply)
     Logger.debug("loopex daemon owner admission cut complete")
-    {:noreply, %{state | stop: %{state.stop | phase: :cut, from: nil}}}
+    phase = if match?({:ok, _}, reply), do: :cut, else: :cut_failed
+    {:noreply, %{state | stop: %{state.stop | phase: phase, from: nil}}}
+  end
+
+  def handle_info(
+        {:transport_cut_deadline, cut_ref},
+        %{stop: %{phase: :cutting, cut_ref: cut_ref, from: from}} = state
+      ) do
+    GenServer.reply(from, {:error, :relay_lost})
+    Logger.debug("loopex daemon owner admission cut deadline reached")
+    {:noreply, %{state | stop: %{state.stop | phase: :cut_failed, from: nil}}}
+  end
+
+  def handle_info(
+        {:transport_sweep_deadline, cut_ref},
+        %{stop: %{cut_ref: cut_ref, swept: false, from: from}} = state
+      )
+      when not is_nil(from) do
+    GenServer.reply(from, {:error, :connections_lost})
+    Logger.debug("loopex daemon owner transport sweep deadline reached")
+    {:noreply, registry_lost(%{state | stop: %{state.stop | from: nil}})}
   end
 
   def handle_info(
@@ -828,7 +918,11 @@ defmodule LoopexDaemon.Owner do
         {:transport_uninitialized_empty, registry, cut_ref},
         %{registry: registry, stop: %{cut_ref: cut_ref}} = state
       ) do
-    if state.stop.from, do: GenServer.reply(state.stop.from, :ok)
+    if state.stop.from do
+      Process.cancel_timer(state.stop.cut_timer)
+      GenServer.reply(state.stop.from, :ok)
+    end
+
     {:noreply, %{state | stop: %{state.stop | swept: true, from: nil}}}
   end
 
@@ -916,6 +1010,15 @@ defmodule LoopexDaemon.Owner do
   end
 
   def handle_info(_message, state), do: {:noreply, state}
+
+  # Concept: a registry that missed a transport-cut acknowledgement is killed
+  # without awaiting its reap; its linked exit then stops this owner with
+  # `connections_lost`, the class the caller has already latched.
+  defp registry_lost(state) do
+    Logger.debug("loopex daemon owner connection registry missed the transport cut")
+    Process.exit(state.registry, :kill)
+    state
+  end
 
   @impl true
   def terminate(_reason, state) do

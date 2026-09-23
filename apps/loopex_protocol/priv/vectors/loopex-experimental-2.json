@@ -446,6 +446,13 @@
       "expect": "valid_uncorrelated_record_shape"
     },
     {
+      "id": "daemon_stopping_fatal_session_index_lost",
+      "direction": "server_to_client",
+      "initial_state": "after_fail_stop",
+      "raw_hex": "7b226d657373616765223a22746865206461656d6f6e2069732073746f7070696e673b207265636f6e6e656374206166746572206974207265737461727473222c22726561736f6e223a22666174616c3a73657373696f6e5f696e6465785f6c6f7374222c2274797065223a226461656d6f6e2e73746f7070696e67227d0a",
+      "expect": "valid_uncorrelated_record_shape"
+    },
+    {
       "id": "daemon_stopping_fatal_listener_lost",
       "direction": "server_to_client",
       "initial_state": "after_fail_stop",

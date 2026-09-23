@@ -26,9 +26,11 @@ defmodule LoopexDaemon.Service do
   sends either release authorization or the startup fatal it observed; only
   the sentinel opens the parked listener. While running, a linked component's
   exit is classified into its fixed fatal class and ends in fail-stop; a
-  forwarded `SIGTERM` runs the orderly stop: the admission cut and transport
-  gate within `transport_cut_deadline_ms: 5_000`, listener stop, the bounded
-  admission wait, the relay's `freeze_lease_ops` barrier with every lease row
+  forwarded `SIGTERM` runs the orderly stop: one absolute
+  `transport_cut_deadline_ms: 5_000`, begun before the relay cut, covers the
+  relay acknowledgement, the registry gate, the listener's exact exit and the
+  uninitialized-peer sweep, and a missing one fail-stops as `relay_lost`,
+  `connections_lost` or `listener_lost`; then the bounded admission wait, the relay's `freeze_lease_ops` barrier with every lease row
   it names cleaned up without client output inside
   `relay_control_timeout_ms: 5_000`, a fresh 5 s
   `quiescing` barrier, core quiesce on core's own clock, then one shared
@@ -68,6 +70,9 @@ defmodule LoopexDaemon.Service do
   @default_admission_wait_ms 5_000
   @relay_control_timeout_ms 5_000
   @transport_cut_deadline_ms 5_000
+  # The collaboration owner decides each transport-cut step at the deadline;
+  # this only lets that verdict arrive. Matches `Owner`'s own margin.
+  @verdict_margin_ms 1_000
   # Measured: an orderly stop at 512 attached connections took 119 ms (OTP 29,
   # Elixir 1.20.3, `maximum_population_test.exs`); 30 s keeps a wide margin.
   @default_teardown_ms 30_000
@@ -86,7 +91,8 @@ defmodule LoopexDaemon.Service do
     credential_registry: :registry_lost,
     custody: :custody_lost,
     capability: :capability_lost,
-    listener: :listener_lost
+    listener: :listener_lost,
+    index: :session_index_lost
   }
 
   @doc false
@@ -552,20 +558,84 @@ defmodule LoopexDaemon.Service do
 
   # Concept: an orderly stop drains admitted work through core before any
   # component it depends on is stopped, and stops the Store last.
+  #
+  # Technical depth: the transport cut is one absolute deadline begun before
+  # the relay cut, never a fresh clock per step. The relay acknowledgement and
+  # registry gate, the listener's exact linked exit and the registry's empty
+  # uninitialized sweep all land by it, or the stop fail-stops with the class of
+  # whatever did not answer: `relay_lost`, `connections_lost` or
+  # `listener_lost`. Each wait also consumes every owned component's exit.
   defp orderly_stop(state) do
     Logger.debug("loopex daemon orderly stop start")
     state = %{state | phase: :stopping}
     collaboration = state.pids.collaboration
     components = Owner.components(collaboration)
+    deadline = monotonic_ms() + @transport_cut_deadline_ms
 
-    case Owner.cut_admission(collaboration, @transport_cut_deadline_ms) do
-      {:ok, cut} ->
-        state = stop_component(state, :listener)
-        _ = Owner.reap_uninitialized(collaboration, cut)
-        admitted_stop(state, collaboration, components)
+    cut = fn -> Owner.cut_admission(collaboration, deadline - monotonic_ms()) end
 
-      _unacknowledged ->
-        fail_stop(state, :relay_lost)
+    with {:ok, cut_ref} <- transport_step(state, cut, deadline),
+         {:ok, state} <- reap_listener(state, deadline),
+         sweep = fn -> Owner.reap_uninitialized(collaboration, cut_ref, deadline) end,
+         {:ok, :ok} <- transport_step(state, sweep, deadline) do
+      Logger.debug("loopex daemon transport cut complete")
+      admitted_stop(state, collaboration, components)
+    else
+      {:fatal, class} -> fail_stop(state, class)
+    end
+  end
+
+  # Concept: the collaboration owner decides each transport step at the cut
+  # deadline and names what failed; an owner that gives no verdict at all is
+  # itself lost, which is `relay_lost`.
+  defp transport_step(state, fun, deadline) do
+    case responsive(state, fun, deadline + @verdict_margin_ms) do
+      {:ok, {:ok, cut_ref}} when is_reference(cut_ref) -> {:ok, cut_ref}
+      {:ok, :ok} -> {:ok, :ok}
+      {:ok, {:error, :connections_lost}} -> {:fatal, :connections_lost}
+      {:fatal, class} -> {:fatal, class}
+      _missing -> {:fatal, :relay_lost}
+    end
+  end
+
+  # Concept: only the listener's exact linked exit proves no later accept can
+  # arrive, so it is killed and that exit is awaited inside the cut deadline.
+  defp reap_listener(state, deadline) do
+    case Map.fetch(state.pids, :listener) do
+      {:ok, listener} ->
+        Process.exit(listener, :kill)
+        await_listener_exit(state, listener, deadline)
+
+      :error ->
+        {:ok, state}
+    end
+  end
+
+  defp await_listener_exit(state, listener, deadline) do
+    receive do
+      {:EXIT, ^listener, _reason} ->
+        Logger.debug("loopex daemon listener reaped")
+
+        {:ok,
+         %{
+           state
+           | pids: Map.delete(state.pids, :listener),
+             components: Map.delete(state.components, {:pid, listener})
+         }}
+
+      {:DOWN, runtime_monitor, :process, _pid, _reason}
+      when is_map_key(state.runtime_monitors, runtime_monitor) ->
+        {:fatal, :runtime_lost}
+
+      {:EXIT, pid, reason} ->
+        case classify_exit(state, pid, reason) do
+          :ignore -> await_listener_exit(state, listener, deadline)
+          class -> {:fatal, class}
+        end
+    after
+      remaining_ms(deadline) ->
+        Logger.debug("loopex daemon listener exit missed the transport cut")
+        {:fatal, :listener_lost}
     end
   end
 
@@ -691,46 +761,60 @@ defmodule LoopexDaemon.Service do
   # Concept: core quiesce runs in an unlinked helper so this owner still
   # consumes every owned component's exit while it drains; a component lost
   # during the drain ends the stop with that component's class, never success.
-  #
-  # Technical depth: the helper exits with the quiesce result as its reason. An
-  # owned exit or runtime monitor that classifies as fatal kills the helper
-  # first; an exit that classifies as ignorable is consumed and the wait
-  # continues. Core owns the drain clock, so the wait is bounded by it.
+  # Core owns the drain clock, so the wait is bounded by it.
   defp quiesce_responsive(state) do
     runtime = state.edges.runtime
 
-    {helper, monitor} =
-      spawn_monitor(fn -> exit({:quiesced, Loopex.Runtime.quiesce(runtime)}) end)
-
-    await_quiesce(state, helper, monitor)
-  end
-
-  defp await_quiesce(state, helper, monitor) do
-    receive do
-      {:DOWN, ^monitor, :process, ^helper, {:quiesced, result}} ->
-        result
-
-      {:DOWN, ^monitor, :process, ^helper, _reason} ->
-        {:error, :runtime_unavailable}
-
-      {:DOWN, runtime_monitor, :process, _pid, _reason}
-      when is_map_key(state.runtime_monitors, runtime_monitor) ->
-        end_quiesce(helper, monitor, :runtime_lost)
-
-      {:EXIT, pid, reason} ->
-        case classify_exit(state, pid, reason) do
-          :ignore -> await_quiesce(state, helper, monitor)
-          class -> end_quiesce(helper, monitor, class)
-        end
+    case responsive(state, fn -> Loopex.Runtime.quiesce(runtime) end, :infinity) do
+      {:ok, result} -> result
+      {:fatal, class} -> {:fatal, class}
+      _unavailable -> {:error, :runtime_unavailable}
     end
   end
 
-  defp end_quiesce(helper, monitor, class) do
-    Logger.debug("loopex daemon component lost during quiesce")
+  # Concept: a stop step that calls another process runs in an unlinked helper,
+  # so this owner keeps consuming every owned component's exit while it waits.
+  #
+  # Technical depth: the helper exits with the call's result as its reason. An
+  # owned exit or runtime monitor that classifies as fatal kills the helper and
+  # returns that class; an exit that classifies as ignorable is consumed and
+  # the wait continues. `until` is an absolute monotonic instant or `:infinity`.
+  defp responsive(state, fun, until) do
+    {helper, monitor} = spawn_monitor(fn -> exit({:responded, fun.()}) end)
+    await_responsive(state, helper, monitor, until)
+  end
+
+  defp await_responsive(state, helper, monitor, until) do
+    receive do
+      {:DOWN, ^monitor, :process, ^helper, {:responded, result}} ->
+        {:ok, result}
+
+      {:DOWN, ^monitor, :process, ^helper, _reason} ->
+        :unavailable
+
+      {:DOWN, runtime_monitor, :process, _pid, _reason}
+      when is_map_key(state.runtime_monitors, runtime_monitor) ->
+        end_responsive(helper, monitor, {:fatal, :runtime_lost})
+
+      {:EXIT, pid, reason} ->
+        case classify_exit(state, pid, reason) do
+          :ignore -> await_responsive(state, helper, monitor, until)
+          class -> end_responsive(helper, monitor, {:fatal, class})
+        end
+    after
+      remaining_ms(until) -> end_responsive(helper, monitor, :timeout)
+    end
+  end
+
+  defp end_responsive(helper, monitor, result) do
+    Logger.debug("loopex daemon stop wait ended without its result")
     Process.exit(helper, :kill)
     Process.demonitor(monitor, [:flush])
-    {:fatal, class}
+    result
   end
+
+  defp remaining_ms(:infinity), do: :infinity
+  defp remaining_ms(until), do: max(until - monotonic_ms(), 0)
 
   # Concept: before an orderly stop reports success, any owned component that
   # was lost while the stop was running turns it into that component's
@@ -954,7 +1038,6 @@ defmodule LoopexDaemon.Service do
   defp classify_exit(state, pid, reason) do
     case Map.get(state.components, {:pid, pid}) do
       nil -> :ignore
-      :index -> :ignore
       :collaboration -> collaboration_class(reason)
       :store -> store_class(reason)
       name -> Map.get(@running_classes, name, :runtime_lost)

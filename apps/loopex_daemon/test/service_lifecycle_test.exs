@@ -371,6 +371,152 @@ defmodule LoopexDaemon.ServiceLifecycleTest do
     end
   end
 
+  # Concept: the transport cut is one five-second deadline begun before the
+  # relay cut. A registry that never answers its gate ends the stop as
+  # `connections_lost` at that deadline, not as `relay_lost` and not after a
+  # fresh clock.
+  #
+  # Technical depth: the registry is suspended before `SIGTERM`, so the relay
+  # acknowledges the cut and the gate request waits out the shared instant.
+  # The exit class separates this from a relay that missed the cut; the
+  # shared-deadline case below proves the gate waits on the cut's own clock.
+  @tag timeout: 90_000
+  test "a registry that misses the transport gate ends the stop as connections_lost",
+       %{options: options} do
+    daemon = start_daemon(options)
+    _ready = await_ready(daemon.output)
+    _client = initialized(options[:socket_path])
+
+    collaboration = :sys.get_state(daemon.owner).pids.collaboration
+    registry = LoopexDaemon.Owner.components(collaboration).registry
+    :ok = :sys.suspend(registry)
+
+    started = System.monotonic_time(:millisecond)
+    send(daemon.sentinel, {:daemon_signal, daemon.owner_ref, :sigterm})
+
+    {:ok, connections_lost} = LoopexDaemon.ExitStatus.fetch(:connections_lost)
+    assert Task.await(daemon.task, 60_000) == connections_lost
+    elapsed = System.monotonic_time(:millisecond) - started
+    assert elapsed >= 4_900
+    assert elapsed < 15_000
+  end
+
+  # Concept: the relay acknowledgement and the registry gate share one clock.
+  # A relay that answers late leaves the registry only what remains of the
+  # five seconds, never a fresh five.
+  #
+  # Technical depth: the relay is held for about three seconds and the
+  # registry throughout. The collaboration owner kills the registry when the
+  # shared deadline passes, which closes every client socket, so the socket's
+  # close time is the owner's decision time: about five seconds after
+  # `SIGTERM`, where a gate given its own five seconds would close at about
+  # eight.
+  @tag timeout: 90_000
+  test "a late relay leaves the registry gate only the rest of the shared deadline",
+       %{options: options} do
+    daemon = start_daemon(options)
+    _ready = await_ready(daemon.output)
+    client = initialized(options[:socket_path])
+
+    collaboration = :sys.get_state(daemon.owner).pids.collaboration
+    components = LoopexDaemon.Owner.components(collaboration)
+    :ok = :sys.suspend(components.relay)
+    :ok = :sys.suspend(components.registry)
+
+    started = System.monotonic_time(:millisecond)
+    send(daemon.sentinel, {:daemon_signal, daemon.owner_ref, :sigterm})
+    Process.sleep(3_000)
+    :ok = :sys.resume(components.relay)
+
+    assert :closed = await_socket_closed(client, 15_000)
+    closed = System.monotonic_time(:millisecond) - started
+    assert closed >= 4_900
+    assert closed < 6_500
+
+    {:ok, connections_lost} = LoopexDaemon.ExitStatus.fetch(:connections_lost)
+    assert Task.await(daemon.task, 60_000) == connections_lost
+  end
+
+  # Concept: the uninitialized-peer sweep is part of the transport cut. A peer
+  # the registry cannot close by the cut deadline ends the stop as
+  # `connections_lost`; the stop never reaches core quiesce with the sweep
+  # unproved.
+  #
+  # Technical depth: a raw peer connects and never initializes; its connection
+  # process is suspended, so the sweep's abort is never acted on and the
+  # registry never acknowledges an empty set. The gate and listener reap
+  # succeed, which leaves the sweep as the only missing acknowledgement.
+  @tag timeout: 90_000
+  test "an uninitialized peer the sweep cannot close ends the stop as connections_lost",
+       %{options: options} do
+    daemon = start_daemon(options)
+    _ready = await_ready(daemon.output)
+    _client = initialized(options[:socket_path])
+
+    {:ok, peer} = :socket.open(:local, :stream, :default)
+    :ok = await_connect(peer, options[:socket_path], 100)
+
+    collaboration = :sys.get_state(daemon.owner).pids.collaboration
+    registry = LoopexDaemon.Owner.components(collaboration).registry
+    connection = await_uninitialized_connection(registry)
+    :ok = :sys.suspend(connection)
+
+    started = System.monotonic_time(:millisecond)
+    send(daemon.sentinel, {:daemon_signal, daemon.owner_ref, :sigterm})
+
+    {:ok, connections_lost} = LoopexDaemon.ExitStatus.fetch(:connections_lost)
+    assert Task.await(daemon.task, 60_000) == connections_lost
+    elapsed = System.monotonic_time(:millisecond) - started
+    assert elapsed >= 4_900
+    assert elapsed < 15_000
+    :socket.close(peer)
+  end
+
+  # Concept: only the listener's exact linked exit proves no later accept, and
+  # it must arrive inside the transport cut; a missing exit is
+  # `listener_lost`.
+  #
+  # Technical depth: the owner's listener entry is swapped for an unlinked
+  # decoy, so the kill the stop sends produces no linked exit and the wait
+  # reaches the shared deadline. The real listener is left running until the
+  # fail-stop teardown, as it would be if its exit were lost.
+  @tag timeout: 90_000
+  test "a listener exit missing at the transport cut ends the stop as listener_lost",
+       %{options: options} do
+    daemon = start_daemon(options)
+    _ready = await_ready(daemon.output)
+    _client = initialized(options[:socket_path])
+
+    decoy = spawn(fn -> Process.sleep(:infinity) end)
+    listener = :sys.get_state(daemon.owner).pids.listener
+
+    :sys.replace_state(daemon.owner, fn state ->
+      listener = state.pids.listener
+
+      %{
+        state
+        | pids: Map.put(state.pids, :listener, decoy),
+          components:
+            state.components
+            |> Map.delete({:pid, listener})
+            |> Map.put({:pid, decoy}, :listener)
+      }
+    end)
+
+    started = System.monotonic_time(:millisecond)
+    send(daemon.sentinel, {:daemon_signal, daemon.owner_ref, :sigterm})
+
+    {:ok, listener_lost} = LoopexDaemon.ExitStatus.fetch(:listener_lost)
+    assert Task.await(daemon.task, 60_000) == listener_lost
+    elapsed = System.monotonic_time(:millisecond) - started
+    assert elapsed >= 4_900
+    assert elapsed < 15_000
+    refute Process.alive?(decoy)
+
+    # The untracked real listener is not stopped by the fail-stop teardown.
+    Process.exit(listener, :kill)
+  end
+
   # Concept: a lease freeze left with unfinished registry work ends the stop
   # as `connections_lost`, not `relay_lost`, and core quiesce never starts.
   #
@@ -441,6 +587,31 @@ defmodule LoopexDaemon.ServiceLifecycleTest do
     assert Task.await(daemon.task, 60_000) == connections_lost
   end
 
+  # Concept: the session index is a linked running component, so losing it is
+  # a daemon failure with its own class rather than a daemon that stays ready
+  # while every create, list and status request fails.
+  #
+  # Technical depth: the index the service started is killed while an
+  # initialized client is connected. The client receives `daemon.stopping`
+  # with `fatal:session_index_lost` and the sentinel exits
+  # `session_index_lost` (111).
+  test "losing the session index fail-stops with session_index_lost",
+       %{options: options} do
+    daemon = start_daemon(options)
+    _ready = await_ready(daemon.output)
+    client = initialized(options[:socket_path])
+
+    index = :sys.get_state(daemon.owner).pids.index
+    Process.exit(index, :kill)
+
+    assert [%{"type" => "daemon.stopping", "reason" => "fatal:session_index_lost"}] =
+             receive_records(client, 1)
+
+    {:ok, session_index_lost} = LoopexDaemon.ExitStatus.fetch(:session_index_lost)
+    assert session_index_lost == 111
+    assert Task.await(daemon.task, 60_000) == session_index_lost
+  end
+
   test "losing the Store fail-stops with its class and tells the client",
        %{options: options} do
     daemon = start_daemon(options)
@@ -508,7 +679,7 @@ defmodule LoopexDaemon.ServiceLifecycleTest do
       :ok = :sys.suspend(children.control)
 
       send(daemon.sentinel, {:daemon_signal, daemon.owner_ref, :sigterm})
-      assert await_function(daemon.owner, {LoopexDaemon.Service, :await_quiesce, 3})
+      assert await_quiesce_wait(daemon.owner)
 
       victim =
         case unquote(target) do
@@ -526,18 +697,26 @@ defmodule LoopexDaemon.ServiceLifecycleTest do
     end
   end
 
-  defp await_function(pid, function, attempts \\ 500)
+  # The owner is waiting on core quiesce: it is inside the shared stop wait,
+  # called from the quiesce step rather than from a transport-cut step.
+  defp await_quiesce_wait(pid, attempts \\ 500)
 
-  defp await_function(pid, function, attempts) when attempts > 0 do
-    if Process.info(pid, :current_function) == {:current_function, function} do
+  defp await_quiesce_wait(pid, attempts) when attempts > 0 do
+    {:current_function, current} = Process.info(pid, :current_function)
+    {:current_stacktrace, stack} = Process.info(pid, :current_stacktrace)
+
+    quiescing =
+      Enum.any?(stack, &match?({LoopexDaemon.Service, :quiesce_responsive, 1, _}, &1))
+
+    if current == {LoopexDaemon.Service, :await_responsive, 4} and quiescing do
       true
     else
       Process.sleep(10)
-      await_function(pid, function, attempts - 1)
+      await_quiesce_wait(pid, attempts - 1)
     end
   end
 
-  defp await_function(_pid, _function, 0), do: false
+  defp await_quiesce_wait(_pid, 0), do: false
 
   defp await_queued_exit(pid, exited, attempts \\ 100)
 
@@ -553,6 +732,36 @@ defmodule LoopexDaemon.ServiceLifecycleTest do
   end
 
   defp await_queued_exit(_pid, _exited, 0), do: {:error, :not_queued}
+
+  defp await_uninitialized_connection(registry, attempts \\ 500)
+
+  defp await_uninitialized_connection(registry, attempts) when attempts > 0 do
+    uninitialized =
+      for {_token, %{initialized: false, connection_pid: pid}} <- :sys.get_state(registry).rows,
+          is_pid(pid),
+          do: pid
+
+    case uninitialized do
+      [connection] ->
+        connection
+
+      _none ->
+        Process.sleep(10)
+        await_uninitialized_connection(registry, attempts - 1)
+    end
+  end
+
+  defp await_uninitialized_connection(_registry, 0),
+    do: flunk("no uninitialized connection appeared")
+
+  defp await_socket_closed(socket, timeout) do
+    case :socket.recv(socket, 0, timeout) do
+      {:ok, _bytes} -> await_socket_closed(socket, timeout)
+      {:error, :closed} -> :closed
+      {:error, :econnreset} -> :closed
+      {:error, reason} -> {:error, reason}
+    end
+  end
 
   defp receive_records_or_closed(socket) do
     receive_records(socket, 1)

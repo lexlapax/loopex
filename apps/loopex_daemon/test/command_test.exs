@@ -53,8 +53,8 @@ defmodule LoopexDaemon.CommandTest do
     classes = ExitStatus.classes()
     statuses = Map.values(classes)
 
-    assert map_size(classes) == 46
-    assert Enum.sort(statuses) == Enum.to_list(65..110)
+    assert map_size(classes) == 47
+    assert Enum.sort(statuses) == Enum.to_list(65..111)
     assert length(Enum.uniq(statuses)) == map_size(classes)
     assert ExitStatus.success() == 0
     assert ExitStatus.parser_refusal() == 1

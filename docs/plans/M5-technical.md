@@ -1496,8 +1496,8 @@ rather than summarising it:
 - **while running**, one per linked component in the fixed set: `store_lost`,
   `store_capacity_exceeded`, `runtime_lost`, `transfers_lost`,
   `workspace_lease_lost`, `executor_lost`, `registry_lost`, `custody_lost`,
-  `capability_lost`, `relay_lost`, `connections_lost` and `listener_lost`;
-  `drain_failed` names an orderly stop whose core census became unavailable
+  `capability_lost`, `relay_lost`, `connections_lost`, `listener_lost` and
+  `session_index_lost`; `drain_failed` names an orderly stop whose core census became unavailable
   and therefore continued as crash-equivalent teardown. A lease owner's death is **not** in this
   list: it is
   session-scoped, closes that session's controller with `control_owner_lost`,
@@ -6148,7 +6148,7 @@ termination, with no daemon-owned resource acquired and no daemon cleanup path
 run; after handler installation it means the documented reverse-clean orderly
 sequence completed. A handled import interruption is deliberately nonzero.
 Every nonzero class has
-one unique integer from 65 through 110. A one-shot helper attempts the class on
+one unique integer from 65 through 111. A one-shot helper attempts the class on
 `stderr`, but the sentinel never awaits that helper, so a blocked diagnostic
 cannot change or delay the status. Running-component failures enter the owner's
 one classifier through `{:EXIT, pid, reason}`; startup steps enter through their
@@ -6215,6 +6215,7 @@ terms remain only in bounded redacted diagnostics and never become a class.
 | `drain_failed` | 108 | `quiesce/1` returned `{:error, :runtime_unavailable}`; during active quiesce captured Control exited or changed identity while the retained exact root remained live, including when an EventDispatcher-first monitor event's nonblocking checks found that root live and captured Control absent or dead; or the monitored outer quiesce helper exited or disappeared without its exact result and no earlier component class was latched, so no census or fence result can be claimed | `fatal:drain_failed`, best effort before crash-equivalent teardown |
 | `owner_lost` | 109 | The monitored daemon owner died before sending a fatal latch | — no live owner can write a record |
 | `prepare_index_interrupted` | 110 | Offline import: a handled operator stop won after signal-handler installation; the scan is reaped and Store and placement cleanup are bounded, while a post-rename complete image is retained | — no socket exists |
+| `session_index_lost` | 111 | The daemon session index exited while the daemon was running; added by the [session-index-lost disposition](../developer/agent-context-map.md#disposition-m5-session-index-lost-2026-09-23) | `fatal:session_index_lost` |
 
 The mapping is injective and closed: status `0` has no nonzero class; every
 composition input, startup step, linked running component, drain failure and

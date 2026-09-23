@@ -750,6 +750,7 @@
         "fatal:custody_lost",
         "fatal:capability_lost",
         "fatal:relay_lost",
+        "fatal:session_index_lost",
         "fatal:drain_failed"
       ],
       "message": "bounded_server_authored_redacted_text"
@@ -1239,7 +1240,7 @@
   },
   "vectors": {
     "path": "apps/loopex_protocol/priv/vectors/loopex-experimental-2.json",
-    "sha256": "82b20498272f5ca155d3f42f63fc12b94deaea24b3be1f92fc120bb4899c5fec"
+    "sha256": "d37e086e42b84b266bbd80633b5b1409a61373a047eded8bede70a595bb33beb"
   },
   "initialize_limits": {
     "inherited_generation_one": true,

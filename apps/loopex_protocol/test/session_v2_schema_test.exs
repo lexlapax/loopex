@@ -249,6 +249,7 @@ defmodule LoopexProtocol.Session.V2Test do
                "fatal:capability_lost",
                "fatal:relay_lost",
                "fatal:listener_lost",
+               "fatal:session_index_lost",
                "fatal:drain_failed"
              ])
 

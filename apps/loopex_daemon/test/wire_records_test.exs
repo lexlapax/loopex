@@ -15,7 +15,7 @@ defmodule LoopexDaemon.WireRecordsTest do
       |> Map.fetch!("cases")
       |> Enum.filter(&String.starts_with?(&1["id"], "daemon_stopping_"))
 
-    assert length(vectors) == 13
+    assert length(vectors) == 14
 
     for %{"raw_hex" => hex} <- vectors do
       bytes = Base.decode16!(hex, case: :lower)

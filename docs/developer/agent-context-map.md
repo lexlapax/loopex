@@ -5734,3 +5734,28 @@ What changes is what the two cases prove: the automated sequence each case
 drives, without a person's independent observation of it. The cases, the
 release check and every other lane are unchanged. The closure evidence page
 says this beside the release-check result.
+
+<a id="disposition-m5-session-index-lost-2026-09-23"></a>
+### M5 session-index loss and the transport cut — 2026-09-23
+
+An adversarial review of candidate `e1dea424` found two lifecycle gaps. First,
+the daemon's session index is a linked running component, yet its exit was
+ignored, so a daemon whose index had died stayed ready while every create, list
+and status request exited its connection. On 2026-09-23 the maintainer chose,
+over folding the loss into another component's class or restarting the index in
+a degraded mode, a fail-stop with its own class: `session_index_lost`, exit
+status `111`, reaching clients as `daemon.stopping` with
+`fatal:session_index_lost`. The principle is the exit-status table's rule that
+every linked running component has exactly one row. The generation-two
+`daemon.stopping` reason set, its schema and vector files and ADR 0032's list
+of ordinary component reasons gain that one value. The negotiated
+`loopex.experimental/2` schema digest, which covers methods, record families,
+error codes and limits, is unchanged. No release carries generation two or the
+daemon, so no migration is needed. Clients should treat `daemon.stopping`
+reasons they do not know as a fatal stop, as they already must.
+
+Second, the orderly stop's transport cut ran separate clocks and dropped the
+uninitialized-peer sweep's result, where the plan and ADR 0032 require one
+absolute five-second deadline begun before the relay cut and a fail-stop on any
+missing acknowledgement. That is a defect against the accepted plan, repaired
+without a decision; the code now matches the text.

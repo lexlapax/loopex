@@ -364,8 +364,8 @@ defmodule LoopexProtocol.PublicSchemaConformanceTest do
 
   test "generation-two schema and vector files have pinned identities" do
     for {directory, expected} <- [
-          {"schema", "49e79bc8bd087d7381228db280a5e702f2544f9965398edf23fe655e845fb5ee"},
-          {"vectors", "82b20498272f5ca155d3f42f63fc12b94deaea24b3be1f92fc120bb4899c5fec"}
+          {"schema", "f30f9822f818417823f6fa917175314060fe5dcb0429f97280d0af2bc3372970"},
+          {"vectors", "d37e086e42b84b266bbd80633b5b1409a61373a047eded8bede70a595bb33beb"}
         ] do
       path =
         Path.join([
@@ -379,6 +379,14 @@ defmodule LoopexProtocol.PublicSchemaConformanceTest do
       assert measured == expected, "the generation-two #{directory} file is #{measured}"
       assert JSON.decode!(bytes)["generation"] == V2.generation()
     end
+
+    # The schema names its vectors file by digest; the two must agree.
+    priv = Application.app_dir(:loopex_protocol, "priv")
+    schema = JSON.decode!(File.read!(Path.join([priv, "schema", "loopex-experimental-2.json"])))
+    vectors = File.read!(Path.join([priv, "vectors", "loopex-experimental-2.json"]))
+
+    assert schema["vectors"]["sha256"] ==
+             :sha256 |> :crypto.hash(vectors) |> Base.encode16(case: :lower)
   end
 
   test "an encoded record is the exact bytes an independent implementation expects" do

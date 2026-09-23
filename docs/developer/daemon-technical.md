@@ -59,7 +59,7 @@ the listener.
 
 | Phase | Clock | On a missed acknowledgement |
 | --- | --- | --- |
-| Admission cut and transport gate; listener stop; uninitialized connections reaped | `transport_cut_deadline_ms` 5 s | `relay_lost` |
+| Admission cut and transport gate; the listener killed and its exact exit awaited; uninitialized connections reaped | one absolute `transport_cut_deadline_ms` 5 s, begun before the relay cut | `relay_lost` for the relay acknowledgement, `connections_lost` for the registry gate or sweep, `listener_lost` for the listener's exit; the collaboration owner decides at the deadline and the service waits `@verdict_margin_ms` 1 s more only for that verdict, treating none as `relay_lost` |
 | Admitted requests reach core | `admission_wait_ms` 5 s | continues |
 | `freeze_lease_ops`: no new lease operation; executing rows finish | `relay_control_timeout_ms` 5 s | `connections_lost` when registry mirror or holder-close work is unfinished; otherwise `relay_lost` |
 | `quiescing` | a fresh 5 s | `relay_lost` |

@@ -236,8 +236,12 @@ census, coordinator termination and fencing, the teardown, the Store stop and
 the placement release. `admission_wait_ms` is 5 s and `teardown_ms` is 30 s; an
 orderly stop of a daemon holding 512 initialized, attached connections measured
 119 ms on the development machine, and the closure evidence records the
-measurement on each supported toolchain. A relay that
-misses a barrier ends the stop as `relay_lost`, except that registry or
+measurement on each supported toolchain. The transport cut is one
+5 s deadline for refusing new work, closing the listener and closing clients
+that never initialized; whatever misses it ends the stop as `relay_lost`,
+`connections_lost` or `listener_lost`, decided at the deadline and latched
+within a further 1 s. A relay that
+misses a later barrier ends the stop as `relay_lost`, except that registry or
 holder-close work unfinished at the lease-operation freeze ends it as
 `connections_lost`; a component lost while core quiesce runs, or before success
 is reported, ends it with that component's class. Losing the runtime's Control
@@ -259,6 +263,7 @@ fatal.
 | 90–95 | `signal_install_failed` … `readiness_write_failed` | Startup components |
 | 96–109 | `store_capacity_exceeded` … `owner_lost` | A running component failed and the daemon fail-stopped |
 | 110 | `prepare_index_interrupted` | The import was stopped |
+| 111 | `session_index_lost` | The running daemon's session index failed and the daemon fail-stopped |
 
 ## Related
 
