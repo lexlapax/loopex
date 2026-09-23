@@ -76,7 +76,11 @@ defmodule LoopexDaemon.ListenerTest do
     _ = send_frame(client, initialize())
 
     eventually(fn -> ConnectionRegistry.status(fixture.registry).occupied == 0 end)
-    assert {:error, :closed} = :socket.recv(client, 0, 1_000)
+
+    # Closing a connection whose sent bytes were never read resets it on
+    # Linux and closes it on Darwin; either way nothing was answered.
+    assert {:error, reason} = :socket.recv(client, 0, 1_000)
+    assert reason in [:closed, :econnreset]
     assert Listener.phase(fixture.listener) == :accepting
     assert :ok = :socket.close(client)
   end

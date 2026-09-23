@@ -5,6 +5,9 @@ defmodule Loopex.LLM.ReqLLM.ProviderRetainerBoundariesTest do
 
   alias Loopex.LLM.ReqLLM.ProviderIsolationFixture, as: Fixture
 
+  # Technical depth: the case proves what a retainer's death stops, not a
+  # deadline, so its request budget of 60 s covers starting the companion on
+  # a loaded two-CPU runner, where the fixture's 10 s default did not.
   test "retainer death during actual credential delivery stops the busy owned writer and child" do
     fixture =
       Fixture.new(:credential_transfer,
@@ -12,7 +15,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderRetainerBoundariesTest do
         credential: String.duplicate("k", 65_536)
       )
 
-    request = Fixture.request()
+    request = Fixture.request(deadline_ms: 60_000)
     {retainer, retainer_monitor} = spawn_monitor(fn -> receive do: (:stop -> :ok) end)
     call = Fixture.managed(fixture, request, retainer)
     guardian = call.guardian
