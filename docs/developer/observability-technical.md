@@ -110,6 +110,12 @@ traced process and never replies to one.
 Match specs by level: `:calls` sends the caller; `:returns` and `:arguments` add
 the return trace; `:arguments` drops the `:arity` flag so argument terms arrive.
 
+Call patterns are installed with `trace:function/4` when the session starts,
+and OTP installs them only for modules already loaded, so a named module
+loaded afterwards is not traced by that session; the session does not load
+code itself. `apps/loopex_cli/test/trace_exclusion_test.exs` loads the provider
+bridge before its session for that reason.
+
 **Exclusion.** `Loopex.Trace.exclude_self/2` takes a host-bound capability
 (`Loopex.Trace.Capability.Handle`, bound once per runtime) and the exact
 `{module, function, arity}` list that can carry sensitive data. `Control`

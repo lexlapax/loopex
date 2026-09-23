@@ -84,6 +84,11 @@ The default allowlist is the two Loopex namespaces. Wildcards exist only over
 those, because a wildcard over anything else would let a trace session observe
 code the runtime does not own. To trace an adapter, name that module exactly.
 
+A session traces only modules already loaded when it starts: a module the
+runtime first loads later — an adapter before its first call, for example — is
+not traced by that session. Start the session after the code you want to see
+has run once, or load that module first.
+
 Entries go to the runtime's diagnostics plane by default, or to the logger.
 
 ### When tracing is unavailable
