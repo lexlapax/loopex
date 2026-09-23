@@ -186,6 +186,62 @@ defmodule LoopexDaemon.ServiceLifecycleTest do
     assert Task.await(daemon.task, 30_000) == 0
   end
 
+  # Concept: the listener must still be alive when the daemon is released to
+  # accept; one that dies while readiness is being written ends the start as
+  # `listener_start_failed`, and no client is ever accepted.
+  #
+  # Technical depth: the sentinel's output device holds the readiness write
+  # until the test has killed the parked listener, then lets it complete. The
+  # owner's recheck after the write finds the listener gone, so the gate never
+  # opens: the sentinel exits `listener_start_failed` and nothing accepts on the
+  # socket path.
+  test "a listener lost while readiness is written ends the start listener_start_failed",
+       %{options: options} do
+    test = self()
+    device = spawn_link(fn -> holding_device(test) end)
+    sentinel_test = self()
+
+    task =
+      Task.async(fn ->
+        Sentinel.run(options, output: device, install_signals: false, notify: sentinel_test)
+      end)
+
+    assert_receive {:readiness_held, writer}, 30_000
+
+    [listener] =
+      for pid <- Process.list(),
+          {:dictionary, dictionary} <- [Process.info(pid, :dictionary)],
+          dictionary[:"$initial_call"] == {LoopexDaemon.Listener, :init, 1},
+          do: pid
+
+    Process.exit(listener, :kill)
+    send(writer, :release_write)
+
+    {:ok, failed} = LoopexDaemon.ExitStatus.fetch(:listener_start_failed)
+    assert Task.await(task, 60_000) == failed
+
+    assert {:error, _refused} =
+             :gen_tcp.connect({:local, options[:socket_path]}, 0, [:binary], 500)
+  end
+
+  defp holding_device(test) do
+    receive do
+      {:io_request, from, reply_as, {:put_chars, _encoding, _chars}} ->
+        send(test, {:readiness_held, self()})
+
+        receive do
+          :release_write -> :ok
+        end
+
+        send(from, {:io_reply, reply_as, :ok})
+        holding_device(test)
+
+      {:io_request, from, reply_as, _request} ->
+        send(from, {:io_reply, reply_as, {:error, :request}})
+        holding_device(test)
+    end
+  end
+
   test "a second daemon on a held root loses at the placement lock",
        %{options: options} do
     first = start_daemon(options)
