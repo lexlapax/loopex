@@ -124,6 +124,112 @@ defmodule LoopexDaemon.TelemetryParityTest do
     end
   end
 
+  # Concept: the daemon's history is the root's history: after an orderly
+  # stop, an offline host reopening the same root replays exactly the durable
+  # events the daemon's clients saw, with the same sequences and identities.
+  #
+  # Technical depth: every durable event record a socket client received during
+  # one scripted turn is kept; after `SIGTERM` the root's Store is opened by a
+  # fresh embedded runtime under the daemon's placement identity, which resumes
+  # the session; replay from sequence zero begins with exactly the same kinds,
+  # sequences and event identities.
+  @tag timeout: 180_000
+  test "after an orderly stop the root replays what the daemon's clients saw" do
+    root = workspace_root("ldt-replay")
+    provider = provider("replay")
+    socket = Path.join([root, "s", "daemon", "d.sock"])
+    options = [state_root: Path.join(root, "s"), socket_path: socket, credential: @credential]
+    options = options ++ host_options(root, provider)
+    {:ok, output} = StringIO.open("")
+    test = self()
+
+    daemon =
+      Task.async(fn ->
+        Sentinel.run(options, output: output, install_signals: false, notify: test)
+      end)
+
+    assert_receive {:loopex_daemon_sentinel, sentinel, owner_ref, _owner}, 5_000
+    await_ready(output, 1_000)
+    {:ok, client} = :socket.open(:local, :stream, :default)
+    :ok = :socket.connect(client, %{family: :local, path: socket})
+    {encoded, epoch} = drive(client)
+    before_answer = events_until_question(client, epoch, [])
+    seen = before_answer ++ events_until_finished(client, [])
+    :socket.close(client)
+    send(sentinel, {:daemon_signal, owner_ref, :sigterm})
+    assert Task.await(daemon, 60_000) == 0
+
+    {:ok, session_id} = Wire.identity(encoded)
+    {:ok, placement} = Loopex.runtime_placement_id(Path.join(root, "s"))
+    {:ok, adapter} = Loopex.Store.Local.start_link(path: Path.join([root, "s", "store.log"]))
+    {:ok, store} = Loopex.Store.new(Loopex.Store.Local, adapter)
+
+    {:ok, runtime} =
+      Loopex.start_link(runtime_id: placement, store: store, context_token_budget: 8_192)
+
+    {:ok, _resumed} = Loopex.resume_session(runtime, session_id, command_id: "replay-resume")
+    {:ok, attachment} = Loopex.attach(runtime, session_id, after_event_sequence: 0)
+    replayed = attachment |> drain_events([]) |> Enum.take(length(seen))
+
+    assert Enum.map(replayed, &{&1.kind, &1.event_sequence, &1.event_id}) ==
+             Enum.map(seen, fn event ->
+               {:ok, event_id} = Wire.identity(event["event_id"])
+               {event["kind"], String.to_integer(event["event_sequence"]), event_id}
+             end)
+
+    :ok = Loopex.stop(runtime)
+    :ok = GenServer.stop(adapter)
+  end
+
+  # Keeps every durable event up to the interaction's question, answers it,
+  # and returns those events in order.
+  defp events_until_question(socket, epoch, acc) do
+    [record] = receive_records(socket, 1)
+
+    case record do
+      %{"type" => "event", "event" => %{"kind" => "interaction.requested"} = event} ->
+        :ok =
+          send_frame(socket, %{
+            "method" => "session.respond_interaction",
+            "request_id" => "answer",
+            "command_id" => Wire.encode_identity("parity-answer"),
+            "interaction_id" => Wire.encode_identity(find_key(event, "interaction_id")),
+            "answer" => %{"choice_id" => Wire.encode_identity("allow")},
+            "writer_epoch" => epoch
+          })
+
+        Enum.reverse([event | acc])
+
+      %{"type" => "event", "event" => event} ->
+        events_until_question(socket, epoch, [event | acc])
+
+      _other ->
+        events_until_question(socket, epoch, acc)
+    end
+  end
+
+  defp events_until_finished(socket, acc) do
+    [record] = receive_records(socket, 1)
+
+    case record do
+      %{"type" => "event", "event" => %{"kind" => "run.finished"} = event} ->
+        Enum.reverse([event | acc])
+
+      %{"type" => "event", "event" => event} ->
+        events_until_finished(socket, [event | acc])
+
+      _other ->
+        events_until_finished(socket, acc)
+    end
+  end
+
+  defp drain_events(attachment, acc) do
+    case Loopex.next_event(attachment) do
+      {:ok, event} -> drain_events(attachment, [event | acc])
+      _none -> Enum.reverse(acc)
+    end
+  end
+
   defp collect(run) do
     handler = {__MODULE__, make_ref()}
     parent = self()
