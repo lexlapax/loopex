@@ -30,7 +30,14 @@ defmodule Loopex.LLM.ReqLLM.CredentialPlaneTest do
 
   alias Loopex.LLM.ReqLLM, as: Adapter
   alias Loopex.LLM.ReqLLM.ProviderIsolationFixture, as: Fixture
-  alias Loopex.LLM.ReqLLM.{CredentialRegistry, ProviderCodec, ProviderPhaseDiagnostic}
+
+  alias Loopex.LLM.ReqLLM.{
+    CredentialCustody,
+    CredentialRegistry,
+    ProviderCodec,
+    ProviderPhaseDiagnostic
+  }
+
   alias Loopex.Model
 
   @sentinel "sk-loopex-credential-plane-sentinel-2f9c41"
@@ -534,6 +541,43 @@ defmodule Loopex.LLM.ReqLLM.CredentialPlaneTest do
       assert Fixture.count(fixture) == 0
       Fixture.assert_gone(fixture)
       GenServer.stop(empty_pid)
+    end
+
+    # Concept: invocations sharing one token each receive one whole credential
+    # as custody held it when that invocation resolved it; a rotation between
+    # them changes what the next invocation receives, never a mix.
+    #
+    # Technical depth: the first managed call completes on the original key,
+    # custody rotates to a second key, and two concurrent calls then resolve
+    # the same token. The raw request headers show the first call carried only
+    # the original key and both later calls only the rotated one.
+    test "same-token invocations around a rotation each carry one whole credential" do
+      original = @sentinel <> "-before-rotation"
+      rotated = @sentinel <> "-after-rotation"
+      fixture = Fixture.new(:reply, credential: original)
+      {:ok, custody} = CredentialCustody.reference(fixture.custody_pid)
+
+      first = Fixture.managed(fixture)
+      await_reply(first)
+      Fixture.stop(first)
+
+      assert :ok = CredentialCustody.rotate(custody, rotated)
+      second = Fixture.managed(fixture)
+      third = Fixture.managed(fixture)
+      await_reply(second)
+      await_reply(third)
+      Fixture.stop(second)
+      Fixture.stop(third)
+
+      assert [before | after_rotation] = Fixture.request_headers(fixture)
+      assert before =~ original
+      refute before =~ rotated
+      assert length(after_rotation) == 2
+
+      for headers <- after_rotation do
+        assert headers =~ rotated
+        refute headers =~ original
+      end
     end
 
     test "one child diagnostic containing two concurrently live synthetic keys cannot escape" do
