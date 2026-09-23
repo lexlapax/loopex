@@ -5610,3 +5610,31 @@ from `loopex daemon`. The general prohibition on client-to-client
 dependencies is unchanged. This changes what `mix loopex.deps_budget`
 enforces; its cases in `apps/loopex/test/deps_budget_test.exs` pin the new
 role in both directions.
+
+<a id="disposition-m5-progress-routing-2026-09-22"></a>
+### M5 per-session progress routing — 2026-09-22
+
+The accepted M5 plan reuses ADR 0023's progress record on the daemon socket,
+but core delivered transient progress to one runtime-wide `progress_to` sink
+whose stream items carry no session identity, so a daemon serving many
+sessions could not route progress to the right attachment. On 2026-09-22 the
+maintainer chose, over emitting no progress in M5, an additional named core
+change: core tags the progress it delivers with its session so a host sink can
+route it, and the daemon forwards each session's progress to that session's
+attachments within ADR 0023's 32-record and 512 KiB progress bound, dropping
+or coalescing before it would delay a durable record. Embedded callers keep
+their existing progress messages.
+
+<a id="disposition-m5-escript-exclusion-2026-09-22"></a>
+### M5 archive build exclusion for the command escript — 2026-09-22
+
+The plan's fresh-source witness compares the extraction's manifest before and
+after the documented build with exactly one exclusion, the top-level `_build`
+and `deps` roots. The documented build writes the `loopex` escript beside its
+application at `apps/loopex_cli/loopex`, so an honest build always differs by
+that one file. On 2026-09-22 the maintainer chose, over moving the escript into
+`_build` or dropping the after-build comparison, to name exactly
+`apps/loopex_cli/loopex` as a second exclusion — the build's one declared
+output outside the build roots — recorded with the other exclusion in the
+retained evidence. The operator build and `bin/loopex` are unchanged; any other
+path the build writes is still a change.
