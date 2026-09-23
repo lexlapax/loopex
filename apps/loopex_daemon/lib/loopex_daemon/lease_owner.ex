@@ -215,6 +215,31 @@ defmodule LoopexDaemon.LeaseOwner do
     :ok
   end
 
+  @doc """
+  ## Concept
+
+  Asks the lease owner to drop a claimed acquire or release whose connection
+  was lost while it was still queued, so no later completion is attempted for
+  a row the daemon owner settles as a connection loss.
+
+  ## Technical depth
+
+  The owner answers `{:lease_owner_resolution_ack, operation_ref, owner,
+  owner_incarnation, :discard, result}`: `:discarded` when it removed the
+  queued descriptor, `:proposed` when that permit already has a transition
+  (its proposal reached the daemon owner first, by same-sender order), and
+  `:absent` when the owner no longer holds it.
+  """
+  @spec request_discard(pid(), reference(), binary(), term()) :: :ok
+  def request_discard(owner, operation_ref, owner_incarnation, permit_id) do
+    send(
+      owner,
+      {:daemon_lease_resolution, operation_ref, self(), owner_incarnation, :discard, permit_id}
+    )
+
+    :ok
+  end
+
   @doc false
   @spec request_expiry_resolution(pid(), reference(), binary(), reference()) :: :ok
   def request_expiry_resolution(owner, operation_ref, owner_incarnation, expiry_ref) do
@@ -1037,6 +1062,29 @@ defmodule LoopexDaemon.LeaseOwner do
          expiry_ref
        ) do
     resolve_expiry_transition(state, lease)
+  end
+
+  defp apply_daemon_resolution(state, :discard, permit_id) do
+    {waiters, kept_waiters} = Enum.split_with(state.waiters, &(&1.permit_id == permit_id))
+
+    {releases, kept_operations} =
+      Enum.split_with(state.pending_operations, fn
+        {:release, descriptor} -> descriptor.permit_id == permit_id
+        _operation -> false
+      end)
+
+    cond do
+      waiters != [] or releases != [] ->
+        state = %{state | waiters: kept_waiters, pending_operations: kept_operations}
+        Logger.debug("loopex daemon lease owner queued operation discarded")
+        {:discarded, cancel_waiter_timer(state, permit_id)}
+
+      match?(%{permit_id: ^permit_id}, state.transition) ->
+        {:proposed, state}
+
+      true ->
+        {:absent, state}
+    end
   end
 
   defp apply_daemon_resolution(state, _action, _payload),
