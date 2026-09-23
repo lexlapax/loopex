@@ -571,19 +571,44 @@ defmodule LoopexDaemon.SocketTransportTest do
     :ok = send_frame(controller, attach("reattach", session_id))
     assert [%{"request_id" => "reattach", "type" => "snapshot"}] = receive_records(controller, 1)
 
+    # A follow-up on the idle session gets past the control check only with
+    # the live lease: a client without it and the holder with a wrong epoch
+    # are refused for control, while the holder's own epoch reaches the run
+    # check and is refused only because no run is active.
+    follow_up = fn socket, request_id, writer_epoch ->
+      :ok =
+        send_frame(socket, %{
+          "method" => "session.follow_up",
+          "request_id" => request_id,
+          "command_id" => Wire.encode_identity(request_id),
+          "content_b64" => Wire.encode_bytes("still in control"),
+          "writer_epoch" => writer_epoch
+        })
+
+      assert [%{"request_id" => ^request_id} = record | _rest] =
+               receive_until(socket, &(&1["request_id"] == request_id))
+
+      record
+    end
+
+    unleased = follow_up.(observer, "observer-follow-up", epoch)
+    stale = follow_up.(controller, "stale-follow-up", Wire.encode_identity("not-the-epoch"))
+    held = follow_up.(controller, "after-succession", epoch)
+
+    assert %{"type" => "error", "code" => "control_not_held"} = unleased
+    assert %{"type" => "error", "code" => "control_not_held"} = stale
+    assert %{"type" => "admission", "status" => "refused", "reason" => "no_active_run"} = held
+
     :ok =
       send_frame(controller, %{
-        "method" => "session.follow_up",
-        "request_id" => "after-succession",
-        "command_id" => Wire.encode_identity("after-succession"),
-        "content_b64" => Wire.encode_bytes("still in control"),
+        "method" => "session.release_control",
+        "request_id" => "release",
+        "session_id" => Wire.encode_identity(session_id),
         "writer_epoch" => epoch
       })
 
-    assert [%{"request_id" => "after-succession", "type" => "admission"} = admission | _rest] =
-             receive_until(controller, &(&1["request_id"] == "after-succession"))
-
-    assert admission["status"] in ["accepted", "refused"]
+    assert [%{"request_id" => "release", "type" => "result"} | _rest] =
+             receive_until(controller, &(&1["request_id"] == "release"))
   end
 
   defp receive_until(socket, predicate, acc \\ []) do
