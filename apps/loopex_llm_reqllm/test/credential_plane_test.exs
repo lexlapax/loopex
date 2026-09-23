@@ -580,6 +580,46 @@ defmodule Loopex.LLM.ReqLLM.CredentialPlaneTest do
       end
     end
 
+    # Concept: only the exact parties of an invocation can move its guardian.
+    # A bootstrap or credential-phase result, a send acknowledgement or a stop
+    # request that names the wrong reference, sender, guardian or phase changes
+    # nothing, and the invocation completes as if none had arrived.
+    #
+    # Technical depth: the companion is held at entry while this test, which
+    # is none of the invocation's parties, sends the live guardian forged forms
+    # of each message the guardian acts on. The companion is then released and
+    # the invocation must return its ordinary reply with one authorized request.
+    test "forged guardian messages with the wrong identities change nothing" do
+      fixture = Fixture.new(:delayed_entry, credential: @sentinel <> "-forged")
+      call = Fixture.managed(fixture)
+      assert Fixture.eventually(fn -> Fixture.reached?(fixture, "pid") end)
+      guardian = call.guardian
+      stranger = self()
+      forged_ref = make_ref()
+      now = System.monotonic_time(:millisecond)
+
+      for message <- [
+            {:bootstrap_result, forged_ref, stranger, guardian, :ok},
+            {:bootstrap_result, forged_ref, stranger, stranger, {:error, :unavailable}},
+            {:credential_phase_result, forged_ref, guardian, stranger, :deliver, :ok},
+            {:credential_phase_result, forged_ref, stranger, stranger, :deliver,
+             {:error, :timeout}},
+            {:provider_sent, stranger, :bootstrap, :ok},
+            {:provider_sent, stranger, :credential, {:error, :closed}},
+            {:loopex_provider_resource_stop, forged_ref, make_ref(), stranger, now, now + 1},
+            {:DOWN, make_ref(), :process, stranger, :killed}
+          ] do
+        send(guardian, message)
+      end
+
+      assert Process.alive?(guardian)
+      Fixture.release(fixture)
+      await_reply(call)
+      Fixture.stop(call)
+      assert_post(fixture)
+      Fixture.assert_gone(fixture)
+    end
+
     test "one child diagnostic containing two concurrently live synthetic keys cannot escape" do
       second_key = @sentinel <> "-second"
       first_key = @sentinel <> "-first"
