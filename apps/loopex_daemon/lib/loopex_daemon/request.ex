@@ -473,7 +473,9 @@ defmodule LoopexDaemon.Request do
           "revocation_state"
         ]
 
-        if map_size(decision) == length(keys) and Enum.sort(Map.keys(decision)) == Enum.sort(keys),
+        exact_keys? = Enum.sort(Map.keys(decision)) == Enum.sort(keys)
+
+        if map_size(decision) == length(keys) and exact_keys?,
           do: ResourcePack.normalize_decision(decision),
           else: :error
 
