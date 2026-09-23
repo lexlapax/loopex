@@ -1,7 +1,10 @@
 Code.require_file("support/provider_build_fixture.exs", __DIR__)
 
 defmodule Loopex.LLM.ReqLLM.ProviderCompanionEntryTest do
-  use ExUnit.Case, async: false
+  # The companion is built into this case's own root from copies of the seed,
+  # dependencies and Mix archives, and the socket is its own; nothing is
+  # shared with another case, so the module runs concurrently.
+  use ExUnit.Case, async: true
 
   alias Loopex.LLM.ReqLLM.ProviderBuildFixture
 

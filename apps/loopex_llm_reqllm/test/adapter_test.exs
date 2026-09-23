@@ -79,6 +79,19 @@ defmodule Loopex.LLM.ReqLLM.AdapterTest do
 
       assert reads == expected
       refute source =~ ~r/System\.fetch_env!?\(/
+
+      # Every other way to read the environment is absent: the Erlang calls
+      # and a captured or applied `System.get_env`. The whole-environment read
+      # is the launcher's one allowed name enumeration, counted above.
+      for form <- [
+            ~r/:os\.getenv/,
+            ~r/:os\.env\b/,
+            ~r/&System\.get_env\//,
+            ~r/&System\.fetch_env/,
+            ~r/apply\(\s*System\s*,\s*:(get|fetch)_env/
+          ] do
+        refute source =~ form, "#{Path.basename(path)} reads the environment as #{inspect(form)}"
+      end
     end
   end
 end
