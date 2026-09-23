@@ -158,6 +158,34 @@ defmodule LoopexDaemon.ServiceLifecycleTest do
     assert {:ok, _holder} = Placement.live_owner(state_root)
   end
 
+  # Concept: the socket's privacy is verified, never repaired: a daemon
+  # directory that others can read refuses the start by its class and binds
+  # nothing, while an ordinary `0755` state root is accepted because the daemon
+  # owns only its own `0700` subdirectory.
+  test "a permissive daemon directory refuses the start and a 0755 root is accepted",
+       %{options: options, state_root: state_root} do
+    File.mkdir_p!(Path.join(state_root, "daemon"))
+    File.chmod!(state_root, 0o755)
+    File.chmod!(Path.join(state_root, "daemon"), 0o755)
+
+    {:ok, unverified} = LoopexDaemon.ExitStatus.fetch(:socket_permission_unverified)
+    {:ok, output} = StringIO.open("")
+    assert Sentinel.run(options, output: output, install_signals: false) == unverified
+    assert StringIO.contents(output) == {"", ""}
+    refute File.exists?(options[:socket_path])
+    assert File.stat!(Path.join(state_root, "daemon")).mode |> Bitwise.band(0o777) == 0o755
+    assert Placement.live_owner(state_root) == :none
+    refute File.exists?(Path.join(state_root, "store.log.writer"))
+
+    File.chmod!(Path.join(state_root, "daemon"), 0o700)
+    daemon = start_daemon(options)
+    ready = await_ready(daemon.output)
+    assert ready["socket"] == options[:socket_path]
+    assert File.stat!(state_root).mode |> Bitwise.band(0o777) == 0o755
+    send(daemon.sentinel, {:daemon_signal, daemon.owner_ref, :sigterm})
+    assert Task.await(daemon.task, 30_000) == 0
+  end
+
   test "a second daemon on a held root loses at the placement lock",
        %{options: options} do
     first = start_daemon(options)
