@@ -424,7 +424,11 @@ defmodule LoopexDaemon.ServiceLifecycleTest do
     send(daemon.sentinel, {:daemon_signal, daemon.owner_ref, :sigterm})
     assert_receive :freeze_parked, 10_000
     :ok = :sys.suspend(registry)
+    lease_owner_monitor = Process.monitor(lease_owner)
     Process.exit(lease_owner, :kill)
+    assert_receive {:DOWN, ^lease_owner_monitor, :process, ^lease_owner, :killed}, 500
+    # The owner's exit must already be queued behind the parked freeze call.
+    assert :ok = await_queued_exit(collaboration, lease_owner)
     send(collaboration, :continue_freeze)
 
     {:ok, connections_lost} = LoopexDaemon.ExitStatus.fetch(:connections_lost)
@@ -446,6 +450,21 @@ defmodule LoopexDaemon.ServiceLifecycleTest do
     {:ok, store_lost} = LoopexDaemon.ExitStatus.fetch(:store_lost)
     assert Task.await(daemon.task, 40_000) == store_lost
   end
+
+  defp await_queued_exit(pid, exited, attempts \\ 100)
+
+  defp await_queued_exit(pid, exited, attempts) when attempts > 0 do
+    {:messages, messages} = Process.info(pid, :messages)
+
+    if Enum.any?(messages, &match?({:EXIT, ^exited, _reason}, &1)) do
+      :ok
+    else
+      Process.sleep(5)
+      await_queued_exit(pid, exited, attempts - 1)
+    end
+  end
+
+  defp await_queued_exit(_pid, _exited, 0), do: {:error, :not_queued}
 
   defp receive_records_or_closed(socket) do
     receive_records(socket, 1)
