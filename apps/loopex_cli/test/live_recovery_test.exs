@@ -298,6 +298,44 @@ defmodule LoopexCli.LiveRecoveryTest do
     stop_daemon(daemon)
   end
 
+  # Concept: a complete `daemon.stopping` record is terminal: the command ends
+  # successfully saying the daemon stopped and does not reconnect, which is
+  # what distinguishes it from a bare end-of-file that recovery answers.
+  #
+  # Technical depth: the proxy replaces the run's `run.started` event with an
+  # `operator_stop` record. The command ends `:ok` with the stop message on
+  # standard error, and the proxy sees exactly one `initialize`.
+  @tag timeout: 120_000
+  test "a daemon.stopping record ends the command without reconnecting", context do
+    daemon = start_daemon(context, launch("unseen answer", "stopping"))
+
+    stopping =
+      ~s({"message":"the daemon is stopping; reconnect after it restarts","reason":"operator_stop","type":"daemon.stopping"})
+
+    proxy =
+      DaemonProxy.start(context.socket, [], fn bytes ->
+        bytes
+        |> String.split("\n")
+        |> Enum.map_join("\n", fn line ->
+          case JSON.decode(line) do
+            {:ok, %{"type" => "event", "event" => %{"kind" => "run.started"}}} -> stopping
+            _other -> line
+          end
+        end)
+      end)
+
+    stderr =
+      capture_io(:stderr, fn ->
+        send(self(), {:result, run(["run", "--daemon", proxy.path, "go"])})
+      end)
+
+    assert_received {:result, {result, _output}}
+    assert result == :ok
+    assert stderr =~ "the daemon stopped"
+    assert Enum.count(DaemonProxy.seen(proxy), &(&1 == "initialize")) == 1
+    stop_daemon(daemon)
+  end
+
   @tag timeout: 120_000
   test "a lost listing reply is asked once more and printed once", context do
     daemon = start_daemon(context, launch("listed answer", "listed"))
