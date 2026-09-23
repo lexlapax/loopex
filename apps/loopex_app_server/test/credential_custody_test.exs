@@ -41,6 +41,38 @@ defmodule LoopexAppServer.CredentialCustodyTest do
              {:error, :provider_credential_required}
   end
 
+  # Concept: a host-supplied credential plane that is not exactly the plane
+  # shape is refused before any edge starts: no Store file, marker or runtime
+  # exists afterwards.
+  test "a malformed credential plane refuses before any edge starts" do
+    root = Path.join(System.tmp_dir!(), "lap-#{System.unique_integer([:positive])}")
+    workspace = Path.join(root, "w")
+    File.mkdir_p!(workspace)
+    on_exit(fn -> File.rm_rf(root) end)
+    state_root = Path.join(root, "s")
+
+    for plane <- [
+          %{capability: :not_a_capability, model_options: []},
+          %{capability: nil, model_options: [credential_token: :forged]},
+          %{model_options: []},
+          :not_a_map
+        ] do
+      assert LoopexComposition.with_runtime(
+               [
+                 runtime_id: "app-server-plane",
+                 state_root: state_root,
+                 workspace: workspace,
+                 policy: Policy,
+                 credential_plane: plane
+               ],
+               fn _runtime -> flunk("a malformed plane reached the runtime") end
+             ) == {:error, {:invalid_composition_option, :credential_plane}}
+
+      refute File.exists?(Path.join(state_root, "store.log"))
+      refute File.exists?(Path.join(state_root, "store.log.writer"))
+    end
+  end
+
   # Concept: the foreground server's composition consumes the credential into
   # custody; that custody refuses requests it does not recognize, and its loss
   # reaches no report, log or observed exit with the credential in it.
