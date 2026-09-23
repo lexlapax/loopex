@@ -117,15 +117,19 @@ defmodule Loopex.LLM.ReqLLM.ProviderWorker do
     # invocation is intentional: the source placeholder returns nil, while the
     # packaged module carries the immutable manifest checked below.
     case :erlang.apply(ProviderBuildIdentity, :manifest, []) do
+      # The source digest is the archive build's manifest digest, and nil for
+      # a build from a checkout.
       %{
         "source" => source,
+        "source_digest" => source_digest,
         "version" => version,
         "dependency_lock_sha256" => lock,
         "packaged_input_sha256" => input,
         "elixir" => elixir,
         "otp" => otp
       } = manifest
-      when map_size(manifest) == 6 and is_binary(source) and is_binary(version) and
+      when map_size(manifest) == 7 and is_binary(source) and
+             (is_nil(source_digest) or is_binary(source_digest)) and is_binary(version) and
              is_binary(lock) and is_binary(input) and is_binary(elixir) and is_binary(otp) ->
         actual =
           :crypto.hash(:sha256, :erlang.term_to_binary(manifest, [:deterministic]))
