@@ -1090,9 +1090,28 @@ defmodule LoopexDaemon.OwnerTest do
     assert_receive {:registering, child}, 500
     :sys.suspend(child)
     send(components.relay, :continue_registration)
-    assert :ok = wait_for_queued_message(child)
+
+    # The child activates and is then held as its first acquire arrives, so
+    # the kill always lands before any proposal.
+    :ok =
+      :sys.install(
+        child,
+        {fn
+           :waiting, {:in, {:"$gen_call", _from, request}}, _proc_state
+           when is_tuple(request) and elem(request, 0) == :first_acquire ->
+             send(test_pid, :first_acquire_held)
+
+             receive do
+               :never -> :done
+             end
+
+           :waiting, _event, _proc_state ->
+             :waiting
+         end, :waiting}
+      )
+
     :sys.resume(child)
-    :sys.suspend(child)
+    assert_receive :first_acquire_held, 500
 
     child_monitor = Process.monitor(child)
     Process.exit(child, :kill)
@@ -3132,21 +3151,6 @@ defmodule LoopexDaemon.OwnerTest do
   end
 
   defp wait_for_mirror_step(_owner, _kind, _step, 0), do: {:error, :not_reached}
-
-  defp wait_for_queued_message(pid, attempts \\ 100)
-
-  defp wait_for_queued_message(pid, attempts) when attempts > 0 do
-    case Process.info(pid, :message_queue_len) do
-      {:message_queue_len, length} when length > 0 ->
-        :ok
-
-      _other ->
-        Process.sleep(5)
-        wait_for_queued_message(pid, attempts - 1)
-    end
-  end
-
-  defp wait_for_queued_message(_pid, 0), do: {:error, :not_queued}
 
   # Concept: a connection-loss release whose lease owner has not restored.
   # Technical depth: the release is proposed, its connection is killed before
