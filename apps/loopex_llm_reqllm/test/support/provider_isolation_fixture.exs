@@ -1240,7 +1240,9 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
         send(handler, {:socket, socket})
         accept_loop(listener, events, transport_events, mode, expected, remaining_responses)
 
-      {:error, :closed} ->
+      # A listener closed at teardown while this accept waits answers
+      # `:closed` or, depending on the moment, `:einval`; both end the loop.
+      {:error, reason} when reason in [:closed, :einval] ->
         :ok
     end
   end
