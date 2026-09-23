@@ -1187,48 +1187,24 @@ defmodule LoopexDaemon.Owner do
   end
 
   defp dispatch_existing_acquire(state, request, owner_row) do
-    case open_existing_permit(state, request, owner_row) do
-      {:ok, opened, operation} ->
-        result =
-          existing_owner_call(fn ->
-            LeaseOwner.acquire(
-              owner_row.pid,
-              request.permit_id,
-              request.request_id,
-              request.connection,
-              request.connection_incarnation,
-              request.request_deadline
-            )
-          end)
-
-        finish_existing_dispatch(state, opened, operation, result)
-
-      {:error, reason} ->
-        {:reply, {:error, reason}, state}
+    with {:ok, state, operation} <- open_existing_permit(state, request, owner_row),
+         {:ok, disposition} <-
+           existing_owner_call(fn ->
+             LeaseOwner.acquire(
+               owner_row.pid,
+               request.permit_id,
+               request.request_id,
+               request.connection,
+               request.connection_incarnation,
+               request.request_deadline
+             )
+           end) do
+      state = maybe_complete_direct_operation(state, request.permit_id, disposition)
+      {:reply, {:ok, disposition, operation.owner_pid, operation.owner_incarnation}, state}
+    else
+      {:error, reason} -> {:reply, {:error, reason}, state}
     end
   end
-
-  # Concept: a client disconnect never fail-stops the daemon. When the
-  # connection's loss reaches the relay between the owner's claim and its
-  # completion, the relay has selected `connection_lost` and will tell this
-  # owner; the operation is kept so that disposition settles it.
-  #
-  # Technical depth: the kept operation is `abandoned`, so the relay's
-  # disposition starts the no-reply settlement that terminalizes the row and
-  # deletes the operation. Any other refusal drops the opened operation.
-  defp finish_existing_dispatch(_state, opened, operation, {:ok, disposition}) do
-    state = maybe_complete_direct_operation(opened, operation.request.permit_id, disposition)
-    {:reply, {:ok, disposition, operation.owner_pid, operation.owner_incarnation}, state}
-  end
-
-  defp finish_existing_dispatch(_state, opened, operation, {:error, :connection_lost}) do
-    Logger.debug("loopex daemon lease operation kept for its connection loss")
-    state = put_in(opened, [:operations, operation.request.permit_id, :phase], :abandoned)
-    {:reply, {:error, :connection_lost}, state}
-  end
-
-  defp finish_existing_dispatch(state, _opened, _operation, {:error, reason}),
-    do: {:reply, {:error, reason}, state}
 
   defp dispatch_release(state, request) do
     case Map.fetch(state.operations, request.permit_id) do
@@ -1240,20 +1216,20 @@ defmodule LoopexDaemon.Owner do
 
       :error ->
         with {:ok, owner_row} <- live_owner(state, request.session_id),
-             {:ok, opened, operation} <- open_existing_permit(state, request, owner_row) do
-          result =
-            existing_owner_call(fn ->
-              LeaseOwner.release(
-                owner_row.pid,
-                request.permit_id,
-                request.request_id,
-                request.connection,
-                request.connection_incarnation,
-                request.writer_epoch
-              )
-            end)
-
-          finish_existing_dispatch(state, opened, operation, result)
+             {:ok, state, operation} <- open_existing_permit(state, request, owner_row),
+             {:ok, disposition} <-
+               existing_owner_call(fn ->
+                 LeaseOwner.release(
+                   owner_row.pid,
+                   request.permit_id,
+                   request.request_id,
+                   request.connection,
+                   request.connection_incarnation,
+                   request.writer_epoch
+                 )
+               end) do
+          state = maybe_complete_direct_operation(state, request.permit_id, disposition)
+          {:reply, {:ok, disposition, operation.owner_pid, operation.owner_incarnation}, state}
         else
           {:error, reason} -> {:reply, {:error, reason}, state}
         end
@@ -2322,8 +2298,61 @@ defmodule LoopexDaemon.Owner do
         end
 
       :error ->
-        {:stop, :relay_lost, state}
+        if orphan_loss_actor?(state, loss),
+          do: settle_orphan_connection_loss(state, permit_id, loss),
+          else: {:stop, :relay_lost, state}
     end
+  end
+
+  # Concept: a client disconnect never fail-stops the daemon. An actor call
+  # can fail before the relay tells this owner the connection was lost — the
+  # request worker dies with its connection, so the claim fails, or the loss
+  # wins between the claim and a direct result — and the opened operation is
+  # dropped with the call's error. The relay still retains that row as
+  # `connection_lost` and names its exact actor, so the loss is settled here
+  # without a reply.
+  #
+  # Technical depth: the disposition is accepted only when its actor is this
+  # daemon owner, for a fresh acquire's start reference, or the exact lease
+  # owner registered for that session; anything else is still `relay_lost`.
+  # A no-reply settlement record is rebuilt from the disposition's own fields
+  # and settled like an abandoned operation, which deletes it on the relay's
+  # acknowledgement.
+  defp orphan_loss_actor?(state, loss) do
+    cond do
+      loss.actor_pid == self() ->
+        loss.actor_incarnation == state.daemon_incarnation and is_reference(loss.start_op_ref) and
+          loss.class == :session_acquire_control
+
+      is_nil(loss.start_op_ref) ->
+        match?(
+          %{pid: pid, incarnation: incarnation}
+          when pid == loss.actor_pid and incarnation == loss.actor_incarnation,
+          Map.get(state.owners, loss.session_id)
+        )
+
+      true ->
+        false
+    end
+  end
+
+  defp settle_orphan_connection_loss(state, permit_id, loss) do
+    owner = if loss.actor_pid == self(), do: nil, else: loss.actor_pid
+    owner_incarnation = if owner, do: loss.actor_incarnation, else: nil
+
+    operation = %{
+      request: %{class: loss.class, session_id: loss.session_id, permit_id: permit_id},
+      owner_pid: owner,
+      owner_incarnation: owner_incarnation,
+      actor_pid: loss.actor_pid,
+      actor_incarnation: loss.actor_incarnation,
+      start_op_ref: loss.start_op_ref,
+      phase: :abandoned
+    }
+
+    Logger.debug("loopex daemon dropped lease operation connection loss settlement start")
+    state = put_in(state, [:operations, permit_id], operation)
+    start_waiting_owner_loss_settlement(state, permit_id, operation, loss)
   end
 
   defp continue_connection_loss(state, permit_id, loss) do

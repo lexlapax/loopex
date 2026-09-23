@@ -1047,11 +1047,6 @@ defmodule LoopexDaemon.AdmissionRelay do
           {:error, reason} -> {:reply, {:error, reason}, state}
         end
 
-      # Concept: a connection loss selected before the claim is named, so the
-      # daemon owner keeps the operation its disposition will settle.
-      {:ok, %{kind: :lease, disposition: :connection_lost}} ->
-        {:reply, {:error, :connection_lost}, state}
-
       {:ok, %{kind: :lease}} ->
         {:reply, {:error, :invalid_actor}, state}
 

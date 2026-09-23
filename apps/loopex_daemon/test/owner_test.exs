@@ -2564,6 +2564,242 @@ defmodule LoopexDaemon.OwnerTest do
     assert_receive {:DOWN, ^registry_monitor, :process, _registry, :killed}, 500
   end
 
+  # Concept: a freeze that fails only because the relay has not answered an
+  # owner-loss classification is `relay_lost`, and the registry, which
+  # answered everything asked of it, is not killed.
+  #
+  # Technical depth: after the cut a held owner is killed while the registry
+  # is suspended, so its mirror pop waits; the freeze is acknowledged, the
+  # registry is resumed, and the relay is parked on the classification that
+  # follows. At the 400 ms freeze deadline only the classification is
+  # unfinished.
+  test "a classification unfinished at the freeze deadline selects relay_lost" do
+    owner = start_owner()
+    components = Owner.components(owner)
+    holder = initialized_connection(components)
+    {lease_owner, _owner_incarnation, _epoch} = acquire_held(owner, holder, "late-class-session")
+    assert {:ok, _cut_ref} = Owner.cut_admission(owner, 5_000)
+    park_relay_classification(components.relay)
+    :sys.suspend(components.registry)
+    Process.exit(lease_owner, :kill)
+    assert :ok = wait_for_owner_loss_step(owner, :pop_owner, 1)
+    freeze_task = Task.async(fn -> freeze(owner, 400) end)
+    assert :ok = wait_for_freeze_descriptors(owner)
+    :sys.resume(components.registry)
+    assert_receive :relay_classification_parked, 500
+    assert {:error, :relay_lost} = Task.await(freeze_task, 1_000)
+    assert Process.alive?(components.registry)
+    send(components.relay, :continue_parked_classification)
+  end
+
+  # Concept: a settling descriptor must name the exact settlement the daemon
+  # owner retained for that permit; a different reference means the relay and
+  # the daemon owner disagree, which is `relay_lost`, and nothing is cleaned.
+  #
+  # Technical depth: a connection-loss release is left waiting for its owner's
+  # restoration; with the relay parked on the freeze, an acknowledgement
+  # naming that exact permit, disposition and actor but a fresh reference is
+  # delivered, and the unrestored owner is not killed.
+  test "a settling descriptor whose reference does not match selects relay_lost" do
+    owner = start_owner(mirror_deadline_ms: 1_000)
+    components = Owner.components(owner)
+    connection = initialized_connection(components)
+
+    {lease_owner, owner_incarnation, release_origin, _loss_ref} =
+      park_release_cancellation(owner, components, connection, "mismatched-ref-session")
+
+    assert {:ok, _cut_ref} = Owner.cut_admission(owner, 5_000)
+    park_relay_freeze(components.relay)
+    freeze_task = Task.async(fn -> freeze(owner) end)
+    assert_receive :relay_freeze_parked, 500
+    %{stop: %{barrier: %{ref: barrier_ref}}} = :sys.get_state(owner)
+
+    send(
+      owner,
+      {:relay_barrier_ack, barrier_ref, :freeze_lease_ops,
+       [
+         {:settling_release, release_origin, :connection_lost, lease_owner, owner_incarnation,
+          make_ref()}
+       ]}
+    )
+
+    assert {:error, :relay_lost} = Task.await(freeze_task, 1_000)
+    assert Process.alive?(lease_owner)
+    send(components.relay, :continue_parked_freeze)
+  end
+
+  # Concept: a connection lost while an existing owner still holds its
+  # claimed acquire queued is settled while serving: the daemon owner tells
+  # that owner to discard it and settles the loss itself, so no relay row,
+  # operation or disposition leaks and the owner can later retire.
+  #
+  # Technical depth: the successor queues behind an expiry whose mirror clear
+  # waits on the suspended registry, with a 300 ms request deadline. Its
+  # connection is killed; the discard settles it before that deadline would
+  # have made the owner refuse it on a row nobody settles. After the registry
+  # resumes the expired owner retires and its slot frees.
+  test "a queued acquire whose connection is lost is discarded and settled while serving" do
+    owner = start_owner(lease_term_ms: 40)
+    components = Owner.components(owner)
+    former = initialized_connection(components)
+    successor = initialized_connection(components)
+
+    {_lease_owner, _owner_incarnation, _successor_origin} =
+      queue_successor_behind_expiry(owner, components, former, successor, "discard-session")
+
+    Process.exit(successor.pid, :kill)
+
+    assert :ok =
+             wait_for_status(owner, &(&1.pending_dispositions == 0 and &1.lease_operations == 0))
+
+    Process.sleep(400)
+    :sys.resume(components.registry)
+    assert_clean_retirement(owner, components)
+  end
+
+  # Concept: an owner lost before it answers a discard cannot settle it, so
+  # its exact `EXIT` settles every connection loss retained for its
+  # unproposed operations, and the ordinary owner-loss path then finishes.
+  #
+  # Technical depth: the lease owner is suspended when the successor's
+  # connection is lost and then killed; after the registry resumes no
+  # operation, disposition, mirror or permit remains.
+  test "an owner lost before its discard answer still settles the retained loss" do
+    owner = start_owner(lease_term_ms: 40)
+    components = Owner.components(owner)
+    former = initialized_connection(components)
+    successor = initialized_connection(components)
+
+    {lease_owner, _owner_incarnation, _successor_origin} =
+      queue_successor_behind_expiry(owner, components, former, successor, "lost-discard-session")
+
+    :sys.suspend(lease_owner)
+    Process.exit(successor.pid, :kill)
+    assert :ok = wait_for_pending_dispositions(owner, 1)
+    lease_owner_monitor = Process.monitor(lease_owner)
+    Process.exit(lease_owner, :kill)
+    assert_receive {:DOWN, ^lease_owner_monitor, :process, ^lease_owner, :killed}, 500
+    :sys.resume(components.registry)
+    assert_clean_retirement(owner, components)
+  end
+
+  # Concept: at the freeze, a retained connection loss for an existing
+  # owner's unproposed acquire is settled without the discard round trip:
+  # the operation is tombstoned and its no-reply settlement terminalizes the
+  # exact row named by the matching reference.
+  #
+  # Technical depth: the lease owner is suspended when the successor's
+  # connection is lost, so its discard is unanswered; the owner is resumed
+  # only after the daemon owner consumed the freeze answer, whose
+  # `settling_acquire` descriptor carries the retained loss reference.
+  test "the freeze settles a retained loss for an unproposed existing-owner acquire" do
+    owner = start_owner(lease_term_ms: 40)
+    components = Owner.components(owner)
+    former = initialized_connection(components)
+    successor = initialized_connection(components)
+
+    {lease_owner, owner_incarnation, successor_origin} =
+      queue_successor_behind_expiry(owner, components, former, successor, "frozen-loss-session")
+
+    :sys.suspend(lease_owner)
+    Process.exit(successor.pid, :kill)
+    assert :ok = wait_for_pending_dispositions(owner, 1)
+
+    [loss_ref] =
+      for {_permit_id, %{settlement_ref: loss_ref}} <- :sys.get_state(owner).pending_dispositions,
+          do: loss_ref
+
+    :sys.resume(components.registry)
+    assert :ok = wait_for_mirror_step(owner, :expiry, :resolve_owner_expiry)
+    assert {:ok, _cut_ref} = Owner.cut_admission(owner, 5_000)
+    freeze_task = Task.async(fn -> freeze(owner) end)
+    assert :ok = wait_for_freeze_descriptors(owner)
+    :sys.resume(lease_owner)
+
+    assert {:ok,
+            [
+              {:settling_acquire, ^successor_origin, :connection_lost, ^lease_owner,
+               ^owner_incarnation, nil, ^loss_ref}
+            ]} = Task.await(freeze_task, 5_500)
+
+    assert %{pending_dispositions: 0, lease_operations: 0, mirror_operations: 0} =
+             Owner.status(owner)
+
+    assert %{permits: 0} = AdmissionRelay.status(components.relay)
+  end
+
+  # Concept: a client disconnect never fail-stops the daemon, even when the
+  # connection's loss reaches the relay between an existing owner's claim and
+  # its renewal result: the relay's connection-loss disposition finds the
+  # kept operation and settles it.
+  #
+  # Technical depth: the relay is parked on the renewal's claim while the
+  # holder connection is killed, so the loss is ordered after the claim and
+  # before the owner's completion, which is refused `connection_lost`.
+  test "a disconnect between a renewal's claim and result settles without a fail-stop" do
+    assert_disconnected_renewal_settles(:claim_lease_permit)
+  end
+
+  # Concept: the same holds when the loss reaches the relay between the
+  # daemon owner's permit open and the lease owner's claim: the claim is
+  # refused `connection_lost` and the kept operation is settled.
+  #
+  # Technical depth: the relay is parked on the permit open while the holder
+  # connection is killed.
+  test "a disconnect between a renewal's open and claim settles without a fail-stop" do
+    assert_disconnected_renewal_settles(:open_lease_permit)
+  end
+
+  # Concept: a lease owner whose release acknowledgement is still missing at
+  # `release_settlement_deadline`, after the relay rendered the one success
+  # and the registry cleared the mirror, is the late party: that exact owner
+  # is killed and superseded, and the registry and daemon keep serving.
+  #
+  # Technical depth: the relay is parked on the result settlement while the
+  # lease owner is suspended, then released; the success reaches the holder,
+  # the 400 ms settlement instant kills the owner, and the lost-owner path
+  # leaves nothing behind.
+  test "a release acknowledgement missing at the settlement deadline kills the owner" do
+    owner = start_owner(mirror_deadline_ms: 200)
+    components = Owner.components(owner)
+    holder = initialized_connection(components)
+    holder_pid = holder.pid
+    session_id = "late-release-ack-session"
+    {lease_owner, owner_incarnation, writer_epoch} = acquire_held(owner, holder, session_id)
+    release_origin = {holder.incarnation, 1, 1}
+    {release_worker, release_worker_incarnation} = start_worker(holder.pid, release_origin)
+    park_relay_operation(components.relay, :settle_result)
+
+    assert {:ok, :proposed, ^lease_owner, ^owner_incarnation} =
+             Owner.release_control(
+               owner,
+               release_origin,
+               "late-release-ack",
+               session_id,
+               holder.pid,
+               holder.incarnation,
+               release_worker,
+               release_worker_incarnation,
+               writer_epoch,
+               now_ms() + 5_000
+             )
+
+    assert_receive {:relay_operation_parked, :settle_result}, 500
+    :sys.suspend(lease_owner)
+    lease_owner_monitor = Process.monitor(lease_owner)
+    send(components.relay, :continue_parked_operation)
+
+    assert_receive {:manual_connection_message, ^holder_pid,
+                    {:relay_permit_result, ^release_origin, release_result}},
+                   500
+
+    assert release_result == WireRecords.control_released("late-release-ack")
+    assert_receive {:DOWN, ^lease_owner_monitor, :process, ^lease_owner, :killed}, 1_000
+    assert Process.alive?(owner)
+    assert Process.alive?(components.registry)
+    assert_clean_retirement(owner, components)
+  end
+
   defp acquire_held(owner, connection, session_id) do
     origin = {connection.incarnation, 0, 1}
     {worker, worker_incarnation} = start_worker(connection.pid, origin)
@@ -3079,6 +3315,168 @@ defmodule LoopexDaemon.OwnerTest do
 
     assert_receive {:ticket_worker_ready, ^worker}, 500
     worker
+  end
+
+  # Concept: a claimed acquire queued inside an existing owner with no
+  # proposal. Technical depth: the former holder's 40 ms lease expires while
+  # the registry is suspended, so its expiry clear waits and the successor's
+  # acquire, with a 300 ms request deadline, queues behind it; the registry
+  # is left suspended.
+  defp queue_successor_behind_expiry(owner, components, former, successor, session_id) do
+    former_origin = {former.incarnation, 0, 1}
+    {former_worker, former_worker_incarnation} = start_worker(former.pid, former_origin)
+
+    assert {:ok, :proposed, lease_owner, owner_incarnation} =
+             Owner.acquire_control(
+               owner,
+               former_origin,
+               "#{session_id}-former",
+               session_id,
+               former.pid,
+               former.incarnation,
+               former_worker,
+               former_worker_incarnation,
+               now_ms() + 2_000
+             )
+
+    assert_receive {:manual_connection_message, _former,
+                    {:relay_permit_result, ^former_origin, _former_result}},
+                   500
+
+    :sys.suspend(components.registry)
+    assert :ok = wait_for_mirror_step(owner, :expiry, :clear)
+    successor_origin = {successor.incarnation, 0, 1}
+
+    {successor_worker, successor_worker_incarnation} =
+      start_worker(successor.pid, successor_origin)
+
+    assert {:ok, :queued, ^lease_owner, ^owner_incarnation} =
+             Owner.acquire_control(
+               owner,
+               successor_origin,
+               "#{session_id}-successor",
+               session_id,
+               successor.pid,
+               successor.incarnation,
+               successor_worker,
+               successor_worker_incarnation,
+               now_ms() + 300
+             )
+
+    assert_receive {:worker_go, ^successor_worker, ^successor_origin}, 500
+    {lease_owner, owner_incarnation, successor_origin}
+  end
+
+  # Technical depth: the relay is parked on the renewal's `action` call while
+  # the holder is killed, so its `DOWN` is queued ahead of the next call.
+  defp assert_disconnected_renewal_settles(action) do
+    owner = start_owner()
+    components = Owner.components(owner)
+    holder = initialized_connection(components)
+    session_id = "disconnected-#{action}"
+    {_lease_owner, _owner_incarnation, _epoch} = acquire_held(owner, holder, session_id)
+    origin = {holder.incarnation, 1, 1}
+    {worker, worker_incarnation} = start_detached_worker(origin)
+
+    park_relay_message(
+      components.relay,
+      fn
+        {:"$gen_call", _from, request} when is_tuple(request) ->
+          elem(request, 0) == action and Enum.member?(Tuple.to_list(request), origin)
+
+        _other ->
+          false
+      end,
+      :renewal_parked,
+      :continue_renewal
+    )
+
+    renewal =
+      Task.async(fn ->
+        Owner.acquire_control(
+          owner,
+          origin,
+          "#{session_id}-renewal",
+          session_id,
+          holder.pid,
+          holder.incarnation,
+          worker,
+          worker_incarnation,
+          now_ms() + 2_000
+        )
+      end)
+
+    assert_receive :renewal_parked, 500
+    holder_monitor = Process.monitor(holder.pid)
+    Process.exit(holder.pid, :kill)
+    assert_receive {:DOWN, ^holder_monitor, :process, _holder, :killed}, 500
+    owner_monitor = Process.monitor(owner)
+    send(components.relay, :continue_renewal)
+
+    assert {:error, _dropped} = Task.await(renewal, 1_000)
+
+    assert %{lease_operations: 0, pending_dispositions: 0, mirror_operations: 0} =
+             wait_for_owner_settlement(owner)
+
+    refute_received {:DOWN, ^owner_monitor, :process, _owner, _reason}
+    assert Process.alive?(owner)
+    assert %{permits: 0} = AdmissionRelay.status(components.relay)
+  end
+
+  defp wait_for_freeze_descriptors(owner, attempts \\ 200)
+
+  defp wait_for_freeze_descriptors(owner, attempts) when attempts > 0 do
+    if match?(%{stop: %{barrier: %{descriptors: [_ | _]}}}, :sys.get_state(owner)) or
+         match?(%{stop: %{barrier: %{descriptors: []}}}, :sys.get_state(owner)) do
+      :ok
+    else
+      Process.sleep(5)
+      wait_for_freeze_descriptors(owner, attempts - 1)
+    end
+  end
+
+  defp wait_for_freeze_descriptors(_owner, 0), do: {:error, :not_frozen}
+
+  defp wait_for_pending_dispositions(owner, count, attempts \\ 200)
+
+  defp wait_for_pending_dispositions(owner, count, attempts) when attempts > 0 do
+    if Owner.status(owner).pending_dispositions == count do
+      :ok
+    else
+      Process.sleep(5)
+      wait_for_pending_dispositions(owner, count, attempts - 1)
+    end
+  end
+
+  defp wait_for_pending_dispositions(_owner, _count, 0), do: {:error, :not_retained}
+
+  defp wait_for_status(owner, predicate, attempts \\ 400)
+
+  defp wait_for_status(owner, predicate, attempts) when attempts > 0 do
+    if predicate.(Owner.status(owner)) do
+      :ok
+    else
+      Process.sleep(5)
+      wait_for_status(owner, predicate, attempts - 1)
+    end
+  end
+
+  defp wait_for_status(_owner, _predicate, 0), do: {:error, :not_reached}
+
+  # Technical depth: a request worker that outlives its connection, so the
+  # relay's claim can still dispatch after the connection's loss is queued.
+  defp start_detached_worker(origin) do
+    parent = self()
+    worker_incarnation = incarnation()
+
+    worker =
+      spawn(fn ->
+        receive do
+          {:relay_go, ^origin, ^worker_incarnation} -> send(parent, {:worker_go, self(), origin})
+        end
+      end)
+
+    {worker, worker_incarnation}
   end
 
   defp incarnation, do: :crypto.strong_rand_bytes(16)

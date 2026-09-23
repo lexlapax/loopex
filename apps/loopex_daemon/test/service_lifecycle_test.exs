@@ -365,6 +365,72 @@ defmodule LoopexDaemon.ServiceLifecycleTest do
     end
   end
 
+  # Concept: a lease freeze left with unfinished registry work ends the stop
+  # as `connections_lost`, not `relay_lost`, and core quiesce never starts.
+  #
+  # Technical depth: a client holds a session's lease. The collaboration
+  # owner is parked by a debug hook as the freeze call reaches it; while
+  # parked the registry is suspended and the lease owner killed, so after the
+  # freeze is acknowledged the lost owner's mirror pop waits on the registry
+  # through the five-second freeze deadline.
+  @tag timeout: 90_000
+  test "a freeze left with unfinished registry work ends the stop as connections_lost",
+       %{options: options} do
+    daemon = start_daemon(options)
+    _ready = await_ready(daemon.output)
+    client = initialized(options[:socket_path])
+
+    :ok =
+      send_frame(client, %{
+        "method" => "session.create",
+        "request_id" => "create",
+        "command_id" => Wire.encode_identity("freeze-create"),
+        "session_options" => %{"purpose" => "freeze"}
+      })
+
+    assert [%{"status" => "accepted", "session_id" => encoded}] = receive_records(client, 1)
+
+    :ok =
+      send_frame(client, %{
+        "method" => "session.acquire_control",
+        "request_id" => "acquire",
+        "session_id" => encoded
+      })
+
+    assert [%{"request_id" => "acquire", "type" => "result"}] = receive_records(client, 1)
+    collaboration = :sys.get_state(daemon.owner).pids.collaboration
+    registry = LoopexDaemon.Owner.components(collaboration).registry
+    [lease_owner] = for {_session_id, row} <- :sys.get_state(collaboration).owners, do: row.pid
+    test_pid = self()
+
+    :ok =
+      :sys.install(
+        collaboration,
+        {fn
+           :waiting,
+           {:in, {:"$gen_call", _from, {:relay_barrier, {:freeze_lease_ops, _}, _}}},
+           _state ->
+             send(test_pid, :freeze_parked)
+
+             receive do
+               :continue_freeze -> :done
+             end
+
+           :waiting, _event, _state ->
+             :waiting
+         end, :waiting}
+      )
+
+    send(daemon.sentinel, {:daemon_signal, daemon.owner_ref, :sigterm})
+    assert_receive :freeze_parked, 10_000
+    :ok = :sys.suspend(registry)
+    Process.exit(lease_owner, :kill)
+    send(collaboration, :continue_freeze)
+
+    {:ok, connections_lost} = LoopexDaemon.ExitStatus.fetch(:connections_lost)
+    assert Task.await(daemon.task, 60_000) == connections_lost
+  end
+
   test "losing the Store fail-stops with its class and tells the client",
        %{options: options} do
     daemon = start_daemon(options)
