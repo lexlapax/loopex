@@ -489,6 +489,34 @@ defmodule LoopexDaemon.ConnectionRegistryTest do
     end)
   end
 
+  # Concept: the succession reserve is sized so every connection the daemon
+  # can hold may be attached at once: all 512 reserves fit inside the real
+  # aggregate allowance, and the 513th connection is refused at accept.
+  @tag timeout: 120_000
+  test "all 512 connections can hold their succession reserve at once" do
+    registry = start_registry(5_000, connection_module: ManualConnection)
+
+    connections =
+      for _index <- 1..512 do
+        connection = start_manual_connection(registry)
+        assert :ok = manual_registry_call(connection.pid, :promote)
+        assert :ok = manual_registry_call(connection.pid, :initialize_complete)
+        assert :ok = manual_registry_call(connection.pid, :reserve_succession)
+        connection
+      end
+
+    assert %{succession_reservations: 512, output_commitment: commitment} =
+             ConnectionRegistry.status(registry)
+
+    assert commitment == 512 * 88_091
+    assert commitment <= 536_870_912
+
+    assert {:error, _full} =
+             ConnectionRegistry.reserve(registry, self(), make_ref(), now_ms())
+
+    Enum.each(connections, &Process.exit(&1.pid, :kill))
+  end
+
   test "pending attachment conflict consumes the reply slot without a notice" do
     registry =
       start_registry(5_000,
