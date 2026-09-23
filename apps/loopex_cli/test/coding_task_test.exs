@@ -456,19 +456,14 @@ defmodule LoopexCli.CodingTaskTest do
         [cleanup_grace_ms: 2_000] ++
         ProviderBuildFixture.custody_options(System.get_env("LOOPEX_PROVIDER_API_KEY"))
 
-    {:ok, request} =
-      Loopex.Model.request(
-        Loopex.LLM.ReqLLM.default_model(),
-        [%{"role" => "user", "content" => "Reply with the single word: acknowledged."}],
-        sampling: %{"max_tokens" => 64},
-        deadline: System.system_time(:millisecond) + 120_000
-      )
-
+    # A standalone call goes through `complete_prompt/3`, which supplies the
+    # no-runtime trace capability a direct call needs (ADR 0034) and the same
+    # 64-token allowance this case used.
     assert {:ok, reply} =
-             Loopex.LLM.ReqLLM.complete(
-               request,
-               launch,
-               Loopex.Model.discard_progress()
+             Loopex.LLM.ReqLLM.complete_prompt(
+               Loopex.LLM.ReqLLM.default_model(),
+               "Reply with the single word: acknowledged.",
+               launch
              )
 
     # The identifier and the reported usage come from the provider. A scripted
