@@ -69,7 +69,11 @@ defmodule LoopexDaemon.Service do
   @transport_cut_deadline_ms 5_000
   # Provisional until the closure run measures the maximum-population teardown.
   @default_teardown_ms 30_000
-  @version "0.2.0"
+  # The readiness version is the source VERSION this build was compiled from.
+  @version Path.join([__DIR__, "..", "..", "..", "..", "VERSION"])
+           |> File.read!()
+           |> String.trim()
+  @external_resource Path.join([__DIR__, "..", "..", "..", "..", "VERSION"])
 
   @running_classes %{
     store: :store_lost,
