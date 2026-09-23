@@ -277,8 +277,11 @@ defmodule Loopex.InputAlgebraTest do
     # run durable but unstaged. Recovery must dispatch it once with a deadline
     # derived at staging; carrying the predecessor's instant or inventing one at
     # promotion would instead end it before the provider call.
+    # The duration must outlast a loaded machine's first model request; the
+    # case then waits longer than it, so it proves the same thing at 2 s as
+    # it did at 200 ms.
     parent = self()
-    duration_ms = 200
+    duration_ms = 2_000
 
     fixture =
       start(
