@@ -364,11 +364,12 @@ defmodule LoopexDaemon.ServiceLifecycleTest do
     assert Task.await(daemon.task, 60_000) == relay_lost
     assert System.monotonic_time(:millisecond) - started < 45_000
 
-    # The client learns why, or at least sees its socket close.
-    case receive_records_or_closed(client) do
-      :closed -> :ok
-      [%{"type" => "daemon.stopping", "reason" => reason}] -> assert reason =~ "relay_lost"
-    end
+    # The relay is killed as fatal teardown, so the registry survives it and
+    # the client learns why.
+    assert [%{"type" => "daemon.stopping", "reason" => "fatal:relay_lost"}] =
+             receive_records(client, 1)
+
+    on_exit(fn -> Process.exit(collaboration, :kill) end)
   end
 
   # Concept: the transport cut is one five-second deadline begun before the
@@ -585,6 +586,50 @@ defmodule LoopexDaemon.ServiceLifecycleTest do
 
     {:ok, connections_lost} = LoopexDaemon.ExitStatus.fetch(:connections_lost)
     assert Task.await(daemon.task, 60_000) == connections_lost
+  end
+
+  # Concept: a fail-stop cannot be held open by a silent registry: the
+  # executor and a live Store are still stopped, each inside its bound, well
+  # before the sentinel's 35-second halt.
+  #
+  # Technical depth: the registry is suspended, then the session index is
+  # killed. The owner only messages the registry, so it goes straight on to
+  # stop the live executor and the healthy Store; both end with an ordinary
+  # stop rather than a kill, and the daemon reports `session_index_lost`
+  # within seconds.
+  @tag timeout: 90_000
+  test "a silent registry cannot keep a fail-stop from stopping the executor and Store",
+       %{options: options} do
+    daemon = start_daemon(options)
+    _ready = await_ready(daemon.output)
+    _client = initialized(options[:socket_path])
+
+    owner_state = :sys.get_state(daemon.owner)
+    executor = owner_state.pids.executor
+    store = owner_state.pids.store
+    executor_monitor = Process.monitor(executor)
+    store_monitor = Process.monitor(store)
+    :ok = :sys.suspend(owner_state.registry)
+
+    # A fail-stop leaves the collaboration owner for the VM halt, which a test
+    # VM never performs.
+    on_exit(fn ->
+      Process.exit(owner_state.registry, :kill)
+      Process.exit(owner_state.pids.collaboration, :kill)
+    end)
+
+    started = System.monotonic_time(:millisecond)
+    Process.exit(owner_state.pids.index, :kill)
+
+    assert_receive {:DOWN, ^executor_monitor, :process, ^executor, executor_reason}, 10_000
+    assert_receive {:DOWN, ^store_monitor, :process, ^store, store_reason}, 10_000
+    refute executor_reason == :killed
+    refute store_reason == :killed
+
+    {:ok, session_index_lost} = LoopexDaemon.ExitStatus.fetch(:session_index_lost)
+    assert Task.await(daemon.task, 60_000) == session_index_lost
+    assert System.monotonic_time(:millisecond) - started < 10_000
+    refute Process.alive?(owner_state.relay)
   end
 
   # Concept: the session index is a linked running component, so losing it is

@@ -25,6 +25,13 @@ defmodule LoopexDaemon.ListenerSocketTest do
     assert File.exists?(path)
     assert file_identity(path) == first_identity
 
+    # A second name for the first socket file keeps its inode allocated, so
+    # a successor that replaced the pathname cannot be handed the same inode
+    # number back by the filesystem.
+    retained = Path.join(directory, "first.sock")
+    :ok = File.ln(path, retained)
+    on_exit(fn -> File.rm(retained) end)
+
     assert {:ok, successor} = ListenerSocket.open_parked(path, daemon_uid)
     assert_verified_socket(path, daemon_uid)
     refute file_identity(path) == first_identity

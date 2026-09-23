@@ -1355,23 +1355,7 @@ defmodule LoopexDaemon.ConnectionRegistry do
 
   def handle_call({:close_all, record, deadline}, from, %{owner: owner} = state)
       when elem(from, 0) == owner do
-    state =
-      Enum.reduce(state.rows, %{state | transport: :stopping}, fn {token, row}, acc ->
-        cond do
-          row.phase in [:live, :closing] and row.initialized and is_pid(row.connection_pid) ->
-            send(row.connection_pid, {:daemon_stopping, record})
-            update_row(acc, token, &%{&1 | phase: :closing})
-
-          row.phase in [:live, :closing] ->
-            close_live(acc, token, :daemon_stopping)
-
-          row.phase in [:handing_off, :aborting] ->
-            request_abort(acc, token, :daemon_stopping)
-
-          true ->
-            acc
-        end
-      end)
+    state = begin_close_all(state, record)
 
     timer =
       Process.send_after(self(), {:close_all_deadline, deadline}, max(deadline - now_ms(), 0))
@@ -1682,7 +1666,55 @@ defmodule LoopexDaemon.ConnectionRegistry do
     end
   end
 
+  # Concept: the collaboration owner's transport-cut requests arrive as
+  # messages so that owner never blocks on this registry; each is answered
+  # exactly as the matching call would be.
+  def handle_info({:owner_request, owner, ref, request}, %{owner: owner} = state)
+      when is_reference(ref) and
+             elem(request, 0) in [:transport_closing, :reap_uninitialized] do
+    {:reply, reply, state} = handle_call(request, {owner, ref}, state)
+    send(owner, {:owner_reply, self(), ref, reply})
+    {:noreply, state}
+  end
+
+  # Concept: on a fatal class the daemon owner asks, once and without waiting,
+  # for one `daemon.stopping` per connection and a close; a registry already
+  # closing ignores a repeat.
+  #
+  # Technical depth: only the daemon owner named in the connection context may
+  # ask. No acknowledgement is sent, so a slow registry cannot extend the
+  # daemon's fail-stop bound.
+  def handle_info(
+        {:daemon_fatal_close, recipient, record},
+        %{connection_context: %{fatal_recipient: recipient}, transport: transport} = state
+      )
+      when is_pid(recipient) and transport != :stopping do
+    Logger.debug("loopex daemon connection fatal close start")
+    {:noreply, begin_close_all(state, record)}
+  end
+
+  def handle_info({:daemon_fatal_close, _recipient, _record}, state), do: {:noreply, state}
+
   def handle_info(_message, state), do: {:noreply, state}
+
+  defp begin_close_all(state, record) do
+    Enum.reduce(state.rows, %{state | transport: :stopping}, fn {token, row}, acc ->
+      cond do
+        row.phase in [:live, :closing] and row.initialized and is_pid(row.connection_pid) ->
+          send(row.connection_pid, {:daemon_stopping, record})
+          update_row(acc, token, &%{&1 | phase: :closing})
+
+        row.phase in [:live, :closing] ->
+          close_live(acc, token, :daemon_stopping)
+
+        row.phase in [:handing_off, :aborting] ->
+          request_abort(acc, token, :daemon_stopping)
+
+        true ->
+          acc
+      end
+    end)
+  end
 
   @impl true
   def terminate(_reason, state) do

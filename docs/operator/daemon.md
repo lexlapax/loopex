@@ -240,7 +240,8 @@ measurement on each supported toolchain. The transport cut is one
 5 s deadline for refusing new work, closing the listener and closing clients
 that never initialized; whatever misses it ends the stop as `relay_lost`,
 `connections_lost` or `listener_lost`, decided at the deadline and latched
-within a further 1 s. A relay that
+within a further 1 s. A cut that completes counts only if it completes by the
+deadline, so the bound below holds. A relay that
 misses a later barrier ends the stop as `relay_lost`, except that registry or
 holder-close work unfinished at the lease-operation freeze ends it as
 `connections_lost`; a component lost while core quiesce runs, or before success

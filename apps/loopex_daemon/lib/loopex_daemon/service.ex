@@ -76,6 +76,10 @@ defmodule LoopexDaemon.Service do
   # Measured: an orderly stop at 512 attached connections took 119 ms (OTP 29,
   # Elixir 1.20.3, `maximum_population_test.exs`); 30 s keeps a wide margin.
   @default_teardown_ms 30_000
+  # A fail-stop's two awaited steps: the executor until `latched_at + 5_000`,
+  # the Store until the earlier of its own 30 s and the sentinel's 35 s bound.
+  @fatal_executor_ms 5_000
+  @fatal_bound_ms 35_000
   # The readiness version is the source VERSION this build was compiled from.
   @version Path.join([__DIR__, "..", "..", "..", "..", "VERSION"])
            |> File.read!()
@@ -120,6 +124,8 @@ defmodule LoopexDaemon.Service do
       startup_ref: nil,
       pending_fatal: nil,
       progress_registry: nil,
+      relay: nil,
+      registry: nil,
       runtime_monitors: %{}
     }
 
@@ -423,7 +429,10 @@ defmodule LoopexDaemon.Service do
          ) do
       {:ok, owner} ->
         Logger.debug("loopex daemon collaboration services started")
-        {:ok, track(state, :collaboration, owner)}
+        # The fail-stop path must reach the relay and registry without calling
+        # the collaboration owner, so their pids are held from the start.
+        %{relay: relay, registry: registry} = Owner.components(owner)
+        {:ok, %{track(state, :collaboration, owner) | relay: relay, registry: registry}}
 
       _other ->
         {:stop, {:fatal, :daemon_services_start_failed}, state}
@@ -574,10 +583,10 @@ defmodule LoopexDaemon.Service do
 
     cut = fn -> Owner.cut_admission(collaboration, deadline - monotonic_ms()) end
 
-    with {:ok, cut_ref} <- transport_step(state, cut, deadline),
+    with {:ok, cut_ref} <- transport_step(state, cut, deadline, :relay_lost),
          {:ok, state} <- reap_listener(state, deadline),
          sweep = fn -> Owner.reap_uninitialized(collaboration, cut_ref, deadline) end,
-         {:ok, :ok} <- transport_step(state, sweep, deadline) do
+         {:ok, :ok} <- transport_step(state, sweep, deadline, :connections_lost) do
       Logger.debug("loopex daemon transport cut complete")
       admitted_stop(state, collaboration, components)
     else
@@ -588,10 +597,22 @@ defmodule LoopexDaemon.Service do
   # Concept: the collaboration owner decides each transport step at the cut
   # deadline and names what failed; an owner that gives no verdict at all is
   # itself lost, which is `relay_lost`.
-  defp transport_step(state, fun, deadline) do
-    case responsive(state, fun, deadline + @verdict_margin_ms) do
-      {:ok, {:ok, cut_ref}} when is_reference(cut_ref) -> {:ok, cut_ref}
-      {:ok, :ok} -> {:ok, :ok}
+  #
+  # Technical depth: a success counts only if it reaches this owner by the
+  # deadline, so a successful orderly stop never spends the verdict margin and
+  # its published bound stands. The margin only lets a failure verdict decided
+  # at the deadline arrive, and a fail-stop's own bound runs from its latch.
+  # A success that arrives late is charged to the component that owns the
+  # step: the relay for the cut, the registry for the sweep.
+  defp transport_step(state, fun, deadline, late_class) do
+    result = responsive(state, fun, deadline + @verdict_margin_ms)
+    in_time = monotonic_ms() <= deadline
+
+    case result do
+      {:ok, {:ok, cut_ref}} when is_reference(cut_ref) and in_time -> {:ok, cut_ref}
+      {:ok, :ok} when in_time -> {:ok, :ok}
+      {:ok, {:ok, _cut_ref}} -> {:fatal, late_class}
+      {:ok, :ok} -> {:fatal, late_class}
       {:ok, {:error, :connections_lost}} -> {:fatal, :connections_lost}
       {:fatal, class} -> {:fatal, class}
       _missing -> {:fatal, :relay_lost}
@@ -855,30 +876,91 @@ defmodule LoopexDaemon.Service do
 
   defp teardown_ms(state), do: Keyword.get(state.options, :teardown_ms, @default_teardown_ms)
 
-  # Concept: a component failure ends the daemon without draining, but still
-  # stops the executor and a live Store so their own cleanup is attempted.
+  # Concept: a component failure ends the daemon without draining. Service is
+  # cut at once, clients are asked once to be told why, and only the two
+  # components whose cleanup outlives the VM are stopped, each on a fixed
+  # bound: the executor, whose stop ends its captured process groups, and a
+  # live Store, whose stop releases its marker.
+  #
+  # Technical depth: the plan's fail-stop steps in order. The sentinel hears
+  # the class first and owns the 35 s halt. The listener and relay are killed
+  # untrappably and not awaited; the collaboration owner is marked first so
+  # the relay's exit does not take the registry down with it. The registry
+  # gets one ordinary message, never a call, except on `connections_lost`.
+  # The executor is stopped until `latched_at + 5_000` and a live Store until
+  # the earlier of 30 s from its start and `latched_at + 35_000`. Nothing else
+  # is stopped: the VM halt ends it.
   defp fail_stop(state, class) do
+    latched_at = monotonic_ms()
     Logger.debug("loopex daemon fail-stop start")
     status = status!(class)
     send(state.sentinel, {:daemon_fatal, state.owner_ref, class, status})
     state = %{state | phase: :failing}
 
+    # The collaboration owner is this owner's linked child, and a GenServer
+    # ends with its parent; unlinking keeps it, and the registry it links, up
+    # for the stop records until the VM halts.
     if pid = state.pids[:collaboration] do
-      if Process.alive?(pid) do
-        _ =
-          safe(fn ->
-            Owner.close_connections(
-              pid,
-              WireRecords.daemon_stopping(fatal_reason(class)),
-              monotonic_ms() + @close_connections_ms
-            )
-          end)
-      end
+      Owner.fatal_teardown(pid)
+      Process.unlink(pid)
     end
 
-    teardown(state)
+    for pid <- [state.pids[:listener], state.relay], is_pid(pid), do: Process.exit(pid, :kill)
+
+    if class != :connections_lost and is_pid(state.registry) do
+      send(
+        state.registry,
+        {:daemon_fatal_close, self(), WireRecords.daemon_stopping(fatal_reason(class))}
+      )
+    end
+
+    state =
+      if class == :executor_lost,
+        do: state,
+        else: stop_until(state, :executor, latched_at + @fatal_executor_ms)
+
+    state =
+      if class in [:store_lost, :store_capacity_exceeded],
+        do: state,
+        else:
+          stop_until(
+            state,
+            :store,
+            min(monotonic_ms() + @store_stop_ms, latched_at + @fatal_bound_ms)
+          )
+
+    Logger.debug("loopex daemon fail-stop complete")
     report_exit(state, status)
     {:stop, :normal, %{state | phase: :stopped}}
+  end
+
+  # Concept: a bounded stop that cannot be extended by the component: a helper
+  # asks it to stop, this owner waits only until the absolute deadline, and a
+  # component still alive then is killed.
+  defp stop_until(state, name, deadline) do
+    case Map.fetch(state.pids, name) do
+      {:ok, pid} ->
+        monitor = Process.monitor(pid)
+
+        spawn(fn ->
+          safe(fn -> GenServer.stop(pid, :normal, max(deadline - monotonic_ms(), 1)) end)
+        end)
+
+        receive do
+          {:DOWN, ^monitor, :process, ^pid, _reason} -> :ok
+        after
+          remaining_ms(deadline) ->
+            Logger.debug("loopex daemon fail-stop component stop deadline reached")
+            Process.exit(pid, :kill)
+            Process.demonitor(monitor, [:flush])
+        end
+
+        flush_exit(pid)
+        %{state | pids: Map.delete(state.pids, name)}
+
+      :error ->
+        state
+    end
   end
 
   defp fatal_reason(class) when class in [:store_lost, :store_capacity_exceeded],

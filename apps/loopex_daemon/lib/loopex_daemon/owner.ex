@@ -225,6 +225,25 @@ defmodule LoopexDaemon.Owner do
     end
   end
 
+  @doc """
+  ## Concept
+
+  Tells this owner, without waiting, that the daemon owner is ending the
+  daemon on a fatal class and is about to kill the relay itself.
+
+  ## Technical depth
+
+  Only the daemon owner named at start (`fatal_recipient`) may send it. After
+  the mark the relay's exit is expected teardown rather than this owner's own
+  `relay_lost`, so the connection registry it links stays up for the bounded
+  `daemon.stopping` writes.
+  """
+  @spec fatal_teardown(pid()) :: :ok
+  def fatal_teardown(owner) do
+    send(owner, {:daemon_fatal_teardown, self()})
+    :ok
+  end
+
   @doc false
   @spec close_connections(pid(), map(), integer()) :: :ok | {:ok, :forced} | {:error, atom()}
   def close_connections(owner, record, deadline),
@@ -292,6 +311,8 @@ defmodule LoopexDaemon.Owner do
            pending_dispositions: %{},
            routes: %{},
            attachments: %{},
+           fatal_recipient: Keyword.get(options, :fatal_recipient),
+           fatal_teardown: false,
            stop: nil
          }}
       else
@@ -413,6 +434,7 @@ defmodule LoopexDaemon.Owner do
       cut_deadline: cut_deadline,
       cut_timer: timer,
       from: from,
+      pending: nil,
       swept: false,
       tombstones: %{},
       killed: MapSet.new(),
@@ -425,8 +447,9 @@ defmodule LoopexDaemon.Owner do
   def handle_call(
         {:cut_admission, _cut_deadline},
         _from,
-        %{stop: %{cut_ref: cut_ref, phase: :cut}} = state
-      ),
+        %{stop: %{cut_ref: cut_ref, phase: phase}} = state
+      )
+      when phase in [:cut, :sweeping, :swept],
       do: {:reply, {:ok, cut_ref}, state}
 
   def handle_call({:cut_admission, _cut_deadline}, _from, state),
@@ -435,28 +458,27 @@ defmodule LoopexDaemon.Owner do
   def handle_call(
         {:reap_uninitialized, cut_ref, deadline},
         from,
-        %{stop: %{cut_ref: cut_ref, phase: :cut}} = stop_state
+        %{stop: %{cut_ref: cut_ref, phase: :cut}} = state
       ) do
-    request = ConnectionRegistry.reap_uninitialized(stop_state.registry, cut_ref)
+    timer =
+      Process.send_after(
+        self(),
+        {:transport_sweep_deadline, cut_ref},
+        max(deadline - monotonic_ms(), 0)
+      )
 
-    case :gen_server.receive_response(request, max(deadline - monotonic_ms(), 0)) do
-      {:reply, :ok} ->
-        if stop_state.stop.swept do
-          {:reply, :ok, stop_state}
-        else
-          timer =
-            Process.send_after(
-              self(),
-              {:transport_sweep_deadline, cut_ref},
-              max(deadline - monotonic_ms(), 0)
-            )
+    state = %{
+      state
+      | stop: %{
+          state.stop
+          | phase: :sweeping,
+            from: from,
+            cut_timer: timer,
+            cut_deadline: deadline
+        }
+    }
 
-          {:noreply, %{stop_state | stop: %{stop_state.stop | from: from, cut_timer: timer}}}
-        end
-
-      _missing ->
-        {:reply, {:error, :connections_lost}, registry_lost(stop_state)}
-    end
+    {:noreply, registry_request(state, :sweep, {:reap_uninitialized, cut_ref})}
   end
 
   def handle_call({:reap_uninitialized, _cut_ref, _deadline}, _from, state),
@@ -817,49 +839,68 @@ defmodule LoopexDaemon.Owner do
   # Concept: the relay acknowledgement and the registry gate share the one
   # transport-cut instant. An acknowledgement consumed at or after it is late,
   # so the relay, not the registry, is what failed.
+  #
+  # Technical depth: the gate is asked of the registry by message and this
+  # owner returns to its mailbox, so a component exit that arrives while the
+  # registry is silent is consumed at once and its class stands.
   def handle_info(
         {:relay_barrier_ack, cut_ref, :cut, _payload},
-        %{stop: %{phase: :cutting, cut_ref: cut_ref, from: from} = stop} = state
+        %{stop: %{phase: :cutting, cut_ref: cut_ref} = stop} = state
       ) do
-    Process.cancel_timer(stop.cut_timer)
-    remaining = stop.cut_deadline - monotonic_ms()
-
-    {reply, state} =
-      if remaining <= 0 do
-        {{:error, :relay_lost}, state}
-      else
-        case :gen_server.receive_response(
-               ConnectionRegistry.transport_closing(state.registry, cut_ref),
-               remaining
-             ) do
-          {:reply, {:ok, ^cut_ref}} -> {{:ok, cut_ref}, state}
-          _missing -> {{:error, :connections_lost}, registry_lost(state)}
-        end
-      end
-
-    GenServer.reply(from, reply)
-    Logger.debug("loopex daemon owner admission cut complete")
-    phase = if match?({:ok, _}, reply), do: :cut, else: :cut_failed
-    {:noreply, %{state | stop: %{state.stop | phase: phase, from: nil}}}
+    if monotonic_ms() >= stop.cut_deadline do
+      {:noreply, fail_cut(state, :relay_lost)}
+    else
+      state = put_in(state, [:stop, :phase], :gating)
+      {:noreply, registry_request(state, :gate, {:transport_closing, cut_ref})}
+    end
   end
 
   def handle_info(
         {:transport_cut_deadline, cut_ref},
-        %{stop: %{phase: :cutting, cut_ref: cut_ref, from: from}} = state
-      ) do
-    GenServer.reply(from, {:error, :relay_lost})
-    Logger.debug("loopex daemon owner admission cut deadline reached")
-    {:noreply, %{state | stop: %{state.stop | phase: :cut_failed, from: nil}}}
-  end
+        %{stop: %{phase: :cutting, cut_ref: cut_ref}} = state
+      ),
+      do: {:noreply, fail_cut(state, :relay_lost)}
+
+  def handle_info(
+        {:transport_cut_deadline, cut_ref},
+        %{stop: %{phase: :gating, cut_ref: cut_ref}} = state
+      ),
+      do: {:noreply, fail_cut(state, :connections_lost)}
 
   def handle_info(
         {:transport_sweep_deadline, cut_ref},
-        %{stop: %{cut_ref: cut_ref, swept: false, from: from}} = state
-      )
-      when not is_nil(from) do
-    GenServer.reply(from, {:error, :connections_lost})
-    Logger.debug("loopex daemon owner transport sweep deadline reached")
-    {:noreply, registry_lost(%{state | stop: %{state.stop | from: nil}})}
+        %{stop: %{phase: :sweeping, cut_ref: cut_ref}} = state
+      ),
+      do: {:noreply, fail_cut(state, :connections_lost)}
+
+  def handle_info(
+        {:owner_reply, registry, ref, reply},
+        %{registry: registry, stop: %{pending: {kind, ref}}} = state
+      ) do
+    state = put_in(state, [:stop, :pending], nil)
+    late = monotonic_ms() >= state.stop.cut_deadline
+
+    case {kind, reply} do
+      {:gate, {:ok, cut_ref}} when cut_ref == state.stop.cut_ref and not late ->
+        Process.cancel_timer(state.stop.cut_timer)
+        GenServer.reply(state.stop.from, {:ok, cut_ref})
+        Logger.debug("loopex daemon owner admission cut complete")
+        {:noreply, %{state | stop: %{state.stop | phase: :cut, from: nil}}}
+
+      {:sweep, :ok} when not late ->
+        {:noreply, maybe_finish_sweep(state)}
+
+      _missing ->
+        {:noreply, fail_cut(state, :connections_lost)}
+    end
+  end
+
+  def handle_info({:owner_reply, _registry, _ref, _reply}, state), do: {:noreply, state}
+
+  def handle_info({:daemon_fatal_teardown, recipient}, %{fatal_recipient: recipient} = state)
+      when is_pid(recipient) do
+    Logger.debug("loopex daemon owner fatal teardown marked")
+    {:noreply, %{state | fatal_teardown: true}}
   end
 
   def handle_info(
@@ -918,12 +959,7 @@ defmodule LoopexDaemon.Owner do
         {:transport_uninitialized_empty, registry, cut_ref},
         %{registry: registry, stop: %{cut_ref: cut_ref}} = state
       ) do
-    if state.stop.from do
-      Process.cancel_timer(state.stop.cut_timer)
-      GenServer.reply(state.stop.from, :ok)
-    end
-
-    {:noreply, %{state | stop: %{state.stop | swept: true, from: nil}}}
+    {:noreply, maybe_finish_sweep(put_in(state, [:stop, :swept], true))}
   end
 
   def handle_info({:mirror_deadline, operation_ref, deadline}, state) do
@@ -956,8 +992,26 @@ defmodule LoopexDaemon.Owner do
   def handle_info({:EXIT, registry, _reason}, %{registry: registry} = state),
     do: {:stop, :connections_lost, state}
 
-  def handle_info({:EXIT, relay, _reason}, %{relay: relay} = state),
-    do: {:stop, :relay_lost, state}
+  # Concept: a relay the daemon owner killed during fatal teardown is expected;
+  # any other relay exit ends this owner as `relay_lost`.
+  #
+  # Technical depth: the daemon owner sends its mark before its kill. Erlang
+  # orders signals only per sender pair, so the mark is normally, not
+  # provably, queued first; a zero-wait receive takes it if it is. A relay this
+  # owner killed at a missed cut is marked here before the kill.
+  def handle_info({:EXIT, relay, _reason}, %{relay: relay, fatal_teardown: true} = state),
+    do: {:noreply, state}
+
+  def handle_info({:EXIT, relay, _reason}, %{relay: relay} = state) do
+    recipient = state.fatal_recipient
+
+    receive do
+      {:daemon_fatal_teardown, ^recipient} when is_pid(recipient) ->
+        {:noreply, %{state | fatal_teardown: true}}
+    after
+      0 -> {:stop, :relay_lost, state}
+    end
+  end
 
   def handle_info({:EXIT, owner, reason}, state) do
     case Map.fetch(state.owner_pids, owner) do
@@ -1011,13 +1065,50 @@ defmodule LoopexDaemon.Owner do
 
   def handle_info(_message, state), do: {:noreply, state}
 
-  # Concept: a registry that missed a transport-cut acknowledgement is killed
-  # without awaiting its reap; its linked exit then stops this owner with
-  # `connections_lost`, the class the caller has already latched.
-  defp registry_lost(state) do
-    Logger.debug("loopex daemon owner connection registry missed the transport cut")
-    Process.exit(state.registry, :kill)
-    state
+  # Concept: the transport cut asks the registry by message, never by a call
+  # this owner would block in.
+  #
+  # Technical depth: the registry authenticates the request by this owner's
+  # pid, answers it exactly as the matching call, and sends the answer back as
+  # `{:owner_reply, registry, ref, reply}`.
+  defp registry_request(state, kind, request) do
+    ref = make_ref()
+    send(state.registry, {:owner_request, self(), ref, request})
+    put_in(state, [:stop, :pending], {kind, ref})
+  end
+
+  defp maybe_finish_sweep(%{stop: %{phase: :sweeping, pending: nil, swept: true}} = state) do
+    Process.cancel_timer(state.stop.cut_timer)
+    GenServer.reply(state.stop.from, :ok)
+    Logger.debug("loopex daemon owner uninitialized sweep complete")
+    %{state | stop: %{state.stop | phase: :swept, from: nil}}
+  end
+
+  defp maybe_finish_sweep(state), do: state
+
+  # Concept: a transport-cut step that missed its deadline is decided at once:
+  # the caller hears the class, and the component that missed it is killed at
+  # that instant so it can do no further work, without awaiting its reap.
+  #
+  # Technical depth: the relay's or registry's linked exit then stops this
+  # owner with the same class the caller has already latched.
+  defp fail_cut(state, class) do
+    Process.cancel_timer(state.stop.cut_timer)
+    if from = state.stop.from, do: GenServer.reply(from, {:error, class})
+    Logger.debug("loopex daemon owner transport cut missed its deadline")
+    state = %{state | stop: %{state.stop | phase: :cut_failed, from: nil, pending: nil}}
+
+    # A relay killed here is fatal teardown: its exit must not end this owner
+    # and the registry with it, which would cut off the stop records.
+    case class do
+      :relay_lost ->
+        Process.exit(state.relay, :kill)
+        %{state | fatal_teardown: true}
+
+      :connections_lost ->
+        Process.exit(state.registry, :kill)
+        state
+    end
   end
 
   @impl true

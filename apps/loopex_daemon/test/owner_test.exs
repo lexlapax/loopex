@@ -3145,9 +3145,14 @@ defmodule LoopexDaemon.OwnerTest do
   # Technical depth: each case suspends the component under test, so only the
   # owner's own deadline can end the wait. Elapsed times are bounded below by
   # the deadline and above by well under the caller's verdict margin.
-  test "a relay silent past the cut deadline answers relay_lost and its late acknowledgement changes nothing" do
+  # Concept: a relay that missed the cut is killed at the decision instant, so
+  # a suspended relay can never resume and admit or dispatch work queued
+  # before the cut.
+  test "a relay silent past the cut deadline answers relay_lost and is killed at that instant" do
     owner = start_owner()
     components = Owner.components(owner)
+    relay_monitor = Process.monitor(components.relay)
+    owner_monitor = Process.monitor(owner)
     :ok = :sys.suspend(components.relay)
 
     started = now_ms()
@@ -3156,10 +3161,34 @@ defmodule LoopexDaemon.OwnerTest do
     assert elapsed >= 290
     assert elapsed < 900
 
-    :ok = :sys.resume(components.relay)
-    assert %{} = AdmissionRelay.status(components.relay)
-    assert Process.alive?(owner)
-    assert {:error, :transport_cut_unavailable} = Owner.cut_admission(owner, 300)
+    assert_receive {:DOWN, ^relay_monitor, :process, _relay, :killed}, 100
+
+    # The owner and its registry stay up so the registry can still write the
+    # daemon's `fatal:relay_lost` stop records.
+    refute_receive {:DOWN, ^owner_monitor, :process, ^owner, _reason}, 200
+    assert Process.alive?(components.registry)
+  end
+
+  # Concept: the collaboration owner never blocks on the registry during the
+  # cut, so a relay lost while the registry is silent is consumed at once and
+  # its class stands, instead of the registry deadline naming
+  # `connections_lost`.
+  test "a relay lost while the registry gate is held ends the owner as relay_lost at once" do
+    owner = start_owner()
+    components = Owner.components(owner)
+    owner_monitor = Process.monitor(owner)
+    :ok = :sys.suspend(components.registry)
+
+    on_exit(fn -> Process.exit(components.registry, :kill) end)
+    cut = Task.async(fn -> Owner.cut_admission(owner, 3_000) end)
+    assert :ok = wait_for_stop(owner)
+    assert :ok = await_owner_phase(owner, :gating)
+
+    started = now_ms()
+    Process.exit(components.relay, :kill)
+    assert_receive {:DOWN, ^owner_monitor, :process, ^owner, :relay_lost}, 1_000
+    assert now_ms() - started < 1_000
+    assert {:error, :relay_barrier_timeout} = Task.await(cut, 5_000)
   end
 
   test "a registry gate silent past the cut deadline answers connections_lost and stops the owner" do
@@ -3216,6 +3245,21 @@ defmodule LoopexDaemon.OwnerTest do
 
     start_supervised!({Owner, options}, restart: :temporary)
   end
+
+  defp await_owner_phase(owner, phase, attempts \\ 200)
+
+  defp await_owner_phase(owner, phase, attempts) when attempts > 0 do
+    case :sys.get_state(owner) do
+      %{stop: %{phase: ^phase}} ->
+        :ok
+
+      _other ->
+        Process.sleep(5)
+        await_owner_phase(owner, phase, attempts - 1)
+    end
+  end
+
+  defp await_owner_phase(_owner, _phase, 0), do: {:error, :phase_not_reached}
 
   defp uninitialized_connection(components) do
     assert {:ok, %{rollback_token: token}} =
