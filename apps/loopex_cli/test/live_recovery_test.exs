@@ -152,6 +152,49 @@ defmodule LoopexCli.LiveRecoveryTest do
     stop_daemon(daemon)
   end
 
+  # Concept: a steer names the run it steers, fixed from the first durable
+  # `run.started` the command saw; when its reply is lost it is re-presented
+  # with that same run and identity and applied once.
+  #
+  # Technical depth: the provider holds the run at entry so the steer lands
+  # while it is live. The proxy loses the steer's reply; after recovery the
+  # command re-presents it, the provider is released, and the run's answer
+  # appears once.
+  @tag timeout: 120_000
+  test "a lost steer reply is re-presented against the same run", context do
+    provider =
+      ProviderFixture.new(:delayed_entry,
+        credential: @credential,
+        response_bodies: [text_response("steered answer", "msg_recovery_steer")]
+      )
+
+    launch =
+      Keyword.drop(provider.options, [
+        :credential_token,
+        :credential_registry,
+        :tracing_capability
+      ])
+
+    daemon = start_daemon(context, launch)
+    proxy = DaemonProxy.start(context.socket, [{"session.steer", 1}])
+
+    command =
+      Task.async(fn -> run(["run", "--daemon", proxy.path, "--steer", "look closer", "go"]) end)
+
+    assert Enum.any?(1..3_000, fn _ ->
+             Process.sleep(20)
+             Enum.count(DaemonProxy.seen(proxy), &(&1 == "session.steer")) >= 2
+           end),
+           "the steer was not re-presented"
+
+    ProviderFixture.release(provider)
+    {result, output} = Task.await(command, 90_000)
+    assert result == :ok, output
+    assert length(String.split(output, "steered answer")) == 2
+    assert Enum.count(DaemonProxy.seen(proxy), &(&1 == "session.steer")) == 2
+    stop_daemon(daemon)
+  end
+
   # Concept: recovery has one clock, started at the first loss; a daemon that
   # never becomes reachable again ends the command when it runs out, naming
   # what is unresolved, rather than retrying forever.
