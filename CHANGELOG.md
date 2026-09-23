@@ -147,6 +147,42 @@ explicit import for legacy roots, serializes durable monotonic rows, preserves
 placement binding, exposes bounded raw-byte cursor pages, reports the 4,096-row
 ceiling, and retains publication poison state without hiding existing rows.
 
+Add `loopex daemon`, which runs one daemon per state root in the foreground under
+a host dependency role, and `loopex daemon prepare-index`, which imports a
+released root's session directory strictly into the daemon index and refuses the
+whole import on any damaged entry. The daemon's orderly stop moves the admission
+relay through ordered lease-freeze, quiescing, seal and teardown barriers under
+fixed clocks; a closed connection's slot is freed only after the relay retires
+it and core releases its holder; an owner succession detaches attachments while
+keeping connections open; idle observers are evicted after ten minutes; and
+aggregate output pressure reclaims other clients' buffers before refusing a
+write. M5 keeps no resident window of encoded events.
+
+Add the live CLI forms `loopex run --daemon`, `loopex resume --daemon`,
+`loopex sessions --daemon` and `loopex attach`. They refuse every host flag,
+follow the protocol's exact request sequences, stream the answer as it is
+produced through per-session progress, recover a lost connection within one
+35-second clock without repeating or skipping a command or event, detach on a
+signal without aborting daemon-owned work, and print live queries as one ordered
+compact JSON record.
+
+Hold the provider credential in host custody. A reference host reads
+`LOOPEX_PROVIDER_API_KEY` once and removes it; the CLI lends one custody to every
+runtime a command composes, which fixes offline `loopex resume` and `cancel`
+refusing the credential on their second composition. Custody and its routing
+registry refuse unrecognized requests instead of crashing with an exit reason
+that carried their state, and composition validates a host-supplied credential
+plane exactly. Core's `progress_to` may be `{:session, pid}` to receive progress
+tagged with its session.
+
+Make a source archive buildable. `git archive` fills `SOURCE_IDENTITY` through
+`export-subst`; the CLI and provider builds resolve one source identity from a
+checkout or an archive and refuse a missing, malformed or changed one; and
+`scripts/source-archive-manifest.sh` describes an extraction for the release
+check's fresh-source lane. The independent Node client gains a generation-2
+socket connection and a cross-process takeover. The source `VERSION` moves to
+`0.2.0`.
+
 ## [0.1.0] — 2026-09-19
 
 M4's closed product baseline: the first numbered source version. It is a source

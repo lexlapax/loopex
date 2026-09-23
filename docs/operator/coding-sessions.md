@@ -53,9 +53,11 @@ the interrupt outside the emulator and forwards the stop the escript already
 knows how to make. Copy the pair together, keeping the launcher's
 `../loopex` layout, or point `LOOPEX_ESCRIPT` at the escript and put the launcher
 anywhere on your `PATH`; this moves only command startup, not the companion's
-embedded location. The reference adapter reads the provider credential from
-`LOOPEX_PROVIDER_API_KEY` after its isolated child is ready. Empty credentials or
-values above 65,536 bytes refuse. A missing or mismatched companion refuses
+embedded location. The command reads the provider credential from
+`LOOPEX_PROVIDER_API_KEY` once, when it first composes a runtime, into private
+custody, and removes the variable from its environment; the reference adapter
+receives only an opaque token for it, and a recovery that composes twice reuses
+that one custody. Empty credentials or values above 65,536 bytes refuse. A missing or mismatched companion refuses
 instead of running provider code inside the command's VM. Embedders can supply
 different explicit companion paths; runtime never searches a workspace for one.
 
@@ -392,9 +394,11 @@ rather than quietly ignored:
 | `skill list`, `skill show` | `--state-root`, `--workspace` |
 
 Naming the same non-repeatable flag twice is refused. `--skill` and
-`--skill-resource` are repeatable. Both numeric options are refused before a
-runtime starts unless they are positive whole numbers within the unsigned
-64-bit domain. The parser accepts `--flag value`, `--flag=value`, and bare
+`--skill-resource` are repeatable. `--context-token-budget` is refused before a
+runtime starts unless it is a positive whole number within the unsigned 64-bit
+domain. `--cleanup-grace-ms` is checked here only for being a positive whole
+number; the runtime enforces the unsigned 64-bit ceiling when composition
+reaches it, after earlier components may have started and been stopped again. The parser accepts `--flag value`, `--flag=value`, and bare
 positional words, and uses the standard library only: a dependency here would
 land in an operator's install for the sake of flag parsing. A bare `--` ends
 option parsing and keeps every remaining word as data, which is how an artifact
@@ -648,6 +652,8 @@ Point M2 at a fresh `--state-root`.
 
 ## Related
 
+- [The daemon](daemon.md#concept) — the same session driven from separate
+  processes through one long-lived daemon per state root.
 - [Tools and policy](tools-and-policy.md#concept) — the four coding tools, host authority, and artifacts.
 - [Runtime operations](runtime.md#concept) — the M1 embedded runtime runbook.
 - [Agent loop and tools](../developer/agent-loop-and-tools.md#concept) — the loop, contracts, and invariants behind this command.
