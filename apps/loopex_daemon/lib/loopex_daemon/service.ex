@@ -31,7 +31,7 @@ defmodule LoopexDaemon.Service do
   admission wait, the relay's `freeze_lease_ops` barrier with every executing
   lease row finished inside `relay_control_timeout_ms: 5_000`, a fresh 5 s
   `quiescing` barrier, core quiesce on core's own clock, then one shared
-  `teardown_ms` deadline (provisionally 30 s until the closure measurement)
+  `teardown_ms` deadline (30 s, against a measured 119 ms at full population)
   over `seal_after_quiesce`, one `daemon.stopping` record per connection and
   the `tearing_down` barrier, before the collaboration owner, runtime and
   edges stop in reverse order, the Store last and the bounded placement
@@ -67,7 +67,8 @@ defmodule LoopexDaemon.Service do
   @default_admission_wait_ms 5_000
   @relay_control_timeout_ms 5_000
   @transport_cut_deadline_ms 5_000
-  # Provisional until the closure run measures the maximum-population teardown.
+  # Measured: an orderly stop at 512 attached connections took 119 ms (OTP 29,
+  # Elixir 1.20.3, `maximum_population_test.exs`); 30 s keeps a wide margin.
   @default_teardown_ms 30_000
   # The readiness version is the source VERSION this build was compiled from.
   @version Path.join([__DIR__, "..", "..", "..", "..", "VERSION"])
