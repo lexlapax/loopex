@@ -324,6 +324,26 @@ ambiguous old unreadable reported accounting cannot resume under the new reader.
 Stop all owners and back up the complete state before rollback: the prior binary
 can resume only histories containing no version-2 settlement.
 
+<a id="concept-run-daemon"></a>
+## When a Daemon Holds the Root
+
+Technical depth:
+[What changes under a daemon](how-a-run-works-technical.md#technical-run-daemon).
+
+Everything above describes one `loopex` process that composes a runtime for one
+command. [`loopex daemon`](daemon.md#concept) composes that same runtime once and
+keeps it running, and the command you type becomes a client that talks to it
+over a socket inside the state root. The run itself does not change: the same
+session owner, turn loop, policy, executor, provider companion and journal do
+the same work in the daemon's process instead of the command's.
+
+Three things do change. The daemon, not the command, chose the workspace,
+policy and credential when it started. Several commands may watch one session at
+once, and one at a time controls it. And Ctrl-C on a client detaches: the
+client releases its control and exits, and the run continues in the daemon.
+Stopping work there is the daemon's orderly stop, which drains every session
+through core before anything it depends on stops.
+
 <a id="concept-run-safe"></a>
 ## What Makes This Safe, and What It Does Not Claim
 

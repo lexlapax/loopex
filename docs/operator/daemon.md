@@ -256,6 +256,7 @@ the first fatal.
 ## Related
 
 - [Coding sessions](coding-sessions.md#concept) — the offline commands.
+- [The daemon for developers](../developer/daemon.md#concept) — its processes, orders and evidence.
 - [App server operations](app-server.md#concept) — the generation-1 stdio server.
 - [ADR 0032](../adr/0032-daemon-attachment-residency-and-replay.md#concept),
   [ADR 0033](../adr/0033-collaboration-controller-lease-and-takeover.md#concept)

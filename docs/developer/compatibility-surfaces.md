@@ -162,7 +162,13 @@ private companion process per invocation and explicit adapter options:
 or mismatched configuration refuses before credential delivery, with no
 shared-VM fallback or runtime code discovery. The bare-model `complete/2` helper
 now refuses; direct callers use `complete_prompt/3` with explicit configuration.
-The Model callback remains `complete/3`.
+The Model callback remains `complete/3`. From M5, `complete_prompt/3` keeps its
+arity and result union but changes its accepted options: the caller composes
+credential custody and a routing registry and passes `:credential_token` and
+`:credential_registry`, and a call that relied on `LOOPEX_PROVIDER_API_KEY` in
+the environment refuses before launch. To migrate, compose custody as
+`LoopexComposition.CredentialHost` does and pass its token and registry handle;
+the helper supplies its own trace capability and refuses one passed in.
 
 `Loopex.LLM.ReqLLM.call_options/3` also remains an exported, unstable helper.
 It takes an explicit credential and returns provider options containing that

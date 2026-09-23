@@ -10,9 +10,11 @@ The returned runtime reference is required for every session operation; Loopex
 installs no global default.
 
 This is a working milestone surface, not an installable package or released
-contract. It supports one attached caller and one active run per session. It
-does not provide a daemon, network transport, multi-client attachment, remote
-executor, distribution, or production credential manager.
+contract. Embedded, it supports one active run per session. Keeping sessions
+alive between processes and serving several local clients is the job of
+[the daemon](daemon.md#concept), a host over this same runtime. Loopex provides
+no network transport, remote executor, distribution, or production credential
+manager.
 
 Developer composition details: [Runtime and embedding](../developer/runtime-and-embedding.md#technical-depth).
 
@@ -33,7 +35,8 @@ alternate loop.
 | Execute the registered controlled workspace tool in a separate OS process | Available |
 | Retain sessions, events, tool receipts, and resume after process loss | Available |
 | Install a released package or invoke a `loopex` CLI | Not provided in M1 |
-| Run a daemon, remote executor, network client, or multi-client service | Not provided in M1 |
+| Keep sessions alive for several local clients over a Unix-domain socket | Available through [the daemon](daemon.md#concept) |
+| Run a remote executor, network client, or distributed service | Not provided |
 
 The missing surfaces are not alternate ways to reach hidden functionality.
 Loopex is deliberately embedded first: a later CLI, IDE, daemon, or web host
@@ -81,10 +84,17 @@ embed Loopex in a host, follow the
 - Start only one active Runtime Control for a Store namespace and `runtime_id`.
   A replacement may start only after the prior runtime OS-process tree is known
   dead or has been quiesced.
-- Hold provider credentials in the host. The reference ReqLLM adapter reads only
-  `LOOPEX_PROVIDER_API_KEY` for the request it performs. Credentials must not be
-  placed in session options, commands, Store data, executor jobs, receipts,
-  events, diagnostics, fixtures, or logs.
+- Hold provider credentials in the host. The reference host composition reads
+  `LOOPEX_PROVIDER_API_KEY` once when it starts, moves it into private custody
+  and removes it from the process environment; a second composition in the same
+  operating-system process refuses with `provider_credential_required` rather
+  than finding the variable again. Each model call receives the credential only
+  in the one private frame its isolated provider process needs. A caller of
+  `Loopex.LLM.ReqLLM.complete_prompt/3` outside a runtime composes that custody
+  and routing registry itself and passes their token and handle; a call that
+  relies on the environment alone now refuses before launch. Credentials must
+  not be placed in session options, commands, Store data, executor jobs,
+  receipts, events, diagnostics, fixtures, or logs.
 - The trusted-local executor is not a sandbox. It launches only its fixed,
   validated tool registry beneath a held workspace lease. The controlled tool
   process receives an explicit environment containing only `PATH`; it receives

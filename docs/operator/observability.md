@@ -91,6 +91,26 @@ Entries go to the runtime's diagnostics plane by default, or to the logger.
 An OTP release built without trace sessions reports unavailability rather than
 pretending to start one. Stopping a session releases every trace flag it set.
 
+### The one process a trace never sees
+
+The process that hands the provider credential to a model call's isolated
+companion excludes itself from every current and future trace session before
+it touches the credential, and names the exact functions that carry it; the
+call does not proceed unless the exclusion is acknowledged. So even the
+`arguments` level never renders the credential, and a trace started mid-call
+cannot reach that process. The exclusion ends when the process does.
+
+### Under the daemon
+
+A trace session covers the processes the runtime owns. The daemon's listener,
+connections and lease owners are host processes above the runtime, so a trace
+session does not flag them. Their lifecycle lines are fixed and identity-free
+and are logged at `debug`, which `loopex daemon` does not print: it logs at
+`info` to standard error, so a running daemon's standard error carries only
+warnings and failures. The daemon's own state is read with
+`loopex sessions --daemon SOCKET --status`; see the
+[daemon page](daemon.md#operator-daemon-listing).
+
 <a id="operator-observability-telemetry"></a>
 ## Telemetry Events
 

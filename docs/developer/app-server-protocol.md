@@ -12,7 +12,13 @@ constraints a change to it must respect.
 
 The founding decision is accepted
 [ADR 0023](../adr/0023-experimental-public-session-protocol.md#concept). The
-generation is named `loopex.experimental/1`.
+generation is named `loopex.experimental/1`. Until M5 it was named
+`loopex.session.v1-experimental`; M5 renamed it to match the schema and vector
+manifests that shipped in `0.1.0`, which changes its schema digest and nothing
+else. The daemon serves a second generation, `loopex.experimental/2`, over its
+Unix-domain socket: generation 1's methods, records, codes and limits plus the
+daemon's own, with its own schema and vectors. See [the daemon](daemon.md#concept).
+The foreground stdio server described here serves generation 1 only.
 
 <a id="concept-protocol-one-contract"></a>
 ## One Contract, Not a Second Loop

@@ -183,6 +183,14 @@ check's fresh-source lane. The independent Node client gains a generation-2
 socket connection and a cross-process takeover. The source `VERSION` moves to
 `0.2.0`.
 
+Run each real-provider release case in its own process. The release check reads
+an explicit manifest of eight cases, gives the credential only to those
+processes, runs every other lane with it removed, asserts an exact executed
+count per lane, and adds the daemon to the Node and long-bound lanes. On Linux
+it runs the daemon's two cross-user cases, which need a second user; elsewhere
+it ends `PASS (closure-incomplete: cross_uid not run)`. New developer pages
+describe the daemon's processes, orders and evidence.
+
 ## [0.1.0] — 2026-09-19
 
 M4's closed product baseline: the first numbered source version. It is a source

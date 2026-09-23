@@ -77,7 +77,8 @@ Technical depth: [The selection table](verification-technical.md#technical-verif
 | The wire protocol, its schema or vectors | The Node consumer workflows (`--only node_client`, part of the release check), and the compatibility surfaces page updated in the same change |
 | The CLI or operator-facing commands | The operator page that describes the behavior updated in the same change; a changed operator command also selects its workflow in the release check |
 | Provider or credential handling | `bash scripts/check-release.sh`, the real-provider cases |
-| The executor's OS boundary (launch, signals, cleanup) | `bash scripts/fixtures/pinned-load.sh` over the touched cases on a Linux host: thirty runs under four pinned cores and load, no failure and no hang |
+| An operating-system process boundary: the executor's or the provider child's (launch, signals, credential delivery, cleanup) | `bash scripts/fixtures/pinned-load.sh` over the touched cases on a Linux host: thirty runs under four pinned cores and load, no failure and no hang |
+| The daemon's socket, peer check or lifecycle | The daemon's `node_client`, `long_bound` and Linux `cross_uid` lanes in the release check, and the [daemon operator page](../operator/daemon.md#concept) updated in the same change |
 | The toolchain floor or `.tool-versions` | The fast check under the floor pair once |
 | Documentation only | `bash scripts/check.sh --docs`, which `check.sh --select` chooses on its own for a prose-only diff |
 | Unknown | The release check, and the review names the boundaries it found |

@@ -80,6 +80,13 @@ exactly the content every other rule removes. That is why these spans are
 emitted directly rather than through the library's own span helper, which
 attaches kind, reason and stacktrace to its metadata.
 
+Where redaction cannot be enough, the process is not traced at all. The one
+process that handles the provider credential excludes itself from every current
+and future trace session before it receives anything, and the call does not
+proceed without that exclusion. Redaction by key would already hide a credential
+under a credential-named key; exclusion removes the need to trust that the value
+is always under one.
+
 <a id="concept-observability-bounded"></a>
 ## Everything Is Bounded, and Says So When It Bounds
 

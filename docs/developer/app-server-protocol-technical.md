@@ -16,6 +16,16 @@ exact limits, and where the schema, the vectors and the evidence live.
 loopex.experimental/1
 ```
 
+Generation 1 was `loopex.session.v1-experimental` before M5. The rename changed
+only the schema digest reported in `initialized`, because the generation string
+is one of the five digest inputs; the methods, record families, error codes,
+limits, schema manifest and vector bytes are unchanged, and
+`apps/loopex_protocol/test/public_schema_conformance_test.exs` proves both.
+Generation 2, `loopex.experimental/2`, is `LoopexProtocol.Session.V2`, with its
+own `priv/schema/loopex-experimental-2.json` and
+`priv/vectors/loopex-experimental-2.json`; only the daemon's socket serves it,
+and a client offering only generation 1 there is refused at initialize.
+
 Initialization happens exactly once per connection; a second attempt is refused
 with `already_initialized`, and any other method before it with
 `not_initialized`. The client offers an ordered list of generations; the server

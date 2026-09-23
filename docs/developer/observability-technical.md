@@ -110,6 +110,24 @@ traced process and never replies to one.
 Match specs by level: `:calls` sends the caller; `:returns` and `:arguments` add
 the return trace; `:arguments` drops the `:arity` flag so argument terms arrive.
 
+**Exclusion.** `Loopex.Trace.exclude_self/2` takes a host-bound capability
+(`Loopex.Trace.Capability.Handle`, bound once per runtime) and the exact
+`{module, function, arity}` list that can carry sensitive data. `Control`
+records the caller in a monitored excluded-process set and adds the functions
+to a ref-counted union with no fixed ceiling; the active session clears the
+caller's flags and those match specs, and the call returns only after an OTP
+trace-delivery barrier. A session started later applies the retained set. When
+the excluded process exits, its whole contribution is removed. The ReqLLM
+credential sender is the one caller: it excludes itself before it receives any
+credential context and refuses the call if exclusion is unavailable. `Trace`
+keeps the full OTP session handle in private ETS so neither crash output nor
+status formatting carries it, and a replacement tracer recreates an active
+session from `Control`'s retained metadata.
+
+Trace sessions cover only runtime-owned processes. A host's own processes —
+the daemon's listener, connections and lease owners — are not flagged and are
+not claimed as trace-session witnesses.
+
 <a id="technical-observability-redaction"></a>
 ## Redaction Rules
 
@@ -132,6 +150,8 @@ marker, so an entry is bounded however deep or wide the term was.
 | Claim | Where it is proved |
 | --- | --- |
 | Five locked trace-session witnesses, redaction and limit negatives | `apps/loopex/test/trace_session_test.exs` |
+| Exclusion: 65 functions for one sender enter and leave both `Control` sets; the private session handle never reaches crash output | `apps/loopex/test/trace_session_test.exs` |
+| The credential sender is excluded before credential context, and a refused exclusion refuses the call | `apps/loopex_llm_reqllm/test/provider_bridge_test.exs` |
 | Port and cut emissions, and the absence of content | `apps/loopex/test/telemetry_boundary_test.exs` |
 | The edge handler carries spans into the diagnostics plane and refuses anything richer | `apps/loopex_telemetry/test/telemetry_handler_test.exs` |
 | A stalled sink neither blocks an emitting boundary nor exceeds the ceiling; ten thousand spans with no handler stay inside a bounded cost | `apps/loopex/test/telemetry_boundary_test.exs` |

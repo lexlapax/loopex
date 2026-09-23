@@ -620,6 +620,25 @@ start so the session, executor, and command observe one committed value.
 `:state_root` and `:workspace` are resolved by the caller, never discovered
 here, and no value is read from application environment.
 
+**The provider credential is consumed once.** A composition started without a
+`:credential_plane` reads `LOOPEX_PROVIDER_API_KEY`, deletes it from the VM
+environment and places it in a custody process beside a routing registry that
+holds one opaque token; the model edge receives only that token and handle. A
+second composition in the same VM finds no variable and returns
+`{:error, :provider_credential_required}` without starting anything. A host that
+composes more than one runtime in one lifetime — the reference CLI inspects and
+then resumes under separate runtimes, and `loopex daemon` holds one for its
+whole life — calls `LoopexComposition.CredentialHost.open/0` once and passes
+`plane/1`'s result as `:credential_plane` to each composition, releasing it with
+`release_plane/1` after that runtime stops. No composition function returns or
+logs credential bytes, and custody answers any request it does not recognize
+with `{:error, :unavailable}`.
+
+The standalone `Loopex.LLM.ReqLLM.complete_prompt/3` keeps its arity and result
+union but no longer reads the environment: its caller composes custody and a
+routing registry and passes them as `:credential_token` and
+`:credential_registry`, and a call without them refuses before launch.
+
 Use `with_runtime/2` when the reference stack is needed for one operation:
 
 ```elixir

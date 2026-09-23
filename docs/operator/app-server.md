@@ -70,7 +70,7 @@ built from an archive is pointed at the one a checkout produced.
 | `LOOPEX_WORKSPACE` | The workspace root the executor leases, and the tree project skills are discovered under. |
 | `LOOPEX_PROVIDER_LAUNCH` | The `.launch` file naming the provider companion this host may start. It carries no credential. |
 | `LOOPEX_POLICY` | `ask` or `allow-all`. There is no default: naming authority is the operator's job. |
-| `LOOPEX_PROVIDER_API_KEY` | The provider credential. The model adapter reads it from the environment itself; it never reaches an argument, a record, a log or a file. |
+| `LOOPEX_PROVIDER_API_KEY` | The provider credential. The server reads it once at start into private custody and removes it from its environment; it never reaches an argument, a record, a log or a file. |
 
 ```bash
 export LOOPEX_HOME="$HOME/.loopex"

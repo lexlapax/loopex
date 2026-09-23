@@ -190,6 +190,12 @@ system process, and commits a truthful denied outcome you read in the transcript
 The run then continues or terminates truthfully. It never retries a call the host
 already refused.
 
+Under [the daemon](daemon.md#concept) the policy is chosen once, by
+`loopex daemon --policy`, and decides for every session and every client of that
+daemon; no client request can name, replace or widen it, and `run --daemon`
+refuses a `--policy` flag. A stance's notice is printed once, on the daemon's
+own standard error at its first decision, not on a client's terminal.
+
 Failure fails closed. A policy that raises, times out, or returns a malformed
 value becomes a denial rather than falling through to allow. `defer` — asking a
 person mid-call — is declared in the port and refused in this milestone rather
@@ -419,8 +425,10 @@ corrupt object or use reports unavailable rather than returning empty content.
 
 ### Credential Boundary
 
-The provider credential is read from `LOOPEX_PROVIDER_API_KEY` by the model
-adapter and nowhere else. Every executor spawn explicitly removes that named
+The provider credential is read from `LOOPEX_PROVIDER_API_KEY` once, by the host
+that composes the runtime, which moves it into private custody and removes it
+from its own environment; a second composition in the same process refuses
+rather than finding it again. Every executor spawn explicitly removes that named
 credential, including the launcher and the executor's own process-management
 helpers. A model-supplied command is then launched through `/usr/bin/env -i`
 with `PATH` as its only variable. The receipt records that constructed downstream

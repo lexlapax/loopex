@@ -312,6 +312,26 @@ the record and probed the same way, and only an absent process makes it
 reclaimable. The refusals and their exact text are in
 [`loopex cancel` is narrow](coding-sessions.md#operator-sessions-cancel).
 
+<a id="technical-run-daemon"></a>
+## What Changes Under a Daemon
+
+Concept: [When a daemon holds the root](how-a-run-works.md#concept-run-daemon).
+
+| | One `loopex` process | Under `loopex daemon` |
+| --- | --- | --- |
+| Who composes the runtime | The command, for its own lifetime | The daemon, once per daemon lifetime |
+| Workspace, policy, credential | The command's flags and environment | The daemon's, fixed at start; a live form refuses those flags |
+| Placement lock and Store marker | Held by the command while it runs | Held by the daemon; offline commands refuse against it |
+| Clients of one session | One | Any number observing, one controlling under a lease |
+| Ctrl-C, `SIGTERM`, `SIGHUP`, `SIGQUIT` on the command | Abort the run | Release control within 5 s and exit `0`; the run continues |
+| Stopping the work | `loopex cancel` once nothing holds the root | The daemon's orderly `SIGTERM`, then `loopex cancel` if needed |
+| Transport | None | Generation-2 JSON lines over the root's Unix-domain socket |
+
+The journal, receipts, artifacts and recovery rules on this page are the same in
+both columns. The daemon adds `daemon/` to the state root for its socket and
+session index. See the [daemon page](daemon.md#technical-depth) for its grammar,
+limits, stop bound and exit statuses.
+
 <a id="technical-run-authority"></a>
 ## Authority, Refusal, and the Credential
 
