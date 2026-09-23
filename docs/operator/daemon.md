@@ -209,7 +209,7 @@ records. A client offering only generation 1 is refused at initialize.
 | Initialize deadline | 30 s from accept |
 | Attachments | 64 per session, 512 per daemon |
 | Output buffered per connection | 4 MiB, a slow client detached at its last emitted cursor |
-| Aggregate buffered output | 512 MiB; other clients' buffers are reclaimed, unattached first, before a new write is refused |
+| Aggregate buffered output | 512 MiB; other clients' buffers are reclaimed, unattached first, before a new write is refused, and a reclaimed attached client is told `detached` at its last cursor before its connection closes |
 | Transient progress queued per connection | 32 records and 512 KiB, written only behind durable output |
 | Idle observer eviction | 10 minutes; a lease holder is exempt while it holds its lease |
 | Lease term / renewal | 30 s / every 10 s |

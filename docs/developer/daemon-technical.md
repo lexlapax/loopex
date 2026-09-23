@@ -98,7 +98,8 @@ of which `SuccessionCapacity` reserves the exact bytes of one maximal
 reply shape. Past the ordinary allowance a client is detached at its last
 completely emitted cursor. The aggregate allowance is 512 MiB; before refusing
 a write the registry reclaims other connections, unattached first and then
-attached, largest buffer first.
+attached, largest buffer first; a reclaimed attached connection writes `detached` at
+its last emitted cursor, best effort, and closes.
 
 Core delivers progress to `{:session, pid}` sinks as
 `{:loopex_progress, session_id, item}`. `Service` forwards it to the registry,

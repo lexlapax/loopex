@@ -165,7 +165,24 @@ defmodule LoopexDaemon.SocketConnection do
     {:noreply, state}
   end
 
+  # Concept: a connection whose buffered output the registry reclaimed under
+  # aggregate pressure is an eviction like overflow or idleness: an attached
+  # client is told `detached` at its last completely emitted cursor, best
+  # effort, and then closed.
+  #
+  # Technical depth: the registry has already emptied this row and released its
+  # charge; the record is one ordinary bounded write and the close is bounded
+  # by `begin_final_close/2`'s deadline whether or not the write is admitted.
   @impl true
+  def handle_info(
+        {:connection_abort, token, :output_reclaimed},
+        %{rollback_token: token, closing: nil, attachment: attached} = state
+      )
+      when attached != nil do
+    Logger.debug("loopex daemon attachment detached by output reclamation")
+    begin_detach_close(state)
+  end
+
   def handle_info({:connection_abort, token, _reason}, %{rollback_token: token} = state),
     do: {:stop, :normal, state}
 

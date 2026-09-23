@@ -1839,8 +1839,10 @@ defmodule LoopexDaemon.ConnectionRegistry do
   # Technical depth: M5 keeps no resident window (the 2026-09-22 disposition),
   # so reclamation starts at the unattached-connection tier. Ties break on the
   # connection incarnation. A victim's buffer and charge are released at once
-  # and it is closed; nothing waits for its peer, and no detach cursor is
-  # invented for bytes that were never written.
+  # and it is told `:output_reclaimed`; an attached victim writes `detached` at
+  # its last completely emitted cursor, best effort, before it closes, so no
+  # cursor is invented for bytes that were never written. Nothing waits for
+  # its peer.
   defp reclaim(state, _candidate, needed) when needed <= 0, do: state
 
   defp reclaim(state, candidate, needed) do

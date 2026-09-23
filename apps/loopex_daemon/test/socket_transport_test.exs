@@ -502,6 +502,52 @@ defmodule LoopexDaemon.SocketTransportTest do
     assert [%{"request_id" => "return", "type" => "snapshot"}] = receive_records(returning, 1)
   end
 
+  # Concept: aggregate-pressure reclamation evicts like overflow and idleness:
+  # an attached client is told `detached` with its session and last emitted
+  # cursor before the close, and an unattached one is simply closed.
+  #
+  # Technical depth: the registry's reclamation message is delivered to each
+  # live connection exactly as `reclaim/3` sends it; the registry-side victim
+  # order is proved in `connection_registry_test.exs`.
+  test "a connection reclaimed under aggregate pressure is detached before it closes",
+       %{daemon: daemon} do
+    client = initialized_client(daemon)
+    session_id = create_session(client, "reclaim-create")
+    :ok = send_frame(client, attach("attach", session_id))
+    assert [%{"type" => "snapshot", "event_cursor" => emitted}] = receive_records(client, 1)
+    {token, pid} = live_connection(daemon)
+
+    send(pid, {:connection_abort, token, :output_reclaimed})
+
+    assert [%{"code" => "detached", "session_id" => encoded, "event_cursor" => cursor}] =
+             receive_records(client, 1)
+
+    assert encoded == Wire.encode_identity(session_id)
+    assert cursor == emitted
+    assert closed?(client, 2_000)
+
+    bare = initialized_client(daemon)
+    {token, pid} = live_connection(daemon)
+    send(pid, {:connection_abort, token, :output_reclaimed})
+    assert closed?(bare, 2_000)
+  end
+
+  defp live_connection(daemon) do
+    eventually(fn ->
+      match?([_], live_rows(daemon))
+    end)
+
+    [{token, %{connection_pid: pid}}] = live_rows(daemon)
+    {token, pid}
+  end
+
+  defp live_rows(daemon) do
+    daemon.registry
+    |> :sys.get_state()
+    |> Map.fetch!(:rows)
+    |> Enum.filter(fn {_token, row} -> row.phase == :live and row.initialized end)
+  end
+
   test "resource queries and artifact transfers answer or refuse over the socket",
        %{daemon: daemon} do
     client = initialized_client(daemon)
