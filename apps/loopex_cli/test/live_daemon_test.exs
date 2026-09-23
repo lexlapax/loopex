@@ -469,6 +469,42 @@ defmodule LoopexCli.LiveDaemonTest do
     stop_daemon(daemon)
   end
 
+  # Concept: taking over a session this daemon has not activated is refused as
+  # dormant, and the lease the take-over had acquired is released before the
+  # command exits, so resuming the session right afterwards is not refused
+  # `control_held`.
+  @tag timeout: 120_000
+  test "a dormant take-over releases its lease so resume succeeds at once", context do
+    first = start_daemon(context, [])
+    {:ok, client} = LoopexCli.DaemonClient.connect(context.socket)
+
+    {:ok, %{"session_id" => encoded}, _client} =
+      LoopexCli.DaemonClient.request(client, "session.create", %{
+        "command_id" => LoopexProtocol.Wire.encode_identity("dormant-take-over"),
+        "session_options" => %{}
+      })
+
+    LoopexCli.DaemonClient.close(client)
+    {:ok, session_id} = LoopexProtocol.Wire.identity(encoded)
+    stop_daemon(first)
+
+    second = start_daemon(context, [])
+
+    assert {:error, message} =
+             LoopexCli.dispatch(["attach", session_id, "--daemon", context.socket, "--take-over"])
+
+    assert message =~ "dormant" or message =~ "resume"
+
+    started = System.monotonic_time(:millisecond)
+
+    capture_io(fn ->
+      assert :ok = LoopexCli.dispatch(["resume", "--daemon", context.socket, session_id])
+    end)
+
+    assert System.monotonic_time(:millisecond) - started < 10_000
+    stop_daemon(second)
+  end
+
   defp daemon_status_tail(socket, session_id) do
     {:ok, client} = LoopexCli.DaemonClient.connect(socket)
 
