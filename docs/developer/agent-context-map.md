@@ -5655,3 +5655,20 @@ owed, and aggregate reclamation begins at the unattached-connection tier:
 unattached connections by descending output-buffer bytes with the connection
 incarnation as tie-break, then live-attachment detachment. Every other
 residency ceiling is unchanged.
+
+<a id="disposition-m5-residual-proofs-2026-09-22"></a>
+### M5 residual proofs without new product seams — 2026-09-22
+
+An audit of the M5 verification table against the tests found claims with no
+test. Most have since been proved and recorded as progress rows. On 2026-09-22
+the maintainer chose, over adding test-only hooks to product code or stopping
+now, that every remaining claim provable without a product change is proved
+before closure, and that the claims which would need a new test-only seam are
+recorded as named limitations for the closure disposition instead: the
+credential handoff's private `:timeout` cuts and before/after-deadline pairs,
+a rotation landing between two in-flight same-token replies, the
+pre-installation signal window, an accept failure after `begin_accept`, and a
+command's own `commit_unknown` when the capacity refusal lands mid-transaction;
+likewise a foreign-owned socket subdirectory at a real start, which needs a
+second user to own it, and overflow detachment driven through a real socket.
+Each is named in the plan's progress rows where it arises.
