@@ -308,10 +308,16 @@ defmodule LoopexDaemon.SocketTransportTest do
     Process.exit(coordinator, :kill)
 
     # Attaching reads durable history, so it may still succeed until core has
-    # processed the coordinator's death; after that it is refused the same way.
+    # processed the coordinator's death; an attach the death cuts is superseded,
+    # which the daemon answers `attachment_conflict`; after that it is refused
+    # `session_unavailable`.
     :ok = send_frame(client, attach("attach", session_id))
     assert [attached] = receive_records(client, 1)
-    assert attached["type"] == "snapshot" or attached["code"] == "session_unavailable"
+
+    assert attached["type"] == "snapshot" or
+             attached["code"] in ["session_unavailable", "attachment_conflict"],
+           inspect(attached)
+
     :ok = send_frame(client, inspect_request("inspect", session_id))
 
     assert [%{"request_id" => "inspect", "code" => "session_unavailable"}] =

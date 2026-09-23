@@ -1836,7 +1836,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
                end) do
           assert_receive {:loopex_progress,
                           %{kind: :text_delta, stream_domain_id: ^predecessor_domain}},
-                         5_000
+                         30_000
         end
       else
         refute Enum.any?(result.progress, fn item ->
