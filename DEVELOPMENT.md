@@ -86,9 +86,17 @@ LOOPEX_PROVIDER_API_KEY=... bash scripts/check-release.sh
 It refuses without the credential, without the pinned Node, or on a dirty tree,
 and then runs a named list of release applications, each in its own VM with
 `--only real_provider --only node_client --include long_bound`: the
-real-provider coding workflows, the independent Node client against the shipped
-app server, and the fresh-source archive build, which prints the extracted
-revision and the archive's SHA-256. A final `--only long_bound` pass over
+real-provider coding workflows and the daemon's real-provider socket workflow,
+and the independent Node client against the shipped app server and against a
+running daemon. It then runs the fresh-source lane: from a hostile caller
+`umask 0777` it stages the exact commit with `git archive` under a scoped
+`umask 022`, retains the extraction's `scripts/source-archive-manifest.sh`
+manifest and the `git ls-files -z` inventory outside the extraction (set
+`LOOPEX_RELEASE_RETAIN` to choose where), proves with
+`scripts/source-archive-check.exs` that the extraction is exactly that commit,
+builds the command there with `mix deps.get` and the documented escript build,
+and proves the build changed nothing outside its declared outputs; it prints
+both retained files' SHA-256 digests. A final `--only long_bound` pass over
 `loopex` and `loopex_executor_local` runs the three real-duration proofs the
 fast check excludes. Every pass must execute at least one test. The credential
 reaches only the test processes; never put it in a command argument, log,

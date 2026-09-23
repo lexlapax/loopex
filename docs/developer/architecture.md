@@ -40,7 +40,7 @@ and the role is what fixes which dependencies an application may declare.
 | `loopex_reference_client` | client | A thin embedded client over the public facade. |
 | `loopex_cli` | client | `loopex`, the command an operator runs. |
 | `loopex_app_server` | client | The foreground server that speaks the experimental session protocol over standard input and output. |
-| `loopex_daemon` | client | The durable local service that owns one state root and serves independent clients over a Unix-domain socket. |
+| `loopex_daemon` | host | The durable local service that owns one state root and serves independent clients over a Unix-domain socket. Its `:host` role obeys every client rule, may depend on no client or host, and is the one host the reference CLI may depend on to start it from `loopex daemon`. |
 
 Every arrow points inward. `loopex_protocol` depends on nothing, so a contributor
 can compile against the contract without acquiring the runtime. `loopex` depends
@@ -94,6 +94,8 @@ flowchart TB
 
     CLI --> COMP
     CLI --> RUNTIME
+    CLI --> DAEMON
+    CLI --> PROTO
     REF --> RUNTIME
     APPS --> COMP
     APPS --> RUNTIME

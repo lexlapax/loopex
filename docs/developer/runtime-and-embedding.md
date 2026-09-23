@@ -141,7 +141,10 @@ only path by which a reserved `loopex.` identifier reaches the registry;
 them; `:policy` names the host authority module and is required whenever any
 tool is active; `:bounds` and `:sampling` carry the declared run bounds and the
 output allowance; and `:progress_to` and `:diagnostics_to` are optional
-unsupervised sinks for transient items. The inherited `:tool` and
+unsupervised sinks for transient items. `:progress_to` may also be
+`{:session, pid}`, which delivers model and executor progress as
+`{:loopex_progress, session_id, item}` so a host serving many sessions can route
+each item; a bare pid keeps the untagged `{:loopex_progress, item}`. The inherited `:tool` and
 `grant_decision` options remain valid and are folded into the same tool set, so
 there is exactly one way a tool reaches a model. Configured defaults exist for
 the bounds — 16 turns, a 1_000_000-token budget, and a 600_000 ms deadline
