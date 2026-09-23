@@ -121,6 +121,65 @@ defmodule LoopexCli.LiveRecoveryTest do
     end
   end
 
+  # Concept: a follow-up whose reply was lost is re-presented like the prompt
+  # before it and applied once.
+  @tag timeout: 120_000
+  test "a lost follow-up reply is re-presented and applied once", context do
+    launch =
+      ProviderFixture.new(:reply,
+        credential: @credential,
+        response_bodies: [
+          text_response("first answer", "msg_recovery_first"),
+          text_response("second answer", "msg_recovery_second")
+        ]
+      ).options
+      |> Keyword.drop([:credential_token, :credential_registry, :tracing_capability])
+
+    daemon = start_daemon(context, launch)
+    proxy = DaemonProxy.start(context.socket, [{"session.follow_up", 1}])
+
+    {result, output} =
+      run(["run", "--daemon", proxy.path, "--follow-up", "and then", "go"])
+
+    assert result == :ok, output
+
+    for answer <- ["first answer", "second answer"] do
+      assert length(String.split(output, answer)) == 2,
+             "expected #{answer} exactly once: #{inspect(output)}"
+    end
+
+    assert Enum.count(DaemonProxy.seen(proxy), &(&1 == "session.follow_up")) == 2
+    stop_daemon(daemon)
+  end
+
+  # Concept: recovery has one clock, started at the first loss; a daemon that
+  # never becomes reachable again ends the command when it runs out, naming
+  # what is unresolved, rather than retrying forever.
+  #
+  # Technical depth: the prompt's reply is lost, and every later connection is
+  # closed before its first request reaches the daemon. The command gives up
+  # 35 seconds after the first loss.
+  @tag timeout: 120_000
+  test "recovery ends on its clock when the daemon stays unreachable", context do
+    daemon = start_daemon(context, launch("unreached answer", "unreached"))
+
+    proxy =
+      DaemonProxy.start(context.socket, [
+        {"session.prompt", 1},
+        {{:before, "initialize"}, {1, 10_000}}
+      ])
+
+    started = System.monotonic_time(:millisecond)
+    {result, _output} = run(["run", "--daemon", proxy.path, "go"])
+    elapsed = System.monotonic_time(:millisecond) - started
+
+    assert {:error, message} = result
+    assert message =~ "did not recover in time"
+    assert message =~ "session.prompt command"
+    assert elapsed >= 35_000 and elapsed < 60_000, "gave up after #{elapsed} ms"
+    stop_daemon(daemon)
+  end
+
   @tag timeout: 120_000
   test "a lost listing reply is asked once more and printed once", context do
     daemon = start_daemon(context, launch("listed answer", "listed"))

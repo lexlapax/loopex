@@ -11,7 +11,9 @@ defmodule LoopexCli.Test.DaemonProxy do
   # Technical depth: requests are read as JSON lines from the client. A cut is
   # `{method, count}`: the next `count` requests with that method are each
   # followed by one lost reply. `{{:before, method}, count}` instead closes the
-  # connection without forwarding the request, so the daemon never sees it. Every other byte is forwarded unchanged. The
+  # connection without forwarding the request, so the daemon never sees it;
+  # its count may be `{skip, count}` to let the first `skip` such requests
+  # through first. Every other byte is forwarded unchanged. The
   # proxy records each request it saw, in order, for the test to inspect. An
   # optional `rewrite` function sees each chunk the daemon sends before the
   # client does, so a test can present a daemon answer it cannot easily cause.
@@ -77,21 +79,20 @@ defmodule LoopexCli.Test.DaemonProxy do
         state = %{state | seen: state.seen ++ [method]}
 
         case Map.get(state.cuts, {:before, method}, 0) do
-          remaining when remaining > 0 ->
+          {skip, remaining} when skip > 0 ->
+            state = %{state | cuts: Map.put(state.cuts, {:before, method}, {skip - 1, remaining})}
+            forward(client, daemon, line, method, state)
+
+          {0, remaining} when remaining > 0 ->
+            close(client, daemon)
+            %{state | cuts: Map.put(state.cuts, {:before, method}, {0, remaining - 1})}
+
+          remaining when is_integer(remaining) and remaining > 0 ->
             close(client, daemon)
             %{state | cuts: Map.put(state.cuts, {:before, method}, remaining - 1)}
 
           _none ->
-            :ok = :gen_tcp.send(daemon, line)
-
-            case Map.get(state.cuts, method, 0) do
-              remaining when remaining > 0 ->
-                lose_reply(client, daemon)
-                %{state | cuts: Map.put(state.cuts, method, remaining - 1)}
-
-              _none ->
-                relay(client, daemon, state)
-            end
+            forward(client, daemon, line, method, state)
         end
 
       {:tcp, ^daemon, bytes} ->
@@ -104,6 +105,19 @@ defmodule LoopexCli.Test.DaemonProxy do
 
       {:seen, caller} ->
         send(caller, {:proxy_seen, state.seen})
+        relay(client, daemon, state)
+    end
+  end
+
+  defp forward(client, daemon, line, method, state) do
+    :ok = :gen_tcp.send(daemon, line)
+
+    case Map.get(state.cuts, method, 0) do
+      remaining when remaining > 0 ->
+        lose_reply(client, daemon)
+        %{state | cuts: Map.put(state.cuts, method, remaining - 1)}
+
+      _none ->
         relay(client, daemon, state)
     end
   end
