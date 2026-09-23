@@ -242,6 +242,53 @@ defmodule LoopexDaemon.LeaseLifecycleTest do
              receive_records(client, 1)
   end
 
+  # Concept: when the Store cannot say whether a session exists, acquisition
+  # is refused `store_unavailable`, distinct from an unknown session, and no
+  # lease is created.
+  #
+  # Technical depth: the runtime is built here so its Store adapter can be
+  # stopped while the runtime keeps running. The acquisition's existence check
+  # then meets an unavailable Store; the wire answer is `store_unavailable`, and
+  # the relay holds no permit and the daemon no lease owner.
+  test "an unavailable Store refuses acquisition store_unavailable" do
+    root = temporary_directory("loopex-store-unavailable")
+    {:ok, adapter} = Loopex.Store.Local.start_link(path: Path.join(root, "store.log"))
+    Process.unlink(adapter)
+    {:ok, store} = Loopex.Store.new(Loopex.Store.Local, adapter)
+
+    {:ok, runtime} =
+      Loopex.start_link(
+        runtime_id: "store-unavailable",
+        store: store,
+        context_token_budget: 8_192
+      )
+
+    {:ok, session_id} = Loopex.create_session(runtime, %{}, command_id: "unavailable-create")
+    :ok = Loopex.stop(runtime)
+
+    {:ok, runtime} =
+      Loopex.start_link(
+        runtime_id: "store-unavailable",
+        store: store,
+        context_token_budget: 8_192
+      )
+
+    daemon = start_daemon(runtime)
+    client = initialized_client(daemon)
+    :ok = GenServer.stop(adapter)
+
+    :ok = send_frame(client, acquire("dark", session_id))
+
+    assert [%{"request_id" => "dark", "code" => "store_unavailable"}] =
+             receive_records(client, 1)
+
+    assert %{permits: 0} = LoopexDaemon.AdmissionRelay.status(daemon.relay)
+    assert lease_owner_count(daemon) == 0
+  end
+
+  defp lease_owner_count(daemon),
+    do: map_size(:sys.get_state(daemon.owner).owners)
+
   defp acquire!(client, session_id) do
     :ok = send_frame(client, acquire("acquire", session_id))
 
