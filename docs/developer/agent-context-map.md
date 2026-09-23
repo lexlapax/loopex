@@ -5638,3 +5638,20 @@ that one file. On 2026-09-22 the maintainer chose, over moving the escript into
 output outside the build roots — recorded with the other exclusion in the
 retained evidence. The operator build and `bin/loopex` are unchanged; any other
 path the build writes is still a change.
+
+<a id="disposition-m5-no-resident-window-2026-09-22"></a>
+### M5 ships no resident window — 2026-09-22
+
+ADR 0032 describes a per-session resident window: a droppable cache of
+already-encoded events, bounded at 4,096 events and 16 MiB, so a second
+connection at the same position need not re-encode. Each daemon connection
+encodes its own events from core's stream, so a shared cache would add a
+cross-process call per event to save a cheap encode. On 2026-09-22 the
+maintainer chose, over building it, that M5 ships no resident window: every
+delivery is encoded from core's stream, which ADR 0032 already permits because
+the window "may be dropped at any moment with no effect but re-encoding". The
+plan's window-disabled and window-dropped delivery proofs are therefore not
+owed, and aggregate reclamation begins at the unattached-connection tier:
+unattached connections by descending output-buffer bytes with the connection
+incarnation as tie-break, then live-attachment detachment. Every other
+residency ceiling is unchanged.
