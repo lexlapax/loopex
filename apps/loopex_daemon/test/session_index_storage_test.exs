@@ -24,6 +24,61 @@ defmodule LoopexDaemon.SessionIndex.StorageTest do
     refute File.exists?(Path.join(directory, "session-index-v1.next"))
   end
 
+  # Concept: a publication that fails before its rename leaves the previous
+  # image exactly as it was and cleans up its own attempt, so the next
+  # publication can simply try again.
+  #
+  # Technical depth: a non-empty directory where the canonical image belongs
+  # makes the real rename fail after the temporary was written and synced; the
+  # attempt removes its own temporary and reports `:retryable`. Once the
+  # obstruction is gone the same rows publish and reload.
+  test "a failed rename cleans its own attempt and is retryable" do
+    root = temporary_root()
+    directory = Path.join(root, "daemon")
+    daemon_uid = File.stat!(root).uid
+    canonical = Path.join(directory, "session-index-v1")
+    rows = [%{session_id: "session", placement_identity: "placement"}]
+
+    on_exit(fn -> File.rm_rf!(root) end)
+
+    assert :ok = Storage.prepare(directory, daemon_uid)
+    File.mkdir!(canonical)
+    File.write!(Path.join(canonical, "occupant"), "kept")
+
+    assert {:error, {:session_index_write_failed, :retryable}} =
+             Storage.publish(directory, daemon_uid, rows)
+
+    refute File.exists?(Path.join(directory, "session-index-v1.next"))
+    assert File.read!(Path.join(canonical, "occupant")) == "kept"
+
+    File.rm_rf!(canonical)
+    assert :ok = Storage.publish(directory, daemon_uid, rows)
+    assert {:ok, ^rows} = Storage.load(directory, daemon_uid)
+  end
+
+  # Concept: a temporary this publication did not create is never overwritten
+  # or removed by it; the index is poisoned instead of guessing.
+  test "an existing temporary poisons publication and is left alone" do
+    root = temporary_root()
+    directory = Path.join(root, "daemon")
+    daemon_uid = File.stat!(root).uid
+    temporary = Path.join(directory, "session-index-v1.next")
+
+    on_exit(fn -> File.rm_rf!(root) end)
+
+    assert :ok = Storage.prepare(directory, daemon_uid)
+    assert :ok = Storage.publish(directory, daemon_uid, [])
+    File.write!(temporary, "someone else's")
+
+    assert {:error, {:session_index_write_failed, :poisoned}} =
+             Storage.publish(directory, daemon_uid, [
+               %{session_id: "session", placement_identity: "placement"}
+             ])
+
+    assert File.read!(temporary) == "someone else's"
+    assert {:ok, []} = Storage.load(directory, daemon_uid)
+  end
+
   test "startup removes only a same-owner regular fixed temporary" do
     root = temporary_root()
     directory = Path.join(root, "daemon")
