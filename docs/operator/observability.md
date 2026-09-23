@@ -102,6 +102,10 @@ cannot reach that process. The exclusion ends when the process does.
 
 ### Under the daemon
 
+Telemetry is unchanged under the daemon: a session driven through its socket
+emits the same spans, with the same identity metadata, as the same session
+driven by an embedded host, and the daemon emits no event of its own.
+
 A trace session covers the processes the runtime owns. The daemon's listener,
 connections and lease owners are host processes above the runtime, so a trace
 session does not flag them. Their lifecycle lines are fixed and identity-free

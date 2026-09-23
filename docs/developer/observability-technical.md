@@ -151,6 +151,7 @@ marker, so an entry is bounded however deep or wide the term was.
 | --- | --- |
 | Five locked trace-session witnesses, redaction and limit negatives | `apps/loopex/test/trace_session_test.exs` |
 | Exclusion: 65 functions for one sender enter and leave both `Control` sets; the private session handle never reaches crash output | `apps/loopex/test/trace_session_test.exs` |
+| A session driven over the daemon socket emits the embedded caller's span names and metadata key sets, and neither the daemon nor the CLI emits telemetry | `apps/loopex_daemon/test/telemetry_parity_test.exs` |
 | The credential sender is excluded before credential context, and a refused exclusion refuses the call | `apps/loopex_llm_reqllm/test/provider_bridge_test.exs` |
 | Port and cut emissions, and the absence of content | `apps/loopex/test/telemetry_boundary_test.exs` |
 | The edge handler carries spans into the diagnostics plane and refuses anything richer | `apps/loopex_telemetry/test/telemetry_handler_test.exs` |
