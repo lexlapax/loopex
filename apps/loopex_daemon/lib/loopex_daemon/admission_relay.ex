@@ -28,6 +28,10 @@ defmodule LoopexDaemon.AdmissionRelay do
   acknowledgement, retains the distinct request worker, and moves to execution
   only through the exact actor's compare-and-set. Result, connection loss and
   owner loss remain selected here until their owning coordinator settles them.
+  The lease freeze wins every still-executing lease permit as terminal
+  `shutdown_admitted` and names every lease row in one fixed tagged set; after
+  it no lease settlement renders client output, and after the cut no owner
+  loss sends a correlated `control_owner_lost` refusal.
   An idle lease owner moves to retiring only when no permit or ticket remains
   for its session; its actual monitored `DOWN` then reports retirement
   completion without being reclassified as owner loss. Daemon-owner result
@@ -1077,8 +1081,16 @@ defmodule LoopexDaemon.AdmissionRelay do
       when disposition in [:connection_lost, :owner_lost] ->
         {:reply, {:error, disposition}, state}
 
+      # Concept: the freeze already won this row, so a later actor result is
+      # cleanup-only and reaches no client.
+      {:ok, %{kind: :lease, disposition: :shutdown_admitted}} ->
+        {:reply, {:error, :daemon_stopping}, state}
+
       {:ok, %{kind: :lease}} ->
         {:reply, {:error, :invalid_actor}, state}
+
+      _other when state.phase in [:lease_ops_frozen, :quiescing, :sealed, :tearing_down] ->
+        {:reply, {:error, :daemon_stopping}, state}
 
       _other ->
         {:reply, {:error, :permit_unavailable}, state}
@@ -1626,8 +1638,12 @@ defmodule LoopexDaemon.AdmissionRelay do
   # sealed after the drain, and the lease-owner set is frozen for teardown.
   #
   # Technical depth: `freeze_lease_ops` ends admission at once, cancels every
-  # pending row as the deadline would, and returns the executing and settling
-  # lease rows the owner must see finish inside its freeze deadline; no claim,
+  # pending row as the deadline would, compare-and-sets every still-executing
+  # lease permit to terminal `shutdown_admitted`, and returns one fixed tagged
+  # descriptor per lease row the daemon owner must clean up inside its freeze
+  # deadline: `shutdown_admitted` for the rows the barrier won, and
+  # `settling_acquire`, `settling_release` or `settling_owner_loss` for rows
+  # whose result, connection loss or owner loss was selected first. No claim,
   # promotion or owner registration is admitted from here on. `quiescing`
   # records the drain identity. `seal_after_quiesce` kills every remaining
   # ticket task, lets a queued real result win its `DOWN` until the given
@@ -1649,13 +1665,13 @@ defmodule LoopexDaemon.AdmissionRelay do
           admission_deadline: min(state.admission_deadline, now)
       })
 
-    descriptors =
+    {descriptors, state} =
       state.permits
-      |> Enum.filter(fn {_origin, permit} ->
-        permit.kind == :lease and permit.phase in [:executing, :settling]
+      |> Enum.filter(fn {_origin, permit} -> permit.kind == :lease end)
+      |> Enum.sort_by(&elem(&1, 0))
+      |> Enum.flat_map_reduce(state, fn {origin_id, permit}, acc ->
+        freeze_lease_permit(acc, origin_id, permit)
       end)
-      |> Enum.map(&elem(&1, 0))
-      |> Enum.sort()
 
     state = %{state | phase: :lease_ops_frozen, barrier: {:freeze_lease_ops, ref, descriptors}}
     send(state.owner, {:relay_barrier_ack, ref, :freeze_lease_ops, descriptors})
@@ -2612,6 +2628,74 @@ defmodule LoopexDaemon.AdmissionRelay do
     end)
   end
 
+  # Concept: the freeze is the one instant at which every lease row not yet
+  # decided becomes the barrier's, so no actor result can reach a client after
+  # it, and every row already decided is named with the exact settlement the
+  # daemon owner still has to finish.
+  #
+  # Technical depth: an executing row with no disposition becomes terminal
+  # `shutdown_admitted`: its request worker is killed and the row is removed
+  # once that exact `DOWN` is consumed. A daemon-coordinated `result` or
+  # `connection_lost` row stays settling and is named with its settlement
+  # reference; an `owner_lost` row stays for its classification. A direct
+  # result or `shutdown_cancelled` row is already terminal and only waits for
+  # its worker's reap, so it is not named.
+  defp freeze_lease_permit(state, origin_id, %{phase: :executing, disposition: nil} = permit) do
+    if is_pid(permit.worker_pid) and Process.alive?(permit.worker_pid),
+      do: Process.exit(permit.worker_pid, :kill)
+
+    admitted = %{permit | phase: :settling, disposition: :shutdown_admitted, settlement_ref: nil}
+
+    state =
+      if is_nil(permit.worker_pid) do
+        state
+        |> remove_permit(origin_id)
+        |> maybe_retire_connection(permit.connection_incarnation)
+      else
+        put_in(state, [:permits, origin_id], admitted)
+      end
+
+    Logger.debug("loopex daemon admission relay lease permit shutdown admitted")
+
+    {[
+       {:shutdown_admitted, origin_id, permit.class, permit.actor_pid, permit.actor_incarnation,
+        permit.start_op_ref}
+     ], state}
+  end
+
+  defp freeze_lease_permit(
+         state,
+         origin_id,
+         %{phase: :settling, disposition: disposition, settlement_ref: settlement_ref} = permit
+       )
+       when disposition in [:result, :connection_lost] and is_reference(settlement_ref) do
+    descriptor =
+      case permit.class do
+        :session_acquire_control ->
+          {:settling_acquire, origin_id, disposition, permit.actor_pid, permit.actor_incarnation,
+           permit.start_op_ref, settlement_ref}
+
+        :session_release_control ->
+          {:settling_release, origin_id, disposition, permit.actor_pid, permit.actor_incarnation,
+           settlement_ref}
+      end
+
+    {[descriptor], state}
+  end
+
+  defp freeze_lease_permit(
+         state,
+         origin_id,
+         %{phase: :settling, disposition: :owner_lost} = permit
+       ) do
+    {[
+       {:settling_owner_loss, origin_id, permit.class, permit.actor_pid, permit.actor_incarnation,
+        permit.settlement_ref}
+     ], state}
+  end
+
+  defp freeze_lease_permit(state, _origin_id, _terminal_permit), do: {[], state}
+
   defp apply_owner_lease_operation(
          state,
          :select_result,
@@ -2719,7 +2803,9 @@ defmodule LoopexDaemon.AdmissionRelay do
          worker_pid: nil,
          result: result
        } = permit} ->
-        if Process.alive?(permit.connection_pid) do
+        # Concept: a result settled after the lease freeze is terminal but
+        # renders nothing; the later `daemon.stopping`/EOF path owns the client.
+        if state.phase in [:serving, :draining] and Process.alive?(permit.connection_pid) do
           send(permit.connection_pid, {:relay_permit_result, origin_id, result})
         end
 
@@ -3097,7 +3183,7 @@ defmodule LoopexDaemon.AdmissionRelay do
     cond do
       Map.has_key?(state.tickets, origin_id) ->
         ticket = Map.fetch!(state.tickets, origin_id)
-        maybe_send_owner_loss_refusal(ticket, origin_id, classification)
+        maybe_send_owner_loss_refusal(state, ticket, origin_id, classification)
 
         state
         |> remove_ticket(origin_id)
@@ -3105,7 +3191,7 @@ defmodule LoopexDaemon.AdmissionRelay do
 
       Map.has_key?(state.permits, origin_id) ->
         permit = Map.fetch!(state.permits, origin_id)
-        maybe_send_owner_loss_refusal(permit, origin_id, classification)
+        maybe_send_owner_loss_refusal(state, permit, origin_id, classification)
 
         state
         |> remove_permit(origin_id)
@@ -3116,7 +3202,15 @@ defmodule LoopexDaemon.AdmissionRelay do
     end
   end
 
+  # Concept: after the admission cut ordinary owner-loss notification stops;
+  # the stop barrier owns every claimed origin and the later
+  # `daemon.stopping`/EOF path owns client notification.
+  defp maybe_send_owner_loss_refusal(%{phase: phase}, _row, _origin_id, _classification)
+       when phase != :serving,
+       do: :ok
+
   defp maybe_send_owner_loss_refusal(
+         _state,
          %{connection_incarnation: holder},
          _origin_id,
          %{holder_connection_incarnation: holder}
@@ -3124,11 +3218,11 @@ defmodule LoopexDaemon.AdmissionRelay do
        when not is_nil(holder),
        do: :ok
 
-  defp maybe_send_owner_loss_refusal(%{kind: :lease} = permit, origin_id, _classification) do
+  defp maybe_send_owner_loss_refusal(_state, %{kind: :lease} = permit, origin_id, _classification) do
     send(permit.connection_pid, {:relay_permit_cancelled, origin_id, :control_owner_lost})
   end
 
-  defp maybe_send_owner_loss_refusal(ticket, origin_id, _classification) do
+  defp maybe_send_owner_loss_refusal(_state, ticket, origin_id, _classification) do
     send(ticket.connection_pid, {:relay_ticket_cancelled, origin_id, :control_owner_lost})
   end
 
@@ -3196,8 +3290,8 @@ defmodule LoopexDaemon.AdmissionRelay do
         {:noreply, state}
 
       {:ok,
-       %{kind: :lease, worker_pid: ^pid, phase: :settling, disposition: :shutdown_cancelled} =
-           permit} ->
+       %{kind: :lease, worker_pid: ^pid, phase: :settling, disposition: disposition} = permit}
+      when disposition in [:shutdown_cancelled, :shutdown_admitted] ->
         state =
           state
           |> remove_permit(origin_id)

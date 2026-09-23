@@ -15,8 +15,13 @@ defmodule LoopexDaemon.Owner do
   one absolute deadline. Registry, relay, and lease-owner steps use exact
   ref-tagged acknowledgements; stale replies are ignored. A missed mirror
   deadline kills the exact registry and stops the daemon owner with
-  `:connections_lost`. Status and formatted state expose counts only, and every
-  lifecycle log is fixed and identity-free.
+  `:connections_lost`. A release fixes `owner_restore_deadline` and
+  `release_settlement_deadline` at acceptance; a missed restoration kills and
+  supersedes the exact owner, and a missed relay settlement is `:relay_lost`.
+  After the admission cut, owner losses and releases start no private clock
+  and emit no `control_owner_lost` form; the lease freeze cleans up every
+  descriptor the relay names before core quiesce. Status and formatted state
+  expose counts only, and every lifecycle log is fixed and identity-free.
   """
 
   use GenServer
@@ -144,11 +149,15 @@ defmodule LoopexDaemon.Owner do
 
   The relay's ref-tagged cut acknowledgement is consumed here, then the
   registry's owner-authenticated transport gate is closed with the same
-  reference. Both answers are bounded by the relay control timeout.
+  reference. Both answers are bounded by `timeout`, whose absolute instant is
+  the transport-cut deadline. Consuming the cut makes every serving-private
+  owner-loss and release clock cleanup-only: an owner-loss operation still in
+  progress is rebound to that instant, and later dead-owner and mirror-pop
+  facts join the stop barriers instead of starting a clock of their own.
   """
   @spec cut_admission(pid(), timeout()) :: {:ok, reference()} | {:error, atom()}
   def cut_admission(owner, timeout \\ 15_000) do
-    GenServer.call(owner, :cut_admission, timeout)
+    GenServer.call(owner, {:cut_admission, monotonic_ms() + timeout}, timeout)
   catch
     :exit, _timeout -> {:error, :relay_barrier_timeout}
   end
@@ -347,21 +356,33 @@ defmodule LoopexDaemon.Owner do
     wait = max(deadline - monotonic_ms(), 0)
     timer = Process.send_after(self(), {:relay_barrier_deadline, ref}, wait)
     Logger.debug("loopex daemon owner relay barrier requested")
-    barrier = %{ref: ref, name: barrier_name(kind), from: from, timer: timer}
+    barrier = %{ref: ref, name: barrier_name(kind), from: from, timer: timer, descriptors: nil}
     {:noreply, put_in(state, [:stop, :barrier], barrier)}
   end
 
   def handle_call({:relay_barrier, _kind, _deadline}, _from, state),
     do: {:reply, {:error, :relay_barrier_unavailable}, state}
 
-  def handle_call(:cut_admission, from, %{stop: nil} = state) do
+  def handle_call({:cut_admission, cut_deadline}, from, %{stop: nil} = state) do
     cut_ref = make_ref()
+    state = stop_own_serving_operations(state, cut_deadline)
     send(state.relay, {:relay_barrier, cut_ref, :cut})
     Logger.debug("loopex daemon owner admission cut requested")
-    {:noreply, %{state | stop: %{phase: :cutting, cut_ref: cut_ref, from: from, swept: false}}}
+
+    stop = %{
+      phase: :cutting,
+      cut_ref: cut_ref,
+      from: from,
+      swept: false,
+      tombstones: %{},
+      killed: MapSet.new(),
+      barrier: nil
+    }
+
+    {:noreply, %{state | stop: stop}}
   end
 
-  def handle_call(:cut_admission, _from, %{stop: %{cut_ref: cut_ref}} = state),
+  def handle_call({:cut_admission, _cut_deadline}, _from, %{stop: %{cut_ref: cut_ref}} = state),
     do: {:reply, {:ok, cut_ref}, state}
 
   def handle_call({:reap_uninitialized, cut_ref}, from, %{stop: %{cut_ref: cut_ref}} = stop_state) do
@@ -417,6 +438,28 @@ defmodule LoopexDaemon.Owner do
   end
 
   @impl true
+  # Concept: the lease freeze tombstones every barrier-owned operation, so a
+  # proposal its actor sent before being killed creates no mirror row.
+  def handle_info(
+        {:lease_grant_proposed, _grant_ref, permit_id, _owner, _owner_incarnation, _session_id,
+         _connection, _connection_incarnation, _writer_epoch, _request_deadline},
+        %{stop: %{tombstones: tombstones}} = state
+      )
+      when is_map_key(tombstones, permit_id) do
+    Logger.debug("loopex daemon tombstoned lease proposal ignored")
+    {:noreply, state}
+  end
+
+  def handle_info(
+        {:release_proposed, _release_ref, permit_id, _owner, _owner_incarnation,
+         _holder_incarnation},
+        %{stop: %{tombstones: tombstones}} = state
+      )
+      when is_map_key(tombstones, permit_id) do
+    Logger.debug("loopex daemon tombstoned lease proposal ignored")
+    {:noreply, state}
+  end
+
   def handle_info(
         {:lease_grant_proposed, grant_ref, permit_id, owner, owner_incarnation, session_id,
          connection, connection_incarnation, writer_epoch, request_deadline},
@@ -724,6 +767,36 @@ defmodule LoopexDaemon.Owner do
   end
 
   def handle_info(
+        {:relay_barrier_ack, ref, :freeze_lease_ops, descriptors},
+        %{stop: %{barrier: %{ref: ref, name: :freeze_lease_ops, descriptors: nil}}} = state
+      ) do
+    case begin_freeze_cleanup(state, descriptors) do
+      {:ok, state} ->
+        Logger.debug("loopex daemon owner lease freeze cleanup start")
+        check_freeze(put_in(state, [:stop, :barrier, :descriptors], descriptors))
+
+      {:error, class} ->
+        finish_freeze(state, {:error, class})
+    end
+  end
+
+  def handle_info({:freeze_check, ref}, %{stop: %{barrier: %{ref: ref}}} = state),
+    do: check_freeze(state)
+
+  def handle_info({:freeze_check, _ref}, state), do: {:noreply, state}
+
+  # Concept: freeze cleanup unfinished at `freeze_deadline` names the component
+  # that failed it: unfinished exact mirror work is `connections_lost`,
+  # anything else the relay still owed is `relay_lost`.
+  def handle_info(
+        {:relay_barrier_deadline, ref},
+        %{stop: %{barrier: %{ref: ref, name: :freeze_lease_ops, descriptors: descriptors}}} =
+          state
+      )
+      when is_list(descriptors),
+      do: finish_freeze(state, {:error, freeze_failure(state)})
+
+  def handle_info(
         {:relay_barrier_ack, ref, name, payload},
         %{stop: %{barrier: %{ref: ref, name: name, from: from, timer: timer}}} = state
       )
@@ -755,6 +828,12 @@ defmodule LoopexDaemon.Owner do
 
   def handle_info({:mirror_deadline, operation_ref, deadline}, state) do
     case Map.get(state.mirror_operations, operation_ref) do
+      %{kind: :release, stop_owned: true} ->
+        {:noreply, state}
+
+      %{kind: :release} = operation ->
+        release_deadline(state, operation_ref, operation)
+
       %{deadline: ^deadline} ->
         if monotonic_ms() >= deadline do
           fail_connections(state)
@@ -1266,9 +1345,21 @@ defmodule LoopexDaemon.Owner do
              holder == operation.request.connection and
              holder_incarnation == operation.request.connection_incarnation ->
         operation_ref = make_ref()
-
-        deadline = monotonic_ms() + state.mirror_deadline_ms
+        accepted_at = monotonic_ms()
         pending_loss = Map.get(state.pending_dispositions, operation.request.permit_id)
+
+        # Concept: a release accepted while serving fixes its two absolute
+        # instants from one acceptance time; neither restarts. A release
+        # accepted after the admission cut has no private clock: the stop
+        # barriers govern it.
+        #
+        # Technical depth: `deadline` is `owner_restore_deadline`, bounding the
+        # result CAS, owner restoration and mirror clear; `settlement_deadline`
+        # is `release_settlement_deadline`, bounding exact relay
+        # terminalization. They are `mirror_deadline_ms` and twice it after
+        # acceptance, the fixed 5,000 and 10,000 ms at the default.
+        stop_owned = not is_nil(state.stop)
+        deadline = accepted_at + state.mirror_deadline_ms
 
         mirror_operation = %{
           kind: :release,
@@ -1281,7 +1372,10 @@ defmodule LoopexDaemon.Owner do
           transition_ref: release_ref,
           row: route,
           deadline: deadline,
-          timer: schedule_deadline(operation_ref, deadline),
+          settlement_deadline: accepted_at + 2 * state.mirror_deadline_ms,
+          timer: if(stop_owned, do: nil, else: schedule_deadline(operation_ref, deadline)),
+          stop_owned: stop_owned,
+          superseded: false,
           loss_ref: if(pending_loss, do: pending_loss.settlement_ref, else: nil)
         }
 
@@ -1388,10 +1482,14 @@ defmodule LoopexDaemon.Owner do
     )
   end
 
+  # Concept: while serving, an owner loss gets its own bounded pop and
+  # classification exchange; after the admission cut the loss joins the stop
+  # barriers and starts no clock of its own.
   defp start_owner_loss_pop(state, session_id, predecessor) do
     operation_ref = make_ref()
     classification_ref = make_ref()
-    deadline = monotonic_ms() + state.mirror_deadline_ms
+    stop_owned = not is_nil(state.stop)
+    deadline = if stop_owned, do: nil, else: monotonic_ms() + state.mirror_deadline_ms
 
     operation = %{
       kind: :owner_loss,
@@ -1408,7 +1506,8 @@ defmodule LoopexDaemon.Owner do
         owner_incarnation: predecessor.incarnation
       },
       deadline: deadline,
-      timer: schedule_deadline(operation_ref, deadline)
+      timer: if(stop_owned, do: nil, else: schedule_deadline(operation_ref, deadline)),
+      stop_owned: stop_owned
     }
 
     state =
@@ -1630,10 +1729,9 @@ defmodule LoopexDaemon.Owner do
         {:noreply, state}
 
       operation ->
-        if deadline_reached?(operation) do
-          fail_connections(state)
-        else
-          apply_registry_result(state, operation_ref, operation, result)
+        case late_disposition(operation) do
+          nil -> apply_registry_result(state, operation_ref, operation, result)
+          late -> late_action(state, operation_ref, operation, late)
         end
     end
   end
@@ -1845,6 +1943,23 @@ defmodule LoopexDaemon.Owner do
     end
   end
 
+  defp apply_registry_result(
+         state,
+         operation_ref,
+         %{kind: :grant, step: :install_shutdown} = operation,
+         result
+       )
+       when result == :ok or result == {:error, :connection_not_live},
+       do: cancel_shutdown_provisional(state, operation_ref, operation)
+
+  defp apply_registry_result(
+         state,
+         operation_ref,
+         %{kind: :grant, step: :cancel_shutdown} = operation,
+         :ok
+       ),
+       do: finish_shutdown_operation(state, operation_ref, operation)
+
   defp apply_registry_result(state, _operation_ref, _operation, _result),
     do: fail_connections(state)
 
@@ -1879,10 +1994,9 @@ defmodule LoopexDaemon.Owner do
         {:noreply, state}
 
       operation ->
-        if deadline_reached?(operation) do
-          fail_connections(state)
-        else
-          apply_relay_result(state, operation_ref, operation, action, result)
+        case late_disposition(operation) do
+          nil -> apply_relay_result(state, operation_ref, operation, action, result)
+          late -> late_action(state, operation_ref, operation, late)
         end
     end
   end
@@ -2041,6 +2155,21 @@ defmodule LoopexDaemon.Owner do
        ),
        do: complete_cancelled_operation(state, operation_ref, operation)
 
+  # Concept: the freeze won this permit before the relay consumed the daemon's
+  # result selection, so whatever the relay answers is cleanup-only.
+  defp apply_relay_result(
+         state,
+         operation_ref,
+         %{step: :select_shutdown} = operation,
+         :select_result,
+         _cleanup_only
+       ) do
+    case operation.kind do
+      :grant -> cancel_shutdown_provisional(state, operation_ref, operation)
+      :release -> finish_shutdown_operation(state, operation_ref, operation)
+    end
+  end
+
   defp apply_relay_result(state, _operation_ref, _operation, _action, _result),
     do: {:stop, :relay_lost, state}
 
@@ -2053,11 +2182,16 @@ defmodule LoopexDaemon.Owner do
          result
        ) do
     case Map.get(state.mirror_operations, operation_ref) do
+      # Concept: a restoration superseded at `owner_restore_deadline` killed
+      # its owner; that owner's queued acknowledgement is cleanup-only.
+      %{superseded: true} ->
+        Logger.debug("loopex daemon superseded owner acknowledgement ignored")
+        {:noreply, state}
+
       %{owner_pid: ^owner, owner_incarnation: ^owner_incarnation} = operation ->
-        if deadline_reached?(operation) do
-          fail_connections(state)
-        else
-          apply_owner_result(state, operation_ref, operation, action, result)
+        case late_disposition(operation) do
+          nil -> apply_owner_result(state, operation_ref, operation, action, result)
+          late -> late_action(state, operation_ref, operation, late)
         end
 
       _other ->
@@ -2487,6 +2621,14 @@ defmodule LoopexDaemon.Owner do
     complete_owner_loss_notification(state, operation_ref, operation)
   end
 
+  # Concept: a classification consumed after the admission cut emits no
+  # `control_owner_lost` form; the later `daemon.stopping`/EOF path closes the
+  # holder, and the loss completes as part of the stop.
+  defp continue_owner_loss_notification(%{stop: %{}} = state, operation_ref, operation) do
+    Logger.debug("loopex daemon lost owner holder close left to the stop")
+    complete_owner_loss_notification(state, operation_ref, operation)
+  end
+
   defp continue_owner_loss_notification(
          state,
          operation_ref,
@@ -2874,7 +3016,384 @@ defmodule LoopexDaemon.Owner do
   defp valid_incarnation?(value),
     do: is_binary(value) and byte_size(value) == @incarnation_bytes
 
+  defp deadline_reached?(%{deadline: nil}), do: false
   defp deadline_reached?(operation), do: monotonic_ms() >= operation.deadline
+
+  @release_settlement_steps [:settle_result, :settle_disposition, :resolve_owner_release]
+
+  # Concept: a message consumed at or after the instant governing its step is
+  # not a success; the step decides which component failed.
+  #
+  # Technical depth: a release step before relay terminalization is governed
+  # by `owner_restore_deadline` (`deadline`): a late relay selection or
+  # connection-loss answer is `relay_lost`, a late mirror clear is
+  # `connections_lost`, and a late owner restoration supersedes the
+  # cancellation. Relay terminalization and the owner's later release
+  # acknowledgement are governed by `release_settlement_deadline`; a late relay
+  # settlement is `relay_lost`. A release the admission cut made stop-owned has
+  # no serving instant. Every other operation keeps its one mirror deadline.
+  defp late_disposition(%{kind: :release, stop_owned: true}), do: nil
+
+  defp late_disposition(%{kind: :release, step: step} = operation)
+       when step in @release_settlement_steps do
+    cond do
+      monotonic_ms() < operation.settlement_deadline -> nil
+      step == :resolve_owner_release -> :connections_lost
+      true -> :relay_lost
+    end
+  end
+
+  defp late_disposition(%{kind: :release, step: step} = operation) do
+    cond do
+      monotonic_ms() < operation.deadline -> nil
+      step == :resolve_owner_cancel -> :supersede
+      step == :clear -> :connections_lost
+      true -> :relay_lost
+    end
+  end
+
+  defp late_disposition(operation),
+    do: if(deadline_reached?(operation), do: :connections_lost, else: nil)
+
+  defp late_action(state, _operation_ref, _operation, :connections_lost),
+    do: fail_connections(state)
+
+  defp late_action(state, _operation_ref, _operation, :relay_lost) do
+    Logger.debug("loopex daemon release relay settlement deadline reached")
+    {:stop, :relay_lost, state}
+  end
+
+  defp late_action(state, operation_ref, operation, :supersede),
+    do: supersede_release_restoration(state, operation_ref, operation)
+
+  # Concept: a lease owner that has not restored its held state by
+  # `owner_restore_deadline`, or whose restoration acknowledgement is consumed
+  # at or after it, cannot keep `release_pending`: the daemon kills that exact
+  # owner and settles the connection loss without a reply, and the ordinary
+  # owner-loss path then handles the dead owner.
+  #
+  # Technical depth: the operation becomes `superseded`, so a queued owner
+  # acknowledgement is cleanup-only; the no-reply relay settlement must be
+  # acknowledged before `release_settlement_deadline`. The killed pid is
+  # recorded while a stop is in progress so the freeze barrier joins its loss.
+  defp supersede_release_restoration(state, operation_ref, operation) do
+    Process.exit(operation.owner_pid, :kill)
+    cancel_timer(operation.timer, operation_ref)
+
+    timer =
+      if operation.stop_owned,
+        do: nil,
+        else: schedule_deadline(operation_ref, operation.settlement_deadline)
+
+    operation = %{operation | step: :settle_disposition, superseded: true, timer: timer}
+
+    state =
+      state
+      |> put_in([:mirror_operations, operation_ref], operation)
+      |> record_stop_kill(operation.owner_pid)
+
+    request_relay_disposition_settlement(state, operation_ref, operation)
+    Logger.debug("loopex daemon release restoration superseded")
+    {:noreply, state}
+  end
+
+  # Technical depth: one timer chain serves both release instants; a firing
+  # before the instant governing the current step rearms for that instant.
+  defp release_deadline(state, operation_ref, operation) do
+    case late_disposition(operation) do
+      nil ->
+        instant =
+          if operation.step in @release_settlement_steps,
+            do: operation.settlement_deadline,
+            else: operation.deadline
+
+        timer = schedule_deadline(operation_ref, instant)
+        {:noreply, put_in(state, [:mirror_operations, operation_ref, :timer], timer)}
+
+      late ->
+        late_action(state, operation_ref, operation, late)
+    end
+  end
+
+  defp record_stop_kill(%{stop: %{killed: killed}} = state, pid),
+    do: put_in(state, [:stop, :killed], MapSet.put(killed, pid))
+
+  defp record_stop_kill(state, _pid), do: state
+
+  # Concept: the relay's freeze returns one fixed tagged descriptor per lease
+  # row it still names; the daemon owner cleans each one up from that set and
+  # its own exact records, never by scanning for actors, and emits no client
+  # output. The freeze barrier answers only when every provisional, pending or
+  # stale operation mirror is gone and every killed owner's loss has joined.
+  #
+  # Technical depth: a malformed or duplicated set, a wrong tag, or a missing
+  # or mismatched required record is `relay_lost`. A `shutdown_admitted` row's
+  # operation is tombstoned. For an existing-owner actor that exact owner is
+  # killed; for a fresh acquire, whose actor is this owner, the start record
+  # either names no child (`not_materialized`), releasing its reserved slot,
+  # or names the exact child, which is killed. A provisional mirror the row
+  # installed is resolved cancelled. A `settling_release` whose owner has not
+  # restored is superseded at once. Settling rows otherwise finish through
+  # their ordinary exact steps, whose relay settlements render nothing after
+  # the freeze, and every killed owner's pop and classification run through
+  # the stop-owned owner-loss path.
+  defp begin_freeze_cleanup(state, descriptors) do
+    if valid_descriptors?(descriptors) do
+      Enum.reduce_while(descriptors, {:ok, state}, fn descriptor, {:ok, acc} ->
+        case freeze_descriptor(acc, descriptor) do
+          {:ok, acc} -> {:cont, {:ok, acc}}
+          {:error, class} -> {:halt, {:error, class}}
+        end
+      end)
+    else
+      {:error, :relay_lost}
+    end
+  end
+
+  defp valid_descriptors?(descriptors) when is_list(descriptors) do
+    ids = Enum.map(descriptors, &descriptor_permit/1)
+    Enum.all?(ids, &(not is_nil(&1))) and length(Enum.uniq(ids)) == length(ids)
+  end
+
+  defp valid_descriptors?(_descriptors), do: false
+
+  defp descriptor_permit({:shutdown_admitted, permit_id, class, actor, incarnation, start_op_ref})
+       when class in [:session_acquire_control, :session_release_control] and is_pid(actor) and
+              (is_nil(start_op_ref) or is_reference(start_op_ref)),
+       do: if(valid_incarnation?(incarnation), do: permit_id, else: nil)
+
+  defp descriptor_permit(
+         {:settling_acquire, permit_id, disposition, actor, incarnation, start_op_ref, op_ref}
+       )
+       when disposition in [:result, :connection_lost] and is_pid(actor) and
+              (is_nil(start_op_ref) or is_reference(start_op_ref)) and is_reference(op_ref),
+       do: if(valid_incarnation?(incarnation), do: permit_id, else: nil)
+
+  defp descriptor_permit({:settling_release, permit_id, disposition, actor, incarnation, op_ref})
+       when disposition in [:result, :connection_lost] and is_pid(actor) and is_reference(op_ref),
+       do: if(valid_incarnation?(incarnation), do: permit_id, else: nil)
+
+  defp descriptor_permit({:settling_owner_loss, permit_id, class, actor, incarnation, _op_ref})
+       when class in [:session_acquire_control, :session_release_control] and is_pid(actor),
+       do: if(valid_incarnation?(incarnation), do: permit_id, else: nil)
+
+  defp descriptor_permit(_descriptor), do: nil
+
+  defp freeze_descriptor(
+         state,
+         {:shutdown_admitted, permit_id, class, actor, actor_incarnation, start_op_ref}
+       ) do
+    case Map.fetch(state.operations, permit_id) do
+      {:ok,
+       %{
+         request: %{class: ^class},
+         actor_pid: ^actor,
+         actor_incarnation: ^actor_incarnation,
+         start_op_ref: ^start_op_ref
+       } = operation} ->
+        with {:ok, state} <- shutdown_mirror_operations(state, permit_id) do
+          state =
+            state
+            |> update_in([:operations], &Map.delete(&1, permit_id))
+            |> update_in([:pending_dispositions], &Map.delete(&1, permit_id))
+            |> put_in([:stop, :tombstones, permit_id], :shutdown_admitted)
+
+          shutdown_actor(state, operation)
+        end
+
+      _missing_or_mismatched ->
+        {:error, :relay_lost}
+    end
+  end
+
+  defp freeze_descriptor(
+         state,
+         {:settling_acquire, permit_id, _disposition, actor, actor_incarnation, start_op_ref,
+          _op_ref}
+       ) do
+    case Map.fetch(state.operations, permit_id) do
+      {:ok,
+       %{
+         request: %{class: :session_acquire_control},
+         actor_pid: ^actor,
+         actor_incarnation: ^actor_incarnation,
+         start_op_ref: ^start_op_ref
+       }} ->
+        {:ok, state}
+
+      _missing_or_mismatched ->
+        {:error, :relay_lost}
+    end
+  end
+
+  defp freeze_descriptor(
+         state,
+         {:settling_release, permit_id, _disposition, actor, actor_incarnation, _op_ref}
+       ) do
+    with {:ok,
+          %{
+            request: %{class: :session_release_control},
+            actor_pid: ^actor,
+            actor_incarnation: ^actor_incarnation
+          }} <- Map.fetch(state.operations, permit_id) do
+      case Enum.find(state.mirror_operations, fn {_operation_ref, operation} ->
+             operation.permit_id == permit_id
+           end) do
+        {operation_ref, %{kind: :release, step: :resolve_owner_cancel} = operation} ->
+          {:noreply, state} = supersede_release_restoration(state, operation_ref, operation)
+          {:ok, state}
+
+        _settling_or_restored ->
+          {:ok, state}
+      end
+    else
+      _missing_or_mismatched -> {:error, :relay_lost}
+    end
+  end
+
+  defp freeze_descriptor(state, {:settling_owner_loss, _permit_id, _, _, _, _}),
+    do: {:ok, state}
+
+  # Technical depth: a barrier-owned permit can have a mirror operation only
+  # before its result was selected: a grant still installing or selecting, or
+  # a release still selecting. Each becomes cleanup-only; any later step means
+  # the relay's barrier and the daemon's record disagree.
+  defp shutdown_mirror_operations(state, permit_id) do
+    state.mirror_operations
+    |> Enum.filter(fn {_operation_ref, operation} -> operation.permit_id == permit_id end)
+    |> Enum.reduce_while({:ok, state}, fn
+      {operation_ref, %{kind: :grant, step: :install}}, {:ok, acc} ->
+        {:cont, {:ok, put_in(acc, [:mirror_operations, operation_ref, :step], :install_shutdown)}}
+
+      {operation_ref, %{kind: kind, step: :select_result}}, {:ok, acc}
+      when kind in [:grant, :release] ->
+        {:cont, {:ok, put_in(acc, [:mirror_operations, operation_ref, :step], :select_shutdown)}}
+
+      _other, _acc ->
+        {:halt, {:error, :relay_lost}}
+    end)
+  end
+
+  defp shutdown_actor(state, %{actor_pid: actor, owner_pid: nil} = operation)
+       when actor == self() do
+    reservation = %{
+      kind: :queued_grant,
+      permit_id: operation.request.permit_id,
+      row: %{session_id: operation.request.session_id}
+    }
+
+    Logger.debug("loopex daemon unmaterialized owner start tombstoned")
+    {:ok, release_successor_reservation(state, reservation)}
+  end
+
+  defp shutdown_actor(state, operation) do
+    case Map.get(state.owners, operation.request.session_id) do
+      %{pid: pid, incarnation: incarnation}
+      when pid == operation.owner_pid and incarnation == operation.owner_incarnation ->
+        Process.exit(pid, :kill)
+        Logger.debug("loopex daemon barrier-owned lease actor killed")
+        {:ok, record_stop_kill(state, pid)}
+
+      _missing_or_mismatched ->
+        {:error, :relay_lost}
+    end
+  end
+
+  defp cancel_shutdown_provisional(state, operation_ref, operation) do
+    state = put_in(state, [:mirror_operations, operation_ref, :step], :cancel_shutdown)
+
+    ConnectionRegistry.apply_mirror(
+      state.registry,
+      operation_ref,
+      state.routing_incarnation,
+      {:resolve_provisional, :cancelled},
+      operation.row
+    )
+
+    {:noreply, state}
+  end
+
+  defp finish_shutdown_operation(state, operation_ref, operation) do
+    {:noreply, state} = complete_operation(state, operation_ref, operation)
+    Logger.debug("loopex daemon barrier-owned mirror operation cleared")
+
+    maybe_start_owner_loss_pop(
+      state,
+      operation.row.session_id,
+      operation.owner_pid,
+      operation.owner_incarnation
+    )
+  end
+
+  defp check_freeze(state) do
+    if freeze_settled?(state) do
+      finish_freeze(state, {:ok, state.stop.barrier.descriptors})
+    else
+      Process.send_after(self(), {:freeze_check, state.stop.barrier.ref}, 5)
+      {:noreply, state}
+    end
+  end
+
+  defp freeze_settled?(state) do
+    permits = Enum.map(state.stop.barrier.descriptors, &descriptor_permit/1)
+    killed = state.stop.killed
+
+    map_size(state.mirror_operations) == 0 and map_size(state.pending_dispositions) == 0 and
+      not Enum.any?(permits, &Map.has_key?(state.operations, &1)) and
+      not Enum.any?(state.owners, fn {_session_id, row} ->
+        row.phase == :lost or MapSet.member?(killed, row.pid)
+      end)
+  end
+
+  defp freeze_failure(state),
+    do: if(map_size(state.mirror_operations) > 0, do: :connections_lost, else: :relay_lost)
+
+  defp finish_freeze(state, reply) do
+    %{from: from, timer: timer} = state.stop.barrier
+    Process.cancel_timer(timer)
+    GenServer.reply(from, reply)
+
+    case reply do
+      {:error, :connections_lost} ->
+        if Process.alive?(state.registry), do: Process.exit(state.registry, :kill)
+        Logger.debug("loopex daemon owner lease freeze left mirror work unfinished")
+
+      {:error, _relay_lost} ->
+        Logger.debug("loopex daemon owner lease freeze left relay work unfinished")
+
+      {:ok, _descriptors} ->
+        Logger.debug("loopex daemon owner lease freeze cleanup complete")
+    end
+
+    {:noreply, put_in(state, [:stop, :barrier], nil)}
+  end
+
+  # Concept: consuming the stop makes every serving-private owner-loss and
+  # release clock cleanup-only.
+  #
+  # Technical depth: each timer is cancelled and its queued message flushed.
+  # An owner-loss operation in progress is rebound to the transport-cut
+  # instant; a release keeps its exact row but loses both serving instants,
+  # so the admission and freeze barriers govern it.
+  defp stop_own_serving_operations(state, cut_deadline) do
+    operations =
+      Map.new(state.mirror_operations, fn
+        {operation_ref, %{kind: :owner_loss} = operation} ->
+          cancel_timer(operation.timer, operation_ref)
+
+          {operation_ref,
+           Map.merge(operation, %{timer: nil, deadline: cut_deadline, stop_owned: true})}
+
+        {operation_ref, %{kind: :release} = operation} ->
+          cancel_timer(operation.timer, operation_ref)
+          {operation_ref, %{operation | timer: nil, stop_owned: true}}
+
+        other ->
+          other
+      end)
+
+    %{state | mirror_operations: operations}
+  end
 
   defp schedule_deadline(operation_ref, deadline) do
     Process.send_after(
@@ -2883,6 +3402,8 @@ defmodule LoopexDaemon.Owner do
       max(deadline - monotonic_ms(), 0)
     )
   end
+
+  defp cancel_timer(nil, _operation_ref), do: :ok
 
   defp cancel_timer(timer, operation_ref) do
     _ = Process.cancel_timer(timer, async: false, info: false)

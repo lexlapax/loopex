@@ -1844,16 +1844,18 @@ defmodule LoopexDaemon.AdmissionRelayTest do
     stop_connection(connection, relay, connection_incarnation)
   end
 
-  # Concept: at the freeze, lease work not yet claimed is cancelled, and every
-  # row the owner must still see finish — executing work and the cancelled rows
-  # settling their refusal — is named to it; nothing new can be claimed.
+  # Concept: at the freeze, lease work not yet claimed is cancelled with a
+  # correlated `daemon_stopping`, and executing lease work becomes the
+  # barrier's own `shutdown_admitted` row: the owner's later result is
+  # cleanup-only and reaches no client; nothing new can be claimed.
   #
   # Technical depth: one lease permit is claimed by its owner and executing,
   # a second is open but unclaimed. After the transport cut, the freeze barrier
-  # names both origins; the unclaimed one can no longer be claimed and settles
-  # by itself, while `pending_origins/2` counts the executing row until its
-  # owner completes it.
-  test "the freeze cancels unclaimed lease work and names every row still to finish" do
+  # names only the executing one, tagged with its class and exact actor; the
+  # unclaimed one can no longer be claimed and settles by itself. The owner's
+  # completion after the freeze is refused `daemon_stopping`, no
+  # `relay_permit_result` reaches the connection, and both rows are terminal.
+  test "the freeze admits executing lease work for shutdown and cancels unclaimed work" do
     relay = start_relay()
     registry = start_registry()
     assert :ok = AdmissionRelay.register_registry(relay, registry, incarnation())
@@ -1894,19 +1896,23 @@ defmodule LoopexDaemon.AdmissionRelayTest do
 
     freeze = make_ref()
     send(relay, {:relay_barrier, freeze, {:freeze_lease_ops, 0}})
-    expected = Enum.sort([executing, unclaimed])
+
+    expected = [
+      {:shutdown_admitted, executing, :session_acquire_control, owner, owner_incarnation, nil}
+    ]
+
     assert_receive {:relay_barrier_ack, ^freeze, :freeze_lease_ops, ^expected}, 500
+
+    assert_receive {:connection_message, ^connection,
+                    {:relay_permit_cancelled, ^unclaimed, :daemon_stopping}},
+                   500
 
     assert {:error, _refused} =
              invoke(owner, fn ->
                AdmissionRelay.claim_lease_permit(relay, unclaimed, owner_incarnation)
              end)
 
-    # The cancelled row settles by itself; the executing one waits for its owner.
-    eventually(fn -> AdmissionRelay.pending_origins(relay, [unclaimed]) == 0 end)
-    assert AdmissionRelay.pending_origins(relay, [executing]) == 1
-
-    assert :ok =
+    assert {:error, :daemon_stopping} =
              invoke(owner, fn ->
                AdmissionRelay.complete_lease_permit(relay, executing, owner_incarnation, %{
                  "writer_epoch" => "epoch",
@@ -1915,7 +1921,172 @@ defmodule LoopexDaemon.AdmissionRelayTest do
                })
              end)
 
-    eventually(fn -> AdmissionRelay.pending_origins(relay, [executing]) == 0 end)
+    eventually(fn -> AdmissionRelay.pending_origins(relay, [executing, unclaimed]) == 0 end)
+
+    refute_receive {:connection_message, ^connection,
+                    {:relay_permit_result, ^executing, _result}},
+                   40
+  end
+
+  # Concept: a lease row whose result, connection loss or owner loss was
+  # selected before the freeze keeps that selection and is named in its exact
+  # settling variant; a row the freeze wins is the barrier's own
+  # `shutdown_admitted`. Every call returns the same fixed tagged set, and
+  # nothing settled after the freeze reaches a client.
+  #
+  # Technical depth: on one connection an existing owner claims an acquire it
+  # never completes, a release and an acquire whose daemon result selections
+  # the relay consumed, and a second owner claims a release before it is
+  # killed; on a second connection a claimed acquire loses its connection.
+  # The freeze answer, and a repeat with the same reference, is compared with
+  # the exact descriptors. Afterwards the first owner's late result is refused
+  # `daemon_stopping`, the selected release settles without any
+  # `relay_permit_result`, and the executing row is terminal.
+  test "the freeze returns one tagged descriptor per lease row in its selected variant" do
+    daemon_incarnation = incarnation()
+    relay = start_relay(owner_incarnation: daemon_incarnation)
+    registry = start_registry()
+    assert :ok = AdmissionRelay.register_registry(relay, registry, incarnation())
+    owner = start_actor()
+    owner_incarnation = incarnation()
+    lost_owner = start_actor()
+    lost_incarnation = incarnation()
+    assert :ok = AdmissionRelay.register_lease_owner(relay, "session", owner, owner_incarnation)
+
+    assert :ok =
+             AdmissionRelay.register_lease_owner(relay, "lost", lost_owner, lost_incarnation)
+
+    connection_incarnation = incarnation()
+    connection = start_connection(relay, connection_incarnation)
+    lost_connection_incarnation = incarnation()
+    lost_connection = start_connection(relay, lost_connection_incarnation)
+    executing = {connection_incarnation, 0, 1}
+    released = {connection_incarnation, 1, 1}
+    granted = {connection_incarnation, 2, 1}
+    owner_lost = {connection_incarnation, 3, 1}
+    connection_lost = {lost_connection_incarnation, 0, 1}
+
+    rows = [
+      {executing, connection, :session_acquire_control, "session", owner, owner_incarnation},
+      {released, connection, :session_release_control, "session", owner, owner_incarnation},
+      {granted, connection, :session_acquire_control, "session", owner, owner_incarnation},
+      {owner_lost, connection, :session_release_control, "lost", lost_owner, lost_incarnation},
+      {connection_lost, lost_connection, :session_acquire_control, "session", owner,
+       owner_incarnation}
+    ]
+
+    for {origin, row_connection, class, session_id, actor, actor_incarnation} <- rows do
+      {worker, worker_incarnation} = start_lease_worker(row_connection, origin)
+
+      assert {:ok, ^origin} =
+               AdmissionRelay.open_lease_permit(
+                 relay,
+                 row_connection,
+                 origin,
+                 class,
+                 session_id,
+                 actor,
+                 actor_incarnation,
+                 worker,
+                 worker_incarnation
+               )
+
+      assert :ok =
+               invoke(actor, fn ->
+                 AdmissionRelay.claim_lease_permit(relay, origin, actor_incarnation)
+               end)
+
+      assert_receive {:lease_worker_go, ^worker, ^origin}, 500
+    end
+
+    selections =
+      for {origin, result} <- [{released, %{"released" => true}}, {granted, %{"granted" => 1}}] do
+        settlement_ref = make_ref()
+        selection_ref = make_ref()
+
+        assert :ok =
+                 AdmissionRelay.request_lease_result_selection(
+                   relay,
+                   selection_ref,
+                   daemon_incarnation,
+                   origin,
+                   owner,
+                   owner_incarnation,
+                   settlement_ref,
+                   result
+                 )
+
+        assert_receive {:relay_lease_operation_ack, ^selection_ref, ^relay, _, :select_result,
+                        :ok},
+                       500
+
+        {origin, settlement_ref}
+      end
+
+    %{^released => release_ref, ^granted => grant_ref} = Map.new(selections)
+    Process.exit(lost_connection, :kill)
+
+    assert_receive {:relay_lease_disposition, ^relay, ^connection_lost, :connection_lost,
+                    loss_ref, :session_acquire_control, "session", ^owner, ^owner_incarnation,
+                    nil},
+                   500
+
+    Process.exit(lost_owner, :kill)
+
+    assert_receive {:relay_owner_lost, ^relay, "lost", ^lost_owner, ^lost_incarnation,
+                    [^owner_lost]},
+                   500
+
+    cut = make_ref()
+    send(relay, {:relay_barrier, cut, :cut})
+    assert_receive {:relay_barrier_ack, ^cut, :cut, _payload}, 500
+    freeze = make_ref()
+    send(relay, {:relay_barrier, freeze, {:freeze_lease_ops, 0}})
+
+    expected =
+      Enum.sort_by(
+        [
+          {:shutdown_admitted, executing, :session_acquire_control, owner, owner_incarnation,
+           nil},
+          {:settling_release, released, :result, owner, owner_incarnation, release_ref},
+          {:settling_acquire, granted, :result, owner, owner_incarnation, nil, grant_ref},
+          {:settling_owner_loss, owner_lost, :session_release_control, lost_owner,
+           lost_incarnation, :owner_loss},
+          {:settling_acquire, connection_lost, :connection_lost, owner, owner_incarnation, nil,
+           loss_ref}
+        ],
+        &elem(&1, 1)
+      )
+
+    assert_receive {:relay_barrier_ack, ^freeze, :freeze_lease_ops, ^expected}, 500
+    send(relay, {:relay_barrier, freeze, {:freeze_lease_ops, 0}})
+    assert_receive {:relay_barrier_ack, ^freeze, :freeze_lease_ops, ^expected}, 500
+
+    assert {:error, :daemon_stopping} =
+             invoke(owner, fn ->
+               AdmissionRelay.complete_lease_permit(relay, executing, owner_incarnation, %{
+                 "renewed" => true
+               })
+             end)
+
+    settle_ref = make_ref()
+
+    assert :ok =
+             AdmissionRelay.request_lease_result_settlement(
+               relay,
+               settle_ref,
+               daemon_incarnation,
+               released,
+               release_ref
+             )
+
+    assert_receive {:relay_lease_operation_ack, ^settle_ref, ^relay, _, :settle_result, :ok},
+                   500
+
+    eventually(fn -> AdmissionRelay.pending_origins(relay, [executing, released]) == 0 end)
+
+    refute_receive {:connection_message, ^connection, {:relay_permit_result, _origin, _result}},
+                   40
   end
 
   test "a fresh acquisition is bound to the daemon actor and start reference" do
@@ -2143,6 +2314,69 @@ defmodule LoopexDaemon.AdmissionRelayTest do
 
     assert %{owner_losses: 0, permits: 0, tickets: 0} = AdmissionRelay.status(relay)
     stop_connection(connection, relay, connection_incarnation)
+  end
+
+  # Concept: after the admission cut ordinary owner-loss notification stops:
+  # a claimed origin still joins the exact classification and is terminal,
+  # but no correlated `control_owner_lost` refusal reaches its connection.
+  #
+  # Technical depth: a pending mutation origin is bound to the owner before
+  # the cut; the owner is killed after it, the relay claims the origin, and
+  # the daemon's classification is acknowledged with the origin removed and
+  # nothing sent to the connection.
+  test "an owner loss after the cut claims its origins without a correlated refusal" do
+    daemon_incarnation = incarnation()
+    relay = start_relay(owner_incarnation: daemon_incarnation)
+    registry = start_registry()
+    assert :ok = AdmissionRelay.register_registry(relay, registry, incarnation())
+    owner = start_actor()
+    owner_incarnation = incarnation()
+    assert :ok = AdmissionRelay.register_lease_owner(relay, "session", owner, owner_incarnation)
+    connection_incarnation = incarnation()
+    connection = start_connection(relay, connection_incarnation)
+    origin = {connection_incarnation, 0, 1}
+
+    assert {:ok, ^origin} =
+             invoke(connection, fn ->
+               AdmissionRelay.open_ticket(
+                 relay,
+                 origin,
+                 :session_prompt,
+                 "session",
+                 {owner, owner_incarnation}
+               )
+             end)
+
+    cut = make_ref()
+    send(relay, {:relay_barrier, cut, :cut})
+    assert_receive {:relay_barrier_ack, ^cut, :cut, _payload}, 500
+    Process.exit(owner, :kill)
+
+    assert_receive {:relay_owner_lost, ^relay, "session", ^owner, ^owner_incarnation, [^origin]},
+                   500
+
+    classification_ref = make_ref()
+
+    assert :ok =
+             AdmissionRelay.classify_owner_loss(
+               relay,
+               classification_ref,
+               daemon_incarnation,
+               "session",
+               owner,
+               owner_incarnation,
+               nil
+             )
+
+    assert_receive {:relay_owner_loss_classified_ack, ^relay, ^classification_ref, "session",
+                    ^owner, ^owner_incarnation},
+                   500
+
+    assert %{owner_losses: 0, tickets: 0} = AdmissionRelay.status(relay)
+
+    refute_receive {:connection_message, ^connection,
+                    {:relay_ticket_cancelled, ^origin, :control_owner_lost}},
+                   40
   end
 
   test "an idle lease owner retires through its exact monitored down" do
@@ -2402,15 +2636,16 @@ defmodule LoopexDaemon.AdmissionRelayTest do
   # Concept: acquire and release permits opened before the cut and claimed
   # immediately before it, or after it but before the admission deadline, are
   # executing when a freeze arrives ahead of the deadline timer; the freeze
-  # names each of them, cancels only the unclaimed row, and the stale timer
+  # wins each of them as a `shutdown_admitted` row, cancels only the unclaimed
+  # row, returns the same tagged set when repeated, and the stale timer
   # cancels nothing later.
   #
   # Technical depth: the claims run inside the frozen-origin window, so each
   # worker starts; the freeze cancels the deadline timer, expires the one
-  # pending row as the deadline would, and its descriptors are the exact
-  # executing and settling lease origins.
+  # pending row as the deadline would, and its descriptors carry each exact
+  # class and actor. The rows are terminal once their workers are reaped.
   test "claims before the admission deadline survive a freeze ahead of the timer" do
-    %{relay: relay, connection: connection, claim: claim, origins: origins} =
+    %{relay: relay, connection: connection, claim: claim, origins: origins, owner: owner} =
       lease_rows_across_the_cut(300)
 
     %{pre_cut: pre_cut, acquire: acquire, release: release, unclaimed: unclaimed} = origins
@@ -2421,7 +2656,9 @@ defmodule LoopexDaemon.AdmissionRelayTest do
 
     freeze = make_ref()
     send(relay, {:relay_barrier, freeze, {:freeze_lease_ops, 0}})
-    expected = Enum.sort([pre_cut, acquire, release, unclaimed])
+    expected = admitted_descriptors(origins, owner)
+    assert_receive {:relay_barrier_ack, ^freeze, :freeze_lease_ops, ^expected}, 500
+    send(relay, {:relay_barrier, freeze, {:freeze_lease_ops, 0}})
     assert_receive {:relay_barrier_ack, ^freeze, :freeze_lease_ops, ^expected}, 500
 
     assert_receive {:connection_message, ^connection,
@@ -2432,20 +2669,19 @@ defmodule LoopexDaemon.AdmissionRelayTest do
                     {:relay_permit_cancelled, _claimed, :daemon_stopping}},
                    400
 
-    assert AdmissionRelay.pending_origins(relay, [pre_cut, acquire, release]) == 3
-    assert %{phase: :lease_ops_frozen, executing: 3} = AdmissionRelay.status(relay)
+    eventually(fn -> AdmissionRelay.pending_origins(relay, [pre_cut, acquire, release]) == 0 end)
+    assert %{phase: :lease_ops_frozen, executing: 0} = AdmissionRelay.status(relay)
   end
 
   # Concept: when the admission deadline timer fires before the freeze, it
   # cancels only the unclaimed row; a claim after the deadline is refused, and
-  # the later freeze still names every claim made before the deadline.
+  # the later freeze still wins every claim made before the deadline.
   #
   # Technical depth: the timer's expiry is observed through the unclaimed
   # row's `daemon_stopping` refusal; the late claim runs against the expired
-  # row, and the freeze's descriptors are compared after removing the one row
-  # whose killed worker may or may not have been reaped yet.
+  # row, which is already terminal and therefore not named by the freeze.
   test "claims before the admission deadline survive a freeze after the timer" do
-    %{relay: relay, connection: connection, claim: claim, origins: origins} =
+    %{relay: relay, connection: connection, claim: claim, origins: origins, owner: owner} =
       lease_rows_across_the_cut(200)
 
     %{pre_cut: pre_cut, acquire: acquire, release: release, unclaimed: unclaimed} = origins
@@ -2461,14 +2697,26 @@ defmodule LoopexDaemon.AdmissionRelayTest do
     freeze = make_ref()
     send(relay, {:relay_barrier, freeze, {:freeze_lease_ops, 0}})
     assert_receive {:relay_barrier_ack, ^freeze, :freeze_lease_ops, descriptors}, 500
-    assert descriptors -- [unclaimed] == Enum.sort([pre_cut, acquire, release])
+    assert descriptors == admitted_descriptors(origins, owner)
 
     refute_receive {:connection_message, ^connection,
                     {:relay_permit_cancelled, _claimed, :daemon_stopping}},
                    40
 
-    assert AdmissionRelay.pending_origins(relay, [pre_cut, acquire, release]) == 3
-    assert %{phase: :lease_ops_frozen, executing: 3} = AdmissionRelay.status(relay)
+    eventually(fn -> AdmissionRelay.pending_origins(relay, [pre_cut, acquire, release]) == 0 end)
+    assert %{phase: :lease_ops_frozen, executing: 0} = AdmissionRelay.status(relay)
+  end
+
+  defp admitted_descriptors(origins, {owner, owner_incarnation}) do
+    [
+      {:shutdown_admitted, origins.pre_cut, :session_acquire_control, owner, owner_incarnation,
+       nil},
+      {:shutdown_admitted, origins.acquire, :session_acquire_control, owner, owner_incarnation,
+       nil},
+      {:shutdown_admitted, origins.release, :session_release_control, owner, owner_incarnation,
+       nil}
+    ]
+    |> Enum.sort_by(&elem(&1, 1))
   end
 
   # Concept: four lease permits straddle the admission cut: an acquire
@@ -2538,7 +2786,13 @@ defmodule LoopexDaemon.AdmissionRelayTest do
              {origins.unclaimed, :pending}
            ]
 
-    %{relay: relay, connection: connection, claim: claim, origins: origins}
+    %{
+      relay: relay,
+      connection: connection,
+      claim: claim,
+      origins: origins,
+      owner: {owner, owner_incarnation}
+    }
   end
 
   defp start_relay(options \\ []) do

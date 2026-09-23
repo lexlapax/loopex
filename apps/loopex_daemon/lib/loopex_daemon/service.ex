@@ -28,8 +28,9 @@ defmodule LoopexDaemon.Service do
   exit is classified into its fixed fatal class and ends in fail-stop; a
   forwarded `SIGTERM` runs the orderly stop: the admission cut and transport
   gate within `transport_cut_deadline_ms: 5_000`, listener stop, the bounded
-  admission wait, the relay's `freeze_lease_ops` barrier with every executing
-  lease row finished inside `relay_control_timeout_ms: 5_000`, a fresh 5 s
+  admission wait, the relay's `freeze_lease_ops` barrier with every lease row
+  it names cleaned up without client output inside
+  `relay_control_timeout_ms: 5_000`, a fresh 5 s
   `quiescing` barrier, core quiesce on core's own clock, then one shared
   `teardown_ms` deadline (30 s, against a measured 119 ms at full population)
   over `seal_after_quiesce`, one `daemon.stopping` record per connection and
@@ -569,18 +570,25 @@ defmodule LoopexDaemon.Service do
            Owner.barrier(collaboration, {:quiescing, drain_id}, relay_control_deadline()) do
       drain(state, collaboration, drain_id)
     else
+      {:error, :connections_lost} -> fail_stop(state, :connections_lost)
       _missing_acknowledgement -> fail_stop(state, :relay_lost)
     end
   end
 
-  # Concept: at the admission bound lease operations freeze, and the ones
-  # already executing must finish inside one fixed relay-control deadline.
+  # Concept: at the admission bound lease operations freeze; the collaboration
+  # owner cleans up every row the relay names without client output, and each
+  # named row must be terminal in the relay, all inside one fixed
+  # relay-control deadline. Unfinished mirror work is `connections_lost`;
+  # anything else is `relay_lost`; neither reaches core quiesce.
   defp freeze_lease_ops(collaboration, relay) do
     deadline = relay_control_deadline()
 
     case Owner.barrier(collaboration, {:freeze_lease_ops, deadline}, deadline) do
       {:ok, descriptors} when is_list(descriptors) ->
-        await_frozen_rows(relay, descriptors, deadline)
+        await_frozen_rows(relay, Enum.map(descriptors, &elem(&1, 1)), deadline)
+
+      {:error, :connections_lost} ->
+        {:error, :connections_lost}
 
       _missing ->
         {:error, :relay_lost}

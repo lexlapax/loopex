@@ -77,6 +77,10 @@ defmodule LoopexDaemon.OwnerTest do
           send(caller, {:manual_result, reference, result})
           loop(parent, options)
 
+        {:manual_call, caller, reference, {:invoke, operation}} ->
+          send(caller, {:manual_result, reference, operation.()})
+          loop(parent, options)
+
         {:connection_abort, _token, _reason} ->
           :ok
 
@@ -1940,6 +1944,626 @@ defmodule LoopexDaemon.OwnerTest do
     assert {:ok, :forced} = Task.await(close_task, 1_000)
   end
 
+  # Concept: the crossing witness, stop first. A serving owner-loss
+  # classification paused before its acknowledgement is overtaken by the
+  # admission cut: the row is rebound to the transport-cut instant, its
+  # private clock becomes cleanup-only, and the later acknowledgement completes
+  # the loss without the uncorrelated `control_owner_lost` close.
+  #
+  # Technical depth: a relay debug hook parks the classification request. The
+  # cut is consumed while it is parked; the owner-loss operation is asserted to
+  # carry no timer and the cut instant, and the daemon owner outlives its
+  # 300 ms serving deadline. Releasing the relay acknowledges the
+  # classification and then the cut; the holder receives nothing and stays
+  # open for the later `daemon.stopping`/EOF path.
+  test "a stop consumed before a paused classification rebinds it and closes no holder" do
+    owner = start_owner(mirror_deadline_ms: 300)
+    components = Owner.components(owner)
+    holder = initialized_connection(components)
+    holder_pid = holder.pid
+    {lease_owner, _owner_incarnation, _epoch} = acquire_held(owner, holder, "stop-first-session")
+    park_relay_classification(components.relay)
+    lease_owner_monitor = Process.monitor(lease_owner)
+    Process.exit(lease_owner, :kill)
+    assert_receive {:DOWN, ^lease_owner_monitor, :process, ^lease_owner, :killed}, 500
+    assert_receive :relay_classification_parked, 500
+
+    cut_started = now_ms()
+    cut_task = Task.async(fn -> Owner.cut_admission(owner, 5_000) end)
+    assert :ok = wait_for_stop(owner)
+
+    assert [%{step: :await_classification, stop_owned: true, timer: nil, deadline: deadline}] =
+             owner_loss_operations(owner)
+
+    assert deadline >= cut_started + 5_000
+    Process.sleep(400)
+    assert Process.alive?(owner)
+    send(components.relay, :continue_parked_classification)
+    assert {:ok, _cut_ref} = Task.await(cut_task, 1_000)
+
+    assert %{lost_owners: 0, owner_slots: 0, mirror_operations: 0} =
+             wait_for_owner_retirement(owner)
+
+    refute_receive {:manual_connection_message, ^holder_pid,
+                    {:daemon_control_owner_lost, _owner, _close_ref, _session_id, _incarnation}},
+                   40
+
+    assert Process.alive?(holder_pid)
+    assert %{routing_mirrors: 0} = ConnectionRegistry.status(components.registry)
+    assert %{owner_losses: 0} = AdmissionRelay.status(components.relay)
+  end
+
+  # Concept: the crossing witness, classification first. A classification
+  # whose acknowledgement the daemon owner consumes before the stop completes
+  # its selected form as an ordinary pre-cut result.
+  #
+  # Technical depth: the relay is parked on the classification while the
+  # daemon owner is suspended; releasing the relay queues the acknowledgement
+  # ahead of the later cut call, so the daemon owner consumes it first and
+  # emits the one uncorrelated close before accepting the cut.
+  test "a classification completed before the stop keeps its selected holder close" do
+    owner = start_owner(mirror_deadline_ms: 1_000)
+    components = Owner.components(owner)
+    holder = initialized_connection(components)
+    holder_pid = holder.pid
+
+    {lease_owner, _owner_incarnation, _epoch} =
+      acquire_held(owner, holder, "classified-first-session")
+
+    park_relay_classification(components.relay)
+    lease_owner_monitor = Process.monitor(lease_owner)
+    Process.exit(lease_owner, :kill)
+    assert_receive {:DOWN, ^lease_owner_monitor, :process, ^lease_owner, :killed}, 500
+    assert_receive :relay_classification_parked, 500
+
+    :sys.suspend(owner)
+    send(components.relay, :continue_parked_classification)
+    assert :ok = wait_for_queue_length(owner, 1)
+    cut_task = Task.async(fn -> Owner.cut_admission(owner, 5_000) end)
+    assert :ok = wait_for_queue_length(owner, 2)
+    :sys.resume(owner)
+
+    assert_receive {:manual_connection_message, ^holder_pid,
+                    {:daemon_control_owner_lost, ^owner, close_ref, "classified-first-session",
+                     holder_incarnation}},
+                   500
+
+    assert holder_incarnation == holder.incarnation
+    assert {:ok, _cut_ref} = Task.await(cut_task, 1_000)
+    close_owner_loss_holder(owner, holder, close_ref)
+
+    assert %{lost_owners: 0, owner_slots: 0, mirror_operations: 0} =
+             wait_for_owner_retirement(owner)
+  end
+
+  # Concept: owner losses after the admission cut join the stop barrier
+  # rather than each starting a clock: at the maximum live-owner population,
+  # every exact `DOWN` and mirror-pop fact, delivered in both orders, settles
+  # under the one freeze deadline with no `control_owner_lost` form.
+  #
+  # Technical depth: 512 held owners on one connection are cut, then half are
+  # killed with the relay suspended (pop first) and half with the registry
+  # suspended (relay `DOWN` first). While each half is parked every owner-loss
+  # operation is asserted to carry no timer, and the daemon owner outlives its
+  # 200 ms serving deadline. The freeze barrier, under one five-second
+  # deadline, answers only after all 512 losses have joined.
+  @tag timeout: 180_000
+  test "owner losses after the cut join one stop deadline at the maximum population" do
+    owner = start_owner(mirror_deadline_ms: 200)
+    components = Owner.components(owner)
+    connection = initialized_connection(components)
+    connection_pid = connection.pid
+
+    owners =
+      for sequence <- 1..512 do
+        origin = {connection.incarnation, 0, sequence}
+        {worker, worker_incarnation} = start_worker(connection.pid, origin)
+
+        assert {:ok, :proposed, lease_owner, _owner_incarnation} =
+                 Owner.acquire_control(
+                   owner,
+                   origin,
+                   "overlap-#{sequence}",
+                   "overlap-#{sequence}",
+                   connection.pid,
+                   connection.incarnation,
+                   worker,
+                   worker_incarnation,
+                   now_ms() + 5_000
+                 )
+
+        assert_receive {:manual_connection_message, _, {:relay_permit_result, ^origin, _result}},
+                       500
+
+        lease_owner
+      end
+
+    assert %{live_owners: 512, granted_routes: 512} = wait_for_owner_settlement(owner, 400)
+    assert {:ok, _cut_ref} = Owner.cut_admission(owner, 5_000)
+    {pop_first, down_first} = Enum.split(owners, 256)
+
+    :sys.suspend(components.relay)
+    Enum.each(pop_first, &Process.exit(&1, :kill))
+    assert :ok = wait_for_owner_loss_step(owner, :await_classification, 256)
+    assert Enum.all?(owner_loss_operations(owner), &is_nil(&1.timer))
+    Process.sleep(300)
+    assert Process.alive?(owner)
+
+    :sys.suspend(components.registry)
+    :sys.resume(components.relay)
+    Enum.each(down_first, &Process.exit(&1, :kill))
+    assert :ok = wait_for_owner_loss_step(owner, :pop_owner, 256)
+    assert Enum.all?(owner_loss_operations(owner), &is_nil(&1.timer))
+    :sys.resume(components.registry)
+
+    started = now_ms()
+    assert {:ok, []} = freeze(owner)
+    assert now_ms() - started < 5_000
+
+    assert %{lost_owners: 0, live_owners: 0, owner_slots: 0, mirror_operations: 0} =
+             Owner.status(owner)
+
+    assert %{routing_mirrors: 0} = ConnectionRegistry.status(components.registry)
+    assert %{owner_losses: 0, lease_owners: 0} = AdmissionRelay.status(components.relay)
+
+    refute_received {:manual_connection_message, ^connection_pid,
+                     {:daemon_control_owner_lost, _owner, _close_ref, _session_id, _incarnation}}
+
+    assert Process.alive?(connection_pid)
+  end
+
+  # Concept: the freeze wins an existing owner's still-executing acquire as
+  # `shutdown_admitted`; the daemon owner kills and reaps that exact actor,
+  # pops its granted mirror and joins the relay's owner loss, all without a
+  # reply, refusal or holder close, while a promoted mutation under the same
+  # owner stays on its real-result path.
+  #
+  # Technical depth: the attached holder's mutation is promoted and blocked in
+  # its task, so the holder's renewal queues behind it and its permit is
+  # executing under the lease owner when the freeze arrives. The barrier
+  # returns that one descriptor only after the kill, the exact pop and the
+  # classification have finished; the blocked task then delivers its result.
+  test "the freeze kills an existing owner it admitted and joins its loss without output" do
+    owner = start_owner()
+    components = Owner.components(owner)
+    holder = initialized_connection(components)
+    holder_pid = holder.pid
+    session_id = "admitted-session"
+    {lease_owner, owner_incarnation, epoch} = acquire_held(owner, holder, session_id)
+
+    send(
+      owner,
+      {:registry_attachment, components.registry, nil, :opened, session_id, holder.pid,
+       holder.incarnation, "admitted-attachment"}
+    )
+
+    assert :ok = wait_for_attachment(lease_owner)
+    mutation_origin = {holder.incarnation, 1, 1}
+    ticket_worker = start_ticket_worker(holder.pid)
+    parent = self()
+    result = %{"operation" => "prompt", "status" => "accepted"}
+
+    assert {:ok, :admitted} =
+             manual_call(
+               holder.pid,
+               {:invoke,
+                fn ->
+                  with {:ok, ^mutation_origin} <-
+                         AdmissionRelay.open_ticket(
+                           components.relay,
+                           mutation_origin,
+                           :session_prompt,
+                           session_id,
+                           {lease_owner, owner_incarnation}
+                         ),
+                       :ok <-
+                         AdmissionRelay.bind_ticket_worker(
+                           components.relay,
+                           mutation_origin,
+                           ticket_worker,
+                           incarnation()
+                         ) do
+                    LeaseOwner.mutate(
+                      lease_owner,
+                      mutation_origin,
+                      :session_prompt,
+                      "admitted-mutation",
+                      holder.incarnation,
+                      epoch,
+                      ticket_worker,
+                      fn ->
+                        send(parent, {:mutation_waiting, self()})
+
+                        receive do
+                          :complete -> {:accepted, result}
+                        end
+                      end
+                    )
+                  end
+                end}
+             )
+
+    assert_receive {:mutation_waiting, task}, 500
+    origin = {holder.incarnation, 2, 1}
+    {worker, worker_incarnation} = start_worker(holder.pid, origin)
+
+    assert {:ok, :queued, ^lease_owner, ^owner_incarnation} =
+             Owner.acquire_control(
+               owner,
+               origin,
+               "admitted-renewal",
+               session_id,
+               holder.pid,
+               holder.incarnation,
+               worker,
+               worker_incarnation,
+               now_ms() + 5_000
+             )
+
+    assert_receive {:worker_go, ^worker, ^origin}, 500
+    assert {:ok, _cut_ref} = Owner.cut_admission(owner, 5_000)
+    lease_owner_monitor = Process.monitor(lease_owner)
+
+    assert {:ok,
+            [
+              {:shutdown_admitted, ^origin, :session_acquire_control, ^lease_owner,
+               ^owner_incarnation, nil}
+            ]} = freeze(owner)
+
+    assert_receive {:DOWN, ^lease_owner_monitor, :process, ^lease_owner, :killed}, 500
+
+    assert %{
+             lease_operations: 0,
+             mirror_operations: 0,
+             lost_owners: 0,
+             owner_slots: 0,
+             granted_routes: 0
+           } = Owner.status(owner)
+
+    assert %{routing_mirrors: 0} = ConnectionRegistry.status(components.registry)
+    assert %{permits: 0, owner_losses: 0, tickets: 1} = AdmissionRelay.status(components.relay)
+
+    # A proposal the killed actor had already sent for the tombstoned permit
+    # arrives after the freeze and creates no mirror row.
+    send(
+      owner,
+      {:lease_grant_proposed, make_ref(), origin, lease_owner, owner_incarnation, session_id,
+       holder.pid, holder.incarnation, :crypto.strong_rand_bytes(16), now_ms() + 5_000}
+    )
+
+    send(
+      owner,
+      {:release_proposed, make_ref(), origin, lease_owner, owner_incarnation, holder.incarnation}
+    )
+
+    assert %{mirror_operations: 0, lease_operations: 0} = Owner.status(owner)
+    assert Process.alive?(owner)
+    send(task, :complete)
+
+    assert_receive {:manual_connection_message, ^holder_pid,
+                    {:relay_ticket_result, ^mutation_origin, ^result}},
+                   500
+
+    refute_receive {:manual_connection_message, ^holder_pid,
+                    {:daemon_control_owner_lost, _owner, _close_ref, _session_id, _incarnation}},
+                   40
+
+    refute_received {:manual_connection_message, ^holder_pid,
+                     {:relay_permit_result, ^origin, _result}}
+
+    refute_received {:manual_connection_message, ^holder_pid,
+                     {:relay_permit_cancelled, ^origin, _reason}}
+  end
+
+  # Concept: a fresh acquire whose owner was never materialized is the daemon
+  # owner's own barrier-owned row; its retained start record says so, the
+  # operation is tombstoned and its reserved slot released, and no successor
+  # owner starts afterwards.
+  #
+  # Technical depth: the predecessor's retirement exit is gated, so the
+  # successor acquire waits unmaterialized. The freeze names it with the
+  # daemon owner as actor and its exact start reference; after the gates open
+  # the predecessor retires and no owner remains.
+  test "the freeze tombstones a fresh acquire whose owner never materialized" do
+    owner = start_owner(retirement_pop_gate: self(), retirement_exit_gate: self())
+    components = Owner.components(owner)
+    connection = initialized_connection(components)
+    connection_pid = connection.pid
+    session_id = "unmaterialized-session"
+
+    {predecessor, predecessor_incarnation, epoch} =
+      acquire_held(owner, connection, session_id)
+
+    release_origin = {connection.incarnation, 1, 1}
+    {release_worker, release_worker_incarnation} = start_worker(connection.pid, release_origin)
+
+    assert {:ok, :proposed, ^predecessor, ^predecessor_incarnation} =
+             Owner.release_control(
+               owner,
+               release_origin,
+               "unmaterialized-release",
+               session_id,
+               connection.pid,
+               connection.incarnation,
+               release_worker,
+               release_worker_incarnation,
+               epoch,
+               now_ms() + 5_000
+             )
+
+    assert_receive {:manual_connection_message, _,
+                    {:relay_permit_result, ^release_origin, _release_result}},
+                   500
+
+    assert_receive {:retirement_exit_blocked, ^predecessor, ^predecessor_incarnation,
+                    retirement_ref},
+                   500
+
+    successor_origin = {connection.incarnation, 2, 1}
+
+    {successor_worker, successor_worker_incarnation} =
+      start_worker(connection.pid, successor_origin)
+
+    daemon_incarnation = components.daemon_incarnation
+
+    assert {:ok, :queued, ^owner, ^daemon_incarnation} =
+             Owner.acquire_control(
+               owner,
+               successor_origin,
+               "unmaterialized-successor",
+               session_id,
+               connection.pid,
+               connection.incarnation,
+               successor_worker,
+               successor_worker_incarnation,
+               now_ms() + 5_000
+             )
+
+    assert_receive {:worker_go, ^successor_worker, ^successor_origin}, 500
+    assert %{waiting_owner_starts: 1} = Owner.status(owner)
+    assert {:ok, _cut_ref} = Owner.cut_admission(owner, 5_000)
+
+    assert {:ok,
+            [
+              {:shutdown_admitted, ^successor_origin, :session_acquire_control, ^owner,
+               ^daemon_incarnation, start_op_ref}
+            ]} = freeze(owner)
+
+    assert is_reference(start_op_ref)
+    assert %{waiting_owner_starts: 0, lease_operations: 0} = Owner.status(owner)
+
+    assert :ok = LeaseOwner.release_retirement_exit(predecessor, retirement_ref)
+    assert_receive {:retirement_pop_blocked, ^owner, ^session_id}, 500
+    assert :ok = Owner.release_retirement_pop(owner, session_id)
+
+    assert %{owner_slots: 0, live_owners: 0, mirror_operations: 0} =
+             wait_for_owner_retirement(owner)
+
+    refute_receive {:manual_connection_message, ^connection_pid,
+                    {:relay_permit_result, ^successor_origin, _result}},
+                   40
+
+    assert %{permits: 0, lease_owners: 0} = AdmissionRelay.status(components.relay)
+  end
+
+  # Concept: the admission cut makes a release's serving clocks cleanup-only,
+  # so a lease owner that has not restored after a connection loss is not
+  # killed by `owner_restore_deadline`; the freeze then owns it and kills,
+  # supersedes and reaps it without a reply.
+  #
+  # Technical depth: the release is proposed, its connection is lost before
+  # the result CAS, and the lease owner is suspended when the cancellation
+  # reaches it. After the cut the daemon owner outlives the 200 ms restore
+  # instant with the owner still alive. The freeze names the
+  # `settling_release` row with its connection-loss disposition, kills the
+  # owner, terminalizes the no-reply settlement and pops the granted mirror.
+  test "the cut makes release clocks cleanup-only and the freeze supersedes an unrestored owner" do
+    owner = start_owner(mirror_deadline_ms: 200)
+    components = Owner.components(owner)
+    connection = initialized_connection(components)
+    session_id = "frozen-release-session"
+
+    {lease_owner, owner_incarnation, release_origin, loss_ref} =
+      park_release_cancellation(owner, components, connection, session_id)
+
+    assert {:ok, _cut_ref} = Owner.cut_admission(owner, 5_000)
+    Process.sleep(300)
+    assert Process.alive?(lease_owner)
+    assert Process.alive?(owner)
+    lease_owner_monitor = Process.monitor(lease_owner)
+
+    assert {:ok,
+            [
+              {:settling_release, ^release_origin, :connection_lost, ^lease_owner,
+               ^owner_incarnation, ^loss_ref}
+            ]} = freeze(owner)
+
+    assert_receive {:DOWN, ^lease_owner_monitor, :process, ^lease_owner, :killed}, 500
+
+    assert %{lease_operations: 0, mirror_operations: 0, lost_owners: 0, owner_slots: 0} =
+             Owner.status(owner)
+
+    assert %{routing_mirrors: 0} = ConnectionRegistry.status(components.registry)
+    assert %{permits: 0, owner_losses: 0} = AdmissionRelay.status(components.relay)
+  end
+
+  # Concept: while serving, a lease owner that stays paused through
+  # `owner_restore_deadline` cannot keep `release_pending`: the daemon owner
+  # kills that exact owner, supersedes the cancellation without a reply, and
+  # the ordinary owner-loss path finishes; the daemon itself keeps serving.
+  #
+  # Technical depth: the owner is suspended when the cancellation reaches it;
+  # the 200 ms restore instant fires, the owner is killed and the no-reply
+  # settlement and owner-loss pop leave no operation, mirror or permit.
+  test "an owner paused through the restore deadline is killed and superseded" do
+    owner = start_owner(mirror_deadline_ms: 200)
+    components = Owner.components(owner)
+    connection = initialized_connection(components)
+
+    {lease_owner, _owner_incarnation, _release_origin, _loss_ref} =
+      park_release_cancellation(owner, components, connection, "paused-restore-session")
+
+    lease_owner_monitor = Process.monitor(lease_owner)
+    assert_receive {:DOWN, ^lease_owner_monitor, :process, ^lease_owner, :killed}, 1_000
+    assert Process.alive?(owner)
+    assert_clean_retirement(owner, components)
+  end
+
+  # Concept: an owner restoration acknowledgement queued before
+  # `owner_restore_deadline` but consumed at or after it is cleanup-only: the
+  # daemon owner still kills that exact owner and supersedes the cancellation.
+  #
+  # Technical depth: the daemon owner is suspended while the resumed lease
+  # owner restores and acknowledges, and stays suspended past the 300 ms
+  # instant so the acknowledgement is queued ahead of the timer. On resume the
+  # acknowledgement is consumed late, and the restored owner is killed.
+  test "a restoration acknowledgement consumed after the restore deadline is cleanup-only" do
+    owner = start_owner(mirror_deadline_ms: 300)
+    components = Owner.components(owner)
+    connection = initialized_connection(components)
+
+    {lease_owner, _owner_incarnation, _release_origin, _loss_ref} =
+      park_release_cancellation(owner, components, connection, "late-restore-session")
+
+    :sys.suspend(owner)
+    lease_owner_monitor = Process.monitor(lease_owner)
+    :sys.resume(lease_owner)
+    assert :ok = wait_for_queue_length(owner, 1)
+    Process.sleep(350)
+    :sys.resume(owner)
+
+    assert_receive {:DOWN, ^lease_owner_monitor, :process, ^lease_owner, :killed}, 1_000
+    assert Process.alive?(owner)
+    assert_clean_retirement(owner, components)
+  end
+
+  # Concept: a result settlement acknowledged after `owner_restore_deadline`
+  # but before `release_settlement_deadline` still terminalizes and renders
+  # the one correlated success; the first instant does not govern relay
+  # terminalization.
+  #
+  # Technical depth: the relay is parked on the result settlement past the
+  # 500 ms restore instant and released before the 1,000 ms settlement
+  # instant.
+  test "a release settlement acknowledged before the settlement deadline succeeds" do
+    owner = start_owner(mirror_deadline_ms: 500)
+    components = Owner.components(owner)
+    holder = initialized_connection(components)
+    holder_pid = holder.pid
+    session_id = "settled-in-time-session"
+    {lease_owner, owner_incarnation, writer_epoch} = acquire_held(owner, holder, session_id)
+    release_origin = {holder.incarnation, 1, 1}
+    {release_worker, release_worker_incarnation} = start_worker(holder.pid, release_origin)
+    park_relay_operation(components.relay, :settle_result)
+
+    assert {:ok, :proposed, ^lease_owner, ^owner_incarnation} =
+             Owner.release_control(
+               owner,
+               release_origin,
+               "settled-in-time",
+               session_id,
+               holder.pid,
+               holder.incarnation,
+               release_worker,
+               release_worker_incarnation,
+               writer_epoch,
+               now_ms() + 5_000
+             )
+
+    assert_receive {:relay_operation_parked, :settle_result}, 500
+    Process.sleep(700)
+    send(components.relay, :continue_parked_operation)
+
+    assert_receive {:manual_connection_message, ^holder_pid,
+                    {:relay_permit_result, ^release_origin, release_result}},
+                   500
+
+    assert release_result == WireRecords.control_released("settled-in-time")
+    assert_clean_retirement(owner, components)
+  end
+
+  # Concept: a relay result settlement still missing at
+  # `release_settlement_deadline` selects `relay_lost`, never
+  # `connections_lost` and never a success.
+  #
+  # Technical depth: the relay stays parked on the result settlement; the
+  # daemon owner's timer passes the 200 ms restore instant, rearms for the
+  # 400 ms settlement instant and stops the daemon owner as `relay_lost`.
+  test "a release settlement missing at the settlement deadline selects relay_lost" do
+    owner = start_owner(mirror_deadline_ms: 200)
+    components = Owner.components(owner)
+    holder = initialized_connection(components)
+    holder_pid = holder.pid
+    session_id = "settlement-deadline-session"
+    {lease_owner, owner_incarnation, writer_epoch} = acquire_held(owner, holder, session_id)
+    release_origin = {holder.incarnation, 1, 1}
+    {release_worker, release_worker_incarnation} = start_worker(holder.pid, release_origin)
+    park_relay_operation(components.relay, :settle_result)
+    owner_monitor = Process.monitor(owner)
+
+    assert {:ok, :proposed, ^lease_owner, ^owner_incarnation} =
+             Owner.release_control(
+               owner,
+               release_origin,
+               "settlement-deadline",
+               session_id,
+               holder.pid,
+               holder.incarnation,
+               release_worker,
+               release_worker_incarnation,
+               writer_epoch,
+               now_ms() + 5_000
+             )
+
+    assert_receive {:relay_operation_parked, :settle_result}, 500
+    assert_receive {:DOWN, ^owner_monitor, :process, ^owner, :relay_lost}, 1_000
+
+    refute_received {:manual_connection_message, ^holder_pid,
+                     {:relay_permit_result, ^release_origin, _result}}
+  end
+
+  # Concept: freeze cleanup fails closed: a descriptor set the daemon owner
+  # cannot match to its own records is `relay_lost` and begins no cleanup.
+  #
+  # Technical depth: the relay is parked on the freeze and an
+  # acknowledgement with the exact barrier reference but an unknown tag is
+  # delivered to the daemon owner.
+  test "an unmatched freeze descriptor selects relay_lost" do
+    owner = start_owner()
+    components = Owner.components(owner)
+    assert {:ok, _cut_ref} = Owner.cut_admission(owner, 5_000)
+    park_relay_freeze(components.relay)
+    freeze_task = Task.async(fn -> freeze(owner) end)
+    assert_receive :relay_freeze_parked, 500
+    %{stop: %{barrier: %{ref: barrier_ref}}} = :sys.get_state(owner)
+
+    send(
+      owner,
+      {:relay_barrier_ack, barrier_ref, :freeze_lease_ops, [{:rolled_back, :origin}]}
+    )
+
+    assert {:error, :relay_lost} = Task.await(freeze_task, 1_000)
+    send(components.relay, :continue_parked_freeze)
+  end
+
+  # Concept: mirror work still unfinished at `freeze_deadline` is
+  # `connections_lost`, and the exact registry is killed rather than trusted.
+  #
+  # Technical depth: the registry is suspended with an expiry clear pending
+  # when a 200 ms freeze begins.
+  test "mirror work unfinished at the freeze deadline selects connections_lost" do
+    owner = start_owner(lease_term_ms: 400)
+    components = Owner.components(owner)
+    holder = initialized_connection(components)
+    _held = acquire_held(owner, holder, "unfinished-mirror-session")
+    assert {:ok, _cut_ref} = Owner.cut_admission(owner, 5_000)
+    :sys.suspend(components.registry)
+    assert :ok = wait_for_mirror_step(owner, :expiry, :clear)
+    registry_monitor = Process.monitor(components.registry)
+    assert {:error, :connections_lost} = freeze(owner, 200)
+    assert_receive {:DOWN, ^registry_monitor, :process, _registry, :killed}, 500
+  end
+
   defp acquire_held(owner, connection, session_id) do
     origin = {connection.incarnation, 0, 1}
     {worker, worker_incarnation} = start_worker(connection.pid, origin)
@@ -2284,6 +2908,178 @@ defmodule LoopexDaemon.OwnerTest do
   end
 
   defp wait_for_queued_message(_pid, 0), do: {:error, :not_queued}
+
+  # Concept: a connection-loss release whose lease owner has not restored.
+  # Technical depth: the release is proposed, its connection is killed before
+  # the result CAS, and the lease owner is suspended when the daemon owner
+  # asks it to restore; the daemon owner is left at `resolve_owner_cancel`.
+  defp park_release_cancellation(owner, components, connection, session_id) do
+    {lease_owner, owner_incarnation, writer_epoch} = acquire_held(owner, connection, session_id)
+    release_origin = {connection.incarnation, 1, 1}
+    {release_worker, release_worker_incarnation} = start_worker(connection.pid, release_origin)
+    :sys.suspend(lease_owner)
+
+    release_task =
+      Task.async(fn ->
+        Owner.release_control(
+          owner,
+          release_origin,
+          "#{session_id}-release",
+          session_id,
+          connection.pid,
+          connection.incarnation,
+          release_worker,
+          release_worker_incarnation,
+          writer_epoch,
+          now_ms() + 5_000
+        )
+      end)
+
+    assert %{pending: 1} = wait_for_relay_pending(components.relay)
+    suspend_task = Task.async(fn -> :sys.suspend(owner) end)
+    :sys.resume(lease_owner)
+    assert {:ok, :proposed, ^lease_owner, ^owner_incarnation} = Task.await(release_task, 500)
+    assert :ok = Task.await(suspend_task, 500)
+    assert_receive {:worker_go, ^release_worker, ^release_origin}, 500
+    :sys.suspend(lease_owner)
+    Process.exit(connection.pid, :kill)
+    assert %{settling: 1} = wait_for_relay_settling(components.relay)
+    :sys.resume(owner)
+    assert :ok = wait_for_mirror_step(owner, :release, :resolve_owner_cancel)
+
+    [loss_ref] =
+      for {_operation_ref, %{kind: :release, loss_ref: loss_ref}} <-
+            :sys.get_state(owner).mirror_operations,
+          do: loss_ref
+
+    {lease_owner, owner_incarnation, release_origin, loss_ref}
+  end
+
+  # Concept: the relay can be held just before it applies an owner-loss
+  # classification or the lease freeze. Technical depth: a debug hook parks
+  # the relay on the first matching message and returns once released.
+  defp park_relay_classification(relay) do
+    park_relay_message(
+      relay,
+      &match?({:relay_owner_loss_classification, _, _, _, _, _, _, _}, &1),
+      :relay_classification_parked,
+      :continue_parked_classification
+    )
+  end
+
+  defp park_relay_freeze(relay) do
+    park_relay_message(
+      relay,
+      &match?({:relay_barrier, _ref, {:freeze_lease_ops, _deadline}}, &1),
+      :relay_freeze_parked,
+      :continue_parked_freeze
+    )
+  end
+
+  defp park_relay_message(relay, matcher, parked, continue) do
+    test_pid = self()
+
+    :ok =
+      :sys.install(
+        relay,
+        {fn
+           :waiting, {:in, message}, _proc_state ->
+             if matcher.(message) do
+               send(test_pid, parked)
+
+               receive do
+                 ^continue -> :done
+               end
+             else
+               :waiting
+             end
+
+           :waiting, _event, _proc_state ->
+             :waiting
+         end, :waiting}
+      )
+  end
+
+  defp freeze(owner, window \\ 5_000) do
+    deadline = now_ms() + window
+    Owner.barrier(owner, {:freeze_lease_ops, deadline}, deadline)
+  end
+
+  defp owner_loss_operations(owner) do
+    for {_operation_ref, %{kind: :owner_loss} = operation} <-
+          :sys.get_state(owner).mirror_operations,
+        do: operation
+  end
+
+  defp wait_for_stop(owner, attempts \\ 100)
+
+  defp wait_for_stop(owner, attempts) when attempts > 0 do
+    if :sys.get_state(owner).stop do
+      :ok
+    else
+      Process.sleep(5)
+      wait_for_stop(owner, attempts - 1)
+    end
+  end
+
+  defp wait_for_stop(_owner, 0), do: {:error, :not_stopping}
+
+  defp wait_for_owner_loss_step(owner, step, count, attempts \\ 2_000)
+
+  defp wait_for_owner_loss_step(owner, step, count, attempts) when attempts > 0 do
+    if Enum.count(owner_loss_operations(owner), &(&1.step == step)) == count do
+      :ok
+    else
+      Process.sleep(5)
+      wait_for_owner_loss_step(owner, step, count, attempts - 1)
+    end
+  end
+
+  defp wait_for_owner_loss_step(_owner, _step, _count, 0), do: {:error, :not_reached}
+
+  defp wait_for_queue_length(pid, length, attempts \\ 100)
+
+  defp wait_for_queue_length(pid, length, attempts) when attempts > 0 do
+    case Process.info(pid, :message_queue_len) do
+      {:message_queue_len, queued} when queued >= length ->
+        :ok
+
+      _other ->
+        Process.sleep(5)
+        wait_for_queue_length(pid, length, attempts - 1)
+    end
+  end
+
+  defp wait_for_queue_length(_pid, _length, 0), do: {:error, :not_queued}
+  defp wait_for_attachment(lease_owner, attempts \\ 100)
+
+  defp wait_for_attachment(lease_owner, attempts) when attempts > 0 do
+    if LeaseOwner.status(lease_owner).attachments == 1 do
+      :ok
+    else
+      Process.sleep(5)
+      wait_for_attachment(lease_owner, attempts - 1)
+    end
+  end
+
+  defp wait_for_attachment(_lease_owner, 0), do: {:error, :not_attached}
+
+  defp start_ticket_worker(connection) do
+    parent = self()
+
+    worker =
+      spawn(fn ->
+        connection_monitor = Process.monitor(connection)
+        send(parent, {:ticket_worker_ready, self()})
+
+        receive do
+          {:DOWN, ^connection_monitor, :process, ^connection, _reason} -> :ok
+        end
+      end)
+
+    assert_receive {:ticket_worker_ready, ^worker}, 500
+    worker
+  end
 
   defp incarnation, do: :crypto.strong_rand_bytes(16)
   defp now_ms, do: System.monotonic_time(:millisecond)
