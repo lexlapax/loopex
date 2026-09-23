@@ -14,6 +14,10 @@ defmodule Loopex.MixProject do
       lockfile: "../../mix.lock",
       elixir: "~> 1.17",
       start_permanent: Mix.env() == :prod,
+      # Support modules are loaded by the cases that need them; without this the
+      # test loader warns that they match no filter, and the suite runs with
+      # warnings as errors.
+      test_ignore_filters: [&String.starts_with?(&1, "test/support/")],
       deps: deps()
     ]
   end

@@ -258,10 +258,12 @@ defmodule LoopexDaemon.SocketTransportTest do
     client = initialized_client(daemon)
     session_id = create_session(client, "killed-create")
 
+    # Other cases run concurrently, so only this runtime's coordinator counts.
     [coordinator] =
       for pid <- Process.list(),
           {:dictionary, dictionary} <- [Process.info(pid, :dictionary)],
           match?({Loopex.Runtime.SessionCoordinator, _, _}, dictionary[:"$initial_call"]),
+          runtime.supervisor in Keyword.get(dictionary, :"$ancestors", []),
           do: pid
 
     Process.exit(coordinator, :kill)
