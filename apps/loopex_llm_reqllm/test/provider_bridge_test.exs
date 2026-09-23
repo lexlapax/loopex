@@ -928,25 +928,39 @@ defmodule Loopex.LLM.ReqLLM.ProviderBridgeTest do
     refute process_alive?(child_pid(root))
   end
 
+  # Concept: a guardian killed after initialization stops everything it owns,
+  # and its loss reaches no log, report or result with the credential in it.
   test "abrupt guardian death also stops its raw host helpers", %{root: root, request: request} do
-    {caller, guardian, _stop_reference} = registered_call(request, worker(root, :stall_ready))
-    :erlang.trace(guardian, true, [:procs, {:tracer, self()}])
-    send(caller, :continue)
-    assert eventually(fn -> File.regular?(Path.join(root, "booted")) end, 5_000)
-    helpers = traced_children(guardian)
-    assert length(helpers) >= 2
-    monitors = Enum.map(helpers, &{&1, Process.monitor(&1)})
-    guardian_monitor = Process.monitor(guardian)
-    Process.exit(guardian, :kill)
-    assert_receive {:DOWN, ^guardian_monitor, :process, ^guardian, :killed}, 1_000
+    log =
+      ExUnit.CaptureLog.capture_log(fn ->
+        {caller, guardian, _stop_reference} =
+          registered_call(request, worker(root, :stall_ready))
 
-    for {helper, monitor} <- monitors do
-      assert_receive {:DOWN, ^monitor, :process, ^helper, _reason}, 1_000
-    end
+        :erlang.trace(guardian, true, [:procs, {:tracer, self()}])
+        send(caller, :continue)
+        assert eventually(fn -> File.regular?(Path.join(root, "booted")) end, 5_000)
+        helpers = traced_children(guardian)
+        assert length(helpers) >= 2
+        monitors = Enum.map(helpers, &{&1, Process.monitor(&1)})
+        guardian_monitor = Process.monitor(guardian)
+        Process.exit(guardian, :kill)
+        assert_receive {:DOWN, ^guardian_monitor, :process, ^guardian, :killed}, 1_000
 
-    assert_receive {:completed, {:error, {:dispatched_or_unknown, "model_call_failed"}}}, 1_000
-    assert eventually(fn -> not process_alive?(child_pid(root)) end, 2_500)
-    refute File.exists?(File.read!(Path.join(root, "namespace")))
+        for {helper, monitor} <- monitors do
+          assert_receive {:DOWN, ^monitor, :process, ^helper, reason}, 1_000
+          refute inspect(reason) =~ "synthetic-provider-credential"
+        end
+
+        assert_receive {:completed, {:error, {:dispatched_or_unknown, "model_call_failed"}}},
+                       1_000
+
+        assert eventually(fn -> not process_alive?(child_pid(root)) end, 2_500)
+        refute File.exists?(File.read!(Path.join(root, "namespace")))
+        Process.sleep(100)
+      end)
+
+    refute log =~ "synthetic-provider-credential"
+    refute log =~ Base.encode64("synthetic-provider-credential")
   end
 
   test "the committed deadline kills a writer blocked by a child that never reads", %{
