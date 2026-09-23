@@ -622,18 +622,44 @@ defmodule LoopexDaemon.SocketTransportTest do
       else: read_through_prompt(socket, sequences)
   end
 
-  # Reads event records through `last` and returns their sequences.
-  defp read_through_sequence(socket, last, sequences) do
-    [%{"type" => "event", "event" => event}] = receive_records(socket, 1, 10_000)
-    sequence = String.to_integer(event["event_sequence"])
-    sequences = [sequence | sequences]
+  # Attaches after `cursor` on fresh connections until event `last` arrives,
+  # returning every sequence received; a closed connection resumes from its
+  # newest complete event, and each attempt must add at least one event.
+  defp resume_through(_daemon, _session_id, cursor, last, _attempts) when cursor >= last, do: []
 
-    if sequence >= last,
-      do: Enum.reverse(sequences),
-      else: read_through_sequence(socket, last, sequences)
+  defp resume_through(daemon, session_id, cursor, last, attempts) when attempts > 0 do
+    client = initialized_client(daemon)
+    :ok = send_frame(client, attach("return-#{cursor}", session_id, after: cursor))
+    assert [%{"type" => "snapshot"}] = receive_records(client, 1)
+    received = read_until_closed(client, last, [])
+    :socket.close(client)
+    assert received != [], "a reconnection made no progress"
+    received ++ resume_through(daemon, session_id, List.last(received), last, attempts - 1)
   end
 
-  # Reads every complete record until the daemon closes the connection.
+  # Reads event sequences until `last` or the daemon closes the connection.
+  defp read_until_closed(socket, last, sequences) do
+    case drain_records(socket, 1) do
+      [%{"type" => "event", "event" => event}] ->
+        sequence = String.to_integer(event["event_sequence"])
+
+        if sequence >= last,
+          do: Enum.reverse([sequence | sequences]),
+          else: read_until_closed(socket, last, [sequence | sequences])
+
+      _closed_or_detached ->
+        Enum.reverse(sequences)
+    end
+  end
+
+  # Reads every complete record until the daemon closes the connection, or
+  # at most `limit` records when given an integer.
+  defp drain_records(socket, limit) when is_integer(limit) do
+    receive_records(socket, limit, 5_000)
+  catch
+    _kind, _reason -> []
+  end
+
   defp drain_records(socket, records) do
     case receive_records(socket, 1, 5_000) do
       [record] -> drain_records(socket, [record | records])
@@ -801,11 +827,10 @@ defmodule LoopexDaemon.SocketTransportTest do
     end
 
     # Reconnecting after its last complete event, it receives the rest of the
-    # run with no gap.
-    returning = initialized_client(daemon)
-    :ok = send_frame(returning, attach("return", session_id, after: held))
-    assert [%{"request_id" => "return", "type" => "snapshot"}] = receive_records(returning, 1)
-    resumed = read_through_sequence(returning, List.last(read), [])
+    # run with no gap. A reconnection that itself falls behind the replay is
+    # detached too, so the client reconnects again from its newest complete
+    # event; each connection must make progress.
+    resumed = resume_through(daemon, session_id, held, List.last(read), 20)
     assert resumed == Enum.to_list((held + 1)..List.last(read))
   end
 

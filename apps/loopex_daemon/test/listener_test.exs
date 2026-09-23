@@ -453,7 +453,7 @@ defmodule LoopexDaemon.ListenerTest do
 
   # Reads until `count` complete frames have arrived, counting newlines per
   # chunk so a large backlog is scanned once.
-  defp read_frames(socket, count, chunks, seen) when seen >= count do
+  defp read_frames(_socket, count, chunks, seen) when seen >= count do
     chunks
     |> Enum.reverse()
     |> IO.iodata_to_binary()
