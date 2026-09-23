@@ -248,6 +248,61 @@ defmodule LoopexDaemon.SocketTransportTest do
              receive_records(other_client, 1)
   end
 
+  # Concept: a session whose coordinator died is still this daemon's active
+  # session, but reading its state says it is unavailable and nothing can
+  # change it; restarting the daemon and resuming the session repairs it.
+  test "a killed coordinator is unavailable until a restart and resume repair it" do
+    root = temporary_directory("loopex-killed-coordinator")
+    {runtime, adapter} = runtime_with_adapter(root)
+    daemon = start_daemon(runtime)
+    client = initialized_client(daemon)
+    session_id = create_session(client, "killed-create")
+
+    [coordinator] =
+      for pid <- Process.list(),
+          {:dictionary, dictionary} <- [Process.info(pid, :dictionary)],
+          match?({Loopex.Runtime.SessionCoordinator, _, _}, dictionary[:"$initial_call"]),
+          do: pid
+
+    Process.exit(coordinator, :kill)
+
+    # Attaching reads durable history, so it may still succeed until core has
+    # processed the coordinator's death; after that it is refused the same way.
+    :ok = send_frame(client, attach("attach", session_id))
+    assert [attached] = receive_records(client, 1)
+    assert attached["type"] == "snapshot" or attached["code"] == "session_unavailable"
+    :ok = send_frame(client, inspect_request("inspect", session_id))
+
+    assert [%{"request_id" => "inspect", "code" => "session_unavailable"}] =
+             receive_records(client, 1)
+
+    :ok = GenServer.stop(daemon.owner, :normal)
+    :ok = Loopex.stop(runtime)
+    :ok = GenServer.stop(adapter)
+
+    {runtime, _adapter} = runtime_with_adapter(root)
+    restarted = start_daemon(runtime)
+    repair = initialized_client(restarted)
+    :ok = send_frame(repair, acquire("acquire", session_id))
+    assert [%{"result" => %{"writer_epoch" => encoded_epoch}}] = receive_records(repair, 1)
+    {:ok, epoch} = Wire.identity(encoded_epoch)
+    :ok = send_frame(repair, resume("resume", session_id, "killed-resume", epoch))
+    assert [%{"request_id" => "resume", "status" => "accepted"}] = receive_records(repair, 1)
+    :ok = send_frame(repair, inspect_request("again", session_id))
+    assert [%{"request_id" => "again", "type" => "result"}] = receive_records(repair, 1)
+  end
+
+  defp runtime_with_adapter(root) do
+    {:ok, adapter} = Loopex.Store.Local.start_link(path: Path.join(root, "store.log"))
+    Process.unlink(adapter)
+    {:ok, store} = Loopex.Store.new(Loopex.Store.Local, adapter)
+
+    {:ok, runtime} =
+      Loopex.start_link(runtime_id: "killed-placement", store: store, context_token_budget: 8_192)
+
+    {runtime, adapter}
+  end
+
   test "session.list pages recorded sessions with residency and control" do
     root = temporary_directory("loopex-socket-list")
     [dormant] = seed_dormant(root, 1, "list-placement")
