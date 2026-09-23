@@ -336,6 +336,76 @@ defmodule LoopexCli.LiveRecoveryTest do
     stop_daemon(daemon)
   end
 
+  # Concept: a controller whose renewal is refused keeps following as an
+  # observer: it says so, still shows the run to its end, and asks for control
+  # no more.
+  #
+  # Technical depth: the provider holds the run past the first ten-second
+  # renewal, and the proxy turns that renewal's grant into `control_not_held`.
+  # The command reports the demotion, finishes with the run's answer, and sends
+  # no further `session.acquire_control` after the refused one.
+  @tag timeout: 120_000
+  test "a refused renewal demotes the controller to an observer", context do
+    provider =
+      ProviderFixture.new(:delayed_entry,
+        credential: @credential,
+        response_bodies: [text_response("demoted answer", "msg_recovery_demoted")]
+      )
+
+    launch =
+      Keyword.drop(provider.options, [
+        :credential_token,
+        :credential_registry,
+        :tracing_capability
+      ])
+
+    daemon = start_daemon(context, launch)
+
+    proxy =
+      DaemonProxy.start(context.socket, [], fn bytes ->
+        bytes
+        |> String.split("\n")
+        |> Enum.map_join("\n", fn line ->
+          case JSON.decode(line) do
+            {:ok,
+             %{
+               "method" => "session.acquire_control",
+               "request_id" => id,
+               "result" => %{"renewed" => true}
+             }} ->
+              ~s({"code":"control_not_held","message":"control is not held by this connection","request_id":"#{id}","type":"error"})
+
+            _other ->
+              line
+          end
+        end)
+      end)
+
+    command =
+      Task.async(fn ->
+        stderr =
+          capture_io(:stderr, fn ->
+            send(self(), {:result, run(["run", "--daemon", proxy.path, "go"])})
+          end)
+
+        {receive(do: ({:result, result} -> result)), stderr}
+      end)
+
+    assert Enum.any?(1..1_000, fn _ ->
+             Process.sleep(20)
+             Enum.count(DaemonProxy.seen(proxy), &(&1 == "session.acquire_control")) >= 2
+           end)
+
+    Process.sleep(500)
+    ProviderFixture.release(provider)
+    {{result, output}, stderr} = Task.await(command, 90_000)
+    assert result == :ok
+    assert output =~ "demoted answer"
+    assert stderr =~ "continuing as an observer"
+    assert Enum.count(DaemonProxy.seen(proxy), &(&1 == "session.acquire_control")) == 2
+    stop_daemon(daemon)
+  end
+
   @tag timeout: 120_000
   test "a lost listing reply is asked once more and printed once", context do
     daemon = start_daemon(context, launch("listed answer", "listed"))
