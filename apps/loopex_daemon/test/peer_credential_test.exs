@@ -44,6 +44,20 @@ defmodule LoopexDaemon.PeerCredentialTest do
     assert :ok = ListenerSocket.close(listener)
   end
 
+  # Concept: a credential the kernel cannot supply is refused like a
+  # mismatched one.
+  #
+  # Technical depth: a local socket closed before the check has no readable
+  # peer credential; `uid/1` reports it unavailable and `authorize/2` returns
+  # the one fail-closed refusal for any daemon uid.
+  test "an unreadable peer credential is refused" do
+    {:ok, socket} = :socket.open(:local, :stream, :default)
+    :ok = :socket.close(socket)
+
+    assert {:error, :peer_credential_unavailable} = PeerCredential.uid(socket)
+    assert {:error, :peer_credential_unverified} = PeerCredential.authorize(socket, 0)
+  end
+
   test "Darwin xucred decoding accepts only the complete known structure" do
     valid = darwin_credential(501, 16)
     assert byte_size(valid) == 76

@@ -57,6 +57,30 @@ defmodule LoopexDaemon.ListenerTest do
     assert :ok = :socket.close(client)
   end
 
+  # Concept: the listener's real peer check closes a connection whose
+  # credential names another user before any frame is read.
+  #
+  # Technical depth: the listener runs the production `PeerCredential` module
+  # with a daemon uid one above the socket owner's, so the kernel-supplied
+  # credential is readable and well formed but mismatched. The client's
+  # initialize frame gets no reply, the connection closes, the registry
+  # returns to empty and the listener keeps accepting.
+  test "the real peer check closes a valid but mismatched credential before initialize" do
+    probe = Path.join(System.tmp_dir!(), "lpc-#{System.unique_integer([:positive])}")
+    File.write!(probe, "")
+    uid = File.stat!(probe).uid
+    File.rm!(probe)
+    fixture = start_fixture(daemon_uid: uid + 1)
+    assert :ok = Listener.begin_accept(fixture.listener, fixture.startup_ref)
+    client = connect(fixture.path)
+    _ = send_frame(client, initialize())
+
+    eventually(fn -> ConnectionRegistry.status(fixture.registry).occupied == 0 end)
+    assert {:error, :closed} = :socket.recv(client, 0, 1_000)
+    assert Listener.phase(fixture.listener) == :accepting
+    assert :ok = :socket.close(client)
+  end
+
   test "owner loss stops the listener and retains the socket pathname" do
     directory = temporary_directory()
     path = Path.join(directory, "daemon.sock")
