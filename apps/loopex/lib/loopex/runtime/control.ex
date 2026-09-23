@@ -383,6 +383,7 @@ defmodule Loopex.Runtime.Control do
        holder_release_waiters: %{},
        dispatcher: nil,
        dispatcher_waiting_attaches: :queue.new(),
+       dispatcher_ready_waiters: [],
        # Concept: the unresolved attempt identities this runtime has authorized,
        # and the one worker and reference each was bound to.
        #
@@ -893,6 +894,27 @@ defmodule Loopex.Runtime.Control do
       {:reply, {:ok, registration_ref, seed}, %{state | dispatcher: registered}}
     else
       {:reply, {:error, :runtime_unavailable}, state}
+    end
+  end
+
+  # Concept: a runtime is handed to its caller only once its dispatcher can
+  # serve, so a resume or attach issued straight after start is not refused
+  # for a dispatcher that has not finished registering.
+  #
+  # Technical depth: the dispatcher registers asynchronously after the
+  # supervisor starts it. A caller asking before `:dispatcher_ready` is kept
+  # and answered when that message arrives; a runtime that dies first ends the
+  # call, which the caller maps to `:runtime_unavailable`.
+  def handle_call({:await_dispatcher_ready, token}, from, state) do
+    cond do
+      token != state.token ->
+        {:reply, {:error, :runtime_unavailable}, state}
+
+      match?(%{status: :ready}, state.dispatcher) ->
+        {:reply, :ok, state}
+
+      true ->
+        {:noreply, %{state | dispatcher_ready_waiters: [from | state.dispatcher_ready_waiters]}}
     end
   end
 
@@ -1483,7 +1505,14 @@ defmodule Loopex.Runtime.Control do
         ready_token: ^ready_token,
         status: :ready_pending
       } = registered ->
-        next = %{state | dispatcher: %{registered | status: :ready}}
+        Enum.each(state.dispatcher_ready_waiters, &GenServer.reply(&1, :ok))
+
+        next = %{
+          state
+          | dispatcher: %{registered | status: :ready},
+            dispatcher_ready_waiters: []
+        }
+
         {:noreply, drain_dispatcher_waiting_attaches(next)}
 
       _other ->

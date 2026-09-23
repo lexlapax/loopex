@@ -95,13 +95,26 @@ defmodule Loopex.Runtime do
       token = make_ref()
 
       case RuntimeSupervisor.start_link(Keyword.put(configuration, :token, token)) do
-        {:ok, supervisor} -> {:ok, %__MODULE__{supervisor: supervisor, token: token}}
+        {:ok, supervisor} -> await_ready(%__MODULE__{supervisor: supervisor, token: token})
         {:error, reason} -> {:error, reason}
       end
     end
   end
 
   def start_link(_options), do: {:error, :invalid_runtime_options}
+
+  # Concept: `start_link/1` returns a runtime whose dispatcher can already
+  # serve; otherwise a resume issued at once could be refused as unavailable.
+  defp await_ready(runtime) do
+    case control_call(runtime, {:await_dispatcher_ready, runtime.token}, :infinity) do
+      :ok ->
+        {:ok, runtime}
+
+      _unavailable ->
+        _ = stop(runtime)
+        {:error, :runtime_unavailable}
+    end
+  end
 
   @doc """
   ## Concept
