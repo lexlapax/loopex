@@ -146,7 +146,7 @@ defmodule LoopexProtocol.Frame do
   end
 
   defp parse_value(<<?", rest::binary>>, _depth) do
-    parse_string(rest, [])
+    parse_string(rest, [], 0)
   end
 
   defp parse_value(<<"true", rest::binary>>, _depth), do: {:ok, true, rest}
@@ -166,7 +166,7 @@ defmodule LoopexProtocol.Frame do
     do: {:error, :too_many_members}
 
   defp parse_members(<<?", rest::binary>>, depth, acc) do
-    with {:ok, key, rest} <- parse_string(rest, []),
+    with {:ok, key, rest} <- parse_string(rest, [], 0),
          <<?:, rest::binary>> <- skip_space(rest),
          {:ok, value, rest} <- parse_value(skip_space(rest), depth + 1) do
       case skip_space(rest) do
@@ -206,10 +206,10 @@ defmodule LoopexProtocol.Frame do
   # Technical depth: the bound is on the decoded bytes rather than on the
   # encoded ones, because an escape sequence costs six wire characters and one
   # byte, and the limit that matters is what the server ends up holding.
-  defp parse_string(_input, acc) when length(acc) > @max_string_bytes,
+  defp parse_string(_input, _acc, count) when count > @max_string_bytes,
     do: {:error, :string_too_large}
 
-  defp parse_string(<<?", rest::binary>>, acc) do
+  defp parse_string(<<?", rest::binary>>, acc, _count) do
     decoded = acc |> Enum.reverse() |> IO.iodata_to_binary()
 
     cond do
@@ -219,51 +219,52 @@ defmodule LoopexProtocol.Frame do
     end
   end
 
-  defp parse_string(<<?\\, ?u, a, b, c, d, rest::binary>>, acc) do
+  defp parse_string(<<?\\, ?u, a, b, c, d, rest::binary>>, acc, count) do
     case Integer.parse(<<a, b, c, d>>, 16) do
-      {code, ""} when code in 0xD800..0xDBFF -> parse_surrogate(code, rest, acc)
+      {code, ""} when code in 0xD800..0xDBFF -> parse_surrogate(code, rest, acc, count)
       {code, ""} when code in 0xDC00..0xDFFF -> {:error, :malformed}
-      {code, ""} -> parse_string(rest, [<<code::utf8>> | acc])
+      {code, ""} -> parse_string(rest, [<<code::utf8>> | acc], count + 1)
       _other -> {:error, :malformed}
     end
   end
 
-  defp parse_string(<<?\\, escape, rest::binary>>, acc) do
+  defp parse_string(<<?\\, escape, rest::binary>>, acc, count) do
     case escape do
-      ?" -> parse_string(rest, [?" | acc])
-      ?\\ -> parse_string(rest, [?\\ | acc])
-      ?/ -> parse_string(rest, [?/ | acc])
-      ?b -> parse_string(rest, [?\b | acc])
-      ?f -> parse_string(rest, [?\f | acc])
-      ?n -> parse_string(rest, [?\n | acc])
-      ?r -> parse_string(rest, [?\r | acc])
-      ?t -> parse_string(rest, [?\t | acc])
+      ?" -> parse_string(rest, [?" | acc], count + 1)
+      ?\\ -> parse_string(rest, [?\\ | acc], count + 1)
+      ?/ -> parse_string(rest, [?/ | acc], count + 1)
+      ?b -> parse_string(rest, [?\b | acc], count + 1)
+      ?f -> parse_string(rest, [?\f | acc], count + 1)
+      ?n -> parse_string(rest, [?\n | acc], count + 1)
+      ?r -> parse_string(rest, [?\r | acc], count + 1)
+      ?t -> parse_string(rest, [?\t | acc], count + 1)
       _other -> {:error, :malformed}
     end
   end
 
   # A raw control character inside a string is malformed JSON, and admitting one
   # would let a sender put a newline inside a line-delimited frame.
-  defp parse_string(<<byte, _rest::binary>>, _acc) when byte < 0x20, do: {:error, :malformed}
+  defp parse_string(<<byte, _rest::binary>>, _acc, _count) when byte < 0x20,
+    do: {:error, :malformed}
 
-  defp parse_string(<<character::utf8, rest::binary>>, acc),
-    do: parse_string(rest, [<<character::utf8>> | acc])
+  defp parse_string(<<character::utf8, rest::binary>>, acc, count),
+    do: parse_string(rest, [<<character::utf8>> | acc], count + 1)
 
-  defp parse_string("", _acc), do: {:error, :truncated}
-  defp parse_string(_input, _acc), do: {:error, :invalid_utf8}
+  defp parse_string("", _acc, _count), do: {:error, :truncated}
+  defp parse_string(_input, _acc, _count), do: {:error, :invalid_utf8}
 
-  defp parse_surrogate(high, <<?\\, ?u, a, b, c, d, rest::binary>>, acc) do
+  defp parse_surrogate(high, <<?\\, ?u, a, b, c, d, rest::binary>>, acc, count) do
     case Integer.parse(<<a, b, c, d>>, 16) do
       {low, ""} when low in 0xDC00..0xDFFF ->
         code = 0x10000 + (high - 0xD800) * 0x400 + (low - 0xDC00)
-        parse_string(rest, [<<code::utf8>> | acc])
+        parse_string(rest, [<<code::utf8>> | acc], count + 1)
 
       _other ->
         {:error, :malformed}
     end
   end
 
-  defp parse_surrogate(_high, _input, _acc), do: {:error, :malformed}
+  defp parse_surrogate(_high, _input, _acc, _count), do: {:error, :malformed}
 
   # Concept: an integer both sides can round-trip, and nothing else.
   #

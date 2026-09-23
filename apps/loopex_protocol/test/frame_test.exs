@@ -101,6 +101,24 @@ defmodule LoopexProtocol.FrameTest do
     assert {:error, :too_many_members} = Frame.decode(refused, 1_048_576)
   end
 
+  # Concept: a string at the decoded-byte limit decodes, one more byte is
+  # refused, and decoding costs time in proportion to the string.
+  #
+  # Technical depth: the limit is 131,072 decoded bytes. The limit-sized case
+  # must finish within 500 milliseconds; a decoder that re-measured its
+  # accumulator at every character took about eleven seconds here, and a
+  # linear one takes a few milliseconds.
+  test "a string at the byte limit decodes in linear time and one byte more is refused" do
+    admitted = ~s({"s":"#{String.duplicate("x", 131_072)}"})
+    refused = ~s({"s":"#{String.duplicate("x", 131_073)}"})
+
+    {elapsed, decoded} = :timer.tc(fn -> Frame.decode(admitted, 1_048_576) end, :millisecond)
+    assert {:ok, %{"s" => string}} = decoded
+    assert byte_size(string) == 131_072
+    assert elapsed < 500
+    assert {:error, :string_too_large} = Frame.decode(refused, 1_048_576)
+  end
+
   test "an integer outside the range both sides round-trip is refused, never truncated" do
     assert {:ok, %{"n" => 9_007_199_254_740_991}} =
              Frame.decode(~s({"n":9007199254740991}), @limit)

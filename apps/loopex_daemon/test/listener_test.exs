@@ -272,6 +272,13 @@ defmodule LoopexDaemon.ListenerTest do
     assert Process.alive?(fixture.registry)
     assert Process.alive?(connection)
 
+    # Once the peer reads, the writer resumes each partial send and every
+    # queued frame arrives whole, releasing the whole charge.
+    records = read_frames(client, 34, [], 0)
+    assert length(records) == 34
+    assert Enum.all?(records, &(&1["message"] == String.duplicate("m", 120_000)))
+    eventually(fn -> ConnectionRegistry.status(fixture.registry).output_bytes == 0 end)
+
     assert :ok = :socket.close(client)
     eventually(fn -> ConnectionRegistry.status(fixture.registry).occupied == 0 end)
     assert %{output_bytes: 0, output_commitment: 0} = ConnectionRegistry.status(fixture.registry)
@@ -442,6 +449,26 @@ defmodule LoopexDaemon.ListenerTest do
       {:ok, bytes} = :socket.recv(socket, 0, 1_000)
       receive_records(socket, count, buffered <> bytes)
     end
+  end
+
+  # Reads until `count` complete frames have arrived, counting newlines per
+  # chunk so a large backlog is scanned once.
+  defp read_frames(socket, count, chunks, seen) when seen >= count do
+    chunks
+    |> Enum.reverse()
+    |> IO.iodata_to_binary()
+    |> :binary.split("\n", [:global])
+    |> Enum.take(count)
+    |> Enum.map(fn payload ->
+      {:ok, record} = Frame.decode(payload, Frame.output_record_bytes())
+      record
+    end)
+  end
+
+  defp read_frames(socket, count, chunks, seen) do
+    {:ok, bytes} = :socket.recv(socket, 0, 5_000)
+    newlines = length(:binary.matches(bytes, "\n"))
+    read_frames(socket, count, [bytes | chunks], seen + newlines)
   end
 
   defp temporary_directory do

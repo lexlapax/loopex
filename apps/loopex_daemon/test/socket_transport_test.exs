@@ -611,6 +611,37 @@ defmodule LoopexDaemon.SocketTransportTest do
              receive_until(controller, &(&1["request_id"] == "release"))
   end
 
+  # Reads event records through the next appended prompt and returns their
+  # sequences in arrival order.
+  defp read_through_prompt(socket, sequences) do
+    [%{"type" => "event", "event" => event}] = receive_records(socket, 1, 10_000)
+    sequences = [String.to_integer(event["event_sequence"]) | sequences]
+
+    if event["kind"] == "user.message_appended",
+      do: Enum.reverse(sequences),
+      else: read_through_prompt(socket, sequences)
+  end
+
+  # Reads event records through `last` and returns their sequences.
+  defp read_through_sequence(socket, last, sequences) do
+    [%{"type" => "event", "event" => event}] = receive_records(socket, 1, 10_000)
+    sequence = String.to_integer(event["event_sequence"])
+    sequences = [sequence | sequences]
+
+    if sequence >= last,
+      do: Enum.reverse(sequences),
+      else: read_through_sequence(socket, last, sequences)
+  end
+
+  # Reads every complete record until the daemon closes the connection.
+  defp drain_records(socket, records) do
+    case receive_records(socket, 1, 5_000) do
+      [record] -> drain_records(socket, [record | records])
+    end
+  catch
+    _kind, _reason -> Enum.reverse(records)
+  end
+
   defp receive_until(socket, predicate, acc \\ []) do
     [record] = receive_records(socket, 1)
     if predicate.(record), do: [record | acc], else: receive_until(socket, predicate, acc)
@@ -706,6 +737,78 @@ defmodule LoopexDaemon.SocketTransportTest do
   # Concept: one session holds at most 64 attachments; the 65th is refused
   # without touching the others, and another session still accepts one.
   @tag timeout: 120_000
+  # Concept: an observer that stops reading is detached at the last cursor
+  # the daemon completely emitted to it, while another attachment to the same
+  # session keeps receiving every event, and the observer reconnects there
+  # with no gap.
+  #
+  # Technical depth: two socket clients attach to one session; one reads each
+  # prompt before the next is written, the other reads nothing. Eighty
+  # embedded prompt-and-abort cycles, each prompt carrying 60,000 bytes, far
+  # exceed the connection's 4 MiB output allowance, and every event frame is
+  # larger than the kernel socket buffer, so each one needs resumed partial
+  # writes. The reader sees one contiguous run of sequences and stays attached
+  # while the silent observer is detached. Draining the observer yields only
+  # a contiguous prefix and at most a `detached` record at its end, and a new
+  # connection attached after that prefix receives the rest of the run.
+  @tag timeout: 120_000
+  test "an observer that stops reading is detached while another attachment continues",
+       %{daemon: daemon, runtime: runtime} do
+    reader = initialized_client(daemon)
+    session_id = create_session(reader, "slow-create")
+    :ok = send_frame(reader, attach("read", session_id, after: 0))
+    assert [%{"type" => "snapshot"}] = receive_records(reader, 1)
+
+    silent = initialized_client(daemon)
+    :ok = send_frame(silent, attach("silent", session_id, after: 0))
+    assert [%{"type" => "snapshot"}] = receive_records(silent, 1)
+
+    {:ok, embedded} = Loopex.attach(runtime, session_id)
+    content = String.duplicate("x", 60_000)
+
+    # The reader is read up to each prompt before the next cycle, so only the
+    # silent observer falls behind.
+    read =
+      Enum.flat_map(1..80, fn index ->
+        prompt = %{type: :prompt, command_id: "slow-p#{index}", content: content}
+        assert {:accepted, _command} = Loopex.command(embedded, prompt)
+
+        assert {:accepted, _command} =
+                 Loopex.command(embedded, %{type: :abort, command_id: "slow-a#{index}"})
+
+        read_through_prompt(reader, [])
+      end)
+
+    assert read == Enum.to_list(1..List.last(read))
+    eventually(fn -> ConnectionRegistry.status(daemon.registry).attachments == 1 end)
+    refute closed?(reader, 50)
+
+    # The silent observer holds only what the daemon completely emitted, a
+    # contiguous prefix, then at most the best-effort `detached` record at
+    # that cursor before the close; a frame cut off by the close is not a
+    # record.
+    records = drain_records(silent, [])
+    {events, rest} = Enum.split_with(records, &(&1["type"] == "event"))
+    assert records == events ++ rest
+    sequences = Enum.map(events, &String.to_integer(&1["event"]["event_sequence"]))
+    assert sequences == Enum.to_list(1..length(sequences)//1)
+    held = length(sequences)
+    assert held < List.last(read)
+
+    for detached <- rest do
+      assert %{"type" => "error", "code" => "detached"} = detached
+      assert detached["event_cursor"] == Integer.to_string(held)
+    end
+
+    # Reconnecting after its last complete event, it receives the rest of the
+    # run with no gap.
+    returning = initialized_client(daemon)
+    :ok = send_frame(returning, attach("return", session_id, after: held))
+    assert [%{"request_id" => "return", "type" => "snapshot"}] = receive_records(returning, 1)
+    resumed = read_through_sequence(returning, List.last(read), [])
+    assert resumed == Enum.to_list((held + 1)..List.last(read))
+  end
+
   test "the sixty-fifth attachment to one session is refused while another session attaches",
        %{daemon: daemon} do
     creator = initialized_client(daemon)

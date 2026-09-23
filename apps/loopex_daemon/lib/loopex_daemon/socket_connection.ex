@@ -224,7 +224,7 @@ defmodule LoopexDaemon.SocketConnection do
         %{
           phase: phase,
           socket: socket,
-          receive_select: {:select_info, :recv, handle}
+          receive_select: {:select_info, _receive_tag, handle}
         } = state
       )
       when phase in [:live, :initialized] do
@@ -234,15 +234,23 @@ defmodule LoopexDaemon.SocketConnection do
 
   def handle_info(
         {:"$socket", socket, :abort, {handle, _reason}},
-        %{socket: socket, receive_select: {:select_info, :recv, handle}} = state
+        %{socket: socket, receive_select: {:select_info, _receive_tag, handle}} = state
       ),
       do: {:stop, :normal, %{state | receive_select: nil}}
 
+  # Concept: a send the kernel could only partly accept resumes when the
+  # socket is writable again.
+  #
+  # Technical depth: the select tag's shape differs across OTP releases —
+  # `:send` on some, `{:send, continuation_data}` on others — so the
+  # notification is matched by its unique handle alone. Matching the atom
+  # left every frame larger than the kernel buffer stalled after its first
+  # partial write.
   def handle_info(
         {:"$socket", socket, :select, handle},
         %{
           socket: socket,
-          send_select: {:select_info, :send, handle} = continuation,
+          send_select: {:select_info, _send_tag, handle} = continuation,
           output_claim: output_claim
         } = state
       )
@@ -255,7 +263,7 @@ defmodule LoopexDaemon.SocketConnection do
 
   def handle_info(
         {:"$socket", socket, :abort, {handle, _reason}},
-        %{socket: socket, send_select: {:select_info, :send, handle}} = state
+        %{socket: socket, send_select: {:select_info, _send_tag, handle}} = state
       ) do
     Logger.debug("loopex daemon socket send aborted")
     {:stop, :normal, %{state | send_select: nil}}
