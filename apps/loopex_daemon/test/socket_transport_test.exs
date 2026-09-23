@@ -305,6 +305,40 @@ defmodule LoopexDaemon.SocketTransportTest do
     {runtime, adapter}
   end
 
+  # Concept: a session the daemon activated but could not record in its index
+  # is still created; the creating client is told so with `daemon.notice`
+  # `index_write_failed`, and the session is fully usable.
+  #
+  # Technical depth: a temporary the index did not create is planted in its
+  # private directory, which poisons the next publication on the real
+  # filesystem. A `session.create` is then accepted, the notice follows naming
+  # that session, and the session can still be attached.
+  test "a session the index cannot record is created with an index_write_failed notice" do
+    root = temporary_directory("loopex-socket-notice")
+    runtime = start_runtime(root, "notice-placement")
+    state = Path.join(root, "state")
+    daemon = start_daemon(runtime, index_root: state, placement_identity: "notice-placement")
+    File.write!(Path.join([state, "daemon", "session-index-v1.next"]), "planted")
+    client = initialized_client(daemon)
+
+    :ok = send_frame(client, create("create", "notice-create", %{}))
+
+    # The notice is written while the session activates, so it may precede the
+    # admission; both name the same session.
+    records = receive_records(client, 2)
+    assert %{"session_id" => encoded} = Enum.find(records, &(&1["status"] == "accepted"))
+
+    assert %{"session_id" => ^encoded} =
+             Enum.find(
+               records,
+               &(&1["type"] == "daemon.notice" and &1["code"] == "index_write_failed")
+             )
+
+    {:ok, session_id} = Wire.identity(encoded)
+    :ok = send_frame(client, attach("attach", session_id))
+    assert [%{"request_id" => "attach", "type" => "snapshot"}] = receive_records(client, 1)
+  end
+
   test "session.list pages recorded sessions with residency and control" do
     root = temporary_directory("loopex-socket-list")
     [dormant] = seed_dormant(root, 1, "list-placement")
