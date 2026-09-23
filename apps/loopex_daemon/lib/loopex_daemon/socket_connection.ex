@@ -53,7 +53,7 @@ defmodule LoopexDaemon.SocketConnection do
     WireRecords
   }
 
-  alias LoopexProtocol.{Frame, Session.V2}
+  alias LoopexProtocol.{Frame, Session.V2, Wire}
 
   @owner_loss_close_ms 1_000
 
@@ -115,6 +115,8 @@ defmodule LoopexDaemon.SocketConnection do
       progress: :queue.new(),
       progress_bytes: 0,
       succession: nil,
+      last_activity: System.monotonic_time(:millisecond),
+      lease_expires_at: nil,
       calls: :gen_server.reqids_new()
     }
 
@@ -336,6 +338,32 @@ defmodule LoopexDaemon.SocketConnection do
       ),
       do: {:noreply, state}
 
+  # Concept: an attached client that has been idle for the residency limit is
+  # evicted like any other daemon eviction, with a record and a close; a
+  # client holding a controller lease is exempt until release or expiry, and
+  # eviction never touches a coordinator.
+  def handle_info(:idle_check, %{closing: nil, attachment: attached} = state)
+      when attached != nil do
+    now = System.monotonic_time(:millisecond)
+    holding = state.lease_expires_at != nil and now < state.lease_expires_at
+    idle_ms = idle_eviction_ms(state)
+
+    if not holding and now - state.last_activity >= idle_ms do
+      Logger.debug("loopex daemon idle attachment evicted")
+      begin_detach_close(state)
+    else
+      schedule_idle_check(state)
+      {:noreply, state}
+    end
+  end
+
+  def handle_info(:idle_check, %{closing: nil} = state) do
+    schedule_idle_check(state)
+    {:noreply, state}
+  end
+
+  def handle_info(:idle_check, state), do: {:noreply, state}
+
   def handle_info({:daemon_notice, record}, %{closing: nil} = state),
     do: noreply_record(state, record)
 
@@ -503,6 +531,8 @@ defmodule LoopexDaemon.SocketConnection do
   end
 
   defp handle_request(state, request) do
+    state = %{state | last_activity: System.monotonic_time(:millisecond)}
+
     case ConnectionProtocol.handle(state.protocol, request) do
       {:request, parsed, protocol} ->
         serve(%{state | protocol: protocol}, parsed)
@@ -523,6 +553,7 @@ defmodule LoopexDaemon.SocketConnection do
             with :ok <- register_relay(state),
                  {:ok, state} <- send_record(state, record) do
               Logger.debug("loopex daemon socket connection initialized")
+              schedule_idle_check(state)
               {:ok, %{state | protocol: protocol, phase: :initialized}}
             else
               {:error, _reason} -> {:stop, state}
@@ -1043,6 +1074,7 @@ defmodule LoopexDaemon.SocketConnection do
   defp stop_pump(state), do: state
 
   defp deliver_event(%{attachment: attached} = state, event) do
+    state = %{state | last_activity: System.monotonic_time(:millisecond)}
     record = WireRecords.event(attached.session_id, event)
 
     case send_record(state, record, Map.fetch!(event, :event_sequence)) do
@@ -1315,6 +1347,8 @@ defmodule LoopexDaemon.SocketConnection do
     do: {:ok, %{state | succession: :queue.in({record, cursor}, held)}}
 
   defp send_record(state, record, cursor) do
+    state = track_lease(state, record)
+
     with {:ok, encoded} <- Frame.encode(record),
          :ok <- ConnectionRegistry.enqueue_output(state.registry, state.incarnation, encoded) do
       {:ok, %{state | output_cursors: :queue.in(cursor, state.output_cursors)}}
@@ -1438,6 +1472,32 @@ defmodule LoopexDaemon.SocketConnection do
         {:noreply, state}
     end
   end
+
+  defp idle_eviction_ms(%{context: %{idle_eviction_ms: ms}}) when is_integer(ms) and ms > 0,
+    do: ms
+
+  defp idle_eviction_ms(_state), do: 600_000
+
+  defp schedule_idle_check(state) do
+    Process.send_after(self(), :idle_check, min(idle_eviction_ms(state), 60_000))
+  end
+
+  # The lease this connection holds is read from the control results it sends.
+  defp track_lease(state, %{
+         "type" => "result",
+         "method" => "session.acquire_control",
+         "result" => %{"expires_in_ms" => expires}
+       }) do
+    case Wire.u64(expires) do
+      {:ok, ms} -> %{state | lease_expires_at: System.monotonic_time(:millisecond) + ms}
+      :error -> state
+    end
+  end
+
+  defp track_lease(state, %{"type" => "result", "method" => "session.release_control"}),
+    do: %{state | lease_expires_at: nil}
+
+  defp track_lease(state, _record), do: state
 
   defp queue_progress(state, encoded) do
     queue = :queue.in(encoded, state.progress)

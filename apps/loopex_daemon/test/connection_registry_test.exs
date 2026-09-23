@@ -232,7 +232,7 @@ defmodule LoopexDaemon.ConnectionRegistryTest do
     eventually(fn -> ConnectionRegistry.status(registry).output_commitment == 0 end)
   end
 
-  test "aggregate output admission cannot exceed the daemon commitment" do
+  test "aggregate pressure reclaims another client's buffer before refusing admission" do
     registry =
       start_registry(5_000,
         connection_module: ManualConnection,
@@ -246,40 +246,57 @@ defmodule LoopexDaemon.ConnectionRegistryTest do
     assert :ok = manual_registry_call(second.pid, :promote)
 
     assert :ok = manual_registry_call(first.pid, {:enqueue_output, "123456"})
-    second_monitor = Process.monitor(second.pid)
+    first_monitor = Process.monitor(first.pid)
 
-    assert {:error, :capacity_exceeded} =
-             manual_registry_call(second.pid, {:enqueue_output, "12345"})
-
-    assert_receive {:DOWN, ^second_monitor, :process, second_pid, :normal}, 500
-    assert second_pid == second.pid
+    # The unattached holder's bytes are reclaimed and it is closed; the
+    # candidate's output is admitted within the commitment.
+    assert :ok = manual_registry_call(second.pid, {:enqueue_output, "12345"})
+    assert_receive {:DOWN, ^first_monitor, :process, first_pid, :normal}, 500
+    assert first_pid == first.pid
 
     eventually(fn ->
-      ConnectionRegistry.status(registry) == %{
-        occupied: 1,
-        provisional: 0,
-        live: 1,
-        closing: 0,
-        transport: :serving,
-        transport_marked: 0,
-        output_bytes: 6,
-        output_commitment: 6,
-        output_commitment_limit: 10,
-        succession_reservations: 0,
-        active_sessions: 0,
-        activation_reservations: 0,
-        activation_preparations: 0,
-        activations_used: 0,
-        activation_limit: 64,
-        attachments: 0,
-        routing_mirrors: 0,
-        provisional_routing_mirrors: 0,
-        granted_routing_mirrors: 0,
-        limit: 512
-      }
+      match?(
+        %{occupied: 1, live: 1, output_bytes: 5, output_commitment: 5},
+        ConnectionRegistry.status(registry)
+      )
     end)
 
-    Process.exit(first.pid, :kill)
+    Process.exit(second.pid, :kill)
+    eventually(fn -> ConnectionRegistry.status(registry).output_commitment == 0 end)
+  end
+
+  test "reclamation takes the largest unattached buffer first and refuses what still cannot fit" do
+    registry =
+      start_registry(5_000,
+        connection_module: ManualConnection,
+        output_buffer_bytes: 8,
+        aggregate_output_bytes: 12
+      )
+
+    [small, large, candidate] = for _ <- 1..3, do: start_manual_connection(registry)
+
+    for connection <- [small, large, candidate],
+        do: :ok = manual_registry_call(connection.pid, :promote)
+
+    assert :ok = manual_registry_call(small.pid, {:enqueue_output, "123"})
+    assert :ok = manual_registry_call(large.pid, {:enqueue_output, "1234567"})
+    small_monitor = Process.monitor(small.pid)
+    large_monitor = Process.monitor(large.pid)
+
+    # Four bytes over: the seven-byte buffer alone covers it, the three-byte
+    # one is left alone.
+    assert :ok = manual_registry_call(candidate.pid, {:enqueue_output, "12345678"})
+    assert_receive {:DOWN, ^large_monitor, :process, _pid, :normal}, 500
+    refute_received {:DOWN, ^small_monitor, :process, _pid, _reason}
+
+    # Nothing can make room for more than the whole commitment.
+    candidate_monitor = Process.monitor(candidate.pid)
+
+    assert {:error, :capacity_exceeded} =
+             manual_registry_call(candidate.pid, {:enqueue_output, "x"})
+
+    assert_receive {:DOWN, ^candidate_monitor, :process, _pid, :normal}, 500
+    Process.exit(small.pid, :kill)
     eventually(fn -> ConnectionRegistry.status(registry).output_commitment == 0 end)
   end
 

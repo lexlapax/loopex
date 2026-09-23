@@ -790,6 +790,9 @@ defmodule LoopexDaemon.ConnectionRegistry do
             after_enqueue = OutputBuffer.commitment(output)
             commitment = state.output_commitment + after_enqueue - before
 
+            state = reclaim(state, token, commitment - state.aggregate_output_bytes)
+            commitment = state.output_commitment + after_enqueue - before
+
             if commitment <= state.aggregate_output_bytes do
               row = %{row | output: output}
               state = %{put_in(state, [:rows, token], row) | output_commitment: commitment}
@@ -1825,6 +1828,54 @@ defmodule LoopexDaemon.ConnectionRegistry do
       _other ->
         state
     end
+  end
+
+  # Concept: when admitting output would carry the daemon past its aggregate
+  # commitment, other clients' buffered bytes are reclaimed first, in a fixed
+  # order: unattached connections, largest buffer first, then connections with
+  # a live attachment; the client asking is refused only if that is not
+  # enough.
+  #
+  # Technical depth: M5 keeps no resident window (the 2026-09-22 disposition),
+  # so reclamation starts at the unattached-connection tier. Ties break on the
+  # connection incarnation. A victim's buffer and charge are released at once
+  # and it is closed; nothing waits for its peer, and no detach cursor is
+  # invented for bytes that were never written.
+  defp reclaim(state, _candidate, needed) when needed <= 0, do: state
+
+  defp reclaim(state, candidate, needed) do
+    victims =
+      state.rows
+      |> Enum.filter(fn {token, row} ->
+        token != candidate and row.phase == :live and OutputBuffer.bytes(row.output) > 0
+      end)
+      |> Enum.sort_by(fn {_token, row} ->
+        attached =
+          match?(%{phase: :installed}, Map.get(state.attachments, row.connection_incarnation))
+
+        {if(attached, do: 1, else: 0), -OutputBuffer.bytes(row.output),
+         row.connection_incarnation}
+      end)
+
+    Enum.reduce_while(victims, {state, 0}, fn {token, row}, {acc, freed} ->
+      if freed >= needed do
+        {:halt, {acc, freed}}
+      else
+        released = OutputBuffer.bytes(row.output)
+        emptied = %{row | output: OutputBuffer.new(acc.output_buffer_bytes)}
+
+        acc =
+          %{
+            put_in(acc, [:rows, token], emptied)
+            | output_commitment: acc.output_commitment - released
+          }
+          |> close_live(token, :output_reclaimed)
+
+        Logger.debug("loopex daemon aggregate output reclaimed from a connection")
+        {:cont, {acc, freed + released}}
+      end
+    end)
+    |> elem(0)
   end
 
   defp close_live(state, token, reason) do

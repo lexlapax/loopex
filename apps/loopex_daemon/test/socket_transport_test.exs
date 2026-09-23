@@ -461,6 +461,47 @@ defmodule LoopexDaemon.SocketTransportTest do
     if predicate.(record), do: [record | acc], else: receive_until(socket, predicate, acc)
   end
 
+  test "an idle observer is evicted with a record while a lease holder stays until it releases" do
+    root = temporary_directory("loopex-socket-idle")
+    daemon = start_daemon(start_runtime(root), idle_eviction_ms: 300)
+
+    controller = initialized_client(daemon)
+    session_id = create_session(controller, "idle-create")
+    :ok = send_frame(controller, acquire("acquire", session_id))
+    assert [%{"request_id" => "acquire", "result" => granted}] = receive_records(controller, 1)
+    :ok = send_frame(controller, attach("attach", session_id))
+    assert [%{"type" => "snapshot"}] = receive_records(controller, 1)
+
+    observer = initialized_client(daemon)
+    :ok = send_frame(observer, attach("observe", session_id))
+    assert [%{"type" => "snapshot"}] = receive_records(observer, 1)
+
+    # The observer is told where it stopped and its connection is closed.
+    assert [%{"code" => "detached", "event_cursor" => cursor}] = receive_records(observer, 1)
+    assert closed?(observer, 2_000)
+
+    # The quiet controller holds its lease, so it outlives several idle limits.
+    Process.sleep(1_000)
+    refute closed?(controller, 50)
+
+    :ok =
+      send_frame(controller, %{
+        "method" => "session.release_control",
+        "request_id" => "release",
+        "session_id" => Wire.encode_identity(session_id),
+        "writer_epoch" => granted["writer_epoch"]
+      })
+
+    assert [%{"request_id" => "release", "type" => "result"}] = receive_records(controller, 1)
+    assert [%{"code" => "detached"}] = receive_records(controller, 1)
+    assert closed?(controller, 2_000)
+
+    # The evicted observer reconnects at its retained cursor.
+    returning = initialized_client(daemon)
+    :ok = send_frame(returning, attach("return", session_id, after: String.to_integer(cursor)))
+    assert [%{"request_id" => "return", "type" => "snapshot"}] = receive_records(returning, 1)
+  end
+
   test "daemon.status reports bounded counts with reservations counted", %{daemon: daemon} do
     client = initialized_client(daemon)
     _session_id = create_session(client, "status-create")

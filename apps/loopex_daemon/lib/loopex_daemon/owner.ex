@@ -867,7 +867,8 @@ defmodule LoopexDaemon.Owner do
       placement_identity: Keyword.get(options, :placement_identity),
       socket_path: Keyword.get(options, :socket_path),
       state_root: Keyword.get(options, :state_root),
-      started_at: System.monotonic_time(:millisecond)
+      started_at: System.monotonic_time(:millisecond),
+      idle_eviction_ms: Keyword.get(options, :idle_eviction_ms, 600_000)
     }
 
     registry_options = [owner: self(), connection_context: context]
