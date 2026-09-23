@@ -78,6 +78,49 @@ defmodule LoopexCli.LiveRecoveryTest do
     stop_daemon(daemon)
   end
 
+  # Concept: an admission the daemon cannot settle is never guessed at. The
+  # command ends non-zero naming the method and command identity left
+  # unresolved, and sends no later step of its plan.
+  #
+  # Technical depth: the proxy presents the prompt's admission as
+  # `admission_unknown`; the run also carries a follow-up, which must never
+  # be sent.
+  @tag timeout: 120_000
+  test "an unknown admission ends the command naming what is unresolved", context do
+    daemon = start_daemon(context, launch("unknown answer", "unknown"))
+
+    proxy =
+      DaemonProxy.start(context.socket, [], fn bytes ->
+        bytes
+        |> String.split("\n")
+        |> Enum.map_join("\n", &unknown_admission/1)
+      end)
+
+    {result, _output} =
+      run(["run", "--daemon", proxy.path, "--follow-up", "and then", "go"])
+
+    assert {:error, message} = result
+    assert message =~ "session.prompt command"
+    assert message =~ "is unresolved"
+    refute "session.follow_up" in DaemonProxy.seen(proxy)
+    stop_daemon(daemon)
+  end
+
+  defp unknown_admission(line) do
+    case JSON.decode(line) do
+      {:ok, %{"type" => "admission", "method" => "session.prompt", "request_id" => id}} ->
+        JSON.encode!(%{
+          "type" => "error",
+          "request_id" => id,
+          "code" => "admission_unknown",
+          "message" => "admission outcome is unknown"
+        })
+
+      _other ->
+        line
+    end
+  end
+
   @tag timeout: 120_000
   test "a lost listing reply is asked once more and printed once", context do
     daemon = start_daemon(context, launch("listed answer", "listed"))
