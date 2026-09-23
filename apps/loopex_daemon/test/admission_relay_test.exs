@@ -2399,6 +2399,148 @@ defmodule LoopexDaemon.AdmissionRelayTest do
     assert_receive {:relay_connection_retired, ^relay, ^connection_incarnation}, 500
   end
 
+  # Concept: acquire and release permits opened before the cut and claimed
+  # immediately before it, or after it but before the admission deadline, are
+  # executing when a freeze arrives ahead of the deadline timer; the freeze
+  # names each of them, cancels only the unclaimed row, and the stale timer
+  # cancels nothing later.
+  #
+  # Technical depth: the claims run inside the frozen-origin window, so each
+  # worker starts; the freeze cancels the deadline timer, expires the one
+  # pending row as the deadline would, and its descriptors are the exact
+  # executing and settling lease origins.
+  test "claims before the admission deadline survive a freeze ahead of the timer" do
+    %{relay: relay, connection: connection, claim: claim, origins: origins} =
+      lease_rows_across_the_cut(300)
+
+    %{pre_cut: pre_cut, acquire: acquire, release: release, unclaimed: unclaimed} = origins
+    assert :ok = claim.(acquire)
+    assert :ok = claim.(release)
+    assert_receive {:lease_worker_go, _acquire_worker, ^acquire}, 500
+    assert_receive {:lease_worker_go, _release_worker, ^release}, 500
+
+    freeze = make_ref()
+    send(relay, {:relay_barrier, freeze, {:freeze_lease_ops, 0}})
+    expected = Enum.sort([pre_cut, acquire, release, unclaimed])
+    assert_receive {:relay_barrier_ack, ^freeze, :freeze_lease_ops, ^expected}, 500
+
+    assert_receive {:connection_message, ^connection,
+                    {:relay_permit_cancelled, ^unclaimed, :daemon_stopping}},
+                   500
+
+    refute_receive {:connection_message, ^connection,
+                    {:relay_permit_cancelled, _claimed, :daemon_stopping}},
+                   400
+
+    assert AdmissionRelay.pending_origins(relay, [pre_cut, acquire, release]) == 3
+    assert %{phase: :lease_ops_frozen, executing: 3} = AdmissionRelay.status(relay)
+  end
+
+  # Concept: when the admission deadline timer fires before the freeze, it
+  # cancels only the unclaimed row; a claim after the deadline is refused, and
+  # the later freeze still names every claim made before the deadline.
+  #
+  # Technical depth: the timer's expiry is observed through the unclaimed
+  # row's `daemon_stopping` refusal; the late claim runs against the expired
+  # row, and the freeze's descriptors are compared after removing the one row
+  # whose killed worker may or may not have been reaped yet.
+  test "claims before the admission deadline survive a freeze after the timer" do
+    %{relay: relay, connection: connection, claim: claim, origins: origins} =
+      lease_rows_across_the_cut(200)
+
+    %{pre_cut: pre_cut, acquire: acquire, release: release, unclaimed: unclaimed} = origins
+    assert :ok = claim.(acquire)
+    assert :ok = claim.(release)
+
+    assert_receive {:connection_message, ^connection,
+                    {:relay_permit_cancelled, ^unclaimed, :daemon_stopping}},
+                   500
+
+    assert {:error, _refused} = claim.(unclaimed)
+
+    freeze = make_ref()
+    send(relay, {:relay_barrier, freeze, {:freeze_lease_ops, 0}})
+    assert_receive {:relay_barrier_ack, ^freeze, :freeze_lease_ops, descriptors}, 500
+    assert descriptors -- [unclaimed] == Enum.sort([pre_cut, acquire, release])
+
+    refute_receive {:connection_message, ^connection,
+                    {:relay_permit_cancelled, _claimed, :daemon_stopping}},
+                   40
+
+    assert AdmissionRelay.pending_origins(relay, [pre_cut, acquire, release]) == 3
+    assert %{phase: :lease_ops_frozen, executing: 3} = AdmissionRelay.status(relay)
+  end
+
+  # Concept: four lease permits straddle the admission cut: an acquire
+  # claimed immediately before it, and an acquire, a release and an acquire
+  # that are still pending when it is taken. Technical depth: the cut payload
+  # is asserted to freeze exactly those phases; `claim` claims as the
+  # registered lease owner.
+  defp lease_rows_across_the_cut(admission_wait_ms) do
+    relay = start_relay(admission_wait_ms: admission_wait_ms)
+    registry = start_registry()
+    assert :ok = AdmissionRelay.register_registry(relay, registry, incarnation())
+    owner = start_actor()
+    owner_incarnation = incarnation()
+    assert :ok = AdmissionRelay.register_lease_owner(relay, "session", owner, owner_incarnation)
+    connection_incarnation = incarnation()
+    connection = start_connection(relay, connection_incarnation)
+
+    origins = %{
+      pre_cut: {connection_incarnation, 0, 1},
+      acquire: {connection_incarnation, 1, 1},
+      release: {connection_incarnation, 2, 1},
+      unclaimed: {connection_incarnation, 3, 1}
+    }
+
+    classes = %{
+      pre_cut: :session_acquire_control,
+      acquire: :session_acquire_control,
+      release: :session_release_control,
+      unclaimed: :session_acquire_control
+    }
+
+    for {name, origin} <- origins do
+      {worker, worker_incarnation} = start_lease_worker(connection, origin)
+
+      assert {:ok, ^origin} =
+               AdmissionRelay.open_lease_permit(
+                 relay,
+                 connection,
+                 origin,
+                 Map.fetch!(classes, name),
+                 "session",
+                 owner,
+                 owner_incarnation,
+                 worker,
+                 worker_incarnation
+               )
+    end
+
+    claim = fn origin ->
+      invoke(owner, fn ->
+        AdmissionRelay.claim_lease_permit(relay, origin, owner_incarnation)
+      end)
+    end
+
+    assert :ok = claim.(origins.pre_cut)
+    pre_cut = origins.pre_cut
+    assert_receive {:lease_worker_go, _pre_cut_worker, ^pre_cut}, 500
+
+    cut = make_ref()
+    send(relay, {:relay_barrier, cut, :cut})
+    assert_receive {:relay_barrier_ack, ^cut, :cut, payload}, 500
+
+    assert payload.permits == [
+             {origins.pre_cut, :executing},
+             {origins.acquire, :pending},
+             {origins.release, :pending},
+             {origins.unclaimed, :pending}
+           ]
+
+    %{relay: relay, connection: connection, claim: claim, origins: origins}
+  end
+
   defp start_relay(options \\ []) do
     options =
       Keyword.merge(

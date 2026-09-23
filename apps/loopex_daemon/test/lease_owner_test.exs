@@ -2114,6 +2114,109 @@ defmodule LoopexDaemon.LeaseOwnerTest do
     stop_connection(holder, fixture.relay, holder_incarnation)
   end
 
+  # Concept: a renewal result the lease owner has already sent to the relay
+  # wins over that owner's later death: the holder receives the renewed epoch
+  # once and owner loss claims nothing.
+  #
+  # Technical depth: a relay debug hook parks the relay on the owner's direct
+  # `complete_lease_permit` call, the owner is killed while that call is
+  # queued, so its `DOWN` necessarily follows the result into the relay.
+  test "a renewal result sent before owner death wins the renewal" do
+    Process.flag(:trap_exit, true)
+    fixture = start_fixture(unmanaged_owner: true)
+    {holder, holder_incarnation, writer_epoch} = grant_first(fixture)
+    renewal_origin = {holder_incarnation, 1, 1}
+    {renewal_worker, renewal_worker_incarnation} = start_worker(holder, renewal_origin)
+
+    assert {:ok, ^renewal_origin} =
+             open_existing_acquire(
+               fixture,
+               holder,
+               holder_incarnation,
+               renewal_origin,
+               renewal_worker,
+               renewal_worker_incarnation
+             )
+
+    kill_owner_while_relay_parked(fixture, :complete_lease_permit, renewal_origin)
+
+    assert {:error, :owner_down} =
+             renewal_call(fixture, renewal_origin, holder, holder_incarnation)
+
+    assert_receive :owner_killed_while_parked, 500
+
+    assert_receive {:connection_message, ^holder,
+                    {:relay_permit_result, ^renewal_origin, renewal}},
+                   500
+
+    assert renewal["result"]["writer_epoch"] == Wire.encode_identity(writer_epoch)
+    assert renewal["result"]["renewed"] == true
+    owner = fixture.owner
+    owner_incarnation = fixture.owner_incarnation
+
+    assert_receive {:relay_owner_lost, relay, session_id, ^owner, ^owner_incarnation, []}, 500
+    assert relay == fixture.relay
+    assert session_id == fixture.session_id
+    classify_loss(fixture, holder_incarnation)
+
+    refute_receive {:connection_message, ^holder, {:relay_permit_cancelled, ^renewal_origin, _}},
+                   40
+
+    stop_connection(holder, fixture.relay, holder_incarnation)
+  end
+
+  # Concept: an owner that dies after claiming a renewal but before sending
+  # its result loses the renewal to owner loss: the relay claims the origin
+  # and no renewed epoch reaches the holder.
+  #
+  # Technical depth: the relay is parked on the owner's claim call; the owner
+  # is killed while blocked on that claim, so the relay admits the claim and
+  # then consumes the exact owner `DOWN` with no direct result ever sent. The
+  # holder's classification suppresses its correlated refusal.
+  test "owner death before the renewal result selects owner loss" do
+    Process.flag(:trap_exit, true)
+    fixture = start_fixture(unmanaged_owner: true)
+    {holder, holder_incarnation, _writer_epoch} = grant_first(fixture)
+    renewal_origin = {holder_incarnation, 1, 1}
+    {renewal_worker, renewal_worker_incarnation} = start_worker(holder, renewal_origin)
+
+    assert {:ok, ^renewal_origin} =
+             open_existing_acquire(
+               fixture,
+               holder,
+               holder_incarnation,
+               renewal_origin,
+               renewal_worker,
+               renewal_worker_incarnation
+             )
+
+    kill_owner_while_relay_parked(fixture, :claim_lease_permit, renewal_origin)
+
+    assert {:error, :owner_down} =
+             renewal_call(fixture, renewal_origin, holder, holder_incarnation)
+
+    assert_receive :owner_killed_while_parked, 500
+    owner = fixture.owner
+    owner_incarnation = fixture.owner_incarnation
+
+    assert_receive {:relay_owner_lost, relay, _session_id, ^owner, ^owner_incarnation,
+                    [^renewal_origin]},
+                   500
+
+    assert relay == fixture.relay
+    classify_loss(fixture, holder_incarnation)
+
+    refute_receive {:connection_message, ^holder,
+                    {:relay_permit_result, ^renewal_origin, _renewal}},
+                   40
+
+    refute_received {:connection_message, ^holder,
+                     {:relay_permit_cancelled, ^renewal_origin, _reason}}
+
+    assert %{permits: 0, owner_losses: 0} = AdmissionRelay.status(fixture.relay)
+    stop_connection(holder, fixture.relay, holder_incarnation)
+  end
+
   defp start_fixture(options \\ []) do
     daemon_incarnation = incarnation()
     session_id = Keyword.get(options, :session_id, "session")
@@ -2438,6 +2541,86 @@ defmodule LoopexDaemon.LeaseOwnerTest do
 
     assert_receive {:lease_request_ready, ^worker}, 500
     {worker, worker_incarnation}
+  end
+
+  # Concept: the lease owner can be killed at an exact point in its exchange
+  # with the relay. Technical depth: a relay debug hook parks the relay on the
+  # owner's first matching call for `origin`; a separate process kills the
+  # owner while the relay is parked, then releases the relay, so the owner's
+  # `DOWN` is queued behind that call.
+  defp kill_owner_while_relay_parked(fixture, call, origin) do
+    test_pid = self()
+    owner = fixture.owner
+
+    killer =
+      spawn(fn ->
+        receive do
+          {:relay_parked, relay} ->
+            monitor = Process.monitor(owner)
+            Process.exit(owner, :kill)
+
+            receive do
+              {:DOWN, ^monitor, :process, ^owner, :killed} -> :ok
+            end
+
+            send(relay, :continue_parked_call)
+            send(test_pid, :owner_killed_while_parked)
+        end
+      end)
+
+    :ok =
+      :sys.install(
+        fixture.relay,
+        {fn
+           :waiting, {:in, {:"$gen_call", _from, request}}, _proc_state
+           when is_tuple(request) and tuple_size(request) > 1 and elem(request, 0) == call and
+                  elem(request, 1) == origin ->
+             send(killer, {:relay_parked, self()})
+
+             receive do
+               :continue_parked_call -> :done
+             end
+
+           :waiting, _event, _proc_state ->
+             :waiting
+         end, :waiting}
+      )
+  end
+
+  defp renewal_call(fixture, origin, holder, holder_incarnation) do
+    LeaseOwner.acquire(
+      fixture.owner,
+      origin,
+      "renew-race",
+      holder,
+      holder_incarnation,
+      now_ms() + 1_000
+    )
+  catch
+    :exit, _reason -> {:error, :owner_down}
+  end
+
+  defp classify_loss(fixture, holder_incarnation) do
+    relay = fixture.relay
+    owner = fixture.owner
+    owner_incarnation = fixture.owner_incarnation
+    assert_receive {:relay_owner_loss_ready, ^relay, ^owner, ^owner_incarnation}, 500
+    classification_ref = make_ref()
+
+    assert :ok =
+             AdmissionRelay.classify_owner_loss(
+               relay,
+               classification_ref,
+               fixture.daemon_incarnation,
+               fixture.session_id,
+               owner,
+               owner_incarnation,
+               holder_incarnation
+             )
+
+    assert_receive {:relay_owner_loss_classified_ack, ^relay, ^classification_ref, _session_id,
+                    ^owner, ^owner_incarnation},
+                   500
   end
 
   defp stop_connection(connection, relay, incarnation) do
