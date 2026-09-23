@@ -1432,6 +1432,14 @@ defmodule LoopexDaemon.AdmissionRelayTest do
                    500
 
     eventually(fn -> AdmissionRelay.status(relay).tickets == 1 end)
+
+    # A resume settles through the registry, but only the relay knows when its
+    # slot is free: removing the ticket tells the session's registered lease
+    # owner, so the owner can promote its next queued mutation.
+    assert_receive {:registry_message, ^owner,
+                    {:relay_lease_ticket_settled, ^relay, ^resume, ^owner_incarnation}},
+                   500
+
     second_result = %{"operation" => "second", "status" => "accepted"}
 
     assert {:ok, ^second} =

@@ -101,6 +101,19 @@ connections.
 | Floor pair (Elixir 1.18.5 / OTP 27.3.4) | Pending |
 | Current pair | Pending |
 
+### Process RSS beside the retained-payload ceilings
+
+The output ceilings bound retained payload, not memory, so the `long_bound`
+lane reports the VM's resident size separately at the full attachment count
+(`maximum-population RSS:` line) and at payload pressure, with 508 MiB of queued
+output held against the 512 MiB aggregate commitment (`payload-pressure RSS:`
+line). The values are reported, not asserted.
+
+| Measurement | Value |
+| --- | --- |
+| RSS at 512 connections and 512 attachments | Pending |
+| RSS before and at 508 MiB retained output | Pending |
+
 ## Outcome 6 security review
 
 | Field | Value |

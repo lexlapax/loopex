@@ -8,9 +8,10 @@ policy labels public surfaces stable, release-candidate, or experimental once
 there are public surfaces to label. No public surface is labelled yet — see
 [compatibility surfaces](docs/developer/compatibility-surfaces.md#concept).
 
-No package is released or installable yet. The annotated tag `v0.0.0-m2` is
-defined as the exact integrated M2 source snapshot; it is not a package version,
-public API freeze, or compatibility label. Entries below the first package release record
+No installable package is published yet. The `0.1.0` entry records the
+source release tagged `v0.1.0`, and the annotated tag `v0.0.0-m2` is defined as
+the exact integrated M2 source snapshot; neither is a package version, public
+API freeze, or compatibility label. Entries below the first package release record
 repository, planning, and milestone implementation work, and carry no consumer
 compatibility meaning.
 
@@ -226,6 +227,14 @@ A trace session now loads each module it names before installing its call
 patterns, so an adapter the runtime has not called yet is traced from its first
 call instead of silently not at all. `Loopex.trace/2` keeps its shape and
 refusals; a name no installed module answers to still traces nothing.
+
+The resource-pack Git import now runs its data commands (`rev-parse`,
+`cat-file`, `ls-tree` and `unpack-file`) as executor jobs of the shape
+`/bin/sh -c 'exec "$@" 2>/dev/null' loopex-git-data /usr/bin/env … git …`, so
+Git's standard error is discarded and only its standard output is parsed; a
+warning Git or a platform wrapper printed had been read as data and refused a
+legitimate import. `clone` keeps the previous job shape. A host policy that
+matches the job's argument vector sees the new shape.
 
 ## [0.1.0] — 2026-09-19
 

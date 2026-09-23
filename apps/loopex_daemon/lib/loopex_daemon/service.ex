@@ -932,6 +932,12 @@ defmodule LoopexDaemon.Service do
       {:DOWN, ^monitor, :process, ^helper, {:placement_released, :ok}} ->
         Logger.debug("loopex daemon placement release attempted")
         :ok
+
+      # A release that failed ends the wait at once; the next daemon's stale
+      # owner recovery handles what it left.
+      {:DOWN, ^monitor, :process, ^helper, _failed} ->
+        Logger.debug("loopex daemon placement release failed")
+        :ok
     after
       @placement_release_ms ->
         Process.exit(helper, :kill)

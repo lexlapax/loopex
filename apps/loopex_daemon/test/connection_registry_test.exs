@@ -476,6 +476,51 @@ defmodule LoopexDaemon.ConnectionRegistryTest do
     end
   end
 
+  # Concept: the output ceilings bound retained payload, not memory, so the
+  # process's actual resident size under payload pressure is measured and
+  # reported beside them for the closure evidence.
+  #
+  # Technical depth: 127 connections each hold the full 4 MiB of queued output,
+  # 508 MiB against the 512 MiB aggregate commitment, in 1 MiB binaries the
+  # registry retains. The commitment is asserted exactly; the VM's RSS before
+  # and at pressure is printed, not asserted, because the plan promises a
+  # retained-payload ceiling rather than an RSS bound.
+  @tag :long_bound
+  @tag timeout: 300_000
+  test "retained output near the aggregate ceiling reports the process RSS" do
+    registry = start_registry(5_000, connection_module: ManualConnection)
+    allowance = 4_194_304
+    count = 127
+    before_kib = rss_kib()
+
+    connections =
+      for _index <- 1..count do
+        connection = start_manual_connection(registry)
+        assert :ok = manual_registry_call(connection.pid, :promote)
+        fill(connection, allowance)
+        connection
+      end
+
+    status = ConnectionRegistry.status(registry)
+    assert status.output_commitment == count * allowance
+    assert status.output_commitment <= 536_870_912
+    pressure_kib = rss_kib()
+
+    IO.puts(
+      "payload-pressure RSS: retained_output_bytes=#{status.output_commitment} " <>
+        "aggregate_ceiling_bytes=536870912 rss_kib_before=#{before_kib} " <>
+        "rss_kib_at_pressure=#{pressure_kib} otp=#{System.otp_release()}"
+    )
+
+    Enum.each(connections, &Process.exit(&1.pid, :kill))
+    eventually(fn -> ConnectionRegistry.status(registry).output_commitment == 0 end)
+  end
+
+  defp rss_kib do
+    {output, 0} = System.cmd("ps", ["-o", "rss=", "-p", System.pid()])
+    output |> String.trim() |> String.to_integer()
+  end
+
   defp fill(connection, bytes) do
     chunk = 1_048_576
 

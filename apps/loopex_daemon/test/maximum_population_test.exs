@@ -117,6 +117,15 @@ defmodule LoopexDaemon.MaximumPopulationTest do
     assert after_replace["connections"] == @connections
     assert after_replace["attachments"] == @connections
 
+    # The attachment ceiling bounds retained payload, not memory; the VM's
+    # resident size at the full population is reported for the closure evidence.
+    {rss, 0} = System.cmd("ps", ["-o", "rss=", "-p", System.pid()])
+
+    IO.puts(
+      "maximum-population RSS: connections=#{@connections} attachments=#{@connections} " <>
+        "rss_kib=#{String.trim(rss)} otp=#{System.otp_release()}"
+    )
+
     started = System.monotonic_time(:millisecond)
     send(sentinel, {:daemon_signal, owner_ref, :sigterm})
     assert Task.await(daemon, 600_000) == 0

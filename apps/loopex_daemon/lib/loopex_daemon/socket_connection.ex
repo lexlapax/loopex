@@ -1711,8 +1711,12 @@ defmodule LoopexDaemon.SocketConnection do
 
         {:admission_unknown, WireRecords.succession_error(request_id, "admission_unknown")}
 
+      # A reply outside the typed set cannot show the command was not
+      # admitted, so the client is told the outcome is unknown and to retry
+      # with the same command identity, never that it was refused.
       _unexpected ->
-        {:refused, WireRecords.request_error(request_id, "internal_failure")}
+        Logger.debug("loopex daemon mutation reply outside the typed set")
+        {:admission_unknown, WireRecords.succession_error(request_id, "admission_unknown")}
     end
   end
 
@@ -1803,7 +1807,10 @@ defmodule LoopexDaemon.SocketConnection do
            WireRecords.succession_error(request_id, "admission_unknown")}
 
         _unexpected ->
-          {:refused, :no_activation, WireRecords.request_error(request_id, "internal_failure")}
+          Logger.debug("loopex daemon resume reply outside the typed set")
+
+          {:admission_unknown, :no_activation,
+           WireRecords.succession_error(request_id, "admission_unknown")}
       end
     end
   end
