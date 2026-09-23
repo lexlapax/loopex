@@ -137,6 +137,30 @@ defmodule Loopex.LLM.ReqLLM.ProviderBuildFixture do
     unless status == 0, do: raise("provider cold build failed (#{status}):\n#{output}")
   end
 
+  @doc """
+  ## Concept
+
+  Host credential custody for a real-provider call made directly through the
+  adapter, which since ADR 0034 resolves its credential per invocation and
+  refuses without it.
+
+  ## Technical depth
+
+  Starts a routing registry and a custody process holding `credential`, binds
+  a fresh opaque token to that custody, and returns the two options the adapter
+  requires. The credential stays inside the custody process and is never
+  returned or printed.
+  """
+  def custody_options(credential) when is_binary(credential) and credential != "" do
+    {:ok, registry_pid} = Loopex.LLM.ReqLLM.CredentialRegistry.start_link([])
+    {:ok, registry} = Loopex.LLM.ReqLLM.CredentialRegistry.handle(registry_pid)
+    {:ok, custody_pid} = Loopex.LLM.ReqLLM.CredentialCustody.start_link(credential: credential)
+    {:ok, custody} = Loopex.LLM.ReqLLM.CredentialCustody.reference(custody_pid)
+    token = Loopex.LLM.ReqLLM.CredentialToken.new()
+    :ok = Loopex.LLM.ReqLLM.CredentialRegistry.put(registry, token, custody)
+    [credential_token: token, credential_registry: registry]
+  end
+
   defp verify!(worker, source) do
     {:ok, [configuration]} = :file.consult(String.to_charlist(worker <> ".launch"))
     {:ok, [manifest]} = :file.consult(String.to_charlist(worker <> ".manifest"))

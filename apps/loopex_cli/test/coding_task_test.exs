@@ -449,7 +449,12 @@ defmodule LoopexCli.CodingTaskTest do
   test "one real provider call surfaces the provider's own response identifier and reported usage that the deterministic adapter cannot produce" do
     {root, _workspace} = Demonstration.repository("real-reply")
     on_exit(fn -> File.rm_rf(root) end)
-    launch = ProviderBuildFixture.options!(root) ++ [cleanup_grace_ms: 2_000]
+    # The adapter resolves its credential per invocation from host custody
+    # (ADR 0034), so a direct call composes that custody from the lane's key.
+    launch =
+      ProviderBuildFixture.options!(root) ++
+        [cleanup_grace_ms: 2_000] ++
+        ProviderBuildFixture.custody_options(System.get_env("LOOPEX_PROVIDER_API_KEY"))
 
     {:ok, request} =
       Loopex.Model.request(

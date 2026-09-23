@@ -372,7 +372,14 @@ defmodule Loopex.ReferenceClientRuntimeFixture do
     if owns_root?, do: File.mkdir!(root)
 
     try do
-      launch = Loopex.LLM.ReqLLM.ProviderBuildFixture.options!(root)
+      # The adapter resolves its credential per invocation from host custody
+      # (ADR 0034), which this fixture composes from the lane's key.
+      launch =
+        Loopex.LLM.ReqLLM.ProviderBuildFixture.options!(root) ++
+          Loopex.LLM.ReqLLM.ProviderBuildFixture.custody_options(
+            System.get_env("LOOPEX_PROVIDER_API_KEY")
+          )
+
       {launch, [sampling: %{"max_tokens" => Keyword.get(options, :max_tokens, 256)}]}
     rescue
       error ->
