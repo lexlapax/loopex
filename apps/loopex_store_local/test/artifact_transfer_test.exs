@@ -307,9 +307,15 @@ defmodule Loopex.Store.Local.ArtifactTransferTest do
     assert {:ok, chunk} = Loopex.read_artifact_chunk(first, transfer.transfer_ref, 8)
     assert chunk.bytes == binary_part(bytes, 0, 8)
 
-    # A second attachment replaces the first, which releases what the first
-    # held; the reference it was using is not readable through either.
-    {:ok, second} = Loopex.attach(runtime, session_id, after_event_sequence: 0)
+    # Replacing the first attachment by name releases what it held; the
+    # reference it was using is not readable through either. Attachments under
+    # one holder otherwise coexist, so the replacement is explicit.
+    {:ok, second} =
+      Loopex.Runtime.attach_for_holder(runtime, session_id, self(),
+        request_id: "replace-first",
+        after_event_sequence: 0,
+        replace_attachment_id: first.attachment_id
+      )
 
     assert {:error, :unknown_transfer} =
              Loopex.read_artifact_chunk(second, transfer.transfer_ref, 8)
@@ -505,9 +511,14 @@ defmodule Loopex.Store.Local.ArtifactTransferTest do
     assert {:error, :unknown_transfer} =
              Loopex.read_artifact_chunk(stranger, transfer.transfer_ref, 16)
 
-    # A second attachment on this session replaces the first, which releases
-    # what the first held: the reference is readable through neither.
-    {:ok, replacement} = Loopex.attach(runtime, session_id, after_event_sequence: 0)
+    # Replacing the first attachment by name releases what it held: the
+    # reference is readable through neither.
+    {:ok, replacement} =
+      Loopex.Runtime.attach_for_holder(runtime, session_id, self(),
+        request_id: "replace-holder",
+        after_event_sequence: 0,
+        replace_attachment_id: holder.attachment_id
+      )
 
     assert {:error, :unknown_transfer} =
              Loopex.read_artifact_chunk(replacement, transfer.transfer_ref, 16)
