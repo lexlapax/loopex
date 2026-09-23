@@ -93,6 +93,9 @@ defmodule LoopexAppServer.CredentialCustodyTest do
       if module == ReqLLM.CredentialCustody,
         do: send(test, {:custody_started, result})
 
+      if module == ReqLLM.CredentialRegistry,
+        do: send(test, {:registry_started, result})
+
       result
     end)
 
@@ -118,6 +121,15 @@ defmodule LoopexAppServer.CredentialCustodyTest do
             monitor = Process.monitor(custody)
             Process.exit(custody, :kill)
             assert_receive {:DOWN, ^monitor, :process, ^custody, :killed}, 1_000
+
+            # The routing registry is refused and crashed the same way.
+            assert_receive {:registry_started, {:ok, registry}}, 1_000
+            assert GenServer.call(registry, {:unexpected, @canary}) == {:error, :unavailable}
+            send(registry, {:unexpected, @canary})
+            assert Process.alive?(registry)
+            registry_monitor = Process.monitor(registry)
+            Process.exit(registry, :kill)
+            assert_receive {:DOWN, ^registry_monitor, :process, ^registry, :killed}, 1_000
             :done
           end
         )
