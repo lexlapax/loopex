@@ -451,6 +451,88 @@ defmodule LoopexDaemon.ServiceLifecycleTest do
     assert Task.await(daemon.task, 40_000) == store_lost
   end
 
+  # Concept: the daemon's routes are bound to the runtime's exact Control and
+  # EventDispatcher, so losing either while serving fail-stops `runtime_lost`
+  # and tells the client.
+  #
+  # Technical depth: each case kills one exact runtime child. The runtime's own
+  # supervisor would restart it, so only the daemon's monitor can notice; the
+  # client receives `daemon.stopping` naming `fatal:runtime_lost` and the
+  # daemon exits with that class. A fail-stop keeps host placement until the
+  # process halts, so a successor is proved by a separate operating-system
+  # process in `apps/loopex_cli/test/daemon_command_test.exs`, not here.
+  for child <- [:control, :dispatcher] do
+    test "losing the runtime's #{child} fail-stops runtime_lost",
+         %{options: options} do
+      daemon = start_daemon(options)
+      _ready = await_ready(daemon.output)
+      client = initialized(options[:socket_path])
+
+      {:ok, children} = Loopex.Runtime.children(:sys.get_state(daemon.owner).edges.runtime)
+      Process.exit(Map.fetch!(children, unquote(child)), :kill)
+
+      assert [%{"type" => "daemon.stopping", "reason" => "fatal:runtime_lost"}] =
+               receive_records(client, 1)
+
+      {:ok, runtime_lost} = LoopexDaemon.ExitStatus.fetch(:runtime_lost)
+      assert Task.await(daemon.task, 40_000) == runtime_lost
+    end
+  end
+
+  # Concept: a component lost while an orderly stop drains ends the stop with
+  # that component's class; the stop never reports success.
+  #
+  # Technical depth: the runtime's Control is suspended so core quiesce blocks
+  # inside the owner's unlinked helper; once the owner is waiting on that
+  # helper, the Store or the EventDispatcher is killed. The owner consumes the
+  # exit or monitor at once, kills the helper and exits with `store_lost` or
+  # `runtime_lost`, and the client hears that class rather than
+  # `operator_stop`.
+  for {target, class, reason} <- [
+        {:store, :store_lost, "store_lost"},
+        {:dispatcher, :runtime_lost, "fatal:runtime_lost"}
+      ] do
+    test "losing the #{target} while quiesce drains ends the stop as #{class}",
+         %{options: options} do
+      daemon = start_daemon(options)
+      _ready = await_ready(daemon.output)
+      client = initialized(options[:socket_path])
+      owner_state = :sys.get_state(daemon.owner)
+      {:ok, children} = Loopex.Runtime.children(owner_state.edges.runtime)
+      :ok = :sys.suspend(children.control)
+
+      send(daemon.sentinel, {:daemon_signal, daemon.owner_ref, :sigterm})
+      assert await_function(daemon.owner, {LoopexDaemon.Service, :await_quiesce, 3})
+
+      victim =
+        case unquote(target) do
+          :store -> owner_state.pids.store
+          :dispatcher -> children.dispatcher
+        end
+
+      Process.exit(victim, :kill)
+
+      {:ok, status} = LoopexDaemon.ExitStatus.fetch(unquote(class))
+      assert Task.await(daemon.task, 40_000) == status
+
+      assert [%{"type" => "daemon.stopping", "reason" => unquote(reason)}] =
+               receive_records(client, 1)
+    end
+  end
+
+  defp await_function(pid, function, attempts \\ 500)
+
+  defp await_function(pid, function, attempts) when attempts > 0 do
+    if Process.info(pid, :current_function) == {:current_function, function} do
+      true
+    else
+      Process.sleep(10)
+      await_function(pid, function, attempts - 1)
+    end
+  end
+
+  defp await_function(_pid, _function, 0), do: false
+
   defp await_queued_exit(pid, exited, attempts \\ 100)
 
   defp await_queued_exit(pid, exited, attempts) when attempts > 0 do

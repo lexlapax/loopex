@@ -113,7 +113,8 @@ defmodule LoopexDaemon.Service do
       socket: nil,
       startup_ref: nil,
       pending_fatal: nil,
-      progress_registry: nil
+      progress_registry: nil,
+      runtime_monitors: %{}
     }
 
     Logger.debug("loopex daemon service owner waiting for its gate")
@@ -160,6 +161,12 @@ defmodule LoopexDaemon.Service do
       :ignore -> {:noreply, state}
       class -> fail_stop(state, class)
     end
+  end
+
+  def handle_info({:DOWN, monitor, :process, _pid, _reason}, %{phase: :running} = state)
+      when is_map_key(state.runtime_monitors, monitor) do
+    Logger.debug("loopex daemon runtime process lost")
+    fail_stop(state, :runtime_lost)
   end
 
   def handle_info(
@@ -363,7 +370,12 @@ defmodule LoopexDaemon.Service do
     case LoopexComposition.start_edges(options, interrupt: interrupt) do
       {:ok, edges} ->
         Logger.debug("loopex daemon composition edges started")
-        {:ok, track_edges(state, edges)}
+        state = track_edges(state, edges)
+
+        case monitor_runtime(state) do
+          {:ok, state} -> {:ok, state}
+          :error -> {:stop, {:fatal, :composition_start_failed}, state}
+        end
 
       {:error, {:stop, reason}, partial} ->
         {:stop, reason, track_edges(state, partial)}
@@ -619,7 +631,10 @@ defmodule LoopexDaemon.Service do
   # teardown deadline, and a relay that misses a barrier inside it ends the
   # stop as `relay_lost`.
   defp drain(state, collaboration, drain_id) do
-    case Loopex.Runtime.quiesce(state.edges.runtime) do
+    case quiesce_responsive(state) do
+      {:fatal, class} ->
+        fail_stop(state, class)
+
       {:ok, _result} ->
         Logger.debug("loopex daemon quiesce complete")
         teardown_deadline = monotonic_ms() + teardown_ms(state)
@@ -636,18 +651,108 @@ defmodule LoopexDaemon.Service do
                  WireRecords.daemon_stopping("operator_stop"),
                  min(monotonic_ms() + @close_connections_ms, teardown_deadline)
                ),
-             {:ok, _owners} <- Owner.barrier(collaboration, :tearing_down, teardown_deadline) do
+             {:ok, _owners} <- Owner.barrier(collaboration, :tearing_down, teardown_deadline),
+             :none <- owned_loss(state) do
           teardown(state)
           release_placement(state)
           report_exit(state, ExitStatus.success())
           {:stop, :normal, %{state | phase: :stopped}}
         else
+          {:fatal, class} -> fail_stop(state, class)
           _missing_acknowledgement -> fail_stop(state, :relay_lost)
         end
 
       {:error, :runtime_unavailable} ->
         Logger.debug("loopex daemon quiesce unavailable")
         fail_stop(state, :drain_failed)
+    end
+  end
+
+  # Concept: the daemon's routes are bound to the runtime's exact Control and
+  # EventDispatcher, so losing either — even one its supervisor restarts —
+  # ends the daemon as `runtime_lost`.
+  #
+  # Technical depth: both are monitored once composition has started; the
+  # monitors live only in this owner and are dropped when the runtime stops.
+  defp monitor_runtime(%{edges: %{runtime: runtime}} = state) do
+    case Loopex.Runtime.children(runtime) do
+      {:ok, %{control: control, dispatcher: dispatcher}}
+      when is_pid(control) and is_pid(dispatcher) ->
+        monitors = Map.new([control, dispatcher], &{Process.monitor(&1), &1})
+        {:ok, %{state | runtime_monitors: monitors}}
+
+      _unavailable ->
+        :error
+    end
+  end
+
+  defp monitor_runtime(state), do: {:ok, state}
+
+  # Concept: core quiesce runs in an unlinked helper so this owner still
+  # consumes every owned component's exit while it drains; a component lost
+  # during the drain ends the stop with that component's class, never success.
+  #
+  # Technical depth: the helper exits with the quiesce result as its reason. An
+  # owned exit or runtime monitor that classifies as fatal kills the helper
+  # first; an exit that classifies as ignorable is consumed and the wait
+  # continues. Core owns the drain clock, so the wait is bounded by it.
+  defp quiesce_responsive(state) do
+    runtime = state.edges.runtime
+
+    {helper, monitor} =
+      spawn_monitor(fn -> exit({:quiesced, Loopex.Runtime.quiesce(runtime)}) end)
+
+    await_quiesce(state, helper, monitor)
+  end
+
+  defp await_quiesce(state, helper, monitor) do
+    receive do
+      {:DOWN, ^monitor, :process, ^helper, {:quiesced, result}} ->
+        result
+
+      {:DOWN, ^monitor, :process, ^helper, _reason} ->
+        {:error, :runtime_unavailable}
+
+      {:DOWN, runtime_monitor, :process, _pid, _reason}
+      when is_map_key(state.runtime_monitors, runtime_monitor) ->
+        end_quiesce(helper, monitor, :runtime_lost)
+
+      {:EXIT, pid, reason} ->
+        case classify_exit(state, pid, reason) do
+          :ignore -> await_quiesce(state, helper, monitor)
+          class -> end_quiesce(helper, monitor, class)
+        end
+    end
+  end
+
+  defp end_quiesce(helper, monitor, class) do
+    Logger.debug("loopex daemon component lost during quiesce")
+    Process.exit(helper, :kill)
+    Process.demonitor(monitor, [:flush])
+    {:fatal, class}
+  end
+
+  # Concept: before an orderly stop reports success, any owned component that
+  # was lost while the stop was running turns it into that component's
+  # fail-stop.
+  defp owned_loss(state) do
+    receive do
+      {:DOWN, runtime_monitor, :process, _pid, _reason}
+      when is_map_key(state.runtime_monitors, runtime_monitor) ->
+        Logger.debug("loopex daemon runtime process lost during stop")
+        {:fatal, :runtime_lost}
+
+      {:EXIT, pid, reason} ->
+        case classify_exit(state, pid, reason) do
+          :ignore ->
+            owned_loss(state)
+
+          class ->
+            Logger.debug("loopex daemon component lost during stop")
+            {:fatal, class}
+        end
+    after
+      0 -> :none
     end
   end
 
@@ -748,6 +853,10 @@ defmodule LoopexDaemon.Service do
   end
 
   defp stop_runtime(%{edges: %{runtime: runtime, runtime_supervisor: supervisor}} = state) do
+    Enum.each(state.runtime_monitors, fn {monitor, _pid} ->
+      Process.demonitor(monitor, [:flush])
+    end)
+
     Process.unlink(supervisor)
     _ = safe(fn -> Loopex.stop(runtime) end)
     ensure_down(supervisor, @stop_wait_ms)
