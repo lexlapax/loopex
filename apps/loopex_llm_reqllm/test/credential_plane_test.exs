@@ -30,7 +30,7 @@ defmodule Loopex.LLM.ReqLLM.CredentialPlaneTest do
 
   alias Loopex.LLM.ReqLLM, as: Adapter
   alias Loopex.LLM.ReqLLM.ProviderIsolationFixture, as: Fixture
-  alias Loopex.LLM.ReqLLM.{ProviderCodec, ProviderPhaseDiagnostic}
+  alias Loopex.LLM.ReqLLM.{CredentialRegistry, ProviderCodec, ProviderPhaseDiagnostic}
   alias Loopex.Model
 
   @sentinel "sk-loopex-credential-plane-sentinel-2f9c41"
@@ -503,6 +503,37 @@ defmodule Loopex.LLM.ReqLLM.CredentialPlaneTest do
 
       assert result == {:error, {:not_dispatched, "model_call_failed"}}
       assert carriers == []
+    end
+
+    # Concept: a routing registry that does not know the token, or is gone,
+    # refuses the invocation: its companion never receives a credential or
+    # sends a request, is cleaned up, and the adapter does not try again.
+    #
+    # Technical depth: the first call carries a live registry that holds no
+    # row for the fixture's token; the second carries the fixture's own
+    # registry after it has been killed. Each answers the fixed
+    # `not_dispatched` result; the fake provider received nothing and the
+    # companion's process group is gone.
+    test "an unknown token or a dead registry refuses before any request is sent" do
+      fixture = Fixture.new(:reply, credential: @sentinel <> "-routing")
+      {:ok, empty_pid} = CredentialRegistry.start_link()
+      {:ok, empty} = CredentialRegistry.handle(empty_pid)
+
+      assert Adapter.complete(
+               Fixture.request(),
+               Keyword.put(fixture.options, :credential_registry, empty),
+               Model.discard_progress()
+             ) == {:error, {:not_dispatched, "model_call_failed"}}
+
+      Process.unlink(fixture.registry_pid)
+      monitor = Process.monitor(fixture.registry_pid)
+      Process.exit(fixture.registry_pid, :kill)
+      assert_receive {:DOWN, ^monitor, :process, _pid, :killed}, 1_000
+      assert Fixture.complete(fixture) == {:error, {:not_dispatched, "model_call_failed"}}
+
+      assert Fixture.count(fixture) == 0
+      Fixture.assert_gone(fixture)
+      GenServer.stop(empty_pid)
     end
 
     test "one child diagnostic containing two concurrently live synthetic keys cannot escape" do
