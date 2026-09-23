@@ -75,16 +75,25 @@ defmodule LoopexDaemon.SessionIndex.Storage do
     end
   end
 
+  # Concept: publication's one step a real filesystem cannot be made to fail
+  # on demand, syncing the directory after the rename, can be replaced by a
+  # caller so its `:renamed` outcome is provable.
+  #
+  # Technical depth: `options` accepts only `:sync_directory`, a one-argument
+  # function returning `:ok` or `{:error, reason}`, used for the post-rename
+  # directory sync alone; every other step is the real filesystem.
   @doc false
-  @spec publish(Path.t(), non_neg_integer(), [Codec.row()]) ::
+  @spec publish(Path.t(), non_neg_integer(), [Codec.row()], keyword()) ::
           :ok
           | {:error, :session_index_full | :invalid_index_entry | write_failure()}
-  def publish(directory, daemon_uid, rows)
-      when is_binary(directory) and is_integer(daemon_uid) and daemon_uid >= 0 do
+  def publish(directory, daemon_uid, rows, options \\ [])
+      when is_binary(directory) and is_integer(daemon_uid) and daemon_uid >= 0 and
+             is_list(options) do
     Logger.debug("loopex daemon session index publication start")
+    sync_after = Keyword.get(options, :sync_directory, &sync_directory/1)
 
     with {:ok, image} <- Codec.encode(rows) do
-      publish_image(directory, daemon_uid, image)
+      publish_image(directory, daemon_uid, image, sync_after)
     end
   end
 
@@ -175,14 +184,14 @@ defmodule LoopexDaemon.SessionIndex.Storage do
     end
   end
 
-  defp publish_image(directory, daemon_uid, image) do
+  defp publish_image(directory, daemon_uid, image, sync_after) do
     canonical = Path.join(directory, @canonical_name)
     temporary = Path.join(directory, @temporary_name)
 
     with {:ok, _identity} <- directory_identity(directory, daemon_uid) do
       case :file.open(String.to_charlist(temporary), [:raw, :binary, :write, :exclusive]) do
         {:ok, io} ->
-          publish_opened(io, temporary, canonical, directory, daemon_uid, image)
+          publish_opened(io, temporary, canonical, directory, daemon_uid, image, sync_after)
 
         {:error, _reason} ->
           write_failure(:poisoned)
@@ -192,7 +201,7 @@ defmodule LoopexDaemon.SessionIndex.Storage do
     end
   end
 
-  defp publish_opened(io, temporary, canonical, directory, daemon_uid, image) do
+  defp publish_opened(io, temporary, canonical, directory, daemon_uid, image, sync_after) do
     case opened_attempt_identity(io, temporary, daemon_uid) do
       {:ok, identity} ->
         result =
@@ -202,7 +211,7 @@ defmodule LoopexDaemon.SessionIndex.Storage do
                :ok <- :file.sync(io),
                :ok <- :file.close(io),
                :ok <- File.rename(temporary, canonical) do
-            sync_after_rename(directory)
+            sync_after_rename(directory, sync_after)
           else
             _other -> :pre_rename_failed
           end
@@ -226,8 +235,8 @@ defmodule LoopexDaemon.SessionIndex.Storage do
     end
   end
 
-  defp sync_after_rename(directory) do
-    case sync_directory(directory) do
+  defp sync_after_rename(directory, sync_after) do
+    case sync_after.(directory) do
       :ok -> :ok
       {:error, _reason} -> :post_rename_failed
     end

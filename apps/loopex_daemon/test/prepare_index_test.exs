@@ -13,6 +13,20 @@ defmodule LoopexDaemon.PrepareIndexTest do
     %{root: root, uid: File.stat!(root).uid, daemon: Path.join(root, "daemon")}
   end
 
+  # Concept: an import whose publication fails exits with the index write
+  # class and leaves the root to the next attempt.
+  test "a failed publication ends the import session_index_write_failed", context do
+    :ok = Loopex.track_session(context.root, "s-one", "placement-a")
+
+    assert PrepareIndex.run(context.root,
+             install_signals: false,
+             storage: [sync_directory: fn _path -> {:error, :eio} end]
+           ) == {:error, :session_index_write_failed}
+
+    assert Placement.live_owner(context.root) == :none
+    assert PrepareIndex.run(context.root, install_signals: false) == {:ok, 1}
+  end
+
   test "a legacy root imports every recorded session and then starts", context do
     :ok = Loopex.track_session(context.root, "s-one", "placement-a")
     :ok = Loopex.track_session(context.root, "s-two", "placement-a")

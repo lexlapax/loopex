@@ -56,6 +56,28 @@ defmodule LoopexDaemon.SessionIndex.StorageTest do
     assert {:ok, ^rows} = Storage.load(directory, daemon_uid)
   end
 
+  # Concept: once the rename has named the complete new image, a failed
+  # directory sync cannot be undone or retried: publication reports that the
+  # image is named but its crash durability is unknown.
+  test "a directory-sync failure after the rename reports the image renamed" do
+    root = temporary_root()
+    directory = Path.join(root, "daemon")
+    daemon_uid = File.stat!(root).uid
+    rows = [%{session_id: "session", placement_identity: "placement"}]
+
+    on_exit(fn -> File.rm_rf!(root) end)
+
+    assert :ok = Storage.prepare(directory, daemon_uid)
+
+    assert {:error, {:session_index_write_failed, :renamed}} =
+             Storage.publish(directory, daemon_uid, rows,
+               sync_directory: fn _path -> {:error, :eio} end
+             )
+
+    assert {:ok, ^rows} = Storage.load(directory, daemon_uid)
+    refute File.exists?(Path.join(directory, "session-index-v1.next"))
+  end
+
   # Concept: a temporary this publication did not create is never overwritten
   # or removed by it; the index is poisoned instead of guessing.
   test "an existing temporary poisons publication and is left alone" do

@@ -50,8 +50,8 @@ defmodule LoopexDaemon.PrepareIndex do
   `state_root` is the validated, expanded root. `options` accepts
   `:install_signals` (default `true`), `:notify` — a pid told
   `{:loopex_prepare_index, sentinel, ref}` so a test can route a stop without
-  an operating-system signal — and `:scan`, replacing the strict scan for
-  tests. Returns `{:ok, rows}` with the published row count, or
+  an operating-system signal — `:scan`, replacing the strict scan for
+  tests, and `:storage`, the options passed to the index publication. Returns `{:ok, rows}` with the published row count, or
   `{:error, class}` naming an `LoopexDaemon.ExitStatus` class.
   """
   @spec run(Path.t(), keyword()) :: {:ok, non_neg_integer()} | {:error, atom()}
@@ -72,7 +72,8 @@ defmodule LoopexDaemon.PrepareIndex do
   defp supervise(state_root, options, ref) do
     sentinel = self()
     scan = Keyword.get(options, :scan, &LegacyImport.scan/2)
-    {owner, monitor} = spawn_monitor(fn -> owner(state_root, scan, ref, sentinel) end)
+    storage = Keyword.get(options, :storage, [])
+    {owner, monitor} = spawn_monitor(fn -> owner(state_root, {scan, storage}, ref, sentinel) end)
     send(owner, {:go, ref})
 
     case Keyword.get(options, :notify) do
@@ -124,14 +125,14 @@ defmodule LoopexDaemon.PrepareIndex do
 
   # -- import owner
 
-  defp owner(state_root, scan, ref, sentinel) do
+  defp owner(state_root, {scan, storage}, ref, sentinel) do
     Process.flag(:trap_exit, true)
 
     receive do
       {:go, ^ref} -> :ok
     end
 
-    state = %{root: state_root, ref: ref, placement: nil, store: nil, uid: nil}
+    state = %{root: state_root, ref: ref, placement: nil, store: nil, uid: nil, storage: storage}
     {result, _state} = run_import(state, scan)
     send(sentinel, {:import_result, ref, result})
     cleanup()
@@ -151,7 +152,7 @@ defmodule LoopexDaemon.PrepareIndex do
          :ok <- drain(state),
          {:ok, rows} <- union(canonical, legacy),
          :ok <- drain(state),
-         :ok <- publish(directory, state.uid, rows) do
+         :ok <- publish(directory, state.uid, rows, state.storage) do
       Logger.debug("loopex prepare-index published the index")
       {{:ok, length(rows)}, state}
     else
@@ -314,8 +315,8 @@ defmodule LoopexDaemon.PrepareIndex do
     end
   end
 
-  defp publish(directory, uid, rows) do
-    case Storage.publish(directory, uid, rows) do
+  defp publish(directory, uid, rows, storage) do
+    case Storage.publish(directory, uid, rows, storage) do
       :ok -> :ok
       {:error, :session_index_full} -> {:error, :session_index_too_large}
       {:error, :invalid_index_entry} -> {:error, :session_index_corrupt}
