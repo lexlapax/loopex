@@ -553,6 +553,51 @@ defmodule LoopexDaemon.ConnectionRegistryTest do
     assert :ok = manual_registry_call(connection.pid, :release_succession)
   end
 
+  # Concept: a lease is never routed to a connection that is already going
+  # away: once a holder's connection is closing, installing a provisional
+  # mirror for it is refused, and nothing is recorded.
+  #
+  # Technical depth: aggregate-pressure reclamation moves the holder's row to
+  # `:closing` while its connection process, suspended, is still alive. A provisional
+  # mirror naming that exact holder then answers `:connection_not_live`, and
+  # the registry holds no routing mirror.
+  test "a provisional mirror for a closing connection is refused" do
+    registry =
+      start_registry(5_000,
+        connection_module: ManualConnection,
+        output_buffer_bytes: 8,
+        aggregate_output_bytes: 10
+      )
+
+    registry_incarnation = :crypto.strong_rand_bytes(16)
+    assert :ok = ConnectionRegistry.bind_relay(registry, self(), registry_incarnation)
+
+    holder = start_manual_connection(registry)
+    candidate = start_manual_connection(registry)
+
+    for connection <- [holder, candidate] do
+      assert :ok = manual_registry_call(connection.pid, :promote)
+      assert :ok = manual_registry_call(connection.pid, :initialize_complete)
+    end
+
+    assert :ok = manual_registry_call(holder.pid, {:enqueue_output, "123456"})
+
+    # Suspended, the holder cannot act on its close, so its row stays closing
+    # while its process is alive.
+    true = :erlang.suspend_process(holder.pid)
+    assert :ok = manual_registry_call(candidate.pid, {:enqueue_output, "12345"})
+    assert Process.alive?(holder.pid)
+
+    provisional =
+      provisional_mirror(holder, "closing-session", self(), :crypto.strong_rand_bytes(16), 1)
+
+    assert {:error, :connection_not_live} =
+             apply_mirror(registry, registry_incarnation, :install_provisional, provisional)
+
+    assert %{routing_mirrors: 0} = ConnectionRegistry.status(registry)
+    true = :erlang.resume_process(holder.pid)
+  end
+
   test "routing mirror promotes after holder loss and exact pop is idempotent" do
     registry = start_registry(5_000, connection_module: ManualConnection)
     registry_incarnation = :crypto.strong_rand_bytes(16)
