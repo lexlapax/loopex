@@ -344,6 +344,73 @@ defmodule LoopexCli.DaemonCommandTest do
     assert {"", 0} = drain_raw(successor, "", 60_000)
   end
 
+  # Concept: Ctrl-C at the terminal reaches a daemon only through the
+  # launcher, which forwards it as the `SIGTERM` the daemon treats as an
+  # orderly stop.
+  #
+  # Technical depth: `bin/loopex` runs a stand-in that execs this test's
+  # compiled command. `SIGINT` is sent to the launcher, not the daemon: a
+  # connected client receives `daemon.stopping` with `operator_stop`, and the
+  # launcher exits with the daemon's status 0.
+  test "SIGINT to the launcher is an orderly daemon stop", context do
+    elixir = System.find_executable("elixir") || flunk("elixir executable unavailable")
+    stand_in = Path.join(context.root, "loopex-stand-in")
+
+    paths =
+      Enum.map_join(:code.get_path(), " ", fn dir ->
+        "-pa " <> shell_quote(List.to_string(dir))
+      end)
+
+    File.write!(stand_in, """
+    #!/bin/sh
+    exec #{shell_quote(elixir)} #{paths} -e 'LoopexCli.main(System.argv())' -- "$@"
+    """)
+
+    File.chmod!(stand_in, 0o755)
+    socket = Path.join([context.state_root, "daemon", "daemon.sock"])
+    launcher = Path.expand("../bin/loopex", __DIR__)
+
+    port =
+      Port.open({:spawn_executable, launcher}, [
+        :binary,
+        :exit_status,
+        :use_stdio,
+        {:line, 65_536},
+        env: [
+          {~c"LOOPEX_ESCRIPT", String.to_charlist(stand_in)},
+          {~c"LOOPEX_PROVIDER_API_KEY", ~c"daemon-command-placeholder"}
+        ],
+        args: [
+          "daemon",
+          "--state-root",
+          context.state_root,
+          "--workspace",
+          context.workspace,
+          "--provider-launch",
+          context.launch,
+          "--policy",
+          "allow-all"
+        ]
+      ])
+
+    {:os_pid, launcher_pid} = Port.info(port, :os_pid)
+    on_exit(fn -> System.cmd("/bin/kill", ["-KILL", Integer.to_string(launcher_pid)]) end)
+    assert await_line(port, 60_000) =~ ~s("record":"daemon_ready")
+
+    client = connect(socket)
+    :ok = send_frame(client, initialize())
+    assert [%{"type" => "initialized"}] = receive_records(client, 1)
+
+    {_output, 0} = System.cmd("/bin/kill", ["-INT", Integer.to_string(launcher_pid)])
+
+    assert [%{"type" => "daemon.stopping", "reason" => "operator_stop"}] =
+             receive_records(client, 1)
+
+    assert await_exit(port, 60_000) == 0
+  end
+
+  defp shell_quote(text), do: "'" <> String.replace(text, "'", "'\\''") <> "'"
+
   # Concept: a Store log larger than the Store will read refuses the daemon
   # with its own class before any socket exists, and leaves the log alone.
   #
