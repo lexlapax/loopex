@@ -285,6 +285,43 @@ defmodule Loopex.ConcurrentAttachmentTest do
     assert_maps_agree(fixture.runtime, session_id, 1)
   end
 
+  # Concept: a replacement refused because the runtime already holds its full
+  # 512 attachment transactions leaves the attachment it named untouched.
+  #
+  # Technical depth: with the dispatcher suspended, 512 concurrent attaches
+  # hold every pending transaction row in Control. A replacement naming a live
+  # attachment is then refused `capacity_exceeded` before any row or borrow
+  # is taken; the target still reads, the pending attaches all complete once
+  # the dispatcher resumes, Control's pending map empties and both live maps
+  # agree on the target plus the 512.
+  @tag timeout: 120_000
+  test "a replacement refused at the 512-transaction ceiling preserves its target", fixture do
+    session_id = create_session(fixture.runtime, "replacement-ceiling")
+    stable_holder = holder(self())
+    {:ok, target} = attach(fixture.runtime, session_id, stable_holder, "target")
+    {:ok, %{control: control, dispatcher: dispatcher}} = Runtime.children(fixture.runtime)
+    :ok = :sys.suspend(dispatcher)
+
+    pending =
+      for index <- 1..512 do
+        Task.async(fn -> attach(fixture.runtime, session_id, holder(self()), "p#{index}") end)
+      end
+
+    assert_eventually(fn -> map_size(:sys.get_state(control).pending_attachments) == 512 end)
+
+    assert {:error, :capacity_exceeded} =
+             Runtime.attach_for_holder(fixture.runtime, session_id, stable_holder,
+               request_id: "refused-replacement",
+               replace_attachment_id: target.attachment_id
+             )
+
+    :ok = :sys.resume(dispatcher)
+    assert Enum.all?(Task.await_many(pending, 60_000), &match?({:ok, _attachment}, &1))
+    assert {:error, :empty} = Loopex.next_event(target)
+    assert map_size(:sys.get_state(control).pending_attachments) == 0
+    assert_maps_agree(fixture.runtime, session_id, 513)
+  end
+
   test "dispatcher replacement resolves a pending attachment and admits a fresh one", fixture do
     session_id = create_session(fixture.runtime, "dispatcher-replacement")
     stable_holder = holder(self())

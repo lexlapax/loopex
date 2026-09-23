@@ -100,6 +100,23 @@ defmodule LoopexDaemon.MaximumPopulationTest do
     assert status["connections"] == @connections
     assert status["attachments"] == @connections
 
+    # At the full population a second attach is refused locally, while an
+    # explicit replacement of the connection's own attachment is net zero: it
+    # delivers a fresh snapshot and the counts stay at the ceiling.
+    probe_session = Enum.at(sessions, rem(@connections - 1, @sessions))
+    attach = %{"method" => "session.attach", "session_id" => probe_session}
+    :ok = send_frame(probe, Map.put(attach, "request_id", "second"))
+
+    [%{"request_id" => "second", "code" => "attachment_conflict"}] =
+      receive_records(probe, 1, 30_000)
+
+    :ok = send_frame(probe, Map.merge(attach, %{"request_id" => "replace", "replace" => true}))
+    [%{"request_id" => "replace", "type" => "snapshot"}] = receive_records(probe, 1, 30_000)
+    :ok = send_frame(probe, %{"method" => "daemon.status", "request_id" => "after"})
+    [%{"request_id" => "after", "result" => after_replace}] = receive_records(probe, 1, 30_000)
+    assert after_replace["connections"] == @connections
+    assert after_replace["attachments"] == @connections
+
     started = System.monotonic_time(:millisecond)
     send(sentinel, {:daemon_signal, owner_ref, :sigterm})
     assert Task.await(daemon, 600_000) == 0
