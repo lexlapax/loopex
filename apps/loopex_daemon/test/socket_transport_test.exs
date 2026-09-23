@@ -401,6 +401,66 @@ defmodule LoopexDaemon.SocketTransportTest do
     assert ConnectionRegistry.status(registry).closing == 1
   end
 
+  test "an owner succession detaches every attached client but keeps each connection open",
+       %{daemon: daemon, runtime: runtime} do
+    controller = initialized_client(daemon)
+    session_id = create_session(controller, "succession-create")
+
+    :ok = send_frame(controller, acquire("acquire", session_id))
+    assert [%{"request_id" => "acquire", "result" => granted}] = receive_records(controller, 1)
+    epoch = granted["writer_epoch"]
+
+    :ok = send_frame(controller, attach("attach", session_id))
+    assert [%{"type" => "snapshot"}] = receive_records(controller, 1)
+
+    observer = initialized_client(daemon)
+    :ok = send_frame(observer, attach("observe", session_id))
+    assert [%{"type" => "snapshot"}] = receive_records(observer, 1)
+    assert %{attachments: 2} = ConnectionRegistry.status(daemon.registry)
+
+    # An ordinary resume of an active session starts a successor owner, which
+    # cuts every attachment of that session.
+    assert {:ok, ^session_id} =
+             Loopex.resume_session(runtime, session_id, command_id: "succession-owner")
+
+    for client <- [controller, observer] do
+      assert [%{"type" => "error", "code" => "detached", "event_cursor" => _cursor} = record] =
+               receive_records(client, 1)
+
+      assert record["session_id"] == Wire.encode_identity(session_id)
+      refute closed?(client, 100)
+    end
+
+    eventually(fn -> ConnectionRegistry.status(daemon.registry).attachments == 0 end)
+
+    # Both reattach on the same connections; the controller keeps its lease and
+    # epoch and may mutate again once reattached.
+    :ok = send_frame(observer, attach("reobserve", session_id))
+    assert [%{"request_id" => "reobserve", "type" => "snapshot"}] = receive_records(observer, 1)
+
+    :ok = send_frame(controller, attach("reattach", session_id))
+    assert [%{"request_id" => "reattach", "type" => "snapshot"}] = receive_records(controller, 1)
+
+    :ok =
+      send_frame(controller, %{
+        "method" => "session.follow_up",
+        "request_id" => "after-succession",
+        "command_id" => Wire.encode_identity("after-succession"),
+        "content_b64" => Wire.encode_bytes("still in control"),
+        "writer_epoch" => epoch
+      })
+
+    assert [%{"request_id" => "after-succession", "type" => "admission"} = admission | _rest] =
+             receive_until(controller, &(&1["request_id"] == "after-succession"))
+
+    assert admission["status"] in ["accepted", "refused"]
+  end
+
+  defp receive_until(socket, predicate, acc \\ []) do
+    [record] = receive_records(socket, 1)
+    if predicate.(record), do: [record | acc], else: receive_until(socket, predicate, acc)
+  end
+
   test "daemon.status reports bounded counts with reservations counted", %{daemon: daemon} do
     client = initialized_client(daemon)
     _session_id = create_session(client, "status-create")

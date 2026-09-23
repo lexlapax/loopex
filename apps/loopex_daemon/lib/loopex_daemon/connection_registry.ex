@@ -188,6 +188,12 @@ defmodule LoopexDaemon.ConnectionRegistry do
   end
 
   @doc false
+  @spec attachment_invalidated(pid(), binary(), binary()) :: :ok
+  def attachment_invalidated(registry, connection_incarnation, attachment_id) do
+    GenServer.call(registry, {:attachment_invalidated, connection_incarnation, attachment_id})
+  end
+
+  @doc false
   @spec finish_succession(pid(), binary()) :: :ok | {:error, :succession_unavailable}
   def finish_succession(registry, connection_incarnation) do
     GenServer.call(registry, {:finish_succession, connection_incarnation})
@@ -930,6 +936,19 @@ defmodule LoopexDaemon.ConnectionRegistry do
 
   def handle_call({:enqueue_succession_reply, _incarnation, _encoded, _mode}, _from, state),
     do: {:reply, {:error, :succession_unavailable}, state}
+
+  # Concept: core's succession cut removed this connection's attachment, so its
+  # record and charge go while the connection itself stays open.
+  def handle_call({:attachment_invalidated, incarnation, attachment_id}, {caller, _tag}, state) do
+    case {connection_row(state, caller, incarnation), Map.get(state.attachments, incarnation)} do
+      {{_token, _row}, %{phase: :installed, attachment_id: ^attachment_id}} ->
+        Logger.debug("loopex daemon attachment invalidated by succession")
+        {:reply, :ok, release_row_attachment(state, incarnation)}
+
+      _other ->
+        {:reply, :ok, state}
+    end
+  end
 
   def handle_call({:finish_succession, incarnation}, {caller, _tag}, state) do
     update_succession(

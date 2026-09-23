@@ -114,6 +114,7 @@ defmodule LoopexDaemon.SocketConnection do
       output_cursors: :queue.new(),
       progress: :queue.new(),
       progress_bytes: 0,
+      succession: nil,
       calls: :gen_server.reqids_new()
     }
 
@@ -279,6 +280,61 @@ defmodule LoopexDaemon.SocketConnection do
 
   def handle_info({:daemon_stopping, record}, %{closing: nil} = state) when is_map(record),
     do: begin_final_close(stop_pump(state), record)
+
+  # Concept: a non-prepared owner succession invalidates this connection's
+  # attachment, not the connection: the client is told `detached` at its last
+  # emitted cursor through the reserved notice slot, the attachment is
+  # cleared, and the connection stays open for the client to reattach.
+  #
+  # Technical depth: every other record this connection would write while the
+  # notice is pending is held in order and written after the notice, when the
+  # succession is finished and its reserve released.
+  def handle_info(
+        {:loopex_attachment_invalidated, session_id, attachment_id, _incarnation, _cursor},
+        %{
+          attachment: %{session_id: session_id, attachment_id: attachment_id} = attached,
+          closing: nil
+        } = state
+      ) do
+    state = stop_pump(state)
+    cursor = attached.emitted_cursor || attached.snapshot_cursor
+
+    with {:ok, encoded} <- Frame.encode(WireRecords.detached(session_id, cursor)),
+         :ok <-
+           ConnectionRegistry.enqueue_succession_notice(
+             state.registry,
+             state.incarnation,
+             IO.iodata_to_binary(encoded)
+           ) do
+      :ok =
+        ConnectionRegistry.attachment_invalidated(
+          state.registry,
+          state.incarnation,
+          attachment_id
+        )
+
+      Logger.debug("loopex daemon attachment detached by succession")
+
+      state = %{
+        state
+        | attachment: nil,
+          progress: :queue.new(),
+          progress_bytes: 0,
+          succession: :queue.new(),
+          output_cursors: :queue.in(nil, state.output_cursors)
+      }
+
+      output_step(state)
+    else
+      _unavailable -> begin_final_close(state, WireRecords.detached(session_id, cursor))
+    end
+  end
+
+  def handle_info(
+        {:loopex_attachment_invalidated, _session, _attachment, _incarnation, _cursor},
+        state
+      ),
+      do: {:noreply, state}
 
   def handle_info({:daemon_notice, record}, %{closing: nil} = state),
     do: noreply_record(state, record)
@@ -1253,7 +1309,12 @@ defmodule LoopexDaemon.SocketConnection do
 
   # Concept: every queued frame is remembered in emission order, so the last
   # completely emitted event cursor is known exactly.
-  defp send_record(state, record, cursor \\ nil) do
+  defp send_record(state, record, cursor \\ nil)
+
+  defp send_record(%{succession: held} = state, record, cursor) when held != nil,
+    do: {:ok, %{state | succession: :queue.in({record, cursor}, held)}}
+
+  defp send_record(state, record, cursor) do
     with {:ok, encoded} <- Frame.encode(record),
          :ok <- ConnectionRegistry.enqueue_output(state.registry, state.incarnation, encoded) do
       {:ok, %{state | output_cursors: :queue.in(cursor, state.output_cursors)}}
@@ -1275,6 +1336,7 @@ defmodule LoopexDaemon.SocketConnection do
       :empty ->
         cond do
           state.closing -> finish_owner_loss_close(state)
+          state.succession != nil -> finish_succession(state)
           :queue.is_empty(state.progress) -> {:noreply, state}
           true -> flush_progress(state)
         end
@@ -1348,6 +1410,32 @@ defmodule LoopexDaemon.SocketConnection do
 
       {:empty, _cursors} ->
         state
+    end
+  end
+
+  # The notice has been written: release the succession reserve, then write
+  # the held records in the order they were produced.
+  defp finish_succession(state) do
+    case ConnectionRegistry.finish_succession(state.registry, state.incarnation) do
+      :ok ->
+        held = state.succession
+        state = %{state | succession: nil}
+
+        result =
+          Enum.reduce_while(:queue.to_list(held), {:ok, state}, fn {record, cursor}, {:ok, acc} ->
+            case send_record(acc, record, cursor) do
+              {:ok, acc} -> {:cont, {:ok, acc}}
+              {:error, acc} -> {:halt, {:error, acc}}
+            end
+          end)
+
+        case result do
+          {:ok, state} -> output_step(state)
+          {:error, state} -> {:stop, :normal, state}
+        end
+
+      {:error, _reason} ->
+        {:noreply, state}
     end
   end
 
