@@ -375,6 +375,115 @@ defmodule LoopexCli.LiveDaemonTest do
     stop_daemon(daemon)
   end
 
+  # Concept: a signal ends an observer with status 0; it never held control,
+  # so it releases nothing and the session is untouched.
+  @tag timeout: 120_000
+  test "a signal ends a live observer with status zero", context do
+    provider =
+      ProviderFixture.new(:delayed_entry,
+        credential: @credential,
+        response_bodies: [text_response("observed later", "msg_live_observer")]
+      )
+
+    launch =
+      Keyword.drop(provider.options, [
+        :credential_token,
+        :credential_registry,
+        :tracing_capability
+      ])
+
+    daemon = start_daemon(context, launch)
+    socket = context.socket
+    on_exit(&LoopexCli.LiveSignal.uninstall/0)
+
+    runner =
+      Task.async(fn ->
+        capture_io(fn -> LoopexCli.dispatch(["run", "--daemon", socket, "go"]) end)
+      end)
+
+    session_id = eventually(fn -> listed_session(socket) end)
+    eventually(fn -> ProviderFixture.reached?(provider, "pid") end)
+
+    observer =
+      Task.async(fn ->
+        capture_io(fn ->
+          send(
+            self(),
+            {:result,
+             LoopexCli.dispatch(["attach", session_id, "--daemon", socket, "--observe"],
+               install_live_signals: true
+             )}
+          )
+        end)
+        |> then(fn output -> {receive(do: ({:result, result} -> result)), output} end)
+      end)
+
+    eventually(fn -> daemon_status(socket)["attachments"] == 2 end)
+    :gen_event.notify(:erl_signal_server, :sigterm)
+    assert {{:detached, 0}, _output} = Task.await(observer, 30_000)
+
+    ProviderFixture.release(provider)
+    assert Task.await(runner, 60_000) =~ "observed later"
+    stop_daemon(daemon)
+  end
+
+  # Concept: `--after N` starts strictly after durable sequence N: history
+  # through N is not shown again, while `--after 0` replays it.
+  @tag timeout: 120_000
+  test "attach --after starts strictly after the named sequence", context do
+    launch =
+      ProviderFixture.new(:reply,
+        credential: @credential,
+        response_bodies: [text_response("history answer", "msg_live_after")]
+      ).options
+      |> Keyword.drop([:credential_token, :credential_registry, :tracing_capability])
+
+    daemon = start_daemon(context, launch)
+    socket = context.socket
+    capture_io(fn -> assert :ok = LoopexCli.dispatch(["run", "--daemon", socket, "go"]) end)
+    session_id = listed_session(socket)
+    tail = daemon_status_tail(socket, session_id)
+
+    replayed =
+      capture_io(fn ->
+        assert :ok =
+                 LoopexCli.dispatch(["attach", session_id, "--daemon", socket, "--after", "0"])
+      end)
+
+    assert replayed =~ "history answer"
+
+    after_tail =
+      capture_io(fn ->
+        assert :ok =
+                 LoopexCli.dispatch([
+                   "attach",
+                   session_id,
+                   "--daemon",
+                   socket,
+                   "--after",
+                   Integer.to_string(tail)
+                 ])
+      end)
+
+    refute after_tail =~ "history answer"
+    stop_daemon(daemon)
+  end
+
+  defp daemon_status_tail(socket, session_id) do
+    {:ok, client} = LoopexCli.DaemonClient.connect(socket)
+
+    try do
+      {:ok, %{"result" => result}, _client} =
+        LoopexCli.DaemonClient.request(client, "session.inspect", %{
+          "session_id" => LoopexProtocol.Wire.encode_identity(session_id)
+        })
+
+      String.to_integer(result["event_sequence"])
+    after
+      LoopexCli.DaemonClient.close(client)
+    end
+  end
+
   test "a signal cancels a live query with status 130", context do
     daemon = start_daemon(context, [])
     send(self(), {:loopex_live_signal, :sigterm})
