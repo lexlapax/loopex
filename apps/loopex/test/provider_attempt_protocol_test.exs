@@ -1825,19 +1825,9 @@ defmodule Loopex.ProviderAttemptProtocolTest do
              end)
 
       if phase == :after_send do
-        # Progress reaches this process through the dispatcher, asynchronously
-        # to the store the terminal was read from, so the predecessor's delta
-        # may still be in flight when the sweep above ran; a loaded host showed
-        # exactly that. It is waited for, not swept for.
-        predecessor_domain = result.predecessor_domain
-
-        unless Enum.any?(result.progress, fn item ->
-                 item.kind == :text_delta and item.stream_domain_id == predecessor_domain
-               end) do
-          assert_receive {:loopex_progress,
-                          %{kind: :text_delta, stream_domain_id: ^predecessor_domain}},
-                         30_000
-        end
+        assert Enum.any?(result.progress, fn item ->
+                 item.kind == :text_delta and item.stream_domain_id == result.predecessor_domain
+               end)
       else
         refute Enum.any?(result.progress, fn item ->
                  item.stream_domain_id == result.predecessor_domain
@@ -4460,11 +4450,11 @@ defmodule Loopex.ProviderAttemptProtocolTest do
         attempt.opened["attempt"]
       )
 
-    {provider_callback, held_guard} =
+    {provider_callback, held_guard, delivered} =
       case {loss, phase} do
         {:control_death, :before_send} ->
           Process.exit(attempt.control, :kill)
-          {nil, nil}
+          {nil, nil, []}
 
         {:control_death, :after_send} ->
           resume_process(attempt.control)
@@ -4474,8 +4464,9 @@ defmodule Loopex.ProviderAttemptProtocolTest do
 
           assert_receive {:holding, callback}, 5_000
           refute callback == attempt.worker
+          delivered = await_predecessor_delta(predecessor_domain)
           Process.exit(attempt.control, :kill)
-          {callback, nil}
+          {callback, nil, delivered}
 
         {:lost_reply, :before_send} ->
           suspend_process(attempt.coordinator)
@@ -4487,7 +4478,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
           control = attempt.control
           refute_receive {:trace, ^control, :send, _permit, ^worker}, 50
           Process.exit(attempt.coordinator, :kill)
-          {nil, nil}
+          {nil, nil, []}
 
         {:lost_reply, :after_send} ->
           suspend_process(attempt.coordinator)
@@ -4520,10 +4511,11 @@ defmodule Loopex.ProviderAttemptProtocolTest do
           assert attempt.worker in owner_worker_children,
                  "the permitted worker was not supervised by the same owner generation"
 
+          delivered = await_predecessor_delta(predecessor_domain)
           suspend_process(guard)
           await_control_call_consumed(attempt.control, attempt.control_message)
           Process.exit(attempt.coordinator, :kill)
-          {callback, guard}
+          {callback, guard, delivered}
       end
 
     await_process_down(attempt.coordinator)
@@ -4569,9 +4561,25 @@ defmodule Loopex.ProviderAttemptProtocolTest do
       finished: finished,
       opens: records_of_kind(records, "model_attempt_opened_v1"),
       settlements: records_of_kind(records, "model_attempt_settled_v2"),
-      progress: receive_progress(),
+      progress: delivered ++ receive_progress(),
       predecessor_domain: predecessor_domain
     }
+  end
+
+  # Concept: the predecessor's delta is observed while its owner is still alive.
+  #
+  # Technical depth: the scripted model hands its delta to the stream relay
+  # before announcing `:holding`, but ADR 0011 and ADR 0014 end the transient
+  # plane at abrupt owner death without draining the relay's queue, so a delta
+  # still queued when the loss is injected may legitimately never arrive. Waiting
+  # for it before the loss makes its delivery certain; the case's claim is that
+  # no closure and no successor-domain item follows, which the sweep checks.
+  defp await_predecessor_delta(predecessor_domain) do
+    assert_receive {:loopex_progress,
+                    %{kind: :text_delta, stream_domain_id: ^predecessor_domain} = delta},
+                   30_000
+
+    [delta]
   end
 
   defp exercise_live_handoff(:before_send) do
