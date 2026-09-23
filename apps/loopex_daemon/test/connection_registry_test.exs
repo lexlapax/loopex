@@ -391,6 +391,104 @@ defmodule LoopexDaemon.ConnectionRegistryTest do
            } = ConnectionRegistry.status(registry)
   end
 
+  # Concept: at the real 4 MiB allowance, an attached connection can always be
+  # told its session changed owner and then answer every held mutation, one at
+  # a time, however full its ordinary output is.
+  #
+  # Technical depth: ordinary output is filled to exactly the allowance minus
+  # the succession reserve. On one connection the next ordinary byte overflows.
+  # On another, the maximal `detached` notice is admitted at that fill and
+  # written after the ordinary backlog, then 32 maximal predecessor replies
+  # each reuse the one
+  # reply slot only after the previous frame was emitted, with the connection's
+  # commitment never above 4 MiB and the connection kept live.
+  @tag timeout: 120_000
+  test "succession fits at the real allowance with 32 serial maximal replies" do
+    registry = start_registry(5_000, connection_module: ManualConnection)
+    allowance = 4_194_304
+    reserve = 88_091
+    ordinary = allowance - reserve
+
+    overflowing = start_manual_connection(registry)
+    succeeding = start_manual_connection(registry)
+
+    for connection <- [overflowing, succeeding] do
+      assert :ok = manual_registry_call(connection.pid, :promote)
+      assert :ok = manual_registry_call(connection.pid, :initialize_complete)
+      assert :ok = manual_registry_call(connection.pid, :reserve_succession)
+      fill(connection, ordinary)
+    end
+
+    monitor = Process.monitor(overflowing.pid)
+
+    assert {:error, :capacity_exceeded} =
+             manual_registry_call(overflowing.pid, {:enqueue_output, "x"})
+
+    assert_receive {:DOWN, ^monitor, :process, _pid, :normal}, 5_000
+
+    {:ok, notice} =
+      Frame.encode(WireRecords.detached(:binary.copy(<<255>>, 256), 18_446_744_073_709_551_615))
+
+    notice = IO.iodata_to_binary(notice)
+    assert :ok = manual_registry_call(succeeding.pid, {:enqueue_succession_notice, notice})
+
+    # Output already queued before the cut is written first, then the notice.
+    assert drain_until(succeeding, notice, 0) == ordinary
+
+    {_id, reply_record} =
+      SuccessionCapacity.reply_records()
+      |> Enum.max_by(fn {_id, record} ->
+        {:ok, encoded} = Frame.encode(record)
+        IO.iodata_length(encoded)
+      end)
+
+    {:ok, reply} = Frame.encode(reply_record)
+    reply = IO.iodata_to_binary(reply)
+
+    for _held <- 1..32 do
+      assert :ok =
+               manual_registry_call(
+                 succeeding.pid,
+                 {:enqueue_succession_reply, reply, :after_notice}
+               )
+
+      assert ConnectionRegistry.status(registry).output_commitment <= allowance
+      assert {:ok, reply_ref, ^reply} = manual_registry_call(succeeding.pid, :claim_output)
+      assert :ok = manual_registry_call(succeeding.pid, {:output_emitted, reply_ref})
+    end
+
+    assert :ok = manual_registry_call(succeeding.pid, :finish_succession)
+    assert Process.alive?(succeeding.pid)
+
+    assert %{output_bytes: 0, output_commitment: 0, succession_reservations: 0} =
+             ConnectionRegistry.status(registry)
+  end
+
+  defp drain_until(connection, notice, emitted) do
+    {:ok, frame_ref, bytes} = manual_registry_call(connection.pid, :claim_output)
+    assert :ok = manual_registry_call(connection.pid, {:output_emitted, frame_ref})
+
+    if bytes == notice do
+      emitted
+    else
+      assert bytes =~ ~r/\Ao+\z/
+      drain_until(connection, notice, emitted + byte_size(bytes))
+    end
+  end
+
+  defp fill(connection, bytes) do
+    chunk = 1_048_576
+
+    Stream.unfold(bytes, fn
+      0 -> nil
+      left -> {min(chunk, left), left - min(chunk, left)}
+    end)
+    |> Enum.each(fn size ->
+      assert :ok =
+               manual_registry_call(connection.pid, {:enqueue_output, :binary.copy("o", size)})
+    end)
+  end
+
   test "pending attachment conflict consumes the reply slot without a notice" do
     registry =
       start_registry(5_000,
