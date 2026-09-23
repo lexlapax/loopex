@@ -942,7 +942,9 @@ defmodule LoopexDaemon.LeaseOwner do
       when disposition in @mutation_dispositions do
     case Map.fetch(state.in_flight, origin_id) do
       {:ok, %{class: :session_resume, disposition: nil} = mutation} ->
-        mutation = %{mutation | disposition: disposition, relay_settled: true}
+        # The relay's own removal of this ticket, not the registry's answer,
+        # frees the session's mutation slot; `relay_settled` waits for it.
+        mutation = %{mutation | disposition: disposition}
         state = put_in(state, [:in_flight, origin_id], mutation)
         {:noreply, settle_mutation_if_ready(state, origin_id)}
 

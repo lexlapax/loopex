@@ -744,8 +744,11 @@ defmodule LoopexDaemon.LeaseOwnerTest do
     stop_connection(holder, fixture.relay, holder_incarnation)
   end
 
+  # Technical depth: the mutation lands 1.25 s into a 2 s term, and the
+  # renewal is proved by no expiry across the original deadline 0.75 s later;
+  # these proportions give a loaded machine room, where 250 ms into 400 ms did not.
   test "an admission-unknown mutation commits its candidate renewal" do
-    lease_term_ms = 400
+    lease_term_ms = 2_000
     fixture = start_fixture(lease_term_ms: lease_term_ms)
     {holder, holder_incarnation, writer_epoch} = grant_first(fixture, lease_term_ms)
 
@@ -757,7 +760,7 @@ defmodule LoopexDaemon.LeaseOwnerTest do
                "unknown-admission-attachment"
              )
 
-    Process.sleep(250)
+    Process.sleep(1_250)
     origin = {holder_incarnation, 1, 1}
     worker = start_ticket_worker(holder)
 
@@ -783,7 +786,7 @@ defmodule LoopexDaemon.LeaseOwnerTest do
     assert_receive {:connection_message, ^holder, {:relay_ticket_result, ^origin, ^result}}, 500
     eventually(fn -> LeaseOwner.status(fixture.owner).in_flight == 0 end)
 
-    refute_receive {:lease_expiry_proposed, _, _, _, _, _, _, _}, 220
+    refute_receive {:lease_expiry_proposed, _, _, _, _, _, _, _}, 1_100
     assert %{phase: :held, held: true} = LeaseOwner.status(fixture.owner)
     stop_connection(holder, fixture.relay, holder_incarnation)
   end

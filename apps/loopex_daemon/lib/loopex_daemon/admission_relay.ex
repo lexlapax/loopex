@@ -3607,12 +3607,7 @@ defmodule LoopexDaemon.AdmissionRelay do
          worker_pid: nil,
          connection_incarnation: incarnation
        } = ticket} ->
-        if ticket.settlement_mode == :direct do
-          send(
-            ticket.promoter_pid,
-            {:relay_lease_ticket_settled, self(), origin_id, ticket.promoter_incarnation}
-          )
-        end
+        notify_lease_ticket_settled(state, ticket, origin_id)
 
         state
         |> remove_ticket(origin_id)
@@ -3622,6 +3617,39 @@ defmodule LoopexDaemon.AdmissionRelay do
         state
     end
   end
+
+  # Concept: a lease owner advances to its next queued mutation only once the
+  # relay has released the session's single mutation slot.
+  #
+  # Technical depth: a direct ticket's promoter is the lease owner. A resume is
+  # promoted and settled through the registry, which tells the owner its
+  # disposition before the relay has reaped the task and worker and freed the
+  # slot, so the relay tells the session's registered lease owner itself when
+  # it removes that ticket; the owner ignores a message for an origin it no
+  # longer holds or an incarnation that is not its own.
+  defp notify_lease_ticket_settled(_state, %{settlement_mode: :direct} = ticket, origin_id) do
+    send(
+      ticket.promoter_pid,
+      {:relay_lease_ticket_settled, self(), origin_id, ticket.promoter_incarnation}
+    )
+  end
+
+  defp notify_lease_ticket_settled(
+         state,
+         %{settlement_mode: :registry, class: class, session_id: session_id},
+         origin_id
+       )
+       when class in @lease_ticket_classes do
+    case Map.fetch(state.lease_owners, session_id) do
+      {:ok, %{binding: {owner, owner_incarnation}}} ->
+        send(owner, {:relay_lease_ticket_settled, self(), origin_id, owner_incarnation})
+
+      :error ->
+        :ok
+    end
+  end
+
+  defp notify_lease_ticket_settled(_state, _ticket, _origin_id), do: :ok
 
   defp remove_permit(state, origin_id) do
     case Map.pop(state.permits, origin_id) do
