@@ -36,4 +36,4 @@ System.at_exit(fn _status -> File.rm_rf(root) end)
 # missing under the gate -- which is the difference between a case that passes
 # and a case that is proved.
 
-ExUnit.start(exclude: [:real_provider])
+ExUnit.start(exclude: [:real_provider, :node_client])

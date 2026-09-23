@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
-# The slow check, run once from the exact candidate before closure: the
-# real-provider workflows, the independent Node client, the fresh-source build,
-# the long-duration bound proofs and, on Linux, the cross-UID witness. An
+# The slow check, run once from the exact candidate before closure. It stages
+# the candidate as a fresh source archive, builds it there as an operator
+# would, and runs every lane inside that extraction: the real-provider
+# workflows, the independent Node client, the long-duration bound proofs and,
+# on Linux, the cross-UID witness. An
 # unchanged-source release reuses that evidence and does not run this command
 # again. It needs a provider credential in LOOPEX_PROVIDER_API_KEY, which
 # reaches only the eight manifest test processes and is never printed. It also
@@ -24,9 +26,15 @@ observed_node=$(node --version 2>/dev/null </dev/null || true)
 
 started=$SECONDS
 platform=$(uname -s)
-printf 'check-release: candidate %s on %s %s\n' "$(git rev-parse HEAD)" "$platform" "$(uname -m)"
+commit=$(git rev-parse HEAD)
+release_version=0.2.0
+printf 'check-release: candidate %s on %s %s\n' "$commit" "$platform" "$(uname -m)"
 logs=$(mktemp -d "${TMPDIR:-/tmp}/loopex-release.XXXXXX")
-trap 'rm -rf "$logs"' EXIT
+fresh=$(mktemp -d "${TMPDIR:-/tmp}/loopex-fresh.XXXXXX")
+trap 'rm -rf "$logs" "$fresh"' EXIT
+# A caller's build-path overrides would move the extraction's builds outside
+# it; every build here belongs to the extraction.
+unset MIX_BUILD_PATH MIX_BUILD_ROOT
 
 # Reference composition consumes and deletes the credential, so each
 # credential-consuming case runs in its own operating-system process that
@@ -44,6 +52,47 @@ without_credential() { env -u LOOPEX_PROVIDER_API_KEY "$@"; }
   [ "$seen" = present ] && [ "$unseen" = absent ]
 ) || { echo 'check-release: credential wrapper self-check RED' >&2; exit 1; }
 
+# The fresh-source lane: stage the exact candidate with `git archive` into a
+# fresh extraction under the canonical scoped `umask 022`, launched from a
+# hostile caller `umask 0777`; retain its pre-build manifest and the source
+# inventory outside the extraction; prove the extraction is exactly the
+# commit; run the documented build inside it; and prove the build changed
+# nothing but its declared outputs. The retained files stay after the run;
+# every later lane runs inside this extraction.
+fresh_started=$SECONDS
+retain=${LOOPEX_RELEASE_RETAIN:-$(mktemp -d "${TMPDIR:-/tmp}/loopex-retained.XXXXXX")}
+tree="$fresh/src"
+printf 'check-release: fresh-source extraction of %s\n' "$commit"
+(umask 0777; (umask 022; mkdir "$tree" && git archive "$commit" | tar -x -C "$tree"))
+bash "$tree/scripts/source-archive-manifest.sh" "$tree" >"$retain/source-archive-manifest"
+git ls-files -z >"$retain/source-inventory"
+elixir scripts/source-archive-check.exs verify \
+  "$retain/source-archive-manifest" "$retain/source-inventory" "$commit" "$tree"
+(cd "$tree" && without_credential mix deps.get &&
+  MIX_ENV=prod without_credential mix cmd --app loopex_cli mix escript.build) 2>&1 |
+  tee "$logs/fresh-source-build.log"
+[ "${PIPESTATUS[0]}" -eq 0 ] || { echo 'check-release: fresh-source build RED' >&2; exit 1; }
+bash "$tree/scripts/source-archive-manifest.sh" "$tree" >"$retain/source-archive-manifest.after"
+elixir scripts/source-archive-check.exs unchanged \
+  "$retain/source-archive-manifest" "$retain/source-archive-manifest.after"
+grep -q "\"source\" => \"$commit\"\|<<\"source\">> => <<\"$commit\">>" \
+  "$tree/_build/prod/loopex_provider.manifest" ||
+  { echo 'check-release: the fresh build does not report the staged commit' >&2; exit 1; }
+identity=$(cd "$tree/apps/loopex_llm_reqllm" && without_credential mix loopex.source_identity </dev/null)
+case "$identity" in
+  *"commit $commit "*) ;;
+  *) echo 'check-release: the extraction does not resolve the staged commit' >&2; exit 1 ;;
+esac
+[ "$(cat "$tree/VERSION")" = "$release_version" ] ||
+  { echo "check-release: the extraction's VERSION is not $release_version" >&2; exit 1; }
+printf 'check-release: extraction identity %s version %s\n' "$commit" "$release_version"
+if command -v sha256sum >/dev/null 2>&1; then digest() { sha256sum "$1" | awk '{print $1}'; }
+else digest() { shasum -a 256 "$1" | awk '{print $1}'; }; fi
+for retained in source-archive-manifest source-inventory; do
+  printf 'check-release: retained %s sha256=%s\n' "$retain/$retained" "$(digest "$retain/$retained")"
+done
+printf 'check-release: fresh-source elapsed=%ss\n' "$((SECONDS - fresh_started))"
+
 # One lane: run its command in one application, stream to its own named log,
 # print its elapsed time, and require its executed count to be exactly the
 # expected number, or at least one when that is `nonzero`. The count is read by
@@ -53,12 +102,12 @@ lane() {
   shift 4
   printf 'check-release: %s\n' "$label"
   set +e
-  (cd "apps/$app" && "$wrap" "$@") 2>&1 | tee "$logs/$label.log"
+  (cd "$tree/apps/$app" && "$wrap" "$@") 2>&1 | tee "$logs/$label.log"
   status=${PIPESTATUS[0]}
   set -e
   [ "$status" -eq 0 ] ||
     { printf 'check-release: %s RED status=%s elapsed=%ss\n' "$label" "$status" "$((SECONDS - lane_started))" >&2; exit 1; }
-  executed=$(bash scripts/suite-summary.sh "$logs/$label.log" --count) ||
+  executed=$(bash "$tree/scripts/suite-summary.sh" "$logs/$label.log" --count) ||
     { printf 'check-release: %s executed no test\n' "$label" >&2; exit 1; }
   if [ "$expected" != nonzero ] && [ "$executed" != "$expected" ]; then
     printf 'check-release: %s executed %s tests, expected exactly %s\n' "$label" "$executed" "$expected" >&2
@@ -85,7 +134,7 @@ rows=0
 # standard input, where the two attended cases read the operator's answers.
 while IFS='|' read -r -u 3 app file name; do
   rows=$((rows + 1))
-  definitions=$(grep -nF "test \"$name\"" "apps/$app/$file" || true)
+  definitions=$(grep -nF "test \"$name\"" "$tree/apps/$app/$file" || true)
   [ -n "$definitions" ] && [ "$(printf '%s\n' "$definitions" | wc -l | tr -d ' ')" = 1 ] ||
     { printf 'check-release: manifest row %s is not defined exactly once in %s\n' "$rows" "$app/$file" >&2; exit 1; }
   line=${definitions%%:*}
@@ -93,46 +142,14 @@ while IFS='|' read -r -u 3 app file name; do
 done 3<"$manifest"
 [ "$rows" -eq 8 ] || { printf 'check-release: the manifest ran %s rows, expected 8\n' "$rows" >&2; exit 1; }
 
-# The independent Node client, each application in its own VM.
-node_client_apps="loopex_app_server loopex_protocol loopex_daemon"
+# The independent Node client, each application in its own VM. The CLI's case
+# is the operator takeover: a killed CLI controller, a Node observer that takes
+# over and aborts, each its own operating-system process.
+node_client_apps="loopex_app_server loopex_protocol loopex_daemon loopex_cli"
 for app in $node_client_apps; do
   lane "node-client-$app" "$app" nonzero without_credential mix test --only node_client
 done
 
-# The fresh-source lane: stage the exact candidate with `git archive` into a
-# fresh extraction under the canonical scoped `umask 022`, launched from a
-# hostile caller `umask 0777`; retain its pre-build manifest and the source
-# inventory outside the extraction; prove the extraction is exactly the
-# commit; run the documented build inside it; and prove the build changed
-# nothing but its declared outputs. The retained files stay after the run.
-fresh_started=$SECONDS
-commit=$(git rev-parse HEAD)
-retain=${LOOPEX_RELEASE_RETAIN:-$(mktemp -d "${TMPDIR:-/tmp}/loopex-retained.XXXXXX")}
-fresh=$(mktemp -d "${TMPDIR:-/tmp}/loopex-fresh.XXXXXX")
-tree="$fresh/src"
-printf 'check-release: fresh-source extraction of %s\n' "$commit"
-(umask 0777; (umask 022; mkdir "$tree" && git archive "$commit" | tar -x -C "$tree"))
-bash "$tree/scripts/source-archive-manifest.sh" "$tree" >"$retain/source-archive-manifest"
-git ls-files -z >"$retain/source-inventory"
-elixir scripts/source-archive-check.exs verify \
-  "$retain/source-archive-manifest" "$retain/source-inventory" "$commit" "$tree"
-(cd "$tree" && without_credential mix deps.get &&
-  MIX_ENV=prod without_credential mix cmd --app loopex_cli mix escript.build) 2>&1 |
-  tee "$logs/fresh-source-build.log"
-[ "${PIPESTATUS[0]}" -eq 0 ] || { echo 'check-release: fresh-source build RED' >&2; exit 1; }
-bash "$tree/scripts/source-archive-manifest.sh" "$tree" >"$retain/source-archive-manifest.after"
-elixir scripts/source-archive-check.exs unchanged \
-  "$retain/source-archive-manifest" "$retain/source-archive-manifest.after"
-grep -q "\"source\" => \"$commit\"\|<<\"source\">> => <<\"$commit\">>" \
-  "$tree/_build/prod/loopex_provider.manifest" ||
-  { echo 'check-release: the fresh build does not report the staged commit' >&2; exit 1; }
-if command -v sha256sum >/dev/null 2>&1; then digest() { sha256sum "$1" | awk '{print $1}'; }
-else digest() { shasum -a 256 "$1" | awk '{print $1}'; }; fi
-for retained in source-archive-manifest source-inventory; do
-  printf 'check-release: retained %s sha256=%s\n' "$retain/$retained" "$(digest "$retain/$retained")"
-done
-rm -rf "$fresh"
-printf 'check-release: fresh-source elapsed=%ss\n' "$((SECONDS - fresh_started))"
 
 # The long-duration bound proofs: cases whose claim is a real wait, tagged
 # long_bound and excluded from the fast check.

@@ -94,6 +94,127 @@ defmodule LoopexCli.MultiClientWorkflowTest do
     assert await_exit(daemon, 60_000) == 0
   end
 
+  # Concept: the cross-process takeover an operator relies on, with every
+  # participant its own operating-system process: the reference CLI controls a
+  # running session through a daemon, the independent Node client observes
+  # it, the CLI is killed, and the observer waits out the lease, takes control
+  # and aborts the work the killed controller started.
+  #
+  # Technical depth: the scripted provider holds its companion at entry, so
+  # the run is still in flight when the controller dies. `SIGKILL` sends no
+  # release, so the Node client's first acquisitions are refused until the
+  # thirty-second term lapses; the case asserts more than one attempt, the
+  # accepted abort and the durable `run.finished`, then that the daemon still
+  # stops orderly.
+  @tag :node_client
+  @tag timeout: 300_000
+  test "a Node observer takes over and aborts after the controlling CLI is killed" do
+    node = System.find_executable("node") || flunk("Node is unavailable on this host")
+    root = Path.join(System.tmp_dir!(), "lmt-#{System.unique_integer([:positive])}")
+    state_root = Path.join(root, "s")
+    workspace = Path.join(root, "w")
+    File.mkdir_p!(state_root)
+    File.mkdir_p!(workspace)
+    on_exit(fn -> File.rm_rf(root) end)
+
+    provider =
+      ProviderFixture.new(:delayed_entry,
+        credential: @credential,
+        response_bodies: [text_response("never finished", "msg_takeover_held")]
+      )
+
+    launch = Path.join(root, "provider.launch")
+
+    File.write!(
+      launch,
+      :io_lib.format(~c"~tp.~n", [
+        Keyword.drop(provider.options, [
+          :credential_token,
+          :credential_registry,
+          :tracing_capability
+        ])
+      ])
+    )
+
+    socket = Path.join([state_root, "daemon", "d.sock"])
+
+    {daemon, daemon_pid} =
+      start(
+        [
+          "daemon",
+          "--state-root",
+          state_root,
+          "--workspace",
+          workspace,
+          "--provider-launch",
+          launch,
+          "--policy",
+          "allow-all",
+          "--socket",
+          socket
+        ],
+        [:use_stdio]
+      )
+
+    assert %{"record" => "daemon_ready"} = daemon |> await_line(60_000) |> JSON.decode!()
+
+    {controller, controller_pid} =
+      start(["run", "--daemon", socket, "hold the line"], [:stderr_to_stdout])
+
+    session_id = await_session(controller, 60_000)
+    eventually(fn -> ProviderFixture.reached?(provider, "pid") end)
+
+    script = Path.expand("../../../clients/node/daemon-takeover.mjs", __DIR__)
+
+    observer =
+      Port.open({:spawn_executable, node}, [
+        :binary,
+        :exit_status,
+        {:line, 65_536},
+        args: [script, socket, session_id]
+      ])
+
+    assert_receive {^observer, {:data, {:eol, ~s({"attached":true})}}}, 30_000
+    {_output, 0} = System.cmd("/bin/kill", ["-KILL", Integer.to_string(controller_pid)])
+    assert await_exit(controller, 10_000) != 0
+
+    {status, lines} = collect(observer, [])
+    assert status == 0, lines
+
+    assert %{"granted" => true, "abort" => "accepted", "finished" => true, "attempts" => attempts} =
+             lines |> String.split("\n", trim: true) |> List.last() |> JSON.decode!()
+
+    # The killed controller released nothing, so taking over had to wait.
+    assert attempts > 1
+
+    ProviderFixture.release(provider)
+    {_output, 0} = System.cmd("/bin/kill", ["-TERM", Integer.to_string(daemon_pid)])
+    assert await_exit(daemon, 120_000) == 0
+  end
+
+  defp await_session(port, bound) do
+    receive do
+      {^port, {:data, {:eol, line}}} ->
+        case Regex.run(~r/loopex: session (\S+)/, line) do
+          [_, session_id] -> session_id
+          nil -> await_session(port, bound)
+        end
+
+      {^port, {:exit_status, status}} ->
+        flunk("the controller exited #{status} before naming its session")
+    after
+      bound -> flunk("the controller never named its session")
+    end
+  end
+
+  defp eventually(predicate, attempts \\ 3_000) do
+    cond do
+      predicate.() -> :ok
+      attempts == 0 -> flunk("condition never held")
+      true -> Process.sleep(10) && eventually(predicate, attempts - 1)
+    end
+  end
+
   defp cli(argv) do
     {port, _pid} = start(argv, [:stderr_to_stdout])
     collect(port, [])
