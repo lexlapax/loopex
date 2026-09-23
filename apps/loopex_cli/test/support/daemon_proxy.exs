@@ -10,7 +10,10 @@ defmodule LoopexCli.Test.DaemonProxy do
   #
   # Technical depth: requests are read as JSON lines from the client. A cut is
   # `{method, count}`: the next `count` requests with that method are each
-  # followed by one lost reply. `{{:before, method}, count}` instead closes the
+  # followed by one lost reply, or `{method, {:nth, ordinals}}` loses the reply
+  # to exactly those occurrences, counted from one; each loss is reported to
+  # the starting process as `{:proxy_lost, method, ordinal}`.
+  # `{{:before, method}, count}` instead closes the
   # connection without forwarding the request, so the daemon never sees it;
   # its count may be `{skip, count}` to let the first `skip` such requests
   # through first. Every other byte is forwarded unchanged. The
@@ -28,7 +31,15 @@ defmodule LoopexCli.Test.DaemonProxy do
           :gen_tcp.listen(0, [:binary, {:ifaddr, {:local, path}}, active: false])
 
         send(parent, {:proxy_listening, self()})
-        accept(listener, daemon_path, %{cuts: Map.new(cuts), seen: [], rewrite: rewrite})
+
+        accept(listener, daemon_path, %{
+          cuts: Map.new(cuts),
+          seen: [],
+          commands: [],
+          counts: %{},
+          rewrite: rewrite,
+          parent: parent
+        })
       end)
 
     receive do
@@ -39,6 +50,17 @@ defmodule LoopexCli.Test.DaemonProxy do
 
     ExUnit.Callbacks.on_exit(fn -> File.rm(path) end)
     %{pid: pid, path: path}
+  end
+
+  # Each request's method and command identity, in order.
+  def commands(proxy) do
+    send(proxy.pid, {:commands, self()})
+
+    receive do
+      {:proxy_commands, commands} -> commands
+    after
+      5_000 -> raise "the proxy did not answer"
+    end
   end
 
   def seen(proxy) do
@@ -56,15 +78,24 @@ defmodule LoopexCli.Test.DaemonProxy do
       {:seen, caller} ->
         send(caller, {:proxy_seen, state.seen})
         accept(listener, daemon_path, state)
+
+      {:commands, caller} ->
+        send(caller, {:proxy_commands, state.commands})
+        accept(listener, daemon_path, state)
     after
       0 ->
         case :gen_tcp.accept(listener, 50) do
           {:ok, client} ->
-            {:ok, daemon} =
-              :gen_tcp.connect({:local, daemon_path}, 0, [:binary, active: true, packet: :raw])
+            case :gen_tcp.connect({:local, daemon_path}, 0, [:binary, active: true, packet: :raw]) do
+              {:ok, daemon} ->
+                :ok = :inet.setopts(client, active: true, packet: :line, buffer: 4_194_304)
+                accept(listener, daemon_path, relay(client, daemon, state))
 
-            :ok = :inet.setopts(client, active: true, packet: :line, buffer: 4_194_304)
-            accept(listener, daemon_path, relay(client, daemon, state))
+              {:error, _no_daemon} ->
+                # A daemon being replaced is simply not there yet.
+                :gen_tcp.close(client)
+                accept(listener, daemon_path, state)
+            end
 
           {:error, :timeout} ->
             accept(listener, daemon_path, state)
@@ -76,7 +107,14 @@ defmodule LoopexCli.Test.DaemonProxy do
     receive do
       {:tcp, ^client, line} ->
         method = method(line)
-        state = %{state | seen: state.seen ++ [method]}
+        count = Map.get(state.counts, method, 0) + 1
+
+        state = %{
+          state
+          | seen: state.seen ++ [method],
+            commands: state.commands ++ [{method, command_id(line)}],
+            counts: Map.put(state.counts, method, count)
+        }
 
         case Map.get(state.cuts, {:before, method}, 0) do
           {skip, remaining} when skip > 0 ->
@@ -106,6 +144,10 @@ defmodule LoopexCli.Test.DaemonProxy do
       {:seen, caller} ->
         send(caller, {:proxy_seen, state.seen})
         relay(client, daemon, state)
+
+      {:commands, caller} ->
+        send(caller, {:proxy_commands, state.commands})
+        relay(client, daemon, state)
     end
   end
 
@@ -113,8 +155,18 @@ defmodule LoopexCli.Test.DaemonProxy do
     :ok = :gen_tcp.send(daemon, line)
 
     case Map.get(state.cuts, method, 0) do
-      remaining when remaining > 0 ->
+      {:nth, ordinals} ->
+        if Map.fetch!(state.counts, method) in ordinals do
+          lose_reply(client, daemon)
+          send(state.parent, {:proxy_lost, method, Map.fetch!(state.counts, method)})
+          state
+        else
+          relay(client, daemon, state)
+        end
+
+      remaining when is_integer(remaining) and remaining > 0 ->
         lose_reply(client, daemon)
+        send(state.parent, {:proxy_lost, method, Map.fetch!(state.counts, method)})
         %{state | cuts: Map.put(state.cuts, method, remaining - 1)}
 
       _none ->
@@ -137,6 +189,15 @@ defmodule LoopexCli.Test.DaemonProxy do
   defp close(client, daemon) do
     :gen_tcp.close(client)
     :gen_tcp.close(daemon)
+  end
+
+  defp command_id(line) do
+    with {:ok, %{"command_id" => encoded}} <- JSON.decode(line),
+         {:ok, command_id} <- LoopexProtocol.Wire.identity(encoded) do
+      command_id
+    else
+      _none -> nil
+    end
   end
 
   defp method(line) do

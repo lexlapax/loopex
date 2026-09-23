@@ -195,6 +195,81 @@ defmodule LoopexCli.LiveRecoveryTest do
     stop_daemon(daemon)
   end
 
+  # Concept: a resume whose reply was lost is re-presented with the same
+  # identity; when a replacement daemon replays it as already applied but the
+  # session is dormant again, that identity is retired for one new identity,
+  # which is itself re-presented after a loss rather than replaced, and exactly
+  # one coordinator is activated.
+  #
+  # Technical depth: a session is created by an earlier daemon lifetime, so it
+  # is dormant. The proxy loses the reply to the first resume request and
+  # drops the third before it reaches the daemon. After the first loss the
+  # daemon is stopped and a replacement started on the same root. The command
+  # sends resume identities A, A, B, B, ends successfully, and the replacement
+  # daemon reports one activation.
+  @tag timeout: 180_000
+  test "a resume replayed across a daemon replacement retires one identity for one more",
+       context do
+    first = start_daemon(context, launch("unused", "resume-first"))
+    session_id = create_via_socket(context.socket, "resume-create")
+    stop_daemon(first)
+
+    second = start_daemon(context, launch("unused", "resume-second"))
+
+    proxy =
+      DaemonProxy.start(context.socket, [
+        {"session.resume", {:nth, [1]}},
+        {{:before, "session.resume"}, {2, 1}}
+      ])
+
+    command = Task.async(fn -> run(["resume", "--daemon", proxy.path, session_id]) end)
+
+    assert_receive {:proxy_lost, "session.resume", 1}, 30_000
+    stop_daemon(second)
+    replacement = start_daemon(context, launch("unused", "resume-replacement"))
+
+    {result, output} = Task.await(command, 120_000)
+    assert result == :ok, output
+
+    resumes =
+      for {"session.resume", command_id} <- DaemonProxy.commands(proxy), do: command_id
+
+    assert [a, a, b, b] = resumes
+    refute a == b
+    assert daemon_status(context.socket)["activations_used"] == 1
+    stop_daemon(replacement)
+  end
+
+  defp daemon_status(socket) do
+    {:ok, client} = LoopexCli.DaemonClient.connect(socket)
+
+    try do
+      {:ok, %{"result" => status}, _client} =
+        LoopexCli.DaemonClient.request(client, "daemon.status", %{})
+
+      status
+    after
+      LoopexCli.DaemonClient.close(client)
+    end
+  end
+
+  defp create_via_socket(socket, label) do
+    {:ok, client} = LoopexCli.DaemonClient.connect(socket)
+
+    try do
+      {:ok, %{"status" => "accepted", "session_id" => encoded}, _client} =
+        LoopexCli.DaemonClient.request(client, "session.create", %{
+          "command_id" => LoopexProtocol.Wire.encode_identity(label),
+          "session_options" => %{}
+        })
+
+      {:ok, session_id} = LoopexProtocol.Wire.identity(encoded)
+      session_id
+    after
+      LoopexCli.DaemonClient.close(client)
+    end
+  end
+
   # Concept: recovery has one clock, started at the first loss; a daemon that
   # never becomes reachable again ends the command when it runs out, naming
   # what is unresolved, rather than retrying forever.

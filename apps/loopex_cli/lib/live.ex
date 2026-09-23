@@ -42,6 +42,7 @@ defmodule LoopexCli.Live do
   alias LoopexProtocol.Wire
 
   @renewal_ms 10_000
+  @expiry_resolution_ms 1_000
   @takeover_retry_ms 1_000
   @live :loopex_cli_live
   @stream_reconnect_deadline_ms 35_000
@@ -349,6 +350,7 @@ defmodule LoopexCli.Live do
       busy: false,
       end_at: nil,
       first_loss: nil,
+      last_loss: nil,
       client: nil,
       epoch: nil,
       lease_deadline: nil,
@@ -405,9 +407,11 @@ defmodule LoopexCli.Live do
     first = state.first_loss || now_ms()
 
     # A mutation whose answer was lost may have extended the lease up to the
-    # loss itself, so only the lease-term cap from the loss is known.
+    # loss itself, so only the lease-term cap from this latest loss is known;
+    # a lease granted or extended during an earlier recovery can outlive a cap
+    # taken from the first loss.
     unconfirmed? = Enum.any?(state.steps, &(&1.status == :sent_unconfirmed))
-    state = %{state | first_loss: first}
+    state = %{state | first_loss: first, last_loss: now_ms()}
     state = if unconfirmed?, do: %{state | lease_deadline: nil}, else: state
     remaining = first + @stream_reconnect_deadline_ms - now_ms()
 
@@ -577,10 +581,19 @@ defmodule LoopexCli.Live do
   # admission, which happened before its answer arrived here.
   defp extended(state), do: %{state | lease_deadline: now_ms() + @lease_term_ms}
 
-  defp recovery_limit(%{first_loss: first, lease_deadline: nil}), do: first + @lease_term_ms
+  # Concept: the command waits for its own lease only as long as that lease
+  # can last, plus the moment the daemon takes to resolve an expiry after its
+  # deadline; past that, a refusal means another client holds control.
+  #
+  # Technical depth: the daemon resolves expiry through its owner after the
+  # deadline passes, so an acquisition at the deadline itself can still meet
+  # the lapsed lease. The fixed margin covers that resolution; the 35-second
+  # recovery clock from the first loss still bounds the whole wait.
+  defp recovery_limit(%{last_loss: loss, lease_deadline: nil}),
+    do: loss + @lease_term_ms + @expiry_resolution_ms
 
-  defp recovery_limit(%{first_loss: first, lease_deadline: deadline}),
-    do: min(deadline, first + @lease_term_ms)
+  defp recovery_limit(%{last_loss: loss, lease_deadline: deadline}),
+    do: min(deadline, loss + @lease_term_ms) + @expiry_resolution_ms
 
   defp ensure_attached(state, resumes) do
     case request(state, "session.attach", %{
