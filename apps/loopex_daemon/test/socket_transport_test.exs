@@ -577,6 +577,30 @@ defmodule LoopexDaemon.SocketTransportTest do
     refute Enum.any?(attached, &closed?(&1, 10))
   end
 
+  # Concept: a client that offers only an older generation — the released
+  # `0.1.0` name or generation one — is refused at initialize, and nothing it
+  # sends afterwards creates anything.
+  test "an older generation is refused and creates nothing", %{daemon: daemon} do
+    for {offer, index} <-
+          Enum.with_index(["loopex.session.v1-experimental", "loopex.experimental/1"]) do
+      client = connect(daemon)
+
+      :ok =
+        send_frame(client, %{
+          "method" => "initialize",
+          "request_id" => "old-#{index}",
+          "generations" => [offer],
+          "capabilities" => []
+        })
+
+      assert [%{"code" => "unsupported_generation"}] = receive_records(client, 1)
+      :ok = send_frame(client, create("late-#{index}", "late-create-#{index}", %{}))
+      assert [%{"request_id" => "late-" <> _}] = receive_records(client, 1)
+    end
+
+    assert %{activations_used: 0, active_sessions: 0} = ConnectionRegistry.status(daemon.registry)
+  end
+
   test "resource queries and artifact transfers answer or refuse over the socket",
        %{daemon: daemon} do
     client = initialized_client(daemon)
