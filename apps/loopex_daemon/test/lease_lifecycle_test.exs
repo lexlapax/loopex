@@ -187,6 +187,32 @@ defmodule LoopexDaemon.LeaseLifecycleTest do
              receive_until(controller, &(&1["request_id"] == "owned"))
   end
 
+  # Concept: once the daemon has cut admission to stop, a mutation still sent
+  # on an open connection is refused `daemon_stopping` on the wire and never
+  # reaches the session.
+  #
+  # Technical depth: the controller holds the lease and is attached; the
+  # daemon's owner takes the admission cut exactly as the service's orderly
+  # stop does. The controller's next prompt is answered `daemon_stopping`, and
+  # the session's durable sequence does not move.
+  test "after the admission cut a mutation is refused daemon_stopping",
+       %{daemon: daemon, runtime: runtime} do
+    client = initialized_client(daemon)
+    session_id = create_session(client, "cut-create")
+    {epoch, _at} = acquire!(client, session_id)
+    :ok = send_frame(client, attach("watch", session_id))
+    assert [%{"request_id" => "watch", "type" => "snapshot"}] = receive_records(client, 1)
+    before = event_sequence(runtime, session_id)
+
+    assert {:ok, _cut} = LoopexDaemon.Owner.cut_admission(daemon.owner)
+    :ok = send_frame(client, prompt("late", "cut-prompt", epoch))
+
+    assert [%{"request_id" => "late", "code" => "daemon_stopping"}] =
+             receive_until(client, &(&1["request_id"] == "late"))
+
+    assert event_sequence(runtime, session_id) == before
+  end
+
   defp acquire!(client, session_id) do
     :ok = send_frame(client, acquire("acquire", session_id))
 
