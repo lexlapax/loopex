@@ -406,6 +406,74 @@ defmodule LoopexCli.LiveRecoveryTest do
     stop_daemon(daemon)
   end
 
+  # Concept: a recovering controller never forces a live holder off: when
+  # another client took control after its own lease lapsed, it ends saying so
+  # rather than retrying against that holder.
+  #
+  # Technical depth: the prompt's reply is lost, and every reconnection's
+  # acquisition is refused while this test's own client waits for the lapsed
+  # lease and takes it. The command then ends with an error naming another
+  # client as the controller.
+  @tag timeout: 120_000
+  test "a recovering controller yields to a client that took over", context do
+    provider =
+      ProviderFixture.new(:delayed_entry,
+        credential: @credential,
+        response_bodies: [text_response("taken answer", "msg_recovery_taken")]
+      )
+
+    launch =
+      Keyword.drop(provider.options, [
+        :credential_token,
+        :credential_registry,
+        :tracing_capability
+      ])
+
+    daemon = start_daemon(context, launch)
+    proxy = DaemonProxy.start(context.socket, [{"session.prompt", 1}])
+    command = Task.async(fn -> run(["run", "--daemon", proxy.path, "go"]) end)
+    assert_receive {:proxy_lost, "session.prompt", 1}, 30_000
+    session_id = listed_session(context.socket)
+    {:ok, rival} = LoopexCli.DaemonClient.connect(context.socket)
+    assert take_over(rival, session_id, 200)
+
+    {result, _output} = Task.await(command, 90_000)
+    assert result == {:error, "another client now controls this session"}
+    LoopexCli.DaemonClient.close(rival)
+    ProviderFixture.release(provider)
+    stop_daemon(daemon)
+  end
+
+  defp take_over(client, session_id, attempts) do
+    case LoopexCli.DaemonClient.request(client, "session.acquire_control", %{
+           "session_id" => LoopexProtocol.Wire.encode_identity(session_id)
+         }) do
+      {:ok, %{"type" => "result"}, _client} ->
+        true
+
+      {:ok, _refused, _client} when attempts > 0 ->
+        Process.sleep(250)
+        take_over(client, session_id, attempts - 1)
+
+      _other ->
+        false
+    end
+  end
+
+  defp listed_session(socket) do
+    {:ok, client} = LoopexCli.DaemonClient.connect(socket)
+
+    try do
+      {:ok, %{"result" => %{"entries" => [%{"session_id" => encoded}]}}, _client} =
+        LoopexCli.DaemonClient.request(client, "session.list", %{"limit" => 1})
+
+      {:ok, session_id} = LoopexProtocol.Wire.identity(encoded)
+      session_id
+    after
+      LoopexCli.DaemonClient.close(client)
+    end
+  end
+
   @tag timeout: 120_000
   test "a lost listing reply is asked once more and printed once", context do
     daemon = start_daemon(context, launch("listed answer", "listed"))
