@@ -128,6 +128,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
     {:ok, events} = Agent.start_link(fn -> [] end)
     {:ok, transport_events} = Agent.start_link(fn -> [] end)
     {:ok, probe_events} = Agent.start_link(fn -> [] end)
+    {:ok, request_headers} = Agent.start_link(fn -> [] end)
     {:ok, probe_listener} = :gen_tcp.listen(0, [:binary, active: false, ip: {127, 0, 0, 1}])
     {:ok, {_address, probe_port}} = :inet.sockname(probe_listener)
 
@@ -183,7 +184,14 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
 
     acceptor =
       spawn_link(fn ->
-        accept_loop(listener, events, transport_events, mode, expected, responses)
+        accept_loop(
+          listener,
+          {events, request_headers},
+          transport_events,
+          mode,
+          expected,
+          responses
+        )
       end)
 
     if mode == :closed_port, do: :gen_tcp.close(listener)
@@ -191,6 +199,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
     fixture = %{
       root: root,
       events: events,
+      request_headers: request_headers,
       transport_events: transport_events,
       probe_events: probe_events,
       listener: listener,
@@ -220,6 +229,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
         if Process.alive?(events), do: Agent.stop(events)
         if Process.alive?(transport_events), do: Agent.stop(transport_events)
         if Process.alive?(probe_events), do: Agent.stop(probe_events)
+        if Process.alive?(request_headers), do: Agent.stop(request_headers)
         if Runtime.alive?(runtime), do: Loopex.stop(runtime)
         stop_if_alive(workers)
         stop_if_alive(capability_pid)
@@ -416,6 +426,10 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
 
   def events(fixture), do: Agent.get(fixture.events, &Enum.reverse/1)
   def transport_events(fixture), do: Agent.get(fixture.transport_events, &Enum.reverse/1)
+
+  # The raw request headers the fake provider received, in order. Tests that
+  # use them carry only synthetic credentials.
+  def request_headers(fixture), do: Agent.get(fixture.request_headers, &Enum.reverse/1)
   def probe_events(fixture), do: Agent.get(fixture.probe_events, &Enum.reverse/1)
   def count(fixture), do: length(events(fixture))
   def credential(fixture), do: fixture.credential
@@ -1235,10 +1249,11 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
   defp next_response({:sequence, [response_body | rest]}), do: {response_body, {:sequence, rest}}
   defp next_response({:sequence, []} = responses), do: {:sequence_exhausted, responses}
 
-  defp serve(socket, events, transport_events, mode, expected, response_body) do
+  defp serve(socket, {events, request_headers}, transport_events, mode, expected, response_body) do
     with {:ok, headers, body} <- read_request(socket, "") do
       authorized = is_binary(expected) and String.contains?(headers, expected)
       Agent.update(events, &[{Jason.decode!(body), authorized} | &1])
+      Agent.update(request_headers, &[headers | &1])
 
       case mode do
         :backpressure ->

@@ -424,6 +424,39 @@ defmodule Loopex.LLM.ReqLLM.CredentialPlaneTest do
 
     # C10: the second key is already live before the first child emits ONE event
     # containing both. Derivation happens solely in child memory, not in script.
+    # Concept: two credential planes in one VM stay apart: each isolated
+    # provider child receives its own plane's credential and never the other
+    # plane's, even while both are live.
+    #
+    # Technical depth: two fixtures each compose their own custody, routing
+    # registry and token with a distinct synthetic key, and both invocations
+    # are started before either completes. The fake provider records the raw
+    # request headers each child sent: each carries only its own key.
+    test "two live credential planes each deliver only their own credential" do
+      first_key = @sentinel <> "-plane-a"
+      second_key = @sentinel <> "-plane-b"
+      first = Fixture.new(:reply, credential: first_key)
+      second = Fixture.new(:reply, credential: second_key)
+
+      first_call = Fixture.managed(first)
+      second_call = Fixture.managed(second)
+      await_reply(first_call)
+      await_reply(second_call)
+
+      assert [first_headers] = Fixture.request_headers(first)
+      assert [second_headers] = Fixture.request_headers(second)
+      assert first_headers =~ first_key
+      refute first_headers =~ second_key
+      assert second_headers =~ second_key
+      refute second_headers =~ first_key
+
+      for {fixture, call} <- [{first, first_call}, {second, second_call}] do
+        Fixture.stop(call)
+        assert_post(fixture)
+        Fixture.assert_gone(fixture)
+      end
+    end
+
     test "one child diagnostic containing two concurrently live synthetic keys cannot escape" do
       second_key = @sentinel <> "-second"
       first_key = @sentinel <> "-first"
