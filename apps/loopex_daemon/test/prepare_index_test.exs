@@ -27,6 +27,36 @@ defmodule LoopexDaemon.PrepareIndexTest do
     assert PrepareIndex.run(context.root, install_signals: false) == {:ok, 1}
   end
 
+  # Concept: the strict reader holds each legacy entry to the released
+  # bounds: 4,096 recorded commands are read and one more refuses the root, an
+  # entry over 1 MiB refuses it, and an identifier that is not UTF-8 refuses it.
+  test "the strict reader enforces the command, size and UTF-8 bounds", context do
+    sessions = Path.join(context.root, "sessions")
+    File.mkdir_p!(sessions)
+    entry = Path.join(sessions, "s-bound")
+
+    write = fn term -> File.write!(entry, :erlang.term_to_binary(term)) end
+    commands = fn count -> Map.new(1..count, &{"c-#{&1}", "s-bound"}) end
+
+    write.(%{session_id: "s-bound", runtime_id: "placement-a", commands: commands.(4_096)})
+
+    assert {:ok, [%{session_id: "s-bound", placement_identity: "placement-a"}]} =
+             LegacyImport.scan(context.root, context.uid)
+
+    write.(%{session_id: "s-bound", runtime_id: "placement-a", commands: commands.(4_097)})
+    assert {:error, :session_index_corrupt} = LegacyImport.scan(context.root, context.uid)
+
+    write.(%{session_id: "s-bound", runtime_id: <<0xFF, 0xFE>>, commands: %{}})
+    assert {:error, :session_index_corrupt} = LegacyImport.scan(context.root, context.uid)
+
+    # Otherwise valid — 4,096 commands with 256-byte identifiers — but over the
+    # 1 MiB entry ceiling, so only the size can refuse it.
+    long = Map.new(1..4_096, &{String.pad_leading("#{&1}", 256, "c"), "s-bound"})
+    write.(%{session_id: "s-bound", runtime_id: "placement-a", commands: long})
+    assert File.stat!(entry).size > 1_048_576
+    assert {:error, :session_index_corrupt} = LegacyImport.scan(context.root, context.uid)
+  end
+
   test "a legacy root imports every recorded session and then starts", context do
     :ok = Loopex.track_session(context.root, "s-one", "placement-a")
     :ok = Loopex.track_session(context.root, "s-two", "placement-a")
