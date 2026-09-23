@@ -104,6 +104,33 @@ defmodule LoopexDaemon.ServiceLifecycleTest do
     :ok = GenServer.stop(adapter)
   end
 
+  # Concept: losing the listener after readiness is a daemon failure: the
+  # daemon tells every connected client why it is stopping and ends with the
+  # listener's own exit class.
+  #
+  # Technical depth: the listener the service started is killed while an
+  # initialized client is connected. The client receives `daemon.stopping`
+  # with `fatal:listener_lost` and the sentinel exits `listener_lost` (107).
+  test "losing the listener after readiness fail-stops with listener_lost",
+       %{options: options, state_root: state_root} do
+    daemon = start_daemon(options)
+    _ready = await_ready(daemon.output)
+    client = initialized(options[:socket_path])
+
+    listener = :sys.get_state(daemon.owner).pids.listener
+    Process.exit(listener, :kill)
+
+    assert [%{"type" => "daemon.stopping", "reason" => "fatal:listener_lost"}] =
+             receive_records(client, 1)
+
+    {:ok, listener_lost} = LoopexDaemon.ExitStatus.fetch(:listener_lost)
+    assert Task.await(daemon.task, 60_000) == listener_lost
+
+    # A fail-stop leaves the host placement lock to the daemon process's own
+    # exit; here that process is this test's VM, which still holds it.
+    assert {:ok, _holder} = Placement.live_owner(state_root)
+  end
+
   test "a second daemon on a held root loses at the placement lock",
        %{options: options} do
     first = start_daemon(options)
