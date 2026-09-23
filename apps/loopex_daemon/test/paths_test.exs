@@ -32,6 +32,39 @@ defmodule LoopexDaemon.PathsTest do
              Paths.startup(root, Path.join([expanded, "daemon", ".."]))
   end
 
+  # Concept: the socket path limit is the platform's own, stated literally, and
+  # a path exactly at it really binds while one byte more is refused.
+  #
+  # Technical depth: Darwin's `sun_path` holds 103 pathname bytes and Linux's
+  # 107. A socket is bound and listened on at exactly that length through the
+  # daemon's own parked-listener opener, and the next byte refuses
+  # `socket_path_too_long` before anything is bound.
+  test "the literal platform limit binds exactly and refuses one byte more" do
+    expected =
+      case :os.type() do
+        {:unix, :darwin} -> 103
+        {:unix, :linux} -> 107
+      end
+
+    assert {:ok, ^expected} = Paths.socket_path_limit()
+
+    root = Path.join("/tmp", "lpb-#{System.unique_integer([:positive])}")
+    on_exit(fn -> File.rm_rf(root) end)
+    directory = Path.join(root, "daemon")
+    File.mkdir_p!(directory)
+    File.chmod!(directory, 0o700)
+    at_limit = Path.join(directory, String.duplicate("a", expected - byte_size(directory) - 1))
+    assert byte_size(at_limit) == expected
+
+    assert {:ok, %{socket_path: ^at_limit}} = Paths.startup(root, at_limit)
+    assert {:ok, socket} = LoopexDaemon.ListenerSocket.open_parked(at_limit, File.stat!(root).uid)
+    assert {:ok, %File.Stat{type: :other}} = File.lstat(at_limit)
+    :socket.close(socket)
+
+    assert {:error, {:socket_path_too_long, ^expected}} = Paths.startup(root, at_limit <> "b")
+    refute File.exists?(at_limit <> "b")
+  end
+
   test "the platform limit is enforced on encoded pathname bytes without truncation" do
     assert {:ok, limit} = Paths.socket_path_limit()
     root_prefix = Path.join(System.tmp_dir!(), "loopex-daemon-bound")
