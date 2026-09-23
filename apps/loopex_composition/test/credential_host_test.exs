@@ -99,6 +99,33 @@ defmodule LoopexComposition.CredentialHostTest do
     assert System.get_env(context.variable) == nil
   end
 
+  # Concept: a workspace-scoped child a host starts never inherits the
+  # credential, even while the variable is still set.
+  test "project-resource discovery runs git without the credential", context do
+    fake = Path.join(context.root, "fake-bin")
+    File.mkdir_p!(fake)
+    dump = Path.join(context.root, "git-env")
+    script = Path.join(fake, "git")
+    File.write!(script, "#!/bin/sh\nenv > \"#{dump}\"\nexit 1\n")
+    File.chmod!(script, 0o755)
+    File.write!(Path.join(context.workspace, "AGENTS.md"), "Be careful.\n")
+
+    previous_path = System.get_env("PATH")
+    System.put_env("PATH", fake <> ":" <> previous_path)
+    System.put_env(context.variable, "discovery-canary")
+
+    try do
+      assert %{workspace: %{revision: nil}} =
+               LoopexComposition.ProjectResources.discover(context.workspace)
+    after
+      System.put_env("PATH", previous_path)
+    end
+
+    environment = File.read!(dump)
+    refute environment =~ "discovery-canary"
+    refute environment =~ context.variable
+  end
+
   defp collect(messages) do
     receive do
       {:trace, _pid, :call, _mfa} = message ->

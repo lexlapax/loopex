@@ -54,20 +54,67 @@ defmodule LoopexComposition.CredentialHost do
     System.delete_env(variable)
 
     if is_binary(credential) and byte_size(credential) in 1..@max_credential_bytes do
-      with {:ok, registry_pid} <- CredentialRegistry.start_link([]),
-           {:ok, registry} <- CredentialRegistry.handle(registry_pid),
-           {:ok, custody_pid} <- CredentialCustody.start_link(credential: credential),
-           {:ok, custody} <- CredentialCustody.reference(custody_pid),
-           token = CredentialToken.new(),
-           :ok <- CredentialRegistry.put(registry, token, custody) do
-        Logger.debug("reference host provider credential consumed")
-        {:ok, %__MODULE__{registry: registry, token: token}}
-      end
+      open_custody(credential)
     else
       Logger.debug("reference host provider credential absent")
       {:error, :provider_credential_required}
     end
   end
+
+  # A partial start stops what it started, so no orphaned custody keeps the
+  # credential for the rest of the host's life.
+  defp open_custody(credential) do
+    with {:ok, registry_pid} <- CredentialRegistry.start_link([]),
+         {:ok, custody_pid} <- start_custody(registry_pid, credential),
+         result = register(registry_pid, custody_pid) do
+      result
+    end
+  end
+
+  defp start_custody(registry_pid, credential) do
+    case CredentialCustody.start_link(credential: credential) do
+      {:ok, custody_pid} ->
+        {:ok, custody_pid}
+
+      failure ->
+        stop_quietly(registry_pid)
+        failure
+    end
+  end
+
+  defp register(registry_pid, custody_pid) do
+    with {:ok, registry} <- CredentialRegistry.handle(registry_pid),
+         {:ok, custody} <- CredentialCustody.reference(custody_pid),
+         token = CredentialToken.new(),
+         :ok <- CredentialRegistry.put(registry, token, custody) do
+      Logger.debug("reference host provider credential consumed")
+      {:ok, %__MODULE__{registry: registry, token: token}}
+    else
+      failure ->
+        stop_quietly(custody_pid)
+        stop_quietly(registry_pid)
+        Logger.debug("reference host credential custody start failed")
+        failure
+    end
+  end
+
+  defp stop_quietly(pid) do
+    Process.unlink(pid)
+    Process.exit(pid, :kill)
+  end
+
+  @doc """
+  ## Concept
+
+  Removes the credential from a host process that will compose no runtime, so
+  no child it starts can inherit it.
+
+  ## Technical depth
+
+  Deletes `LOOPEX_PROVIDER_API_KEY` without reading it.
+  """
+  @spec discard() :: :ok
+  def discard, do: System.delete_env(ReqLLM.credential_variable())
 
   @doc """
   ## Concept

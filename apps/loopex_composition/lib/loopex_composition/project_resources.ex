@@ -450,7 +450,11 @@ defmodule LoopexComposition.ProjectResources do
   # not a repository has no revision, and `nil` is the honest answer rather than
   # a placeholder that would make two different trees look like one.
   defp revision(workspace) do
-    case System.cmd("git", ["-C", workspace, "rev-parse", "HEAD"], stderr_to_stdout: true) do
+    # The provider credential never enters a workspace-scoped child.
+    case System.cmd("git", ["-C", workspace, "rev-parse", "HEAD"],
+           stderr_to_stdout: true,
+           env: [{Loopex.LLM.ReqLLM.credential_variable(), nil}]
+         ) do
       {output, 0} -> String.trim(output)
       _absent -> nil
     end

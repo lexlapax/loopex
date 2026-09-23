@@ -53,6 +53,7 @@ defmodule LoopexCli do
   def main(["daemon" | arguments]), do: LoopexCli.Daemon.main(arguments)
 
   def main(argv) do
+    unless composes_offline?(argv), do: LoopexComposition.CredentialHost.discard()
     result = dispatch(argv, install_live_signals: true)
     release_placement()
     halt(result)
@@ -100,6 +101,14 @@ defmodule LoopexCli do
 
   def dispatch([unknown | _rest], _options),
     do: {:error, "unknown command #{unknown}\n\n" <> usage()}
+
+  # Concept: only an offline command that composes a runtime needs the
+  # credential; every other command removes it before doing anything, so no
+  # child it starts can inherit it.
+  defp composes_offline?([command | rest]) when command in ~w(run resume cancel),
+    do: not LoopexCli.Live.daemon_form?(rest)
+
+  defp composes_offline?(_argv), do: false
 
   # Concept: `--daemon` selects the live grammar before any offline flag is
   # admitted, so the offline forms keep their released grammar untouched.
@@ -1372,8 +1381,9 @@ defmodule LoopexCli do
     end
   end
 
-  defp runtime_options(flags, policy, _options, resource_manifest) do
-    with {:ok, workspace} <- workspace(flags),
+  defp runtime_options(flags, policy, options, resource_manifest) do
+    with :ok <- consume_credential(options),
+         {:ok, workspace} <- workspace(flags),
          {:ok, root} <- state_root(flags),
          {:ok, cleanup} <- cleanup_grace(flags),
          {:ok, context} <- context_token_budget(flags),
@@ -1468,6 +1478,21 @@ defmodule LoopexCli do
   defp hosted_plane do
     with {:ok, host} <- credential_host(),
          do: LoopexComposition.CredentialHost.plane(host)
+  end
+
+  # Concept: the credential is taken into custody before this command starts
+  # any child process, so no discovery or probe child ever inherits it.
+  #
+  # Technical depth: an injected runtime starter composes nothing here, so a
+  # case that supplies one needs no credential.
+  defp consume_credential(options) do
+    if Keyword.has_key?(options, :runtime_starter) do
+      :ok
+    else
+      with {:ok, _host} <- credential_host(),
+           do: :ok,
+           else: ({:error, reason} -> {:error, reason})
+    end
   end
 
   defp credential_host do

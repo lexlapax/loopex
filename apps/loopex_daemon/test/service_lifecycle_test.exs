@@ -47,6 +47,9 @@ defmodule LoopexDaemon.ServiceLifecycleTest do
     assert ready["socket"] == options[:socket_path]
     assert ready["version"] == "0.2.0"
 
+    # Custody holds the one copy of the credential; the owner keeps none.
+    refute Keyword.has_key?(:sys.get_state(daemon.owner).options, :credential)
+
     client = initialized(options[:socket_path])
 
     :ok =

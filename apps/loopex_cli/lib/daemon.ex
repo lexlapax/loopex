@@ -61,9 +61,13 @@ defmodule LoopexCli.Daemon do
   """
   @spec run([binary()], keyword()) :: non_neg_integer()
   def run(arguments, options \\ []) when is_list(arguments) do
+    # The credential leaves the environment before any input is checked or any
+    # child can start, whichever form this is.
+    credential = credential(options)
+
     case Command.parse(arguments) do
       {:ok, {:start, flags}} ->
-        start(flags, options)
+        start(flags, Keyword.put(options, :resolved_credential, credential))
 
       {:ok, {:prepare_index, flags}} ->
         prepare_index(flags, options)
@@ -83,7 +87,7 @@ defmodule LoopexCli.Daemon do
          {:ok, launch} <- provider_launch(flags, env),
          {:ok, policy} <- policy(flags, env),
          {:ok, grace} <- cleanup_grace(flags),
-         {:ok, credential} <- credential(options),
+         {:ok, credential} <- Keyword.fetch!(options, :resolved_credential),
          {:ok, skills} <- resource_manifest(workspace, paths.state_root) do
       discovered = ProjectResources.discover(workspace)
 

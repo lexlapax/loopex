@@ -535,7 +535,7 @@ defmodule LoopexComposition.Placement do
     try do
       case System.cmd(probe, ["-o", "lstart=", "-p", pid],
              stderr_to_stdout: true,
-             env: [{"LC_ALL", "C"}]
+             env: [{"LC_ALL", "C"}, {Loopex.LLM.ReqLLM.credential_variable(), nil}]
            ) do
         {output, 0} ->
           case String.trim(output) do

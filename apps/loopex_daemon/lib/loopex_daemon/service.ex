@@ -319,6 +319,9 @@ defmodule LoopexDaemon.Service do
       }
 
       Logger.debug("loopex daemon credential plane started")
+
+      # Custody now holds the one copy; the owner keeps none.
+      state = %{state | options: Keyword.delete(state.options, :credential)}
       {:ok, put_in(state, [:components, :credential_plane], plane)}
     else
       _failure -> {:stop, {:fatal, :credential_plane_start_failed}, state}
