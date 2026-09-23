@@ -12,9 +12,11 @@ defmodule LoopexCli.Test.DaemonProxy do
   # `{method, count}`: the next `count` requests with that method are each
   # followed by one lost reply. `{{:before, method}, count}` instead closes the
   # connection without forwarding the request, so the daemon never sees it. Every other byte is forwarded unchanged. The
-  # proxy records each request it saw, in order, for the test to inspect.
+  # proxy records each request it saw, in order, for the test to inspect. An
+  # optional `rewrite` function sees each chunk the daemon sends before the
+  # client does, so a test can present a daemon answer it cannot easily cause.
 
-  def start(daemon_path, cuts) do
+  def start(daemon_path, cuts, rewrite \\ & &1) do
     path = Path.join("/tmp", "ldp-#{System.unique_integer([:positive])}.sock")
     parent = self()
 
@@ -24,7 +26,7 @@ defmodule LoopexCli.Test.DaemonProxy do
           :gen_tcp.listen(0, [:binary, {:ifaddr, {:local, path}}, active: false])
 
         send(parent, {:proxy_listening, self()})
-        accept(listener, daemon_path, %{cuts: Map.new(cuts), seen: []})
+        accept(listener, daemon_path, %{cuts: Map.new(cuts), seen: [], rewrite: rewrite})
       end)
 
     receive do
@@ -93,7 +95,7 @@ defmodule LoopexCli.Test.DaemonProxy do
         end
 
       {:tcp, ^daemon, bytes} ->
-        :ok = :gen_tcp.send(client, bytes)
+        :ok = :gen_tcp.send(client, state.rewrite.(bytes))
         relay(client, daemon, state)
 
       {:tcp_closed, _socket} ->
