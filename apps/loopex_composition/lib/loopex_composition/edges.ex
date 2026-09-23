@@ -39,17 +39,39 @@ defmodule LoopexComposition.Edges do
           {:ok, map()} | {:error, term()}
   def credential_plane(options, start_edge) do
     case Keyword.fetch(options, :credential_plane) do
-      {:ok, %{capability: _capability, model_options: model_options} = plane}
-      when is_list(model_options) ->
-        {:ok, plane}
-
-      {:ok, _invalid} ->
-        {:error, {:invalid_composition_option, :credential_plane}}
+      {:ok, plane} ->
+        if valid_plane?(plane),
+          do: {:ok, plane},
+          else: {:error, {:invalid_composition_option, :credential_plane}}
 
       :error ->
         CredentialPlane.open(start_edge)
     end
   end
+
+  # Concept: a host-supplied credential plane is checked exactly before any
+  # edge starts, so a malformed handle can never reach the runtime.
+  #
+  # Technical depth: the plane holds only `capability`, `model_options` and
+  # the optional host-owned `capability_pid`; the model options are exactly the
+  # opaque token, the routing-registry handle and that same capability, each
+  # accepted only by its own validator.
+  defp valid_plane?(%{capability: capability, model_options: model_options} = plane)
+       when is_list(model_options) do
+    Map.keys(plane) -- [:capability, :model_options, :capability_pid] == [] and
+      Enum.sort(Keyword.keys(model_options)) ==
+        [:credential_registry, :credential_token, :tracing_capability] and
+      length(model_options) == 3 and
+      Loopex.Trace.Capability.validate(capability) == :ok and
+      Keyword.fetch!(model_options, :tracing_capability) == capability and
+      Loopex.LLM.ReqLLM.CredentialToken.validate(Keyword.fetch!(model_options, :credential_token)) ==
+        :ok and
+      Loopex.LLM.ReqLLM.CredentialRegistry.validate(
+        Keyword.fetch!(model_options, :credential_registry)
+      ) == :ok
+  end
+
+  defp valid_plane?(_plane), do: false
 
   @doc false
   @spec start(term(), term(), (term() -> term()), (term() -> term())) ::

@@ -122,8 +122,14 @@ defmodule Mix.Tasks.Loopex.Provider.Build do
   # Concept: a checkout or an archive, the build names the source it proves.
   defp source_identity!(root) do
     case Mix.LoopexSourceIdentity.resolve(root) do
-      {:ok, identity} -> identity
-      {:error, reason} -> Mix.raise("provider build refused: #{reason}")
+      {:ok, identity} ->
+        identity
+
+      {:error, :source_checkout_dirty} ->
+        Mix.raise("provider build requires a clean source checkout: source_checkout_dirty")
+
+      {:error, reason} ->
+        Mix.raise("provider build refused: #{reason}")
     end
   end
 

@@ -149,6 +149,18 @@ defmodule Loopex.LLM.ReqLLM.CredentialCustody do
     {:reply, {:error, :unavailable}, state}
   end
 
+  # Concept: a request this process does not recognize is refused, never a
+  # crash: a crash's exit reason carries its arguments and state to every
+  # monitor and linked owner, and GenServer's default for an unexpected
+  # message logs its content. Either could carry credential bytes.
+  def handle_call(_request, _from, state), do: {:reply, {:error, :unavailable}, state}
+
+  @impl GenServer
+  def handle_cast(_request, state), do: {:noreply, state}
+
+  @impl GenServer
+  def handle_info(_message, state), do: {:noreply, state}
+
   @impl GenServer
   def format_status(status) do
     status
