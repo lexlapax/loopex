@@ -127,6 +127,51 @@ defmodule Loopex.TraceSessionTest do
     assert_receive {:trace, ^worker, :call, {Loopex.Trace.Config, :ceilings, _arguments}}, 1_000
   end
 
+  # Concept: a session traces a named module the runtime has not called yet,
+  # because the session loads it before installing its patterns.
+  #
+  # Technical depth: a module is compiled to a `.beam` file in a temporary code
+  # path directory and never loaded, so `:code.is_loaded/1` is false when the
+  # session starts. After the session starts it is loaded, and a call from a
+  # runtime-owned worker produces a `trace_call` entry naming it.
+  test "a session loads a named module that is not yet loaded and traces its calls" do
+    runtime = fixture(runtime_id: "trace-unloaded-module")
+    module = :"Elixir.Loopex.TraceSessionTest.Unloaded#{System.unique_integer([:positive])}"
+    directory = Path.join(System.tmp_dir!(), "ltu-#{System.unique_integer([:positive])}")
+    File.mkdir_p!(directory)
+
+    [{^module, binary}] =
+      Code.compile_string("""
+      defmodule #{inspect(module)} do
+        def call(parent), do: send(parent, {:unloaded_called, self()})
+      end
+      """)
+
+    :code.purge(module)
+    true = :code.delete(module)
+    :code.purge(module)
+    File.write!(Path.join(directory, "#{module}.beam"), binary)
+    true = Code.prepend_path(directory)
+
+    on_exit(fn ->
+      Code.delete_path(directory)
+      File.rm_rf(directory)
+    end)
+
+    assert :code.is_loaded(module) == false
+    assert {:ok, _status} = Loopex.trace(runtime, %{modules: [module], level: :calls})
+    assert {:file, _path} = :code.is_loaded(module)
+
+    {:ok, %{workers: workers}} = Runtime.children(runtime)
+    parent = self()
+    {:ok, worker} = Task.Supervisor.start_child(workers, fn -> module.call(parent) end)
+    assert_receive {:unloaded_called, ^worker}
+
+    entry = await_entry("trace_call")
+    assert entry["module"] == inspect(module)
+    assert entry["function"] == "call"
+  end
+
   test "each trace level reports its documented fields and the arguments level redacts credential references model content tool arguments and artifact bytes" do
     calls = fixture()
     assert {:ok, _status} = Loopex.trace(calls, %{modules: [@control], level: :calls})

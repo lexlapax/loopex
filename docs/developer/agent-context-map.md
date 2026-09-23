@@ -5672,3 +5672,19 @@ command's own `commit_unknown` when the capacity refusal lands mid-transaction;
 likewise a foreign-owned socket subdirectory at a real start, which needs a
 second user to own it, and overflow detachment driven through a real socket.
 Each is named in the plan's progress rows where it arises.
+
+<a id="disposition-m5-trace-loads-named-modules-2026-09-23"></a>
+### A trace session loads the modules it names — 2026-09-23
+
+OTP installs call patterns only for loaded modules, so a trace session that
+named an adapter the runtime had not called yet silently traced nothing; M5's
+provider-bridge trace case found it. On 2026-09-23 the maintainer chose, over
+documenting the gap or refusing an unloaded module, that the session loads
+what it names. The principle weighed is the product rule that only the VM
+generation manager performs code loading. The session calls
+`Code.ensure_loaded/1`, which loads installed code from the code path, as the
+Store, executor and artifact boundaries already do when they probe an adapter;
+it creates, replaces or purges no code generation, so that rule is unchanged.
+Compatibility impact: `Loopex.trace/2` keeps its shape and refusals, and a
+session now also observes named modules not yet called; a name no installed
+module answers to still traces nothing. No migration is needed.

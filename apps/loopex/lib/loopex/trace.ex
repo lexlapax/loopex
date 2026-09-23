@@ -682,19 +682,27 @@ defmodule Loopex.Trace do
     }
   end
 
-  # Concept: the session observes named modules inside owned processes only.
+  # Concept: the session observes named modules inside owned processes only,
+  # including a named module the runtime has not yet called.
   #
-  # Technical depth: call patterns are installed per module, and trace flags per
-  # owned process with `set_on_spawn`, so a session coordinator started later is
-  # covered and a process outside this runtime's tree never is. A session that
-  # cannot install its patterns is destroyed rather than left half-armed.
+  # Technical depth: OTP installs call patterns only for loaded modules, so the
+  # session first loads each named module from the installed code path with
+  # `Code.ensure_loaded/1`; a name no installed module answers to still traces
+  # nothing. This loads existing code, never a new code generation. Patterns are
+  # installed per module, and trace flags per owned process with
+  # `set_on_spawn`, so a session coordinator started later is covered and a
+  # process outside this runtime's tree never is. A session that cannot install
+  # its patterns is destroyed rather than left half-armed.
   defp create_session(config, snapshot, state) do
+    named = modules(config)
+    Enum.each(named, &Code.ensure_loaded/1)
+    Logger.debug("loopex trace session loaded its named modules")
     session = trace_apply(state, :session_create, [:loopex_trace, self(), []])
     identity = weak_identity(session)
     true = :ets.insert(state.session_table, {:session, session})
 
     try do
-      Enum.each(modules(config), fn module ->
+      Enum.each(named, fn module ->
         trace_apply(state, :function, [
           session,
           {module, :_, :_},

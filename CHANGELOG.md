@@ -212,8 +212,10 @@ Fix several daemon and live-command behaviours found while proving M5:
   first loss, which could make it report another client in control when there
   was none.
 
-A runtime trace session traces only modules loaded when it starts; the
-observability pages now say so.
+A trace session now loads each module it names before installing its call
+patterns, so an adapter the runtime has not called yet is traced from its first
+call instead of silently not at all. `Loopex.trace/2` keeps its shape and
+refusals; a name no installed module answers to still traces nothing.
 
 ## [0.1.0] — 2026-09-19
 

@@ -28,9 +28,8 @@ defmodule LoopexCli.TraceExclusionTest do
   #
   # Technical depth: a reference composition runs one prompt through a
   # scripted provider while a runtime trace session names the provider bridge
-  # at `:arguments` level with the logger as its sink. The bridge module is
-  # loaded before the session starts, because a trace session installs call
-  # patterns only for modules already loaded. Bridge entries appear, so the
+  # at `:arguments` level with the logger as its sink. Bridge entries appear,
+  # so the
   # session covered the invocation's processes; none names `route_credential`,
   # `receive_custody_reply` or `write_credential_frame`, and no captured line
   # carries the credential or its base64 form.
@@ -40,7 +39,6 @@ defmodule LoopexCli.TraceExclusionTest do
     workspace = Path.join(root, "w")
     File.mkdir_p!(workspace)
     on_exit(fn -> File.rm_rf(root) end)
-    Code.ensure_loaded!(Loopex.LLM.ReqLLM.ProviderBridge)
 
     provider =
       ProviderFixture.new(:reply,
