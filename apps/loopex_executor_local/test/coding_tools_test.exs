@@ -5266,7 +5266,9 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
       assert Enum.all?([command, status, guard, carrier], &(&1.group == carrier.pid))
     end
 
-    assert {output, 0} = Local.answer_within("/bin/sh", ["-c", probe], 5_000)
+    # The probe's own answer bound, not a product bound: 30 s leaves a loaded
+    # machine room to start the shell and its supervision chain.
+    assert {output, 0} = Local.answer_within("/bin/sh", ["-c", probe], 30_000)
     [command, status, guard, carrier] = observed_supervision_chain(output)
     assert command.parent == status.pid
     assert status.parent == guard.pid

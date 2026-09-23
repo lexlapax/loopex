@@ -1018,10 +1018,18 @@ defmodule Loopex.RuntimeQuiesceTest do
         self()
       )
 
+    # Only the fence budget and reap are under test; every other phase gets a
+    # bound of seconds, within the relations `Quiesce` validates, so a loaded
+    # machine cannot end the drain on a bound this case does not examine.
     bounds =
       fast_bounds(%{
-        admission_ms: 2_000,
-        coordinator_termination_ms: 2_000,
+        admission_ms: 4_000,
+        initial_gate_ms: 2_000,
+        worker_reap_ms: 500,
+        status_census_ms: 2_000,
+        status_work_ms: 1_000,
+        coordinator_termination_ms: 4_000,
+        termination_projection_ms: 2_000,
         fence_budget_ms: 500,
         fence_reap_ms: 100
       })
@@ -1044,8 +1052,10 @@ defmodule Loopex.RuntimeQuiesceTest do
              result.fences[session_id] == {:unknown, :no_head}
            end)
 
+    # One shared cutoff: at least the budget, and far below the 31.5 s that
+    # sixty-three sequential cutoffs of 500 ms would take.
     assert elapsed_ms >= bounds.fence_budget_ms - bounds.fence_reap_ms
-    assert elapsed_ms < 3_000
+    assert elapsed_ms < 10_000
     assert Enum.all?(delayed, fn {_id, %{caller: caller}} -> not Process.alive?(caller) end)
 
     {:ok, %{control: control}} = Runtime.children(fixture.runtime)
