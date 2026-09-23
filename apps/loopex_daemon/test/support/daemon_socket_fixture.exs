@@ -10,7 +10,10 @@ defmodule LoopexDaemon.Test.DaemonSocketFixture do
   @doc false
   def temporary_directory(prefix) do
     directory =
-      Path.join(System.tmp_dir!(), "#{prefix}-#{System.unique_integer([:positive, :monotonic])}")
+      Path.join(
+        System.tmp_dir!(),
+        "#{prefix}-#{Base.encode16(:crypto.strong_rand_bytes(6), case: :lower)}"
+      )
 
     File.mkdir!(directory)
     on_exit(fn -> File.rm_rf(directory) end)

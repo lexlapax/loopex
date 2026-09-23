@@ -116,7 +116,7 @@ defmodule LoopexDaemon.ListenerTest do
         end
       end)
 
-    assert_receive {:owner_listener, ^owner, listener}
+    assert_receive {:owner_listener, ^owner, listener}, 2_000
     monitor = Process.monitor(listener)
     Process.exit(owner, :kill)
     assert_receive {:DOWN, ^monitor, :process, ^listener, _reason}, 500
@@ -479,7 +479,7 @@ defmodule LoopexDaemon.ListenerTest do
     directory =
       Path.join(
         System.tmp_dir!(),
-        "loopex-listener-#{System.unique_integer([:positive, :monotonic])}"
+        "loopex-listener-#{Base.encode16(:crypto.strong_rand_bytes(6), case: :lower)}"
       )
 
     File.mkdir!(directory)

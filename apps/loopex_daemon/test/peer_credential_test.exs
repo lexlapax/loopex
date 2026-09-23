@@ -103,7 +103,7 @@ defmodule LoopexDaemon.PeerCredentialTest do
     path =
       Path.join(
         System.tmp_dir!(),
-        "loopex-daemon-peer-#{System.unique_integer([:positive, :monotonic])}"
+        "loopex-daemon-peer-#{Base.encode16(:crypto.strong_rand_bytes(6), case: :lower)}"
       )
 
     File.mkdir!(path)

@@ -82,7 +82,7 @@ defmodule LoopexDaemon.ListenerSocketTest do
     path =
       Path.join(
         System.tmp_dir!(),
-        "loopex-daemon-listener-#{System.unique_integer([:positive, :monotonic])}"
+        "loopex-daemon-listener-#{Base.encode16(:crypto.strong_rand_bytes(6), case: :lower)}"
       )
 
     File.mkdir!(path)

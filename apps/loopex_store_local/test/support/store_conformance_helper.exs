@@ -2146,7 +2146,7 @@ defmodule LoopexStoreLocalTest.Conformance do
   end
 
   defp unique(prefix),
-    do: "#{prefix}-#{System.unique_integer([:positive, :monotonic])}"
+    do: "#{prefix}-#{Base.encode16(:crypto.strong_rand_bytes(6), case: :lower)}"
 
   defp kill(pid) do
     reference = Process.monitor(pid)

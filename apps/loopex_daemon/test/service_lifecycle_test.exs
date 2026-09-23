@@ -208,10 +208,16 @@ defmodule LoopexDaemon.ServiceLifecycleTest do
 
     assert_receive {:readiness_held, writer}, 30_000
 
+    # This daemon's own listener, started by its owner: another case's
+    # listener may still be alive in the same VM, and the owner is busy in
+    # startup, so the listener is found by its ancestry.
+    assert_receive {:loopex_daemon_sentinel, _sentinel, _owner_ref, owner}, 5_000
+
     [listener] =
       for pid <- Process.list(),
           {:dictionary, dictionary} <- [Process.info(pid, :dictionary)],
           dictionary[:"$initial_call"] == {LoopexDaemon.Listener, :init, 1},
+          owner in Keyword.get(dictionary, :"$ancestors", []),
           do: pid
 
     Process.exit(listener, :kill)
