@@ -430,8 +430,40 @@ defmodule LoopexCli.Live do
          {:ok, state} <- ensure_control(state),
          {:ok, state} <- ensure_attached(state, 0),
          {:ok, state} <- inspect_session(state),
-         {:ok, state, sent?} <- send_steps(state, 0, false) do
+         {:ok, state, sent?} <- present_steps(state) do
       follow(state, sent?)
+    end
+  end
+
+  # Concept: a re-presented step the daemon had already applied is replayed,
+  # and its run may have ended while this command was away; that run is then
+  # history to show, not work to wait for.
+  #
+  # Technical depth: a freshly admitted prompt, follow-up or steer commits its
+  # durable record before its admission reply, so the session's tail advances.
+  # When a pass re-presented a `sent_unconfirmed` step, the session is
+  # inspected again: an unchanged tail on an idle session means nothing new was
+  # applied, and following ends once the history through that tail is shown.
+  defp present_steps(state) do
+    represented? = Enum.any?(state.steps, &(&1.status == :sent_unconfirmed))
+    before = state.tail
+
+    with {:ok, state, sent?} <- send_steps(state, 0, false) do
+      if represented? and sent? do
+        case inspect_session(state) do
+          {:ok, %{busy: false, tail: ^before} = state} ->
+            Logger.debug("loopex live client found its re-presented work already applied")
+            {:ok, state, false}
+
+          {:ok, state} ->
+            {:ok, state, sent?}
+
+          other ->
+            other
+        end
+      else
+        {:ok, state, sent?}
+      end
     end
   end
 
@@ -757,7 +789,7 @@ defmodule LoopexCli.Live do
 
     with {:ok, state} <- ensure_attached(state, 2),
          {:ok, state} <- inspect_session(state),
-         {:ok, state, sent?} <- send_steps(state, 0, false) do
+         {:ok, state, sent?} <- present_steps(state) do
       follow(state, sent?)
     end
   end
