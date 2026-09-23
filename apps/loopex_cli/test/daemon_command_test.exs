@@ -526,6 +526,36 @@ defmodule LoopexCli.DaemonCommandTest do
     assert {_rest, 0} = drain_raw(second, "", 60_000)
   end
 
+  # Concept: the readiness line is a promise that the root is already held: by
+  # the time it appears, the placement lock names the daemon process, the Store
+  # marker exists, and the socket and its directory carry their verified modes.
+  test "readiness appears only after the lock, marker and private socket exist", context do
+    arguments = [
+      "daemon",
+      "--state-root",
+      context.state_root,
+      "--workspace",
+      context.workspace,
+      "--provider-launch",
+      context.launch,
+      "--policy",
+      "allow-all"
+    ]
+
+    {daemon, daemon_pid} = start_cli_process(arguments, [:stream])
+    assert await_raw(daemon, "", 60_000) =~ ~s("record":"daemon_ready")
+
+    assert {:ok, owner} = LoopexComposition.Placement.live_owner(context.state_root)
+    assert owner == Integer.to_string(daemon_pid)
+    assert File.regular?(Path.join(context.state_root, "store.log.writer"))
+    socket = Path.join([context.state_root, "daemon", "daemon.sock"])
+    assert File.stat!(socket).mode |> Bitwise.band(0o777) == 0o600
+    assert File.stat!(Path.dirname(socket)).mode |> Bitwise.band(0o777) == 0o700
+
+    {_output, 0} = System.cmd("/bin/kill", ["-TERM", Integer.to_string(daemon_pid)])
+    assert {"", 0} = drain_raw(daemon, "", 60_000)
+  end
+
   defp run_raw(arguments) do
     {port, _os_pid} = start_cli_process(arguments, [:stream])
     drain_raw(port, "", 60_000)
