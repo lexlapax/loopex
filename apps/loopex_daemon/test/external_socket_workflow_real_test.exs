@@ -34,7 +34,7 @@ defmodule LoopexDaemon.ExternalSocketWorkflowRealTest do
     workspace = Path.join(root, "w")
     File.mkdir_p!(workspace)
     on_exit(fn -> File.rm_rf(root) end)
-    launch = build_companion(Path.join(root, "build"))
+    launch = build_companion(Path.join(physical(root), "build"))
 
     socket = Path.join([root, "s", "daemon", "d.sock"])
 
@@ -137,6 +137,13 @@ defmodule LoopexDaemon.ExternalSocketWorkflowRealTest do
       :file.consult(String.to_charlist(Path.join(build, "loopex_provider.launch")))
 
     launch
+  end
+
+  # Mix links `priv` by resolved paths, so a build root reached through a
+  # symbolic link (`/var` on macOS) must be named by its physical path.
+  defp physical(directory) do
+    {path, 0} = System.cmd("sh", ["-c", "cd \"$1\" && pwd -P", "sh", directory])
+    String.trim(path)
   end
 
   defp client(path) do
