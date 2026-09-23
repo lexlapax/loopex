@@ -84,6 +84,54 @@ defmodule LoopexCli.LiveQueryTest do
     stop_daemon(daemon)
   end
 
+  # Concept: each accepted live form speaks a fixed request sequence, so a
+  # change to what a command sends is a visible change, not a silent one.
+  test "accepted live forms send their exact request sequences", context do
+    state_root = Path.join(context.base, "s")
+    socket = Path.join([state_root, "daemon", "d.sock"])
+    daemon = start_daemon(context.workspace, state_root, socket)
+    session_id = create(socket, "sequence-session")
+
+    sequences =
+      for argv <- [
+            ["sessions", "--daemon", :proxy, "--limit", "1"],
+            ["sessions", "--daemon", :proxy, "--status"],
+            ["attach", session_id, "--daemon", :proxy, "--observe"],
+            ["run", "--daemon", :proxy, "go"],
+            ["attach", session_id, "--daemon", :proxy, "--take-over", "--prompt", "more"]
+          ] do
+        proxy = DaemonProxy.start(socket, [])
+        argv = Enum.map(argv, &if(&1 == :proxy, do: proxy.path, else: &1))
+        {_stdout, _stderr} = raw(argv)
+        DaemonProxy.seen(proxy)
+      end
+
+    assert sequences == [
+             ["initialize", "session.list"],
+             ["initialize", "daemon.status"],
+             ["initialize", "session.attach", "session.inspect"],
+             [
+               "initialize",
+               "session.create",
+               "session.acquire_control",
+               "session.attach",
+               "session.inspect",
+               "session.prompt",
+               "session.release_control"
+             ],
+             [
+               "initialize",
+               "session.acquire_control",
+               "session.attach",
+               "session.inspect",
+               "session.prompt",
+               "session.release_control"
+             ]
+           ]
+
+    stop_daemon(daemon)
+  end
+
   defp create(socket, label) do
     {:ok, client} = DaemonClient.connect(socket)
 
