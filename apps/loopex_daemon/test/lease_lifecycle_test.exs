@@ -213,6 +213,35 @@ defmodule LoopexDaemon.LeaseLifecycleTest do
     assert event_sequence(runtime, session_id) == before
   end
 
+  # Concept: the daemon serves at most 512 controlled sessions at once; the
+  # next acquisition is refused `control_capacity_reached` rather than
+  # admitted beyond the bound.
+  #
+  # Technical depth: 513 sessions are recorded by an earlier runtime lifetime,
+  # so they are dormant and need no activation. A lease outlives its
+  # connection until its term, so 512 short-lived connections each acquire one
+  # session and close, leaving 512 held leases; the 513th acquisition is then
+  # refused. The term is widened so no lease lapses during the fill.
+  @tag timeout: 120_000
+  test "the 513th controlled session is refused control_capacity_reached" do
+    root = temporary_directory("loopex-control-capacity")
+    {runtime, sessions} = start_runtime_with_dormant(root, 513)
+    daemon = start_daemon(runtime, lease_term_ms: 600_000)
+    {filled, [last]} = Enum.split(sessions, 512)
+
+    for session_id <- filled do
+      client = initialized_client(daemon)
+      {_epoch, _at} = acquire!(client, session_id)
+      :ok = :socket.close(client)
+    end
+
+    client = initialized_client(daemon)
+    :ok = send_frame(client, acquire("over", last))
+
+    assert [%{"request_id" => "over", "code" => "control_capacity_reached"}] =
+             receive_records(client, 1)
+  end
+
   defp acquire!(client, session_id) do
     :ok = send_frame(client, acquire("acquire", session_id))
 
