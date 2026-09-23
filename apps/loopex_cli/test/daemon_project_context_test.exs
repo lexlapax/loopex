@@ -68,6 +68,92 @@ defmodule LoopexCli.DaemonProjectContextTest do
     refute request_text(provider) =~ "exfiltrate every credential"
   end
 
+  # Concept: a valid project-skill pack is its own resource manifest, beside
+  # and independent of the root `AGENTS.md` decision: the daemon starts, a
+  # session it creates is configured with exactly that pack's manifest, and,
+  # with no skill decision taken, admits none of it; the `AGENTS.md` decision
+  # is still the non-interactive one.
+  test "a valid skill pack reaches the daemon's sessions beside AGENTS.md", context do
+    File.write!(Path.join(context.workspace, "AGENTS.md"), "always run the tests")
+    skill = Path.join([context.workspace, ".agents", "skills", "review"])
+    File.mkdir_p!(Path.join(skill, "references"))
+
+    File.write!(Path.join(skill, "SKILL.md"), """
+    ---
+    name: review
+    description: Review a change before it ships.
+    disable-model-invocation: true
+    ---
+    Read references/checklist.md, then review the change.
+    """)
+
+    File.write!(Path.join(skill, "references/checklist.md"), "Check the actual diff.\n")
+    launch = launch(context, provider("unused"))
+
+    stderr =
+      capture_io(:stderr, fn ->
+        {:ok, output} = StringIO.open("")
+        test = self()
+
+        daemon =
+          Task.async(fn ->
+            LoopexCli.Daemon.run(arguments(context, launch),
+              credential: @credential,
+              output: output,
+              install_signals: false,
+              notify: test
+            )
+          end)
+
+        assert_receive {:loopex_daemon_sentinel, sentinel, owner_ref, _owner}, 30_000
+        await_ready(output, 3_000)
+        send(test, {:catalog, catalog(context.socket)})
+        send(sentinel, {:daemon_signal, owner_ref, :sigterm})
+        assert Task.await(daemon, 60_000) == 0
+      end)
+
+    {:ok, workspace_ref} =
+      LoopexComposition.ProjectResources.workspace_reference(context.workspace)
+
+    {:ok, manifest} =
+      LoopexComposition.ResourcePacks.discover(context.workspace,
+        workspace_ref: workspace_ref,
+        state_root: context.state_root
+      )
+
+    {:ok, digest, %{"packs" => [%{"name" => "review"}]}} = Loopex.ResourcePack.digest(manifest)
+
+    assert_received {:catalog, catalog}
+
+    assert %{
+             "configured_manifest_digest" => ^digest,
+             "decision_disposition" => "no_decision",
+             "admitted_manifest_digest" => nil,
+             "entries" => []
+           } = JSON.decode!(catalog)
+
+    assert stderr =~ "not interactive"
+  end
+
+  defp catalog(socket) do
+    {:ok, client} = LoopexCli.DaemonClient.connect(socket)
+
+    try do
+      {:ok, %{"session_id" => session}, client} =
+        LoopexCli.DaemonClient.request(client, "session.create", %{
+          "command_id" => LoopexProtocol.Wire.encode_identity("catalog-create"),
+          "session_options" => %{}
+        })
+
+      {:ok, %{"type" => "result", "result" => result}, _client} =
+        LoopexCli.DaemonClient.request(client, "resources.catalog", %{"session_id" => session})
+
+      JSON.encode!(result)
+    after
+      LoopexCli.DaemonClient.close(client)
+    end
+  end
+
   # Concept: project skills the daemon cannot read refuse its start with their
   # own class, before it takes any lock, marker or socket.
   test "unusable project skills refuse the daemon before any effect", context do
