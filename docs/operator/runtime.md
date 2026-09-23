@@ -3,7 +3,7 @@
 <a id="concept"></a>
 ## Concept
 
-M1 supplies one source-tree, single-machine embedded runtime. A host starts an
+Loopex supplies one source-tree, single-machine embedded runtime. A host starts an
 explicit runtime with a durable local Store, model adapter, trusted-local
 executor, one controlled tool definition, and an explicit host-policy decision.
 The returned runtime reference is required for every session operation; Loopex
@@ -19,28 +19,30 @@ manager.
 Developer composition details: [Runtime and embedding](../developer/runtime-and-embedding.md#technical-depth).
 
 <a id="operator-runtime-available"></a>
-## What M1 Delivers
+## What the Runtime Delivers
 
-M1 is a runnable, headless Loopex loop. A host can start the runtime, submit a
+The runtime is a runnable, headless Loopex loop. A host can start the runtime, submit a
 prompt, call a model, authorize and execute the registered local tool, observe
 durable events, stop, and resume from retained state. The reference client uses
 the same embedded API available to a host; it does not own a test-only or
 alternate loop.
 
-| Operator capability | M1 state |
+| Operator capability | State |
 | --- | --- |
 | Run the complete loop from this source tree | Available |
 | Use a deterministic model for a credential-free demonstration | Available |
 | Use the ReqLLM adapter with a real supported provider | Available |
 | Execute the registered controlled workspace tool in a separate OS process | Available |
 | Retain sessions, events, tool receipts, and resume after process loss | Available |
-| Install a released package or invoke a `loopex` CLI | Not provided in M1 |
+| Invoke the `loopex` command from a source build | Available: [coding sessions](coding-sessions.md#concept) |
+| Install a released package | Not provided |
 | Keep sessions alive for several local clients over a Unix-domain socket | Available through [the daemon](daemon.md#concept) |
 | Run a remote executor, network client, or distributed service | Not provided |
 
 The missing surfaces are not alternate ways to reach hidden functionality.
-Loopex is deliberately embedded first: a later CLI, IDE, daemon, or web host
-must drive this same runtime contract rather than introduce another loop.
+Loopex is deliberately embedded first: the command, the daemon and any later
+IDE or web host drive this same runtime contract rather than introduce another
+loop.
 
 <a id="operator-runtime-first-run"></a>
 ## Run the Working Loop
