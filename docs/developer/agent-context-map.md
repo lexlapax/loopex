@@ -85,8 +85,8 @@ Product tests run against a temporary `LOOPEX_HOME`; the
 affected conformance suites (`conformance/`) run for any adapter or behaviour
 change; property tests own reducer/replay claims; fault injection owns
 durable-transition claims. Real-provider runs are a tagged, explicitly invoked
-lane — never part of the default suite, and so are the three `long_bound`
-cases whose claim is a real duration: the two `test_helper.exs` files exclude
+lane — never part of the default suite, and so are the `long_bound`
+cases whose claim is a real duration: the `test_helper.exs` files exclude
 them and `scripts/check-release.sh` runs them in a pass of its own.
 
 M3's implementation used focused checks under the reviewed

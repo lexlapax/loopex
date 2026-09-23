@@ -14,6 +14,9 @@ defmodule LoopexDaemon.MixProject do
       lockfile: "../../mix.lock",
       elixir: "~> 1.17",
       start_permanent: Mix.env() == :prod,
+      # The socket fixture is a support module, not a test file; without this
+      # the test loader warns on every run that it matches no filter.
+      test_ignore_filters: [&String.starts_with?(&1, "test/support/")],
       deps: deps()
     ]
   end

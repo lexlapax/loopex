@@ -4,8 +4,11 @@
 # skipped and excluded tests are subtracted before the count is judged, so
 # `1 test, 0 failures, 1 skipped` on the floor toolchain is refused, as is a
 # `Result:` line with a failure fraction or an invalid module. Exit 1 otherwise.
+# With `--count` it prints the executed count instead of the line, read from
+# either toolchain's shape, so a caller can assert an exact number.
 set -euo pipefail
 log=$1
+mode=${2:-line}
 line=$(grep -aE '^Result: |^([0-9]+ [a-z]+, )*[0-9]+ tests?, ' "$log" | tail -n 1 || true)
 [ -n "$line" ] || exit 1
 case "$line" in
@@ -34,4 +37,4 @@ case "$line" in
     ;;
 esac
 [ "${passed:-0}" -ge 1 ] || exit 1
-printf '%s\n' "$line"
+if [ "$mode" = --count ]; then printf '%s\n' "$passed"; else printf '%s\n' "$line"; fi

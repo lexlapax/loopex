@@ -493,6 +493,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
   defp write_worker(root, mode, port, probe_port) do
     manifest = %{
       "source" => "synthetic-process-fixture",
+      "source_digest" => nil,
       "version" => "fixture",
       "dependency_lock_sha256" => String.duplicate("0", 64),
       "packaged_input_sha256" => String.duplicate("1", 64),

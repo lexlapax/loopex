@@ -83,12 +83,16 @@ machine with the pinned Node and a provider credential:
 LOOPEX_PROVIDER_API_KEY=... bash scripts/check-release.sh
 ```
 
-It refuses without the credential, without the pinned Node, or on a dirty tree,
-and then runs a named list of release applications, each in its own VM with
-`--only real_provider --only node_client --include long_bound`: the
-real-provider coding workflows and the daemon's real-provider socket workflow,
-and the independent Node client against the shipped app server and against a
-running daemon. It then runs the fresh-source lane: from a hostile caller
+It refuses without the credential, without the pinned Node, or on a dirty tree.
+Reference composition consumes the credential, so each of the eight
+real-provider cases runs from a named manifest (application, file and exact
+case name) in its own `mix test FILE:LINE` process and must execute exactly one
+test; the eight rows must each run once. Only those processes inherit the
+credential: every other lane runs under `env -u LOOPEX_PROVIDER_API_KEY`, which
+a self-check proves first by logging only `present` or `absent`. The
+independent Node client then runs with `--only node_client` over
+`loopex_app_server`, `loopex_protocol` and `loopex_daemon`. The fresh-source
+lane follows: from a hostile caller
 `umask 0777` it stages the exact commit with `git archive` under a scoped
 `umask 022`, retains the extraction's `scripts/source-archive-manifest.sh`
 manifest and the `git ls-files -z` inventory outside the extraction (set
@@ -96,11 +100,16 @@ manifest and the `git ls-files -z` inventory outside the extraction (set
 `scripts/source-archive-check.exs` that the extraction is exactly that commit,
 builds the command there with `mix deps.get` and the documented escript build,
 and proves the build changed nothing outside its declared outputs; it prints
-both retained files' SHA-256 digests. A final `--only long_bound` pass over
-`loopex` and `loopex_executor_local` runs the three real-duration proofs the
-fast check excludes. Every pass must execute at least one test. The credential
-reaches only the test processes; never put it in a command argument, log,
-fixture, or retained evidence. Two of the real-provider tests are attended:
+both retained files' SHA-256 digests. A `--only long_bound` pass over `loopex`,
+`loopex_executor_local` and `loopex_daemon` runs the real-duration proofs the
+fast check excludes. On Linux the last lane runs the daemon's two
+`--only cross_uid` cases and requires exactly two to execute; it needs a second
+unprivileged user named in `LOOPEX_CROSS_UID_USER` that you may run a command
+as with `sudo -n`. Elsewhere that lane prints `cross_uid: not run (Darwin)` and
+the run ends `PASS (closure-incomplete: cross_uid not run)`; closure needs a
+Linux run ending in a plain `PASS`. Every lane prints its executed count and
+elapsed time. The credential never goes in a command argument, log, fixture
+or retained evidence. Two of the real-provider tests are attended:
 they prompt on the controlling terminal for the operator's trust decisions
 (`Type yes and press Enter.`), so run the command from a terminal.
 

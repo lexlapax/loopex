@@ -75,6 +75,31 @@ defmodule LoopexCli.DaemonCommandTest do
     assert File.regular?(Path.join([context.state_root, "daemon", "session-index-v1"]))
   end
 
+  # Concept: the daemon command consumes the operator's variable once, at
+  # entry; a later start in the same VM finds nothing and refuses before any
+  # effect rather than finding a restored copy.
+  test "the credential is consumed once per VM and a second start refuses", context do
+    System.put_env("LOOPEX_PROVIDER_API_KEY", "consumed-once-placeholder")
+    File.mkdir_p!(context.state_root)
+
+    assert LoopexCli.Daemon.run(["prepare-index", "--state-root", context.state_root],
+             install_signals: false
+           ) == 0
+
+    assert System.get_env("LOOPEX_PROVIDER_API_KEY") == nil
+    {:ok, required} = ExitStatus.fetch(:provider_credential_required)
+
+    env = %{
+      "LOOPEX_HOME" => context.state_root,
+      "LOOPEX_WORKSPACE" => context.workspace,
+      "LOOPEX_PROVIDER_LAUNCH" => context.launch,
+      "LOOPEX_POLICY" => "allow-all"
+    }
+
+    assert LoopexCli.Daemon.run([], env: &Map.get(env, &1), install_signals: false) == required
+    refute File.exists?(Path.join([context.state_root, "daemon", "daemon.sock"]))
+  end
+
   test "each missing or invalid input refuses with its own class before any effect", context do
     base = %{
       "LOOPEX_HOME" => context.state_root,

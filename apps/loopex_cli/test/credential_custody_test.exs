@@ -107,6 +107,22 @@ defmodule LoopexCli.CredentialCustodyTest do
     send(holder, :stop)
   end
 
+  # Concept: the operator's variable is consumed once; a second production
+  # host in the same VM finds nothing and refuses rather than restoring it.
+  test "a second credential host in the same VM refuses without starting anything" do
+    System.put_env(ReqLLM.credential_variable(), @canary)
+    test = self()
+
+    spawn(fn ->
+      first = CredentialHost.open()
+      second = CredentialHost.open()
+      send(test, {:opened, match?({:ok, _host}, first), second})
+    end)
+
+    assert_receive {:opened, true, {:error, :provider_credential_required}}, 5_000
+    assert System.get_env(ReqLLM.credential_variable()) == nil
+  end
+
   # The host process owns the plane's links, so a test crash cannot reach
   # the test process itself.
   defp hosted_plane do
