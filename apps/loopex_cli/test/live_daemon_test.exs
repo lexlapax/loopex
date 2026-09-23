@@ -113,7 +113,8 @@ defmodule LoopexCli.LiveDaemonTest do
     output =
       capture_io(fn -> assert :ok = LoopexCli.dispatch(["run", "--daemon", socket, "go"]) end)
 
-    assert output =~ "first answer"
+    # Streamed progress and the durable answer show the text exactly once.
+    assert length(String.split(output, "first answer")) == 2, output
 
     listing =
       capture_io(fn -> assert :ok = LoopexCli.dispatch(["sessions", "--daemon", socket]) end)
@@ -380,6 +381,43 @@ defmodule LoopexCli.LiveDaemonTest do
 
     assert LoopexCli.dispatch(["sessions", "--daemon", context.socket]) == {:detached, 130}
     stop_daemon(daemon)
+  end
+
+  test "wire progress rebuilds the renderer's item from closed tables only" do
+    record = %{
+      "type" => "progress",
+      "session_id" => LoopexProtocol.Wire.encode_identity("s"),
+      "progress" => %{
+        "kind" => "text_delta",
+        "stream_domain_id" => LoopexProtocol.Wire.encode_identity("domain"),
+        "base_event_sequence" => "4",
+        "turn_id" => "turn",
+        "model_sequence" => 0,
+        "content_index" => 0,
+        "text" => "hi",
+        "unexpected" => "ignored"
+      }
+    }
+
+    assert {:ok,
+            %{
+              kind: :text_delta,
+              stream_domain_id: "domain",
+              base_event_sequence: 4,
+              turn_id: "turn",
+              model_sequence: 0,
+              content_index: 0,
+              text: "hi"
+            } = item} = LoopexCli.DaemonClient.progress(record)
+
+    refute Map.has_key?(item, "unexpected")
+
+    assert LoopexCli.DaemonClient.progress(put_in(record, ["progress", "kind"], "novel")) ==
+             :error
+
+    assert LoopexCli.DaemonClient.progress(
+             put_in(record, ["progress", "stream_domain_id"], "not=valid")
+           ) == :error
   end
 
   test "an empty live listing is exactly the fixed compact record", context do

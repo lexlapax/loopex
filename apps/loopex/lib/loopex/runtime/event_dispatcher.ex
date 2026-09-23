@@ -1765,6 +1765,7 @@ defmodule Loopex.Runtime.EventDispatcher do
 
   defp maybe_send(nil, _message), do: :ok
   defp maybe_send(pid, message) when is_pid(pid), do: send(pid, message)
+  defp maybe_send({:session, pid}, message) when is_pid(pid), do: send(pid, message)
 
   defp plain_transient?(value) do
     match?(

@@ -1559,6 +1559,30 @@ defmodule LoopexDaemon.ConnectionRegistry do
     {:noreply, state}
   end
 
+  # Concept: a session's transient progress reaches every client attached to
+  # that session and no other; the connection decides whether it can be sent
+  # without delaying durable output.
+  def handle_info({:loopex_progress, session_id, item}, state)
+      when is_binary(session_id) and is_map(item) do
+    Enum.each(state.attachments, fn
+      {incarnation, %{phase: :installed, session_id: ^session_id}} ->
+        case Enum.find(state.rows, fn {_token, row} ->
+               row.connection_incarnation == incarnation and row.phase == :live
+             end) do
+          {_token, %{connection_pid: pid}} when is_pid(pid) ->
+            send(pid, {:daemon_progress, session_id, item})
+
+          _absent ->
+            :ok
+        end
+
+      _other ->
+        :ok
+    end)
+
+    {:noreply, state}
+  end
+
   def handle_info({:relay_connection_retired, _relay, incarnation}, state) do
     case retiring_token(state, incarnation) do
       nil -> {:noreply, state}

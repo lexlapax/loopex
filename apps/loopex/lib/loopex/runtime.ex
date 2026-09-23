@@ -63,7 +63,7 @@ defmodule Loopex.Runtime do
           {:runtime_id, binary()}
           | {:store, Store.t()}
           | {:attachment_capacity, pos_integer()}
-          | {:progress_to, pid() | nil}
+          | {:progress_to, pid() | {:session, pid()} | nil}
           | {:diagnostics_to, pid() | nil}
           | {:model, map() | nil}
           | {:executor, map() | nil}
@@ -816,7 +816,7 @@ defmodule Loopex.Runtime do
            validate_context_token_budget(validated[:context_token_budget]),
          {:ok, %Store{} = store} <- Keyword.fetch(validated, :store),
          {:ok, attachment_capacity} <- validate_capacity(validated[:attachment_capacity]),
-         {:ok, progress_to} <- validate_sink(validated[:progress_to]),
+         {:ok, progress_to} <- validate_progress_sink(validated[:progress_to]),
          {:ok, diagnostics_to} <- validate_sink(validated[:diagnostics_to]),
          {:ok, model} <- validate_model(validated[:model]),
          {:ok, executor} <- validate_executor(validated[:executor]),
@@ -1138,6 +1138,15 @@ defmodule Loopex.Runtime do
        do: {:ok, %{module: module, handle: handle}}
 
   defp validate_artifact_store(_store), do: {:error, :invalid_artifact_store}
+
+  # Concept: a host serving many sessions asks for progress tagged with its
+  # session, so it can route each item to that session's readers.
+  #
+  # Technical depth: `{:session, pid}` makes every stream relay deliver
+  # `{:loopex_progress, session_id, item}`, the shape attachment progress
+  # already uses; a bare pid keeps the untagged `{:loopex_progress, item}`.
+  defp validate_progress_sink({:session, pid} = sink) when is_pid(pid), do: {:ok, sink}
+  defp validate_progress_sink(sink), do: validate_sink(sink)
 
   defp validate_sink(nil), do: {:ok, nil}
   defp validate_sink(pid) when is_pid(pid), do: {:ok, pid}

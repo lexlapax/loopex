@@ -237,6 +237,32 @@ defmodule LoopexDaemon.WireRecords do
   @doc """
   ## Concept
 
+  One transient progress item for an attached client, in the record ADR 0023
+  fixes; it may be dropped and is never history.
+
+  ## Technical depth
+
+  The item's stream domain and base sequence are encoded as a wire identity
+  and quantity; every other member is carried as the core projected it.
+  """
+  @spec progress(binary(), map()) :: map()
+  def progress(session_id, item) when is_binary(session_id) and is_map(item) do
+    %{
+      "type" => "progress",
+      "session_id" => Wire.encode_identity(session_id),
+      "progress" =>
+        item
+        |> Map.drop([:stream_domain_id, :base_event_sequence])
+        |> Map.merge(%{
+          "stream_domain_id" => optional_identity(Map.get(item, :stream_domain_id)),
+          "base_event_sequence" => optional_sequence(Map.get(item, :base_event_sequence))
+        })
+    }
+  end
+
+  @doc """
+  ## Concept
+
   One durable event, with only the members its kind carries.
 
   ## Technical depth
@@ -260,6 +286,9 @@ defmodule LoopexDaemon.WireRecords do
 
   defp optional_identity(nil), do: nil
   defp optional_identity(value) when is_binary(value), do: Wire.encode_identity(value)
+
+  defp optional_sequence(nil), do: nil
+  defp optional_sequence(value) when is_integer(value), do: Wire.encode_u64(value)
 
   defp optional_word(nil), do: nil
   defp optional_word(value) when is_atom(value), do: Atom.to_string(value)

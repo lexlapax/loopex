@@ -1604,7 +1604,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
       File.read!(Path.expand("../lib/loopex/runtime/session_coordinator.ex", __DIR__))
 
     {:ok, ast} = Code.string_to_quoted(source)
-    await_start = private_function_body!(ast, :await_provider_start, 6)
+    await_start = private_function_body!(ast, :await_provider_start, 7)
     await_guard = private_function_body!(ast, :await_provider_guard, 5)
     await_callback = private_function_body!(ast, :await_provider_callback, 8)
     await_callback_exit = private_function_body!(ast, :await_provider_callback_exit, 9)

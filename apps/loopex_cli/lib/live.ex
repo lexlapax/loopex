@@ -791,6 +791,14 @@ defmodule LoopexCli.Live do
         {:loopex_daemon_record, ^reader, %{"type" => "event"} = record} ->
           delivered(state, DaemonClient.event(record))
 
+        # Concept: progress is handed to the renderer's own transient drain;
+        # an item this client cannot read is simply not shown.
+        {:loopex_daemon_record, ^reader, %{"type" => "progress"} = record} ->
+          with {:ok, item} <- DaemonClient.progress(record),
+               do: send(self(), {:loopex_progress, item})
+
+          next_event()
+
         {:loopex_daemon_record, ^reader, %{"type" => "daemon.stopping"} = record} ->
           throw({@live, {:stopping, Map.get(record, "reason")}})
 

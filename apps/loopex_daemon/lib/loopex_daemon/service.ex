@@ -106,7 +106,8 @@ defmodule LoopexDaemon.Service do
       edges: %{},
       socket: nil,
       startup_ref: nil,
-      pending_fatal: nil
+      pending_fatal: nil,
+      progress_registry: nil
     }
 
     Logger.debug("loopex daemon service owner waiting for its gate")
@@ -161,6 +162,16 @@ defmodule LoopexDaemon.Service do
       ) do
     Logger.debug("loopex daemon sentinel lost")
     orderly_stop(state)
+  end
+
+  # Concept: the runtime is composed before the connection registry exists, so
+  # this owner is the runtime's session-routed progress sink and forwards each
+  # item to the registry once it is running; earlier progress is dropped.
+  def handle_info({:loopex_progress, session_id, item} = progress, state)
+      when is_binary(session_id) and is_map(item) do
+    registry = state.progress_registry || cached_registry(state)
+    if is_pid(registry), do: send(registry, progress)
+    {:noreply, %{state | progress_registry: registry}}
   end
 
   def handle_info(_message, state), do: {:noreply, state}
@@ -325,6 +336,7 @@ defmodule LoopexDaemon.Service do
         :artifact_transfers,
         :context_token_budget
       ])
+      |> Keyword.put(:progress_to, {:session, self()})
       |> Keyword.merge(
         state_root: option!(state, :state_root),
         runtime_id: state.placement_identity,
@@ -621,6 +633,17 @@ defmodule LoopexDaemon.Service do
         Logger.debug("loopex daemon quiesce unavailable")
         fail_stop(state, :drain_failed)
     end
+  end
+
+  defp cached_registry(%{pids: %{collaboration: collaboration}}),
+    do: progress_registry(collaboration)
+
+  defp cached_registry(_state), do: nil
+
+  defp progress_registry(collaboration) do
+    Owner.components(collaboration).registry
+  catch
+    :exit, _unavailable -> nil
   end
 
   defp relay_control_deadline, do: monotonic_ms() + @relay_control_timeout_ms

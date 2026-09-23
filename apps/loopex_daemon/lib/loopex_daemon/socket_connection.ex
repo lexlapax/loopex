@@ -85,6 +85,9 @@ defmodule LoopexDaemon.SocketConnection do
   @spec activate(pid(), :socket.socket()) :: :ok
   def activate(connection, socket), do: GenServer.cast(connection, {:activate, socket})
 
+  @progress_records 32
+  @progress_bytes 524_288
+
   @impl true
   def init(options) do
     state = %{
@@ -109,6 +112,8 @@ defmodule LoopexDaemon.SocketConnection do
       closing: nil,
       attachment: nil,
       output_cursors: :queue.new(),
+      progress: :queue.new(),
+      progress_bytes: 0,
       calls: :gen_server.reqids_new()
     }
 
@@ -169,6 +174,30 @@ defmodule LoopexDaemon.SocketConnection do
     do: output_step(state)
 
   def handle_info(:flush_output, state), do: output_step(state)
+
+  # Concept: progress is decoration: it waits behind durable output in a small
+  # bounded queue and is dropped, oldest first, rather than ever delaying an
+  # event.
+  #
+  # Technical depth: at most 32 records and 512 KiB of encoded progress wait,
+  # ADR 0023's transient bound. The queue is written only when this
+  # connection's durable output is empty.
+  def handle_info(
+        {:daemon_progress, session_id, item},
+        %{attachment: %{session_id: session_id}} = state
+      ) do
+    case Frame.encode(WireRecords.progress(session_id, item)) do
+      {:ok, encoded} ->
+        state
+        |> queue_progress(IO.iodata_to_binary(encoded))
+        |> flush_progress()
+
+      _unencodable ->
+        {:noreply, state}
+    end
+  end
+
+  def handle_info({:daemon_progress, _session_id, _item}, state), do: {:noreply, state}
 
   def handle_info(
         {:"$socket", socket, :select, handle},
@@ -1244,7 +1273,11 @@ defmodule LoopexDaemon.SocketConnection do
         |> output_result()
 
       :empty ->
-        if state.closing, do: finish_owner_loss_close(state), else: {:noreply, state}
+        cond do
+          state.closing -> finish_owner_loss_close(state)
+          :queue.is_empty(state.progress) -> {:noreply, state}
+          true -> flush_progress(state)
+        end
 
       {:error, _reason} ->
         {:stop, :normal, state}
@@ -1315,6 +1348,45 @@ defmodule LoopexDaemon.SocketConnection do
 
       {:empty, _cursors} ->
         state
+    end
+  end
+
+  defp queue_progress(state, encoded) do
+    queue = :queue.in(encoded, state.progress)
+    bytes = state.progress_bytes + byte_size(encoded)
+    trim_progress(%{state | progress: queue, progress_bytes: bytes})
+  end
+
+  defp trim_progress(state) do
+    if :queue.len(state.progress) > @progress_records or state.progress_bytes > @progress_bytes do
+      {{:value, dropped}, queue} = :queue.out(state.progress)
+
+      trim_progress(%{
+        state
+        | progress: queue,
+          progress_bytes: state.progress_bytes - byte_size(dropped)
+      })
+    else
+      state
+    end
+  end
+
+  defp flush_progress(state) do
+    idle = state.output_claim == nil and :queue.is_empty(state.output_cursors)
+
+    with true <- idle,
+         {{:value, encoded}, queue} <- :queue.out(state.progress),
+         :ok <- ConnectionRegistry.enqueue_output(state.registry, state.incarnation, encoded) do
+      state = %{
+        state
+        | progress: queue,
+          progress_bytes: state.progress_bytes - byte_size(encoded),
+          output_cursors: :queue.in(nil, state.output_cursors)
+      }
+
+      output_step(state)
+    else
+      _waiting -> {:noreply, state}
     end
   end
 

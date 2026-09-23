@@ -157,6 +157,70 @@ defmodule LoopexCli.DaemonClient do
 
   def event(_record), do: :error
 
+  @progress_kinds %{
+    "text_delta" => :text_delta,
+    "reasoning_delta" => :reasoning_delta,
+    "tool_call_delta" => :tool_call_delta,
+    "tool_progress" => :tool_progress,
+    "model_stream_closed" => :model_stream_closed,
+    "tool_stream_closed" => :tool_stream_closed
+  }
+  @progress_keys %{
+    "turn_id" => :turn_id,
+    "model_sequence" => :model_sequence,
+    "progress_sequence" => :progress_sequence,
+    "tool_call_id" => :tool_call_id,
+    "content_index" => :content_index,
+    "text" => :text,
+    "call_index" => :call_index,
+    "name" => :name,
+    "arguments_fragment" => :arguments_fragment,
+    "chunk" => :chunk,
+    "delta_count" => :delta_count,
+    "progress_count" => :progress_count
+  }
+  @dispositions %{"complete" => :complete, "abandoned" => :abandoned}
+
+  @doc """
+  ## Concept
+
+  Rebuilds the transient progress item a wire progress record carries, so a
+  daemon session's answer appears as it is produced, exactly as an embedded
+  one does.
+
+  ## Technical depth
+
+  Keys, kinds and dispositions come only from closed tables, so untrusted
+  input never creates an atom; the stream domain and base sequence return to
+  bytes and an integer. Any other shape is `:error` and is simply not shown.
+  """
+  @spec progress(map()) :: {:ok, map()} | :error
+  def progress(%{"type" => "progress", "progress" => %{"kind" => kind} = item}) do
+    with {:ok, kind} <- Map.fetch(@progress_kinds, kind),
+         {:ok, domain} <- Wire.identity(Map.get(item, "stream_domain_id")),
+         {:ok, base} <- Wire.u64(Map.get(item, "base_event_sequence")) do
+      fields =
+        for {key, atom} <- @progress_keys, Map.has_key?(item, key), into: %{} do
+          {atom, Map.fetch!(item, key)}
+        end
+
+      fields =
+        case Map.fetch(item, "disposition") do
+          {:ok, word} when is_map_key(@dispositions, word) ->
+            Map.put(fields, :disposition, Map.fetch!(@dispositions, word))
+
+          _absent ->
+            fields
+        end
+
+      {:ok, Map.merge(fields, %{kind: kind, stream_domain_id: domain, base_event_sequence: base})}
+    else
+      _invalid -> :error
+    end
+  end
+
+  def progress(_record), do: :error
+
   defp send_frame(%__MODULE__{socket: socket}, frame) do
     with {:ok, encoded} <- Frame.encode(frame) do
       :socket.send(socket, IO.iodata_to_binary(encoded))

@@ -5163,7 +5163,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
     {:ok, relay} =
       StreamRelay.open(
         state.workers,
-        state.progress_to,
+        progress_sink(state),
         fn delta, sequence ->
           Map.merge(delta, %{
             turn_id: turn_id,
@@ -6880,7 +6880,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
       {:ok, stream, progress} =
         ExecutorStream.open(
           state.workers,
-          state.progress_to,
+          progress_sink(state),
           work.job,
           state.durable.event_sequence,
           publish
@@ -8031,4 +8031,11 @@ defmodule Loopex.Runtime.SessionCoordinator do
         {:error, :invalid_store_page}
     end
   end
+
+  # Concept: a session-routed host receives each progress item with this
+  # session's identity; any other sink receives it as before.
+  defp progress_sink(%{progress_to: {:session, pid}, session_id: session_id}),
+    do: {pid, session_id}
+
+  defp progress_sink(%{progress_to: sink}), do: sink
 end

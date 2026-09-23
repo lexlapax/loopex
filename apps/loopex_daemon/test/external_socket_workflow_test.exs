@@ -110,6 +110,137 @@ defmodule LoopexDaemon.ExternalSocketWorkflowTest do
     assert Task.await(daemon, 60_000) == 0
   end
 
+  # Concept: a client attached to a session sees its answer as it is produced,
+  # as transient progress for that session, before the durable record of it.
+  @tag timeout: 120_000
+  test "an attached client receives the session's model progress before its durable answer" do
+    root = Path.join(System.tmp_dir!(), "ldp-#{System.unique_integer([:positive])}")
+    workspace = Path.join(root, "w")
+    File.mkdir_p!(workspace)
+    on_exit(fn -> File.rm_rf(root) end)
+
+    provider =
+      ProviderFixture.new(:reply,
+        credential: @credential,
+        response_bodies: [text_response("streamed answer", "msg_progress")]
+      )
+
+    socket = Path.join([root, "s", "daemon", "d.sock"])
+
+    options = [
+      state_root: Path.join(root, "s"),
+      socket_path: socket,
+      workspace: workspace,
+      policy: AllowPolicy,
+      provider_launch:
+        Keyword.drop(provider.options, [
+          :credential_token,
+          :credential_registry,
+          :tracing_capability
+        ]),
+      credential: @credential
+    ]
+
+    {:ok, output} = StringIO.open("")
+    test = self()
+
+    daemon =
+      Task.async(fn ->
+        Sentinel.run(options, output: output, install_signals: false, notify: test)
+      end)
+
+    assert_receive {:loopex_daemon_sentinel, sentinel, owner_ref, _owner}, 5_000
+    await_ready(output, 1_000)
+
+    {:ok, client} = :socket.open(:local, :stream, :default)
+    :ok = :socket.connect(client, %{family: :local, path: socket})
+    {encoded, epoch} = drive(client, "progress")
+
+    records = records_until_finished(client, [])
+    kinds = Enum.map(records, &record_kind/1)
+
+    assert {:progress, "text_delta"} in kinds
+
+    assert Enum.find_index(kinds, &(&1 == {:progress, "text_delta"})) <
+             Enum.find_index(kinds, &(&1 == {:event, "assistant.message_appended"}))
+
+    assert Enum.all?(
+             for(%{"type" => "progress"} = record <- records, do: record["session_id"]),
+             &(&1 == encoded)
+           )
+
+    assert epoch
+    send(sentinel, {:daemon_signal, owner_ref, :sigterm})
+    assert Task.await(daemon, 60_000) == 0
+  end
+
+  defp drive(socket, label) do
+    :ok =
+      send_frame(socket, %{
+        "method" => "initialize",
+        "request_id" => "init",
+        "generations" => [V2.generation()],
+        "capabilities" => []
+      })
+
+    [%{"type" => "initialized"}] = receive_records(socket, 1)
+
+    :ok =
+      send_frame(socket, %{
+        "method" => "session.create",
+        "request_id" => "create",
+        "command_id" => Wire.encode_identity("#{label}-create"),
+        "session_options" => %{}
+      })
+
+    [%{"status" => "accepted", "session_id" => encoded}] = receive_records(socket, 1)
+
+    :ok =
+      send_frame(socket, %{
+        "method" => "session.acquire_control",
+        "request_id" => "acquire",
+        "session_id" => encoded
+      })
+
+    [%{"result" => %{"writer_epoch" => epoch}}] = receive_records(socket, 1)
+
+    :ok =
+      send_frame(socket, %{
+        "method" => "session.attach",
+        "request_id" => "attach",
+        "session_id" => encoded,
+        "after_event_sequence" => "0"
+      })
+
+    [%{"type" => "snapshot"}] = receive_records(socket, 1)
+
+    :ok =
+      send_frame(socket, %{
+        "method" => "session.prompt",
+        "request_id" => "prompt",
+        "command_id" => Wire.encode_identity("#{label}-prompt"),
+        "content_b64" => Wire.encode_bytes("answer me"),
+        "writer_epoch" => epoch
+      })
+
+    {encoded, epoch}
+  end
+
+  defp records_until_finished(socket, acc) do
+    [record] = receive_records(socket, 1)
+    acc = acc ++ [record]
+
+    if match?(%{"type" => "event", "event" => %{"kind" => "run.finished"}}, record),
+      do: acc,
+      else: records_until_finished(socket, acc)
+  end
+
+  defp record_kind(%{"type" => "progress", "progress" => %{"kind" => kind}}),
+    do: {:progress, kind}
+
+  defp record_kind(%{"type" => "event", "event" => %{"kind" => kind}}), do: {:event, kind}
+  defp record_kind(%{"type" => type}), do: {:other, type}
+
   # The controlling client: create, acquire, attach, prompt, then hold its
   # connection open until it is killed.
   defp control(path, test) do
