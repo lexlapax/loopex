@@ -17,6 +17,11 @@ defmodule LoopexCli.MultiClientWorkflowRealTest do
   # run to finish, prompts under its fresh epoch, and must see an assistant
   # message and `run.finished` after its admission. The daemon then stops
   # orderly with status `0`.
+  # A controller prompt whose answer takes the model several seconds to write,
+  # so the controller is still streaming when it is killed.
+  @long_prompt "Write every integer from 1 to 400 in order, separated by single spaces, " <>
+                 "and nothing else."
+
   @tag :real_provider
   @tag timeout: 900_000
   test "a Node observer takes over from a killed CLI controller and a real provider answers it" do
@@ -57,7 +62,7 @@ defmodule LoopexCli.MultiClientWorkflowRealTest do
 
     {controller, controller_pid} =
       start(
-        ["run", "--daemon", socket, "Reply with the single word: pong"],
+        ["run", "--daemon", socket, @long_prompt],
         [:stderr_to_stdout],
         nil
       )
@@ -70,10 +75,15 @@ defmodule LoopexCli.MultiClientWorkflowRealTest do
         :binary,
         :exit_status,
         {:line, 65_536},
+        env: [{~c"LOOPEX_PROVIDER_API_KEY", false}],
         args: [script, socket, session_id, "--prompt", "Reply with the single word: ping"]
       ])
 
     assert_receive {^observer, {:data, {:eol, ~s({"attached":true})}}}, 30_000
+
+    # The controller must still be running when it is killed: a controller
+    # that had already finished would have released its lease.
+    refute_received {^controller, {:exit_status, _status}}
     {_output, 0} = System.cmd("/bin/kill", ["-KILL", Integer.to_string(controller_pid)])
     assert await_exit(controller, 10_000) != 0
 
@@ -128,8 +138,8 @@ defmodule LoopexCli.MultiClientWorkflowRealTest do
     Path.join(String.trim(path), name)
   end
 
-  # Only the daemon receives the credential; every other process runs with the
-  # variable removed.
+  # Only the daemon receives the credential; the controller runs with the
+  # variable removed, and so does the Node observer, started separately.
   defp start(argv, extra, credential) do
     executable = System.find_executable("elixir") || raise "elixir executable unavailable"
 

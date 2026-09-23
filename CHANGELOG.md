@@ -212,6 +212,12 @@ Fix several daemon and live-command behaviours found while proving M5:
   first loss, which could make it report another client in control when there
   was none.
 
+`Loopex.start_link/1` now returns only once the runtime's event dispatcher is
+ready. It had returned while the dispatcher was still registering, so a resume
+of an active session issued at once could be refused `runtime_unavailable`; if
+the runtime dies before it is ready, `start_link/1` now returns
+`{:error, :runtime_unavailable}`.
+
 The ReqLLM reference adapter now requires `req_llm ~> 1.24.0`; the
 releases from `1.18.0` were reviewed and the adapter's call and streaming paths
 are unchanged.
