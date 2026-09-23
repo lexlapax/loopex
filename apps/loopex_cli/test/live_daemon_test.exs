@@ -71,6 +71,19 @@ defmodule LoopexCli.LiveDaemonTest do
 
     refute File.exists?(socket)
 
+    # With something listening at that path, every refused form still dials
+    # nothing: the listener never sees a connection.
+    File.mkdir_p!(Path.dirname(socket))
+    {:ok, listener} = :gen_tcp.listen(0, [:binary, {:ifaddr, {:local, socket}}, active: false])
+
+    for {form, arguments, _reason} <- refused do
+      assert {:error, _message} = LoopexCli.dispatch([form | arguments])
+    end
+
+    assert {:error, :timeout} = :gen_tcp.accept(listener, 100)
+    :gen_tcp.close(listener)
+    File.rm(socket)
+
     # `--` ends options, so a prompt spelled `--daemon` stays an offline prompt.
     refute LoopexCli.Live.daemon_form?(["--policy", "allow-all", "--", "--daemon"])
     assert LoopexCli.Live.daemon_form?(["--daemon=#{socket}", "p"])
