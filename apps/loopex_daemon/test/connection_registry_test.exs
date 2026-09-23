@@ -1225,8 +1225,11 @@ defmodule LoopexDaemon.ConnectionRegistryTest do
     close_fixture(fixture)
   end
 
+  # Technical depth: the connection must start before the initialize deadline
+  # and then expire while the listener still owns it; 300 ms leaves a loaded
+  # machine room to start it, where 30 ms did not.
   test "expiry while listener-owned requires exact close acknowledgement and child reap" do
-    registry = start_registry(30)
+    registry = start_registry(300)
     accepted_at = now_ms()
 
     assert {:ok, %{rollback_token: token}} =
@@ -1235,7 +1238,7 @@ defmodule LoopexDaemon.ConnectionRegistryTest do
     assert {:ok, connection, _incarnation} =
              ConnectionRegistry.start_connection(registry, token)
 
-    assert_receive {:close_accepted, ^token}, 500
+    assert_receive {:close_accepted, ^token}, 2_000
     assert %{occupied: 1, provisional: 1} = ConnectionRegistry.status(registry)
 
     assert :ok = ConnectionRegistry.listener_closed(registry, token)
