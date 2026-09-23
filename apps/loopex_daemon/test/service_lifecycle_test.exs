@@ -37,6 +37,26 @@ defmodule LoopexDaemon.ServiceLifecycleTest do
     %{options: options, state_root: state_root}
   end
 
+  # Concept: every Store refusal at open reaches the operator as its own exit
+  # class, whatever arity the Store's refusal carries.
+  test "each Store open refusal shape names its exit class" do
+    for {reason, class} <- [
+          {{:store_writer_active, "/r/store.log.writer"}, :store_writer_active},
+          {{:store_writer_unverifiable, "/r/store.log.writer", :malformed},
+           :store_writer_unverifiable},
+          {{:store_log_too_large, 300, 200}, :store_log_too_large},
+          {{:store_writer_lock_failed, :eacces}, :store_writer_acquisition_failed},
+          {{:store_writer_lock_close_failed, :eio}, :store_writer_acquisition_failed},
+          {{:store_writer_recovery_failed, :eperm}, :store_writer_acquisition_failed},
+          {{:store_writer_identity_unavailable, :timeout}, :store_writer_acquisition_failed},
+          {:store_writer_active, :store_writer_active},
+          {{:store_corrupt, 12}, nil},
+          {:unexpected, nil}
+        ] do
+      assert LoopexDaemon.ExitStatus.store_open_class(reason) == class, inspect(reason)
+    end
+  end
+
   test "a ready daemon serves a client and an orderly stop releases every exclusion",
        %{options: options, state_root: state_root} do
     daemon = start_daemon(options)

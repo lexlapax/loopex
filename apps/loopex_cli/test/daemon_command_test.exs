@@ -179,6 +179,138 @@ defmodule LoopexCli.DaemonCommandTest do
     assert {:ok, %File.Stat{type: :other}} = File.lstat(socket)
   end
 
+  # Concept: an operator's supervisor reads exactly one line from the daemon's
+  # standard output, so that line is compared byte for byte, and nothing else
+  # may ever appear there, even for a state root whose name needs escaping.
+  #
+  # Technical depth: the root's final component carries a quote, a backslash, a
+  # space, a tab and a newline. Standard output is read raw from start to exit,
+  # so a second record, a missing or doubled LF, or any stray byte fails. The
+  # incarnation is the one value the test cannot know in advance; it is pinned
+  # to its lowercase-hex shape and every other byte is literal.
+  test "a real daemon writes exactly one escaped readiness line and nothing else", context do
+    base = Path.join("/tmp", "lcr-#{System.unique_integer([:positive])}")
+    on_exit(fn -> File.rm_rf(base) end)
+    state_root = Path.join(base, "r \"q\\b\tt\nn")
+    socket = Path.join([state_root, "daemon", "daemon.sock"])
+
+    {port, os_pid} =
+      start_cli_process(
+        [
+          "daemon",
+          "--state-root",
+          state_root,
+          "--workspace",
+          context.workspace,
+          "--provider-launch",
+          context.launch,
+          "--policy",
+          "allow-all"
+        ],
+        [:stream]
+      )
+
+    output = await_raw(port, "", 60_000)
+    escaped_root = base <> "/r \\\"q\\\\b\\tt\\nn"
+
+    assert [_, incarnation] =
+             Regex.run(~r/"incarnation":"([0-9a-f]+)"/, output),
+           "no incarnation in #{inspect(output)}"
+
+    assert output ==
+             ~s({"record":"daemon_ready","root":"#{escaped_root}","socket":"#{escaped_root}/daemon/daemon.sock","incarnation":"#{incarnation}","version":"0.2.0"}\n)
+
+    assert JSON.decode!(output)["socket"] == socket
+
+    {_output, 0} = System.cmd("/bin/kill", ["-TERM", Integer.to_string(os_pid)])
+    assert {rest, 0} = drain_raw(port, "", 60_000)
+    assert rest == "", "the daemon wrote more to standard output: #{inspect(rest)}"
+  end
+
+  # Concept: the root's Store marker decides whether a daemon may start. A live
+  # writer refuses the daemon with its own class and an unverifiable marker
+  # with another, each before any socket exists and with the marker untouched;
+  # a daemon killed outright leaves a marker its successor recovers.
+  #
+  # Technical depth: every start is a real `loopex daemon` process. The live
+  # writer is a Store opened on the root's log by this test VM; the
+  # unverifiable marker is bytes no Store wrote. After `SIGKILL` the dead
+  # holder's marker remains and the next daemon reaches readiness.
+  test "a real daemon refuses a live or unverifiable Store marker and recovers a killed one",
+       context do
+    File.mkdir_p!(context.state_root)
+    log = Path.join(context.state_root, "store.log")
+    marker = log <> ".writer"
+    socket = Path.join([context.state_root, "daemon", "daemon.sock"])
+
+    arguments = [
+      "daemon",
+      "--state-root",
+      context.state_root,
+      "--workspace",
+      context.workspace,
+      "--provider-launch",
+      context.launch,
+      "--policy",
+      "allow-all"
+    ]
+
+    {:ok, holder} = Loopex.Store.Local.start_link(path: log)
+    held = File.read!(marker)
+    {:ok, active} = ExitStatus.fetch(:store_writer_active)
+    assert {"", ^active} = run_raw(arguments)
+    assert File.read!(marker) == held
+    refute File.exists?(socket)
+    :ok = GenServer.stop(holder)
+
+    File.write!(marker, "not a marker any Store wrote\n")
+    {:ok, unverifiable} = ExitStatus.fetch(:store_writer_unverifiable)
+    assert {"", ^unverifiable} = run_raw(arguments)
+    assert File.read!(marker) == "not a marker any Store wrote\n"
+    refute File.exists?(socket)
+    File.rm!(marker)
+
+    {first, first_pid} = start_cli_process(arguments, [:stream])
+    assert await_raw(first, "", 60_000) =~ ~s("record":"daemon_ready")
+    {_output, 0} = System.cmd("/bin/kill", ["-KILL", Integer.to_string(first_pid)])
+    assert {_rest, status} = drain_raw(first, "", 30_000)
+    assert status != 0
+    assert File.regular?(marker), "the killed daemon left no marker to recover"
+
+    {second, second_pid} = start_cli_process(arguments, [:stream])
+    assert await_raw(second, "", 60_000) =~ ~s("record":"daemon_ready")
+    {_output, 0} = System.cmd("/bin/kill", ["-TERM", Integer.to_string(second_pid)])
+    assert {"", 0} = drain_raw(second, "", 60_000)
+    refute File.exists?(marker)
+  end
+
+  defp run_raw(arguments) do
+    {port, _os_pid} = start_cli_process(arguments, [:stream])
+    drain_raw(port, "", 60_000)
+  end
+
+  defp await_raw(port, acc, bound) do
+    receive do
+      {^port, {:data, bytes}} ->
+        acc = acc <> bytes
+        if String.ends_with?(acc, "\n"), do: acc, else: await_raw(port, acc, bound)
+
+      {^port, {:exit_status, status}} ->
+        flunk("the daemon exited #{status} before readiness: #{inspect(acc)}")
+    after
+      bound -> flunk("the daemon never announced readiness")
+    end
+  end
+
+  defp drain_raw(port, acc, bound) do
+    receive do
+      {^port, {:data, bytes}} -> drain_raw(port, acc <> bytes, bound)
+      {^port, {:exit_status, status}} -> {acc, status}
+    after
+      bound -> flunk("the daemon never exited")
+    end
+  end
+
   defp start_daemon_process(arguments), do: start_cli_process(["daemon" | arguments])
 
   defp start_cli_process(argv, extra \\ []) do
@@ -193,9 +325,9 @@ defmodule LoopexCli.DaemonCommandTest do
           :exit_status,
           :use_stdio,
           :hide,
-          {:line, 65_536},
           env: [{~c"LOOPEX_PROVIDER_API_KEY", ~c"daemon-command-placeholder"}]
         ] ++
+          if(:stream in extra, do: [], else: [{:line, 65_536}]) ++
           extra ++
           [
             args:

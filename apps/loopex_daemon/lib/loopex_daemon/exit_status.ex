@@ -84,4 +84,43 @@ defmodule LoopexDaemon.ExitStatus do
   @doc false
   @spec classes() :: %{required(failure_class()) => 65..110}
   def classes, do: @statuses
+
+  @own_classes [:store_writer_active, :store_writer_unverifiable, :store_log_too_large]
+  @acquisition_failures [
+    :store_writer_lock_failed,
+    :store_writer_lock_close_failed,
+    :store_writer_recovery_failed,
+    :store_writer_identity_unavailable
+  ]
+
+  @doc """
+  ## Concept
+
+  Names the exit class of a Store refusal met while opening the root's log, so
+  every way the root's writer marker or log can refuse reaches the operator
+  as its own status.
+
+  ## Technical depth
+
+  The local Store refuses as a bare class or a tuple whose first element is the
+  class, carrying a path and a reason of varying arity. A live writer, an
+  unverifiable marker and an oversized log keep their own classes; the lock's
+  other failures are `store_writer_acquisition_failed`. Any other value is
+  `nil`, left to the caller's own class.
+  """
+  @spec store_open_class(term()) ::
+          :store_writer_active
+          | :store_writer_unverifiable
+          | :store_log_too_large
+          | :store_writer_acquisition_failed
+          | nil
+  def store_open_class(reason) when is_tuple(reason) and tuple_size(reason) >= 1,
+    do: store_open_class(elem(reason, 0))
+
+  def store_open_class(class) when class in @own_classes, do: class
+
+  def store_open_class(class) when class in @acquisition_failures,
+    do: :store_writer_acquisition_failed
+
+  def store_open_class(_reason), do: nil
 end

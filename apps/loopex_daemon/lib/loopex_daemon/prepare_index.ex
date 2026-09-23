@@ -31,7 +31,7 @@ defmodule LoopexDaemon.PrepareIndex do
   require Logger
 
   alias LoopexComposition.Placement
-  alias LoopexDaemon.{LegacyImport, SignalHandler}
+  alias LoopexDaemon.{ExitStatus, LegacyImport, SignalHandler}
   alias LoopexDaemon.SessionIndex.{Codec, Storage}
 
   @interrupt_ms 40_000
@@ -217,15 +217,8 @@ defmodule LoopexDaemon.PrepareIndex do
     end
   end
 
-  defp store_class({class, _detail})
-       when class in [:store_writer_active, :store_writer_unverifiable, :store_log_too_large],
-       do: class
-
-  defp store_class(class)
-       when class in [:store_writer_active, :store_writer_unverifiable, :store_log_too_large],
-       do: class
-
-  defp store_class(_reason), do: :store_writer_acquisition_failed
+  defp store_class(reason),
+    do: ExitStatus.store_open_class(reason) || :store_writer_acquisition_failed
 
   defp prepare(directory, uid) do
     case Storage.prepare(directory, uid) do

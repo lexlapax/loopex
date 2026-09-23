@@ -84,23 +84,28 @@ LOOPEX_PROVIDER_API_KEY=... bash scripts/check-release.sh
 ```
 
 It refuses without the credential, without the pinned Node, or on a dirty tree.
-Reference composition consumes the credential, so each of the eight
+It first stages the candidate as a fresh source archive and builds it there
+(described below), then runs every test lane inside that extraction rather than
+in your checkout. Reference composition consumes the credential, so each of the eight
 real-provider cases runs from a named manifest (application, file and exact
 case name) in its own `mix test FILE:LINE` process and must execute exactly one
 test; the eight rows must each run once. Only those processes inherit the
 credential: every other lane runs under `env -u LOOPEX_PROVIDER_API_KEY`, which
 a self-check proves first by logging only `present` or `absent`. The
-independent Node client then runs with `--only node_client` over
-`loopex_app_server`, `loopex_protocol` and `loopex_daemon`. The fresh-source
-lane follows: from a hostile caller
+independent Node client runs with `--only node_client` over
+`loopex_app_server`, `loopex_protocol`, `loopex_daemon` and `loopex_cli`, the
+last being the operator takeover: a killed CLI controller and a Node observer
+that takes over and aborts. The fresh-source lane that precedes them: from a
+hostile caller
 `umask 0777` it stages the exact commit with `git archive` under a scoped
 `umask 022`, retains the extraction's `scripts/source-archive-manifest.sh`
 manifest and the `git ls-files -z` inventory outside the extraction (set
 `LOOPEX_RELEASE_RETAIN` to choose where), proves with
 `scripts/source-archive-check.exs` that the extraction is exactly that commit,
 builds the command there with `mix deps.get` and the documented escript build,
-and proves the build changed nothing outside its declared outputs; it prints
-both retained files' SHA-256 digests. A `--only long_bound` pass over `loopex`,
+and proves the build changed nothing outside its declared outputs; it then
+requires the extraction's source identity to be the staged commit and its
+`VERSION` to be `0.2.0`, and prints both retained files' SHA-256 digests. A `--only long_bound` pass over `loopex`,
 `loopex_executor_local` and `loopex_daemon` runs the real-duration proofs the
 fast check excludes. On Linux the last lane runs the daemon's two
 `--only cross_uid` cases and requires exactly two to execute; it needs a second

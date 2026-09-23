@@ -856,15 +856,8 @@ defmodule LoopexDaemon.Service do
   defp store_class(:store_capacity_exceeded), do: :store_capacity_exceeded
   defp store_class(_reason), do: :store_lost
 
-  defp composition_class({class, _detail})
-       when class in [:store_writer_active, :store_writer_unverifiable, :store_log_too_large],
-       do: class
-
-  defp composition_class(class)
-       when class in [:store_writer_active, :store_writer_unverifiable, :store_log_too_large],
-       do: class
-
-  defp composition_class(_reason), do: :composition_start_failed
+  defp composition_class(reason),
+    do: ExitStatus.store_open_class(reason) || :composition_start_failed
 
   defp track(state, name, pid) do
     %{
