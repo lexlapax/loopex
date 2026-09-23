@@ -120,7 +120,10 @@ defmodule LoopexDaemon.ExternalSocketWorkflowRealTest do
       System.cmd(mix, ["loopex.provider.build"],
         cd: adapter,
         env: [
-          {"MIX_ENV", "prod"},
+          # The same isolated test-environment build the M4 real-provider lane
+          # uses, so the release run needs no second dependency compilation.
+          {"MIX_ENV", "test"},
+          {"HEX_OFFLINE", "1"},
           {"MIX_BUILD_PATH", build},
           {"LOOPEX_PROVIDER_API_KEY", nil},
           {"ANTHROPIC_API_KEY", nil}
