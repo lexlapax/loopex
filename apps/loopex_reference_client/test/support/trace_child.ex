@@ -87,10 +87,7 @@ defmodule Loopex.ReferenceClientTraceChild do
           provider_credential_present: receipt.provider_credential_present
         })
 
-        receive do
-        after
-          :infinity -> :ok
-        end
+        Process.sleep(:infinity)
     after
       120_000 -> raise "real trace did not reach the receipt fault point"
     end
