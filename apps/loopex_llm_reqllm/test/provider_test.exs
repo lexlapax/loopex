@@ -26,6 +26,16 @@ defmodule Loopex.LLM.ReqLLM.ProviderTest do
 
   @prompt "Reply with exactly one word: loopex"
 
+  defp custody_options(credential) do
+    {:ok, registry_pid} = Loopex.LLM.ReqLLM.CredentialRegistry.start_link([])
+    {:ok, registry} = Loopex.LLM.ReqLLM.CredentialRegistry.handle(registry_pid)
+    {:ok, custody_pid} = Loopex.LLM.ReqLLM.CredentialCustody.start_link(credential: credential)
+    {:ok, custody} = Loopex.LLM.ReqLLM.CredentialCustody.reference(custody_pid)
+    token = Loopex.LLM.ReqLLM.CredentialToken.new()
+    :ok = Loopex.LLM.ReqLLM.CredentialRegistry.put(registry, token, custody)
+    [credential_token: token, credential_registry: registry]
+  end
+
   @tag :real_provider
   test "one real model call completes through the model boundary" do
     model_spec = Adapter.default_model()
@@ -35,7 +45,12 @@ defmodule Loopex.LLM.ReqLLM.ProviderTest do
 
     File.mkdir!(root)
     on_exit(fn -> File.rm_rf!(root) end)
-    options = ProviderBuildFixture.options!(root) ++ [cleanup_grace_ms: 2_000]
+    # The adapter resolves its credential per invocation from host custody
+    # (ADR 0034), so the lane composes that custody from its own credential.
+    options =
+      ProviderBuildFixture.options!(root) ++
+        [cleanup_grace_ms: 2_000] ++
+        custody_options(System.get_env(Adapter.credential_variable()))
 
     Loopex.LLM.ReqLLM.ProviderPhaseDiagnostic.capture(fn ->
       case Adapter.complete_prompt(model_spec, @prompt, options) do
