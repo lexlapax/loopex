@@ -36,6 +36,19 @@ trap 'rm -rf "$logs" "$fresh"' EXIT
 # it; every build here belongs to the extraction.
 unset MIX_BUILD_PATH MIX_BUILD_ROOT
 
+# The maximum-population case holds both ends of 512 daemon connections in one
+# VM, beyond a stock Linux soft limit of 1,024 descriptors, so the soft limit is
+# raised toward the hard limit and a host that cannot reach 4,096 refuses.
+hard_files=$(ulimit -Hn)
+if [ "$hard_files" = unlimited ] || [ "$hard_files" -ge 65536 ]; then
+  ulimit -Sn 65536
+else
+  ulimit -Sn "$hard_files"
+fi
+[ "$(ulimit -Sn)" -ge 4096 ] ||
+  { echo "check-release: at least 4096 open files are required, found $(ulimit -Sn)" >&2; exit 2; }
+printf 'check-release: open-file limit %s\n' "$(ulimit -Sn)"
+
 # Reference composition consumes and deletes the credential, so each
 # credential-consuming case runs in its own operating-system process that
 # inherits it once; every other lane runs with the name removed.

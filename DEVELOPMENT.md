@@ -83,7 +83,7 @@ machine with the pinned Node and a provider credential:
 LOOPEX_PROVIDER_API_KEY=... bash scripts/check-release.sh
 ```
 
-It refuses without the credential, without the pinned Node, or on a dirty tree.
+It refuses without the credential, without the pinned Node, or on a dirty tree, and raises its own open-file soft limit toward the hard limit, refusing below 4,096, because the maximum-population case holds both ends of 512 daemon connections in one VM.
 It first stages the candidate as a fresh source archive and builds it there
 (described below), then runs every test lane inside that extraction rather than
 in your checkout. Reference composition consumes the credential, so each of the nine
