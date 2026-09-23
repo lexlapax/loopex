@@ -2378,8 +2378,12 @@ defmodule LoopexDaemon.OwnerTest do
   # instant with the owner still alive. The freeze names the
   # `settling_release` row with its connection-loss disposition, kills the
   # owner, terminalizes the no-reply settlement and pops the granted mirror.
+  # Technical depth: the restore clock runs from the park until the cut, so its
+  # 2 s deadline leaves a loaded machine room to reach the cut first; the
+  # 2.3 s sleep after the cut then outlasts that deadline, which proves the cut
+  # made the clock cleanup-only.
   test "the cut makes release clocks cleanup-only and the freeze supersedes an unrestored owner" do
-    owner = start_owner(mirror_deadline_ms: 200)
+    owner = start_owner(mirror_deadline_ms: 2_000)
     components = Owner.components(owner)
     connection = initialized_connection(components)
     session_id = "frozen-release-session"
@@ -2388,7 +2392,7 @@ defmodule LoopexDaemon.OwnerTest do
       park_release_cancellation(owner, components, connection, session_id)
 
     assert {:ok, _cut_ref} = Owner.cut_admission(owner, 5_000)
-    Process.sleep(300)
+    Process.sleep(2_300)
     assert Process.alive?(lease_owner)
     assert Process.alive?(owner)
     lease_owner_monitor = Process.monitor(lease_owner)
