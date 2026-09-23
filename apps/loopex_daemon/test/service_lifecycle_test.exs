@@ -242,6 +242,64 @@ defmodule LoopexDaemon.ServiceLifecycleTest do
     end
   end
 
+  # Concept: a state root that cannot even be created refuses at the first
+  # acquisition, the placement lock, and leaves nothing behind.
+  test "a root that cannot be created refuses placement_lock_failed", %{options: options} do
+    blocker = Path.join(Path.dirname(options[:state_root]), "a-file")
+    File.write!(blocker, "not a directory")
+    root = Path.join(blocker, "s")
+
+    options =
+      Keyword.merge(options,
+        state_root: root,
+        socket_path: Path.join([root, "daemon", "d.sock"])
+      )
+
+    {:ok, failed} = LoopexDaemon.ExitStatus.fetch(:placement_lock_failed)
+    {:ok, output} = StringIO.open("")
+    assert Sentinel.run(options, output: output, install_signals: false) == failed
+    assert StringIO.contents(output) == {"", ""}
+    assert File.read!(blocker) == "not a directory"
+  end
+
+  # Concept: two daemons started at the same moment on one root produce one
+  # daemon: exactly one reaches readiness and the other loses at the
+  # placement lock without disturbing it.
+  test "simultaneous starts on one root yield exactly one daemon", %{options: options} do
+    parent = self()
+
+    starts =
+      for index <- 1..2 do
+        Task.async(fn ->
+          {:ok, output} = StringIO.open("")
+
+          status =
+            Sentinel.run(options, output: output, install_signals: false, notify: parent)
+
+          {index, status, StringIO.contents(output)}
+        end)
+      end
+
+    {:ok, active} = LoopexDaemon.ExitStatus.fetch(:placement_active)
+
+    # The loser ends on its own; the winner is stopped once the loser has.
+    {loser, [winner]} =
+      case Task.yield_many(starts, 30_000) |> Enum.split_with(fn {_task, result} -> result end) do
+        {[{_task, {:ok, result}}], [{task, nil}]} -> {result, [task]}
+      end
+
+    assert {_index, ^active, {"", ""}} = loser
+
+    # Both sentinels announced themselves; the stop reaches whichever is live.
+    for _announced <- 1..2 do
+      assert_receive {:loopex_daemon_sentinel, sentinel, owner_ref, _owner}, 1_000
+      send(sentinel, {:daemon_signal, owner_ref, :sigterm})
+    end
+
+    assert {_index, 0, {"", readiness}} = Task.await(winner, 30_000)
+    assert readiness =~ ~s("record":"daemon_ready")
+  end
+
   test "a second daemon on a held root loses at the placement lock",
        %{options: options} do
     first = start_daemon(options)
