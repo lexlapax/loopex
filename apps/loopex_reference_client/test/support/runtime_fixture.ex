@@ -180,6 +180,11 @@ defmodule Loopex.ReferenceClientRuntimeFixture do
     runtime_options = runtime_options ++ sampling_options
     {:ok, client} = ReferenceClient.start(runtime_options)
 
+    case Keyword.get(model_options, :tracing_capability) do
+      nil -> :ok
+      capability -> :ok = Loopex.Trace.Capability.bind(capability, client.runtime)
+    end
+
     %{
       root: root,
       workspace: workspace,
@@ -373,12 +378,17 @@ defmodule Loopex.ReferenceClientRuntimeFixture do
 
     try do
       # The adapter resolves its credential per invocation from host custody
-      # (ADR 0034), which this fixture composes from the lane's key.
+      # and runs under a runtime-bound trace capability (ADR 0034), which this
+      # fixture composes as the reference composition does; the capability is
+      # bound to the runtime once it has started.
+      {:ok, capability_pid} = Loopex.Trace.Capability.start_link([])
+      {:ok, capability} = Loopex.Trace.Capability.handle(capability_pid)
+
       launch =
         Loopex.LLM.ReqLLM.ProviderBuildFixture.options!(root) ++
           Loopex.LLM.ReqLLM.ProviderBuildFixture.custody_options(
             System.get_env("LOOPEX_PROVIDER_API_KEY")
-          )
+          ) ++ [tracing_capability: capability]
 
       {launch, [sampling: %{"max_tokens" => Keyword.get(options, :max_tokens, 256)}]}
     rescue
