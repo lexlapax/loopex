@@ -61,14 +61,15 @@ the listener.
 | --- | --- | --- |
 | Admission cut and transport gate; listener stop; uninitialized connections reaped | `transport_cut_deadline_ms` 5 s | `relay_lost` |
 | Admitted requests reach core | `admission_wait_ms` 5 s | continues |
-| `freeze_lease_ops`: no new lease operation; executing rows finish | `relay_control_timeout_ms` 5 s | `relay_lost` |
+| `freeze_lease_ops`: no new lease operation; executing rows finish | `relay_control_timeout_ms` 5 s | `connections_lost` when registry mirror or holder-close work is unfinished; otherwise `relay_lost` |
 | `quiescing` | a fresh 5 s | `relay_lost` |
 | `Loopex.Runtime.quiesce/1`, in an unlinked helper while the owner keeps consuming component exits | core's own clocks | `drain_failed` when the runtime is unavailable; a component lost meanwhile ends the stop with its own class |
 | `seal_after_quiesce`, one `daemon.stopping` per connection, `tearing_down` | one shared `teardown_ms` 30 s | `relay_lost` |
 | Collaboration, runtime and edges stop in reverse; Store last | 5 s each, Store 30 s | — |
 | Placement release | 5 s | — |
 
-A fail-stop sends `daemon.stopping` with `fatal:<class>` within 5 s and ends
+A fail-stop sends `daemon.stopping` naming `fatal:<class>` — or the bare
+`store_lost` or `store_capacity_exceeded` for the Store — within 5 s and ends
 within 35 s of the first fatal. The owner monitors the runtime's exact Control
 and EventDispatcher, so losing either — even one the runtime's supervisor
 restarts — is `runtime_lost`; and before an orderly stop reports success it
@@ -126,8 +127,10 @@ deadline. The connection stays open.
 <a id="technical-daemon-credential"></a>
 ## Credential
 
-`loopex daemon` reads `LOOPEX_PROVIDER_API_KEY` at command entry through
-`LoopexComposition.CredentialHost`, which removes it from the environment.
+`loopex daemon` reads `LOOPEX_PROVIDER_API_KEY` at command entry, before it
+parses its arguments, and deletes it from the environment
+(`LoopexCli.Daemon.credential/1`); the offline commands read it through
+`LoopexComposition.CredentialHost` instead.
 `Service` deletes the value from its own options once custody holds it, and the
 git and `ps` children the host starts run with the variable removed. Custody
 and the registry answer unknown calls with `{:error, :unavailable}` and ignore

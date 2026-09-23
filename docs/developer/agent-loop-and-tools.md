@@ -334,7 +334,10 @@ suppresses that child's Logger and direct IO before starting ReqLLM; the parent
 installs no credential registry, Logger filter, or shared group-leader change.
 An independent process guardian owns the worker group through result retention
 and cleanup. The private channel carries bounded plain data, not provider
-exceptions or runtime terms. Missing explicit launch configuration refuses before
+exceptions or runtime terms. The credential reaches that child per invocation
+over its private channel: the host's custody process holds it behind an opaque
+`:credential_token` resolved through its `:credential_registry`, and a launch
+missing either is refused. Missing explicit launch configuration refuses before
 dispatch; it never falls back to executing ReqLLM in the embedding VM.
 
 A settlement is four closed enumerations and one result. `transport` is

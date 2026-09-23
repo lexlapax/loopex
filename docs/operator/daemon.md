@@ -162,7 +162,9 @@ closes and exits `0`; `sessions --daemon` exits `130`. `SIGKILL` sends nothing.
 The daemon handles `SIGTERM` as an orderly stop: it refuses new work, lets
 admitted work reach core, drains its sessions through core, tells every client
 `daemon.stopping` with `operator_stop`, stops its components with the Store last,
-releases the root, and exits `0`. Allow it to finish; a service manager timeout
+releases the root, and exits `0`. If a component is lost while it stops — the
+Store, or the runtime's own processes — the stop ends with that component's
+exit status instead, never `0`. Allow it to finish; a service manager timeout
 shorter than the bound below forces a stop, after which the next daemon recovers
 the root.
 
@@ -235,8 +237,13 @@ the placement release. `admission_wait_ms` is 5 s and `teardown_ms` is 30 s; an
 orderly stop of a daemon holding 512 initialized, attached connections measured
 119 ms on the development machine, and the closure evidence records the
 measurement on each supported toolchain. A relay that
-misses a barrier ends the stop as `relay_lost`; a fatal class ends within 35 s of
-the first fatal.
+misses a barrier ends the stop as `relay_lost`, except that registry or
+holder-close work unfinished at the lease-operation freeze ends it as
+`connections_lost`; a component lost while core quiesce runs, or before success
+is reported, ends it with that component's class. Losing the runtime's Control
+or EventDispatcher, even one its supervisor restarts, is `runtime_lost` whether
+the daemon is serving or stopping. A fatal class ends within 35 s of the first
+fatal.
 
 ### Exit statuses
 

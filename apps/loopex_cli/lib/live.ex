@@ -175,6 +175,9 @@ defmodule LoopexCli.Live do
 
   defp validate("attach", flags, [_session_id]) do
     cond do
+      not Map.has_key?(flags, :daemon) ->
+        {:error, "attach requires --daemon <socket>"}
+
       flags[:observe] && flags[:"take-over"] ->
         {:error, "--observe and --take-over cannot be combined"}
 

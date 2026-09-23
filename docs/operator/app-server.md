@@ -304,14 +304,14 @@ would not notice a server that was.
 | Capability | State |
 | --- | --- |
 | Drive a session from another language over stdio | Available, experimental |
-| Run as a daemon or listen on a socket | Not provided |
-| Attach more than one client to a session, or take one over | Not provided |
+| Run as a daemon or listen on a socket | Not provided here; `loopex daemon` does, on generation 2 — see the [daemon page](daemon.md) |
+| Attach more than one client to a session, or take one over | Not provided here; the daemon provides both |
 | Install a Hex package, binary or installer | Not provided |
 | Rely on the generation across milestones | Not provided; the name says experimental |
 
-These are not alternate routes to hidden functionality. A later daemon, socket
-transport or packaged client must drive this same session contract rather than
-introduce another loop.
+These are not alternate routes to hidden functionality. The daemon drives this
+same session contract over its socket rather than introducing another loop, and
+a later packaged client must do the same.
 
 ## Related
 

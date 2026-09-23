@@ -639,6 +639,14 @@ where an integer belongs, no trailing bytes. A lenient client that relied on
 repair was never conformant. Fixed by
 [ADR 0023](../adr/0023-experimental-public-session-protocol.md#concept).
 
+**Daemon wire protocol.** The daemon speaks its own exact generation,
+`loopex.experimental/2`, over a Unix-domain socket: generation one's framing,
+records and error codes reused, the daemon's four methods, two record families
+and twelve refusal codes added, `writer_epoch` required on existing-session
+mutations, and its own schema digest, manifest and vectors. It is as
+experimental as generation one and carries no promise across generations. See
+the [daemon pair](daemon.md#concept).
+
 **Durable interaction records.** `interaction_requested_v1`,
 `interaction_answer_admitted_v1`, and `interaction_resolved_v1`, plus the
 `interaction_answer` command record and the `interaction.requested`,
@@ -682,7 +690,8 @@ implementation choice, which is what makes the inventory something a consumer
 can read against. Core attaches no handler; `loopex_telemetry` owns the only
 Loopex-attached one, and a host handler runs in the emitting process and is the
 host's own responsibility. Trace sessions are runtime-scoped, need the refreshed
-OTP floor, and are administrative diagnostics: neither plane is durable truth,
+OTP floor, load from the code path each module they name before observing it,
+and are administrative diagnostics: neither plane is durable truth,
 neither is authority, and no session command, wire request, model output or
 project resource can start, change or stop either. No durable format changes,
 and removing the facility needs no migration.

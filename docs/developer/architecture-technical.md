@@ -611,9 +611,13 @@ the lease ends the owned process group or abandons the filesystem effect, and th
 job is retained as unproven rather than complete. Exact duplicate jobs return the
 retained receipt without another start.
 
-Credentials stay at the provider boundary. The reference adapter reads only
-`LOOPEX_PROVIDER_API_KEY`; a short-lived sender materializes it after the
-configured companion has proved its protected entry and build identity. Neither
+Credentials stay at the provider boundary. The reference adapter reads no
+environment variable: the host reads `LOOPEX_PROVIDER_API_KEY` once, deletes it
+and holds it in a custody process beside a routing registry
+(`LoopexComposition.CredentialHost`), and the adapter, given an opaque
+`:credential_token` and that `:credential_registry`, resolves it per
+invocation; a short-lived sender materializes it after the configured
+companion has proved its protected entry and build identity. Neither
 the initial process image nor its arguments carry the credential. The companion
 uses it as a per-request option, with child diagnostics suppressed before ReqLLM
 starts. Its classified failures carry the literal `"model_call_failed"` and no

@@ -51,6 +51,8 @@ defmodule LoopexCli.LiveDaemonTest do
       {"sessions", ["--daemon", socket, "--limit", "x"], "from 1 to 256"},
       {"sessions", ["--daemon", socket, "--status=yes"], "takes no value"},
       {"sessions", ["--daemon", socket, "extra"], "takes no arguments"},
+      {"attach", ["s"], "requires --daemon"},
+      {"attach", ["s", "--observe"], "requires --daemon"},
       {"attach", ["s", "--daemon", socket, "--observe", "--take-over"], "cannot be combined"},
       {"attach", ["s", "--daemon", socket, "--prompt", "p"], "requires --take-over"},
       {"attach", ["s", "--daemon", socket, "--observe", "--prompt", "p"], "requires --take-over"},

@@ -97,8 +97,10 @@ than one shared budget.
 
 The process owns no session residency. Its loss is an ordinary host loss: the
 durable session stays where it was. There is no socket, no background lifetime,
-and no takeover — a second attachment to one session is refused as a conflict
-rather than displacing the first.
+and no takeover between clients. A connection holds at most one attachment: a
+second `session.attach` on it is refused `attachment_conflict` unless it sets
+`replace`, which replaces the connection's own attachment. The
+[daemon](daemon.md#concept) provides several clients and takeover.
 
 Ending input is not cancelling. Clean EOF and abrupt death both leave a pending
 interaction pending; `session.abort` is the only deliberate cancellation. A

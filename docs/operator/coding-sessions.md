@@ -379,6 +379,9 @@ loopex skill list [--state-root DIR] [--workspace DIR]
 loopex skill show <source-qualified-name> [--state-root DIR] [--workspace DIR]
 ```
 
+These are the offline commands; the live forms that drive a running daemon —
+`run`, `resume` and `sessions` with `--daemon`, and `attach` — and `loopex
+daemon` itself have their own grammar on the [daemon page](daemon.md#technical-depth).
 Each subcommand names its own flags, and a flag is refused by name wherever the
 subcommand does not offer it — `loopex sessions --policy allow-all` is refused
 rather than quietly ignored:
@@ -405,7 +408,8 @@ option parsing and keeps every remaining word as data, which is how an artifact
 locator that begins with `--` is retrievable at all.
 
 Exit status is `0` for success and `1` for a refusal or failure, with the reason
-on standard error prefixed `loopex:`. An unrecognised subcommand, or no arguments
+on standard error prefixed `loopex:`. The live forms and `loopex daemon` add
+their own statuses, listed on the [daemon page](daemon.md#technical-depth). An unrecognised subcommand, or no arguments
 at all, prints the usage text there and exits `1`, so a script wrapping the
 command can tell a run from a mistyped one.
 
@@ -422,6 +426,7 @@ command can tell a run from a mistyped one.
 | `resource-packs/manifests/` | Complete verified resource manifests, named by manifest digest |
 | `resource-packs/provenance/` | Exact retained Git provenance for matching pack bytes |
 | `resource-packs/receipts/` | Executor receipts for Git acquisition jobs |
+| `daemon/` | A running daemon's socket and session index |
 
 The state root resolves from `LOOPEX_HOME` and never from Elixir application
 environment, so the directory an operator's shell names is the directory used.

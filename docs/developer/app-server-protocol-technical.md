@@ -62,7 +62,10 @@ guard masks an unimplemented method and reports the wrong reason.
 `session.attach` returns the attachment on the connection rather than to the
 caller alone: the connection holds it, because a later command is admitted
 through the same attachment and a transport delivers what that attachment
-publishes.
+publishes. A connection holds at most one attachment: a further
+`session.attach` is refused `attachment_conflict`, for any session, unless it
+carries the optional boolean `replace: true`, which replaces the connection's
+own attachment with the new one.
 
 This generation does not list sessions over the wire.
 
