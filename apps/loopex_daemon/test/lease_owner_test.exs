@@ -2016,7 +2016,11 @@ defmodule LoopexDaemon.LeaseOwnerTest do
     assert_receive {:connection_message, ^holder, {:relay_ticket_result, ^first, ^first_result}},
                    500
 
-    assert_receive {:invoked, ^queued_invoke, {:ok, :completed}}, 500
+    # Once the first resume settles, the owner may recheck the queued resume
+    # against the lapsed term first or propose the expiry first; this case
+    # stands in for the daemon owner, so it resolves a proposed expiry and the
+    # queued resume must be refused either way.
+    await_queued_after_expiry(fixture, queued_invoke)
     refused = WireRecords.request_error("resume-expiry-queued", "control_not_held")
 
     assert_receive {:connection_message, ^holder, {:relay_ticket_result, ^queued, ^refused}},
@@ -2032,6 +2036,30 @@ defmodule LoopexDaemon.LeaseOwnerTest do
            } = ConnectionRegistry.status(fixture.registry)
 
     stop_connection(holder, fixture.relay, holder_incarnation)
+  end
+
+  defp await_queued_after_expiry(fixture, queued_invoke) do
+    receive do
+      {:invoked, ^queued_invoke, {:ok, :completed}} ->
+        :ok
+
+      {:lease_expiry_proposed, expiry_ref, _owner, _incarnation, _session, _holder,
+       _holder_incarnation, _epoch} ->
+        resolution_ref = make_ref()
+
+        assert :ok =
+                 LeaseOwner.request_expiry_resolution(
+                   fixture.owner,
+                   resolution_ref,
+                   fixture.owner_incarnation,
+                   expiry_ref
+                 )
+
+        assert_receive {:lease_owner_resolution_ack, ^resolution_ref, _, _, :expiry, :ok}, 2_000
+        assert_receive {:invoked, ^queued_invoke, {:ok, :completed}}, 2_000
+    after
+      2_000 -> flunk("the queued resume neither completed nor waited on an expiry")
+    end
   end
 
   test "released owner waits for the final relay row before acknowledged retirement" do
