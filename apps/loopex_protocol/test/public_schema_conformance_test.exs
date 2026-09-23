@@ -364,8 +364,8 @@ defmodule LoopexProtocol.PublicSchemaConformanceTest do
 
   test "generation-two schema and vector files have pinned identities" do
     for {directory, expected} <- [
-          {"schema", "83751e744bdebc2164162d61a717aad7a1e6364465763a5d1697ddcf8b122381"},
-          {"vectors", "09f1f1ecace1ab2e1e5bbba6002b4b162f7ee64e72e53e2d2499926a3c030684"}
+          {"schema", "49e79bc8bd087d7381228db280a5e702f2544f9965398edf23fe655e845fb5ee"},
+          {"vectors", "82b20498272f5ca155d3f42f63fc12b94deaea24b3be1f92fc120bb4899c5fec"}
         ] do
       path =
         Path.join([

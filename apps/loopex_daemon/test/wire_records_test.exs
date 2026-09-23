@@ -4,6 +4,26 @@ defmodule LoopexDaemon.WireRecordsTest do
   alias LoopexDaemon.WireRecords
   alias LoopexProtocol.Frame
 
+  # Concept: what the daemon writes when it stops is byte for byte the
+  # generation's literal vector for that reason.
+  test "every daemon.stopping vector is exactly the record the daemon writes" do
+    vectors =
+      :loopex_protocol
+      |> Application.app_dir("priv/vectors/loopex-experimental-2.json")
+      |> File.read!()
+      |> JSON.decode!()
+      |> Map.fetch!("cases")
+      |> Enum.filter(&String.starts_with?(&1["id"], "daemon_stopping_"))
+
+    assert length(vectors) == 13
+
+    for %{"raw_hex" => hex} <- vectors do
+      bytes = Base.decode16!(hex, case: :lower)
+      %{"reason" => reason} = JSON.decode!(bytes)
+      assert encode(WireRecords.daemon_stopping(reason)) == bytes
+    end
+  end
+
   test "control records match the generation-two vectors exactly" do
     epoch = "epoch"
 

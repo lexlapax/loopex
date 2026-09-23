@@ -223,6 +223,41 @@ defmodule LoopexProtocol.Session.V2Test do
              "session cannot be activated by this daemon composition"
   end
 
+  # Concept: a client can be told the daemon is stopping for exactly these
+  # reasons, each a literal record: an orderly stop, the Store's loss or
+  # capacity, and one fatal class per component whose loss the daemon can
+  # still report. Registry loss removes the connection set, so no
+  # `connections_lost` record can reach a client, and no reason carries a retry
+  # hint.
+  test "daemon.stopping has one literal vector per reason a client can receive" do
+    stopping =
+      contract_file("vectors")["cases"]
+      |> Enum.filter(&String.starts_with?(&1["id"], "daemon_stopping_"))
+      |> Enum.map(&decode_vector/1)
+
+    assert Enum.map(stopping, & &1["reason"]) |> Enum.sort() ==
+             Enum.sort([
+               "operator_stop",
+               "store_lost",
+               "store_capacity_exceeded",
+               "fatal:runtime_lost",
+               "fatal:transfers_lost",
+               "fatal:workspace_lease_lost",
+               "fatal:executor_lost",
+               "fatal:registry_lost",
+               "fatal:custody_lost",
+               "fatal:capability_lost",
+               "fatal:relay_lost",
+               "fatal:listener_lost",
+               "fatal:drain_failed"
+             ])
+
+    for record <- stopping do
+      assert Map.keys(record) |> Enum.sort() == ["message", "reason", "type"]
+      assert record["type"] == "daemon.stopping"
+    end
+  end
+
   defp contract_file(directory) do
     :loopex_protocol
     |> Application.app_dir(Path.join(["priv", directory, "loopex-experimental-2.json"]))

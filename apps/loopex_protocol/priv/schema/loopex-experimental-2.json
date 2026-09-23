@@ -1239,7 +1239,7 @@
   },
   "vectors": {
     "path": "apps/loopex_protocol/priv/vectors/loopex-experimental-2.json",
-    "sha256": "09f1f1ecace1ab2e1e5bbba6002b4b162f7ee64e72e53e2d2499926a3c030684"
+    "sha256": "82b20498272f5ca155d3f42f63fc12b94deaea24b3be1f92fc120bb4899c5fec"
   },
   "initialize_limits": {
     "inherited_generation_one": true,
