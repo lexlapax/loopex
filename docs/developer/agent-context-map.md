@@ -5720,3 +5720,17 @@ disposition listed was proved instead. Three witness files the accepted
 Outcomes table names were remapped as the code settled, recorded in the plan's
 evidence-scaffold progress row: `session_lifetime_test.exs`,
 `replay_residency_test.exs` and `apps/loopex_daemon/test/multi_client_workflow_test.exs`.
+
+<a id="disposition-m5-driver-attendance-2026-09-23"></a>
+### M5 release-check attendance — 2026-09-23
+
+The release check has two attended cases, which wait for a person to type
+`yes` at an exact notice. On the M5 closure candidates they were answered by
+the implementing session's terminal driver on the maintainer's instruction,
+only at their exact notice, not by a person watching the run. The final delta
+review asked that the evidence not read as human attendance. On 2026-09-23 the
+maintainer accepted the driver-answered run as the closure run of record.
+What changes is what the two cases prove: the automated sequence each case
+drives, without a person's independent observation of it. The cases, the
+release check and every other lane are unchanged. The closure evidence page
+says this beside the release-check result.

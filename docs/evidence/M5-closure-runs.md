@@ -46,7 +46,11 @@ values.
 
 `LOOPEX_CROSS_UID_USER=<second user> bash scripts/check-release.sh`, with the
 provider credential and Node 22.14.0. Closure requires a plain `PASS` final
-line; `PASS (closure-incomplete: cross_uid not run)` is not that.
+line; `PASS (closure-incomplete: cross_uid not run)` is not that. The two
+attended cases were answered by the implementing session's terminal driver on
+the maintainer's instruction, not by a person watching, which the maintainer
+accepted as the closure run of record
+([disposition](../developer/agent-context-map.md#disposition-m5-driver-attendance-2026-09-23)).
 
 | Field | Value |
 | --- | --- |
