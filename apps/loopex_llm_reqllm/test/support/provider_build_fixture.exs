@@ -143,9 +143,10 @@ defmodule Loopex.LLM.ReqLLM.ProviderBuildFixture do
     {:ok, validated} = ProviderConfiguration.validate(configuration)
 
     expected = %{
-      "source" => source,
-      # A checkout build carries no archive source digest.
-      "source_digest" => nil,
+      "source" => source.commit,
+      # A checkout build carries no archive source digest; an extraction's
+      # build carries the digest of its own archive manifest.
+      "source_digest" => source.source_digest,
       "version" => File.read!(Path.join(@source_root, "VERSION")) |> String.trim(),
       "dependency_lock_sha256" => digest(File.read!(Path.join(@source_root, "mix.lock"))),
       "packaged_input_sha256" => Mix.Tasks.Loopex.Provider.Build.packaged_input_digest(worker),
@@ -198,21 +199,21 @@ defmodule Loopex.LLM.ReqLLM.ProviderBuildFixture do
     File.cp_r!(source, destination, dereference_symlinks: true)
   end
 
+  # Concept: the fixture builds from the same source identity the production
+  # build records: a clean checkout's commit, or, in a `git archive`
+  # extraction with no `.git`, the archive-carried `SOURCE_IDENTITY` and its
+  # manifest digest. The release check runs every lane inside an extraction.
   defp clean_source! do
-    environment =
-      empty_environment()
-      |> Map.merge(%{"PATH" => "/usr/bin:/bin", "GIT_OPTIONAL_LOCKS" => "0"})
-      |> Map.to_list()
+    case Mix.LoopexSourceIdentity.resolve(@source_root) do
+      {:ok, %{commit: commit, source_digest: digest}} ->
+        %{commit: commit, source_digest: digest}
 
-    {status, 0} =
-      System.cmd("git", ["status", "--porcelain=v1", "--untracked-files=all"],
-        cd: @source_root,
-        env: environment
-      )
+      {:error, :source_checkout_dirty} ->
+        raise("provider fixture requires a clean source checkout")
 
-    unless status == "", do: raise("provider fixture requires a clean source checkout")
-    {source, 0} = System.cmd("git", ["rev-parse", "HEAD"], cd: @source_root, env: environment)
-    String.trim(source)
+      {:error, reason} ->
+        raise("provider fixture cannot identify its source: #{inspect(reason)}")
+    end
   end
 
   defp empty_environment do
