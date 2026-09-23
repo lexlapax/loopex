@@ -2707,13 +2707,14 @@ defmodule LoopexDaemon.OwnerTest do
 
   # Concept: at the freeze, a retained connection loss for an existing
   # owner's unproposed acquire is settled without the discard round trip:
-  # the operation is tombstoned and its no-reply settlement terminalizes the
-  # exact row named by the matching reference.
+  # the operation is tombstoned, its no-reply settlement terminalizes the
+  # exact row named by the matching reference, and that exact owner is killed
+  # so it can neither keep the queued acquire nor propose it later.
   #
   # Technical depth: the lease owner is suspended when the successor's
-  # connection is lost, so its discard is unanswered; the owner is resumed
-  # only after the daemon owner consumed the freeze answer, whose
-  # `settling_acquire` descriptor carries the retained loss reference.
+  # connection is lost, so its discard is unanswered. The freeze names the
+  # `settling_acquire` descriptor with the retained loss reference, kills the
+  # owner and answers once its loss has joined.
   test "the freeze settles a retained loss for an unproposed existing-owner acquire" do
     owner = start_owner(lease_term_ms: 40)
     components = Owner.components(owner)
@@ -2734,20 +2735,189 @@ defmodule LoopexDaemon.OwnerTest do
     :sys.resume(components.registry)
     assert :ok = wait_for_mirror_step(owner, :expiry, :resolve_owner_expiry)
     assert {:ok, _cut_ref} = Owner.cut_admission(owner, 5_000)
-    freeze_task = Task.async(fn -> freeze(owner) end)
-    assert :ok = wait_for_freeze_descriptors(owner)
-    :sys.resume(lease_owner)
+    lease_owner_monitor = Process.monitor(lease_owner)
 
     assert {:ok,
             [
               {:settling_acquire, ^successor_origin, :connection_lost, ^lease_owner,
                ^owner_incarnation, nil, ^loss_ref}
-            ]} = Task.await(freeze_task, 5_500)
+            ]} = freeze(owner)
 
-    assert %{pending_dispositions: 0, lease_operations: 0, mirror_operations: 0} =
-             Owner.status(owner)
+    assert_receive {:DOWN, ^lease_owner_monitor, :process, ^lease_owner, :killed}, 500
+
+    assert %{
+             pending_dispositions: 0,
+             lease_operations: 0,
+             mirror_operations: 0,
+             lost_owners: 0,
+             owner_slots: 0
+           } = Owner.status(owner)
 
     assert %{permits: 0} = AdmissionRelay.status(components.relay)
+  end
+
+  # Concept: a connection loss the relay reports after the daemon owner has
+  # already consumed the exact owner's `EXIT` is settled at once rather than
+  # sent as a discard nobody can answer, so the lost owner's pop, its slot and
+  # any successor are not held forever.
+  #
+  # Technical depth: the relay is suspended while the successor's connection
+  # and then the lease owner are killed, so the daemon owner consumes the
+  # owner's `EXIT` first. Resuming the relay delivers the connection-loss
+  # disposition for the owner's unproposed acquire; after the registry
+  # resumes, nothing is left.
+  test "a loss reported after its owner's exit is settled without a discard" do
+    owner = start_owner(lease_term_ms: 40)
+    components = Owner.components(owner)
+    former = initialized_connection(components)
+    successor = initialized_connection(components)
+
+    {lease_owner, _owner_incarnation, _successor_origin} =
+      queue_successor_behind_expiry(owner, components, former, successor, "exit-first-session")
+
+    :sys.suspend(components.relay)
+    Process.exit(successor.pid, :kill)
+    lease_owner_monitor = Process.monitor(lease_owner)
+    Process.exit(lease_owner, :kill)
+    assert_receive {:DOWN, ^lease_owner_monitor, :process, ^lease_owner, :killed}, 500
+    assert :ok = wait_for_status(owner, &(&1.lost_owners == 1))
+    assert %{pending_dispositions: 0, lease_operations: 1} = Owner.status(owner)
+    :sys.resume(components.relay)
+    :sys.resume(components.registry)
+    assert_clean_retirement(owner, components)
+  end
+
+  # Concept: a fresh child whose first acquire lost its connection before it
+  # proposed is killed at the freeze and its permit tombstoned, so a proposal
+  # it sent just before the kill creates no mirror row and does not stop the
+  # daemon owner.
+  #
+  # Technical depth: a debug hook holds the child as its first acquire
+  # arrives, so the daemon owner's call times out and the acquire is kept
+  # unproposed; the connection is then lost and the loss retained. After the
+  # freeze has killed the child and settled the loss, the proposal the child
+  # would have sent is delivered to the daemon owner; the kill always lands
+  # before the held child can send it, so it is delivered from the test.
+  @tag timeout: 60_000
+  test "the freeze tombstones a fresh child's unproposed acquire and kills the child" do
+    owner = start_owner()
+    components = Owner.components(owner)
+    holder = initialized_connection(components)
+    origin = {holder.incarnation, 0, 1}
+    {worker, worker_incarnation} = start_worker(holder.pid, origin)
+    test_pid = self()
+
+    :ok =
+      :sys.install(
+        components.relay,
+        {fn
+           :waiting,
+           {:in, {:"$gen_call", _from, {:register_lease_owner, "held-child-session", child, _}}},
+           _proc_state ->
+             send(test_pid, {:registering, child})
+
+             receive do
+               :continue_registration -> :done
+             end
+
+           :waiting, _event, _proc_state ->
+             :waiting
+         end, :waiting}
+      )
+
+    # The daemon owner's own call to the held child times out after five
+    # seconds, so the acquire is called with a longer bound than the client's.
+    acquire =
+      Task.async(fn ->
+        GenServer.call(
+          owner,
+          {:acquire_control, origin, "held-child-acquire", "held-child-session", holder.pid,
+           holder.incarnation, worker, worker_incarnation, now_ms() + 30_000},
+          10_000
+        )
+      end)
+
+    assert_receive {:registering, child}, 500
+    :sys.suspend(child)
+    send(components.relay, :continue_registration)
+
+    :ok =
+      :sys.install(
+        child,
+        {fn
+           :waiting, {:in, {:"$gen_call", _from, request}}, _proc_state
+           when is_tuple(request) and elem(request, 0) == :first_acquire ->
+             send(test_pid, :first_acquire_held)
+
+             receive do
+               :never -> :done
+             end
+
+           :waiting, _event, _proc_state ->
+             :waiting
+         end, :waiting}
+      )
+
+    :sys.resume(child)
+    assert_receive :first_acquire_held, 500
+    assert {:ok, :queued, ^child, child_incarnation} = Task.await(acquire, 10_000)
+    Process.exit(holder.pid, :kill)
+    assert :ok = wait_for_pending_dispositions(owner, 1)
+    assert {:ok, _cut_ref} = Owner.cut_admission(owner, 5_000)
+    child_monitor = Process.monitor(child)
+    daemon_incarnation = components.daemon_incarnation
+
+    assert {:ok,
+            [
+              {:settling_acquire, ^origin, :connection_lost, ^owner, ^daemon_incarnation,
+               start_op_ref, _loss_ref}
+            ]} = freeze(owner)
+
+    assert is_reference(start_op_ref)
+    assert_receive {:DOWN, ^child_monitor, :process, ^child, :killed}, 500
+
+    send(
+      owner,
+      {:lease_grant_proposed, make_ref(), origin, child, child_incarnation, "held-child-session",
+       holder.pid, holder.incarnation, :crypto.strong_rand_bytes(16), now_ms() + 30_000}
+    )
+
+    assert %{
+             pending_dispositions: 0,
+             lease_operations: 0,
+             mirror_operations: 0,
+             owner_slots: 0
+           } = Owner.status(owner)
+
+    assert Process.alive?(owner)
+    assert %{permits: 0} = AdmissionRelay.status(components.relay)
+  end
+
+  # Concept: a holder close the connection never acknowledges is a
+  # connection-side failure: unfinished at `freeze_deadline` it is
+  # `connections_lost`, as it is at the rebound transport-cut instant, and
+  # the exact registry is killed.
+  #
+  # Technical depth: a held owner is killed while serving, its classification
+  # completes and the one close reaches the holder, which never answers; the
+  # cut and a 300 ms freeze follow.
+  test "a holder close unacknowledged at the freeze deadline selects connections_lost" do
+    owner = start_owner(mirror_deadline_ms: 1_000)
+    components = Owner.components(owner)
+    holder = initialized_connection(components)
+    holder_pid = holder.pid
+    {lease_owner, _owner_incarnation, _epoch} = acquire_held(owner, holder, "unclosed-session")
+    Process.exit(lease_owner, :kill)
+
+    assert_receive {:manual_connection_message, ^holder_pid,
+                    {:daemon_control_owner_lost, ^owner, _close_ref, "unclosed-session",
+                     _holder_incarnation}},
+                   500
+
+    assert {:ok, _cut_ref} = Owner.cut_admission(owner, 5_000)
+    registry_monitor = Process.monitor(components.registry)
+    assert {:error, :connections_lost} = freeze(owner, 300)
+    assert_receive {:DOWN, ^registry_monitor, :process, _registry, :killed}, 500
   end
 
   # Concept: a client disconnect never fail-stops the daemon, even when the

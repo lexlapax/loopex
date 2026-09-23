@@ -2448,19 +2448,38 @@ defmodule LoopexDaemon.Owner do
   # owner answers after any proposal it already sent for that permit, so a
   # proposal consumes the loss first and the answer then finds nothing to
   # settle; otherwise the answer starts the no-reply relay settlement, which
-  # deletes the operation. A fresh child's first acquire always proposes, so
-  # it needs no discard.
+  # deletes the operation. An owner whose exact `EXIT` was already consumed
+  # can answer nothing, so its loss is settled at once instead. A fresh
+  # child's first acquire always proposes, so it needs no discard.
   defp request_queued_discard(state, permit_id) do
     case Map.fetch!(state.operations, permit_id) do
-      %{actor_pid: owner, owner_pid: owner, owner_incarnation: owner_incarnation}
+      %{actor_pid: owner, owner_pid: owner, owner_incarnation: owner_incarnation} = operation
       when is_pid(owner) and owner != self() ->
-        discard_ref = make_ref()
-        :ok = LeaseOwner.request_discard(owner, discard_ref, owner_incarnation, permit_id)
-        put_in(state, [:pending_dispositions, permit_id, :discard_ref], discard_ref)
+        if live_owner_incarnation?(state, operation) do
+          discard_ref = make_ref()
+          :ok = LeaseOwner.request_discard(owner, discard_ref, owner_incarnation, permit_id)
+          put_in(state, [:pending_dispositions, permit_id, :discard_ref], discard_ref)
+        else
+          {loss, state} = pop_in(state, [:pending_dispositions, permit_id])
+          Logger.debug("loopex daemon lost owner queued operation settlement start")
+
+          {:noreply, state} =
+            start_waiting_owner_loss_settlement(state, permit_id, operation, loss)
+
+          state
+        end
 
       _fresh_or_waiting ->
         state
     end
+  end
+
+  defp live_owner_incarnation?(state, operation) do
+    match?(
+      %{pid: pid, incarnation: incarnation, exit_consumed: false}
+      when pid == operation.owner_pid and incarnation == operation.owner_incarnation,
+      Map.get(state.owners, operation.request.session_id)
+    )
   end
 
   defp settle_discarded_operation(state, discard_ref, owner, owner_incarnation) do
@@ -3443,9 +3462,17 @@ defmodule LoopexDaemon.Owner do
     end
   end
 
+  # Technical depth: both branches tombstone the permit, so a proposal the
+  # actor sent before its kill creates no mirror row. The fresh child's own
+  # `EXIT` settles the retained loss through `refuse_unproposed_grants`; an
+  # existing owner is killed too, so it cannot keep the queued operation or
+  # leave a later proposal in `release_pending` or a proposed grant, and its
+  # loss is settled here.
   defp settle_unproposed_loss(state, %{actor_pid: actor} = operation, _loss)
        when actor == self() do
-    shutdown_actor(state, operation)
+    state
+    |> put_in([:stop, :tombstones, operation.request.permit_id], :connection_lost)
+    |> shutdown_actor(operation)
   end
 
   defp settle_unproposed_loss(state, operation, loss) do
@@ -3456,9 +3483,11 @@ defmodule LoopexDaemon.Owner do
       |> update_in([:pending_dispositions], &Map.delete(&1, permit_id))
       |> put_in([:stop, :tombstones, permit_id], :connection_lost)
 
-    Logger.debug("loopex daemon unproposed lease operation settled at freeze")
-    {:noreply, state} = start_waiting_owner_loss_settlement(state, permit_id, operation, loss)
-    {:ok, state}
+    with {:ok, state} <- shutdown_actor(state, operation) do
+      Logger.debug("loopex daemon unproposed lease operation settled at freeze")
+      {:noreply, state} = start_waiting_owner_loss_settlement(state, permit_id, operation, loss)
+      {:ok, state}
+    end
   end
 
   # Technical depth: a barrier-owned permit can have a mirror operation only
@@ -3552,7 +3581,7 @@ defmodule LoopexDaemon.Owner do
       end)
   end
 
-  @registry_steps [
+  @connections_steps [
     :install,
     :install_connection_lost,
     :install_shutdown,
@@ -3561,18 +3590,21 @@ defmodule LoopexDaemon.Owner do
     :resolve_owner_lost,
     :cancel_shutdown,
     :clear,
-    :pop_owner
+    :pop_owner,
+    :await_holder_close
   ]
 
   # Concept: the step each unfinished operation waits on names the component
-  # that failed the freeze. Only a missed registry acknowledgement is
-  # `connections_lost`; every other unfinished step — a relay selection,
-  # settlement or classification, or a lease owner's or holder's answer the
-  # relay join depends on — is `relay_lost`, so the registry is killed only
-  # when the registry is the late party.
+  # that failed the freeze. A missed registry acknowledgement, or a missed
+  # holder-close acknowledgement from the connection, is `connections_lost`,
+  # the same class the rebound transport-cut instant selects for a late holder
+  # close; every other unfinished step — a relay selection, settlement or
+  # classification, or a lease owner's `resolve_owner_*` answer the relay join
+  # depends on — is `relay_lost`, so the registry is killed only when the
+  # connection side is the late party.
   defp freeze_failure(state) do
     if Enum.any?(state.mirror_operations, fn {_operation_ref, operation} ->
-         operation.step in @registry_steps
+         operation.step in @connections_steps
        end),
        do: :connections_lost,
        else: :relay_lost
