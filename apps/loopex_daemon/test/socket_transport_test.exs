@@ -548,6 +548,35 @@ defmodule LoopexDaemon.SocketTransportTest do
     |> Enum.filter(fn {_token, row} -> row.phase == :live and row.initialized end)
   end
 
+  # Concept: one session holds at most 64 attachments; the 65th is refused
+  # without touching the others, and another session still accepts one.
+  @tag timeout: 120_000
+  test "the sixty-fifth attachment to one session is refused while another session attaches",
+       %{daemon: daemon} do
+    creator = initialized_client(daemon)
+    full = create_session(creator, "full-create")
+    other = create_session(creator, "other-create")
+
+    attached =
+      for index <- 1..64 do
+        client = initialized_client(daemon)
+        :ok = send_frame(client, attach("a#{index}", full))
+        assert [%{"type" => "snapshot"}] = receive_records(client, 1)
+        client
+      end
+
+    extra = initialized_client(daemon)
+    :ok = send_frame(extra, attach("sixty-fifth", full))
+
+    assert [%{"request_id" => "sixty-fifth", "code" => "capacity_exceeded"}] =
+             receive_records(extra, 1)
+
+    :ok = send_frame(extra, attach("elsewhere", other))
+    assert [%{"request_id" => "elsewhere", "type" => "snapshot"}] = receive_records(extra, 1)
+    assert %{attachments: 65} = ConnectionRegistry.status(daemon.registry)
+    refute Enum.any?(attached, &closed?(&1, 10))
+  end
+
   test "resource queries and artifact transfers answer or refuse over the socket",
        %{daemon: daemon} do
     client = initialized_client(daemon)
