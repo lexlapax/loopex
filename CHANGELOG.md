@@ -191,6 +191,30 @@ it runs the daemon's two cross-user cases, which need a second user; elsewhere
 it ends `PASS (closure-incomplete: cross_uid not run)`. New developer pages
 describe the daemon's processes, orders and evidence.
 
+The release check now builds the candidate from a fresh source archive first
+and runs every lane inside that extraction, checking its source identity and
+`VERSION`; its Node lane includes the operator takeover, in which a killed CLI
+controller is replaced by a Node observer that takes over and aborts.
+
+Fix several daemon and live-command behaviours found while proving M5:
+
+- A connection reclaimed under aggregate output pressure now writes `detached`
+  with its session and last emitted cursor, best effort, before closing.
+- A Store marker that cannot be verified, and a Store log over its ceiling,
+  now end a daemon start with their own exit statuses (80 and 82) instead of
+  `composition_start_failed`, and `prepare-index` reports them the same way;
+  the lock's other failures are `store_writer_acquisition_failed` (81).
+- A live command whose run finished while it was reconnecting no longer
+  follows forever: after re-presenting unconfirmed work it checks whether that
+  work already ran and ends once history is shown.
+- A recovering controller waits for its own lease from its latest loss, with
+  a short margin for the daemon to resolve the expiry, instead of from its
+  first loss, which could make it report another client in control when there
+  was none.
+
+A runtime trace session traces only modules loaded when it starts; the
+observability pages now say so.
+
 ## [0.1.0] — 2026-09-19
 
 M4's closed product baseline: the first numbered source version. It is a source
