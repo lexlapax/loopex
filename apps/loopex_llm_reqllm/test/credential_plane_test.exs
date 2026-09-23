@@ -620,6 +620,50 @@ defmodule Loopex.LLM.ReqLLM.CredentialPlaneTest do
       Fixture.assert_gone(fixture)
     end
 
+    # Concept: an invocation asks custody for its credential exactly once;
+    # nothing on the way to the child resolves it again or retries.
+    #
+    # Technical depth: a trace session of its own records every call custody
+    # receives while one managed invocation runs to its reply; exactly one is a
+    # `resolve` for custody's incarnation.
+    test "one invocation resolves its credential from custody exactly once" do
+      fixture = Fixture.new(:reply, credential: @sentinel <> "-resolve-once")
+      parent = self()
+
+      tracer =
+        spawn_link(fn ->
+          collect = fn collect, count ->
+            receive do
+              {:trace, _pid, :receive, {:"$gen_call", _from, {:resolve, _incarnation}}} ->
+                collect.(collect, count + 1)
+
+              {:trace, _pid, :receive, _other} ->
+                collect.(collect, count)
+
+              {:report, caller} ->
+                send(caller, {:resolutions, count})
+            end
+          end
+
+          collect.(collect, 0)
+        end)
+
+      session = :trace.session_create(:custody_resolution_census, tracer, [])
+
+      try do
+        1 = :trace.process(session, fixture.custody_pid, true, [:receive])
+        call = Fixture.managed(fixture)
+        await_reply(call)
+        Fixture.stop(call)
+      after
+        :trace.session_destroy(session)
+      end
+
+      send(tracer, {:report, parent})
+      assert_receive {:resolutions, 1}, 5_000
+      assert_post(fixture)
+    end
+
     test "one child diagnostic containing two concurrently live synthetic keys cannot escape" do
       second_key = @sentinel <> "-second"
       first_key = @sentinel <> "-first"
