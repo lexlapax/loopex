@@ -541,6 +541,45 @@ defmodule LoopexComposition.SkillAcquisitionTest do
     end
   end
 
+  # Concept: a warning Git prints on stderr is not data, so it cannot refuse
+  # a legitimate import.
+  #
+  # Technical depth: the executor merges a job's stderr into its captured
+  # output. A wrapper prints a warning line on stderr before running the real
+  # Git for every command; the import still verifies each identity and installs
+  # the exact bytes. Before the data commands discarded stderr, the warning was
+  # parsed as the temporary filename and the import was refused.
+  test "a warning on Git's stderr does not refuse a legitimate import" do
+    root = tmp_dir!("stderr-warning")
+    source = Path.join(root, "source")
+    bytes = skill("warned")
+    write!(Path.join(source, "warned/SKILL.md"), bytes)
+    commit = commit!(source)
+    git = System.find_executable("git")
+    wrapper = Path.join(root, "git-warning")
+
+    write!(wrapper, """
+    #!/bin/sh
+    printf 'warning: a platform notice unrelated to the requested object\\n' >&2
+    exec #{git} "$@"
+    """)
+
+    File.chmod!(wrapper, 0o700)
+
+    assert {:ok, pack} =
+             ResourcePacks.add(Path.join(root, "workspace"), source,
+               workspace_ref: "workspace:warned",
+               state_root: Path.join(root, "state"),
+               rev: commit,
+               path: "warned",
+               git_executable: wrapper,
+               executor_authorization: {:host_policy, :allow}
+             )
+
+    assert pack["commit"] == commit
+    assert [%{"content" => ^bytes}] = pack["files"]
+  end
+
   test "an incomplete Git tree listing refuses before blob export" do
     root = tmp_dir!("truncated-inventory")
     source = Path.join(root, "source")

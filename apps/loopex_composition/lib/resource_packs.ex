@@ -1255,12 +1255,27 @@ defmodule LoopexComposition.ResourcePacks do
 
   defp remaining_ms(deadline), do: max(deadline - System.system_time(:millisecond), 0)
 
+  # Concept: a Git command whose output is data yields only its stdout.
+  #
+  # Technical depth: the executor merges a job's stderr into its captured
+  # output, so a warning Git or a platform wrapper prints — seen only under a
+  # heavily loaded machine — would be parsed as a tree listing or a temporary
+  # filename and refuse a legitimate import. The data commands run with stderr
+  # sent to `/dev/null`; a failure still reports through the exit status, and
+  # `clone`, whose output is only diagnostic, keeps its stderr.
+  @git_data_labels ["commit", "tree", "tree-type", "tree-files", "blob"]
+
   defp git_job(context, config, label, args) do
     sequence = context.sequence + 1
     deadline = config.deadline
     remaining_ms = max(deadline - System.system_time(:millisecond), 1)
     job_id = "resource-import-#{label}-#{nonce()}"
-    argv = ["/usr/bin/env" | @git_environment ++ [config.git] ++ @git_config ++ args]
+    command = ["/usr/bin/env" | @git_environment ++ [config.git] ++ @git_config ++ args]
+
+    argv =
+      if label in @git_data_labels,
+        do: ["/bin/sh", "-c", "exec \"$@\" 2>/dev/null", "loopex-git-data" | command],
+        else: command
 
     fields = %{
       protocol_version: 1,
