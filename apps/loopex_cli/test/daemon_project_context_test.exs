@@ -154,6 +154,116 @@ defmodule LoopexCli.DaemonProjectContextTest do
     end
   end
 
+  @pty_driver ~S"""
+  import os, pty, sys, select
+  pid, fd = pty.fork()
+  if pid == 0:
+      os.execv(sys.argv[1], sys.argv[1:])
+  print("CHILD", pid, flush=True)
+  answered = False
+  buffer = b""
+  while True:
+      try:
+          ready, _, _ = select.select([fd], [], [], 1.0)
+      except InterruptedError:
+          continue
+      if fd in ready:
+          try:
+              data = os.read(fd, 65536)
+          except OSError:
+              break
+          if not data:
+              break
+          buffer += data
+          sys.stdout.buffer.write(data.replace(b"\r\n", b"\n"))
+          sys.stdout.flush()
+          if not answered and b"admit these project resources for this run?" in buffer:
+              os.write(fd, b"y\n")
+              answered = True
+  _, status = os.waitpid(pid, 0)
+  sys.exit(os.waitstatus_to_exitcode(status))
+  """
+
+  # Concept: an operator at the daemon's terminal is shown the root
+  # `AGENTS.md` manifest and asked; answering yes admits it, and its words then
+  # reach the model for the daemon's sessions.
+  #
+  # Technical depth: a real `loopex daemon` process runs on a pseudo-terminal
+  # driven by a small Python `pty` program, which answers `y` to the admission
+  # question and relays everything the daemon writes. After readiness a run
+  # through the socket makes one model request, and that request carries the
+  # admitted file's words.
+  @tag timeout: 180_000
+  test "an operator at the daemon's terminal admits the root AGENTS.md", context do
+    python = System.find_executable("python3") || flunk("python3 is unavailable")
+    File.write!(Path.join(context.workspace, "AGENTS.md"), "always run the tests")
+    provider = provider("admitted answer")
+    launch = launch(context, provider)
+    elixir = System.find_executable("elixir") || flunk("elixir executable unavailable")
+
+    argv =
+      Enum.flat_map(:code.get_path(), fn dir -> ["-pa", List.to_string(dir)] end) ++
+        ["-e", "LoopexCli.main(#{inspect(["daemon" | arguments(context, launch)])})"]
+
+    port =
+      Port.open({:spawn_executable, python}, [
+        :binary,
+        :exit_status,
+        {:line, 65_536},
+        env: [{~c"LOOPEX_PROVIDER_API_KEY", String.to_charlist(@credential)}],
+        args: ["-c", @pty_driver, elixir | argv]
+      ])
+
+    child = await_child(port)
+    on_exit(fn -> System.cmd("/bin/kill", ["-KILL", child], stderr_to_stdout: true) end)
+    transcript = await_ready_line(port, [])
+
+    assert Enum.any?(transcript, &(&1 =~ "admit these project resources for this run?"))
+
+    output =
+      capture_io(fn ->
+        assert :ok = LoopexCli.dispatch(["run", "--daemon", context.socket, "go"])
+      end)
+
+    assert output =~ "admitted answer"
+    assert ProviderFixture.count(provider) == 1
+    assert request_text(provider) =~ "always run the tests"
+
+    {_output, 0} = System.cmd("/bin/kill", ["-TERM", child])
+    assert await_exit(port) == 0
+  end
+
+  defp await_child(port) do
+    receive do
+      {^port, {:data, {:eol, "CHILD " <> pid}}} -> String.trim(pid)
+    after
+      30_000 -> flunk("the pty driver did not start the daemon")
+    end
+  end
+
+  defp await_ready_line(port, lines) do
+    receive do
+      {^port, {:data, {_flag, line}}} ->
+        if line =~ ~s("record":"daemon_ready"),
+          do: Enum.reverse([line | lines]),
+          else: await_ready_line(port, [line | lines])
+
+      {^port, {:exit_status, status}} ->
+        flunk("the daemon exited #{status}: #{Enum.join(Enum.reverse(lines), "\n")}")
+    after
+      90_000 -> flunk("no readiness: #{Enum.join(Enum.reverse(lines), "\n")}")
+    end
+  end
+
+  defp await_exit(port) do
+    receive do
+      {^port, {:exit_status, status}} -> status
+      {^port, {:data, _line}} -> await_exit(port)
+    after
+      60_000 -> flunk("the daemon never exited")
+    end
+  end
+
   # Concept: project skills the daemon cannot read refuse its start with their
   # own class, before it takes any lock, marker or socket.
   test "unusable project skills refuse the daemon before any effect", context do
