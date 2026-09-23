@@ -212,6 +212,10 @@ Fix several daemon and live-command behaviours found while proving M5:
   first loss, which could make it report another client in control when there
   was none.
 
+The ReqLLM reference adapter now requires `req_llm ~> 1.24.0`; the
+releases from `1.18.0` were reviewed and the adapter's call and streaming paths
+are unchanged.
+
 A trace session now loads each module it names before installing its call
 patterns, so an adapter the runtime has not called yet is traced from its first
 call instead of silently not at all. `Loopex.trace/2` keeps its shape and

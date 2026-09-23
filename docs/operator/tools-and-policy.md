@@ -431,7 +431,12 @@ from its own environment; a second composition in the same process refuses
 rather than finding it again. Every executor spawn explicitly removes that named
 credential, including the launcher and the executor's own process-management
 helpers. A model-supplied command is then launched through `/usr/bin/env -i`
-with `PATH` as its only variable. The receipt records that constructed downstream
+with `PATH` as its only variable. Removing the variable changes only the running
+environment: the operating system keeps the process's launch environment, which
+another process of the same user can still read (`/proc/<pid>/environ` on
+Linux, `ps -E` on macOS) for as long as Loopex runs, and a model's `bash`
+command runs as that user. Treat the key as visible to that account and run
+Loopex under an account whose processes you trust. The receipt records that constructed downstream
 environment and whether the provider credential was present, so the command-side
 claim is journalled rather than asserted. A provider failure exposes only its
 dispatch classification and the fixed `model_call_failed` literal, not a provider

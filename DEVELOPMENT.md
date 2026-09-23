@@ -86,10 +86,13 @@ LOOPEX_PROVIDER_API_KEY=... bash scripts/check-release.sh
 It refuses without the credential, without the pinned Node, or on a dirty tree.
 It first stages the candidate as a fresh source archive and builds it there
 (described below), then runs every test lane inside that extraction rather than
-in your checkout. Reference composition consumes the credential, so each of the eight
+in your checkout. Reference composition consumes the credential, so each of the nine
 real-provider cases runs from a named manifest (application, file and exact
 case name) in its own `mix test FILE:LINE` process and must execute exactly one
-test; the eight rows must each run once. Only those processes inherit the
+test; the nine rows must each run once. The ninth is the operator takeover:
+`loopex daemon`, a CLI controller killed with `SIGKILL` and the Node observer
+taking over, each its own process, the observer's prompt answered by the real
+provider. Only those processes inherit the
 credential: every other lane runs under `env -u LOOPEX_PROVIDER_API_KEY`, which
 a self-check proves first by logging only `present` or `absent`. The
 independent Node client runs with `--only node_client` over

@@ -6,7 +6,7 @@
 # on Linux, the cross-UID witness. An
 # unchanged-source release reuses that evidence and does not run this command
 # again. It needs a provider credential in LOOPEX_PROVIDER_API_KEY, which
-# reaches only the eight manifest test processes and is never printed. It also
+# reaches only the nine manifest test processes and is never printed. It also
 # needs the Node version pinned in scripts/fixtures/m4/client-toolchain.txt
 # and, on Linux, a second unprivileged user named in LOOPEX_CROSS_UID_USER that
 # the current user may run a command as with `sudo -n`. Output streams as it
@@ -128,6 +128,7 @@ loopex_llm_reqllm|test/provider_test.exs|one real model call completes through t
 loopex_reference_client|test/end_to_end_recovery_test.exs|one real-provider trace forces a credential-free tool survives an untrappable runtime-tree kill after receipt before fact reconciles one effect without redispatch preserves its fact and completes a second real call
 loopex_reference_client|test/real_model_session_test.exs|one real non-streaming model call receives the committed canonical request bytes and digest and completes inside a session
 loopex_daemon|test/external_socket_workflow_real_test.exs|a controller and observer complete the documented daemon workflow against a real provider
+loopex_cli|test/multi_client_workflow_real_test.exs|a Node observer takes over from a killed CLI controller and a real provider answers it
 EOF
 rows=0
 # The manifest is read on descriptor 3: the lanes keep the terminal as their
@@ -140,7 +141,7 @@ while IFS='|' read -r -u 3 app file name; do
   line=${definitions%%:*}
   lane "real-provider-$rows" "$app" 1 with_credential mix test "$file:$line" --only real_provider
 done 3<"$manifest"
-[ "$rows" -eq 8 ] || { printf 'check-release: the manifest ran %s rows, expected 8\n' "$rows" >&2; exit 1; }
+[ "$rows" -eq 9 ] || { printf 'check-release: the manifest ran %s rows, expected 9\n' "$rows" >&2; exit 1; }
 
 # The independent Node client, each application in its own VM. The CLI's case
 # is the operator takeover: a killed CLI controller, a Node observer that takes

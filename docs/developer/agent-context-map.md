@@ -5689,3 +5689,34 @@ it creates, replaces or purges no code generation, so that rule is unchanged.
 Compatibility impact: `Loopex.trace/2` keeps its shape and refusals, and a
 session now also observes named modules not yet called; a name no installed
 module answers to still traces nothing. No migration is needed.
+
+<a id="disposition-m5-closure-review-2026-09-23"></a>
+### M5 closure-review decisions — 2026-09-23
+
+The independent review of the first closure candidate found Outcome 5's
+real-provider two-process demonstration defined nowhere: the real-provider
+daemon workflow ran in the test VM without a kill, and the separate-process
+kill-and-takeover ran against a scripted provider. On 2026-09-23 the maintainer
+chose, over accepting the two halves or an attended manual run, to build it:
+`apps/loopex_cli/test/multi_client_workflow_real_test.exs` runs `loopex daemon`,
+a CLI controller killed with `SIGKILL` and the Node observer taking over, each
+its own operating-system process, the observer's prompt answered by the real
+provider, and is the release manifest's ninth row, so the release check now
+requires nine rows where the technical plan names eight.
+
+The maintainer also chose that the named limitations the residual-proofs
+disposition did not list are accepted here by name, each with its nearest
+proof: an uncreated path component at a real start (the other socket-directory
+refusals at a real start in `daemon_command_test.exs` and `paths_test.exs`); an
+effect in flight when the daemon is killed not being dispatched twice after
+restart (core's restart recovery for embedded callers); a claimed
+`artifact.read_chunk` held through quiesce until `connection_lost` at the
+socket (the unclaimed read's cancellation without dispatch in
+`admission_relay_test.exs`); and the per-invocation guardian and credential
+sender absent from the positive trace census (`trace_exclusion_test.exs`,
+which proves the bridge traced and no credential function or value recorded).
+The overflow detachment through a real socket that the residual-proofs
+disposition listed was proved instead. Three witness files the accepted
+Outcomes table names were remapped as the code settled, recorded in the plan's
+evidence-scaffold progress row: `session_lifetime_test.exs`,
+`replay_residency_test.exs` and `apps/loopex_daemon/test/multi_client_workflow_test.exs`.

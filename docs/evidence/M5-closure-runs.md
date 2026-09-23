@@ -61,7 +61,7 @@ line; `PASS (closure-incomplete: cross_uid not run)` is not that.
 
 | Lane | Executed | Result |
 | --- | --- | --- |
-| Real-provider manifest, eight rows | Pending | Pending |
+| Real-provider manifest, nine rows | Pending | Pending |
 | Node client: `loopex_app_server`, `loopex_protocol`, `loopex_daemon`, `loopex_cli` | Pending | Pending |
 | Long-duration bounds: `loopex`, `loopex_executor_local`, `loopex_daemon` | Pending | Pending |
 | Cross-UID, exactly two | Pending | Pending |
@@ -78,11 +78,18 @@ line; `PASS (closure-incomplete: cross_uid not run)` is not that.
 
 ### Attended real-provider demonstration
 
+The two-process demonstration is the manifest's ninth row,
+`apps/loopex_cli/test/multi_client_workflow_real_test.exs`: `loopex daemon`,
+a CLI controller killed with `SIGKILL` and the Node observer taking over, each
+its own operating-system process, the observer's prompt answered by the real
+provider. Its summary line is retained from the release check's output.
+
 | Field | Value |
 | --- | --- |
 | Provider | Pending |
 | Model | Pending |
 | Provider response identifiers | Pending |
+| Takeover summary line | Pending |
 
 ### Full-population orderly stop
 
