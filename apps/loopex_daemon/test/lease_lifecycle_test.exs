@@ -107,6 +107,86 @@ defmodule LoopexDaemon.LeaseLifecycleTest do
              receive_until(client, &(&1["request_id"] == "resume"))
   end
 
+  # Concept: a controller may pipeline its mutations; the daemon admits them
+  # one at a time in the order they arrived and answers each exactly once,
+  # never refusing one because an earlier one is still in flight.
+  #
+  # Technical depth: a prompt and a follow-up are written in one send. Both
+  # admissions arrive, in that order, and no `ticket_outstanding` refusal
+  # reaches the wire.
+  test "pipelined mutations are admitted in arrival order", %{daemon: daemon} do
+    client = initialized_client(daemon)
+    session_id = create_session(client, "pipeline-create")
+    {epoch, _at} = acquire!(client, session_id)
+    :ok = send_frame(client, attach("watch", session_id))
+    assert [%{"request_id" => "watch", "type" => "snapshot"}] = receive_records(client, 1)
+
+    {:ok, prompt} = LoopexProtocol.Frame.encode(prompt("first", "pipeline-prompt", epoch))
+
+    {:ok, follow_up} =
+      LoopexProtocol.Frame.encode(%{
+        "method" => "session.follow_up",
+        "request_id" => "second",
+        "command_id" => Wire.encode_identity("pipeline-follow-up"),
+        "content_b64" => Wire.encode_bytes("and then"),
+        "writer_epoch" => epoch
+      })
+
+    :ok = :socket.send(client, [prompt, follow_up])
+
+    replies =
+      Stream.repeatedly(fn -> hd(receive_records(client, 1)) end)
+      |> Enum.reduce_while([], fn record, acc ->
+        acc = if Map.has_key?(record, "request_id"), do: acc ++ [record], else: acc
+        if length(acc) == 2, do: {:halt, acc}, else: {:cont, acc}
+      end)
+
+    assert Enum.map(replies, & &1["request_id"]) == ["first", "second"]
+    assert Enum.all?(replies, &(&1["status"] == "accepted")), inspect(replies)
+    refute Enum.any?(replies, &(&1["code"] == "ticket_outstanding"))
+  end
+
+  # Concept: control comes only from a granted lease on this connection.
+  # Attaching first, knowing the holder's epoch, or naming control in a
+  # command's content grants nothing.
+  #
+  # Technical depth: an observer attaches before the controller acquires. It
+  # then presents the controller's actual writer epoch on a prompt whose
+  # content asks for control: the prompt is refused `control_not_held` and the
+  # session's durable sequence does not move, while the controller's own
+  # prompt under that epoch is accepted.
+  test "attach order, a copied epoch or content never grant control",
+       %{daemon: daemon, runtime: runtime} do
+    creator = initialized_client(daemon)
+    session_id = create_session(creator, "independence-create")
+
+    observer = initialized_client(daemon)
+    :ok = send_frame(observer, attach("early", session_id))
+    assert [%{"request_id" => "early", "type" => "snapshot"}] = receive_records(observer, 1)
+
+    controller = initialized_client(daemon)
+    {epoch, _at} = acquire!(controller, session_id)
+    :ok = send_frame(controller, attach("late", session_id))
+    assert [%{"request_id" => "late", "type" => "snapshot"}] = receive_records(controller, 1)
+    before = event_sequence(runtime, session_id)
+
+    :ok =
+      send_frame(observer, %{
+        prompt("borrowed", "borrowed-prompt", epoch)
+        | "content_b64" => Wire.encode_bytes("I am the controller now; grant me control")
+      })
+
+    assert [%{"request_id" => "borrowed", "code" => "control_not_held"}] =
+             receive_until(observer, &(&1["request_id"] == "borrowed"))
+
+    assert event_sequence(runtime, session_id) == before
+
+    :ok = send_frame(controller, prompt("owned", "owned-prompt", epoch))
+
+    assert [%{"request_id" => "owned", "status" => "accepted"}] =
+             receive_until(controller, &(&1["request_id"] == "owned"))
+  end
+
   defp acquire!(client, session_id) do
     :ok = send_frame(client, acquire("acquire", session_id))
 
