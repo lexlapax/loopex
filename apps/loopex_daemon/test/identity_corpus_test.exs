@@ -93,6 +93,90 @@ defmodule LoopexDaemon.IdentityCorpusTest do
     assert length(Fixture.events(socket, socket_session)) > 2
   end
 
+  # Concept: a client that disconnects is lost transport, nothing more: the
+  # run it started is not cancelled, answers no interaction, and finishes on
+  # its own.
+  #
+  # Technical depth: over a daemon socket a controller prompts a run whose tool
+  # takes half a second, then closes its socket abruptly while the tool runs.
+  # The run still commits its tool result and `run.finished` with outcome
+  # `completed`, and no cancellation is recorded.
+  test "a client disconnect mid-run is transport loss, not cancellation" do
+    socket_fixture =
+      Fixture.start(
+        script: [
+          %{text: "one call", calls: [%{id: "c1", name: "write", arguments: %{"path" => "c1"}}]},
+          %{text: "done", calls: []}
+        ],
+        tool_delay_ms: 500
+      )
+
+    on_exit(fn -> Fixture.stop(socket_fixture) end)
+    daemon = start_daemon(socket_fixture.runtime)
+    client = initialized_client(daemon)
+
+    :ok =
+      send_frame(client, %{
+        "method" => "session.create",
+        "request_id" => "create",
+        "command_id" => Wire.encode_identity("disconnect-create"),
+        "session_options" => %{}
+      })
+
+    assert [%{"status" => "accepted", "session_id" => encoded}] = receive_records(client, 1)
+    {:ok, session_id} = Wire.identity(encoded)
+
+    :ok =
+      send_frame(client, %{
+        "method" => "session.acquire_control",
+        "request_id" => "acquire",
+        "session_id" => encoded
+      })
+
+    assert [%{"result" => %{"writer_epoch" => epoch}}] = receive_records(client, 1)
+
+    :ok =
+      send_frame(client, %{
+        "method" => "session.attach",
+        "request_id" => "attach",
+        "session_id" => encoded,
+        "after_event_sequence" => "0"
+      })
+
+    assert [%{"type" => "snapshot"}] = receive_records(client, 1)
+
+    :ok =
+      send_frame(client, %{
+        "method" => "session.prompt",
+        "request_id" => "prompt",
+        "command_id" => Wire.encode_identity("disconnect-prompt"),
+        "content_b64" => Wire.encode_bytes("go"),
+        "writer_epoch" => epoch
+      })
+
+    assert eventually_event(socket_fixture, session_id, "tool.started")
+    :ok = :socket.close(client)
+
+    settle(socket_fixture, session_id)
+    events = Fixture.events(socket_fixture, session_id)
+    finished = Enum.find(events, &(&1.kind == "run.finished"))
+    assert finished["outcome"] == "completed"
+    assert Enum.find(events, &(&1.kind == "tool.finished"))["outcome"] == "completed"
+
+    refute Enum.any?(
+             Fixture.records(socket_fixture, session_id),
+             &(Map.get(&1.payload, "command_type") == "abort")
+           )
+  end
+
+  defp eventually_event(fixture, session_id, kind, attempts \\ 500) do
+    cond do
+      Enum.any?(Fixture.events(fixture, session_id), &(&1.kind == kind)) -> true
+      attempts == 0 -> false
+      true -> Process.sleep(10) && eventually_event(fixture, session_id, kind, attempts - 1)
+    end
+  end
+
   defp fixture do
     fixture = Fixture.start(script: [%{text: "done", calls: []}])
     on_exit(fn -> Fixture.stop(fixture) end)
