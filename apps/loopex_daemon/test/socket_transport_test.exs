@@ -502,6 +502,79 @@ defmodule LoopexDaemon.SocketTransportTest do
     assert [%{"request_id" => "return", "type" => "snapshot"}] = receive_records(returning, 1)
   end
 
+  test "resource queries and artifact transfers answer or refuse over the socket",
+       %{daemon: daemon} do
+    client = initialized_client(daemon)
+    session_id = create_session(client, "resource-create")
+    encoded = Wire.encode_identity(session_id)
+
+    :ok =
+      send_frame(client, %{
+        "method" => "resources.catalog",
+        "request_id" => "catalog",
+        "session_id" => encoded
+      })
+
+    assert [%{"request_id" => "catalog", "type" => "result", "method" => "resources.catalog"}] =
+             receive_records(client, 1)
+
+    :ok =
+      send_frame(client, %{
+        "method" => "resources.read",
+        "request_id" => "read",
+        "session_id" => encoded,
+        "manifest_digest" => String.duplicate("0", 64),
+        "source_id" => "no-source",
+        "name" => "no-skill",
+        "label" => "SKILL.md"
+      })
+
+    assert [%{"request_id" => "read", "type" => "error"}] = receive_records(client, 1)
+
+    reference =
+      Wire.encode_reference(%{
+        digest: String.duplicate("a", 64),
+        size: 9,
+        locator: "no-such-artifact",
+        use_locator: "use:" <> String.duplicate("a", 64)
+      })
+
+    open = %{
+      "method" => "artifact.open_transfer",
+      "request_id" => "open-unattached",
+      "use_ref" => reference,
+      "start_offset" => "0"
+    }
+
+    :ok = send_frame(client, open)
+
+    assert [%{"request_id" => "open-unattached", "code" => "not_attached"}] =
+             receive_records(client, 1)
+
+    :ok = send_frame(client, attach("attach", session_id))
+    assert [%{"type" => "snapshot"}] = receive_records(client, 1)
+
+    :ok = send_frame(client, Map.put(open, "request_id", "open-bogus"))
+
+    assert [%{"request_id" => "open-bogus", "code" => "transfer_refused", "reason" => _reason}] =
+             receive_records(client, 1)
+
+    :ok =
+      send_frame(client, %{
+        "method" => "artifact.read_chunk",
+        "request_id" => "chunk-unknown",
+        "transfer_ref" => Wire.encode_identity("no-such-transfer"),
+        "length" => 1
+      })
+
+    assert [%{"request_id" => "chunk-unknown", "code" => "transfer_refused"}] =
+             receive_records(client, 1)
+
+    # The connection still serves after every refusal.
+    :ok = send_frame(client, inspect_request("inspect", session_id))
+    assert [%{"request_id" => "inspect", "type" => "result"}] = receive_records(client, 1)
+  end
+
   test "daemon.status reports bounded counts with reservations counted", %{daemon: daemon} do
     client = initialized_client(daemon)
     _session_id = create_session(client, "status-create")
