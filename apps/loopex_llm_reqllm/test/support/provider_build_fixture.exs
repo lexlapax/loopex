@@ -144,6 +144,8 @@ defmodule Loopex.LLM.ReqLLM.ProviderBuildFixture do
 
     expected = %{
       "source" => source,
+      # A checkout build carries no archive source digest.
+      "source_digest" => nil,
       "version" => File.read!(Path.join(@source_root, "VERSION")) |> String.trim(),
       "dependency_lock_sha256" => digest(File.read!(Path.join(@source_root, "mix.lock"))),
       "packaged_input_sha256" => Mix.Tasks.Loopex.Provider.Build.packaged_input_digest(worker),
