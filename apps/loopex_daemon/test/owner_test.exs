@@ -2644,13 +2644,16 @@ defmodule LoopexDaemon.OwnerTest do
     former = initialized_connection(components)
     successor = initialized_connection(components)
 
-    {_lease_owner, _owner_incarnation, _successor_origin} =
+    {lease_owner, _owner_incarnation, _successor_origin} =
       queue_successor_behind_expiry(owner, components, former, successor, "discard-session")
 
+    assert %{waiting_acquires: 1} = LeaseOwner.status(lease_owner)
     Process.exit(successor.pid, :kill)
 
     assert :ok =
              wait_for_status(owner, &(&1.pending_dispositions == 0 and &1.lease_operations == 0))
+
+    assert %{waiting_acquires: 0} = LeaseOwner.status(lease_owner)
 
     Process.sleep(400)
     :sys.resume(components.registry)
