@@ -83,8 +83,11 @@ defmodule Loopex.M1RuntimeTestStore do
     do: GenServer.call(pid, {:transaction_status, session_id, domain, tx_id})
 
   @impl Store
+  # A head read the test holds with `delay_ownership_heads/3` waits for the test
+  # rather than GenServer's 5 s default, so a production-bound fence case is
+  # ended by the runtime's own fence cutoff, not by this store's call timeout.
   def ownership_head(pid, session_id, _domain),
-    do: GenServer.call(pid, {:ownership_head, session_id})
+    do: GenServer.call(pid, {:ownership_head, session_id}, :infinity)
 
   @impl Store
   def runtime_command(pid, command),
