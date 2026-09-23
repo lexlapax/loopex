@@ -96,6 +96,45 @@ defmodule LoopexDaemon.SocketTransportTest do
     assert %{activations_used: 64} = ConnectionRegistry.status(daemon.registry)
   end
 
+  # Concept: the activation ceiling holds under concurrency: at 63 activations,
+  # a create and a resume arriving at once on two connections activate exactly
+  # one session, and the other is refused `activation_ceiling_reached`.
+  @tag timeout: 120_000
+  test "at 63 activations two concurrent activations admit exactly one" do
+    root = temporary_directory("loopex-socket-race")
+    {runtime, [dormant]} = start_runtime_with_dormant(root, 1)
+    daemon = start_daemon(runtime)
+    filler = initialized_client(daemon)
+
+    for index <- 1..63 do
+      :ok = send_frame(filler, create("f#{index}", "race-fill-#{index}", %{"n" => index}))
+      assert [%{"status" => "accepted"}] = receive_records(filler, 1, 5_000)
+    end
+
+    creator = initialized_client(daemon)
+    resumer = initialized_client(daemon)
+    :ok = send_frame(resumer, acquire("acquire", dormant))
+    assert [%{"result" => %{"writer_epoch" => encoded_epoch}}] = receive_records(resumer, 1)
+    {:ok, epoch} = Wire.identity(encoded_epoch)
+
+    :ok = send_frame(creator, create("race-create", "race-create", %{"n" => 64}))
+    :ok = send_frame(resumer, resume("race-resume", dormant, "race-resume", epoch))
+    [created] = receive_records(creator, 1, 10_000)
+    [resumed] = receive_records(resumer, 1, 10_000)
+
+    outcomes =
+      Enum.map([created, resumed], fn record ->
+        cond do
+          record["status"] == "accepted" -> :activated
+          record["code"] == "activation_ceiling_reached" -> :refused
+          true -> {:unexpected, record}
+        end
+      end)
+
+    assert Enum.sort(outcomes) == [:activated, :refused]
+    assert %{activations_used: 64} = ConnectionRegistry.status(daemon.registry)
+  end
+
   test "attach delivers the snapshot and then every later durable event in order",
        %{daemon: daemon, runtime: runtime} do
     client = initialized_client(daemon)
