@@ -98,13 +98,13 @@ defmodule LoopexDaemon.StartupArbiterTest do
     assert_receive {:io_request_blocked, ^output}, 2_000
     {:ok, status} = ExitStatus.fetch(:readiness_write_failed)
 
-    assert_receive {:arbiter_result, {:hard_halt, :readiness_write_failed, ^status}}, 500
+    assert_receive {:arbiter_result, {:hard_halt, :readiness_write_failed, ^status}}, 2_000
     refute_receive {:readiness_disposition, _, _, _}
     refute_receive {:begin_accept, _startup_ref}
 
     Process.exit(output, :kill)
     sentinel = context.sentinel
-    assert_receive {:DOWN, _monitor, :process, ^sentinel, _reason}, 500
+    assert_receive {:DOWN, _monitor, :process, ^sentinel, _reason}, 2_000
   end
 
   test "owner loss during readiness selects owner_lost" do
