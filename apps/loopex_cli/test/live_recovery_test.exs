@@ -435,7 +435,13 @@ defmodule LoopexCli.LiveRecoveryTest do
     assert_receive {:proxy_lost, "session.prompt", 1}, 30_000
     session_id = listed_session(context.socket)
     {:ok, rival} = LoopexCli.DaemonClient.connect(context.socket)
+
+    # The recovering command and the rival both ask for control until the lost
+    # lease lapses, and either could ask first; the command is held still so
+    # the rival is the one that takes over, then it resumes and must yield.
+    true = :erlang.suspend_process(command.pid)
     assert take_over(rival, session_id, 200)
+    true = :erlang.resume_process(command.pid)
 
     {result, _output} = Task.await(command, 90_000)
     assert result == {:error, "another client now controls this session"}

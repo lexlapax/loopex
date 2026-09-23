@@ -4,8 +4,13 @@ defmodule Loopex.LLM.ReqLLM.ProviderBackpressureObserverTest do
   use ExUnit.Case, async: true
   alias Loopex.LLM.ReqLLM.ProviderIsolationFixture, as: Fixture
 
+  # Technical depth: every wait below spends the one request budget, which
+  # must cover starting a companion BEAM and each staged proof on a machine
+  # running the whole fast check at once; the case proves how writer calls are
+  # counted under backpressure, not a deadline, so its budget is 60 s rather
+  # than the fixture's 10 s default.
   test "barrier-drained real writer calls remain counted on the next observer iteration" do
-    request = Fixture.request()
+    request = Fixture.request(deadline_ms: 60_000)
 
     fixture =
       Fixture.new(:backpressure,
