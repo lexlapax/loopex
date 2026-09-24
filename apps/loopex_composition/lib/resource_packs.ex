@@ -813,7 +813,6 @@ defmodule LoopexComposition.ResourcePacks do
          {:ok, deadline_ms} <- deadline(Keyword.get(options, :deadline_ms, @max_deadline_ms)),
          deadline = System.system_time(:millisecond) + deadline_ms,
          :ok <- authorization(Keyword.get(options, :executor_authorization)),
-         {:ok, close} <- open_authority_close(Keyword.get(options, :open_authority_close)),
          {:ok, root} <- canonical_workspace(workspace) do
       {:ok,
        %{
@@ -828,7 +827,7 @@ defmodule LoopexComposition.ResourcePacks do
          git: git,
          deadline: deadline,
          authorization: {:host_policy, :allow},
-         open_authority_close: close
+         open_authority_close: open_authority_close_seam()
        }}
     else
       false -> error(:invalid_revision, "revision must be one exact lowercase Git object ID")
@@ -841,18 +840,23 @@ defmodule LoopexComposition.ResourcePacks do
   defp authorization(_other),
     do: error(:executor_authorization_required, "explicit host-policy allow is required")
 
-  # Concept: a trusted-local caller may hand the import executor its own
-  # open-authority close, so a case can hold a settlement where it runs.
+  # Concept: a case in the importing process can hand the import executor its
+  # own open-authority close, so it can hold a settlement where it runs.
   #
-  # Technical depth: this is the executor's `open_authority_close` start option
-  # passed through unchanged, and absent it the executor keeps its default. It
-  # carries executable host authority, so it is a trusted-local option only; it
-  # enters no job, ledger record, receipt, manifest, or provenance record.
-  defp open_authority_close(nil), do: {:ok, nil}
-  defp open_authority_close(close) when is_function(close, 2), do: {:ok, close}
+  # Technical depth: the hook is read from the calling process's dictionary,
+  # the same kind of trusted-local seam as the composition's edge observer, and
+  # is passed unchanged as the executor's `open_authority_close` start option.
+  # It is no `add/3` option and no public contract. Anything other than a
+  # function of two arguments is ignored and the executor keeps its default.
+  # It enters no job, ledger record, receipt, manifest, or provenance record.
+  @open_authority_close_seam :"$loopex_resource_import_open_authority_close"
 
-  defp open_authority_close(_other),
-    do: error(:invalid_options, "open authority close must be a function of two arguments")
+  defp open_authority_close_seam do
+    case Process.get(@open_authority_close_seam) do
+      close when is_function(close, 2) -> close
+      _absent -> nil
+    end
+  end
 
   defp deadline(value) when is_integer(value) and value in 1..@max_deadline_ms, do: {:ok, value}
 

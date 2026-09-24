@@ -1073,7 +1073,8 @@ defmodule LoopexComposition.SkillAcquisitionTest do
 
     task =
       Task.async(fn ->
-        ResourcePacks.add(workspace, source, [{:open_authority_close, close} | options])
+        Process.put(:"$loopex_resource_import_open_authority_close", close)
+        ResourcePacks.add(workspace, source, options)
       end)
 
     assert_receive {:closing, closer}, 20_000
