@@ -7079,6 +7079,98 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     end
   end
 
+  test "an execute caller whose executor table is gone leaves at once when its callback raises" do
+    # Concept: once its executor's table is gone nobody can hand a caller
+    # anything, so a caller whose progress callback raises leaves at once
+    # rather than waiting for its job owner to die.
+    #
+    # Technical depth: the caller's in-flight table is replaced, from inside the
+    # held callback, by a stand-in whose owning process has already exited, so
+    # the hand-off claim meets a missing table exactly as it would after the
+    # executor died. The job's owner stays alive running the command. A caller
+    # that read the missing table as a claim the owner holds waited for that
+    # owner's `DOWN`, which comes only at the job's 60-second run deadline; the
+    # raise must instead arrive while the owner still lives. The job is then
+    # cancelled through the real executor so no group outlives the case.
+    root = workspace()
+    parent = self()
+    ready = Path.join(root, "table-gone-ready")
+    job_id = "table-gone-#{System.unique_integer([:positive])}"
+    {executor, lease_id} = executor_with_grace(root, 2_000)
+
+    stand_in_owner =
+      spawn(fn ->
+        send(parent, {:stand_in_table, :ets.new(:loopex_stand_in, [:public, :set])})
+
+        receive do
+          :stop -> :ok
+        end
+      end)
+
+    assert_receive {:stand_in_table, stand_in}, 5_000
+
+    progress = fn _event ->
+      send(parent, {:callback_held, self()})
+
+      receive do
+        :raise_now -> Process.put(:loopex_inflight_table, stand_in)
+      end
+
+      raise "host progress callback failed"
+    end
+
+    caller =
+      spawn(fn ->
+        result =
+          try do
+            run(
+              root,
+              "loopex.bash",
+              %{
+                "command" =>
+                  "printf ready > #{shell_path(ready)}; printf progress; " <>
+                    "while :; do sleep 0.05; done"
+              },
+              %{
+                executor: executor,
+                lease_id: lease_id,
+                job_id: job_id,
+                cleanup_grace_ms: 2_000,
+                progress: progress
+              }
+            )
+          rescue
+            error -> {:raised, error}
+          end
+
+        send(parent, {:abandoned, self(), result})
+
+        receive do
+          :finish -> :ok
+        end
+      end)
+
+    on_exit(fn -> if Process.alive?(caller), do: send(caller, :finish) end)
+    assert_receive {:callback_held, ^caller}, 30_000
+    owner = job_owner(executor, job_id)
+    owner_monitor = Process.monitor(owner)
+    stand_in_monitor = Process.monitor(stand_in_owner)
+    send(stand_in_owner, :stop)
+    assert_receive {:DOWN, ^stand_in_monitor, :process, ^stand_in_owner, :normal}, 5_000
+
+    send(caller, :raise_now)
+
+    assert_receive {:abandoned, ^caller, {:raised, %RuntimeError{}}},
+                   10_000,
+                   "the raise waited on the job owner although no table remained"
+
+    assert Process.alive?(owner), "the raise arrived only after the job owner stopped"
+
+    assert {:ok, _answer} = Local.cancel(executor, job_id)
+    assert_receive {:DOWN, ^owner_monitor, :process, ^owner, _reason}, 30_000
+    send(caller, :finish)
+  end
+
   test "a TERM-interrupted wrapper waits for its owned shell job rather than rechecking its pid" do
     # Concept: cooperative cancellation preserves the command's own TERM
     # handler and waits for that actual child before confirming cleanup.

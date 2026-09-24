@@ -617,7 +617,7 @@ defmodule Loopex.Executor.Local do
     requests = Enum.reverse(Process.get(:loopex_cancel_requests, [])) ++ queued_cancellations()
     Process.delete(:loopex_cancel_requests)
 
-    if claim_hand_off(tag, :owner) do
+    if claim_hand_off(tag, :owner) == true do
       send(settler, {tag, :cancel_requests, requests})
 
       Enum.each(requests, fn {token, reply_to} ->
@@ -636,11 +636,14 @@ defmodule Loopex.Executor.Local do
   # leaving execute caller as `:caller_left`. ETS makes the insert atomic, so
   # exactly one succeeds. The tag is unique to one launch of one job, so a
   # claim can never be mistaken for another job's or another attempt's. A
-  # table that no longer exists takes no claim.
+  # table that no longer exists takes no claim and answers `:unavailable`
+  # rather than `false`: `false` means the other claimant holds the claim and
+  # is acting on it, while a missing table means its executor is gone and
+  # nobody holds anything a leaving caller could wait for.
   defp claim_hand_off(tag, claimant) do
     :ets.insert_new(inflight_table(), {{@hand_off_claim_key, tag}, claimant})
   rescue
-    ArgumentError -> false
+    ArgumentError -> :unavailable
   end
 
   defp release_hand_off_claim(tag) do
@@ -701,16 +704,28 @@ defmodule Loopex.Executor.Local do
   # the owner is past it. Either way the collected requests go into the
   # admission's request list, and the admission's `after` answers them
   # `unconfirmed`.
+  #
+  # A claim that is unavailable -- the executor and its table are gone -- is
+  # neither: no owner can take the claim either, so nothing more will be handed
+  # on and waiting for the owner's death would hold this caller's raise for as
+  # long as the owner lives, up to its whole cleanup period. The caller keeps
+  # only what is already in its mailbox and leaves at once; each requester still
+  # watching the owner answers `unconfirmed` on the owner's `DOWN`.
   defp withdraw_from_hand_off(tag, worker, monitor) do
-    if claim_hand_off(tag, :caller_left) do
-      if collect_handed_off_cancellations(tag), do: release_hand_off_claim(tag)
-    else
-      receive do
-        {^tag, :cancel_requests, requests} -> hold_handed_off(requests)
-        {:DOWN, ^monitor, :process, ^worker, _reason} -> :ok
-      end
+    case claim_hand_off(tag, :caller_left) do
+      true ->
+        if collect_handed_off_cancellations(tag), do: release_hand_off_claim(tag)
 
-      collect_handed_off_cancellations(tag)
+      :unavailable ->
+        collect_handed_off_cancellations(tag)
+
+      false ->
+        receive do
+          {^tag, :cancel_requests, requests} -> hold_handed_off(requests)
+          {:DOWN, ^monitor, :process, ^worker, _reason} -> :ok
+        end
+
+        collect_handed_off_cancellations(tag)
     end
 
     :ok
