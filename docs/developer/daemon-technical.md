@@ -149,7 +149,7 @@ in the same VM returns `provider_credential_required` without starting anything.
 | Slots, retirement barrier, eviction, reclamation, succession | `connection_registry_test.exs`, `succession_capacity_test.exs`, `wire_records_test.exs`, `output_buffer_test.exs` |
 | Leases and takeover | `lease_owner_test.exs` |
 | Non-blocking components: per-step clocks, lease-owner replacement, the monitored holder close, held requests, the stop rule | `owner_test.exs`, `lease_owner_test.exs`, `socket_transport_test.exs` |
-| No blocking call between components while serving or stopping (T14); an orderly stop exits 0 with a relay request unanswered past a step between the cut and the freeze (T21) | `service_lifecycle_test.exs` |
+| No blocking call between components through `:gen.call/4` while serving or stopping (T14); an orderly stop exits 0 with a lease owner's relay request unanswered past a step between the cut and the freeze (T21's owner and Service halves) | `service_lifecycle_test.exs` |
 | Socket, peer credential, framing and methods | `listener_test.exs`, `listener_socket_test.exs`, `peer_credential_test.exs`, `connection_protocol_test.exs`, `request_test.exs`, `request_ledger_test.exs`, `socket_transport_test.exs` |
 | Index and import | `session_index*_test.exs`, `prepare_index_test.exs` |
 | Credential custody | `credential_custody_test.exs` here and in the app server and CLI |

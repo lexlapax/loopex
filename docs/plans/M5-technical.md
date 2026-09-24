@@ -7465,13 +7465,24 @@ any other refusal selects `relay_lost` was not implemented. The returned
 holder of a lost owner hears only an uncorrelated close on every path: a
 request it sends during the loss, one held on it, and one answered at the cut
 are each answered `holder_closed`, which the connection settles without
-writing. The call-trace witness (T14, `service_lifecycle_test.exs`) traces
-every `:gen.call/4` from the owner, the registry, lease owners and
-connections while serving and through an orderly stop, and allows only a
-connection's calls into the registry and its `register_connection`; the full
-T21 witness in the same file stops a real daemon with a lease owner's relay
-request unanswered for six seconds between the cut and the freeze and
-requires exit status 0.
+writing. A holder acknowledgement consumed after its step's instant but
+before the timer fires completes the close normally, without a kill; that is
+benign, since the close still completes exactly once. The call-trace witness
+(T14, `service_lifecycle_test.exs`) traces every `:gen.call/4` from the owner,
+the registry, lease owners and connections while serving and through an
+orderly stop, fixing each process's kind when it spawns and failing closed on
+a caller or target it cannot resolve, and allows only a connection's calls
+into the registry and its `register_connection`. It sees blocking through
+`:gen.call/4` only — not a `proc_lib` start or a bare `receive`; no component
+blocks those ways today, and the design allows `LeaseOwner.start_link`. The
+T21 witness in the same file covers T21's owner and Service halves at Service
+level: it stops a real daemon with a lease owner's relay request unanswered
+for six seconds between the cut and the freeze, observes that lease owner's
+unanswered-request report reach the collaboration owner, and requires exit
+status 0. T21's registry half is witnessed in `connection_registry_test.exs`
+("a resume settlement refused after the cut still settles its lease owner")
+and `owner_test.exs` ("an unanswered registry relay report after the cut is
+cleanup-only").
 
 Three rows deserve their reading stated, because they are where earlier drafts
 went wrong. The **coordinator death** row is the one that forced `residency`

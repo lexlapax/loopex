@@ -5826,4 +5826,8 @@ On 2026-09-24 the maintainer decided:
   cancel answer allowed to be weaker than its receipt (`c36d74d0`); item 7, the holder-close
   monitor, was fixed in step 7 (`b3c295b8`); items 8–19 are accepted as the
   M5 plan's "Named limitation: 2026-09-24 risk packet" rows, each with its
-  reachability, direction and tripwire.
+  reachability, direction and tripwire. The final internal pass over steps 7
+  and 8 added one accepted residual, #20: a lease-owner step still
+  unfinished at `freeze_deadline`, from a lease owner stalled since the cut,
+  is classified `relay_lost` — the wrong exit class, with no durability
+  effect.

@@ -131,8 +131,9 @@ callback is reported as `outcome_unknown`.
 
 The Local executor answers `cleaned` only once the job's receipt, recording
 confirmed cleanup, is safely on disk; anything short of that is answered
-`unconfirmed`, including a cancellation that arrives before the command
-starts. So a clean cancellation always has a durable record behind it. The
+`unconfirmed`. A cancellation that arrives before the command starts is
+answered `cleaned` once its refusal is durably published, and `unconfirmed`
+otherwise. So a clean cancellation always has a durable record behind it. The
 answer can be more cautious than the record — a slow settlement can be
 answered `unconfirmed` while its receipt later says `confirmed` — but never
 more confident. The answer is waited for until the job's cleanup instant plus

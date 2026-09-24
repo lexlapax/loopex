@@ -142,26 +142,50 @@ defmodule LoopexDaemon.ServiceLifecycleTest do
   # connection — makes a blocking call into another daemon component, while
   # serving or during the orderly stop. The only calls allowed are a
   # connection's calls into the registry, whose handlers never wait, and its
-  # `register_connection` before it initializes.
+  # `register_connection` before it initializes. The witness sees blocking
+  # through `:gen.call/4` only — every `GenServer.call`, `:gen_server.call`
+  # and `:sys` call goes through it — and not a `proc_lib` start or a bare
+  # `receive`; no component blocks those ways today, and the design allows
+  # `LeaseOwner.start_link`.
   #
   # Technical depth: every `:gen.call/4` made by the collaboration owner, the
   # registry and the listener, and by every process they spawn (lease owners,
-  # connections and their workers), is traced. Each traced call is classified
-  # at once by the caller's and the target's initial call; request workers,
-  # relay tasks and other non-component callers are allowed.
+  # connections and their workers), is traced together with their spawns.
+  # Each process's kind is fixed when it is known: the processes present at
+  # the start from their initial call, and every later traced process from
+  # the `gen` module named in its own spawn event, so a process that has
+  # exited by the time a call is classified keeps its kind. A call's target
+  # is resolved when the tracer receives it — a pid through that table or its
+  # initial call, a registered name through `Process.whereis/1` — and calls
+  # are classified only after the stop. A caller the table cannot name, or a
+  # target that cannot be resolved, is a violation: the witness fails closed.
   @tag timeout: 90_000
   test "no deadline-subject component blocks on another while serving or stopping",
        %{options: options} do
     daemon = start_daemon(options)
     _ready = await_ready(daemon.output)
     %{collaboration: collaboration, listener: listener} = :sys.get_state(daemon.owner).pids
-    %{registry: registry} = :sys.get_state(collaboration)
-    tracer = spawn_link(fn -> call_trace_loop({[], 0}) end)
+    %{registry: registry, relay: relay} = :sys.get_state(collaboration)
+
+    known =
+      Process.list()
+      |> Enum.map(&{&1, initial_kind(&1)})
+      |> Enum.reject(fn {_pid, kind} -> is_nil(kind) end)
+      |> Map.new()
+      |> Map.merge(%{
+        collaboration => :owner,
+        registry => :registry,
+        relay => :relay,
+        listener => :other
+      })
+
+    test_pid = self()
+    tracer = spawn_link(fn -> call_trace_loop(%{kinds: known, calls: [], test: test_pid}) end)
     :erlang.trace_pattern({:gen, :call, 4}, true, [:global])
     on_exit(fn -> :erlang.trace_pattern({:gen, :call, 4}, false, [:global]) end)
 
     for pid <- [collaboration, registry, listener],
-        do: :erlang.trace(pid, true, [:call, :set_on_spawn, {:tracer, tracer}])
+        do: :erlang.trace(pid, true, [:call, :procs, :set_on_spawn, {:tracer, tracer}])
 
     client = initialized(options[:socket_path])
 
@@ -205,53 +229,74 @@ defmodule LoopexDaemon.ServiceLifecycleTest do
     assert Task.await(daemon.task, 60_000) == 0
 
     send(tracer, {:violations, self()})
-    assert_receive {:violations, violations, allowed}, 1_000
+    assert_receive {:violations, violations, allowed}, 5_000
     assert violations == []
     # The trace saw the connections' allowed calls, so it was live.
     assert allowed > 0
   end
 
-  defp call_trace_loop({violations, allowed}) do
+  defp call_trace_loop(state) do
     receive do
+      {:trace, _parent, :spawn, child, mfa} ->
+        call_trace_loop(put_in(state, [:kinds, child], spawn_kind(mfa)))
+
       {:trace, caller, :call, {:gen, :call, [target, _label, request, _timeout]}} ->
-        case classify_call(caller, target, request) do
-          :allowed -> call_trace_loop({violations, allowed + 1})
-          :ignored -> call_trace_loop({violations, allowed})
-          violation -> call_trace_loop({[violation | violations], allowed})
-        end
+        call = {caller, resolve_target(state.kinds, target), request}
+        call_trace_loop(%{state | calls: [call | state.calls]})
 
       {:violations, from} ->
-        send(from, {:violations, Enum.reverse(violations), allowed})
-        call_trace_loop({violations, allowed})
+        {violations, allowed} = classify_calls(state)
+        send(from, {:violations, violations, allowed})
+        call_trace_loop(state)
 
       _other ->
-        call_trace_loop({violations, allowed})
+        call_trace_loop(state)
     end
   end
 
-  # Technical depth: a call is a violation only when a deadline-subject
-  # component calls another daemon component, other than a connection's calls
-  # into the registry and its relay registration.
-  defp classify_call(caller, target, request) do
-    caller_kind = component(caller)
-    target_kind = component(target)
+  defp classify_calls(state) do
+    Enum.reduce(Enum.reverse(state.calls), {[], 0}, fn {caller, target, request},
+                                                       {violations, allowed} ->
+      case classify_call(state, caller, target, request) do
+        :allowed -> {violations, allowed + 1}
+        :ignored -> {violations, allowed}
+        violation -> {violations ++ [violation], allowed}
+      end
+    end)
+  end
+
+  # Technical depth: a call is a violation when a deadline-subject component
+  # calls another daemon component, other than a connection's calls into the
+  # registry and its relay registration, and whenever its caller or target
+  # cannot be resolved.
+  defp classify_call(state, caller, target, request) do
+    caller_kind = Map.get(state.kinds, caller, :unresolved)
     tag = if is_tuple(request), do: elem(request, 0), else: request
 
     cond do
+      caller == state.test ->
+        :ignored
+
+      caller_kind == :unresolved ->
+        {:unresolved_caller, target, tag}
+
       caller_kind not in [:owner, :registry, :lease_owner, :connection] ->
         :ignored
 
-      is_nil(target_kind) or caller == target ->
+      target == :unresolved ->
+        {caller_kind, :unresolved_target, tag}
+
+      target in [:other, :self] ->
         :ignored
 
-      caller_kind == :connection and target_kind == :registry ->
+      caller_kind == :connection and target == :registry ->
         :allowed
 
-      caller_kind == :connection and target_kind == :relay and tag == :register_connection ->
+      caller_kind == :connection and target == :relay and tag == :register_connection ->
         :allowed
 
       true ->
-        {caller_kind, target_kind, tag}
+        {caller_kind, target, tag}
     end
   end
 
@@ -263,7 +308,22 @@ defmodule LoopexDaemon.ServiceLifecycleTest do
     LoopexDaemon.AdmissionRelay => :relay
   }
 
-  defp component(pid) when is_pid(pid) do
+  # Technical depth: a `gen` process's spawn event names its callback module
+  # in `gen:init_it/6,7`'s arguments, named or not.
+  defp spawn_kind({:proc_lib, :init_p, [_parent, _ancestors, :gen, :init_it, arguments]}) do
+    module =
+      case arguments do
+        [_gen_module, _starter, _parent, module, _args, _options] -> module
+        [_gen_module, _starter, _parent, _name, module, _args, _options] -> module
+        _other -> nil
+      end
+
+    Map.get(@component_modules, module, :other)
+  end
+
+  defp spawn_kind(_mfa), do: :other
+
+  defp initial_kind(pid) do
     case Process.info(pid, :dictionary) do
       {:dictionary, dictionary} ->
         case dictionary[:"$initial_call"] do
@@ -276,8 +336,35 @@ defmodule LoopexDaemon.ServiceLifecycleTest do
     end
   end
 
-  defp component(_name), do: nil
+  # Technical depth: a target is resolved when the call is received, while it
+  # most likely still lives; a pid the table does not name is a non-component
+  # when it is alive and not a component, and unresolved when it is gone.
+  defp resolve_target(kinds, pid) when is_pid(pid) do
+    case Map.fetch(kinds, pid) do
+      {:ok, kind} ->
+        kind
 
+      :error ->
+        if Process.alive?(pid), do: initial_kind(pid) || :other, else: :unresolved
+    end
+  end
+
+  defp resolve_target(kinds, name) when is_atom(name),
+    do: resolve_named(kinds, Process.whereis(name))
+
+  defp resolve_target(kinds, {name, node}) when is_atom(name) and node == node(),
+    do: resolve_named(kinds, Process.whereis(name))
+
+  defp resolve_target(kinds, {:via, module, name}),
+    do: resolve_named(kinds, module.whereis_name(name))
+
+  defp resolve_target(kinds, {:global, name}),
+    do: resolve_named(kinds, :global.whereis_name(name))
+
+  defp resolve_target(_kinds, _other), do: :unresolved
+
+  defp resolve_named(kinds, pid) when is_pid(pid), do: resolve_target(kinds, pid)
+  defp resolve_named(_kinds, _missing), do: :unresolved
   # Concept (T21): during an orderly stop, a lease owner's relay request that
   # stays unanswered for longer than a serving step between the admission
   # cut and the freeze is governed by the stop's own deadlines: its
@@ -288,8 +375,14 @@ defmodule LoopexDaemon.ServiceLifecycleTest do
   # owner is suspended, so the lease owner claims it only after the cut. The
   # relay is suspended for six seconds from the moment the cut is consumed,
   # and the lease owner is then resumed, so its claim waits past its
-  # five-second report. The admission wait is ten seconds, so the stop
-  # reaches the freeze only after the relay resumes and the request settles.
+  # five-second report, which a debug hook on the collaboration owner
+  # observes. The admission wait is ten seconds, so the stop reaches the
+  # freeze only after the relay resumes and the request settles. This is the
+  # owner and Service halves of T21; the registry's half — a relay request
+  # of the registry unanswered after the cut — is witnessed in
+  # `connection_registry_test.exs` ("a resume settlement refused after the
+  # cut still settles its lease owner") and `owner_test.exs` ("an
+  # unanswered registry relay report after the cut is cleanup-only").
   @tag timeout: 90_000
   test "a lease owner's relay request outlasting its step during the stop still exits zero",
        %{options: options} do
@@ -323,9 +416,29 @@ defmodule LoopexDaemon.ServiceLifecycleTest do
 
     await_until(fn -> :sys.get_state(relay).phase == :draining end)
 
+    test_pid = self()
+
+    :ok =
+      :sys.install(
+        collaboration,
+        {fn
+           forwarding,
+           {:in, {:lease_owner_relay_unanswered, ^lease_owner, _incarnation}},
+           _state ->
+             send(test_pid, :lease_owner_reported)
+             forwarding
+
+           forwarding, _event, _state ->
+             forwarding
+         end, :forwarding}
+      )
+
     :ok = :sys.suspend(relay)
     :ok = :sys.resume(lease_owner)
     Process.sleep(6_000)
+    # The lease owner's claim really waited on the relay past its step: its
+    # report reached the collaboration owner, which latched nothing.
+    assert_received :lease_owner_reported
     :ok = :sys.resume(relay)
 
     assert [%{"request_id" => "observer-acquire", "code" => "control_held"}] =
