@@ -13,7 +13,11 @@ defmodule LoopexComposition.CredentialPlane do
   reference edge, so registry, custody and tracing capability remain linked to
   the exact composition owner and participate in its reverse cleanup. This
   module returns only opaque token and handle values for model options; it
-  never returns credential bytes.
+  never returns credential bytes. Custody's start arguments carry the
+  credential through that starter, so an observer installed at the
+  composition's process-dictionary edge seam can see them; production installs
+  no observer there, only `LoopexComposition.Edges`' tracking starter, which
+  passes custody's arguments through unchanged and keeps none of them.
   """
 
   alias Loopex.LLM.ReqLLM
