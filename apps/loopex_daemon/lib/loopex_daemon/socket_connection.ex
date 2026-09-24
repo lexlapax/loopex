@@ -32,7 +32,10 @@ defmodule LoopexDaemon.SocketConnection do
   requests in the order they were sent, so output keeps its order and every
   enqueue still meets the output buffer's bounds and the succession reserve
   at the same point in that order. A registry exit while any request is
-  outstanding stops the connection as `registry_lost`.
+  outstanding stops the connection as `registry_lost`. Every registry request
+  the registry answers by itself has a five-second instant: one still
+  unanswered then is reported to the daemon owner, which names the registry
+  `connections_lost` while serving.
 
   After initialization a connection composed with a daemon context registers
   its incarnation with the admission relay and serves requests through a
@@ -75,6 +78,12 @@ defmodule LoopexDaemon.SocketConnection do
   # its own five-second instant; the instant only prompts one report to the
   # daemon owner and never abandons the request.
   @relay_request_ms 5_000
+
+  # Concept: each registry request this connection sends, other than a
+  # create or attach promotion, has its own five-second instant; at it the connection reports the registry to the
+  # daemon owner, which names it `connections_lost` while serving. The
+  # request stays pending and the daemon's fail-stop ends it.
+  @registry_request_ms 5_000
 
   @mutation_operations [
     :session_prompt,
@@ -323,6 +332,29 @@ defmodule LoopexDaemon.SocketConnection do
   end
 
   def handle_info({:relay_request_unanswered, _request}, state), do: {:noreply, state}
+
+  # Concept: a registry request still unanswered at its instant is reported
+  # to the daemon owner; the owner latches `connections_lost` once while
+  # serving and treats every report after the admission cut as cleanup.
+  #
+  # Technical depth: a connection composed without a daemon context has no
+  # owner to tell; its request simply stays pending.
+  def handle_info({:registry_request_unanswered, request}, state)
+      when is_map_key(state.exchanges, request) do
+    case state.context do
+      %{owner: owner} when is_pid(owner) ->
+        report = {:connection_registry_unanswered, self(), state.incarnation, state.registry}
+        send(owner, report)
+        Logger.debug("loopex daemon connection registry request unanswered")
+
+      _uncomposed ->
+        :ok
+    end
+
+    {:noreply, put_in(state, [:exchanges, request, :timer], nil)}
+  end
+
+  def handle_info({:registry_request_unanswered, _request}, state), do: {:noreply, state}
 
   def handle_info({:request_worker_result, origin, incarnation, result}, state),
     do: continue_worker(state, origin, incarnation, result)
@@ -1462,8 +1494,25 @@ defmodule LoopexDaemon.SocketConnection do
 
   defp await_exchange(state, request_id, target, label) do
     timer =
-      if target == :relay,
-        do: Process.send_after(self(), {:relay_request_unanswered, request_id}, @relay_request_ms)
+      case target do
+        :relay ->
+          Process.send_after(self(), {:relay_request_unanswered, request_id}, @relay_request_ms)
+
+        # A promotion's answer waits on the registry's relay flow, whose
+        # own instants bound it, so the connection holds no deadline there.
+        :registry when elem(label, 0) == :promote ->
+          nil
+
+        :registry ->
+          Process.send_after(
+            self(),
+            {:registry_request_unanswered, request_id},
+            @registry_request_ms
+          )
+
+        _owner ->
+          nil
+      end
 
     put_in(state, [:exchanges, request_id], %{label: label, timer: timer, target: target})
   end

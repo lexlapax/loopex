@@ -1100,6 +1100,29 @@ defmodule LoopexDaemon.Owner do
     latch_relay_lost(state)
   end
 
+  # Concept: a connection reports a registry request it has waited on for
+  # five seconds while serving; the registry is what failed, and the daemon
+  # names it `connections_lost` exactly as if the registry had exited.
+  #
+  # Technical depth: the report latches, through `latch_connections_lost`,
+  # only while this owner serves and no fatal teardown is marked, the same
+  # guards as the connection's relay report, and only when it names this
+  # owner's current registry. Any reporting pid is accepted for the same
+  # reason as the relay report. After the admission cut the stop's own
+  # deadlines govern, and every report is then cleanup-only, as is one naming
+  # another registry.
+  def handle_info(
+        {:connection_registry_unanswered, connection, connection_incarnation, registry},
+        %{registry: registry} = state
+      )
+      when is_pid(connection) and is_binary(connection_incarnation) do
+    Logger.debug("loopex daemon owner connection registry request unanswered")
+    latch_connections_lost(state)
+  end
+
+  def handle_info({:connection_registry_unanswered, _connection, _incarnation, _registry}, state),
+    do: {:noreply, state}
+
   def handle_info({:daemon_fatal_teardown, recipient}, %{fatal_recipient: recipient} = state)
       when is_pid(recipient) do
     Logger.debug("loopex daemon owner fatal teardown marked")
@@ -1205,9 +1228,13 @@ defmodule LoopexDaemon.Owner do
   # Concept: the registry never waits on the relay inside a call, so its exit
   # is always its own: `connections_lost`. A final close still waiting is told
   # the same class.
+  #
+  # Technical depth: an exit during fatal teardown — including the registry
+  # this owner killed on a connection's unanswered-request report — is
+  # reported by no one again.
   def handle_info({:EXIT, registry, _reason}, %{registry: registry} = state) do
     state = if state.close, do: answer_close(state, {:error, :connections_lost}), else: state
-    report_component_loss(state, :connections_lost)
+    unless state.fatal_teardown, do: report_component_loss(state, :connections_lost)
     {:stop, :connections_lost, state}
   end
 
@@ -2351,6 +2378,23 @@ defmodule LoopexDaemon.Owner do
   end
 
   defp latch_relay_lost(state), do: {:stop, :relay_lost, state}
+
+  # Concept: a late registry is named once and killed untrappably, so no
+  # request queued at it is applied afterwards; the teardown mark keeps its
+  # coming exit from being reported again.
+  defp latch_connections_lost(%{fatal_teardown: true} = state), do: {:noreply, state}
+
+  defp latch_connections_lost(%{stop: stop} = state) when not is_nil(stop),
+    do: {:noreply, state}
+
+  defp latch_connections_lost(%{fatal_recipient: recipient} = state) when is_pid(recipient) do
+    Logger.debug("loopex daemon owner registry exchange failed")
+    report_component_loss(state, :connections_lost)
+    Process.exit(state.registry, :kill)
+    {:noreply, %{state | fatal_teardown: true}}
+  end
+
+  defp latch_connections_lost(state), do: fail_connections(state)
 
   defp noreply(state), do: {:noreply, state}
 

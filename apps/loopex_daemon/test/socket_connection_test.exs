@@ -82,6 +82,61 @@ defmodule LoopexDaemon.SocketConnectionTest do
     refute_received {:daemon_component_fatal, _component, _class}
   end
 
+  # Concept: a registry that leaves a connection's request unanswered for its
+  # five-second step while serving is named `connections_lost`, once, and
+  # the daemon fail-stops on that class rather than blaming the connection.
+  #
+  # Technical depth: the registry is suspended and a client frame makes its
+  # connection send an output enqueue to it. The connection's instant reports
+  # the registry to the collaboration owner, which reports `connections_lost`
+  # to the fatal recipient, here the test, and kills the registry; its exit
+  # is not reported again.
+  @tag timeout: 60_000
+  test "a registry request unanswered for its step while serving is connections_lost once",
+       %{daemon: daemon} do
+    client = initialized_client(daemon)
+    owner = daemon.owner
+    :ok = :sys.suspend(daemon.registry)
+    started = System.monotonic_time(:millisecond)
+    :ok = send_frame(client, unsupported("stalled"))
+
+    assert_receive {:daemon_component_fatal, ^owner, :connections_lost}, 8_000
+    assert System.monotonic_time(:millisecond) - started >= 4_900
+    refute_receive {:daemon_component_fatal, _component, _class}, 1_000
+  end
+
+  # Concept: after the admission cut the stop's own deadlines govern, so the
+  # same unanswered registry request is reported and names nothing.
+  #
+  # Technical depth: the cut completes before the registry is suspended. The
+  # report is observed arriving at the collaboration owner, so the refusal
+  # to latch is not the absence of a report.
+  @tag timeout: 60_000
+  test "a registry request unanswered after the cut is reported and names nothing",
+       %{daemon: daemon} do
+    client = initialized_client(daemon)
+    owner = daemon.owner
+    registry = daemon.registry
+    assert {:ok, _cut_ref} = LoopexDaemon.Owner.cut_admission(owner, 2_000)
+    1 = :erlang.trace(owner, true, [:receive])
+    :ok = :sys.suspend(registry)
+
+    try do
+      :ok = send_frame(client, unsupported("after-cut"))
+
+      assert_receive {:trace, ^owner, :receive,
+                      {:connection_registry_unanswered, _connection, _incarnation, ^registry}},
+                     8_000
+
+      refute_receive {:daemon_component_fatal, _component, _class}, 500
+      assert Process.alive?(registry)
+      assert %{fatal_teardown: false} = :sys.get_state(owner)
+    after
+      :erlang.trace(owner, false, [:receive])
+      :sys.resume(registry)
+    end
+  end
+
   defp initialized_connections(daemon) do
     for {_token, %{initialized: true, connection_pid: pid}} <-
           :sys.get_state(daemon.registry).rows,
