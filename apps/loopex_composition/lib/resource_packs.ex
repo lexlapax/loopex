@@ -27,6 +27,16 @@ defmodule LoopexComposition.ResourcePacks do
   @max_text_bytes 65_536
   @max_detail_bytes 1_024
   @max_deadline_ms 30_000
+
+  # Concept: every import job commits one cleanup period, and the import
+  # executor names its own root-claim wait, so a cancellation knows how long a
+  # settling worker may still need.
+  #
+  # Technical depth: the period is each Git job's `cleanup_grace_ms`; the claim
+  # wait is the executor's `claim_wait_ms` start option, equal to its default.
+  # `import_settlement_ms/0` derives the settling worker's bound from both.
+  @import_cleanup_grace_ms 5_000
+  @import_claim_wait_ms 5_000
   @git_oid ~r/\A(?:[0-9a-f]{40}|[0-9a-f]{64})\z/
   @skill_name ~r/\A[a-z0-9]+(?:-[a-z0-9]+)*\z/
   @frontmatter_keys ~w(name description license compatibility metadata disable-model-invocation)
@@ -190,7 +200,15 @@ defmodule LoopexComposition.ResourcePacks do
           )
         else
           refusal ->
-            cancel_import_worker(context, worker, worker_monitor, current_job, config.deadline)
+            cancel_import_worker(
+              context,
+              tag,
+              worker,
+              worker_monitor,
+              current_job,
+              config.deadline
+            )
+
             refusal
         end
 
@@ -210,7 +228,7 @@ defmodule LoopexComposition.ResourcePacks do
         result
 
       {:DOWN, ^caller_monitor, :process, ^caller, _reason} ->
-        cancel_import_worker(context, worker, worker_monitor, current_job, config.deadline)
+        cancel_import_worker(context, tag, worker, worker_monitor, current_job, config.deadline)
         :caller_down
 
       {:DOWN, ^worker_monitor, :process, ^worker, reason} ->
@@ -218,12 +236,24 @@ defmodule LoopexComposition.ResourcePacks do
         error(:executor_failed, inspect(reason))
     after
       remaining_ms(config.deadline) ->
-        cancel_import_worker(context, worker, worker_monitor, current_job, config.deadline)
+        cancel_import_worker(context, tag, worker, worker_monitor, current_job, config.deadline)
         error(:git_failed, "resource import deadline reached")
     end
   end
 
-  defp cancel_import_worker(context, worker, worker_monitor, current_job, deadline) do
+  # Concept: an unconfirmed cancellation may mean the worker is still settling
+  # its job, so it is given the time that settlement is allowed before it is
+  # killed.
+  #
+  # Technical depth: the worker is the job's execute caller, and after its
+  # effect ends it retains the receipt and removes the open entry under the
+  # shared ledger's root claim. `Local.cancel/2` answers `unconfirmed` for a job
+  # it can no longer find, including one whose settlement is still running. A
+  # kill there can strand the claim or leave the root settling, which refuses
+  # every later import on this state root. The worker is therefore awaited for
+  # `import_settlement_ms/0` and killed only if it is still alive. A worker that
+  # announces its next job is between effects, so it is killed at once.
+  defp cancel_import_worker(context, tag, worker, worker_monitor, current_job, deadline) do
     cancellation =
       if is_binary(current_job),
         do: Local.cancel(context.executor, current_job),
@@ -241,11 +271,37 @@ defmodule LoopexComposition.ResourcePacks do
         end
 
       _unconfirmed ->
-        Process.exit(worker, :kill)
-        await_worker_down(worker, worker_monitor)
+        case await_settling_worker(tag, worker, worker_monitor, import_settlement_ms()) do
+          :ok ->
+            :ok
+
+          :kill ->
+            Process.exit(worker, :kill)
+            await_worker_down(worker, worker_monitor)
+        end
     end
 
     close_import_executor(context)
+  end
+
+  defp await_settling_worker(tag, worker, monitor, bound_ms) do
+    receive do
+      {:DOWN, ^monitor, :process, ^worker, _reason} -> :ok
+      {^tag, :job_ready, ^worker, _job_id} -> :kill
+    after
+      bound_ms -> :kill
+    end
+  end
+
+  # Concept: the longest one import job's settlement may take after its effect.
+  #
+  # Technical depth: the executor bounds a settlement by the job's retention
+  # allowance, `receipt_retention_ms` from `Loopex.Executor.cancellation_bounds/1`
+  # for the committed period, and an admission may first wait the executor's
+  # root-claim ceiling. The sum is the bound; a worker alive past it is killed.
+  defp import_settlement_ms do
+    {:ok, bounds} = Executor.cancellation_bounds(@import_cleanup_grace_ms)
+    bounds.receipt_retention_ms + @import_claim_wait_ms
   end
 
   defp await_worker_down(worker, monitor) do
@@ -757,6 +813,7 @@ defmodule LoopexComposition.ResourcePacks do
          {:ok, deadline_ms} <- deadline(Keyword.get(options, :deadline_ms, @max_deadline_ms)),
          deadline = System.system_time(:millisecond) + deadline_ms,
          :ok <- authorization(Keyword.get(options, :executor_authorization)),
+         {:ok, close} <- open_authority_close(Keyword.get(options, :open_authority_close)),
          {:ok, root} <- canonical_workspace(workspace) do
       {:ok,
        %{
@@ -770,7 +827,8 @@ defmodule LoopexComposition.ResourcePacks do
          path: selected_path,
          git: git,
          deadline: deadline,
-         authorization: {:host_policy, :allow}
+         authorization: {:host_policy, :allow},
+         open_authority_close: close
        }}
     else
       false -> error(:invalid_revision, "revision must be one exact lowercase Git object ID")
@@ -782,6 +840,19 @@ defmodule LoopexComposition.ResourcePacks do
 
   defp authorization(_other),
     do: error(:executor_authorization_required, "explicit host-policy allow is required")
+
+  # Concept: a trusted-local caller may hand the import executor its own
+  # open-authority close, so a case can hold a settlement where it runs.
+  #
+  # Technical depth: this is the executor's `open_authority_close` start option
+  # passed through unchanged, and absent it the executor keeps its default. It
+  # carries executable host authority, so it is a trusted-local option only; it
+  # enters no job, ledger record, receipt, manifest, or provenance record.
+  defp open_authority_close(nil), do: {:ok, nil}
+  defp open_authority_close(close) when is_function(close, 2), do: {:ok, close}
+
+  defp open_authority_close(_other),
+    do: error(:invalid_options, "open authority close must be a function of two arguments")
 
   defp deadline(value) when is_integer(value) and value in 1..@max_deadline_ms, do: {:ok, value}
 
@@ -1118,12 +1189,15 @@ defmodule LoopexComposition.ResourcePacks do
       with {:ok, artifacts} <- LoopexComposition.artifacts(config.state_root),
            {:ok, executor} <-
              Local.start_link(
-               identity: identity,
-               epoch: 1,
-               fencing_token: 1,
-               workspace_leases: %{lease_id => lease},
-               ledger_root: ledger,
-               artifacts: artifacts
+               [
+                 identity: identity,
+                 epoch: 1,
+                 fencing_token: 1,
+                 workspace_leases: %{lease_id => lease},
+                 ledger_root: ledger,
+                 artifacts: artifacts,
+                 claim_wait_ms: @import_claim_wait_ms
+               ] ++ executor_seams(config)
              ) do
         {:ok,
          %{lease: lease, lease_id: lease_id, executor: executor, identity: identity, sequence: 0}}
@@ -1134,6 +1208,9 @@ defmodule LoopexComposition.ResourcePacks do
     if match?({:error, _reason}, result), do: stop_process(lease)
     result
   end
+
+  defp executor_seams(%{open_authority_close: nil}), do: []
+  defp executor_seams(%{open_authority_close: close}), do: [open_authority_close: close]
 
   defp close_import_executor(context) do
     Enum.each([context.executor, context.lease], &stop_process/1)
@@ -1302,7 +1379,7 @@ defmodule LoopexComposition.ResourcePacks do
       fencing_token: 1,
       artifact_policy: %{"retain" => false},
       output_policy: %{"capture" => true},
-      cleanup_grace_ms: 5_000
+      cleanup_grace_ms: @import_cleanup_grace_ms
     }
 
     with {:ok, job} <- Executor.job(fields),

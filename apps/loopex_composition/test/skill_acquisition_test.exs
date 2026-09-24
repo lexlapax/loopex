@@ -1,6 +1,7 @@
 defmodule LoopexComposition.SkillAcquisitionTest do
   use ExUnit.Case, async: true
 
+  alias Loopex.Executor.Local.Ledger
   alias LoopexComposition.ResourcePacks
 
   test "pinned Git import retains the exact tree and complete file identities" do
@@ -1022,6 +1023,107 @@ defmodule LoopexComposition.SkillAcquisitionTest do
     assert Path.wildcard(Path.join(cancel_state, "resource-packs/receipts/open/*")) == []
 
     assert_cancellation_before_next_job(root, workspace, source, commit, installed)
+  end
+
+  test "a cancelled import lets a settling worker finish and leaves the ledger admissible" do
+    # Concept: cancelling an import never kills the worker while it settles its
+    # job on the shared receipt ledger, so the next import on that state root is
+    # admitted rather than refused by a stranded claim.
+    #
+    # Technical depth: the import executor's open-authority close is held for
+    # the clone job, which is the last step of that job's settlement and runs
+    # under the root claim. The import's caller is then killed. `Local.cancel/2`
+    # no longer finds the finished job and answers `unconfirmed`; the
+    # coordinator must wait on the worker rather than kill it. The close is
+    # released only once the coordinator is observed waiting with the worker
+    # alive; a worker already dead at that point is the defect.
+    root = tmp_dir!("settling-cancel")
+    source = Path.join(root, "source")
+    workspace = Path.join(root, "workspace")
+    state_root = Path.join(root, "state")
+    receipts = Path.join(state_root, "resource-packs/receipts")
+    git = System.find_executable("git") || flunk("git is required for this test")
+    write!(Path.join(source, "settling/SKILL.md"), skill("settling"))
+    commit = commit!(source)
+    parent = self()
+
+    close = fn ledger, job_id ->
+      if String.starts_with?(job_id, "resource-import-clone-") do
+        send(parent, {:closing, self()})
+
+        receive do
+          :close_now -> :ok
+        after
+          10_000 -> :ok
+        end
+      end
+
+      Ledger.close_open(ledger, job_id)
+    end
+
+    options = [
+      workspace_ref: "workspace:settling",
+      state_root: state_root,
+      rev: commit,
+      path: "settling",
+      git_executable: git,
+      executor_authorization: {:host_policy, :allow},
+      deadline_ms: 20_000
+    ]
+
+    task =
+      Task.async(fn ->
+        ResourcePacks.add(workspace, source, [{:open_authority_close, close} | options])
+      end)
+
+    assert_receive {:closing, closer}, 20_000
+    coordinator = import_coordinator!(task.pid)
+    worker = import_worker!(coordinator, task.pid)
+    coordinator_monitor = Process.monitor(coordinator)
+    closer_monitor = Process.monitor(closer)
+    Task.shutdown(task, :brutal_kill)
+
+    assert await_settling_wait(coordinator, worker) == :waiting,
+           "the import cancel killed its worker while it was settling"
+
+    send(closer, :close_now)
+    assert_receive {:DOWN, ^closer_monitor, :process, ^closer, :normal}, 10_000
+    assert_receive {:DOWN, ^coordinator_monitor, :process, ^coordinator, :normal}, 20_000
+
+    refute File.exists?(Path.join(receipts, "claim"))
+    assert Path.wildcard(Path.join(receipts, "open/*")) == []
+
+    assert {:ok, pack} = ResourcePacks.add(workspace, source, options)
+    assert pack["commit"] == commit
+  end
+
+  defp import_worker!(coordinator, caller) do
+    {:monitors, monitors} = Process.info(coordinator, :monitors)
+
+    case for({:process, pid} <- monitors, pid != caller, do: pid) do
+      [worker] -> worker
+      other -> flunk("expected one import worker, got: #{inspect(other)}")
+    end
+  end
+
+  # Whether the coordinator reached its bounded wait on a live worker, or the
+  # worker died first. Each poll is a few milliseconds and the number is bounded.
+  defp await_settling_wait(coordinator, worker, remaining \\ 2_000)
+  defp await_settling_wait(_coordinator, _worker, 0), do: :no_decision
+
+  defp await_settling_wait(coordinator, worker, remaining) do
+    cond do
+      not Process.alive?(worker) ->
+        :worker_gone
+
+      Process.info(coordinator, :current_function) ==
+          {:current_function, {ResourcePacks, :await_settling_worker, 4}} ->
+        :waiting
+
+      true ->
+        Process.sleep(1)
+        await_settling_wait(coordinator, worker, remaining - 1)
+    end
   end
 
   defp assert_cancellation_before_next_job(root, workspace, source, commit, installed) do
