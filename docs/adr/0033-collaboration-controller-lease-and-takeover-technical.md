@@ -808,8 +808,6 @@ unchanged writer marker remains physical Store-writer exclusion.
 
 ### Inter-component exchanges
 
-### Inter-component exchanges
-
 No process whose answer another daemon component awaits under a deadline — the daemon owner, the connection registry, a lease owner or a connection — makes a blocking call to another daemon component. Requests are ref-tagged messages or OTP request identifiers; replies are consumed as messages. The process that directly awaits a component's own work holds that exchange's deadline, and expiry names that component: the relay is `relay_lost`, the registry is `connections_lost`, a lease owner is replaced and a holder connection is closed alone. A process awaiting a reply its callee has deferred on a third component holds no deadline. Reports of an unanswered relay request from a lease owner, the registry or a connection reach the daemon owner, which latches `relay_lost` only while serving. After the orderly stop begins, every step and request is owned by the current stop phase and its deadline. A lease owner acknowledges a daemon resolution before it starts any further relay request, and each permit it executes produces exactly one reported answer to the daemon owner.
 
 ### Methods and fields

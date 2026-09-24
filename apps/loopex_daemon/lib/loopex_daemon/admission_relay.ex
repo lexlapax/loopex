@@ -743,6 +743,46 @@ defmodule LoopexDaemon.AdmissionRelay do
     )
   end
 
+  @doc """
+  ## Concept
+
+  A connection's requests to the relay at the start of a request, sent
+  without waiting, so a slow relay never stops the connection from serving
+  its socket or closing when told to.
+
+  ## Technical depth
+
+  Each function sends exactly the request its blocking counterpart above
+  sends and returns the OTP request identifier; the connection consumes the
+  answer, or the relay's exit, as a message under its own request instant.
+  """
+  @spec open_ticket_request(pid(), origin_id(), ticket_class(), binary() | nil, owner_binding()) ::
+          :gen_server.request_id()
+  def open_ticket_request(relay, origin_id, class, session_id, owner_binding),
+    do:
+      :gen_server.send_request(relay, {:open_ticket, origin_id, class, session_id, owner_binding})
+
+  @doc false
+  @spec bind_ticket_worker_request(pid(), origin_id(), pid(), binary()) ::
+          :gen_server.request_id()
+  def bind_ticket_worker_request(relay, origin_id, worker, worker_incarnation),
+    do:
+      :gen_server.send_request(
+        relay,
+        {:bind_ticket_worker, origin_id, worker, worker_incarnation}
+      )
+
+  @doc false
+  @spec open_permit_request(pid(), origin_id(), permit_class(), binary() | nil) ::
+          :gen_server.request_id()
+  def open_permit_request(relay, origin_id, class, session_id),
+    do: :gen_server.send_request(relay, {:open_permit, origin_id, class, session_id})
+
+  @doc false
+  @spec bind_worker_request(pid(), origin_id(), pid(), binary()) :: :gen_server.request_id()
+  def bind_worker_request(relay, origin_id, worker, worker_incarnation),
+    do: :gen_server.send_request(relay, {:bind_worker, origin_id, worker, worker_incarnation})
+
   @doc false
   @spec complete_permit(pid(), origin_id(), binary(), map()) ::
           :ok | {:error, :connection_lost | :invalid_result | :permit_unavailable}

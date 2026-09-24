@@ -6,7 +6,7 @@ defmodule LoopexDaemon.SocketTransportTest do
 
   import LoopexDaemon.Test.DaemonSocketFixture
 
-  alias LoopexDaemon.{AdmissionRelay, ConnectionRegistry, LeaseOwner}
+  alias LoopexDaemon.{AdmissionRelay, ConnectionRegistry, LeaseOwner, WireRecords}
   alias LoopexProtocol.Wire
 
   setup do
@@ -1087,6 +1087,517 @@ defmodule LoopexDaemon.SocketTransportTest do
 
     assert {:ok, _uptime} = Wire.u64(uptime)
     assert is_binary(status["daemon_incarnation"])
+  end
+
+  # Concept (E9, T26): a connection whose relay open is parked keeps serving
+  # its client: told its session owner was lost, it writes the one
+  # `control_owner_lost` record and closes while the open is still pending.
+  test "a connection with a parked relay open still answers a holder close",
+       %{daemon: daemon} do
+    client = initialized_client(daemon)
+    connection = initialized_connection(daemon)
+    incarnation = :sys.get_state(connection).incarnation
+    monitor = Process.monitor(connection)
+    park_relay_on(daemon.relay, &match?({:"$gen_call", _from, {:open_permit, _, _, _}}, &1))
+
+    :ok = send_frame(client, %{"method" => "daemon.status", "request_id" => "status"})
+    assert_receive :relay_parked, 1_000
+
+    close_ref = make_ref()
+
+    send(
+      connection,
+      {:daemon_control_owner_lost, daemon.owner, close_ref, :crypto.strong_rand_bytes(16),
+       incarnation}
+    )
+
+    assert [%{"type" => "error", "code" => "control_owner_lost"}] =
+             receive_records(client, 1, 2_000)
+
+    assert_receive {:DOWN, ^monitor, :process, ^connection, :normal}, 2_000
+    send(daemon.relay, :continue_relay)
+  end
+
+  # Concept (E9, T26): a relay open left unanswered for five seconds is
+  # reported by the connection; the daemon owner names the relay lost once,
+  # and the request is answered exactly once when the relay exits.
+  @tag timeout: 30_000
+  test "an unanswered relay open is reported and the owner names relay_lost",
+       %{daemon: daemon} do
+    client = initialized_client(daemon)
+    connection = initialized_connection(daemon)
+    :ok = :sys.suspend(daemon.relay)
+
+    started = System.monotonic_time(:millisecond)
+    :ok = send_frame(client, %{"method" => "daemon.status", "request_id" => "status"})
+
+    assert_receive {:daemon_component_fatal, owner, :relay_lost}, 7_000
+    assert owner == daemon.owner
+    assert System.monotonic_time(:millisecond) - started >= 4_900
+
+    assert [%{"type" => "error", "request_id" => "status", "code" => "internal_failure"}] =
+             receive_records(client, 1, 2_000)
+
+    refute_receive {:daemon_component_fatal, _reporter, _class}, 300
+    assert Process.alive?(connection)
+  end
+
+  # Concept (E9): a ticket's worker stays monitored until the relay answers
+  # its bind, and a result it reports before that answer is held: nothing is
+  # promoted until the ticket is bound.
+  test "a create's worker result waits for its ticket bind before promotion",
+       %{daemon: daemon} do
+    client = initialized_client(daemon)
+    connection = initialized_connection(daemon)
+
+    park_relay_on(
+      daemon.relay,
+      &match?({:"$gen_call", _from, {:bind_ticket_worker, _, _, _}}, &1)
+    )
+
+    :ok = send_frame(client, create("held", "held-create", %{"purpose" => "held"}))
+    assert_receive :relay_parked, 1_000
+
+    eventually(fn ->
+      Enum.any?(:sys.get_state(connection).ledger.requests, fn {_origin, entry} ->
+        entry.phase == :binding and match?({:held, _result}, entry.prepared)
+      end)
+    end)
+
+    assert %{relay_flow: nil, activation_promotions: promotions} =
+             :sys.get_state(daemon.registry)
+
+    assert promotions == %{}
+    send(daemon.relay, :continue_relay)
+
+    assert [%{"request_id" => "held", "status" => "accepted"}] = receive_records(client, 1)
+  end
+
+  # Concept (E7, F5): a create whose own promotion waits longer than any
+  # fixed call bound is still admitted, never refused after it may have
+  # committed.
+  #
+  # Technical depth: the registry is suspended while both clients' creates
+  # reach `:promoting`, so both promotions are pending before the stamp. Each
+  # relay promotion then takes 3.5 s, inside every component's own
+  # five-second instant, and the second waits behind the first in the
+  # registry's flow queue: its own wait from the stamp exceeds five seconds.
+  @tag timeout: 60_000
+  test "a create promoted after more than five seconds is admitted", %{daemon: daemon} do
+    first = initialized_client(daemon)
+    second = initialized_client(daemon)
+    connections = connection_pids(daemon)
+
+    delay_relay_on(
+      daemon.relay,
+      &match?({:"$gen_call", _from, {:promote_ticket, _, _, _, _}}, &1),
+      3_500
+    )
+
+    :ok = :sys.suspend(daemon.registry)
+    :ok = send_frame(first, create("first", "slow-first", %{"purpose" => "first"}))
+    :ok = send_frame(second, create("second", "slow-second", %{"purpose" => "second"}))
+
+    eventually(fn ->
+      Enum.all?(connections, fn connection -> ledger_phase?(connection, :promoting) end)
+    end)
+
+    stamped = System.monotonic_time(:millisecond)
+    :ok = :sys.resume(daemon.registry)
+
+    assert [%{"request_id" => "first", "status" => "accepted"}] =
+             receive_records(first, 1, 15_000)
+
+    assert [%{"request_id" => "second", "status" => "accepted"}] =
+             receive_records(second, 1, 15_000)
+
+    assert System.monotonic_time(:millisecond) - stamped >= 5_000
+    refute_received {:daemon_component_fatal, _reporter, _class}
+  end
+
+  # Concept (F1): once the connection is closing, a relay answer to a request
+  # it opened is cleanup-only: no correlated record follows the close, no
+  # worker is started and nothing is left behind.
+  #
+  # Technical depth: the relay is parked on the permit open, the connection
+  # is suspended, the close is delivered, and then the open's answer — the
+  # relay's exit, or its acceptance — lands behind it in the connection's
+  # mailbox before the connection resumes.
+  for close <- [:owner_loss, :final], outcome <- [:refusal, :acceptance] do
+    test "an open answered during the #{close} close writes nothing (#{outcome})",
+         %{daemon: daemon} do
+      client = initialized_client(daemon)
+      connection = initialized_connection(daemon)
+      incarnation = :sys.get_state(connection).incarnation
+      monitor = Process.monitor(connection)
+      relay = daemon.relay
+
+      park_then_watch(
+        relay,
+        &match?({:"$gen_call", _from, {:open_permit, _, _, _}}, &1),
+        &match?({:"$gen_call", _from, {:bind_worker, _, _, _}}, &1)
+      )
+
+      :ok = send_frame(client, %{"method" => "daemon.status", "request_id" => "status"})
+      assert_receive :relay_parked, 1_000
+      :ok = :sys.suspend(connection)
+      send(connection, close_message(unquote(close), daemon, incarnation))
+
+      case unquote(outcome) do
+        :refusal ->
+          Process.exit(relay, :kill)
+
+          eventually(fn ->
+            mailbox_has?(connection, &match?({:DOWN, _, :process, ^relay, _}, &1))
+          end)
+
+        :acceptance ->
+          send(relay, :continue_relay)
+          eventually(fn -> mailbox_has?(connection, &match?({[:alias | _], {:ok, _}}, &1)) end)
+      end
+
+      :ok = :sys.resume(connection)
+
+      assert [record] = records_until_closed(client)
+      assert record["type"] == close_record_type(unquote(close))
+      refute Map.has_key?(record, "request_id")
+      assert_receive {:DOWN, ^monitor, :process, ^connection, _reason}, 2_000
+      refute_receive {:relay_watched, _message}, 200
+
+      if unquote(outcome) == :acceptance,
+        do: eventually(fn -> AdmissionRelay.status(relay).permits == 0 end)
+    end
+  end
+
+  # Concept (F2): a create whose relay is lost after core committed it is
+  # never refused: its outcome is unknown, so the connection writes nothing
+  # for it and leaves it to the uncorrelated close, and the committed session
+  # is what a retry of the same command finds.
+  test "a create whose relay is lost after its task committed writes no refusal",
+       %{daemon: daemon, runtime: runtime} do
+    client = initialized_client(daemon)
+    park_after_promotion(daemon.relay)
+    options = %{"purpose" => "lost"}
+
+    :ok = send_frame(client, create("lost", "lost-create", options))
+    assert_receive :promotion_parked, 2_000
+
+    eventually(fn ->
+      match?(
+        {:ok, {:historical, _session}},
+        Loopex.Runtime.lookup_create_result(runtime, "lost-create", options)
+      )
+    end)
+
+    Process.exit(daemon.relay, :kill)
+    assert_receive {:daemon_component_fatal, _owner, :relay_lost}, 2_000
+
+    assert Process.get({LoopexDaemon.Test.DaemonSocketFixture, client}, "") == ""
+    assert {:error, :timeout} = :socket.recv(client, 0, 1_000)
+
+    assert {:ok, {:historical, _session}} =
+             Loopex.Runtime.lookup_create_result(runtime, "lost-create", options)
+  end
+
+  # Concept (F3): a relay cancel that ends a request while its ticket is
+  # still binding kills the worker the relay never took over.
+  test "a relay cancel while a ticket binds kills its worker", %{daemon: daemon} do
+    client = initialized_client(daemon)
+    connection = initialized_connection(daemon)
+
+    park_relay_on(
+      daemon.relay,
+      &match?({:"$gen_call", _from, {:bind_ticket_worker, _, _, _}}, &1)
+    )
+
+    :ok = send_frame(client, create("cancelled", "cancel-create", %{"purpose" => "cancel"}))
+    assert_receive :relay_parked, 1_000
+    {origin, entry} = ledger_entry(connection, :binding)
+
+    send(connection, {:relay_ticket_cancelled, origin, :daemon_stopping})
+
+    assert [%{"request_id" => "cancelled", "code" => "daemon_stopping"}] =
+             receive_records(client, 1)
+
+    eventually(fn -> not Process.alive?(entry.worker) end)
+    send(daemon.relay, :continue_relay)
+  end
+
+  # Concept (F4): a permit worker's normal exit that overtakes the relay's
+  # bind answer is not the request's failure: the permit's result still
+  # answers it.
+  #
+  # Technical depth: the relay is parked on the bind, and the worker's normal
+  # `DOWN` is delivered first, forcing the cross-sender order.
+  test "a permit worker's exit before its bind answer still yields the result",
+       %{daemon: daemon} do
+    client = initialized_client(daemon)
+    connection = initialized_connection(daemon)
+    park_relay_on(daemon.relay, &match?({:"$gen_call", _from, {:bind_worker, _, _, _}}, &1))
+
+    :ok = send_frame(client, %{"method" => "daemon.status", "request_id" => "status"})
+    assert_receive :relay_parked, 1_000
+    {_origin, entry} = ledger_entry(connection, :binding)
+
+    send(connection, {:DOWN, entry.worker_monitor, :process, entry.worker, :normal})
+    send(daemon.relay, :continue_relay)
+
+    assert [%{"request_id" => "status", "type" => "result"}] = receive_records(client, 1)
+  end
+
+  # Concept (F7): a refused attach releases exactly the succession reserve it
+  # took at dispatch, even when the connection's attachment changed while it
+  # was promoting.
+  #
+  # Technical depth: an unattached attach takes the reserve and is parked at
+  # its relay promotion; the connection's attachment is then set, as a
+  # concurrent change would, and a relay cancel refuses the attach.
+  #
+  # The state forced here cannot occur today. On the real interleaving —
+  # succession invalidating the attachment while a replacement is promoting —
+  # the notice is enqueued before the attachment clears, so the reserve is
+  # already out of `:reserved` and the registry refuses to release it: the
+  # old release-by-current-attachment code is correct there too. The fix and
+  # this witness defend the invariant "release exactly the reserve this
+  # attach took" against future change.
+  test "a refused attach releases the succession reserve it took", %{daemon: daemon} do
+    client = initialized_client(daemon)
+    session_id = create_session(client, "reserve-create")
+    connection = initialized_connection(daemon)
+
+    park_relay_on(
+      daemon.relay,
+      &match?({:"$gen_call", _from, {:promote_ticket, _, _, _, _}}, &1)
+    )
+
+    :ok = send_frame(client, attach("taken", session_id))
+    assert_receive :relay_parked, 1_000
+    {origin, _entry} = ledger_entry(connection, :promoting)
+    assert %{succession_reservations: 1} = ConnectionRegistry.status(daemon.registry)
+
+    :sys.replace_state(connection, fn state ->
+      %{state | attachment: %{session_id: session_id, attachment_id: "concurrent"}}
+    end)
+
+    send(connection, {:relay_ticket_cancelled, origin, :daemon_stopping})
+    assert [%{"request_id" => "taken", "code" => "daemon_stopping"}] = receive_records(client, 1)
+    assert %{succession_reservations: 0} = ConnectionRegistry.status(daemon.registry)
+
+    :sys.replace_state(connection, &%{&1 | attachment: nil})
+    send(daemon.relay, :continue_relay)
+  end
+
+  # Concept (round 2): nothing new starts while the connection is closing: a
+  # create's worker result that arrives during the close starts no
+  # promotion, commits no session, leaves no reservation and writes nothing.
+  #
+  # Technical depth: Control is suspended so the create's worker is parked in
+  # its lookup after its ticket is bound; the connection is suspended while
+  # the owner-loss close is delivered and Control resumed, so the worker's
+  # result lands behind the close in the connection's mailbox.
+  test "a worker result arriving during the close starts no promotion",
+       %{daemon: daemon, runtime: runtime} do
+    client = initialized_client(daemon)
+    connection = initialized_connection(daemon)
+    incarnation = :sys.get_state(connection).incarnation
+    monitor = Process.monitor(connection)
+    options = %{"purpose" => "closing"}
+    {:ok, children} = Loopex.Runtime.children(runtime)
+    watch_relay(daemon.relay, &match?({:"$gen_call", _from, {:promote_ticket, _, _, _, _}}, &1))
+
+    :ok = :sys.suspend(children.control)
+    :ok = send_frame(client, create("closing", "closing-create", options))
+    {_origin, entry} = ledger_entry(connection, :ready)
+
+    :ok = :sys.suspend(connection)
+    send(connection, close_message(:owner_loss, daemon, incarnation))
+    :ok = :sys.resume(children.control)
+    eventually(fn -> mailbox_has?(connection, &match?({:request_worker_result, _, _, _}, &1)) end)
+    :ok = :sys.resume(connection)
+
+    assert [record] = records_until_closed(client)
+    assert record["code"] == "control_owner_lost"
+    refute Map.has_key?(record, "request_id")
+    assert_receive {:DOWN, ^monitor, :process, ^connection, _reason}, 2_000
+
+    refute_receive {:relay_watched, _promotion}, 300
+    refute Process.alive?(entry.worker)
+
+    assert {:ok, :absent} =
+             Loopex.Runtime.lookup_create_result(runtime, "closing-create", options)
+
+    eventually(fn -> AdmissionRelay.status(daemon.relay).tickets == 0 end)
+    assert %{activation_reservations: 0} = ConnectionRegistry.status(daemon.registry)
+  end
+
+  # Reports every message the relay handles that matches.
+  defp watch_relay(relay, matcher) do
+    test = self()
+
+    :ok =
+      :sys.install(
+        relay,
+        {fn
+           :watching, {:in, message}, _state ->
+             if matcher.(message), do: send(test, {:relay_watched, message})
+             :watching
+
+           phase, _event, _state ->
+             phase
+         end, :watching}
+      )
+  end
+
+  defp close_message(:owner_loss, daemon, incarnation),
+    do:
+      {:daemon_control_owner_lost, daemon.owner, make_ref(), :crypto.strong_rand_bytes(16),
+       incarnation}
+
+  defp close_message(:final, _daemon, _incarnation),
+    do: {:daemon_stopping, WireRecords.daemon_stopping("operator_stop")}
+
+  defp close_record_type(:owner_loss), do: "error"
+  defp close_record_type(:final), do: "daemon.stopping"
+
+  defp mailbox_has?(pid, matcher) do
+    {:messages, messages} = Process.info(pid, :messages)
+    Enum.any?(messages, matcher)
+  end
+
+  # Every record the client receives until its socket closes.
+  defp records_until_closed(socket) do
+    buffered = Process.get({LoopexDaemon.Test.DaemonSocketFixture, socket}, "")
+    Process.put({LoopexDaemon.Test.DaemonSocketFixture, socket}, "")
+    collect_until_closed(socket, buffered)
+  end
+
+  defp collect_until_closed(socket, bytes) do
+    case :socket.recv(socket, 0, 2_000) do
+      {:ok, more} ->
+        collect_until_closed(socket, bytes <> more)
+
+      {:error, :closed} ->
+        bytes
+        |> String.split("\n", trim: true)
+        |> Enum.map(fn payload ->
+          {:ok, record} =
+            LoopexProtocol.Frame.decode(payload, LoopexProtocol.Frame.output_record_bytes())
+
+          record
+        end)
+    end
+  end
+
+  defp ledger_phase?(connection, phase) do
+    Enum.any?(:sys.get_state(connection).ledger.requests, fn {_origin, entry} ->
+      entry.phase == phase
+    end)
+  end
+
+  defp ledger_entry(connection, phase) do
+    eventually(fn -> ledger_phase?(connection, phase) end)
+
+    Enum.find(:sys.get_state(connection).ledger.requests, fn {_origin, entry} ->
+      entry.phase == phase
+    end)
+  end
+
+  # Parks the relay on the first matching message until `:continue_relay`,
+  # then reports every later message that matches `watch`.
+  defp park_then_watch(relay, park, watch) do
+    test = self()
+
+    :ok =
+      :sys.install(
+        relay,
+        {fn
+           :waiting, {:in, message}, _state ->
+             if park.(message) do
+               send(test, :relay_parked)
+
+               receive do
+                 :continue_relay -> :watching
+               end
+             else
+               :waiting
+             end
+
+           :watching, {:in, message}, _state ->
+             if watch.(message), do: send(test, {:relay_watched, message})
+             :watching
+
+           phase, _event, _state ->
+             phase
+         end, :waiting}
+      )
+  end
+
+  # Parks the relay for good once it has started a ticket promotion's task
+  # and is handling the killed waiting worker's exit, before it answers the
+  # registry.
+  defp park_after_promotion(relay) do
+    test = self()
+
+    :ok =
+      :sys.install(
+        relay,
+        {fn
+           :waiting, {:in, {:"$gen_call", _from, {:promote_ticket, _, _, _, _}}}, _state ->
+             :promoted
+
+           :promoted, {:in, {:DOWN, _monitor, :process, _worker, :killed}}, _state ->
+             send(test, :promotion_parked)
+
+             receive do
+               :never_released -> :done
+             end
+
+           phase, _event, _state ->
+             phase
+         end, :waiting}
+      )
+  end
+
+  # Parks the relay just before it handles the first matching message, until
+  # the test sends it `:continue_relay`.
+  defp park_relay_on(relay, matcher) do
+    test = self()
+
+    :ok =
+      :sys.install(
+        relay,
+        {fn
+           :waiting, {:in, message}, _state ->
+             if matcher.(message) do
+               send(test, :relay_parked)
+
+               receive do
+                 :continue_relay -> :done
+               end
+             else
+               :waiting
+             end
+
+           :waiting, _event, _state ->
+             :waiting
+         end, :waiting}
+      )
+  end
+
+  # Delays the relay by `delay_ms` before each matching message it handles.
+  defp delay_relay_on(relay, matcher, delay_ms) do
+    :ok =
+      :sys.install(
+        relay,
+        {fn
+           :waiting, {:in, message}, _state ->
+             if matcher.(message), do: Process.sleep(delay_ms)
+             :waiting
+
+           :waiting, _event, _state ->
+             :waiting
+         end, :waiting}
+      )
   end
 
   # This daemon's connection processes, found by initial call and registry.

@@ -31,7 +31,12 @@ defmodule LoopexDaemon.SocketConnection do
   relay origin until exactly one answer is rendered. Blocking work runs in a
   monitored `LoopexDaemon.RequestWorker`; the relay, the daemon owner and the
   lease owners deliver results, cancellations and failures back to this
-  process, which renders each as one correlated record. When the daemon owner
+  process, which renders each as one correlated record. A request's relay
+  open and bind and a create's or attach's registry promotion are request
+  messages the connection never awaits inside a handler: each relay request
+  has its own five-second instant, reported once to the daemon owner when
+  unanswered, and a promotion carries no connection deadline because the
+  registry's own relay instants bound it. When the daemon owner
   reports the loss of this connection's granted session owner, the connection
   writes the one uncorrelated `control_owner_lost` record, stops reading,
   attempts to flush within a fixed bound, closes and only then acknowledges
@@ -57,6 +62,11 @@ defmodule LoopexDaemon.SocketConnection do
 
   @owner_loss_close_ms 1_000
 
+  # Concept: each relay request this connection sends at a request's start has
+  # its own five-second instant; the instant only prompts one report to the
+  # daemon owner and never abandons the request.
+  @relay_request_ms 5_000
+
   @mutation_operations [
     :session_prompt,
     :session_steer,
@@ -76,6 +86,11 @@ defmodule LoopexDaemon.SocketConnection do
     :artifact_read_chunk,
     :artifact_close_transfer
   ]
+
+  # A permit's worker exits normally once it has completed its permit, which
+  # it can do only after the relay's `go`; a ticket's worker never exits
+  # normally before its ticket is bound and promoted.
+  @permit_operations @session_queries ++ @transfer_operations ++ [:session_list, :daemon_status]
 
   @doc false
   @spec start_link(keyword()) :: GenServer.on_start()
@@ -117,7 +132,8 @@ defmodule LoopexDaemon.SocketConnection do
       succession: nil,
       last_activity: System.monotonic_time(:millisecond),
       lease_expires_at: nil,
-      calls: :gen_server.reqids_new()
+      calls: :gen_server.reqids_new(),
+      exchanges: %{}
     }
 
     Logger.debug("loopex daemon socket connection waiting")
@@ -268,6 +284,29 @@ defmodule LoopexDaemon.SocketConnection do
     Logger.debug("loopex daemon socket send aborted")
     {:stop, :normal, %{state | send_select: nil}}
   end
+
+  # Concept: the relay's and the registry's answers to this connection's
+  # requests arrive as messages, so a slow relay or registry never stops the
+  # connection from serving its socket, delivering results or closing.
+  def handle_info({[:alias | request], _reply} = message, state)
+      when is_map_key(state.exchanges, request),
+      do: exchange_answered(state, request, message)
+
+  def handle_info({:DOWN, request, :process, _server, _reason} = message, state)
+      when is_map_key(state.exchanges, request),
+      do: exchange_answered(state, request, message)
+
+  # Concept: a relay request still unanswered at its instant is reported once
+  # to the daemon owner, which names the relay lost while serving; the
+  # request stays pending and the daemon's fail-stop ends it.
+  def handle_info({:relay_request_unanswered, request}, state)
+      when is_map_key(state.exchanges, request) do
+    send(state.context.owner, {:connection_relay_unanswered, self(), state.incarnation})
+    Logger.debug("loopex daemon connection relay request unanswered")
+    {:noreply, put_in(state, [:exchanges, request, :timer], nil)}
+  end
+
+  def handle_info({:relay_request_unanswered, _request}, state), do: {:noreply, state}
 
   def handle_info({:request_worker_result, origin, incarnation, result}, state),
     do: continue_worker(state, origin, incarnation, result)
@@ -446,9 +485,9 @@ defmodule LoopexDaemon.SocketConnection do
       ),
       do: {:stop, :registry_lost, state}
 
-  def handle_info({:DOWN, monitor, :process, _worker, _reason}, state)
+  def handle_info({:DOWN, monitor, :process, _worker, reason}, state)
       when is_map_key(state.workers, monitor),
-      do: worker_lost(state, monitor)
+      do: worker_lost(state, monitor, reason)
 
   def handle_info(
         {:DOWN, monitor, :process, listener, _reason},
@@ -772,6 +811,16 @@ defmodule LoopexDaemon.SocketConnection do
   defp serve(state, request),
     do: reply(state, WireRecords.request_error(request.request_id, "unsupported_method"))
 
+  # Concept: a ticketed request opens its relay ticket, starts its worker and
+  # binds it, each relay step by request message, so the connection keeps
+  # serving while the relay answers.
+  #
+  # Technical depth: the ledger entry is `:opening` until the relay answers
+  # the open and `:binding` until it answers the bind. The worker is started
+  # only once the ticket exists and stays monitored until the bind answer; a
+  # result it reports before that answer is held and dispatched after it. A
+  # refused open answers the request and releases any session reservation, as
+  # the request never began; a refused bind settles it.
   defp begin_ticket(
          state,
          ledger,
@@ -782,36 +831,19 @@ defmodule LoopexDaemon.SocketConnection do
          owner_binding \\ nil,
          after_bind \\ fn state, _origin -> {:ok, state} end
        ) do
-    case RequestLedger.begin(ledger, request.request_id, new_entry(request)) do
+    case RequestLedger.begin(ledger, request.request_id, new_entry(request, :opening)) do
       {:ok, origin, ledger} ->
-        case AdmissionRelay.open_ticket(
-               state.context.relay,
-               origin,
-               class,
-               session_id,
-               owner_binding
-             ) do
-          {:ok, ^origin} ->
-            state = start_request_worker(%{state | ledger: ledger}, origin, fun)
-            {:ok, entry} = RequestLedger.fetch(state.ledger, origin)
+        request_id =
+          AdmissionRelay.open_ticket_request(
+            state.context.relay,
+            origin,
+            class,
+            session_id,
+            owner_binding
+          )
 
-            case AdmissionRelay.bind_ticket_worker(
-                   state.context.relay,
-                   origin,
-                   entry.worker,
-                   entry.worker_incarnation
-                 ) do
-              :ok ->
-                after_bind.(state, origin)
-
-              {:error, reason} ->
-                {:noreply, state} = settle_locally(state, origin, ticket_refusal(reason))
-                {:ok, state}
-            end
-
-          {:error, reason} ->
-            reply(state, WireRecords.request_error(request.request_id, ticket_refusal(reason)))
-        end
+        state = %{state | ledger: ledger}
+        {:ok, await_exchange(state, request_id, :relay, {:open_ticket, origin, fun, after_bind})}
 
       {:error, :duplicate_request} ->
         reply(state, WireRecords.invalid_request(request.request_id, "duplicate_request"))
@@ -821,11 +853,14 @@ defmodule LoopexDaemon.SocketConnection do
     end
   end
 
-  defp new_entry(request) do
+  defp new_entry(request, phase \\ :ready) do
     %{
       method: request.method,
       operation: request.operation,
       fields: request.fields,
+      phase: phase,
+      prepared: nil,
+      succession_reserved: false,
       worker: nil,
       worker_monitor: nil,
       worker_incarnation: nil
@@ -862,8 +897,36 @@ defmodule LoopexDaemon.SocketConnection do
     end
   end
 
+  # Concept: nothing new starts while the connection is closing: a worker
+  # result that arrives then is discarded, so no create commits a session and
+  # no attach installs during the close, and nothing is written.
+  #
+  # Technical depth: for a create, an attach, an acquire or a release this
+  # is a definite outcome, not an unknown one: the result only prepares the
+  # request, and no core task has started, because core work begins only
+  # with the promotion or hand-off this result would have triggered.
+  # Discarding kills the still-monitored worker, which the relay holds as the
+  # ticket's bound worker, so the relay's ordinary worker-loss path removes
+  # the ticket; the request's session reservation and any succession reserve
+  # are released with it. A lease ticket's hand-off is different: the bind
+  # answer itself hands the descriptor to the lease owner and gives the
+  # worker to the relay, so a result discarded here may follow a hand-off
+  # already made. That is acceptable: its worker is no longer monitored and
+  # is not killed, nothing is written, the relay settles the ticket normally,
+  # and the uncorrelated close stands for its answer.
+  defp continue_worker(%{closing: closing} = state, origin, _incarnation, _result)
+       when closing != nil do
+    Logger.debug("loopex daemon connection worker result discarded while closing")
+    {:noreply, discard_entry(state, origin)}
+  end
+
   defp continue_worker(state, origin, incarnation, result) do
     case RequestLedger.fetch(state.ledger, origin) do
+      {:ok, %{worker_incarnation: ^incarnation, worker_monitor: monitor, phase: :binding}}
+      when is_reference(monitor) ->
+        ledger = RequestLedger.update(state.ledger, origin, &%{&1 | prepared: {:held, result}})
+        {:noreply, %{state | ledger: ledger}}
+
       {:ok, %{worker_incarnation: ^incarnation, worker_monitor: monitor} = entry}
       when is_reference(monitor) ->
         dispatch_prepared(state, origin, entry, result)
@@ -961,24 +1024,19 @@ defmodule LoopexDaemon.SocketConnection do
     ceiling = WireRecords.request_error(request_id, "activation_ceiling_reached")
     conflict = create_admission(request_id, command_id, {:refused, :runtime_command_conflict})
 
-    case safe_call(fn ->
-           ConnectionRegistry.promote_create(
-             state.registry,
-             origin,
-             command_id,
-             options_digest(options),
-             mode,
-             ceiling,
-             conflict,
-             task
-           )
-         end) do
-      {:ok, _promotion} ->
-        {:noreply, relay_owns_worker(state, origin, entry)}
+    request_id =
+      ConnectionRegistry.promote_create_request(
+        state.registry,
+        origin,
+        command_id,
+        options_digest(options),
+        mode,
+        ceiling,
+        conflict,
+        task
+      )
 
-      {:error, reason} ->
-        settle_locally(state, origin, ticket_refusal(reason))
-    end
+    {:noreply, promote(state, origin, request_id, :create)}
   end
 
   # Concept: the attach task installs the connection itself as the holder, so
@@ -993,6 +1051,12 @@ defmodule LoopexDaemon.SocketConnection do
 
     request_id = entry.request_id
     reserve = if state.attachment, do: :ok, else: reserve_succession(state)
+    took_reserve = is_nil(state.attachment) and reserve == :ok
+
+    ledger =
+      RequestLedger.update(state.ledger, origin, &%{&1 | succession_reserved: took_reserve})
+
+    state = %{state | ledger: ledger}
 
     # A replacement removes the current attachment in core before this
     # connection installs the new one, so the old pump's failure while it is
@@ -1015,24 +1079,18 @@ defmodule LoopexDaemon.SocketConnection do
 
         task = attach_task(state.context, origin, request_id, session_id, options)
 
-        case safe_call(fn ->
-               ConnectionRegistry.promote_attach(
-                 state.registry,
-                 origin,
-                 state.incarnation,
-                 session_id,
-                 WireRecords.request_error(request_id, "session_dormant"),
-                 WireRecords.request_error(request_id, "capacity_exceeded"),
-                 task
-               )
-             end) do
-          {:ok, :admitted} ->
-            {:noreply, relay_owns_worker(state, origin, entry)}
+        registry_request =
+          ConnectionRegistry.promote_attach_request(
+            state.registry,
+            origin,
+            state.incarnation,
+            session_id,
+            WireRecords.request_error(request_id, "session_dormant"),
+            WireRecords.request_error(request_id, "capacity_exceeded"),
+            task
+          )
 
-          {:error, reason} ->
-            state = release_unused_succession(state)
-            settle_locally(state, origin, ticket_refusal(reason))
-        end
+        {:noreply, promote(state, origin, registry_request, :attach)}
 
       {:error, _reason} ->
         settle_locally(state, origin, "capacity_exceeded")
@@ -1086,12 +1144,15 @@ defmodule LoopexDaemon.SocketConnection do
     end
   end
 
-  defp release_unused_succession(%{attachment: nil} = state) do
+  # Concept: a refused attach releases exactly the succession reserve it took
+  # when it was dispatched, whatever this connection's attachment has become
+  # since, so it can never release a reserve another request holds.
+  defp release_taken_succession(state, %{succession_reserved: true}) do
     _result = ConnectionRegistry.release_succession(state.registry, state.incarnation)
     state
   end
 
-  defp release_unused_succession(state), do: state
+  defp release_taken_succession(state, _entry), do: state
 
   # Concept: delivery starts only after the snapshot is queued, so a client
   # never receives an event for a cursor it has not been told about.
@@ -1148,7 +1209,7 @@ defmodule LoopexDaemon.SocketConnection do
         noreply_record(%{state | attachment: Map.delete(attached, :replacing)}, record)
 
       _other ->
-        noreply_record(release_unused_succession(state), record)
+        noreply_record(release_taken_succession(state, entry), record)
     end
   end
 
@@ -1244,10 +1305,255 @@ defmodule LoopexDaemon.SocketConnection do
 
   # Concept: promotion retires the waiting worker; the relay reaps it, so its
   # exit is not this request's failure.
+  defp relay_owns_worker(state, _origin, %{worker_monitor: nil}), do: state
+
   defp relay_owns_worker(state, origin, entry) do
     Process.demonitor(entry.worker_monitor, [:flush])
     ledger = RequestLedger.update(state.ledger, origin, &%{&1 | worker_monitor: nil})
     %{state | ledger: ledger, workers: Map.delete(state.workers, entry.worker_monitor)}
+  end
+
+  # Concept: a create or attach is promoted by a registry request this
+  # connection never awaits, so no call timeout can turn a promotion that
+  # may have committed into a refusal.
+  #
+  # Technical depth: the entry is `:promoting` until the registry answers.
+  # The relay kills the waiting worker as part of promotion, so that worker's
+  # exit while promoting is expected and only drops its monitor. The registry
+  # answers once its relay step does; its own request instants bound that, so
+  # the connection holds no deadline here.
+  defp promote(state, origin, request_id, kind) do
+    ledger = RequestLedger.update(state.ledger, origin, &%{&1 | phase: :promoting})
+    await_exchange(%{state | ledger: ledger}, request_id, :registry, {:promote, origin, kind})
+  end
+
+  defp await_exchange(state, request_id, target, label) do
+    timer =
+      if target == :relay,
+        do: Process.send_after(self(), {:relay_request_unanswered, request_id}, @relay_request_ms)
+
+    put_in(state, [:exchanges, request_id], %{label: label, timer: timer})
+  end
+
+  # Concept: each relay or registry answer continues exactly one request, and
+  # a request the connection has already answered takes nothing from it.
+  #
+  # Technical depth: an exited relay answers the request `internal_failure`;
+  # the daemon owner classifies the relay. An exited registry stops this
+  # connection as `registry_lost`, the same as its monitor does, because a
+  # promotion it may have committed can no longer be answered truthfully.
+  # Once the connection is closing — after its owner-loss close or its final
+  # close — every answer is cleanup-only: the request's unbound worker is
+  # killed, its entry completed and its reservations released, and nothing
+  # is written, so no correlated record ever follows the uncorrelated close.
+  defp exchange_answered(state, request_id, message) do
+    {exchange, exchanges} = Map.pop(state.exchanges, request_id)
+    if exchange.timer, do: Process.cancel_timer(exchange.timer)
+    state = %{state | exchanges: exchanges}
+
+    response =
+      case :gen_server.check_response(message, request_id) do
+        {:reply, reply} -> {:reply, reply}
+        _server_gone -> :down
+      end
+
+    if state.closing,
+      do: close_exchange(state, exchange.label, response),
+      else: continue_exchange(state, exchange.label, response)
+  end
+
+  defp close_exchange(state, {:promote, _origin, _kind}, :down),
+    do: {:stop, :registry_lost, state}
+
+  defp close_exchange(state, label, _response) do
+    Logger.debug("loopex daemon connection answer discarded while closing")
+    {:noreply, discard_entry(state, elem(label, 1))}
+  end
+
+  # Concept: a request abandoned while the connection closes leaves nothing
+  # behind and writes nothing.
+  defp discard_entry(state, origin) do
+    case RequestLedger.complete(state.ledger, origin) do
+      {nil, _ledger} ->
+        state
+
+      {entry, ledger} ->
+        %{state | ledger: ledger}
+        |> release_unbound_worker(entry)
+        |> release_reservation(entry)
+        |> release_taken_succession(entry)
+    end
+  end
+
+  # Concept: a worker the relay has not yet taken over belongs to this
+  # connection, so a request that ends while its worker is unbound kills it
+  # rather than leave it waiting for a `go` that will never come.
+  defp release_unbound_worker(state, %{worker_monitor: monitor, worker: worker})
+       when is_reference(monitor) do
+    Process.demonitor(monitor, [:flush])
+    Process.exit(worker, :kill)
+    %{state | workers: Map.delete(state.workers, monitor)}
+  end
+
+  defp release_unbound_worker(state, _entry), do: state
+
+  defp continue_exchange(state, {:open_ticket, origin, fun, after_bind}, {:reply, {:ok, origin}}) do
+    case RequestLedger.fetch(state.ledger, origin) do
+      {:ok, %{phase: :opening}} ->
+        state = start_request_worker(state, origin, fun)
+        ledger = RequestLedger.update(state.ledger, origin, &%{&1 | phase: :binding})
+        state = %{state | ledger: ledger}
+        {:ok, entry} = RequestLedger.fetch(state.ledger, origin)
+
+        request_id =
+          AdmissionRelay.bind_ticket_worker_request(
+            state.context.relay,
+            origin,
+            entry.worker,
+            entry.worker_incarnation
+          )
+
+        {:noreply, await_exchange(state, request_id, :relay, {:bind_ticket, origin, after_bind})}
+
+      _answered ->
+        {:noreply, state}
+    end
+  end
+
+  defp continue_exchange(state, {:open_ticket, origin, _fun, _after_bind}, response),
+    do: refuse_opening(state, origin, response)
+
+  defp continue_exchange(state, {:bind_ticket, origin, after_bind}, {:reply, :ok}) do
+    case RequestLedger.fetch(state.ledger, origin) do
+      {:ok, %{phase: :binding}} ->
+        ledger = RequestLedger.update(state.ledger, origin, &%{&1 | phase: :ready})
+
+        case after_bind.(%{state | ledger: ledger}, origin) do
+          {:ok, state} -> dispatch_held_result(state, origin)
+          {:stop, state} -> {:stop, :normal, state}
+        end
+
+      _answered ->
+        {:noreply, state}
+    end
+  end
+
+  defp continue_exchange(state, {:bind_ticket, origin, _after_bind}, response),
+    do: refuse_binding(state, origin, response)
+
+  defp continue_exchange(state, {:open_permit, origin, fun}, {:reply, {:ok, origin}}) do
+    case RequestLedger.fetch(state.ledger, origin) do
+      {:ok, %{phase: :opening}} ->
+        relay = state.context.relay
+        {worker, monitor, incarnation} = RequestWorker.start_permit(origin, relay, fun)
+
+        ledger =
+          RequestLedger.update(state.ledger, origin, fn entry ->
+            %{
+              entry
+              | phase: :binding,
+                worker: worker,
+                worker_monitor: monitor,
+                worker_incarnation: incarnation
+            }
+          end)
+
+        state = %{state | ledger: ledger, workers: Map.put(state.workers, monitor, origin)}
+        request_id = AdmissionRelay.bind_worker_request(relay, origin, worker, incarnation)
+        {:noreply, await_exchange(state, request_id, :relay, {:bind_permit, origin})}
+
+      _answered ->
+        {:noreply, state}
+    end
+  end
+
+  defp continue_exchange(state, {:open_permit, origin, _fun}, response),
+    do: refuse_opening(state, origin, response)
+
+  defp continue_exchange(state, {:bind_permit, origin}, {:reply, :ok}) do
+    case RequestLedger.fetch(state.ledger, origin) do
+      {:ok, %{phase: :binding} = entry} ->
+        ledger = RequestLedger.update(state.ledger, origin, &%{&1 | phase: :ready})
+        {:noreply, relay_owns_worker(%{state | ledger: ledger}, origin, entry)}
+
+      _answered ->
+        {:noreply, state}
+    end
+  end
+
+  defp continue_exchange(state, {:bind_permit, origin}, response),
+    do: refuse_binding(state, origin, response)
+
+  defp continue_exchange(state, {:promote, _origin, _kind}, :down) do
+    Logger.debug("loopex daemon connection registry lost during promotion")
+    {:stop, :registry_lost, state}
+  end
+
+  defp continue_exchange(state, {:promote, origin, _kind}, {:reply, reply}) do
+    case {RequestLedger.fetch(state.ledger, origin), reply} do
+      {{:ok, %{phase: :promoting} = entry}, {:ok, _promotion}} ->
+        ledger = RequestLedger.update(state.ledger, origin, &%{&1 | phase: :ready})
+        {:noreply, relay_owns_worker(%{state | ledger: ledger}, origin, entry)}
+
+      # Concept: when the relay was lost or torn down with this promotion in
+      # flight, whether core ran it is unknown, so no correlated refusal is
+      # written; the request is left to the connection's uncorrelated close,
+      # which the daemon's fail-stop or teardown always brings. Every other
+      # refusal is definite: the registry or the relay decided it before any
+      # core effect could start.
+      {{:ok, %{phase: :promoting} = entry}, {:error, :promotion_outcome_unknown}} ->
+        Logger.debug("loopex daemon connection promotion outcome unknown")
+        ledger = RequestLedger.update(state.ledger, origin, &%{&1 | phase: :outcome_unknown})
+        {:noreply, relay_owns_worker(%{state | ledger: ledger}, origin, entry)}
+
+      {{:ok, %{phase: :promoting}}, {:error, reason}} ->
+        settle_locally(state, origin, ticket_refusal(reason))
+
+      _answered ->
+        {:noreply, state}
+    end
+  end
+
+  # A refused or unanswerable open answers the request that never began and
+  # releases any session reservation it made.
+  defp refuse_opening(state, origin, response) do
+    case RequestLedger.fetch(state.ledger, origin) do
+      {:ok, %{phase: :opening}} ->
+        {entry, ledger} = RequestLedger.complete(state.ledger, origin)
+        state = release_reservation(%{state | ledger: ledger}, entry)
+
+        noreply_record(
+          state,
+          WireRecords.request_error(entry.request_id, relay_refusal(response))
+        )
+
+      _answered ->
+        {:noreply, state}
+    end
+  end
+
+  defp refuse_binding(state, origin, response) do
+    case RequestLedger.fetch(state.ledger, origin) do
+      {:ok, %{phase: :binding}} -> settle_locally(state, origin, relay_refusal(response))
+      _answered -> {:noreply, state}
+    end
+  end
+
+  defp relay_refusal({:reply, {:error, reason}}), do: ticket_refusal(reason)
+  defp relay_refusal(_unanswerable), do: "internal_failure"
+
+  # A worker result that arrived while its ticket was binding is dispatched
+  # now, exactly as it would have been had the bind answered first.
+  defp dispatch_held_result(state, origin) do
+    case RequestLedger.fetch(state.ledger, origin) do
+      {:ok, %{prepared: {:held, result}, worker_monitor: monitor} = entry}
+      when is_reference(monitor) ->
+        ledger = RequestLedger.update(state.ledger, origin, &%{&1 | prepared: nil})
+        dispatch_prepared(%{state | ledger: ledger}, origin, %{entry | prepared: nil}, result)
+
+      _none ->
+        {:noreply, state}
+    end
   end
 
   # Concept: once the daemon owner accepts a lease operation, the relay owns
@@ -1310,11 +1616,31 @@ defmodule LoopexDaemon.SocketConnection do
       else: noreply_record(release_reservation(state, entry), record)
   end
 
-  defp worker_lost(state, monitor) do
+  # Concept: a worker's exit is its request's failure only when nothing else
+  # can still answer the request.
+  #
+  # Technical depth: while promoting, the relay kills the waiting worker as
+  # part of promotion. While a permit binds, a normal exit means the worker
+  # already received its `go` and completed, and its exit overtook the
+  # relay's bind answer, which comes from another sender; the bind answer or
+  # the permit's result still follows, bounded by the bind request's own
+  # instant. Only permits take this path: a ticket's worker cannot exit
+  # normally while binding, so its held result always keeps its monitor.
+  defp worker_lost(state, monitor, reason) do
     {origin, workers} = Map.pop(state.workers, monitor)
     state = %{state | workers: workers}
 
     case RequestLedger.fetch(state.ledger, origin) do
+      {:ok, %{phase: :promoting}} ->
+        ledger = RequestLedger.update(state.ledger, origin, &%{&1 | worker_monitor: nil})
+        {:noreply, %{state | ledger: ledger}}
+
+      {:ok, %{phase: :binding, operation: operation}}
+      when reason == :normal and operation in @permit_operations ->
+        Process.demonitor(monitor, [:flush])
+        ledger = RequestLedger.update(state.ledger, origin, &%{&1 | worker_monitor: nil})
+        {:noreply, %{state | ledger: ledger}}
+
       {:ok, entry} ->
         {_entry, ledger} = RequestLedger.complete(state.ledger, origin)
         state = %{state | ledger: ledger}
@@ -1362,7 +1688,7 @@ defmodule LoopexDaemon.SocketConnection do
         {:noreply, state}
 
       {entry, ledger} ->
-        state = %{state | ledger: ledger}
+        state = release_unbound_worker(%{state | ledger: ledger}, entry)
         record = WireRecords.request_error(entry.request_id, code)
 
         if entry.operation == :session_attach,
@@ -1731,6 +2057,11 @@ defmodule LoopexDaemon.SocketConnection do
        when disposition in [:admitted, :completed],
        do: {:noreply, state}
 
+  defp descriptor_answered(state, _origin, {:error, :promotion_outcome_unknown}) do
+    Logger.debug("loopex daemon connection promotion outcome unknown")
+    {:noreply, state}
+  end
+
   defp descriptor_answered(state, origin, {:error, reason}) do
     case RequestLedger.fetch(state.ledger, origin) do
       {:ok, _entry} -> settle_locally(state, origin, descriptor_refusal(reason))
@@ -1945,40 +2276,17 @@ defmodule LoopexDaemon.SocketConnection do
 
   defp reason_word(_reason), do: "internal_failure"
 
+  # Concept: a permit opens and binds its worker by relay request messages,
+  # exactly as a ticket does; the worker starts only once the permit exists
+  # and waits for the relay's `go` before running.
   defp begin_permit(state, request, class, session_id, fun) do
-    relay = state.context.relay
-
-    case RequestLedger.begin(state.ledger, request.request_id, new_entry(request)) do
+    case RequestLedger.begin(state.ledger, request.request_id, new_entry(request, :opening)) do
       {:ok, origin, ledger} ->
-        case AdmissionRelay.open_permit(relay, origin, class, session_id) do
-          {:ok, ^origin} ->
-            {worker, monitor, incarnation} = RequestWorker.start_permit(origin, relay, fun)
+        request_id =
+          AdmissionRelay.open_permit_request(state.context.relay, origin, class, session_id)
 
-            ledger =
-              RequestLedger.update(ledger, origin, fn entry ->
-                %{
-                  entry
-                  | worker: worker,
-                    worker_monitor: monitor,
-                    worker_incarnation: incarnation
-                }
-              end)
-
-            state = %{state | ledger: ledger, workers: Map.put(state.workers, monitor, origin)}
-
-            case AdmissionRelay.bind_worker(relay, origin, worker, incarnation) do
-              :ok ->
-                {:ok, entry} = RequestLedger.fetch(state.ledger, origin)
-                {:ok, relay_owns_worker(state, origin, entry)}
-
-              {:error, reason} ->
-                {:noreply, state} = settle_locally(state, origin, ticket_refusal(reason))
-                {:ok, state}
-            end
-
-          {:error, reason} ->
-            reply(state, WireRecords.request_error(request.request_id, ticket_refusal(reason)))
-        end
+        state = %{state | ledger: ledger}
+        {:ok, await_exchange(state, request_id, :relay, {:open_permit, origin, fun})}
 
       {:error, :duplicate_request} ->
         reply(state, WireRecords.invalid_request(request.request_id, "duplicate_request"))

@@ -1684,7 +1684,7 @@ defmodule LoopexDaemon.ConnectionRegistryTest do
   end
 
   # Concept (R1): teardown abandons an in-flight create once: its caller hears
-  # `relay_unavailable` exactly once, its reservation and promotion are
+  # `promotion_outcome_unknown` exactly once, its reservation and promotion are
   # released, and the relay's late answer is ignored.
   test "teardown abandons an in-flight create once and releases its reservation" do
     registry = start_registry(5_000)
@@ -1696,7 +1696,7 @@ defmodule LoopexDaemon.ConnectionRegistryTest do
     assert %{activation_reservations: 1} = ConnectionRegistry.status(registry)
 
     send(registry, {:registry_tearing_down, self()})
-    assert_receive {^create, {:error, :relay_unavailable}}, 500
+    assert_receive {^create, {:error, :promotion_outcome_unknown}}, 500
 
     GenServer.reply(from, {:ok, origin})
     refute_receive {^create, _second}, 100
@@ -1708,7 +1708,7 @@ defmodule LoopexDaemon.ConnectionRegistryTest do
   end
 
   # Concept (R1): teardown abandons an in-flight replacement attach once: the
-  # connection hears `relay_unavailable` exactly once, the promotion is
+  # connection hears `promotion_outcome_unknown` exactly once, the promotion is
   # dropped and the connection's previous attachment is restored.
   test "teardown abandons an in-flight attach once and restores the previous attachment" do
     registry = start_registry(5_000, connection_module: ManualConnection)
@@ -1724,7 +1724,7 @@ defmodule LoopexDaemon.ConnectionRegistryTest do
     eventually(fn -> is_nil(:sys.get_state(registry).relay_flow) end)
     GenServer.reply(from, {:ok, origin})
 
-    assert [{:error, :relay_unavailable}] = connection_replies(connection, replacement)
+    assert [{:error, :promotion_outcome_unknown}] = connection_replies(connection, replacement)
 
     assert %{attachments: attachments, activation_promotions: promotions} =
              :sys.get_state(registry)
@@ -1737,7 +1737,7 @@ defmodule LoopexDaemon.ConnectionRegistryTest do
   end
 
   # Concept (R1): teardown abandons an in-flight resume promotion once: its
-  # lease owner hears `relay_unavailable` exactly once and its claimed
+  # lease owner hears `promotion_outcome_unknown` exactly once and its claimed
   # preparation, reservation and promotion are all released.
   test "teardown abandons an in-flight resume promotion once and releases it" do
     registry = start_registry(5_000)
@@ -1757,7 +1757,7 @@ defmodule LoopexDaemon.ConnectionRegistryTest do
     assert_receive {:relay_request, ^relay, from, {:promote_ticket, ^origin, _, _, _, _}}, 500
 
     send(registry, {:registry_tearing_down, self()})
-    assert_receive {^promote, {:error, :relay_unavailable}}, 500
+    assert_receive {^promote, {:error, :promotion_outcome_unknown}}, 500
     GenServer.reply(from, {:ok, origin})
     refute_receive {^promote, _second}, 100
 
@@ -2154,7 +2154,7 @@ defmodule LoopexDaemon.ConnectionRegistryTest do
     assert_receive {:relay_request, ^relay, _from, {:promote_ticket, origin, _, ref, task}}, 500
 
     send(registry, {:registry_tearing_down, self()})
-    assert_receive {^create, {:error, :relay_unavailable}}, 500
+    assert_receive {^create, {:error, :promotion_outcome_unknown}}, 500
 
     result = task.()
     send(registry, {:relay_ticket_settlement, relay, origin, ref, result})
@@ -2294,19 +2294,20 @@ defmodule LoopexDaemon.ConnectionRegistryTest do
 
     spawn(fn ->
       result =
-        try do
-          ConnectionRegistry.promote_create(
-            registry,
-            {:crypto.strong_rand_bytes(16), 0, 1},
-            "command",
-            :crypto.hash(:sha256, "options"),
-            :historical,
-            %{"refusal" => "ceiling"},
-            %{"refusal" => "conflict"},
-            fn -> {:no_activation, nil, %{"result" => "none"}} end
-          )
-        catch
-          :exit, _reason -> :call_exit
+        registry
+        |> ConnectionRegistry.promote_create_request(
+          {:crypto.strong_rand_bytes(16), 0, 1},
+          "command",
+          :crypto.hash(:sha256, "options"),
+          :historical,
+          %{"refusal" => "ceiling"},
+          %{"refusal" => "conflict"},
+          fn -> {:no_activation, nil, %{"result" => "none"}} end
+        )
+        |> :gen_server.receive_response(5_000)
+        |> case do
+          {:reply, reply} -> reply
+          _no_reply -> :call_exit
         end
 
       send(test, {:promotion_result, self(), result})

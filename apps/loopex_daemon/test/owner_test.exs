@@ -3381,6 +3381,36 @@ defmodule LoopexDaemon.OwnerTest do
     assert %{fatal_teardown: false} = :sys.get_state(owner)
   end
 
+  # Concept (E9): a connection's report of an unanswered relay request while
+  # serving names the relay lost once: the fatal recipient hears
+  # `relay_lost` and the relay is killed.
+  test "a connection relay report while serving latches relay_lost" do
+    owner = start_owner(fatal_recipient: self())
+    components = Owner.components(owner)
+    relay_monitor = Process.monitor(components.relay)
+
+    send(owner, {:connection_relay_unanswered, self(), incarnation()})
+
+    assert_receive {:daemon_component_fatal, ^owner, :relay_lost}, 500
+    assert_receive {:DOWN, ^relay_monitor, :process, _relay, :killed}, 1_000
+    send(owner, {:connection_relay_unanswered, self(), incarnation()})
+    refute_receive {:daemon_component_fatal, _reporter, _class}, 200
+  end
+
+  # Concept (E9): once the stop has begun, a connection's relay report is
+  # cleanup-only; the stop's own deadlines govern.
+  test "a connection relay report after the cut is cleanup-only" do
+    owner = start_owner(fatal_recipient: self())
+    components = Owner.components(owner)
+    assert {:ok, _cut_ref} = Owner.cut_admission(owner, 2_000)
+
+    send(owner, {:connection_relay_unanswered, self(), incarnation()})
+
+    refute_receive {:daemon_component_fatal, _reporter, _class}, 300
+    assert Process.alive?(components.relay)
+    assert %{fatal_teardown: false} = :sys.get_state(owner)
+  end
+
   # Concept (E8): a second final close while one is in flight joins it: the
   # registry is asked once and both callers hear its one answer.
   test "a repeated final close joins the close in flight" do
@@ -3496,19 +3526,20 @@ defmodule LoopexDaemon.OwnerTest do
 
     spawn(fn ->
       result =
-        try do
-          ConnectionRegistry.promote_create(
-            registry,
-            origin,
-            command_id,
-            digest,
-            mode,
-            %{"refusal" => "ceiling"},
-            %{"refusal" => "conflict"},
-            fn -> {:no_activation, nil, %{"result" => "none"}} end
-          )
-        catch
-          :exit, _reason -> :call_exit
+        registry
+        |> ConnectionRegistry.promote_create_request(
+          origin,
+          command_id,
+          digest,
+          mode,
+          %{"refusal" => "ceiling"},
+          %{"refusal" => "conflict"},
+          fn -> {:no_activation, nil, %{"result" => "none"}} end
+        )
+        |> :gen_server.receive_response(5_000)
+        |> case do
+          {:reply, reply} -> reply
+          _no_reply -> :call_exit
         end
 
       send(test, {:registry_promotion, self(), result})

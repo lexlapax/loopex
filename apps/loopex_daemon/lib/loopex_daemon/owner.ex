@@ -972,6 +972,31 @@ defmodule LoopexDaemon.Owner do
     end
   end
 
+  # Concept: a connection reports a relay request it opened for a client and
+  # has waited on for five seconds while serving; the relay is what failed,
+  # and the daemon names it `relay_lost` exactly as for the registry's report.
+  #
+  # Technical depth: the report latches only while this owner serves and no
+  # fatal teardown is marked. It names the reporting connection, not the
+  # relay, and any reporting pid is accepted by decision: there is no cheap
+  # non-blocking way to ask the registry whether a pid is its connection, and
+  # none is needed. This owner has exactly one relay for its lifetime, never
+  # restarted, and every connection its registry starts is composed with that
+  # relay, so any report concerns the current relay; once that relay has
+  # exited, or any fatal class is latched, `fatal_teardown` is set and every
+  # later report is cleanup-only.
+  def handle_info({:connection_relay_unanswered, connection, connection_incarnation}, state)
+      when is_pid(connection) and is_binary(connection_incarnation) do
+    if is_nil(state.stop) and not state.fatal_teardown do
+      Logger.debug("loopex daemon owner connection relay request unanswered")
+      report_component_loss(state, :relay_lost)
+      Process.exit(state.relay, :kill)
+      {:noreply, %{state | fatal_teardown: true}}
+    else
+      {:noreply, state}
+    end
+  end
+
   def handle_info({:daemon_fatal_teardown, recipient}, %{fatal_recipient: recipient} = state)
       when is_pid(recipient) do
     Logger.debug("loopex daemon owner fatal teardown marked")

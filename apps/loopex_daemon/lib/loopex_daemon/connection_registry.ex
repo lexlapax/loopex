@@ -100,8 +100,8 @@ defmodule LoopexDaemon.ConnectionRegistry do
   # This caller deadline is therefore not a guarantee: a lease owner that
   # times out here reports `registry_unavailable` for that step. The lease
   # owner's own non-blocking exchange replaces it in a later step. A
-  # connection's `promote_create` and `promote_attach` use the default
-  # five-second call bound under the same queue and are replaced likewise.
+  # connection's create and attach promotions are requests it never awaits,
+  # so they carry no caller deadline at all.
   @resume_call_ms 20_000
 
   # Concept: each relay request the registry sends has its own five-second
@@ -113,12 +113,14 @@ defmodule LoopexDaemon.ConnectionRegistry do
   # per relay origin the daemon admits.
   @relay_flow_limit 16_384
 
-  # Concept: once the stop has begun or the relay's teardown has abandoned
-  # the flows, a classification or settlement for a promotion that no longer
-  # exists is late cleanup, not an invalid settlement; while serving it
-  # still ends the registry.
+  # Concept: once the stop has begun, the relay's teardown has abandoned the
+  # flows, or the relay has exited, a classification or settlement for a
+  # promotion that no longer exists is late cleanup, not an invalid
+  # settlement: a task the lost relay started may still classify a promotion
+  # whose outcome was reported unknown. Otherwise it still ends the registry.
   defguardp registry_stopping(state)
             when :erlang.map_get(:relay_flows_abandoned, state) or
+                   :erlang.map_get(:relay_down, state) or
                    :erlang.map_get(:transport, state) != :serving
 
   @doc false
@@ -282,8 +284,17 @@ defmodule LoopexDaemon.ConnectionRegistry do
   reserves nothing because core returns its retained session without starting
   a coordinator. The relay task's classified disposition resolves the exact
   reservation before the ticket settles.
+
+  The call is sent as an OTP request and never awaited: its answer waits on
+  the registry's relay flow, so the caller consumes the reply —
+  `{:ok, :admitted | {:waiting, origin_id}}` or `{:error, reason}` — as a
+  message and holds no deadline of its own.
+
+  `{:error, :promotion_outcome_unknown}` means the relay was lost or torn
+  down with the promotion in flight, so whether core ran it is unknown; every
+  other refusal was decided before any core effect could start.
   """
-  @spec promote_create(
+  @spec promote_create_request(
           pid(),
           origin_id(),
           binary(),
@@ -292,17 +303,8 @@ defmodule LoopexDaemon.ConnectionRegistry do
           map(),
           map(),
           (-> {:activated | :no_activation, binary() | nil, map()})
-        ) ::
-          {:ok, :admitted | {:waiting, origin_id()}}
-          | {:error,
-             :daemon_stopping
-             | :invalid_activation
-             | :invalid_promotion
-             | :registry_unavailable
-             | :relay_unavailable
-             | :ticket_outstanding
-             | :ticket_unavailable}
-  def promote_create(
+        ) :: :gen_server.request_id()
+  def promote_create_request(
         registry,
         origin_id,
         command_id,
@@ -312,7 +314,7 @@ defmodule LoopexDaemon.ConnectionRegistry do
         conflict_refusal,
         task_fun
       ) do
-    GenServer.call(
+    :gen_server.send_request(
       registry,
       {:promote_create, origin_id, command_id, digest, mode, ceiling_refusal, conflict_refusal,
        task_fun}
@@ -334,8 +336,16 @@ defmodule LoopexDaemon.ConnectionRegistry do
   either installs the connection's one attachment, which the daemon owner
   records for the session's mutation gate before the snapshot settles, or
   restores the connection's previous attachment state.
+
+  The call is sent as an OTP request and never awaited; its reply —
+  `{:ok, :admitted}` or `{:error, reason}` — is consumed as a message, and
+  the caller holds no deadline of its own.
+
+  `{:error, :promotion_outcome_unknown}` means the relay was lost or torn
+  down with the promotion in flight, so whether core ran it is unknown; every
+  other refusal was decided before any core effect could start.
   """
-  @spec promote_attach(
+  @spec promote_attach_request(
           pid(),
           origin_id(),
           binary(),
@@ -343,18 +353,8 @@ defmodule LoopexDaemon.ConnectionRegistry do
           map(),
           map(),
           (-> {:installed, binary(), map()} | {:refused, map()})
-        ) ::
-          {:ok, :admitted}
-          | {:error,
-             :attachment_pending
-             | :daemon_stopping
-             | :invalid_promotion
-             | :registry_unavailable
-             | :relay_unavailable
-             | :reservation_unavailable
-             | :ticket_outstanding
-             | :ticket_unavailable}
-  def promote_attach(
+        ) :: :gen_server.request_id()
+  def promote_attach_request(
         registry,
         origin_id,
         connection_incarnation,
@@ -363,7 +363,7 @@ defmodule LoopexDaemon.ConnectionRegistry do
         capacity_refusal,
         task_fun
       ) do
-    GenServer.call(
+    :gen_server.send_request(
       registry,
       {:promote_attach, origin_id, connection_incarnation, session_id, dormant_refusal,
        capacity_refusal, task_fun}
@@ -484,6 +484,7 @@ defmodule LoopexDaemon.ConnectionRegistry do
              | :invalid_activation
              | :invalid_promotion
              | :owner_unavailable
+             | :promotion_outcome_unknown
              | :registry_unavailable
              | :relay_unavailable
              | :ticket_outstanding
@@ -631,6 +632,7 @@ defmodule LoopexDaemon.ConnectionRegistry do
            relay_flow_queue: :queue.new(),
            relay_flow_count: 0,
            relay_flows_abandoned: false,
+           relay_down: false,
            routing_mirrors: %{},
            rows: %{},
            child_monitors: %{},
@@ -1931,7 +1933,7 @@ defmodule LoopexDaemon.ConnectionRegistry do
         if flow.timer, do: Process.cancel_timer(flow.timer)
         :erlang.demonitor(flow.request, [:flush])
         state = %{state | relay_flow: nil}
-        finish_relay_response(state, flow, relay_gone_response(flow))
+        finish_relay_response(state, flow, relay_gone_response(flow, :maybe_processed))
     end
   end
 
@@ -2000,10 +2002,16 @@ defmodule LoopexDaemon.ConnectionRegistry do
     if flow.timer, do: Process.cancel_timer(flow.timer)
     state = %{state | relay_flow: nil}
 
-    response =
+    {response, state} =
       case :gen_server.check_response(message, flow.request) do
-        {:reply, reply} when state.relay == flow.relay -> {:reply, reply}
-        _relay_gone -> relay_gone_response(flow)
+        {:reply, reply} when state.relay == flow.relay ->
+          {{:reply, reply}, state}
+
+        {:error, {:noproc, _relay}} ->
+          {relay_gone_response(flow, :unprocessed), %{state | relay_down: true}}
+
+        _relay_gone ->
+          {relay_gone_response(flow, :maybe_processed), %{state | relay_down: true}}
       end
 
     finish_relay_response(state, flow, response)
@@ -2017,8 +2025,22 @@ defmodule LoopexDaemon.ConnectionRegistry do
   defp finish_relay_response(state, flow, response),
     do: relay_step(flow.from, flow.call, continue_relay_flow(state, flow.continuation, response))
 
-  defp relay_gone_response(%{from: nil}), do: :relay_down
-  defp relay_gone_response(_flow), do: {:reply, {:error, :relay_unavailable}}
+  # Concept: a promotion the relay may already have started when it was lost
+  # or torn down has an unknown outcome, and its caller is told so, so that
+  # no refusal is ever rendered for work core may have committed.
+  #
+  # Technical depth: outcome unknown is exactly a create, attach or resume
+  # promotion whose request was in flight when the relay exited, other than
+  # with `:noproc`, or when teardown abandoned it; a request sent to an
+  # already-dead relay (`:noproc`) was never processed, and every other relay
+  # step starts no core work. Those answer `relay_unavailable`.
+  defp relay_gone_response(%{from: nil}, _processed), do: :relay_down
+
+  defp relay_gone_response(%{continuation: {step, _origin, _ref, _data}}, :maybe_processed)
+       when step in [:promote_create, :promote_attach, :promote_resume],
+       do: {:reply, {:error, :promotion_outcome_unknown}}
+
+  defp relay_gone_response(_flow, _processed), do: {:reply, {:error, :relay_unavailable}}
 
   defp continue_relay_flow(state, {:authorize_resume, preparation}, {:reply, :ok}) do
     prepare_resume_call(
