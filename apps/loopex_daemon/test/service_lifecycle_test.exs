@@ -39,6 +39,39 @@ defmodule LoopexDaemon.ServiceLifecycleTest do
 
   # Concept: every Store refusal at open reaches the operator as its own exit
   # class, whatever arity the Store's refusal carries.
+  # The monitor and the stop request travel from two senders, so a component
+  # can take the stop and exit before the monitor is set, which then reports
+  # `:noproc` for a clean stop. The helper's own answer decides that case; a
+  # component that was really gone stays a loss.
+  test "a requested stop that overtakes its monitor is clean, and an absent component is not" do
+    deadline = System.monotonic_time(:millisecond) + 1_000
+
+    {:ok, stopped} = Agent.start(fn -> nil end)
+    :ok = Agent.stop(stopped)
+
+    assert LoopexDaemon.Service.await_requested_stop(stopped, fn -> :ok end, deadline) ==
+             :normal
+
+    {:ok, gone} = Agent.start(fn -> nil end)
+    :ok = Agent.stop(gone)
+
+    assert LoopexDaemon.Service.await_requested_stop(
+             gone,
+             fn -> GenServer.stop(gone, :normal, 500) end,
+             deadline
+           ) == :noproc
+
+    {:ok, live} = Agent.start(fn -> nil end)
+
+    assert LoopexDaemon.Service.await_requested_stop(
+             live,
+             fn -> GenServer.stop(live, :normal, 500) end,
+             deadline
+           ) == :normal
+
+    refute_receive {:requested_stop, _helper, _answer}, 100
+  end
+
   test "each Store open refusal shape names its exit class" do
     for {reason, class} <- [
           {{:store_writer_active, "/r/store.log.writer"}, :store_writer_active},

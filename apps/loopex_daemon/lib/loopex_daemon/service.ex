@@ -1176,9 +1176,14 @@ defmodule LoopexDaemon.Service do
     case Map.fetch(state.pids, name) do
       {:ok, pid} ->
         Process.unlink(pid)
-        monitor = Process.monitor(pid)
-        request_stop(fn -> GenServer.stop(pid, :normal, max(deadline - monotonic_ms(), 1)) end)
-        reason = await_stopped(pid, monitor, deadline)
+
+        reason =
+          await_requested_stop(
+            pid,
+            fn -> GenServer.stop(pid, :normal, max(deadline - monotonic_ms(), 1)) end,
+            deadline
+          )
+
         flush_exit(pid)
         state = %{state | pids: Map.delete(state.pids, name)}
 
@@ -1194,7 +1199,47 @@ defmodule LoopexDaemon.Service do
     end
   end
 
-  defp request_stop(stop), do: spawn(fn -> safe(stop) end)
+  # Concept: the reason a requested stop reports is the component's own exit,
+  # never an artefact of how this owner watched it.
+  #
+  # Technical depth: this owner's monitor and the helper's stop request are
+  # signals from two senders, so nothing orders them: the component can
+  # receive the stop, and exit, before the monitor is set, which then reports
+  # `:noproc` for a component this owner just stopped cleanly. The helper's
+  # own stop call is ordered, since it monitors before it asks, so its answer
+  # decides that case: `:ok` means the component ended with the requested
+  # reason, and anything else means it was already gone, which stays a loss.
+  # The answer is always consumed, within the same deadline, so no helper
+  # message is left behind.
+  @doc false
+  @spec await_requested_stop(pid(), (-> term()), integer()) :: term()
+  def await_requested_stop(pid, stop, deadline) do
+    monitor = Process.monitor(pid)
+    owner = self()
+    helper = spawn(fn -> send(owner, {:requested_stop, self(), requested_stop(stop)}) end)
+
+    reason = await_stopped(pid, monitor, deadline)
+
+    answer =
+      receive do
+        {:requested_stop, ^helper, answer} -> answer
+      after
+        remaining_ms(deadline) ->
+          Process.exit(helper, :kill)
+          :failed
+      end
+
+    if reason == :noproc and answer == :ok, do: :normal, else: reason
+  end
+
+  defp requested_stop(stop) do
+    case stop.() do
+      :ok -> :ok
+      _other -> :failed
+    end
+  catch
+    :exit, _reason -> :failed
+  end
 
   defp await_stopped(pid, monitor, deadline) do
     receive do
@@ -1235,13 +1280,14 @@ defmodule LoopexDaemon.Service do
       {:fatal, :runtime_lost, state}
     else
       Process.unlink(supervisor)
-      monitor = Process.monitor(supervisor)
 
-      request_stop(fn ->
-        Supervisor.stop(supervisor, :normal, max(deadline - monotonic_ms(), 1))
-      end)
+      reason =
+        await_requested_stop(
+          supervisor,
+          fn -> Supervisor.stop(supervisor, :normal, max(deadline - monotonic_ms(), 1)) end,
+          deadline
+        )
 
-      reason = await_stopped(supervisor, monitor, deadline)
       flush_exit(supervisor)
       state = %{state | pids: Map.delete(state.pids, :runtime_supervisor)}
 
