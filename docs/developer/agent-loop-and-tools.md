@@ -638,7 +638,12 @@ collects at most the tool's declared 8 MiB artifact ceiling and drops the rest,
 and hands what it collected to the Core facade its host composed, with the exact
 validated session, run, operation, attempt, and tool-call identities. A
 truncated result carries `ArtifactStore.truncation_notice/3` naming the compact
-reference, and the receipt carries that reference in `artifacts`. The reference
+reference, and the receipt carries that reference in `artifacts`. The artifact
+holds exactly the bytes the command produced. The executor's own notes, such as
+a nonzero exit status or a process group that could not be shown to hold only
+the command at exit, appear only in the model-facing result beside the notice;
+they are never retained, and the notice's "N of M bytes shown" counts only the
+command's bytes. The reference
 reaches the public plane on `tool.finished`; the terminal prints it; and
 `loopex artifact <reference>` extracts its object locator and reads exact bytes
 back through the same Core facade.
