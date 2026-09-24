@@ -1063,21 +1063,18 @@ defmodule LoopexDaemon.Owner do
   # seconds while serving; the relay is what failed, so the daemon names it
   # `relay_lost` exactly as if the relay had exited.
   #
-  # Technical depth: the report latches only while this owner serves, no
-  # fatal teardown is marked and it names the current registry and routing
-  # incarnation. The daemon owner is told once and the teardown mark keeps the
+  # Technical depth: the report latches, through `latch_relay_lost`, only
+  # while this owner serves, no fatal teardown is marked and it names the
+  # current registry and routing incarnation. The daemon owner is told once and the teardown mark keeps the
   # relay's coming exit from being reported again. Decision: the relay is
   # killed untrappably at once, as on every other relay-loss path, so the
   # registry does not keep its request pending until the fail-stop; its
   # request ends on the relay's exit as `relay_unavailable` and the registry
   # keeps serving (witness T13). Any other report is cleanup-only.
   def handle_info({:registry_relay_unanswered, registry, routing_incarnation}, state) do
-    if is_nil(state.stop) and not state.fatal_teardown and registry == state.registry and
-         routing_incarnation == state.routing_incarnation do
+    if registry == state.registry and routing_incarnation == state.routing_incarnation do
       Logger.debug("loopex daemon owner registry relay request unanswered")
-      report_component_loss(state, :relay_lost)
-      Process.exit(state.relay, :kill)
-      {:noreply, %{state | fatal_teardown: true}}
+      latch_relay_lost(state)
     else
       {:noreply, state}
     end
@@ -1087,7 +1084,8 @@ defmodule LoopexDaemon.Owner do
   # has waited on for five seconds while serving; the relay is what failed,
   # and the daemon names it `relay_lost` exactly as for the registry's report.
   #
-  # Technical depth: the report latches only while this owner serves and no
+  # Technical depth: the report latches, through `latch_relay_lost`, only
+  # while this owner serves and no
   # fatal teardown is marked. It names the reporting connection, not the
   # relay, and any reporting pid is accepted by decision: there is no cheap
   # non-blocking way to ask the registry whether a pid is its connection, and
@@ -1098,14 +1096,8 @@ defmodule LoopexDaemon.Owner do
   # later report is cleanup-only.
   def handle_info({:connection_relay_unanswered, connection, connection_incarnation}, state)
       when is_pid(connection) and is_binary(connection_incarnation) do
-    if is_nil(state.stop) and not state.fatal_teardown do
-      Logger.debug("loopex daemon owner connection relay request unanswered")
-      report_component_loss(state, :relay_lost)
-      Process.exit(state.relay, :kill)
-      {:noreply, %{state | fatal_teardown: true}}
-    else
-      {:noreply, state}
-    end
+    Logger.debug("loopex daemon owner connection relay request unanswered")
+    latch_relay_lost(state)
   end
 
   def handle_info({:daemon_fatal_teardown, recipient}, %{fatal_recipient: recipient} = state)
@@ -2375,7 +2367,7 @@ defmodule LoopexDaemon.Owner do
 
   defp start_grant_operation(state, operation, grant_ref, writer_epoch, _request_deadline) do
     operation_ref = make_ref()
-    deadline = monotonic_ms() + state.mirror_deadline_ms
+    {deadline, timer} = mirror_clock(state, operation_ref)
     pending_loss = Map.get(state.pending_dispositions, operation.request.permit_id)
 
     row = %{
@@ -2400,7 +2392,7 @@ defmodule LoopexDaemon.Owner do
       transition_ref: grant_ref,
       row: row,
       deadline: deadline,
-      timer: schedule_deadline(operation_ref, deadline),
+      timer: timer,
       loss_ref: if(pending_loss, do: pending_loss.settlement_ref, else: nil)
     }
 
@@ -2498,7 +2490,7 @@ defmodule LoopexDaemon.Owner do
 
   defp start_expiry_operation(state, expiry_ref, route) do
     operation_ref = make_ref()
-    deadline = monotonic_ms() + state.mirror_deadline_ms
+    {deadline, timer} = mirror_clock(state, operation_ref)
 
     mirror_operation = %{
       kind: :expiry,
@@ -2509,7 +2501,7 @@ defmodule LoopexDaemon.Owner do
       transition_ref: expiry_ref,
       row: route,
       deadline: deadline,
-      timer: schedule_deadline(operation_ref, deadline),
+      timer: timer,
       loss_ref: nil
     }
 
@@ -2529,7 +2521,7 @@ defmodule LoopexDaemon.Owner do
 
   defp start_retirement_pop(state, session_id, predecessor) do
     operation_ref = make_ref()
-    deadline = monotonic_ms() + state.mirror_deadline_ms
+    {deadline, timer} = mirror_clock(state, operation_ref)
 
     step = if is_pid(state.retirement_pop_gate), do: :pop_owner_blocked, else: :pop_owner
 
@@ -2545,7 +2537,7 @@ defmodule LoopexDaemon.Owner do
         owner_incarnation: predecessor.incarnation
       },
       deadline: deadline,
-      timer: schedule_deadline(operation_ref, deadline)
+      timer: timer
     }
 
     state = put_in(state, [:mirror_operations, operation_ref], operation)
@@ -3595,7 +3587,7 @@ defmodule LoopexDaemon.Owner do
 
   defp start_waiting_owner_loss_settlement(state, permit_id, operation, loss) do
     operation_ref = make_ref()
-    deadline = monotonic_ms() + state.mirror_deadline_ms
+    {deadline, timer} = mirror_clock(state, operation_ref)
 
     settlement = %{
       kind: :queued_grant,
@@ -3608,7 +3600,7 @@ defmodule LoopexDaemon.Owner do
       transition_ref: nil,
       row: %{session_id: operation.request.session_id},
       deadline: deadline,
-      timer: schedule_deadline(operation_ref, deadline),
+      timer: timer,
       loss_ref: loss.settlement_ref
     }
 
@@ -4644,13 +4636,14 @@ defmodule LoopexDaemon.Owner do
     {:noreply, put_in(state, [:stop, :barrier], nil)}
   end
 
-  # Concept: consuming the stop makes every serving-private owner-loss and
-  # release clock cleanup-only.
+  # Concept: consuming the stop makes every serving-private mirror clock
+  # cleanup-only.
   #
   # Technical depth: each timer is cancelled and its queued message flushed.
   # An owner-loss operation in progress is rebound to the transport-cut
-  # instant; a release keeps its exact row but loses both serving instants,
-  # so the admission and freeze barriers govern it.
+  # instant; a release keeps its exact row but loses both serving instants;
+  # every other mirror step loses its deadline, so the admission and freeze
+  # barriers govern them.
   defp stop_own_serving_operations(state, cut_deadline) do
     state =
       state
@@ -4670,8 +4663,9 @@ defmodule LoopexDaemon.Owner do
           cancel_timer(operation.timer, operation_ref)
           {operation_ref, %{operation | timer: nil, stop_owned: true}}
 
-        other ->
-          other
+        {operation_ref, operation} ->
+          cancel_timer(operation.timer, operation_ref)
+          {operation_ref, %{operation | timer: nil, deadline: nil}}
       end)
 
     %{state | mirror_operations: operations}
@@ -4791,6 +4785,19 @@ defmodule LoopexDaemon.Owner do
       operation.owner_pid,
       operation.owner_incarnation
     )
+  end
+
+  # Concept: a mirror step started while serving has its own instant; one
+  # started after the admission cut has none, because the stop's own phase
+  # deadlines govern it.
+  #
+  # Technical depth: a stop-owned step has neither a deadline nor a timer,
+  # so neither the timer nor a late answer can select `connections_lost`.
+  defp mirror_clock(%{stop: stop}, _operation_ref) when not is_nil(stop), do: {nil, nil}
+
+  defp mirror_clock(state, operation_ref) do
+    deadline = monotonic_ms() + state.mirror_deadline_ms
+    {deadline, schedule_deadline(operation_ref, deadline)}
   end
 
   defp schedule_deadline(operation_ref, deadline) do

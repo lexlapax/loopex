@@ -484,7 +484,7 @@ defmodule LoopexDaemon.LeaseOwnerTest do
 
     assert {:ok, :admitted} =
              invoke(holder, fn ->
-               LeaseOwner.mutate(
+               lease_mutate(
                  fixture.owner,
                  origin,
                  :session_prompt,
@@ -647,7 +647,7 @@ defmodule LoopexDaemon.LeaseOwnerTest do
 
     assert {:ok, :admitted} =
              invoke(holder, fn ->
-               LeaseOwner.mutate(
+               lease_mutate(
                  fixture.owner,
                  origin,
                  :session_prompt,
@@ -733,7 +733,7 @@ defmodule LoopexDaemon.LeaseOwnerTest do
 
     assert {:ok, :admitted} =
              invoke(holder, fn ->
-               LeaseOwner.mutate(
+               lease_mutate(
                  fixture.owner,
                  origin,
                  :session_prompt,
@@ -771,7 +771,7 @@ defmodule LoopexDaemon.LeaseOwnerTest do
 
     assert {:ok, :admitted} =
              invoke(holder, fn ->
-               LeaseOwner.mutate(
+               lease_mutate(
                  fixture.owner,
                  origin,
                  :session_prompt,
@@ -821,7 +821,7 @@ defmodule LoopexDaemon.LeaseOwnerTest do
 
     assert {:ok, :admitted} =
              invoke(holder, fn ->
-               LeaseOwner.mutate(
+               lease_mutate(
                  fixture.owner,
                  mutation_origin,
                  :session_prompt,
@@ -934,7 +934,7 @@ defmodule LoopexDaemon.LeaseOwnerTest do
 
     assert {:ok, :admitted} =
              invoke(holder, fn ->
-               LeaseOwner.mutate(
+               lease_mutate(
                  fixture.owner,
                  first_origin,
                  :session_prompt,
@@ -959,7 +959,7 @@ defmodule LoopexDaemon.LeaseOwnerTest do
       holder,
       {:invoke, self(), second_invoke,
        fn ->
-         LeaseOwner.mutate(
+         lease_mutate(
            fixture.owner,
            second_origin,
            :session_abort,
@@ -1022,7 +1022,7 @@ defmodule LoopexDaemon.LeaseOwnerTest do
 
     assert {:ok, :admitted} =
              invoke(holder, fn ->
-               LeaseOwner.mutate(
+               lease_mutate(
                  fixture.owner,
                  first_origin,
                  :session_prompt,
@@ -1047,7 +1047,7 @@ defmodule LoopexDaemon.LeaseOwnerTest do
       holder,
       {:invoke, self(), lost_invoke,
        fn ->
-         LeaseOwner.mutate(
+         lease_mutate(
            fixture.owner,
            lost_origin,
            :session_abort,
@@ -1107,7 +1107,7 @@ defmodule LoopexDaemon.LeaseOwnerTest do
 
     assert {:ok, :admitted} =
              invoke(holder, fn ->
-               LeaseOwner.resume(
+               lease_resume(
                  fixture.owner,
                  origin,
                  "resume-dormant",
@@ -1148,7 +1148,7 @@ defmodule LoopexDaemon.LeaseOwnerTest do
 
     assert {:ok, :completed} =
              invoke(holder, fn ->
-               LeaseOwner.resume(
+               lease_resume(
                  fixture.owner,
                  origin,
                  "resume-unattached",
@@ -1208,7 +1208,7 @@ defmodule LoopexDaemon.LeaseOwnerTest do
 
     assert {:ok, :admitted} =
              invoke(holder, fn ->
-               LeaseOwner.resume(
+               lease_resume(
                  fixture.owner,
                  origin,
                  "resume-active",
@@ -1253,7 +1253,7 @@ defmodule LoopexDaemon.LeaseOwnerTest do
 
     assert {:ok, :completed} =
              invoke(holder, fn ->
-               LeaseOwner.resume(
+               lease_resume(
                  fixture.owner,
                  origin,
                  "resume-capacity",
@@ -1306,7 +1306,7 @@ defmodule LoopexDaemon.LeaseOwnerTest do
 
     assert {:ok, :admitted} =
              invoke(holder, fn ->
-               LeaseOwner.resume(
+               lease_resume(
                  fixture.owner,
                  first,
                  "resume-primary",
@@ -1328,7 +1328,7 @@ defmodule LoopexDaemon.LeaseOwnerTest do
 
     assert {:ok, :admitted} =
              invoke(holder, fn ->
-               LeaseOwner.resume(
+               lease_resume(
                  fixture.owner,
                  duplicate,
                  "resume-duplicate",
@@ -1397,7 +1397,7 @@ defmodule LoopexDaemon.LeaseOwnerTest do
 
     assert {:ok, :admitted} =
              invoke(holder, fn ->
-               LeaseOwner.resume(
+               lease_resume(
                  fixture.owner,
                  first,
                  "resume-distinct-first",
@@ -1422,7 +1422,7 @@ defmodule LoopexDaemon.LeaseOwnerTest do
       holder,
       {:invoke, self(), second_invoke,
        fn ->
-         LeaseOwner.resume(
+         lease_resume(
            fixture.owner,
            second,
            "resume-distinct-second",
@@ -1521,7 +1521,7 @@ defmodule LoopexDaemon.LeaseOwnerTest do
 
     assert {:ok, :admitted} =
              invoke(holder, fn ->
-               LeaseOwner.resume(
+               lease_resume(
                  fixture.owner,
                  first,
                  "resume-worker-primary",
@@ -1546,7 +1546,7 @@ defmodule LoopexDaemon.LeaseOwnerTest do
       holder,
       {:invoke, self(), queued_invoke,
        fn ->
-         LeaseOwner.resume(
+         lease_resume(
            fixture.owner,
            queued,
            "resume-worker-queued",
@@ -1611,7 +1611,7 @@ defmodule LoopexDaemon.LeaseOwnerTest do
 
     assert {:ok, :admitted} =
              invoke(holder, fn ->
-               LeaseOwner.resume(
+               lease_resume(
                  fixture.owner,
                  first,
                  "resume-owner-primary",
@@ -1637,7 +1637,7 @@ defmodule LoopexDaemon.LeaseOwnerTest do
       {:invoke, self(), queued_invoke,
        fn ->
          catch_exit(
-           LeaseOwner.resume(
+           lease_resume(
              fixture.owner,
              queued,
              "resume-owner-queued",
@@ -1733,7 +1733,7 @@ defmodule LoopexDaemon.LeaseOwnerTest do
 
     assert {:ok, :admitted} =
              invoke(holder, fn ->
-               LeaseOwner.resume(
+               lease_resume(
                  fixture.owner,
                  first,
                  "resume-cut-primary",
@@ -1758,7 +1758,7 @@ defmodule LoopexDaemon.LeaseOwnerTest do
       holder,
       {:invoke, self(), queued_invoke,
        fn ->
-         LeaseOwner.resume(
+         lease_resume(
            fixture.owner,
            queued,
            "resume-cut-queued",
@@ -1822,7 +1822,7 @@ defmodule LoopexDaemon.LeaseOwnerTest do
 
     assert {:ok, :admitted} =
              invoke(holder, fn ->
-               LeaseOwner.resume(
+               lease_resume(
                  fixture.owner,
                  first,
                  "resume-connection-primary",
@@ -1846,7 +1846,7 @@ defmodule LoopexDaemon.LeaseOwnerTest do
       holder,
       {:invoke, self(), make_ref(),
        fn ->
-         LeaseOwner.resume(
+         lease_resume(
            fixture.owner,
            queued,
            "resume-connection-queued",
@@ -1901,7 +1901,7 @@ defmodule LoopexDaemon.LeaseOwnerTest do
 
     assert {:ok, :admitted} =
              invoke(holder, fn ->
-               LeaseOwner.resume(
+               lease_resume(
                  fixture.owner,
                  first,
                  "resume-expiry-primary",
@@ -1926,7 +1926,7 @@ defmodule LoopexDaemon.LeaseOwnerTest do
       holder,
       {:invoke, self(), queued_invoke,
        fn ->
-         LeaseOwner.resume(
+         lease_resume(
            fixture.owner,
            queued,
            "resume-expiry-queued",
@@ -2343,7 +2343,7 @@ defmodule LoopexDaemon.LeaseOwnerTest do
 
     resume =
       invoke_async(holder, fn ->
-        LeaseOwner.resume(
+        lease_resume(
           owner,
           origin,
           "resume-awaiting",
@@ -2399,7 +2399,7 @@ defmodule LoopexDaemon.LeaseOwnerTest do
 
     mutation =
       invoke_async(holder, fn ->
-        LeaseOwner.mutate(
+        lease_mutate(
           owner,
           origin,
           :session_prompt,
@@ -2495,7 +2495,7 @@ defmodule LoopexDaemon.LeaseOwnerTest do
 
     mutation =
       invoke_async(holder, fn ->
-        LeaseOwner.mutate(
+        lease_mutate(
           owner,
           origin,
           :session_prompt,
@@ -2628,7 +2628,7 @@ defmodule LoopexDaemon.LeaseOwnerTest do
 
     resume =
       invoke_async(holder, fn ->
-        LeaseOwner.resume(
+        lease_resume(
           fixture.owner,
           origin,
           "resume-registry-lost",
@@ -2818,6 +2818,32 @@ defmodule LoopexDaemon.LeaseOwnerTest do
                settlement_ref
              )
   end
+
+  # Concept: a connection sends its mutation or resume descriptor without
+  # blocking, exactly as the socket connection does; this helper runs in the
+  # connection and waits for that one reply.
+  defp descriptor_call(owner, descriptor) do
+    calls = LeaseOwner.send_descriptor(owner, descriptor, :descriptor, :gen_server.reqids_new())
+
+    case :gen_server.receive_response(calls, 10_000, true) do
+      {{:reply, reply}, :descriptor, _calls} -> reply
+      {{:error, {reason, _server}}, :descriptor, _calls} -> exit(reason)
+    end
+  end
+
+  defp lease_mutate(owner, origin, class, request_id, incarnation, epoch, worker, task),
+    do:
+      descriptor_call(
+        owner,
+        {:mutate, origin, class, request_id, incarnation, epoch, worker, task}
+      )
+
+  defp lease_resume(owner, origin, request_id, command_id, incarnation, epoch, worker, task),
+    do:
+      descriptor_call(
+        owner,
+        {:resume, origin, request_id, command_id, incarnation, epoch, worker, task}
+      )
 
   defp start_fixture(options \\ []) do
     daemon_incarnation = incarnation()
@@ -3046,7 +3072,7 @@ defmodule LoopexDaemon.LeaseOwnerTest do
 
     assert {:ok, :admitted} =
              invoke(connection, fn ->
-               LeaseOwner.mutate(
+               lease_mutate(
                  fixture.owner,
                  origin,
                  :session_prompt,

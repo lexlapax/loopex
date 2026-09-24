@@ -2208,7 +2208,7 @@ defmodule LoopexDaemon.OwnerTest do
                            ticket_worker,
                            incarnation()
                          ) do
-                    LeaseOwner.mutate(
+                    lease_mutate(
                       lease_owner,
                       mutation_origin,
                       :session_prompt,
@@ -2784,6 +2784,58 @@ defmodule LoopexDaemon.OwnerTest do
            } = Owner.status(owner)
 
     assert %{permits: 0} = AdmissionRelay.status(components.relay)
+  end
+
+  # Concept (risk packet fix 2): a settlement the freeze starts has no mirror
+  # instant of its own: while the relay takes longer than the serving step to
+  # settle it, the freeze deadline governs, so the daemon is never failed
+  # `connections_lost` for it.
+  #
+  # Technical depth: as above, but the relay parks on the freeze's no-reply
+  # disposition settlement for six seconds, past the five-second mirror
+  # step, inside a ten-second freeze window.
+  @tag timeout: 30_000
+  test "a freeze-time settlement outlasting the mirror step does not fail connections" do
+    owner = start_owner(lease_term_ms: 40, fatal_recipient: self())
+    components = Owner.components(owner)
+    former = initialized_connection(components)
+    successor = initialized_connection(components)
+
+    {lease_owner, _owner_incarnation, _successor_origin} =
+      queue_successor_behind_expiry(owner, components, former, successor, "slow-freeze-loss")
+
+    :sys.suspend(lease_owner)
+    Process.exit(successor.pid, :kill)
+    assert :ok = wait_for_pending_dispositions(owner, 1)
+    :sys.resume(components.registry)
+    assert :ok = wait_for_mirror_step(owner, :expiry, :resolve_owner_expiry)
+    assert {:ok, _cut_ref} = Owner.cut_admission(owner, 5_000)
+    test_pid = self()
+
+    :ok =
+      :sys.install(
+        components.relay,
+        {fn
+           :waiting, {:in, message}, _state
+           when is_tuple(message) and elem(message, 0) == :relay_lease_operation and
+                  elem(message, 4) == :settle_disposition ->
+             send(test_pid, :settlement_parked)
+             Process.sleep(6_000)
+             :done
+
+           hook_state, _event, _state ->
+             hook_state
+         end, :waiting}
+      )
+
+    frozen = Task.async(fn -> freeze(owner, 10_000) end)
+    assert_receive :settlement_parked, 2_000
+
+    assert {:ok, [{:settling_acquire, _, :connection_lost, _, _, _, _}]} =
+             Task.await(frozen, 12_000)
+
+    refute_received {:daemon_component_fatal, _reporter, _class}
+    assert Process.alive?(owner)
   end
 
   # Concept: a connection loss the relay reports after the daemon owner has
@@ -4662,7 +4714,7 @@ defmodule LoopexDaemon.OwnerTest do
       {:manual_call, self(), make_ref(),
        {:invoke,
         fn ->
-          LeaseOwner.mutate(
+          lease_mutate(
             lease_owner,
             origin,
             :session_prompt,
@@ -5491,6 +5543,25 @@ defmodule LoopexDaemon.OwnerTest do
       writer_epoch: incarnation()
     }
   end
+
+  # Concept: a connection sends its mutation or resume descriptor without
+  # blocking, exactly as the socket connection does; this helper runs in the
+  # connection and waits for that one reply.
+  defp descriptor_call(owner, descriptor) do
+    calls = LeaseOwner.send_descriptor(owner, descriptor, :descriptor, :gen_server.reqids_new())
+
+    case :gen_server.receive_response(calls, 10_000, true) do
+      {{:reply, reply}, :descriptor, _calls} -> reply
+      {{:error, {reason, _server}}, :descriptor, _calls} -> exit(reason)
+    end
+  end
+
+  defp lease_mutate(owner, origin, class, request_id, incarnation, epoch, worker, task),
+    do:
+      descriptor_call(
+        owner,
+        {:mutate, origin, class, request_id, incarnation, epoch, worker, task}
+      )
 
   defp pending_close_state do
     owner = start_owner(fatal_recipient: self())
