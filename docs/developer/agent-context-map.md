@@ -5759,3 +5759,35 @@ uninitialized-peer sweep's result, where the plan and ADR 0032 require one
 absolute five-second deadline begun before the relay cut and a fail-stop on any
 missing acknowledgement. That is a defect against the accepted plan, repaired
 without a decision; the code now matches the text.
+
+<a id="disposition-m5-nonblocking-components-2026-09-24"></a>
+### M5 non-blocking daemon components — 2026-09-24
+
+Five review rounds showed that the blocking calls between daemon components had
+no correct set of timeouts: short bounds gave up on working callees and
+stranded operations, while long bounds outran the deadlines of the callers
+above and let a slow but answering relay end the daemon under the wrong class.
+On 2026-09-24 the maintainer chose to replace those calls with request messages
+inside M5, and decided three points of the design:
+
+- **Per-step budgets.** Each serving step of a grant, expiry, release or
+  owner-loss operation has its own five-second instant, fixed when its request
+  is sent and never restarted; an overrun names the step's owner — the registry
+  as `connections_lost`, the relay as `relay_lost`. Once the stop begins, the
+  stop phase's deadline replaces every step instant. This replaces ADR 0033's
+  single operation clock and the release's two instants.
+- **A late lease owner is replaced.** A lease owner that overruns its own
+  resolution, attachment or retirement acknowledgement is killed and
+  superseded, scoped to its session, instead of `connections_lost`.
+- **A late holder connection is closed alone.** A holder that overruns its
+  owner-loss close step is killed; the daemon's monitor `DOWN` completes the
+  close, that client observes EOF instead of `control_owner_lost`, and the
+  daemon keeps serving. `connections_lost` names the registry only.
+
+The principle is ADR 0033's session-scoped lease-owner rule and the exit
+table's one-component-per-class rule: a deadline names only the component
+whose own work was late. The generation-two wire, its error codes and the exit
+status set are unchanged; exit selection changes as above. No durable record
+changes, so no migration is needed. ADR 0033's accepted text is amended in the
+same change and its governance record is re-bound. Witnesses T1–T26 of the
+design must be red with their mechanism removed.

@@ -90,16 +90,7 @@ renewal, expiry or retirement then removes the pending row and replies to the
 lease owner. Release uses the result-CAS-and-clear settlement below. A
 holder-changing acquisition takes the two resolution steps below before either
 the owner or a fresh child may finalize. A stale or late ack is cleanup-only.
-The effective absolute mirror deadline is
-`accepted_at + 5_000 ms`, or the earlier shared admission deadline when shutdown
-has begun. It is one clock for the operation, never restarted by an ack or owner
-exit. Every apply acknowledgement and continuation rechecks that instant in
-serving and draining states. An ack queued before its timer but consumed after
-the instant is cleanup-only: the daemon atomically latches `connections_lost`,
-notifies the sentinel so the 35-second fail-stop watchdog is running, sends
-untrappable `:kill` to the exact registry and enters fail-stop without awaiting
-its reap or claiming mirror success. Its later linked `EXIT` is cleanup-only.
-The timer only prompts the check; mailbox order never extends the operation.
+While serving, every step of the operation has its own absolute instant, `step_sent_at + 5_000 ms`, fixed when the daemon sends that step's request and never restarted by an acknowledgement, another step or an owner exit. The step's owner is recorded with it. A registry apply acknowledgement consumed at or after its step instant is cleanup-only: the daemon atomically latches `connections_lost`, notifies the sentinel so the 35-second fail-stop watchdog is running, sends untrappable `:kill` to the exact registry and enters fail-stop without awaiting its reap or claiming mirror success; its later linked `EXIT` is cleanup-only. A late relay step selects `relay_lost` by the same rule. A lease owner that has not acknowledged its resolution by its step instant is killed and superseded; its operation completes through the lost-owner path. Once the orderly stop begins, the current stop phase's deadline replaces every step instant. The timer only prompts the check; mailbox order never extends a step.
 
 An acquisition that would change the holder uses three exact mirror actions:
 `install_provisional`, then `resolve_provisional(granted)` or
@@ -184,28 +175,10 @@ absent, so no uncorrelated holder-loss form can accompany the correlated
 release result. Registry or relay loss follows its existing daemon-fatal path;
 neither component guesses success from a missing acknowledgement.
 
-When the daemon records `release_proposed` while serving, it fixes two absolute
-monotonic instants from the same acceptance time:
-`owner_restore_deadline = proposal_accepted_at + 5_000 ms` and
-`release_settlement_deadline = proposal_accepted_at + 10_000 ms`. Neither
-restarts. The relay's initial result CAS, any owner cancellation and restoration
-acknowledgement, and a result branch's mirror clear must be accepted before the
-first instant. The matching relay cancellation or result-settlement
-acknowledgement may use the remaining interval but must be accepted before the
-second. A missing or malformed relay answer at either exchange is `relay_lost`.
-A result branch whose registry clear does not complete by the first instant is
-`connections_lost`, as for every mirror apply. On the `connection_lost` branch,
-a missing, malformed or late owner restoration acknowledgement at the first
-instant makes the daemon send untrappable `:kill` to that exact owner, mark
-cancellation superseded, and begin the no-reply
-`release_cancellation_owner_lost` settlement. Its matching relay
-acknowledgement must arrive before the second instant; otherwise the daemon
-selects `relay_lost`. An owner acknowledgement queued before but consumed at or
-after the first instant, or a relay settlement acknowledgement consumed at or
-after the second, is cleanup-only.
+While serving, each release step has its own five-second instant fixed when the daemon sends it: the relay's initial result CAS, the owner's cancellation and restoration acknowledgement, a result branch's registry mirror clear, the relay's cancellation or result settlement, and the owner's final release acknowledgement. A missing or malformed relay answer at its step is `relay_lost`; a registry clear late at its step is `connections_lost`. On the `connection_lost` branch, a missing, malformed or late owner restoration acknowledgement makes the daemon send untrappable `:kill` to that exact owner, mark cancellation superseded and begin the no-reply `release_cancellation_owner_lost` settlement, whose relay acknowledgement has its own step instant; a late final release acknowledgement likewise kills and supersedes the owner. An acknowledgement consumed at or after its step instant is cleanup-only.
 
 If the orderly admission cut linearizes before the release row terminalizes,
-both serving timers become cleanup-only and the exact row joins the frozen
+every serving step instant becomes cleanup-only and the exact row joins the frozen
 pre-cut set. It may settle only under the already fixed `admission_deadline`;
 at that instant any remaining exact cleanup and terminal CAS are owned by the
 `freeze_lease_ops` barrier and must finish by its `freeze_deadline`. Shutdown
@@ -328,13 +301,7 @@ wins. Every acquire/release message carries its `permit_id`. Before acknowledgin
 a lease permit, the daemon owner supplies its session ID and intended exact
 actor: the registered lease-owner pid/incarnation for an existing-owner
 operation, or the daemon-owner pid/incarnation for a fresh-owner acquisition.
-The relay serializes that creation against its owner monitor. Owner `DOWN` first
-routes the new origin into the retained owner-loss classification; a pending
-acknowledgement therefore always names a live registered actor and never leaves
-an unbound lease permit. Immediately before an existing lease owner mutates
-lease state, it synchronously claims `pending -> executing` only when its exact
-pid/incarnation matches that immutable intended binding, while retaining the
-distinct request-worker fields. For a query, read or artifact transfer, the
+The relay serializes that creation against its owner monitor. An open naming an actor whose exact `DOWN` the relay has already consumed, or whose binding is retiring, is refused with the exact reason `actor_lost` or `actor_retiring` and creates no row; the daemon owner holds that request until the owner-loss notification completes or the retirement intent arrives, and then dispatches it again, a request from the returned holder rendering nothing beyond its uncorrelated close. A pending acknowledgement therefore always names a live registered actor and never leaves an unbound lease permit. Immediately before an existing lease owner mutates lease state, it claims `pending -> executing` through one ref-tagged relay exchange, acting only on the relay's exact answer and only when its exact pid/incarnation matches that immutable intended binding, while retaining the distinct request-worker fields. A claim on a permit whose disposition is already selected answers that disposition. For a query, read or artifact transfer, the
 request worker is also the actor. In either case the connection first completes
 ADR 0032's worker-ready and relay-bind handshake, and the relay sends `go` only
 after the executing CAS.
@@ -345,14 +312,13 @@ authority for that entire first acquire. The child reports its grant or refusal
 to the daemon owner, which alone settles the permit; later lease operations use
 the registered lease owner as actor. A request worker is never the completion authority
 after delivery; the exact lease owner or daemon owner reports the terminal
-result to the relay. Connection loss kills only the request worker, never the
+result to the relay. It also reports the relay's exact answer for that permit to the daemon owner in its own ordered message stream — its proposal, or `result`, `connection_lost`, `shutdown` or `discarded` — so the daemon owner never infers an outcome from a missing answer, and no process turns a call timeout into a refusal. Connection loss kills only the request worker, never the
 daemon or lease-owner actor. An acquisition grant remains provisional through
 owner start and mirror install; the daemon owner's relay `result` CAS on behalf
 of the recorded actor and the exact mirror resolution follow the rule above.
 
 Every lease owner first registers its pid, session and fresh owner incarnation
-with the relay in a synchronous handshake before it may answer an acquisition
-or admit a mutation. A replacement registration carries the exact predecessor
+with the relay in a ref-tagged handshake that the daemon owner completes before it activates the owner, synchronous only in sequencing, so the owner answers no acquisition and admits no mutation before registration. A replacement registration carries the exact predecessor
 pid/incarnation. For a lease-authorized mutation the owner validates the
 combined gate. For an activation-capable resume it asks the connection registry
 to bind an activation reservation to the exact queued origin and promote the
@@ -616,8 +582,7 @@ the rest. Owner death is disposed by the state the exact owner incarnation had:
   `ticketed` mutation instead stays owned by its relay task until the real core
   result, fatal disposition or orderly seal. The daemon owner
   and relay then join two independently ordered facts: the relay's exact owner
-  `DOWN` and the registry's exact mirror-pop result. Under one fresh
-  `now + relay_control_timeout_ms` instant, the daemon sends exact
+  `DOWN` and the registry's exact mirror-pop result. Under the classification step's own fresh `now + relay_control_timeout_ms` instant, the daemon sends exact
   `{:owner_lost_classified, classification_ref, owner_pid, owner_incarnation,
   holder_connection_incarnation_or_none}`. The relay keys and retains whichever
   fact arrives first — that classification or the exact owner `DOWN` — and
@@ -629,11 +594,7 @@ the rest. Owner death is disposed by the state the exact owner incarnation had:
   `holder_close` and suppresses its correlated reply. Every other claimed
   lease-operation origin resolves as `correlated_refusal`, carrying its
   `request_id` and leaving its connection open. The relay acknowledges only
-  after every claimed origin has one of those dispositions. Only then does the
-  daemon write the one uncorrelated `control_owner_lost` record and close the
-  returned holder. A missing or malformed classification acknowledgement takes
-  the existing bounded `relay_lost` path; registry loss takes
-  `connections_lost`. The predecessor barrier remains until this exchange and
+  after every claimed origin has one of those dispositions. Only then does the daemon monitor the exact returned holder, send it the one uncorrelated `control_owner_lost` record to write before closing, and await its close acknowledgement or its exact `DOWN` under the holder-close step's own five-second instant. A holder that overruns that instant is killed untrappably and its exact `DOWN` completes the close: that one client observes EOF instead of the record, every other connection and session keeps serving, and no daemon class is selected. A missing or malformed classification acknowledgement takes the existing bounded `relay_lost` path; a late mirror pop or registry loss takes `connections_lost`. The predecessor barrier remains until this exchange and
   the holder close or correlated replies are terminal. The two monitor/message
   orders therefore produce the same mutually exclusive wire forms.
 
@@ -643,7 +604,7 @@ the rest. Owner death is disposed by the state the exact owner incarnation had:
   before sending the ref-tagged cut. Cut acceptance in the relay atomically
   absorbs every matching in-progress classification into the earlier
   `transport_cut_deadline_ms` instant; its old private timer becomes
-  prompt/cleanup-only. A classification whose acknowledgement the daemon owner
+  prompt/cleanup-only. A holder close already in progress keeps its monitor and is rebound to the same transport-cut instant, at which an unclosed holder is killed and its exact `DOWN` completes the close; no holder-close step can remain at the lease freeze. A classification whose acknowledgement the daemon owner
   consumed and whose selected output it completed before consuming the stop
   remains an ordinary pre-cut result. Otherwise, ordinary owner-loss
   notification stops: no fresh per-owner deadline starts, any queued
@@ -845,6 +806,12 @@ holder connection. Runtime-Control exclusion between two daemons on one state
 root is the shared crash-reclaimable host placement lock; the local Store's
 unchanged writer marker remains physical Store-writer exclusion.
 
+### Inter-component exchanges
+
+### Inter-component exchanges
+
+No process whose answer another daemon component awaits under a deadline — the daemon owner, the connection registry, a lease owner or a connection — makes a blocking call to another daemon component. Requests are ref-tagged messages or OTP request identifiers; replies are consumed as messages. The process that directly awaits a component's own work holds that exchange's deadline, and expiry names that component: the relay is `relay_lost`, the registry is `connections_lost`, a lease owner is replaced and a holder connection is closed alone. A process awaiting a reply its callee has deferred on a third component holds no deadline. Reports of an unanswered relay request from a lease owner, the registry or a connection reach the daemon owner, which latches `relay_lost` only while serving. After the orderly stop begins, every step and request is owned by the current stop phase and its deadline. A lease owner acknowledges a daemon resolution before it starts any further relay request, and each permit it executes produces exactly one reported answer to the daemon owner.
+
 ### Methods and fields
 
 - `session.acquire_control` (`session_id`, `request_id`): grants control when
@@ -1019,7 +986,7 @@ linearization rule is:
    acquire waits, bounded by the acquiring request's own deadline; a wait that
    exceeds it refuses with **`control_pending`**, the stable reason ADR 0032's
    generation-2 error inventory carries for exactly this case, and the client
-   may acquire again. It is distinct from `control_held`, which says another
+   may acquire again. That deadline is enforced by the lease owner and rendered through the relay; no intermediate call timeout can produce `control_pending`. It is distinct from `control_held`, which says another
    client holds the lease; `control_pending` says only that this acquisition
    ran out of time behind an admission that had not resolved.
 4. The grant then mints a fresh epoch, so nothing admitted under the previous
@@ -1144,15 +1111,7 @@ terminalizes the permit and frees the lease even when its reply is lost. It
 queues each matching result, cancellation and clear acknowledgement around
 owner `DOWN`: owner death before cancellation acknowledgement uses the
 exact no-reply supersede and then ordinary pop/classification, while
-acknowledgement first restores `held` before the later owner-loss path. An
-owner restoration acknowledgement queued before `owner_restore_deadline` but
-consumed at or after it is cleanup-only, and a nonanswering owner is killed at
-that same instant; both begin the no-reply supersede and ordinary owner-loss
-path without leaving `release_pending`. The supersede acknowledgement is then
-forced just before and at or after `release_settlement_deadline`: the first
-terminalizes, while the latter is cleanup-only after `relay_lost`. Matching
-cancellation and result-settlement acknowledgements are forced at the same
-second cut. A missing or malformed relay settlement also selects `relay_lost`.
+acknowledgement first restores `held` before the later owner-loss path. An owner restoration acknowledgement queued before its step instant but consumed at or after it is cleanup-only, and a nonanswering owner is killed at that instant; both begin the no-reply supersede and ordinary owner-loss path without leaving `release_pending`. The supersede acknowledgement is then forced just before and at or after its own step instant: the first terminalizes, while the latter is cleanup-only after `relay_lost`. Matching cancellation and result-settlement acknowledgements are forced around their own step instants. A missing or malformed relay settlement also selects `relay_lost`.
 Separate cut crossings overtake each serving instant and prove the exact row
 joins the fixed admission/freeze cleanup without a private extension. If it is
 still settling at the admission deadline, the barrier returns its exact tagged
@@ -1300,6 +1259,8 @@ same acknowledgement consumed at or after it is cleanup-only. A failed cut,
 freeze or quiescing barrier starts no core quiesce; a failed seal or
 tearing-down barrier reports no operator-stop success. Every later relay `EXIT`
 is cleanup-only under the 35-second fail-stop watchdog.
+
+Non-blocking exchanges are proved by: two relay steps of one grant each delayed about three seconds, completing without a fatal stop; a suspended lease owner, attachment acknowledgement and holder each replaced or closed alone at their own step; a discard reaching a request deferred behind a relay step settling once; a second acquire during owner registration queued behind the first grant; an expiry falling due during a relay wait still proposed; relay-unanswered reports ignored after the cut; and a call trace showing no blocking call between daemon components.
 
 ### Alternatives
 

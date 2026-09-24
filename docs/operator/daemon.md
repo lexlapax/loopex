@@ -241,11 +241,9 @@ measurement on each supported toolchain. The transport cut is one
 that never initialized; whatever misses it ends the stop as `relay_lost`,
 `connections_lost` or `listener_lost`, decided at the deadline and latched
 within a further 1 s. A cut that completes counts only if it completes by the
-deadline, so the bound below holds. A relay that
-misses a later barrier ends the stop as `relay_lost`, except that registry or
-holder-close work unfinished at the lease-operation freeze ends it as
-`connections_lost`; a component lost while core quiesce runs, or before success
-is reported, ends it with that component's class. Losing the runtime's Control
+deadline, so the bound below holds. A relay that misses a later barrier ends the stop as `relay_lost`, except that registry work unfinished at the lease-operation freeze ends it as `connections_lost`; a component lost while core quiesce runs, or before success is reported, ends it with that component's class. A controller connection still closing after its session's lease owner was lost is killed at the transport-cut deadline; that client sees EOF and the stop continues.
+
+While the daemon serves, each step of a lease operation has its own 5 s budget. A step the registry overruns ends the daemon as `connections_lost` and a step the relay overruns as `relay_lost`. A session's lease owner that overruns its step is replaced, and that session's controller is closed with `control_owner_lost`. A controller connection that does not close within 5 s of being told its lease owner was lost is killed: that client sees EOF and the daemon keeps serving. Losing the runtime's Control
 or EventDispatcher, even one its supervisor restarts, is `runtime_lost`, except
 that Control lost while core quiesce is running and the runtime itself still
 lives is `drain_failed`: the drain can no longer report which sessions it

@@ -61,7 +61,7 @@ the listener.
 | --- | --- | --- |
 | Admission cut and transport gate; the listener killed and its exact exit awaited; uninitialized connections reaped | one absolute `transport_cut_deadline_ms` 5 s, begun before the relay cut | `relay_lost` for the relay acknowledgement, `connections_lost` for the registry gate or sweep, `listener_lost` for the listener's exit; the collaboration owner decides at the deadline and the service waits `@verdict_margin_ms` 1 s more only for a failure verdict, treating none as `relay_lost`; a success counts only by the deadline. The owner asks the registry by message, never blocking, so an earlier component exit keeps its class, and a relay or registry that missed the deadline is killed at that instant |
 | Admitted requests reach core | `admission_wait_ms` 5 s | continues |
-| `freeze_lease_ops`: no new lease operation; executing rows finish | `relay_control_timeout_ms` 5 s | `connections_lost` when registry mirror or holder-close work is unfinished; otherwise `relay_lost` |
+| `freeze_lease_ops`: no new lease operation; executing rows finish | `relay_control_timeout_ms` 5 s | `connections_lost` when registry mirror work is unfinished; otherwise `relay_lost`. No holder close remains here: one in progress at the cut is killed at the transport-cut deadline |
 | `quiescing` | a fresh 5 s | `relay_lost` |
 | `Loopex.Runtime.quiesce/1`, in an unlinked helper while the owner keeps consuming component exits | core's own clocks | `drain_failed` when the runtime is unavailable; a component lost meanwhile ends the stop with its own class |
 | `seal_after_quiesce`, one `daemon.stopping` per connection, `tearing_down` | one shared `teardown_ms` 30 s | `relay_lost` |

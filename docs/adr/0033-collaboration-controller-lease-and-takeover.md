@@ -145,8 +145,7 @@ later exit. After resolving that operation, the daemon atomically pops only the
 dead pid/incarnation's row and returns the exact holder it must close before a
 successor install may run; a stale pop cannot erase the successor. The relay
 also classifies every acquire, release or lease-authorized mutation that had no
-visible result. An origin on the returned holder receives only the uncorrelated
-`control_owner_lost` close. Any other claimed acquire or release, or a pending
+visible result. An origin on the returned holder receives only the uncorrelated `control_owner_lost` close; a holder connection that does not finish that close within its own five-second step is killed, so that one client observes EOF instead of the record while every other client keeps serving. Any other claimed acquire or release, or a pending
 or queued mutation claimed before promotion, receives the correlated
 request-shaped refusal and its connection stays usable. A promoted
 mutation remains relay-owned until its real core result or shutdown settlement,
@@ -156,6 +155,8 @@ start waits for mirror pop, classification acknowledgement and terminal
 holder-close or correlated-refusal settlement. Its first grant additionally
 waits for every predecessor ticket and retirement completion; the relay then
 releases the bounded transient rows.
+
+Daemon components never wait on one another inside a blocking call. The daemon owner, the connection registry, every lease owner and every connection exchange requests by message, so a slow component can delay only the work that depends on it. Each step of a lease operation — a registry apply, a relay selection, settlement or classification, a lease owner's acknowledgement, a holder's close — has its own five-second budget while serving, and an overrun names the component that owned the step: a late registry is `connections_lost`, a late relay is `relay_lost`, a late lease owner is replaced as a session-scoped loss, and a late holder connection is closed alone. No caller turns a missing answer into a refusal: every lease outcome reaches the client through the relay, and a lease owner reports the relay's exact answer for each permit to the daemon owner. After the orderly stop begins, the stop's own phase deadlines replace every step budget.
 
 Starting-waiting-pop, starting, live and retiring lease-owner rows share one
 512-slot count. A
@@ -203,7 +204,7 @@ daemon connections open, preserves the controller's exact holder, epoch and
 deadline when another actor caused the cut, orders an already-routed mutation
 to its real result, `admission_unknown`, or `detached` then
 `control_not_held`, refuses later mutation until reattach, and permits another connection
-to take over only after explicit release or expiry. No durable record changes, so no migration or
+to take over only after explicit release or expiry. Per-step budgets are proved by delaying two relay steps that together exceed five seconds without any fatal stop, a late lease owner and a late holder each being replaced or closed alone with the daemon still serving, and a trace showing no blocking call between daemon components. No durable record changes, so no migration or
 rollback evidence is owed.
 
 Technical depth: [Contract and evidence](0033-collaboration-controller-lease-and-takeover-technical.md#technical-adr-0033-decision).
