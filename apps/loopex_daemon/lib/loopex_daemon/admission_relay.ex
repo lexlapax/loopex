@@ -616,6 +616,101 @@ defmodule LoopexDaemon.AdmissionRelay do
     )
   end
 
+  @doc """
+  ## Concept
+
+  The daemon owner's and a lease owner's requests to the relay, sent without
+  waiting, so neither waits on the relay inside a handler.
+
+  ## Technical depth
+
+  Each function sends exactly the request its blocking counterpart sends and
+  returns the OTP request identifier; the caller consumes the answer, or the
+  relay's exit, as a message under its own request instant. The relay
+  authenticates each by the sending pid, so they must be sent from the actor
+  itself.
+  """
+  @spec claim_lease_permit_request(pid(), origin_id(), binary(), reference() | nil) ::
+          :gen_server.request_id()
+  def claim_lease_permit_request(relay, origin_id, actor_incarnation, start_op_ref \\ nil),
+    do:
+      :gen_server.send_request(
+        relay,
+        {:claim_lease_permit, origin_id, actor_incarnation, start_op_ref}
+      )
+
+  @doc false
+  @spec complete_lease_permit_request(pid(), origin_id(), binary(), map()) ::
+          :gen_server.request_id()
+  def complete_lease_permit_request(relay, origin_id, actor_incarnation, result),
+    do:
+      :gen_server.send_request(
+        relay,
+        {:complete_lease_permit, origin_id, actor_incarnation, result}
+      )
+
+  @doc false
+  @spec promote_lease_ticket_request(pid(), origin_id(), binary(), (-> map())) ::
+          :gen_server.request_id()
+  def promote_lease_ticket_request(relay, origin_id, owner_incarnation, task_fun),
+    do:
+      :gen_server.send_request(
+        relay,
+        {:promote_lease_ticket, origin_id, owner_incarnation, task_fun}
+      )
+
+  @doc false
+  @spec prepare_lease_owner_retirement_request(pid(), binary(), binary()) ::
+          :gen_server.request_id()
+  def prepare_lease_owner_retirement_request(relay, session_id, owner_incarnation),
+    do:
+      :gen_server.send_request(
+        relay,
+        {:prepare_lease_owner_retirement, session_id, owner_incarnation}
+      )
+
+  @doc false
+  @spec register_lease_owner_request(pid(), binary(), pid(), binary()) ::
+          :gen_server.request_id()
+  def register_lease_owner_request(relay, session_id, owner, owner_incarnation),
+    do:
+      :gen_server.send_request(
+        relay,
+        {:register_lease_owner, session_id, owner, owner_incarnation}
+      )
+
+  @doc false
+  @spec open_lease_permit_request(
+          pid(),
+          pid(),
+          origin_id(),
+          lease_permit_class(),
+          binary(),
+          pid(),
+          binary(),
+          pid(),
+          binary(),
+          reference() | nil
+        ) :: :gen_server.request_id()
+  def open_lease_permit_request(
+        relay,
+        connection,
+        origin_id,
+        class,
+        session_id,
+        actor,
+        actor_incarnation,
+        worker,
+        worker_incarnation,
+        start_op_ref \\ nil
+      ) do
+    :gen_server.send_request(
+      relay,
+      {:open_lease_permit, connection, origin_id, class, session_id, actor, actor_incarnation,
+       worker, worker_incarnation, start_op_ref}
+    )
+  end
+
   @doc false
   @spec settle_ticket(pid(), origin_id(), binary(), settlement_ref()) ::
           :ok | {:error, :registry_unavailable | :ticket_unavailable}

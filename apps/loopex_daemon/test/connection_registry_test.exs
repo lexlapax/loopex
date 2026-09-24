@@ -1906,6 +1906,23 @@ defmodule LoopexDaemon.ConnectionRegistryTest do
     assert :sys.get_state(registry).activation_promotion_bindings == %{}
   end
 
+  # Concept (carried requirement 2): while serving, a resume's settlement
+  # the relay refuses ends the registry instead of settling the lease owner,
+  # so a lease owner never hears a resume settled without the relay's own
+  # ticket settlement while the daemon serves.
+  test "a resume settlement refused while serving ends the registry without a notice" do
+    Process.flag(:trap_exit, true)
+    registry = start_registry(5_000)
+    {relay, _registry_incarnation} = bind_scripted_relay(registry)
+    owner_incarnation = incarnation()
+    {settle, _origin} = settling_resume(registry, relay, owner_incarnation)
+
+    GenServer.reply(settle, {:error, :ticket_unavailable})
+
+    assert_receive {:EXIT, ^registry, :activation_settlement_failed}, 500
+    refute_received {:registry_resume_settled, ^registry, _, _, _}
+  end
+
   # Concept (R5): a resume whose settlement is abandoned at teardown still
   # gives its lease owner its classified disposition.
   test "a resume settlement abandoned at teardown still settles its lease owner" do

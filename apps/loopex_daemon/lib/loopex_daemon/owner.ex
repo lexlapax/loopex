@@ -43,6 +43,11 @@ defmodule LoopexDaemon.Owner do
   @lease_term_ms 30_000
   @incarnation_bytes 16
 
+  # Concept: each relay request this owner sends, each lease owner's
+  # attachment acknowledgement and each request held for a retiring lease
+  # owner has its own five-second instant while serving.
+  @relay_request_ms 5_000
+
   @typedoc false
   @type origin_id :: AdmissionRelay.origin_id()
 
@@ -59,8 +64,20 @@ defmodule LoopexDaemon.Owner do
         }
   def components(owner), do: GenServer.call(owner, :components)
 
-  @doc false
-  @spec acquire_control(
+  @doc """
+  ## Concept
+
+  Sends a connection's acquire to this owner without waiting: the answer
+  arrives later as the request's reply, once the relay has opened the permit
+  or before any permit exists, so the connection keeps serving meanwhile.
+
+  ## Technical depth
+
+  The request is `:gen_server.send_request/2`; its reply is
+  `{:ok, :accepted, actor, actor_incarnation}` or `{:error, reason}`. The
+  owner admits it only from the connection it names.
+  """
+  @spec acquire_control_request(
           pid(),
           origin_id(),
           binary(),
@@ -70,10 +87,8 @@ defmodule LoopexDaemon.Owner do
           pid(),
           binary(),
           integer()
-        ) ::
-          {:ok, :completed | :proposed | :queued, pid(), binary()}
-          | {:error, atom()}
-  def acquire_control(
+        ) :: :gen_server.request_id()
+  def acquire_control_request(
         owner,
         permit_id,
         request_id,
@@ -84,15 +99,25 @@ defmodule LoopexDaemon.Owner do
         worker_incarnation,
         request_deadline
       ) do
-    GenServer.call(
+    :gen_server.send_request(
       owner,
       {:acquire_control, permit_id, request_id, session_id, connection, connection_incarnation,
        worker, worker_incarnation, request_deadline}
     )
   end
 
-  @doc false
-  @spec release_control(
+  @doc """
+  ## Concept
+
+  Sends a connection's release to this owner without waiting, exactly as
+  `acquire_control_request/9` does for an acquire.
+
+  ## Technical depth
+
+  The reply is `{:ok, :accepted, actor, actor_incarnation}` or
+  `{:error, reason}`; only the named connection is admitted.
+  """
+  @spec release_control_request(
           pid(),
           origin_id(),
           binary(),
@@ -103,10 +128,8 @@ defmodule LoopexDaemon.Owner do
           binary(),
           binary(),
           integer()
-        ) ::
-          {:ok, :completed | :proposed | :queued, pid(), binary()}
-          | {:error, atom()}
-  def release_control(
+        ) :: :gen_server.request_id()
+  def release_control_request(
         owner,
         permit_id,
         request_id,
@@ -118,7 +141,7 @@ defmodule LoopexDaemon.Owner do
         writer_epoch,
         request_deadline
       ) do
-    GenServer.call(
+    :gen_server.send_request(
       owner,
       {:release_control, permit_id, request_id, session_id, connection, connection_incarnation,
        worker, worker_incarnation, writer_epoch, request_deadline}
@@ -324,6 +347,9 @@ defmodule LoopexDaemon.Owner do
            pending_dispositions: %{},
            routes: %{},
            attachments: %{},
+           attachment_acks: %{},
+           relay_requests: %{},
+           lost_holders: %{},
            fatal_recipient: Keyword.get(options, :fatal_recipient),
            fatal_teardown: false,
            close: nil,
@@ -348,51 +374,25 @@ defmodule LoopexDaemon.Owner do
      }, state}
   end
 
-  def handle_call(
-        {:acquire_control, permit_id, request_id, session_id, connection, connection_incarnation,
-         worker, worker_incarnation, request_deadline},
-        _from,
-        state
-      ) do
-    requested = %{
-      class: :session_acquire_control,
-      permit_id: permit_id,
-      request_id: request_id,
-      session_id: session_id,
-      connection: connection,
-      connection_incarnation: connection_incarnation,
-      worker: worker,
-      worker_incarnation: worker_incarnation,
-      request_deadline: request_deadline,
-      writer_epoch: nil,
-      phase: :opened
-    }
-
-    dispatch_acquire(state, requested)
+  # Concept: a connection's own request is admitted only from that
+  # connection, so the later reply reaches the process that holds the
+  # request.
+  #
+  # Technical depth: this is the only path by which an acquire or a release
+  # reaches this owner; a caller naming another connection is refused
+  # `invalid_operation` before any permit exists.
+  def handle_call(message, {caller, _tag} = from, state)
+      when is_tuple(message) and tuple_size(message) in [9, 10] and
+             elem(message, 0) in [:acquire_control, :release_control] do
+    if caller == elem(message, 4),
+      do: connection_request(message, from, state),
+      else: {:reply, {:error, :invalid_operation}, state}
   end
 
-  def handle_call(
-        {:release_control, permit_id, request_id, session_id, connection, connection_incarnation,
-         worker, worker_incarnation, writer_epoch, request_deadline},
-        _from,
-        state
-      ) do
-    requested = %{
-      class: :session_release_control,
-      permit_id: permit_id,
-      request_id: request_id,
-      session_id: session_id,
-      connection: connection,
-      connection_incarnation: connection_incarnation,
-      worker: worker,
-      worker_incarnation: worker_incarnation,
-      request_deadline: request_deadline,
-      writer_epoch: writer_epoch,
-      phase: :opened
-    }
-
-    dispatch_release(state, requested)
-  end
+  def handle_call(message, _from, state)
+      when is_tuple(message) and tuple_size(message) > 0 and
+             elem(message, 0) in [:acquire_control, :release_control],
+      do: {:reply, {:error, :invalid_operation}, state}
 
   def handle_call(
         {:release_retirement_pop, session_id},
@@ -452,7 +452,8 @@ defmodule LoopexDaemon.Owner do
       swept: false,
       tombstones: %{},
       killed: MapSet.new(),
-      barrier: nil
+      barrier: nil,
+      frozen: false
     }
 
     {:noreply, %{state | stop: stop}}
@@ -555,6 +556,117 @@ defmodule LoopexDaemon.Owner do
   end
 
   @impl true
+  # Concept: the relay's answer to a request this owner sent continues the
+  # one operation it belongs to.
+  def handle_info({[:alias | request_id], _reply} = message, state)
+      when is_map_key(state.relay_requests, request_id),
+      do: relay_request_answered(state, request_id, message)
+
+  def handle_info({:DOWN, request_id, :process, _relay, _reason} = message, state)
+      when is_map_key(state.relay_requests, request_id),
+      do: relay_request_answered(state, request_id, message)
+
+  def handle_info({:owner_relay_unanswered, request_id}, state)
+      when is_map_key(state.relay_requests, request_id) do
+    if is_nil(state.stop),
+      do: latch_relay_lost(state),
+      else: {:noreply, put_in(state, [:relay_requests, request_id, :timer], nil)}
+  end
+
+  def handle_info({:owner_relay_unanswered, _request_id}, state), do: {:noreply, state}
+
+  # Concept: a lease owner reports the relay's exact answer for each permit
+  # it handled; this owner never infers an outcome from a missing reply.
+  #
+  # Technical depth: `:result` removes the operation — a retained connection
+  # loss for the same permit cannot coexist with it, and the pair is the
+  # relay's inconsistency. `:connection_lost` settles a disposition that
+  # already arrived, or marks the operation `:superseded` so the disposition
+  # settles it when it comes. `:shutdown` and `:invalid` remove the
+  # operation; an `:invalid` first acquire, whose actor is this owner, is
+  # refused through the relay. A notice for an operation that is already
+  # settling as a connection loss, tombstoned or gone is cleanup-only, while
+  # one for a grant or release this owner is mirroring is a lease owner
+  # contradicting its own proposal.
+  def handle_info({:lease_permit_settled, permit_id, owner, owner_incarnation, kind}, state)
+      when kind in [:result, :connection_lost, :shutdown, :invalid] do
+    case Map.fetch(state.operations, permit_id) do
+      {:ok,
+       %{owner_pid: ^owner, owner_incarnation: ^owner_incarnation, phase: :opened} = operation} ->
+        settle_notice(state, permit_id, operation, kind)
+
+      {:ok, %{phase: :settling}} ->
+        if Enum.any?(state.mirror_operations, fn {_ref, mirror} ->
+             mirror.permit_id == permit_id and mirror.kind in [:grant, :release]
+           end),
+           do: {:stop, :lease_operation_invalid, state},
+           else: {:noreply, state}
+
+      _cleanup ->
+        {:noreply, state}
+    end
+  end
+
+  def handle_info({:lease_attachment_ack, ack_ref, owner, owner_incarnation}, state) do
+    case Map.get(state.attachment_acks, ack_ref) do
+      %{owner: ^owner, owner_incarnation: ^owner_incarnation} = ack ->
+        {:noreply, finish_attachment_ack(state, ack_ref, ack)}
+
+      _other ->
+        {:noreply, state}
+    end
+  end
+
+  # Concept: a lease owner that has not acknowledged an attachment within its
+  # own five-second step while serving is replaced; its exit completes the
+  # acknowledgement.
+  def handle_info({:attachment_ack_deadline, ack_ref}, %{stop: nil} = state) do
+    case Map.get(state.attachment_acks, ack_ref) do
+      %{owner: owner} ->
+        Logger.debug("loopex daemon lease owner attachment acknowledgement late")
+        Process.exit(owner, :kill)
+        {:noreply, put_in(state, [:attachment_acks, ack_ref, :timer], nil)}
+
+      nil ->
+        {:noreply, state}
+    end
+  end
+
+  def handle_info({:attachment_ack_deadline, _ack_ref}, state), do: {:noreply, state}
+
+  def handle_info({:held_request_deadline, session_id, owner}, %{stop: nil} = state) do
+    case Map.get(state.owners, session_id) do
+      %{pid: ^owner, held: held} when held != [] ->
+        if Enum.any?(held, &(&1.reason == :actor_retiring)) do
+          Logger.debug("loopex daemon retiring lease owner late")
+          Process.exit(owner, :kill)
+        end
+
+        {:noreply, state}
+
+      _other ->
+        {:noreply, state}
+    end
+  end
+
+  def handle_info({:held_request_deadline, _session_id, _owner}, state), do: {:noreply, state}
+
+  # Concept: a lease owner reports a relay request it has waited on for five
+  # seconds while serving; the relay is what failed, so the daemon names it
+  # `relay_lost`. Any other report is cleanup-only.
+  def handle_info({:lease_owner_relay_unanswered, owner, owner_incarnation}, state)
+      when is_pid(owner) and is_binary(owner_incarnation) do
+    current? =
+      case Map.get(state.owner_pids, owner) do
+        nil -> false
+        session_id -> match?(%{incarnation: ^owner_incarnation}, state.owners[session_id])
+      end
+
+    if is_nil(state.stop) and not state.fatal_teardown and current?,
+      do: latch_relay_lost(state),
+      else: {:noreply, state}
+  end
+
   # Concept: the lease freeze tombstones every barrier-owned operation, so a
   # proposal its actor sent before being killed creates no mirror row.
   def handle_info(
@@ -712,7 +824,7 @@ defmodule LoopexDaemon.Owner do
 
         :ok = LeaseOwner.complete_retirement(owner, retirement_ref)
         Logger.debug("loopex daemon lease owner retirement acknowledged")
-        {:noreply, state}
+        {:noreply, release_row_holds(state, session_id)}
 
       _other ->
         {:stop, :lease_operation_invalid, state}
@@ -747,7 +859,7 @@ defmodule LoopexDaemon.Owner do
 
           state =
             if row.exit_consumed do
-              discard_claimed_owner_operations(state, owner, owner_incarnation, origins)
+              discard_claimed_owner_operations(state, owner, owner_incarnation)
             else
               state
             end
@@ -837,38 +949,37 @@ defmodule LoopexDaemon.Owner do
         do: Map.delete(attachments, session_id),
         else: attachments
 
-    case Map.get(state.owners, session_id) do
-      %{phase: :live, pid: owner} ->
-        _result =
-          lease_owner_call(fn ->
-            case action do
-              :opened ->
-                LeaseOwner.attachment_opened(
-                  owner,
-                  connection,
-                  connection_incarnation,
-                  attachment_id
-                )
+    state = %{state | attachments: attachments}
 
-              :closed ->
-                LeaseOwner.attachment_closed(
-                  owner,
-                  connection,
-                  connection_incarnation,
-                  attachment_id
-                )
-            end
-          end)
+    state =
+      case Map.get(state.owners, session_id) do
+        %{pid: owner, incarnation: owner_incarnation, exit_consumed: false}
+        when is_pid(owner) ->
+          ack_ref = if is_reference(record_ref), do: make_ref()
 
-      _other ->
-        :ok
-    end
+          :ok =
+            LeaseOwner.request(owner, owner_incarnation, {
+              :attachment,
+              ack_ref,
+              action,
+              connection,
+              connection_incarnation,
+              attachment_id
+            })
 
-    if is_reference(record_ref),
-      do: send(registry, {:owner_attachment_recorded, self(), record_ref})
+          if ack_ref,
+            do: await_attachment_ack(state, ack_ref, record_ref, owner, owner_incarnation),
+            else: state
+
+        _no_lease_owner ->
+          if is_reference(record_ref),
+            do: send(registry, {:owner_attachment_recorded, self(), record_ref})
+
+          state
+      end
 
     Logger.debug("loopex daemon session attachment recorded")
-    {:noreply, %{state | attachments: attachments}}
+    {:noreply, state}
   end
 
   # Concept: the relay acknowledgement and the registry gate share the one
@@ -1152,7 +1263,11 @@ defmodule LoopexDaemon.Owner do
               |> update_in([:owner_pids], &Map.delete(&1, owner))
 
             Logger.debug("loopex daemon lease owner retirement exit consumed")
-            start_retirement_pop(state, session_id, row)
+
+            state
+            |> finish_owner_attachment_acks(owner)
+            |> release_row_holds(session_id)
+            |> start_retirement_pop(session_id, row)
 
           %{pid: ^owner} = row ->
             slot_charged = not is_nil(row.successor)
@@ -1171,7 +1286,10 @@ defmodule LoopexDaemon.Owner do
 
             Logger.debug("loopex daemon lease owner exit retained")
             _ = reason
-            continue_lost_owner_exit(state, session_id, row)
+
+            state
+            |> finish_owner_attachment_acks(owner)
+            |> continue_lost_owner_exit(session_id, row)
         end
 
       :error ->
@@ -1299,309 +1417,943 @@ defmodule LoopexDaemon.Owner do
     ConnectionRegistry.start_link(registry_options)
   end
 
-  defp install_session_owner(state, session_id) do
+  defp connection_request(
+         {:acquire_control, permit_id, request_id, session_id, connection, connection_incarnation,
+          worker, worker_incarnation, request_deadline},
+         from,
+         state
+       ) do
+    requested = %{
+      class: :session_acquire_control,
+      permit_id: permit_id,
+      request_id: request_id,
+      session_id: session_id,
+      connection: connection,
+      connection_incarnation: connection_incarnation,
+      worker: worker,
+      worker_incarnation: worker_incarnation,
+      request_deadline: request_deadline,
+      writer_epoch: nil,
+      phase: :opened
+    }
+
+    admit_request(state, requested, from)
+  end
+
+  defp connection_request(
+         {:release_control, permit_id, request_id, session_id, connection, connection_incarnation,
+          worker, worker_incarnation, writer_epoch, request_deadline},
+         from,
+         state
+       ) do
+    requested = %{
+      class: :session_release_control,
+      permit_id: permit_id,
+      request_id: request_id,
+      session_id: session_id,
+      connection: connection,
+      connection_incarnation: connection_incarnation,
+      worker: worker,
+      worker_incarnation: worker_incarnation,
+      request_deadline: request_deadline,
+      writer_epoch: writer_epoch,
+      phase: :opened
+    }
+
+    admit_request(state, requested, from)
+  end
+
+  defp connection_request(_malformed, _from, state),
+    do: {:reply, {:error, :invalid_operation}, state}
+
+  # Concept: a connection's acquire or release is admitted without this owner
+  # waiting on the relay or a lease owner: the relay's open is a request
+  # message, and the connection is answered once the relay acknowledges it —
+  # `{:ok, :accepted, actor, actor_incarnation}` — or refused before any
+  # permit exists. The relay's permit then carries the one client answer.
+  #
+  # Technical depth: an operation is `:opening` until the relay answers the
+  # open; a fresh or successor acquire, whose actor is this owner, is then
+  # `:claiming` until the relay answers its claim. A request for a session
+  # whose lease owner is still registering waits in that row's
+  # `pending_dispatch` and is dispatched, in order, once registration
+  # completes. After the lease freeze no lease request reaches the relay.
+  #
+  # An identical request for a permit already answered is answered again
+  # with the same acceptance; any other request naming a known permit is
+  # `permit_conflict`.
+  defp admit_request(state, request, from) do
     cond do
-      not valid_session?(session_id) ->
-        {:error, :invalid_session}
+      Map.has_key?(state.operations, request.permit_id) ->
+        {:reply, repeated_answer(state, Map.fetch!(state.operations, request.permit_id), request),
+         state}
 
-      Map.has_key?(state.owners, session_id) ->
-        {:error, :owner_conflict}
-
-      owner_slot_count(state) >= @owner_limit ->
-        {:error, :control_capacity_reached}
+      not valid_request?(request) ->
+        {:reply, {:error, :invalid_operation}, state}
 
       true ->
-        owner_incarnation = incarnation()
-
-        case LeaseOwner.start_link(
-               daemon_owner: self(),
-               relay: state.relay,
-               registry: state.registry,
-               session_id: session_id,
-               owner_incarnation: owner_incarnation,
-               lease_term_ms: state.lease_term_ms,
-               retirement_exit_gate: state.retirement_exit_gate,
-               attachments: Map.get(state.attachments, session_id, MapSet.new())
-             ) do
-          {:ok, owner} ->
-            case AdmissionRelay.register_lease_owner(
-                   state.relay,
-                   session_id,
-                   owner,
-                   owner_incarnation
-                 ) do
-              :ok ->
-                row = owner_row(owner, owner_incarnation)
-
-                state =
-                  state
-                  |> put_in([:owners, session_id], row)
-                  |> put_in([:owner_pids, owner], session_id)
-
-                activate_installed_owner(owner)
-
-                Logger.debug("loopex daemon lease owner installed")
-                {:ok, state, row}
-
-              _error ->
-                discard_unregistered_owner(owner)
-                {:error, :owner_conflict}
-            end
-
-          _error ->
-            {:error, :owner_conflict}
-        end
+        {:noreply, dispatch(state, request, from)}
     end
   end
 
-  defp dispatch_acquire(state, request) do
-    case Map.fetch(state.operations, request.permit_id) do
-      {:ok, %{request: ^request, phase: phase}}
-      when phase in [:waiting_owner, :settling, :abandoned] ->
-        {:reply, {:ok, :queued, self(), state.daemon_incarnation}, state}
+  defp repeated_answer(state, %{request: request} = operation, request)
+       when not is_map_key(operation, :reply_to) do
+    cond do
+      operation.phase in [:waiting_owner, :settling, :abandoned] ->
+        {:ok, :accepted, self(), state.daemon_incarnation}
 
-      {:ok, %{request: ^request, owner_pid: pid, owner_incarnation: owner_incarnation}} ->
-        {:reply, {:ok, :completed, pid, owner_incarnation}, state}
+      is_pid(operation.owner_pid) ->
+        {:ok, :accepted, operation.owner_pid, operation.owner_incarnation}
 
-      {:ok, _other} ->
-        {:reply, {:error, :permit_conflict}, state}
-
-      :error ->
-        case Map.get(state.owners, request.session_id) do
-          %{phase: :live} = owner_row ->
-            dispatch_existing_acquire(state, request, owner_row)
-
-          %{phase: phase} = owner_row
-          when phase in [:retirement_pending, :retiring, :starting_waiting_pop, :lost] ->
-            dispatch_waiting_owner_acquire(state, request, owner_row)
-
-          nil ->
-            dispatch_first_acquire(state, request)
-
-          _other ->
-            {:reply, {:error, :owner_unavailable}, state}
-        end
+      true ->
+        {:error, :permit_conflict}
     end
   end
 
-  defp dispatch_waiting_owner_acquire(state, request, owner_row) do
+  defp repeated_answer(_state, _operation, _request), do: {:error, :permit_conflict}
+
+  # Concept: the returned holder of a lost session owner is being closed
+  # with its one uncorrelated record, so any request it sends meanwhile is
+  # answered `holder_closed`, which its connection settles without writing.
+  defp dispatch(state, request, from) do
+    if lost_owner_holder?(state, request) do
+      GenServer.reply(from, {:error, :holder_closed})
+      state
+    else
+      dispatch_session(state, request, from)
+    end
+  end
+
+  # Technical depth: while the row is `:lost` its granted route still names
+  # the holder until classification moves it to `lost_holders`; a live row's
+  # route names a holder that is not being closed, so it never counts.
+  defp lost_owner_holder?(state, request) do
+    lost? = match?(%{phase: :lost}, Map.get(state.owners, request.session_id))
+
+    if lost?,
+      do: returned_holder?(state, request),
+      else: holder_named?(Map.get(state.lost_holders, request.session_id), request)
+  end
+
+  defp dispatch_session(state, request, from) do
+    case Map.get(state.owners, request.session_id) do
+      _row when is_map(state.stop) and state.stop.frozen ->
+        GenServer.reply(from, {:error, :daemon_stopping})
+        state
+
+      # Concept: a request for a session with held requests waits behind them,
+      # so the held ones are dispatched first and per-session order holds.
+      %{held: [_ | _] = held} ->
+        entry = %{request: request, from: from, reason: :queued, owner: nil, timer: nil}
+        put_in(state, [:owners, request.session_id, :held], held ++ [entry])
+
+      %{phase: :live} = row ->
+        open_existing(state, request, from, row)
+
+      %{phase: :registering} = row ->
+        pending = row.pending_dispatch ++ [{request, from}]
+        put_in(state, [:owners, request.session_id, :pending_dispatch], pending)
+
+      %{phase: phase} = row
+      when phase in [:retirement_pending, :retiring, :starting_waiting_pop, :lost] and
+             request.class == :session_acquire_control ->
+        dispatch_waiting_owner_acquire(state, request, from, row)
+
+      nil when request.class == :session_acquire_control ->
+        dispatch_first_acquire(state, request, from)
+
+      _other ->
+        GenServer.reply(from, {:error, :owner_unavailable})
+        state
+    end
+  end
+
+  defp open_existing(state, request, from, row) do
+    request_id =
+      AdmissionRelay.open_lease_permit_request(
+        state.relay,
+        request.connection,
+        request.permit_id,
+        request.class,
+        request.session_id,
+        row.pid,
+        row.incarnation,
+        request.worker,
+        request.worker_incarnation
+      )
+
+    operation =
+      request
+      |> lease_operation(row, row.pid, row.incarnation)
+      |> Map.merge(%{phase: :opening, reply_to: from})
+
+    state
+    |> put_in([:operations, request.permit_id], operation)
+    |> relay_request(request_id, {:open, request.permit_id})
+  end
+
+  defp dispatch_waiting_owner_acquire(state, request, from, owner_row) do
     cond do
       not is_nil(owner_row.successor) ->
-        {:reply, {:error, :owner_unavailable}, state}
+        GenServer.reply(from, {:error, :owner_unavailable})
+        state
 
       not owner_row.slot_charged and owner_slot_count(state) >= @owner_limit ->
-        {:reply, {:error, :control_capacity_reached}, state}
+        GenServer.reply(from, {:error, :control_capacity_reached})
+        state
 
       true ->
-        permit_id = request.permit_id
-        start_op_ref = make_ref()
+        phase =
+          if owner_row.exit_consumed and owner_row.phase != :lost,
+            do: :starting_waiting_pop,
+            else: owner_row.phase
 
-        with true <- valid_request?(request),
-             {:ok, ^permit_id} <-
-               AdmissionRelay.open_lease_permit(
-                 state.relay,
-                 request.connection,
-                 permit_id,
-                 request.class,
-                 request.session_id,
-                 self(),
-                 state.daemon_incarnation,
-                 request.worker,
-                 request.worker_incarnation,
-                 start_op_ref
-               ),
-             :ok <-
-               AdmissionRelay.claim_lease_permit(
-                 state.relay,
-                 permit_id,
-                 state.daemon_incarnation,
-                 start_op_ref
-               ) do
-          operation = %{
-            request: request,
-            owner_pid: nil,
-            owner_incarnation: nil,
-            actor_pid: self(),
-            actor_incarnation: state.daemon_incarnation,
-            start_op_ref: start_op_ref,
-            phase: :waiting_owner
-          }
+        owner_row = %{
+          owner_row
+          | phase: phase,
+            slot_charged: true,
+            successor: request.permit_id
+        }
 
-          phase =
-            if owner_row.exit_consumed and owner_row.phase != :lost,
-              do: :starting_waiting_pop,
-              else: owner_row.phase
-
-          owner_row = %{owner_row | phase: phase, slot_charged: true, successor: permit_id}
-
-          state =
-            state
-            |> put_in([:owners, request.session_id], owner_row)
-            |> put_in([:operations, permit_id], operation)
-
-          Logger.debug("loopex daemon successor owner start retained")
-          {:reply, {:ok, :queued, self(), state.daemon_incarnation}, state}
-        else
-          false -> {:reply, {:error, :invalid_operation}, state}
-          {:error, reason} -> {:reply, {:error, reason}, state}
-        end
+        state
+        |> put_in([:owners, request.session_id], owner_row)
+        |> open_daemon_actor(request, from)
     end
   end
 
-  defp dispatch_first_acquire(state, request) do
+  defp dispatch_first_acquire(state, request, from) do
     if owner_slot_count(state) >= @owner_limit do
-      {:reply, {:error, :control_capacity_reached}, state}
+      GenServer.reply(from, {:error, :control_capacity_reached})
+      state
     else
-      open_first_acquire(state, request)
+      row = %{owner_row(nil, nil) | phase: :registering, first_permit: request.permit_id}
+
+      state
+      |> put_in([:owners, request.session_id], row)
+      |> open_daemon_actor(request, from)
     end
   end
 
-  defp open_first_acquire(state, request) do
-    permit_id = request.permit_id
+  # Concept: a fresh or successor acquire names this owner as its actor, so
+  # it is opened and then claimed by this owner before any lease owner acts.
+  defp open_daemon_actor(state, request, from) do
     start_op_ref = make_ref()
 
-    with true <- valid_request?(request),
-         {:ok, ^permit_id} <-
-           AdmissionRelay.open_lease_permit(
-             state.relay,
-             request.connection,
-             permit_id,
-             request.class,
-             request.session_id,
-             self(),
-             state.daemon_incarnation,
-             request.worker,
-             request.worker_incarnation,
-             start_op_ref
-           ),
-         :ok <-
-           AdmissionRelay.claim_lease_permit(
-             state.relay,
-             permit_id,
-             state.daemon_incarnation,
-             start_op_ref
-           ),
-         {:ok, state, owner_row} <- install_session_owner(state, request.session_id),
-         operation =
-           lease_operation(
-             request,
-             owner_row,
-             self(),
-             state.daemon_incarnation,
-             start_op_ref
-           ),
-         state = put_in(state, [:operations, permit_id], operation),
-         {:ok, disposition} <-
-           first_acquire(owner_row.pid, request) do
-      {:reply, {:ok, disposition, owner_row.pid, owner_row.incarnation}, state}
+    request_id =
+      AdmissionRelay.open_lease_permit_request(
+        state.relay,
+        request.connection,
+        request.permit_id,
+        request.class,
+        request.session_id,
+        self(),
+        state.daemon_incarnation,
+        request.worker,
+        request.worker_incarnation,
+        start_op_ref
+      )
+
+    operation = %{
+      request: request,
+      owner_pid: nil,
+      owner_incarnation: nil,
+      actor_pid: self(),
+      actor_incarnation: state.daemon_incarnation,
+      start_op_ref: start_op_ref,
+      phase: :opening,
+      reply_to: from
+    }
+
+    state
+    |> put_in([:operations, request.permit_id], operation)
+    |> relay_request(request_id, {:open, request.permit_id})
+  end
+
+  # Concept: each relay request this owner sends has its own five-second
+  # instant while serving; a relay that has not answered by it is lost.
+  #
+  # Technical depth: a request sent after the admission cut arms no instant:
+  # the stop's own phase deadlines govern it.
+  defp relay_request(state, request_id, continuation) do
+    timer =
+      if is_nil(state.stop),
+        do: Process.send_after(self(), {:owner_relay_unanswered, request_id}, @relay_request_ms)
+
+    put_in(state, [:relay_requests, request_id], %{continuation: continuation, timer: timer})
+  end
+
+  defp relay_request_answered(state, request_id, message) do
+    {%{continuation: continuation, timer: timer}, requests} =
+      Map.pop(state.relay_requests, request_id)
+
+    if timer, do: Process.cancel_timer(timer)
+    state = %{state | relay_requests: requests}
+
+    response =
+      case :gen_server.check_response(message, request_id) do
+        {:reply, reply} -> {:reply, reply}
+        _relay_gone -> :down
+      end
+
+    relay_answered(state, continuation, response)
+  end
+
+  defp relay_answered(state, {:open, permit_id}, response) do
+    case Map.fetch(state.operations, permit_id) do
+      {:ok, %{phase: :opening} = operation} -> open_answered(state, operation, response)
+      _gone -> {:noreply, state}
+    end
+  end
+
+  defp relay_answered(state, {:claim, permit_id}, response) do
+    case Map.fetch(state.operations, permit_id) do
+      {:ok, %{phase: :claiming} = operation} -> claim_answered(state, operation, response)
+      _gone -> {:noreply, state}
+    end
+  end
+
+  defp relay_answered(state, {:register, session_id, owner, owner_incarnation}, response) do
+    case Map.get(state.owners, session_id) do
+      %{phase: phase, pid: ^owner, incarnation: ^owner_incarnation} = row
+      when phase in [:registering, :lost] ->
+        register_answered(state, session_id, row, response)
+
+      _other ->
+        {:noreply, state}
+    end
+  end
+
+  defp relay_answered(state, {:complete, permit_id, purpose}, response) do
+    case {response, Map.fetch(state.operations, permit_id)} do
+      {{:reply, :ok}, {:ok, %{phase: :refusing} = operation}} ->
+        state =
+          state
+          |> update_in([:operations], &Map.delete(&1, permit_id))
+          |> update_in([:pending_dispositions], &Map.delete(&1, permit_id))
+
+        completed(state, operation, purpose)
+
+      {{:reply, {:error, :connection_lost}}, {:ok, %{phase: :refusing}}} ->
+        {:noreply, put_in(state, [:operations, permit_id, :phase], :abandoned)}
+
+      {_answer, {:ok, %{phase: :refusing}}} when is_nil(state.stop) ->
+        latch_relay_lost(state)
+
+      # Concept: during the stop the relay may refuse the completion
+      # (`daemon_stopping`, `owner_lost`); the permit is then the barrier's,
+      # which settles it through its descriptor.
+      {_answer, {:ok, %{phase: :refusing}}} ->
+        {:noreply, state}
+
+      _gone ->
+        {:noreply, state}
+    end
+  end
+
+  defp open_answered(state, operation, {:reply, {:ok, permit_id}})
+       when permit_id == operation.request.permit_id do
+    cond do
+      operation.actor_pid == self() and lease_relay_closed?(state) ->
+        GenServer.reply(operation.reply_to, {:ok, :accepted, self(), state.daemon_incarnation})
+
+        state
+        |> put_in([:operations, permit_id], %{
+          Map.delete(operation, :reply_to)
+          | phase: :refusing
+        })
+        |> undo_first_acquire(operation)
+        |> noreply()
+
+      operation.actor_pid == self() ->
+        claim_opened(state, operation, permit_id)
+
+      true ->
+        hand_opened(state, operation, permit_id)
+    end
+  end
+
+  defp open_answered(state, operation, {:reply, {:error, reason}})
+       when reason in [:actor_retiring, :actor_lost] do
+    state
+    |> update_in([:operations], &Map.delete(&1, operation.request.permit_id))
+    |> hold_request(operation, reason)
+    |> opening_removed(operation)
+  end
+
+  # Concept: the relay refusing an actor this owner still has live means the
+  # two disagree about that actor, which is the relay's loss; the request is
+  # still answered. A refusal naming a lease owner this owner has already
+  # moved past — its retirement or exit overtook the open — is held like any
+  # other refusal of a departing actor.
+  defp open_answered(state, operation, {:reply, {:error, :invalid_actor}}) do
+    state = update_in(state.operations, &Map.delete(&1, operation.request.permit_id))
+
+    if actor_live?(state, operation) do
+      GenServer.reply(operation.reply_to, {:error, :owner_unavailable})
+      state |> undo_daemon_actor_start(operation) |> latch_relay_lost()
     else
-      false -> {:reply, {:error, :invalid_operation}, state}
-      {:error, reason} -> {:reply, {:error, reason}, state}
+      reason =
+        if match?(%{phase: :lost}, Map.get(state.owners, operation.request.session_id)),
+          do: :actor_lost,
+          else: :actor_retiring
+
+      state
+      |> hold_request(operation, reason)
+      |> opening_removed(operation)
     end
   end
 
-  # Concept: a child that dies before it answers still owns the retained
-  # acquire. Technical depth: the caller learns the result through the relay;
-  # the child's linked `EXIT` either follows its proposal or proves none came.
-  defp first_acquire(owner, request) do
-    case lease_owner_call(fn ->
-           LeaseOwner.first_acquire(
-             owner,
-             request.permit_id,
-             request.request_id,
-             request.connection,
-             request.connection_incarnation,
-             request.request_deadline
-           )
-         end) do
-      {:error, :owner_down} -> {:ok, :queued}
-      result -> result
+  defp open_answered(state, operation, response) do
+    reason =
+      case response do
+        {:reply, {:error, reason}} -> reason
+        _relay_gone -> :daemon_stopping
+      end
+
+    GenServer.reply(operation.reply_to, {:error, reason})
+
+    state
+    |> update_in([:operations], &Map.delete(&1, operation.request.permit_id))
+    |> undo_daemon_actor_start(operation)
+    |> opening_removed(operation)
+  end
+
+  defp claim_opened(state, operation, permit_id) do
+    request_id =
+      AdmissionRelay.claim_lease_permit_request(
+        state.relay,
+        permit_id,
+        state.daemon_incarnation,
+        operation.start_op_ref
+      )
+
+    state
+    |> put_in([:operations, permit_id], %{operation | phase: :claiming})
+    |> relay_request(request_id, {:claim, permit_id})
+    |> noreply()
+  end
+
+  defp hand_opened(state, operation, permit_id) do
+    GenServer.reply(
+      operation.reply_to,
+      {:ok, :accepted, operation.actor_pid, operation.actor_incarnation}
+    )
+
+    operation = operation |> Map.delete(:reply_to) |> Map.put(:phase, :opened)
+    state = put_in(state, [:operations, permit_id], operation)
+
+    :ok =
+      LeaseOwner.request(
+        operation.owner_pid,
+        operation.owner_incarnation,
+        lease_owner_request(operation.request)
+      )
+
+    {:noreply, state}
+  end
+
+  defp actor_live?(_state, %{actor_pid: actor}) when actor == self(), do: true
+
+  defp actor_live?(state, operation) do
+    match?(
+      %{phase: :live, pid: pid, incarnation: incarnation, exit_consumed: false}
+      when pid == operation.owner_pid and incarnation == operation.owner_incarnation,
+      Map.get(state.owners, operation.request.session_id)
+    )
+  end
+
+  # Concept: an open still awaiting the relay keeps a lost owner's pop
+  # waiting, since its answer may yet hand that owner a permit; once the
+  # answer removes the operation, the pop is checked again.
+  defp opening_removed(state, %{owner_pid: owner} = operation) when is_pid(owner) do
+    maybe_start_owner_loss_pop(
+      state,
+      operation.request.session_id,
+      owner,
+      operation.owner_incarnation
+    )
+  end
+
+  defp opening_removed(state, _daemon_actor), do: {:noreply, state}
+
+  # Technical depth: a fresh acquire is answered once its lease owner is
+  # started, naming that owner; a successor acquire is answered naming this
+  # owner, which acts for it until its lease owner starts.
+  defp claim_answered(state, operation, {:reply, :ok}) do
+    permit_id = operation.request.permit_id
+    {from, operation} = Map.pop(operation, :reply_to)
+    state = put_in(state, [:operations, permit_id], operation)
+
+    case Map.get(state.owners, operation.request.session_id) do
+      %{phase: :registering, first_permit: ^permit_id, pid: nil} ->
+        start_registering_owner(state, operation, from)
+
+      %{successor: ^permit_id} = row ->
+        GenServer.reply(from, {:ok, :accepted, self(), state.daemon_incarnation})
+        Logger.debug("loopex daemon successor owner start retained")
+        state = put_in(state, [:operations, permit_id, :phase], :waiting_owner)
+
+        if row.phase == :lost,
+          do: finish_owner_loss(state, operation.request.session_id),
+          else: finish_owner_retirement(state, operation.request.session_id)
+
+      # Concept: a claimed permit whose session row is gone is still
+      # answered: this owner is its actor, so it refuses it through the relay.
+      _row ->
+        GenServer.reply(from, {:ok, :accepted, self(), state.daemon_incarnation})
+        Logger.debug("loopex daemon claimed lease permit without an owner row refused")
+        state = put_in(state, [:operations, permit_id, :phase], :refusing)
+        code = if state.stop, do: "daemon_stopping", else: "control_pending"
+        refuse_permit(state, operation, code, :registration_failed)
     end
   end
 
-  defp dispatch_existing_acquire(state, request, owner_row) do
-    with {:ok, state, operation} <- open_existing_permit(state, request, owner_row),
-         {:ok, disposition} <-
-           existing_owner_call(fn ->
-             LeaseOwner.acquire(
-               owner_row.pid,
-               request.permit_id,
-               request.request_id,
-               request.connection,
-               request.connection_incarnation,
-               request.request_deadline
-             )
-           end) do
-      state = maybe_complete_direct_operation(state, request.permit_id, disposition)
-      {:reply, {:ok, disposition, operation.owner_pid, operation.owner_incarnation}, state}
+  # Concept: a claim refused `connection_lost` follows the relay's
+  # connection-loss disposition for the same permit, which this owner
+  # retained while it waited for the claim; that disposition is settled now.
+  #
+  # Technical depth: the relay sends the disposition before it answers the
+  # later claim, so it is normally retained; if it is not, the `:abandoned`
+  # operation is settled when it arrives.
+  defp claim_answered(state, operation, {:reply, {:error, :connection_lost}}) do
+    permit_id = operation.request.permit_id
+    GenServer.reply(operation.reply_to, {:error, :connection_lost})
+    operation = operation |> Map.delete(:reply_to) |> Map.put(:phase, :abandoned)
+
+    state =
+      state
+      |> put_in([:operations, permit_id], operation)
+      |> undo_first_acquire(operation)
+
+    case Map.pop(state.pending_dispositions, permit_id) do
+      {nil, _pending} ->
+        {:noreply, state}
+
+      {loss, pending} ->
+        state = %{state | pending_dispositions: pending}
+        start_waiting_owner_loss_settlement(state, permit_id, operation, loss)
+    end
+  end
+
+  defp claim_answered(state, operation, response) do
+    reason =
+      case response do
+        {:reply, {:error, reason}} -> reason
+        _relay_gone -> :daemon_stopping
+      end
+
+    GenServer.reply(operation.reply_to, {:error, reason})
+    state = update_in(state.operations, &Map.delete(&1, operation.request.permit_id))
+    {:noreply, undo_daemon_actor_start(state, operation)}
+  end
+
+  # A fresh acquire's reserved row is dropped, and anything waiting on it is
+  # dispatched again; a successor acquire gives back its reservation.
+  defp undo_daemon_actor_start(state, %{actor_pid: actor} = operation) when actor == self() do
+    state
+    |> undo_first_acquire(operation)
+    |> release_successor_reservation(%{
+      kind: :queued_grant,
+      permit_id: operation.request.permit_id,
+      row: %{session_id: operation.request.session_id}
+    })
+  end
+
+  defp undo_daemon_actor_start(state, _operation), do: state
+
+  defp undo_first_acquire(state, operation) do
+    permit_id = operation.request.permit_id
+    session_id = operation.request.session_id
+
+    case Map.get(state.owners, session_id) do
+      %{phase: :registering, first_permit: ^permit_id, pid: nil} ->
+        delete_row(state, session_id)
+
+      _other ->
+        state
+    end
+  end
+
+  defp redispatch(state, requests),
+    do: Enum.reduce(requests, state, fn {request, from}, acc -> dispatch(acc, request, from) end)
+
+  # Concept: the fresh lease owner is started once its first permit is
+  # claimed, and registered with the relay by request; the row stays
+  # `:registering`, with its slot charged, until the relay answers.
+  defp start_registering_owner(state, operation, from) do
+    if lease_relay_closed?(state) do
+      # Concept: after the freeze no lease owner is registered; the claimed
+      # permit is the barrier's.
+      GenServer.reply(from, {:ok, :accepted, self(), state.daemon_incarnation})
+
+      state
+      |> put_in([:operations, operation.request.permit_id, :phase], :refusing)
+      |> undo_first_acquire(operation)
+      |> noreply()
     else
-      {:error, reason} -> {:reply, {:error, reason}, state}
+      start_registering_child(state, operation, from)
     end
   end
 
-  defp dispatch_release(state, request) do
-    case Map.fetch(state.operations, request.permit_id) do
-      {:ok, %{request: ^request, owner_pid: pid, owner_incarnation: owner_incarnation}} ->
-        {:reply, {:ok, :completed, pid, owner_incarnation}, state}
+  defp start_registering_child(state, operation, from) do
+    session_id = operation.request.session_id
+    owner_incarnation = incarnation()
 
-      {:ok, _other} ->
-        {:reply, {:error, :permit_conflict}, state}
+    case LeaseOwner.start_link(
+           daemon_owner: self(),
+           relay: state.relay,
+           registry: state.registry,
+           session_id: session_id,
+           owner_incarnation: owner_incarnation,
+           lease_term_ms: state.lease_term_ms,
+           retirement_exit_gate: state.retirement_exit_gate,
+           attachments: Map.get(state.attachments, session_id, MapSet.new())
+         ) do
+      {:ok, owner} ->
+        GenServer.reply(from, {:ok, :accepted, owner, owner_incarnation})
 
-      :error ->
-        with {:ok, owner_row} <- live_owner(state, request.session_id),
-             {:ok, state, operation} <- open_existing_permit(state, request, owner_row),
-             {:ok, disposition} <-
-               existing_owner_call(fn ->
-                 LeaseOwner.release(
-                   owner_row.pid,
-                   request.permit_id,
-                   request.request_id,
-                   request.connection,
-                   request.connection_incarnation,
-                   request.writer_epoch
-                 )
-               end) do
-          state = maybe_complete_direct_operation(state, request.permit_id, disposition)
-          {:reply, {:ok, disposition, operation.owner_pid, operation.owner_incarnation}, state}
+        operation = %{
+          operation
+          | owner_pid: owner,
+            owner_incarnation: owner_incarnation,
+            phase: :opened
+        }
+
+        row = Map.get(state.owners, session_id)
+        row = %{row | pid: owner, incarnation: owner_incarnation}
+
+        request_id =
+          AdmissionRelay.register_lease_owner_request(
+            state.relay,
+            session_id,
+            owner,
+            owner_incarnation
+          )
+
+        state
+        |> put_in([:owners, session_id], row)
+        |> put_in([:owner_pids, owner], session_id)
+        |> put_in([:operations, operation.request.permit_id], operation)
+        |> relay_request(request_id, {:register, session_id, owner, owner_incarnation})
+        |> noreply()
+
+      _error ->
+        GenServer.reply(from, {:ok, :accepted, self(), state.daemon_incarnation})
+
+        state =
+          state
+          |> put_in([:operations, operation.request.permit_id, :phase], :refusing)
+          |> undo_first_acquire(operation)
+
+        refuse_permit(state, operation, "control_pending", :registration_failed)
+    end
+  end
+
+  # Concept: on the relay's registration, in one handler, the lease owner is
+  # activated, handed its first acquire, marked live and given every request
+  # that waited for it, in order; same-sender order puts each after the
+  # first acquire.
+  #
+  # Technical depth: a lease owner whose exit was already consumed was
+  # registered dead, so the relay reports its loss and the ordinary
+  # lost-owner path continues. A refused registration discards the child,
+  # frees its slot, completes its first permit through the relay and
+  # dispatches the waiting requests again from scratch.
+  defp register_answered(state, session_id, %{phase: :registering} = row, {:reply, :ok}) do
+    :ok = LeaseOwner.request(row.pid, row.incarnation, :activate)
+
+    state =
+      case Map.get(state.operations, row.first_permit) do
+        %{phase: :opened, request: request} ->
+          :ok =
+            LeaseOwner.request(row.pid, row.incarnation, {
+              :first_acquire,
+              request.permit_id,
+              request.request_id,
+              request.connection,
+              request.connection_incarnation,
+              request.request_deadline
+            })
+
+          state
+
+        _refused ->
+          state
+      end
+
+    pending = row.pending_dispatch
+    row = %{row | phase: :live, pending_dispatch: [], first_permit: nil}
+
+    state =
+      state
+      |> put_in([:owners, session_id], row)
+      |> update_in([:lost_holders], &Map.delete(&1, session_id))
+
+    Logger.debug("loopex daemon lease owner installed")
+    {:noreply, redispatch(state, pending)}
+  end
+
+  defp register_answered(state, _session_id, %{phase: :lost}, {:reply, :ok}),
+    do: {:noreply, state}
+
+  defp register_answered(state, session_id, row, _refused) do
+    if not row.exit_consumed, do: discard_unregistered_owner(row.pid)
+
+    state =
+      state
+      |> update_in([:owners], &Map.put(&1, session_id, %{row | pending_dispatch: []}))
+      |> delete_row(session_id)
+      |> update_in([:owner_pids], &Map.delete(&1, row.pid))
+
+    state =
+      case Map.get(state.operations, row.first_permit) do
+        %{phase: :opened, actor_pid: actor} = operation when actor == self() ->
+          code = if state.stop, do: "daemon_stopping", else: "control_pending"
+
+          # Technical depth: the discarded child is no longer the permit's
+          # lease owner, so the freeze matches the permit to this owner.
+          operation = %{operation | owner_pid: nil, owner_incarnation: nil, phase: :refusing}
+          state = put_in(state, [:operations, row.first_permit], operation)
+          {:noreply, state} = refuse_permit(state, operation, code, :registration_failed)
+          state
+
+        _gone ->
+          state
+      end
+
+    Logger.debug("loopex daemon lease owner registration refused")
+    {:noreply, redispatch(state, row.pending_dispatch)}
+  end
+
+  # Concept: a permit this owner is the actor for is refused through the
+  # relay; the operation is removed once the relay records the refusal.
+  defp refuse_permit(state, operation, code, purpose) do
+    if lease_relay_closed?(state) do
+      state = update_in(state.operations, &Map.delete(&1, operation.request.permit_id))
+      completed(state, operation, purpose)
+    else
+      result = refusal_record(operation.request.request_id, code)
+
+      request_id =
+        AdmissionRelay.complete_lease_permit_request(
+          state.relay,
+          operation.request.permit_id,
+          state.daemon_incarnation,
+          result
+        )
+
+      state
+      |> relay_request(request_id, {:complete, operation.request.permit_id, purpose})
+      |> noreply()
+    end
+  end
+
+  # Technical depth: `daemon_stopping` is a request error, not a control
+  # error, so each refusal code takes its own record shape.
+  defp refusal_record(request_id, "daemon_stopping"),
+    do: WireRecords.request_error(request_id, "daemon_stopping")
+
+  defp refusal_record(request_id, code), do: WireRecords.control_error(request_id, code)
+
+  defp completed(state, operation, :unproposed) do
+    Logger.debug("loopex daemon unproposed lease grant refused")
+
+    maybe_start_owner_loss_pop(
+      state,
+      operation.request.session_id,
+      operation.owner_pid,
+      operation.owner_incarnation
+    )
+  end
+
+  defp completed(state, _operation, {:waiting_successor, session_id}) do
+    state =
+      case Map.get(state.owners, session_id) do
+        %{successor: permit_id} when not is_nil(permit_id) ->
+          delete_row(state, session_id)
+
+        _other ->
+          state
+      end
+
+    Logger.debug("loopex daemon successor owner start refused")
+    {:noreply, state}
+  end
+
+  defp completed(state, _operation, _purpose), do: {:noreply, state}
+
+  # Concept: a request the relay refused because its lease owner is retiring
+  # or already lost is held, not answered: it is dispatched again once that
+  # owner's retirement intent or loss notification settles the session, so
+  # an acquire racing a retirement is never answered as a failure.
+  #
+  # Technical depth: a retiring hold has its own five-second instant while
+  # serving, since the intent is the lease owner's own next step; a lease
+  # owner that has not sent it by then is killed and the hold is dispatched
+  # again at its exit. A lost hold waits for `finish_owner_loss`, which the
+  # owner-loss steps bound; a loss already finished releases it at once.
+  defp hold_request(state, operation, reason) do
+    request = operation.request
+
+    entry = %{
+      request: request,
+      from: operation.reply_to,
+      reason: reason,
+      owner: operation.owner_pid
+    }
+
+    case Map.get(state.owners, request.session_id) do
+      _row when not is_nil(state.stop) ->
+        GenServer.reply(entry.from, stopping_answer(state, request))
+        state
+
+      %{pid: pid} = row when pid == operation.owner_pid ->
+        if (reason == :actor_retiring and is_reference(row.retirement_ref)) or loss_finished?(row) do
+          release_held(state, [entry])
         else
-          {:error, reason} -> {:reply, {:error, reason}, state}
+          timer =
+            if reason == :actor_retiring and is_nil(state.stop) do
+              Process.send_after(
+                self(),
+                {:held_request_deadline, request.session_id, pid},
+                @relay_request_ms
+              )
+            end
+
+          Logger.debug("loopex daemon lease request held")
+          held = row.held ++ [Map.put(entry, :timer, timer)]
+          put_in(state, [:owners, request.session_id, :held], held)
         end
+
+      _loss_or_retirement_finished ->
+        release_held(state, [entry])
     end
   end
 
-  defp open_existing_permit(state, request, owner_row) do
-    permit_id = request.permit_id
+  defp loss_finished?(row) do
+    row.phase == :lost and row.exit_consumed and row.mirror_complete and
+      row.classification_complete and row.notification_complete
+  end
 
-    with true <- valid_request?(request),
-         {:ok, ^permit_id} <-
-           AdmissionRelay.open_lease_permit(
-             state.relay,
-             request.connection,
-             permit_id,
-             request.class,
-             request.session_id,
-             owner_row.pid,
-             owner_row.incarnation,
-             request.worker,
-             request.worker_incarnation
-           ) do
-      operation = lease_operation(request, owner_row, owner_row.pid, owner_row.incarnation)
-      {:ok, put_in(state, [:operations, permit_id], operation), operation}
-    else
-      false -> {:error, :invalid_operation}
-      {:error, reason} -> {:error, reason}
+  # Concept: a held request is answered as the settled session now allows:
+  # the returned holder of a lost owner is already being closed and hears
+  # nothing more, an acquire is dispatched again, and a release is refused
+  # `control_not_held`, since the lease it named is gone.
+  defp release_held(state, entries) do
+    Enum.reduce(entries, state, fn entry, acc ->
+      if entry[:timer], do: Process.cancel_timer(entry.timer)
+      request = entry.request
+
+      cond do
+        returned_holder?(acc, request) ->
+          GenServer.reply(entry.from, {:error, :holder_closed})
+          acc
+
+        request.class == :session_acquire_control ->
+          dispatch(acc, request, entry.from)
+
+        true ->
+          GenServer.reply(entry.from, {:error, :control_not_held})
+          acc
+      end
+    end)
+  end
+
+  # Concept: the returned holder of a session whose owner is lost is the
+  # holder its granted route names, from the owner's loss until a successor
+  # registers; that route is replaced by `lost_holders` when classification
+  # begins, so one of the two always names it.
+  #
+  # Technical depth: a held request exists only for a retiring or lost row,
+  # or behind one; a retiring row's lease is free and has no route, so a
+  # route match on a held request is always the lost owner's holder.
+  defp returned_holder?(state, request) do
+    Enum.any?(
+      [
+        Map.get(state.lost_holders, request.session_id),
+        Map.get(state.routes, request.session_id)
+      ],
+      &holder_named?(&1, request)
+    )
+  end
+
+  defp holder_named?(holder, request) do
+    match?(
+      %{holder_pid: pid, holder_incarnation: incarnation}
+      when pid == request.connection and incarnation == request.connection_incarnation,
+      holder
+    )
+  end
+
+  # Concept: after the cut a held request is refused `daemon_stopping`,
+  # except the returned holder's, which hears only its uncorrelated close.
+  defp stopping_answer(state, request) do
+    if returned_holder?(state, request),
+      do: {:error, :holder_closed},
+      else: {:error, :daemon_stopping}
+  end
+
+  # Technical depth: every held entry is released in arrival order; the row
+  # is emptied first, so a released acquire is not queued behind the ones
+  # after it.
+  defp release_row_holds(state, session_id) do
+    case Map.get(state.owners, session_id) do
+      %{held: [_ | _] = held} = row ->
+        state = put_in(state, [:owners, session_id], %{row | held: []})
+        release_held(state, held)
+
+      _other ->
+        state
     end
   end
 
-  # Concept: an existing owner's permit names that owner as its actor, so the
-  # relay claims it when the owner dies. Technical depth: a call that observes
-  # the death answers `:queued`; the relay's owner-loss refusal is the result.
-  defp existing_owner_call(fun) do
-    case lease_owner_call(fun) do
-      {:error, :owner_down} -> {:ok, :queued}
-      result -> result
+  # Concept: no owner row is ever dropped with a request still waiting on
+  # it: every held request and every request waiting for its registration is
+  # answered or dispatched again once the row is gone.
+  defp delete_row(state, session_id) do
+    case Map.pop(state.owners, session_id) do
+      {nil, _owners} ->
+        state
+
+      {row, owners} ->
+        release_loss_waiters(%{state | owners: owners}, row)
     end
   end
+
+  defp lease_owner_request(%{class: :session_acquire_control} = request) do
+    {:acquire, request.permit_id, request.request_id, request.connection,
+     request.connection_incarnation, request.request_deadline}
+  end
+
+  defp lease_owner_request(%{class: :session_release_control} = request) do
+    {:release, request.permit_id, request.request_id, request.connection,
+     request.connection_incarnation, request.writer_epoch}
+  end
+
+  # Concept: after the lease freeze this owner sends no lease request to the
+  # relay.
+  defp lease_relay_closed?(%{stop: %{frozen: true}}), do: true
+  defp lease_relay_closed?(_state), do: false
+
+  # Concept: a relay that does not answer, or answers inconsistently, is
+  # lost: the daemon owner is told once, the teardown mark keeps the relay's
+  # coming exit from being reported again, and the relay is killed.
+  defp latch_relay_lost(%{fatal_teardown: true} = state), do: {:noreply, state}
+
+  # Concept: once the stop has begun, its own deadlines govern; a relay
+  # inconsistency is then cleanup only.
+  defp latch_relay_lost(%{stop: stop} = state) when not is_nil(stop), do: {:noreply, state}
+
+  defp latch_relay_lost(%{fatal_recipient: recipient} = state) when is_pid(recipient) do
+    Logger.debug("loopex daemon owner relay exchange failed")
+    report_component_loss(state, :relay_lost)
+    Process.exit(state.relay, :kill)
+    {:noreply, %{state | fatal_teardown: true}}
+  end
+
+  defp latch_relay_lost(state), do: {:stop, :relay_lost, state}
+
+  defp noreply(state), do: {:noreply, state}
 
   defp lease_operation(
          request,
@@ -1869,12 +2621,7 @@ defmodule LoopexDaemon.Owner do
   defp continue_lost_owner_exit(state, session_id, predecessor) do
     state =
       if predecessor.loss_origins do
-        discard_claimed_owner_operations(
-          state,
-          predecessor.pid,
-          predecessor.incarnation,
-          predecessor.loss_origins
-        )
+        discard_claimed_owner_operations(state, predecessor.pid, predecessor.incarnation)
       else
         state
       end
@@ -1882,8 +2629,8 @@ defmodule LoopexDaemon.Owner do
     state = settle_pending_owner_losses(state, predecessor.pid, predecessor.incarnation)
 
     case refuse_unproposed_grants(state, predecessor.pid, predecessor.incarnation) do
-      {:ok, state} -> continue_lost_owner_operation(state, session_id, predecessor)
-      :error -> {:stop, :relay_lost, state}
+      {:noreply, state} -> continue_lost_owner_operation(state, session_id, predecessor)
+      stopped -> stopped
     end
   end
 
@@ -1973,11 +2720,12 @@ defmodule LoopexDaemon.Owner do
         not MapSet.member?(mirrored, permit_id)
     end)
     |> Enum.sort_by(&elem(&1, 0))
-    |> Enum.reduce_while({:ok, state}, fn {permit_id, operation}, {:ok, acc} ->
-      case refuse_unproposed_grant(acc, permit_id, operation) do
-        {:ok, acc} -> {:cont, {:ok, acc}}
-        :error -> {:halt, :error}
-      end
+    |> Enum.reduce({:noreply, state}, fn
+      {permit_id, operation}, {:noreply, acc} ->
+        refuse_unproposed_grant(acc, permit_id, operation)
+
+      _operation, stopped ->
+        stopped
     end)
   end
 
@@ -1985,28 +2733,11 @@ defmodule LoopexDaemon.Owner do
     case Map.fetch(state.pending_dispositions, permit_id) do
       {:ok, loss} ->
         state = update_in(state.pending_dispositions, &Map.delete(&1, permit_id))
-        {:noreply, state} = start_waiting_owner_loss_settlement(state, permit_id, operation, loss)
-        {:ok, state}
+        start_waiting_owner_loss_settlement(state, permit_id, operation, loss)
 
       :error ->
-        result = WireRecords.control_error(operation.request.request_id, "control_pending")
-
-        case AdmissionRelay.complete_lease_permit(
-               state.relay,
-               permit_id,
-               state.daemon_incarnation,
-               result
-             ) do
-          :ok ->
-            Logger.debug("loopex daemon unproposed lease grant refused")
-            {:ok, update_in(state.operations, &Map.delete(&1, permit_id))}
-
-          {:error, :connection_lost} ->
-            {:ok, put_in(state, [:operations, permit_id, :phase], :abandoned)}
-
-          {:error, _reason} ->
-            :error
-        end
+        state = put_in(state, [:operations, permit_id, :phase], :refusing)
+        refuse_permit(state, operation, "control_pending", :unproposed)
     end
   end
 
@@ -2024,18 +2755,26 @@ defmodule LoopexDaemon.Owner do
     end)
   end
 
-  defp discard_claimed_owner_operations(state, owner, owner_incarnation, origins) do
-    claimed = MapSet.new(origins)
+  # Concept: once a lost owner's exit and the relay's loss report have both
+  # been consumed, no answer from that owner can still come, so every
+  # operation it was acting for that nothing else still settles is removed.
+  #
+  # Technical depth: the relay claims every permit of that actor whose
+  # disposition was unset at its `DOWN` and renders its owner-loss refusal,
+  # and it sent every earlier disposition first, so an operation that is not
+  # mirrored, has no retained connection loss and is not still opening has
+  # already been answered by the relay. Operations this owner acts for itself
+  # are refused separately.
+  defp discard_claimed_owner_operations(state, owner, owner_incarnation) do
     mirrored = mirrored_permits(state)
+    daemon = self()
 
     operations =
-      Enum.reduce(state.operations, state.operations, fn {permit_id, operation}, acc ->
-        if operation.owner_pid == owner and operation.owner_incarnation == owner_incarnation and
-             MapSet.member?(claimed, permit_id) and not MapSet.member?(mirrored, permit_id) do
-          Map.delete(acc, permit_id)
-        else
-          acc
-        end
+      Map.reject(state.operations, fn {permit_id, operation} ->
+        operation.owner_pid == owner and operation.owner_incarnation == owner_incarnation and
+          operation.actor_pid != daemon and operation.phase != :opening and
+          not MapSet.member?(mirrored, permit_id) and
+          not Map.has_key?(state.pending_dispositions, permit_id)
       end)
 
     %{state | operations: operations}
@@ -2313,6 +3052,11 @@ defmodule LoopexDaemon.Owner do
       |> put_in([:mirror_operations, operation_ref, :holder], holder)
       |> put_in([:owners, operation.row.session_id, :mirror_complete], true)
       |> update_in([:routes], &Map.delete(&1, operation.row.session_id))
+
+    state =
+      if holder,
+        do: put_in(state, [:lost_holders, operation.row.session_id], holder),
+        else: state
 
     :ok =
       AdmissionRelay.classify_owner_loss(
@@ -2694,7 +3438,7 @@ defmodule LoopexDaemon.Owner do
          end) do
       [] ->
         case Map.fetch!(state.operations, permit_id) do
-          %{phase: phase} = operation when phase in [:waiting_owner, :abandoned] ->
+          %{phase: phase} = operation when phase in [:waiting_owner, :abandoned, :superseded] ->
             start_waiting_owner_loss_settlement(state, permit_id, operation, loss)
 
           _operation ->
@@ -3007,33 +3751,13 @@ defmodule LoopexDaemon.Owner do
     {:noreply, state}
   end
 
-  defp maybe_complete_direct_operation(state, permit_id, :completed) do
-    state
-    |> update_in([:operations], &Map.delete(&1, permit_id))
-    |> update_in([:pending_dispositions], &Map.delete(&1, permit_id))
-  end
-
-  defp maybe_complete_direct_operation(state, _permit_id, disposition)
-       when disposition in [:proposed, :queued],
-       do: state
-
+  # Concept: retirement is requested without waiting; the lease owner's
+  # retirement intent is its only answer.
   defp request_owner_retirement(state, owner, session_id) do
     case Map.get(state.owners, session_id) do
-      %{pid: ^owner, phase: :live} = row ->
-        case lease_owner_call(fn -> LeaseOwner.retire_if_idle(owner) end) do
-          {:ok, :retiring} ->
-            Logger.debug("loopex daemon lease owner retirement pending")
-            {:noreply, put_in(state, [:owners, session_id], %{row | phase: :retirement_pending})}
-
-          {:ok, :waiting} ->
-            {:noreply, state}
-
-          {:error, :not_idle} ->
-            {:noreply, state}
-
-          {:error, reason} when reason in [:daemon_stopping, :owner_unavailable, :owner_down] ->
-            {:noreply, state}
-        end
+      %{pid: ^owner, incarnation: owner_incarnation, phase: :live} ->
+        :ok = LeaseOwner.request(owner, owner_incarnation, :retire_if_idle)
+        {:noreply, state}
 
       _other ->
         {:noreply, state}
@@ -3161,6 +3885,9 @@ defmodule LoopexDaemon.Owner do
     finish_owner_loss(state, operation.row.session_id)
   end
 
+  # Concept: once a lost owner's pop, classification and holder close are
+  # done, every request that waited on that loss is answered or dispatched
+  # again, and the session serves its next owner.
   defp finish_owner_loss(state, session_id) do
     case Map.get(state.owners, session_id) do
       %{
@@ -3169,9 +3896,10 @@ defmodule LoopexDaemon.Owner do
         classification_complete: true,
         notification_complete: true,
         successor: nil
-      } ->
+      } = row ->
         Logger.debug("loopex daemon lease owner loss complete")
-        {:noreply, update_in(state.owners, &Map.delete(&1, session_id))}
+        _ = row
+        {:noreply, delete_row(state, session_id)}
 
       %{
         exit_consumed: true,
@@ -3181,11 +3909,23 @@ defmodule LoopexDaemon.Owner do
         successor: permit_id
       } = row
       when not is_nil(permit_id) ->
-        start_waiting_successor(state, session_id, row, permit_id)
+        state =
+          put_in(state, [:owners, session_id], %{row | held: [], pending_dispatch: []})
+
+        case start_waiting_successor(state, session_id, row, permit_id) do
+          {:noreply, state} -> {:noreply, release_loss_waiters(state, row)}
+          stopped -> stopped
+        end
 
       _other ->
         {:noreply, state}
     end
+  end
+
+  defp release_loss_waiters(state, row) do
+    state
+    |> release_held(row.held)
+    |> redispatch(row.pending_dispatch)
   end
 
   defp finish_owner_retirement(state, session_id) do
@@ -3197,7 +3937,7 @@ defmodule LoopexDaemon.Owner do
         successor: nil
       } ->
         Logger.debug("loopex daemon lease owner retirement complete")
-        {:noreply, update_in(state.owners, &Map.delete(&1, session_id))}
+        {:noreply, delete_row(state, session_id)}
 
       %{
         exit_consumed: true,
@@ -3213,8 +3953,13 @@ defmodule LoopexDaemon.Owner do
     end
   end
 
+  # Technical depth: a successor whose open or claim the relay has not yet
+  # answered is started by that answer.
   defp start_waiting_successor(state, session_id, predecessor, permit_id) do
     case Map.get(state.operations, permit_id) do
+      %{phase: phase} when phase in [:opening, :claiming] ->
+        {:noreply, state}
+
       %{phase: :waiting_owner, request: %{session_id: ^session_id} = request} = operation ->
         if request.request_deadline <= monotonic_ms() do
           complete_waiting_successor(
@@ -3234,6 +3979,13 @@ defmodule LoopexDaemon.Owner do
   end
 
   defp materialize_waiting_successor(state, session_id, predecessor, operation) do
+    if lease_relay_closed?(state),
+      do:
+        complete_waiting_successor(state, session_id, predecessor, operation, "daemon_stopping"),
+      else: start_waiting_owner(state, session_id, operation)
+  end
+
+  defp start_waiting_owner(state, session_id, operation) do
     owner_incarnation = incarnation()
 
     case LeaseOwner.start_link(
@@ -3247,93 +3999,44 @@ defmodule LoopexDaemon.Owner do
            attachments: Map.get(state.attachments, session_id, MapSet.new())
          ) do
       {:ok, owner} ->
-        case AdmissionRelay.register_lease_owner(
-               state.relay,
-               session_id,
-               owner,
-               owner_incarnation
-             ) do
-          :ok ->
-            permit_id = operation.request.permit_id
-            row = owner_row(owner, owner_incarnation)
+        permit_id = operation.request.permit_id
 
-            operation = %{
-              operation
-              | owner_pid: owner,
-                owner_incarnation: owner_incarnation,
-                phase: :opened
-            }
+        row = %{
+          owner_row(owner, owner_incarnation)
+          | phase: :registering,
+            first_permit: permit_id
+        }
 
-            state =
-              state
-              |> put_in([:owners, session_id], row)
-              |> put_in([:owner_pids, owner], session_id)
-              |> put_in([:operations, permit_id], operation)
+        operation = %{
+          operation
+          | owner_pid: owner,
+            owner_incarnation: owner_incarnation,
+            phase: :opened
+        }
 
-            activate_installed_owner(owner)
+        request_id =
+          AdmissionRelay.register_lease_owner_request(
+            state.relay,
+            session_id,
+            owner,
+            owner_incarnation
+          )
 
-            case first_acquire(owner, operation.request) do
-              {:ok, disposition} when disposition in [:proposed, :queued] ->
-                Logger.debug("loopex daemon successor lease owner installed")
-                {:noreply, state}
-
-              {:error, :invalid_operation} ->
-                {:stop, :lease_operation_invalid, state}
-            end
-
-          _error ->
-            discard_unregistered_owner(owner)
-
-            complete_waiting_successor(
-              state,
-              session_id,
-              predecessor,
-              operation,
-              "control_pending"
-            )
-        end
+        state
+        |> put_in([:owners, session_id], row)
+        |> put_in([:owner_pids, owner], session_id)
+        |> put_in([:operations, permit_id], operation)
+        |> relay_request(request_id, {:register, session_id, owner, owner_incarnation})
+        |> noreply()
 
       _error ->
-        complete_waiting_successor(
-          state,
-          session_id,
-          predecessor,
-          operation,
-          "control_pending"
-        )
+        complete_waiting_successor(state, session_id, nil, operation, "control_pending")
     end
   end
 
-  defp complete_waiting_successor(state, session_id, predecessor, operation, code) do
-    result = WireRecords.control_error(operation.request.request_id, code)
-
-    case AdmissionRelay.complete_lease_permit(
-           state.relay,
-           operation.request.permit_id,
-           state.daemon_incarnation,
-           result
-         ) do
-      :ok ->
-        state =
-          state
-          |> update_in([:operations], &Map.delete(&1, operation.request.permit_id))
-          |> update_in([:pending_dispositions], &Map.delete(&1, operation.request.permit_id))
-
-        state =
-          case Map.get(state.owners, session_id) do
-            ^predecessor -> update_in(state.owners, &Map.delete(&1, session_id))
-            _other -> state
-          end
-
-        Logger.debug("loopex daemon successor owner start refused")
-        {:noreply, state}
-
-      {:error, :connection_lost} ->
-        {:noreply, state}
-
-      {:error, _reason} ->
-        {:stop, :relay_lost, state}
-    end
+  defp complete_waiting_successor(state, session_id, _predecessor, operation, code) do
+    state = put_in(state, [:operations, operation.request.permit_id, :phase], :refusing)
+    refuse_permit(state, operation, code, {:waiting_successor, session_id})
   end
 
   defp release_successor_reservation(
@@ -3359,7 +4062,7 @@ defmodule LoopexDaemon.Owner do
             row.classification_complete and row.notification_complete
 
         if retired or lost do
-          update_in(state.owners, &Map.delete(&1, session_id))
+          state |> put_in([:owners, session_id], row) |> delete_row(session_id)
         else
           put_in(state, [:owners, session_id], row)
         end
@@ -3370,26 +4073,6 @@ defmodule LoopexDaemon.Owner do
   end
 
   defp release_successor_reservation(state, _operation), do: state
-
-  # Concept: a lease owner is a session-scoped child whose death never stops
-  # the daemon owner. Technical depth: a synchronous call can observe that
-  # death before the linked `EXIT` is consumed; the exit becomes
-  # `{:error, :owner_down}` and the queued `EXIT` completes owner-loss handling.
-  defp lease_owner_call(fun) do
-    fun.()
-  catch
-    :exit, _reason -> {:error, :owner_down}
-  end
-
-  # Concept: a registered child that cannot activate is lost like any other
-  # owner. Technical depth: killing it keeps the link, so the relay's owner
-  # loss and the daemon's linked `EXIT` settle it on the ordinary path.
-  defp activate_installed_owner(owner) do
-    case lease_owner_call(fn -> LeaseOwner.activate(owner) end) do
-      :ok -> :ok
-      _error -> Process.exit(owner, :kill)
-    end
-  end
 
   # Concept: a child the relay never registered has no owner-loss path.
   # Technical depth: it is unlinked, killed and its possible `EXIT` flushed.
@@ -3420,7 +4103,10 @@ defmodule LoopexDaemon.Owner do
       loss_origins: nil,
       classification_complete: false,
       notification_complete: false,
-      loss_pop_started: false
+      loss_pop_started: false,
+      first_permit: nil,
+      pending_dispatch: [],
+      held: []
     }
   end
 
@@ -3450,13 +4136,6 @@ defmodule LoopexDaemon.Owner do
 
       _other ->
         false
-    end
-  end
-
-  defp live_owner(state, session_id) do
-    case Map.get(state.owners, session_id) do
-      %{phase: :live} = row -> {:ok, row}
-      _other -> {:error, :owner_unavailable}
     end
   end
 
@@ -3908,6 +4587,7 @@ defmodule LoopexDaemon.Owner do
     killed = state.stop.killed
 
     map_size(state.mirror_operations) == 0 and map_size(state.pending_dispositions) == 0 and
+      map_size(state.relay_requests) == 0 and
       not Enum.any?(permits, &Map.has_key?(state.operations, &1)) and
       not Enum.any?(state.owners, fn {_session_id, row} ->
         row.phase == :lost or MapSet.member?(killed, row.pid)
@@ -3960,6 +4640,7 @@ defmodule LoopexDaemon.Owner do
         Logger.debug("loopex daemon owner lease freeze cleanup complete")
     end
 
+    state = if match?({:ok, _}, reply), do: put_in(state, [:stop, :frozen], true), else: state
     {:noreply, put_in(state, [:stop, :barrier], nil)}
   end
 
@@ -3971,6 +4652,12 @@ defmodule LoopexDaemon.Owner do
   # instant; a release keeps its exact row but loses both serving instants,
   # so the admission and freeze barriers govern it.
   defp stop_own_serving_operations(state, cut_deadline) do
+    state =
+      state
+      |> stop_own_relay_requests()
+      |> stop_own_attachment_acks()
+      |> answer_held_requests()
+
     operations =
       Map.new(state.mirror_operations, fn
         {operation_ref, %{kind: :owner_loss} = operation} ->
@@ -3988,6 +4675,122 @@ defmodule LoopexDaemon.Owner do
       end)
 
     %{state | mirror_operations: operations}
+  end
+
+  defp stop_own_relay_requests(state) do
+    requests =
+      Map.new(state.relay_requests, fn {request_id, request} ->
+        if request.timer, do: Process.cancel_timer(request.timer)
+        {request_id, %{request | timer: nil}}
+      end)
+
+    %{state | relay_requests: requests}
+  end
+
+  defp stop_own_attachment_acks(state) do
+    acks =
+      Map.new(state.attachment_acks, fn {ack_ref, ack} ->
+        if ack.timer, do: Process.cancel_timer(ack.timer)
+        {ack_ref, %{ack | timer: nil}}
+      end)
+
+    %{state | attachment_acks: acks}
+  end
+
+  # Concept: a request still held when admission closes had no permit, so it
+  # is refused `daemon_stopping` like any request after the cut.
+  defp answer_held_requests(state) do
+    owners =
+      Map.new(state.owners, fn {session_id, row} ->
+        Enum.each(row.held, fn entry ->
+          if entry[:timer], do: Process.cancel_timer(entry.timer)
+          GenServer.reply(entry.from, stopping_answer(state, entry.request))
+        end)
+
+        {session_id, %{row | held: []}}
+      end)
+
+    %{state | owners: owners}
+  end
+
+  defp await_attachment_ack(state, ack_ref, record_ref, owner, owner_incarnation) do
+    timer =
+      if is_nil(state.stop),
+        do: Process.send_after(self(), {:attachment_ack_deadline, ack_ref}, @relay_request_ms)
+
+    ack = %{
+      record_ref: record_ref,
+      owner: owner,
+      owner_incarnation: owner_incarnation,
+      timer: timer
+    }
+
+    put_in(state, [:attachment_acks, ack_ref], ack)
+  end
+
+  defp finish_attachment_ack(state, ack_ref, ack) do
+    if ack.timer, do: Process.cancel_timer(ack.timer)
+    send(state.registry, {:owner_attachment_recorded, self(), ack.record_ref})
+    update_in(state.attachment_acks, &Map.delete(&1, ack_ref))
+  end
+
+  defp finish_owner_attachment_acks(state, owner) do
+    state.attachment_acks
+    |> Enum.filter(fn {_ack_ref, ack} -> ack.owner == owner end)
+    |> Enum.reduce(state, fn {ack_ref, ack}, acc -> finish_attachment_ack(acc, ack_ref, ack) end)
+  end
+
+  defp settle_notice(state, permit_id, operation, :result) do
+    if Map.has_key?(state.pending_dispositions, permit_id) do
+      latch_relay_lost(state)
+    else
+      state = update_in(state.operations, &Map.delete(&1, permit_id))
+      Logger.debug("loopex daemon lease permit settled by its owner")
+
+      maybe_start_owner_loss_pop(
+        state,
+        operation.request.session_id,
+        operation.owner_pid,
+        operation.owner_incarnation
+      )
+    end
+  end
+
+  defp settle_notice(state, permit_id, operation, :connection_lost) do
+    case Map.pop(state.pending_dispositions, permit_id) do
+      {nil, _pending} ->
+        {:noreply, put_in(state, [:operations, permit_id, :phase], :superseded)}
+
+      {loss, pending} ->
+        state = %{state | pending_dispositions: pending}
+        start_waiting_owner_loss_settlement(state, permit_id, operation, loss)
+    end
+  end
+
+  defp settle_notice(state, permit_id, %{actor_pid: actor} = operation, :invalid)
+       when actor == self() do
+    state = put_in(state, [:operations, permit_id, :phase], :refusing)
+    refuse_permit(state, operation, "control_pending", :unproposed)
+  end
+
+  # Concept: a lease owner that cannot settle a permit it was handed through
+  # the relay disagrees with the relay about it; while serving that is the
+  # relay's loss, whose fail-stop closes the waiting client.
+  defp settle_notice(state, permit_id, _operation, :invalid) when is_nil(state.stop) do
+    state = update_in(state.operations, &Map.delete(&1, permit_id))
+    Logger.debug("loopex daemon lease permit left undecided by its owner")
+    latch_relay_lost(state)
+  end
+
+  defp settle_notice(state, permit_id, operation, _shutdown_or_invalid) do
+    state = update_in(state.operations, &Map.delete(&1, permit_id))
+
+    maybe_start_owner_loss_pop(
+      state,
+      operation.request.session_id,
+      operation.owner_pid,
+      operation.owner_incarnation
+    )
   end
 
   defp schedule_deadline(operation_ref, deadline) do

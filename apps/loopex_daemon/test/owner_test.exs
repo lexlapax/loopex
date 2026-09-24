@@ -17,6 +17,25 @@ defmodule LoopexDaemon.OwnerTest do
       {:ok, pid}
     end
 
+    # Technical depth: the owner's reply to a request this connection sent
+    # for a test goes to the test process that asked; everything else is
+    # reported to the listener.
+    defp forward(parent, {[:alias | request_id], reply} = message) do
+      case Process.delete({:manual_request, request_id}) do
+        {caller, reference} -> send(caller, {:manual_reply, reference, reply})
+        nil -> send(parent, {:manual_connection_message, self(), message})
+      end
+    end
+
+    defp forward(parent, {:DOWN, request_id, :process, _owner, _reason} = message) do
+      case Process.delete({:manual_request, request_id}) do
+        {caller, reference} -> send(caller, {:manual_reply, reference, :owner_down})
+        nil -> send(parent, {:manual_connection_message, self(), message})
+      end
+    end
+
+    defp forward(parent, message), do: send(parent, {:manual_connection_message, self(), message})
+
     defp loop(parent, options) do
       receive do
         {:manual_call, caller, reference, :promote} ->
@@ -81,11 +100,16 @@ defmodule LoopexDaemon.OwnerTest do
           send(caller, {:manual_result, reference, operation.()})
           loop(parent, options)
 
+        {:manual_request, caller, reference, request} ->
+          request_id = request.()
+          Process.put({:manual_request, request_id}, {caller, reference})
+          loop(parent, options)
+
         {:connection_abort, _token, _reason} ->
           :ok
 
         message ->
-          send(parent, {:manual_connection_message, self(), message})
+          forward(parent, message)
           loop(parent, options)
       end
     end
@@ -101,8 +125,8 @@ defmodule LoopexDaemon.OwnerTest do
     {acquire_worker, acquire_worker_incarnation} =
       start_worker(connection.pid, acquire_origin)
 
-    assert {:ok, :proposed, lease_owner, owner_incarnation} =
-             Owner.acquire_control(
+    assert {:ok, :accepted, lease_owner, owner_incarnation} =
+             acquire_as(
                owner,
                acquire_origin,
                "acquire-1",
@@ -137,8 +161,8 @@ defmodule LoopexDaemon.OwnerTest do
     {refused_worker, refused_worker_incarnation} =
       start_worker(connection.pid, refused_origin)
 
-    assert {:ok, :completed, ^lease_owner, ^owner_incarnation} =
-             Owner.release_control(
+    assert {:ok, :accepted, ^lease_owner, ^owner_incarnation} =
+             release_as(
                owner,
                refused_origin,
                "release-refused",
@@ -163,8 +187,8 @@ defmodule LoopexDaemon.OwnerTest do
     {release_worker, release_worker_incarnation} =
       start_worker(connection.pid, release_origin)
 
-    assert {:ok, :proposed, ^lease_owner, ^owner_incarnation} =
-             Owner.release_control(
+    assert {:ok, :accepted, ^lease_owner, ^owner_incarnation} =
+             release_as(
                owner,
                release_origin,
                "release-1",
@@ -210,8 +234,8 @@ defmodule LoopexDaemon.OwnerTest do
     {successor_worker, successor_worker_incarnation} =
       start_worker(connection.pid, successor_origin)
 
-    assert {:ok, :proposed, successor, successor_incarnation} =
-             Owner.acquire_control(
+    assert {:ok, :accepted, successor, successor_incarnation} =
+             acquire_as(
                owner,
                successor_origin,
                "acquire-2",
@@ -252,8 +276,8 @@ defmodule LoopexDaemon.OwnerTest do
         session_id = "capacity-#{sequence}"
         {worker, worker_incarnation} = start_worker(connection.pid, origin)
 
-        assert {:ok, :proposed, lease_owner, owner_incarnation} =
-                 Owner.acquire_control(
+        assert {:ok, :accepted, lease_owner, owner_incarnation} =
+                 acquire_as(
                    owner,
                    origin,
                    "acquire-#{sequence}",
@@ -281,8 +305,8 @@ defmodule LoopexDaemon.OwnerTest do
     release_origin = {connection.incarnation, 0, 513}
     {release_worker, release_worker_incarnation} = start_worker(connection.pid, release_origin)
 
-    assert {:ok, :proposed, ^predecessor, ^predecessor_incarnation} =
-             Owner.release_control(
+    assert {:ok, :accepted, ^predecessor, ^predecessor_incarnation} =
+             release_as(
                owner,
                release_origin,
                "release-capacity-1",
@@ -322,8 +346,8 @@ defmodule LoopexDaemon.OwnerTest do
 
     successor_deadline = now_ms() + 5_000
 
-    assert {:ok, :queued, ^owner, _daemon_incarnation} =
-             Owner.acquire_control(
+    assert {:ok, :accepted, ^owner, _daemon_incarnation} =
+             acquire_as(
                owner,
                successor_origin,
                "acquire-successor",
@@ -337,8 +361,8 @@ defmodule LoopexDaemon.OwnerTest do
 
     assert_receive {:worker_go, ^successor_worker, ^successor_origin}, 500
 
-    assert {:ok, :queued, ^owner, _daemon_incarnation} =
-             Owner.acquire_control(
+    assert {:ok, :accepted, ^owner, _daemon_incarnation} =
+             acquire_as(
                owner,
                successor_origin,
                "acquire-successor",
@@ -363,7 +387,7 @@ defmodule LoopexDaemon.OwnerTest do
       start_worker(connection.pid, unrelated_origin)
 
     assert {:error, :control_capacity_reached} =
-             Owner.acquire_control(
+             acquire_as(
                owner,
                unrelated_origin,
                "acquire-unrelated",
@@ -416,8 +440,8 @@ defmodule LoopexDaemon.OwnerTest do
     acquire_origin = {holder.incarnation, 0, 1}
     {acquire_worker, acquire_worker_incarnation} = start_worker(holder.pid, acquire_origin)
 
-    assert {:ok, :proposed, predecessor, predecessor_incarnation} =
-             Owner.acquire_control(
+    assert {:ok, :accepted, predecessor, predecessor_incarnation} =
+             acquire_as(
                owner,
                acquire_origin,
                "acquire-held",
@@ -439,8 +463,8 @@ defmodule LoopexDaemon.OwnerTest do
     release_origin = {holder.incarnation, 0, 2}
     {release_worker, release_worker_incarnation} = start_worker(holder.pid, release_origin)
 
-    assert {:ok, :proposed, ^predecessor, ^predecessor_incarnation} =
-             Owner.release_control(
+    assert {:ok, :accepted, ^predecessor, ^predecessor_incarnation} =
+             release_as(
                owner,
                release_origin,
                "release-held",
@@ -467,8 +491,8 @@ defmodule LoopexDaemon.OwnerTest do
     {successor_worker, successor_worker_incarnation} =
       start_worker(successor.pid, successor_origin)
 
-    assert {:ok, :queued, ^owner, _daemon_incarnation} =
-             Owner.acquire_control(
+    assert {:ok, :accepted, ^owner, _daemon_incarnation} =
+             acquire_as(
                owner,
                successor_origin,
                "acquire-cancelled",
@@ -513,8 +537,8 @@ defmodule LoopexDaemon.OwnerTest do
     acquire_origin = {holder.incarnation, 0, 1}
     {acquire_worker, acquire_worker_incarnation} = start_worker(holder.pid, acquire_origin)
 
-    assert {:ok, :proposed, predecessor, predecessor_incarnation} =
-             Owner.acquire_control(
+    assert {:ok, :accepted, predecessor, predecessor_incarnation} =
+             acquire_as(
                owner,
                acquire_origin,
                "owner-loss-acquire",
@@ -566,8 +590,8 @@ defmodule LoopexDaemon.OwnerTest do
     {successor_worker, successor_worker_incarnation} =
       start_worker(successor.pid, successor_origin)
 
-    assert {:ok, :queued, ^owner, _daemon_incarnation} =
-             Owner.acquire_control(
+    assert {:ok, :accepted, ^owner, _daemon_incarnation} =
+             acquire_as(
                owner,
                successor_origin,
                "owner-loss-successor",
@@ -630,8 +654,8 @@ defmodule LoopexDaemon.OwnerTest do
     acquire_origin = {holder.incarnation, 0, 1}
     {acquire_worker, acquire_worker_incarnation} = start_worker(holder.pid, acquire_origin)
 
-    assert {:ok, :proposed, lease_owner, owner_incarnation} =
-             Owner.acquire_control(
+    assert {:ok, :accepted, lease_owner, owner_incarnation} =
+             acquire_as(
                owner,
                acquire_origin,
                "release-owner-loss-acquire",
@@ -658,7 +682,7 @@ defmodule LoopexDaemon.OwnerTest do
 
     release_task =
       Task.async(fn ->
-        Owner.release_control(
+        release_as(
           owner,
           release_origin,
           "release-owner-loss",
@@ -676,7 +700,7 @@ defmodule LoopexDaemon.OwnerTest do
     suspend_task = Task.async(fn -> :sys.suspend(owner) end)
     :sys.resume(lease_owner)
 
-    assert {:ok, :proposed, ^lease_owner, ^owner_incarnation} = Task.await(release_task, 500)
+    assert {:ok, :accepted, ^lease_owner, ^owner_incarnation} = Task.await(release_task, 500)
     assert :ok = Task.await(suspend_task, 500)
     assert_receive {:worker_go, ^release_worker, ^release_origin}, 500
 
@@ -730,8 +754,8 @@ defmodule LoopexDaemon.OwnerTest do
     acquire_origin = {holder.incarnation, 0, 1}
     {acquire_worker, acquire_worker_incarnation} = start_worker(holder.pid, acquire_origin)
 
-    assert {:ok, :proposed, lease_owner, owner_incarnation} =
-             Owner.acquire_control(
+    assert {:ok, :accepted, lease_owner, owner_incarnation} =
+             acquire_as(
                owner,
                acquire_origin,
                "selected-release-acquire",
@@ -756,8 +780,8 @@ defmodule LoopexDaemon.OwnerTest do
     {release_worker, release_worker_incarnation} = start_worker(holder.pid, release_origin)
     :sys.suspend(components.registry)
 
-    assert {:ok, :proposed, ^lease_owner, ^owner_incarnation} =
-             Owner.release_control(
+    assert {:ok, :accepted, ^lease_owner, ^owner_incarnation} =
+             release_as(
                owner,
                release_origin,
                "selected-release",
@@ -821,8 +845,8 @@ defmodule LoopexDaemon.OwnerTest do
     {worker, worker_incarnation} = start_worker(holder.pid, origin)
     :sys.suspend(components.registry)
 
-    assert {:ok, :proposed, lease_owner, _owner_incarnation} =
-             Owner.acquire_control(
+    assert {:ok, :accepted, lease_owner, _owner_incarnation} =
+             acquire_as(
                owner,
                origin,
                "selected-fresh-grant",
@@ -899,8 +923,8 @@ defmodule LoopexDaemon.OwnerTest do
     former_origin = {former.incarnation, 0, 1}
     {former_worker, former_worker_incarnation} = start_worker(former.pid, former_origin)
 
-    assert {:ok, :proposed, lease_owner, owner_incarnation} =
-             Owner.acquire_control(
+    assert {:ok, :accepted, lease_owner, owner_incarnation} =
+             acquire_as(
                owner,
                former_origin,
                "existing-grant-former",
@@ -926,8 +950,8 @@ defmodule LoopexDaemon.OwnerTest do
     {successor_worker, successor_worker_incarnation} =
       start_worker(successor.pid, successor_origin)
 
-    assert {:ok, :queued, ^lease_owner, ^owner_incarnation} =
-             Owner.acquire_control(
+    assert {:ok, :accepted, ^lease_owner, ^owner_incarnation} =
+             acquire_as(
                owner,
                successor_origin,
                "existing-grant-successor",
@@ -996,8 +1020,8 @@ defmodule LoopexDaemon.OwnerTest do
     {worker, worker_incarnation} = start_worker(holder.pid, origin)
     :sys.suspend(components.registry)
 
-    assert {:ok, :proposed, lease_owner, _owner_incarnation} =
-             Owner.acquire_control(
+    assert {:ok, :accepted, lease_owner, _owner_incarnation} =
+             acquire_as(
                owner,
                origin,
                "cancelled-grant-owner-loss",
@@ -1074,7 +1098,7 @@ defmodule LoopexDaemon.OwnerTest do
 
     acquire =
       Task.async(fn ->
-        Owner.acquire_control(
+        acquire_as(
           owner,
           origin,
           "unproposed-first-acquire",
@@ -1097,7 +1121,7 @@ defmodule LoopexDaemon.OwnerTest do
       :sys.install(
         child,
         {fn
-           :waiting, {:in, {:"$gen_call", _from, request}}, _proc_state
+           :waiting, {:in, {:lease_request, _owner, _incarnation, request}}, _proc_state
            when is_tuple(request) and elem(request, 0) == :first_acquire ->
              send(test_pid, :first_acquire_held)
 
@@ -1116,7 +1140,7 @@ defmodule LoopexDaemon.OwnerTest do
     child_monitor = Process.monitor(child)
     Process.exit(child, :kill)
     assert_receive {:DOWN, ^child_monitor, :process, ^child, :killed}, 500
-    assert {:ok, :queued, ^child, _owner_incarnation} = Task.await(acquire, 1_000)
+    assert {:ok, :accepted, ^child, _owner_incarnation} = Task.await(acquire, 1_000)
     assert_receive {:worker_go, ^worker, ^origin}, 500
 
     assert_receive {:manual_connection_message, ^holder_pid,
@@ -1151,8 +1175,8 @@ defmodule LoopexDaemon.OwnerTest do
 
     owner_monitor = Process.monitor(owner)
 
-    assert {:ok, :proposed, lease_owner, owner_incarnation} =
-             Owner.acquire_control(
+    assert {:ok, :accepted, lease_owner, owner_incarnation} =
+             acquire_as(
                owner,
                origin,
                "deadline-acquire",
@@ -1180,8 +1204,8 @@ defmodule LoopexDaemon.OwnerTest do
 
     :sys.suspend(components.registry)
 
-    assert {:ok, :proposed, lease_owner, _owner_incarnation} =
-             Owner.acquire_control(
+    assert {:ok, :accepted, lease_owner, _owner_incarnation} =
+             acquire_as(
                owner,
                origin,
                "lost-acquire",
@@ -1222,8 +1246,8 @@ defmodule LoopexDaemon.OwnerTest do
     {acquire_worker, acquire_worker_incarnation} =
       start_worker(connection.pid, acquire_origin)
 
-    assert {:ok, :proposed, lease_owner, owner_incarnation} =
-             Owner.acquire_control(
+    assert {:ok, :accepted, lease_owner, owner_incarnation} =
+             acquire_as(
                owner,
                acquire_origin,
                "release-loss-acquire",
@@ -1251,7 +1275,7 @@ defmodule LoopexDaemon.OwnerTest do
 
     release_task =
       Task.async(fn ->
-        Owner.release_control(
+        release_as(
           owner,
           release_origin,
           "lost-release",
@@ -1269,7 +1293,7 @@ defmodule LoopexDaemon.OwnerTest do
     suspend_task = Task.async(fn -> :sys.suspend(owner) end)
     :sys.resume(lease_owner)
 
-    assert {:ok, :proposed, ^lease_owner, ^owner_incarnation} = Task.await(release_task, 500)
+    assert {:ok, :accepted, ^lease_owner, ^owner_incarnation} = Task.await(release_task, 500)
     assert :ok = Task.await(suspend_task, 500)
     assert_receive {:worker_go, ^release_worker, ^release_origin}, 500
 
@@ -1300,8 +1324,8 @@ defmodule LoopexDaemon.OwnerTest do
     origin = {connection.incarnation, 0, 1}
     {worker, worker_incarnation} = start_worker(connection.pid, origin)
 
-    assert {:ok, :proposed, lease_owner, _owner_incarnation} =
-             Owner.acquire_control(
+    assert {:ok, :accepted, lease_owner, _owner_incarnation} =
+             acquire_as(
                owner,
                origin,
                "expiring-acquire",
@@ -1329,8 +1353,8 @@ defmodule LoopexDaemon.OwnerTest do
     origin = {holder.incarnation, 0, 1}
     {worker, worker_incarnation} = start_worker(holder.pid, origin)
 
-    assert {:ok, :proposed, lease_owner, _owner_incarnation} =
-             Owner.acquire_control(
+    assert {:ok, :accepted, lease_owner, _owner_incarnation} =
+             acquire_as(
                owner,
                origin,
                "expiry-owner-loss-acquire",
@@ -1398,7 +1422,7 @@ defmodule LoopexDaemon.OwnerTest do
 
     release_task =
       Task.async(fn ->
-        Owner.release_control(
+        release_as(
           owner,
           release_origin,
           "unproposed-release",
@@ -1416,7 +1440,7 @@ defmodule LoopexDaemon.OwnerTest do
     lease_owner_monitor = Process.monitor(lease_owner)
     Process.exit(lease_owner, :kill)
     assert_receive {:DOWN, ^lease_owner_monitor, :process, ^lease_owner, :killed}, 500
-    assert {:ok, :queued, ^lease_owner, ^owner_incarnation} = Task.await(release_task, 1_000)
+    assert {:ok, :accepted, ^lease_owner, ^owner_incarnation} = Task.await(release_task, 1_000)
 
     assert_receive {:manual_connection_message, ^holder_pid,
                     {:daemon_control_owner_lost, ^owner, close_ref, "unproposed-release-session",
@@ -1459,8 +1483,8 @@ defmodule LoopexDaemon.OwnerTest do
     {release_worker, release_worker_incarnation} = start_worker(holder.pid, release_origin)
     park_relay_operation(components.relay, :select_result)
 
-    assert {:ok, :proposed, ^lease_owner, ^owner_incarnation} =
-             Owner.release_control(
+    assert {:ok, :accepted, ^lease_owner, ^owner_incarnation} =
+             release_as(
                owner,
                release_origin,
                "selected-before-clear",
@@ -1524,8 +1548,8 @@ defmodule LoopexDaemon.OwnerTest do
     {release_worker, release_worker_incarnation} = start_worker(holder.pid, release_origin)
     park_relay_operation(components.relay, :settle_result)
 
-    assert {:ok, :proposed, ^lease_owner, ^owner_incarnation} =
-             Owner.release_control(
+    assert {:ok, :accepted, ^lease_owner, ^owner_incarnation} =
+             release_as(
                owner,
                release_origin,
                "cleared-release",
@@ -1581,8 +1605,8 @@ defmodule LoopexDaemon.OwnerTest do
     {release_worker, release_worker_incarnation} = start_worker(holder.pid, release_origin)
     park_relay_operation(components.relay, :settle_result)
 
-    assert {:ok, :proposed, ^lease_owner, ^owner_incarnation} =
-             Owner.release_control(
+    assert {:ok, :accepted, ^lease_owner, ^owner_incarnation} =
+             release_as(
                owner,
                release_origin,
                "malformed-settlement",
@@ -1773,8 +1797,8 @@ defmodule LoopexDaemon.OwnerTest do
     {worker, worker_incarnation} = start_worker(holder.pid, origin)
     :sys.suspend(components.registry)
 
-    assert {:ok, :proposed, lease_owner, _owner_incarnation} =
-             Owner.acquire_control(
+    assert {:ok, :accepted, lease_owner, _owner_incarnation} =
+             acquire_as(
                owner,
                origin,
                "uncommitted-install",
@@ -1846,8 +1870,8 @@ defmodule LoopexDaemon.OwnerTest do
     {successor_worker, successor_worker_incarnation} =
       start_worker(successor.pid, successor_origin)
 
-    assert {:ok, :proposed, successor_owner, _successor_owner_incarnation} =
-             Owner.acquire_control(
+    assert {:ok, :accepted, successor_owner, _successor_owner_incarnation} =
+             acquire_as(
                owner,
                successor_origin,
                "stale-mirror-successor",
@@ -2078,8 +2102,8 @@ defmodule LoopexDaemon.OwnerTest do
         origin = {connection.incarnation, 0, sequence}
         {worker, worker_incarnation} = start_worker(connection.pid, origin)
 
-        assert {:ok, :proposed, lease_owner, _owner_incarnation} =
-                 Owner.acquire_control(
+        assert {:ok, :accepted, lease_owner, _owner_incarnation} =
+                 acquire_as(
                    owner,
                    origin,
                    "overlap-#{sequence}",
@@ -2208,8 +2232,8 @@ defmodule LoopexDaemon.OwnerTest do
     origin = {holder.incarnation, 2, 1}
     {worker, worker_incarnation} = start_worker(holder.pid, origin)
 
-    assert {:ok, :queued, ^lease_owner, ^owner_incarnation} =
-             Owner.acquire_control(
+    assert {:ok, :accepted, ^lease_owner, ^owner_incarnation} =
+             acquire_as(
                owner,
                origin,
                "admitted-renewal",
@@ -2298,8 +2322,8 @@ defmodule LoopexDaemon.OwnerTest do
     release_origin = {connection.incarnation, 1, 1}
     {release_worker, release_worker_incarnation} = start_worker(connection.pid, release_origin)
 
-    assert {:ok, :proposed, ^predecessor, ^predecessor_incarnation} =
-             Owner.release_control(
+    assert {:ok, :accepted, ^predecessor, ^predecessor_incarnation} =
+             release_as(
                owner,
                release_origin,
                "unmaterialized-release",
@@ -2327,8 +2351,8 @@ defmodule LoopexDaemon.OwnerTest do
 
     daemon_incarnation = components.daemon_incarnation
 
-    assert {:ok, :queued, ^owner, ^daemon_incarnation} =
-             Owner.acquire_control(
+    assert {:ok, :accepted, ^owner, ^daemon_incarnation} =
+             acquire_as(
                owner,
                successor_origin,
                "unmaterialized-successor",
@@ -2481,8 +2505,8 @@ defmodule LoopexDaemon.OwnerTest do
     {release_worker, release_worker_incarnation} = start_worker(holder.pid, release_origin)
     park_relay_operation(components.relay, :settle_result)
 
-    assert {:ok, :proposed, ^lease_owner, ^owner_incarnation} =
-             Owner.release_control(
+    assert {:ok, :accepted, ^lease_owner, ^owner_incarnation} =
+             release_as(
                owner,
                release_origin,
                "settled-in-time",
@@ -2526,8 +2550,8 @@ defmodule LoopexDaemon.OwnerTest do
     park_relay_operation(components.relay, :settle_result)
     owner_monitor = Process.monitor(owner)
 
-    assert {:ok, :proposed, ^lease_owner, ^owner_incarnation} =
-             Owner.release_control(
+    assert {:ok, :accepted, ^lease_owner, ^owner_incarnation} =
+             release_as(
                owner,
                release_origin,
                "settlement-deadline",
@@ -2672,7 +2696,7 @@ defmodule LoopexDaemon.OwnerTest do
     {lease_owner, _owner_incarnation, _successor_origin} =
       queue_successor_behind_expiry(owner, components, former, successor, "discard-session")
 
-    assert %{waiting_acquires: 1} = LeaseOwner.status(lease_owner)
+    assert :ok = wait_for_lease_owner(lease_owner, &(&1.waiting_acquires == 1))
     Process.exit(successor.pid, :kill)
 
     assert :ok =
@@ -2835,10 +2859,16 @@ defmodule LoopexDaemon.OwnerTest do
     # seconds, so the acquire is called with a longer bound than the client's.
     acquire =
       Task.async(fn ->
-        GenServer.call(
+        acquire_as(
           owner,
-          {:acquire_control, origin, "held-child-acquire", "held-child-session", holder.pid,
-           holder.incarnation, worker, worker_incarnation, now_ms() + 30_000},
+          origin,
+          "held-child-acquire",
+          "held-child-session",
+          holder.pid,
+          holder.incarnation,
+          worker,
+          worker_incarnation,
+          now_ms() + 30_000,
           10_000
         )
       end)
@@ -2851,7 +2881,7 @@ defmodule LoopexDaemon.OwnerTest do
       :sys.install(
         child,
         {fn
-           :waiting, {:in, {:"$gen_call", _from, request}}, _proc_state
+           :waiting, {:in, {:lease_request, _owner, _incarnation, request}}, _proc_state
            when is_tuple(request) and elem(request, 0) == :first_acquire ->
              send(test_pid, :first_acquire_held)
 
@@ -2866,7 +2896,7 @@ defmodule LoopexDaemon.OwnerTest do
 
     :sys.resume(child)
     assert_receive :first_acquire_held, 500
-    assert {:ok, :queued, ^child, child_incarnation} = Task.await(acquire, 10_000)
+    assert {:ok, :accepted, ^child, child_incarnation} = Task.await(acquire, 10_000)
     Process.exit(holder.pid, :kill)
     assert :ok = wait_for_pending_dispositions(owner, 1)
     assert {:ok, _cut_ref} = Owner.cut_admission(owner, 5_000)
@@ -2887,6 +2917,10 @@ defmodule LoopexDaemon.OwnerTest do
       {:lease_grant_proposed, make_ref(), origin, child, child_incarnation, "held-child-session",
        holder.pid, holder.incarnation, :crypto.strong_rand_bytes(16), now_ms() + 30_000}
     )
+
+    # Concept (T7, R7): a notice for an operation the freeze tombstoned is
+    # cleanup-only.
+    send(owner, {:lease_permit_settled, origin, child, child_incarnation, :result})
 
     assert %{
              pending_dispositions: 0,
@@ -2968,8 +3002,8 @@ defmodule LoopexDaemon.OwnerTest do
     {release_worker, release_worker_incarnation} = start_worker(holder.pid, release_origin)
     park_relay_operation(components.relay, :settle_result)
 
-    assert {:ok, :proposed, ^lease_owner, ^owner_incarnation} =
-             Owner.release_control(
+    assert {:ok, :accepted, ^lease_owner, ^owner_incarnation} =
+             release_as(
                owner,
                release_origin,
                "late-release-ack",
@@ -3002,8 +3036,8 @@ defmodule LoopexDaemon.OwnerTest do
     origin = {connection.incarnation, 0, 1}
     {worker, worker_incarnation} = start_worker(connection.pid, origin)
 
-    assert {:ok, :proposed, lease_owner, owner_incarnation} =
-             Owner.acquire_control(
+    assert {:ok, :accepted, lease_owner, owner_incarnation} =
+             acquire_as(
                owner,
                origin,
                "#{session_id}-acquire",
@@ -3034,8 +3068,8 @@ defmodule LoopexDaemon.OwnerTest do
     former_origin = {former.incarnation, 0, 1}
     {former_worker, former_worker_incarnation} = start_worker(former.pid, former_origin)
 
-    assert {:ok, :proposed, lease_owner, owner_incarnation} =
-             Owner.acquire_control(
+    assert {:ok, :accepted, lease_owner, owner_incarnation} =
+             acquire_as(
                owner,
                former_origin,
                "#{session_id}-former",
@@ -3060,8 +3094,8 @@ defmodule LoopexDaemon.OwnerTest do
     {successor_worker, successor_worker_incarnation} =
       start_worker(successor.pid, successor_origin)
 
-    assert {:ok, :queued, ^lease_owner, ^owner_incarnation} =
-             Owner.acquire_control(
+    assert {:ok, :accepted, ^lease_owner, ^owner_incarnation} =
+             acquire_as(
                owner,
                successor_origin,
                "#{session_id}-successor",
@@ -3497,6 +3531,1967 @@ defmodule LoopexDaemon.OwnerTest do
 
   # An owner state with one final close pending, answered to the test under
   # `tag`.
+  # Concept (T1): the daemon owner never waits on a lease owner, so a
+  # suspended lease owner leaves the owner answering its connections.
+  #
+  # Technical depth: the holder's renewal is accepted when the relay opens
+  # its permit, and a status request answers promptly, while the lease owner
+  # stays suspended; the renewal completes once it resumes.
+  test "the owner stays responsive while a lease owner is suspended" do
+    owner = start_owner()
+    components = Owner.components(owner)
+    holder = initialized_connection(components)
+    session_id = "responsive-session"
+    {lease_owner, owner_incarnation, _epoch} = acquire_held(owner, holder, session_id)
+    :sys.suspend(lease_owner)
+    origin = {holder.incarnation, 1, 1}
+    {worker, worker_incarnation} = start_worker(holder.pid, origin)
+
+    renewal =
+      Task.async(fn ->
+        acquire_as(
+          owner,
+          origin,
+          "responsive-renewal",
+          session_id,
+          holder.pid,
+          holder.incarnation,
+          worker,
+          worker_incarnation,
+          now_ms() + 2_000
+        )
+      end)
+
+    assert {:ok, :accepted, ^lease_owner, ^owner_incarnation} = Task.await(renewal, 500)
+    assert %{live_owners: 1} = Task.await(Task.async(fn -> Owner.status(owner) end), 500)
+    :sys.resume(lease_owner)
+
+    assert_receive {:manual_connection_message, _holder,
+                    {:relay_permit_result, ^origin, %{"result" => %{"renewed" => true}}}},
+                   500
+  end
+
+  # Concept (T2): a relay that leaves the owner's open unanswered for five
+  # seconds while serving is named `relay_lost` exactly once; the owner
+  # answers meanwhile, and the waiting connection gets its one answer.
+  @tag timeout: 30_000
+  test "an open unanswered for five seconds latches relay_lost once" do
+    owner = start_owner(fatal_recipient: self())
+    components = Owner.components(owner)
+    holder = initialized_connection(components)
+    session_id = "unanswered-open"
+    {_lease_owner, _owner_incarnation, _epoch} = acquire_held(owner, holder, session_id)
+    origin = {holder.incarnation, 1, 1}
+    {worker, worker_incarnation} = start_worker(holder.pid, origin)
+    relay_monitor = Process.monitor(components.relay)
+
+    park_relay_message(
+      components.relay,
+      &match?({:"$gen_call", _from, {:open_lease_permit, _, ^origin, _, _, _, _, _, _, _}}, &1),
+      :open_parked,
+      :continue_open
+    )
+
+    started = now_ms()
+
+    renewal =
+      Task.async(fn ->
+        long_acquire(
+          owner,
+          origin,
+          "unanswered-open",
+          session_id,
+          holder,
+          {worker, worker_incarnation}
+        )
+      end)
+
+    assert_receive :open_parked, 500
+    assert %{live_owners: 1} = Task.await(Task.async(fn -> Owner.status(owner) end), 500)
+    assert_receive {:daemon_component_fatal, ^owner, :relay_lost}, 6_000
+    assert now_ms() - started >= 4_900
+    assert_receive {:DOWN, ^relay_monitor, :process, _relay, :killed}, 1_000
+    assert {:error, :daemon_stopping} = Task.await(renewal, 1_000)
+    refute_receive {:daemon_component_fatal, _reporter, _class}, 300
+  end
+
+  # Concept (D1, T4): a queued acquire the lease owner later settles
+  # directly — here refused at its request deadline — is removed from the
+  # owner's operations by its notice while its lease owner is still live, so
+  # nothing waits on it.
+  #
+  # Technical depth: the observer queues behind the holder's release, held at
+  # the suspended registry's mirror clear. Its short request deadline passes
+  # either while it waits or before it is claimed; both are the lease owner's
+  # direct `control_pending`, so the outcome does not depend on timing. After
+  # the registry resumes, the released lease owner retires and its slot frees.
+  test "a queued acquire settled directly leaves no operation" do
+    owner = start_owner()
+    components = Owner.components(owner)
+    holder = initialized_connection(components)
+    observer = initialized_connection(components)
+    session_id = "direct-session"
+    {lease_owner, owner_incarnation, epoch} = acquire_held(owner, holder, session_id)
+    :sys.suspend(components.registry)
+    release_origin = {holder.incarnation, 1, 1}
+    {release_worker, release_worker_incarnation} = start_worker(holder.pid, release_origin)
+
+    assert {:ok, :accepted, ^lease_owner, ^owner_incarnation} =
+             release_as(
+               owner,
+               release_origin,
+               "direct-release",
+               session_id,
+               holder.pid,
+               holder.incarnation,
+               release_worker,
+               release_worker_incarnation,
+               epoch,
+               now_ms() + 5_000
+             )
+
+    assert :ok = wait_for_mirror_step(owner, :release, :clear)
+    origin = {observer.incarnation, 0, 1}
+    {worker, worker_incarnation} = start_worker(observer.pid, origin)
+
+    assert {:ok, :accepted, ^lease_owner, ^owner_incarnation} =
+             acquire_as(
+               owner,
+               origin,
+               "direct-acquire",
+               session_id,
+               observer.pid,
+               observer.incarnation,
+               worker,
+               worker_incarnation,
+               now_ms() + 100
+             )
+
+    observer_pid = observer.pid
+
+    assert_receive {:manual_connection_message, ^observer_pid,
+                    {:relay_permit_result, ^origin, %{"code" => "control_pending"}}},
+                   2_000
+
+    assert :ok =
+             wait_for_status(owner, fn _status ->
+               not Map.has_key?(:sys.get_state(owner).operations, origin)
+             end)
+
+    assert Process.alive?(lease_owner)
+    :sys.resume(components.registry)
+    assert %{owner_slots: 0, lease_operations: 0} = wait_for_owner_retirement(owner)
+  end
+
+  # Concept (T5, R5, notice first): a `connection_lost` notice that arrives
+  # before the relay's disposition marks the operation superseded, and the
+  # disposition then settles it once, without the lease owner.
+  #
+  # Technical depth: the lease owner is suspended, so the notice is forged;
+  # the settlement completes while it stays suspended. Its later claim finds
+  # no permit and its notice is cleanup-only.
+  test "a connection_lost notice before the disposition settles once" do
+    assert_connection_lost_notice(:notice_first)
+  end
+
+  # Concept (T5, R5, disposition first): the notice then settles the
+  # retained disposition itself, and the lease owner's later discard answer
+  # finds nothing.
+  test "a connection_lost notice after the disposition settles once" do
+    assert_connection_lost_notice(:disposition_first)
+  end
+
+  # Concept (D3, T6): a lease owner that dies after the relay recorded its
+  # result, but before it saw the answer, strands no operation: once its
+  # exit and the relay's loss report are both seen, its unmirrored
+  # operations outside the relay's claim are deleted and the loss finishes.
+  #
+  # Technical depth: a relay debug hook suspends the lease owner when its
+  # renewal completion arrives and kills it once the relay has answered.
+  test "a lease owner killed after its recorded result strands no operation" do
+    owner = start_owner()
+    components = Owner.components(owner)
+    holder = initialized_connection(components)
+    session_id = "recorded-result"
+    {lease_owner, owner_incarnation, _epoch} = acquire_held(owner, holder, session_id)
+    test_pid = self()
+
+    :ok =
+      :sys.install(
+        components.relay,
+        {fn
+           :waiting, {:in, {:"$gen_call", {^lease_owner, _tag}, request}}, _proc_state
+           when elem(request, 0) == :complete_lease_permit ->
+             :sys.suspend(lease_owner)
+             :recorded
+
+           :recorded, {:out, _reply, {^lease_owner, _tag}, _state}, _proc_state ->
+             Process.exit(lease_owner, :kill)
+             send(test_pid, :lease_owner_killed)
+             :done
+
+           hook_state, _event, _proc_state ->
+             hook_state
+         end, :waiting}
+      )
+
+    origin = {holder.incarnation, 1, 1}
+    {worker, worker_incarnation} = start_worker(holder.pid, origin)
+
+    assert {:ok, :accepted, ^lease_owner, ^owner_incarnation} =
+             acquire_as(
+               owner,
+               origin,
+               "recorded-renewal",
+               session_id,
+               holder.pid,
+               holder.incarnation,
+               worker,
+               worker_incarnation,
+               now_ms() + 2_000
+             )
+
+    assert_receive :lease_owner_killed, 500
+
+    assert_receive {:manual_connection_message, _holder,
+                    {:relay_permit_result, ^origin, %{"result" => %{"renewed" => true}}}},
+                   500
+
+    holder_pid = holder.pid
+
+    assert_receive {:manual_connection_message, ^holder_pid,
+                    {:daemon_control_owner_lost, ^owner, close_ref, ^session_id, _incarnation}},
+                   1_000
+
+    close_owner_loss_holder(owner, holder, close_ref)
+    assert %{owner_slots: 0, lease_operations: 0} = wait_for_owner_retirement(owner)
+  end
+
+  # Concept (T8): a request whose deadline passed before it reached its
+  # lease owner is still claimed and answered by the relay, `control_pending`.
+  #
+  # Technical depth: the relay is parked on the observer's open past the
+  # request's 100 ms deadline.
+  test "a request expired before it reaches the lease owner gets control_pending" do
+    owner = start_owner()
+    components = Owner.components(owner)
+    holder = initialized_connection(components)
+    observer = initialized_connection(components)
+    session_id = "expired-in-transit"
+    {lease_owner, owner_incarnation, _epoch} = acquire_held(owner, holder, session_id)
+    origin = {observer.incarnation, 0, 1}
+    {worker, worker_incarnation} = start_worker(observer.pid, origin)
+
+    park_relay_message(
+      components.relay,
+      &match?({:"$gen_call", _from, {:open_lease_permit, _, ^origin, _, _, _, _, _, _, _}}, &1),
+      :open_parked,
+      :continue_open
+    )
+
+    acquire =
+      Task.async(fn ->
+        acquire_as(
+          owner,
+          origin,
+          "expired-in-transit",
+          session_id,
+          observer.pid,
+          observer.incarnation,
+          worker,
+          worker_incarnation,
+          now_ms() + 100
+        )
+      end)
+
+    assert_receive :open_parked, 500
+    Process.sleep(200)
+    send(components.relay, :continue_open)
+    assert {:ok, :accepted, ^lease_owner, ^owner_incarnation} = Task.await(acquire, 500)
+    observer_pid = observer.pid
+
+    assert_receive {:manual_connection_message, ^observer_pid,
+                    {:relay_permit_result, ^origin, %{"code" => "control_pending"}}},
+                   500
+  end
+
+  # Concept (T18, F4): a request for a session whose lease owner is still
+  # registering waits and is dispatched after that owner's first acquire, so
+  # it is decided against the first acquire's grant.
+  #
+  # Technical depth: the relay is parked on the registration; the second
+  # acquire arrives meanwhile and is held in the row's `pending_dispatch`.
+  test "an acquire during registration is dispatched after the first acquire" do
+    owner = start_owner()
+    components = Owner.components(owner)
+    first = initialized_connection(components)
+    second = initialized_connection(components)
+    session_id = "registering-session"
+
+    park_relay_message(
+      components.relay,
+      &match?({:"$gen_call", _from, {:register_lease_owner, ^session_id, _, _}}, &1),
+      :register_parked,
+      :continue_register
+    )
+
+    first_origin = {first.incarnation, 0, 1}
+    {first_worker, first_worker_incarnation} = start_worker(first.pid, first_origin)
+
+    assert {:ok, :accepted, lease_owner, owner_incarnation} =
+             acquire_as(
+               owner,
+               first_origin,
+               "registering-first",
+               session_id,
+               first.pid,
+               first.incarnation,
+               first_worker,
+               first_worker_incarnation,
+               now_ms() + 2_000
+             )
+
+    assert_receive :register_parked, 500
+    second_origin = {second.incarnation, 0, 1}
+    {second_worker, second_worker_incarnation} = start_worker(second.pid, second_origin)
+
+    queued =
+      Task.async(fn ->
+        acquire_as(
+          owner,
+          second_origin,
+          "registering-second",
+          session_id,
+          second.pid,
+          second.incarnation,
+          second_worker,
+          second_worker_incarnation,
+          now_ms() + 2_000
+        )
+      end)
+
+    assert :ok =
+             wait_for_status(owner, fn _status ->
+               match?(
+                 %{owners: %{^session_id => %{phase: :registering, pending_dispatch: [_]}}},
+                 :sys.get_state(owner)
+               )
+             end)
+
+    send(components.relay, :continue_register)
+    assert {:ok, :accepted, ^lease_owner, ^owner_incarnation} = Task.await(queued, 1_000)
+
+    assert_receive {:manual_connection_message, _first,
+                    {:relay_permit_result, ^first_origin, %{"result" => %{"writer_epoch" => _}}}},
+                   1_000
+
+    second_pid = second.pid
+
+    assert_receive {:manual_connection_message, ^second_pid,
+                    {:relay_permit_result, ^second_origin, %{"code" => "control_held"}}},
+                   1_000
+  end
+
+  # Concept (T18, F4, error branch): a registration the relay refuses
+  # discards the started child, frees its slot and refuses the first acquire
+  # through the relay.
+  #
+  # Technical depth: the owner is suspended once the relay has admitted the
+  # first acquire's claim; a conflicting lease-owner row is then written into
+  # the relay's state, so the registration that follows is refused.
+  test "a refused registration discards its child and refuses the first acquire" do
+    owner = start_owner()
+    components = Owner.components(owner)
+    connection = initialized_connection(components)
+    session_id = "refused-registration"
+    origin = {connection.incarnation, 0, 1}
+    {worker, worker_incarnation} = start_worker(connection.pid, origin)
+
+    park_relay_message(
+      components.relay,
+      &match?({:"$gen_call", _from, {:claim_lease_permit, ^origin, _, _}}, &1),
+      :claim_parked,
+      :continue_claim
+    )
+
+    acquire =
+      Task.async(fn ->
+        acquire_as(
+          owner,
+          origin,
+          "refused-registration",
+          session_id,
+          connection.pid,
+          connection.incarnation,
+          worker,
+          worker_incarnation,
+          now_ms() + 2_000
+        )
+      end)
+
+    assert_receive :claim_parked, 500
+    :sys.suspend(owner)
+    send(components.relay, :continue_claim)
+    assert_receive {:worker_go, ^worker, ^origin}, 500
+    conflict = %{binding: {self(), incarnation()}, monitor: make_ref(), phase: :live}
+
+    :sys.replace_state(components.relay, fn relay_state ->
+      put_in(relay_state, [:lease_owners, session_id], conflict)
+    end)
+
+    :sys.resume(owner)
+    assert {:ok, :accepted, child, _child_incarnation} = Task.await(acquire, 1_000)
+    child_monitor = Process.monitor(child)
+    assert_receive {:DOWN, ^child_monitor, :process, ^child, reason}, 500
+    assert reason in [:killed, :noproc]
+
+    assert_receive {:manual_connection_message, _connection,
+                    {:relay_permit_result, ^origin, %{"code" => "control_pending"}}},
+                   500
+
+    assert :ok = wait_for_status(owner, &(&1.owner_slots == 0 and &1.lease_operations == 0))
+  end
+
+  # Concept (T20, F5): a lease owner that does not acknowledge an attachment
+  # within its five-second step while serving is killed, and the attachment
+  # completes at its exit.
+  @tag timeout: 30_000
+  test "a lease owner suspended past its attachment acknowledgement is killed" do
+    owner = start_owner()
+    components = Owner.components(owner)
+    holder = initialized_connection(components)
+    session_id = "attachment-bound"
+    {lease_owner, _owner_incarnation, _epoch} = acquire_held(owner, holder, session_id)
+    :sys.suspend(lease_owner)
+    monitor = Process.monitor(lease_owner)
+    started = now_ms()
+
+    send(
+      owner,
+      {:registry_attachment, components.registry, make_ref(), :opened, session_id, holder.pid,
+       holder.incarnation, "bounded-attachment"}
+    )
+
+    assert :ok =
+             wait_for_status(owner, fn _status ->
+               map_size(:sys.get_state(owner).attachment_acks) == 1
+             end)
+
+    assert_receive {:DOWN, ^monitor, :process, ^lease_owner, :killed}, 6_000
+    assert now_ms() - started >= 4_900
+
+    assert :ok =
+             wait_for_status(owner, fn _status -> :sys.get_state(owner).attachment_acks == %{} end)
+  end
+
+  # Concept (T22, F8, D6): an acquire racing its lease owner's retirement is
+  # held, not failed, and dispatched as a successor acquire when the
+  # retirement intent arrives.
+  #
+  # Technical depth: a relay debug hook suspends the lease owner when its
+  # retirement preparation arrives, so the relay marks it retiring while its
+  # intent is not yet sent. The observer's open is refused `actor_retiring`
+  # and held until the lease owner resumes.
+  test "an acquire racing a retirement is held until the retirement intent" do
+    {owner, observer, origin, acquire, lease_owner} = race_retirement("retiring-hold")
+    assert nil == Task.yield(acquire, 200)
+    :sys.resume(lease_owner)
+    assert {:ok, :accepted, ^owner, _daemon_incarnation} = Task.await(acquire, 1_000)
+    observer_pid = observer.pid
+
+    assert_receive {:manual_connection_message, ^observer_pid,
+                    {:relay_permit_result, ^origin, %{"result" => %{"writer_epoch" => _}}}},
+                   2_000
+  end
+
+  # Concept (F8): a retiring lease owner that has not sent its intent within
+  # the hold's five-second step is killed; the held acquire waits for that
+  # owner's loss to finish and is then dispatched to a fresh owner.
+  @tag timeout: 30_000
+  test "a retiring hold past its step kills the lease owner and dispatches the acquire" do
+    {_owner, observer, origin, acquire, lease_owner} = race_retirement("retiring-bound")
+    monitor = Process.monitor(lease_owner)
+    assert_receive {:DOWN, ^monitor, :process, ^lease_owner, :killed}, 6_000
+    assert {:ok, :accepted, successor, _incarnation} = Task.await(acquire, 1_000)
+    refute successor == lease_owner
+    observer_pid = observer.pid
+
+    assert_receive {:manual_connection_message, ^observer_pid,
+                    {:relay_permit_result, ^origin, %{"result" => %{"writer_epoch" => _}}}},
+                   2_000
+  end
+
+  # Concept (carried requirement 1, F8): requests refused `actor_lost` are
+  # held until the owner-loss notification finishes: the returned holder's
+  # then hears `holder_closed`, and another connection's acquire is
+  # dispatched afresh.
+  #
+  # Technical depth: the owner is suspended with both requests queued ahead
+  # of the lease owner's `EXIT`, and resumed once the relay has seen the
+  # loss, so both opens name the lost owner.
+  test "actor_lost requests wait for the loss notification to finish" do
+    owner = start_owner()
+    components = Owner.components(owner)
+    holder = initialized_connection(components)
+    observer = initialized_connection(components)
+    session_id = "lost-hold"
+    {lease_owner, _owner_incarnation, _epoch} = acquire_held(owner, holder, session_id)
+    holder_origin = {holder.incarnation, 1, 1}
+    observer_origin = {observer.incarnation, 0, 1}
+    {holder_worker, holder_worker_incarnation} = start_worker(holder.pid, holder_origin)
+    {observer_worker, observer_worker_incarnation} = start_worker(observer.pid, observer_origin)
+    :sys.suspend(owner)
+
+    renewal =
+      Task.async(fn ->
+        acquire_as(
+          owner,
+          holder_origin,
+          "lost-hold-renewal",
+          session_id,
+          holder.pid,
+          holder.incarnation,
+          holder_worker,
+          holder_worker_incarnation,
+          now_ms() + 5_000
+        )
+      end)
+
+    acquire =
+      Task.async(fn ->
+        acquire_as(
+          owner,
+          observer_origin,
+          "lost-hold-acquire",
+          session_id,
+          observer.pid,
+          observer.incarnation,
+          observer_worker,
+          observer_worker_incarnation,
+          now_ms() + 5_000
+        )
+      end)
+
+    assert :ok = wait_for_queue_length(owner, 2)
+    Process.exit(lease_owner, :kill)
+    assert %{owner_losses: 1} = wait_for_relay_owner_loss(components.relay)
+    :sys.resume(owner)
+    holder_pid = holder.pid
+
+    assert_receive {:manual_connection_message, ^holder_pid,
+                    {:daemon_control_owner_lost, ^owner, close_ref, ^session_id, _incarnation}},
+                   1_000
+
+    assert nil == Task.yield(renewal, 200)
+    assert nil == Task.yield(acquire, 0)
+    assert [_, _] = :sys.get_state(owner).owners[session_id].held
+    close_owner_loss_holder(owner, holder, close_ref)
+    # The holder's connection has closed, so its `holder_closed` answer
+    # reaches no one; the held entry is gone.
+    assert :ok =
+             wait_for_status(owner, fn _status ->
+               not match?(%{held: [_ | _]}, :sys.get_state(owner).owners[session_id])
+             end)
+
+    Task.shutdown(renewal, :brutal_kill)
+    assert {:ok, :accepted, successor, _incarnation} = Task.await(acquire, 1_000)
+    refute successor == lease_owner
+    observer_pid = observer.pid
+
+    assert_receive {:manual_connection_message, ^observer_pid,
+                    {:relay_permit_result, ^observer_origin,
+                     %{"result" => %{"writer_epoch" => _}}}},
+                   1_000
+  end
+
+  # Concept (carried requirement 1, loss already finished): an `actor_lost`
+  # answer that arrives after the loss finished is released at once — the
+  # returned holder hears `holder_closed` and another connection's release
+  # `control_not_held` — since no later step would release it.
+  #
+  # Technical depth: by same-relay order this answer precedes the
+  # classification the loss waits for, so it is driven directly against the
+  # owner's state after a finished loss.
+  test "an actor_lost answer after the loss finished is released at once" do
+    owner = start_owner()
+    components = Owner.components(owner)
+    holder = initialized_connection(components)
+    session_id = "finished-loss"
+    {lease_owner, owner_incarnation, epoch} = acquire_held(owner, holder, session_id)
+    monitor = Process.monitor(lease_owner)
+    Process.exit(lease_owner, :kill)
+    assert_receive {:DOWN, ^monitor, :process, ^lease_owner, :killed}, 500
+    holder_pid = holder.pid
+
+    assert_receive {:manual_connection_message, ^holder_pid,
+                    {:daemon_control_owner_lost, ^owner, close_ref, ^session_id, _incarnation}},
+                   1_000
+
+    close_owner_loss_holder(owner, holder, close_ref)
+    assert %{owner_slots: 0} = wait_for_owner_retirement(owner)
+    state = :sys.get_state(owner)
+    refute Map.has_key?(state.owners, session_id)
+
+    holder_request = %{
+      class: :session_acquire_control,
+      session_id: session_id,
+      permit_id: {holder.incarnation, 1, 1},
+      connection: holder.pid,
+      connection_incarnation: holder.incarnation
+    }
+
+    other_request = %{
+      class: :session_release_control,
+      session_id: session_id,
+      permit_id: {incarnation(), 0, 1},
+      connection: self(),
+      connection_incarnation: incarnation(),
+      writer_epoch: epoch
+    }
+
+    for {request, tag} <- [{holder_request, make_ref()}, {other_request, make_ref()}] do
+      request_id = make_ref()
+
+      operation = %{
+        request: request,
+        owner_pid: lease_owner,
+        owner_incarnation: owner_incarnation,
+        actor_pid: lease_owner,
+        actor_incarnation: owner_incarnation,
+        start_op_ref: nil,
+        phase: :opening,
+        reply_to: {self(), tag}
+      }
+
+      state =
+        state
+        |> put_in([:operations, request.permit_id], operation)
+        |> put_in([:relay_requests, request_id], %{
+          continuation: {:open, request.permit_id},
+          timer: nil
+        })
+
+      assert {:noreply, released} =
+               Owner.handle_info({[:alias | request_id], {:error, :actor_lost}}, state)
+
+      refute Map.has_key?(released.operations, request.permit_id)
+      expected = if request == holder_request, do: :holder_closed, else: :control_not_held
+      assert_received {^tag, {:error, ^expected}}
+    end
+  end
+
+  # Concept: a lease owner's report of an unanswered relay request latches
+  # `relay_lost` once while serving and is cleanup-only after the cut.
+  test "a lease owner's unanswered-relay report latches relay_lost once while serving" do
+    owner = start_owner(fatal_recipient: self())
+    components = Owner.components(owner)
+    holder = initialized_connection(components)
+    {lease_owner, owner_incarnation, _epoch} = acquire_held(owner, holder, "report-session")
+    relay_monitor = Process.monitor(components.relay)
+    send(owner, {:lease_owner_relay_unanswered, lease_owner, owner_incarnation})
+    assert_receive {:daemon_component_fatal, ^owner, :relay_lost}, 500
+    assert_receive {:DOWN, ^relay_monitor, :process, _relay, :killed}, 500
+    send(owner, {:lease_owner_relay_unanswered, lease_owner, owner_incarnation})
+    refute_receive {:daemon_component_fatal, _reporter, _class}, 200
+  end
+
+  test "a lease owner's unanswered-relay report after the cut is cleanup-only" do
+    cut_owner = start_owner(fatal_recipient: self())
+    cut_components = Owner.components(cut_owner)
+    cut_holder = initialized_connection(cut_components)
+
+    {cut_lease_owner, cut_incarnation, _epoch} =
+      acquire_held(cut_owner, cut_holder, "report-after-cut")
+
+    assert {:ok, _cut_ref} = Owner.cut_admission(cut_owner, 2_000)
+    send(cut_owner, {:lease_owner_relay_unanswered, cut_lease_owner, cut_incarnation})
+    refute_receive {:daemon_component_fatal, _reporter, _class}, 300
+    assert Process.alive?(cut_components.relay)
+  end
+
+  defp assert_connection_lost_notice(order) do
+    owner = start_owner(fatal_recipient: self())
+    components = Owner.components(owner)
+    holder = initialized_connection(components)
+    observer = initialized_connection(components)
+    session_id = "notice-#{order}"
+    {lease_owner, owner_incarnation, _epoch} = acquire_held(owner, holder, session_id)
+    :sys.suspend(lease_owner)
+    origin = {observer.incarnation, 0, 1}
+    {worker, worker_incarnation} = start_worker(observer.pid, origin)
+
+    assert {:ok, :accepted, ^lease_owner, ^owner_incarnation} =
+             acquire_as(
+               owner,
+               origin,
+               "notice-acquire",
+               session_id,
+               observer.pid,
+               observer.incarnation,
+               worker,
+               worker_incarnation,
+               now_ms() + 5_000
+             )
+
+    notice = {:lease_permit_settled, origin, lease_owner, owner_incarnation, :connection_lost}
+
+    if order == :notice_first do
+      send(owner, notice)
+
+      assert :ok =
+               wait_for_status(owner, fn _status ->
+                 :sys.get_state(owner).operations[origin].phase == :superseded
+               end)
+    end
+
+    Process.exit(observer.pid, :kill)
+
+    if order == :disposition_first do
+      assert :ok = wait_for_pending_dispositions(owner, 1)
+      send(owner, notice)
+    end
+
+    assert :ok =
+             wait_for_status(
+               owner,
+               &(&1.lease_operations == 0 and &1.pending_dispositions == 0 and
+                   &1.mirror_operations == 0)
+             )
+
+    :sys.resume(lease_owner)
+    assert %{permits: 0} = wait_for_relay_permits(components.relay, 0)
+    refute_receive {:daemon_component_fatal, _reporter, _class}, 200
+    assert Process.alive?(owner)
+    assert %{lease_operations: 0, pending_dispositions: 0} = Owner.status(owner)
+  end
+
+  # Technical depth: the holder releases, so its lease owner prepares its
+  # retirement; a relay debug hook suspends the lease owner as that
+  # preparation arrives. The observer's acquire then meets a retiring actor.
+  defp race_retirement(session_id) do
+    owner = start_owner()
+    components = Owner.components(owner)
+    holder = initialized_connection(components)
+    observer = initialized_connection(components)
+    {lease_owner, owner_incarnation, epoch} = acquire_held(owner, holder, session_id)
+    test_pid = self()
+
+    :ok =
+      :sys.install(
+        components.relay,
+        {fn
+           :waiting, {:in, {:"$gen_call", {^lease_owner, _tag}, request}}, _proc_state
+           when elem(request, 0) == :prepare_lease_owner_retirement ->
+             :sys.suspend(lease_owner)
+             send(test_pid, :retirement_prepared)
+             :done
+
+           hook_state, _event, _proc_state ->
+             hook_state
+         end, :waiting}
+      )
+
+    release_origin = {holder.incarnation, 1, 1}
+    {release_worker, release_worker_incarnation} = start_worker(holder.pid, release_origin)
+
+    assert {:ok, :accepted, ^lease_owner, ^owner_incarnation} =
+             release_as(
+               owner,
+               release_origin,
+               "#{session_id}-release",
+               session_id,
+               holder.pid,
+               holder.incarnation,
+               release_worker,
+               release_worker_incarnation,
+               epoch,
+               now_ms() + 2_000
+             )
+
+    assert_receive :retirement_prepared, 1_000
+    origin = {observer.incarnation, 0, 1}
+    {worker, worker_incarnation} = start_worker(observer.pid, origin)
+
+    acquire =
+      Task.async(fn ->
+        long_acquire(
+          owner,
+          origin,
+          "#{session_id}-acquire",
+          session_id,
+          observer,
+          {worker, worker_incarnation}
+        )
+      end)
+
+    assert :ok =
+             wait_for_status(owner, fn _status ->
+               match?(%{held: [_]}, :sys.get_state(owner).owners[session_id])
+             end)
+
+    {owner, observer, origin, acquire, lease_owner}
+  end
+
+  # Technical depth: a connection's acquire held across a five-second step
+  # is awaited past the default call timeout.
+  defp long_acquire(
+         owner,
+         origin,
+         request_id,
+         session_id,
+         connection,
+         {worker, worker_incarnation}
+       ) do
+    acquire_as(
+      owner,
+      origin,
+      request_id,
+      session_id,
+      connection.pid,
+      connection.incarnation,
+      worker,
+      worker_incarnation,
+      now_ms() + 20_000,
+      10_000
+    )
+  end
+
+  # Concept: every acquire and release reaches the owner from the connection
+  # it names, as a request whose reply the connection receives; the test
+  # asks the manual connection to send it and waits for that reply.
+  defp acquire_as(
+         owner,
+         origin,
+         request_id,
+         session_id,
+         connection,
+         connection_incarnation,
+         worker,
+         worker_incarnation,
+         request_deadline,
+         timeout \\ 5_000
+       ) do
+    as_connection(
+      connection,
+      fn ->
+        Owner.acquire_control_request(
+          owner,
+          origin,
+          request_id,
+          session_id,
+          connection,
+          connection_incarnation,
+          worker,
+          worker_incarnation,
+          request_deadline
+        )
+      end,
+      timeout
+    )
+  end
+
+  defp release_as(
+         owner,
+         origin,
+         request_id,
+         session_id,
+         connection,
+         connection_incarnation,
+         worker,
+         worker_incarnation,
+         writer_epoch,
+         request_deadline
+       ) do
+    as_connection(
+      connection,
+      fn ->
+        Owner.release_control_request(
+          owner,
+          origin,
+          request_id,
+          session_id,
+          connection,
+          connection_incarnation,
+          worker,
+          worker_incarnation,
+          writer_epoch,
+          request_deadline
+        )
+      end,
+      5_000
+    )
+  end
+
+  defp as_connection(connection, request, timeout) do
+    reference = make_ref()
+    send(connection, {:manual_request, self(), reference, request})
+
+    receive do
+      {:manual_reply, ^reference, :owner_down} -> exit(:owner_down)
+      {:manual_reply, ^reference, reply} -> reply
+    after
+      timeout -> exit({:timeout, :owner_request})
+    end
+  end
+
+  defp wait_for_relay_permits(relay, count, attempts \\ 200)
+
+  defp wait_for_relay_permits(relay, count, attempts) when attempts > 0 do
+    status = AdmissionRelay.status(relay)
+
+    if status.permits == count do
+      status
+    else
+      Process.sleep(5)
+      wait_for_relay_permits(relay, count, attempts - 1)
+    end
+  end
+
+  defp wait_for_relay_permits(relay, _count, 0), do: AdmissionRelay.status(relay)
+
+  # Concept: a fresh acquire whose connection is lost between the relay's
+  # open and this owner's claim is refused `connection_lost` and its
+  # disposition, which arrived while the claim was outstanding, is settled
+  # once.
+  #
+  # Technical depth: the owner is suspended while the relay answers the
+  # open, and the connection is killed then, so the relay's disposition is
+  # retained at the owner before the claim is sent and refused.
+  test "a fresh acquire whose connection is lost before its claim settles once" do
+    owner = start_owner(fatal_recipient: self())
+    components = Owner.components(owner)
+    connection = initialized_connection(components)
+    session_id = "lost-before-claim"
+    origin = {connection.incarnation, 0, 1}
+    {worker, worker_incarnation} = start_worker(connection.pid, origin)
+
+    park_relay_message(
+      components.relay,
+      &match?({:"$gen_call", _from, {:open_lease_permit, _, ^origin, _, _, _, _, _, _, _}}, &1),
+      :open_parked,
+      :continue_open
+    )
+
+    acquire =
+      Task.async(fn ->
+        acquire_as(
+          owner,
+          origin,
+          "lost-before-claim",
+          session_id,
+          connection.pid,
+          connection.incarnation,
+          worker,
+          worker_incarnation,
+          now_ms() + 2_000
+        )
+      end)
+
+    assert_receive :open_parked, 500
+    :sys.suspend(owner)
+    send(components.relay, :continue_open)
+    assert %{permits: 1} = wait_for_relay_permits(components.relay, 1)
+    monitor = Process.monitor(connection.pid)
+    Process.exit(connection.pid, :kill)
+    assert_receive {:DOWN, ^monitor, :process, _connection, :killed}, 500
+    assert %{settling: 1} = wait_for_relay_settling(components.relay)
+    :sys.resume(owner)
+    # The connection is gone, so the refusal reaches no one.
+    Task.shutdown(acquire, :brutal_kill)
+
+    assert :ok =
+             wait_for_status(
+               owner,
+               &(&1.lease_operations == 0 and &1.pending_dispositions == 0 and
+                   &1.mirror_operations == 0 and &1.owner_slots == 0)
+             )
+
+    assert %{permits: 0} = wait_for_relay_permits(components.relay, 0)
+    refute_receive {:daemon_component_fatal, _reporter, _class}, 100
+  end
+
+  # Concept: a successor acquire whose claim is still outstanding when its
+  # predecessor's retirement finishes is started by the claim's answer, not
+  # refused as an inconsistent operation.
+  #
+  # Technical depth: both retirement gates hold the predecessor; its exit is
+  # released first, the successor's claim is parked at the relay, and the
+  # retirement pop is released then, so the retirement finishes while the
+  # successor is `:claiming`.
+  test "a successor opened while its predecessor finishes starts after its claim" do
+    owner = start_owner(retirement_pop_gate: self(), retirement_exit_gate: self())
+    components = Owner.components(owner)
+    holder = initialized_connection(components)
+    observer = initialized_connection(components)
+    session_id = "claiming-successor"
+    {lease_owner, owner_incarnation, epoch} = acquire_held(owner, holder, session_id)
+    release_origin = {holder.incarnation, 1, 1}
+    {release_worker, release_worker_incarnation} = start_worker(holder.pid, release_origin)
+
+    assert {:ok, :accepted, ^lease_owner, ^owner_incarnation} =
+             release_as(
+               owner,
+               release_origin,
+               "claiming-successor-release",
+               session_id,
+               holder.pid,
+               holder.incarnation,
+               release_worker,
+               release_worker_incarnation,
+               epoch,
+               now_ms() + 2_000
+             )
+
+    assert_receive {:retirement_exit_blocked, ^lease_owner, ^owner_incarnation, retirement_ref},
+                   1_000
+
+    assert :ok = LeaseOwner.release_retirement_exit(lease_owner, retirement_ref)
+    assert_receive {:retirement_pop_blocked, ^owner, ^session_id}, 1_000
+
+    assert :ok =
+             wait_for_status(owner, fn _status ->
+               match?(%{relay_complete: true}, :sys.get_state(owner).owners[session_id])
+             end)
+
+    origin = {observer.incarnation, 0, 1}
+    {worker, worker_incarnation} = start_worker(observer.pid, origin)
+
+    park_relay_message(
+      components.relay,
+      &match?({:"$gen_call", _from, {:claim_lease_permit, ^origin, _, _}}, &1),
+      :claim_parked,
+      :continue_claim
+    )
+
+    acquire =
+      Task.async(fn ->
+        acquire_as(
+          owner,
+          origin,
+          "claiming-successor-acquire",
+          session_id,
+          observer.pid,
+          observer.incarnation,
+          worker,
+          worker_incarnation,
+          now_ms() + 5_000
+        )
+      end)
+
+    assert_receive :claim_parked, 500
+    assert :ok = Owner.release_retirement_pop(owner, session_id)
+
+    assert :ok =
+             wait_for_status(owner, fn _status ->
+               match?(%{mirror_complete: true}, :sys.get_state(owner).owners[session_id])
+             end)
+
+    assert Process.alive?(owner)
+    send(components.relay, :continue_claim)
+    assert {:ok, :accepted, ^owner, _daemon_incarnation} = Task.await(acquire, 1_000)
+    observer_pid = observer.pid
+
+    assert_receive {:manual_connection_message, ^observer_pid,
+                    {:relay_permit_result, ^origin, %{"result" => %{"writer_epoch" => _}}}},
+                   1_000
+  end
+
+  # Concept (T21 at the collaboration owner): between the cut and the
+  # freeze, a lease owner's and a registry's reports of relay requests left
+  # unanswered for five seconds are cleanup-only; the stop's own deadlines
+  # govern, the relay keeps serving once it resumes, and the freeze then
+  # settles.
+  #
+  # Technical depth: a mutation ticket is opened before the cut; after the
+  # cut the relay is suspended for six seconds while the lease owner's
+  # promotion and a registry promotion wait on it. An owner debug hook
+  # forwards both kinds of report: the lease owner's real report arrives and
+  # latches nothing; the registry arms no instant after the cut, so its
+  # waiting promotion reports nothing at all.
+  @tag timeout: 30_000
+  test "a lease owner's real unanswered-relay report during the stop latches nothing" do
+    owner = start_owner(fatal_recipient: self(), admission_wait_ms: 10_000)
+    components = Owner.components(owner)
+    holder = initialized_connection(components)
+    session_id = "stop-report"
+    {lease_owner, owner_incarnation, epoch} = acquire_held(owner, holder, session_id)
+    origin = {holder.incarnation, 1, 1}
+    worker = spawn(fn -> Process.sleep(20_000) end)
+    relay = components.relay
+
+    assert {:ok, ^origin} =
+             manual_call(
+               holder.pid,
+               {:open_ticket, relay, origin, :session_prompt, session_id,
+                {lease_owner, owner_incarnation}}
+             )
+
+    assert :ok =
+             manual_call(
+               holder.pid,
+               {:invoke,
+                fn -> AdmissionRelay.bind_ticket_worker(relay, origin, worker, incarnation()) end}
+             )
+
+    test_pid = self()
+
+    :ok =
+      :sys.install(
+        owner,
+        {fn
+           forwarded,
+           {:in, {:lease_owner_relay_unanswered, ^lease_owner, _incarnation}},
+           _proc_state ->
+             send(test_pid, :lease_owner_reported)
+             forwarded
+
+           forwarded, {:in, {:registry_relay_unanswered, _registry, _incarnation}}, _proc_state ->
+             send(test_pid, :registry_reported)
+             forwarded
+
+           forwarded, _event, _proc_state ->
+             forwarded
+         end, :forwarding}
+      )
+
+    assert {:ok, _cut_ref} = Owner.cut_admission(owner, 10_000)
+    :sys.suspend(relay)
+
+    send(
+      holder.pid,
+      {:manual_call, self(), make_ref(),
+       {:invoke,
+        fn ->
+          LeaseOwner.mutate(
+            lease_owner,
+            origin,
+            :session_prompt,
+            "stop-report-mutation",
+            holder.incarnation,
+            epoch,
+            worker,
+            fn -> {:accepted, %{"accepted" => true}} end
+          )
+        end}}
+    )
+
+    spawn_registry_promotion(components.registry, {:crypto.strong_rand_bytes(16), 0, 1})
+    assert_receive :lease_owner_reported, 6_000
+    refute_received :registry_reported
+    refute_receive {:daemon_component_fatal, _reporter, _class}, 500
+    :sys.resume(relay)
+    assert Process.alive?(relay)
+    assert %{fatal_teardown: false} = :sys.get_state(owner)
+    assert {:ok, _descriptors} = freeze(owner)
+    refute_receive {:daemon_component_fatal, _reporter, _class}, 100
+  end
+
+  # Concept (review item 2): no owner row is dropped with a request still
+  # held on it. A successor whose claim fails after its predecessor's loss
+  # finished frees the row, and the request held there is answered.
+  #
+  # Technical depth: driven directly against the owner's state: a finished
+  # loss row with a claiming successor and one held release is given the
+  # relay's refusal of the successor's claim.
+  test "a successor claim refused after a finished loss answers the held request" do
+    {state, session_id, row} = finished_loss_state("successor-claim-held")
+    successor_tag = make_ref()
+    held_tag = make_ref()
+    successor_origin = {incarnation(), 0, 1}
+    request_id = make_ref()
+
+    held = %{
+      request: other_release(session_id),
+      from: {self(), held_tag},
+      reason: :actor_lost,
+      owner: row.pid,
+      timer: nil
+    }
+
+    operation = %{
+      request: %{
+        class: :session_acquire_control,
+        session_id: session_id,
+        permit_id: successor_origin,
+        connection: self(),
+        connection_incarnation: elem(successor_origin, 0),
+        request_id: "successor",
+        request_deadline: now_ms() + 5_000
+      },
+      owner_pid: nil,
+      owner_incarnation: nil,
+      actor_pid: self(),
+      actor_incarnation: state.daemon_incarnation,
+      start_op_ref: make_ref(),
+      phase: :claiming,
+      reply_to: {self(), successor_tag}
+    }
+
+    state =
+      state
+      |> put_in([:owners, session_id], %{row | successor: successor_origin, held: [held]})
+      |> put_in([:operations, successor_origin], operation)
+      |> put_in([:relay_requests, request_id], %{
+        continuation: {:claim, successor_origin},
+        timer: nil
+      })
+
+    assert {:noreply, state} =
+             Owner.handle_info({[:alias | request_id], {:error, :permit_unavailable}}, state)
+
+    assert_received {^successor_tag, {:error, :permit_unavailable}}
+    assert_received {^held_tag, {:error, :control_not_held}}
+    refute Map.has_key?(state.owners, session_id)
+  end
+
+  # Concept (review item 3, F8): held acquires keep their arrival order: an
+  # acquire that arrives while an earlier one is held waits behind it, so the
+  # earlier one becomes the session's next holder.
+  #
+  # Technical depth: the first observer's acquire is refused `actor_lost`
+  # and held; the second arrives after the loss began and queues behind it.
+  test "an acquire arriving behind a held acquire keeps its place" do
+    owner = start_owner()
+    components = Owner.components(owner)
+    holder = initialized_connection(components)
+    first = initialized_connection(components)
+    second = initialized_connection(components)
+    session_id = "held-order"
+    {lease_owner, _owner_incarnation, _epoch} = acquire_held(owner, holder, session_id)
+    first_origin = {first.incarnation, 0, 1}
+    {first_worker, first_worker_incarnation} = start_worker(first.pid, first_origin)
+    :sys.suspend(owner)
+
+    first_acquire =
+      Task.async(fn ->
+        acquire_as(
+          owner,
+          first_origin,
+          "held-first",
+          session_id,
+          first.pid,
+          first.incarnation,
+          first_worker,
+          first_worker_incarnation,
+          now_ms() + 5_000
+        )
+      end)
+
+    assert :ok = wait_for_queue_length(owner, 1)
+    Process.exit(lease_owner, :kill)
+    assert %{owner_losses: 1} = wait_for_relay_owner_loss(components.relay)
+    :sys.resume(owner)
+    holder_pid = holder.pid
+
+    assert_receive {:manual_connection_message, ^holder_pid,
+                    {:daemon_control_owner_lost, ^owner, close_ref, ^session_id, _incarnation}},
+                   1_000
+
+    assert :ok =
+             wait_for_status(owner, fn _status ->
+               match?(%{held: [_]}, :sys.get_state(owner).owners[session_id])
+             end)
+
+    second_origin = {second.incarnation, 0, 1}
+    {second_worker, second_worker_incarnation} = start_worker(second.pid, second_origin)
+
+    second_acquire =
+      Task.async(fn ->
+        acquire_as(
+          owner,
+          second_origin,
+          "held-second",
+          session_id,
+          second.pid,
+          second.incarnation,
+          second_worker,
+          second_worker_incarnation,
+          now_ms() + 5_000
+        )
+      end)
+
+    assert :ok =
+             wait_for_status(owner, fn _status ->
+               match?(%{held: [_, _]}, :sys.get_state(owner).owners[session_id])
+             end)
+
+    close_owner_loss_holder(owner, holder, close_ref)
+    assert {:ok, :accepted, _first_actor, _} = Task.await(first_acquire, 1_000)
+    assert {:ok, :accepted, _second_actor, _} = Task.await(second_acquire, 1_000)
+    first_pid = first.pid
+    second_pid = second.pid
+
+    assert_receive {:manual_connection_message, ^first_pid,
+                    {:relay_permit_result, ^first_origin, %{"result" => %{"writer_epoch" => _}}}},
+                   1_000
+
+    assert_receive {:manual_connection_message, ^second_pid,
+                    {:relay_permit_result, ^second_origin, %{"code" => "control_held"}}},
+                   1_000
+  end
+
+  # Concept (review item 4): a request refused `actor_lost` after the
+  # admission cut is answered `daemon_stopping` at once, since the cut has
+  # already answered every held request and no later hold would be; it is
+  # never held and dispatched again.
+  test "a hold created after the cut is refused daemon_stopping" do
+    owner = start_owner(admission_wait_ms: 5_000)
+    components = Owner.components(owner)
+    holder = initialized_connection(components)
+    observer = initialized_connection(components)
+    session_id = "hold-after-cut"
+    {lease_owner, _owner_incarnation, _epoch} = acquire_held(owner, holder, session_id)
+    origin = {observer.incarnation, 0, 1}
+    {worker, worker_incarnation} = start_worker(observer.pid, origin)
+    :sys.suspend(owner)
+
+    renewal =
+      Task.async(fn ->
+        acquire_as(
+          owner,
+          origin,
+          "hold-after-cut",
+          session_id,
+          observer.pid,
+          observer.incarnation,
+          worker,
+          worker_incarnation,
+          now_ms() + 5_000
+        )
+      end)
+
+    assert :ok = wait_for_queue_length(owner, 1)
+    Process.exit(lease_owner, :kill)
+    assert %{owner_losses: 1} = wait_for_relay_owner_loss(components.relay)
+
+    test_pid = self()
+
+    :ok =
+      :sys.install(
+        components.relay,
+        {fn
+           reporting,
+           {:in, {:"$gen_call", _from, {:open_lease_permit, _, ^origin, _, _, _, _, _, _, _}}},
+           _state ->
+             send(test_pid, :relay_saw_open)
+             reporting
+
+           reporting, _event, _state ->
+             reporting
+         end, :reporting}
+      )
+
+    park_relay_message(
+      components.relay,
+      &match?({:"$gen_call", _from, {:open_lease_permit, _, ^origin, _, _, _, _, _, _, _}}, &1),
+      :open_parked,
+      :continue_open
+    )
+
+    :sys.resume(owner)
+    assert_receive :open_parked, 500
+    cut = Task.async(fn -> Owner.cut_admission(owner, 5_000) end)
+    assert :ok = wait_for_status(owner, fn _status -> not is_nil(:sys.get_state(owner).stop) end)
+    send(components.relay, :continue_open)
+    assert {:error, :daemon_stopping} = Task.await(renewal, 500)
+    assert_received :relay_saw_open
+    refute_receive :relay_saw_open, 200
+    Task.await(cut, 6_000)
+  end
+
+  # Concept (review item 2): an acquire or a release reaches the owner only
+  # from the connection it names; any other caller is refused before any
+  # permit exists.
+  test "a request naming another connection is refused and opens nothing" do
+    owner = start_owner()
+    components = Owner.components(owner)
+    connection = initialized_connection(components)
+    origin = {connection.incarnation, 0, 1}
+    {worker, worker_incarnation} = start_worker(connection.pid, origin)
+
+    acquire =
+      Owner.acquire_control_request(
+        owner,
+        origin,
+        "impostor-acquire",
+        "impostor-session",
+        connection.pid,
+        connection.incarnation,
+        worker,
+        worker_incarnation,
+        now_ms() + 2_000
+      )
+
+    assert {:reply, {:error, :invalid_operation}} = :gen_server.receive_response(acquire, 1_000)
+
+    release =
+      Owner.release_control_request(
+        owner,
+        {connection.incarnation, 1, 1},
+        "impostor-release",
+        "impostor-session",
+        connection.pid,
+        connection.incarnation,
+        worker,
+        worker_incarnation,
+        incarnation(),
+        now_ms() + 2_000
+      )
+
+    assert {:reply, {:error, :invalid_operation}} = :gen_server.receive_response(release, 1_000)
+    assert %{permits: 0} = AdmissionRelay.status(components.relay)
+    assert %{lease_operations: 0, owner_slots: 0} = Owner.status(owner)
+  end
+
+  # Concept (round 3 item 2): a malformed acquire or release request —
+  # too short, or the wrong size for its tag — is refused `invalid_operation`
+  # and never stops the owner.
+  test "a malformed acquire or release request is refused" do
+    owner = start_owner()
+    me = self()
+
+    for message <- [
+          {:acquire_control},
+          {:release_control, 1, 2},
+          {:acquire_control, 1, 2, 3, me, 5, 6, 7, 8, 9},
+          {:release_control, 1, 2, 3, me, 5, 6, 7, 8},
+          {:acquire_control, 1, 2, 3, me, 5, 6, 7, 8}
+        ] do
+      assert {:error, :invalid_operation} = GenServer.call(owner, message)
+    end
+
+    assert Process.alive?(owner)
+    assert %{lease_operations: 0} = Owner.status(owner)
+  end
+
+  # Concept (review item 4): after the lease freeze no lease request reaches
+  # the relay: a connection's acquire is refused `daemon_stopping` by the
+  # owner itself.
+  #
+  # Technical depth: a relay debug hook reports every permit open it
+  # receives after the freeze.
+  test "after the freeze an acquire is refused without reaching the relay" do
+    owner = start_owner()
+    components = Owner.components(owner)
+    connection = initialized_connection(components)
+    assert {:ok, _cut_ref} = Owner.cut_admission(owner, 5_000)
+    assert {:ok, _descriptors} = freeze(owner)
+    test_pid = self()
+
+    :ok =
+      :sys.install(
+        components.relay,
+        {fn
+           reporting, {:in, {:"$gen_call", _from, request}}, _state
+           when elem(request, 0) == :open_lease_permit ->
+             send(test_pid, :relay_saw_open)
+             reporting
+
+           reporting, _event, _state ->
+             reporting
+         end, :reporting}
+      )
+
+    origin = {connection.incarnation, 0, 1}
+    {worker, worker_incarnation} = start_worker(connection.pid, origin)
+
+    assert {:error, :daemon_stopping} =
+             acquire_as(
+               owner,
+               origin,
+               "after-freeze",
+               "after-freeze-session",
+               connection.pid,
+               connection.incarnation,
+               worker,
+               worker_incarnation,
+               now_ms() + 2_000
+             )
+
+    refute_receive :relay_saw_open, 100
+  end
+
+  # Concept (review item 4, review item 5): the freeze does not settle while
+  # a relay request this owner sent after the freeze barrier is unanswered,
+  # and the relay's refusal of that request during the stop latches nothing.
+  #
+  # Technical depth: a fresh acquire's open is parked across the cut, so its
+  # claim and its lease owner's registration follow the cut; the registration
+  # is parked until the freeze is requested, and its refusal makes this
+  # owner complete the first permit through the relay after the freeze
+  # barrier. That completion is parked while the freeze waits.
+  @tag timeout: 30_000
+  test "the freeze waits for a completion sent after its barrier" do
+    owner = start_owner(fatal_recipient: self(), admission_wait_ms: 5_000)
+    components = Owner.components(owner)
+    connection = initialized_connection(components)
+    session_id = "freeze-wait"
+    origin = {connection.incarnation, 0, 1}
+    {worker, worker_incarnation} = start_worker(connection.pid, origin)
+
+    park_relay_message(
+      components.relay,
+      &match?({:"$gen_call", _from, {:open_lease_permit, _, ^origin, _, _, _, _, _, _, _}}, &1),
+      :open_parked,
+      :continue_open
+    )
+
+    park_relay_message(
+      components.relay,
+      &match?({:"$gen_call", _from, {:register_lease_owner, ^session_id, _, _}}, &1),
+      :register_parked,
+      :continue_register
+    )
+
+    park_relay_message(
+      components.relay,
+      &match?({:"$gen_call", _from, {:complete_lease_permit, ^origin, _, _}}, &1),
+      :complete_parked,
+      :continue_complete
+    )
+
+    acquire =
+      Task.async(fn ->
+        acquire_as(
+          owner,
+          origin,
+          "freeze-wait",
+          session_id,
+          connection.pid,
+          connection.incarnation,
+          worker,
+          worker_incarnation,
+          now_ms() + 5_000
+        )
+      end)
+
+    assert_receive :open_parked, 500
+    cut = Task.async(fn -> Owner.cut_admission(owner, 5_000) end)
+    assert :ok = wait_for_status(owner, fn _status -> not is_nil(:sys.get_state(owner).stop) end)
+
+    send(components.relay, :continue_open)
+    assert_receive :register_parked, 1_000
+    assert {:ok, _cut_ref} = Task.await(cut, 6_000)
+    assert {:ok, :accepted, _child, _child_incarnation} = Task.await(acquire, 1_000)
+
+    frozen = Task.async(fn -> freeze(owner) end)
+    assert :ok = wait_for_queue_length(components.relay, 1)
+    send(components.relay, :continue_register)
+    assert_receive :complete_parked, 1_000
+    assert nil == Task.yield(frozen, 300)
+    send(components.relay, :continue_complete)
+    assert {:ok, _descriptors} = Task.await(frozen, 6_000)
+    assert :sys.get_state(owner).relay_requests == %{}
+    refute_receive {:daemon_component_fatal, _reporter, _class}, 100
+  end
+
+  # Concept (review item 5): during the stop a relay refusal of this owner's
+  # completion is cleanup only; `relay_lost` latches only while serving.
+  #
+  # Technical depth: driven directly against the owner's state, because a
+  # correct relay does not produce it: a completion sent before the freeze
+  # barrier is answered before it and admitted, and one sent after it is
+  # answered only after the barrier's acknowledgement has already
+  # tombstoned the operation.
+  test "a completion refused during the stop latches nothing" do
+    owner = start_owner(fatal_recipient: self())
+    assert {:ok, _cut_ref} = Owner.cut_admission(owner, 5_000)
+    state = :sys.get_state(owner)
+    permit_id = {incarnation(), 0, 1}
+    request_id = make_ref()
+
+    operation = %{
+      request: %{
+        class: :session_acquire_control,
+        session_id: "stop-complete",
+        permit_id: permit_id
+      },
+      owner_pid: nil,
+      owner_incarnation: nil,
+      actor_pid: self(),
+      actor_incarnation: state.daemon_incarnation,
+      start_op_ref: make_ref(),
+      phase: :refusing
+    }
+
+    state =
+      state
+      |> put_in([:operations, permit_id], operation)
+      |> put_in([:relay_requests, request_id], %{
+        continuation: {:complete, permit_id, :registration_failed},
+        timer: nil
+      })
+
+    assert {:noreply, settled} =
+             Owner.handle_info({[:alias | request_id], {:error, :daemon_stopping}}, state)
+
+    refute settled.fatal_teardown
+    refute_received {:daemon_component_fatal, _reporter, _class}
+  end
+
+  # Concept (review item 5): a `:result` notice meeting a retained
+  # connection loss during the stop is cleanup only.
+  #
+  # Technical depth: driven directly against the owner's state, because the
+  # pairing cannot be produced: one relay compare-and-set decides each
+  # permit, so a `:result` and a connection-loss disposition for the same
+  # permit never both exist unless the relay is inconsistent.
+  test "a result notice meeting a retained loss during the stop latches nothing" do
+    owner = start_owner(fatal_recipient: self())
+    assert {:ok, _cut_ref} = Owner.cut_admission(owner, 5_000)
+    state = :sys.get_state(owner)
+    permit_id = {incarnation(), 0, 1}
+    lease_owner = spawn(fn -> Process.sleep(1_000) end)
+    lease_owner_incarnation = incarnation()
+
+    state =
+      state
+      |> put_in([:operations, permit_id], %{
+        request: %{
+          class: :session_acquire_control,
+          session_id: "stop-notice",
+          permit_id: permit_id
+        },
+        owner_pid: lease_owner,
+        owner_incarnation: lease_owner_incarnation,
+        actor_pid: lease_owner,
+        actor_incarnation: lease_owner_incarnation,
+        start_op_ref: nil,
+        phase: :opened
+      })
+      |> put_in([:pending_dispositions, permit_id], %{settlement_ref: make_ref()})
+
+    assert {:noreply, settled} =
+             Owner.handle_info(
+               {:lease_permit_settled, permit_id, lease_owner, lease_owner_incarnation, :result},
+               state
+             )
+
+    refute settled.fatal_teardown
+    refute_received {:daemon_component_fatal, _reporter, _class}
+  end
+
+  # Concept (review item 5): `invalid_actor` for a lease owner this owner
+  # still has live is the relay's loss and still answers the request; for a
+  # lease owner that has already retired or exited it is treated like any
+  # refusal of a departing actor, and latches nothing.
+  #
+  # Technical depth: these are driven directly against the owner's state.
+  # A live-actor refusal needs a relay that disagrees with the owner, which
+  # a correct relay never does; a departed-actor refusal needs the lease
+  # owner's exit or retirement to overtake the owner's earlier open at the
+  # relay, an order between different senders the runtime does not let a
+  # test impose.
+  test "invalid_actor for a live actor answers the request and latches relay_lost" do
+    {state, session_id, row} = live_row_state("invalid-actor", fatal_recipient: self())
+    live_tag = make_ref()
+    {state, live_request} = opening_existing(state, session_id, row, live_tag, :acquire)
+
+    assert {:noreply, latched} =
+             Owner.handle_info({[:alias | live_request], {:error, :invalid_actor}}, state)
+
+    assert_received {^live_tag, {:error, :owner_unavailable}}
+    assert latched.fatal_teardown
+    assert_received {:daemon_component_fatal, _reporter, :relay_lost}
+  end
+
+  test "invalid_actor for a retired actor is released at once and latches nothing" do
+    {state, session_id, row} = live_row_state("departed-actor", fatal_recipient: self())
+    retiring = %{row | phase: :retiring, retirement_ref: make_ref()}
+    state = put_in(state, [:owners, session_id], retiring)
+    departed_tag = make_ref()
+
+    {state, departed_request} =
+      opening_existing(state, session_id, retiring, departed_tag, :release)
+
+    assert {:noreply, released} =
+             Owner.handle_info({[:alias | departed_request], {:error, :invalid_actor}}, state)
+
+    assert_received {^departed_tag, {:error, :control_not_held}}
+    refute released.fatal_teardown
+    refute_received {:daemon_component_fatal, _reporter, _class}
+  end
+
+  # Concept (review item 3): `invalid_actor` for a lease owner whose exit
+  # this owner has consumed but whose loss has not finished is held until
+  # that loss finishes, like `actor_lost`, and latches nothing.
+  #
+  # Technical depth: driven directly against the owner's state, because a
+  # correct relay cannot produce it: `open_existing` is reached only for a
+  # `:live` row, so the open was sent before this owner consumed the exit,
+  # and the relay removes a lost lease owner's binding only through this
+  # owner's later classification, which it handles after that earlier open;
+  # the open therefore meets `actor_lost`, never `invalid_actor`.
+  test "invalid_actor for an exited actor whose loss is unfinished is held" do
+    {state, session_id, row} = live_row_state("exited-actor", fatal_recipient: self())
+    lost = %{row | phase: :lost, exit_consumed: true}
+    state = put_in(state, [:owners, session_id], lost)
+    tag = make_ref()
+    {state, request_id} = opening_existing(state, session_id, lost, tag, :release)
+
+    assert {:noreply, held} =
+             Owner.handle_info({[:alias | request_id], {:error, :invalid_actor}}, state)
+
+    refute_received {^tag, _reply}
+    assert [%{reason: :actor_lost}] = held.owners[session_id].held
+    refute held.fatal_teardown
+    refute_received {:daemon_component_fatal, _reporter, _class}
+  end
+
+  # Concept (review item 6): a claimed permit whose session row is gone is
+  # answered and refused through the relay, never left to crash the owner.
+  #
+  # Technical depth: driven directly against the owner's state, because a
+  # claiming operation's row is removed only by that operation's own
+  # answers, so the state cannot be produced by any interleaving.
+  test "a claim answered after its session row is gone is still answered" do
+    owner = start_owner()
+    state = :sys.get_state(owner)
+    permit_id = {incarnation(), 0, 1}
+    request_id = make_ref()
+    tag = make_ref()
+
+    operation = %{
+      request: %{
+        class: :session_acquire_control,
+        session_id: "rowless-claim",
+        permit_id: permit_id,
+        request_id: "rowless-claim"
+      },
+      owner_pid: nil,
+      owner_incarnation: nil,
+      actor_pid: self(),
+      actor_incarnation: state.daemon_incarnation,
+      start_op_ref: make_ref(),
+      phase: :claiming,
+      reply_to: {self(), tag}
+    }
+
+    state =
+      state
+      |> put_in([:operations, permit_id], operation)
+      |> put_in([:relay_requests, request_id], %{continuation: {:claim, permit_id}, timer: nil})
+
+    assert {:noreply, refusing} = Owner.handle_info({[:alias | request_id], :ok}, state)
+    assert_received {^tag, {:ok, :accepted, _actor, _incarnation}}
+    assert %{phase: :refusing} = refusing.operations[permit_id]
+    assert map_size(refusing.relay_requests) == 1
+  end
+
+  # Concept (D4): a fresh lease owner lost while its registration is in
+  # flight keeps its row, so its loss is reported against a known owner and
+  # finishes: the first acquire is refused through the relay and the slot
+  # frees.
+  #
+  # Technical depth: the relay is parked on the registration; the child is
+  # killed there, so the owner consumes its `EXIT` while the row is still
+  # registering and the relay then registers a dead pid and reports its loss.
+  test "a lease owner lost while registering keeps its row until its loss finishes" do
+    owner = start_owner(fatal_recipient: self())
+    components = Owner.components(owner)
+    connection = initialized_connection(components)
+    session_id = "lost-registering"
+    origin = {connection.incarnation, 0, 1}
+    {worker, worker_incarnation} = start_worker(connection.pid, origin)
+
+    park_relay_message(
+      components.relay,
+      &match?({:"$gen_call", _from, {:register_lease_owner, ^session_id, _, _}}, &1),
+      :register_parked,
+      :continue_register
+    )
+
+    assert {:ok, :accepted, child, _child_incarnation} =
+             acquire_as(
+               owner,
+               origin,
+               "lost-registering",
+               session_id,
+               connection.pid,
+               connection.incarnation,
+               worker,
+               worker_incarnation,
+               now_ms() + 2_000
+             )
+
+    assert_receive :register_parked, 500
+    monitor = Process.monitor(child)
+    Process.exit(child, :kill)
+    assert_receive {:DOWN, ^monitor, :process, ^child, :killed}, 500
+
+    assert :ok =
+             wait_for_status(owner, fn _status ->
+               match?(%{phase: :lost}, :sys.get_state(owner).owners[session_id])
+             end)
+
+    send(components.relay, :continue_register)
+
+    assert_receive {:manual_connection_message, _connection,
+                    {:relay_permit_result, ^origin, %{"code" => "control_pending"}}},
+                   1_000
+
+    assert %{owner_slots: 0, lease_operations: 0} = wait_for_owner_retirement(owner)
+    assert Process.alive?(owner)
+    refute_receive {:daemon_component_fatal, _reporter, _class}, 100
+  end
+
+  # Concept (T7, R7): a lease owner's completion the relay records before the
+  # freeze is a terminal direct result the freeze does not name; the notice
+  # that follows still removes the operation, before or after the freeze
+  # settles, and the stop continues.
+  #
+  # Technical depth: the observer's permit is opened before the cut with its
+  # lease owner suspended; after the cut the relay is parked on that lease
+  # owner's `control_held` completion and the freeze is requested behind it.
+  test "a completion recorded before the freeze settles through its notice" do
+    owner = start_owner(fatal_recipient: self(), admission_wait_ms: 5_000)
+    components = Owner.components(owner)
+    holder = initialized_connection(components)
+    observer = initialized_connection(components)
+    session_id = "freeze-notice"
+    {lease_owner, owner_incarnation, _epoch} = acquire_held(owner, holder, session_id)
+    origin = {observer.incarnation, 0, 1}
+    {worker, worker_incarnation} = start_worker(observer.pid, origin)
+    :sys.suspend(lease_owner)
+
+    assert {:ok, :accepted, ^lease_owner, ^owner_incarnation} =
+             acquire_as(
+               owner,
+               origin,
+               "freeze-notice",
+               session_id,
+               observer.pid,
+               observer.incarnation,
+               worker,
+               worker_incarnation,
+               now_ms() + 5_000
+             )
+
+    assert {:ok, _cut_ref} = Owner.cut_admission(owner, 5_000)
+
+    park_relay_message(
+      components.relay,
+      &match?({:"$gen_call", _from, {:complete_lease_permit, ^origin, _, _}}, &1),
+      :complete_parked,
+      :continue_complete
+    )
+
+    :sys.resume(lease_owner)
+    assert_receive :complete_parked, 500
+    frozen = Task.async(fn -> freeze(owner) end)
+    assert :ok = wait_for_queue_length(components.relay, 1)
+    send(components.relay, :continue_complete)
+    assert {:ok, _descriptors} = Task.await(frozen, 6_000)
+    observer_pid = observer.pid
+
+    assert_receive {:manual_connection_message, ^observer_pid,
+                    {:relay_permit_result, ^origin, %{"code" => "control_held"}}},
+                   1_000
+
+    assert :ok = wait_for_status(owner, &(&1.lease_operations == 0))
+    refute_receive {:daemon_component_fatal, _reporter, _class}, 100
+  end
+
+  # Technical depth: a live owner's state after a real loss of the session's
+  # lease owner has finished, with that row kept as a template.
+  defp finished_loss_state(session_id) do
+    owner = start_owner()
+    components = Owner.components(owner)
+    holder = initialized_connection(components)
+    {lease_owner, _owner_incarnation, _epoch} = acquire_held(owner, holder, session_id)
+    template = :sys.get_state(owner).owners[session_id]
+    monitor = Process.monitor(lease_owner)
+    Process.exit(lease_owner, :kill)
+    assert_receive {:DOWN, ^monitor, :process, ^lease_owner, :killed}, 500
+    holder_pid = holder.pid
+
+    assert_receive {:manual_connection_message, ^holder_pid,
+                    {:daemon_control_owner_lost, ^owner, close_ref, ^session_id, _incarnation}},
+                   1_000
+
+    close_owner_loss_holder(owner, holder, close_ref)
+    assert %{owner_slots: 0} = wait_for_owner_retirement(owner)
+    state = :sys.get_state(owner)
+
+    row = %{
+      template
+      | phase: :lost,
+        exit_consumed: true,
+        mirror_complete: true,
+        classification_complete: true,
+        notification_complete: true,
+        relay_loss_seen: true,
+        relay_loss_ready: true,
+        loss_origins: [],
+        slot_charged: true
+    }
+
+    {state, session_id, row}
+  end
+
+  defp live_row_state(session_id, options) do
+    owner = start_owner(options)
+    components = Owner.components(owner)
+    holder = initialized_connection(components)
+    {_lease_owner, _owner_incarnation, _epoch} = acquire_held(owner, holder, session_id)
+    state = :sys.get_state(owner)
+    {state, session_id, state.owners[session_id]}
+  end
+
+  # Technical depth: an existing-owner operation awaiting the relay's open,
+  # with its request identifier registered as outstanding.
+  defp opening_existing(state, session_id, row, tag, kind) do
+    request_id = make_ref()
+
+    request =
+      if kind == :acquire,
+        do: %{
+          class: :session_acquire_control,
+          session_id: session_id,
+          permit_id: {incarnation(), 0, 1},
+          connection: self(),
+          connection_incarnation: incarnation(),
+          request_id: "invalid-actor",
+          request_deadline: now_ms() + 5_000
+        },
+        else: other_release(session_id)
+
+    operation = %{
+      request: request,
+      owner_pid: row.pid,
+      owner_incarnation: row.incarnation,
+      actor_pid: row.pid,
+      actor_incarnation: row.incarnation,
+      start_op_ref: nil,
+      phase: :opening,
+      reply_to: {self(), tag}
+    }
+
+    state =
+      state
+      |> put_in([:operations, request.permit_id], operation)
+      |> put_in([:relay_requests, request_id], %{
+        continuation: {:open, request.permit_id},
+        timer: nil
+      })
+
+    {state, request_id}
+  end
+
+  defp other_release(session_id) do
+    connection_incarnation = incarnation()
+
+    %{
+      class: :session_release_control,
+      session_id: session_id,
+      permit_id: {connection_incarnation, 0, 1},
+      connection: spawn(fn -> :ok end),
+      connection_incarnation: connection_incarnation,
+      request_id: "other-release",
+      writer_epoch: incarnation()
+    }
+  end
+
   defp pending_close_state do
     owner = start_owner(fatal_recipient: self())
     tag = make_ref()
@@ -3776,7 +5771,7 @@ defmodule LoopexDaemon.OwnerTest do
 
     release_task =
       Task.async(fn ->
-        Owner.release_control(
+        release_as(
           owner,
           release_origin,
           "#{session_id}-release",
@@ -3793,9 +5788,10 @@ defmodule LoopexDaemon.OwnerTest do
     assert %{pending: 1} = wait_for_relay_pending(components.relay)
     suspend_task = Task.async(fn -> :sys.suspend(owner) end)
     :sys.resume(lease_owner)
-    assert {:ok, :proposed, ^lease_owner, ^owner_incarnation} = Task.await(release_task, 500)
+    assert {:ok, :accepted, ^lease_owner, ^owner_incarnation} = Task.await(release_task, 500)
     assert :ok = Task.await(suspend_task, 500)
     assert_receive {:worker_go, ^release_worker, ^release_origin}, 500
+    assert :ok = wait_for_lease_owner(lease_owner, &(&1.phase == :release_pending))
     :sys.suspend(lease_owner)
     Process.exit(connection.pid, :kill)
     assert %{settling: 1} = wait_for_relay_settling(components.relay)
@@ -3906,6 +5902,21 @@ defmodule LoopexDaemon.OwnerTest do
   end
 
   defp wait_for_queue_length(_pid, _length, 0), do: {:error, :not_queued}
+  # Technical depth: the connection's answer is its acceptance, so a test
+  # that needs the lease owner's later step waits for its status.
+  defp wait_for_lease_owner(lease_owner, predicate, attempts \\ 200)
+
+  defp wait_for_lease_owner(lease_owner, predicate, attempts) when attempts > 0 do
+    if predicate.(LeaseOwner.status(lease_owner)) do
+      :ok
+    else
+      Process.sleep(5)
+      wait_for_lease_owner(lease_owner, predicate, attempts - 1)
+    end
+  end
+
+  defp wait_for_lease_owner(_lease_owner, _predicate, 0), do: {:error, :not_reached}
+
   defp wait_for_attachment(lease_owner, attempts \\ 100)
 
   defp wait_for_attachment(lease_owner, attempts) when attempts > 0 do
@@ -3945,8 +5956,8 @@ defmodule LoopexDaemon.OwnerTest do
     former_origin = {former.incarnation, 0, 1}
     {former_worker, former_worker_incarnation} = start_worker(former.pid, former_origin)
 
-    assert {:ok, :proposed, lease_owner, owner_incarnation} =
-             Owner.acquire_control(
+    assert {:ok, :accepted, lease_owner, owner_incarnation} =
+             acquire_as(
                owner,
                former_origin,
                "#{session_id}-former",
@@ -3969,8 +5980,8 @@ defmodule LoopexDaemon.OwnerTest do
     {successor_worker, successor_worker_incarnation} =
       start_worker(successor.pid, successor_origin)
 
-    assert {:ok, :queued, ^lease_owner, ^owner_incarnation} =
-             Owner.acquire_control(
+    assert {:ok, :accepted, ^lease_owner, ^owner_incarnation} =
+             acquire_as(
                owner,
                successor_origin,
                "#{session_id}-successor",
@@ -4012,7 +6023,7 @@ defmodule LoopexDaemon.OwnerTest do
 
     renewal =
       Task.async(fn ->
-        Owner.acquire_control(
+        acquire_as(
           owner,
           origin,
           "#{session_id}-renewal",
@@ -4032,7 +6043,14 @@ defmodule LoopexDaemon.OwnerTest do
     owner_monitor = Process.monitor(owner)
     send(components.relay, :continue_renewal)
 
-    assert {:error, _dropped} = Task.await(renewal, 1_000)
+    # The acceptance precedes the loss; the relay's disposition settles the
+    # operation it kept.
+    # The holder's connection is gone, so the acceptance, if any, reaches no
+    # one; the relay's disposition settles the operation.
+    case Task.yield(renewal, 1_000) || Task.shutdown(renewal, :brutal_kill) do
+      nil -> :ok
+      {:ok, reply} -> assert {:ok, :accepted, _lease_owner, _owner_incarnation} = reply
+    end
 
     assert %{lease_operations: 0, pending_dispositions: 0, mirror_operations: 0} =
              wait_for_owner_settlement(owner)

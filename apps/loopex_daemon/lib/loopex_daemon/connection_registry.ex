@@ -453,6 +453,83 @@ defmodule LoopexDaemon.ConnectionRegistry do
     )
   end
 
+  @doc """
+  ## Concept
+
+  A lease owner's resume requests to the registry, sent without waiting: the
+  registry's answer may wait on its relay flow, and the lease owner keeps
+  serving meanwhile.
+
+  ## Technical depth
+
+  Each sends exactly the request its blocking counterpart sends and returns
+  the OTP request identifier; the lease owner consumes the answer as a
+  message and holds no deadline of its own, since the registry's relay
+  instants bound it.
+  """
+  @spec prepare_resume_request(
+          pid(),
+          origin_id(),
+          binary(),
+          binary(),
+          binary(),
+          :eligible | :ineligible
+        ) :: :gen_server.request_id()
+  def prepare_resume_request(
+        registry,
+        origin_id,
+        session_id,
+        command_id,
+        owner_incarnation,
+        eligibility
+      ) do
+    :gen_server.send_request(
+      registry,
+      {:prepare_resume, origin_id, session_id, command_id, owner_incarnation, eligibility}
+    )
+  end
+
+  @doc false
+  @spec cancel_prepared_resume_request(pid(), origin_id(), binary()) :: :gen_server.request_id()
+  def cancel_prepared_resume_request(registry, origin_id, owner_incarnation),
+    do:
+      :gen_server.send_request(
+        registry,
+        {:cancel_prepared_resume, origin_id, owner_incarnation}
+      )
+
+  @doc false
+  @spec promote_resume_request(
+          pid(),
+          origin_id(),
+          binary(),
+          binary(),
+          binary(),
+          :eligible | :ineligible,
+          boolean(),
+          map(),
+          map(),
+          (-> {:accepted | :admission_unknown | :refused, :activated | :no_activation, map()})
+        ) :: :gen_server.request_id()
+  def promote_resume_request(
+        registry,
+        origin_id,
+        session_id,
+        command_id,
+        owner_incarnation,
+        eligibility,
+        attached,
+        control_refusal,
+        capacity_refusal,
+        task_fun
+      ) do
+    :gen_server.send_request(
+      registry,
+      {:promote_resume, origin_id, session_id, command_id, owner_incarnation, eligibility,
+       attached, control_refusal, capacity_refusal, task_fun}
+    )
+  end
+
   @doc false
   @spec cancel_prepared_resume(pid(), origin_id(), binary()) ::
           :ok | {:error, :owner_unavailable}

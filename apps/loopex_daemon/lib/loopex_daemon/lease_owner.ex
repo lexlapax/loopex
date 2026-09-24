@@ -6,31 +6,50 @@ defmodule LoopexDaemon.LeaseOwner do
   the lease outside durable session truth, grants at most one connection at a
   time, admits one controller mutation at a time through the complete holder
   gate, renews only the current holder, preserves wire order through explicit
-  release, and makes takeover eligible on the daemon's monotonic clock.
+  release, and makes takeover eligible on the daemon's monotonic clock. It
+  never waits on another daemon component inside a handler, and it reports the
+  relay's exact answer for every permit it handles to the daemon owner.
 
   ## Technical depth
 
-  The owner begins parked. Its linked daemon owner first installs the exact
-  pid/incarnation in the admission relay and then activates it. Existing-owner
-  acquire and release operations compare-and-set their actor-bound relay permit
-  before changing state. A first acquisition is already claimed by the daemon
-  actor before this child is started. Holder-changing grants, expiry and release
+  The owner begins parked. Its linked daemon owner registers the exact
+  pid/incarnation in the admission relay and then sends `:activate` as a
+  plain message. Every request from the daemon owner arrives as
+  `{:lease_request, daemon_owner, owner_incarnation, request}`; resolutions
+  and discards keep their ref-tagged messages. Existing-owner acquire and
+  release operations compare-and-set their actor-bound relay permit before
+  changing state. A first acquisition is already claimed by the daemon actor
+  before this child is started. Holder-changing grants, expiry and release
   are proposals: this process exposes no epoch or state transition until the
   daemon owner acknowledges the corresponding routing-mirror settlement.
 
+  Every relay or registry request is an OTP request message. At most one is
+  awaited at a time; while it is, acquisitions, releases, resumes, waiter
+  deadlines and retirement requests wait in arrival order, while resolutions,
+  discards, attachments, activation and the expiry timer are processed at
+  once. After each answer, and after a resolution or expiry while nothing is
+  awaited, the owner drains its work in a fixed order: pending operations,
+  the expiry check, one waiter, the expiry re-arm, then one deferred input. A
+  relay request unanswered for five seconds is reported once to the daemon
+  owner, which names the relay lost while serving; the registry's answers
+  carry no deadline here because the registry bounds its own relay steps.
+
+  For each permit it is asked to handle, the owner sends exactly one terminal
+  message, after the relay's answer: its grant or release proposal, or
+  `{:lease_permit_settled, permit_id, owner, owner_incarnation, kind}` with
+  `kind` one of `:result`, `:connection_lost`, `:shutdown` or `:invalid`. A
+  permit the daemon owner discarded while it was awaited sends nothing.
+
   A mutation records a candidate renewal at its gate instant. Only the joined
   relay settlement and core disposition commit that deadline, and only for an
-  accepted or admission-unknown call; refusal discards it. Expiry, a later
-  mutation and explicit release wait for that join. Writer epochs are fresh
-  128-bit opaque values. Lease and request deadlines use monotonic milliseconds;
-  timer messages only prompt a live deadline check. Process status is fully
-  redacted and lifecycle logs contain no session, connection, epoch, request or
-  permit data. Once the daemon requests retirement from a free idle owner, the
-  owner waits for the relay's exact session rows to clear, marks its binding
-  retiring there, sends a pre-exit intent to the daemon, and exits normally only
-  after the daemon acknowledges that exact intent. Daemon-owned grant, release
-  and expiry resolutions also use authenticated ref-tagged messages so the
-  fixed owner never blocks while this process commits the selected transition.
+  accepted or admission-unknown call; refusal discards it. Writer epochs are
+  fresh 128-bit opaque values. Lease and request deadlines use monotonic
+  milliseconds; timer messages only prompt a live deadline check. Process
+  status is fully redacted and lifecycle logs contain no session, connection,
+  epoch, request or permit data. Once the daemon requests retirement from a
+  free idle owner, the owner waits for the relay's exact session rows to
+  clear, marks its binding retiring there, sends a pre-exit intent to the
+  daemon, and exits normally only after the daemon acknowledges that intent.
   """
 
   use GenServer
@@ -42,6 +61,10 @@ defmodule LoopexDaemon.LeaseOwner do
   @max_timer_ms 4_294_967_295
   @incarnation_bytes 16
   @max_session_bytes 256
+
+  # Concept: each relay request this owner sends has its own five-second
+  # instant; it only prompts one report to the daemon owner.
+  @relay_request_ms 5_000
 
   @direct_mutation_classes [
     :session_prompt,
@@ -58,25 +81,34 @@ defmodule LoopexDaemon.LeaseOwner do
   @typedoc false
   @type permit_id :: AdmissionRelay.origin_id()
 
-  # Concept: the collaboration owner's calls into a lease owner keep the
-  # ordinary 5 s bound. Blocking calls between daemon components are being
-  # replaced by a non-blocking design recorded in the M5 plan; until then no
-  # fixed bound is correct for every caller under a slow relay.
-  @daemon_call_ms 5_000
-
   @doc false
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(options), do: GenServer.start_link(__MODULE__, options, timeout: 5_000)
 
-  @doc false
-  @spec activate(pid()) :: :ok | {:error, :invalid_owner | :owner_unavailable}
-  def activate(owner), do: GenServer.call(owner, :activate, @daemon_call_ms)
+  @doc """
+  ## Concept
 
-  @doc false
-  @spec retire_if_idle(pid()) ::
-          {:ok, :retiring | :waiting}
-          | {:error, :daemon_stopping | :not_idle | :owner_unavailable}
-  def retire_if_idle(owner), do: GenServer.call(owner, :retire_if_idle, @daemon_call_ms)
+  Sends one daemon-owner request to this lease owner without waiting.
+
+  ## Technical depth
+
+  `request` is `:activate`, `:retire_if_idle`,
+  `{:first_acquire, permit_id, request_id, connection, connection_incarnation,
+  request_deadline}`, `{:acquire, …}` with the same fields,
+  `{:release, permit_id, request_id, connection, connection_incarnation,
+  writer_epoch}` or `{:attachment, ack_ref, :opened | :closed, connection,
+  connection_incarnation, attachment_id}`. Only the daemon owner that started
+  this owner, naming its exact incarnation, is heard. Each permit's answer
+  arrives later as its proposal or its `lease_permit_settled` notice; an
+  attachment with an `ack_ref` is acknowledged with `{:lease_attachment_ack,
+  ack_ref, owner, owner_incarnation}`; `:retire_if_idle` is answered only by
+  the retirement intent.
+  """
+  @spec request(pid(), binary(), term()) :: :ok
+  def request(owner, owner_incarnation, request) do
+    send(owner, {:lease_request, self(), owner_incarnation, request})
+    :ok
+  end
 
   @doc false
   @spec complete_retirement(pid(), reference()) :: :ok
@@ -88,108 +120,6 @@ defmodule LoopexDaemon.LeaseOwner do
   @spec release_retirement_exit(pid(), reference()) :: :ok
   def release_retirement_exit(owner, retirement_ref) do
     GenServer.cast(owner, {:release_retirement_exit, self(), retirement_ref})
-  end
-
-  @doc false
-  @spec first_acquire(
-          pid(),
-          permit_id(),
-          binary(),
-          pid(),
-          binary(),
-          integer()
-        ) ::
-          {:ok, :proposed} | {:error, :invalid_operation | :owner_unavailable}
-  def first_acquire(
-        owner,
-        permit_id,
-        request_id,
-        connection,
-        connection_incarnation,
-        request_deadline
-      ) do
-    GenServer.call(
-      owner,
-      {:first_acquire, permit_id, request_id, connection, connection_incarnation,
-       request_deadline},
-      @daemon_call_ms
-    )
-  end
-
-  @doc false
-  @spec acquire(pid(), permit_id(), binary(), pid(), binary(), integer()) ::
-          {:ok, :completed | :proposed | :queued}
-          | {:error,
-             :connection_lost
-             | :daemon_stopping
-             | :invalid_actor
-             | :invalid_operation
-             | :owner_lost
-             | :permit_unavailable
-             | :result
-             | :shutdown_admitted
-             | :shutdown_cancelled}
-  def acquire(
-        owner,
-        permit_id,
-        request_id,
-        connection,
-        connection_incarnation,
-        request_deadline
-      ) do
-    GenServer.call(
-      owner,
-      {:acquire, permit_id, request_id, connection, connection_incarnation, request_deadline},
-      @daemon_call_ms
-    )
-  end
-
-  @doc false
-  @spec release(pid(), permit_id(), binary(), pid(), binary(), binary()) ::
-          {:ok, :completed | :proposed | :queued}
-          | {:error,
-             :connection_lost
-             | :daemon_stopping
-             | :invalid_actor
-             | :invalid_operation
-             | :owner_lost
-             | :permit_unavailable
-             | :result
-             | :shutdown_admitted
-             | :shutdown_cancelled}
-  def release(
-        owner,
-        permit_id,
-        request_id,
-        connection,
-        connection_incarnation,
-        writer_epoch
-      ) do
-    GenServer.call(
-      owner,
-      {:release, permit_id, request_id, connection, connection_incarnation, writer_epoch},
-      @daemon_call_ms
-    )
-  end
-
-  @doc false
-  @spec resolve_grant(pid(), reference(), :granted | :cancelled, integer() | nil) ::
-          :ok | {:error, :invalid_operation}
-  def resolve_grant(owner, grant_ref, disposition, granted_at \\ nil) do
-    GenServer.call(owner, {:resolve_grant, grant_ref, disposition, granted_at})
-  end
-
-  @doc false
-  @spec resolve_release(pid(), reference(), :released | :cancelled) ::
-          :ok | {:error, :invalid_operation}
-  def resolve_release(owner, release_ref, disposition) do
-    GenServer.call(owner, {:resolve_release, release_ref, disposition})
-  end
-
-  @doc false
-  @spec resolve_expiry(pid(), reference()) :: :ok | {:error, :invalid_operation}
-  def resolve_expiry(owner, expiry_ref) do
-    GenServer.call(owner, {:resolve_expiry, expiry_ref})
   end
 
   @doc false
@@ -245,17 +175,19 @@ defmodule LoopexDaemon.LeaseOwner do
   @doc """
   ## Concept
 
-  Asks the lease owner to drop a claimed acquire or release whose connection
-  was lost while it was still queued, so no later completion is attempted for
-  a row the daemon owner settles as a connection loss.
+  Asks the lease owner to drop an acquire or release whose connection was
+  lost before it was decided, so no later decision is made for a row the
+  daemon owner settles as a connection loss.
 
   ## Technical depth
 
   The owner answers `{:lease_owner_resolution_ack, operation_ref, owner,
-  owner_incarnation, :discard, result}`: `:discarded` when it removed the
-  queued descriptor, `:proposed` when that permit already has a transition
-  (its proposal reached the daemon owner first, by same-sender order), and
-  `:absent` when the owner no longer holds it.
+  owner_incarnation, :discard, result}`. It looks, in order, at the permit its
+  awaited relay step names, its deferred inputs, its waiters and pending
+  operations — each answering `:discarded`, after which every relay answer
+  for that permit is cleanup-only and no notice is sent — then at its
+  transition, answering `:proposed`, since its proposal reached the daemon
+  owner first by same-sender order; otherwise it answers `:absent`.
   """
   @spec request_discard(pid(), reference(), binary(), term()) :: :ok
   def request_discard(owner, operation_ref, owner_incarnation, permit_id) do
@@ -279,28 +211,6 @@ defmodule LoopexDaemon.LeaseOwner do
   end
 
   @doc false
-  @spec attachment_opened(pid(), pid(), binary(), binary()) ::
-          :ok | {:error, :invalid_operation}
-  def attachment_opened(owner, connection, connection_incarnation, attachment_id) do
-    GenServer.call(
-      owner,
-      {:attachment, :opened, connection, connection_incarnation, attachment_id},
-      @daemon_call_ms
-    )
-  end
-
-  @doc false
-  @spec attachment_closed(pid(), pid(), binary(), binary()) ::
-          :ok | {:error, :invalid_operation}
-  def attachment_closed(owner, connection, connection_incarnation, attachment_id) do
-    GenServer.call(
-      owner,
-      {:attachment, :closed, connection, connection_incarnation, attachment_id},
-      @daemon_call_ms
-    )
-  end
-
-  @doc false
   @spec mutate(
           pid(),
           permit_id(),
@@ -316,6 +226,7 @@ defmodule LoopexDaemon.LeaseOwner do
              :daemon_stopping
              | :invalid_operation
              | :owner_unavailable
+             | :promotion_outcome_unknown
              | :ticket_outstanding
              | :ticket_unavailable}
   def mutate(
@@ -354,6 +265,7 @@ defmodule LoopexDaemon.LeaseOwner do
              | :invalid_operation
              | :invalid_promotion
              | :owner_unavailable
+             | :promotion_outcome_unknown
              | :registry_unavailable
              | :relay_unavailable
              | :ticket_outstanding
@@ -438,7 +350,10 @@ defmodule LoopexDaemon.LeaseOwner do
          waiter_timers: %{},
          attachments: attachments,
          in_flight: %{},
-         pending_operations: []
+         pending_operations: [],
+         awaiting: nil,
+         deferred: :queue.new(),
+         discarded: MapSet.new()
        }}
     else
       {:stop, :invalid_lease_owner_options}
@@ -446,172 +361,6 @@ defmodule LoopexDaemon.LeaseOwner do
   end
 
   @impl true
-  def handle_call(:activate, {caller, _tag}, %{daemon_owner: caller, phase: :starting} = state) do
-    if Process.alive?(state.relay) do
-      Logger.debug("loopex daemon lease owner active")
-      {:reply, :ok, %{state | phase: :active}}
-    else
-      {:reply, {:error, :owner_unavailable}, state}
-    end
-  end
-
-  def handle_call(:activate, {caller, _tag}, %{daemon_owner: caller, phase: :active} = state),
-    do: {:reply, :ok, state}
-
-  def handle_call(:activate, _from, state), do: {:reply, {:error, :invalid_owner}, state}
-
-  def handle_call(
-        :retire_if_idle,
-        {caller, _tag},
-        %{daemon_owner: caller, phase: :active} = state
-      ) do
-    if retirement_eligible?(state) do
-      {reply, state} = begin_retirement(%{state | retirement_requested: true})
-      {:reply, reply, state}
-    else
-      {:reply, {:error, :not_idle}, state}
-    end
-  end
-
-  def handle_call(:retire_if_idle, _from, state),
-    do: {:reply, {:error, :owner_unavailable}, state}
-
-  def handle_call(
-        {:first_acquire, permit_id, request_id, connection, connection_incarnation,
-         request_deadline},
-        {caller, _tag},
-        %{daemon_owner: caller, phase: :active, first_acquire_available: true} = state
-      ) do
-    now = monotonic_ms()
-
-    with :ok <-
-           validate_acquire(
-             permit_id,
-             request_id,
-             connection,
-             connection_incarnation,
-             request_deadline,
-             now
-           ),
-         true <- state.lease == :free and is_nil(state.transition) do
-      acquisition =
-        acquisition(
-          permit_id,
-          request_id,
-          connection,
-          connection_incarnation,
-          request_deadline,
-          now,
-          :daemon
-        )
-
-      state = %{state | first_acquire_available: false}
-      {state, _grant_ref} = propose_grant(state, acquisition)
-      {:reply, {:ok, :proposed}, state}
-    else
-      false -> {:reply, {:error, :invalid_operation}, state}
-      {:error, _reason} -> {:reply, {:error, :invalid_operation}, state}
-    end
-  end
-
-  def handle_call(
-        {:first_acquire, _, _, _, _, _},
-        {caller, _tag},
-        %{daemon_owner: caller} = state
-      ),
-      do: {:reply, {:error, :invalid_operation}, state}
-
-  def handle_call({:first_acquire, _, _, _, _, _}, _from, state),
-    do: {:reply, {:error, :owner_unavailable}, state}
-
-  def handle_call(
-        {:acquire, permit_id, request_id, connection, connection_incarnation, request_deadline},
-        {caller, _tag},
-        %{daemon_owner: caller, phase: :active} = state
-      ) do
-    now = monotonic_ms()
-
-    with :ok <-
-           validate_acquire(
-             permit_id,
-             request_id,
-             connection,
-             connection_incarnation,
-             request_deadline,
-             now
-           ),
-         :ok <-
-           AdmissionRelay.claim_lease_permit(
-             state.relay,
-             permit_id,
-             state.owner_incarnation
-           ) do
-      acquisition =
-        acquisition(
-          permit_id,
-          request_id,
-          connection,
-          connection_incarnation,
-          request_deadline,
-          now,
-          :owner
-        )
-
-      {reply, state} = handle_acquisition(state, acquisition, now)
-      {:reply, reply, state}
-    else
-      {:error, :invalid_operation} -> {:reply, {:error, :invalid_operation}, state}
-      {:error, reason} -> {:reply, {:error, reason}, state}
-    end
-  end
-
-  def handle_call({:acquire, _, _, _, _, _}, _from, state),
-    do: {:reply, {:error, :invalid_operation}, state}
-
-  def handle_call(
-        {:release, permit_id, request_id, connection, connection_incarnation, writer_epoch},
-        {caller, _tag},
-        %{daemon_owner: caller, phase: :active} = state
-      ) do
-    with :ok <-
-           validate_release(
-             permit_id,
-             request_id,
-             connection,
-             connection_incarnation,
-             writer_epoch
-           ),
-         :ok <-
-           AdmissionRelay.claim_lease_permit(
-             state.relay,
-             permit_id,
-             state.owner_incarnation
-           ) do
-      descriptor = %{
-        permit_id: permit_id,
-        request_id: request_id,
-        connection: connection,
-        connection_incarnation: connection_incarnation,
-        writer_epoch: writer_epoch
-      }
-
-      if operation_blocked?(state) do
-        state = update_in(state.pending_operations, &(&1 ++ [{:release, descriptor}]))
-        Logger.debug("loopex daemon lease release queued")
-        {:reply, {:ok, :queued}, state}
-      else
-        {reply, state} = perform_release(state, descriptor)
-        {:reply, reply, state}
-      end
-    else
-      {:error, :invalid_operation} -> {:reply, {:error, :invalid_operation}, state}
-      {:error, reason} -> {:reply, {:error, reason}, state}
-    end
-  end
-
-  def handle_call({:release, _, _, _, _, _}, _from, state),
-    do: {:reply, {:error, :invalid_operation}, state}
-
   def handle_call(
         {:mutate, origin_id, class, request_id, connection_incarnation, writer_epoch, worker,
          task_fun},
@@ -643,7 +392,7 @@ defmodule LoopexDaemon.LeaseOwner do
       }
 
       state = enqueue_mutation(state, descriptor)
-      {:noreply, continue_session_work(state)}
+      {:noreply, drain(state)}
     else
       {:error, reason} -> {:reply, {:error, reason}, state}
     end
@@ -654,153 +403,27 @@ defmodule LoopexDaemon.LeaseOwner do
 
   def handle_call(
         {:resume, origin_id, request_id, command_id, connection_incarnation, writer_epoch, worker,
-         task_fun},
+         task_fun} = request,
         from = {connection, _tag},
         %{phase: :active} = state
       ) do
-    with :ok <-
-           validate_resume(
-             origin_id,
-             request_id,
-             command_id,
-             connection,
-             connection_incarnation,
-             writer_epoch,
-             worker,
-             task_fun
-           ) do
-      descriptor = %{
-        origin_id: origin_id,
-        class: :session_resume,
-        request_id: request_id,
-        command_id: command_id,
-        connection: connection,
-        connection_incarnation: connection_incarnation,
-        writer_epoch: writer_epoch,
-        worker: worker,
-        worker_monitor: Process.monitor(worker),
-        task_fun: task_fun,
-        from: from
-      }
-
-      eligibility =
-        if resume_holder_gate?(state, descriptor, monotonic_ms()),
-          do: :eligible,
-          else: :ineligible
-
-      case registry_call(fn ->
-             ConnectionRegistry.prepare_resume(
-               state.registry,
-               origin_id,
-               state.session_id,
-               command_id,
-               state.owner_incarnation,
-               eligibility
-             )
-           end) do
-        {:ok, {:waiting, _primary_origin_id}} ->
-          Process.demonitor(descriptor.worker_monitor, [:flush])
-          Logger.debug("loopex daemon queued resume joined primary")
-          {:reply, {:ok, :admitted}, state}
-
-        {:ok, preparation} when preparation in [:prepared, :unreserved] ->
-          state = enqueue_mutation(state, descriptor)
-          {:noreply, continue_session_work(state)}
-
-        {:error, :activation_ceiling_reached} ->
-          state = enqueue_mutation(state, descriptor)
-          {:noreply, continue_session_work(state)}
-
-        {:error, reason} ->
-          Process.demonitor(descriptor.worker_monitor, [:flush])
-          {:reply, {:error, reason}, state}
-      end
-    else
+    case validate_resume(
+           origin_id,
+           request_id,
+           command_id,
+           connection,
+           connection_incarnation,
+           writer_epoch,
+           worker,
+           task_fun
+         ) do
+      :ok -> {:noreply, accept_input(state, {:resume_call, request, from})}
       {:error, reason} -> {:reply, {:error, reason}, state}
     end
   end
 
   def handle_call({:resume, _, _, _, _, _, _, _}, _from, state),
     do: {:reply, {:error, :owner_unavailable}, state}
-
-  def handle_call(
-        {:resolve_grant, grant_ref, :granted, granted_at},
-        {caller, _tag},
-        %{daemon_owner: caller, transition: %{kind: :grant, ref: grant_ref} = transition} = state
-      )
-      when is_integer(granted_at) do
-    {:ok, state} = resolve_grant_transition(state, transition, :granted, granted_at)
-    {:reply, :ok, state}
-  end
-
-  def handle_call(
-        {:resolve_grant, grant_ref, :cancelled, nil},
-        {caller, _tag},
-        %{daemon_owner: caller, transition: %{kind: :grant, ref: grant_ref} = transition} = state
-      ) do
-    {:ok, state} = resolve_grant_transition(state, transition, :cancelled, nil)
-    {:reply, :ok, state}
-  end
-
-  def handle_call({:resolve_grant, _, _, _}, _from, state),
-    do: {:reply, {:error, :invalid_operation}, state}
-
-  def handle_call(
-        {:resolve_release, release_ref, disposition},
-        {caller, _tag},
-        %{
-          daemon_owner: caller,
-          transition: %{kind: :release, ref: release_ref, lease: lease}
-        } = state
-      )
-      when disposition in [:released, :cancelled] do
-    {:ok, state} = resolve_release_transition(state, lease, disposition)
-    {:reply, :ok, state}
-  end
-
-  def handle_call({:resolve_release, _, _}, _from, state),
-    do: {:reply, {:error, :invalid_operation}, state}
-
-  def handle_call(
-        {:resolve_expiry, expiry_ref},
-        {caller, _tag},
-        %{
-          daemon_owner: caller,
-          transition: %{kind: :expiry, ref: expiry_ref, lease: lease}
-        } = state
-      ) do
-    {:ok, state} = resolve_expiry_transition(state, lease)
-    {:reply, :ok, state}
-  end
-
-  def handle_call({:resolve_expiry, _}, _from, state),
-    do: {:reply, {:error, :invalid_operation}, state}
-
-  def handle_call(
-        {:attachment, action, connection, connection_incarnation, attachment_id},
-        {caller, _tag},
-        %{daemon_owner: caller, phase: :active} = state
-      )
-      when action in [:opened, :closed] do
-    if is_pid(connection) and valid_incarnation?(connection_incarnation) and
-         is_binary(attachment_id) and byte_size(attachment_id) in 1..256 do
-      key = {connection, connection_incarnation, attachment_id}
-
-      attachments =
-        case action do
-          :opened -> MapSet.put(state.attachments, key)
-          :closed -> MapSet.delete(state.attachments, key)
-        end
-
-      Logger.debug("loopex daemon lease attachment state changed")
-      {:reply, :ok, %{state | attachments: attachments}}
-    else
-      {:reply, {:error, :invalid_operation}, state}
-    end
-  end
-
-  def handle_call({:attachment, _, _, _, _}, _from, state),
-    do: {:reply, {:error, :invalid_operation}, state}
 
   def handle_call(:status, _from, state) do
     {:reply,
@@ -811,6 +434,8 @@ defmodule LoopexDaemon.LeaseOwner do
        in_flight: map_size(state.in_flight),
        queued_operations: length(state.pending_operations),
        waiting_acquires: length(state.waiters),
+       awaiting: not is_nil(state.awaiting),
+       deferred: :queue.len(state.deferred),
        lease_term_ms: state.lease_term_ms,
        retirement_requested: state.retirement_requested,
        first_acquire_available: state.first_acquire_available
@@ -866,7 +491,46 @@ defmodule LoopexDaemon.LeaseOwner do
     {:noreply, state}
   end
 
+  # Concept: the awaited relay or registry answer continues its step, and
+  # the owner then drains whatever work that answer unblocked.
   @impl true
+  def handle_info(
+        {[:alias | request], _reply} = message,
+        %{awaiting: %{request: request}} = state
+      ),
+      do: {:noreply, awaited_answer(state, message)}
+
+  def handle_info(
+        {:DOWN, request, :process, _server, _reason} = message,
+        %{awaiting: %{request: request}} = state
+      ),
+      do: {:noreply, awaited_answer(state, message)}
+
+  # Concept: a relay request still unanswered at its instant is reported once
+  # to the daemon owner, which names the relay lost while serving; the
+  # request stays awaited and the daemon's fail-stop ends it.
+  def handle_info({:lease_request_unanswered, request}, %{awaiting: %{request: request}} = state) do
+    send(state.daemon_owner, {:lease_owner_relay_unanswered, self(), state.owner_incarnation})
+    Logger.debug("loopex daemon lease owner relay request unanswered")
+    {:noreply, put_in(state, [:awaiting, :timer], nil)}
+  end
+
+  def handle_info({:lease_request_unanswered, _request}, state), do: {:noreply, state}
+
+  def handle_info(
+        {:lease_request, daemon_owner, owner_incarnation, request},
+        %{daemon_owner: daemon_owner, owner_incarnation: owner_incarnation} = state
+      ),
+      do: {:noreply, accept_request(state, request)}
+
+  def handle_info({:lease_request, _daemon_owner, _owner_incarnation, _request}, state) do
+    Logger.debug("loopex daemon lease owner request ignored")
+    {:noreply, state}
+  end
+
+  # Concept: a daemon resolution is applied and acknowledged before this
+  # owner starts any further relay request, so the acknowledgement measures
+  # only this owner's own work.
   def handle_info(
         {:daemon_lease_resolution, operation_ref, daemon_owner, owner_incarnation, action,
          payload},
@@ -880,7 +544,7 @@ defmodule LoopexDaemon.LeaseOwner do
       {:lease_owner_resolution_ack, operation_ref, self(), owner_incarnation, action, reply}
     )
 
-    {:noreply, state}
+    {:noreply, drain(state)}
   end
 
   def handle_info(
@@ -893,47 +557,26 @@ defmodule LoopexDaemon.LeaseOwner do
   end
 
   def handle_info({:lease_expiry, token, deadline}, %{expiry_token: token} = state) do
-    if monotonic_ms() >= deadline do
-      state = %{state | expiry_timer: nil, expiry_token: nil}
-      {:noreply, ensure_expiry_transition(state)}
-    else
-      {:noreply, schedule_expiry(state, deadline)}
-    end
+    state = %{state | expiry_timer: nil, expiry_token: nil}
+
+    state =
+      if monotonic_ms() >= deadline,
+        do: state,
+        else: schedule_expiry(state, deadline)
+
+    {:noreply, drain(state)}
   end
 
   def handle_info({:lease_expiry, _token, _deadline}, state), do: {:noreply, state}
 
   def handle_info(
         {:relay_owner_idle, relay, owner_incarnation},
-        %{
-          relay: relay,
-          owner_incarnation: owner_incarnation,
-          phase: :active,
-          retirement_requested: true
-        } = state
-      ) do
-    {_reply, state} = begin_retirement(state)
-    {:noreply, state}
-  end
+        %{relay: relay, owner_incarnation: owner_incarnation} = state
+      ),
+      do: {:noreply, accept_input(state, :relay_owner_idle)}
 
-  def handle_info({:acquire_deadline, permit_id, deadline}, state) do
-    case Enum.split_with(state.waiters, &(&1.permit_id == permit_id)) do
-      {[waiter], remaining} ->
-        state = %{state | waiters: remaining}
-        state = cancel_waiter_timer(state, permit_id)
-
-        if monotonic_ms() >= deadline do
-          _result = complete_control_error(state, waiter, "control_pending")
-          Logger.debug("loopex daemon lease acquire deadline reached")
-          {:noreply, state}
-        else
-          {:noreply, queue_acquisition(state, waiter)}
-        end
-
-      _other ->
-        {:noreply, state}
-    end
-  end
+  def handle_info({:acquire_deadline, permit_id, deadline}, state),
+    do: {:noreply, accept_input(state, {:acquire_deadline, permit_id, deadline})}
 
   def handle_info(
         {:lease_mutation_classified, task_ref, origin_id, disposition},
@@ -944,7 +587,7 @@ defmodule LoopexDaemon.LeaseOwner do
       {:ok, %{task_ref: ^task_ref, disposition: nil} = mutation} ->
         mutation = %{mutation | disposition: disposition}
         state = put_in(state, [:in_flight, origin_id], mutation)
-        {:noreply, settle_mutation_if_ready(state, origin_id)}
+        {:noreply, drain(settle_mutation_if_ready(state, origin_id))}
 
       _other ->
         {:noreply, state}
@@ -959,13 +602,26 @@ defmodule LoopexDaemon.LeaseOwner do
       {:ok, %{relay_settled: false} = mutation} ->
         mutation = %{mutation | relay_settled: true}
         state = put_in(state, [:in_flight, origin_id], mutation)
-        {:noreply, settle_mutation_if_ready(state, origin_id)}
+        {:noreply, drain(settle_mutation_if_ready(state, origin_id))}
 
       _other ->
         {:noreply, state}
     end
   end
 
+  # Concept: a resume's slot is freed by the relay's own removal of its
+  # ticket, never by the registry's answer alone; the registry's answer only
+  # supplies the disposition.
+  #
+  # Technical depth: while serving, the registry sends this notice only after
+  # the relay accepted the settlement, and the relay then sends
+  # `relay_lease_ticket_settled`, so the slot always frees. The registry sends
+  # it without a relay settlement only when the relay refuses the settlement
+  # during the stop (`transport != :serving`), when it abandons the flow at
+  # teardown, or when the relay has exited; while serving, a refused
+  # settlement exits the registry instead (`connections_lost`). In each of
+  # those cases the stop's own barriers bound this lease owner, which the
+  # freeze or teardown kills, so the unsettled slot cannot outlive the stop.
   def handle_info(
         {:registry_resume_settled, registry, origin_id, owner_incarnation, disposition},
         %{registry: registry, owner_incarnation: owner_incarnation} = state
@@ -977,7 +633,7 @@ defmodule LoopexDaemon.LeaseOwner do
         # frees the session's mutation slot; `relay_settled` waits for it.
         mutation = %{mutation | disposition: disposition}
         state = put_in(state, [:in_flight, origin_id], mutation)
-        {:noreply, settle_mutation_if_ready(state, origin_id)}
+        {:noreply, drain(settle_mutation_if_ready(state, origin_id))}
 
       _other ->
         {:noreply, state}
@@ -990,10 +646,16 @@ defmodule LoopexDaemon.LeaseOwner do
            _operation -> false
          end) do
       {[{:mutation, %{worker: ^worker} = descriptor}], remaining} ->
-        cancel_prepared_resume(state, descriptor)
         GenServer.reply(descriptor.from, {:error, :ticket_unavailable})
         Logger.debug("loopex daemon queued mutation worker lost")
-        {:noreply, continue_session_work(%{state | pending_operations: remaining})}
+        state = %{state | pending_operations: remaining}
+
+        state =
+          if descriptor.class == :session_resume,
+            do: accept_input(state, {:cancel_prepared, descriptor.origin_id}),
+            else: state
+
+        {:noreply, drain(state)}
 
       _other ->
         {:noreply, state}
@@ -1025,6 +687,555 @@ defmodule LoopexDaemon.LeaseOwner do
     |> Map.put(:log, [])
   end
 
+  # Concept: activation and attachments are processed at once in any phase;
+  # every other daemon request waits behind an awaited relay step.
+  defp accept_request(%{phase: :starting} = state, :activate) do
+    Logger.debug("loopex daemon lease owner active")
+    drain(%{state | phase: :active})
+  end
+
+  defp accept_request(state, :activate), do: state
+
+  defp accept_request(
+         state,
+         {:attachment, ack_ref, action, connection, connection_incarnation, attachment_id}
+       )
+       when action in [:opened, :closed] do
+    state =
+      if is_pid(connection) and valid_incarnation?(connection_incarnation) and
+           is_binary(attachment_id) and byte_size(attachment_id) in 1..256 do
+        key = {connection, connection_incarnation, attachment_id}
+
+        attachments =
+          case action do
+            :opened -> MapSet.put(state.attachments, key)
+            :closed -> MapSet.delete(state.attachments, key)
+          end
+
+        Logger.debug("loopex daemon lease attachment state changed")
+        %{state | attachments: attachments}
+      else
+        state
+      end
+
+    if is_reference(ack_ref) do
+      send(
+        state.daemon_owner,
+        {:lease_attachment_ack, ack_ref, self(), state.owner_incarnation}
+      )
+    end
+
+    state
+  end
+
+  defp accept_request(state, request), do: accept_input(state, request)
+
+  # Concept: a deferrable input runs now only when no relay or registry step
+  # is awaited; otherwise it waits its turn in arrival order.
+  defp accept_input(%{awaiting: nil} = state, input), do: drain(handle_input(state, input))
+
+  defp accept_input(state, input),
+    do: %{state | deferred: :queue.in(input, state.deferred)}
+
+  defp handle_input(
+         %{phase: :active, first_acquire_available: true} = state,
+         {:first_acquire, permit_id, request_id, connection, connection_incarnation,
+          request_deadline}
+       ) do
+    with :ok <-
+           validate_acquire(
+             permit_id,
+             request_id,
+             connection,
+             connection_incarnation,
+             request_deadline
+           ),
+         true <- state.lease == :free and is_nil(state.transition) do
+      acquisition =
+        acquisition(
+          permit_id,
+          request_id,
+          connection,
+          connection_incarnation,
+          request_deadline,
+          monotonic_ms(),
+          :daemon
+        )
+
+      state = %{state | first_acquire_available: false}
+      {state, _grant_ref} = propose_grant(state, acquisition)
+      state
+    else
+      _invalid -> notify_permit(state, permit_id, :invalid)
+    end
+  end
+
+  defp handle_input(state, {:first_acquire, permit_id, _, _, _, _}),
+    do: notify_permit(state, permit_id, :invalid)
+
+  defp handle_input(
+         %{phase: :active} = state,
+         {:acquire, permit_id, request_id, connection, connection_incarnation, request_deadline}
+       ) do
+    case validate_acquire(
+           permit_id,
+           request_id,
+           connection,
+           connection_incarnation,
+           request_deadline
+         ) do
+      :ok ->
+        acquisition =
+          acquisition(
+            permit_id,
+            request_id,
+            connection,
+            connection_incarnation,
+            request_deadline,
+            monotonic_ms(),
+            :owner
+          )
+
+        request =
+          AdmissionRelay.claim_lease_permit_request(
+            state.relay,
+            permit_id,
+            state.owner_incarnation
+          )
+
+        await(state, :relay, request, {:claim_acquire, acquisition})
+
+      {:error, _reason} ->
+        notify_permit(state, permit_id, :invalid)
+    end
+  end
+
+  defp handle_input(
+         %{phase: :active} = state,
+         {:release, permit_id, request_id, connection, connection_incarnation, writer_epoch}
+       ) do
+    case validate_release(permit_id, request_id, connection, connection_incarnation, writer_epoch) do
+      :ok ->
+        descriptor = %{
+          permit_id: permit_id,
+          request_id: request_id,
+          connection: connection,
+          connection_incarnation: connection_incarnation,
+          writer_epoch: writer_epoch
+        }
+
+        request =
+          AdmissionRelay.claim_lease_permit_request(
+            state.relay,
+            permit_id,
+            state.owner_incarnation
+          )
+
+        await(state, :relay, request, {:claim_release, descriptor})
+
+      {:error, _reason} ->
+        notify_permit(state, permit_id, :invalid)
+    end
+  end
+
+  # Concept: a request this owner cannot take in its current phase is still
+  # answered: it claims the permit and completes it `internal_failure`
+  # through the relay, so no permit is left undecided.
+  defp handle_input(state, {kind, permit_id, request_id, _, _, _})
+       when kind in [:acquire, :release] and is_binary(request_id) do
+    request =
+      AdmissionRelay.claim_lease_permit_request(state.relay, permit_id, state.owner_incarnation)
+
+    await(state, :relay, request, {:claim_refuse, permit_id, request_id})
+  end
+
+  defp handle_input(state, {kind, permit_id, _, _, _, _}) when kind in [:acquire, :release],
+    do: notify_permit(state, permit_id, :invalid)
+
+  defp handle_input(%{phase: :active} = state, :retire_if_idle) do
+    if retirement_eligible?(state),
+      do: begin_retirement(%{state | retirement_requested: true}),
+      else: state
+  end
+
+  defp handle_input(state, :retire_if_idle), do: state
+
+  defp handle_input(
+         %{phase: :active, retirement_requested: true} = state,
+         :relay_owner_idle
+       ),
+       do: begin_retirement(state)
+
+  defp handle_input(state, :relay_owner_idle), do: state
+
+  defp handle_input(state, {:acquire_deadline, permit_id, deadline}) do
+    case Enum.split_with(state.waiters, &(&1.permit_id == permit_id)) do
+      {[waiter], remaining} ->
+        state = cancel_waiter_timer(%{state | waiters: remaining}, permit_id)
+
+        if monotonic_ms() >= deadline do
+          Logger.debug("loopex daemon lease acquire deadline reached")
+          complete_control_error(state, waiter, "control_pending")
+        else
+          queue_acquisition(state, waiter)
+        end
+
+      _other ->
+        state
+    end
+  end
+
+  defp handle_input(
+         %{phase: :active} = state,
+         {:resume_call,
+          {:resume, origin_id, request_id, command_id, connection_incarnation, writer_epoch,
+           worker, task_fun}, {connection, _tag} = from}
+       ) do
+    descriptor = %{
+      origin_id: origin_id,
+      class: :session_resume,
+      request_id: request_id,
+      command_id: command_id,
+      connection: connection,
+      connection_incarnation: connection_incarnation,
+      writer_epoch: writer_epoch,
+      worker: worker,
+      worker_monitor: Process.monitor(worker),
+      task_fun: task_fun,
+      from: from
+    }
+
+    eligibility =
+      if resume_holder_gate?(state, descriptor, monotonic_ms()),
+        do: :eligible,
+        else: :ineligible
+
+    request =
+      ConnectionRegistry.prepare_resume_request(
+        state.registry,
+        origin_id,
+        state.session_id,
+        command_id,
+        state.owner_incarnation,
+        eligibility
+      )
+
+    await(state, :registry, request, {:prepare_resume, descriptor})
+  end
+
+  defp handle_input(state, {:resume_call, _request, from}) do
+    GenServer.reply(from, {:error, :owner_unavailable})
+    state
+  end
+
+  defp handle_input(state, {:cancel_prepared, origin_id}) do
+    request =
+      ConnectionRegistry.cancel_prepared_resume_request(
+        state.registry,
+        origin_id,
+        state.owner_incarnation
+      )
+
+    await(state, :registry, request, :cancel_prepared)
+  end
+
+  # Concept: one relay or registry step is awaited at a time.
+  #
+  # Technical depth: a relay request has a five-second instant that only
+  # prompts a report; a registry request has none.
+  defp await(state, target, request, step) do
+    timer =
+      if target == :relay,
+        do: Process.send_after(self(), {:lease_request_unanswered, request}, @relay_request_ms)
+
+    %{state | awaiting: %{request: request, step: step, timer: timer}}
+  end
+
+  defp awaited_answer(state, message) do
+    %{request: request, step: step, timer: timer} = state.awaiting
+    if timer, do: cancel_timer(timer)
+    state = %{state | awaiting: nil}
+
+    response =
+      case :gen_server.check_response(message, request) do
+        {:reply, reply} -> {:reply, reply}
+        _server_gone -> :down
+      end
+
+    state
+    |> continue_step(step, response)
+    |> drain()
+  end
+
+  # Concept: a permit the daemon owner discarded while its step was awaited
+  # takes nothing from the relay's answer: no notice and no decision.
+  defp continue_step(state, {kind, %{permit_id: permit_id}} = step, response)
+       when kind in [:claim_acquire, :claim_release] do
+    if MapSet.member?(state.discarded, permit_id),
+      do: %{state | discarded: MapSet.delete(state.discarded, permit_id)},
+      else: continue_claim(state, step, response)
+  end
+
+  defp continue_step(state, {:complete, permit_id, on_ok, result}, response) do
+    fallback = WireRecords.request_error(result["request_id"], "internal_failure")
+
+    cond do
+      MapSet.member?(state.discarded, permit_id) ->
+        %{state | discarded: MapSet.delete(state.discarded, permit_id)}
+
+      response == {:reply, :ok} ->
+        state
+        |> apply_completion(on_ok)
+        |> notify_permit(permit_id, :result)
+
+      # Concept: a record the relay refuses as invalid never leaves the
+      # client unanswered: the fixed internal-failure record replaces it once.
+      response == {:reply, {:error, :invalid_result}} and result != fallback ->
+        Logger.debug("loopex daemon lease result replaced after refusal")
+        complete_permit(state, permit_id, fallback, nil)
+
+      true ->
+        notify_permit(state, permit_id, answer_kind(response))
+    end
+  end
+
+  defp continue_step(state, {:promote_mutation, descriptor, _task_ref, _candidate}, response) do
+    origin_id = descriptor.origin_id
+    Process.demonitor(descriptor.worker_monitor, [:flush])
+
+    case response do
+      {:reply, {:ok, ^origin_id}} ->
+        GenServer.reply(descriptor.from, {:ok, :admitted})
+        Logger.debug("loopex daemon lease mutation admitted")
+        admit_promoted(state, origin_id)
+
+      {:reply, {:error, reason}} ->
+        GenServer.reply(descriptor.from, {:error, reason})
+        update_in(state.in_flight, &Map.delete(&1, origin_id))
+
+      _relay_gone ->
+        # The relay may have started the task before it was lost.
+        GenServer.reply(descriptor.from, {:error, :promotion_outcome_unknown})
+        update_in(state.in_flight, &Map.delete(&1, origin_id))
+    end
+  end
+
+  defp continue_step(state, {:prepare_resume, descriptor}, response) do
+    case response do
+      {:reply, {:ok, {:waiting, _primary_origin_id}}} ->
+        Process.demonitor(descriptor.worker_monitor, [:flush])
+        GenServer.reply(descriptor.from, {:ok, :admitted})
+        Logger.debug("loopex daemon queued resume joined primary")
+        state
+
+      {:reply, {:ok, preparation}} when preparation in [:prepared, :unreserved] ->
+        enqueue_mutation(state, descriptor)
+
+      {:reply, {:error, :activation_ceiling_reached}} ->
+        enqueue_mutation(state, descriptor)
+
+      {:reply, {:error, reason}} ->
+        Process.demonitor(descriptor.worker_monitor, [:flush])
+        GenServer.reply(descriptor.from, {:error, reason})
+        state
+
+      :down ->
+        Process.demonitor(descriptor.worker_monitor, [:flush])
+        GenServer.reply(descriptor.from, {:error, :registry_unavailable})
+        state
+    end
+  end
+
+  defp continue_step(state, {:promote_resume, descriptor, _candidate}, response) do
+    Process.demonitor(descriptor.worker_monitor, [:flush])
+    origin_id = descriptor.origin_id
+
+    case response do
+      {:reply, {:ok, :admitted}} ->
+        GenServer.reply(descriptor.from, {:ok, :admitted})
+        Logger.debug("loopex daemon resume mutation admitted")
+        admit_promoted(state, origin_id)
+
+      {:reply, {:ok, {:waiting, _primary_origin_id}}} ->
+        GenServer.reply(descriptor.from, {:ok, :admitted})
+        Logger.debug("loopex daemon resume mutation joined")
+        update_in(state.in_flight, &Map.delete(&1, origin_id))
+
+      {:reply, {:ok, :completed}} ->
+        GenServer.reply(descriptor.from, {:ok, :completed})
+        Logger.debug("loopex daemon resume mutation refused")
+        update_in(state.in_flight, &Map.delete(&1, origin_id))
+
+      {:reply, {:error, reason}} ->
+        GenServer.reply(descriptor.from, {:error, reason})
+        update_in(state.in_flight, &Map.delete(&1, origin_id))
+
+      # Concept: the registry may have started the resume before it was
+      # lost, so its outcome is unknown and no refusal is written.
+      :down ->
+        GenServer.reply(descriptor.from, {:error, :promotion_outcome_unknown})
+        update_in(state.in_flight, &Map.delete(&1, origin_id))
+    end
+  end
+
+  defp continue_step(state, :cancel_prepared, _response), do: state
+
+  defp continue_step(state, {:claim_refuse, permit_id, request_id}, response) do
+    cond do
+      MapSet.member?(state.discarded, permit_id) ->
+        %{state | discarded: MapSet.delete(state.discarded, permit_id)}
+
+      response == {:reply, :ok} ->
+        record = WireRecords.request_error(request_id, "internal_failure")
+        complete_permit(state, permit_id, record, nil)
+
+      true ->
+        notify_permit(state, permit_id, answer_kind(response))
+    end
+  end
+
+  defp continue_step(state, :prepare_retirement, response) do
+    case response do
+      {:reply, :ok} ->
+        retirement_ref = make_ref()
+
+        send(
+          state.daemon_owner,
+          {:lease_owner_retirement_intent, retirement_ref, self(), state.owner_incarnation,
+           state.session_id}
+        )
+
+        Logger.debug("loopex daemon lease owner retirement proposed")
+        %{state | phase: :retiring, retirement_requested: true, retirement_ref: retirement_ref}
+
+      {:reply, {:error, :owner_busy}} ->
+        %{state | retirement_requested: true}
+
+      _unavailable ->
+        state
+    end
+  end
+
+  defp continue_claim(state, {:claim_acquire, acquisition}, {:reply, :ok}),
+    do: handle_acquisition(state, acquisition, monotonic_ms())
+
+  defp continue_claim(state, {:claim_release, descriptor}, {:reply, :ok}) do
+    if operation_blocked?(state) do
+      Logger.debug("loopex daemon lease release queued")
+      update_in(state.pending_operations, &(&1 ++ [{:release, descriptor}]))
+    else
+      perform_release(state, descriptor)
+    end
+  end
+
+  defp continue_claim(state, {_kind, %{permit_id: permit_id}}, response),
+    do: notify_permit(state, permit_id, answer_kind(response))
+
+  defp apply_completion(state, nil), do: state
+
+  defp apply_completion(%{lease: %{status: :held} = lease} = state, {:renew, deadline}) do
+    Logger.debug("loopex daemon lease renewed")
+    state |> Map.put(:lease, %{lease | deadline: deadline}) |> schedule_expiry(deadline)
+  end
+
+  defp apply_completion(state, {:renew, _deadline}), do: state
+
+  # Concept: the relay's answer for a permit is reported to the daemon owner
+  # exactly as the relay gave it.
+  defp answer_kind({:reply, :ok}), do: :result
+  defp answer_kind({:reply, {:error, :connection_lost}}), do: :connection_lost
+  defp answer_kind({:reply, {:error, :result}}), do: :result
+
+  # Concept: a permit the relay already answered its client for — its worker
+  # was lost, or its owner loss was classified — is settled as a result.
+  defp answer_kind({:reply, {:error, reason}}) when reason in [:permit_unavailable, :owner_lost],
+    do: :result
+
+  defp answer_kind({:reply, {:error, reason}})
+       when reason in [:daemon_stopping, :shutdown_admitted, :shutdown_cancelled],
+       do: :shutdown
+
+  defp answer_kind(:down), do: :shutdown
+  defp answer_kind(_other), do: :invalid
+
+  # Concept: exactly one terminal notice per permit, never for one the daemon
+  # owner discarded while it was awaited.
+  defp notify_permit(state, permit_id, kind) do
+    if MapSet.member?(state.discarded, permit_id) do
+      %{state | discarded: MapSet.delete(state.discarded, permit_id)}
+    else
+      send(
+        state.daemon_owner,
+        {:lease_permit_settled, permit_id, self(), state.owner_incarnation, kind}
+      )
+
+      state
+    end
+  end
+
+  # Concept: work runs in one fixed order after each answer, resolution or
+  # expiry, until a relay or registry step is awaited or nothing is left.
+  #
+  # Technical depth: pending operations run before the expiry check, one
+  # waiter and the expiry re-arm, and a deferred input is taken only when none
+  # of those can advance, so older admitted work is decided before a later
+  # arrival. A proposal from a waiter ends the drain until it resolves.
+  defp drain(%{awaiting: nil} = state) do
+    case drain_step(state) do
+      {:progress, state} -> drain(state)
+      {:stop, state} -> state
+    end
+  end
+
+  defp drain(state), do: state
+
+  defp drain_step(state) do
+    cond do
+      pending_ready?(state) ->
+        {:progress, process_next_operation(state)}
+
+      expiry_due?(state) ->
+        {:progress, ensure_expiry_transition(state)}
+
+      waiters_ready?(state) ->
+        process_one_waiter(state)
+
+      rearm_needed?(state) ->
+        {:progress, schedule_expiry(state, state.lease.deadline)}
+
+      not :queue.is_empty(state.deferred) ->
+        {{:value, input}, deferred} = :queue.out(state.deferred)
+        {:progress, handle_input(%{state | deferred: deferred}, input)}
+
+      true ->
+        {:stop, state}
+    end
+  end
+
+  defp pending_ready?(%{phase: :active, pending_operations: [_ | _]} = state) do
+    map_size(state.in_flight) == 0 and
+      (is_nil(state.transition) or match?(%{kind: :expiry}, state.transition))
+  end
+
+  defp pending_ready?(_state), do: false
+
+  defp expiry_due?(%{phase: :active, transition: nil, lease: %{status: :held} = lease} = state),
+    do:
+      map_size(state.in_flight) == 0 and state.pending_operations == [] and
+        monotonic_ms() >= lease.deadline
+
+  defp expiry_due?(_state), do: false
+
+  defp waiters_ready?(%{phase: :active, transition: nil, waiters: [_ | _]} = state),
+    do: map_size(state.in_flight) == 0 and state.pending_operations == []
+
+  defp waiters_ready?(_state), do: false
+
+  defp rearm_needed?(%{lease: %{status: :held, deadline: deadline}, expiry_timer: nil}),
+    do: deadline > monotonic_ms()
+
+  defp rearm_needed?(_state), do: false
+
   defp enqueue_mutation(state, descriptor) do
     update_in(state.pending_operations, &(&1 ++ [{:mutation, descriptor}]))
   end
@@ -1034,32 +1245,18 @@ defmodule LoopexDaemon.LeaseOwner do
       state.pending_operations != []
   end
 
-  defp continue_session_work(state) do
-    cond do
-      map_size(state.in_flight) > 0 ->
-        state
-
-      match?(%{kind: :expiry}, state.transition) and state.pending_operations != [] ->
-        process_next_operation(state)
-
-      not is_nil(state.transition) ->
-        state
-
-      state.pending_operations != [] ->
-        process_next_operation(state)
-
-      true ->
-        state
-        |> ensure_expiry_transition()
-        |> process_waiters()
-    end
-  end
-
   defp begin_retirement(state) do
     if retirement_eligible?(state) do
-      begin_eligible_retirement(state)
+      request =
+        AdmissionRelay.prepare_lease_owner_retirement_request(
+          state.relay,
+          state.session_id,
+          state.owner_incarnation
+        )
+
+      await(state, :relay, request, :prepare_retirement)
     else
-      {{:error, :not_idle}, state}
+      state
     end
   end
 
@@ -1098,6 +1295,30 @@ defmodule LoopexDaemon.LeaseOwner do
   end
 
   defp apply_daemon_resolution(state, :discard, permit_id) do
+    cond do
+      awaited_permit?(state, permit_id) ->
+        Logger.debug("loopex daemon lease owner awaited operation discarded")
+        {:discarded, %{state | discarded: MapSet.put(state.discarded, permit_id)}}
+
+      deferred_permit?(state, permit_id) ->
+        deferred =
+          state.deferred
+          |> :queue.to_list()
+          |> Enum.reject(&input_permit?(&1, permit_id))
+          |> :queue.from_list()
+
+        Logger.debug("loopex daemon lease owner deferred operation discarded")
+        {:discarded, %{state | deferred: deferred}}
+
+      true ->
+        discard_queued(state, permit_id)
+    end
+  end
+
+  defp apply_daemon_resolution(state, _action, _payload),
+    do: {{:error, :invalid_operation}, state}
+
+  defp discard_queued(state, permit_id) do
     {waiters, kept_waiters} = Enum.split_with(state.waiters, &(&1.permit_id == permit_id))
 
     {releases, kept_operations} =
@@ -1120,9 +1341,29 @@ defmodule LoopexDaemon.LeaseOwner do
     end
   end
 
-  defp apply_daemon_resolution(state, _action, _payload),
-    do: {{:error, :invalid_operation}, state}
+  defp awaited_permit?(%{awaiting: %{step: {kind, %{permit_id: permit_id}}}}, permit_id)
+       when kind in [:claim_acquire, :claim_release],
+       do: true
 
+  defp awaited_permit?(%{awaiting: %{step: {:complete, permit_id, _on_ok, _result}}}, permit_id),
+    do: true
+
+  defp awaited_permit?(%{awaiting: %{step: {:claim_refuse, permit_id, _request_id}}}, permit_id),
+    do: true
+
+  defp awaited_permit?(_state, _permit_id), do: false
+
+  defp deferred_permit?(state, permit_id),
+    do: Enum.any?(:queue.to_list(state.deferred), &input_permit?(&1, permit_id))
+
+  defp input_permit?({kind, permit_id, _, _, _, _}, permit_id)
+       when kind in [:acquire, :release, :first_acquire],
+       do: true
+
+  defp input_permit?(_input, _permit_id), do: false
+
+  # Technical depth: a resolution applies only its state change; the caller
+  # acknowledges it and only then drains any further work.
   defp resolve_grant_transition(state, transition, :granted, granted_at) do
     deadline = granted_at + state.lease_term_ms
 
@@ -1141,7 +1382,6 @@ defmodule LoopexDaemon.LeaseOwner do
       |> Map.put(:lease, lease)
       |> Map.put(:transition, nil)
       |> schedule_expiry(deadline)
-      |> continue_session_work()
 
     Logger.debug("loopex daemon lease grant committed")
     {:ok, state}
@@ -1153,7 +1393,6 @@ defmodule LoopexDaemon.LeaseOwner do
       |> cancel_waiter_timer(transition.permit_id)
       |> Map.put(:lease, transition.previous_lease)
       |> Map.put(:transition, nil)
-      |> continue_session_work()
 
     Logger.debug("loopex daemon lease grant cancelled")
     {:ok, state}
@@ -1173,8 +1412,6 @@ defmodule LoopexDaemon.LeaseOwner do
           %{state | lease: lease}
       end
 
-    state = continue_session_work(state)
-
     Logger.debug("loopex daemon lease release resolved")
     {:ok, state}
   end
@@ -1185,41 +1422,9 @@ defmodule LoopexDaemon.LeaseOwner do
       |> cancel_expiry_timer()
       |> Map.put(:lease, %{lease | status: :expired})
       |> Map.put(:transition, nil)
-      |> continue_session_work()
 
     Logger.debug("loopex daemon lease expiry resolved")
     {:ok, state}
-  end
-
-  defp begin_eligible_retirement(state) do
-    case AdmissionRelay.prepare_lease_owner_retirement(
-           state.relay,
-           state.session_id,
-           state.owner_incarnation
-         ) do
-      :ok ->
-        retirement_ref = make_ref()
-
-        send(
-          state.daemon_owner,
-          {:lease_owner_retirement_intent, retirement_ref, self(), state.owner_incarnation,
-           state.session_id}
-        )
-
-        Logger.debug("loopex daemon lease owner retirement proposed")
-
-        {{:ok, :retiring},
-         %{state | phase: :retiring, retirement_requested: true, retirement_ref: retirement_ref}}
-
-      {:error, :owner_busy} ->
-        {{:ok, :waiting}, %{state | retirement_requested: true}}
-
-      {:error, :daemon_stopping} ->
-        {{:error, :daemon_stopping}, state}
-
-      {:error, _reason} ->
-        {{:error, :owner_unavailable}, state}
-    end
   end
 
   defp retirement_eligible?(state) do
@@ -1229,7 +1434,8 @@ defmodule LoopexDaemon.LeaseOwner do
 
     state.phase == :active and not state.first_acquire_available and free? and
       is_nil(state.transition) and state.waiters == [] and state.pending_operations == [] and
-      map_size(state.in_flight) == 0
+      map_size(state.in_flight) == 0 and is_nil(state.awaiting) and
+      :queue.is_empty(state.deferred)
   end
 
   defp process_next_operation(
@@ -1237,28 +1443,13 @@ defmodule LoopexDaemon.LeaseOwner do
        ) do
     state = %{state | pending_operations: remaining}
 
-    case promote_mutation(state, descriptor) do
-      {:ok, state} ->
-        state
-
-      {:joined, state} ->
-        continue_session_work(state)
-
-      {:error, reason, state} ->
-        GenServer.reply(descriptor.from, {:error, reason})
-        continue_session_work(state)
-    end
+    if descriptor.class == :session_resume,
+      do: promote_resume_mutation(state, descriptor),
+      else: promote_direct_mutation(state, descriptor)
   end
 
   defp process_next_operation(%{pending_operations: [{:release, descriptor} | remaining]} = state) do
-    state = %{state | pending_operations: remaining}
-    {reply, state} = perform_release(state, descriptor)
-
-    if match?({:error, _reason}, reply) do
-      Logger.debug("loopex daemon queued lease release settlement unavailable")
-    end
-
-    continue_session_work(state)
+    perform_release(%{state | pending_operations: remaining}, descriptor)
   end
 
   defp perform_release(state, descriptor) do
@@ -1287,31 +1478,13 @@ defmodule LoopexDaemon.LeaseOwner do
         )
 
         Logger.debug("loopex daemon lease release proposed")
-        {{:ok, :proposed}, %{state | transition: transition}}
+        %{state | transition: transition}
 
       :error ->
+        Logger.debug("loopex daemon lease release refused")
         result = WireRecords.control_error(descriptor.request_id, "control_not_held")
-
-        case AdmissionRelay.complete_lease_permit(
-               state.relay,
-               descriptor.permit_id,
-               state.owner_incarnation,
-               result
-             ) do
-          :ok ->
-            Logger.debug("loopex daemon lease release refused")
-            {{:ok, :completed}, state}
-
-          {:error, reason} ->
-            {{:error, reason}, state}
-        end
+        complete_permit(state, descriptor.permit_id, result, nil)
     end
-  end
-
-  defp promote_mutation(state, descriptor) do
-    if descriptor.class == :session_resume,
-      do: promote_resume_mutation(state, descriptor),
-      else: promote_direct_mutation(state, descriptor)
   end
 
   defp promote_direct_mutation(state, descriptor) do
@@ -1341,35 +1514,48 @@ defmodule LoopexDaemon.LeaseOwner do
       end
     end
 
-    case AdmissionRelay.promote_lease_ticket(
-           state.relay,
-           origin_id,
-           state.owner_incarnation,
-           relay_task
-         ) do
-      {:ok, ^origin_id} ->
-        Process.demonitor(descriptor.worker_monitor, [:flush])
+    request =
+      AdmissionRelay.promote_lease_ticket_request(
+        state.relay,
+        origin_id,
+        state.owner_incarnation,
+        relay_task
+      )
 
-        mutation = %{
-          class: descriptor.class,
-          command_id: nil,
-          task_ref: task_ref,
-          holder_pid: descriptor.connection,
-          holder_incarnation: descriptor.connection_incarnation,
-          writer_epoch: descriptor.writer_epoch,
-          candidate_deadline: candidate_deadline,
-          disposition: nil,
-          relay_settled: false
-        }
+    state
+    |> put_in(
+      [:in_flight, origin_id],
+      promoting_mutation(descriptor, task_ref, candidate_deadline)
+    )
+    |> await(:relay, request, {:promote_mutation, descriptor, task_ref, candidate_deadline})
+  end
 
-        GenServer.reply(descriptor.from, {:ok, :admitted})
-        Logger.debug("loopex daemon lease mutation admitted")
-        {:ok, put_in(state, [:in_flight, origin_id], mutation)}
+  # Concept: a mutation is in flight from the moment its promotion is sent,
+  # because its task's classification and the relay's settlement can arrive
+  # before the promotion's answer; neither is lost, and nothing settles until
+  # the answer admits it.
+  #
+  # Technical depth: `promoted` is false until the answer admits the
+  # mutation; any other answer removes the entry.
+  defp promoting_mutation(descriptor, task_ref, candidate_deadline) do
+    %{
+      class: descriptor.class,
+      command_id: Map.get(descriptor, :command_id),
+      task_ref: task_ref,
+      holder_pid: descriptor.connection,
+      holder_incarnation: descriptor.connection_incarnation,
+      writer_epoch: descriptor.writer_epoch,
+      candidate_deadline: candidate_deadline,
+      disposition: nil,
+      relay_settled: false,
+      promoted: false
+    }
+  end
 
-      {:error, reason} ->
-        Process.demonitor(descriptor.worker_monitor, [:flush])
-        {:error, reason, state}
-    end
+  defp admit_promoted(state, origin_id) do
+    state
+    |> put_in([:in_flight, origin_id, :promoted], true)
+    |> settle_mutation_if_ready(origin_id)
   end
 
   defp promote_resume_mutation(state, descriptor) do
@@ -1382,60 +1568,31 @@ defmodule LoopexDaemon.LeaseOwner do
     capacity_refusal =
       WireRecords.request_error(descriptor.request_id, "activation_ceiling_reached")
 
-    case registry_call(fn ->
-           ConnectionRegistry.promote_resume(
-             state.registry,
-             descriptor.origin_id,
-             state.session_id,
-             descriptor.command_id,
-             state.owner_incarnation,
-             eligibility,
-             attached,
-             control_refusal,
-             capacity_refusal,
-             descriptor.task_fun
-           )
-         end) do
-      {:ok, :admitted} ->
-        Process.demonitor(descriptor.worker_monitor, [:flush])
+    request =
+      ConnectionRegistry.promote_resume_request(
+        state.registry,
+        descriptor.origin_id,
+        state.session_id,
+        descriptor.command_id,
+        state.owner_incarnation,
+        eligibility,
+        attached,
+        control_refusal,
+        capacity_refusal,
+        descriptor.task_fun
+      )
 
-        mutation = %{
-          class: :session_resume,
-          command_id: descriptor.command_id,
-          task_ref: nil,
-          holder_pid: descriptor.connection,
-          holder_incarnation: descriptor.connection_incarnation,
-          writer_epoch: descriptor.writer_epoch,
-          candidate_deadline: candidate_deadline,
-          disposition: nil,
-          relay_settled: false
-        }
-
-        GenServer.reply(descriptor.from, {:ok, :admitted})
-        Logger.debug("loopex daemon resume mutation admitted")
-        {:ok, put_in(state, [:in_flight, descriptor.origin_id], mutation)}
-
-      {:ok, {:waiting, _primary_origin_id}} ->
-        Process.demonitor(descriptor.worker_monitor, [:flush])
-        GenServer.reply(descriptor.from, {:ok, :admitted})
-        Logger.debug("loopex daemon resume mutation joined")
-        {:joined, state}
-
-      {:ok, :completed} ->
-        Process.demonitor(descriptor.worker_monitor, [:flush])
-        GenServer.reply(descriptor.from, {:ok, :completed})
-        Logger.debug("loopex daemon resume mutation refused")
-        {:joined, state}
-
-      {:error, reason} ->
-        Process.demonitor(descriptor.worker_monitor, [:flush])
-        {:error, reason, state}
-    end
+    state
+    |> put_in(
+      [:in_flight, descriptor.origin_id],
+      promoting_mutation(descriptor, nil, candidate_deadline)
+    )
+    |> await(:registry, request, {:promote_resume, descriptor, candidate_deadline})
   end
 
   defp settle_mutation_if_ready(state, origin_id) do
     case Map.fetch(state.in_flight, origin_id) do
-      {:ok, %{disposition: disposition, relay_settled: true} = mutation}
+      {:ok, %{disposition: disposition, relay_settled: true, promoted: true} = mutation}
       when disposition in @mutation_dispositions ->
         state =
           if disposition in [:accepted, :admission_unknown] do
@@ -1446,7 +1603,7 @@ defmodule LoopexDaemon.LeaseOwner do
 
         state = update_in(state.in_flight, &Map.delete(&1, origin_id))
         Logger.debug("loopex daemon lease mutation settled")
-        continue_session_work(state)
+        state
 
       _other ->
         state
@@ -1502,21 +1659,6 @@ defmodule LoopexDaemon.LeaseOwner do
 
   defp resume_holder_gate?(_state, _descriptor, _now), do: false
 
-  defp cancel_prepared_resume(state, %{class: :session_resume, origin_id: origin_id}) do
-    case registry_call(fn ->
-           ConnectionRegistry.cancel_prepared_resume(
-             state.registry,
-             origin_id,
-             state.owner_incarnation
-           )
-         end) do
-      :ok -> :ok
-      {:error, _reason} -> Logger.debug("loopex daemon prepared resume cleanup unavailable")
-    end
-  end
-
-  defp cancel_prepared_resume(_state, _descriptor), do: :ok
-
   defp attached?(state, connection, connection_incarnation) do
     Enum.any?(state.attachments, fn
       {^connection, ^connection_incarnation, _attachment_id} -> true
@@ -1524,32 +1666,59 @@ defmodule LoopexDaemon.LeaseOwner do
     end)
   end
 
+  # Concept: an acquisition is decided once its permit is claimed; a refusal
+  # or renewal this owner decides itself completes through the relay and is
+  # reported with the relay's answer.
   defp handle_acquisition(state, acquisition, now) do
     cond do
       now >= acquisition.request_deadline ->
-        _result = complete_control_error(state, acquisition, "control_pending")
-        {{:ok, :completed}, state}
+        complete_control_error(state, acquisition, "control_pending")
 
       not is_nil(state.transition) ->
-        {{:ok, :queued}, queue_acquisition(state, acquisition)}
+        queue_acquisition(state, acquisition)
 
       map_size(state.in_flight) > 0 and same_holder?(state.lease, acquisition) ->
-        {{:ok, :queued}, queue_acquisition(state, acquisition)}
+        queue_acquisition(state, acquisition)
 
       match?(%{status: :held}, state.lease) and state.lease.deadline <= now ->
-        state = state |> queue_acquisition(acquisition) |> ensure_expiry_transition()
-        {{:ok, :queued}, state}
+        state |> queue_acquisition(acquisition) |> ensure_expiry_transition()
 
       same_holder?(state.lease, acquisition) ->
         renew(state, acquisition, now)
 
       match?(%{status: :held}, state.lease) ->
-        _result = complete_control_error(state, acquisition, "control_held")
-        {{:ok, :completed}, state}
+        complete_control_error(state, acquisition, "control_held")
 
       true ->
         {state, _grant_ref} = propose_grant(state, acquisition)
-        {{:ok, :proposed}, state}
+        state
+    end
+  end
+
+  # Technical depth: one waiter advances per drain step; a refusal or renewal
+  # becomes the awaited relay step, and a proposal ends the drain.
+  defp process_one_waiter(state) do
+    [acquisition | remaining] = state.waiters
+    state = cancel_waiter_timer(%{state | waiters: remaining}, acquisition.permit_id)
+    now = monotonic_ms()
+
+    cond do
+      now >= acquisition.request_deadline ->
+        {:progress, complete_control_error(state, acquisition, "control_pending")}
+
+      match?(%{status: :held}, state.lease) and state.lease.deadline <= now ->
+        state = %{state | waiters: [acquisition | state.waiters]}
+        {:progress, ensure_expiry_transition(state)}
+
+      same_holder?(state.lease, acquisition) ->
+        {:progress, renew(state, acquisition, acquisition.admitted_at)}
+
+      match?(%{status: :held}, state.lease) ->
+        {:progress, complete_control_error(state, acquisition, "control_held")}
+
+      true ->
+        {state, _grant_ref} = propose_grant(state, acquisition)
+        {:stop, state}
     end
   end
 
@@ -1565,30 +1734,24 @@ defmodule LoopexDaemon.LeaseOwner do
         true
       )
 
-    case AdmissionRelay.complete_lease_permit(
-           state.relay,
-           acquisition.permit_id,
-           state.owner_incarnation,
-           result
-         ) do
-      :ok ->
-        lease = %{state.lease | deadline: deadline}
-        state = state |> Map.put(:lease, lease) |> schedule_expiry(deadline)
-        Logger.debug("loopex daemon lease renewed")
-        {{:ok, :completed}, state}
-
-      {:error, reason} ->
-        {{:error, reason}, state}
-    end
+    complete_permit(state, acquisition.permit_id, result, {:renew, deadline})
   end
 
-  # Concept: the registry not answering a session's resume step is that step's
-  # failure, `{:error, :registry_unavailable}`, not the loss of this session's
-  # owner; the registry's own loss is classified where it is observed.
-  defp registry_call(call) do
-    call.()
-  catch
-    :exit, _reason -> {:error, :registry_unavailable}
+  defp complete_control_error(state, acquisition, code) do
+    result = WireRecords.control_error(acquisition.request_id, code)
+    complete_permit(state, acquisition.permit_id, result, nil)
+  end
+
+  defp complete_permit(state, permit_id, result, on_ok) do
+    request =
+      AdmissionRelay.complete_lease_permit_request(
+        state.relay,
+        permit_id,
+        state.owner_incarnation,
+        result
+      )
+
+    await(state, :relay, request, {:complete, permit_id, on_ok, result})
   end
 
   defp propose_grant(state, acquisition) do
@@ -1634,38 +1797,6 @@ defmodule LoopexDaemon.LeaseOwner do
       | waiters: state.waiters ++ [acquisition],
         waiter_timers: Map.put(state.waiter_timers, acquisition.permit_id, timer)
     }
-  end
-
-  defp process_waiters(%{transition: transition} = state) when not is_nil(transition), do: state
-  defp process_waiters(%{waiters: []} = state), do: state
-
-  defp process_waiters(state) do
-    [acquisition | remaining] = state.waiters
-    state = %{state | waiters: remaining}
-    state = cancel_waiter_timer(state, acquisition.permit_id)
-    now = monotonic_ms()
-
-    cond do
-      now >= acquisition.request_deadline ->
-        _result = complete_control_error(state, acquisition, "control_pending")
-        process_waiters(state)
-
-      match?(%{status: :held}, state.lease) and state.lease.deadline <= now ->
-        state = %{state | waiters: [acquisition | state.waiters]}
-        ensure_expiry_transition(state)
-
-      same_holder?(state.lease, acquisition) ->
-        {_reply, state} = renew(state, acquisition, acquisition.admitted_at)
-        process_waiters(state)
-
-      match?(%{status: :held}, state.lease) ->
-        _result = complete_control_error(state, acquisition, "control_held")
-        process_waiters(state)
-
-      true ->
-        {state, _grant_ref} = propose_grant(state, acquisition)
-        state
-    end
   end
 
   defp ensure_expiry_transition(%{transition: transition} = state) when not is_nil(transition),
@@ -1721,17 +1852,6 @@ defmodule LoopexDaemon.LeaseOwner do
 
   defp same_holder?(_lease, _acquisition), do: false
 
-  defp complete_control_error(state, acquisition, code) do
-    result = WireRecords.control_error(acquisition.request_id, code)
-
-    AdmissionRelay.complete_lease_permit(
-      state.relay,
-      acquisition.permit_id,
-      state.owner_incarnation,
-      result
-    )
-  end
-
   defp acquisition(
          permit_id,
          request_id,
@@ -1752,20 +1872,22 @@ defmodule LoopexDaemon.LeaseOwner do
     }
   end
 
+  # Technical depth: an acquisition's deadline is not validated here: one
+  # already past is still claimed and refused `control_pending` through the
+  # relay, so its client hears the relay-rendered answer.
   defp validate_acquire(
          {incarnation, slot, sequence},
          request_id,
          connection,
          connection_incarnation,
-         request_deadline,
-         now
+         request_deadline
        )
        when incarnation == connection_incarnation and slot in 0..31 and sequence > 0 and
               is_binary(request_id) and byte_size(request_id) in 1..64 and is_pid(connection) and
-              is_integer(request_deadline) and request_deadline > now,
+              is_integer(request_deadline),
        do: :ok
 
-  defp validate_acquire(_, _, _, _, _, _), do: {:error, :invalid_operation}
+  defp validate_acquire(_, _, _, _, _), do: {:error, :invalid_operation}
 
   defp validate_release(
          {incarnation, slot, sequence},

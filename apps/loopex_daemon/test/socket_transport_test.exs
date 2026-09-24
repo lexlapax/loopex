@@ -1431,6 +1431,354 @@ defmodule LoopexDaemon.SocketTransportTest do
   end
 
   # Reports every message the relay handles that matches.
+  # Concept (E1, F8): the returned holder of a lost session owner hears only
+  # its one uncorrelated `control_owner_lost` close: a renewal it sent, held
+  # by the daemon owner until the loss finishes, is never answered with a
+  # correlated refusal, and its connection is never blocked while held.
+  #
+  # Technical depth: the daemon owner is suspended with the renewal queued,
+  # the lease owner is killed, and the owner resumes once the relay has seen
+  # the loss, so the renewal's open is refused `actor_lost` and held. The
+  # loss's holder close needs this very connection to answer.
+  @tag timeout: 30_000
+  test "a held renewal of a lost owner's holder gets only the owner-lost close",
+       %{daemon: daemon} do
+    client = initialized_client(daemon)
+    session_id = create_session(client, "lost-holder")
+    :ok = send_frame(client, acquire("acquire", session_id))
+    assert [%{"request_id" => "acquire", "type" => "result"}] = receive_records(client, 1)
+    [lease_owner] = lease_owner_pids(daemon)
+    :ok = :sys.suspend(daemon.owner)
+    :ok = send_frame(client, acquire("renewal", session_id))
+
+    eventually(fn ->
+      mailbox_has?(
+        daemon.owner,
+        &match?(
+          {:"$gen_call", _from, request}
+          when elem(request, 0) in [:acquire_control, :connection_acquire_control],
+          &1
+        )
+      )
+    end)
+
+    Process.exit(lease_owner, :kill)
+    eventually(fn -> AdmissionRelay.status(daemon.relay).owner_losses == 1 end)
+    :ok = :sys.resume(daemon.owner)
+
+    assert [%{"type" => "error", "code" => "control_owner_lost"} = close] =
+             records_until_closed(client, 8_000)
+
+    refute Map.has_key?(close, "request_id")
+    refute_receive {:daemon_component_fatal, _reporter, _class}, 200
+  end
+
+  # Concept (E1, F8, P2): an acquire racing its lease owner's retirement is
+  # held; a lease owner that never sends its retirement intent is killed at
+  # the hold's five-second step, and the held acquire is then granted by a
+  # fresh owner. The connection waits without a deadline of its own, so it
+  # never answers `control_pending` meanwhile.
+  #
+  # Technical depth: a relay debug hook suspends the lease owner as its
+  # retirement preparation arrives, so the relay refuses the later acquire
+  # `actor_retiring` while no intent follows.
+  @tag timeout: 30_000
+  test "an acquire held past a silent retirement is granted, not refused",
+       %{daemon: daemon} do
+    holder = initialized_client(daemon)
+    session_id = create_session(holder, "silent-retirement")
+    :ok = send_frame(holder, acquire("acquire", session_id))
+
+    assert [%{"request_id" => "acquire", "result" => %{"writer_epoch" => epoch}}] =
+             receive_records(holder, 1)
+
+    [lease_owner] = lease_owner_pids(daemon)
+    test_pid = self()
+
+    :ok =
+      :sys.install(
+        daemon.relay,
+        {fn
+           :waiting, {:in, {:"$gen_call", {^lease_owner, _tag}, request}}, _state
+           when elem(request, 0) == :prepare_lease_owner_retirement ->
+             :sys.suspend(lease_owner)
+             send(test_pid, :retirement_prepared)
+             :done
+
+           hook_state, _event, _state ->
+             hook_state
+         end, :waiting}
+      )
+
+    :ok =
+      send_frame(holder, %{
+        "method" => "session.release_control",
+        "request_id" => "release",
+        "session_id" => Wire.encode_identity(session_id),
+        "writer_epoch" => epoch
+      })
+
+    assert [%{"request_id" => "release", "type" => "result"}] = receive_records(holder, 1)
+    assert_receive :retirement_prepared, 2_000
+    monitor = Process.monitor(lease_owner)
+    successor = initialized_client(daemon)
+    started = System.monotonic_time(:millisecond)
+    :ok = send_frame(successor, acquire("late", session_id))
+
+    assert [%{"request_id" => "late", "type" => "result", "result" => %{"writer_epoch" => _}}] =
+             receive_records(successor, 1, 10_000)
+
+    assert System.monotonic_time(:millisecond) - started >= 4_900
+    assert_received {:DOWN, ^monitor, :process, ^lease_owner, :killed}
+    refute_receive {:daemon_component_fatal, _reporter, _class}, 200
+  end
+
+  # Concept (E1, F8, round 2 item 1): during the stop, the returned holder of
+  # a lost session owner still hears only an uncorrelated close: the cut
+  # answers its held renewal `holder_closed`, which writes nothing, and its
+  # connection ends with `daemon.stopping`.
+  #
+  # Technical depth: the loss is held at its classification (the relay is
+  # parked on it) or before it, at the registry's mirror pop (the registry is
+  # suspended), so the renewal is held (`actor_lost`) and the cut is
+  # consumed before the classification. The holder is then named by
+  # `lost_holders` in the first case and by its granted route in the second.
+  # No owner-lost close is emitted after the cut, so the test delivers the
+  # final close itself.
+  for stage <- [:classification, :pop] do
+    @tag timeout: 30_000
+    test "a held renewal of a lost owner's holder during the stop writes no refusal (#{stage})",
+         %{daemon: daemon} do
+      client = initialized_client(daemon)
+      session_id = create_session(client, "lost-holder-stop")
+      :ok = send_frame(client, acquire("acquire", session_id))
+      assert [%{"request_id" => "acquire", "type" => "result"}] = receive_records(client, 1)
+      [lease_owner] = lease_owner_pids(daemon)
+      connection = initialized_connection(daemon)
+      :ok = :sys.suspend(daemon.owner)
+      :ok = send_frame(client, acquire("renewal", session_id))
+
+      eventually(fn ->
+        mailbox_has?(
+          daemon.owner,
+          &match?({:"$gen_call", _from, request} when elem(request, 0) == :acquire_control, &1)
+        )
+      end)
+
+      if unquote(stage) == :classification do
+        park_relay_on(
+          daemon.relay,
+          &match?({:relay_owner_loss_classification, _, _, _, _, _, _, _}, &1)
+        )
+      else
+        :ok = :sys.suspend(daemon.registry)
+      end
+
+      Process.exit(lease_owner, :kill)
+      eventually(fn -> AdmissionRelay.status(daemon.relay).owner_losses == 1 end)
+      :ok = :sys.resume(daemon.owner)
+      if unquote(stage) == :classification, do: assert_receive(:relay_parked, 2_000)
+
+      eventually(fn ->
+        match?(%{held: [_]}, :sys.get_state(daemon.owner).owners[session_id])
+      end)
+
+      cut = Task.async(fn -> LoopexDaemon.Owner.cut_admission(daemon.owner, 5_000) end)
+      eventually(fn -> not is_nil(:sys.get_state(daemon.owner).stop) end)
+
+      if unquote(stage) == :classification,
+        do: send(daemon.relay, :continue_relay),
+        else: :ok = :sys.resume(daemon.registry)
+
+      assert {:ok, _cut_ref} = Task.await(cut, 6_000)
+      eventually(fn -> :sys.get_state(connection).ledger.requests == %{} end)
+      send(connection, close_message(:final, daemon, nil))
+
+      assert [%{"type" => "daemon.stopping"}] = records_until_closed(client, 8_000)
+    end
+  end
+
+  # Concept (E1, round 2 item 4): a relay record that reaches the connection
+  # before the daemon owner's answer is the request's one answer; the
+  # owner's later acceptance is cleanup only.
+  #
+  # Technical depth: a relay debug hook suspends the daemon owner as its
+  # open reaches the relay, so the open's answer waits in the suspended
+  # owner's mailbox; the pending permit's worker is then killed, so
+  # the relay sends `relay_permit_failed` first; the owner then resumes.
+  test "a relay record before the owner's answer is the request's only answer",
+       %{daemon: daemon} do
+    holder = initialized_client(daemon)
+    session_id = create_session(holder, "record-first")
+    :ok = send_frame(holder, acquire("acquire", session_id))
+    assert [%{"request_id" => "acquire", "type" => "result"}] = receive_records(holder, 1)
+    holder_connection = initialized_connection(daemon)
+    observer = initialized_client(daemon)
+    owner = daemon.owner
+    test_pid = self()
+
+    :ok =
+      :sys.install(
+        daemon.relay,
+        {fn
+           :waiting, {:in, {:"$gen_call", {^owner, _tag}, request}}, _proc_state
+           when elem(request, 0) == :open_lease_permit ->
+             :sys.suspend(owner)
+             send(test_pid, :open_answered)
+             :done
+
+           hook_state, _event, _proc_state ->
+             hook_state
+         end, :waiting}
+      )
+
+    :ok = send_frame(observer, acquire("late", session_id))
+    assert_receive :open_answered, 2_000
+
+    [{_origin, %{worker_pid: worker, connection_pid: observer_connection}}] =
+      Enum.filter(:sys.get_state(daemon.relay).permits, fn {_origin, permit} ->
+        permit.connection_pid != holder_connection
+      end)
+
+    Process.exit(worker, :kill)
+
+    assert [%{"request_id" => "late", "type" => "error", "code" => "internal_failure"}] =
+             receive_records(observer, 1)
+
+    :ok = :sys.resume(owner)
+    eventually(fn -> :sys.get_state(observer_connection).ledger.requests == %{} end)
+    eventually(fn -> LoopexDaemon.Owner.status(owner).lease_operations == 0 end)
+    assert {:error, :timeout} = :socket.recv(observer, 0, 300)
+  end
+
+  # Concept (E1, round 2 item 5): a hand-off the daemon owner accepted
+  # leaves its worker to the relay even when the connection is closing; the
+  # relay then settles the permit as the connection's loss.
+  #
+  # Technical depth: the lease owner and the daemon owner are suspended, so
+  # the renewal's permit stays pending; the connection is suspended, handed
+  # an owner-loss close, and then receives the owner's acceptance behind it.
+  test "a close during an accepted hand-off leaves the worker to the relay",
+       %{daemon: daemon} do
+    client = initialized_client(daemon)
+    session_id = create_session(client, "close-handoff")
+    :ok = send_frame(client, acquire("acquire", session_id))
+    assert [%{"request_id" => "acquire", "type" => "result"}] = receive_records(client, 1)
+    [lease_owner] = lease_owner_pids(daemon)
+    connection = initialized_connection(daemon)
+    incarnation = :sys.get_state(connection).incarnation
+    :ok = :sys.suspend(lease_owner)
+    :ok = :sys.suspend(daemon.owner)
+    :ok = send_frame(client, acquire("renewal", session_id))
+    {origin, _entry} = ledger_entry(connection, :handoff)
+    :ok = :sys.suspend(connection)
+    send(connection, close_message(:owner_loss, daemon, incarnation))
+    :ok = :sys.resume(daemon.owner)
+
+    eventually(fn ->
+      mailbox_has?(connection, &match?({[:alias | _], {:ok, :accepted, _, _}}, &1))
+    end)
+
+    monitor = Process.monitor(connection)
+    :ok = :sys.resume(connection)
+    assert_receive {:DOWN, ^monitor, :process, ^connection, _reason}, 2_000
+
+    eventually(fn ->
+      match?(%{disposition: :connection_lost}, :sys.get_state(daemon.relay).permits[origin])
+    end)
+
+    :ok = :sys.resume(lease_owner)
+  end
+
+  # Concept (round 3 item 1): a request the returned holder of a lost session
+  # owner sends after the owner's exit but before its close — a release, or
+  # a renewal while a successor acquire is already waiting — is answered
+  # `holder_closed`, so the holder hears only its uncorrelated close.
+  #
+  # Technical depth: a registry debug hook parks the loss's mirror pop, so
+  # the row is `:lost` and the granted route still names the holder while
+  # the holder's request is dispatched; an owner debug hook reports that the
+  # request arrived, and the pop is then released so the loss classifies and
+  # closes the holder.
+  for variant <- [:release, :renewal_behind_successor] do
+    @tag timeout: 30_000
+    test "a returned holder's #{variant} before its close gets only the owner-lost close",
+         %{daemon: daemon} do
+      client = initialized_client(daemon)
+      session_id = create_session(client, "returned-#{unquote(variant)}")
+      :ok = send_frame(client, acquire("acquire", session_id))
+
+      assert [%{"request_id" => "acquire", "result" => %{"writer_epoch" => epoch}}] =
+               receive_records(client, 1)
+
+      [lease_owner] = lease_owner_pids(daemon)
+      connection = initialized_connection(daemon)
+      other = if unquote(variant) == :renewal_behind_successor, do: initialized_client(daemon)
+      test_pid = self()
+
+      :ok =
+        :sys.install(
+          daemon.registry,
+          {fn
+             :waiting, {:in, {:apply_mirror, _, _, _, :pop_owner_mirror, _}}, _state ->
+               send(test_pid, :pop_parked)
+
+               receive do
+                 :continue_pop -> :done
+               end
+
+             hook_state, _event, _state ->
+               hook_state
+           end, :waiting}
+        )
+
+      :ok =
+        :sys.install(
+          daemon.owner,
+          {fn
+             reporting, {:in, {:"$gen_call", {^connection, _tag}, request}}, _state
+             when elem(request, 0) in [:acquire_control, :release_control] ->
+               send(test_pid, :holder_request_arrived)
+               reporting
+
+             reporting, _event, _state ->
+               reporting
+           end, :reporting}
+        )
+
+      Process.exit(lease_owner, :kill)
+      assert_receive :pop_parked, 2_000
+
+      if unquote(variant) == :renewal_behind_successor do
+        :ok = send_frame(other, acquire("successor", session_id))
+
+        eventually(fn ->
+          match?(%{successor: {_, _, _}}, :sys.get_state(daemon.owner).owners[session_id])
+        end)
+
+        :ok = send_frame(client, acquire("renewal", session_id))
+      else
+        :ok =
+          send_frame(client, %{
+            "method" => "session.release_control",
+            "request_id" => "release",
+            "session_id" => Wire.encode_identity(session_id),
+            "writer_epoch" => epoch
+          })
+      end
+
+      assert_receive :holder_request_arrived, 2_000
+      _ = :sys.get_state(daemon.owner)
+      eventually(fn -> :sys.get_state(connection).ledger.requests == %{} end)
+      send(daemon.registry, :continue_pop)
+
+      assert [%{"type" => "error", "code" => "control_owner_lost"} = close] =
+               records_until_closed(client, 8_000)
+
+      refute Map.has_key?(close, "request_id")
+    end
+  end
+
   defp watch_relay(relay, matcher) do
     test = self()
 
@@ -1465,16 +1813,16 @@ defmodule LoopexDaemon.SocketTransportTest do
   end
 
   # Every record the client receives until its socket closes.
-  defp records_until_closed(socket) do
+  defp records_until_closed(socket, timeout \\ 2_000) do
     buffered = Process.get({LoopexDaemon.Test.DaemonSocketFixture, socket}, "")
     Process.put({LoopexDaemon.Test.DaemonSocketFixture, socket}, "")
-    collect_until_closed(socket, buffered)
+    collect_until_closed(socket, buffered, timeout)
   end
 
-  defp collect_until_closed(socket, bytes) do
-    case :socket.recv(socket, 0, 2_000) do
+  defp collect_until_closed(socket, bytes, timeout) do
+    case :socket.recv(socket, 0, timeout) do
       {:ok, more} ->
-        collect_until_closed(socket, bytes <> more)
+        collect_until_closed(socket, bytes <> more, timeout)
 
       {:error, :closed} ->
         bytes

@@ -941,7 +941,7 @@ defmodule LoopexDaemon.SocketConnection do
       {:ok, :present} ->
         state
         |> hand_to_relay(origin, entry, fn ->
-          Owner.acquire_control(
+          Owner.acquire_control_request(
             state.context.owner,
             origin,
             entry.request_id,
@@ -971,7 +971,7 @@ defmodule LoopexDaemon.SocketConnection do
 
   defp dispatch_prepared(state, origin, %{operation: :session_release_control} = entry, :ok) do
     hand_to_relay(state, origin, entry, fn ->
-      Owner.release_control(
+      Owner.release_control_request(
         state.context.owner,
         origin,
         entry.request_id,
@@ -1365,10 +1365,38 @@ defmodule LoopexDaemon.SocketConnection do
   defp close_exchange(state, {:promote, _origin, _kind}, :down),
     do: {:stop, :registry_lost, state}
 
+  # Concept: while closing, an accepted hand-off leaves its worker to the
+  # relay, which owns it once the permit exists. A hand-off whose owner
+  # exited (`:down`) is also left alone: its worker exits on this
+  # connection's own `DOWN`. Only a worker whose hand-off the owner refused
+  # is ended here.
+  defp close_exchange(state, {:handoff, origin}, response) do
+    Logger.debug("loopex daemon connection answer discarded while closing")
+
+    state =
+      case {RequestLedger.fetch(state.ledger, origin), response} do
+        {{:ok, %{phase: :handoff}}, {:reply, {:ok, :accepted, _actor, _incarnation}}} -> state
+        {{:ok, %{phase: :handoff}}, :down} -> state
+        {{:ok, %{phase: :handoff} = entry}, _refused} -> kill_handed_worker(state, entry)
+        _answered -> state
+      end
+
+    {:noreply, discard_entry(state, origin)}
+  end
+
   defp close_exchange(state, label, _response) do
     Logger.debug("loopex daemon connection answer discarded while closing")
     {:noreply, discard_entry(state, elem(label, 1))}
   end
+
+  # A handed worker is no longer monitored; a request the owner answered
+  # without a permit, or one abandoned by the close, still ends it.
+  defp kill_handed_worker(state, %{worker: worker}) when is_pid(worker) do
+    Process.exit(worker, :kill)
+    state
+  end
+
+  defp kill_handed_worker(state, _entry), do: state
 
   # Concept: a request abandoned while the connection closes leaves nothing
   # behind and writes nothing.
@@ -1484,6 +1512,35 @@ defmodule LoopexDaemon.SocketConnection do
   defp continue_exchange(state, {:bind_permit, origin}, response),
     do: refuse_binding(state, origin, response)
 
+  defp continue_exchange(state, {:handoff, origin}, response) do
+    case {RequestLedger.fetch(state.ledger, origin), response} do
+      {{:ok, %{phase: :handoff}}, {:reply, {:ok, :accepted, _actor, _actor_incarnation}}} ->
+        ledger = RequestLedger.update(state.ledger, origin, &%{&1 | phase: :ready})
+        {:noreply, %{state | ledger: ledger}}
+
+      # Concept: the returned holder of a lost session owner is being closed
+      # with its one uncorrelated record, so a request it sent is settled
+      # without writing anything alongside that close.
+      {{:ok, %{phase: :handoff} = entry}, {:reply, {:error, :holder_closed}}} ->
+        Logger.debug("loopex daemon lease request of a closing holder settled")
+        {:noreply, state |> kill_handed_worker(entry) |> discard_entry(origin)}
+
+      {{:ok, %{phase: :handoff}}, {:reply, {:error, reason}}} ->
+        settle_locally(state, origin, lease_refusal(reason))
+
+      # Concept: an owner that exited is the daemon's fail-stop; whether the
+      # relay opened the permit is unknown, so nothing is written and the
+      # relay's record or the uncorrelated close answers the request.
+      {{:ok, %{phase: :handoff}}, _owner_gone} ->
+        Logger.debug("loopex daemon lease hand-off outcome unknown")
+        ledger = RequestLedger.update(state.ledger, origin, &%{&1 | phase: :ready})
+        {:noreply, %{state | ledger: ledger}}
+
+      _answered ->
+        {:noreply, state}
+    end
+  end
+
   defp continue_exchange(state, {:promote, _origin, _kind}, :down) do
     Logger.debug("loopex daemon connection registry lost during promotion")
     {:stop, :registry_lost, state}
@@ -1556,32 +1613,32 @@ defmodule LoopexDaemon.SocketConnection do
     end
   end
 
-  # Concept: once the daemon owner accepts a lease operation, the relay owns
-  # the worker's accounting and delivers the one answer.
+  # Concept: an acquire or release is handed to the daemon owner by a
+  # request this connection never waits in: the owner may hold it until its
+  # session settles, and the connection keeps serving its socket, its
+  # results and its closes meanwhile. The owner's acceptance hands the one
+  # answer to the relay's permit; its refusal, which comes before any permit
+  # exists, is answered here.
   #
-  # Technical depth: the connection stops monitoring the worker so the
-  # worker's normal exit after `go` is not mistaken for its loss. A refused
-  # hand-off kills the worker and settles the request here.
-  defp hand_to_relay(state, origin, entry, call) do
-    case safe_call(call) do
-      {:ok, _disposition, _actor, _actor_incarnation} ->
-        {:noreply, relay_owns_worker(state, origin, entry)}
-
-      {:error, reason} ->
-        settle_locally(state, origin, lease_refusal(reason))
-    end
+  # Technical depth: before sending, the entry becomes `:handoff` and the
+  # worker stops being monitored, so its normal exit after `go` is not taken
+  # for its loss; its pid is kept so a refusal can kill it. No deadline of
+  # the connection covers the owner's answer: the owner answers every
+  # request exactly once, bounded by its own steps and the stop. A relay
+  # record that arrives first is final, and the owner's later answer is then
+  # cleanup only.
+  defp hand_to_relay(state, origin, entry, send_request) do
+    state = relay_owns_worker(state, origin, entry)
+    ledger = RequestLedger.update(state.ledger, origin, &%{&1 | phase: :handoff})
+    request_id = send_request.()
+    {:noreply, await_exchange(%{state | ledger: ledger}, request_id, :owner, {:handoff, origin})}
   end
 
   defp lease_refusal(:daemon_stopping), do: "daemon_stopping"
   defp lease_refusal(:control_capacity_reached), do: "control_capacity_reached"
   defp lease_refusal(:owner_unavailable), do: "control_pending"
   defp lease_refusal(:capacity_exceeded), do: "capacity_exceeded"
-
-  # The relay's exact actor answers render as its generic actor refusal did
-  # until the daemon owner holds those requests itself.
-  defp lease_refusal(reason) when reason in [:invalid_actor, :actor_retiring, :actor_lost],
-    do: "internal_failure"
-
+  defp lease_refusal(:control_not_held), do: "control_not_held"
   defp lease_refusal(_reason), do: "internal_failure"
 
   defp safe_call(call) do
