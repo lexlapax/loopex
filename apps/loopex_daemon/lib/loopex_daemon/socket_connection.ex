@@ -1270,6 +1270,12 @@ defmodule LoopexDaemon.SocketConnection do
   defp lease_refusal(:control_capacity_reached), do: "control_capacity_reached"
   defp lease_refusal(:owner_unavailable), do: "control_pending"
   defp lease_refusal(:capacity_exceeded), do: "capacity_exceeded"
+
+  # The relay's exact actor answers render as its generic actor refusal did
+  # until the daemon owner holds those requests itself.
+  defp lease_refusal(reason) when reason in [:invalid_actor, :actor_retiring, :actor_lost],
+    do: "internal_failure"
+
   defp lease_refusal(_reason), do: "internal_failure"
 
   defp safe_call(call) do

@@ -3253,31 +3253,276 @@ defmodule LoopexDaemon.OwnerTest do
     start_supervised!({Owner, options}, restart: :temporary)
   end
 
-  # Concept: a registry that died on a call the relay never answered names the
-  # relay, and the daemon owner hears `relay_lost`, not `connections_lost`.
-  #
-  # Technical depth: the owner's exit clause is applied to its real state with
-  # the exact exit reason `GenServer.call/3` gives a caller whose callee did not
-  # answer; the same state with any other reason keeps `connections_lost`.
-  test "a registry that died waiting on the relay is classified relay_lost" do
+  # Concept: the registry never waits on the relay inside a call, so its exit
+  # is its own loss whatever its reason.
+  test "a registry exit is connections_lost whatever its reason" do
     owner = start_owner(fatal_recipient: self())
     state = :sys.get_state(owner)
     timeout = {:timeout, {GenServer, :call, [state.relay, :x, 5_000]}}
 
-    assert {:stop, :relay_lost, _state} =
+    assert {:stop, :connections_lost, _state} =
              Owner.handle_info({:EXIT, state.registry, timeout}, state)
 
-    assert_received {:daemon_component_fatal, _reporter, :relay_lost}
+    assert_received {:daemon_component_fatal, _reporter, :connections_lost}
+
+    assert {:stop, :connections_lost, _state} =
+             Owner.handle_info({:EXIT, state.registry, :killed}, state)
+  end
+
+  # Concept (T13): a relay that leaves a registry request unanswered for five
+  # seconds while serving is named `relay_lost` exactly once, and the registry
+  # that reported it keeps serving.
+  #
+  # Technical depth: the relay is suspended and a registry promotion is sent
+  # from a separate caller. At the request's instant the registry reports to
+  # the owner, which reports `relay_lost` to its fatal recipient, marks fatal
+  # teardown and kills the relay. The registry's request then ends on the
+  # relay's exit without ending the registry, and a repeated report latches
+  # nothing further.
+  @tag timeout: 30_000
+  test "an unanswered registry relay request latches relay_lost once while serving" do
+    owner = start_owner(fatal_recipient: self())
+    components = Owner.components(owner)
+    relay_monitor = Process.monitor(components.relay)
+    :ok = :sys.suspend(components.relay)
+
+    started = now_ms()
+    spawn_registry_promotion(components.registry, {:crypto.strong_rand_bytes(16), 0, 1})
+
+    assert_receive {:daemon_component_fatal, ^owner, :relay_lost}, 7_000
+    assert now_ms() - started >= 4_900
+    assert_receive {:DOWN, ^relay_monitor, :process, _relay, :killed}, 1_000
+
+    send(
+      owner,
+      {:registry_relay_unanswered, components.registry, components.routing_incarnation}
+    )
+
+    refute_receive {:daemon_component_fatal, _reporter, _class}, 300
+    assert Process.alive?(owner)
+    assert Process.alive?(components.registry)
+    assert %{relay_flow: nil} = :sys.get_state(components.registry)
+  end
+
+  # Concept (T21, partial: the daemon owner's side only; the full witness
+  # needs the later lease-owner step): once the stop has begun, the stop's own
+  # deadlines govern, so the daemon owner treats a registry's unanswered-relay
+  # report as cleanup and the relay keeps serving.
+  test "an unanswered registry relay report after the cut is cleanup-only" do
+    owner = start_owner(fatal_recipient: self())
+    components = Owner.components(owner)
+    assert {:ok, _cut_ref} = Owner.cut_admission(owner, 2_000)
+
+    send(
+      owner,
+      {:registry_relay_unanswered, components.registry, components.routing_incarnation}
+    )
+
+    refute_receive {:daemon_component_fatal, _reporter, _class}, 300
+    assert Process.alive?(components.relay)
+    assert %{fatal_teardown: false} = :sys.get_state(owner)
+  end
+
+  # Concept (T23): after the admission deadline the relay refuses the
+  # registry's queued promotions with `daemon_stopping`, each caller hears it
+  # and its reservation is released, and the final close never waits behind
+  # those flows.
+  #
+  # Technical depth: after the cut, a debug hook parks the relay on the first
+  # promotion while a second waits in the registry's flow queue. The final
+  # close answers while the relay is still parked. Released past the
+  # admission deadline, the relay answers both promotions `daemon_stopping`.
+  test "queued registry flows end daemon_stopping past the admission deadline" do
+    owner = start_owner(admission_wait_ms: 200)
+    components = Owner.components(owner)
+    _connection = initialized_connection(components)
+    assert {:ok, _cut_ref} = Owner.cut_admission(owner, 2_000)
+
+    park_relay_message(
+      components.relay,
+      &match?({:"$gen_call", _from, {:promote_ticket, _, _, _, _}}, &1),
+      :relay_promotion_parked,
+      :continue_parked_promotion
+    )
+
+    first = spawn_registry_promotion(components.registry, {incarnation(), 0, 1}, :fresh)
+    assert_receive :relay_promotion_parked, 1_000
+    second = spawn_registry_promotion(components.registry, {incarnation(), 1, 1}, :fresh)
+
+    eventually_true(fn -> registry_flow_state(components.registry).queued == 1 end)
+
+    assert %{relay_flow: %{}, queued: 1, activation_reservations: 1} =
+             registry_flow_state(components.registry)
+
+    record = WireRecords.daemon_stopping("operator_stop")
+    assert {:ok, :forced} = Owner.close_connections(owner, record, now_ms() + 200)
+
+    Process.sleep(300)
+    send(components.relay, :continue_parked_promotion)
+
+    assert_receive {:registry_promotion, ^first, {:error, :daemon_stopping}}, 1_000
+    assert_receive {:registry_promotion, ^second, {:error, :daemon_stopping}}, 1_000
+
+    assert %{relay_flow: nil, activation_reservations: 0} =
+             registry_flow_state(components.registry)
+  end
+
+  # Concept: an unanswered-relay report names the current registry and
+  # routing incarnation; any other report latches nothing.
+  test "a registry relay report naming another registry or incarnation is cleanup-only" do
+    owner = start_owner(fatal_recipient: self())
+    components = Owner.components(owner)
+
+    send(owner, {:registry_relay_unanswered, self(), components.routing_incarnation})
+    send(owner, {:registry_relay_unanswered, components.registry, incarnation()})
+
+    refute_receive {:daemon_component_fatal, _reporter, _class}, 300
+    assert Process.alive?(components.relay)
+    assert %{fatal_teardown: false} = :sys.get_state(owner)
+  end
+
+  # Concept (E8): a second final close while one is in flight joins it: the
+  # registry is asked once and both callers hear its one answer.
+  test "a repeated final close joins the close in flight" do
+    owner = start_owner()
+    components = Owner.components(owner)
+    _connection = initialized_connection(components)
+    1 = :erlang.trace(components.registry, true, [:receive])
+
+    record = WireRecords.daemon_stopping("operator_stop")
+    deadline = now_ms() + 300
+
+    closes =
+      for _ <- 1..2, do: Task.async(fn -> Owner.close_connections(owner, record, deadline) end)
+
+    assert [{:ok, :forced}, {:ok, :forced}] = Enum.map(closes, &Task.await(&1, 3_000))
+    :erlang.trace(components.registry, false, [:receive])
+
+    requests =
+      Stream.repeatedly(fn ->
+        receive do
+          {:trace, _registry, :receive, {:owner_request, ^owner, _ref, {:close_all, _, _}}} ->
+            :close_all
+
+          {:trace, _registry, :receive, _other} ->
+            :other
+        after
+          0 -> :done
+        end
+      end)
+      |> Enum.take_while(&(&1 != :done))
+      |> Enum.count(&(&1 == :close_all))
+
+    assert requests == 1
+  end
+
+  # Concept (E8): a close the registry misses is answered `connections_lost`
+  # once at its deadline; the registry's reply arriving later is ignored.
+  test "a late close reply after the close deadline is ignored" do
+    {state, tag, ref} = pending_close_state()
+    state = %{state | registry: spawn(fn -> Process.sleep(:infinity) end)}
+
+    assert {:noreply, state} = Owner.handle_info({:close_connections_deadline, ref}, state)
+    assert_received {^tag, {:error, :connections_lost}}
+
+    assert {:noreply, _state} =
+             Owner.handle_info({:owner_reply, state.registry, ref, :ok}, state)
+
+    refute_received {^tag, _reply}
+  end
+
+  # Concept (E8): a registry that exits while the final close waits answers
+  # that close `connections_lost`, the same class the owner stops with.
+  test "a registry exit answers a pending close connections_lost" do
+    {state, tag, _ref} = pending_close_state()
 
     assert {:stop, :connections_lost, _state} =
              Owner.handle_info({:EXIT, state.registry, :killed}, state)
 
-    # A callee that died on its own unanswered call wraps its reason inside
-    # the caller's; the innermost callee is the one that stalled.
-    nested = {timeout, {GenServer, :call, [self(), :y, 7_000]}}
+    assert_received {^tag, {:error, :connections_lost}}
+  end
 
-    assert {:stop, :relay_lost, _state} =
-             Owner.handle_info({:EXIT, state.registry, nested}, state)
+  # Concept (F1): when the relay acknowledges its teardown, the daemon owner
+  # tells the registry, which abandons every remaining relay flow.
+  test "the relay's teardown barrier abandons the registry's relay flows" do
+    owner = start_owner()
+    components = Owner.components(owner)
+    deadline = now_ms() + 2_000
+    assert {:ok, cut_ref} = Owner.cut_admission(owner, 1_000)
+    assert :ok = Owner.reap_uninitialized(owner, cut_ref, now_ms() + 1_000)
+    assert {:ok, _descriptors} = freeze(owner)
+    assert {:ok, _drain} = Owner.barrier(owner, {:quiescing, "drain"}, deadline)
+
+    assert {:ok, _sealed} =
+             Owner.barrier(owner, {:seal_after_quiesce, "drain", deadline}, deadline)
+
+    assert %{relay_flows_abandoned: false} = :sys.get_state(components.registry)
+
+    assert {:ok, _owners} = Owner.barrier(owner, :tearing_down, deadline)
+    assert %{relay_flows_abandoned: true} = :sys.get_state(components.registry)
+
+    caller = spawn_registry_promotion(components.registry, {incarnation(), 0, 1})
+    assert_receive {:registry_promotion, ^caller, {:error, :relay_unavailable}}, 500
+  end
+
+  # An owner state with one final close pending, answered to the test under
+  # `tag`.
+  defp pending_close_state do
+    owner = start_owner(fatal_recipient: self())
+    tag = make_ref()
+    ref = make_ref()
+    close = %{ref: ref, froms: [{self(), tag}], timer: make_ref()}
+    {%{:sys.get_state(owner) | close: close}, tag, ref}
+  end
+
+  defp eventually_true(predicate, attempts \\ 100)
+  defp eventually_true(predicate, 0), do: assert(predicate.())
+
+  defp eventually_true(predicate, attempts) do
+    if predicate.() do
+      :ok
+    else
+      Process.sleep(10)
+      eventually_true(predicate, attempts - 1)
+    end
+  end
+
+  # A promotion sent to the registry from its own caller process, whose answer
+  # (or its call exit) is reported back to the test.
+  defp spawn_registry_promotion(registry, origin, mode \\ :historical) do
+    test = self()
+    command_id = Base.encode16(:crypto.strong_rand_bytes(8))
+    digest = :crypto.hash(:sha256, command_id)
+
+    spawn(fn ->
+      result =
+        try do
+          ConnectionRegistry.promote_create(
+            registry,
+            origin,
+            command_id,
+            digest,
+            mode,
+            %{"refusal" => "ceiling"},
+            %{"refusal" => "conflict"},
+            fn -> {:no_activation, nil, %{"result" => "none"}} end
+          )
+        catch
+          :exit, _reason -> :call_exit
+        end
+
+      send(test, {:registry_promotion, self(), result})
+    end)
+  end
+
+  defp registry_flow_state(registry) do
+    state = :sys.get_state(registry)
+
+    %{
+      relay_flow: state.relay_flow,
+      queued: :queue.len(state.relay_flow_queue),
+      activation_reservations: map_size(state.activation_reservations)
+    }
   end
 
   defp await_owner_phase(owner, phase, attempts \\ 200)

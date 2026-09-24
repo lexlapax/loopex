@@ -148,6 +148,10 @@ defmodule LoopexDaemon.ConnectionRegistryTest do
           send(caller, {:registry_result, reference, result})
           loop(options, token)
 
+        {:registry_call, caller, reference, {:invoke, operation}} ->
+          send(caller, {:registry_result, reference, operation.()})
+          loop(options, token)
+
         {:connection_abort, ^token, _reason} ->
           :ok
 
@@ -1505,6 +1509,1028 @@ defmodule LoopexDaemon.ConnectionRegistryTest do
     eventually(fn -> ConnectionRegistry.status(registry).occupied == 0 end)
     assert Process.alive?(registry)
   end
+
+  # Concept (T10): a relay step the registry is waiting on delays only the
+  # flow that needs it; the routing mirror is still applied and acknowledged.
+  #
+  # Technical depth: the registry is bound to a scripted relay that is never
+  # told to answer, so the create promotion's relay step stays parked.
+  test "the registry acknowledges a mirror while its relay step is parked" do
+    registry = start_registry(5_000, connection_module: ManualConnection)
+    {relay, registry_incarnation} = bind_scripted_relay(registry)
+    connection = initialized_manual_connection(registry)
+
+    _caller = spawn_promotion(registry)
+    assert_receive {:relay_request, ^relay, _from, {:promote_ticket, _, _, _, _}}, 500
+
+    mirror = provisional_mirror(connection, "parked-session", self(), incarnation(), 1)
+    assert :ok = apply_mirror(registry, registry_incarnation, :install_provisional, mirror)
+    assert %{provisional_routing_mirrors: 1} = ConnectionRegistry.status(registry)
+    assert %{relay_flow: %{}} = :sys.get_state(registry)
+  end
+
+  # Concept (T21, partial: the registry side only; the full witness needs the
+  # later lease-owner step): once the transport cut has begun the stop, a
+  # relay request left unanswered past its instant is never reported.
+  #
+  # Technical depth: the promotion's relay request is sent while serving, so
+  # its five-second instant is armed; the owner then closes the transport
+  # gate, and the instant passes with no report.
+  @tag timeout: 30_000
+  test "a relay request overtaken by the transport cut is never reported" do
+    registry = start_registry(5_000)
+    {relay, _registry_incarnation} = bind_scripted_relay(registry)
+
+    started = now_ms()
+    _caller = spawn_promotion(registry)
+    assert_receive {:relay_request, ^relay, _from, {:promote_ticket, _, _, _, _}}, 500
+    assert %{relay_flow: %{timer: timer}} = :sys.get_state(registry)
+    assert is_reference(timer)
+
+    cut(registry)
+
+    refute_receive {:registry_relay_unanswered, ^registry, _incarnation},
+                   max(started + 5_600 - now_ms(), 0)
+
+    assert %{relay_flow: %{timer: nil}} = :sys.get_state(registry)
+    assert Process.alive?(registry)
+  end
+
+  # Concept: a relay request sent after the cut belongs to the stop and
+  # carries no instant of its own.
+  test "no request instant is armed for a relay request sent after the cut" do
+    registry = start_registry(5_000)
+    {relay, _registry_incarnation} = bind_scripted_relay(registry)
+    cut(registry)
+
+    _caller = spawn_promotion(registry)
+    assert_receive {:relay_request, ^relay, _from, {:promote_ticket, _, _, _, _}}, 500
+    assert %{relay_flow: %{timer: nil}} = :sys.get_state(registry)
+  end
+
+  # Concept (F1): after the stop has begun, a settlement the relay no longer
+  # accepts is cleanup-only; the registry keeps serving.
+  test "a settlement refused after the cut is cleanup-only" do
+    registry = start_registry(5_000)
+    {relay, _registry_incarnation} = bind_scripted_relay(registry)
+    monitor = Process.monitor(registry)
+    settle = settling_promotion(registry, relay)
+
+    cut(registry)
+    GenServer.reply(settle.from, {:error, :ticket_unavailable})
+
+    refute_receive {:DOWN, ^monitor, :process, ^registry, _reason}, 200
+    assert %{relay_flow: nil, activation_promotions: promotions} = :sys.get_state(registry)
+    assert promotions == %{}
+  end
+
+  # Concept (F1): once the relay tears down, every remaining flow is
+  # abandoned: queued and later callers hear `relay_unavailable` at once,
+  # the settlement in flight is dropped, and the relay is asked nothing more.
+  test "the relay's teardown abandons every remaining relay flow" do
+    registry = start_registry(5_000)
+    {relay, _registry_incarnation} = bind_scripted_relay(registry)
+    settle = settling_promotion(registry, relay)
+
+    first = spawn_promotion(registry)
+    second = spawn_promotion(registry)
+    eventually(fn -> :queue.len(:sys.get_state(registry).relay_flow_queue) == 2 end)
+
+    send(registry, {:registry_tearing_down, self()})
+
+    assert_receive {:promotion_result, ^first, {:error, :relay_unavailable}}, 500
+    assert_receive {:promotion_result, ^second, {:error, :relay_unavailable}}, 500
+
+    late = spawn_promotion(registry)
+    assert_receive {:promotion_result, ^late, {:error, :relay_unavailable}}, 500
+    refute_receive {:relay_request, ^relay, _from, _request}, 100
+
+    assert %{relay_flow: nil, activation_promotions: promotions} = :sys.get_state(registry)
+    refute Map.has_key?(promotions, settle.settlement_ref)
+  end
+
+  # Concept: a relay that exits under queued flows ends each call flow as
+  # `relay_unavailable` and abandons each settlement, and the registry keeps
+  # serving; the daemon owner classifies the relay.
+  test "a relay exit ends queued calls as relay_unavailable and abandons settlements" do
+    registry = start_registry(5_000)
+    {relay, _registry_incarnation} = bind_scripted_relay(registry)
+    monitor = Process.monitor(registry)
+    settle = settling_promotion(registry, relay)
+
+    first = spawn_promotion(registry)
+    second = spawn_promotion(registry)
+    eventually(fn -> :queue.len(:sys.get_state(registry).relay_flow_queue) == 2 end)
+
+    Process.exit(relay, :kill)
+
+    assert_receive {:promotion_result, ^first, {:error, :relay_unavailable}}, 500
+    assert_receive {:promotion_result, ^second, {:error, :relay_unavailable}}, 500
+    refute_receive {:DOWN, ^monitor, :process, ^registry, _reason}, 100
+
+    assert %{relay_flow: nil, activation_promotions: promotions} = :sys.get_state(registry)
+    refute Map.has_key?(promotions, settle.settlement_ref)
+  end
+
+  # Concept (F4, R3): a resume cancellation is answered at once, never waits
+  # behind the relay queue, and removes the queued preparation it cancels.
+  test "a resume cancellation removes its queued preparation without waiting" do
+    registry = start_registry(5_000)
+    {relay, _registry_incarnation} = bind_scripted_relay(registry)
+
+    _blocker = spawn_promotion(registry)
+    assert_receive {:relay_request, ^relay, blocker, {:promote_ticket, _, _, _, _}}, 500
+
+    origin = {incarnation(), 3, 1}
+    owner_incarnation = incarnation()
+    prepare = raw_call(registry, prepare_request(origin, owner_incarnation))
+    eventually(fn -> :sys.get_state(registry).relay_flow_count == 1 end)
+
+    cancel = raw_call(registry, {:cancel_prepared_resume, origin, owner_incarnation})
+    assert_receive {^cancel, :ok}, 200
+    assert_receive {^prepare, {:error, :relay_unavailable}}, 200
+
+    GenServer.reply(blocker, {:error, :ticket_unavailable})
+    refute_receive {:relay_request, ^relay, _from, {:authorize_resume_ticket, _, _, _, _}}, 200
+    refute_receive {^prepare, _second}, 50
+
+    assert %{activation_preparations: 0, activation_reservations: 0} =
+             ConnectionRegistry.status(registry)
+  end
+
+  # Concept (R3): a cancellation reaching a preparation whose relay step is in
+  # flight is answered at once, and that preparation records nothing.
+  test "a resume cancellation during its preparation's relay step records nothing" do
+    registry = start_registry(5_000)
+    {relay, _registry_incarnation} = bind_scripted_relay(registry)
+    origin = {incarnation(), 3, 1}
+    owner_incarnation = incarnation()
+
+    prepare = raw_call(registry, prepare_request(origin, owner_incarnation))
+
+    assert_receive {:relay_request, ^relay, authorize,
+                    {:authorize_resume_ticket, ^origin, _, _, _}},
+                   500
+
+    cancel = raw_call(registry, {:cancel_prepared_resume, origin, owner_incarnation})
+    assert_receive {^cancel, :ok}, 200
+
+    GenServer.reply(authorize, :ok)
+    assert_receive {^prepare, {:error, :relay_unavailable}}, 500
+    refute_receive {^prepare, _second}, 50
+
+    assert %{activation_preparations: 0, activation_reservations: 0} =
+             ConnectionRegistry.status(registry)
+  end
+
+  # Concept (R1): teardown abandons an in-flight create once: its caller hears
+  # `relay_unavailable` exactly once, its reservation and promotion are
+  # released, and the relay's late answer is ignored.
+  test "teardown abandons an in-flight create once and releases its reservation" do
+    registry = start_registry(5_000)
+    {relay, _registry_incarnation} = bind_scripted_relay(registry)
+    monitor = Process.monitor(registry)
+
+    create = raw_call(registry, create_request({incarnation(), 0, 1}, :fresh))
+    assert_receive {:relay_request, ^relay, from, {:promote_ticket, origin, _, _, _}}, 500
+    assert %{activation_reservations: 1} = ConnectionRegistry.status(registry)
+
+    send(registry, {:registry_tearing_down, self()})
+    assert_receive {^create, {:error, :relay_unavailable}}, 500
+
+    GenServer.reply(from, {:ok, origin})
+    refute_receive {^create, _second}, 100
+    refute_receive {:DOWN, ^monitor, :process, ^registry, _reason}, 50
+
+    assert %{relay_flow: nil, activation_promotions: promotions} = :sys.get_state(registry)
+    assert promotions == %{}
+    assert %{activation_reservations: 0} = ConnectionRegistry.status(registry)
+  end
+
+  # Concept (R1): teardown abandons an in-flight replacement attach once: the
+  # connection hears `relay_unavailable` exactly once, the promotion is
+  # dropped and the connection's previous attachment is restored.
+  test "teardown abandons an in-flight attach once and restores the previous attachment" do
+    registry = start_registry(5_000, connection_module: ManualConnection)
+    {relay, _registry_incarnation} = bind_scripted_relay(registry)
+    connection = initialized_manual_connection(registry)
+    activate(registry, "attach-session")
+    install_attachment(registry, relay, connection, "attach-session", 1, "attachment-1")
+
+    replacement = attach_async(registry, connection, "attach-session", 2, "attachment-2")
+    assert_receive {:relay_request, ^relay, from, {:promote_ticket, origin, _, _, _}}, 500
+
+    send(registry, {:registry_tearing_down, self()})
+    eventually(fn -> is_nil(:sys.get_state(registry).relay_flow) end)
+    GenServer.reply(from, {:ok, origin})
+
+    assert [{:error, :relay_unavailable}] = connection_replies(connection, replacement)
+
+    assert %{attachments: attachments, activation_promotions: promotions} =
+             :sys.get_state(registry)
+
+    assert %{phase: :installed, attachment_id: "attachment-1"} =
+             Map.fetch!(attachments, connection.incarnation)
+
+    assert promotions == %{}
+    refute_receive {:registry_attachment, ^registry, _, :closed, _, _, _, _}, 50
+  end
+
+  # Concept (R1): teardown abandons an in-flight resume promotion once: its
+  # lease owner hears `relay_unavailable` exactly once and its claimed
+  # preparation, reservation and promotion are all released.
+  test "teardown abandons an in-flight resume promotion once and releases it" do
+    registry = start_registry(5_000)
+    {relay, _registry_incarnation} = bind_scripted_relay(registry)
+    origin = {incarnation(), 4, 1}
+    owner_incarnation = incarnation()
+
+    prepare = raw_call(registry, prepare_request(origin, owner_incarnation))
+
+    assert_receive {:relay_request, ^relay, authorize, {:authorize_resume_ticket, _, _, _, _}},
+                   500
+
+    GenServer.reply(authorize, :ok)
+    assert_receive {^prepare, {:ok, :prepared}}, 500
+
+    promote = raw_call(registry, promote_resume_request(origin, owner_incarnation))
+    assert_receive {:relay_request, ^relay, from, {:promote_ticket, ^origin, _, _, _, _}}, 500
+
+    send(registry, {:registry_tearing_down, self()})
+    assert_receive {^promote, {:error, :relay_unavailable}}, 500
+    GenServer.reply(from, {:ok, origin})
+    refute_receive {^promote, _second}, 100
+
+    state = :sys.get_state(registry)
+    assert state.activation_promotions == %{}
+    assert state.activation_promotion_bindings == %{}
+
+    assert %{activation_preparations: 0, activation_reservations: 0} =
+             ConnectionRegistry.status(registry)
+  end
+
+  # Concept (R1): teardown abandons a preparation whose authorization is in
+  # flight once, recording nothing.
+  test "teardown abandons an in-flight resume authorization once" do
+    registry = start_registry(5_000)
+    {relay, _registry_incarnation} = bind_scripted_relay(registry)
+    origin = {incarnation(), 5, 1}
+
+    prepare = raw_call(registry, prepare_request(origin, incarnation()))
+
+    assert_receive {:relay_request, ^relay, authorize, {:authorize_resume_ticket, _, _, _, _}},
+                   500
+
+    send(registry, {:registry_tearing_down, self()})
+    assert_receive {^prepare, {:error, :relay_unavailable}}, 500
+    GenServer.reply(authorize, :ok)
+    refute_receive {^prepare, _second}, 100
+
+    assert %{activation_preparations: 0, activation_reservations: 0} =
+             ConnectionRegistry.status(registry)
+  end
+
+  # Concept (R2): a continuation re-checks its connection's row. A refused
+  # replacement attach for a connection that is retiring restores nothing and
+  # closes the attachment it would have replaced, once.
+  test "a refused attach for a retiring connection closes its previous attachment once" do
+    registry =
+      start_registry(5_000,
+        connection_module: ManualConnection,
+        connection_context: %{runtime: :unavailable_runtime, relay: spawn(fn -> :ok end)}
+      )
+
+    {relay, _registry_incarnation} = bind_scripted_relay(registry)
+    connection = initialized_manual_connection(registry)
+    activate(registry, "attach-session")
+    install_attachment(registry, relay, connection, "attach-session", 1, "attachment-1")
+
+    _replacement = attach_async(registry, connection, "attach-session", 2, "attachment-2")
+    assert_receive {:relay_request, ^relay, pending, {:promote_ticket, _, _, _, _}}, 500
+
+    Process.exit(connection.pid, :kill)
+    eventually(fn -> retiring?(registry, connection.incarnation) end)
+    assert retiring?(registry, connection.incarnation)
+
+    GenServer.reply(pending, {:error, :ticket_unavailable})
+    eventually(fn -> is_nil(:sys.get_state(registry).relay_flow) end)
+
+    assert_receive {:registry_attachment, ^registry, nil, :closed, "attach-session", _, _,
+                    "attachment-1"},
+                   500
+
+    refute_receive {:registry_attachment, ^registry, _, _, _, _, _, "attachment-1"}, 100
+    refute Map.has_key?(:sys.get_state(registry).attachments, connection.incarnation)
+  end
+
+  # Concept (b): a connection that goes away while its replacement attach is
+  # pending closes the attachment it would have replaced, exactly once.
+  test "a connection lost during a pending replacement closes its previous attachment once" do
+    registry = start_registry(5_000, connection_module: ManualConnection)
+    {relay, _registry_incarnation} = bind_scripted_relay(registry)
+    connection = initialized_manual_connection(registry)
+    activate(registry, "attach-session")
+    install_attachment(registry, relay, connection, "attach-session", 1, "attachment-1")
+
+    _replacement = attach_async(registry, connection, "attach-session", 2, "attachment-2")
+    assert_receive {:relay_request, ^relay, pending, {:promote_ticket, _, _, _, _}}, 500
+
+    Process.exit(connection.pid, :kill)
+
+    assert_receive {:registry_attachment, ^registry, nil, :closed, "attach-session", _, _,
+                    "attachment-1"},
+                   500
+
+    GenServer.reply(pending, {:error, :ticket_unavailable})
+    eventually(fn -> is_nil(:sys.get_state(registry).relay_flow) end)
+    refute_receive {:registry_attachment, ^registry, _, _, _, _, _, "attachment-1"}, 100
+    refute Map.has_key?(:sys.get_state(registry).attachments, connection.incarnation)
+  end
+
+  # Concept (R4): after an invalidation during a pending replacement, the
+  # replacement's success opens the new attachment once and closes nothing,
+  # and the connection's later loss closes only the new attachment.
+  test "an attachment invalidated during a pending replacement is closed once on success" do
+    registry = start_registry(5_000, connection_module: ManualConnection)
+    {relay, _registry_incarnation} = bind_scripted_relay(registry)
+    connection = initialized_manual_connection(registry)
+    activate(registry, "attach-session")
+    install_attachment(registry, relay, connection, "attach-session", 1, "attachment-1")
+
+    replacement = attach_async(registry, connection, "attach-session", 2, "attachment-2")
+    assert_receive {:relay_request, ^relay, from, {:promote_ticket, origin, _, ref, task}}, 500
+    invalidate(registry, connection, "attachment-1")
+
+    assert_receive {:registry_attachment, ^registry, nil, :closed, "attach-session", _, _,
+                    "attachment-1"},
+                   500
+
+    GenServer.reply(from, {:ok, origin})
+    assert [{:ok, :admitted}] = connection_replies(connection, replacement)
+    send(registry, {:relay_ticket_settlement, relay, origin, ref, task.()})
+
+    assert_receive {:registry_attachment, ^registry, record_ref, :opened, "attach-session", _, _,
+                    "attachment-2"},
+                   500
+
+    refute_receive {:registry_attachment, ^registry, _, _, _, _, _, "attachment-1"}, 100
+    send(registry, {:owner_attachment_recorded, self(), record_ref})
+    assert_receive {:relay_request, ^relay, settle, {:settle_ticket, ^origin, _, ^ref}}, 500
+    GenServer.reply(settle, :ok)
+
+    Process.exit(connection.pid, :kill)
+
+    assert_receive {:registry_attachment, ^registry, nil, :closed, "attach-session", _, _,
+                    "attachment-2"},
+                   500
+
+    refute_receive {:registry_attachment, ^registry, _, _, _, _, _, "attachment-1"}, 100
+    refute_receive {:registry_attachment, ^registry, _, :opened, _, _, _, _}, 50
+  end
+
+  # Concept (R5): a resume whose settlement the relay refuses after the cut
+  # still gives its lease owner its classified disposition.
+  test "a resume settlement refused after the cut still settles its lease owner" do
+    registry = start_registry(5_000)
+    {relay, _registry_incarnation} = bind_scripted_relay(registry)
+    owner_incarnation = incarnation()
+    {settle, origin} = settling_resume(registry, relay, owner_incarnation)
+
+    cut(registry)
+    GenServer.reply(settle, {:error, :ticket_unavailable})
+
+    assert_receive {:registry_resume_settled, ^registry, ^origin, ^owner_incarnation, :accepted},
+                   500
+
+    refute_receive {:registry_resume_settled, ^registry, _, _, _}, 100
+    assert :sys.get_state(registry).activation_promotion_bindings == %{}
+  end
+
+  # Concept (R5): a resume whose settlement is abandoned at teardown still
+  # gives its lease owner its classified disposition.
+  test "a resume settlement abandoned at teardown still settles its lease owner" do
+    registry = start_registry(5_000)
+    {relay, _registry_incarnation} = bind_scripted_relay(registry)
+    owner_incarnation = incarnation()
+    {settle, origin} = settling_resume(registry, relay, owner_incarnation)
+
+    send(registry, {:registry_tearing_down, self()})
+
+    assert_receive {:registry_resume_settled, ^registry, ^origin, ^owner_incarnation, :accepted},
+                   500
+
+    GenServer.reply(settle, :ok)
+    refute_receive {:registry_resume_settled, ^registry, _, _, _}, 100
+  end
+
+  # Concept (R6): at most 16,384 relay flows wait in the registry's queue; a
+  # call beyond that is refused at once with `relay_unavailable`, and once
+  # the queue drains a new call is accepted again.
+  #
+  # Technical depth: the queued calls reply to a sink process, so the test's
+  # own mailbox holds only the relay requests it answers while draining.
+  @tag timeout: 120_000
+  test "a relay flow beyond the queue bound is refused at once" do
+    registry = start_registry(5_000)
+    {relay, _registry_incarnation} = bind_scripted_relay(registry)
+    sink = spawn(fn -> sink_loop() end)
+    on_exit(fn -> Process.exit(sink, :kill) end)
+
+    _blocker = spawn_promotion(registry)
+    assert_receive {:relay_request, ^relay, blocker, {:promote_ticket, _, _, _, _}}, 500
+
+    for sequence <- 1..16_384 do
+      send(
+        registry,
+        {:"$gen_call", {sink, make_ref()},
+         create_request({incarnation(), rem(sequence, 32), sequence}, :historical)}
+      )
+    end
+
+    assert %{relay_flow_count: 16_384} = :sys.get_state(registry, 30_000)
+
+    beyond = raw_call(registry, create_request({incarnation(), 0, 1}, :historical))
+    assert_receive {^beyond, {:error, :relay_unavailable}}, 1_000
+    assert %{relay_flow_count: 16_384} = :sys.get_state(registry, 30_000)
+
+    GenServer.reply(blocker, {:error, :ticket_unavailable})
+
+    for _ <- 1..16_384 do
+      assert_receive {:relay_request, ^relay, from, {:promote_ticket, _, _, _, _}}, 5_000
+      GenServer.reply(from, {:error, :ticket_unavailable})
+    end
+
+    assert %{relay_flow_count: 0, relay_flow: nil} = :sys.get_state(registry, 30_000)
+
+    accepted = raw_call(registry, create_request({incarnation(), 1, 1}, :historical))
+    assert_receive {:relay_request, ^relay, from, {:promote_ticket, origin, _, _, _}}, 500
+    GenServer.reply(from, {:ok, origin})
+    assert_receive {^accepted, {:ok, :admitted}}, 500
+  end
+
+  # Concept (F1): with a recorded but unsettled attach and a later pending
+  # replacement on the same connection, the connection's loss closes the
+  # attachment the pending replacement would have replaced, once, and never
+  # the one the recorded attach already closed.
+  #
+  # Technical depth: the recorded promotion is re-keyed to sort first, so the
+  # search over promotions meets it before the pending one on every run.
+  test "a lost connection closes only the pending replacement's previous attachment" do
+    registry = start_registry(5_000, connection_module: ManualConnection)
+    {relay, _registry_incarnation} = bind_scripted_relay(registry)
+    connection = initialized_manual_connection(registry)
+    activate(registry, "attach-session")
+    install_attachment(registry, relay, connection, "attach-session", 1, "attachment-1")
+
+    recorded_ref =
+      record_unacknowledged(registry, relay, connection, "attach-session", 2, "attachment-2")
+
+    assert_receive {:registry_attachment, ^registry, nil, :closed, _, _, _, "attachment-1"}, 500
+
+    _pending = attach_async(registry, connection, "attach-session", 3, "attachment-3")
+    assert_receive {:relay_request, ^relay, _from, {:promote_ticket, _, _, _, _}}, 500
+    sort_promotion_first(registry, recorded_ref)
+
+    Process.exit(connection.pid, :kill)
+
+    assert_receive {:registry_attachment, ^registry, nil, :closed, "attach-session", _, _,
+                    "attachment-2"},
+                   500
+
+    refute_receive {:registry_attachment, ^registry, _, :closed, _, _, _, "attachment-1"}, 100
+    refute_receive {:registry_attachment, ^registry, _, :closed, _, _, _, "attachment-2"}, 50
+  end
+
+  # Concept (F1): invalidating an attachment a recorded attach has already
+  # replaced and closed closes nothing again, even while a later replacement
+  # is pending.
+  test "invalidating an already replaced attachment during a pending attach closes nothing" do
+    registry = start_registry(5_000, connection_module: ManualConnection)
+    {relay, _registry_incarnation} = bind_scripted_relay(registry)
+    connection = initialized_manual_connection(registry)
+    activate(registry, "attach-session")
+    install_attachment(registry, relay, connection, "attach-session", 1, "attachment-1")
+
+    _recorded =
+      record_unacknowledged(registry, relay, connection, "attach-session", 2, "attachment-2")
+
+    assert_receive {:registry_attachment, ^registry, nil, :closed, _, _, _, "attachment-1"}, 500
+
+    _pending = attach_async(registry, connection, "attach-session", 3, "attachment-3")
+    assert_receive {:relay_request, ^relay, _from, {:promote_ticket, _, _, _, _}}, 500
+
+    invalidate(registry, connection, "attachment-1")
+    refute_receive {:registry_attachment, ^registry, _, :closed, _, _, _, _}, 100
+  end
+
+  # Concept (F2): a resume settlement still queued at teardown is accounted
+  # from core's classification: the activated session joins the activation
+  # set, its reservation is resolved and its lease owner hears the classified
+  # disposition exactly once.
+  test "a queued resume settlement abandoned at teardown accounts its classification" do
+    registry = start_registry(5_000)
+    {relay, _registry_incarnation} = bind_scripted_relay(registry)
+    owner_incarnation = incarnation()
+    origin = {incarnation(), 6, 1}
+
+    promote = raw_call(registry, promote_resume_request(origin, owner_incarnation))
+
+    assert_receive {:relay_request, ^relay, from, {:promote_ticket, ^origin, _, ref, task, _}},
+                   500
+
+    GenServer.reply(from, {:ok, origin})
+    assert_receive {^promote, {:ok, :admitted}}, 500
+
+    _blocker = spawn_promotion(registry)
+    assert_receive {:relay_request, ^relay, _blocker_from, {:promote_ticket, _, _, _, _}}, 500
+    send(registry, {:relay_ticket_settlement, relay, origin, ref, task.()})
+    eventually(fn -> :sys.get_state(registry).relay_flow_count == 1 end)
+    assert %{activation_reservations: 1} = ConnectionRegistry.status(registry)
+
+    send(registry, {:registry_tearing_down, self()})
+
+    assert_receive {:registry_resume_settled, ^registry, ^origin, ^owner_incarnation, :accepted},
+                   500
+
+    refute_receive {:registry_resume_settled, ^registry, _, _, _}, 100
+    assert %{activation_reservations: 0} = ConnectionRegistry.status(registry)
+    assert :sys.get_state(registry).activation_promotions == %{}
+    assert MapSet.member?(:sys.get_state(registry).activation_set, "dormant-session")
+  end
+
+  # Concept (F2): a create settlement still queued at teardown is accounted
+  # from core's classification: the created session joins the activation set
+  # and its reservation is resolved.
+  test "a queued create settlement abandoned at teardown accounts its classification" do
+    registry = start_registry(5_000)
+    {relay, _registry_incarnation} = bind_scripted_relay(registry)
+
+    create =
+      raw_call(
+        registry,
+        create_request({incarnation(), 0, 1}, :fresh, fn ->
+          {:activated, "created-session", %{"result" => "created"}}
+        end)
+      )
+
+    assert_receive {:relay_request, ^relay, from, {:promote_ticket, origin, _, ref, task}}, 500
+    GenServer.reply(from, {:ok, origin})
+    assert_receive {^create, {:ok, :admitted}}, 500
+
+    _blocker = spawn_promotion(registry)
+    assert_receive {:relay_request, ^relay, _blocker_from, {:promote_ticket, _, _, _, _}}, 500
+    send(registry, {:relay_ticket_settlement, relay, origin, ref, task.()})
+    eventually(fn -> :sys.get_state(registry).relay_flow_count == 1 end)
+    assert %{activation_reservations: 1} = ConnectionRegistry.status(registry)
+
+    send(registry, {:registry_tearing_down, self()})
+    eventually(fn -> :sys.get_state(registry).relay_flow_count == 0 end)
+
+    assert %{activation_reservations: 0} = ConnectionRegistry.status(registry)
+    assert :sys.get_state(registry).activation_promotions == %{}
+    assert MapSet.member?(:sys.get_state(registry).activation_set, "created-session")
+  end
+
+  # Concept (round 5): a queued settlement whose classification cannot be
+  # accounted at teardown is released rather than fatal, and one fixed line
+  # records it; the lease owner still hears its disposition.
+  test "an unaccountable settlement at teardown is released with one fixed log line" do
+    registry = start_registry(5_000)
+    {relay, _registry_incarnation} = bind_scripted_relay(registry)
+    activate(registry, "active-session")
+    owner_incarnation = incarnation()
+    origin = {incarnation(), 7, 1}
+
+    promote =
+      raw_call(
+        registry,
+        {:promote_resume, origin, "active-session", "attached-resume", owner_incarnation,
+         :eligible, true, %{"refusal" => "control"}, %{"refusal" => "capacity"},
+         fn -> {:accepted, :activated, %{"resume" => "accepted"}} end}
+      )
+
+    assert_receive {:relay_request, ^relay, from, {:promote_ticket, ^origin, _, ref, task, _}},
+                   500
+
+    GenServer.reply(from, {:ok, origin})
+    assert_receive {^promote, {:ok, :admitted}}, 500
+
+    _blocker = spawn_promotion(registry)
+    assert_receive {:relay_request, ^relay, _blocker_from, {:promote_ticket, _, _, _, _}}, 500
+    send(registry, {:relay_ticket_settlement, relay, origin, ref, task.()})
+    eventually(fn -> :sys.get_state(registry).relay_flow_count == 1 end)
+
+    # The session is taken out of the activation set, so its classification
+    # can no longer be accounted.
+    :sys.replace_state(registry, fn state ->
+      %{state | activation_set: MapSet.delete(state.activation_set, "active-session")}
+    end)
+
+    monitor = Process.monitor(registry)
+
+    log =
+      ExUnit.CaptureLog.capture_log(fn ->
+        send(registry, {:registry_tearing_down, self()})
+
+        assert_receive {:registry_resume_settled, ^registry, ^origin, ^owner_incarnation,
+                        :accepted},
+                       500
+      end)
+
+    assert log =~ "loopex daemon unsettled activation released without accounting"
+    refute log =~ "active-session"
+    refute_receive {:DOWN, ^monitor, :process, ^registry, _reason}, 50
+  end
+
+  # Concept (round 5): after teardown abandons an in-flight promotion, its
+  # late classification and relay settlement are cleanup-only: the registry
+  # stays alive and answers nothing further.
+  test "a late classification and settlement after abandonment are cleanup-only" do
+    registry = start_registry(5_000)
+    {relay, _registry_incarnation} = bind_scripted_relay(registry)
+    monitor = Process.monitor(registry)
+
+    create = raw_call(registry, create_request({incarnation(), 0, 1}, :historical))
+    assert_receive {:relay_request, ^relay, _from, {:promote_ticket, origin, _, ref, task}}, 500
+
+    send(registry, {:registry_tearing_down, self()})
+    assert_receive {^create, {:error, :relay_unavailable}}, 500
+
+    result = task.()
+    send(registry, {:relay_ticket_settlement, relay, origin, ref, result})
+
+    refute_receive {:DOWN, ^monitor, :process, ^registry, _reason}, 200
+    refute_receive {^create, _second}, 50
+    assert %{activation_promotions: promotions} = :sys.get_state(registry)
+    assert promotions == %{}
+  end
+
+  # Concept (round 5b): while serving, a classification or relay settlement
+  # for a promotion the registry does not hold is an invalid settlement and
+  # still ends the registry, with the attach arm's own reason.
+  for {arm, reason} <- [
+        create: :activation_settlement_invalid,
+        resume: :activation_settlement_invalid,
+        attach: :attachment_settlement_invalid,
+        settlement: :activation_settlement_invalid
+      ] do
+    test "a #{arm} message for a missing promotion while serving stops the registry" do
+      Process.flag(:trap_exit, true)
+      registry = start_registry(5_000)
+      {relay, _registry_incarnation} = bind_scripted_relay(registry)
+      monitor = Process.monitor(registry)
+
+      send(registry, late_message(unquote(arm), relay))
+
+      assert_receive {:DOWN, ^monitor, :process, ^registry, unquote(reason)}, 500
+    end
+  end
+
+  # Concept (round 5b): after the cut, with no teardown and no flow
+  # abandoned, a classification or relay settlement for a promotion the
+  # registry does not hold is cleanup-only on every arm.
+  test "a message for a missing promotion after the cut is cleanup-only on every arm" do
+    registry = start_registry(5_000)
+    {relay, _registry_incarnation} = bind_scripted_relay(registry)
+    monitor = Process.monitor(registry)
+    cut(registry)
+    assert %{relay_flows_abandoned: false, transport: :closing} = :sys.get_state(registry)
+
+    for arm <- [:create, :resume, :attach, :settlement] do
+      send(registry, late_message(arm, relay))
+    end
+
+    refute_receive {:DOWN, ^monitor, :process, ^registry, _reason}, 200
+    assert %{activation_promotions: promotions} = :sys.get_state(registry)
+    assert promotions == %{}
+  end
+
+  # Concept (F3): a resume settlement in flight when the relay exits still
+  # gives its lease owner the classified disposition, exactly once.
+  test "a resume settlement ended by the relay's exit still settles its lease owner" do
+    registry = start_registry(5_000)
+    {relay, _registry_incarnation} = bind_scripted_relay(registry)
+    owner_incarnation = incarnation()
+    {_settle, origin} = settling_resume(registry, relay, owner_incarnation)
+
+    Process.exit(relay, :kill)
+
+    assert_receive {:registry_resume_settled, ^registry, ^origin, ^owner_incarnation, :accepted},
+                   500
+
+    refute_receive {:registry_resume_settled, ^registry, _, _, _}, 100
+    assert %{activation_reservations: 0} = ConnectionRegistry.status(registry)
+  end
+
+  # Concept (F4, R4): an attachment invalidated while its connection's
+  # replacement attach waits on the relay is closed then, once; the
+  # replacement's refusal cannot restore it and the connection's loss does not
+  # close it again.
+  test "an attachment invalidated during a pending replacement is not restored" do
+    registry = start_registry(5_000, connection_module: ManualConnection)
+    {relay, _registry_incarnation} = bind_scripted_relay(registry)
+    connection = initialized_manual_connection(registry)
+    activate(registry, "attach-session")
+    install_attachment(registry, relay, connection, "attach-session", 1, "attachment-1")
+
+    replacement = attach_async(registry, connection, "attach-session", 2, "attachment-2")
+    assert_receive {:relay_request, ^relay, pending, {:promote_ticket, _, _, _, _}}, 500
+    invalidate(registry, connection, "attachment-1")
+
+    assert_receive {:registry_attachment, ^registry, nil, :closed, "attach-session", _, _,
+                    "attachment-1"},
+                   500
+
+    GenServer.reply(pending, {:error, :ticket_unavailable})
+    assert [{:error, :ticket_unavailable}] = connection_replies(connection, replacement)
+    refute Map.has_key?(:sys.get_state(registry).attachments, connection.incarnation)
+
+    Process.exit(connection.pid, :kill)
+    refute_receive {:registry_attachment, ^registry, _, _, _, _, _, "attachment-1"}, 200
+  end
+
+  # Concept: a queued attach decides on the state current when it leaves the
+  # queue, as the blocking registry did when it reached the call.
+  test "a queued attach decides on the state current when it is dequeued" do
+    registry = start_registry(5_000, connection_module: ManualConnection)
+    {relay, _registry_incarnation} = bind_scripted_relay(registry)
+    connection = initialized_manual_connection(registry)
+
+    _blocker = spawn_promotion(registry)
+    assert_receive {:relay_request, ^relay, blocker, {:promote_ticket, _, _, _, _}}, 500
+
+    _attach = attach_async(registry, connection, "late-session", 1, "attachment-1")
+    eventually(fn -> :queue.len(:sys.get_state(registry).relay_flow_queue) == 1 end)
+    activate(registry, "late-session")
+    GenServer.reply(blocker, {:error, :ticket_unavailable})
+
+    assert_receive {:relay_request, ^relay, _from, {:promote_ticket, _, _, _, _task}}, 500
+
+    assert %{attachments: %{} = attachments} = :sys.get_state(registry)
+    assert %{phase: :pending} = Map.fetch!(attachments, connection.incarnation)
+  end
+
+  # A relay stand-in: each request it receives is reported with its caller's
+  # reply handle, and the test answers it with `GenServer.reply/2`.
+  defp bind_scripted_relay(registry) do
+    test = self()
+    relay = spawn(fn -> scripted_relay_loop(test) end)
+    on_exit(fn -> Process.exit(relay, :kill) end)
+    registry_incarnation = :crypto.strong_rand_bytes(16)
+    assert :ok = ConnectionRegistry.bind_relay(registry, relay, registry_incarnation)
+    {relay, registry_incarnation}
+  end
+
+  defp scripted_relay_loop(test) do
+    receive do
+      {:"$gen_call", from, request} ->
+        send(test, {:relay_request, self(), from, request})
+        scripted_relay_loop(test)
+    end
+  end
+
+  defp spawn_promotion(registry) do
+    test = self()
+
+    spawn(fn ->
+      result =
+        try do
+          ConnectionRegistry.promote_create(
+            registry,
+            {:crypto.strong_rand_bytes(16), 0, 1},
+            "command",
+            :crypto.hash(:sha256, "options"),
+            :historical,
+            %{"refusal" => "ceiling"},
+            %{"refusal" => "conflict"},
+            fn -> {:no_activation, nil, %{"result" => "none"}} end
+          )
+        catch
+          :exit, _reason -> :call_exit
+        end
+
+      send(test, {:promotion_result, self(), result})
+    end)
+  end
+
+  # A create promotion admitted and classified, whose settlement request is
+  # now the registry's relay step in flight.
+  defp settling_promotion(registry, relay) do
+    caller = spawn_promotion(registry)
+    assert_receive {:relay_request, ^relay, from, {:promote_ticket, origin, _, ref, task}}, 500
+    GenServer.reply(from, {:ok, origin})
+    assert_receive {:promotion_result, ^caller, {:ok, :admitted}}, 500
+    send(registry, {:relay_ticket_settlement, relay, origin, ref, task.()})
+    assert_receive {:relay_request, ^relay, settle, {:settle_ticket, ^origin, _, ^ref}}, 500
+    %{from: settle, settlement_ref: ref}
+  end
+
+  # Sends a promotion from the connection itself with a plain reply tag, so
+  # the connection stays free for its other registry calls and its replies
+  # can be counted.
+  defp attach_async(registry, connection, session_id, slot, attachment_id) do
+    tag = make_ref()
+
+    request =
+      {:promote_attach, {connection.incarnation, slot, 1}, connection.incarnation, session_id,
+       %{"refusal" => "dormant"}, %{"refusal" => "capacity"},
+       fn -> {:installed, attachment_id, %{"attachment" => attachment_id}} end}
+
+    assert :ok =
+             manual_registry_call(
+               connection.pid,
+               {:invoke,
+                fn ->
+                  send(registry, {:"$gen_call", {self(), tag}, request})
+                  :ok
+                end}
+             )
+
+    tag
+  end
+
+  # An attach admitted and recorded at the daemon owner, whose settlement
+  # waits for the owner's acknowledgement; returns its settlement reference.
+  defp record_unacknowledged(registry, relay, connection, session_id, slot, attachment_id) do
+    tag = attach_async(registry, connection, session_id, slot, attachment_id)
+    assert_receive {:relay_request, ^relay, from, {:promote_ticket, origin, _, ref, task}}, 500
+    GenServer.reply(from, {:ok, origin})
+    assert [{:ok, :admitted}] = connection_replies(connection, tag)
+    send(registry, {:relay_ticket_settlement, relay, origin, ref, task.()})
+
+    assert_receive {:registry_attachment, ^registry, record_ref, :opened, ^session_id, _, _,
+                    ^attachment_id},
+                   500
+
+    assert is_reference(record_ref)
+    ref
+  end
+
+  # Re-keys one promotion under the smallest settlement reference, so a
+  # search over the promotion map meets it first.
+  defp sort_promotion_first(registry, settlement_ref) do
+    :sys.replace_state(registry, fn state ->
+      {promotion, promotions} = Map.pop!(state.activation_promotions, settlement_ref)
+      %{state | activation_promotions: Map.put(promotions, <<0::128>>, promotion)}
+    end)
+  end
+
+  defp retiring?(registry, incarnation) do
+    Enum.any?(:sys.get_state(registry).rows, fn {_token, row} ->
+      row.connection_incarnation == incarnation and row.phase == :retiring
+    end)
+  end
+
+  defp sink_loop do
+    receive do
+      _message -> sink_loop()
+    end
+  end
+
+  # A classification or relay settlement naming a settlement reference the
+  # registry holds no promotion for.
+  defp late_message(:create, _relay),
+    do:
+      {:activation_create_classified, make_ref(), :crypto.strong_rand_bytes(16), :no_activation,
+       nil, %{"result" => "late"}}
+
+  defp late_message(:resume, _relay),
+    do:
+      {:activation_resume_classified, make_ref(), :crypto.strong_rand_bytes(16), :accepted,
+       :activated, %{"result" => "late"}}
+
+  defp late_message(:attach, _relay),
+    do:
+      {:attachment_classified, make_ref(), :crypto.strong_rand_bytes(16),
+       {:refused, %{"result" => "late"}}}
+
+  defp late_message(:settlement, relay),
+    do:
+      {:relay_ticket_settlement, relay, {incarnation(), 0, 1}, :crypto.strong_rand_bytes(16),
+       %{"result" => "late"}}
+
+  # Sends a call to the registry with a plain tag, so every reply it sends
+  # arrives here as `{tag, reply}` and a second reply would be seen.
+  defp raw_call(registry, request) do
+    tag = make_ref()
+    send(registry, {:"$gen_call", {self(), tag}, request})
+    tag
+  end
+
+  defp prepare_request(origin, owner_incarnation),
+    do:
+      {:prepare_resume, origin, "dormant-session", "resume-command", owner_incarnation, :eligible}
+
+  defp promote_resume_request(origin, owner_incarnation) do
+    {:promote_resume, origin, "dormant-session", "resume-command", owner_incarnation, :eligible,
+     false, %{"refusal" => "control"}, %{"refusal" => "capacity"},
+     fn -> {:accepted, :activated, %{"resume" => "accepted"}} end}
+  end
+
+  defp create_request(
+         origin,
+         mode,
+         task \\ fn -> {:no_activation, nil, %{"result" => "none"}} end
+       ) do
+    command_id = Base.encode16(:crypto.strong_rand_bytes(8))
+
+    {:promote_create, origin, command_id, :crypto.hash(:sha256, command_id), mode,
+     %{"refusal" => "ceiling"}, %{"refusal" => "conflict"}, task}
+  end
+
+  # A resume promotion admitted and classified, whose settlement request is
+  # now the registry's relay step in flight; the test process is its owner.
+  defp settling_resume(registry, relay, owner_incarnation) do
+    origin = {incarnation(), 6, 1}
+    promote = raw_call(registry, promote_resume_request(origin, owner_incarnation))
+
+    assert_receive {:relay_request, ^relay, from, {:promote_ticket, ^origin, _, ref, task, _}},
+                   500
+
+    GenServer.reply(from, {:ok, origin})
+    assert_receive {^promote, {:ok, :admitted}}, 500
+    send(registry, {:relay_ticket_settlement, relay, origin, ref, task.()})
+    assert_receive {:relay_request, ^relay, settle, {:settle_ticket, ^origin, _, ^ref}}, 500
+    {settle, origin}
+  end
+
+  # Installs one attachment for the connection through a full attach flow.
+  defp install_attachment(registry, relay, connection, session_id, slot, attachment_id) do
+    installed = attach_async(registry, connection, session_id, slot, attachment_id)
+    assert_receive {:relay_request, ^relay, from, {:promote_ticket, origin, _, ref, task}}, 500
+    GenServer.reply(from, {:ok, origin})
+    assert [{:ok, :admitted}] = connection_replies(connection, installed)
+    send(registry, {:relay_ticket_settlement, relay, origin, ref, task.()})
+
+    assert_receive {:registry_attachment, ^registry, record_ref, :opened, ^session_id, _, _,
+                    ^attachment_id},
+                   500
+
+    send(registry, {:owner_attachment_recorded, self(), record_ref})
+    assert_receive {:relay_request, ^relay, settle, {:settle_ticket, ^origin, _, ^ref}}, 500
+    GenServer.reply(settle, :ok)
+    eventually(fn -> is_nil(:sys.get_state(registry).relay_flow) end)
+  end
+
+  defp invalidate(registry, connection, attachment_id) do
+    assert :ok =
+             manual_registry_call(
+               connection.pid,
+               {:invoke,
+                fn ->
+                  ConnectionRegistry.attachment_invalidated(
+                    registry,
+                    connection.incarnation,
+                    attachment_id
+                  )
+                end}
+             )
+  end
+
+  # Every registry reply the connection has received under `tag` so far.
+  defp connection_replies(connection, tag) do
+    manual_registry_call(
+      connection.pid,
+      {:invoke,
+       fn ->
+         Stream.repeatedly(fn ->
+           receive do
+             {^tag, reply} -> {:reply, reply}
+           after
+             50 -> :none
+           end
+         end)
+         |> Enum.take_while(&(&1 != :none))
+         |> Enum.map(fn {:reply, reply} -> reply end)
+       end}
+    )
+  end
+
+  defp activate(registry, session_id) do
+    origin = {incarnation(), 31, 1}
+
+    assert {:ok, {:primary, reservation_ref}} =
+             ConnectionRegistry.reserve_activation(
+               registry,
+               origin,
+               {:resume, session_id, "activate"}
+             )
+
+    assert :ok =
+             ConnectionRegistry.resolve_activation(
+               registry,
+               reservation_ref,
+               :activated,
+               session_id
+             )
+  end
+
+  defp cut(registry) do
+    cut_ref = make_ref()
+    assert {:ok, ^cut_ref} = reply_value(ConnectionRegistry.transport_closing(registry, cut_ref))
+  end
+
+  defp incarnation, do: :crypto.strong_rand_bytes(16)
 
   defp start_registry(deadline_ms, options \\ []) do
     {:ok, registry} =

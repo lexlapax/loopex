@@ -2417,7 +2417,7 @@ defmodule LoopexDaemon.AdmissionRelayTest do
     origin = {connection_incarnation, 0, 1}
     {worker, worker_incarnation} = start_lease_worker(connection, origin)
 
-    assert {:error, :invalid_actor} =
+    assert {:error, :actor_retiring} =
              AdmissionRelay.open_lease_permit(
                relay,
                connection,
@@ -2455,6 +2455,101 @@ defmodule LoopexDaemon.AdmissionRelayTest do
 
     assert %{lease_owners: 0, retiring_lease_owners: 0, owner_losses: 0} =
              AdmissionRelay.status(relay)
+  end
+
+  # Concept: the relay refuses an open for an actor it has already seen die
+  # with that exact reason, and still refuses an actor it never bound.
+  test "an open naming a lost actor answers actor_lost" do
+    relay = start_relay()
+    owner = start_actor()
+    owner_incarnation = incarnation()
+
+    assert :ok =
+             AdmissionRelay.register_lease_owner(relay, "lost-session", owner, owner_incarnation)
+
+    owner_monitor = Process.monitor(owner)
+    Process.exit(owner, :kill)
+    assert_receive {:DOWN, ^owner_monitor, :process, ^owner, :killed}, 500
+    eventually(fn -> AdmissionRelay.status(relay).lease_owners == 0 end)
+
+    connection_incarnation = incarnation()
+    connection = start_connection(relay, connection_incarnation)
+    origin = {connection_incarnation, 0, 1}
+    {worker, worker_incarnation} = start_lease_worker(connection, origin)
+
+    assert {:error, :actor_lost} =
+             AdmissionRelay.open_lease_permit(
+               relay,
+               connection,
+               origin,
+               :session_acquire_control,
+               "lost-session",
+               owner,
+               owner_incarnation,
+               worker,
+               worker_incarnation
+             )
+
+    assert {:error, :invalid_actor} =
+             AdmissionRelay.open_lease_permit(
+               relay,
+               connection,
+               origin,
+               :session_acquire_control,
+               "lost-session",
+               start_actor(),
+               owner_incarnation,
+               worker,
+               worker_incarnation
+             )
+
+    assert AdmissionRelay.status(relay).permits == 0
+    stop_connection(connection, relay, connection_incarnation)
+  end
+
+  # Concept: an actor claiming a permit whose disposition was already
+  # selected learns that disposition, not a generic actor refusal.
+  test "a claim after connection loss answers the selected disposition" do
+    relay = start_relay()
+    owner = start_actor()
+    owner_incarnation = incarnation()
+
+    assert :ok =
+             AdmissionRelay.register_lease_owner(relay, "claim-session", owner, owner_incarnation)
+
+    connection_incarnation = incarnation()
+    connection = start_connection(relay, connection_incarnation)
+    origin = {connection_incarnation, 0, 1}
+    {worker, worker_incarnation} = start_lease_worker(connection, origin)
+
+    assert {:ok, ^origin} =
+             AdmissionRelay.open_lease_permit(
+               relay,
+               connection,
+               origin,
+               :session_acquire_control,
+               "claim-session",
+               owner,
+               owner_incarnation,
+               worker,
+               worker_incarnation
+             )
+
+    connection_monitor = Process.monitor(connection)
+    Process.exit(connection, :kill)
+    assert_receive {:DOWN, ^connection_monitor, :process, ^connection, :killed}, 500
+
+    assert_receive {:relay_lease_disposition, ^relay, ^origin, :connection_lost, _settlement_ref,
+                    _class, _session, ^owner, ^owner_incarnation, nil},
+                   500
+
+    assert {:error, :connection_lost} =
+             invoke(owner, fn ->
+               AdmissionRelay.claim_lease_permit(relay, origin, owner_incarnation)
+             end)
+
+    assert {:error, :invalid_actor} =
+             AdmissionRelay.claim_lease_permit(relay, origin, owner_incarnation)
   end
 
   test "retirement waits for the session's final relay row and then wakes the owner" do

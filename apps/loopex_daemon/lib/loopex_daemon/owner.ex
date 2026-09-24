@@ -18,8 +18,11 @@ defmodule LoopexDaemon.Owner do
   `:connections_lost`. A release fixes `owner_restore_deadline` and
   `release_settlement_deadline` at acceptance; a missed restoration kills and
   supersedes the exact owner, and a missed relay settlement is `:relay_lost`.
-  After the admission cut, owner losses and releases start no private clock
-  and emit no `control_owner_lost` form; the lease freeze cleans up every
+  A relay request the registry reports unanswered while serving is also
+  `:relay_lost`; the registry's own exit is always `:connections_lost`, since
+  it never waits on the relay inside a call. After the admission cut, owner
+  losses and releases start no private clock and emit no `control_owner_lost`
+  form; the lease freeze cleans up every
   descriptor the relay names before core quiesce. Status and formatted state
   expose counts only, and every lifecycle log is fixed and identity-free.
   """
@@ -34,6 +37,9 @@ defmodule LoopexDaemon.Owner do
   # Concept: the transport cut is decided at its deadline; this only lets the
   # decision made at that instant reach the waiting stop.
   @verdict_margin_ms 1_000
+  # Concept: the registry answers its final close by the close deadline
+  # itself; this is how much longer it may take before it is lost.
+  @registry_close_margin_ms 500
   @lease_term_ms 30_000
   @incarnation_bytes 16
 
@@ -320,6 +326,7 @@ defmodule LoopexDaemon.Owner do
            attachments: %{},
            fatal_recipient: Keyword.get(options, :fatal_recipient),
            fatal_teardown: false,
+           close: nil,
            stop: nil
          }}
       else
@@ -493,16 +500,28 @@ defmodule LoopexDaemon.Owner do
 
   # Concept: a registry that cannot answer its own bounded close is lost: it
   # is killed and the stop is told `connections_lost`, never left waiting.
-  def handle_call({:close_connections, record, deadline}, _from, state) do
-    case ConnectionRegistry.close_all(state.registry, record, deadline) do
-      {:error, :registry_unanswered} ->
-        Logger.debug("loopex daemon owner connection registry missed its close")
-        Process.exit(state.registry, :kill)
-        {:reply, {:error, :connections_lost}, state}
+  #
+  # Technical depth: the close is asked of the registry by message and this
+  # owner returns to its mailbox. The registry answers by `deadline` itself,
+  # killing survivors if it must; one that has not answered
+  # `@registry_close_margin_ms` later is lost. That decision lands inside the
+  # caller's own margin on the same deadline, so the registry, not the relay,
+  # is named. A repeated close joins the one in flight.
+  def handle_call({:close_connections, _record, _deadline}, from, %{close: %{} = close} = state),
+    do: {:noreply, %{state | close: %{close | froms: [from | close.froms]}}}
 
-      result ->
-        {:reply, result, state}
-    end
+  def handle_call({:close_connections, record, deadline}, from, state) do
+    ref = make_ref()
+    send(state.registry, {:owner_request, self(), ref, {:close_all, record, deadline}})
+
+    timer =
+      Process.send_after(
+        self(),
+        {:close_connections_deadline, ref},
+        max(deadline - monotonic_ms(), 0) + @registry_close_margin_ms
+      )
+
+    {:noreply, %{state | close: %{ref: ref, froms: [from], timer: timer}}}
   end
 
   def handle_call(:status, _from, state) do
@@ -911,7 +930,47 @@ defmodule LoopexDaemon.Owner do
     end
   end
 
+  def handle_info(
+        {:owner_reply, registry, ref, reply},
+        %{registry: registry, close: %{ref: ref} = close} = state
+      ) do
+    Process.cancel_timer(close.timer)
+    {:noreply, answer_close(state, reply)}
+  end
+
   def handle_info({:owner_reply, _registry, _ref, _reply}, state), do: {:noreply, state}
+
+  def handle_info({:close_connections_deadline, ref}, %{close: %{ref: ref}} = state) do
+    Logger.debug("loopex daemon owner connection registry missed its close")
+    Process.exit(state.registry, :kill)
+    {:noreply, answer_close(state, {:error, :connections_lost})}
+  end
+
+  def handle_info({:close_connections_deadline, _ref}, state), do: {:noreply, state}
+
+  # Concept: the registry reports a relay request it has waited on for five
+  # seconds while serving; the relay is what failed, so the daemon names it
+  # `relay_lost` exactly as if the relay had exited.
+  #
+  # Technical depth: the report latches only while this owner serves, no
+  # fatal teardown is marked and it names the current registry and routing
+  # incarnation. The daemon owner is told once and the teardown mark keeps the
+  # relay's coming exit from being reported again. Decision: the relay is
+  # killed untrappably at once, as on every other relay-loss path, so the
+  # registry does not keep its request pending until the fail-stop; its
+  # request ends on the relay's exit as `relay_unavailable` and the registry
+  # keeps serving (witness T13). Any other report is cleanup-only.
+  def handle_info({:registry_relay_unanswered, registry, routing_incarnation}, state) do
+    if is_nil(state.stop) and not state.fatal_teardown and registry == state.registry and
+         routing_incarnation == state.routing_incarnation do
+      Logger.debug("loopex daemon owner registry relay request unanswered")
+      report_component_loss(state, :relay_lost)
+      Process.exit(state.relay, :kill)
+      {:noreply, %{state | fatal_teardown: true}}
+    else
+      {:noreply, state}
+    end
+  end
 
   def handle_info({:daemon_fatal_teardown, recipient}, %{fatal_recipient: recipient} = state)
       when is_pid(recipient) do
@@ -955,6 +1014,11 @@ defmodule LoopexDaemon.Owner do
       )
       when name != :cut do
     Process.cancel_timer(timer)
+
+    # The registry abandons its remaining relay flows once the relay tears
+    # down; none of them can finish after this barrier.
+    if name == :tearing_down, do: send(state.registry, {:registry_tearing_down, self()})
+
     GenServer.reply(from, {:ok, payload})
     Logger.debug("loopex daemon owner relay barrier acknowledged")
     {:noreply, put_in(state, [:stop, :barrier], nil)}
@@ -1005,12 +1069,13 @@ defmodule LoopexDaemon.Owner do
     end
   end
 
-  # Concept: a component that died on a call its callee never answered names
-  # the callee: a registry that died waiting on the relay is `relay_lost`.
-  def handle_info({:EXIT, registry, reason}, %{registry: registry} = state) do
-    class = if called(reason) == state.relay, do: :relay_lost, else: :connections_lost
-    report_component_loss(state, class)
-    {:stop, class, state}
+  # Concept: the registry never waits on the relay inside a call, so its exit
+  # is always its own: `connections_lost`. A final close still waiting is told
+  # the same class.
+  def handle_info({:EXIT, registry, _reason}, %{registry: registry} = state) do
+    state = if state.close, do: answer_close(state, {:error, :connections_lost}), else: state
+    report_component_loss(state, :connections_lost)
+    {:stop, :connections_lost, state}
   end
 
   # Concept: a relay exit never ends this owner while a daemon owner is
@@ -1103,15 +1168,10 @@ defmodule LoopexDaemon.Owner do
     put_in(state, [:stop, :pending], {kind, ref})
   end
 
-  # The process a failed `GenServer.call` named, read from the caller's exit.
-  # A caller whose callee died on its own unanswered call exits with the
-  # callee's reason wrapped inside its own; the innermost callee is the one
-  # that actually stalled.
-  defp called({why, {module, :call, [callee | _rest]}})
-       when module in [GenServer, :gen_server, :gen] and is_pid(callee),
-       do: called(why) || callee
-
-  defp called(_reason), do: nil
+  defp answer_close(%{close: close} = state, reply) do
+    Enum.each(close.froms, &GenServer.reply(&1, reply))
+    %{state | close: nil}
+  end
 
   defp report_component_loss(%{fatal_recipient: recipient}, class) when is_pid(recipient) do
     Logger.debug("loopex daemon owner reported a component loss")

@@ -41,6 +41,16 @@ defmodule LoopexDaemon.ConnectionRegistry do
   provisional rows install only for an initialized live connection, promotion
   may finish after that connection begins closing, and exact clears or owner
   pops cannot erase a successor row. Status reports only phase counts.
+
+  The registry never waits on the relay inside a call. Every flow that needs
+  the relay — a create, attach or resume promotion, a resume preparation and
+  each ticket settlement — sends its relay request as a message and keeps
+  serving; one relay step is in flight at a time and later flows wait in
+  arrival order. Mirror, output, succession, routing, facts, the transport
+  gate and sweep, and the final close never wait on that queue. While the
+  transport serves, a relay request unanswered for five seconds is reported
+  once to the daemon owner, which names the relay lost; after the stop has
+  begun the stop's own deadlines govern and no report is sent.
   """
 
   use GenServer
@@ -77,13 +87,39 @@ defmodule LoopexDaemon.ConnectionRegistry do
           | :clear_granted
           | :pop_owner_mirror
 
-  # Concept: a caller of the registry outlasts the registry's own worst-case
-  # wait on the relay (5 s per call, at most three in one request), so a relay
-  # stall ends the registry first and is named `relay_lost`, and no caller
-  # gives up on a registry that is still working. See `LeaseOwner` for the
-  # whole chain of bounds.
+  # Concept: the listener's calls never join the relay flow queue, so the
+  # registry answers them at once and this bound only covers a registry that
+  # has stopped serving.
   @listener_call_ms 20_000
+
+  # Concept: a resume preparation, cancellation or promotion waits for its own
+  # relay flow and for every flow queued before it. While serving, each relay
+  # step is answered or reported to the daemon owner within five seconds, and
+  # a reported relay is killed, which ends every later flow at once; a relay
+  # that is slow but still answering has no constant bound across the queue.
+  # This caller deadline is therefore not a guarantee: a lease owner that
+  # times out here reports `registry_unavailable` for that step. The lease
+  # owner's own non-blocking exchange replaces it in a later step. A
+  # connection's `promote_create` and `promote_attach` use the default
+  # five-second call bound under the same queue and are replaced likewise.
   @resume_call_ms 20_000
+
+  # Concept: each relay request the registry sends has its own five-second
+  # instant while the transport serves; the instant only prompts a report and
+  # never abandons the request.
+  @relay_request_ms 5_000
+
+  # Concept: the most relay flows that may wait in the registry's queue: one
+  # per relay origin the daemon admits.
+  @relay_flow_limit 16_384
+
+  # Concept: once the stop has begun or the relay's teardown has abandoned
+  # the flows, a classification or settlement for a promotion that no longer
+  # exists is late cleanup, not an invalid settlement; while serving it
+  # still ends the registry.
+  defguardp registry_stopping(state)
+            when :erlang.map_get(:relay_flows_abandoned, state) or
+                   :erlang.map_get(:transport, state) != :serving
 
   @doc false
   @spec start_link(keyword()) :: GenServer.on_start()
@@ -501,33 +537,6 @@ defmodule LoopexDaemon.ConnectionRegistry do
   def reap_uninitialized(registry, cut_ref),
     do: :gen_server.send_request(registry, {:reap_uninitialized, cut_ref})
 
-  @doc """
-  ## Concept
-
-  Ends every remaining connection at the end of an orderly or fatal stop,
-  telling each initialized client why where its transport accepts one record.
-
-  ## Technical depth
-
-  Only the registry owner may ask. Each initialized live connection receives
-  the exact encoded `daemon.stopping` record to write once before it closes;
-  every other row is aborted or closed without a record. The call answers
-  `:ok` once every row is gone, or `{:ok, :forced}` after killing the
-  survivors at the absolute deadline, so a stalled peer cannot extend the stop.
-  """
-  @spec close_all(pid(), map(), integer()) :: :ok | {:ok, :forced} | {:error, :owner_mismatch}
-  def close_all(registry, record, deadline)
-      when is_map(record) and is_integer(deadline) do
-    # The registry answers by `deadline` itself, killing survivors if it must;
-    # one that has not answered 500 ms later is lost. That decision lands
-    # inside the daemon owner's own 1 s margin on the same deadline, so the
-    # registry, not the relay, is named.
-    remaining = max(deadline - System.monotonic_time(:millisecond), 0)
-    GenServer.call(registry, {:close_all, record, deadline}, remaining + 500)
-  catch
-    :exit, _unanswered -> {:error, :registry_unanswered}
-  end
-
   @doc false
   @spec status(pid()) :: %{
           occupied: non_neg_integer(),
@@ -618,6 +627,10 @@ defmodule LoopexDaemon.ConnectionRegistry do
            close_all: nil,
            activation_promotion_bindings: %{},
            relay: nil,
+           relay_flow: nil,
+           relay_flow_queue: :queue.new(),
+           relay_flow_count: 0,
+           relay_flows_abandoned: false,
            routing_mirrors: %{},
            rows: %{},
            child_monitors: %{},
@@ -974,6 +987,9 @@ defmodule LoopexDaemon.ConnectionRegistry do
         Logger.debug("loopex daemon attachment invalidated by succession")
         {:reply, :ok, release_row_attachment(state, incarnation)}
 
+      {{_token, _row}, %{phase: :pending}} ->
+        {:reply, :ok, close_pending_previous(state, incarnation, attachment_id)}
+
       _other ->
         {:reply, :ok, state}
     end
@@ -989,89 +1005,16 @@ defmodule LoopexDaemon.ConnectionRegistry do
     )
   end
 
-  def handle_call(
-        {:promote_create, origin_id, command_id, digest, mode, ceiling_refusal, conflict_refusal,
-         task_fun},
-        _from,
-        state
-      ) do
-    with {:ok, relay, relay_incarnation} <- bound_relay(state),
-         true <- mode in [:fresh, :historical] and is_function(task_fun, 0),
-         true <- is_map(ceiling_refusal) and is_map(conflict_refusal) do
-      promote_create_call(
-        state,
-        relay,
-        relay_incarnation,
-        origin_id,
-        command_id,
-        digest,
-        mode,
-        ceiling_refusal,
-        conflict_refusal,
-        task_fun
-      )
-    else
-      {:error, reason} -> {:reply, {:error, reason}, state}
-      false -> {:reply, {:error, :invalid_activation}, state}
-    end
-  end
-
-  def handle_call(
-        {:promote_attach, origin_id, incarnation, session_id, dormant_refusal, capacity_refusal,
-         task_fun},
-        {caller, _tag},
-        state
-      ) do
-    with {:ok, relay, relay_incarnation} <- bound_relay(state),
-         {_token, _row} <- initialized_connection_row(state, caller, incarnation),
-         true <- is_binary(session_id) and byte_size(session_id) in 1..256,
-         true <- is_map(dormant_refusal) and is_map(capacity_refusal),
-         true <- is_function(task_fun, 0),
-         :ok <- attachment_not_pending(state, incarnation) do
-      previous = Map.get(state.attachments, incarnation)
-
-      cond do
-        not MapSet.member?(state.activation_set, session_id) ->
-          Logger.debug("loopex daemon attach refused for dormant session")
-
-          promote_attach_refusal(
-            state,
-            relay,
-            relay_incarnation,
-            origin_id,
-            dormant_refusal
-          )
-
-        not attachment_capacity?(state, session_id, previous) ->
-          Logger.debug("loopex daemon attach capacity reached")
-
-          promote_attach_refusal(
-            state,
-            relay,
-            relay_incarnation,
-            origin_id,
-            capacity_refusal
-          )
-
-        true ->
-          promote_attach_primary(
-            state,
-            relay,
-            relay_incarnation,
-            origin_id,
-            caller,
-            incarnation,
-            session_id,
-            previous,
-            task_fun
-          )
-      end
-    else
-      {:error, reason} -> {:reply, {:error, reason}, state}
-      nil -> {:reply, {:error, :reservation_unavailable}, state}
-      false -> {:reply, {:error, :invalid_promotion}, state}
-    end
-  end
+  # Concept: every call whose answer needs the relay joins the one relay flow
+  # queue and is answered with `GenServer.reply/2` when its flow finishes.
+  def handle_call(request, from, state)
+      when elem(request, 0) in [
+             :promote_create,
+             :promote_attach,
+             :prepare_resume,
+             :promote_resume
+           ],
+      do: {:noreply, enqueue_relay_flow(state, {:call, request, from})}
 
   def handle_call({:session_facts, session_ids}, _from, state) do
     facts =
@@ -1137,99 +1080,17 @@ defmodule LoopexDaemon.ConnectionRegistry do
   def handle_call({:bind_relay, _relay, _relay_incarnation}, _from, state),
     do: {:reply, {:error, :owner_mismatch}, state}
 
-  def handle_call(
-        {:prepare_resume, origin_id, session_id, command_id, owner_incarnation, eligibility},
-        {owner, _tag},
-        state
-      ) do
-    with :ok <-
-           validate_resume_identity(
-             origin_id,
-             session_id,
-             command_id,
-             owner_incarnation,
-             eligibility
-           ),
-         {:ok, relay, relay_incarnation} <- bound_relay(state),
-         :ok <-
-           AdmissionRelay.authorize_resume_ticket(
-             relay,
-             origin_id,
-             relay_incarnation,
-             owner,
-             owner_incarnation
-           ) do
-      prepare_resume_call(
-        state,
-        relay,
-        relay_incarnation,
-        owner,
-        owner_incarnation,
-        origin_id,
-        session_id,
-        command_id,
-        eligibility
-      )
-    else
-      {:error, reason} -> {:reply, {:error, reason}, state}
-    end
-  end
-
+  # Concept: a resume cancellation needs no relay and is answered at once,
+  # yet never overtakes the preparation it cancels: a queued preparation for
+  # the same origin and owner is removed and answered `relay_unavailable`, one
+  # whose relay step is in flight is marked so it records nothing, and a
+  # recorded preparation is released as before.
   def handle_call(
         {:cancel_prepared_resume, origin_id, owner_incarnation},
         {owner, _tag},
         state
-      ) do
-    case Map.fetch(state.activation_preparations, origin_id) do
-      {:ok, %{owner: ^owner, owner_incarnation: ^owner_incarnation}} ->
-        {:reply, :ok, release_resume_preparation(state, origin_id)}
-
-      :error ->
-        {:reply, :ok, state}
-
-      _other ->
-        {:reply, {:error, :owner_unavailable}, state}
-    end
-  end
-
-  def handle_call(
-        {:promote_resume, origin_id, session_id, command_id, owner_incarnation, eligibility,
-         attached, control_refusal, capacity_refusal, task_fun},
-        {owner, _tag},
-        state
-      ) do
-    with :ok <-
-           validate_resume_promotion(
-             origin_id,
-             session_id,
-             command_id,
-             owner_incarnation,
-             eligibility,
-             attached,
-             control_refusal,
-             capacity_refusal,
-             task_fun
-           ),
-         {:ok, relay, relay_incarnation} <- bound_relay(state) do
-      promote_resume_call(
-        state,
-        relay,
-        relay_incarnation,
-        owner,
-        owner_incarnation,
-        origin_id,
-        session_id,
-        command_id,
-        eligibility,
-        attached,
-        control_refusal,
-        capacity_refusal,
-        task_fun
-      )
-    else
-      {:error, reason} -> {:reply, {:error, reason}, state}
-    end
-  end
+      ),
+      do: cancel_resume_preparation(state, origin_id, owner, owner_incarnation)
 
   def handle_call(
         {:abort_provisional, token, reason},
@@ -1379,20 +1240,6 @@ defmodule LoopexDaemon.ConnectionRegistry do
   def handle_call({:reap_uninitialized, _cut_ref}, _from, state),
     do: {:reply, {:error, :owner_mismatch}, state}
 
-  def handle_call({:close_all, record, deadline}, from, %{owner: owner} = state)
-      when elem(from, 0) == owner do
-    state = begin_close_all(state, record)
-
-    timer =
-      Process.send_after(self(), {:close_all_deadline, deadline}, max(deadline - now_ms(), 0))
-
-    Logger.debug("loopex daemon connection close-all start")
-    {:noreply, maybe_finish_close_all(%{state | close_all: %{from: from, timer: timer}})}
-  end
-
-  def handle_call({:close_all, _record, _deadline}, _from, state),
-    do: {:reply, {:error, :owner_mismatch}, state}
-
   def handle_call(:status, _from, state) do
     counts = Enum.frequencies_by(state.rows, fn {_token, row} -> row.phase end)
 
@@ -1430,14 +1277,49 @@ defmodule LoopexDaemon.ConnectionRegistry do
      }, state}
   end
 
+  # Concept: the relay's answer to the one request in flight continues its
+  # flow; the relay's exit ends that flow as an unavailable relay, never this
+  # registry.
   @impl true
-  def handle_info({:close_all_deadline, deadline}, %{close_all: %{from: from}} = state) do
+  def handle_info(
+        {[:alias | request], _reply} = message,
+        %{relay_flow: %{request: request}} = state
+      ),
+      do: {:noreply, relay_flow_response(state, message)}
+
+  def handle_info(
+        {:DOWN, request, :process, _relay, _reason} = message,
+        %{relay_flow: %{request: request}} = state
+      ),
+      do: {:noreply, relay_flow_response(state, message)}
+
+  # Concept: a relay request still unanswered at its five-second instant while
+  # the transport serves is reported once to the daemon owner; the registry
+  # keeps waiting and keeps serving, and the daemon's fail-stop ends the wait.
+  #
+  # Technical depth: once the stop has begun the transport no longer serves,
+  # the stop's own deadlines govern, and no report is sent.
+  def handle_info(
+        {:relay_request_unanswered, request},
+        %{relay_flow: %{request: request}} = state
+      ) do
+    if state.transport == :serving do
+      send(state.owner, {:registry_relay_unanswered, self(), state.relay.incarnation})
+      Logger.debug("loopex daemon registry relay request unanswered")
+    end
+
+    {:noreply, put_in(state, [:relay_flow, :timer], nil)}
+  end
+
+  def handle_info({:relay_request_unanswered, _request}, state), do: {:noreply, state}
+
+  def handle_info({:close_all_deadline, deadline}, %{close_all: %{ref: ref}} = state) do
     if now_ms() >= deadline do
       Enum.each(state.rows, fn {_token, row} ->
         if is_pid(row.connection_pid), do: Process.exit(row.connection_pid, :kill)
       end)
 
-      GenServer.reply(from, {:ok, :forced})
+      send(state.owner, {:owner_reply, self(), ref, {:ok, :forced}})
       Logger.debug("loopex daemon connection close-all forced at deadline")
       {:noreply, %{state | close_all: nil}}
     else
@@ -1491,6 +1373,10 @@ defmodule LoopexDaemon.ConnectionRegistry do
       when not is_nil(classification) ->
         {:noreply, state}
 
+      :error when registry_stopping(state) ->
+        Logger.debug("loopex daemon settlement for a missing promotion ignored during stop")
+        {:noreply, state}
+
       _other ->
         Logger.debug("loopex daemon activation classification invalid")
         {:stop, :activation_settlement_invalid, state}
@@ -1513,6 +1399,10 @@ defmodule LoopexDaemon.ConnectionRegistry do
         state = put_in(state, [:activation_promotions, settlement_ref], promotion)
         {:noreply, settle_create_promotion(state, settlement_ref)}
 
+      :error when registry_stopping(state) ->
+        Logger.debug("loopex daemon settlement for a missing promotion ignored during stop")
+        {:noreply, state}
+
       _other ->
         Logger.debug("loopex daemon create classification invalid")
         {:stop, :activation_settlement_invalid, state}
@@ -1530,6 +1420,10 @@ defmodule LoopexDaemon.ConnectionRegistry do
         promotion = %{promotion | classification: classification}
         state = put_in(state, [:activation_promotions, settlement_ref], promotion)
         {:noreply, settle_attach_promotion(state, settlement_ref)}
+
+      :error when registry_stopping(state) ->
+        Logger.debug("loopex daemon settlement for a missing promotion ignored during stop")
+        {:noreply, state}
 
       _other ->
         Logger.debug("loopex daemon attach classification invalid")
@@ -1563,6 +1457,10 @@ defmodule LoopexDaemon.ConnectionRegistry do
         {:noreply, settle_promotion(state, settlement_ref, promotion)}
 
       {:ok, %{origin_id: ^origin_id, relay_result: ^result}} ->
+        {:noreply, state}
+
+      :error when registry_stopping(state) ->
+        Logger.debug("loopex daemon settlement for a missing promotion ignored during stop")
         {:noreply, state}
 
       _other ->
@@ -1703,6 +1601,35 @@ defmodule LoopexDaemon.ConnectionRegistry do
     {:noreply, state}
   end
 
+  # Concept: the daemon owner's final close ends every remaining connection,
+  # telling each initialized client why where its transport accepts one
+  # record, and never waits on a relay flow.
+  #
+  # Technical depth: only the registry owner may ask, by message. Each
+  # initialized live connection receives the exact encoded `daemon.stopping`
+  # record to write once before it closes; every other row is aborted or
+  # closed without a record. The answer is `:ok` once every row is gone, or
+  # `{:ok, :forced}` after killing the survivors at the absolute deadline, so
+  # a stalled peer cannot extend the stop. Queued relay flows keep running.
+  def handle_info(
+        {:owner_request, owner, ref, {:close_all, record, deadline}},
+        %{owner: owner} = state
+      )
+      when is_reference(ref) and is_map(record) and is_integer(deadline) do
+    state = begin_close_all(state, record)
+
+    timer =
+      Process.send_after(self(), {:close_all_deadline, deadline}, max(deadline - now_ms(), 0))
+
+    Logger.debug("loopex daemon connection close-all start")
+    {:noreply, maybe_finish_close_all(%{state | close_all: %{ref: ref, timer: timer}})}
+  end
+
+  # Concept: the daemon owner says when the relay has begun tearing down; from
+  # then on no relay flow runs, and every remaining one is abandoned.
+  def handle_info({:registry_tearing_down, owner}, %{owner: owner} = state),
+    do: {:noreply, abandon_relay_flows(state)}
+
   # Concept: on a fatal class the daemon owner asks, once and without waiting,
   # for one `daemon.stopping` per connection and a close; a registry already
   # closing ignores a repeat.
@@ -1760,6 +1687,742 @@ defmodule LoopexDaemon.ConnectionRegistry do
     |> Map.put(:reason, :redacted_connection_registry_reason)
     |> Map.put(:log, [])
   end
+
+  # Concept: a relay-dependent call runs exactly as the blocking registry ran
+  # it, up to its first relay request; the flow's continuation takes it on
+  # from the relay's answer.
+  #
+  # Technical depth: each clause returns `{:reply, reply, state}` when the
+  # flow finishes without the relay, or `{:await, state, request,
+  # continuation}` after sending one relay request.
+  defp relay_flow_call(
+         {:promote_create, origin_id, command_id, digest, mode, ceiling_refusal, conflict_refusal,
+          task_fun},
+         _from,
+         state
+       ) do
+    with {:ok, relay, relay_incarnation} <- bound_relay(state),
+         true <- mode in [:fresh, :historical] and is_function(task_fun, 0),
+         true <- is_map(ceiling_refusal) and is_map(conflict_refusal) do
+      promote_create_call(
+        state,
+        relay,
+        relay_incarnation,
+        origin_id,
+        command_id,
+        digest,
+        mode,
+        ceiling_refusal,
+        conflict_refusal,
+        task_fun
+      )
+    else
+      {:error, reason} -> {:reply, {:error, reason}, state}
+      false -> {:reply, {:error, :invalid_activation}, state}
+    end
+  end
+
+  defp relay_flow_call(
+         {:promote_attach, origin_id, incarnation, session_id, dormant_refusal, capacity_refusal,
+          task_fun},
+         {caller, _tag},
+         state
+       ) do
+    with {:ok, relay, relay_incarnation} <- bound_relay(state),
+         {_token, _row} <- initialized_connection_row(state, caller, incarnation),
+         true <- is_binary(session_id) and byte_size(session_id) in 1..256,
+         true <- is_map(dormant_refusal) and is_map(capacity_refusal),
+         true <- is_function(task_fun, 0),
+         :ok <- attachment_not_pending(state, incarnation) do
+      previous = Map.get(state.attachments, incarnation)
+
+      cond do
+        not MapSet.member?(state.activation_set, session_id) ->
+          Logger.debug("loopex daemon attach refused for dormant session")
+
+          promote_attach_refusal(
+            state,
+            relay,
+            relay_incarnation,
+            origin_id,
+            dormant_refusal
+          )
+
+        not attachment_capacity?(state, session_id, previous) ->
+          Logger.debug("loopex daemon attach capacity reached")
+
+          promote_attach_refusal(
+            state,
+            relay,
+            relay_incarnation,
+            origin_id,
+            capacity_refusal
+          )
+
+        true ->
+          promote_attach_primary(
+            state,
+            relay,
+            relay_incarnation,
+            origin_id,
+            caller,
+            incarnation,
+            session_id,
+            previous,
+            task_fun
+          )
+      end
+    else
+      {:error, reason} -> {:reply, {:error, reason}, state}
+      nil -> {:reply, {:error, :reservation_unavailable}, state}
+      false -> {:reply, {:error, :invalid_promotion}, state}
+    end
+  end
+
+  defp relay_flow_call(
+         {:prepare_resume, origin_id, session_id, command_id, owner_incarnation, eligibility},
+         {owner, _tag},
+         state
+       ) do
+    with :ok <-
+           validate_resume_identity(
+             origin_id,
+             session_id,
+             command_id,
+             owner_incarnation,
+             eligibility
+           ),
+         {:ok, relay, relay_incarnation} <- bound_relay(state) do
+      request =
+        AdmissionRelay.authorize_resume_ticket_request(
+          relay,
+          origin_id,
+          relay_incarnation,
+          owner,
+          owner_incarnation
+        )
+
+      preparation = %{
+        relay: relay,
+        relay_incarnation: relay_incarnation,
+        owner: owner,
+        owner_incarnation: owner_incarnation,
+        origin_id: origin_id,
+        session_id: session_id,
+        command_id: command_id,
+        eligibility: eligibility
+      }
+
+      {:await, state, request, {:authorize_resume, preparation}}
+    else
+      {:error, reason} -> {:reply, {:error, reason}, state}
+    end
+  end
+
+  defp relay_flow_call(
+         {:promote_resume, origin_id, session_id, command_id, owner_incarnation, eligibility,
+          attached, control_refusal, capacity_refusal, task_fun},
+         {owner, _tag},
+         state
+       ) do
+    with :ok <-
+           validate_resume_promotion(
+             origin_id,
+             session_id,
+             command_id,
+             owner_incarnation,
+             eligibility,
+             attached,
+             control_refusal,
+             capacity_refusal,
+             task_fun
+           ),
+         {:ok, relay, relay_incarnation} <- bound_relay(state) do
+      promote_resume_call(
+        state,
+        relay,
+        relay_incarnation,
+        owner,
+        owner_incarnation,
+        origin_id,
+        session_id,
+        command_id,
+        eligibility,
+        attached,
+        control_refusal,
+        capacity_refusal,
+        task_fun
+      )
+    else
+      {:error, reason} -> {:reply, {:error, reason}, state}
+    end
+  end
+
+  # Concept: the registry runs one relay-dependent step at a time; every later
+  # flow — a promotion, a resume preparation or a ticket settlement — waits
+  # its turn in arrival order, while every other handler runs at once.
+  #
+  # Technical depth: at most `@relay_flow_limit` flows wait in the queue; a
+  # call beyond it is refused at once with `relay_unavailable`, which every
+  # relay-dependent caller already handles, and is never queued. Settlements
+  # are always queued: the relay holds a settling ticket for each, so its
+  # origin ledger bounds them. Repeated identical flows are not merged. A
+  # flow runs entirely against the state current when it is dequeued,
+  # exactly as the blocking registry ran the call when it reached it. Once
+  # the relay is tearing down, flows are abandoned instead of run.
+  defp enqueue_relay_flow(%{relay_flows_abandoned: true} = state, flow),
+    do: abandon_relay_flow(state, flow)
+
+  defp enqueue_relay_flow(state, {:call, _request, from})
+       when state.relay_flow_count >= @relay_flow_limit do
+    GenServer.reply(from, {:error, :relay_unavailable})
+    Logger.debug("loopex daemon registry relay flow queue full")
+    state
+  end
+
+  defp enqueue_relay_flow(state, flow) do
+    state = %{
+      state
+      | relay_flow_queue: :queue.in(flow, state.relay_flow_queue),
+        relay_flow_count: state.relay_flow_count + 1
+    }
+
+    next_relay_flow(state)
+  end
+
+  defp next_relay_flow(%{relay_flows_abandoned: true} = state) do
+    queued = :queue.to_list(state.relay_flow_queue)
+    state = %{state | relay_flow_queue: :queue.new(), relay_flow_count: 0}
+    Enum.reduce(queued, state, &abandon_relay_flow(&2, &1))
+  end
+
+  defp next_relay_flow(%{relay_flow: nil} = state) do
+    case :queue.out(state.relay_flow_queue) do
+      {{:value, flow}, queue} ->
+        state = %{state | relay_flow_queue: queue, relay_flow_count: state.relay_flow_count - 1}
+        run_relay_flow(state, flow)
+
+      {:empty, _queue} ->
+        state
+    end
+  end
+
+  defp next_relay_flow(state), do: state
+
+  # Concept: at the relay's teardown every remaining flow is abandoned: each
+  # waiting caller hears `relay_unavailable` once, each settlement is dropped
+  # with its reservation released and a resume's lease owner still hears its
+  # classified disposition, so no flow outlives the relay it needs.
+  #
+  # Technical depth: the flow in flight stops awaiting its request, whose
+  # alias is deactivated so a late relay answer is discarded, and takes the
+  # continuation a vanished relay takes, which releases its reservation,
+  # promotion, preparation or pending attachment. Queued calls never start;
+  # queued settlements are accounted and dropped by `abandon_settlement/4`.
+  defp abandon_relay_flows(state) do
+    state = %{state | relay_flows_abandoned: true}
+    Logger.debug("loopex daemon registry relay flows abandoned")
+
+    case state.relay_flow do
+      nil ->
+        next_relay_flow(state)
+
+      flow ->
+        if flow.timer, do: Process.cancel_timer(flow.timer)
+        :erlang.demonitor(flow.request, [:flush])
+        state = %{state | relay_flow: nil}
+        finish_relay_response(state, flow, relay_gone_response(flow))
+    end
+  end
+
+  defp abandon_relay_flow(state, {:call, _request, from}) do
+    GenServer.reply(from, {:error, :relay_unavailable})
+    state
+  end
+
+  defp abandon_relay_flow(state, {:settle, kind, settlement_ref}),
+    do: abandon_settlement(state, kind, settlement_ref, false)
+
+  defp run_relay_flow(state, {:call, request, from}),
+    do: relay_step(from, request, relay_flow_call(request, from, state))
+
+  defp run_relay_flow(state, {:settle, kind, settlement_ref}),
+    do: relay_step(nil, nil, settle_flow(state, kind, settlement_ref))
+
+  # Concept: a finished flow answers its caller and lets the next flow start;
+  # an awaiting flow holds the one relay slot until the relay answers.
+  #
+  # Technical depth: the request's five-second instant is armed only while
+  # the transport serves; a request sent after the cut belongs to the stop.
+  # The originating call is kept with the flow so a resume cancellation can
+  # find the preparation it cancels.
+  defp relay_step(from, _call, {:reply, reply, state}) do
+    GenServer.reply(from, reply)
+    next_relay_flow(state)
+  end
+
+  defp relay_step(_from, _call, {:done, state}), do: next_relay_flow(state)
+
+  defp relay_step(from, call, {:await, state, request, continuation}) do
+    timer =
+      if state.transport == :serving,
+        do: Process.send_after(self(), {:relay_request_unanswered, request}, @relay_request_ms)
+
+    flow = %{
+      from: from,
+      call: call,
+      cancelled: false,
+      request: request,
+      relay: state.relay,
+      continuation: continuation,
+      timer: timer
+    }
+
+    %{state | relay_flow: flow}
+  end
+
+  # Concept: each continuation starts from the relay's exact answer for the
+  # current relay binding and re-checks the connection row it acts for. A
+  # relay that exited, or a binding that changed, ends a call flow as
+  # `relay_unavailable` and abandons a settlement; the registry keeps serving
+  # and the daemon owner classifies the relay. A preparation cancelled while
+  # its step was in flight records nothing and answers `relay_unavailable`.
+  #
+  # Technical depth: an attach continuation re-checks its connection's row:
+  # one gone or retiring holds no pending attachment, and its replaced
+  # attachment is closed at the daemon owner rather than restored. Create and
+  # resume promotions are not bound to a registry row — a create's caller is
+  # never validated against one and a resume's caller is a lease owner — so
+  # they re-check the relay binding only. The relay answers one registry
+  # request at a time in order, so no answer describes a later request.
+  defp relay_flow_response(state, message) do
+    flow = state.relay_flow
+    if flow.timer, do: Process.cancel_timer(flow.timer)
+    state = %{state | relay_flow: nil}
+
+    response =
+      case :gen_server.check_response(message, flow.request) do
+        {:reply, reply} when state.relay == flow.relay -> {:reply, reply}
+        _relay_gone -> relay_gone_response(flow)
+      end
+
+    finish_relay_response(state, flow, response)
+  end
+
+  defp finish_relay_response(state, %{cancelled: true} = flow, _response) do
+    Logger.debug("loopex daemon prepared resume cancelled in flight")
+    relay_step(flow.from, nil, {:reply, {:error, :relay_unavailable}, state})
+  end
+
+  defp finish_relay_response(state, flow, response),
+    do: relay_step(flow.from, flow.call, continue_relay_flow(state, flow.continuation, response))
+
+  defp relay_gone_response(%{from: nil}), do: :relay_down
+  defp relay_gone_response(_flow), do: {:reply, {:error, :relay_unavailable}}
+
+  defp continue_relay_flow(state, {:authorize_resume, preparation}, {:reply, :ok}) do
+    prepare_resume_call(
+      state,
+      preparation.relay,
+      preparation.relay_incarnation,
+      preparation.owner,
+      preparation.owner_incarnation,
+      preparation.origin_id,
+      preparation.session_id,
+      preparation.command_id,
+      preparation.eligibility
+    )
+  end
+
+  defp continue_relay_flow(state, {:authorize_resume, _preparation}, {:reply, {:error, reason}}),
+    do: {:reply, {:error, reason}, state}
+
+  defp continue_relay_flow(
+         state,
+         {:await_primary, primary_origin_id, log},
+         {:reply, {:ok, primary_origin_id}}
+       ) do
+    if log, do: Logger.debug(log)
+    {:reply, {:ok, {:waiting, primary_origin_id}}, state}
+  end
+
+  defp continue_relay_flow(state, {:await_primary, _primary, _log}, {:reply, {:error, reason}}),
+    do: {:reply, {:error, reason}, state}
+
+  defp continue_relay_flow(
+         state,
+         {:promote_resume, origin_id, _settlement_ref, _promotion},
+         {:reply, {:ok, origin_id}}
+       ) do
+    Logger.debug("loopex daemon resume promoted")
+    {:reply, {:ok, :admitted}, state}
+  end
+
+  defp continue_relay_flow(
+         state,
+         {:promote_resume, _origin_id, settlement_ref, promotion},
+         {:reply, {:error, reason}}
+       ) do
+    state =
+      state
+      |> drop_resume_promotion(settlement_ref, promotion)
+      |> release_promotion_reservation(promotion.reservation_ref)
+
+    {:reply, {:error, reason}, state}
+  end
+
+  defp continue_relay_flow(state, {:refuse_resume, origin_id}, {:reply, {:ok, origin_id}}),
+    do: {:reply, {:ok, :completed}, state}
+
+  defp continue_relay_flow(state, {:refuse_resume, _origin_id}, {:reply, {:error, reason}}),
+    do: {:reply, {:error, reason}, state}
+
+  defp continue_relay_flow(
+         state,
+         {:promote_attach, origin_id, settlement_ref, promotion},
+         {:reply, {:ok, origin_id}}
+       ) do
+    promotion = Map.get(state.activation_promotions, settlement_ref, promotion)
+    Logger.debug("loopex daemon attach promoted")
+    {:reply, {:ok, :admitted}, release_absent_attachment(state, promotion)}
+  end
+
+  defp continue_relay_flow(
+         state,
+         {:promote_attach, _origin_id, settlement_ref, promotion},
+         {:reply, {:error, reason}}
+       ) do
+    promotion = Map.get(state.activation_promotions, settlement_ref, promotion)
+
+    state =
+      if promotion.refusal or attach_connection_present?(state, promotion.incarnation),
+        do: restore_attachment(state, promotion),
+        else: release_pending_attachment(state, promotion.incarnation)
+
+    state = update_in(state.activation_promotions, &Map.delete(&1, settlement_ref))
+
+    {:reply, {:error, reason}, state}
+  end
+
+  defp continue_relay_flow(
+         state,
+         {:promote_create, origin_id, _settlement_ref, _reservation_ref},
+         {:reply, {:ok, origin_id}}
+       ) do
+    Logger.debug("loopex daemon create promoted")
+    {:reply, {:ok, :admitted}, state}
+  end
+
+  defp continue_relay_flow(
+         state,
+         {:promote_create, _origin_id, settlement_ref, reservation_ref},
+         {:reply, {:error, reason}}
+       ) do
+    state =
+      state
+      |> update_in([:activation_promotions], &Map.delete(&1, settlement_ref))
+      |> release_promotion_reservation(reservation_ref)
+
+    {:reply, {:error, reason}, state}
+  end
+
+  defp continue_relay_flow(state, {:settle, kind, settlement_ref, _data}, :relay_down),
+    do: {:done, abandon_settlement(state, kind, settlement_ref, true)}
+
+  defp continue_relay_flow(state, {:settle, :create, settlement_ref, nil}, {:reply, :ok}) do
+    Logger.debug("loopex daemon create activation settled")
+    {:done, update_in(state.activation_promotions, &Map.delete(&1, settlement_ref))}
+  end
+
+  defp continue_relay_flow(state, {:settle, :attach, settlement_ref, nil}, {:reply, :ok}) do
+    Logger.debug("loopex daemon attach settled")
+    {:done, update_in(state.activation_promotions, &Map.delete(&1, settlement_ref))}
+  end
+
+  defp continue_relay_flow(
+         state,
+         {:settle, :resume, settlement_ref, {promotion, lease_disposition}},
+         {:reply, :ok}
+       ) do
+    state = drop_resume_promotion(state, settlement_ref, promotion)
+
+    send(
+      promotion.owner,
+      {:registry_resume_settled, self(), promotion.origin_id, promotion.owner_incarnation,
+       lease_disposition}
+    )
+
+    Logger.debug("loopex daemon resume activation settled")
+    {:done, state}
+  end
+
+  # Concept: once the stop has begun, a settlement the relay no longer
+  # accepts is cleanup-only: the stop's own barriers account for that ticket,
+  # and the registry must not end as `connections_lost` over it.
+  defp continue_relay_flow(
+         %{transport: transport} = state,
+         {:settle, _kind, settlement_ref, _data},
+         {:reply, reply}
+       )
+       when transport != :serving and reply != :ok do
+    Logger.debug("loopex daemon registry settlement refused during stop")
+    state = state |> notify_resume_unsettled(settlement_ref) |> drop_promotion(settlement_ref)
+    {:done, state}
+  end
+
+  defp continue_relay_flow(_state, {:settle, :attach, _settlement_ref, _data}, {:reply, _error}),
+    do: exit(:attachment_settlement_failed)
+
+  defp continue_relay_flow(_state, {:settle, _kind, _settlement_ref, _data}, {:reply, _error}),
+    do: exit(:activation_settlement_failed)
+
+  # Concept: a settlement starts from the promotion as it stands when the
+  # flow reaches the relay slot; one already settled or dropped is done.
+  #
+  # Technical depth: the activation accounting and the relay settlement stay
+  # one flow step, as they were one handler before, so no other flow observes
+  # the accounting without its settlement request.
+  defp settle_flow(state, :create, settlement_ref) do
+    case Map.fetch(state.activation_promotions, settlement_ref) do
+      {:ok,
+       %{classification: %{result: result} = classification, relay_result: result} = promotion} ->
+        case account_create_promotion(state, promotion, classification) do
+          {:ok, state} ->
+            request = settle_request(state, promotion, settlement_ref)
+            {:await, state, request, {:settle, :create, settlement_ref, nil}}
+
+          _error ->
+            exit(:activation_settlement_failed)
+        end
+
+      _other ->
+        {:done, state}
+    end
+  end
+
+  defp settle_flow(state, :resume, settlement_ref) do
+    case Map.fetch(state.activation_promotions, settlement_ref) do
+      {:ok,
+       %{
+         classification: %{
+           lease_disposition: lease_disposition,
+           activation_disposition: activation_disposition,
+           result: result
+         },
+         relay_result: result
+       } = promotion} ->
+        case account_resume_promotion(state, promotion, activation_disposition) do
+          {:ok, state} ->
+            request = settle_request(state, promotion, settlement_ref)
+            data = {promotion, lease_disposition}
+            {:await, state, request, {:settle, :resume, settlement_ref, data}}
+
+          _error ->
+            exit(:activation_settlement_failed)
+        end
+
+      _other ->
+        {:done, state}
+    end
+  end
+
+  defp settle_flow(state, :attach, settlement_ref) do
+    case Map.fetch(state.activation_promotions, settlement_ref) do
+      {:ok, promotion} ->
+        request = settle_request(state, promotion, settlement_ref)
+        {:await, state, request, {:settle, :attach, settlement_ref, nil}}
+
+      :error ->
+        {:done, state}
+    end
+  end
+
+  defp settle_request(state, promotion, settlement_ref) do
+    AdmissionRelay.settle_ticket_request(
+      state.relay.pid,
+      promotion.origin_id,
+      state.relay.incarnation,
+      settlement_ref
+    )
+  end
+
+  defp await_primary(state, relay, relay_incarnation, origin_id, primary_origin_id, log) do
+    request =
+      AdmissionRelay.wait_for_ticket_request(
+        relay,
+        origin_id,
+        primary_origin_id,
+        relay_incarnation
+      )
+
+    {:await, state, request, {:await_primary, primary_origin_id, log}}
+  end
+
+  # A pending attach for a connection gone or retiring holds nothing.
+  defp release_absent_attachment(state, %{refusal: false, incarnation: incarnation}) do
+    if attach_connection_present?(state, incarnation),
+      do: state,
+      else: release_pending_attachment(state, incarnation)
+  end
+
+  defp release_absent_attachment(state, _refusal), do: state
+
+  # Concept: a settlement that can no longer reach the relay — abandoned at
+  # teardown, or ended by the relay's exit — releases what its promotion
+  # holds: the activation reservation is resolved from core's classification
+  # (or released when that classification cannot be accounted), a resume's
+  # lease owner hears its classified disposition, and the promotion is
+  # dropped. Nothing after teardown depends on these reservations.
+  #
+  # Technical depth: a settlement still queued has not accounted its
+  # reservation, so it is accounted here; one whose request was in flight
+  # accounted it before sending, and `accounted` says so. Accounting that
+  # fails here is released and logged rather than fatal: teardown is lenient
+  # by decision, since the registry is ending and nothing reads these
+  # reservations after it.
+  defp abandon_settlement(state, kind, settlement_ref, accounted) do
+    state = if accounted, do: state, else: account_unsettled(state, kind, settlement_ref)
+
+    if kind == :resume,
+      do: notify_resume_unsettled(state, settlement_ref),
+      else: drop_promotion(state, settlement_ref)
+  end
+
+  defp account_unsettled(state, :create, settlement_ref) do
+    case Map.fetch(state.activation_promotions, settlement_ref) do
+      {:ok, %{classification: %{} = classification} = promotion} ->
+        case account_create_promotion(state, promotion, classification) do
+          {:ok, state} -> state
+          _invalid -> release_unaccounted(state, promotion.reservation_ref)
+        end
+
+      _other ->
+        state
+    end
+  end
+
+  defp account_unsettled(state, :resume, settlement_ref) do
+    case Map.fetch(state.activation_promotions, settlement_ref) do
+      {:ok, %{classification: %{activation_disposition: disposition}} = promotion} ->
+        case account_resume_promotion(state, promotion, disposition) do
+          {:ok, state} -> state
+          _invalid -> release_unaccounted(state, promotion.reservation_ref)
+        end
+
+      _other ->
+        state
+    end
+  end
+
+  defp account_unsettled(state, :attach, _settlement_ref), do: state
+
+  # Concept: teardown is lenient by decision: a classification it cannot
+  # account no longer stops the registry, which is ending anyway; the
+  # reservation is released and one fixed line records that it happened.
+  defp release_unaccounted(state, reservation_ref) do
+    Logger.debug("loopex daemon unsettled activation released without accounting")
+    release_promotion_reservation(state, reservation_ref)
+  end
+
+  # Concept: a resume whose settlement the relay no longer accepts, or which
+  # is abandoned at teardown, still gives its lease owner the one terminal
+  # answer it waits for: the disposition core classified.
+  #
+  # Technical depth: this is the ordinary `registry_resume_settled` notice
+  # with the classified lease disposition; the promotion and its binding are
+  # dropped with it, so no later path sends a second notice.
+  defp notify_resume_unsettled(state, settlement_ref) do
+    case Map.fetch(state.activation_promotions, settlement_ref) do
+      {:ok,
+       %{key: {:resume, _session, _command}, classification: %{} = classification} = promotion} ->
+        send(
+          promotion.owner,
+          {:registry_resume_settled, self(), promotion.origin_id, promotion.owner_incarnation,
+           classification.lease_disposition}
+        )
+
+        Logger.debug("loopex daemon resume unsettled at stop")
+        drop_resume_promotion(state, settlement_ref, promotion)
+
+      _other ->
+        state
+    end
+  end
+
+  defp drop_promotion(state, settlement_ref) do
+    case Map.fetch(state.activation_promotions, settlement_ref) do
+      {:ok, %{key: _key} = promotion} -> drop_resume_promotion(state, settlement_ref, promotion)
+      {:ok, _promotion} -> update_in(state.activation_promotions, &Map.delete(&1, settlement_ref))
+      :error -> state
+    end
+  end
+
+  defp release_promotion_reservation(state, nil), do: state
+
+  defp release_promotion_reservation(state, reservation_ref) do
+    {:ok, state} = resolve_activation_reservation(state, reservation_ref, :no_activation, nil)
+    state
+  end
+
+  defp cancel_resume_preparation(state, origin_id, owner, owner_incarnation) do
+    state =
+      state
+      |> cancel_queued_preparation(origin_id, owner, owner_incarnation)
+      |> cancel_preparation_in_flight(origin_id, owner, owner_incarnation)
+
+    case Map.fetch(state.activation_preparations, origin_id) do
+      {:ok, %{owner: ^owner, owner_incarnation: ^owner_incarnation}} ->
+        {:reply, :ok, release_resume_preparation(state, origin_id)}
+
+      :error ->
+        {:reply, :ok, state}
+
+      _other ->
+        {:reply, {:error, :owner_unavailable}, state}
+    end
+  end
+
+  defp cancel_queued_preparation(state, origin_id, owner, owner_incarnation) do
+    {cancelled, kept} =
+      state.relay_flow_queue
+      |> :queue.to_list()
+      |> Enum.split_with(&preparation_flow?(&1, origin_id, owner, owner_incarnation))
+
+    Enum.each(cancelled, fn {:call, _request, from} ->
+      GenServer.reply(from, {:error, :relay_unavailable})
+    end)
+
+    %{
+      state
+      | relay_flow_queue: :queue.from_list(kept),
+        relay_flow_count: length(kept)
+    }
+  end
+
+  defp cancel_preparation_in_flight(
+         %{relay_flow: %{from: from, call: call}} = state,
+         origin_id,
+         owner,
+         owner_incarnation
+       ) do
+    if preparation_flow?({:call, call, from}, origin_id, owner, owner_incarnation),
+      do: put_in(state, [:relay_flow, :cancelled], true),
+      else: state
+  end
+
+  defp cancel_preparation_in_flight(state, _origin_id, _owner, _owner_incarnation), do: state
+
+  defp preparation_flow?(
+         {:call,
+          {:prepare_resume, origin_id, _session, _command, owner_incarnation, _eligibility},
+          {owner, _tag}},
+         origin_id,
+         owner,
+         owner_incarnation
+       ),
+       do: true
+
+  defp preparation_flow?(_flow, _origin_id, _owner, _owner_incarnation), do: false
 
   defp start_waiting_connection(state, row) do
     incarnation = :crypto.strong_rand_bytes(16)
@@ -1950,10 +2613,10 @@ defmodule LoopexDaemon.ConnectionRegistry do
     end
   end
 
-  defp maybe_finish_close_all(%{close_all: %{from: from, timer: timer}} = state)
+  defp maybe_finish_close_all(%{close_all: %{ref: ref, timer: timer}} = state)
        when map_size(state.rows) == 0 do
     _ = Process.cancel_timer(timer)
-    GenServer.reply(from, :ok)
+    send(state.owner, {:owner_reply, self(), ref, :ok})
     Logger.debug("loopex daemon connection close-all complete")
     %{state | close_all: nil}
   end
@@ -2667,19 +3330,14 @@ defmodule LoopexDaemon.ConnectionRegistry do
         end
 
       {:ok, {:duplicate, primary_origin_id, _reservation_ref}, state} ->
-        case AdmissionRelay.wait_for_ticket(
-               relay,
-               origin_id,
-               primary_origin_id,
-               relay_incarnation
-             ) do
-          {:ok, ^primary_origin_id} ->
-            Logger.debug("loopex daemon prepared resume joined primary")
-            {:reply, {:ok, {:waiting, primary_origin_id}}, state}
-
-          {:error, reason} ->
-            {:reply, {:error, reason}, state}
-        end
+        await_primary(
+          state,
+          relay,
+          relay_incarnation,
+          origin_id,
+          primary_origin_id,
+          "loopex daemon prepared resume joined primary"
+        )
 
       {:ok, :already_active, state} ->
         {:reply, {:ok, :unreserved}, state}
@@ -2857,19 +3515,14 @@ defmodule LoopexDaemon.ConnectionRegistry do
 
     case Map.fetch(state.activation_promotion_bindings, key) do
       {:ok, %{primary_origin_id: primary_origin_id}} when primary_origin_id != origin_id ->
-        case AdmissionRelay.wait_for_ticket(
-               relay,
-               origin_id,
-               primary_origin_id,
-               relay_incarnation
-             ) do
-          {:ok, ^primary_origin_id} ->
-            Logger.debug("loopex daemon resume joined primary")
-            {:reply, {:ok, {:waiting, primary_origin_id}}, state}
-
-          {:error, reason} ->
-            {:reply, {:error, reason}, state}
-        end
+        await_primary(
+          state,
+          relay,
+          relay_incarnation,
+          origin_id,
+          primary_origin_id,
+          "loopex daemon resume joined primary"
+        )
 
       {:ok, %{primary_origin_id: ^origin_id}} ->
         {:reply, {:ok, :admitted}, state}
@@ -2970,18 +3623,7 @@ defmodule LoopexDaemon.ConnectionRegistry do
         end
 
       {:ok, {:duplicate, primary_origin_id, _reservation_ref}, state} ->
-        case AdmissionRelay.wait_for_ticket(
-               relay,
-               origin_id,
-               primary_origin_id,
-               relay_incarnation
-             ) do
-          {:ok, ^primary_origin_id} ->
-            {:reply, {:ok, {:waiting, primary_origin_id}}, state}
-
-          {:error, reason} ->
-            {:reply, {:error, reason}, state}
-        end
+        await_primary(state, relay, relay_incarnation, origin_id, primary_origin_id, nil)
 
       {:ok, :already_active, state} when attached ->
         promote_resume_primary(
@@ -3080,39 +3722,18 @@ defmodule LoopexDaemon.ConnectionRegistry do
         settlement_ref: settlement_ref
       })
 
-    case AdmissionRelay.promote_resume_ticket(
-           relay,
-           origin_id,
-           relay_incarnation,
-           settlement_ref,
-           owner,
-           owner_incarnation,
-           relay_task
-         ) do
-      {:ok, ^origin_id} ->
-        Logger.debug("loopex daemon resume promoted")
-        {:reply, {:ok, :admitted}, state}
+    request =
+      AdmissionRelay.promote_resume_ticket_request(
+        relay,
+        origin_id,
+        relay_incarnation,
+        settlement_ref,
+        owner,
+        owner_incarnation,
+        relay_task
+      )
 
-      {:error, reason} ->
-        state = drop_resume_promotion(state, settlement_ref, promotion)
-
-        state =
-          if reservation_ref do
-            {:ok, state} =
-              resolve_activation_reservation(
-                state,
-                reservation_ref,
-                :no_activation,
-                nil
-              )
-
-            state
-          else
-            state
-          end
-
-        {:reply, {:error, reason}, state}
-    end
+    {:await, state, request, {:promote_resume, origin_id, settlement_ref, promotion}}
   end
 
   defp refuse_resume(
@@ -3124,17 +3745,17 @@ defmodule LoopexDaemon.ConnectionRegistry do
          origin_id,
          result
        ) do
-    case AdmissionRelay.refuse_resume_ticket(
-           relay,
-           origin_id,
-           relay_incarnation,
-           owner,
-           owner_incarnation,
-           result
-         ) do
-      {:ok, ^origin_id} -> {:reply, {:ok, :completed}, state}
-      {:error, reason} -> {:reply, {:error, reason}, state}
-    end
+    request =
+      AdmissionRelay.refuse_resume_ticket_request(
+        relay,
+        origin_id,
+        relay_incarnation,
+        owner,
+        owner_incarnation,
+        result
+      )
+
+    {:await, state, request, {:refuse_resume, origin_id}}
   end
 
   defp settle_promotion(state, settlement_ref, %{kind: :create}),
@@ -3251,25 +3872,16 @@ defmodule LoopexDaemon.ConnectionRegistry do
 
     state = put_in(state, [:activation_promotions, settlement_ref], promotion)
 
-    case AdmissionRelay.promote_ticket(
-           relay,
-           origin_id,
-           relay_incarnation,
-           settlement_ref,
-           relay_task
-         ) do
-      {:ok, ^origin_id} ->
-        Logger.debug("loopex daemon attach promoted")
-        {:reply, {:ok, :admitted}, state}
+    request =
+      AdmissionRelay.promote_ticket_request(
+        relay,
+        origin_id,
+        relay_incarnation,
+        settlement_ref,
+        relay_task
+      )
 
-      {:error, reason} ->
-        state =
-          state
-          |> update_in([:activation_promotions], &Map.delete(&1, settlement_ref))
-          |> restore_attachment(promotion)
-
-        {:reply, {:error, reason}, state}
-    end
+    {:await, state, request, {:promote_attach, origin_id, settlement_ref, promotion}}
   end
 
   defp restore_attachment(state, %{refusal: true}), do: state
@@ -3314,8 +3926,9 @@ defmodule LoopexDaemon.ConnectionRegistry do
   end
 
   defp record_attachment(state, settlement_ref, promotion, attachment_id) do
-    case Map.get(state.attachments, promotion.incarnation) do
-      %{phase: :pending, connection: connection} = pending ->
+    case {Map.get(state.attachments, promotion.incarnation),
+          attach_connection_present?(state, promotion.incarnation)} do
+      {%{phase: :pending, connection: connection} = pending, true} ->
         record_ref = make_ref()
         installed = %{pending | phase: :installed, attachment_id: attachment_id}
 
@@ -3333,10 +3946,15 @@ defmodule LoopexDaemon.ConnectionRegistry do
 
         state
         |> put_in([:attachments, promotion.incarnation], %{installed | connection: connection})
-        |> put_in([:activation_promotions, settlement_ref], %{promotion | record_ref: record_ref})
+        |> put_in(
+          [:activation_promotions, settlement_ref],
+          %{promotion | record_ref: record_ref, previous: nil}
+        )
 
       _connection_gone ->
-        finish_attach_promotion(state, settlement_ref, promotion)
+        state
+        |> release_pending_attachment(promotion.incarnation)
+        |> finish_attach_promotion(settlement_ref, promotion)
     end
   end
 
@@ -3348,21 +3966,47 @@ defmodule LoopexDaemon.ConnectionRegistry do
     )
   end
 
-  defp finish_attach_promotion(state, settlement_ref, promotion) do
-    case AdmissionRelay.settle_ticket(
-           state.relay.pid,
-           promotion.origin_id,
-           state.relay.incarnation,
-           settlement_ref
-         ) do
-      :ok ->
-        Logger.debug("loopex daemon attach settled")
-        update_in(state.activation_promotions, &Map.delete(&1, settlement_ref))
+  defp finish_attach_promotion(state, settlement_ref, _promotion),
+    do: enqueue_relay_flow(state, {:settle, :attach, settlement_ref})
 
-      {:error, _reason} ->
-        exit(:attachment_settlement_failed)
+  # Concept: the attachment a pending attach would replace is closed at the
+  # daemon owner as soon as it can no longer come back — when succession
+  # invalidates it, or when its connection is gone — so a refused
+  # replacement never restores it and it is closed exactly once.
+  #
+  # Technical depth: the pending promotion for that connection carries the
+  # replaced attachment as `previous`; the one matching `attachment_id`, or
+  # any with `:any`, is closed now and cleared from the promotion, so neither
+  # the refusal's restore nor the success path's close notice acts on it
+  # again. A queued attach flow needs nothing: it reads the connection's
+  # attachment when it is dequeued.
+  defp close_pending_previous(state, incarnation, attachment_id) do
+    case Enum.find(state.activation_promotions, fn {_ref, promotion} ->
+           pending_previous?(promotion, incarnation, attachment_id)
+         end) do
+      {settlement_ref, promotion} ->
+        notify_attachment(state, :closed, promotion.previous, incarnation, nil)
+        Logger.debug("loopex daemon replaced attachment closed while pending")
+        put_in(state, [:activation_promotions, settlement_ref], %{promotion | previous: nil})
+
+      nil ->
+        state
     end
   end
+
+  defp pending_previous?(
+         %{
+           kind: :attach,
+           incarnation: incarnation,
+           record_ref: nil,
+           previous: %{phase: :installed} = previous
+         },
+         incarnation,
+         attachment_id
+       ),
+       do: attachment_id == :any or previous.attachment_id == attachment_id
+
+  defp pending_previous?(_promotion, _incarnation, _attachment_id), do: false
 
   defp release_row_attachment(state, incarnation) do
     case Map.pop(state.attachments, incarnation) do
@@ -3370,8 +4014,27 @@ defmodule LoopexDaemon.ConnectionRegistry do
         notify_attachment(state, :closed, attachment, incarnation, nil)
         %{state | attachments: attachments}
 
-      {_pending_or_nil, attachments} ->
+      {%{phase: :pending}, attachments} ->
+        close_pending_previous(%{state | attachments: attachments}, incarnation, :any)
+
+      {nil, attachments} ->
         %{state | attachments: attachments}
+    end
+  end
+
+  # Concept: an attach continuation acts only for a connection whose row is
+  # still live or closing; for one gone or retiring it holds no pending
+  # attachment and closes the attachment it would have replaced.
+  defp attach_connection_present?(state, incarnation) do
+    Enum.any?(state.rows, fn {_token, row} ->
+      row.connection_incarnation == incarnation and row.phase in [:live, :closing]
+    end)
+  end
+
+  defp release_pending_attachment(state, incarnation) do
+    case Map.get(state.attachments, incarnation) do
+      %{phase: :pending} -> release_row_attachment(state, incarnation)
+      _other -> close_pending_previous(state, incarnation, :any)
     end
   end
 
@@ -3414,15 +4077,7 @@ defmodule LoopexDaemon.ConnectionRegistry do
         )
 
       {:ok, {:duplicate, primary_origin_id, _reservation_ref}, state} ->
-        case AdmissionRelay.wait_for_ticket(
-               relay,
-               origin_id,
-               primary_origin_id,
-               relay_incarnation
-             ) do
-          {:ok, ^primary_origin_id} -> {:reply, {:ok, {:waiting, primary_origin_id}}, state}
-          {:error, reason} -> {:reply, {:error, reason}, state}
-        end
+        await_primary(state, relay, relay_incarnation, origin_id, primary_origin_id, nil)
 
       {:error, :activation_ceiling_reached} ->
         refusal = fn -> {:no_activation, nil, ceiling_refusal} end
@@ -3481,51 +4136,22 @@ defmodule LoopexDaemon.ConnectionRegistry do
 
     state = put_in(state, [:activation_promotions, settlement_ref], promotion)
 
-    case AdmissionRelay.promote_ticket(
-           relay,
-           origin_id,
-           relay_incarnation,
-           settlement_ref,
-           relay_task
-         ) do
-      {:ok, ^origin_id} ->
-        Logger.debug("loopex daemon create promoted")
-        {:reply, {:ok, :admitted}, state}
+    request =
+      AdmissionRelay.promote_ticket_request(
+        relay,
+        origin_id,
+        relay_incarnation,
+        settlement_ref,
+        relay_task
+      )
 
-      {:error, reason} ->
-        state = update_in(state.activation_promotions, &Map.delete(&1, settlement_ref))
-
-        state =
-          if reservation_ref do
-            {:ok, state} =
-              resolve_activation_reservation(state, reservation_ref, :no_activation, nil)
-
-            state
-          else
-            state
-          end
-
-        {:reply, {:error, reason}, state}
-    end
+    {:await, state, request, {:promote_create, origin_id, settlement_ref, reservation_ref}}
   end
 
   defp settle_create_promotion(state, settlement_ref) do
     case Map.fetch(state.activation_promotions, settlement_ref) do
-      {:ok,
-       %{classification: %{result: result} = classification, relay_result: result} = promotion} ->
-        with {:ok, state} <- account_create_promotion(state, promotion, classification),
-             :ok <-
-               AdmissionRelay.settle_ticket(
-                 state.relay.pid,
-                 promotion.origin_id,
-                 state.relay.incarnation,
-                 settlement_ref
-               ) do
-          Logger.debug("loopex daemon create activation settled")
-          update_in(state.activation_promotions, &Map.delete(&1, settlement_ref))
-        else
-          _error -> exit(:activation_settlement_failed)
-        end
+      {:ok, %{classification: %{result: result}, relay_result: result}} ->
+        enqueue_relay_flow(state, {:settle, :create, settlement_ref})
 
       {:ok, %{classification: classification, relay_result: relay_result}}
       when not is_nil(classification) and not is_nil(relay_result) ->
@@ -3578,36 +4204,8 @@ defmodule LoopexDaemon.ConnectionRegistry do
 
   defp settle_resume_promotion(state, settlement_ref) do
     case Map.fetch(state.activation_promotions, settlement_ref) do
-      {:ok,
-       %{
-         classification: %{
-           lease_disposition: lease_disposition,
-           activation_disposition: activation_disposition,
-           result: result
-         },
-         relay_result: result
-       } = promotion} ->
-        with {:ok, state} <- account_resume_promotion(state, promotion, activation_disposition),
-             :ok <-
-               AdmissionRelay.settle_ticket(
-                 state.relay.pid,
-                 promotion.origin_id,
-                 state.relay.incarnation,
-                 settlement_ref
-               ) do
-          state = drop_resume_promotion(state, settlement_ref, promotion)
-
-          send(
-            promotion.owner,
-            {:registry_resume_settled, self(), promotion.origin_id, promotion.owner_incarnation,
-             lease_disposition}
-          )
-
-          Logger.debug("loopex daemon resume activation settled")
-          state
-        else
-          _error -> exit(:activation_settlement_failed)
-        end
+      {:ok, %{classification: %{result: result}, relay_result: result}} ->
+        enqueue_relay_flow(state, {:settle, :resume, settlement_ref})
 
       {:ok, %{classification: classification, relay_result: relay_result}}
       when not is_nil(classification) and not is_nil(relay_result) ->

@@ -233,7 +233,9 @@ defmodule LoopexDaemon.AdmissionRelay do
         ) ::
           {:ok, origin_id()}
           | {:error,
-             :capacity_exceeded
+             :actor_lost
+             | :actor_retiring
+             | :capacity_exceeded
              | :connection_unavailable
              | :daemon_stopping
              | :invalid_actor
@@ -262,7 +264,16 @@ defmodule LoopexDaemon.AdmissionRelay do
 
   @doc false
   @spec claim_lease_permit(pid(), origin_id(), binary(), reference() | nil) ::
-          :ok | {:error, :daemon_stopping | :invalid_actor | :permit_unavailable}
+          :ok
+          | {:error,
+             :connection_lost
+             | :daemon_stopping
+             | :invalid_actor
+             | :owner_lost
+             | :permit_unavailable
+             | :result
+             | :shutdown_admitted
+             | :shutdown_cancelled}
   def claim_lease_permit(relay, origin_id, actor_incarnation, start_op_ref \\ nil) do
     GenServer.call(
       relay,
@@ -613,6 +624,106 @@ defmodule LoopexDaemon.AdmissionRelay do
       relay,
       {:settle_ticket, origin_id, registry_incarnation, settlement_ref},
       @control_timeout_ms
+    )
+  end
+
+  @doc """
+  ## Concept
+
+  The connection registry's requests to the relay, sent without waiting, so a
+  slow relay delays only the registry flow that needs its answer.
+
+  ## Technical depth
+
+  Each function sends exactly the request its blocking counterpart above
+  sends and returns the OTP request identifier. The registry consumes the
+  answer, or the relay's exit, as a message under its own request instant.
+  """
+  @spec authorize_resume_ticket_request(pid(), origin_id(), binary(), pid(), binary()) ::
+          :gen_server.request_id()
+  def authorize_resume_ticket_request(
+        relay,
+        origin_id,
+        registry_incarnation,
+        owner,
+        owner_incarnation
+      ) do
+    :gen_server.send_request(
+      relay,
+      {:authorize_resume_ticket, origin_id, registry_incarnation, owner, owner_incarnation}
+    )
+  end
+
+  @doc false
+  @spec wait_for_ticket_request(pid(), origin_id(), origin_id(), binary()) ::
+          :gen_server.request_id()
+  def wait_for_ticket_request(relay, origin_id, primary_origin_id, registry_incarnation) do
+    :gen_server.send_request(
+      relay,
+      {:wait_for_ticket, origin_id, primary_origin_id, registry_incarnation}
+    )
+  end
+
+  @doc false
+  @spec promote_ticket_request(pid(), origin_id(), binary(), settlement_ref(), (-> map())) ::
+          :gen_server.request_id()
+  def promote_ticket_request(relay, origin_id, registry_incarnation, settlement_ref, task_fun) do
+    :gen_server.send_request(
+      relay,
+      {:promote_ticket, origin_id, registry_incarnation, settlement_ref, task_fun}
+    )
+  end
+
+  @doc false
+  @spec promote_resume_ticket_request(
+          pid(),
+          origin_id(),
+          binary(),
+          settlement_ref(),
+          pid(),
+          binary(),
+          (-> map())
+        ) :: :gen_server.request_id()
+  def promote_resume_ticket_request(
+        relay,
+        origin_id,
+        registry_incarnation,
+        settlement_ref,
+        owner,
+        owner_incarnation,
+        task_fun
+      ) do
+    :gen_server.send_request(
+      relay,
+      {:promote_ticket, origin_id, registry_incarnation, settlement_ref, task_fun,
+       {owner, owner_incarnation}}
+    )
+  end
+
+  @doc false
+  @spec refuse_resume_ticket_request(pid(), origin_id(), binary(), pid(), binary(), map()) ::
+          :gen_server.request_id()
+  def refuse_resume_ticket_request(
+        relay,
+        origin_id,
+        registry_incarnation,
+        owner,
+        owner_incarnation,
+        result
+      ) do
+    :gen_server.send_request(
+      relay,
+      {:refuse_resume_ticket, origin_id, registry_incarnation, owner, owner_incarnation, result}
+    )
+  end
+
+  @doc false
+  @spec settle_ticket_request(pid(), origin_id(), binary(), settlement_ref()) ::
+          :gen_server.request_id()
+  def settle_ticket_request(relay, origin_id, registry_incarnation, settlement_ref) do
+    :gen_server.send_request(
+      relay,
+      {:settle_ticket, origin_id, registry_incarnation, settlement_ref}
     )
   end
 
@@ -1048,6 +1159,19 @@ defmodule LoopexDaemon.AdmissionRelay do
           false -> {:reply, {:error, :permit_unavailable}, state}
           {:error, reason} -> {:reply, {:error, reason}, state}
         end
+
+      # Concept: the permit's own actor learns the exact disposition that
+      # already won the row, never a generic actor refusal.
+      {:ok,
+       %{
+         kind: :lease,
+         actor_pid: ^caller,
+         actor_incarnation: ^actor_incarnation,
+         start_op_ref: ^start_op_ref,
+         disposition: disposition
+       }}
+      when not is_nil(disposition) ->
+        {:reply, {:error, disposition}, state}
 
       {:ok, %{kind: :lease}} ->
         {:reply, {:error, :invalid_actor}, state}
@@ -2120,12 +2244,26 @@ defmodule LoopexDaemon.AdmissionRelay do
        when class in @lease_permit_classes do
     case Map.get(state.lease_owners, session_id) do
       %{binding: {^actor, ^actor_incarnation}, phase: :live} -> :ok
-      _other -> {:error, :invalid_actor}
+      %{binding: {^actor, ^actor_incarnation}, phase: :retiring} -> {:error, :actor_retiring}
+      _other -> if lost_actor?(actor), do: {:error, :actor_lost}, else: {:error, :invalid_actor}
     end
   end
 
   defp validate_lease_actor(_state, _class, _session_id, _actor, _incarnation, _start_op_ref),
     do: {:error, :invalid_actor}
+
+  # Concept: an actor is lost once the relay has consumed its exact `DOWN`.
+  #
+  # Technical depth: a lease-owner row leaves `lease_owners` only when its
+  # monitored `DOWN` is consumed, so for an actor the daemon owner registered,
+  # a dead local pid with no matching row means that `DOWN` was consumed.
+  # Liveness alone cannot tell such an actor from a dead pid that was never
+  # registered, which also answers `actor_lost`; the daemon owner names only
+  # actors it registered. It says nothing about whether the relay has
+  # finished that owner's loss, which may still be classifying. A live pid
+  # with no matching row answers `invalid_actor`.
+  defp lost_actor?(actor),
+    do: is_pid(actor) and node(actor) == node() and not Process.alive?(actor)
 
   defp handle_registry_promotion(
          origin_id,

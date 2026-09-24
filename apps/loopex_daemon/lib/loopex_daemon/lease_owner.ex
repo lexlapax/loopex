@@ -119,7 +119,16 @@ defmodule LoopexDaemon.LeaseOwner do
   @doc false
   @spec acquire(pid(), permit_id(), binary(), pid(), binary(), integer()) ::
           {:ok, :completed | :proposed | :queued}
-          | {:error, :daemon_stopping | :invalid_actor | :invalid_operation | :permit_unavailable}
+          | {:error,
+             :connection_lost
+             | :daemon_stopping
+             | :invalid_actor
+             | :invalid_operation
+             | :owner_lost
+             | :permit_unavailable
+             | :result
+             | :shutdown_admitted
+             | :shutdown_cancelled}
   def acquire(
         owner,
         permit_id,
@@ -138,7 +147,16 @@ defmodule LoopexDaemon.LeaseOwner do
   @doc false
   @spec release(pid(), permit_id(), binary(), pid(), binary(), binary()) ::
           {:ok, :completed | :proposed | :queued}
-          | {:error, :daemon_stopping | :invalid_actor | :invalid_operation | :permit_unavailable}
+          | {:error,
+             :connection_lost
+             | :daemon_stopping
+             | :invalid_actor
+             | :invalid_operation
+             | :owner_lost
+             | :permit_unavailable
+             | :result
+             | :shutdown_admitted
+             | :shutdown_cancelled}
   def release(
         owner,
         permit_id,
