@@ -246,8 +246,14 @@ misses a later barrier ends the stop as `relay_lost`, except that registry or
 holder-close work unfinished at the lease-operation freeze ends it as
 `connections_lost`; a component lost while core quiesce runs, or before success
 is reported, ends it with that component's class. Losing the runtime's Control
-or EventDispatcher, even one its supervisor restarts, is `runtime_lost` whether
-the daemon is serving or stopping. A fatal class ends within 35 s of the first
+or EventDispatcher, even one its supervisor restarts, is `runtime_lost`, except
+that Control lost while core quiesce is running and the runtime itself still
+lives is `drain_failed`: the drain can no longer report which sessions it
+stopped. Every component the teardown stops shares the one `teardown_ms`
+deadline, and the Store then has its own 30 s; a component still running at
+its deadline is killed and the stop ends with that component's class, and a
+placement release that fails or does not finish in 5 s is
+`placement_lock_failed`, never `0`. A fatal class ends within 35 s of the first
 fatal.
 
 ### Exit statuses

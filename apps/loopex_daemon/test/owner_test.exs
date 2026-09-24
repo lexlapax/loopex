@@ -3253,6 +3253,33 @@ defmodule LoopexDaemon.OwnerTest do
     start_supervised!({Owner, options}, restart: :temporary)
   end
 
+  # Concept: a registry that died on a call the relay never answered names the
+  # relay, and the daemon owner hears `relay_lost`, not `connections_lost`.
+  #
+  # Technical depth: the owner's exit clause is applied to its real state with
+  # the exact exit reason `GenServer.call/3` gives a caller whose callee did not
+  # answer; the same state with any other reason keeps `connections_lost`.
+  test "a registry that died waiting on the relay is classified relay_lost" do
+    owner = start_owner(fatal_recipient: self())
+    state = :sys.get_state(owner)
+    timeout = {:timeout, {GenServer, :call, [state.relay, :x, 5_000]}}
+
+    assert {:stop, :relay_lost, _state} =
+             Owner.handle_info({:EXIT, state.registry, timeout}, state)
+
+    assert_received {:daemon_component_fatal, _reporter, :relay_lost}
+
+    assert {:stop, :connections_lost, _state} =
+             Owner.handle_info({:EXIT, state.registry, :killed}, state)
+
+    # A callee that died on its own unanswered call wraps its reason inside
+    # the caller's; the innermost callee is the one that stalled.
+    nested = {timeout, {GenServer, :call, [self(), :y, 7_000]}}
+
+    assert {:stop, :relay_lost, _state} =
+             Owner.handle_info({:EXIT, state.registry, nested}, state)
+  end
+
   defp await_owner_phase(owner, phase, attempts \\ 200)
 
   defp await_owner_phase(owner, phase, attempts) when attempts > 0 do

@@ -412,7 +412,7 @@ defmodule LoopexDaemon.Listener do
 
   defp stop_started_listener(listener) do
     try do
-      GenServer.stop(listener, :normal)
+      GenServer.stop(listener, :normal, 5_000)
     catch
       :exit, _reason -> :ok
     end

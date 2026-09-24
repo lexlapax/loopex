@@ -662,12 +662,14 @@ defmodule LoopexDaemon.AdmissionRelay do
           retiring_lease_owners: non_neg_integer(),
           owner_losses: non_neg_integer()
         }
-  def status(relay), do: GenServer.call(relay, :status, @control_timeout_ms)
+  def status(relay, timeout \\ @control_timeout_ms),
+    do: GenServer.call(relay, :status, timeout)
 
   @doc false
-  @spec pending_origins(pid(), [binary()]) :: non_neg_integer()
-  def pending_origins(relay, origin_ids) when is_list(origin_ids),
-    do: GenServer.call(relay, {:pending_origins, origin_ids}, @control_timeout_ms)
+  @spec pending_origins(pid(), [binary()], timeout()) :: non_neg_integer()
+  def pending_origins(relay, origin_ids, timeout \\ @control_timeout_ms)
+      when is_list(origin_ids),
+      do: GenServer.call(relay, {:pending_origins, origin_ids}, timeout)
 
   @impl true
   def init(options) do

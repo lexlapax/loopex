@@ -531,6 +531,277 @@ defmodule LoopexDaemon.ServiceLifecycleTest do
     assert Task.await(daemon.task, 60_000) == relay_lost
   end
 
+  # Concept: until success is reported, a component that dies during the
+  # orderly stop's own teardown is that component's loss, not a clean exit.
+  #
+  # Technical depth: the teardown stops the collaboration owner first and the
+  # Store last. The test kills the Store the moment the collaboration owner is
+  # down, so the Store is lost after the drain's final check and before its
+  # own stop; the daemon must exit `store_lost`, not `0`.
+  @tag timeout: 90_000
+  test "a Store lost during the orderly teardown ends the stop as store_lost, not success",
+       %{options: options} do
+    daemon = start_daemon(options)
+    _ready = await_ready(daemon.output)
+    _client = initialized(options[:socket_path])
+
+    owner_state = :sys.get_state(daemon.owner)
+    collaboration_monitor = Process.monitor(owner_state.pids.collaboration)
+    store = owner_state.pids.store
+
+    send(daemon.sentinel, {:daemon_signal, daemon.owner_ref, :sigterm})
+    assert_receive {:DOWN, ^collaboration_monitor, :process, _collaboration, _reason}, 30_000
+    Process.exit(store, :kill)
+
+    {:ok, store_lost} = LoopexDaemon.ExitStatus.fetch(:store_lost)
+    assert Task.await(daemon.task, 60_000) == store_lost
+  end
+
+  # Concept: a collaboration owner lost after the last startup checkpoint never
+  # takes the daemon owner down with a call: readiness uses what startup
+  # already obtained, and the loss is classified.
+  #
+  # Technical depth: the collaboration owner is killed as soon as the daemon
+  # owner has started it, so any later synchronous call to it would exit the
+  # daemon owner and the sentinel would report `owner_lost`.
+  @tag timeout: 90_000
+  test "a collaboration owner lost during startup is daemon_services_start_failed",
+       %{options: options} do
+    {:ok, output} = StringIO.open("")
+    test = self()
+
+    task =
+      Task.async(fn ->
+        Sentinel.run(options, output: output, install_signals: false, notify: test)
+      end)
+
+    assert_receive {:loopex_daemon_sentinel, _sentinel, _owner_ref, owner}, 1_000
+    collaboration = await_collaboration(owner)
+    Process.exit(collaboration, :kill)
+
+    # Lost before readiness it is a startup failure, whose reverse cleanup
+    # releases the root; lost just after, the running classifier names the
+    # relay it owned. Never `owner_lost`, which would mean the daemon owner
+    # itself died on a call.
+    {:ok, start_failed} = LoopexDaemon.ExitStatus.fetch(:daemon_services_start_failed)
+    {:ok, relay_lost} = LoopexDaemon.ExitStatus.fetch(:relay_lost)
+    status = Task.await(task, 60_000)
+    assert status in [start_failed, relay_lost]
+
+    if status == start_failed,
+      do: assert(Placement.live_owner(options[:state_root]) == :none)
+  end
+
+  # Concept: after its one guarded call at startup, the daemon owner never
+  # calls the collaboration owner outside a stop wait, so a collaboration
+  # owner that stops answering can never exit the daemon owner with a call.
+  #
+  # Technical depth: the collaboration owner's received messages are traced
+  # from the moment it appears. Through readiness and a full orderly stop it
+  # receives at most one `:components` call from the daemon owner; the earlier
+  # code made one at startup, one for the listener and one for readiness.
+  @tag timeout: 90_000
+  test "the daemon owner calls the collaboration owner at most once outside stop waits",
+       %{options: options} do
+    {:ok, output} = StringIO.open("")
+    test = self()
+
+    task =
+      Task.async(fn ->
+        Sentinel.run(options, output: output, install_signals: false, notify: test)
+      end)
+
+    assert_receive {:loopex_daemon_sentinel, sentinel, owner_ref, owner}, 1_000
+    collaboration = await_collaboration(owner)
+    1 = :erlang.trace(collaboration, true, [:receive])
+    _ready = await_ready(output)
+
+    send(sentinel, {:daemon_signal, owner_ref, :sigterm})
+    assert Task.await(task, 60_000) == 0
+
+    component_calls =
+      Stream.repeatedly(fn ->
+        receive do
+          {:trace, ^collaboration, :receive, {:"$gen_call", {^owner, _tag}, :components}} -> :call
+          {:trace, ^collaboration, :receive, _other} -> :other
+        after
+          0 -> :done
+        end
+      end)
+      |> Enum.take_while(&(&1 != :done))
+      |> Enum.count(&(&1 == :call))
+
+    assert component_calls <= 1
+  end
+
+  # Concept: a registry that cannot answer its own bounded close is the
+  # connections' loss, not the relay's, and it cannot hold the stop open.
+  #
+  # Technical depth: a debug hook suspends the registry as the collaboration
+  # owner receives the orderly close call. The registry never answers, the
+  # owner kills it after its deadline and the stop ends `connections_lost`.
+  @tag timeout: 90_000
+  test "a registry silent at the orderly close ends the stop as connections_lost",
+       %{options: options} do
+    daemon = start_daemon(options)
+    _ready = await_ready(daemon.output)
+    _client = initialized(options[:socket_path])
+
+    owner_state = :sys.get_state(daemon.owner)
+    collaboration = owner_state.pids.collaboration
+    registry = owner_state.registry
+    on_exit(fn -> Process.exit(collaboration, :kill) end)
+
+    :ok =
+      :sys.install(
+        collaboration,
+        {fn
+           :waiting, {:in, {:"$gen_call", _from, {:close_connections, _record, _deadline}}}, _ ->
+             :ok = :sys.suspend(registry)
+             :done
+
+           :waiting, _event, _state ->
+             :waiting
+         end, :waiting}
+      )
+
+    send(daemon.sentinel, {:daemon_signal, daemon.owner_ref, :sigterm})
+
+    {:ok, connections_lost} = LoopexDaemon.ExitStatus.fetch(:connections_lost)
+    assert Task.await(daemon.task, 60_000) == connections_lost
+  end
+
+  # Concept: the runtime tree is stopped on the shared teardown deadline, never
+  # by an unbounded call; a tree still up at that instant is killed and the
+  # stop ends `runtime_lost`, not a hang and not success.
+  #
+  # Technical depth: the runtime supervisor is suspended at the VM level as
+  # the drain's last barrier is acknowledged, so it cannot serve the system
+  # stop request; the teardown's bounded helper waits until the 2 s teardown
+  # deadline, kills the tree and reports `runtime_lost`.
+  @tag timeout: 90_000
+  test "a runtime tree that cannot stop is killed at the teardown deadline as runtime_lost",
+       %{options: options} do
+    daemon = start_daemon(Keyword.put(options, :teardown_ms, 2_000))
+    _ready = await_ready(daemon.output)
+    _client = initialized(options[:socket_path])
+
+    owner_state = :sys.get_state(daemon.owner)
+    supervisor = owner_state.edges.runtime_supervisor
+    on_exit(fn -> Process.exit(owner_state.pids.collaboration, :kill) end)
+    suspend_after_drain(owner_state.pids.collaboration, supervisor)
+
+    started = System.monotonic_time(:millisecond)
+    send(daemon.sentinel, {:daemon_signal, daemon.owner_ref, :sigterm})
+
+    {:ok, runtime_lost} = LoopexDaemon.ExitStatus.fetch(:runtime_lost)
+    assert Task.await(daemon.task, 60_000) == runtime_lost
+    assert System.monotonic_time(:millisecond) - started < 30_000
+    refute Process.alive?(supervisor)
+  end
+
+  # Concept: a component that does not stop by the shared teardown deadline is
+  # killed then, and that is its own class: the stop does not report success
+  # after a component it had to kill.
+  #
+  # Technical depth: the executor is suspended at the VM level as the drain's
+  # last barrier is acknowledged, so its stop request waits out the 2 s
+  # teardown deadline.
+  @tag timeout: 90_000
+  test "a component that misses the teardown deadline ends the stop with its class",
+       %{options: options} do
+    daemon = start_daemon(Keyword.put(options, :teardown_ms, 2_000))
+    _ready = await_ready(daemon.output)
+    _client = initialized(options[:socket_path])
+
+    owner_state = :sys.get_state(daemon.owner)
+    executor = owner_state.pids.executor
+    suspend_after_drain(owner_state.pids.collaboration, executor)
+
+    send(daemon.sentinel, {:daemon_signal, daemon.owner_ref, :sigterm})
+
+    {:ok, executor_lost} = LoopexDaemon.ExitStatus.fetch(:executor_lost)
+    assert Task.await(daemon.task, 60_000) == executor_lost
+    refute Process.alive?(executor)
+  end
+
+  # Concept: during active quiesce, losing the captured Control while the
+  # runtime root still lives leaves no trustworthy census: `drain_failed`, not
+  # `runtime_lost`.
+  #
+  # Technical depth: Control is suspended so core quiesce blocks inside the
+  # drain helper; once the daemon owner is waiting on it, Control is killed.
+  # The runtime root restarts it and stays alive.
+  @tag timeout: 90_000
+  test "Control lost during active quiesce ends the stop as drain_failed",
+       %{options: options} do
+    daemon = start_daemon(options)
+    _ready = await_ready(daemon.output)
+    _client = initialized(options[:socket_path])
+
+    owner_state = :sys.get_state(daemon.owner)
+    {:ok, children} = Loopex.Runtime.children(owner_state.edges.runtime)
+    :ok = :sys.suspend(children.control)
+    on_exit(fn -> Process.exit(owner_state.pids.collaboration, :kill) end)
+
+    send(daemon.sentinel, {:daemon_signal, daemon.owner_ref, :sigterm})
+    assert await_quiesce_wait(daemon.owner)
+    Process.exit(children.control, :kill)
+
+    {:ok, drain_failed} = LoopexDaemon.ExitStatus.fetch(:drain_failed)
+    assert Task.await(daemon.task, 60_000) == drain_failed
+    assert Process.alive?(owner_state.edges.runtime_supervisor)
+  end
+
+  # Concept: the Store's stop is its own fixed 30 s phase; a Store still
+  # running at its end is killed and the stop ends `store_lost`, not success.
+  #
+  # Technical depth: the Store is suspended at the VM level as the drain's last
+  # barrier is acknowledged, so its stop request waits out the 30 s phase.
+  @tag timeout: 120_000
+  test "a Store that misses its 30 s stop phase ends the stop as store_lost",
+       %{options: options} do
+    daemon = start_daemon(Keyword.put(options, :teardown_ms, 2_000))
+    _ready = await_ready(daemon.output)
+    _client = initialized(options[:socket_path])
+
+    owner_state = :sys.get_state(daemon.owner)
+    store = owner_state.pids.store
+    suspend_after_drain(owner_state.pids.collaboration, store)
+
+    started = System.monotonic_time(:millisecond)
+    send(daemon.sentinel, {:daemon_signal, daemon.owner_ref, :sigterm})
+
+    {:ok, store_lost} = LoopexDaemon.ExitStatus.fetch(:store_lost)
+    assert Task.await(daemon.task, 90_000) == store_lost
+    assert System.monotonic_time(:millisecond) - started >= 30_000
+    refute Process.alive?(store)
+  end
+
+  # Concept: a component that dies on a call its callee never answered names
+  # the callee: a listener that died waiting on the connection registry is
+  # `connections_lost`, not `listener_lost`.
+  #
+  # Technical depth: the registry is suspended and a client connects, so the
+  # listener's reservation call times out naming the registry.
+  @tag timeout: 90_000
+  test "a listener that dies waiting on the registry ends the daemon connections_lost",
+       %{options: options} do
+    daemon = start_daemon(options)
+    _ready = await_ready(daemon.output)
+
+    owner_state = :sys.get_state(daemon.owner)
+    :ok = :sys.suspend(owner_state.registry)
+    on_exit(fn -> Process.exit(owner_state.pids.collaboration, :kill) end)
+
+    {:ok, socket} = :socket.open(:local, :stream, :default)
+    :ok = await_connect(socket, options[:socket_path], 100)
+
+    {:ok, connections_lost} = LoopexDaemon.ExitStatus.fetch(:connections_lost)
+    assert Task.await(daemon.task, 60_000) == connections_lost
+    :socket.close(socket)
+  end
+
   # Concept: a component lost while a later stop barrier is held keeps its own
   # class; the barrier timing out behind it cannot rename it `relay_lost`.
   #
@@ -931,6 +1202,79 @@ defmodule LoopexDaemon.ServiceLifecycleTest do
   end
 
   defp await_queued_exit(_pid, _exited, 0), do: {:error, :not_queued}
+
+  # Suspends `target` at the VM level, where even system messages such as a
+  # stop request wait, exactly as the collaboration owner receives the relay's
+  # tearing-down acknowledgement: after the drain, before the teardown. The
+  # test process holds the suspension, since a suspension ends with the
+  # process that made it, and the collaboration owner waits until it is held.
+  defp suspend_after_drain(collaboration, target) do
+    test = self()
+
+    spawn_link(fn ->
+      receive do
+        {:suspend_now, hook} ->
+          true = :erlang.suspend_process(target)
+          send(hook, :suspended)
+          Process.sleep(:infinity)
+      end
+    end)
+    |> then(&send(test, {:suspender, &1}))
+
+    suspender =
+      receive do
+        {:suspender, pid} -> pid
+      end
+
+    :ok =
+      :sys.install(
+        collaboration,
+        {fn
+           :waiting, {:in, {:relay_barrier_ack, _ref, :tearing_down, _payload}}, _state ->
+             send(suspender, {:suspend_now, self()})
+
+             receive do
+               :suspended -> :done
+             end
+
+           :waiting, _event, _state ->
+             :waiting
+         end, :waiting}
+      )
+  end
+
+  defp await_collaboration(owner, attempts \\ 2_000)
+
+  defp await_collaboration(owner, attempts) when attempts > 0 do
+    case Process.info(owner, :links) do
+      {:links, links} ->
+        case Enum.find(links, &collaboration_owner?/1) do
+          nil ->
+            Process.sleep(1)
+            await_collaboration(owner, attempts - 1)
+
+          collaboration ->
+            collaboration
+        end
+
+      nil ->
+        flunk("daemon owner ended before starting its collaboration owner")
+    end
+  end
+
+  defp await_collaboration(_owner, 0), do: flunk("collaboration owner never started")
+
+  defp collaboration_owner?(pid) when is_pid(pid) do
+    case Process.info(pid, :dictionary) do
+      {:dictionary, dictionary} ->
+        match?({LoopexDaemon.Owner, :init, 1}, Keyword.get(dictionary, :"$initial_call"))
+
+      nil ->
+        false
+    end
+  end
+
+  defp collaboration_owner?(_port), do: false
 
   defp await_uninitialized_connection(registry, attempts \\ 500)
 

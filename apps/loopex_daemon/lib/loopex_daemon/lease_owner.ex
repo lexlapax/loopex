@@ -58,19 +58,25 @@ defmodule LoopexDaemon.LeaseOwner do
   @typedoc false
   @type permit_id :: AdmissionRelay.origin_id()
 
+  # Concept: the collaboration owner's calls into a lease owner keep the
+  # ordinary 5 s bound. Blocking calls between daemon components are being
+  # replaced by a non-blocking design recorded in the M5 plan; until then no
+  # fixed bound is correct for every caller under a slow relay.
+  @daemon_call_ms 5_000
+
   @doc false
   @spec start_link(keyword()) :: GenServer.on_start()
-  def start_link(options), do: GenServer.start_link(__MODULE__, options)
+  def start_link(options), do: GenServer.start_link(__MODULE__, options, timeout: 5_000)
 
   @doc false
   @spec activate(pid()) :: :ok | {:error, :invalid_owner | :owner_unavailable}
-  def activate(owner), do: GenServer.call(owner, :activate)
+  def activate(owner), do: GenServer.call(owner, :activate, @daemon_call_ms)
 
   @doc false
   @spec retire_if_idle(pid()) ::
           {:ok, :retiring | :waiting}
           | {:error, :daemon_stopping | :not_idle | :owner_unavailable}
-  def retire_if_idle(owner), do: GenServer.call(owner, :retire_if_idle)
+  def retire_if_idle(owner), do: GenServer.call(owner, :retire_if_idle, @daemon_call_ms)
 
   @doc false
   @spec complete_retirement(pid(), reference()) :: :ok
@@ -105,7 +111,8 @@ defmodule LoopexDaemon.LeaseOwner do
     GenServer.call(
       owner,
       {:first_acquire, permit_id, request_id, connection, connection_incarnation,
-       request_deadline}
+       request_deadline},
+      @daemon_call_ms
     )
   end
 
@@ -123,7 +130,8 @@ defmodule LoopexDaemon.LeaseOwner do
       ) do
     GenServer.call(
       owner,
-      {:acquire, permit_id, request_id, connection, connection_incarnation, request_deadline}
+      {:acquire, permit_id, request_id, connection, connection_incarnation, request_deadline},
+      @daemon_call_ms
     )
   end
 
@@ -141,7 +149,8 @@ defmodule LoopexDaemon.LeaseOwner do
       ) do
     GenServer.call(
       owner,
-      {:release, permit_id, request_id, connection, connection_incarnation, writer_epoch}
+      {:release, permit_id, request_id, connection, connection_incarnation, writer_epoch},
+      @daemon_call_ms
     )
   end
 
@@ -257,7 +266,8 @@ defmodule LoopexDaemon.LeaseOwner do
   def attachment_opened(owner, connection, connection_incarnation, attachment_id) do
     GenServer.call(
       owner,
-      {:attachment, :opened, connection, connection_incarnation, attachment_id}
+      {:attachment, :opened, connection, connection_incarnation, attachment_id},
+      @daemon_call_ms
     )
   end
 
@@ -267,7 +277,8 @@ defmodule LoopexDaemon.LeaseOwner do
   def attachment_closed(owner, connection, connection_incarnation, attachment_id) do
     GenServer.call(
       owner,
-      {:attachment, :closed, connection, connection_incarnation, attachment_id}
+      {:attachment, :closed, connection, connection_incarnation, attachment_id},
+      @daemon_call_ms
     )
   end
 
@@ -659,14 +670,16 @@ defmodule LoopexDaemon.LeaseOwner do
           do: :eligible,
           else: :ineligible
 
-      case ConnectionRegistry.prepare_resume(
-             state.registry,
-             origin_id,
-             state.session_id,
-             command_id,
-             state.owner_incarnation,
-             eligibility
-           ) do
+      case registry_call(fn ->
+             ConnectionRegistry.prepare_resume(
+               state.registry,
+               origin_id,
+               state.session_id,
+               command_id,
+               state.owner_incarnation,
+               eligibility
+             )
+           end) do
         {:ok, {:waiting, _primary_origin_id}} ->
           Process.demonitor(descriptor.worker_monitor, [:flush])
           Logger.debug("loopex daemon queued resume joined primary")
@@ -1351,18 +1364,20 @@ defmodule LoopexDaemon.LeaseOwner do
     capacity_refusal =
       WireRecords.request_error(descriptor.request_id, "activation_ceiling_reached")
 
-    case ConnectionRegistry.promote_resume(
-           state.registry,
-           descriptor.origin_id,
-           state.session_id,
-           descriptor.command_id,
-           state.owner_incarnation,
-           eligibility,
-           attached,
-           control_refusal,
-           capacity_refusal,
-           descriptor.task_fun
-         ) do
+    case registry_call(fn ->
+           ConnectionRegistry.promote_resume(
+             state.registry,
+             descriptor.origin_id,
+             state.session_id,
+             descriptor.command_id,
+             state.owner_incarnation,
+             eligibility,
+             attached,
+             control_refusal,
+             capacity_refusal,
+             descriptor.task_fun
+           )
+         end) do
       {:ok, :admitted} ->
         Process.demonitor(descriptor.worker_monitor, [:flush])
 
@@ -1470,11 +1485,13 @@ defmodule LoopexDaemon.LeaseOwner do
   defp resume_holder_gate?(_state, _descriptor, _now), do: false
 
   defp cancel_prepared_resume(state, %{class: :session_resume, origin_id: origin_id}) do
-    case ConnectionRegistry.cancel_prepared_resume(
-           state.registry,
-           origin_id,
-           state.owner_incarnation
-         ) do
+    case registry_call(fn ->
+           ConnectionRegistry.cancel_prepared_resume(
+             state.registry,
+             origin_id,
+             state.owner_incarnation
+           )
+         end) do
       :ok -> :ok
       {:error, _reason} -> Logger.debug("loopex daemon prepared resume cleanup unavailable")
     end
@@ -1545,6 +1562,15 @@ defmodule LoopexDaemon.LeaseOwner do
       {:error, reason} ->
         {{:error, reason}, state}
     end
+  end
+
+  # Concept: the registry not answering a session's resume step is that step's
+  # failure, `{:error, :registry_unavailable}`, not the loss of this session's
+  # owner; the registry's own loss is classified where it is observed.
+  defp registry_call(call) do
+    call.()
+  catch
+    :exit, _reason -> {:error, :registry_unavailable}
   end
 
   defp propose_grant(state, acquisition) do

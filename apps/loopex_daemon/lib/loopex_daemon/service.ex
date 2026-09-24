@@ -79,6 +79,9 @@ defmodule LoopexDaemon.Service do
   # A fail-stop's two awaited steps: the executor until `latched_at + 5_000`,
   # the Store until the earlier of its own 30 s and the sentinel's 35 s bound.
   @fatal_executor_ms 5_000
+  # The loss reports a component may send the daemon owner in place of dying
+  # with the wrong component's class.
+  @reported_classes [:runtime_lost, :relay_lost, :connections_lost]
   @fatal_bound_ms 35_000
   # The readiness version is the source VERSION this build was compiled from.
   @version Path.join([__DIR__, "..", "..", "..", "..", "VERSION"])
@@ -125,6 +128,8 @@ defmodule LoopexDaemon.Service do
       pending_fatal: nil,
       relay: nil,
       registry: nil,
+      daemon_incarnation: nil,
+      runtime_control: nil,
       runtime_monitors: %{}
     }
 
@@ -165,7 +170,7 @@ defmodule LoopexDaemon.Service do
         {:daemon_component_fatal, _reporter, class},
         %{phase: :running} = state
       )
-      when class in [:runtime_lost, :relay_lost],
+      when class in @reported_classes,
       do: fail_stop(state, class)
 
   def handle_info({:EXIT, pid, reason}, %{phase: :running} = state) do
@@ -282,8 +287,13 @@ defmodule LoopexDaemon.Service do
           class -> {:stop, {:fatal, class}}
         end
 
-      {:daemon_component_fatal, _reporter, :relay_lost} ->
+      {:daemon_component_fatal, _reporter, class}
+      when class in [:relay_lost, :connections_lost] ->
         {:stop, {:fatal, :daemon_services_start_failed}}
+
+      {:DOWN, monitor, :process, _pid, _reason}
+      when is_map_key(state.runtime_monitors, monitor) ->
+        {:stop, {:fatal, :composition_start_failed}}
     after
       0 ->
         case Enum.find(state.pids, fn {_name, pid} -> not Process.alive?(pid) end) do
@@ -443,10 +453,19 @@ defmodule LoopexDaemon.Service do
          ) do
       {:ok, owner} ->
         Logger.debug("loopex daemon collaboration services started")
-        # The fail-stop path must reach the relay and registry without calling
-        # the collaboration owner, so their pids are held from the start.
-        %{relay: relay, registry: registry} = Owner.components(owner)
-        {:ok, %{track(state, :collaboration, owner) | relay: relay, registry: registry}}
+        state = track(state, :collaboration, owner)
+
+        # Concept: this is the one call made to the collaboration owner outside
+        # a stop wait. Every later step, and the fail-stop path, uses what it
+        # returns, so a collaboration owner that later stops answering can
+        # never take this owner down with a call.
+        case safe(fn -> Owner.components(owner) end) do
+          %{relay: relay, registry: registry, daemon_incarnation: incarnation} ->
+            {:ok, %{state | relay: relay, registry: registry, daemon_incarnation: incarnation}}
+
+          _unavailable ->
+            {:stop, {:fatal, :daemon_services_start_failed}, state}
+        end
 
       _other ->
         {:stop, {:fatal, :daemon_services_start_failed}, state}
@@ -462,11 +481,10 @@ defmodule LoopexDaemon.Service do
 
   defp start_listener(state) do
     startup_ref = make_ref()
-    components = Owner.components(state.pids.collaboration)
 
     case Listener.start_link(
            owner: self(),
-           registry: components.registry,
+           registry: state.registry,
            socket: state.socket,
            daemon_uid: state.daemon_uid,
            startup_ref: startup_ref
@@ -474,24 +492,37 @@ defmodule LoopexDaemon.Service do
       {:ok, listener} ->
         state = %{track(state, :listener, listener) | startup_ref: startup_ref, socket: nil}
 
-        receive do
-          {:listener_parked, ^startup_ref, ^listener} -> {:ok, state}
-        after
-          @listener_park_ms -> {:stop, {:fatal, :listener_start_failed}, state}
-        end
+        await_listener_park(state, listener, startup_ref, monotonic_ms() + @listener_park_ms)
 
       _other ->
         {:stop, {:fatal, :listener_start_failed}, state}
     end
   end
 
+  # Concept: while the listener parks, an owned component lost first keeps its
+  # own startup class.
+  defp await_listener_park(state, listener, startup_ref, deadline) do
+    receive do
+      {:listener_parked, ^startup_ref, ^listener} ->
+        {:ok, state}
+
+      {:EXIT, pid, reason} when pid != listener ->
+        case classify_startup_exit(state, pid, reason) do
+          :ignore -> await_listener_park(state, listener, startup_ref, deadline)
+          class -> {:stop, {:fatal, class}, state}
+        end
+
+      {:DOWN, monitor, :process, _pid, _reason}
+      when is_map_key(state.runtime_monitors, monitor) ->
+        {:stop, {:fatal, :composition_start_failed}, state}
+    after
+      remaining_ms(deadline) -> {:stop, {:fatal, :listener_start_failed}, state}
+    end
+  end
+
   # Concept: the sentinel alone decides whether the parked listener opens.
   defp begin_readiness(state) do
-    incarnation =
-      state.pids.collaboration
-      |> Owner.components()
-      |> Map.fetch!(:daemon_incarnation)
-      |> Base.encode16(case: :lower)
+    incarnation = Base.encode16(state.daemon_incarnation, case: :lower)
 
     case Readiness.encode(
            option!(state, :state_root),
@@ -564,10 +595,26 @@ defmodule LoopexDaemon.Service do
     end
   end
 
+  # Concept: a stop before readiness is still an operator stop, so its reverse
+  # cleanup is held to the same rule as an orderly stop's: a component that
+  # does not stop in time, or a placement release that fails, is that class,
+  # never `0`. A startup failure already carries its class, which wins.
+  defp finish_startup_failure(state, :operator_stop) do
+    Logger.debug("loopex daemon startup reverse cleanup")
+
+    with {:ok, state} <- orderly_teardown(state, monotonic_ms() + teardown_ms(state)),
+         :ok <- release_placement(state) do
+      report_exit(state, ExitStatus.success())
+      {:stop, :normal, %{state | phase: :stopped}}
+    else
+      {:fatal, class, state} -> fail_stop(state, class)
+      {:placement_failed, class} -> placement_failed(state, class)
+    end
+  end
+
   defp finish_startup_failure(state, reason) do
     status =
       case reason do
-        :operator_stop -> ExitStatus.success()
         {:fatal, class} -> status!(class)
         {:fatal, class, _kind} -> status!(class)
       end
@@ -662,7 +709,7 @@ defmodule LoopexDaemon.Service do
         {:fatal, :runtime_lost}
 
       {:daemon_component_fatal, _reporter, class}
-      when class in [:runtime_lost, :relay_lost] ->
+      when class in @reported_classes ->
         {:fatal, class}
 
       {:EXIT, pid, reason} ->
@@ -698,13 +745,18 @@ defmodule LoopexDaemon.Service do
       teardown_ms: teardown_ms(state)
     }
 
-    with {:ok, :drained} <- responsive(state, fn -> drain_sequence(plan) end, :infinity),
-         :none <- owned_loss(state) do
-      teardown(state)
-      release_placement(state)
+    reporter = self()
+    drain = fn -> drain_sequence(Map.put(plan, :reporter, reporter)) end
+
+    with {:ok, {:drained, teardown_deadline}} <- responsive(state, drain, :infinity),
+         :none <- owned_loss(state),
+         {:ok, state} <- orderly_teardown(state, teardown_deadline),
+         :ok <- release_placement(state) do
       report_exit(state, ExitStatus.success())
       {:stop, :normal, %{state | phase: :stopped}}
     else
+      {:fatal, class, state} -> fail_stop(state, class)
+      {:placement_failed, class} -> placement_failed(state, class)
       {:ok, {:fatal, class}} -> fail_stop(state, class)
       {:fatal, class} -> fail_stop(state, class)
       _unanswered -> fail_stop(state, :relay_lost)
@@ -718,7 +770,7 @@ defmodule LoopexDaemon.Service do
     with :ok <- freeze_lease_ops(plan.collaboration, plan.relay),
          {:ok, ^drain_id} <-
            Owner.barrier(plan.collaboration, {:quiescing, drain_id}, relay_control_deadline()),
-         {:ok, _census} <- quiesce(plan.runtime) do
+         {:ok, _census} <- quiesce(plan) do
       Logger.debug("loopex daemon quiesce complete")
       seal_and_close(plan, drain_id)
     else
@@ -728,10 +780,18 @@ defmodule LoopexDaemon.Service do
     end
   end
 
-  defp quiesce(runtime) do
-    Loopex.Runtime.quiesce(runtime)
-  catch
-    _kind, _reason -> {:error, :runtime_unavailable}
+  # The daemon owner is told when core quiesce is active, because losing the
+  # captured Control while the runtime root lives is `drain_failed` only then.
+  defp quiesce(plan) do
+    send(plan.reporter, {:quiesce_active, self(), true})
+
+    try do
+      Loopex.Runtime.quiesce(plan.runtime)
+    catch
+      _kind, _reason -> {:error, :runtime_unavailable}
+    after
+      send(plan.reporter, {:quiesce_active, self(), false})
+    end
   end
 
   # Concept: at the admission bound lease operations freeze; the collaboration
@@ -757,7 +817,11 @@ defmodule LoopexDaemon.Service do
   defp await_frozen_rows(_relay, [], _deadline), do: :ok
 
   defp await_frozen_rows(relay, descriptors, deadline) do
-    case safe(fn -> LoopexDaemon.AdmissionRelay.pending_origins(relay, descriptors) end) do
+    query = fn ->
+      LoopexDaemon.AdmissionRelay.pending_origins(relay, descriptors, remaining_ms(deadline))
+    end
+
+    case safe(query) do
       0 ->
         :ok
 
@@ -787,15 +851,16 @@ defmodule LoopexDaemon.Service do
              {:seal_after_quiesce, drain_id, teardown_deadline},
              teardown_deadline
            ),
-         _closed =
+         closed when closed in [:ok, {:ok, :forced}] <-
            Owner.close_connections(
              collaboration,
              WireRecords.daemon_stopping("operator_stop"),
              min(monotonic_ms() + @close_connections_ms, teardown_deadline)
            ),
          {:ok, _owners} <- Owner.barrier(collaboration, :tearing_down, teardown_deadline) do
-      :drained
+      {:drained, teardown_deadline}
     else
+      {:error, :connections_lost} -> {:fatal, :connections_lost}
       _missing_acknowledgement -> {:fatal, :relay_lost}
     end
   end
@@ -807,11 +872,11 @@ defmodule LoopexDaemon.Service do
   # Technical depth: both are monitored once composition has started; the
   # monitors live only in this owner and are dropped when the runtime stops.
   defp monitor_runtime(%{edges: %{runtime: runtime}} = state) do
-    case Loopex.Runtime.children(runtime) do
+    case safe(fn -> Loopex.Runtime.children(runtime) end) do
       {:ok, %{control: control, dispatcher: dispatcher}}
       when is_pid(control) and is_pid(dispatcher) ->
         monitors = Map.new([control, dispatcher], &{Process.monitor(&1), &1})
-        {:ok, %{state | runtime_monitors: monitors}}
+        {:ok, %{state | runtime_monitors: monitors, runtime_control: control}}
 
       _unavailable ->
         :error
@@ -829,7 +894,7 @@ defmodule LoopexDaemon.Service do
   # the wait continues. `until` is an absolute monotonic instant or `:infinity`.
   defp responsive(state, fun, until) do
     {helper, monitor} = spawn_monitor(fn -> exit({:responded, fun.()}) end)
-    await_responsive(state, helper, monitor, until)
+    await_responsive(Map.put(state, :quiesce_active, false), helper, monitor, until)
   end
 
   defp await_responsive(state, helper, monitor, until) do
@@ -840,12 +905,15 @@ defmodule LoopexDaemon.Service do
       {:DOWN, ^monitor, :process, ^helper, _reason} ->
         :unavailable
 
-      {:DOWN, runtime_monitor, :process, _pid, _reason}
+      {:quiesce_active, ^helper, active} ->
+        await_responsive(%{state | quiesce_active: active}, helper, monitor, until)
+
+      {:DOWN, runtime_monitor, :process, pid, _reason}
       when is_map_key(state.runtime_monitors, runtime_monitor) ->
-        end_responsive(helper, monitor, {:fatal, :runtime_lost})
+        end_responsive(helper, monitor, {:fatal, runtime_monitor_class(state, pid)})
 
       {:daemon_component_fatal, _reporter, class}
-      when class in [:runtime_lost, :relay_lost] ->
+      when class in @reported_classes ->
         end_responsive(helper, monitor, {:fatal, class})
 
       {:EXIT, pid, reason} ->
@@ -856,6 +924,22 @@ defmodule LoopexDaemon.Service do
     after
       remaining_ms(until) -> end_responsive(helper, monitor, :timeout)
     end
+  end
+
+  # Concept: the plan's split for a runtime process lost while the daemon
+  # waits. During active quiesce, a captured Control found dead while the
+  # runtime root still lives leaves no trustworthy census, which is
+  # `drain_failed`, whichever monitor fired first; an EventDispatcher lost
+  # while the root and Control live, a dead root, and any loss outside active
+  # quiesce are `runtime_lost`.
+  defp runtime_monitor_class(state, _pid) do
+    root = get_in(state, [:edges, :runtime_supervisor])
+    control = state.runtime_control
+
+    if state.quiesce_active and is_pid(root) and Process.alive?(root) and is_pid(control) and
+         not Process.alive?(control),
+       do: :drain_failed,
+       else: :runtime_lost
   end
 
   defp end_responsive(helper, monitor, result) do
@@ -872,6 +956,9 @@ defmodule LoopexDaemon.Service do
   # was lost while the stop was running turns it into that component's
   # fail-stop.
   defp owned_loss(state) do
+    # A runtime-loss report after this owner stopped the runtime is its own doing.
+    runtime_owned = Map.has_key?(state.pids, :runtime_supervisor)
+
     receive do
       {:DOWN, runtime_monitor, :process, _pid, _reason}
       when is_map_key(state.runtime_monitors, runtime_monitor) ->
@@ -879,7 +966,8 @@ defmodule LoopexDaemon.Service do
         {:fatal, :runtime_lost}
 
       {:daemon_component_fatal, _reporter, class}
-      when class in [:runtime_lost, :relay_lost] ->
+      when class in [:relay_lost, :connections_lost] or
+             (class == :runtime_lost and runtime_owned) ->
         Logger.debug("loopex daemon component lost during stop")
         {:fatal, class}
 
@@ -1009,7 +1097,7 @@ defmodule LoopexDaemon.Service do
 
   defp await_admission_until(relay, deadline) do
     settled =
-      case safe(fn -> LoopexDaemon.AdmissionRelay.status(relay) end) do
+      case safe(fn -> LoopexDaemon.AdmissionRelay.status(relay, remaining_ms(deadline)) end) do
         %{pending: 0, queued: 0} -> true
         _other -> false
       end
@@ -1026,6 +1114,148 @@ defmodule LoopexDaemon.Service do
         await_admission_until(relay, deadline)
     end
   end
+
+  # Concept: the orderly stop's teardown is part of the stop, so until success
+  # is reported a component found dead that this owner did not stop is that
+  # component's loss, not a clean exit.
+  #
+  # Technical depth: the same reverse order as `teardown/1`. Before each stop
+  # every queued owned exit is classified; the stop itself is monitored, and a
+  # component already gone, or ending for any reason but this owner's own
+  # `:shutdown` or its kill after the stop wait, is classified by its running
+  # class. The first loss ends the teardown and the stop fail-stops with the
+  # components not yet stopped.
+  defp orderly_teardown(state, deadline) do
+    state = close_parked_socket(state)
+
+    steps = [
+      :listener,
+      :collaboration,
+      :runtime,
+      :executor,
+      :workspace_lease,
+      :transfers,
+      :index,
+      :capability,
+      :custody,
+      :credential_registry,
+      :store
+    ]
+
+    Enum.reduce_while(steps, {:ok, state}, fn step, {:ok, acc} ->
+      with :none <- owned_loss(acc),
+           {:ok, acc} <- orderly_stop_step(acc, step, deadline) do
+        {:cont, {:ok, acc}}
+      else
+        {:fatal, class} -> {:halt, {:fatal, class, acc}}
+        {:fatal, class, acc} -> {:halt, {:fatal, class, acc}}
+      end
+    end)
+  end
+
+  defp orderly_stop_step(state, :runtime, deadline), do: stop_runtime_bounded(state, deadline)
+
+  # The relay is the collaboration owner's child and stops with it.
+  defp orderly_stop_step(state, :collaboration, deadline) do
+    with {:ok, state} <- stop_classified(state, :collaboration, deadline),
+         do: {:ok, %{state | relay: nil}}
+  end
+
+  # The Store's stop is its own fixed phase, begun when the shared teardown
+  # deadline is done with.
+  defp orderly_stop_step(state, :store, _deadline),
+    do: stop_classified(state, :store, monotonic_ms() + @store_stop_ms)
+
+  defp orderly_stop_step(state, name, deadline), do: stop_classified(state, name, deadline)
+
+  # Concept: a helper asks the component to stop with the time that remains;
+  # this owner waits on the component itself until the absolute deadline and
+  # kills it then. A component killed at the deadline has not stopped in
+  # time, which is its own class, never a clean exit.
+  defp stop_classified(state, name, deadline) do
+    case Map.fetch(state.pids, name) do
+      {:ok, pid} ->
+        Process.unlink(pid)
+        monitor = Process.monitor(pid)
+        request_stop(fn -> GenServer.stop(pid, :normal, max(deadline - monotonic_ms(), 1)) end)
+        reason = await_stopped(pid, monitor, deadline)
+        flush_exit(pid)
+        state = %{state | pids: Map.delete(state.pids, name)}
+
+        if reason in [:shutdown, :normal] or match?({:shutdown, _detail}, reason) do
+          {:ok, state}
+        else
+          Logger.debug("loopex daemon component lost or late during teardown")
+          {:fatal, running_class(name, reason), state}
+        end
+
+      :error ->
+        {:ok, state}
+    end
+  end
+
+  defp request_stop(stop), do: spawn(fn -> safe(stop) end)
+
+  defp await_stopped(pid, monitor, deadline) do
+    receive do
+      {:DOWN, ^monitor, :process, ^pid, reason} -> reason
+    after
+      remaining_ms(deadline) ->
+        Logger.debug("loopex daemon teardown deadline reached")
+        Process.exit(pid, :kill)
+
+        receive do
+          {:DOWN, ^monitor, :process, ^pid, _reason} -> :stopped_late
+        after
+          @stop_wait_ms ->
+            Process.demonitor(monitor, [:flush])
+            :stopped_late
+        end
+    end
+  end
+
+  # Concept: the runtime tree is ended by a helper calling
+  # `Supervisor.stop/3` with what remains of the shared deadline, never by the
+  # unbounded `Loopex.stop/1`; a tree still up at the deadline is killed and is
+  # `runtime_lost`. A runtime monitor that fired before this step is a loss,
+  # not something to flush away.
+  defp stop_runtime_bounded(
+         %{edges: %{runtime_supervisor: supervisor}} = state,
+         deadline
+       )
+       when is_pid(supervisor) do
+    fired =
+      Enum.any?(state.runtime_monitors, fn {monitor, _pid} ->
+        Process.demonitor(monitor, [:info]) == false
+      end)
+
+    state = %{state | runtime_monitors: %{}}
+
+    if fired do
+      {:fatal, :runtime_lost, state}
+    else
+      Process.unlink(supervisor)
+      monitor = Process.monitor(supervisor)
+
+      request_stop(fn ->
+        Supervisor.stop(supervisor, :normal, max(deadline - monotonic_ms(), 1))
+      end)
+
+      reason = await_stopped(supervisor, monitor, deadline)
+      flush_exit(supervisor)
+      state = %{state | pids: Map.delete(state.pids, :runtime_supervisor)}
+
+      if reason in [:normal, :shutdown] or match?({:shutdown, _detail}, reason),
+        do: {:ok, state},
+        else: {:fatal, :runtime_lost, state}
+    end
+  end
+
+  defp stop_runtime_bounded(state, _deadline), do: {:ok, state}
+
+  defp running_class(:store, reason), do: store_class(reason)
+  defp running_class(:collaboration, reason), do: collaboration_class(reason)
+  defp running_class(name, _reason), do: Map.get(@running_classes, name, :runtime_lost)
 
   # Concept: components stop in the reverse of their start, with the Store
   # after every component that could still write through it.
@@ -1052,15 +1282,21 @@ defmodule LoopexDaemon.Service do
     %{state | socket: nil}
   end
 
-  defp stop_runtime(%{edges: %{runtime: runtime, runtime_supervisor: supervisor}} = state) do
+  # Startup reverse cleanup: a class is already latched, so the bounded stop's
+  # own verdict is not needed; the tree is never stopped with an unbounded call.
+  defp stop_runtime(%{edges: %{runtime_supervisor: supervisor}} = state)
+       when is_pid(supervisor) do
     Enum.each(state.runtime_monitors, fn {monitor, _pid} ->
       Process.demonitor(monitor, [:flush])
     end)
 
-    Process.unlink(supervisor)
-    _ = safe(fn -> Loopex.stop(runtime) end)
-    ensure_down(supervisor, @stop_wait_ms)
-    %{state | pids: Map.delete(state.pids, :runtime_supervisor)}
+    {_verdict, state} =
+      case stop_runtime_bounded(%{state | runtime_monitors: %{}}, monotonic_ms() + @stop_wait_ms) do
+        {:ok, state} -> {:ok, state}
+        {:fatal, _class, state} -> {:late, state}
+      end
+
+    state
   end
 
   defp stop_runtime(state), do: state
@@ -1093,25 +1329,6 @@ defmodule LoopexDaemon.Service do
     end
   end
 
-  defp ensure_down(pid, wait_ms) do
-    monitor = Process.monitor(pid)
-
-    receive do
-      {:DOWN, ^monitor, :process, ^pid, _reason} -> :ok
-    after
-      wait_ms ->
-        Process.exit(pid, :kill)
-
-        receive do
-          {:DOWN, ^monitor, :process, ^pid, _reason} -> :ok
-        after
-          @stop_wait_ms -> Process.demonitor(monitor, [:flush])
-        end
-    end
-
-    flush_exit(pid)
-  end
-
   defp flush_exit(pid) do
     receive do
       {:EXIT, ^pid, _reason} -> :ok
@@ -1122,6 +1339,11 @@ defmodule LoopexDaemon.Service do
 
   # Concept: the placement lock is released last, by a bounded helper, so a
   # blocked filesystem cannot hold the stop open.
+  # Concept: the placement lock is released last, by a bounded helper, so a
+  # blocked filesystem cannot hold the stop open. Exact `:ok` completes the
+  # phase; a malformed result, an abnormal helper death or expiry is
+  # `placement_lock_failed`, since a clean exit would claim a release that was
+  # not proved.
   defp release_placement(%{placement: nil}), do: :ok
 
   defp release_placement(%{placement: handle}) do
@@ -1133,17 +1355,24 @@ defmodule LoopexDaemon.Service do
         Logger.debug("loopex daemon placement release attempted")
         :ok
 
-      # A release that failed ends the wait at once; the next daemon's stale
-      # owner recovery handles what it left.
       {:DOWN, ^monitor, :process, ^helper, _failed} ->
         Logger.debug("loopex daemon placement release failed")
-        :ok
+        {:placement_failed, :placement_lock_failed}
     after
       @placement_release_ms ->
         Process.exit(helper, :kill)
         Logger.debug("loopex daemon placement release deadline reached")
-        :ok
+        {:placement_failed, :placement_lock_failed}
     end
+  end
+
+  # Every component is already stopped; only the class and the sentinel's
+  # latch remain.
+  defp placement_failed(state, class) do
+    status = status!(class)
+    send(state.sentinel, {:daemon_fatal, state.owner_ref, class, status})
+    report_exit(state, status)
+    {:stop, :normal, %{state | phase: :stopped}}
   end
 
   defp report_exit(state, status) do
@@ -1151,7 +1380,35 @@ defmodule LoopexDaemon.Service do
     :ok
   end
 
+  # Concept: a component that died on a call its callee never answered names
+  # the callee, so a listener that died waiting on the registry is
+  # `connections_lost`, not `listener_lost`.
   defp classify_exit(state, pid, reason) do
+    case Map.get(state.components, {:pid, pid}) do
+      nil -> :ignore
+      _component -> callee_class(state, reason) || component_class(state, pid, reason)
+    end
+  end
+
+  # A caller whose callee died on its own unanswered call exits with the
+  # callee's reason wrapped inside its own; the innermost named component is
+  # the one that actually stalled.
+  defp callee_class(state, {why, {module, :call, [callee | _rest]}})
+       when module in [GenServer, :gen_server, :gen] and is_pid(callee) do
+    callee_class(state, why) || direct_callee_class(state, callee)
+  end
+
+  defp callee_class(_state, _reason), do: nil
+
+  defp direct_callee_class(state, callee) do
+    cond do
+      callee == state.relay -> :relay_lost
+      callee == state.registry -> :connections_lost
+      true -> Map.get(@running_classes, Map.get(state.components, {:pid, callee}))
+    end
+  end
+
+  defp component_class(state, pid, reason) do
     case Map.get(state.components, {:pid, pid}) do
       nil -> :ignore
       :collaboration -> collaboration_class(reason)

@@ -77,6 +77,14 @@ defmodule LoopexDaemon.ConnectionRegistry do
           | :clear_granted
           | :pop_owner_mirror
 
+  # Concept: a caller of the registry outlasts the registry's own worst-case
+  # wait on the relay (5 s per call, at most three in one request), so a relay
+  # stall ends the registry first and is named `relay_lost`, and no caller
+  # gives up on a registry that is still working. See `LeaseOwner` for the
+  # whole chain of bounds.
+  @listener_call_ms 20_000
+  @resume_call_ms 20_000
+
   @doc false
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(options), do: GenServer.start_link(__MODULE__, options)
@@ -92,7 +100,8 @@ defmodule LoopexDaemon.ConnectionRegistry do
   def reserve(registry, listener, listener_incarnation, accepted_at) do
     GenServer.call(
       registry,
-      {:reserve, listener, listener_incarnation, accepted_at}
+      {:reserve, listener, listener_incarnation, accepted_at},
+      @listener_call_ms
     )
   end
 
@@ -100,13 +109,17 @@ defmodule LoopexDaemon.ConnectionRegistry do
   @spec start_connection(pid(), binary()) ::
           {:ok, pid(), binary()} | {:error, atom()}
   def start_connection(registry, rollback_token) do
-    GenServer.call(registry, {:start_connection, rollback_token})
+    GenServer.call(registry, {:start_connection, rollback_token}, @listener_call_ms)
   end
 
   @doc false
   @spec begin_transfer(pid(), binary(), binary()) :: :ok | {:error, atom()}
   def begin_transfer(registry, rollback_token, connection_incarnation) do
-    GenServer.call(registry, {:begin_transfer, rollback_token, connection_incarnation})
+    GenServer.call(
+      registry,
+      {:begin_transfer, rollback_token, connection_incarnation},
+      @listener_call_ms
+    )
   end
 
   @doc false
@@ -115,7 +128,8 @@ defmodule LoopexDaemon.ConnectionRegistry do
   def transfer_result(registry, rollback_token, connection_incarnation, result) do
     GenServer.call(
       registry,
-      {:transfer_result, rollback_token, connection_incarnation, result}
+      {:transfer_result, rollback_token, connection_incarnation, result},
+      @listener_call_ms
     )
   end
 
@@ -398,7 +412,8 @@ defmodule LoopexDaemon.ConnectionRegistry do
       ) do
     GenServer.call(
       registry,
-      {:prepare_resume, origin_id, session_id, command_id, owner_incarnation, eligibility}
+      {:prepare_resume, origin_id, session_id, command_id, owner_incarnation, eligibility},
+      @resume_call_ms
     )
   end
 
@@ -406,7 +421,11 @@ defmodule LoopexDaemon.ConnectionRegistry do
   @spec cancel_prepared_resume(pid(), origin_id(), binary()) ::
           :ok | {:error, :owner_unavailable}
   def cancel_prepared_resume(registry, origin_id, owner_incarnation) do
-    GenServer.call(registry, {:cancel_prepared_resume, origin_id, owner_incarnation})
+    GenServer.call(
+      registry,
+      {:cancel_prepared_resume, origin_id, owner_incarnation},
+      @resume_call_ms
+    )
   end
 
   @doc false
@@ -449,7 +468,7 @@ defmodule LoopexDaemon.ConnectionRegistry do
       registry,
       {:promote_resume, origin_id, session_id, command_id, owner_incarnation, eligibility,
        attached, control_refusal, capacity_refusal, task_fun},
-      :infinity
+      @resume_call_ms
     )
   end
 
@@ -457,13 +476,13 @@ defmodule LoopexDaemon.ConnectionRegistry do
   @spec abort_provisional(pid(), binary(), :peer_credential_unverified | :handoff_failed) ::
           :ok | {:error, :abort_unavailable}
   def abort_provisional(registry, rollback_token, reason) do
-    GenServer.call(registry, {:abort_provisional, rollback_token, reason})
+    GenServer.call(registry, {:abort_provisional, rollback_token, reason}, @listener_call_ms)
   end
 
   @doc false
   @spec listener_closed(pid(), binary()) :: :ok | {:error, :close_acknowledgement_unavailable}
   def listener_closed(registry, rollback_token) do
-    GenServer.call(registry, {:listener_closed, rollback_token})
+    GenServer.call(registry, {:listener_closed, rollback_token}, @listener_call_ms)
   end
 
   @doc false
@@ -499,7 +518,14 @@ defmodule LoopexDaemon.ConnectionRegistry do
   @spec close_all(pid(), map(), integer()) :: :ok | {:ok, :forced} | {:error, :owner_mismatch}
   def close_all(registry, record, deadline)
       when is_map(record) and is_integer(deadline) do
-    GenServer.call(registry, {:close_all, record, deadline}, :infinity)
+    # The registry answers by `deadline` itself, killing survivors if it must;
+    # one that has not answered 500 ms later is lost. That decision lands
+    # inside the daemon owner's own 1 s margin on the same deadline, so the
+    # registry, not the relay, is named.
+    remaining = max(deadline - System.monotonic_time(:millisecond), 0)
+    GenServer.call(registry, {:close_all, record, deadline}, remaining + 500)
+  catch
+    :exit, _unanswered -> {:error, :registry_unanswered}
   end
 
   @doc false

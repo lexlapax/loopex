@@ -209,6 +209,101 @@ defmodule LoopexDaemon.SocketTransportTest do
     assert %{succession_reservations: 1} = ConnectionRegistry.status(daemon.registry)
   end
 
+  # Concept: the connection marks a requested replacement as pending when it
+  # dispatches it, so the replaced attachment's pump ending before the new one
+  # is installed keeps the connection.
+  #
+  # Technical depth: Control is suspended so the replacement's core attach
+  # cannot complete; once the connection shows the mark, the old pump is ended
+  # as core's removal ends it, and Control is resumed.
+  test "a pending replacement is marked at dispatch and survives its old pump ending",
+       %{daemon: daemon, runtime: runtime} do
+    client = initialized_client(daemon)
+    session_id = create_session(client, "replace-marked-create")
+    :ok = send_frame(client, attach("first", session_id))
+    assert [%{"request_id" => "first", "type" => "snapshot"}] = receive_records(client, 1)
+    connection = initialized_connection(daemon)
+    %{attachment: %{pump: pump}} = :sys.get_state(connection)
+
+    {:ok, children} = Loopex.Runtime.children(runtime)
+    :ok = :sys.suspend(children.control)
+    :ok = send_frame(client, attach("replace", session_id, replace: true))
+    eventually(fn -> match?(%{attachment: %{replacing: _origin}}, :sys.get_state(connection)) end)
+
+    Process.exit(pump, :kill)
+    eventually(fn -> match?(%{attachment: %{pump_ended: true}}, :sys.get_state(connection)) end)
+    :ok = :sys.resume(children.control)
+
+    assert [%{"request_id" => "replace", "type" => "snapshot"}] = receive_records(client, 1)
+    assert Process.alive?(connection)
+  end
+
+  # Concept: the pending-replacement mark belongs to the request that set it,
+  # so a second replacement the client sends meanwhile, which the registry
+  # refuses as already pending, can neither take it over nor end it, and the
+  # first replacement still completes.
+  #
+  # Technical depth: Control is suspended so the replacement stays pending; a
+  # second replacement then passes the connection's own checks and is refused
+  # by the registry because this connection's attachment is pending; then the
+  # old pump ends as core's removal ends it, and Control is resumed.
+  test "an attach refused while a replacement is pending leaves the replacement marked",
+       %{daemon: daemon, runtime: runtime} do
+    client = initialized_client(daemon)
+    session_id = create_session(client, "replace-pipelined-create")
+    :ok = send_frame(client, attach("first", session_id))
+    assert [%{"request_id" => "first", "type" => "snapshot"}] = receive_records(client, 1)
+    connection = initialized_connection(daemon)
+    %{attachment: %{pump: pump}} = :sys.get_state(connection)
+
+    {:ok, children} = Loopex.Runtime.children(runtime)
+    :ok = :sys.suspend(children.control)
+    :ok = send_frame(client, attach("replace", session_id, replace: true))
+    eventually(fn -> match?(%{attachment: %{replacing: _origin}}, :sys.get_state(connection)) end)
+
+    :ok = send_frame(client, attach("second", session_id, replace: true))
+    assert [%{"request_id" => "second", "type" => "error"}] = receive_records(client, 1)
+
+    assert match?(%{attachment: %{replacing: _origin}}, :sys.get_state(connection))
+
+    Process.exit(pump, :kill)
+    eventually(fn -> match?(%{attachment: %{pump_ended: true}}, :sys.get_state(connection)) end)
+    :ok = :sys.resume(children.control)
+
+    assert [%{"request_id" => "replace", "type" => "snapshot"}] = receive_records(client, 1)
+    assert Process.alive?(connection)
+  end
+
+  # Concept: a replacement that fails after its old attachment's pump ended leaves
+  # the client no attachment, so it is told `detached` after the refusal and
+  # the connection closes, which releases its delivery reserve.
+  test "a replacement refused after its old pump ended reports detached and closes",
+       %{daemon: daemon, runtime: runtime} do
+    client = initialized_client(daemon)
+    session_id = create_session(client, "replace-lost-create")
+    :ok = send_frame(client, attach("first", session_id))
+    assert [%{"request_id" => "first", "type" => "snapshot"}] = receive_records(client, 1)
+    connection = initialized_connection(daemon)
+    %{attachment: %{pump: pump}} = :sys.get_state(connection)
+    connection_monitor = Process.monitor(connection)
+
+    {:ok, children} = Loopex.Runtime.children(runtime)
+    :ok = :sys.suspend(children.control)
+    :ok = send_frame(client, attach("replace", session_id, replace: true))
+    eventually(fn -> match?(%{attachment: %{replacing: _origin}}, :sys.get_state(connection)) end)
+
+    Process.exit(pump, :kill)
+    eventually(fn -> match?(%{attachment: %{pump_ended: true}}, :sys.get_state(connection)) end)
+
+    # The replacement's core attach is blocked on Control; ending Control makes
+    # it fail after dispatch, so it is refused with the old pump already gone.
+    Process.exit(children.control, :kill)
+
+    assert [%{"request_id" => "replace", "type" => "error"}] = receive_records(client, 1)
+    assert [%{"type" => "error", "code" => "detached"}] = receive_records(client, 1)
+    assert_receive {:DOWN, ^connection_monitor, :process, ^connection, _reason}, 5_000
+  end
+
   test "the session's mutation gate sees an attachment before its snapshot and forgets it on close",
        %{daemon: daemon} do
     client = initialized_client(daemon)
@@ -1073,5 +1168,14 @@ defmodule LoopexDaemon.SocketTransportTest do
       "command_id" => Wire.encode_identity(command_id),
       "session_options" => options
     }
+  end
+
+  defp initialized_connection(daemon) do
+    [connection] =
+      for {_token, %{initialized: true, connection_pid: pid}} <-
+            :sys.get_state(daemon.registry).rows,
+          do: pid
+
+    connection
   end
 end

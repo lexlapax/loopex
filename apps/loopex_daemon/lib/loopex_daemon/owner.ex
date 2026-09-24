@@ -42,7 +42,7 @@ defmodule LoopexDaemon.Owner do
 
   @doc false
   @spec start_link(keyword()) :: GenServer.on_start()
-  def start_link(options), do: GenServer.start_link(__MODULE__, options)
+  def start_link(options), do: GenServer.start_link(__MODULE__, options, timeout: 10_000)
 
   @doc false
   @spec components(pid()) :: %{
@@ -491,9 +491,18 @@ defmodule LoopexDaemon.Owner do
   def handle_call({:reap_uninitialized, _cut_ref, _deadline}, _from, state),
     do: {:reply, {:error, :transport_cut_unavailable}, state}
 
+  # Concept: a registry that cannot answer its own bounded close is lost: it
+  # is killed and the stop is told `connections_lost`, never left waiting.
   def handle_call({:close_connections, record, deadline}, _from, state) do
-    result = ConnectionRegistry.close_all(state.registry, record, deadline)
-    {:reply, result, state}
+    case ConnectionRegistry.close_all(state.registry, record, deadline) do
+      {:error, :registry_unanswered} ->
+        Logger.debug("loopex daemon owner connection registry missed its close")
+        Process.exit(state.registry, :kill)
+        {:reply, {:error, :connections_lost}, state}
+
+      result ->
+        {:reply, result, state}
+    end
   end
 
   def handle_call(:status, _from, state) do
@@ -996,8 +1005,13 @@ defmodule LoopexDaemon.Owner do
     end
   end
 
-  def handle_info({:EXIT, registry, _reason}, %{registry: registry} = state),
-    do: {:stop, :connections_lost, state}
+  # Concept: a component that died on a call its callee never answered names
+  # the callee: a registry that died waiting on the relay is `relay_lost`.
+  def handle_info({:EXIT, registry, reason}, %{registry: registry} = state) do
+    class = if called(reason) == state.relay, do: :relay_lost, else: :connections_lost
+    report_component_loss(state, class)
+    {:stop, class, state}
+  end
 
   # Concept: a relay exit never ends this owner while a daemon owner is
   # present, so the relay's exit itself cannot take down the connection
@@ -1088,6 +1102,24 @@ defmodule LoopexDaemon.Owner do
     send(state.registry, {:owner_request, self(), ref, request})
     put_in(state, [:stop, :pending], {kind, ref})
   end
+
+  # The process a failed `GenServer.call` named, read from the caller's exit.
+  # A caller whose callee died on its own unanswered call exits with the
+  # callee's reason wrapped inside its own; the innermost callee is the one
+  # that actually stalled.
+  defp called({why, {module, :call, [callee | _rest]}})
+       when module in [GenServer, :gen_server, :gen] and is_pid(callee),
+       do: called(why) || callee
+
+  defp called(_reason), do: nil
+
+  defp report_component_loss(%{fatal_recipient: recipient}, class) when is_pid(recipient) do
+    Logger.debug("loopex daemon owner reported a component loss")
+    send(recipient, {:daemon_component_fatal, self(), class})
+    :ok
+  end
+
+  defp report_component_loss(_state, _class), do: :ok
 
   defp answer_pending_cut(%{stop: %{phase: phase, from: from} = stop} = state, class)
        when phase in [:cutting, :gating, :sweeping] and not is_nil(from) do
@@ -1222,6 +1254,7 @@ defmodule LoopexDaemon.Owner do
                   |> put_in([:owner_pids, owner], session_id)
 
                 activate_installed_owner(owner)
+
                 Logger.debug("loopex daemon lease owner installed")
                 {:ok, state, row}
 

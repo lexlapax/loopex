@@ -403,6 +403,28 @@ defmodule LoopexDaemon.SocketConnection do
       ),
       do: deliver_event(state, event)
 
+  # Concept: while a requested replacement is pending, the replaced
+  # attachment's pump ending is the replacement taking effect; it is noted, and
+  # the connection neither tells the client `detached` nor closes.
+  def handle_info(
+        {:attachment_disconnected, pump, _cursor},
+        %{attachment: %{pump: pump, replacing: _replacement}, closing: nil} = state
+      ),
+      do: {:noreply, replaced_pump_ended(state)}
+
+  def handle_info(
+        {:attachment_failed, pump},
+        %{attachment: %{pump: pump, replacing: _replacement}, closing: nil} = state
+      ),
+      do: {:noreply, replaced_pump_ended(state)}
+
+  def handle_info(
+        {:DOWN, monitor, :process, pump, _reason},
+        %{attachment: %{pump: pump, pump_monitor: monitor, replacing: _replacement}, closing: nil} =
+          state
+      ),
+      do: {:noreply, replaced_pump_ended(state)}
+
   def handle_info(
         {:attachment_disconnected, pump, _cursor},
         %{attachment: %{pump: pump}, closing: nil} = state
@@ -972,6 +994,17 @@ defmodule LoopexDaemon.SocketConnection do
     request_id = entry.request_id
     reserve = if state.attachment, do: :ok, else: reserve_succession(state)
 
+    # A replacement removes the current attachment in core before this
+    # connection installs the new one, so the old pump's failure while it is
+    # pending is expected, not a lost attachment. The mark names this
+    # request's origin: only its own settlement may end it, and a later
+    # replacement sent while it is pending never takes it over.
+    state =
+      if replace == true && is_map(state.attachment) &&
+           not is_map_key(state.attachment, :replacing),
+         do: put_in(state, [:attachment, :replacing], origin),
+         else: state
+
     case reserve do
       :ok ->
         options =
@@ -1087,6 +1120,35 @@ defmodule LoopexDaemon.SocketConnection do
 
       _missing ->
         {state, nil, record}
+    end
+  end
+
+  defp replaced_pump_ended(state) do
+    Logger.debug("loopex daemon replaced attachment pump ended")
+    put_in(state, [:attachment, :pump_ended], true)
+  end
+
+  # Concept: every way an attach ends without installing comes here, so a
+  # pending replacement's mark never outlives it. A replacement that did not
+  # happen leaves the current attachment in place; if that attachment's pump
+  # already ended, the attachment is gone, so after the refusal the client is
+  # told `detached` at its last emitted cursor and the connection closes, which
+  # also releases its delivery reserve.
+  defp refuse_attach(state, origin, entry, record) do
+    state = release_reservation(state, entry)
+
+    case state.attachment do
+      %{replacing: ^origin, pump_ended: true} ->
+        case noreply_record(state, record) do
+          {:noreply, state} -> begin_detach_close(state)
+          stopped -> stopped
+        end
+
+      %{replacing: ^origin} = attached ->
+        noreply_record(%{state | attachment: Map.delete(attached, :replacing)}, record)
+
+      _other ->
+        noreply_record(release_unused_succession(state), record)
     end
   end
 
@@ -1235,8 +1297,11 @@ defmodule LoopexDaemon.SocketConnection do
           state
       end
 
-    state = release_reservation(state, entry)
-    noreply_record(state, WireRecords.request_error(entry.request_id, code))
+    record = WireRecords.request_error(entry.request_id, code)
+
+    if entry.operation == :session_attach,
+      do: refuse_attach(state, origin, entry, record),
+      else: noreply_record(release_reservation(state, entry), record)
   end
 
   defp worker_lost(state, monitor) do
@@ -1246,9 +1311,13 @@ defmodule LoopexDaemon.SocketConnection do
     case RequestLedger.fetch(state.ledger, origin) do
       {:ok, entry} ->
         {_entry, ledger} = RequestLedger.complete(state.ledger, origin)
-        state = release_reservation(%{state | ledger: ledger}, entry)
+        state = %{state | ledger: ledger}
         Logger.debug("loopex daemon request worker lost")
-        noreply_record(state, WireRecords.request_error(entry.request_id, "internal_failure"))
+        record = WireRecords.request_error(entry.request_id, "internal_failure")
+
+        if entry.operation == :session_attach,
+          do: refuse_attach(state, origin, entry, record),
+          else: noreply_record(release_reservation(state, entry), record)
 
       :error ->
         {:noreply, state}
@@ -1270,8 +1339,7 @@ defmodule LoopexDaemon.SocketConnection do
             noreply_record(state, record, cursor)
 
           {:session_attach, _refused} ->
-            state = state |> release_reservation(entry) |> release_unused_succession()
-            noreply_record(state, record)
+            refuse_attach(state, origin, entry, record)
 
           {_operation, "result"} ->
             noreply_record(bind_session(state, entry), record)
@@ -1288,8 +1356,12 @@ defmodule LoopexDaemon.SocketConnection do
         {:noreply, state}
 
       {entry, ledger} ->
-        state = release_reservation(%{state | ledger: ledger}, entry)
-        noreply_record(state, WireRecords.request_error(entry.request_id, code))
+        state = %{state | ledger: ledger}
+        record = WireRecords.request_error(entry.request_id, code)
+
+        if entry.operation == :session_attach,
+          do: refuse_attach(state, origin, entry, record),
+          else: noreply_record(release_reservation(state, entry), record)
     end
   end
 
