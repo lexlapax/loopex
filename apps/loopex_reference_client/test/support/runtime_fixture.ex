@@ -381,14 +381,15 @@ defmodule Loopex.ReferenceClientRuntimeFixture do
       # and runs under a runtime-bound trace capability (ADR 0034), which this
       # fixture composes as the reference composition does; the capability is
       # bound to the runtime once it has started.
+      # The credential is consumed first, so a failed build cannot leave it
+      # in this VM's environment.
+      credential_options = provider_credential_options()
       {:ok, capability_pid} = Loopex.Trace.Capability.start_link([])
       {:ok, capability} = Loopex.Trace.Capability.handle(capability_pid)
 
       launch =
         Loopex.LLM.ReqLLM.ProviderBuildFixture.options!(root) ++
-          Loopex.LLM.ReqLLM.ProviderBuildFixture.custody_options(
-            System.get_env("LOOPEX_PROVIDER_API_KEY")
-          ) ++ [tracing_capability: capability]
+          credential_options ++ [tracing_capability: capability]
 
       {launch, [sampling: %{"max_tokens" => Keyword.get(options, :max_tokens, 256)}]}
     rescue
@@ -400,6 +401,22 @@ defmodule Loopex.ReferenceClientRuntimeFixture do
 
   defp model_configuration(_module, options, _root, _owns_root?),
     do: {Keyword.put_new(options, :max_tokens, 256), []}
+
+  @doc """
+  ## Concept
+
+  The credential options a real-provider fixture composes with. Composition
+  consumes the credential: once they are built, this VM's environment no
+  longer names it.
+
+  ## Technical depth
+
+  Reads and deletes `LOOPEX_PROVIDER_API_KEY` once through
+  `ProviderBuildFixture.consume_custody_options/0` and returns the opaque token
+  and registry handle routed to the custody process that holds the bytes.
+  """
+  def provider_credential_options,
+    do: Loopex.LLM.ReqLLM.ProviderBuildFixture.consume_custody_options()
 
   defp load_pages(loader, position, accumulated) do
     case loader.(position) do

@@ -36,11 +36,12 @@ defmodule Loopex.LLM.ReqLLM.ProviderTest do
     File.mkdir!(root)
     on_exit(fn -> File.rm_rf!(root) end)
     # The adapter resolves its credential per invocation from host custody
-    # (ADR 0034), so the lane composes that custody from its own credential.
+    # (ADR 0034), so the lane composes that custody from its own credential,
+    # reading and deleting the variable as a host does.
+    credential_options = ProviderBuildFixture.consume_custody_options()
+
     options =
-      ProviderBuildFixture.options!(root) ++
-        [cleanup_grace_ms: 2_000] ++
-        ProviderBuildFixture.custody_options(System.get_env(Adapter.credential_variable()))
+      ProviderBuildFixture.options!(root) ++ [cleanup_grace_ms: 2_000] ++ credential_options
 
     Loopex.LLM.ReqLLM.ProviderPhaseDiagnostic.capture(fn ->
       case Adapter.complete_prompt(model_spec, @prompt, options) do

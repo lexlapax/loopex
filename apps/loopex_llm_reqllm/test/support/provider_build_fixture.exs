@@ -161,6 +161,31 @@ defmodule Loopex.LLM.ReqLLM.ProviderBuildFixture do
     [credential_token: token, credential_registry: registry]
   end
 
+  @doc """
+  ## Concept
+
+  Takes the lane's credential the way the reference hosts compose one: read
+  once from the environment, removed from this VM's environment in the same
+  step, and held only in custody from then on.
+
+  ## Technical depth
+
+  Reads and deletes `Loopex.LLM.ReqLLM.credential_variable/0` as
+  `LoopexComposition.CredentialHost.open/0` does, then returns
+  `custody_options/1` for the value. The variable is deleted whether or not
+  its value is usable; an absent value is unavailable evidence and raises
+  without naming anything but the variable.
+  """
+  def consume_custody_options do
+    variable = Loopex.LLM.ReqLLM.credential_variable()
+    credential = System.get_env(variable)
+    System.delete_env(variable)
+
+    if is_binary(credential) and credential != "",
+      do: custody_options(credential),
+      else: raise("evidence unavailable: #{variable} is not set")
+  end
+
   defp verify!(worker, source) do
     {:ok, [configuration]} = :file.consult(String.to_charlist(worker <> ".launch"))
     {:ok, [manifest]} = :file.consult(String.to_charlist(worker <> ".manifest"))

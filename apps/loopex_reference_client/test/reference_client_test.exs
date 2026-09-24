@@ -6,6 +6,41 @@ defmodule Loopex.ReferenceClientTest do
   alias Loopex.ReferenceClient
   alias Loopex.ReferenceClientRuntimeFixture, as: Fixture
 
+  # Concept: a real-provider fixture consumes its credential when it composes:
+  # afterwards this VM's environment no longer names it, and custody alone
+  # holds it.
+  #
+  # Technical depth: a synthetic key is placed in `LOOPEX_PROVIDER_API_KEY`
+  # and the fixture's credential composition runs once. The variable is then
+  # absent, and the returned token routes through the returned registry to a
+  # custody process that resolves exactly that key. A value the variable held
+  # before the case is restored when it ends.
+  test "real-provider fixture composition consumes the credential into custody" do
+    variable = Loopex.LLM.ReqLLM.credential_variable()
+    previous = System.get_env(variable)
+
+    on_exit(fn ->
+      if previous,
+        do: System.put_env(variable, previous),
+        else: System.delete_env(variable)
+    end)
+
+    key = "reference-fixture-synthetic-credential"
+    System.put_env(variable, key)
+    options = Fixture.provider_credential_options()
+
+    assert System.get_env(variable) == nil
+    assert Enum.sort(Keyword.keys(options)) == [:credential_registry, :credential_token]
+
+    assert {:ok, custody} =
+             Loopex.LLM.ReqLLM.CredentialRegistry.route(
+               Keyword.fetch!(options, :credential_registry),
+               Keyword.fetch!(options, :credential_token)
+             )
+
+    assert {:ok, %{credential: ^key}} = Loopex.LLM.ReqLLM.CredentialCustody.resolve(custody)
+  end
+
   test "the client drives the loop through the embedded API only" do
     fixture =
       Fixture.start(

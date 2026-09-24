@@ -9,9 +9,15 @@ defmodule Loopex.ReferenceClientTraceChild do
   @marker "LOOPEX_TRACE_V1 "
   @credential_limit 16_384
 
+  # Concept: the child is handed the credential the way an operator hands it
+  # to a host, and its composition consumes it.
+  #
+  # Technical depth: the frame arrives on standard input so the child's
+  # initial environment never carries it. It is placed in the environment
+  # only for the fixture's composition, which reads and deletes it before any
+  # runtime starts, so from then on this VM's environment names no credential.
   def run do
-    credential = read_credential!()
-    System.put_env("LOOPEX_PROVIDER_API_KEY", credential)
+    System.put_env(Loopex.LLM.ReqLLM.credential_variable(), read_credential!())
 
     case System.argv() do
       ["phase1", root] -> phase1(root)
