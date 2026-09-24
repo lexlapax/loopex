@@ -450,11 +450,12 @@ defmodule LoopexCli.CodingTaskTest do
     {root, _workspace} = Demonstration.repository("real-reply")
     on_exit(fn -> File.rm_rf(root) end)
     # The adapter resolves its credential per invocation from host custody
-    # (ADR 0034), so a direct call composes that custody from the lane's key.
+    # (ADR 0034), so a direct call composes that custody from the lane's key,
+    # reading and deleting the variable as a host does.
+    credential_options = ProviderBuildFixture.consume_custody_options()
+
     launch =
-      ProviderBuildFixture.options!(root) ++
-        [cleanup_grace_ms: 2_000] ++
-        ProviderBuildFixture.custody_options(System.get_env("LOOPEX_PROVIDER_API_KEY"))
+      ProviderBuildFixture.options!(root) ++ [cleanup_grace_ms: 2_000] ++ credential_options
 
     # A standalone call goes through `complete_prompt/3`, which supplies the
     # no-runtime trace capability a direct call needs (ADR 0034) and the same

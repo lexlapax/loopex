@@ -137,21 +137,12 @@ defmodule Loopex.LLM.ReqLLM.ProviderBuildFixture do
     unless status == 0, do: raise("provider cold build failed (#{status}):\n#{output}")
   end
 
-  @doc """
-  ## Concept
-
-  Host credential custody for a real-provider call made directly through the
-  adapter, which since ADR 0034 resolves its credential per invocation and
-  refuses without it.
-
-  ## Technical depth
-
-  Starts a routing registry and a custody process holding `credential`, binds
-  a fresh opaque token to that custody, and returns the two options the adapter
-  requires. The credential stays inside the custody process and is never
-  returned or printed.
-  """
-  def custody_options(credential) when is_binary(credential) and credential != "" do
+  # Concept: host credential custody for a real-provider call, which since
+  # ADR 0034 resolves its credential per invocation and refuses without it.
+  # Technical depth: starts a routing registry and a custody process holding
+  # `credential`, binds a fresh opaque token to that custody, and returns the
+  # two options the adapter requires. The bytes stay inside custody.
+  defp custody_options(credential) when is_binary(credential) and credential != "" do
     {:ok, registry_pid} = Loopex.LLM.ReqLLM.CredentialRegistry.start_link([])
     {:ok, registry} = Loopex.LLM.ReqLLM.CredentialRegistry.handle(registry_pid)
     {:ok, custody_pid} = Loopex.LLM.ReqLLM.CredentialCustody.start_link(credential: credential)
@@ -171,8 +162,9 @@ defmodule Loopex.LLM.ReqLLM.ProviderBuildFixture do
   ## Technical depth
 
   Reads and deletes `Loopex.LLM.ReqLLM.credential_variable/0` as
-  `LoopexComposition.CredentialHost.open/0` does, then returns
-  `custody_options/1` for the value. The variable is deleted whether or not
+  `LoopexComposition.CredentialHost.open/0` does, then starts a routing
+  registry and a custody process holding the value and returns the opaque
+  token and registry handle routed to it. The variable is deleted whether or not
   its value is usable; an absent value is unavailable evidence and raises
   without naming anything but the variable.
   """
