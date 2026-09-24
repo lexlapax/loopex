@@ -1779,6 +1779,34 @@ defmodule LoopexDaemon.SocketTransportTest do
     end
   end
 
+  # Concept (P3, T12): a holder connection that never acknowledges its
+  # owner-lost close within its five-second step is killed alone: its client
+  # sees EOF, and the daemon keeps serving other clients with no daemon-wide
+  # failure.
+  #
+  # Technical depth: the holder's connection is suspended before its lease
+  # owner is killed, so the close waits in its mailbox past the step.
+  @tag timeout: 30_000
+  test "a suspended holder is killed at its close step and the daemon keeps serving",
+       %{daemon: daemon} do
+    client = initialized_client(daemon)
+    session_id = create_session(client, "suspended-holder")
+    :ok = send_frame(client, acquire("acquire", session_id))
+    assert [%{"request_id" => "acquire", "type" => "result"}] = receive_records(client, 1)
+    [lease_owner] = lease_owner_pids(daemon)
+    connection = initialized_connection(daemon)
+    monitor = Process.monitor(connection)
+    :ok = :sys.suspend(connection)
+    started = System.monotonic_time(:millisecond)
+    Process.exit(lease_owner, :kill)
+    assert_receive {:DOWN, ^monitor, :process, ^connection, :killed}, 7_000
+    assert System.monotonic_time(:millisecond) - started >= 4_900
+    assert records_until_closed(client, 2_000) == []
+    refute_received {:daemon_component_fatal, _reporter, _class}
+    _other = initialized_client(daemon)
+    assert Process.alive?(daemon.owner)
+  end
+
   defp watch_relay(relay, matcher) do
     test = self()
 

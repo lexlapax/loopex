@@ -137,6 +137,74 @@ defmodule LoopexDaemon.ServiceLifecycleTest do
     :ok = GenServer.stop(adapter)
   end
 
+  # Concept (T21): during an orderly stop, a lease owner's relay request that
+  # stays unanswered for longer than a serving step between the admission
+  # cut and the freeze is governed by the stop's own deadlines: its
+  # unanswered-request report latches nothing, the request completes once
+  # the relay resumes, and the stop exits 0.
+  #
+  # Technical depth: a second client's acquire is opened while its lease
+  # owner is suspended, so the lease owner claims it only after the cut. The
+  # relay is suspended for six seconds from the moment the cut is consumed,
+  # and the lease owner is then resumed, so its claim waits past its
+  # five-second report. The admission wait is ten seconds, so the stop
+  # reaches the freeze only after the relay resumes and the request settles.
+  @tag timeout: 90_000
+  test "a lease owner's relay request outlasting its step during the stop still exits zero",
+       %{options: options} do
+    daemon = start_daemon(Keyword.put(options, :admission_wait_ms, 10_000))
+    _ready = await_ready(daemon.output)
+    holder = initialized(options[:socket_path])
+
+    :ok =
+      send_frame(holder, %{
+        "method" => "session.create",
+        "request_id" => "create",
+        "command_id" => Wire.encode_identity("t21-create"),
+        "session_options" => %{"purpose" => "t21"}
+      })
+
+    assert [%{"status" => "accepted", "session_id" => session_id}] = receive_records(holder, 1)
+    acquire = %{"method" => "session.acquire_control", "session_id" => session_id}
+    :ok = send_frame(holder, Map.put(acquire, "request_id", "holder-acquire"))
+    assert [%{"type" => "result"}] = receive_records(holder, 1)
+
+    collaboration = :sys.get_state(daemon.owner).pids.collaboration
+    %{relay: relay, owners: owners} = :sys.get_state(collaboration)
+    [%{pid: lease_owner}] = Map.values(owners)
+    :ok = :sys.suspend(lease_owner)
+
+    observer = initialized(options[:socket_path])
+    :ok = send_frame(observer, Map.put(acquire, "request_id", "observer-acquire"))
+    await_until(fn -> map_size(:sys.get_state(relay).permits) == 1 end)
+
+    send(daemon.sentinel, {:daemon_signal, daemon.owner_ref, :sigterm})
+
+    await_until(fn -> :sys.get_state(relay).phase == :draining end)
+
+    :ok = :sys.suspend(relay)
+    :ok = :sys.resume(lease_owner)
+    Process.sleep(6_000)
+    :ok = :sys.resume(relay)
+
+    assert [%{"request_id" => "observer-acquire", "code" => "control_held"}] =
+             receive_records(observer, 1)
+
+    assert Task.await(daemon.task, 60_000) == 0
+  end
+
+  defp await_until(predicate, attempts \\ 1_000)
+  defp await_until(predicate, 0), do: assert(predicate.())
+
+  defp await_until(predicate, attempts) do
+    if predicate.() do
+      :ok
+    else
+      Process.sleep(10)
+      await_until(predicate, attempts - 1)
+    end
+  end
+
   # Concept: losing the listener after readiness is a daemon failure: the
   # daemon tells every connected client why it is stopping and ends with the
   # listener's own exit class.

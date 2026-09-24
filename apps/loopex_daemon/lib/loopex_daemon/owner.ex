@@ -11,18 +11,18 @@ defmodule LoopexDaemon.Owner do
 
   The owner starts and links the admission relay and connection registry,
   binds their shared incarnation, and starts bounded per-session lease owners.
-  Each holder-changing grant, release, or expiry is one retained operation with
-  one absolute deadline. Registry, relay, and lease-owner steps use exact
-  ref-tagged acknowledgements; stale replies are ignored. A missed mirror
-  deadline kills the exact registry and stops the daemon owner with
-  `:connections_lost`. A release fixes `owner_restore_deadline` and
-  `release_settlement_deadline` at acceptance; a missed restoration kills and
-  supersedes the exact owner, and a missed relay settlement is `:relay_lost`.
-  A relay request the registry reports unanswered while serving is also
-  `:relay_lost`; the registry's own exit is always `:connections_lost`, since
-  it never waits on the relay inside a call. After the admission cut, owner
-  losses and releases start no private clock and emit no `control_owner_lost`
-  form; the lease freeze cleans up every
+  Each holder-changing grant, release, expiry or owner loss is one retained
+  operation whose every step has its own instant, fixed when the step's
+  request is sent. Registry, relay, lease-owner and holder steps use exact
+  ref-tagged acknowledgements; stale replies are ignored. A missed step names
+  its owner: the registry is `:connections_lost` (the registry is killed), the
+  relay is `:relay_lost`, a lease owner is killed and superseded, and a holder
+  connection is killed and its exit completes the close. A relay request the
+  registry reports unanswered while serving is also `:relay_lost`; the
+  registry's own exit is always `:connections_lost`, since it never waits on
+  the relay inside a call. After the admission cut, no step starts an
+  instant, a holder close already sent is bound to the transport-cut instant,
+  and no `control_owner_lost` form is emitted; the lease freeze cleans up every
   descriptor the relay names before core quiesce. Status and formatted state
   expose counts only, and every lifecycle log is fixed and identity-free.
   """
@@ -404,7 +404,7 @@ defmodule LoopexDaemon.Owner do
              operation.row.session_id == session_id
          end) do
       {operation_ref, operation} ->
-        state = put_in(state, [:mirror_operations, operation_ref, :step], :pop_owner)
+        state = enter_step(state, operation_ref, :pop_owner)
         request_retirement_pop(state, operation_ref, operation)
         {:reply, :ok, state}
 
@@ -1170,30 +1170,35 @@ defmodule LoopexDaemon.Owner do
     {:noreply, maybe_finish_sweep(put_in(state, [:stop, :swept], true))}
   end
 
+  # Concept: a step whose instant passes names the component that owns it.
   def handle_info({:mirror_deadline, operation_ref, deadline}, state) do
     case Map.get(state.mirror_operations, operation_ref) do
-      %{kind: :release, stop_owned: true} ->
-        {:noreply, state}
-
-      %{kind: :release} = operation ->
-        release_deadline(state, operation_ref, operation)
-
-      %{deadline: ^deadline} ->
+      %{step_deadline: ^deadline} = operation ->
         if monotonic_ms() >= deadline do
-          fail_connections(state)
+          late_action(state, operation_ref, operation, late_class(operation))
         else
-          timer =
-            Process.send_after(
-              self(),
-              {:mirror_deadline, operation_ref, deadline},
-              max(deadline - monotonic_ms(), 0)
-            )
-
+          timer = schedule_deadline(operation_ref, deadline)
           {:noreply, put_in(state, [:mirror_operations, operation_ref, :timer], timer)}
         end
 
       _other ->
         {:noreply, state}
+    end
+  end
+
+  # Concept: a holder connection's exit completes its owner-loss close,
+  # whether it acknowledged, crashed or was killed at its step.
+  def handle_info({:DOWN, monitor, :process, _holder, _reason} = message, state) do
+    case Enum.find(state.mirror_operations, fn {_operation_ref, operation} ->
+           operation.kind == :owner_loss and operation.step == :await_holder_close and
+             operation.holder_monitor == monitor
+         end) do
+      {operation_ref, operation} ->
+        Logger.debug("loopex daemon lost owner holder exit completed its close")
+        complete_owner_loss_notification(state, operation_ref, operation)
+
+      nil ->
+        unexpected_down(state, message)
     end
   end
 
@@ -1290,6 +1295,8 @@ defmodule LoopexDaemon.Owner do
   end
 
   def handle_info(_message, state), do: {:noreply, state}
+
+  defp unexpected_down(state, _message), do: {:noreply, state}
 
   # Concept: the transport cut asks the registry by message, never by a call
   # this owner would block in.
@@ -2367,7 +2374,6 @@ defmodule LoopexDaemon.Owner do
 
   defp start_grant_operation(state, operation, grant_ref, writer_epoch, _request_deadline) do
     operation_ref = make_ref()
-    {deadline, timer} = mirror_clock(state, operation_ref)
     pending_loss = Map.get(state.pending_dispositions, operation.request.permit_id)
 
     row = %{
@@ -2391,15 +2397,13 @@ defmodule LoopexDaemon.Owner do
       actor_incarnation: operation.actor_incarnation,
       transition_ref: grant_ref,
       row: row,
-      deadline: deadline,
-      timer: timer,
       loss_ref: if(pending_loss, do: pending_loss.settlement_ref, else: nil)
     }
 
     state =
       state
       |> put_in([:operations, operation.request.permit_id, :phase], :settling)
-      |> put_in([:mirror_operations, operation_ref], mirror_operation)
+      |> put_mirror(operation_ref, mirror_operation)
       |> update_in([:pending_dispositions], &Map.delete(&1, operation.request.permit_id))
 
     ConnectionRegistry.apply_mirror(
@@ -2428,21 +2432,7 @@ defmodule LoopexDaemon.Owner do
              holder == operation.request.connection and
              holder_incarnation == operation.request.connection_incarnation ->
         operation_ref = make_ref()
-        accepted_at = monotonic_ms()
         pending_loss = Map.get(state.pending_dispositions, operation.request.permit_id)
-
-        # Concept: a release accepted while serving fixes its two absolute
-        # instants from one acceptance time; neither restarts. A release
-        # accepted after the admission cut has no private clock: the stop
-        # barriers govern it.
-        #
-        # Technical depth: `deadline` is `owner_restore_deadline`, bounding the
-        # result CAS, owner restoration and mirror clear; `settlement_deadline`
-        # is `release_settlement_deadline`, bounding exact relay
-        # terminalization. They are `mirror_deadline_ms` and twice it after
-        # acceptance, the fixed 5,000 and 10,000 ms at the default.
-        stop_owned = not is_nil(state.stop)
-        deadline = accepted_at + state.mirror_deadline_ms
 
         mirror_operation = %{
           kind: :release,
@@ -2454,10 +2444,6 @@ defmodule LoopexDaemon.Owner do
           actor_incarnation: operation.actor_incarnation,
           transition_ref: release_ref,
           row: route,
-          deadline: deadline,
-          settlement_deadline: accepted_at + 2 * state.mirror_deadline_ms,
-          timer: if(stop_owned, do: nil, else: schedule_deadline(operation_ref, deadline)),
-          stop_owned: stop_owned,
           superseded: false,
           loss_ref: if(pending_loss, do: pending_loss.settlement_ref, else: nil)
         }
@@ -2465,7 +2451,7 @@ defmodule LoopexDaemon.Owner do
         state =
           state
           |> put_in([:operations, operation.request.permit_id, :phase], :settling)
-          |> put_in([:mirror_operations, operation_ref], mirror_operation)
+          |> put_mirror(operation_ref, mirror_operation)
           |> update_in([:pending_dispositions], &Map.delete(&1, operation.request.permit_id))
 
         if pending_loss do
@@ -2490,7 +2476,6 @@ defmodule LoopexDaemon.Owner do
 
   defp start_expiry_operation(state, expiry_ref, route) do
     operation_ref = make_ref()
-    {deadline, timer} = mirror_clock(state, operation_ref)
 
     mirror_operation = %{
       kind: :expiry,
@@ -2500,12 +2485,10 @@ defmodule LoopexDaemon.Owner do
       owner_incarnation: route.owner_incarnation,
       transition_ref: expiry_ref,
       row: route,
-      deadline: deadline,
-      timer: timer,
       loss_ref: nil
     }
 
-    state = put_in(state, [:mirror_operations, operation_ref], mirror_operation)
+    state = put_mirror(state, operation_ref, mirror_operation)
 
     ConnectionRegistry.apply_mirror(
       state.registry,
@@ -2521,7 +2504,6 @@ defmodule LoopexDaemon.Owner do
 
   defp start_retirement_pop(state, session_id, predecessor) do
     operation_ref = make_ref()
-    {deadline, timer} = mirror_clock(state, operation_ref)
 
     step = if is_pid(state.retirement_pop_gate), do: :pop_owner_blocked, else: :pop_owner
 
@@ -2535,12 +2517,10 @@ defmodule LoopexDaemon.Owner do
         session_id: session_id,
         owner_pid: predecessor.pid,
         owner_incarnation: predecessor.incarnation
-      },
-      deadline: deadline,
-      timer: timer
+      }
     }
 
-    state = put_in(state, [:mirror_operations, operation_ref], operation)
+    state = put_mirror(state, operation_ref, operation)
 
     if step == :pop_owner_blocked do
       send(
@@ -2571,8 +2551,6 @@ defmodule LoopexDaemon.Owner do
   defp start_owner_loss_pop(state, session_id, predecessor) do
     operation_ref = make_ref()
     classification_ref = make_ref()
-    stop_owned = not is_nil(state.stop)
-    deadline = if stop_owned, do: nil, else: monotonic_ms() + state.mirror_deadline_ms
 
     operation = %{
       kind: :owner_loss,
@@ -2582,20 +2560,18 @@ defmodule LoopexDaemon.Owner do
       owner_incarnation: predecessor.incarnation,
       classification_ref: classification_ref,
       close_ref: nil,
+      holder_monitor: nil,
       holder: nil,
       row: %{
         session_id: session_id,
         owner_pid: predecessor.pid,
         owner_incarnation: predecessor.incarnation
-      },
-      deadline: deadline,
-      timer: if(stop_owned, do: nil, else: schedule_deadline(operation_ref, deadline)),
-      stop_owned: stop_owned
+      }
     }
 
     state =
       state
-      |> put_in([:mirror_operations, operation_ref], operation)
+      |> put_mirror(operation_ref, operation)
       |> put_in([:owners, session_id, :loss_pop_started], true)
 
     ConnectionRegistry.apply_mirror(
@@ -2659,7 +2635,7 @@ defmodule LoopexDaemon.Owner do
     state =
       state
       |> put_in([:routes, session_id], route)
-      |> put_in([:mirror_operations, operation_ref, :step], :settle_result_after_owner_loss)
+      |> enter_step(operation_ref, :settle_result_after_owner_loss)
 
     request_relay_result_settlement(state, operation_ref, operation)
     {:noreply, state}
@@ -2693,7 +2669,7 @@ defmodule LoopexDaemon.Owner do
       operation.owner_pid == owner and operation.owner_incarnation == owner_incarnation and
         operation.kind != :owner_loss
     end)
-    |> Enum.sort_by(fn {_operation_ref, operation} -> operation.deadline end)
+    |> Enum.sort_by(fn {_operation_ref, operation} -> operation.opened_at end)
   end
 
   # Concept: a fresh child's first acquire names the daemon as its actor, so
@@ -2814,7 +2790,7 @@ defmodule LoopexDaemon.Owner do
          %{kind: :grant, step: :install} = operation,
          :ok
        ) do
-    state = put_in(state, [:mirror_operations, operation_ref, :step], :select_result)
+    state = enter_step(state, operation_ref, :select_result)
     request_relay_selection(state, operation_ref, operation)
     {:noreply, state}
   end
@@ -2826,7 +2802,7 @@ defmodule LoopexDaemon.Owner do
          result
        )
        when result == :ok or result == {:error, :connection_not_live} do
-    state = put_in(state, [:mirror_operations, operation_ref, :step], :resolve_cancelled)
+    state = enter_step(state, operation_ref, :resolve_cancelled)
 
     ConnectionRegistry.apply_mirror(
       state.registry,
@@ -2845,7 +2821,7 @@ defmodule LoopexDaemon.Owner do
          %{kind: :grant, step: :install},
          {:error, :connection_not_live}
        ) do
-    state = put_in(state, [:mirror_operations, operation_ref, :step], :await_connection_loss)
+    state = enter_step(state, operation_ref, :await_connection_loss)
     {:noreply, state}
   end
 
@@ -2861,15 +2837,12 @@ defmodule LoopexDaemon.Owner do
       state =
         state
         |> put_in([:routes, route.session_id], route)
-        |> put_in(
-          [:mirror_operations, operation_ref, :step],
-          :settle_result_after_owner_loss
-        )
+        |> enter_step(operation_ref, :settle_result_after_owner_loss)
 
       request_relay_result_settlement(state, operation_ref, operation)
       {:noreply, state}
     else
-      state = put_in(state, [:mirror_operations, operation_ref, :step], :resolve_owner_grant)
+      state = enter_step(state, operation_ref, :resolve_owner_grant)
 
       LeaseOwner.request_grant_resolution(
         operation.owner_pid,
@@ -2893,7 +2866,7 @@ defmodule LoopexDaemon.Owner do
     if lost_owner?(state, operation) do
       settle_cancelled_disposition(state, operation_ref, operation)
     else
-      state = put_in(state, [:mirror_operations, operation_ref, :step], :resolve_owner_cancel)
+      state = enter_step(state, operation_ref, :resolve_owner_cancel)
 
       LeaseOwner.request_grant_resolution(
         operation.owner_pid,
@@ -2921,7 +2894,7 @@ defmodule LoopexDaemon.Owner do
          %{kind: :release, step: :clear} = operation,
          :ok
        ) do
-    state = put_in(state, [:mirror_operations, operation_ref, :step], :settle_result)
+    state = enter_step(state, operation_ref, :settle_result)
     request_relay_result_settlement(state, operation_ref, operation)
     {:noreply, state}
   end
@@ -2936,7 +2909,7 @@ defmodule LoopexDaemon.Owner do
       state = update_in(state.routes, &Map.delete(&1, operation.row.session_id))
       complete_operation_after_owner_loss(state, operation_ref, operation)
     else
-      state = put_in(state, [:mirror_operations, operation_ref, :step], :resolve_owner_expiry)
+      state = enter_step(state, operation_ref, :resolve_owner_expiry)
 
       LeaseOwner.request_expiry_resolution(
         operation.owner_pid,
@@ -3040,7 +3013,7 @@ defmodule LoopexDaemon.Owner do
 
     state =
       state
-      |> put_in([:mirror_operations, operation_ref, :step], :await_classification)
+      |> enter_step(operation_ref, :await_classification)
       |> put_in([:mirror_operations, operation_ref, :holder], holder)
       |> put_in([:owners, operation.row.session_id, :mirror_complete], true)
       |> update_in([:routes], &Map.delete(&1, operation.row.session_id))
@@ -3085,7 +3058,7 @@ defmodule LoopexDaemon.Owner do
          :select_result,
          :ok
        ) do
-    state = put_in(state, [:mirror_operations, operation_ref, :step], :resolve_granted)
+    state = enter_step(state, operation_ref, :resolve_granted)
 
     ConnectionRegistry.apply_mirror(
       state.registry,
@@ -3105,7 +3078,7 @@ defmodule LoopexDaemon.Owner do
          :select_result,
          {:error, :owner_lost}
        ) do
-    state = put_in(state, [:mirror_operations, operation_ref, :step], :resolve_owner_lost)
+    state = enter_step(state, operation_ref, :resolve_owner_lost)
 
     ConnectionRegistry.apply_mirror(
       state.registry,
@@ -3125,7 +3098,7 @@ defmodule LoopexDaemon.Owner do
          :select_result,
          {:error, :connection_lost}
        ) do
-    {:noreply, put_in(state, [:mirror_operations, operation_ref, :step], :await_connection_loss)}
+    {:noreply, enter_step(state, operation_ref, :await_connection_loss)}
   end
 
   defp apply_relay_result(
@@ -3135,7 +3108,7 @@ defmodule LoopexDaemon.Owner do
          :select_result,
          :ok
        ) do
-    state = put_in(state, [:mirror_operations, operation_ref, :step], :clear)
+    state = enter_step(state, operation_ref, :clear)
 
     ConnectionRegistry.apply_mirror(
       state.registry,
@@ -3164,7 +3137,7 @@ defmodule LoopexDaemon.Owner do
          :select_result,
          {:error, :connection_lost}
        ) do
-    {:noreply, put_in(state, [:mirror_operations, operation_ref, :step], :await_connection_loss)}
+    {:noreply, enter_step(state, operation_ref, :await_connection_loss)}
   end
 
   defp apply_relay_result(
@@ -3209,7 +3182,7 @@ defmodule LoopexDaemon.Owner do
       state = update_in(state.routes, &Map.delete(&1, operation.row.session_id))
       complete_operation_after_owner_loss(state, operation_ref, operation)
     else
-      state = put_in(state, [:mirror_operations, operation_ref, :step], :resolve_owner_release)
+      state = enter_step(state, operation_ref, :resolve_owner_release)
 
       LeaseOwner.request_release_resolution(
         operation.owner_pid,
@@ -3285,7 +3258,7 @@ defmodule LoopexDaemon.Owner do
        ) do
     route = operation.row |> Map.drop([:permit_id, :start_op_ref]) |> Map.put(:phase, :granted)
     state = put_in(state, [:routes, route.session_id], route)
-    state = put_in(state, [:mirror_operations, operation_ref, :step], :settle_result)
+    state = enter_step(state, operation_ref, :settle_result)
     request_relay_result_settlement(state, operation_ref, operation)
     {:noreply, state}
   end
@@ -3297,7 +3270,7 @@ defmodule LoopexDaemon.Owner do
          :grant,
          :ok
        ) do
-    state = put_in(state, [:mirror_operations, operation_ref, :step], :settle_disposition)
+    state = enter_step(state, operation_ref, :settle_disposition)
     request_relay_disposition_settlement(state, operation_ref, operation)
     {:noreply, state}
   end
@@ -3309,7 +3282,7 @@ defmodule LoopexDaemon.Owner do
          :release,
          :ok
        ) do
-    state = put_in(state, [:mirror_operations, operation_ref, :step], :settle_disposition)
+    state = enter_step(state, operation_ref, :settle_disposition)
     request_relay_disposition_settlement(state, operation_ref, operation)
     {:noreply, state}
   end
@@ -3438,8 +3411,12 @@ defmodule LoopexDaemon.Owner do
         end
 
       [{operation_ref, %{kind: :grant, step: :install} = operation}] ->
-        operation = %{operation | step: :install_connection_lost, loss_ref: loss.settlement_ref}
-        {:noreply, put_in(state, [:mirror_operations, operation_ref], operation)}
+        operation = %{operation | loss_ref: loss.settlement_ref}
+
+        state
+        |> put_in([:mirror_operations, operation_ref], operation)
+        |> enter_step(operation_ref, :install_connection_lost)
+        |> noreply()
 
       [{_operation_ref, %{step: :install_connection_lost, loss_ref: loss_ref}}]
       when loss_ref == loss.settlement_ref ->
@@ -3448,7 +3425,11 @@ defmodule LoopexDaemon.Owner do
       [{operation_ref, %{kind: :grant, step: step, row: row} = operation}]
       when step in [:await_connection_loss, :select_result] ->
         operation = %{operation | step: :resolve_cancelled, loss_ref: loss.settlement_ref}
-        state = put_in(state, [:mirror_operations, operation_ref], operation)
+
+        state =
+          state
+          |> put_in([:mirror_operations, operation_ref], operation)
+          |> enter_step(operation_ref, :resolve_cancelled)
 
         ConnectionRegistry.apply_mirror(
           state.registry,
@@ -3463,7 +3444,11 @@ defmodule LoopexDaemon.Owner do
       [{operation_ref, %{kind: :release, step: step} = operation}]
       when step in [:await_connection_loss, :select_result] ->
         operation = %{operation | step: :resolve_owner_cancel, loss_ref: loss.settlement_ref}
-        state = put_in(state, [:mirror_operations, operation_ref], operation)
+
+        state =
+          state
+          |> put_in([:mirror_operations, operation_ref], operation)
+          |> enter_step(operation_ref, :resolve_owner_cancel)
 
         if lost_owner?(state, operation) do
           settle_cancelled_disposition(state, operation_ref, operation)
@@ -3587,7 +3572,6 @@ defmodule LoopexDaemon.Owner do
 
   defp start_waiting_owner_loss_settlement(state, permit_id, operation, loss) do
     operation_ref = make_ref()
-    {deadline, timer} = mirror_clock(state, operation_ref)
 
     settlement = %{
       kind: :queued_grant,
@@ -3599,15 +3583,13 @@ defmodule LoopexDaemon.Owner do
       actor_incarnation: operation.actor_incarnation,
       transition_ref: nil,
       row: %{session_id: operation.request.session_id},
-      deadline: deadline,
-      timer: timer,
       loss_ref: loss.settlement_ref
     }
 
     state =
       state
       |> put_in([:operations, permit_id, :phase], :settling)
-      |> put_in([:mirror_operations, operation_ref], settlement)
+      |> put_mirror(operation_ref, settlement)
 
     request_relay_disposition_settlement(state, operation_ref, settlement)
     Logger.debug("loopex daemon queued successor connection loss settlement start")
@@ -3695,7 +3677,7 @@ defmodule LoopexDaemon.Owner do
   end
 
   defp settle_cancelled_disposition(state, operation_ref, operation) do
-    state = put_in(state, [:mirror_operations, operation_ref, :step], :settle_disposition)
+    state = enter_step(state, operation_ref, :settle_disposition)
     request_relay_disposition_settlement(state, operation_ref, operation)
     Logger.debug("loopex daemon lost owner cancellation settlement start")
     {:noreply, state}
@@ -3784,24 +3766,26 @@ defmodule LoopexDaemon.Owner do
              operation.owner_incarnation == owner_incarnation
          end) do
       {operation_ref, operation} ->
-        if deadline_reached?(operation) do
-          fail_connections(state)
-        else
-          case Map.get(state.owners, session_id) do
-            %{
-              pid: ^owner,
-              incarnation: ^owner_incarnation,
-              relay_loss_seen: true,
-              relay_loss_ready: true,
-              mirror_complete: true
-            } = row ->
-              row = %{row | classification_complete: true}
-              state = put_in(state, [:owners, session_id], row)
-              continue_owner_loss_notification(state, operation_ref, operation)
+        # Concept: a classification consumed after its step's instant is the
+        # relay's lateness, never the registry's.
+        case {late_disposition(operation), Map.get(state.owners, session_id)} do
+          {nil,
+           %{
+             pid: ^owner,
+             incarnation: ^owner_incarnation,
+             relay_loss_seen: true,
+             relay_loss_ready: true,
+             mirror_complete: true
+           } = row} ->
+            row = %{row | classification_complete: true}
+            state = put_in(state, [:owners, session_id], row)
+            continue_owner_loss_notification(state, operation_ref, operation)
 
-            _other ->
-              {:stop, :relay_lost, state}
-          end
+          {nil, _other} ->
+            {:stop, :relay_lost, state}
+
+          {late, _row} ->
+            late_action(state, operation_ref, operation, late)
         end
 
       nil ->
@@ -3821,30 +3805,35 @@ defmodule LoopexDaemon.Owner do
     complete_owner_loss_notification(state, operation_ref, operation)
   end
 
+  # Concept (P3): the holder is monitored before it is told, so its close
+  # completes on whichever comes first — its acknowledgement or its exit for
+  # any reason, including one that happened before the send; a holder still
+  # silent at its step's instant is killed and its exit completes the close.
   defp continue_owner_loss_notification(
          state,
          operation_ref,
          %{holder: holder} = operation
        ) do
-    if Process.alive?(holder.holder_pid) do
-      close_ref = make_ref()
+    monitor = Process.monitor(holder.holder_pid)
+    close_ref = make_ref()
 
-      send(
-        holder.holder_pid,
-        {:daemon_control_owner_lost, self(), close_ref, operation.row.session_id,
-         holder.holder_incarnation}
-      )
+    send(
+      holder.holder_pid,
+      {:daemon_control_owner_lost, self(), close_ref, operation.row.session_id,
+       holder.holder_incarnation}
+    )
 
-      state =
-        state
-        |> put_in([:mirror_operations, operation_ref, :step], :await_holder_close)
-        |> put_in([:mirror_operations, operation_ref, :close_ref], close_ref)
+    state =
+      state
+      |> put_in([:mirror_operations, operation_ref], %{
+        operation
+        | close_ref: close_ref,
+          holder_monitor: monitor
+      })
+      |> enter_step(operation_ref, :await_holder_close)
 
-      Logger.debug("loopex daemon lost owner holder close start")
-      {:noreply, state}
-    else
-      complete_owner_loss_notification(state, operation_ref, operation)
-    end
+    Logger.debug("loopex daemon lost owner holder close start")
+    {:noreply, state}
   end
 
   defp continue_owner_loss_close(state, close_ref, connection, connection_incarnation) do
@@ -3854,11 +3843,7 @@ defmodule LoopexDaemon.Owner do
              operation.holder.holder_incarnation == connection_incarnation
          end) do
       {operation_ref, operation} ->
-        if deadline_reached?(operation) do
-          fail_connections(state)
-        else
-          complete_owner_loss_notification(state, operation_ref, operation)
-        end
+        complete_owner_loss_notification(state, operation_ref, operation)
 
       nil ->
         {:noreply, state}
@@ -3867,6 +3852,9 @@ defmodule LoopexDaemon.Owner do
 
   defp complete_owner_loss_notification(state, operation_ref, operation) do
     cancel_timer(operation.timer, operation_ref)
+
+    if operation.holder_monitor,
+      do: Process.demonitor(operation.holder_monitor, [:flush])
 
     state =
       state
@@ -4163,131 +4151,100 @@ defmodule LoopexDaemon.Owner do
   defp valid_incarnation?(value),
     do: is_binary(value) and byte_size(value) == @incarnation_bytes
 
-  defp deadline_reached?(%{deadline: nil}), do: false
-  defp deadline_reached?(operation), do: monotonic_ms() >= operation.deadline
-
-  @release_settlement_steps [:settle_result, :settle_disposition, :resolve_owner_release]
-
-  # Concept: a message consumed at or after the instant governing its step is
-  # not a success; the step decides which component failed.
+  # Concept: a message consumed at or after its step's instant is not a
+  # success; the step's owner decides what follows: a late registry step is
+  # `connections_lost`, a late relay step `relay_lost`, a late lease owner is
+  # replaced, and a late holder connection is killed.
   #
-  # Technical depth: a release step before relay terminalization is governed
-  # by `owner_restore_deadline` (`deadline`): a late relay selection or
-  # connection-loss answer is `relay_lost`, a late mirror clear is
-  # `connections_lost`, and a late owner restoration supersedes the
-  # cancellation. Relay terminalization and the owner's later release
-  # acknowledgement are governed by `release_settlement_deadline`; a late relay
-  # settlement is `relay_lost`; a late release acknowledgement kills the owner.
-  # A release the admission cut made stop-owned has
-  # no serving instant. Every other operation keeps its one mirror deadline.
-  defp late_disposition(%{kind: :release, stop_owned: true}), do: nil
-
-  defp late_disposition(%{kind: :release, step: step} = operation)
-       when step in @release_settlement_steps do
-    cond do
-      monotonic_ms() < operation.settlement_deadline -> nil
-      step == :resolve_owner_release -> :kill_owner
-      true -> :relay_lost
-    end
+  # Technical depth: a lease owner late restoring a cancelled release is
+  # superseded by settling the connection loss at once; one late with its
+  # release acknowledgement, or with any other resolution, is killed and its
+  # exit resolves the operation through the ordinary lost-owner path. A step
+  # entered after the admission cut has no instant.
+  defp late_disposition(%{step_deadline: deadline} = operation) when is_integer(deadline) do
+    if monotonic_ms() >= deadline, do: late_class(operation), else: nil
   end
 
-  defp late_disposition(%{kind: :release, step: step} = operation) do
-    cond do
-      monotonic_ms() < operation.deadline -> nil
-      step == :resolve_owner_cancel -> :supersede
-      step == :clear -> :connections_lost
-      true -> :relay_lost
-    end
-  end
+  defp late_disposition(_operation), do: nil
 
-  defp late_disposition(operation),
-    do: if(deadline_reached?(operation), do: :connections_lost, else: nil)
+  defp late_class(%{step_owner: :registry}), do: :connections_lost
+  defp late_class(%{step_owner: :relay}), do: :relay_lost
+  defp late_class(%{step_owner: :connection}), do: :kill_holder
+  defp late_class(%{kind: :release, step: :resolve_owner_cancel}), do: :supersede
+  defp late_class(%{step_owner: :lease_owner}), do: :replace_owner
 
   defp late_action(state, _operation_ref, _operation, :connections_lost),
     do: fail_connections(state)
 
   defp late_action(state, _operation_ref, _operation, :relay_lost) do
-    Logger.debug("loopex daemon release relay settlement deadline reached")
+    Logger.debug("loopex daemon relay step deadline reached")
     {:stop, :relay_lost, state}
   end
 
   defp late_action(state, operation_ref, operation, :supersede),
     do: supersede_release_restoration(state, operation_ref, operation)
 
-  defp late_action(state, operation_ref, operation, :kill_owner),
-    do: supersede_release_acknowledgement(state, operation_ref, operation)
+  defp late_action(state, operation_ref, operation, :replace_owner),
+    do: replace_late_owner(state, operation_ref, operation)
 
-  # Concept: once the relay has terminalized a release and the registry has
-  # cleared its mirror, the only party still owed is the lease owner's own
-  # acknowledgement. A lease owner that has not given it by
-  # `release_settlement_deadline` is the late party, so that exact owner is
-  # killed and superseded rather than the registry blamed.
+  # Concept (P3): a holder that has not acknowledged its owner-lost close by
+  # its step's instant is killed; its monitored exit completes the close, and
+  # that client gets EOF instead of its record.
+  defp late_action(state, operation_ref, operation, :kill_holder) do
+    Process.exit(operation.holder.holder_pid, :kill)
+    Logger.debug("loopex daemon lost owner holder close missed its step")
+
+    operation = %{operation | timer: nil, step_deadline: nil}
+    {:noreply, put_in(state, [:mirror_operations, operation_ref], operation)}
+  end
+
+  # Concept (P2): a lease owner that misses its own step — a resolution or a
+  # release acknowledgement — is killed and superseded, scoped to its
+  # session; the registry is not blamed and the daemon keeps serving.
   #
-  # Technical depth: the operation keeps its `resolve_owner_release` step and
-  # becomes `superseded`, so a queued owner acknowledgement is cleanup-only;
-  # the owner's exact `EXIT` completes it through the ordinary lost-owner path,
-  # which deletes the route and starts the mirror pop.
-  defp supersede_release_acknowledgement(state, operation_ref, operation) do
+  # Technical depth: the operation keeps its step and becomes `superseded`,
+  # so a queued owner acknowledgement is cleanup-only; the owner's exact
+  # `EXIT` resolves the operation through the ordinary lost-owner path
+  # (`resolve_lost_owner_operation`), which enters the next step with its own
+  # instant. The killed pid is recorded while a stop is in progress so the
+  # freeze barrier joins its loss.
+  defp replace_late_owner(state, operation_ref, operation) do
     Process.exit(operation.owner_pid, :kill)
     cancel_timer(operation.timer, operation_ref)
-    operation = %{operation | superseded: true, timer: nil}
+    operation = %{operation | superseded: true, timer: nil, step_deadline: nil}
 
     state =
       state
       |> put_in([:mirror_operations, operation_ref], operation)
       |> record_stop_kill(operation.owner_pid)
 
-    Logger.debug("loopex daemon release acknowledgement superseded")
+    Logger.debug("loopex daemon late lease owner superseded")
     {:noreply, state}
   end
 
-  # Concept: a lease owner that has not restored its held state by
-  # `owner_restore_deadline`, or whose restoration acknowledgement is consumed
-  # at or after it, cannot keep `release_pending`: the daemon kills that exact
-  # owner and settles the connection loss without a reply, and the ordinary
-  # owner-loss path then handles the dead owner.
+  # Concept: a lease owner that has not restored its held state within its
+  # step, or whose restoration acknowledgement is consumed after it, cannot
+  # keep `release_pending`: the daemon kills that exact owner and settles the
+  # connection loss without a reply, and the ordinary owner-loss path then
+  # handles the dead owner.
   #
   # Technical depth: the operation becomes `superseded`, so a queued owner
-  # acknowledgement is cleanup-only; the no-reply relay settlement must be
-  # acknowledged before `release_settlement_deadline`. The killed pid is
-  # recorded while a stop is in progress so the freeze barrier joins its loss.
+  # acknowledgement is cleanup-only; the no-reply relay settlement is a
+  # relay step with its own instant. The killed pid is recorded while a stop
+  # is in progress so the freeze barrier joins its loss.
   defp supersede_release_restoration(state, operation_ref, operation) do
     Process.exit(operation.owner_pid, :kill)
-    cancel_timer(operation.timer, operation_ref)
-
-    timer =
-      if operation.stop_owned,
-        do: nil,
-        else: schedule_deadline(operation_ref, operation.settlement_deadline)
-
-    operation = %{operation | step: :settle_disposition, superseded: true, timer: timer}
+    operation = %{operation | superseded: true}
 
     state =
       state
       |> put_in([:mirror_operations, operation_ref], operation)
+      |> enter_step(operation_ref, :settle_disposition)
       |> record_stop_kill(operation.owner_pid)
 
     request_relay_disposition_settlement(state, operation_ref, operation)
     Logger.debug("loopex daemon release restoration superseded")
     {:noreply, state}
-  end
-
-  # Technical depth: one timer chain serves both release instants; a firing
-  # before the instant governing the current step rearms for that instant.
-  defp release_deadline(state, operation_ref, operation) do
-    case late_disposition(operation) do
-      nil ->
-        instant =
-          if operation.step in @release_settlement_steps,
-            do: operation.settlement_deadline,
-            else: operation.deadline
-
-        timer = schedule_deadline(operation_ref, instant)
-        {:noreply, put_in(state, [:mirror_operations, operation_ref, :timer], timer)}
-
-      late ->
-        late_action(state, operation_ref, operation, late)
-    end
   end
 
   defp record_stop_kill(%{stop: %{killed: killed}} = state, pid),
@@ -4503,11 +4460,11 @@ defmodule LoopexDaemon.Owner do
     |> Enum.filter(fn {_operation_ref, operation} -> operation.permit_id == permit_id end)
     |> Enum.reduce_while({:ok, state}, fn
       {operation_ref, %{kind: :grant, step: :install}}, {:ok, acc} ->
-        {:cont, {:ok, put_in(acc, [:mirror_operations, operation_ref, :step], :install_shutdown)}}
+        {:cont, {:ok, enter_step(acc, operation_ref, :install_shutdown)}}
 
       {operation_ref, %{kind: kind, step: :select_result}}, {:ok, acc}
       when kind in [:grant, :release] ->
-        {:cont, {:ok, put_in(acc, [:mirror_operations, operation_ref, :step], :select_shutdown)}}
+        {:cont, {:ok, enter_step(acc, operation_ref, :select_shutdown)}}
 
       _other, _acc ->
         {:halt, {:error, :relay_lost}}
@@ -4540,7 +4497,7 @@ defmodule LoopexDaemon.Owner do
   end
 
   defp cancel_shutdown_provisional(state, operation_ref, operation) do
-    state = put_in(state, [:mirror_operations, operation_ref, :step], :cancel_shutdown)
+    state = enter_step(state, operation_ref, :cancel_shutdown)
 
     ConnectionRegistry.apply_mirror(
       state.registry,
@@ -4595,8 +4552,7 @@ defmodule LoopexDaemon.Owner do
     :resolve_owner_lost,
     :cancel_shutdown,
     :clear,
-    :pop_owner,
-    :await_holder_close
+    :pop_owner
   ]
 
   # Concept: the step each unfinished operation waits on names the component
@@ -4653,19 +4609,14 @@ defmodule LoopexDaemon.Owner do
 
     operations =
       Map.new(state.mirror_operations, fn
-        {operation_ref, %{kind: :owner_loss} = operation} ->
+        {operation_ref, %{step: :await_holder_close} = operation} ->
           cancel_timer(operation.timer, operation_ref)
-
-          {operation_ref,
-           Map.merge(operation, %{timer: nil, deadline: cut_deadline, stop_owned: true})}
-
-        {operation_ref, %{kind: :release} = operation} ->
-          cancel_timer(operation.timer, operation_ref)
-          {operation_ref, %{operation | timer: nil, stop_owned: true}}
+          timer = schedule_deadline(operation_ref, cut_deadline)
+          {operation_ref, %{operation | timer: timer, step_deadline: cut_deadline}}
 
         {operation_ref, operation} ->
           cancel_timer(operation.timer, operation_ref)
-          {operation_ref, %{operation | timer: nil, deadline: nil}}
+          {operation_ref, %{operation | timer: nil, step_deadline: nil}}
       end)
 
     %{state | mirror_operations: operations}
@@ -4787,18 +4738,89 @@ defmodule LoopexDaemon.Owner do
     )
   end
 
-  # Concept: a mirror step started while serving has its own instant; one
-  # started after the admission cut has none, because the stop's own phase
-  # deadlines govern it.
+  # Concept: each step of a lease operation has its own five-second instant,
+  # fixed when the step's request is sent and never restarted; the step's
+  # owner — the registry, the relay, a lease owner or a holder connection —
+  # is the component its expiry names. A step entered after the admission cut
+  # has no instant: the stop's own phase deadlines govern it.
   #
-  # Technical depth: a stop-owned step has neither a deadline nor a timer,
-  # so neither the timer nor a late answer can select `connections_lost`.
-  defp mirror_clock(%{stop: stop}, _operation_ref) when not is_nil(stop), do: {nil, nil}
+  # Technical depth: `enter_step/3` records `step`, `step_owner` and
+  # `step_deadline` and rearms the operation's one timer; an operation is
+  # added by `put_mirror/3`, which enters its first step.
+  defp put_mirror(state, operation_ref, operation) do
+    operation =
+      operation
+      |> Map.put_new(:opened_at, System.unique_integer([:monotonic]))
+      |> Map.put_new(:superseded, false)
+      |> Map.merge(%{timer: nil, step_owner: nil, step_deadline: nil})
 
-  defp mirror_clock(state, operation_ref) do
-    deadline = monotonic_ms() + state.mirror_deadline_ms
-    {deadline, schedule_deadline(operation_ref, deadline)}
+    state
+    |> put_in([:mirror_operations, operation_ref], operation)
+    |> enter_step(operation_ref, operation.step)
   end
+
+  defp enter_step(state, operation_ref, step) do
+    case Map.fetch(state.mirror_operations, operation_ref) do
+      {:ok, operation} ->
+        cancel_timer(Map.get(operation, :timer), operation_ref)
+        owner = step_owner(step)
+
+        {deadline, timer} =
+          if is_nil(state.stop) and not is_nil(owner) do
+            deadline = monotonic_ms() + state.mirror_deadline_ms
+            {deadline, schedule_deadline(operation_ref, deadline)}
+          else
+            {nil, nil}
+          end
+
+        operation =
+          Map.merge(operation, %{
+            step: step,
+            step_owner: owner,
+            step_deadline: deadline,
+            timer: timer
+          })
+
+        put_in(state, [:mirror_operations, operation_ref], operation)
+
+      :error ->
+        state
+    end
+  end
+
+  # Technical depth: the component whose own work each step waits on.
+  @registry_steps [
+    :install,
+    :install_connection_lost,
+    :resolve_granted,
+    :resolve_cancelled,
+    :resolve_owner_lost,
+    :clear,
+    :pop_owner,
+    :install_shutdown,
+    :cancel_shutdown
+  ]
+  @relay_steps [
+    :select_result,
+    :await_connection_loss,
+    :settle_result,
+    :settle_result_after_owner_loss,
+    :settle_disposition,
+    :await_classification,
+    :select_shutdown
+  ]
+  @lease_owner_steps [
+    :resolve_owner_grant,
+    :resolve_owner_cancel,
+    :resolve_owner_expiry,
+    :resolve_owner_release
+  ]
+
+  defp step_owner(step) when step in @registry_steps, do: :registry
+  defp step_owner(step) when step in @relay_steps, do: :relay
+  defp step_owner(step) when step in @lease_owner_steps, do: :lease_owner
+  defp step_owner(:await_holder_close), do: :connection
+  defp step_owner(_gated), do: nil
 
   defp schedule_deadline(operation_ref, deadline) do
     Process.send_after(

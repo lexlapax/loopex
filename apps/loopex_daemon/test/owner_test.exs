@@ -1995,8 +1995,8 @@ defmodule LoopexDaemon.OwnerTest do
   #
   # Technical depth: a relay debug hook parks the classification request. The
   # cut is consumed while it is parked; the owner-loss operation is asserted to
-  # carry no timer and the cut instant, and the daemon owner outlives its
-  # 300 ms serving deadline. Releasing the relay acknowledges the
+  # carry no timer and no step instant, and the daemon owner outlives its
+  # 300 ms serving step. Releasing the relay acknowledges the
   # classification and then the cut; the holder receives nothing and stays
   # open for the later `daemon.stopping`/EOF path.
   test "a stop consumed before a paused classification rebinds it and closes no holder" do
@@ -2015,10 +2015,10 @@ defmodule LoopexDaemon.OwnerTest do
     cut_task = Task.async(fn -> Owner.cut_admission(owner, 5_000) end)
     assert :ok = wait_for_stop(owner)
 
-    assert [%{step: :await_classification, stop_owned: true, timer: nil, deadline: deadline}] =
+    assert [%{step: :await_classification, timer: nil, step_deadline: nil}] =
              owner_loss_operations(owner)
 
-    assert deadline >= cut_started + 5_000
+    assert now_ms() >= cut_started
     Process.sleep(400)
     assert Process.alive?(owner)
     send(components.relay, :continue_parked_classification)
@@ -2486,15 +2486,14 @@ defmodule LoopexDaemon.OwnerTest do
     assert_clean_retirement(owner, components)
   end
 
-  # Concept: a result settlement acknowledged after `owner_restore_deadline`
-  # but before `release_settlement_deadline` still terminalizes and renders
-  # the one correlated success; the first instant does not govern relay
-  # terminalization.
+  # Concept (P1, T16 for a release): each step of a release has its own
+  # instant, so a selection and a settlement that each take most of their own
+  # step still render the one correlated success, although together they
+  # outlast any single step.
   #
-  # Technical depth: the relay is parked on the result settlement past the
-  # 500 ms restore instant and released before the 1,000 ms settlement
-  # instant.
-  test "a release settlement acknowledged before the settlement deadline succeeds" do
+  # Technical depth: the relay is parked on the result selection and then on
+  # the result settlement for 350 ms each, against a 500 ms step.
+  test "a release whose steps each use most of their instant succeeds" do
     owner = start_owner(mirror_deadline_ms: 500)
     components = Owner.components(owner)
     holder = initialized_connection(components)
@@ -2503,6 +2502,7 @@ defmodule LoopexDaemon.OwnerTest do
     {lease_owner, owner_incarnation, writer_epoch} = acquire_held(owner, holder, session_id)
     release_origin = {holder.incarnation, 1, 1}
     {release_worker, release_worker_incarnation} = start_worker(holder.pid, release_origin)
+    park_relay_operation(components.relay, :select_result)
     park_relay_operation(components.relay, :settle_result)
 
     assert {:ok, :accepted, ^lease_owner, ^owner_incarnation} =
@@ -2519,8 +2519,11 @@ defmodule LoopexDaemon.OwnerTest do
                now_ms() + 5_000
              )
 
+    assert_receive {:relay_operation_parked, :select_result}, 500
+    Process.sleep(350)
+    send(components.relay, :continue_parked_operation)
     assert_receive {:relay_operation_parked, :settle_result}, 500
-    Process.sleep(700)
+    Process.sleep(350)
     send(components.relay, :continue_parked_operation)
 
     assert_receive {:manual_connection_message, ^holder_pid,
@@ -2985,16 +2988,16 @@ defmodule LoopexDaemon.OwnerTest do
     assert %{permits: 0} = AdmissionRelay.status(components.relay)
   end
 
-  # Concept: a holder close the connection never acknowledges is a
-  # connection-side failure: unfinished at `freeze_deadline` it is
-  # `connections_lost`, as it is at the rebound transport-cut instant, and
-  # the exact registry is killed.
+  # Concept (P3 at the stop): a holder close the connection never
+  # acknowledges is bound, at the cut, to the transport-cut instant; there the
+  # holder is killed, its exit completes the close, and the freeze settles
+  # with no daemon failure.
   #
   # Technical depth: a held owner is killed while serving, its classification
   # completes and the one close reaches the holder, which never answers; the
-  # cut and a 300 ms freeze follow.
-  test "a holder close unacknowledged at the freeze deadline selects connections_lost" do
-    owner = start_owner(mirror_deadline_ms: 1_000)
+  # cut is given a 300 ms deadline.
+  test "a holder close unacknowledged at the cut instant is killed and the freeze settles" do
+    owner = start_owner(mirror_deadline_ms: 1_000, fatal_recipient: self())
     components = Owner.components(owner)
     holder = initialized_connection(components)
     holder_pid = holder.pid
@@ -3006,10 +3009,14 @@ defmodule LoopexDaemon.OwnerTest do
                      _holder_incarnation}},
                    500
 
-    assert {:ok, _cut_ref} = Owner.cut_admission(owner, 5_000)
-    registry_monitor = Process.monitor(components.registry)
-    assert {:error, :connections_lost} = freeze(owner, 300)
-    assert_receive {:DOWN, ^registry_monitor, :process, _registry, :killed}, 500
+    holder_monitor = Process.monitor(holder_pid)
+    cut_started = now_ms()
+    assert {:ok, _cut_ref} = Owner.cut_admission(owner, 300)
+    assert_receive {:DOWN, ^holder_monitor, :process, ^holder_pid, :killed}, 1_000
+    assert now_ms() - cut_started >= 250
+    assert {:ok, _descriptors} = freeze(owner)
+    refute_received {:daemon_component_fatal, _reporter, _class}
+    assert Process.alive?(components.registry)
   end
 
   # Concept: a client disconnect never fail-stops the daemon, even when the
@@ -5562,6 +5569,227 @@ defmodule LoopexDaemon.OwnerTest do
         owner,
         {:mutate, origin, class, request_id, incarnation, epoch, worker, task}
       )
+
+  # Concept (step 7, risk item 7): a holder that disconnects after its
+  # owner-lost close was sent, without acknowledging it, completes the close
+  # by its exit; the daemon keeps serving.
+  #
+  # Technical depth: the close reaches the manual holder, which never
+  # answers, and the holder is then killed well inside its step.
+  test "a holder disconnecting after its close was sent completes the loss" do
+    owner = start_owner(mirror_deadline_ms: 1_000, fatal_recipient: self())
+    components = Owner.components(owner)
+    holder = initialized_connection(components)
+    holder_pid = holder.pid
+    {lease_owner, _owner_incarnation, _epoch} = acquire_held(owner, holder, "racing-holder")
+    Process.exit(lease_owner, :kill)
+
+    assert_receive {:manual_connection_message, ^holder_pid,
+                    {:daemon_control_owner_lost, ^owner, _close_ref, "racing-holder",
+                     _incarnation}},
+                   500
+
+    Process.exit(holder_pid, :kill)
+    assert %{owner_slots: 0, lost_owners: 0} = wait_for_owner_retirement(owner)
+    refute_received {:daemon_component_fatal, _reporter, _class}
+    Process.sleep(1_100)
+    refute_received {:daemon_component_fatal, _reporter, _class}
+    assert Process.alive?(owner)
+  end
+
+  # Concept (P3, T12): a holder that ignores its owner-lost close is killed at
+  # its step's instant, its exit completes the close, and the daemon keeps
+  # serving without a daemon-wide failure.
+  test "a holder ignoring its close is killed at its step and the loss completes" do
+    owner = start_owner(mirror_deadline_ms: 300, fatal_recipient: self())
+    components = Owner.components(owner)
+    holder = initialized_connection(components)
+    holder_pid = holder.pid
+    {lease_owner, _owner_incarnation, _epoch} = acquire_held(owner, holder, "silent-holder")
+    holder_monitor = Process.monitor(holder_pid)
+    Process.exit(lease_owner, :kill)
+
+    assert_receive {:manual_connection_message, ^holder_pid,
+                    {:daemon_control_owner_lost, ^owner, _close_ref, "silent-holder",
+                     _incarnation}},
+                   500
+
+    sent = now_ms()
+    assert_receive {:DOWN, ^holder_monitor, :process, ^holder_pid, :killed}, 1_000
+    assert now_ms() - sent >= 250
+    assert %{owner_slots: 0, lost_owners: 0} = wait_for_owner_retirement(owner)
+    refute_received {:daemon_component_fatal, _reporter, _class}
+    assert Process.alive?(owner)
+    assert Process.alive?(components.registry)
+  end
+
+  # Concept (P1): a relay step that overruns its own instant names the relay.
+  #
+  # Technical depth: the relay is parked on a fresh grant's result selection
+  # past its 300 ms step.
+  test "a grant selection overrunning its step names the relay" do
+    owner = start_owner(mirror_deadline_ms: 300)
+    components = Owner.components(owner)
+    connection = initialized_connection(components)
+    origin = {connection.incarnation, 0, 1}
+    {worker, worker_incarnation} = start_worker(connection.pid, origin)
+    park_relay_operation(components.relay, :select_result)
+    owner_monitor = Process.monitor(owner)
+
+    assert {:ok, :accepted, _lease_owner, _incarnation} =
+             acquire_as(
+               owner,
+               origin,
+               "late-selection",
+               "late-selection-session",
+               connection.pid,
+               connection.incarnation,
+               worker,
+               worker_incarnation,
+               now_ms() + 5_000
+             )
+
+    assert_receive {:relay_operation_parked, :select_result}, 500
+    assert_receive {:DOWN, ^owner_monitor, :process, ^owner, :relay_lost}, 1_000
+  end
+
+  # Concept (P1): a late owner-loss classification is the relay's lateness,
+  # never the registry's.
+  #
+  # Technical depth: the relay is parked on the classification past its
+  # 300 ms step.
+  test "an owner-loss classification overrunning its step names the relay" do
+    owner = start_owner(mirror_deadline_ms: 300)
+    components = Owner.components(owner)
+    holder = initialized_connection(components)
+    {lease_owner, _owner_incarnation, _epoch} = acquire_held(owner, holder, "late-classification")
+    park_relay_classification(components.relay)
+    owner_monitor = Process.monitor(owner)
+    Process.exit(lease_owner, :kill)
+    assert_receive :relay_classification_parked, 500
+    assert_receive {:DOWN, ^owner_monitor, :process, ^owner, :relay_lost}, 1_000
+  end
+
+  # Concept (P1, P2): a lease owner that overruns its own resolution step is
+  # killed and superseded, scoped to its session: its grant still reaches the
+  # client through the lost-owner path, and the daemon keeps serving.
+  #
+  # Technical depth: the relay is parked on the fresh lease owner's
+  # registration while a debug hook is installed on it; the hook holds the
+  # lease owner on its grant resolution, past the 300 ms step.
+  test "a lease owner overrunning its resolution step is replaced" do
+    owner = start_owner(mirror_deadline_ms: 300, fatal_recipient: self())
+    components = Owner.components(owner)
+    connection = initialized_connection(components)
+    connection_pid = connection.pid
+    origin = {connection.incarnation, 0, 1}
+    {worker, worker_incarnation} = start_worker(connection.pid, origin)
+    test_pid = self()
+
+    park_relay_message(
+      components.relay,
+      &match?(
+        {:"$gen_call", _from, {:register_lease_owner, "late-resolution-session", _, _}},
+        &1
+      ),
+      :register_parked,
+      :continue_register
+    )
+
+    acquire =
+      Task.async(fn ->
+        acquire_as(
+          owner,
+          origin,
+          "late-resolution",
+          "late-resolution-session",
+          connection.pid,
+          connection.incarnation,
+          worker,
+          worker_incarnation,
+          now_ms() + 5_000
+        )
+      end)
+
+    assert {:ok, :accepted, lease_owner, _incarnation} = Task.await(acquire, 1_000)
+    monitor = Process.monitor(lease_owner)
+
+    :ok =
+      :sys.install(
+        lease_owner,
+        {fn
+           :waiting, {:in, {:daemon_lease_resolution, _, _, _, :grant, _}}, _state ->
+             send(test_pid, :resolution_held)
+
+             receive do
+               :never -> :done
+             end
+
+           hook_state, _event, _state ->
+             hook_state
+         end, :waiting}
+      )
+
+    assert_receive :register_parked, 1_000
+    send(components.relay, :continue_register)
+    assert_receive :resolution_held, 1_000
+    assert_receive {:DOWN, ^monitor, :process, ^lease_owner, :killed}, 1_000
+
+    assert_receive {:manual_connection_message, ^connection_pid,
+                    {:relay_permit_result, ^origin, %{"result" => %{"writer_epoch" => _}}}},
+                   1_000
+
+    refute_received {:daemon_component_fatal, _reporter, _class}
+    assert Process.alive?(owner)
+    assert Process.alive?(components.registry)
+  end
+
+  # Concept (P1, T16): each step of a grant has its own instant, so a
+  # selection and a settlement that each take most of their step still
+  # complete the grant, although together they outlast any single step.
+  #
+  # Technical depth: the relay is parked on the grant's result selection and
+  # then on its result settlement for 350 ms each, against a 500 ms step.
+  test "a grant whose steps each use most of their instant completes" do
+    owner = start_owner(mirror_deadline_ms: 500, fatal_recipient: self())
+    components = Owner.components(owner)
+    connection = initialized_connection(components)
+    connection_pid = connection.pid
+    origin = {connection.incarnation, 0, 1}
+    {worker, worker_incarnation} = start_worker(connection.pid, origin)
+    park_relay_operation(components.relay, :select_result)
+    park_relay_operation(components.relay, :settle_result)
+
+    acquire =
+      Task.async(fn ->
+        acquire_as(
+          owner,
+          origin,
+          "slow-steps",
+          "slow-steps-session",
+          connection.pid,
+          connection.incarnation,
+          worker,
+          worker_incarnation,
+          now_ms() + 5_000
+        )
+      end)
+
+    assert_receive {:relay_operation_parked, :select_result}, 1_000
+    Process.sleep(350)
+    send(components.relay, :continue_parked_operation)
+    assert_receive {:relay_operation_parked, :settle_result}, 1_000
+    Process.sleep(350)
+    send(components.relay, :continue_parked_operation)
+    assert {:ok, :accepted, _lease_owner, _incarnation} = Task.await(acquire, 1_000)
+
+    assert_receive {:manual_connection_message, ^connection_pid,
+                    {:relay_permit_result, ^origin, %{"result" => %{"writer_epoch" => _}}}},
+                   1_000
+
+    assert %{granted_routes: 1} = wait_for_owner_settlement(owner)
+    refute_received {:daemon_component_fatal, _reporter, _class}
+  end
 
   defp pending_close_state do
     owner = start_owner(fatal_recipient: self())
