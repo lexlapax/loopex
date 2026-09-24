@@ -246,8 +246,15 @@ defmodule LoopexDaemon.Owner do
 
   @doc false
   @spec close_connections(pid(), map(), integer()) :: :ok | {:ok, :forced} | {:error, atom()}
-  def close_connections(owner, record, deadline),
-    do: GenServer.call(owner, {:close_connections, record, deadline}, :infinity)
+  def close_connections(owner, record, deadline) do
+    GenServer.call(
+      owner,
+      {:close_connections, record, deadline},
+      max(deadline - monotonic_ms(), 0) + @verdict_margin_ms
+    )
+  catch
+    :exit, _timeout -> {:error, :close_unavailable}
+  end
 
   @doc false
   @spec owner_loss_connection_closed(pid(), reference(), binary()) :: :ok
@@ -992,26 +999,31 @@ defmodule LoopexDaemon.Owner do
   def handle_info({:EXIT, registry, _reason}, %{registry: registry} = state),
     do: {:stop, :connections_lost, state}
 
-  # Concept: a relay the daemon owner killed during fatal teardown is expected;
-  # any other relay exit ends this owner as `relay_lost`.
+  # Concept: a relay exit never ends this owner while a daemon owner is
+  # present, so the relay's exit itself cannot take down the connection
+  # registry this owner links, whatever order the daemon owner's teardown
+  # mark and that exit arrive in. A later request that needs the dead relay
+  # can still end this owner, and the registry with it, before the stop
+  # records are written; nothing is admitted either way, and the halt bounds
+  # the window.
   #
-  # Technical depth: the daemon owner sends its mark before its kill. Erlang
-  # orders signals only per sender pair, so the mark is normally, not
-  # provably, queued first; a zero-wait receive takes it if it is. A relay this
-  # owner killed at a missed cut is marked here before the kill.
-  def handle_info({:EXIT, relay, _reason}, %{relay: relay, fatal_teardown: true} = state),
-    do: {:noreply, state}
-
-  def handle_info({:EXIT, relay, _reason}, %{relay: relay} = state) do
-    recipient = state.fatal_recipient
-
-    receive do
-      {:daemon_fatal_teardown, ^recipient} when is_pid(recipient) ->
-        {:noreply, %{state | fatal_teardown: true}}
-    after
-      0 -> {:stop, :relay_lost, state}
+  # Technical depth: an unexpected relay exit is reported to the daemon owner
+  # as `relay_lost`, which fail-stops; an exit during fatal teardown, whether
+  # the daemon owner or this owner killed the relay, is reported by no one
+  # again. A transport-cut caller still waiting is answered `relay_lost`.
+  # Without a daemon owner, as in unit tests, the old stop remains.
+  def handle_info({:EXIT, relay, _reason}, %{relay: relay, fatal_recipient: recipient} = state)
+      when is_pid(recipient) do
+    unless state.fatal_teardown do
+      Logger.debug("loopex daemon owner relay lost")
+      send(recipient, {:daemon_component_fatal, self(), :relay_lost})
     end
+
+    {:noreply, answer_pending_cut(%{state | fatal_teardown: true}, :relay_lost)}
   end
+
+  def handle_info({:EXIT, relay, _reason}, %{relay: relay} = state),
+    do: {:stop, :relay_lost, state}
 
   def handle_info({:EXIT, owner, reason}, state) do
     case Map.fetch(state.owner_pids, owner) do
@@ -1076,6 +1088,15 @@ defmodule LoopexDaemon.Owner do
     send(state.registry, {:owner_request, self(), ref, request})
     put_in(state, [:stop, :pending], {kind, ref})
   end
+
+  defp answer_pending_cut(%{stop: %{phase: phase, from: from} = stop} = state, class)
+       when phase in [:cutting, :gating, :sweeping] and not is_nil(from) do
+    Process.cancel_timer(stop.cut_timer)
+    GenServer.reply(from, {:error, class})
+    %{state | stop: %{stop | phase: :cut_failed, from: nil, pending: nil}}
+  end
+
+  defp answer_pending_cut(state, _class), do: state
 
   defp maybe_finish_sweep(%{stop: %{phase: :sweeping, pending: nil, swept: true}} = state) do
     Process.cancel_timer(state.stop.cut_timer)

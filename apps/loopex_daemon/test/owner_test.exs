@@ -3149,7 +3149,7 @@ defmodule LoopexDaemon.OwnerTest do
   # a suspended relay can never resume and admit or dispatch work queued
   # before the cut.
   test "a relay silent past the cut deadline answers relay_lost and is killed at that instant" do
-    owner = start_owner()
+    owner = start_owner(fatal_recipient: self())
     components = Owner.components(owner)
     relay_monitor = Process.monitor(components.relay)
     owner_monitor = Process.monitor(owner)
@@ -3167,16 +3167,18 @@ defmodule LoopexDaemon.OwnerTest do
     # daemon's `fatal:relay_lost` stop records.
     refute_receive {:DOWN, ^owner_monitor, :process, ^owner, _reason}, 200
     assert Process.alive?(components.registry)
+
+    # The caller already holds the class; the kill is not reported again.
+    refute_received {:daemon_component_fatal, ^owner, _class}
   end
 
   # Concept: the collaboration owner never blocks on the registry during the
   # cut, so a relay lost while the registry is silent is consumed at once and
   # its class stands, instead of the registry deadline naming
   # `connections_lost`.
-  test "a relay lost while the registry gate is held ends the owner as relay_lost at once" do
-    owner = start_owner()
+  test "a relay lost while the registry gate is held is reported relay_lost at once" do
+    owner = start_owner(fatal_recipient: self())
     components = Owner.components(owner)
-    owner_monitor = Process.monitor(owner)
     :ok = :sys.suspend(components.registry)
 
     on_exit(fn -> Process.exit(components.registry, :kill) end)
@@ -3186,9 +3188,14 @@ defmodule LoopexDaemon.OwnerTest do
 
     started = now_ms()
     Process.exit(components.relay, :kill)
-    assert_receive {:DOWN, ^owner_monitor, :process, ^owner, :relay_lost}, 1_000
+    assert_receive {:daemon_component_fatal, ^owner, :relay_lost}, 1_000
+    assert {:error, :relay_lost} = Task.await(cut, 1_000)
     assert now_ms() - started < 1_000
-    assert {:error, :relay_barrier_timeout} = Task.await(cut, 5_000)
+
+    # The owner, and the registry it links, outlive the relay for the daemon's
+    # stop records.
+    assert Process.alive?(owner)
+    assert Process.alive?(components.registry)
   end
 
   test "a registry gate silent past the cut deadline answers connections_lost and stops the owner" do
