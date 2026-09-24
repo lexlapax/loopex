@@ -252,6 +252,49 @@ unchanged.
 
 Changes to behaviour released in `0.1.0`:
 
+- The foreground server and the independent Node client offer the generation
+  name `loopex.experimental/1` instead of `loopex.session.v1-experimental`, so
+  a `0.1.0` client's offer is refused; generation one's schema digest changes
+  and its methods, records, errors, limits and vectors do not.
+- A reference host reads `LOOPEX_PROVIDER_API_KEY` once into private custody
+  and removes it from the environment: the CLI's offline `run`, `resume` and
+  `cancel` and `Loopex.AppServer.Host.serve/0` consume it, and every other CLI
+  command removes it unread. In `0.1.0` it stayed set for the adapter to read.
+- The ReqLLM adapter no longer reads the credential from the environment: a
+  host supplies an opaque credential token and routing-registry handle, and
+  `Loopex.LLM.ReqLLM.complete_prompt/3` takes both as options.
+- `Loopex.AppServer.Host.serve/0` refuses a missing credential, or one over
+  65,536 bytes, when composition takes custody rather than at launch
+  validation, still with status 3, and moves OTP's default log handler from
+  standard output to standard error before composing, refusing if it cannot.
+- `Loopex.start_link/1` returns only once the runtime's event dispatcher is
+  ready, and returns `{:error, :runtime_unavailable}` if the runtime dies
+  first; in `0.1.0` it could return before a resume could be served.
+- `Loopex.attach/3` no longer supersedes a session's other attachments: they
+  coexist, and one is replaced only when `replace_attachment_id:` names it for
+  the same holder.
+- `Loopex.trace/2` loads each module it names before installing call patterns,
+  so a module the runtime has not called yet is traced from its first call.
+- The resource-pack Git data jobs (`rev-parse`, `cat-file`, `ls-tree`,
+  `unpack-file`) run as `/bin/sh -c 'exec "$@" 2>/dev/null' loopex-git-data
+  /usr/bin/env … git …`, and host policy sees that argument vector; `clone` is
+  unchanged.
+- A resource-pack Git identity refusal names the check that failed instead of
+  "Git identity or selected skill directory did not match".
+- The ReqLLM reference adapter requires `req_llm ~> 1.24.0` instead of
+  `~> 1.17.1`.
+- The local Store answers `runtime_command` for a committed create command with
+  its session identifier, or `runtime_command_conflict` when the binding
+  differs, and the Store facade reads a malformed adapter answer as
+  `unavailable`.
+- The CLI and provider builds resolve one source identity from a Git checkout
+  or an archive's `SOURCE_IDENTITY` and refuse a missing, malformed or changed
+  one; a provider manifest built from an archive also records its
+  `source_digest`.
+- The CLI refuses a placement lock whose owner cannot be verified as "the
+  placement owner could not be verified (…)", naming the probe failure, and a
+  lock naming a live process whose record it cannot read as the ordinary
+  in-use refusal.
 - `Loopex.Executor.Local.cancel/2` answers `{:ok, :cleaned}` only after the
   job's receipt recording confirmed cleanup is durably published; every other
   ending answers `{:ok, :unconfirmed}`. In `0.1.0` a running job's cancel could

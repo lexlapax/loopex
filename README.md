@@ -30,11 +30,11 @@ while the session lives; a session "brain" can coordinate local or remote
 [Canonical milestone status and plan records](docs/plans/)
 <!-- loopex:readme-status:end -->
 
-M0 through M4 are closed and integrated. M5, the durable-service milestone, is
-accepted and in progress: the maintainer accepted its plan pair and ADRs 0031
-to 0034 on 2026-09-21, and implementation runs against them on the `m5`
-branch. M6 is next; it is not yet registered as a candidate, so the capsule
-above, validated against the canonical register, records none. M1 delivered the durability kernel:
+M0 through M4 are closed and integrated. M5 is the durable-service milestone,
+built against the plan pair and ADRs 0031 to 0034 the maintainer accepted on
+2026-09-21; the M5 Durable Service section below says what it delivers, and the
+marked status capsule above and the canonical register carry its lifecycle
+state and any next candidate. M1 delivered the durability kernel:
 an explicit embedded runtime, durable local Store, canonical model boundary, trusted-local
 executor, thin reference client, durable events, and receipt reconciliation
 across a real runtime-process crash. What it deliberately did not deliver is a
@@ -136,7 +136,7 @@ before using the reference stack. Core and custom executors are unaffected.
 
 ### M5 Durable Service
 
-`M5` defines the durable-service rung: a local daemon
+`M5` delivers the durable-service rung: a local daemon
 that owns session lifetime for a state root, so sessions keep running while no
 client is connected; several independent client processes reaching one session
 over a Unix-domain socket; one of them driving while the others watch, with an
@@ -144,7 +144,7 @@ explicit takeover when the driver dies; and all of it on the existing local
 store adapter within that adapter's documented limits. Read the
 [M5 plan](docs/plans/M5.md#concept) and its
 [technical companion](docs/plans/M5-technical.md#technical-depth) for the
-purpose, outcomes and how each one is to be proved.
+purpose, outcomes and how each one is proved.
 
 The four prerequisite decision records are ADRs
 [0031](docs/adr/0031-daemon-grade-store-selection-and-migration.md#concept),
@@ -153,8 +153,8 @@ The four prerequisite decision records are ADRs
 and [0034](docs/adr/0034-provider-credential-handoff-over-bootstrap-channel.md#concept).
 The status capsule above and the
 [canonical register](docs/plans/README.md)
-carry the milestone and decision state; this paragraph only says what the work
-is for.
+carry the milestone and decision state; this section only says what the work
+delivers.
 
 The [roadmap](docs/roadmap.md#concept) is non-normative capability guidance;
 [CHANGELOG.md](CHANGELOG.md) records what changed.
