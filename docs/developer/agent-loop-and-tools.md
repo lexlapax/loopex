@@ -594,6 +594,24 @@ answer, and the defensive case of a legacy module missing the required callback
 to unconfirmed cleanup. Retained `cancel/3` keeps its fixed defensive bound for
 direct compatibility callers and is never selected by production coordination.
 
+`Loopex.Executor.Local.cancel/2` answers `{:ok, :cleaned}` only after the job's
+receipt with `cleanup_confirmation: :confirmed` is durably published and its
+open entry removed; every other ending answers `{:ok, :unconfirmed}`. The rule
+is one-directional: an answer weaker than the receipt is allowed, one stronger
+is impossible. The launch owner still acts on a cancellation — TERM, KILL, or
+refusing a job before it begins, all inside the job's one cleanup episode —
+but never answers; it hands each request to the execute caller, which answers
+it exactly once after `settle_receipt`, and a caller or owner that dies first
+leaves the answer `unconfirmed`. A pre-run cancellation of an admitted job is
+the same case: it answers `cleaned` only once the refusal is durable, as ADR
+0016's clauses 5 and 7 require. A requester waits until its episode instant
+plus the reply margin `min(receipt_retention_ms + 1_000, executor_observe_ms -
+grace - 250)`, both from `Loopex.Executor.cancellation_bounds/1` for the job's
+period, where `receipt_retention_ms = ceil(grace / 4)` and `executor_observe_ms
+= max(10_000, grace + 2_000)`. Above a 7,000 ms period the second term binds,
+so a settlement slower than the margin is answered `unconfirmed` although its
+receipt may be `confirmed`.
+
 ### Tool Output, Spill, and Artifacts
 
 `Loopex.ArtifactStore` is both the Core-owned caller facade and the adapter

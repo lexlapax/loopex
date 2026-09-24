@@ -68,6 +68,8 @@ the listener.
 | Collaboration, runtime and edges stop in reverse; Store last | 5 s each, Store 30 s | — |
 | Placement release | 5 s | — |
 
+While serving, each lease-operation step — a registry apply, pop or clear; a relay selection, settlement or owner-loss classification; a lease owner's resolution; a holder's close — has its own 5 s instant from when its request is sent. A late registry step is `connections_lost` and kills the registry; a late relay step is `relay_lost`; a late lease owner is killed and superseded, its session going through the ordinary owner-loss path; a late holder is killed and its monitored `DOWN` completes the close. Consuming the admission cut cancels every step instant; a holder close already sent is re-bound to the transport-cut deadline, and a relay-unanswered report is cleanup-only from then on.
+
 A fail-stop sends `daemon.stopping` naming `fatal:<class>` — or the bare
 `store_lost` or `store_capacity_exceeded` for the Store — within 5 s and ends
 within 35 s of the first fatal. The owner monitors the runtime's exact Control
@@ -146,6 +148,8 @@ in the same VM returns `provider_credential_required` without starting anything.
 | Relay tickets, barriers, retirement | `admission_relay_test.exs`, `owner_test.exs`, `collaboration_test.exs` |
 | Slots, retirement barrier, eviction, reclamation, succession | `connection_registry_test.exs`, `succession_capacity_test.exs`, `wire_records_test.exs`, `output_buffer_test.exs` |
 | Leases and takeover | `lease_owner_test.exs` |
+| Non-blocking components: per-step clocks, lease-owner replacement, the monitored holder close, held requests, the stop rule | `owner_test.exs`, `lease_owner_test.exs`, `socket_transport_test.exs` |
+| No blocking call between components while serving or stopping (T14); an orderly stop exits 0 with a relay request unanswered past a step between the cut and the freeze (T21) | `service_lifecycle_test.exs` |
 | Socket, peer credential, framing and methods | `listener_test.exs`, `listener_socket_test.exs`, `peer_credential_test.exs`, `connection_protocol_test.exs`, `request_test.exs`, `request_ledger_test.exs`, `socket_transport_test.exs` |
 | Index and import | `session_index*_test.exs`, `prepare_index_test.exs` |
 | Credential custody | `credential_custody_test.exs` here and in the app server and CLI |

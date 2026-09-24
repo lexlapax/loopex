@@ -137,6 +137,147 @@ defmodule LoopexDaemon.ServiceLifecycleTest do
     :ok = GenServer.stop(adapter)
   end
 
+  # Concept (T14): no process another component waits on under a deadline —
+  # the collaboration owner, the connection registry, a lease owner or a
+  # connection — makes a blocking call into another daemon component, while
+  # serving or during the orderly stop. The only calls allowed are a
+  # connection's calls into the registry, whose handlers never wait, and its
+  # `register_connection` before it initializes.
+  #
+  # Technical depth: every `:gen.call/4` made by the collaboration owner, the
+  # registry and the listener, and by every process they spawn (lease owners,
+  # connections and their workers), is traced. Each traced call is classified
+  # at once by the caller's and the target's initial call; request workers,
+  # relay tasks and other non-component callers are allowed.
+  @tag timeout: 90_000
+  test "no deadline-subject component blocks on another while serving or stopping",
+       %{options: options} do
+    daemon = start_daemon(options)
+    _ready = await_ready(daemon.output)
+    %{collaboration: collaboration, listener: listener} = :sys.get_state(daemon.owner).pids
+    %{registry: registry} = :sys.get_state(collaboration)
+    tracer = spawn_link(fn -> call_trace_loop({[], 0}) end)
+    :erlang.trace_pattern({:gen, :call, 4}, true, [:global])
+    on_exit(fn -> :erlang.trace_pattern({:gen, :call, 4}, false, [:global]) end)
+
+    for pid <- [collaboration, registry, listener],
+        do: :erlang.trace(pid, true, [:call, :set_on_spawn, {:tracer, tracer}])
+
+    client = initialized(options[:socket_path])
+
+    :ok =
+      send_frame(client, %{
+        "method" => "session.create",
+        "request_id" => "create",
+        "command_id" => Wire.encode_identity("t14-create"),
+        "session_options" => %{"purpose" => "t14"}
+      })
+
+    assert [%{"status" => "accepted", "session_id" => session_id}] = receive_records(client, 1)
+    acquire = %{"method" => "session.acquire_control", "session_id" => session_id}
+    :ok = send_frame(client, Map.put(acquire, "request_id", "acquire"))
+
+    assert [%{"type" => "result", "result" => %{"writer_epoch" => epoch}}] =
+             receive_records(client, 1)
+
+    :ok =
+      send_frame(client, %{
+        "method" => "session.attach",
+        "request_id" => "attach",
+        "session_id" => session_id
+      })
+
+    assert [%{"type" => "snapshot"}] = receive_records(client, 1)
+
+    :ok =
+      send_frame(client, %{
+        "method" => "session.release_control",
+        "request_id" => "release",
+        "session_id" => session_id,
+        "writer_epoch" => epoch
+      })
+
+    assert [%{"request_id" => "release", "type" => "result"}] = receive_records(client, 1)
+    :ok = send_frame(client, Map.put(acquire, "request_id", "reacquire"))
+    assert [%{"request_id" => "reacquire", "type" => "result"}] = receive_records(client, 1)
+
+    send(daemon.sentinel, {:daemon_signal, daemon.owner_ref, :sigterm})
+    assert Task.await(daemon.task, 60_000) == 0
+
+    send(tracer, {:violations, self()})
+    assert_receive {:violations, violations, allowed}, 1_000
+    assert violations == []
+    # The trace saw the connections' allowed calls, so it was live.
+    assert allowed > 0
+  end
+
+  defp call_trace_loop({violations, allowed}) do
+    receive do
+      {:trace, caller, :call, {:gen, :call, [target, _label, request, _timeout]}} ->
+        case classify_call(caller, target, request) do
+          :allowed -> call_trace_loop({violations, allowed + 1})
+          :ignored -> call_trace_loop({violations, allowed})
+          violation -> call_trace_loop({[violation | violations], allowed})
+        end
+
+      {:violations, from} ->
+        send(from, {:violations, Enum.reverse(violations), allowed})
+        call_trace_loop({violations, allowed})
+
+      _other ->
+        call_trace_loop({violations, allowed})
+    end
+  end
+
+  # Technical depth: a call is a violation only when a deadline-subject
+  # component calls another daemon component, other than a connection's calls
+  # into the registry and its relay registration.
+  defp classify_call(caller, target, request) do
+    caller_kind = component(caller)
+    target_kind = component(target)
+    tag = if is_tuple(request), do: elem(request, 0), else: request
+
+    cond do
+      caller_kind not in [:owner, :registry, :lease_owner, :connection] ->
+        :ignored
+
+      is_nil(target_kind) or caller == target ->
+        :ignored
+
+      caller_kind == :connection and target_kind == :registry ->
+        :allowed
+
+      caller_kind == :connection and target_kind == :relay and tag == :register_connection ->
+        :allowed
+
+      true ->
+        {caller_kind, target_kind, tag}
+    end
+  end
+
+  @component_modules %{
+    LoopexDaemon.Owner => :owner,
+    LoopexDaemon.ConnectionRegistry => :registry,
+    LoopexDaemon.LeaseOwner => :lease_owner,
+    LoopexDaemon.SocketConnection => :connection,
+    LoopexDaemon.AdmissionRelay => :relay
+  }
+
+  defp component(pid) when is_pid(pid) do
+    case Process.info(pid, :dictionary) do
+      {:dictionary, dictionary} ->
+        case dictionary[:"$initial_call"] do
+          {module, _function, _arity} -> Map.get(@component_modules, module)
+          _other -> nil
+        end
+
+      nil ->
+        nil
+    end
+  end
+
+  defp component(_name), do: nil
+
   # Concept (T21): during an orderly stop, a lease owner's relay request that
   # stays unanswered for longer than a serving step between the admission
   # cut and the freeze is governed by the stop's own deadlines: its

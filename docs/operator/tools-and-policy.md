@@ -129,6 +129,18 @@ An executor integration participates in that sequence through required
 an error, unconfirmed answer, failed call, or legacy module missing the required
 callback is reported as `outcome_unknown`.
 
+The Local executor answers `cleaned` only once the job's receipt, recording
+confirmed cleanup, is safely on disk; anything short of that is answered
+`unconfirmed`, including a cancellation that arrives before the command
+starts. So a clean cancellation always has a durable record behind it. The
+answer can be more cautious than the record — a slow settlement can be
+answered `unconfirmed` while its receipt later says `confirmed` — but never
+more confident. The answer is waited for until the job's cleanup instant plus
+a margin of `min(ceil(period / 4) + 1_000, max(10_000, period + 2_000) -
+period - 250)` milliseconds, where `period` is the cleanup period; above a
+7,000 ms period the margin no longer covers the whole receipt-writing
+allowance, so such cautious answers become more likely.
+
 How long that answer is waited for is the session's cleanup period, not a number
 this runtime invented. One committed period derives every observation window a
 stop uses — how long an executor is watched for its answer, what its receipt
@@ -280,6 +292,15 @@ with `--` would otherwise be unreachable. A reference to nothing says
 reference whose bytes are unreadable or fail their own digest says
 `the artifact could not be read` rather than handing you content it cannot
 vouch for.
+
+The artifact holds exactly the bytes the command produced and nothing else. The
+executor's own notes — a nonzero exit status, or a process group that "could not
+be shown to hold only the command" when the command exited — appear only in
+the result shown to the model, beside the notice, and are never retained; and
+the notice's "N of M bytes shown" counts only the command's bytes. A note states
+only what was proved: it never says that other processes were running, only
+that the group could not be shown to hold the command alone, and then whether
+cleanup of that group was confirmed.
 
 An artifact is held up to 64 MiB, and nothing collects it afterwards. Artifacts
 stay under the state root until you remove them; an artifact outlives the run

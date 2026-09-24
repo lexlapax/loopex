@@ -250,6 +250,25 @@ stayed ready while create, list and status requests failed. The generation-two
 `daemon.stopping` reason set gains that value; the negotiated schema digest is
 unchanged.
 
+Changes to behaviour released in `0.1.0`:
+
+- `Loopex.Executor.Local.cancel/2` answers `{:ok, :cleaned}` only after the
+  job's receipt recording confirmed cleanup is durably published; every other
+  ending answers `{:ok, :unconfirmed}`. In `0.1.0` a running job's cancel could
+  answer `cleaned` and its owner then be lost, leaving a receipt that said
+  `unconfirmed`. An answer may now be weaker than the receipt — a settlement
+  slower than the reply margin, which above a 7,000 ms cleanup period no
+  longer covers the whole receipt allowance — but never stronger.
+- A cancellation of an admitted job before it starts answers `cleaned` only
+  after its refusal is durable, as ADR 0016's clauses 5 and 7 require; in
+  `0.1.0` it answered at once.
+- A spilled output artifact holds only the bytes the command produced. The
+  executor's exit-status and process-group notes appear only in the
+  model-facing result and are no longer retained in the artifact, and the
+  truncation notice's "N of M bytes shown" counts only the command's bytes.
+- A process-group note now says only what was proved: that the group could not
+  be shown to hold only the command, and whether its cleanup was confirmed.
+
 ## [0.1.0] — 2026-09-19
 
 M4's closed product baseline: the first numbered source version. It is a source

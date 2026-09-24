@@ -7427,7 +7427,7 @@ No process whose answer another daemon component awaits under a deadline — the
 
 | Edge | Target | Deadline holder |
 | --- | --- | --- |
-| E1: connection → collaboration owner (acquire, release) | `:gen_server.send_request`; the owner replies `{:ok, :accepted}` after the relay acknowledges the open, or `{:error, reason}` before any permit exists | None; the owner never blocks |
+| E1: connection → collaboration owner (acquire, release) | `:gen_server.send_request`, admitted only from the named connection; the owner replies `{:ok, :accepted, actor, actor_incarnation}` after the relay acknowledges the open, or `{:error, reason}` before any permit exists; the connection ignores the actor fields | None; the owner never blocks |
 | E2: collaboration owner → lease owner | Plain `{:lease_request, daemon_owner, lo_incarnation, req}`; replies are ordered notices and acknowledgements | Per-step for resolution and attachment acknowledgements (P2); none for permit notices |
 | E3: collaboration owner → relay (open, claim, register, complete) | `send_request` | Owner, 5 s per request while serving; `relay_lost` |
 | E4: lease owner → relay (claim, complete, `promote_lease_ticket`, `prepare_lease_owner_retirement`) | `send_request`; one awaiting slot and a deferred queue | Lease owner, 5 s while serving; reports `{:lease_owner_relay_unanswered, lo, inc}` to the owner, which selects `relay_lost` |
@@ -7441,6 +7441,37 @@ No process whose answer another daemon component awaits under a deadline — the
 | Unchanged: listener, daemon-owner helper, `LeaseOwner.start_link` | — | — |
 
 A lease owner has one awaiting relay or registry step; resolutions, discards, attachments and activation are processed immediately, while acquisitions, releases, resumes, acquisition deadlines and retirement requests wait behind it. After each await, or after a resolution or expiry while idle, it drains in this order: the awaited continuation, pending operations, the expiry check, one waiter, expiry re-arm, one deferred input. A discard also removes a deferred or awaited request, after which every relay answer for it is cleanup-only. The registry runs one relay-dependent flow at a time from a FIFO queue bounded by the origin ledger; mirror, output, gate, sweep and close handlers never wait on it.
+
+**As shipped.** E1 landed inside the lease-owner and owner step rather than
+as a step of its own, because the connection could not stop waiting until
+the owner answered without blocking. Every retained lease operation records
+`step`, `step_owner` (`:registry`, `:relay`, `:lease_owner`, `:connection`)
+and a `step_deadline` fixed when the step's request is sent. A late registry
+step is `connections_lost`; a late relay step, owner-loss classification
+included, is `relay_lost`; a late lease-owner resolution kills and supersedes
+that lease owner, whose `EXIT` resolves the operation through the lost-owner
+path; a late restoration of a cancelled release settles the connection loss at
+once. The holder close monitors the holder before sending
+`control_owner_lost`, completes on the exact acknowledgement or on the
+holder's `DOWN`, and kills the holder at the step's instant.
+`:await_holder_close` has left `@connections_steps`: a close in flight at the
+cut is re-bound to the transport-cut instant, and no step entered after the
+cut arms an instant. An open refused `actor_retiring` or `actor_lost` is held
+until that lease owner's intent or loss settles, in arrival order with any
+later request for the session; `invalid_actor` for a still-live lease owner
+selects `relay_lost` and answers the request, and for a departed one is held;
+every other open refusal is passed to the client — the design's wording that
+any other refusal selects `relay_lost` was not implemented. The returned
+holder of a lost owner hears only an uncorrelated close on every path: a
+request it sends during the loss, one held on it, and one answered at the cut
+are each answered `holder_closed`, which the connection settles without
+writing. The call-trace witness (T14, `service_lifecycle_test.exs`) traces
+every `:gen.call/4` from the owner, the registry, lease owners and
+connections while serving and through an orderly stop, and allows only a
+connection's calls into the registry and its `register_connection`; the full
+T21 witness in the same file stops a real daemon with a lease owner's relay
+request unanswered for six seconds between the cut and the freeze and
+requires exit status 0.
 
 Three rows deserve their reading stated, because they are where earlier drafts
 went wrong. The **coordinator death** row is the one that forced `residency`

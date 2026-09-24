@@ -5791,3 +5791,39 @@ status set are unchanged; exit selection changes as above. No durable record
 changes, so no migration is needed. ADR 0033's accepted text is amended in the
 same change and its governance record is re-bound. Witnesses T1–T26 of the
 design must be red with their mechanism removed. On 2026-09-24 the maintainer accepted this amendment as written at `2a197943`; ADR 0033's governance record is re-bound to its bytes there, and it replaces the record of the ADR's 2026-09-21 acceptance, which remains in [that disposition](#disposition-m5-acceptance-2026-09-21).
+
+<a id="disposition-m5-cleaned-implies-durable-2026-09-24"></a>
+### M5 executor cancellation, output artifacts and the risk packet — 2026-09-24
+
+On 2026-09-24 the maintainer decided:
+
+- **The forced-KILL test is split.** A deterministic rule test pins
+  `cleanup_confirmed?/3`; the real-process case accepts `:cleaned` or
+  `:unconfirmed`, provided the answer agrees with the receipt and the outcome
+  is `:cancelled` or `:outcome_unknown` as ADR 0016 requires.
+- **Option A for spilled output.** A spilled output artifact holds the
+  command's bytes only; the executor's notes appear only in the model-facing
+  text, and "N of M" counts command bytes.
+- **Notes state only what was proved.** A process-group note says the group
+  "could not be shown to hold only the command", never that members were
+  running.
+- **Cleaned implies durable.** `Loopex.Executor.Local.cancel/2` answers
+  `{:ok, :cleaned}` only after a durable receipt with
+  `cleanup_confirmation: :confirmed` is published; everything else answers
+  `unconfirmed`. An answer weaker than the receipt is allowed and a stronger
+  one must be impossible. This replaces the verdict-record machinery and
+  closes a gap already in v0.1.0, where a running job's cancel could answer
+  `cleaned` while its receipt later said `unconfirmed`.
+- **Pre-run cancellation conforms to ADR 0016.** A cancel of an admitted job
+  before it runs answers `cleaned` only after durable publication, under
+  clauses 5 and 7; clause 4 covers only the queued or pre-marker refusal
+  record. This is a conformance change, not a new decision, and a special case
+  of the rule above.
+- **The risk packet.** Items 1–6 were fixed: the settling import worker
+  (`15e1152b`, with its close hook moved off `add/3` in `ae74367f`), no mirror
+  clock during the stop, the deleted blocking lease-owner calls and the latched
+  relay reports (`9cc8f075`), the missing hand-off table (`996b0d7d`) and the
+  cancel answer allowed to be weaker than its receipt (`c36d74d0`); item 7, the holder-close
+  monitor, was fixed in step 7 (`b3c295b8`); items 8–19 are accepted as the
+  M5 plan's "Named limitation: 2026-09-24 risk packet" rows, each with its
+  reachability, direction and tripwire.
