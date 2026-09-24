@@ -233,4 +233,4 @@ Technical depth: [Compatibility mechanics](0033-collaboration-controller-lease-a
 
 | Decision | Authority | Authority evidence | Bound bytes |
 | --- | --- | --- | --- |
-| Acceptance | Maintainer | [disposition](../developer/agent-context-map.md#disposition-m5-acceptance-2026-09-21) | candidate `1e1b33bfbf83953463e6abcdaebd52dc12735d8f`; concept `sha256:920d2dff8dbf37f1f341ef6885ff19fb85f430f2908d2b99af0d7c6681482018`; technical `sha256:08aa94e95e15ac1a83a54b353a79fb71722599f9abf03db3522b4067daad1ed3` |
+| Acceptance | Maintainer | [disposition](../developer/agent-context-map.md#disposition-m5-nonblocking-components-2026-09-24) | candidate `2a19794339ab6c061f5caefaf9a077279bdbb22f`; concept `sha256:097958d2dcb93372221c3ce8b15b72d33fd8ab49457165c7031fb0711c8565e8`; technical `sha256:51e793c3908bc3aaf04645fdb767075d2fdde8ac324195b5af409db6ecfc4859` |

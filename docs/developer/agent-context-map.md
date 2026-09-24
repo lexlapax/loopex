@@ -5790,4 +5790,4 @@ whose own work was late. The generation-two wire, its error codes and the exit
 status set are unchanged; exit selection changes as above. No durable record
 changes, so no migration is needed. ADR 0033's accepted text is amended in the
 same change and its governance record is re-bound. Witnesses T1–T26 of the
-design must be red with their mechanism removed.
+design must be red with their mechanism removed. On 2026-09-24 the maintainer accepted this amendment as written at `2a197943`; ADR 0033's governance record is re-bound to its bytes there, and it replaces the record of the ADR's 2026-09-21 acceptance, which remains in [that disposition](#disposition-m5-acceptance-2026-09-21).
