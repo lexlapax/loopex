@@ -6229,17 +6229,21 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     # on how loaded the host is, so which answer comes back is not asserted
     # here; the rule that turns those facts into `cleaned` is proved on
     # supplied facts by `Local.forced_kill_confirmed?/1` in the executor tests.
-    # Whatever the answer, the receipt must carry the same verdict and the
-    # outcome ADR 0016 pairs with it, and the case's own `ps` must find the
-    # captured group gone once the job has ended.
+    # Whatever the answer, it may not be stronger than the receipt's verdict,
+    # the receipt must carry the outcome ADR 0016 pairs with that verdict, and
+    # the case's own `ps` must find the captured group gone once the job has
+    # ended.
     assert {:ok, answer} = Local.cancel(executor, job_id)
     assert answer in [:cleaned, :unconfirmed]
     assert {:ok, killed} = Task.await(running, 5_000)
 
-    assert killed.cleanup_confirmation ==
-             if(answer == :cleaned, do: :confirmed, else: :unconfirmed)
+    assert never_stronger_than?({:ok, answer}, killed),
+           "cancel answered #{inspect(answer)} for a job whose receipt recorded " <>
+             "#{inspect(killed.cleanup_confirmation)}"
 
-    assert killed.outcome == if(answer == :cleaned, do: :cancelled, else: :outcome_unknown)
+    assert killed.outcome ==
+             if(killed.cleanup_confirmation == :confirmed, do: :cancelled, else: :outcome_unknown)
+
     assert String.starts_with?(killed.output, "hello\n")
 
     assert {:ok, ^group} =
@@ -6323,7 +6327,9 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     # queued request. It must hand that request to the execute caller rather
     # than exit with it unread or answer it, and the execute caller's answer is
     # traced: it is given whether its settlement published a confirmed receipt,
-    # and that must agree with the receipt it returns and with the answer.
+    # and that must agree with the receipt it returns. The answer may be weaker
+    # than that receipt when the settlement outlasts the caller's bound, but
+    # never stronger.
     root = workspace()
     {executor, lease_id} = executor_with_grace(root, 2_000)
     ready = Path.join(root, "finishing-ready")
@@ -6386,7 +6392,7 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     assert published_flags(events) == [receipt.cleanup_confirmation == :confirmed, false],
            "the settlement did not answer from what it published: #{inspect(events)}"
 
-    assert answer == cleanup_answer(receipt),
+    assert never_stronger_than?(answer, receipt),
            "cancel answered #{inspect(answer)} for a job whose receipt recorded " <>
              "#{inspect(receipt.cleanup_confirmation)}"
 
@@ -6713,7 +6719,7 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     # mailbox. The owner used to exit with it unread, so its caller saw `DOWN`
     # and answered `unconfirmed`. Both must now be handed to the execute
     # caller, whose traced answer is given whether its settlement published a
-    # confirmed receipt, and both answers must equal the receipt's.
+    # confirmed receipt, and neither answer may be stronger than the receipt.
     root = workspace()
     ready = Path.join(root, "twice-cancelled-ready")
     job_id = "twice-cancelled-#{System.unique_integer([:positive])}"
@@ -6752,9 +6758,9 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     assert published_flags(events) == [receipt.cleanup_confirmation == :confirmed, false],
            "the settlement did not answer from what it published: #{inspect(events)}"
 
-    assert first_answer == cleanup_answer(receipt)
+    assert never_stronger_than?(first_answer, receipt)
 
-    assert second_answer == cleanup_answer(receipt),
+    assert never_stronger_than?(second_answer, receipt),
            "the queued second cancellation answered #{inspect(second_answer)} for a job " <>
              "whose receipt recorded #{inspect(receipt.cleanup_confirmation)}"
 
@@ -7576,8 +7582,17 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     :ok
   end
 
-  defp cleanup_answer(%{cleanup_confirmation: :confirmed}), do: {:ok, :cleaned}
-  defp cleanup_answer(_receipt), do: {:ok, :unconfirmed}
+  # Concept: a cancellation's answer may be weaker than the job's receipt but
+  # never stronger.
+  #
+  # Technical depth: `cleaned` requires a receipt whose cleanup is confirmed;
+  # `unconfirmed` is admissible for any receipt, because a settlement that
+  # finishes after the caller's bound leaves the caller the weaker answer.
+  defp never_stronger_than?({:ok, :cleaned}, receipt),
+    do: receipt.cleanup_confirmation == :confirmed
+
+  defp never_stronger_than?({:ok, :unconfirmed}, _receipt), do: true
+  defp never_stronger_than?(_answer, _receipt), do: false
 
   defp wait_for_os_pid_exit(_os_pid, 0), do: false
 
