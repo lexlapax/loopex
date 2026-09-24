@@ -91,8 +91,15 @@ defmodule Loopex.LLM.ReqLLM.CredentialCustody do
 
   def validate(_reference), do: {:error, :invalid_custody_reference}
 
+  # Concept: nothing observes the process that holds the credential.
+  # Technical depth: the sensitive flag is set before this process reads its
+  # options. From then on the runtime generates no trace message for it, and
+  # `Process.info/2` and crash dumps omit its messages, dictionary and stack.
+  # `:sys.get_state/1` still returns the state to trusted code in the same VM,
+  # which ADR 0019's forensic-memory disclaimer already covers.
   @impl GenServer
   def init(options) do
+    Process.flag(:sensitive, true)
     credential = Keyword.get(options, :credential)
     expires_at = Keyword.get(options, :expires_at, :infinity)
 

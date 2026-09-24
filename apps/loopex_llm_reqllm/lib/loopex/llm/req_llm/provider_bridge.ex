@@ -572,7 +572,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderBridge do
           retainer_lost: false
         }
 
-        if System.monotonic_time() < deadline, do: launch(state), else: fail(state)
+        if System.monotonic_time() < deadline, do: launch(state), else: expire(state)
 
       {:loopex_provider_resource_stop, ^stop_reference, stop, requester, _cooperative,
        _observation}
@@ -771,14 +771,22 @@ defmodule Loopex.LLM.ReqLLM.ProviderBridge do
       {:provider_frame, receiver, frame} when receiver == state.receiver ->
         data_frame(state, frame)
 
+      # Concept: a credential-sender message moves the guardian only from the
+      # phase that awaits it and only from its live sender.
+      # Technical depth: without the pid guard, a message naming a `nil`
+      # sender matched whenever no sender was live, and the release it
+      # triggered raised on `send(nil, ...)` with the token, registry handle
+      # and nonce in the crash report. A bootstrap result outside
+      # `:credential_bootstrap` is ignored like any other stranger's message.
       {:bootstrap_result, sender_ref, sender, guardian, result}
-      when sender_ref == state.sender_ref and sender == state.credential_sender and
+      when state.phase == :credential_bootstrap and is_pid(state.credential_sender) and
+             sender_ref == state.sender_ref and sender == state.credential_sender and
              guardian == self() ->
         credential_bootstrap_result(state, result)
 
       {:credential_phase_result, sender_ref, guardian, sender, phase, result}
-      when sender_ref == state.sender_ref and sender == state.credential_sender and
-             guardian == self() ->
+      when is_pid(state.credential_sender) and sender_ref == state.sender_ref and
+             sender == state.credential_sender and guardian == self() ->
         credential_phase_result(state, phase, result)
 
       {:provider_sent, sender, phase, result} when sender == state.sender ->
@@ -867,7 +875,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderBridge do
 
   defp tick(state) do
     cond do
-      System.monotonic_time() >= state.deadline -> fail(state)
+      System.monotonic_time() >= state.deadline -> expire(state)
       state.phase == :accept -> accept(state)
       true -> loop(state)
     end
@@ -996,9 +1004,9 @@ defmodule Loopex.LLM.ReqLLM.ProviderBridge do
       {:begin_bootstrap, ^sender_ref, ^guardian, sender, deadline}
       when sender == self() and is_integer(deadline) ->
         result =
-          with :ok <- before_deadline(deadline),
+          with :ok <- credential_deadline!(deadline),
                :ok <- exclude_credential_sender(capability, deadline),
-               :ok <- before_deadline(deadline),
+               :ok <- credential_deadline!(deadline),
                :ok <- install_sender_sink() do
             :ok
           else
@@ -1037,7 +1045,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderBridge do
   end
 
   defp direct_trace_clear(deadline) do
-    direct_deadline!(deadline)
+    credential_deadline!(deadline)
 
     with {:ok, sessions} <- named_trace_sessions(),
          :ok <- clear_named_sessions(sessions),
@@ -1046,7 +1054,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderBridge do
          :ok <- await_named_delivery(sessions, self(), deadline),
          :ok <- await_legacy_delivery(self(), deadline),
          :ok <- verify_trace_clear(sessions, [self()]) do
-      direct_deadline!(deadline)
+      credential_deadline!(deadline)
       :ok
     end
   catch
@@ -1143,7 +1151,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderBridge do
   defp await_named_delivery(sessions, pid, deadline) do
     references =
       Enum.reduce_while(sessions, {:ok, []}, fn session, {:ok, references} ->
-        direct_deadline!(deadline)
+        credential_deadline!(deadline)
 
         case named_trace_operation(session, fn -> :trace.delivered(session, pid) end) do
           {:ok, reference} when is_reference(reference) ->
@@ -1164,7 +1172,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderBridge do
   end
 
   defp await_legacy_delivery(pid, deadline) do
-    direct_deadline!(deadline)
+    credential_deadline!(deadline)
 
     case :erlang.trace_delivered(pid) do
       reference when is_reference(reference) ->
@@ -1182,7 +1190,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderBridge do
     if MapSet.size(pending) == 0 do
       :ok
     else
-      direct_deadline!(deadline)
+      credential_deadline!(deadline)
 
       receive do
         {:trace_delivered, ^pid, reference} ->
@@ -1195,7 +1203,16 @@ defmodule Loopex.LLM.ReqLLM.ProviderBridge do
     end
   end
 
-  defp direct_deadline!(deadline) do
+  # Concept: a credential sender that consumes a release at or after the
+  # invocation deadline starts nothing more, in managed and direct mode alike.
+  # Technical depth: ADR 0034 technical step 10. The check runs when the sender
+  # receives `:begin_bootstrap`, credential context or a phase continuation and
+  # again immediately before the one operation that message permits. Expiry
+  # exits with the fixed non-secret `:credential_deadline` reason, which drops
+  # any custody bytes the sender holds and sends no phase result. The guardian
+  # classifies the resulting `DOWN` as a timeout only after its own clock
+  # confirms expiry.
+  defp credential_deadline!(deadline) do
     if System.monotonic_time() < deadline, do: :ok, else: exit(:credential_deadline)
   end
 
@@ -1219,7 +1236,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderBridge do
     receive do
       {:credential_context, ^sender_ref, ^guardian, sender, token, registry, socket, nonce}
       when sender == self() ->
-        with :ok <- before_deadline(deadline),
+        with :ok <- credential_deadline!(deadline),
              {:ok, custody} <- route_credential(registry, token) do
           Logger.debug("provider credential route resolved")
           send(guardian, {:credential_phase_result, sender_ref, guardian, self(), :registry, :ok})
@@ -1249,7 +1266,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderBridge do
     receive do
       {:credential_phase_continue, ^sender_ref, ^guardian, sender, :registry, ^deadline}
       when sender == self() ->
-        with :ok <- before_deadline(deadline),
+        with :ok <- credential_deadline!(deadline),
              {:ok, credential_reply} <- receive_custody_reply(custody, :resolve),
              :ok <- credential_size(credential_reply) do
           Logger.debug("provider credential custody resolved")
@@ -1296,7 +1313,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderBridge do
       {:credential_phase_continue, ^sender_ref, ^guardian, sender, :custody, ^deadline}
       when sender == self() ->
         result =
-          with :ok <- before_deadline(deadline),
+          with :ok <- credential_deadline!(deadline),
                :ok <- write_credential_frame(socket, {nonce, credential_reply}) do
             :ok
           else
@@ -1326,7 +1343,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderBridge do
     receive do
       {:credential_phase_continue, ^sender_ref, ^guardian, sender, :credential_frame, ^deadline}
       when sender == self() ->
-        if before_deadline(deadline) == :ok, do: :ok, else: exit(:credential_deadline)
+        credential_deadline!(deadline)
     end
   end
 
@@ -1362,10 +1379,6 @@ defmodule Loopex.LLM.ReqLLM.ProviderBridge do
   end
 
   def write_credential_frame(_socket, _credential), do: {:error, :unavailable}
-
-  defp before_deadline(deadline) do
-    if System.monotonic_time() < deadline, do: :ok, else: {:error, :timeout}
-  end
 
   defp credential_size(%{credential: credential} = reply)
        when map_size(reply) == 1 and is_binary(credential) and byte_size(credential) in 1..65_536,
@@ -1478,7 +1491,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderBridge do
         do: begin_cleanup(state, nil),
         else: deliver_or_retain(state)
     else
-      fail(state)
+      expire(state)
     end
   end
 
@@ -1495,7 +1508,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderBridge do
 
       loop(%{state | phase: :credential_registry})
     else
-      fail(state)
+      expire(state)
     end
   end
 
@@ -1525,7 +1538,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderBridge do
 
       loop(%{state | phase: next_phase})
     else
-      fail(state)
+      expire(state)
     end
   end
 
@@ -1543,11 +1556,23 @@ defmodule Loopex.LLM.ReqLLM.ProviderBridge do
       sender = start_send(state.socket, :invocation, payload)
       loop(%{state | phase: :invocation, sender: sender, possible_delivery: true})
     else
-      fail(state)
+      expire(state)
     end
   end
 
-  defp credential_sender_down(state, _reason), do: fail(state)
+  defp credential_sender_down(state, _reason) do
+    if System.monotonic_time() < state.deadline, do: fail(state), else: expire(state)
+  end
+
+  # Concept: the guardian, not the sender, decides that an invocation timed
+  # out, and only after its own clock has reached the deadline.
+  # Technical depth: a sender's `:credential_deadline` exit is not proof of
+  # time, so every path that has just read the guardian's clock at or after
+  # the deadline ends here and every other failure ends in `fail/1`. The
+  # public result is the same fixed failure either way; this function is the
+  # timeout classification, and test support may attach a static arity-only
+  # trace pattern to it.
+  defp expire(state), do: fail(state)
 
   # Concept: only a sealed, finite failure category is observable locally.
   # Technical depth: test support may attach static arity-only trace patterns.

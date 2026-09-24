@@ -34,6 +34,7 @@ defmodule Loopex.LLM.ReqLLM.CredentialPlaneTest do
   alias Loopex.LLM.ReqLLM.{
     CredentialCustody,
     CredentialRegistry,
+    ProviderBridge,
     ProviderCodec,
     ProviderPhaseDiagnostic
   }
@@ -470,26 +471,37 @@ defmodule Loopex.LLM.ReqLLM.CredentialPlaneTest do
     #
     # Technical depth: an OTP trace session of its own records every message
     # sent by every process that existed before one managed invocation with a
-    # unique synthetic key — custody and the registry included. Exactly one
-    # traced message contains the key, and custody sent it. The invocation's own
-    # guardian and sender are created by the call; the sender excludes itself
-    # from tracing before it receives the credential, and its write to the
-    # child is a port command, not a message.
+    # unique synthetic key. Custody is sensitive, so no trace can see its
+    # reply; the case instead holds the sender inside its custody call,
+    # suspends it, releases custody and has a one-use inspector confirm that
+    # the queued message is the complete `GenServer.call` reply carrying the
+    # key. The only traced carrier is the case's own control message, sent
+    # inside the census to prove the census records. The sender excludes
+    # itself from tracing before it receives the credential, and its write to
+    # the child is a port command, not a message.
     test "the custody reply is the sole credential-bearing BEAM message" do
       key = @sentinel <> "-sole-message"
       fixture = Fixture.new(:reply, credential: key)
+      test = self()
 
-      {result, carriers} =
+      {{result, reply_queued?}, carriers} =
         census(key, :existing, fn ->
-          call = Fixture.managed(fixture)
+          send(test, {:census_control, key})
+          assert_received {:census_control, ^key}
+          {call, sender} = hold_in_custody(fixture, Fixture.request())
+          assert :erlang.suspend_process(sender)
+          assert :erlang.resume_process(fixture.custody_pid)
+          assert Fixture.eventually(fn -> queued(sender) == 1 end, 5_000)
+          reply_queued? = custody_reply_queued?(sender, key)
+          assert :erlang.resume_process(sender)
           result = completion(call)
           Fixture.stop(call)
-          result
+          {result, reply_queued?}
         end)
 
       assert {:ok, %{text: "loopex"}} = result
-      assert [{from, _to}] = carriers
-      assert from == fixture.custody_pid
+      assert reply_queued?
+      assert carriers == [{test, test}]
       assert_post(fixture)
       Fixture.assert_gone(fixture)
     end
@@ -620,47 +632,168 @@ defmodule Loopex.LLM.ReqLLM.CredentialPlaneTest do
       Fixture.assert_gone(fixture)
     end
 
-    # Concept: an invocation asks custody for its credential exactly once;
-    # nothing on the way to the child resolves it again or retries.
+    # Concept: a bootstrap result that names the invocation's own reference but
+    # no live sender changes nothing, and nothing about the invocation reaches
+    # the host log.
     #
-    # Technical depth: a trace session of its own records every call custody
-    # receives while one managed invocation runs to its reply; exactly one is a
-    # `resolve` for custody's incarnation.
-    test "one invocation resolves its credential from custody exactly once" do
-      fixture = Fixture.new(:reply, credential: @sentinel <> "-resolve-once")
-      parent = self()
+    # Technical depth: a direct invocation has its sender reference before it
+    # has a sender. While the child is held at entry, an arity-only call trace
+    # whose match specification returns only that reference reads it from the
+    # guardian's loop, and the case then sends the guardian
+    # `{:bootstrap_result, sender_ref, nil, guardian, :ok}`. The guardian stays
+    # alive, the released invocation returns its ordinary reply, and the
+    # captured log names neither the token nor the credential context.
+    test "a bootstrap result naming no live sender leaves the guardian and log untouched" do
+      fixture = Fixture.new(:delayed_entry, credential: @sentinel <> "-nil-sender")
+      token = Keyword.fetch!(fixture.options, :credential_token)
 
-      tracer =
-        spawn_link(fn ->
-          collect = fn collect, count ->
-            receive do
-              {:trace, _pid, :receive, {:"$gen_call", _from, {:resolve, _incarnation}}} ->
-                collect.(collect, count + 1)
+      log =
+        capture_log(fn ->
+          call = Fixture.managed(fixture, Fixture.request(), :unmanaged)
+          guardian = call.guardian
+          assert Fixture.eventually(fn -> Fixture.reached?(fixture, "pid") end)
+          sender_ref = guardian_sender_ref(guardian)
+          forged = {:bootstrap_result, sender_ref, nil, guardian, :ok}
+          send(guardian, forged)
+          assert Fixture.eventually(fn -> not queued?(guardian, forged) end, 1_000)
 
-              {:trace, _pid, :receive, _other} ->
-                collect.(collect, count)
+          # Handling a consumed message finishes before the guardian waits in
+          # its loop again, or it ends the guardian.
+          assert Fixture.eventually(
+                   fn -> current_function(guardian) in [{ProviderBridge, :loop, 1}, :gone] end,
+                   1_000
+                 )
 
-              {:report, caller} ->
-                send(caller, {:resolutions, count})
+          assert Process.alive?(guardian)
+          Fixture.release(fixture)
+          caller = call.caller
+
+          assert_receive {:completed, ^caller, {:ok, %{text: "loopex"}}},
+                         Fixture.until_settled(call)
+
+          Fixture.stop(call)
+        end)
+
+      refute log =~ "[error]"
+      refute log =~ inspect(token.id)
+      refute log =~ "CredentialToken"
+      refute log =~ "credential_context"
+      refute log =~ @sentinel
+      assert_post(fixture)
+      Fixture.assert_gone(fixture)
+    end
+
+    # Concept: a custody continuation the sender takes up only after the
+    # deadline starts nothing: the sender exits, no credential frame is
+    # written, and the guardian reports its own timeout.
+    #
+    # Technical depth: ADR 0034 technical step 10 in managed mode. The case
+    # holds the sender inside its custody call, suspends the guardian, lets
+    # custody answer, and suspends the sender once it waits for the custody
+    # continuation. The guardian then runs just long enough to queue that
+    # continuation before the deadline and is suspended again with the
+    # guardian's receiver and the child held too, so neither of them can
+    # report the deadline first. After the deadline the sender alone resumes:
+    # it must exit `:credential_deadline` without another write on the data
+    # socket. The resumed guardian must then reach its arity-only traced
+    # timeout classification, and the call returns the fixed refusal.
+    test "a custody continuation consumed after the deadline is the guardian's timeout and writes no frame" do
+      key = @sentinel <> "-late-continuation"
+      fixture = Fixture.new(:reply, credential: key)
+      request = Fixture.request()
+
+      log =
+        capture_log(fn ->
+          {call, sender} = hold_in_custody(fixture, request)
+          guardian = call.guardian
+          sender_monitor = Process.monitor(sender)
+          {socket, receiver} = guardian_io(fixture, guardian, sender)
+          written = sent_frames(socket)
+          assert :erlang.trace_pattern({ProviderBridge, :expire, 1}, true, [:local]) == 1
+          assert :erlang.trace(guardian, true, [:call, :arity]) == 1
+          child = Integer.to_string(Fixture.pid(fixture))
+          held = [guardian, receiver, fixture.custody_pid]
+
+          try do
+            assert :erlang.suspend_process(guardian)
+            assert :erlang.suspend_process(receiver)
+            assert {_, 0} = System.cmd("/bin/kill", ["-STOP", child])
+            assert :erlang.resume_process(fixture.custody_pid)
+
+            assert Fixture.eventually(
+                     fn ->
+                       current_function(sender) == {ProviderBridge, :await_custody_continue, 6}
+                     end,
+                     5_000
+                   )
+
+            assert :erlang.suspend_process(sender)
+            assert :erlang.resume_process(guardian)
+            assert Fixture.eventually(fn -> queued(sender) == 1 end, 5_000)
+            assert :erlang.suspend_process(guardian)
+            assert System.system_time(:millisecond) < request.deadline
+            Process.sleep(max(request.deadline - System.system_time(:millisecond), 0) + 50)
+            assert :erlang.resume_process(sender)
+
+            assert_receive {:DOWN, ^sender_monitor, :process, ^sender, :credential_deadline},
+                           2_000
+
+            assert sent_frames(socket) == written
+            assert :erlang.resume_process(guardian)
+            assert_receive {:trace, ^guardian, :call, {ProviderBridge, :expire, 1}}, 2_000
+          after
+            :erlang.trace_pattern({ProviderBridge, :expire, 1}, false, [:local])
+            System.cmd("/bin/kill", ["-CONT", child])
+
+            for pid <- held, Process.alive?(pid) do
+              if Process.info(pid, :status) == {:status, :suspended},
+                do: :erlang.resume_process(pid)
             end
           end
 
-          collect.(collect, 0)
+          caller = call.caller
+          assert_receive {:completed, ^caller, @refused}, Fixture.until_settled(call)
+          Fixture.stop(call)
         end)
 
-      session = :trace.session_create(:custody_resolution_census, tracer, [])
+      refute log =~ key
+      assert Fixture.count(fixture) == 0
+      assert Fixture.canaries(fixture) == 0
+      Fixture.assert_gone(fixture)
+    end
+
+    # Concept: an invocation asks custody for its credential exactly once;
+    # nothing on the way to the child resolves it again or retries.
+    #
+    # Technical depth: custody is sensitive, so no trace sees what it
+    # receives. A `:sys` debug function installed in custody instead counts
+    # each incoming `resolve` call while one managed invocation runs to its
+    # reply, and reports only a fixed atom per call; exactly one arrives.
+    test "one invocation resolves its credential from custody exactly once" do
+      fixture = Fixture.new(:reply, credential: @sentinel <> "-resolve-once")
+      test = self()
+
+      counter = fn
+        :counting, {:in, {:"$gen_call", _from, {:resolve, _incarnation}}}, _process ->
+          send(test, :custody_resolution)
+          :counting
+
+        :counting, _event, _process ->
+          :counting
+      end
+
+      assert :ok = :sys.install(fixture.custody_pid, {counter, :counting})
 
       try do
-        1 = :trace.process(session, fixture.custody_pid, true, [:receive])
         call = Fixture.managed(fixture)
         await_reply(call)
         Fixture.stop(call)
       after
-        :trace.session_destroy(session)
+        :sys.remove(fixture.custody_pid, counter)
       end
 
-      send(tracer, {:report, parent})
-      assert_receive {:resolutions, 1}, 5_000
+      assert_received :custody_resolution
+      refute_received :custody_resolution
       assert_post(fixture)
     end
 
@@ -1004,6 +1137,142 @@ defmodule Loopex.LLM.ReqLLM.CredentialPlaneTest do
       assert System.system_time(:millisecond) < request.deadline
     after
       if Process.alive?(call.guardian), do: :erlang.resume_process(call.guardian)
+    end
+  end
+
+  # Concept: a managed invocation is held with its sender waiting inside its
+  # one custody call, so the case decides what the sender sees next.
+  #
+  # Technical depth: custody is suspended before the call starts, so the
+  # sender's `GenServer.call` waits on it. The sender is the fixture's one
+  # supervised child other than the guardian. Its current stack, which holds
+  # only modules, functions and arities, shows the wait inside custody
+  # resolution. Custody stays suspended; the caller releases it.
+  defp hold_in_custody(fixture, request) do
+    assert :erlang.suspend_process(fixture.custody_pid)
+    call = Fixture.managed(fixture, request)
+    guardian = call.guardian
+
+    assert Fixture.eventually(fn ->
+             Task.Supervisor.children(fixture.workers) -- [guardian] != []
+           end)
+
+    [sender] = Task.Supervisor.children(fixture.workers) -- [guardian]
+
+    assert Fixture.eventually(
+             fn ->
+               case Process.info(sender, :current_stacktrace) do
+                 {:current_stacktrace, stack} ->
+                   Enum.any?(stack, &match?({CredentialCustody, :resolve, 1, _}, &1)) and
+                     Enum.any?(stack, &match?({:gen, :do_call, 4, _}, &1))
+
+                 nil ->
+                   false
+               end
+             end,
+             Fixture.until_settled(call)
+           )
+
+    {call, sender}
+  end
+
+  defp queued(pid) do
+    case Process.info(pid, :message_queue_len) do
+      {:message_queue_len, length} -> length
+      nil -> :gone
+    end
+  end
+
+  # True while `message` still waits in `pid`'s mailbox; a gone process has
+  # consumed nothing more, so it reads as false and its liveness is asserted
+  # separately.
+  defp queued?(pid, message) do
+    case Process.info(pid, :messages) do
+      {:messages, messages} -> message in messages
+      nil -> false
+    end
+  end
+
+  defp current_function(pid) do
+    case Process.info(pid, :current_function) do
+      {:current_function, mfa} -> mfa
+      nil -> :gone
+    end
+  end
+
+  # Concept: the one queued message is custody's complete call reply.
+  #
+  # Technical depth: an unlinked one-use inspector reads the suspended
+  # sender's mailbox, reports only a boolean and is killed and awaited, so the
+  # message is never copied into the case process.
+  defp custody_reply_queued?(sender, key) do
+    parent = self()
+
+    {inspector, monitor} =
+      spawn_monitor(fn ->
+        verdict =
+          case Process.info(sender, :messages) do
+            {:messages, [{tag, {:ok, %{credential: ^key} = reply}}]}
+            when map_size(reply) == 1 ->
+              reply_tag?(tag)
+
+            _other ->
+              false
+          end
+
+        send(parent, {:inspected, self(), verdict})
+        receive do: (:never -> :ok)
+      end)
+
+    assert_receive {:inspected, ^inspector, verdict}, 1_000
+    Process.exit(inspector, :kill)
+    assert_receive {:DOWN, ^monitor, :process, ^inspector, :killed}, 1_000
+    verdict
+  end
+
+  # A `GenServer.call` reply is tagged with the call's monitor reference, or
+  # with that reference behind `:alias` when the call used a process alias.
+  defp reply_tag?([:alias | tag]), do: is_reference(tag)
+  defp reply_tag?(tag), do: is_reference(tag)
+
+  # Concept: the guardian's data socket and socket reader are found from the
+  # guardian's own links.
+  #
+  # Technical depth: the guardian owns the accepted TCP socket, so the socket
+  # port is linked to it, and it links its raw receiver. Every other linked
+  # process is the fixture's supervisor or the credential sender.
+  defp guardian_io(fixture, guardian, sender) do
+    {:links, links} = Process.info(guardian, :links)
+
+    [socket] =
+      Enum.filter(links, &(is_port(&1) and Port.info(&1, :name) == {:name, ~c"tcp_inet"}))
+
+    [receiver] = Enum.filter(links, &is_pid/1) -- [fixture.workers, sender]
+    {socket, receiver}
+  end
+
+  defp sent_frames(socket) do
+    {:ok, [send_cnt: count]} = :inet.getstat(socket, [:send_cnt])
+    count
+  end
+
+  # Concept: a direct guardian's sender reference is read without copying its
+  # state out of the guardian.
+  #
+  # Technical depth: an arity-only call trace on the guardian's loop carries
+  # only the value its match specification selects, the reference.
+  defp guardian_sender_ref(guardian) do
+    specification = [{[:"$1"], [], [{:message, {:map_get, :sender_ref, :"$1"}}]}]
+    assert :erlang.trace_pattern({ProviderBridge, :loop, 1}, specification, [:local]) == 1
+    assert :erlang.trace(guardian, true, [:call, :arity]) == 1
+
+    try do
+      assert_receive {:trace, ^guardian, :call, {ProviderBridge, :loop, 1}, sender_ref}, 2_000
+      assert is_reference(sender_ref)
+      sender_ref
+    after
+      :erlang.trace(guardian, false, [:call, :arity])
+      :erlang.trace_pattern({ProviderBridge, :loop, 1}, false, [:local])
     end
   end
 
