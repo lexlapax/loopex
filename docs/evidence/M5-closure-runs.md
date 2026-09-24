@@ -98,12 +98,17 @@ provider. Its summary line is retained from the release check's output.
 ### Full-population orderly stop
 
 The `long_bound` measurement behind `teardown_ms`: 512 initialized, attached
-connections.
+connections. The current-pair value is filled from this release check's
+long-duration lane. The floor-pair value is filled from a separate floor-pair
+`long_bound` run, `env -u MIX_BUILD_PATH MIX_BUILD_ROOT="/absolute/retained-work/M5-otp27-build" mise exec erlang@27.3.4 elixir@1.18.5-otp-27 -- mix test --only long_bound`
+in `apps/loopex_daemon` at the tested revision, whose retained output and
+SHA-256 are recorded beside it.
 
 | Toolchain | Elapsed |
 | --- | --- |
-| Floor pair (Elixir 1.18.5 / OTP 27.3.4) | Pending |
-| Current pair | Pending |
+| Floor pair (Elixir 1.18.5 / OTP 27.3.4), from the floor-pair `long_bound` run | Pending |
+| Floor-pair `long_bound` run: retained-output reference and SHA-256 | Pending |
+| Current pair, from this release check's long-duration lane | Pending |
 
 ### Process RSS beside the retained-payload ceilings
 
@@ -111,14 +116,34 @@ The output ceilings bound retained payload, not memory, so the `long_bound`
 lane reports the VM's resident size separately at the full attachment count
 (`maximum-population RSS:` line) and at payload pressure, with 508 MiB of queued
 output held against the 512 MiB aggregate commitment (`payload-pressure RSS:`
-line). The values are reported, not asserted.
+line). The values are reported, not asserted, and are filled from this
+release check's long-duration lane output.
 
 | Measurement | Value |
 | --- | --- |
 | RSS at 512 connections and 512 attachments | Pending |
 | RSS before and at 508 MiB retained output | Pending |
 
+### Step durations at the full population (T15)
+
+The `long_bound` lane traces every collaboration-owner step at 512
+connections and prints one `maximum-population steps:` line per step class —
+registry, relay, lease owner and connection — with its count, p50, p99 and
+maximum in milliseconds; the test fails if any class is unsampled or reaches
+its 5,000 ms step. Filled from this release check's long-duration lane output.
+
+| Step class | Count, p50, p99, maximum |
+| --- | --- |
+| Registry | Pending |
+| Relay | Pending |
+| Lease owner | Pending |
+| Connection (holder close) | Pending |
+
 ## Outcome 6 security review
+
+Filled from the independent security review of Outcome 6 that the maintainer
+commissions against the tested revision; it is not produced by any check
+command.
 
 | Field | Value |
 | --- | --- |

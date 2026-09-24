@@ -221,11 +221,21 @@ defmodule LoopexDaemon.Service do
   end
 
   # Concept: each acquisition happens only after a checkpoint proves no stop
-  # or component failure is already waiting.
+  # or component failure is already waiting. The provider credential leaves
+  # the owner's state before the first step, so no startup outcome — a
+  # placement or credential-plane failure included — leaves it readable there.
+  #
+  # Technical depth: the credential lives only in this frame until the
+  # credential-plane step hands it to custody; `step/3` returns the state it
+  # was given on a raise, which is already the state without it.
   defp run_startup(state) do
+    {credential, options} = Keyword.pop_first(state.options, :credential, :missing)
+    state = %{state | options: options}
+    plane = fn state -> start_credential_plane(state, credential) end
+
     result =
       with {:ok, state} <- step(state, :placement_lock_failed, &acquire_placement/1),
-           {:ok, state} <- step(state, :credential_plane_start_failed, &start_credential_plane/1),
+           {:ok, state} <- step(state, :credential_plane_start_failed, plane),
            {:ok, state} <- step(state, :composition_start_failed, &start_composition/1),
            {:ok, state} <- step(state, :session_index_corrupt, &start_index/1),
            {:ok, state} <- step(state, :daemon_services_start_failed, &start_collaboration/1),
@@ -341,12 +351,15 @@ defmodule LoopexDaemon.Service do
     end
   end
 
-  defp start_credential_plane(state) do
+  defp start_credential_plane(state, :missing),
+    do: {:stop, {:fatal, :credential_plane_start_failed}, state}
+
+  defp start_credential_plane(state, credential) do
     with {:ok, registry_pid} <- CredentialRegistry.start_link([]),
          state = track(state, :credential_registry, registry_pid),
          {:ok, registry} <- CredentialRegistry.handle(registry_pid),
          {:ok, custody_pid} <-
-           CredentialCustody.start_link(credential: option!(state, :credential)),
+           CredentialCustody.start_link(credential: credential),
          state = track(state, :custody, custody_pid),
          {:ok, custody} <- CredentialCustody.reference(custody_pid),
          token = CredentialToken.new(),
@@ -365,8 +378,6 @@ defmodule LoopexDaemon.Service do
 
       Logger.debug("loopex daemon credential plane started")
 
-      # Custody now holds the one copy; the owner keeps none.
-      state = %{state | options: Keyword.delete(state.options, :credential)}
       {:ok, put_in(state, [:components, :credential_plane], plane)}
     else
       _failure -> {:stop, {:fatal, :credential_plane_start_failed}, state}
@@ -1191,7 +1202,7 @@ defmodule LoopexDaemon.Service do
           {:ok, state}
         else
           Logger.debug("loopex daemon component lost or late during teardown")
-          {:fatal, running_class(name, reason), state}
+          {:fatal, running_class(name, own_exit_reason(reason)), state}
         end
 
       :error ->
@@ -1199,18 +1210,21 @@ defmodule LoopexDaemon.Service do
     end
   end
 
-  # Concept: the reason a requested stop reports is the component's own exit,
-  # never an artefact of how this owner watched it.
+  # Concept: a stop counts as this owner's only when the stop request itself
+  # produced the exit; a component that ended on its own — even with
+  # `:normal` — is that component's loss.
   #
-  # Technical depth: this owner's monitor and the helper's stop request are
-  # signals from two senders, so nothing orders them: the component can
-  # receive the stop, and exit, before the monitor is set, which then reports
-  # `:noproc` for a component this owner just stopped cleanly. The helper's
-  # own stop call is ordered, since it monitors before it asks, so its answer
-  # decides that case: `:ok` means the component ended with the requested
-  # reason, and anything else means it was already gone, which stays a loss.
-  # The answer is always consumed, within the same deadline, so no helper
-  # message is left behind.
+  # Technical depth: the helper's stop call is ordered, since it monitors
+  # before it asks, so its answer decides whose exit this was. `:ok` means
+  # the component ended with the requested reason because it was asked:
+  # the monitor's reason is returned, and `:noproc` — the component took the
+  # stop and exited before this owner's monitor was set, a signal from
+  # another sender — is returned as `:normal`. Any other answer (`noproc`
+  # from an already-gone component, a timeout, a mismatched reason) means the
+  # exit was not this owner's request, and `{:component_exit, reason}` is
+  # returned whatever the monitor saw, `:normal` included. The answer is
+  # always consumed, within the same deadline, so no helper message is left
+  # behind.
   @doc false
   @spec await_requested_stop(pid(), (-> term()), integer()) :: term()
   def await_requested_stop(pid, stop, deadline) do
@@ -1229,7 +1243,11 @@ defmodule LoopexDaemon.Service do
           :failed
       end
 
-    if reason == :noproc and answer == :ok, do: :normal, else: reason
+    cond do
+      answer != :ok -> {:component_exit, reason}
+      reason == :noproc -> :normal
+      true -> reason
+    end
   end
 
   defp requested_stop(stop) do
@@ -1298,6 +1316,10 @@ defmodule LoopexDaemon.Service do
   end
 
   defp stop_runtime_bounded(state, _deadline), do: {:ok, state}
+
+  # A component's own exit is classified by the reason it gave.
+  defp own_exit_reason({:component_exit, reason}), do: reason
+  defp own_exit_reason(reason), do: reason
 
   defp running_class(:store, reason), do: store_class(reason)
   defp running_class(:collaboration, reason), do: collaboration_class(reason)

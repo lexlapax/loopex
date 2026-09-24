@@ -3351,51 +3351,57 @@ has the class in hand before anything else happens. Nothing here is
 `rest_for_one`, `one_for_all` or `max_restarts`; those words belonged to the
 withdrawn design and are gone.
 
-**One field keeps that clause from firing on the owner's own work.** An
-earlier draft said "any linked exit, whatever the reason, is fatal", which is
-right for an exit the owner did not cause and wrong for every exit it does:
-an orderly stop terminates them all deliberately, so that rule would classify
-step 1 as `listener_lost`, every lease owner's stop as a lost controller,
-step 5's clean return as `runtime_lost` — a daemon that could never exit `0`, and an
-idle-shutdown witness that could never pass.
+**The stop rule as implemented.** An orderly stop must not read the exits it
+causes as losses, and must not read a component's own exit as a stop it
+caused. Earlier revisions of this section specified a `stopping` field naming
+the component being stopped and an owner that ignored its stop helper's
+answer; neither was built, and the rule below replaced both.
 
-So the owner carries a `stopping` field naming **the component it is
-currently stopping and the exact expected-exit mode** — one pid at every step
-but the teardown's lease-owner sweep, where it names that step's set of pids.
-The modes are `normal_stop`, the listener's `planned_transport_kill`, and
-`{:timeout_kill, class}` recorded only after that class has been latched. The
-field is set immediately before each stop or owner-issued kill. The EXIT clause
-reads:
+The service owner stops the components one at a time in the fixed reverse
+order — the listener, the collaboration owner (the relay stops with it), the
+runtime tree, the executor, the workspace lease, the transfers owner, the
+index, the capability, custody, the credential registry, and the Store last.
+Before each step it drains, with a zero wait, every queued owned exit, runtime
+monitor `DOWN` and component-fatal report (`owned_loss/1`); any of those is a
+loss, classified by that component's running class, and ends the orderly stop
+as a fail-stop with the components not yet stopped. Then, for the step's
+component:
 
-- an exit from the pid named in `stopping` is **consumed** only when
-  `normal_stop` receives `:normal` or `:shutdown`, when
-  `planned_transport_kill` receives the listener's exact `:killed`, or when
-  `{:timeout_kill, class}` receives exact `:killed` after `class` was already
-  latched. The timeout case is cleanup-only and cannot permit exit `0`;
-- **every other exit is classified**, including one from the pid named in
-  `stopping` whose reason is none of those three, and one from a
-  component not yet stopped that dies of its own accord *during* another
-  component's stop. A store that fails while the listener is being stopped is
-  still `store_lost`, and must be: the daemon is going down either way, but
-  the operator is owed the real reason rather than `operator_stop`.
+1. The owner unlinks the component and calls `await_requested_stop/3`, which
+   monitors it and then spawns an unlinked helper whose whole body is
+   `GenServer.stop(pid, :normal, remaining(deadline))` —
+   `Supervisor.stop/3` for the runtime tree — where the deadline is the shared
+   teardown deadline, or the Store's own fixed phase for the Store. Whatever
+   that call raises, exits or returns ends in the helper, and its answer is
+   reduced to `:ok` or not.
+2. The owner waits for the component's `DOWN` until the absolute deadline.
+   A component still alive then is killed, and the step's reason is
+   `:stopped_late`. The helper's answer is then consumed within the same
+   deadline, so no helper message outlives the step.
+3. **A step is clean only when the helper's own stop answer is `:ok`**, that
+   is, when the stop request produced the exit, and the monitor's reason is
+   `:normal`, `:shutdown` or `{:shutdown, _}`. A monitor reporting `:noproc`
+   with an `:ok` answer is also clean: the component took the stop and exited
+   before the monitor was set, the two being signals from different senders.
+   Any other answer — `noproc` because the component was already gone, a
+   timeout, a mismatched reason — means the exit was the component's own, and
+   the step is returned as `{:component_exit, reason}` and classified by the
+   component's running class **even when the reason is `:normal`**: a Store
+   that ended on its own between the pre-step loss check and the stop request
+   is `store_lost`, and a runtime tree that did is `runtime_lost`. A late kill
+   is likewise the component's running class.
+4. The component's `EXIT` on the link removed in step 1 is flushed, so it is
+   never read later as a loss.
 
-**The field and expected mode narrow *which* exits can be consumed; the reason
-decides whether the expectation was met**, and an earlier revision had the pid
-field deciding on its own.
-That version consumed **any** exit from the named pid, which contradicts the
-reason-sensitive rule four steps below and contradicts this file's own
-witness: the transfers owner is made to raise inside its `terminate/2` during
-a stop the owner asked for, and the case asserts `transfers_lost` rather than
-`operator_stop`. Under "any exit from the named pid is consumed" that case
-fails. The two rules are one rule now, stated here and applied at step 4 of
-the stop driver: **reason first, and the field only says whose `:killed` was
-the owner's doing.**
-
-**The owner never calls `GenServer.stop/3` itself**, and the reason is a
-result an earlier draft did not have. Every previous version of this section
-put the call in the owner and tried to name the shapes it must catch. That
-approach is abandoned here, because at a boundary the composition already
-admits the call does not raise an *exit* at all.
+The first failing step ends the teardown; the fail-stop that follows stops
+the executor and a live Store with the same helper-and-deadline shape, where
+exits are cleanup only because the first fatal class is already latched. One
+race stays indistinguishable and is accepted as a named limitation: a
+component that ends on its own with `:normal` after the helper's stop request
+has reached it makes that request answer `:ok`, so the exit is counted as the
+stop. `service_lifecycle_test.exs` pins the rule: an own clean stop observed
+as `:noproc` with an `:ok` answer is clean, an absent component is not, and
+an independent `:normal` exit racing the request is the component's own.
 
 **The probe.** A trapping `GenServer` whose `terminate/2` takes longer than
 the timeout passed to `GenServer.stop/3`, run at both toolchain pairs. The
@@ -3427,154 +3433,13 @@ inline design:
   the call" turns a successful stop into a killed one; the guard an earlier
   round added on exactly that test is withdrawn with the rest.
 
-**So the stop is driven from outside the owner, and the classification comes
-only from the exit the owner observes on its own link.** For each component:
-
-1. The owner sets `stopping` to that component, as before.
-2. It `spawn_monitor`s a **helper** whose whole body is
-   `GenServer.stop(pid, :normal, remaining(deadline))`, where
-   `remaining(deadline) = max(0, deadline - monotonic_now())`. No component
-   carries a budget of its own. The helper is monitored, never
-   linked, so whatever that call raises, exits or returns dies with the helper
-   and never reaches the owner. The owner uses neither its return value nor its
-   death reason to classify the component. It does retain the helper pid and
-   monitor reference, because the helper itself must be gone before another
-   component stop begins.
-
-   **Killing the helper would not cancel the stop it has already delivered**,
-   which is the same property that makes a dead coordinator's transaction
-   commit and a dead relay task's mutation reach core. That is precisely why
-   classification comes from the **exit reason on the owner's own link** and
-   never from what became of the helper: the helper is a way to make a call
-   without risking the caller, not a handle on the call.
-3. The owner then waits on the link it already holds. The wait is a lifecycle
-   loop, not a selective receive for the target alone:
-
-```elixir
-defp await_component_exit(target, helper, helper_ref, deadline, state) do
-  owned = state.owned
-
-  receive do
-    {:EXIT, ^target, reason} ->
-      state = finish_target_exit(target, reason, state)
-      reap_stop_helper(helper, helper_ref, state)
-
-    {:EXIT, other, reason} when is_map_key(owned, other) ->
-      state = classify_and_latch_owned_exit(state, other, reason)
-      await_component_exit(target, helper, helper_ref, deadline, state)
-
-    {:DOWN, ^helper_ref, :process, _helper, _reason} ->
-      await_component_exit(target, nil, nil, deadline, state)
-  after
-    remaining(deadline) ->
-      state = latch_stop_timeout_class(state, target)
-      Process.exit(target, :kill)
-      await_killed_target_exit(target, helper, helper_ref, state)
-  end
-end
-
-defp await_killed_target_exit(target, helper, helper_ref, state) do
-  owned = state.owned
-
-  receive do
-    {:EXIT, ^target, reason} ->
-      state = finish_target_exit(target, reason, state)
-      reap_stop_helper(helper, helper_ref, state)
-
-    {:EXIT, other, reason} when is_map_key(owned, other) ->
-      state = classify_and_latch_owned_exit(state, other, reason)
-      await_killed_target_exit(target, helper, helper_ref, state)
-
-    {:DOWN, ^helper_ref, :process, _helper, _reason} ->
-      await_killed_target_exit(target, nil, nil, state)
-  end
-end
-
-defp reap_stop_helper(nil, nil, state), do: state
-
-defp reap_stop_helper(helper, helper_ref, state) do
-  Process.exit(helper, :kill)
-  await_stop_helper_down(helper_ref, state)
-end
-
-defp await_stop_helper_down(helper_ref, state) do
-  owned = state.owned
-
-  receive do
-    {:DOWN, ^helper_ref, :process, _helper, _reason} ->
-      state
-
-    {:EXIT, other, reason} when is_map_key(owned, other) ->
-      state = classify_and_latch_owned_exit(state, other, reason)
-      await_stop_helper_down(helper_ref, state)
-  end
-end
-```
-
-   `classify_and_latch_owned_exit/3` accepts only a pid from the owner's
-   retained component inventory; any other message remains in the mailbox.
-   It applies the same reason-sensitive fatal map as the target exit and calls
-   the one `latch_first_fatal/2` primitive before it marks that component dead
-   and keeps waiting for the target. The lease-owner set uses the collective
-   variant specified below.
-
-4. **The reason decides, and a deadline is itself a classified failure.**
-   `:normal` and `:shutdown` are the stop the owner asked for, so the exit is
-   consumed. Before an orderly deadline kill, `latch_stop_timeout_class/2`
-   records the target's existing fatal class: `listener_lost`,
-   `connections_lost`, `relay_lost`, `runtime_lost`, `executor_lost`,
-   `workspace_lease_lost`, `transfers_lost`, `capability_lost`, `custody_lost`,
-   `registry_lost` or `store_lost`; a lease-owner sweep deadline uses
-   `drain_failed`. It records that class through `latch_first_fatal/2` before
-   it sends `:kill`. The later `:killed` is cleanup-only and cannot erase that
-   class. On a fail-stop an earlier class is already latched, so its timeout
-   kill likewise preserves the first class. **Every other reason is
-   classified**, first class wins, and that is true whether the component died
-   before the stop, during it, or of something unrelated at that moment.
-
-`latch_first_fatal/2` is the only nil-to-fatal transition. It captures
-`latched_at`, records the class and its unique status locally, and executes the
-exact same-sender ordered send
-`{:fatal_latched, owner_ref, class, status, latched_at}` to the lifecycle
-sentinel before it returns. Every owned-exit classifier, barrier and stop
-deadline uses that primitive; a later class is a no-op. The caller therefore
-cannot kill a component, continue an orderly stop or enter fatal teardown
-until the first latch signal has been sent. Erlang signal ordering makes that
-message precede any later owner-exit signal to the sentinel, so owner death at
-the next instruction retains the original class and its absolute watchdog
-rather than selecting `owner_lost`.
-
-This is smaller than what it replaces and it is total. There is no shape to
-enumerate, because the owner reads the one thing the VM guarantees it: the
-exit reason on a link it holds. The four-row catch table of the previous
-revision, its `{:timeout, _}` / `{:noproc, _}` / catch-all clauses, its
-`Process.alive?` guard and its "no daemon component exits with the bare atom
-`:timeout`" rule are all withdrawn — they were an attempt to classify a
-component's fate from what a library function did to the caller, and row 1
-shows that is not derivable.
-
-**What bounds each step.** The outer `receive` waits until that step's
-**absolute deadline** — the shared teardown deadline for every non-Store stop,
-the Store's own fixed phase for the Store — and the helper is given what
-remains of it, so a component is bounded once rather than twice and the step
-is bounded whatever the component does. Expiry is non-zero even though the
-subsequent unconditional kill guarantees progress. The inner `receive` after the kill
-carries no `after`, and needs none: `Process.exit(pid, :kill)` on a live
-process is unconditional, and on one already dead the exit the owner is
-waiting for is the one that made it dead, already queued. It is a wait for a
-signal that exists, not a second bound.
-
-**Every component exit is read while every stop wait runs.** The loop matches
-the target pid (or the lease-owner target set), every other daemon-owned linked
-pid, and the monitored stop helper. An exit from another component is
-classified immediately and the first fatal class is latched; the owner marks
-that component dead, keeps stopping the current target, and later skips the
-dead component's own step. A helper `DOWN` is consumed without using its
-reason. If the target exit arrives first, the target is already gone, so the
-owner kills the still-live helper and consumes its exact `DOWN` before another
-helper may start; the same cleanup follows the timeout-kill branch. Thus the
-one-at-a-time population is literal and no stale helper `DOWN` reaches a later
-stop. Client frames and unrelated messages may wait, but lifecycle signals do
+**Every component exit is read before the next step.** A step waits only
+for its own component's `DOWN` and its helper's answer; an exit of any other
+owned component that arrives meanwhile stays queued on its link and is
+classified by the zero-wait loss check before the next step, which ends the
+orderly stop with that component's class. The helper's answer is always
+consumed within the step's deadline, so no helper message reaches a later
+step. Client frames and unrelated messages may wait, but lifecycle signals do
 not. Immediately before the first
 step-3 notification the owner drains already queued lifecycle signals once
 more. If a fatal class is latched, it sends that class where the connection
@@ -4352,8 +4217,9 @@ witnesses cover owner-exit-first, helper-DOWN-first and deadline orders at the
 maximum population, return both populations to baseline, and leave no helper
 `DOWN` for the next teardown step.
 
-**Two rules bend exactly here, and only here.** The `stopping` field names one
-component elsewhere; for this step it names the **set** of lease-owner pids.
+**Two rules bend exactly here, and only here.** The stop rule consumes one
+component's requested exit elsewhere; for this step it covers the **set** of
+lease-owner pids.
 And the reason rule bends with it: for a pid in that set **every** reason is
 consumed, not only the three. That is not an exception to classification but
 a consequence of the fatal map — **a lease owner has no daemon exit class at
@@ -6516,7 +6382,7 @@ children, a pid's liveness, a socket's EOF, or the daemon's own `stderr`.
   release attempt, and exits `0`; the foreground server then opens the same root
   immediately. Those observations, rather than callback completion, prove
   healthy release. The case also asserts the
-  negative that the `stopping` field exists for: **no fatal class is recorded
+  negative that the stop rule exists for: **no fatal class is recorded
   at any point during the stop**, and `stderr` carries **nothing but the one
   census line** — `drain_id`, `budget_ms`, `fence_budget_ms`, three counts and no unknown-fence
   heads, an idle daemon having none — **with no fatal
@@ -6528,7 +6394,7 @@ children, a pid's liveness, a socket's EOF, or the daemon's own `stderr`.
   being stopped. The case asserts three things, because the second and third
   are what an earlier draft would have failed: the daemon exits with
   `store_lost` rather than `operator_stop`, since the Store is not the
-  component named in `stopping` and the operator is owed the reason it
+  component being stopped and the operator is owed the reason it
   actually went down for; **the sequence runs to its end**, reaching the
   Store's own step — where the helper's stop meets `noproc` without reaching
   the owner, while the owner consumes the already-queued Store exit — then
@@ -7415,7 +7281,7 @@ registry or Control restart.
 | **Listener ↔ connections** | `loopex_daemon` | Foreign peer, malformed frame, over-long path, backpressure, initialize-deadline expiry, listener or connection death during handoff, listener death after promotion | Filesystem permission verified after bind, then the per-platform peer-credential read (`LOCAL_PEERCRED` / `SO_PEERCRED`), then ADR 0023's framing refusals. The registry monitors the listener incarnation, traps exits while retaining the exact daemon-owner pid, and creates each waiting connection linked inside the registry callback that atomically installs its child monitor and row before unlinking and replying; an exact temporary-child `EXIT` is handled idempotently as cleanup with its monitor `DOWN`, and the child monitors registry and listener from its inert `init/1`. During handoff the listener temporarily monitors the connection and the connection monitors the listener; the provisional row retains the exact listener-owned/transferring/connection-owned disposition so abort or deadline expiry closes and reaps the actual owner; registry promotion retains its permanent monitor and deadline before acknowledgement, then the connection drops the listener monitor and tells the listener to drop its temporary monitor. The registry's exact CAS accepts initialize only before that instant. Backpressure is enforced at the 4 MiB total output buffer; while an attachment is pending or installed or a local succession row remains, ordinary frames stop at `4 MiB - succession_delivery_reserve_bytes`, leaving the maximal succession `detached` frame plus one serial maximal correlated succession-reply slot | Closed before initialize for a peer refusal or deadline expiry; a stable framing reason otherwise; detachment at the last emitted cursor under attachment backpressure. Before promotion, the listener and connection each send an exact idempotent abort for their provisional row; if both die, the daemon owner's listener-EXIT path aborts every remaining row for that listener incarnation. The aborting row stays occupied until its branch has exact evidence: close acknowledgement or listener `DOWN` with no child; that listener close evidence plus child `DOWN` for listener-owned; connection `DOWN` for connection-owned; or the exact transfer result followed by its selected branch, with listener `DOWN` plus child `DOWN` resolving an unreported transfer. Promotion or exact reap makes a late abort a no-op. After promotion listener death leaves the connection alive for the bounded fatal record and close | **Not durable:** connections, buffers, windows |
 | **Registry ↔ sender ↔ custody ↔ provider child** | The **host** owns registry, custody and tracing capability. For managed calls core's `owner_workers` directly owns guardian and credential sender; the guardian owns the socket receiver and generic phase-send helpers, the credential sender owns its linked-and-monitoring group-leader sink, the registered guardian owns the Port it opens, that Port's direct OS image is the carrier, the carrier starts the independent OS guard, and the guard starts and owns the provider BEAM. Direct calls use the explicit unmanaged adapter lifetime: raw guardian and sender are linked and monitored, and the guardian carries the request's pre-launch absolute instant. The token is bound at composition and resolved per invocation | Composition handle invalidity; immediate guardian start, Core registration, guardian authorization, sender start or adoption refusal; provider readiness, sink-install or Direct-clear failure; no registry row; registry/custody death, refusal, malformed reply or silence; immediate or blocked private-frame write; or exclusion that cannot be confirmed | A missing or malformed registry handle, or a missing, malformed or unbound tracing capability, refuses composition before runtime use or child creation and reverse-cleans started edges. Adapter preflight produces `:no_token` or `:invalid_token`; an invocation-private refusal produces `:missing`, `:expired`, `:oversized` or `:unavailable`, including `:unavailable` from a live registry with no token row. The managed absolute invocation deadline exists before either supervised start and is never reset. After guardian registration, sender adoption and initialize, the guardian applies that instant to provider launch/readiness, sender release and every later step, kills the sender on expiry and produces `:timeout`. Before accepting any provider-readiness, sender, registry, custody or frame completion or emitting the next release, it rechecks monotonic `now < deadline`; the timer only prompts the check, so a queued completion consumed at or after the instant is cleanup-only; a non-answering managed start remains an owner-group/runtime liveness failure. Direct has no Core registration or adoption gate: its raw guardian carries the request's pre-launch absolute instant through inherited-session clearing, sink installation, routing, custody and frame write, kills and reaps sender and sink on expiry, and also produces `:timeout` | The adapter's existing generic `Loopex.Model` refusal only; no private atom enters ADR 0029's terminal, a public event or an operator diagnostic | **Not durable:** nothing about credentials is journaled, and no span or record carries model `options`. Exactly one credential-bearing BEAM message crosses from custody to sender, followed by one credential-bearing private socket frame to the child. A later core command outcome follows its existing durability semantics; the credential-resolution class itself is transient |
 | **CLI ↔ socket** | `loopex_cli` | Socket unreachable, refusal, transport loss, renewal failure, a complete `daemon.stopping` record or a handled client signal | The client retains its command form, durable create and resume identities, session ID, role and last emitted cursor, plus an exact ordered mutation plan. Every prompt, optional follow-up or steer, and takeover prompt has its method, preallocated command ID and `not_sent | sent_unconfirmed` state, and the record carries `next_step`. Non-steer input is fixed when planned; steer retains its content template until replay supplies `run_id`, then fixes its canonical semantic input before first send. It never retains a writer epoch. List, status and liveness use one 10-second query clock and at most one reconnect/retry. Streaming uses one non-resetting 35-second recovery clock with 250 ms retry delay: a lost create reply replays the same command ID; run and resume may reacquire, attach, inspect and resume after restart; an unresolved resume retains its ID, while a resolved historical replay followed by dormant reattach after daemon replacement retires that completed ID and allocates a fresh activation attempt under the same clock; observers and takeover never activate. A `not_sent` next step is sent exactly once after recovery and proof of its prerequisite. After reacquisition a `sent_unconfirmed` step is re-presented with the same method, durable command ID and canonical semantic input, a fresh request ID and fresh writer epoch; a fresh or replayed accepted or refused admission resolves the step without a duplicate mutation, while exact `admission_unknown` advances nothing, sends no later mutation and exits non-zero with the retained method and command ID unresolved. `control_held` retries only until the prior lease can have expired. A complete stop record is terminal; bare EOF follows the phase matrix. Handled live-client signals suppress reconnect and never send `session.abort`, with one bounded release attempt only when a lease is held and the socket remains writable | Exact compact JSON for list and status; contiguous at-least-once streaming from the retained cursor with seam duplicates removed; terminal stop reason, bounded refusal or non-zero unresolved outcome on `stderr`; signal exits fixed by the live-form table | **Durable:** nothing the client holds. The cursor and recovery phase are client-side positions; durable command identity makes create replay safe |
-| **Daemon ↔ OS: signals** | The operator | Before handler installation, direct child `SIGTERM` or launcher `INT`, `TERM`, `HUP` or `QUIT` at the root-resource prompt reaches BEAM's default handler. After installation, `SIGTERM` reaches the daemon handler; terminal `SIGINT` reaches it only as the `SIGTERM` the launcher forwards, since `:os.set_signal/2` refuses `:sigint`; direct `SIGHUP` is operating-system signal death with status `129`, and direct `SIGQUIT` is ignored after the daemon installation removes OTP's default handler | Before installation no installed daemon handler routes the signal to the existing lifecycle sentinel: the command exits `0` through BEAM's default termination with no daemon-owned resource acquired and no cleanup path run. After installation the lifecycle sentinel records and forwards pre-readiness stops, arbitrates stops during readiness, and forwards post-release stops. Its catch-all returns `{:ok, state}` for every unhandled bare or tuple event, so an ignored `SIGQUIT` cannot remove the handler. The owner first completes the relay admission cut, the registry's `transport_closing` gate, the listener's untrappable kill and exact linked `EXIT`, and the provisional/uninitialized sweep under the one transport-cut deadline, leaving the socket pathname for the next verified placement-lock and marker holder. It then runs the bounded admission wait and core drain, tells initialized clients and closes every remaining connection, and stops the connection registry, lease owners, relay, runtime, edges, and Store in that order, with Store last in its own fixed 30 s phase — each process stop driven by a monitored helper while the owner waits on its own link until the shared teardown deadline and kills on expiry. It then runs the exact-handle placement attempt in its separate five-second helper. Classification uses the observed exit plus the exact `stopping` mode: `:normal` or `:shutdown` is consumed for `normal_stop`; the listener's exact owner-issued `:killed` is consumed for `planned_transport_kill`; and a timeout-issued `:killed` is cleanup-only after that target's fatal class was latched, so it can never independently permit exit `0`. Every other exit is classified | Before installation no client or readiness surface exists. After handled `SIGTERM`, an initialized client sees `daemon.stopping` with `operator_stop`, then close. Direct `SIGHUP` provides only abrupt EOF; direct `SIGQUIT` leaves the connection and process live, and a following direct `SIGTERM` still performs the orderly sequence | **Durable:** before installation, nothing changed; afterwards, whatever committed. **Not:** work ended crash-equivalently — a claim about the journal, not about every process being gone |
+| **Daemon ↔ OS: signals** | The operator | Before handler installation, direct child `SIGTERM` or launcher `INT`, `TERM`, `HUP` or `QUIT` at the root-resource prompt reaches BEAM's default handler. After installation, `SIGTERM` reaches the daemon handler; terminal `SIGINT` reaches it only as the `SIGTERM` the launcher forwards, since `:os.set_signal/2` refuses `:sigint`; direct `SIGHUP` is operating-system signal death with status `129`, and direct `SIGQUIT` is ignored after the daemon installation removes OTP's default handler | Before installation no installed daemon handler routes the signal to the existing lifecycle sentinel: the command exits `0` through BEAM's default termination with no daemon-owned resource acquired and no cleanup path run. After installation the lifecycle sentinel records and forwards pre-readiness stops, arbitrates stops during readiness, and forwards post-release stops. Its catch-all returns `{:ok, state}` for every unhandled bare or tuple event, so an ignored `SIGQUIT` cannot remove the handler. The owner first completes the relay admission cut, the registry's `transport_closing` gate, the listener's untrappable kill and exact linked `EXIT`, and the provisional/uninitialized sweep under the one transport-cut deadline, leaving the socket pathname for the next verified placement-lock and marker holder. It then runs the bounded admission wait and core drain, tells initialized clients and closes every remaining connection, and stops the connection registry, lease owners, relay, runtime, edges, and Store in that order, with Store last in its own fixed 30 s phase — each process stop driven by a monitored helper while the owner waits on its own link until the shared teardown deadline and kills on expiry. It then runs the exact-handle placement attempt in its separate five-second helper. Classification follows the stop rule above: a step is clean only when its helper's own stop answer is `:ok` and the component's exit is `:normal`, `:shutdown` or `{:shutdown, _}` (or `:noproc` with that `:ok` answer); a component's own exit — any exit its stop request did not produce, `:normal` included — and a deadline kill are classified by that component's running class, so neither can permit exit `0` | Before installation no client or readiness surface exists. After handled `SIGTERM`, an initialized client sees `daemon.stopping` with `operator_stop`, then close. Direct `SIGHUP` provides only abrupt EOF; direct `SIGQUIT` leaves the connection and process live, and a following direct `SIGTERM` still performs the orderly sequence | **Durable:** before installation, nothing changed; afterwards, whatever committed. **Not:** work ended crash-equivalently — a claim about the journal, not about every process being gone |
 | **Offline import ↔ OS: signals** | The operator | After parser and path-byte validation the import installs the same direct-`SIGTERM` handler before placement or Store acquisition; launcher `INT`, `TERM`, `HUP` and `QUIT` arrive as that `SIGTERM` | The import sentinel retains status `110` and tells its monitored owner to stop. The owner kills and reaps the scan worker, preserves the prior image before rename or the complete image after rename, stops Store under 30 seconds and attempts placement release under five seconds. A 40-second sentinel watchdog hard-halts with the same status and existing residual rules | No stdout, readiness or wire record; bounded stderr diagnostic only | **Durable:** never a partial image. The old complete index remains before rename; the new complete index may remain after rename. Exclusion residuals use their existing verified recovery |
 | **Daemon ↔ OS: kill** | The operator | `SIGKILL`, power loss | Nothing runs — no handler, no `terminate/2` | The socket closes with no record at all | **Durable:** the journal. The marker is left for the next daemon's verified stale-writer recovery |
 | **Daemon ↔ OS: socket file** | `loopex_daemon` | A stale `daemon.sock` left by any exit path, or an unsafe object at the selected path | Only a daemon that has acquired and verified both the host placement lock and Store marker may inspect it. A no-follow `File.lstat/1` must prove the uid retained from this acquisition's placement owner handle, `:other` and `S_IFSOCK` mode bits before removal; absent proceeds, while wrong kind/owner or metadata/removal failure preserves the path and returns `socket_permission_unverified`. No daemon removes one on its way out, so no predecessor can delete a successor's socket | The loser of two simultaneous starts exits without touching the socket; a client meeting a stale socket is refused rather than hung; an unsafe path prevents readiness | **Not durable:** the socket file is a path, never state |
@@ -7472,9 +7338,17 @@ benign, since the close still completes exactly once. The call-trace witness
 the registry, lease owners and connections while serving and through an
 orderly stop, fixing each process's kind when it spawns and failing closed on
 a caller or target it cannot resolve, and allows only a connection's calls
-into the registry and its `register_connection`. It sees blocking through
+into the registry and its `register_connection`. Its companion run in the
+same file applies the same trace to a prompt's mutation ticket, a resume and
+the owner succession it causes, a reattach, a lost lease owner and the new
+one started after it, a holder that closes while holding, `session.list`,
+`daemon.status` and a `relay_lost` fail-stop. It sees blocking through
 `:gen.call/4` only — not a `proc_lib` start or a bare `receive`; no component
-blocks those ways today, and the design allows `LeaseOwner.start_link`. The
+blocks those ways today, and the design allows `LeaseOwner.start_link`. T3
+(`socket_transport_test.exs`), T9 (`lease_owner_test.exs`) and T15
+(`maximum_population_test.exs`) are `long_bound` witnesses; T15 traces every
+daemon-owner step at the full population and prints each step class's
+distribution. T24 is in `owner_test.exs`. The
 T21 witness in the same file covers T21's owner and Service halves at Service
 level: it stops a real daemon with a lease owner's relay request unanswered
 for six seconds between the cut and the freeze, observes that lease owner's

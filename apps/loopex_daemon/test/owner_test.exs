@@ -5791,6 +5791,125 @@ defmodule LoopexDaemon.OwnerTest do
     refute_received {:daemon_component_fatal, _reporter, _class}
   end
 
+  # Concept (T24, R11): when the daemon kills a lease owner whose grant is
+  # being resolved, the grant's settlement is requested and acknowledged
+  # before the lost owner's mirror pop begins, so the holder's grant precedes
+  # its close in causal order.
+  #
+  # Technical depth: the relay is parked on the fresh lease owner's
+  # registration while a debug hook is installed on it; the hook holds the
+  # lease owner on its grant resolution, and it is killed there. The relay is
+  # then parked on the result settlement request itself, so no pop may be
+  # sent while that request is unanswered; once the relay continues, a trace
+  # of the daemon owner's sends and receives orders the settlement request,
+  # its acknowledgement and the pop's `apply_mirror`.
+  test "T24: a lease owner killed in its resolution settles the grant before the pop" do
+    owner = start_owner(fatal_recipient: self())
+    components = Owner.components(owner)
+    connection = initialized_connection(components)
+    connection_pid = connection.pid
+    session_id = "t24-session"
+    origin = {connection.incarnation, 0, 1}
+    {worker, worker_incarnation} = start_worker(connection.pid, origin)
+    test_pid = self()
+
+    park_relay_message(
+      components.relay,
+      &match?({:"$gen_call", _from, {:register_lease_owner, ^session_id, _, _}}, &1),
+      :register_parked,
+      :continue_register
+    )
+
+    acquire =
+      Task.async(fn ->
+        acquire_as(
+          owner,
+          origin,
+          "t24-acquire",
+          session_id,
+          connection.pid,
+          connection.incarnation,
+          worker,
+          worker_incarnation,
+          now_ms() + 5_000
+        )
+      end)
+
+    assert {:ok, :accepted, lease_owner, _incarnation} = Task.await(acquire, 1_000)
+
+    :ok =
+      :sys.install(
+        lease_owner,
+        {fn
+           :waiting, {:in, {:daemon_lease_resolution, _, _, _, :grant, _}}, _state ->
+             send(test_pid, :resolution_held)
+
+             receive do
+               :never -> :done
+             end
+
+           hook_state, _event, _state ->
+             hook_state
+         end, :waiting}
+      )
+
+    assert_receive :register_parked, 1_000
+    send(components.relay, :continue_register)
+    assert_receive :resolution_held, 1_000
+
+    park_relay_message(
+      components.relay,
+      &match?({:relay_lease_operation, _, _, _, :settle_result, _}, &1),
+      :settle_parked,
+      :continue_settle
+    )
+
+    :erlang.trace(owner, true, [:send, :receive, {:tracer, test_pid}])
+    Process.exit(lease_owner, :kill)
+    assert_receive :settle_parked, 1_000
+    Process.sleep(200)
+    send(components.relay, :continue_settle)
+
+    assert_receive {:manual_connection_message, ^connection_pid,
+                    {:daemon_control_owner_lost, ^owner, _close_ref, ^session_id, _incarnation}},
+                   2_000
+
+    :erlang.trace(owner, false, [:send, :receive])
+    events = collect_trace_events([])
+
+    settle =
+      Enum.find_index(events, fn event ->
+        match?({:send, {:relay_lease_operation, _, _, _, :settle_result, _}}, event)
+      end)
+
+    acknowledged =
+      Enum.find_index(events, fn event ->
+        match?({:receive, {:relay_lease_operation_ack, _, _, _, :settle_result, _}}, event)
+      end)
+
+    pop =
+      Enum.find_index(events, fn event ->
+        match?({:send, {:apply_mirror, _, _, _, :pop_owner_mirror, _}}, event)
+      end)
+
+    assert is_integer(settle) and is_integer(acknowledged) and is_integer(pop)
+    assert settle < acknowledged
+    assert acknowledged < pop
+
+    assert_receive {:manual_connection_message, ^connection_pid,
+                    {:relay_permit_result, ^origin, %{"result" => %{"writer_epoch" => _}}}},
+                   1_000
+  end
+
+  defp collect_trace_events(events) do
+    receive do
+      {:trace, _owner, :send, message, _to} -> collect_trace_events([{:send, message} | events])
+      {:trace, _owner, :receive, message} -> collect_trace_events([{:receive, message} | events])
+    after
+      100 -> Enum.reverse(events)
+    end
+  end
+
   defp pending_close_state do
     owner = start_owner(fatal_recipient: self())
     tag = make_ref()

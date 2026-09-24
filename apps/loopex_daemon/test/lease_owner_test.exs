@@ -2645,6 +2645,55 @@ defmodule LoopexDaemon.LeaseOwnerTest do
     assert {:error, :promotion_outcome_unknown} = Task.await(resume, 2_000)
   end
 
+  # Concept (T9): a resume whose relay promotion is held for more than twenty
+  # seconds is still admitted: the lease owner holds no deadline on the
+  # registry's answer, which waits on the relay, so it never turns the wait
+  # into a `registry_unavailable` refusal.
+  #
+  # Technical depth: the relay is parked on the resume's ticket promotion for
+  # 21 s — past the lease owner's former 20 s registry bound — and released;
+  # the connection's descriptor then hears `{:ok, :admitted}`.
+  @tag :long_bound
+  @tag timeout: 90_000
+  test "T9: a resume held more than twenty seconds in the relay is admitted" do
+    fixture = start_fixture()
+    {holder, holder_incarnation, writer_epoch} = grant_first(fixture)
+    owner = fixture.owner
+    origin = {holder_incarnation, 1, 1}
+    worker = start_ticket_worker(holder)
+    assert {:ok, ^origin} = open_mutation(fixture, holder, origin, :session_resume, worker)
+
+    park_relay(fixture.relay, fn
+      {:in, {:"$gen_call", _from, request}} ->
+        tuple_size(request) == 6 and elem(request, 0) == :promote_ticket
+
+      _event ->
+        false
+    end)
+
+    descriptor =
+      {:resume, origin, "held-resume", "held-resume-command", holder_incarnation, writer_epoch,
+       worker, fn -> {:accepted, :activated, %{"resumed" => true}} end}
+
+    test_pid = self()
+    reference = make_ref()
+
+    send(
+      holder,
+      {:invoke, test_pid, reference,
+       fn ->
+         calls = LeaseOwner.send_descriptor(owner, descriptor, :held, :gen_server.reqids_new())
+         {{:reply, reply}, :held, _calls} = :gen_server.receive_response(calls, 60_000, true)
+         reply
+       end}
+    )
+
+    assert_receive :relay_parked, 5_000
+    Process.sleep(21_000)
+    send(fixture.relay, :continue_relay)
+    assert_receive {:invoked, ^reference, {:ok, :admitted}}, 10_000
+  end
+
   defp assert_awaited_discard(order) do
     fixture = start_fixture()
     {holder, holder_incarnation, _writer_epoch} = grant_first(fixture)

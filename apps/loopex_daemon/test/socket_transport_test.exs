@@ -1807,6 +1807,40 @@ defmodule LoopexDaemon.SocketTransportTest do
     assert Process.alive?(daemon.owner)
   end
 
+  # Concept (T3): a connection holds no deadline of its own on the daemon
+  # owner's answer to its acquire, so an owner paused for longer than five
+  # seconds delays the grant but never turns it into `control_pending`.
+  #
+  # Technical depth: the daemon owner is suspended for 5.5 s with the
+  # connection's acquire hand-off waiting in its mailbox; the client then
+  # receives the real grant.
+  @tag :long_bound
+  @tag timeout: 60_000
+  test "T3: an owner paused past five seconds still grants, never control_pending",
+       %{daemon: daemon} do
+    client = initialized_client(daemon)
+    session_id = create_session(client, "paused-owner")
+    :ok = :sys.suspend(daemon.owner)
+    started = System.monotonic_time(:millisecond)
+    :ok = send_frame(client, acquire("acquire", session_id))
+
+    eventually(fn ->
+      mailbox_has?(
+        daemon.owner,
+        &match?({:"$gen_call", _from, request} when elem(request, 0) == :acquire_control, &1)
+      )
+    end)
+
+    Process.sleep(max(5_500 - (System.monotonic_time(:millisecond) - started), 0))
+    :ok = :sys.resume(daemon.owner)
+
+    assert [%{"request_id" => "acquire", "type" => "result", "result" => %{"writer_epoch" => _}}] =
+             receive_records(client, 1, 10_000)
+
+    assert System.monotonic_time(:millisecond) - started >= 5_500
+    refute_received {:daemon_component_fatal, _reporter, _class}
+  end
+
   defp watch_relay(relay, matcher) do
     test = self()
 

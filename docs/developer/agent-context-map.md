@@ -5830,4 +5830,8 @@ On 2026-09-24 the maintainer decided:
   and 8 added one accepted residual, #20: a lease-owner step still
   unfinished at `freeze_deadline`, from a lease owner stalled since the cut,
   is classified `relay_lost` — the wrong exit class, with no durability
-  effect.
+  effect. The external audit of the in-review candidate added #21, a late or
+  dead collaboration owner during the stop reported `relay_lost` because the
+  cut and barrier calls catch every exit, and #22, a resource-pack import
+  that can outlast its caller's deadline by the cleanup period, the reply
+  margin and the import settlement wait; both are liveness or diagnosis only.

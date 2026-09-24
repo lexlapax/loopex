@@ -4,7 +4,8 @@ defmodule LoopexDaemon.ServiceLifecycleTest do
   use ExUnit.Case, async: false
   @moduletag capture_log: true
 
-  import LoopexDaemon.Test.DaemonSocketFixture, only: [send_frame: 2, receive_records: 2]
+  import LoopexDaemon.Test.DaemonSocketFixture,
+    only: [send_frame: 2, receive_records: 2, receive_records: 3]
 
   alias LoopexComposition.Placement
   alias LoopexDaemon.Sentinel
@@ -59,7 +60,7 @@ defmodule LoopexDaemon.ServiceLifecycleTest do
              gone,
              fn -> GenServer.stop(gone, :normal, 500) end,
              deadline
-           ) == :noproc
+           ) == {:component_exit, :noproc}
 
     {:ok, live} = Agent.start(fn -> nil end)
 
@@ -68,6 +69,29 @@ defmodule LoopexDaemon.ServiceLifecycleTest do
              fn -> GenServer.stop(live, :normal, 500) end,
              deadline
            ) == :normal
+
+    refute_receive {:requested_stop, _helper, _answer}, 100
+  end
+
+  # Concept (audit fix 2): a component that ends on its own with `:normal`
+  # after this owner began watching it, but before the stop request reached
+  # it, is that component's own exit, not a clean stop.
+  #
+  # Technical depth: the stop function first makes the component exit
+  # `:normal` by itself — after `await_requested_stop/3` has set its monitor —
+  # and only then asks it to stop, so the monitor reports `:normal` while the
+  # stop request answers `noproc`.
+  test "an independent normal exit racing a requested stop is the component's own" do
+    deadline = System.monotonic_time(:millisecond) + 1_000
+    {:ok, racing} = Agent.start(fn -> nil end)
+
+    stop = fn ->
+      :ok = Agent.stop(racing, :normal)
+      GenServer.stop(racing, :normal, 500)
+    end
+
+    assert LoopexDaemon.Service.await_requested_stop(racing, stop, deadline) ==
+             {:component_exit, :normal}
 
     refute_receive {:requested_stop, _helper, _answer}, 100
   end
@@ -150,7 +174,9 @@ defmodule LoopexDaemon.ServiceLifecycleTest do
   #
   # Technical depth: every `:gen.call/4` made by the collaboration owner, the
   # registry and the listener, and by every process they spawn (lease owners,
-  # connections and their workers), is traced together with their spawns.
+  # connections and their workers), is traced together with their spawns. The
+  # pattern is local, so a `:sys` call, which reaches `:gen.call/4` from
+  # `:gen.call/3` inside `gen`, is seen too.
   # Each process's kind is fixed when it is known: the processes present at
   # the start from their initial call, and every later traced process from
   # the `gen` module named in its own spawn event, so a process that has
@@ -164,29 +190,7 @@ defmodule LoopexDaemon.ServiceLifecycleTest do
        %{options: options} do
     daemon = start_daemon(options)
     _ready = await_ready(daemon.output)
-    %{collaboration: collaboration, listener: listener} = :sys.get_state(daemon.owner).pids
-    %{registry: registry, relay: relay} = :sys.get_state(collaboration)
-
-    known =
-      Process.list()
-      |> Enum.map(&{&1, initial_kind(&1)})
-      |> Enum.reject(fn {_pid, kind} -> is_nil(kind) end)
-      |> Map.new()
-      |> Map.merge(%{
-        collaboration => :owner,
-        registry => :registry,
-        relay => :relay,
-        listener => :other
-      })
-
-    test_pid = self()
-    tracer = spawn_link(fn -> call_trace_loop(%{kinds: known, calls: [], test: test_pid}) end)
-    :erlang.trace_pattern({:gen, :call, 4}, true, [:global])
-    on_exit(fn -> :erlang.trace_pattern({:gen, :call, 4}, false, [:global]) end)
-
-    for pid <- [collaboration, registry, listener],
-        do: :erlang.trace(pid, true, [:call, :procs, :set_on_spawn, {:tracer, tracer}])
-
+    %{tracer: tracer} = start_call_trace(daemon)
     client = initialized(options[:socket_path])
 
     :ok =
@@ -228,6 +232,163 @@ defmodule LoopexDaemon.ServiceLifecycleTest do
     send(daemon.sentinel, {:daemon_signal, daemon.owner_ref, :sigterm})
     assert Task.await(daemon.task, 60_000) == 0
 
+    assert_call_trace_clean(tracer)
+  end
+
+  # Concept (T14, companion): the same rule holds across the rest of the
+  # serving surface — a prompt's mutation ticket, a resume, the owner
+  # succession it causes and the reattach after it, a lease owner that
+  # is lost and the new lease owner started after it, a holder that closes
+  # while holding,
+  # `session.list` and `daemon.status` — and through a fail-stop instead of
+  # an orderly stop.
+  #
+  # Technical depth: the trace is the one above. The lease owner is killed,
+  # so the holder is told its owner was lost and a fresh acquire from another
+  # connection starts the replacement, whose holder then closes without
+  # releasing. The run ends by killing the relay, so the daemon fail-stops
+  # `relay_lost`. A lease owner superseded for missing its own step (P2) is
+  # witnessed in `owner_test.exs`.
+  @tag timeout: 120_000
+  test "T14: no component blocks across tickets, succession, replacement, close and fail-stop",
+       %{options: options} do
+    daemon = start_daemon(options)
+    _ready = await_ready(daemon.output)
+    %{collaboration: collaboration, relay: relay, tracer: tracer} = start_call_trace(daemon)
+    on_exit(fn -> Process.exit(collaboration, :kill) end)
+
+    holder = initialized(options[:socket_path])
+    observer = initialized(options[:socket_path])
+
+    :ok =
+      send_frame(holder, %{
+        "method" => "session.create",
+        "request_id" => "create",
+        "command_id" => Wire.encode_identity("t14b-create"),
+        "session_options" => %{"purpose" => "t14b"}
+      })
+
+    assert [%{"status" => "accepted", "session_id" => session_id}] = receive_records(holder, 1)
+    acquire = %{"method" => "session.acquire_control", "session_id" => session_id}
+    attach = %{"method" => "session.attach", "session_id" => session_id}
+    :ok = send_frame(holder, Map.put(acquire, "request_id", "acquire"))
+    assert [%{"result" => %{"writer_epoch" => epoch}}] = receive_records(holder, 1)
+    :ok = send_frame(holder, Map.put(attach, "request_id", "attach"))
+    assert [%{"type" => "snapshot"}] = receive_records(holder, 1)
+
+    # A resume of the active session goes through the lease owner's route and starts a
+    # successor owner, which detaches the attached holder through the
+    # succession notice before the admission; the holder reattaches.
+    :ok =
+      send_frame(holder, %{
+        "method" => "session.resume",
+        "request_id" => "resume",
+        "session_id" => session_id,
+        "command_id" => Wire.encode_identity("t14b-resume"),
+        "writer_epoch" => epoch
+      })
+
+    assert %{"code" => "detached"} = await_record(holder, &(&1["type"] == "error"))
+    assert [%{"request_id" => "resume", "status" => "accepted"}] = receive_records(holder, 1)
+
+    :ok = send_frame(holder, Map.put(attach, "request_id", "reattach"))
+    assert %{"type" => "snapshot"} = await_record(holder, &(&1["request_id"] == "reattach"))
+
+    # A prompt's mutation ticket goes through the lease owner's route; it runs
+    # after the resume, so the resume meets an idle session.
+    :ok =
+      send_frame(holder, %{
+        "method" => "session.prompt",
+        "request_id" => "prompt",
+        "command_id" => Wire.encode_identity("t14b-prompt"),
+        "content_b64" => Wire.encode_bytes("hello"),
+        "writer_epoch" => epoch
+      })
+
+    assert %{"type" => "admission", "status" => "accepted"} =
+             await_record(holder, &(&1["request_id"] == "prompt"))
+
+    # list and status from a second connection.
+    :ok =
+      send_frame(observer, %{"method" => "session.list", "request_id" => "list", "limit" => 8})
+
+    assert %{"type" => "result"} = await_record(observer, &(&1["request_id"] == "list"))
+    :ok = send_frame(observer, %{"method" => "daemon.status", "request_id" => "status"})
+    assert %{"type" => "result"} = await_record(observer, &(&1["request_id"] == "status"))
+
+    # The holder's lease owner is lost: the collaboration owner pops it and
+    # closes the holder, and a fresh acquire starts a new lease owner.
+    {:ok, raw} = Wire.identity(session_id)
+    lease_owner = Map.fetch!(:sys.get_state(collaboration).owners, raw).pid
+    Process.exit(lease_owner, :kill)
+
+    assert %{"code" => "control_owner_lost"} =
+             await_record(holder, &(&1["code"] == "control_owner_lost"))
+
+    replacement = initialized(options[:socket_path])
+    :ok = send_frame(replacement, Map.put(acquire, "request_id", "replace"))
+
+    assert %{"result" => %{"writer_epoch" => _epoch}} =
+             await_record(replacement, &(&1["request_id"] == "replace"))
+
+    # The replacement holder closes while holding.
+    :socket.close(replacement)
+    registry = :sys.get_state(collaboration).registry
+    await_until(fn -> LoopexDaemon.ConnectionRegistry.status(registry).occupied == 2 end)
+
+    # A fail-stop instead of an orderly stop.
+    Process.exit(relay, :kill)
+
+    assert %{"reason" => "fatal:relay_lost"} =
+             await_record(observer, &(&1["type"] == "daemon.stopping"))
+
+    {:ok, relay_lost} = LoopexDaemon.ExitStatus.fetch(:relay_lost)
+    assert Task.await(daemon.task, 60_000) == relay_lost
+    assert_call_trace_clean(tracer)
+  end
+
+  defp await_record(socket, predicate, timeout \\ 5_000) do
+    deadline = System.monotonic_time(:millisecond) + timeout
+    await_record_until(socket, predicate, deadline)
+  end
+
+  defp await_record_until(socket, predicate, deadline) do
+    remaining = max(deadline - System.monotonic_time(:millisecond), 0)
+    [record] = receive_records(socket, 1, remaining)
+    if predicate.(record), do: record, else: await_record_until(socket, predicate, deadline)
+  end
+
+  # Technical depth: the trace covers the collaboration owner, the registry,
+  # the listener and everything they spawn; the kinds of processes already
+  # present are fixed from their initial calls.
+  defp start_call_trace(daemon) do
+    %{collaboration: collaboration, listener: listener} = :sys.get_state(daemon.owner).pids
+    %{registry: registry, relay: relay} = :sys.get_state(collaboration)
+
+    known =
+      Process.list()
+      |> Enum.map(&{&1, initial_kind(&1)})
+      |> Enum.reject(fn {_pid, kind} -> is_nil(kind) end)
+      |> Map.new()
+      |> Map.merge(%{
+        collaboration => :owner,
+        registry => :registry,
+        relay => :relay,
+        listener => :other
+      })
+
+    test_pid = self()
+    tracer = spawn_link(fn -> call_trace_loop(%{kinds: known, calls: [], test: test_pid}) end)
+    :erlang.trace_pattern({:gen, :call, 4}, true, [:local])
+    on_exit(fn -> :erlang.trace_pattern({:gen, :call, 4}, false, [:local]) end)
+
+    for pid <- [collaboration, registry, listener],
+        do: :erlang.trace(pid, true, [:call, :procs, :set_on_spawn, {:tracer, tracer}])
+
+    %{collaboration: collaboration, relay: relay, tracer: tracer}
+  end
+
+  defp assert_call_trace_clean(tracer) do
     send(tracer, {:violations, self()})
     assert_receive {:violations, violations, allowed}, 5_000
     assert violations == []
@@ -621,6 +782,54 @@ defmodule LoopexDaemon.ServiceLifecycleTest do
     assert Sentinel.run(options, output: output, install_signals: false) == failed
     assert StringIO.contents(output) == {"", ""}
     assert File.read!(blocker) == "not a directory"
+  end
+
+  # Concept: the daemon owner keeps no copy of the provider credential once
+  # startup begins. A credential-plane step that fails leaves no credential
+  # bytes in the owner's state; the ready-daemon test pins the running state.
+  #
+  # Technical depth: the failed owner is inside its startup callback until it
+  # stops, so its state is read from a call trace of `finish_startup_failure/2`
+  # on every new process. The module is loaded first, since a pattern set on
+  # an unloaded module matches nothing.
+  # The synthetic key is over custody's size bound, so custody refuses it and
+  # the plane step fails with `credential_plane_start_failed`.
+  test "the daemon owner holds no credential bytes after a failed credential plane",
+       %{options: options} do
+    marker = "f4-synthetic-provider-key-#{System.unique_integer([:positive])}"
+    oversized = marker <> String.duplicate("x", 65_536)
+    tracer = self()
+
+    Code.ensure_loaded!(LoopexDaemon.Service)
+
+    assert :erlang.trace_pattern(
+             {LoopexDaemon.Service, :finish_startup_failure, 2},
+             true,
+             [:local]
+           ) == 1
+
+    :erlang.trace(:new_processes, true, [:call, {:tracer, tracer}])
+
+    on_exit(fn ->
+      :erlang.trace_pattern({LoopexDaemon.Service, :finish_startup_failure, 2}, false, [:local])
+    end)
+
+    {:ok, failed} = LoopexDaemon.ExitStatus.fetch(:credential_plane_start_failed)
+    {:ok, output} = StringIO.open("")
+
+    assert Sentinel.run(Keyword.put(options, :credential, oversized),
+             output: output,
+             install_signals: false
+           ) == failed
+
+    :erlang.trace(:new_processes, false, [:call])
+
+    assert_receive {:trace, _owner, :call,
+                    {LoopexDaemon.Service, :finish_startup_failure,
+                     [failed_state, {:fatal, :credential_plane_start_failed}]}},
+                   1_000
+
+    assert :binary.match(:erlang.term_to_binary(failed_state), marker) == :nomatch
   end
 
   # Concept: two daemons started at the same moment on one root produce one
