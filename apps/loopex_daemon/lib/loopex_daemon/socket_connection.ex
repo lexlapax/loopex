@@ -25,6 +25,15 @@ defmodule LoopexDaemon.SocketConnection do
   contain no received bytes. The socket, buffered bytes and monitor handles are
   redacted from formatted process status.
 
+  Every exchange with the registry and the relay is a request message whose
+  answer arrives in `handle_info/2`: the connection never waits inside a
+  handler, so a stalled registry cannot keep it from an owner-loss close, a
+  holder close, a relay record or EOF. The registry applies one connection's
+  requests in the order they were sent, so output keeps its order and every
+  enqueue still meets the output buffer's bounds and the succession reserve
+  at the same point in that order. A registry exit while any request is
+  outstanding stops the connection as `registry_lost`.
+
   After initialization a connection composed with a daemon context registers
   its incarnation with the admission relay and serves requests through a
   `LoopexDaemon.RequestLedger`: every admitted request occupies one sequenced
@@ -103,6 +112,15 @@ defmodule LoopexDaemon.SocketConnection do
   @progress_records 32
   @progress_bytes 524_288
 
+  # Concept: reading pauses while this many output enqueues are unanswered, so
+  # a stalled registry cannot accumulate unbounded requests from one client;
+  # below it the connection keeps reading and sees EOF.
+  #
+  # Technical depth: ADR 0023's durable writer holds at most 64 records. The
+  # bound is checked before each receive, so one received batch may exceed
+  # it by the frames that batch holds.
+  @pending_output_limit 64
+
   @impl true
   def init(options) do
     state = %{
@@ -121,6 +139,11 @@ defmodule LoopexDaemon.SocketConnection do
       receive_select: nil,
       send_select: nil,
       output_claim: nil,
+      enqueue_seq: 0,
+      enqueues_pending: 0,
+      input_paused: false,
+      finishing_succession: false,
+      deferred_stop: nil,
       context: Keyword.get(options, :context),
       ledger: RequestLedger.new(Keyword.fetch!(options, :connection_incarnation)),
       workers: %{},
@@ -146,31 +169,24 @@ defmodule LoopexDaemon.SocketConnection do
      }}
   end
 
+  # Concept: the slot promotion is a registry request; while it is answered
+  # the connection is `:promoting` and owns the socket, so an abort or a
+  # registry loss still closes it.
+  #
+  # Technical depth: a listener exit while promoting is left to the registry,
+  # which decides the promotion; only the `:waiting` phase takes it as a
+  # pre-promotion loss.
   @impl true
   def handle_cast({:activate, socket}, %{phase: :waiting} = state) do
     if socket_owner?(socket, self()) do
-      case ConnectionRegistry.promote(
-             state.registry,
-             state.rollback_token,
-             state.incarnation
-           ) do
-        :ok ->
-          Process.demonitor(state.listener_monitor, [:flush])
+      request =
+        ConnectionRegistry.connection_request(
+          state.registry,
+          {:promote, state.rollback_token, state.incarnation}
+        )
 
-          send(
-            state.listener,
-            {:promotion_complete, state.rollback_token, state.incarnation, self()}
-          )
-
-          Logger.debug("loopex daemon socket connection promoted")
-
-          send(self(), :receive_next)
-
-          {:noreply, %{state | phase: :live, socket: socket, listener_monitor: nil}}
-
-        {:error, _reason} ->
-          {:stop, :normal, %{state | socket: socket}}
-      end
+      state = %{state | phase: :promoting, socket: socket}
+      {:noreply, await_exchange(state, request, :registry, {:slot_promotion})}
     else
       {:stop, :socket_owner_unverified, state}
     end
@@ -344,6 +360,13 @@ defmodule LoopexDaemon.SocketConnection do
       ),
       do: finish_owner_loss_close(state)
 
+  # Concept: a stop that reaches a connection still completing its
+  # initialization follows the initialization reply, exactly as it would had
+  # initialization been one step.
+  def handle_info({:daemon_stopping, record}, %{phase: :initializing, deferred_stop: nil} = state)
+      when is_map(record),
+      do: {:noreply, %{state | deferred_stop: record}}
+
   def handle_info({:daemon_stopping, record}, %{closing: nil} = state) when is_map(record),
     do: begin_final_close(stop_pump(state), record)
 
@@ -354,7 +377,10 @@ defmodule LoopexDaemon.SocketConnection do
   #
   # Technical depth: every other record this connection would write while the
   # notice is pending is held in order and written after the notice, when the
-  # succession is finished and its reserve released.
+  # succession is finished and its reserve released. The notice is a registry
+  # request: records produced before its answer are already held, and only
+  # its acceptance sends the attachment invalidation. A refused notice closes
+  # the connection with the `detached` record, then writes the held records.
   def handle_info(
         {:loopex_attachment_invalidated, session_id, attachment_id, _incarnation, _cursor},
         %{
@@ -365,34 +391,27 @@ defmodule LoopexDaemon.SocketConnection do
     state = stop_pump(state)
     cursor = attached.emitted_cursor || attached.snapshot_cursor
 
-    with {:ok, encoded} <- Frame.encode(WireRecords.detached(session_id, cursor)),
-         :ok <-
-           ConnectionRegistry.enqueue_succession_notice(
-             state.registry,
-             state.incarnation,
-             IO.iodata_to_binary(encoded)
-           ) do
-      :ok =
-        ConnectionRegistry.attachment_invalidated(
-          state.registry,
-          state.incarnation,
-          attachment_id
-        )
+    case Frame.encode(WireRecords.detached(session_id, cursor)) do
+      {:ok, encoded} ->
+        request =
+          ConnectionRegistry.connection_request(
+            state.registry,
+            {:enqueue_succession_notice, state.incarnation, IO.iodata_to_binary(encoded)}
+          )
 
-      Logger.debug("loopex daemon attachment detached by succession")
+        state = %{
+          state
+          | attachment: nil,
+            progress: :queue.new(),
+            progress_bytes: 0,
+            succession: :queue.new()
+        }
 
-      state = %{
-        state
-        | attachment: nil,
-          progress: :queue.new(),
-          progress_bytes: 0,
-          succession: :queue.new(),
-          output_cursors: :queue.in(nil, state.output_cursors)
-      }
+        notice = {:notice, session_id, attachment_id, cursor}
+        {:noreply, track_enqueue(state, request, nil, notice)}
 
-      output_step(state)
-    else
-      _unavailable -> begin_final_close(state, WireRecords.detached(session_id, cursor))
+      _unencodable ->
+        begin_final_close(state, WireRecords.detached(session_id, cursor))
     end
   end
 
@@ -524,17 +543,14 @@ defmodule LoopexDaemon.SocketConnection do
     end
   end
 
+  defp arm_receive(%{enqueues_pending: pending} = state)
+       when pending >= @pending_output_limit,
+       do: {:noreply, %{state | input_paused: true}}
+
   defp arm_receive(state) do
     case :socket.recv(state.socket, 0, :nowait) do
       {:ok, bytes} when is_binary(bytes) and byte_size(bytes) > 0 ->
-        case consume_bytes(state, bytes) do
-          {:ok, state} ->
-            send(self(), :receive_next)
-            {:noreply, state}
-
-          {:stop, state} ->
-            {:stop, :normal, state}
-        end
+        state |> consume_bytes(bytes) |> input_result()
 
       {:ok, _empty} ->
         {:stop, :normal, state}
@@ -550,6 +566,24 @@ defmodule LoopexDaemon.SocketConnection do
         {:stop, :normal, state}
     end
   end
+
+  defp input_result({:ok, state}) do
+    send(self(), :receive_next)
+    {:noreply, state}
+  end
+
+  defp input_result({:pause, state}), do: {:noreply, state}
+  defp input_result({:stop, state}), do: {:stop, :normal, state}
+
+  # Concept: reading resumes once the unanswered output enqueues fall below
+  # their bound again.
+  defp resume_input(%{input_paused: true, enqueues_pending: pending} = state)
+       when pending < @pending_output_limit do
+    send(self(), :receive_next)
+    %{state | input_paused: false}
+  end
+
+  defp resume_input(state), do: state
 
   defp consume_bytes(%{discarding_oversize: true} = state, bytes) do
     case :binary.match(bytes, "\n") do
@@ -568,19 +602,18 @@ defmodule LoopexDaemon.SocketConnection do
   defp consume_data(state, data) do
     parts = :binary.split(data, "\n", [:global])
     {payloads, [partial]} = Enum.split(parts, -1)
-    state = %{state | input_buffer: ""}
+    consume_payloads(%{state | input_buffer: ""}, payloads, partial)
+  end
 
-    case Enum.reduce_while(payloads, {:ok, state}, fn payload, {:ok, acc} ->
-           case handle_payload(acc, payload) do
-             {:ok, next} -> {:cont, {:ok, next}}
-             {:stop, next} -> {:halt, {:stop, next}}
-           end
-         end) do
-      {:stop, state} ->
-        {:stop, state}
+  # Concept: frames after an `initialize` wait, unparsed and in wire order,
+  # until the registry and the relay have answered that initialization.
+  defp consume_payloads(state, [], partial), do: retain_partial(state, partial)
 
-      {:ok, state} ->
-        retain_partial(state, partial)
+  defp consume_payloads(state, [payload | rest], partial) do
+    case handle_payload(state, payload) do
+      {:ok, state} -> consume_payloads(state, rest, partial)
+      {:stop, state} -> {:stop, state}
+      {:pause, state} -> {:pause, %{state | input_buffer: Enum.join(rest ++ [partial], "\n")}}
     end
   end
 
@@ -630,37 +663,65 @@ defmodule LoopexDaemon.SocketConnection do
         end
 
       {:ok, record, protocol, :initialized} ->
-        case ConnectionRegistry.initialize_complete(
-               state.registry,
-               state.rollback_token,
-               state.incarnation
-             ) do
-          :ok ->
-            with :ok <- register_relay(state),
-                 {:ok, state} <- send_record(state, record) do
-              Logger.debug("loopex daemon socket connection initialized")
-              schedule_idle_check(state)
-              {:ok, %{state | protocol: protocol, phase: :initialized}}
-            else
-              {:error, _reason} -> {:stop, state}
-            end
+        request =
+          ConnectionRegistry.connection_request(
+            state.registry,
+            {:initialize_complete, state.rollback_token, state.incarnation}
+          )
 
-          {:error, _reason} ->
-            {:stop, state}
-        end
+        state = %{state | phase: :initializing}
+        {:pause, await_exchange(state, request, :registry, {:initialize, record, protocol})}
     end
   end
 
-  defp register_relay(%{context: nil}), do: :ok
+  # Concept: initialization completes in two request steps — the registry's
+  # initialize compare-and-set, then the relay registration — and only then
+  # is the negotiation reply written and input read again.
+  #
+  # Technical depth: a refusal at either step stops the connection without
+  # the reply, as before. The relay step has its own five-second instant like
+  # every relay request of this connection.
+  defp continue_initialization(state, {:initialize, record, protocol}, {:reply, :ok}) do
+    case state.context do
+      nil ->
+        finish_initialization(state, record, protocol)
 
-  defp register_relay(%{context: %{relay: relay}} = state) do
-    case AdmissionRelay.register_connection(relay, state.incarnation, state.registry) do
-      :ok ->
-        :ok
+      %{relay: relay} ->
+        request =
+          AdmissionRelay.register_connection_request(relay, state.incarnation, state.registry)
 
-      {:error, _reason} ->
-        Logger.debug("loopex daemon socket connection relay registration refused")
-        {:error, :relay_registration_refused}
+        {:noreply, await_exchange(state, request, :relay, {:register_relay, record, protocol})}
+    end
+  end
+
+  defp continue_initialization(state, {:register_relay, record, protocol}, {:reply, :ok}),
+    do: finish_initialization(state, record, protocol)
+
+  defp continue_initialization(state, {:register_relay, _record, _protocol}, _refused) do
+    Logger.debug("loopex daemon socket connection relay registration refused")
+    {:stop, :normal, state}
+  end
+
+  defp continue_initialization(state, {:initialize, _record, _protocol}, _refused),
+    do: {:stop, :normal, state}
+
+  defp finish_initialization(state, record, protocol) do
+    case send_record(state, record) do
+      {:ok, state} ->
+        Logger.debug("loopex daemon socket connection initialized")
+        schedule_idle_check(state)
+        state = %{state | protocol: protocol, phase: :initialized}
+
+        case state.deferred_stop do
+          nil ->
+            state |> consume_data(state.input_buffer) |> input_result()
+
+          record ->
+            begin_final_close(%{state | deferred_stop: nil}, record)
+        end
+
+      {:error, state} ->
+        {:stop, :normal, state}
     end
   end
 
@@ -833,17 +894,10 @@ defmodule LoopexDaemon.SocketConnection do
        ) do
     case RequestLedger.begin(ledger, request.request_id, new_entry(request, :opening)) do
       {:ok, origin, ledger} ->
-        request_id =
-          AdmissionRelay.open_ticket_request(
-            state.context.relay,
-            origin,
-            class,
-            session_id,
-            owner_binding
-          )
-
         state = %{state | ledger: ledger}
-        {:ok, await_exchange(state, request_id, :relay, {:open_ticket, origin, fun, after_bind})}
+
+        {:ok,
+         open_ticket_exchange(state, origin, class, session_id, fun, owner_binding, after_bind)}
 
       {:error, :duplicate_request} ->
         reply(state, WireRecords.invalid_request(request.request_id, "duplicate_request"))
@@ -852,6 +906,31 @@ defmodule LoopexDaemon.SocketConnection do
         reply(state, WireRecords.request_error(request.request_id, "capacity_exceeded"))
     end
   end
+
+  defp open_ticket_exchange(state, origin, class, session_id, fun, owner_binding, after_bind) do
+    ledger = RequestLedger.update(state.ledger, origin, &%{&1 | phase: :opening})
+
+    request_id =
+      AdmissionRelay.open_ticket_request(
+        state.context.relay,
+        origin,
+        class,
+        session_id,
+        owner_binding
+      )
+
+    await_exchange(
+      %{state | ledger: ledger},
+      request_id,
+      :relay,
+      {:open_ticket, origin, fun, after_bind}
+    )
+  end
+
+  defp open_ticket(state, origin, class, session_id, fun, owner_binding, after_bind),
+    do:
+      {:noreply,
+       open_ticket_exchange(state, origin, class, session_id, fun, owner_binding, after_bind)}
 
   defp new_entry(request, phase \\ :ready) do
     %{
@@ -1043,15 +1122,31 @@ defmodule LoopexDaemon.SocketConnection do
   # the connection's exit releases every attachment it owns.
   #
   # Technical depth: an unattached connection first takes its succession
-  # delivery reserve; a replacement transfers the one it holds. The task hands
-  # the core attachment to this process before its snapshot record settles.
+  # delivery reserve by a registry request, its entry `:reserving` until the
+  # answer; a replacement transfers the one it holds. The task hands the core
+  # attachment to this process before its snapshot record settles.
   defp dispatch_prepared(state, origin, %{operation: :session_attach} = entry, :ok) do
+    if state.attachment do
+      promote_attach(state, origin, entry, :ok, false)
+    else
+      request =
+        ConnectionRegistry.connection_request(
+          state.registry,
+          {:reserve_succession, state.incarnation}
+        )
+
+      ledger = RequestLedger.update(state.ledger, origin, &%{&1 | phase: :reserving})
+
+      {:noreply,
+       await_exchange(%{state | ledger: ledger}, request, :registry, {:reserve, origin})}
+    end
+  end
+
+  defp promote_attach(state, origin, entry, reserve, took_reserve) do
     %{session_id: session_id, after_event_sequence: after_sequence, replace: replace} =
       entry.fields
 
     request_id = entry.request_id
-    reserve = if state.attachment, do: :ok, else: reserve_succession(state)
-    took_reserve = is_nil(state.attachment) and reserve == :ok
 
     ledger =
       RequestLedger.update(state.ledger, origin, &%{&1 | succession_reserved: took_reserve})
@@ -1137,22 +1232,56 @@ defmodule LoopexDaemon.SocketConnection do
   defp attach_refusal(:session_unavailable), do: "session_unavailable"
   defp attach_refusal(_reason), do: "internal_failure"
 
-  defp reserve_succession(state) do
-    case ConnectionRegistry.reserve_succession(state.registry, state.incarnation) do
-      :ok -> :ok
-      {:error, reason} -> {:error, reason}
+  # Concept: the succession reserve's answer continues the attach that asked
+  # for it; an attach that ended meanwhile releases a reserve it was granted,
+  # so no reserve outlives its request.
+  defp reserve_answered(state, origin, response) do
+    case {RequestLedger.fetch(state.ledger, origin), response} do
+      {{:ok, %{phase: :reserving} = entry}, {:reply, :ok}} when is_nil(state.closing) ->
+        promote_attach(state, origin, entry, :ok, true)
+
+      {{:ok, %{phase: :reserving} = entry}, {:reply, {:error, reason}}}
+      when is_nil(state.closing) ->
+        promote_attach(state, origin, entry, {:error, reason}, false)
+
+      {{:ok, %{phase: :reserving}}, {:reply, granted}} ->
+        Logger.debug("loopex daemon connection answer discarded while closing")
+        state = mark_reserved(state, origin, granted == :ok)
+        {:noreply, discard_entry(state, origin)}
+
+      {_ended, {:reply, :ok}} ->
+        {:noreply, release_succession(state)}
+
+      _refused ->
+        {:noreply, state}
     end
+  end
+
+  defp mark_reserved(state, origin, taken) do
+    ledger = RequestLedger.update(state.ledger, origin, &%{&1 | succession_reserved: taken})
+    %{state | ledger: ledger}
   end
 
   # Concept: a refused attach releases exactly the succession reserve it took
   # when it was dispatched, whatever this connection's attachment has become
   # since, so it can never release a reserve another request holds.
-  defp release_taken_succession(state, %{succession_reserved: true}) do
-    _result = ConnectionRegistry.release_succession(state.registry, state.incarnation)
-    state
-  end
+  defp release_taken_succession(state, %{succession_reserved: true}),
+    do: release_succession(state)
 
   defp release_taken_succession(state, _entry), do: state
+
+  # Technical depth: the release is a registry request whose answer is
+  # consumed and ignored, as the call's answer was; it is ordered before every
+  # later output request of this connection.
+  defp release_succession(state) do
+    request =
+      ConnectionRegistry.connection_request(
+        state.registry,
+        {:release_succession, state.incarnation}
+      )
+
+    await_exchange(state, request, :registry, {:ignored})
+  end
 
   # Concept: delivery starts only after the snapshot is queued, so a client
   # never receives an event for a cursor it has not been told about.
@@ -1224,10 +1353,14 @@ defmodule LoopexDaemon.SocketConnection do
   defp deliver_event(%{attachment: attached} = state, event) do
     state = %{state | last_activity: System.monotonic_time(:millisecond)}
     record = WireRecords.event(attached.session_id, event)
+    held = state.succession != nil
+    kind = {:event, attached.pump}
 
-    case send_record(state, record, Map.fetch!(event, :event_sequence)) do
+    # A sent event lets the pump continue once the registry accepts it; a
+    # held one continues it at once, as it always has.
+    case send_record(state, record, Map.fetch!(event, :event_sequence), kind) do
       {:ok, state} ->
-        LoopexDaemon.AttachmentPump.continue(attached.pump)
+        if held, do: LoopexDaemon.AttachmentPump.continue(attached.pump)
         {:noreply, state}
 
       {:error, state} ->
@@ -1332,7 +1465,7 @@ defmodule LoopexDaemon.SocketConnection do
       if target == :relay,
         do: Process.send_after(self(), {:relay_request_unanswered, request_id}, @relay_request_ms)
 
-    put_in(state, [:exchanges, request_id], %{label: label, timer: timer})
+    put_in(state, [:exchanges, request_id], %{label: label, timer: timer, target: target})
   end
 
   # Concept: each relay or registry answer continues exactly one request, and
@@ -1340,12 +1473,16 @@ defmodule LoopexDaemon.SocketConnection do
   #
   # Technical depth: an exited relay answers the request `internal_failure`;
   # the daemon owner classifies the relay. An exited registry stops this
-  # connection as `registry_lost`, the same as its monitor does, because a
-  # promotion it may have committed can no longer be answered truthfully.
-  # Once the connection is closing — after its owner-loss close or its final
-  # close — every answer is cleanup-only: the request's unbound worker is
-  # killed, its entry completed and its reservations released, and nothing
-  # is written, so no correlated record ever follows the uncorrelated close.
+  # connection as `registry_lost` whatever it was asked, the same as its
+  # monitor does, because a promotion or output it may have committed can no
+  # longer be answered truthfully. The output path — enqueue, claim, emission
+  # and succession finish — and initialization continue whether or not the
+  # connection is closing, because the close itself writes through them.
+  # Every other answer consumed once the connection is closing — after its
+  # owner-loss close or its final close — is cleanup-only: the request's
+  # unbound worker is killed, its entry completed and its reservations
+  # released, and nothing is written, so no correlated record ever follows
+  # the uncorrelated close.
   defp exchange_answered(state, request_id, message) do
     {exchange, exchanges} = Map.pop(state.exchanges, request_id)
     if exchange.timer, do: Process.cancel_timer(exchange.timer)
@@ -1357,13 +1494,47 @@ defmodule LoopexDaemon.SocketConnection do
         _server_gone -> :down
       end
 
-    if state.closing,
-      do: close_exchange(state, exchange.label, response),
-      else: continue_exchange(state, exchange.label, response)
+    label = exchange.label
+
+    cond do
+      response == :down and exchange.target == :registry ->
+        Logger.debug("loopex daemon connection registry lost during an exchange")
+        {:stop, :registry_lost, state}
+
+      elem(label, 0) in [:enqueue, :claim, :emitted, :finish_succession, :ignored] ->
+        output_answered(state, label, response)
+
+      elem(label, 0) == :slot_promotion ->
+        promotion_answered(state, response)
+
+      elem(label, 0) in [:initialize, :register_relay] ->
+        continue_initialization(state, label, response)
+
+      elem(label, 0) == :reserve ->
+        reserve_answered(state, elem(label, 1), response)
+
+      state.closing ->
+        close_exchange(state, label, response)
+
+      true ->
+        continue_exchange(state, label, response)
+    end
   end
 
-  defp close_exchange(state, {:promote, _origin, _kind}, :down),
-    do: {:stop, :registry_lost, state}
+  defp promotion_answered(state, {:reply, :ok}) do
+    Process.demonitor(state.listener_monitor, [:flush])
+
+    send(
+      state.listener,
+      {:promotion_complete, state.rollback_token, state.incarnation, self()}
+    )
+
+    Logger.debug("loopex daemon socket connection promoted")
+    send(self(), :receive_next)
+    {:noreply, %{state | phase: :live, listener_monitor: nil}}
+  end
+
+  defp promotion_answered(state, _refused), do: {:stop, :normal, state}
 
   # Concept: while closing, an accepted hand-off leaves its worker to the
   # relay, which owns it once the permit exists. A hand-off whose owner
@@ -1541,9 +1712,30 @@ defmodule LoopexDaemon.SocketConnection do
     end
   end
 
-  defp continue_exchange(state, {:promote, _origin, _kind}, :down) do
-    Logger.debug("loopex daemon connection registry lost during promotion")
-    {:stop, :registry_lost, state}
+  defp continue_exchange(state, {:lease_route, origin, session_id}, response) do
+    case {RequestLedger.fetch(state.ledger, origin), response} do
+      {{:ok, %{phase: :routing} = entry}, {:reply, {:ok, owner, owner_incarnation}}} ->
+        open_ticket(
+          state,
+          origin,
+          entry.operation,
+          session_id,
+          fn -> :ok end,
+          {owner, owner_incarnation},
+          fn state, origin -> send_lease_descriptor(state, origin, owner) end
+        )
+
+      {{:ok, %{phase: :routing}}, _no_route} ->
+        {entry, ledger} = RequestLedger.complete(state.ledger, origin)
+
+        noreply_record(
+          %{state | ledger: ledger},
+          WireRecords.request_error(entry.request_id, "control_not_held")
+        )
+
+      _answered ->
+        {:noreply, state}
+    end
   end
 
   defp continue_exchange(state, {:promote, origin, _kind}, {:reply, reply}) do
@@ -1640,12 +1832,6 @@ defmodule LoopexDaemon.SocketConnection do
   defp lease_refusal(:capacity_exceeded), do: "capacity_exceeded"
   defp lease_refusal(:control_not_held), do: "control_not_held"
   defp lease_refusal(_reason), do: "internal_failure"
-
-  defp safe_call(call) do
-    call.()
-  catch
-    :exit, _reason -> {:error, :owner_unavailable}
-  end
 
   defp settle_locally(state, origin, code) do
     {entry, ledger} = RequestLedger.complete(state.ledger, origin)
@@ -1827,44 +2013,65 @@ defmodule LoopexDaemon.SocketConnection do
 
   # Concept: every queued frame is remembered in emission order, so the last
   # completely emitted event cursor is known exactly.
-  defp send_record(state, record, cursor \\ nil)
+  #
+  # Technical depth: the enqueue is a registry request; its frame's cursor
+  # joins the emission order when the registry accepts it, which is always
+  # before that frame can be claimed. A refusal arrives later and is handled
+  # by `output_answered/3` as this function's `{:error, state}` was: a record
+  # that cannot be enqueued stops the connection, an event detaches, and a
+  # closing connection completes its close.
+  defp send_record(state, record, cursor \\ nil, kind \\ :record)
 
-  defp send_record(%{succession: held} = state, record, cursor) when held != nil,
+  defp send_record(%{succession: held} = state, record, cursor, _kind) when held != nil,
     do: {:ok, %{state | succession: :queue.in({record, cursor}, held)}}
 
-  defp send_record(state, record, cursor) do
+  defp send_record(state, record, cursor, kind) do
     state = track_lease(state, record)
 
-    with {:ok, encoded} <- Frame.encode(record),
-         :ok <- ConnectionRegistry.enqueue_output(state.registry, state.incarnation, encoded) do
-      {:ok, %{state | output_cursors: :queue.in(cursor, state.output_cursors)}}
-    else
-      _other ->
+    case Frame.encode(record) do
+      {:ok, encoded} ->
+        {:ok, enqueue_output(state, encoded, cursor, kind)}
+
+      _unencodable ->
         Logger.debug("loopex daemon socket output enqueue failed")
         {:error, state}
     end
   end
 
-  defp output_step(%{output_claim: nil} = state) do
-    case ConnectionRegistry.claim_output(state.registry, state.incarnation) do
-      {:ok, frame_ref, bytes} ->
-        state
-        |> Map.put(:output_claim, %{frame_ref: frame_ref, remaining: bytes})
-        |> attempt_output(nil)
-        |> output_result()
+  defp enqueue_output(state, encoded, cursor, kind) do
+    request =
+      ConnectionRegistry.connection_request(
+        state.registry,
+        {:enqueue_output, state.incarnation, encoded}
+      )
 
-      :empty ->
-        cond do
-          state.closing -> finish_owner_loss_close(state)
-          state.succession != nil -> finish_succession(state)
-          :queue.is_empty(state.progress) -> {:noreply, state}
-          true -> flush_progress(state)
-        end
-
-      {:error, _reason} ->
-        {:stop, :normal, state}
-    end
+    track_enqueue(state, request, cursor, kind)
   end
+
+  # Technical depth: `enqueue_seq` counts every enqueue sent, so a claim
+  # answered `:empty` is final only when no enqueue was sent after it.
+  defp track_enqueue(state, request, cursor, kind) do
+    state = %{
+      state
+      | enqueue_seq: state.enqueue_seq + 1,
+        enqueues_pending: state.enqueues_pending + 1
+    }
+
+    await_exchange(state, request, :registry, {:enqueue, cursor, kind})
+  end
+
+  defp output_step(%{output_claim: nil} = state) do
+    request =
+      ConnectionRegistry.connection_request(
+        state.registry,
+        {:claim_output, state.incarnation}
+      )
+
+    state = %{state | output_claim: :claiming}
+    {:noreply, await_exchange(state, request, :registry, {:claim, state.enqueue_seq})}
+  end
+
+  defp output_step(%{output_claim: :claiming} = state), do: {:noreply, state}
 
   defp output_step(%{send_select: nil} = state) do
     state
@@ -1907,16 +2114,20 @@ defmodule LoopexDaemon.SocketConnection do
     end
   end
 
+  # Technical depth: the emission acknowledgement is a registry request sent
+  # before the next claim, so the registry releases this frame's charge
+  # before it answers that claim; a refused acknowledgement stops the
+  # connection when its answer arrives.
   defp complete_output(%{output_claim: %{frame_ref: frame_ref}} = state) do
-    case ConnectionRegistry.output_emitted(state.registry, state.incarnation, frame_ref) do
-      :ok ->
-        send(self(), :flush_output)
-        state = %{state | output_claim: nil, send_select: nil}
-        {:ok, advance_emitted_cursor(state)}
+    request =
+      ConnectionRegistry.connection_request(
+        state.registry,
+        {:output_emitted, state.incarnation, frame_ref}
+      )
 
-      {:error, _reason} ->
-        {:stop, state}
-    end
+    send(self(), :flush_output)
+    state = %{state | output_claim: nil, send_select: nil}
+    {:ok, state |> await_exchange(request, :registry, {:emitted}) |> advance_emitted_cursor()}
   end
 
   defp advance_emitted_cursor(state) do
@@ -1934,28 +2145,150 @@ defmodule LoopexDaemon.SocketConnection do
   end
 
   # The notice has been written: release the succession reserve, then write
-  # the held records in the order they were produced.
+  # the held records in the order they were produced. The release is a
+  # registry request; records keep being held until it is answered.
+  defp finish_succession(%{finishing_succession: true} = state), do: {:noreply, state}
+
   defp finish_succession(state) do
-    case ConnectionRegistry.finish_succession(state.registry, state.incarnation) do
-      :ok ->
+    request =
+      ConnectionRegistry.connection_request(
+        state.registry,
+        {:finish_succession, state.incarnation}
+      )
+
+    state = %{state | finishing_succession: true}
+    {:noreply, await_exchange(state, request, :registry, {:finish_succession})}
+  end
+
+  defp succession_finished(state, {:reply, :ok}) do
+    held = state.succession
+    state = %{state | succession: nil, finishing_succession: false}
+
+    case send_records(state, :queue.to_list(held)) do
+      {:ok, state} -> output_step(state)
+      {:error, state} -> {:stop, :normal, state}
+    end
+  end
+
+  defp succession_finished(state, _refused),
+    do: {:noreply, %{state | finishing_succession: false}}
+
+  defp send_records(state, records) do
+    Enum.reduce_while(records, {:ok, state}, fn {record, cursor}, {:ok, acc} ->
+      case send_record(acc, record, cursor) do
+        {:ok, acc} -> {:cont, {:ok, acc}}
+        {:error, acc} -> {:halt, {:error, acc}}
+      end
+    end)
+  end
+
+  # Concept: every output answer is consumed exactly once, whether or not the
+  # connection is closing, because a close writes through the same path.
+  #
+  # Technical depth: an accepted enqueue places its cursor in emission order
+  # and, for an event, lets the pump send the next one, so an attachment still
+  # has at most one event awaiting the registry. A refused enqueue is the
+  # synchronous refusal it replaces: a closing connection completes its close,
+  # an event detaches its attachment, a succession notice closes with the
+  # `detached` record, progress is dropped and any other record stops the
+  # connection. A claim answered `:empty` after a later enqueue was sent is
+  # claimed again, so neither a close nor a succession finish can overtake a
+  # record already sent to the registry.
+  defp output_answered(state, {:enqueue, cursor, kind}, {:reply, :ok}) do
+    state =
+      resume_input(%{
+        state
+        | enqueues_pending: state.enqueues_pending - 1,
+          output_cursors: :queue.in(cursor, state.output_cursors)
+      })
+
+    case kind do
+      {:event, pump} ->
+        if match?(%{pump: ^pump}, state.attachment),
+          do: LoopexDaemon.AttachmentPump.continue(pump)
+
+        {:noreply, state}
+
+      {:notice, _session_id, attachment_id, _cursor} ->
+        request =
+          ConnectionRegistry.connection_request(
+            state.registry,
+            {:attachment_invalidated, state.incarnation, attachment_id}
+          )
+
+        Logger.debug("loopex daemon attachment detached by succession")
+        output_step(await_exchange(state, request, :registry, {:ignored}))
+
+      _record ->
+        {:noreply, state}
+    end
+  end
+
+  defp output_answered(state, {:enqueue, _cursor, kind}, _refused) do
+    state = resume_input(%{state | enqueues_pending: state.enqueues_pending - 1})
+    Logger.debug("loopex daemon socket output enqueue failed")
+
+    case kind do
+      _any when state.closing != nil ->
+        finish_owner_loss_close(state)
+
+      {:notice, session_id, _attachment_id, cursor} ->
         held = state.succession
         state = %{state | succession: nil}
 
-        result =
-          Enum.reduce_while(:queue.to_list(held), {:ok, state}, fn {record, cursor}, {:ok, acc} ->
-            case send_record(acc, record, cursor) do
-              {:ok, acc} -> {:cont, {:ok, acc}}
-              {:error, acc} -> {:halt, {:error, acc}}
-            end
-          end)
-
-        case result do
-          {:ok, state} -> output_step(state)
-          {:error, state} -> {:stop, :normal, state}
+        case begin_final_close(state, WireRecords.detached(session_id, cursor)) do
+          {:noreply, state} -> send_held_after_close(state, held)
+          stopped -> stopped
         end
 
-      {:error, _reason} ->
+      {:event, pump} ->
+        if match?(%{pump: ^pump}, state.attachment),
+          do: begin_detach_close(state),
+          else: {:stop, :normal, state}
+
+      :progress ->
         {:noreply, state}
+
+      :record ->
+        {:stop, :normal, state}
+    end
+  end
+
+  defp output_answered(state, {:claim, _seq}, {:reply, {:ok, frame_ref, bytes}}) do
+    state
+    |> Map.put(:output_claim, %{frame_ref: frame_ref, remaining: bytes})
+    |> attempt_output(nil)
+    |> output_result()
+  end
+
+  defp output_answered(%{enqueue_seq: current} = state, {:claim, seq}, {:reply, :empty})
+       when current != seq,
+       do: output_step(%{state | output_claim: nil})
+
+  defp output_answered(state, {:claim, _seq}, {:reply, :empty}) do
+    state = %{state | output_claim: nil}
+
+    cond do
+      state.closing -> finish_owner_loss_close(state)
+      state.succession != nil -> finish_succession(state)
+      :queue.is_empty(state.progress) -> {:noreply, state}
+      true -> flush_progress(state)
+    end
+  end
+
+  defp output_answered(state, {:claim, _seq}, _refused), do: {:stop, :normal, state}
+  defp output_answered(state, {:emitted}, {:reply, :ok}), do: {:noreply, state}
+  defp output_answered(state, {:emitted}, _refused), do: {:stop, :normal, state}
+
+  defp output_answered(state, {:finish_succession}, response),
+    do: succession_finished(state, response)
+
+  defp output_answered(state, {:ignored}, _response), do: {:noreply, state}
+
+  defp send_held_after_close(state, held) do
+    case send_records(state, :queue.to_list(held)) do
+      {:ok, state} -> {:noreply, state}
+      {:error, state} -> finish_owner_loss_close(state)
     end
   end
 
@@ -2005,20 +2338,25 @@ defmodule LoopexDaemon.SocketConnection do
     end
   end
 
+  # Technical depth: durable output is empty only when nothing is claimed,
+  # enqueued or awaiting the registry's acceptance; progress is then enqueued
+  # one record at a time, directly, as before.
   defp flush_progress(state) do
-    idle = state.output_claim == nil and :queue.is_empty(state.output_cursors)
+    idle =
+      state.output_claim == nil and :queue.is_empty(state.output_cursors) and
+        state.enqueues_pending == 0
 
     with true <- idle,
-         {{:value, encoded}, queue} <- :queue.out(state.progress),
-         :ok <- ConnectionRegistry.enqueue_output(state.registry, state.incarnation, encoded) do
+         {{:value, encoded}, queue} <- :queue.out(state.progress) do
       state = %{
         state
         | progress: queue,
-          progress_bytes: state.progress_bytes - byte_size(encoded),
-          output_cursors: :queue.in(nil, state.output_cursors)
+          progress_bytes: state.progress_bytes - byte_size(encoded)
       }
 
-      output_step(state)
+      state
+      |> enqueue_output(encoded, nil, :progress)
+      |> output_step()
     else
       _waiting -> {:noreply, state}
     end
@@ -2056,22 +2394,31 @@ defmodule LoopexDaemon.SocketConnection do
   defp frame_reason(:number_not_an_integer), do: "a number is not an integer"
   defp frame_reason(_reason), do: "the frame is malformed"
 
+  # Concept: a lease-authorized request first asks the registry for its
+  # session's route by a request message; its ledger entry is `:routing`
+  # until the answer, so its identity and the in-flight ceiling are checked on
+  # arrival. A session with no granted lease refuses `control_not_held`
+  # before any ticket.
+  #
+  # Technical depth: the registry answers route requests in the order they
+  # were sent, so tickets still open, bind and hand their descriptors to the
+  # lease owner in wire order.
   defp serve_lease_ticket(state, request, session_id) do
-    case safe_call(fn -> ConnectionRegistry.lease_route(state.registry, session_id) end) do
-      {:ok, owner, owner_incarnation} ->
-        begin_ticket(
-          state,
-          state.ledger,
-          request,
-          request.operation,
-          session_id,
-          fn -> :ok end,
-          {owner, owner_incarnation},
-          fn state, origin -> send_lease_descriptor(state, origin, owner) end
-        )
+    case RequestLedger.begin(state.ledger, request.request_id, new_entry(request, :routing)) do
+      {:ok, origin, ledger} ->
+        registry_request =
+          ConnectionRegistry.connection_request(state.registry, {:lease_route, session_id})
 
-      _no_route ->
-        reply(state, WireRecords.request_error(request.request_id, "control_not_held"))
+        state = %{state | ledger: ledger}
+
+        {:ok,
+         await_exchange(state, registry_request, :registry, {:lease_route, origin, session_id})}
+
+      {:error, :duplicate_request} ->
+        reply(state, WireRecords.invalid_request(request.request_id, "duplicate_request"))
+
+      {:error, :capacity_exceeded} ->
+        reply(state, WireRecords.request_error(request.request_id, "capacity_exceeded"))
     end
   end
 

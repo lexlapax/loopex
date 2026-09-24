@@ -251,6 +251,40 @@ defmodule LoopexDaemon.ConnectionRegistry do
     GenServer.call(registry, {:finish_succession, connection_incarnation})
   end
 
+  @doc """
+  ## Concept
+
+  A socket connection exchanges every request with the registry by message:
+  it never waits inside a handler for its slot promotion, its initialization,
+  an output enqueue, claim or emission acknowledgement, its succession
+  reserve, notice, invalidation or finish, or a lease route. A stalled
+  registry therefore delays only that connection's dependent work; the
+  connection keeps serving its socket, its relay records and its closes.
+
+  ## Technical depth
+
+  Each request is the exact message the matching synchronous function sends
+  and is answered by the same handler at once, so a connection's requests are
+  applied and answered in the order it sent them. The returned OTP request
+  identifier is consumed by the caller as a message.
+  """
+  @spec connection_request(pid(), tuple()) :: :gen_server.request_id()
+  def connection_request(registry, request)
+      when elem(request, 0) in [
+             :promote,
+             :initialize_complete,
+             :enqueue_output,
+             :claim_output,
+             :output_emitted,
+             :reserve_succession,
+             :release_succession,
+             :enqueue_succession_notice,
+             :attachment_invalidated,
+             :finish_succession,
+             :lease_route
+           ],
+      do: :gen_server.send_request(registry, request)
+
   @doc false
   @spec reserve_activation(pid(), origin_id(), activation_binding()) ::
           {:ok, {:primary, binary()} | {:duplicate, origin_id(), binary()} | :already_active}

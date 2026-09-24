@@ -139,6 +139,17 @@ defmodule LoopexDaemon.AdmissionRelay do
     )
   end
 
+  # Concept: a socket connection registers by a request message it never
+  # awaits inside a handler; its reply is `register_connection/3`'s.
+  @doc false
+  @spec register_connection_request(pid(), binary(), pid()) :: :gen_server.request_id()
+  def register_connection_request(relay, incarnation, retirement_recipient),
+    do:
+      :gen_server.send_request(
+        relay,
+        {:register_connection, incarnation, retirement_recipient}
+      )
+
   @doc false
   @spec register_registry(pid(), pid(), binary()) ::
           :ok | {:error, :invalid_registry | :registry_conflict}
