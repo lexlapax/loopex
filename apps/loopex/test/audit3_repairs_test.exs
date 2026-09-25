@@ -100,16 +100,19 @@ defmodule Loopex.Audit3RepairsTest do
     {fixture, holder} = start_held(script: [%{text: "done", calls: []}])
     :ok = Audit3HoldingStore.arm(holder, self())
 
-    {session_id, attachment, _reply} = Fixture.run(fixture, "go", %{deadline_ms: 400})
+    # The authority must outlast the path to the read on a loaded machine, and
+    # the hold below must outlast the authority while staying inside Control's
+    # 1,000 ms read bound.
+    {session_id, attachment, _reply} = Fixture.run(fixture, "go", %{deadline_ms: 700})
 
     assert_receive {:audit3_position_read_held, reader},
                    5_000,
                    "Control never read the attempt-open row while authorizing the attempt"
 
-    # Longer than the run's whole remaining authority and well inside Control's
-    # own read bound, so the read answers and the refusal can only come from the
-    # clock.
-    Process.sleep(600)
+    # Longer than the run's whole authority (the deadline was committed before
+    # this read began) and inside Control's own read bound, so the read answers
+    # and the refusal can only come from the clock.
+    Process.sleep(800)
     send(reader, :audit3_release)
 
     events = drain(attachment)
