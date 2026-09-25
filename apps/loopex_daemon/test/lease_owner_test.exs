@@ -628,14 +628,18 @@ defmodule LoopexDaemon.LeaseOwnerTest do
     stop_connection(holder, fixture.relay, holder_incarnation)
   end
 
+  # Technical depth: the mutation lands 1.25 s into a 2 s term and is held
+  # open past the original deadline; no expiry there proves the renewal. These
+  # are the proportions of the admission-unknown case below, where 150 ms into
+  # 300 ms let a loaded machine expire the lease before the mutation began.
   test "an accepted mutation renews before a queued takeover can pass" do
-    lease_term_ms = 300
+    lease_term_ms = 2_000
     fixture = start_fixture(lease_term_ms: lease_term_ms)
     {holder, holder_incarnation, writer_epoch} = grant_first(fixture, lease_term_ms)
 
     assert :ok = attach(fixture, holder, holder_incarnation, "controller-attachment")
 
-    Process.sleep(150)
+    Process.sleep(1_250)
     origin = {holder_incarnation, 1, 1}
     worker = start_ticket_worker(holder)
 
@@ -667,8 +671,8 @@ defmodule LoopexDaemon.LeaseOwnerTest do
 
     assert_receive {:mutation_waiting, task}, 500
     assert %{in_flight: 1, phase: :held} = LeaseOwner.status(fixture.owner)
-    Process.sleep(180)
-    refute_receive {:lease_expiry_proposed, _, _, _, _, _, _, _}, 40
+    Process.sleep(750)
+    refute_receive {:lease_expiry_proposed, _, _, _, _, _, _, _}, 100
 
     successor_incarnation = incarnation()
     successor = start_connection(fixture.relay, successor_incarnation)
@@ -753,14 +757,17 @@ defmodule LoopexDaemon.LeaseOwnerTest do
     stop_connection(holder, fixture.relay, holder_incarnation)
   end
 
+  # Technical depth: the refused mutation lands 1.25 s into a 2 s term, so a
+  # loaded machine still admits it before the deadline; the expiry then comes
+  # at the original deadline, proving no renewal was kept.
   test "a refused mutation discards its candidate renewal" do
-    lease_term_ms = 400
+    lease_term_ms = 2_000
     fixture = start_fixture(lease_term_ms: lease_term_ms)
     {holder, holder_incarnation, writer_epoch} = grant_first(fixture, lease_term_ms)
 
     assert :ok = attach(fixture, holder, holder_incarnation, "refused-admission-attachment")
 
-    Process.sleep(250)
+    Process.sleep(1_250)
     origin = {holder_incarnation, 1, 1}
     worker = start_ticket_worker(holder)
 
@@ -788,7 +795,7 @@ defmodule LoopexDaemon.LeaseOwnerTest do
 
     assert_receive {:lease_expiry_proposed, expiry_ref, owner, owner_incarnation, session_id,
                     ^holder, ^holder_incarnation, ^writer_epoch},
-                   250
+                   1_500
 
     assert owner == fixture.owner
     assert owner_incarnation == fixture.owner_incarnation
