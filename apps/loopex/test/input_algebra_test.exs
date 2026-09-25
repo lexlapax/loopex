@@ -280,10 +280,11 @@ defmodule Loopex.InputAlgebraTest do
     # derived at staging; carrying the predecessor's instant or inventing one at
     # promotion would instead end it before the provider call.
     # The duration must outlast a loaded machine's first model request; the
-    # case then waits longer than it, so it proves the same thing at 2 s as
-    # it did at 200 ms.
+    # case then waits longer than it, so it proves the same thing at 5 s as
+    # it did at 200 ms. At 2 s a floor-pair run with ten suites at once starved
+    # the first run past its own deadline before its model was scheduled.
     parent = self()
-    duration_ms = 2_000
+    duration_ms = 5_000
 
     fixture =
       start(
@@ -300,7 +301,7 @@ defmodule Loopex.InputAlgebraTest do
     {:accepted, "p1"} =
       Loopex.command(attachment, %{type: :prompt, command_id: "p1", content: "first"})
 
-    assert_receive {:holding, model}, 5_000
+    assert_receive {:holding, model}, duration_ms + 5_000
 
     assert {:accepted, "f1"} =
              Loopex.command(attachment, %{
