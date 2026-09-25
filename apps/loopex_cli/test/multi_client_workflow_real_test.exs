@@ -25,7 +25,11 @@ defmodule LoopexCli.MultiClientWorkflowRealTest do
   @tag :real_provider
   @tag timeout: 900_000
   test "a Node observer takes over from a killed CLI controller and a real provider answers it" do
+    # Consumed as a host consumes it: read and deleted in one step, so this
+    # VM's environment names it no longer and only the daemon child is handed
+    # it; the release check runs each real-provider case in a VM of its own.
     credential = System.get_env("LOOPEX_PROVIDER_API_KEY")
+    System.delete_env("LOOPEX_PROVIDER_API_KEY")
     if credential in [nil, ""], do: flunk("provider credential unavailable: evidence unavailable")
     node = System.find_executable("node") || flunk("Node is unavailable on this host")
 

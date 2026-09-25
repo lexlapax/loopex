@@ -5824,9 +5824,12 @@ On 2026-09-24 the maintainer decided:
   clock during the stop, the deleted blocking lease-owner calls and the latched
   relay reports (`9cc8f075`), the missing hand-off table (`996b0d7d`) and the
   cancel answer allowed to be weaker than its receipt (`c36d74d0`); item 7, the holder-close
-  monitor, was fixed in step 7 (`b3c295b8`); items 8–19 are accepted as the
-  M5 plan's "Named limitation: 2026-09-24 risk packet" rows, each with its
-  reachability, direction and tripwire. The final internal pass over steps 7
+  monitor, was fixed in step 7 (`b3c295b8`); items 8–12 and 14–19 are
+  accepted as the M5 plan's "Named limitation: 2026-09-24 risk packet" rows,
+  each with its reachability, direction and tripwire. Item 13, the stop
+  helper's near-deadline answer, was later closed by the external audit's
+  repair: components now stop with the owner's own stop reason and the
+  monitor's `DOWN` reason alone decides the step. The final internal pass over steps 7
   and 8 added one accepted residual, #20: a lease-owner step still
   unfinished at `freeze_deadline`, from a lease owner stalled since the cut,
   is classified `relay_lost` — the wrong exit class, with no durability

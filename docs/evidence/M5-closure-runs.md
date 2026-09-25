@@ -126,11 +126,16 @@ release check's long-duration lane output.
 
 ### Step durations at the full population (T15)
 
-The `long_bound` lane traces every collaboration-owner step at 512
-connections and prints one `maximum-population steps:` line per step class —
-registry, relay, lease owner and connection — with its count, p50, p99 and
-maximum in milliseconds; the test fails if any class is unsampled or reaches
-its 5,000 ms step. Filled from this release check's long-duration lane output.
+The `long_bound` lane traces every collaboration-owner step at 512 connections
+while the owner is under load: grants, releases and lease-owner losses run in
+the middle of two bursts of 252 concurrent refused acquires. It prints one
+`maximum-population steps:` line per step class — registry, relay, lease owner
+and connection — with its count, p50, p99 and maximum in milliseconds. The
+owner's deadline path is traced too, and a step that reaches it counts as at
+least 5,000 ms, so the test fails if any class is unsampled or any step
+reaches its 5,000 ms instant; the distribution is judged before the workload's
+replies and the exit status. Filled from this release check's long-duration
+lane output.
 
 | Step class | Count, p50, p99, maximum |
 | --- | --- |

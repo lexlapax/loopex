@@ -64,6 +64,10 @@ defmodule LoopexDaemon.Service do
   @owner_start_gate_ms 5_000
   @listener_park_ms 5_000
   @stop_wait_ms 5_000
+  # Concept: the one reason this owner stops a component with. An exit with
+  # exactly this reason is this owner's stop; any other exit, `:normal`
+  # included, is the component's own.
+  @owner_stop_reason {:shutdown, :loopex_owner_stop}
   @store_stop_ms 30_000
   @placement_release_ms 5_000
   @close_connections_ms 5_000
@@ -1076,7 +1080,9 @@ defmodule LoopexDaemon.Service do
         monitor = Process.monitor(pid)
 
         spawn(fn ->
-          safe(fn -> GenServer.stop(pid, :normal, max(deadline - monotonic_ms(), 1)) end)
+          requested_stop(fn reason ->
+            GenServer.stop(pid, reason, max(deadline - monotonic_ms(), 1))
+          end)
         end)
 
         receive do
@@ -1188,21 +1194,23 @@ defmodule LoopexDaemon.Service do
       {:ok, pid} ->
         Process.unlink(pid)
 
-        reason =
+        result =
           await_requested_stop(
             pid,
-            fn -> GenServer.stop(pid, :normal, max(deadline - monotonic_ms(), 1)) end,
+            fn reason -> GenServer.stop(pid, reason, max(deadline - monotonic_ms(), 1)) end,
             deadline
           )
 
         flush_exit(pid)
         state = %{state | pids: Map.delete(state.pids, name)}
 
-        if reason in [:shutdown, :normal] or match?({:shutdown, _detail}, reason) do
-          {:ok, state}
-        else
-          Logger.debug("loopex daemon component lost or late during teardown")
-          {:fatal, running_class(name, own_exit_reason(reason)), state}
+        case result do
+          :stopped ->
+            {:ok, state}
+
+          other ->
+            Logger.debug("loopex daemon component lost or late during teardown")
+            {:fatal, running_class(name, own_exit_reason(other)), state}
         end
 
       :error ->
@@ -1210,53 +1218,40 @@ defmodule LoopexDaemon.Service do
     end
   end
 
-  # Concept: a stop counts as this owner's only when the stop request itself
-  # produced the exit; a component that ended on its own — even with
-  # `:normal` — is that component's loss.
+  # Concept: a stop counts as this owner's only when the component exits with
+  # this owner's own stop reason; a component that ended any other way — even
+  # with `:normal`, even after the request was sent — is that component's own
+  # exit and is classified by its running class.
   #
-  # Technical depth: the helper's stop call is ordered, since it monitors
-  # before it asks, so its answer decides whose exit this was. `:ok` means
-  # the component ended with the requested reason because it was asked:
-  # the monitor's reason is returned, and `:noproc` — the component took the
-  # stop and exited before this owner's monitor was set, a signal from
-  # another sender — is returned as `:normal`. Any other answer (`noproc`
-  # from an already-gone component, a timeout, a mismatched reason) means the
-  # exit was not this owner's request, and `{:component_exit, reason}` is
-  # returned whatever the monitor saw, `:normal` included. The answer is
-  # always consumed, within the same deadline, so no helper message is left
-  # behind.
+  # Technical depth: the component is monitored, then an unlinked helper
+  # passes `@owner_stop_reason` to `stop`, which asks the component to stop
+  # with it (`GenServer.stop/3` or `Supervisor.stop/3`). The monitor's `DOWN`
+  # reason alone decides the result: `:stopped` for exactly that reason,
+  # `:stopped_late` for a component killed at the deadline, and
+  # `{:component_exit, reason}` otherwise — `:noproc` for a component already
+  # gone included. The helper's own answer is never read, so a helper that
+  # times out or raises inside the stop call changes nothing; it is killed
+  # once the component's exit is known.
   @doc false
-  @spec await_requested_stop(pid(), (-> term()), integer()) :: term()
+  @spec await_requested_stop(pid(), (term() -> term()), integer()) ::
+          :stopped | :stopped_late | {:component_exit, term()}
   def await_requested_stop(pid, stop, deadline) do
     monitor = Process.monitor(pid)
-    owner = self()
-    helper = spawn(fn -> send(owner, {:requested_stop, self(), requested_stop(stop)}) end)
-
+    helper = spawn(fn -> requested_stop(stop) end)
     reason = await_stopped(pid, monitor, deadline)
+    Process.exit(helper, :kill)
 
-    answer =
-      receive do
-        {:requested_stop, ^helper, answer} -> answer
-      after
-        remaining_ms(deadline) ->
-          Process.exit(helper, :kill)
-          :failed
-      end
-
-    cond do
-      answer != :ok -> {:component_exit, reason}
-      reason == :noproc -> :normal
-      true -> reason
+    case reason do
+      @owner_stop_reason -> :stopped
+      :stopped_late -> :stopped_late
+      other -> {:component_exit, other}
     end
   end
 
   defp requested_stop(stop) do
-    case stop.() do
-      :ok -> :ok
-      _other -> :failed
-    end
+    stop.(@owner_stop_reason)
   catch
-    :exit, _reason -> :failed
+    _kind, _reason -> :ok
   end
 
   defp await_stopped(pid, monitor, deadline) do
@@ -1268,6 +1263,9 @@ defmodule LoopexDaemon.Service do
         Process.exit(pid, :kill)
 
         receive do
+          # A component that took the stop just as the deadline fell still
+          # stopped as asked.
+          {:DOWN, ^monitor, :process, ^pid, @owner_stop_reason} -> @owner_stop_reason
           {:DOWN, ^monitor, :process, ^pid, _reason} -> :stopped_late
         after
           @stop_wait_ms ->
@@ -1299,17 +1297,19 @@ defmodule LoopexDaemon.Service do
     else
       Process.unlink(supervisor)
 
-      reason =
+      result =
         await_requested_stop(
           supervisor,
-          fn -> Supervisor.stop(supervisor, :normal, max(deadline - monotonic_ms(), 1)) end,
+          fn reason ->
+            Supervisor.stop(supervisor, reason, max(deadline - monotonic_ms(), 1))
+          end,
           deadline
         )
 
       flush_exit(supervisor)
       state = %{state | pids: Map.delete(state.pids, :runtime_supervisor)}
 
-      if reason in [:normal, :shutdown] or match?({:shutdown, _detail}, reason),
+      if result == :stopped,
         do: {:ok, state},
         else: {:fatal, :runtime_lost, state}
     end

@@ -23,11 +23,15 @@ defmodule LoopexDaemon.ExternalSocketWorkflowRealTest do
   #
   # Technical depth: the credential comes only from the release check's
   # `LOOPEX_PROVIDER_API_KEY` into the daemon's custody; this case never
-  # prints it. Its absence is evidence unavailable, never a pass.
+  # prints it. It is read and deleted from this VM's environment in one step,
+  # as a host consumes it, so nothing started afterwards inherits it; the
+  # release check runs each real-provider case in a VM of its own. Its
+  # absence is evidence unavailable, never a pass.
   @tag :real_provider
   @tag timeout: 900_000
   test "a controller and observer complete the documented daemon workflow against a real provider" do
     credential = System.get_env("LOOPEX_PROVIDER_API_KEY")
+    System.delete_env("LOOPEX_PROVIDER_API_KEY")
     if credential in [nil, ""], do: flunk("provider credential unavailable: evidence unavailable")
 
     root = Path.join(System.tmp_dir!(), "ldr-#{System.unique_integer([:positive])}")

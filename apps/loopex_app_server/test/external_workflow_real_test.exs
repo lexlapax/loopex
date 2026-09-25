@@ -84,7 +84,7 @@ defmodule Loopex.AppServer.ExternalWorkflowRealTest do
 
   @tag :real_provider
   test "an extracted source archive follows the operator guide to serve the shipped host and complete the chain against a real provider" do
-    credential!()
+    credential = credential!()
     node_executable = System.find_executable("node") || flunk("Node is unavailable")
     elixir = System.find_executable("elixir") || flunk("Elixir is unavailable")
     mix = System.find_executable("mix") || flunk("Mix is unavailable")
@@ -110,11 +110,13 @@ defmodule Loopex.AppServer.ExternalWorkflowRealTest do
     launch_configuration = Keyword.fetch!(launch, :worker_path) <> ".launch"
     assert File.regular?(launch_configuration)
 
-    # Every input the guide names. The credential is not among them: it is
-    # already in this process's environment, which the shell, the client and the
-    # server child inherit, so it never appears in an argument list, a file or a
-    # record.
+    # Every input the guide names. The credential reaches the shell, the client
+    # and the server child through the environment the guide describes, but
+    # this VM consumed it at the start and holds it only in a variable: it is
+    # handed to that one command's environment, never to this VM's, so it never
+    # appears in an argument list, a file or a record.
     environment = [
+      {"LOOPEX_PROVIDER_API_KEY", credential},
       {"PATH", Enum.join([Path.dirname(elixir), Path.dirname(node_executable), path()], ":")},
       {"LOOPEX_HOME", home},
       {"LOOPEX_WORKSPACE", workspace},
@@ -184,7 +186,7 @@ defmodule Loopex.AppServer.ExternalWorkflowRealTest do
 
     # Nothing the client printed carries the credential, which is the only place
     # a leak could have reached this process.
-    refute String.contains?(output, System.fetch_env!("LOOPEX_PROVIDER_API_KEY"))
+    refute String.contains?(output, credential)
 
     # The client reports the wire form of the session identity; the Store keys
     # the session by the identity the runtime assigned, which the wire encodes.
@@ -286,14 +288,18 @@ defmodule Loopex.AppServer.ExternalWorkflowRealTest do
   # Concept: a lane that spends a real credential refuses immediately without
   # one, and says so.
   #
-  # Technical depth: the value is compared, never printed. Refusing here is what
+  # Technical depth: the value is read and deleted from this VM's environment
+  # in one step and returned; it is compared, never printed. Refusing here is what
   # keeps an unattended `--include real_provider` run from building a source
   # archive and a provider companion that could only fail later, and it is the
   # difference between a clear refusal and a wait.
   defp credential! do
-    case System.get_env("LOOPEX_PROVIDER_API_KEY") do
+    value = System.get_env("LOOPEX_PROVIDER_API_KEY")
+    System.delete_env("LOOPEX_PROVIDER_API_KEY")
+
+    case value do
       value when is_binary(value) and value != "" ->
-        :ok
+        value
 
       _absent ->
         flunk(

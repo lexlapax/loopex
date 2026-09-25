@@ -142,17 +142,27 @@ defmodule LoopexDaemon.MaximumPopulationTest do
 
   # Concept (T15): at the full population every lease-operation step the
   # daemon owner waits on — registry, relay and lease-owner steps, and the
-  # holder's close — answers within its five-second step, measured as a
-  # distribution per step class over a composed grant, refusal, release,
-  # retirement and owner-loss run, and the run ends in an orderly stop with
-  # status 0.
+  # holder's close — answers within its five-second step while the owner is
+  # under load: grants, releases and owner losses run in the middle of two
+  # bursts of 252 concurrent refused acquires, and the run ends in an orderly
+  # stop.
   #
-  # Technical depth: the daemon owner's private `enter_step/3` and its two
-  # completion functions are traced with monotonic timestamps; each step's
-  # duration runs from its entry to the next transition of the same
-  # operation. A step still open when its operation leaves by another path
-  # is not sampled. The distribution per class is printed for the closure
-  # evidence and every class's maximum must stay below 5,000 ms.
+  # Technical depth: the daemon owner's private `enter_step/3`, its two
+  # completion functions and its deadline path `late_action/4` are traced
+  # with monotonic timestamps (nanoseconds). A step's duration runs from its
+  # entry to the next transition of the same operation; a step that reaches
+  # the deadline path is a failure and counts as at least 5,000 ms. The
+  # distribution per class is printed and asserted before anything about the
+  # workload's replies or the exit status, so a slow step fails here and
+  # nowhere else first. Replies are read by request id and a missing one is
+  # recorded, not raised, until the distribution has been judged. Every wait
+  # is bounded: 30 s per reply, 60 s for the stop, 240 s for the case, and
+  # `on_exit` kills the daemon and closes every connection. The bursts come
+  # only from clients of sessions whose lease stays held, so no burst acquire
+  # contends for a free lease; a burst that did — 64 connections acquiring one
+  # unheld session at once — made the test VM itself fail with a segmentation
+  # fault or a spinning scheduler on both toolchain pairs, which is recorded
+  # for investigation rather than exercised here.
   @tag :long_bound
   @tag timeout: 240_000
   test "T15: every step answers within its instant at the full population" do
@@ -221,73 +231,87 @@ defmodule LoopexDaemon.MaximumPopulationTest do
         client
       end
 
-    acquire = fn client, encoded, request_id ->
-      :ok =
-        send_frame(client, %{
-          "method" => "session.acquire_control",
-          "request_id" => request_id,
-          "session_id" => encoded
-        })
+    on_exit(fn -> Enum.each(clients, &:socket.close/1) end)
+
+    # Client i is attached to session rem(i, 8), and a connection may act only
+    # on its own session. Holders (clients 0-7) grant sessions 0-5 first. The
+    # bursts come only from the other clients of sessions whose lease stays
+    # held throughout, so every burst acquire is refused and no burst acquire
+    # contends for a free lease.
+    session_of = fn index -> rem(index, @sessions) end
+    holder = &Enum.at(clients, &1)
+    session = &Enum.at(sessions, &1)
+    others = clients |> Enum.with_index() |> Enum.drop(@sessions)
+    in_sessions = fn range -> Enum.filter(others, fn {_c, i} -> session_of.(i) in range end) end
+
+    grant = fn index ->
+      case reply(holder.(index), "grant") do
+        %{"result" => %{"writer_epoch" => epoch}} -> {:ok, epoch}
+        other -> {:missing, index, other}
+      end
     end
 
-    # One holder per session: eight grants.
-    holders =
-      for index <- 0..(@sessions - 1) do
-        client = Enum.at(clients, index)
-        acquire.(client, Enum.at(sessions, index), "grant")
-        [%{"request_id" => "grant", "result" => granted}] = receive_records(client, 1, 30_000)
-        {client, Enum.at(sessions, index), granted["writer_epoch"]}
+    early =
+      for index <- 0..5 do
+        send_acquire(holder.(index), session.(index), "grant")
+        grant.(index)
       end
 
-    # Every other connection asks too and is refused while the lease is held.
-    others = Enum.drop(clients, @sessions)
+    epochs = for {{:ok, epoch}, index} <- Enum.with_index(early), into: %{}, do: {index, epoch}
 
-    others
-    |> Enum.with_index(@sessions)
-    |> Enum.each(fn {client, index} ->
-      acquire.(client, Enum.at(sessions, rem(index, @sessions)), "refused")
-    end)
+    burst = fn pairs, tag ->
+      Enum.each(pairs, fn {client, index} ->
+        send_acquire(client, session.(session_of.(index)), tag)
+      end)
+    end
 
-    Enum.each(others, fn client ->
-      [%{"request_id" => "refused", "code" => "control_held"}] =
-        receive_records(client, 1, 30_000)
-    end)
+    # Burst one: the 252 other clients of sessions 2-5, with the grants of
+    # sessions 6 and 7 and the releases of sessions 0 and 1 in its middle.
+    {first_half, second_half} = Enum.split(in_sessions.(2..5), 126)
+    burst.(first_half, "burst-1")
+    Enum.each(6..7, &send_acquire(holder.(&1), session.(&1), "grant"))
+    # A session whose grant went missing has nothing to release; that is
+    # recorded and judged after the distribution.
+    released = Enum.filter(0..1, &Map.has_key?(epochs, &1))
+    Enum.each(released, &send_release(holder.(&1), session.(&1), epochs[&1]))
+    burst.(second_half, "burst-1")
 
-    # Half the holders release; their lease owners then retire.
-    {releasing, losing} = Enum.split(holders, div(@sessions, 2))
+    burst_one =
+      Enum.map(first_half ++ second_half, fn {client, _i} -> reply(client, "burst-1") end)
 
-    Enum.each(releasing, fn {client, encoded, epoch} ->
-      :ok =
-        send_frame(client, %{
-          "method" => "session.release_control",
-          "request_id" => "release",
-          "session_id" => encoded,
-          "writer_epoch" => epoch
-        })
-    end)
+    late = Enum.map(6..7, grant)
+    releases = Enum.map(released, &reply(holder.(&1), "release"))
 
-    Enum.each(releasing, fn {client, _encoded, _epoch} ->
-      [%{"request_id" => "release", "type" => "result"}] = receive_records(client, 1, 30_000)
-    end)
-
-    # The other half lose their lease owners: pop, classification, holder close.
+    # Burst two: the 252 other clients of sessions 4-7, with the lease owners
+    # of sessions 2 and 3 killed in its middle.
     owners = :sys.get_state(collaboration).owners
+    {first_half, second_half} = Enum.split(in_sessions.(4..7), 126)
+    burst.(first_half, "burst-2")
 
-    Enum.each(losing, fn {_client, encoded, _epoch} ->
-      {:ok, raw} = Wire.identity(encoded)
-      Process.exit(Map.fetch!(owners, raw).pid, :kill)
+    Enum.each(2..3, fn index ->
+      {:ok, raw} = Wire.identity(session.(index))
+
+      case Map.fetch(owners, raw) do
+        {:ok, %{pid: pid}} -> Process.exit(pid, :kill)
+        :error -> :no_owner
+      end
     end)
 
-    Enum.each(losing, fn {client, _encoded, _epoch} ->
-      [%{"code" => "control_owner_lost"}] = receive_records(client, 1, 30_000)
-    end)
+    burst.(second_half, "burst-2")
+
+    burst_two =
+      Enum.map(first_half ++ second_half, fn {client, _i} -> reply(client, "burst-2") end)
+
+    owner_lost? = &(&1["code"] == "control_owner_lost")
+    losses = Enum.map(2..3, &reply_matching(holder.(&1), owner_lost?))
 
     send(sentinel, {:daemon_signal, owner_ref, :sigterm})
-    assert Task.await(daemon, 60_000) == 0
+    status = Task.yield(daemon, 60_000) || Task.shutdown(daemon, :brutal_kill)
     untrace_steps()
     send(tracer, {:events, self()})
     assert_receive {:events, events}, 5_000
 
+    # The distribution is judged first.
     durations = step_durations(events)
 
     for {class, samples} <- Enum.sort(durations) do
@@ -310,7 +334,69 @@ defmodule LoopexDaemon.MaximumPopulationTest do
       assert Enum.max(samples) < 5_000, "#{class} step took #{Enum.max(samples)} ms"
     end
 
+    # Then the workload's own replies and the orderly stop.
+    assert Enum.all?(early ++ late, &match?({:ok, _epoch}, &1)), inspect(early ++ late)
+    held? = &match?(%{"type" => "error", "code" => "control_held"}, &1)
+    assert Enum.all?(burst_one ++ burst_two, held?)
+    assert length(releases) == 2 and Enum.all?(releases, &match?(%{"type" => "result"}, &1))
+    assert Enum.all?(losses, owner_lost?)
+    assert status == {:ok, 0}
+
     Enum.each(clients, &:socket.close/1)
+  end
+
+  # A send to a connection the daemon closed returns its error instead of
+  # raising; the missing reply is judged after the step distribution.
+  defp send_acquire(client, encoded, request_id) do
+    send_frame(client, %{
+      "method" => "session.acquire_control",
+      "request_id" => request_id,
+      "session_id" => encoded
+    })
+  end
+
+  defp send_release(client, encoded, epoch) do
+    send_frame(client, %{
+      "method" => "session.release_control",
+      "request_id" => "release",
+      "session_id" => encoded,
+      "writer_epoch" => epoch
+    })
+  end
+
+  # Technical depth: a reply is the next record carrying the request id; any
+  # other record is skipped. A socket that closes or stays silent for 30 s
+  # yields `{:missing, reason}` rather than raising, so the step distribution
+  # is judged before the workload is.
+  defp reply(client, request_id), do: reply_matching(client, &(&1["request_id"] == request_id))
+
+  defp reply_matching(client, predicate) do
+    case receive_one(client) do
+      {:ok, record} ->
+        if predicate.(record), do: record, else: reply_matching(client, predicate)
+
+      {:missing, _reason} = missing ->
+        missing
+    end
+  end
+
+  defp receive_one(client) do
+    buffered = Process.get({LoopexDaemon.Test.DaemonSocketFixture, client}, "")
+
+    case :binary.split(buffered, "\n") do
+      [_payload, _rest] ->
+        {:ok, hd(receive_records(client, 1, 30_000))}
+
+      [_partial] ->
+        case :socket.recv(client, 0, 30_000) do
+          {:ok, bytes} ->
+            Process.put({LoopexDaemon.Test.DaemonSocketFixture, client}, buffered <> bytes)
+            receive_one(client)
+
+          {:error, reason} ->
+            {:missing, reason}
+        end
+    end
   end
 
   @registry_steps [
@@ -340,6 +426,7 @@ defmodule LoopexDaemon.MaximumPopulationTest do
   defp trace_steps(collaboration, tracer) do
     step = [{[:_, :"$1", :"$2"], [], [{:message, {{:"$1", :"$2"}}}]}]
     done = [{[:_, :"$1", :_], [], [{:message, {{:"$1", :done}}}]}]
+    late = [{[:_, :"$1", :_, :_], [], [{:message, {{:"$1", :late}}}]}]
     :erlang.trace_pattern({LoopexDaemon.Owner, :enter_step, 3}, step, [:local])
     :erlang.trace_pattern({LoopexDaemon.Owner, :complete_operation, 3}, done, [:local])
 
@@ -349,17 +436,23 @@ defmodule LoopexDaemon.MaximumPopulationTest do
       [:local]
     )
 
+    :erlang.trace_pattern({LoopexDaemon.Owner, :late_action, 4}, late, [:local])
     :erlang.trace(collaboration, true, [:call, :arity, :monotonic_timestamp, {:tracer, tracer}])
   end
 
   defp untrace_steps do
-    for function <- [:enter_step, :complete_operation, :complete_owner_loss_notification],
-        do: :erlang.trace_pattern({LoopexDaemon.Owner, function, 3}, false, [:local])
+    for {function, arity} <- [
+          enter_step: 3,
+          complete_operation: 3,
+          complete_owner_loss_notification: 3,
+          late_action: 4
+        ],
+        do: :erlang.trace_pattern({LoopexDaemon.Owner, function, arity}, false, [:local])
   end
 
   defp step_trace_loop(events) do
     receive do
-      {:trace_ts, _pid, :call, {LoopexDaemon.Owner, _function, 3}, {ref, step}, at} ->
+      {:trace_ts, _pid, :call, {LoopexDaemon.Owner, _function, _arity}, {ref, step}, at} ->
         step_trace_loop([{ref, step, at} | events])
 
       {:events, from} ->
@@ -371,19 +464,23 @@ defmodule LoopexDaemon.MaximumPopulationTest do
     end
   end
 
-  # Technical depth: a step's duration runs from its entry to the next
-  # transition of the same operation, in native monotonic units converted to
-  # milliseconds.
+  # Technical depth: `:monotonic_timestamp` trace times are nanoseconds. A
+  # step's duration runs from its entry to the next transition of the same
+  # operation; a step whose next transition is the deadline path counts as
+  # at least 5,000 ms.
   defp step_durations(events) do
     events
     |> Enum.group_by(fn {ref, _step, _at} -> ref end)
     |> Enum.flat_map(fn {_ref, transitions} ->
       transitions
       |> Enum.chunk_every(2, 1, :discard)
-      |> Enum.flat_map(fn [{_ref, step, entered}, {_next_ref, _next, left}] ->
+      |> Enum.flat_map(fn [{_ref, step, entered}, {_next_ref, next, left}] ->
+        elapsed = :erlang.convert_time_unit(left - entered, :nanosecond, :millisecond)
+        elapsed = if next == :late, do: max(elapsed, 5_000), else: elapsed
+
         case step_class(step) do
           nil -> []
-          class -> [{class, System.convert_time_unit(left - entered, :native, :millisecond)}]
+          class -> [{class, elapsed}]
         end
       end)
     end)

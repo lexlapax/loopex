@@ -85,7 +85,13 @@ defmodule Loopex.ReferenceClientRuntimeFixture do
       end)
 
     {model_options, sampling_options} =
-      model_configuration(model_module, model_options, root, not Keyword.has_key?(options, :root))
+      model_configuration(
+        model_module,
+        model_options,
+        root,
+        not Keyword.has_key?(options, :root),
+        Keyword.get(options, :credential)
+      )
 
     workspace = Path.join(root, "workspace")
     ledger = Path.join(root, "executor-ledger")
@@ -370,7 +376,7 @@ defmodule Loopex.ReferenceClientRuntimeFixture do
   # Technical depth: build before Store/executor startup; demo-only tool inputs
   # never enter the adapter's closed launch options. The deterministic branch
   # retains its existing options and max_tokens default without a build.
-  defp model_configuration(Loopex.LLM.ReqLLM, options, root, owns_root?) do
+  defp model_configuration(Loopex.LLM.ReqLLM, options, root, owns_root?, credential) do
     # Technical depth: an automatically named root has no outer cleanup owner
     # until start/4 returns. Exclusive creation makes pre-resource failure
     # cleanup safe; explicit trace roots remain their caller's responsibility.
@@ -382,8 +388,14 @@ defmodule Loopex.ReferenceClientRuntimeFixture do
       # fixture composes as the reference composition does; the capability is
       # bound to the runtime once it has started.
       # The credential is consumed first, so a failed build cannot leave it
-      # in this VM's environment.
-      credential_options = provider_credential_options()
+      # in this VM's environment. A caller that already holds the value (a
+      # trace child reads it from standard input) passes it as `:credential`,
+      # and it goes straight to custody without touching the environment.
+      credential_options =
+        if credential,
+          do: Loopex.LLM.ReqLLM.ProviderBuildFixture.custody_options(credential),
+          else: provider_credential_options()
+
       {:ok, capability_pid} = Loopex.Trace.Capability.start_link([])
       {:ok, capability} = Loopex.Trace.Capability.handle(capability_pid)
 
@@ -399,7 +411,7 @@ defmodule Loopex.ReferenceClientRuntimeFixture do
     end
   end
 
-  defp model_configuration(_module, options, _root, _owns_root?),
+  defp model_configuration(_module, options, _root, _owns_root?, _credential),
     do: {Keyword.put_new(options, :max_tokens, 256), []}
 
   @doc """
