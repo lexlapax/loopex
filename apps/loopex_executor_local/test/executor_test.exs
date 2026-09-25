@@ -662,6 +662,9 @@ defmodule Loopex.Executor.LocalTest do
 
     assert output =~ "\n[loopex: the command exited, but its process group could not be shown"
     assert output =~ "so the group was terminated. It is confirmed cleaned"
+    assert Local.command_output(output) == "done\n"
+    assert Local.command_output("done\n") == "done\n"
+    assert Local.command_output(<<"a", 0, "b", 0>>) == <<"a", 0, "b", 0>>
 
     assert {{:completed, "done\n", :complete}, :confirmed} =
              Local.exited_result(0, "done\n", :quiescent, true, 4_096)
@@ -670,6 +673,7 @@ defmodule Loopex.Executor.LocalTest do
              Local.exited_result(0, "done\n", :unconfirmed, false, 4_096)
 
     assert unproven =~ "could not be confirmed cleaned"
+    assert Local.command_output(unproven) == unproven
   end
 
   test "a command worker exits before run when its execute caller dies" do

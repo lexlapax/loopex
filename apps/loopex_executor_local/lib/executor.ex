@@ -4657,6 +4657,33 @@ defmodule Loopex.Executor.Local do
   # case can pin that a terminated group can be confirmed, which a real group's
   # timing on a loaded host cannot. It is a `@doc false` seam and no part of
   # any contract.
+  @doc """
+  ## Concept
+
+  The bytes a completed command printed, for a caller that parses them as
+  data rather than showing them to a model.
+
+  ## Technical depth
+
+  A completed receipt whose process group had to be terminated, and was
+  confirmed cleaned, carries the executor's terminated-group note after the
+  command's bytes. Under load the quiescence probe can miss its bound, so the
+  note appears on a command that did nothing unusual. This removes exactly
+  that one trailing note and returns every other output unchanged. The
+  unconfirmed-cleanup note is not removed: that receipt is `outcome_unknown`,
+  never a completed result to parse.
+  """
+  @spec command_output(binary()) :: binary()
+  def command_output(output) when is_binary(output) do
+    note_size = byte_size(@group_terminated_note)
+    size = byte_size(output)
+
+    if size >= note_size and
+         binary_part(output, size - note_size, note_size) == @group_terminated_note,
+       do: binary_part(output, 0, size - note_size),
+       else: output
+  end
+
   @doc false
   @spec exited_result(integer(), binary(), atom(), boolean(), pos_integer()) ::
           {tuple(), :confirmed | :unconfirmed}

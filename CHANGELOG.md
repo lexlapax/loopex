@@ -40,6 +40,13 @@ The daemon writes best-effort stop lines to standard error:
 Neither line is awaited, so a blocked standard error cannot delay the stop or
 change the exit status.
 
+A resource-pack import reads each Git data command's output through
+`Loopex.Executor.Local.command_output/1`. That removes the note the executor
+appends when it terminates a command's confirmed-cleaned process group, which
+happens on a loaded host whose quiescence probe misses its bound. Such an
+import previously refused as `git_identity_mismatch`, because the note broke
+the tree listing's terminator.
+
 Add `LoopexProtocol.Session.V2` as the daemon's distinct
 `loopex.experimental/2` metadata and negotiation contract. It retains the
 generation-one inventories and adds the four daemon methods, two daemon record

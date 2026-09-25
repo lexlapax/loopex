@@ -1343,7 +1343,10 @@ defmodule LoopexComposition.ResourcePacks do
   # heavily loaded machine — would be parsed as a tree listing or a temporary
   # filename and refuse a legitimate import. The data commands run with stderr
   # sent to `/dev/null`; a failure still reports through the exit status, and
-  # `clone`, whose output is only diagnostic, keeps its stderr.
+  # `clone`, whose output is only diagnostic, keeps its stderr. For the same
+  # reason a completed job's output is read through `Local.command_output/1`:
+  # when a loaded host's quiescence probe misses its bound, the executor
+  # terminates the confirmed-idle group and appends a note that is not Git's.
   @git_data_labels ["commit", "tree", "tree-type", "tree-files", "blob"]
 
   defp git_job(context, config, label, args) do
@@ -1394,7 +1397,7 @@ defmodule LoopexComposition.ResourcePacks do
          :ok <- adopt_import_job(config, job_id),
          {:ok, receipt} <- Local.execute(context.executor, job, grant),
          :completed <- receipt.outcome do
-      {:ok, %{context | sequence: sequence}, receipt.output}
+      {:ok, %{context | sequence: sequence}, Local.command_output(receipt.output)}
     else
       {:ok, %{outcome: outcome, output: output}} -> error(:git_failed, "#{outcome}: #{output}")
       {:error, reason} -> error(:executor_failed, inspect(reason))
