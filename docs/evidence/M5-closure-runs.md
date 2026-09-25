@@ -19,7 +19,7 @@ values.
 | Source `VERSION` | `0.2.0` |
 | Administrative closure SHA | Not recorded on this page: a commit cannot contain its own hash. It is located by the plans register's `Closed` transition and by the tag |
 
-## The fast check under the floor pair, on Darwin
+## The fast check under the floor pair, on Linux (serenity)
 
 `env -u MIX_BUILD_PATH MIX_BUILD_ROOT="/absolute/retained-work/M5-otp27-build" mise exec erlang@27.3.4 elixir@1.18.5-otp-27 -- bash scripts/check.sh`
 
