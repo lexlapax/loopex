@@ -7,7 +7,8 @@ defmodule Loopex.LLM.ReqLLM.ProviderRetainerBoundariesTest do
 
   # Technical depth: ExUnit's clock starts before `Fixture.new` compiles the
   # synthetic worker (a watchdog of up to 50 s) and before the real child boots,
-  # while every wait below is bounded by the request's own 60 s deadline. This
+  # while every wait below is bounded by its request's own deadline, 60 s or the
+  # fixture's 10 s default. This
   # bound covers compile, deadline and cleanup, so the case's own deadlines,
   # not ExUnit's, decide; it only catches a true hang.
   @moduletag timeout: 150_000

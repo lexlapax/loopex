@@ -208,9 +208,11 @@ merge needs green in hosted CI, M5 selects exactly these, from the
 
 **Closure runs.** At the candidate: hosted CI's green fast check on that
 commit is the current-pair Linux evidence; `bash scripts/check.sh` runs once
-under the floor pair **on Darwin**, `env -u MIX_BUILD_PATH
-MIX_BUILD_ROOT="/absolute/retained-work/M5-otp27-build" mise exec
-erlang@27.3.4 elixir@1.18.5-otp-27 -- bash scripts/check.sh`; and
+under the floor pair **on Darwin** and once **on Linux (serenity)**, each as
+`env -u MIX_BUILD_PATH
+MIX_BUILD_ROOT="/absolute/retained-work/M5-otp27-build"
+LOOPEX_CHECK_ALONE=loopex_llm_reqllm mise exec erlang@27.3.4
+elixir@1.18.5-otp-27 -- bash scripts/check.sh`; and
 `bash scripts/check-release.sh` runs once on the current pair **on Linux**.
 This platform split is required: the Darwin floor run executes
 `LOCAL_PEERCRED` decode/fail-closed and the 103/104-byte path boundary, while
