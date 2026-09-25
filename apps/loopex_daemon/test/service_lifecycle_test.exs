@@ -58,30 +58,24 @@ defmodule LoopexDaemon.ServiceLifecycleTest do
   # component exits with the owner's own stop reason; a component already
   # gone, or one that exits `:normal` itself, is that component's own exit.
   #
-  # Technical depth: each case passes a production-shaped stop function,
-  # which receives the owner's stop reason. The answering stand-in takes the
-  # stop request's `sys:terminate` message and exits `:normal` on its own,
-  # the window `proc_lib:stop/3` would count as success were the requested
-  # reason `:normal`.
+  # Technical depth: `await_requested_stop/2` sends the `sys` terminate
+  # request itself, after its monitor, so the `DOWN` reason is the
+  # component's real exit. The answering stand-in takes that request and
+  # exits `:normal` on its own, the case `proc_lib:stop/3` would count as
+  # success were the requested reason `:normal`; an absent component is
+  # `:noproc`.
   test "only the owner's own stop reason is a clean stop" do
     deadline = System.monotonic_time(:millisecond) + 1_000
 
     {:ok, live} = Agent.start(fn -> nil end)
 
-    assert LoopexDaemon.Service.await_requested_stop(
-             live,
-             &GenServer.stop(live, &1, 500),
-             deadline
-           ) == :stopped
+    assert LoopexDaemon.Service.await_requested_stop(live, deadline) == :stopped
 
     {:ok, gone} = Agent.start(fn -> nil end)
     :ok = Agent.stop(gone)
 
-    assert LoopexDaemon.Service.await_requested_stop(
-             gone,
-             &GenServer.stop(gone, &1, 500),
-             deadline
-           ) == {:component_exit, :noproc}
+    assert LoopexDaemon.Service.await_requested_stop(gone, deadline) ==
+             {:component_exit, :noproc}
 
     answering =
       spawn(fn ->
@@ -90,30 +84,7 @@ defmodule LoopexDaemon.ServiceLifecycleTest do
         end
       end)
 
-    assert LoopexDaemon.Service.await_requested_stop(
-             answering,
-             &GenServer.stop(answering, &1, 500),
-             deadline
-           ) == {:component_exit, :normal}
-  end
-
-  # Concept (audit fix 2): a component that ends on its own with `:normal`
-  # after this owner began watching it, but before the stop request reached
-  # it, is that component's own exit, not a clean stop.
-  #
-  # Technical depth: the stop function first makes the component exit
-  # `:normal` by itself — after `await_requested_stop/3` has set its monitor —
-  # and only then asks it to stop.
-  test "an independent normal exit racing a requested stop is the component's own" do
-    deadline = System.monotonic_time(:millisecond) + 1_000
-    {:ok, racing} = Agent.start(fn -> nil end)
-
-    stop = fn reason ->
-      :ok = Agent.stop(racing, :normal)
-      GenServer.stop(racing, reason, 500)
-    end
-
-    assert LoopexDaemon.Service.await_requested_stop(racing, stop, deadline) ==
+    assert LoopexDaemon.Service.await_requested_stop(answering, deadline) ==
              {:component_exit, :normal}
   end
 
@@ -122,28 +93,19 @@ defmodule LoopexDaemon.ServiceLifecycleTest do
   # even when the request gives up first, or the stop lands just before the
   # deadline.
   #
-  # Technical depth: `SlowStop` sleeps in `terminate/2`. In the first case
-  # the stop call's own 50 ms timeout expires inside the helper while the
-  # component is still stopping; in the second the component's stop ends
-  # 30 ms before the deadline that also bounds the stop call.
+  # Technical depth: `SlowStop` sleeps in `terminate/2`. In the first case it
+  # stops well within the deadline; in the second its stop ends 30 ms before
+  # the deadline.
   test "a stop that ends within its deadline is clean whatever its request answers" do
     {:ok, slow} = GenServer.start(SlowStop, 150)
     deadline = System.monotonic_time(:millisecond) + 1_000
 
-    assert LoopexDaemon.Service.await_requested_stop(
-             slow,
-             &GenServer.stop(slow, &1, 50),
-             deadline
-           ) == :stopped
+    assert LoopexDaemon.Service.await_requested_stop(slow, deadline) == :stopped
 
     {:ok, edge} = GenServer.start(SlowStop, 170)
     deadline = System.monotonic_time(:millisecond) + 200
 
-    assert LoopexDaemon.Service.await_requested_stop(
-             edge,
-             &GenServer.stop(edge, &1, max(deadline - System.monotonic_time(:millisecond), 1)),
-             deadline
-           ) == :stopped
+    assert LoopexDaemon.Service.await_requested_stop(edge, deadline) == :stopped
   end
 
   # Concept: every Store refusal at open reaches the operator as its own exit

@@ -1085,19 +1085,14 @@ defmodule LoopexDaemon.Service do
     {:stop, :normal, %{state | phase: :stopped}}
   end
 
-  # Concept: a bounded stop that cannot be extended by the component: a helper
-  # asks it to stop, this owner waits only until the absolute deadline, and a
-  # component still alive then is killed.
+  # Concept: a bounded stop that cannot be extended by the component: this
+  # owner asks it to stop, waits only until the absolute deadline, and kills a
+  # component still alive then.
   defp stop_until(state, name, deadline) do
     case Map.fetch(state.pids, name) do
       {:ok, pid} ->
         monitor = Process.monitor(pid)
-
-        spawn(fn ->
-          requested_stop(fn reason ->
-            GenServer.stop(pid, reason, max(deadline - monotonic_ms(), 1))
-          end)
-        end)
+        send(pid, {:system, {self(), :loopex_owner_stop}, {:terminate, @owner_stop_reason}})
 
         receive do
           {:DOWN, ^monitor, :process, ^pid, _reason} -> :ok
@@ -1209,11 +1204,7 @@ defmodule LoopexDaemon.Service do
         Process.unlink(pid)
 
         result =
-          await_requested_stop(
-            pid,
-            fn reason -> GenServer.stop(pid, reason, max(deadline - monotonic_ms(), 1)) end,
-            deadline
-          )
+          await_requested_stop(pid, deadline)
 
         flush_exit(pid)
         state = %{state | pids: Map.delete(state.pids, name)}
@@ -1237,21 +1228,23 @@ defmodule LoopexDaemon.Service do
   # with `:normal`, even after the request was sent — is that component's own
   # exit and is classified by its running class.
   #
-  # Technical depth: the component is monitored, then an unlinked helper
-  # passes `@owner_stop_reason` to `stop`, which asks the component to stop
-  # with it (`GenServer.stop/3` or `Supervisor.stop/3`). The monitor's `DOWN`
-  # reason alone decides the result: `:stopped` for exactly that reason,
+  # Technical depth: this owner monitors the component and then itself sends
+  # it the `sys` terminate request carrying `@owner_stop_reason`, the message
+  # `GenServer.stop/3` and `Supervisor.stop/3` send. Signals from one sender
+  # arrive in order, so the monitor is always in place before the component
+  # can act on the request, and the `DOWN` reason is the component's real
+  # exit reason. A stop sent from a second process could overtake the
+  # monitor and turn a clean stop into `:noproc`. The monitor's `DOWN` reason
+  # alone decides the result: `:stopped` for exactly that reason,
   # `:stopped_late` for a component killed at the deadline, and
   # `{:component_exit, reason}` otherwise — `:noproc` for a component already
-  # gone included. The helper's own answer is never read, so a helper that
-  # times out or raises inside the stop call changes nothing; it is killed
-  # once the component's exit is known.
+  # gone included. The terminate request is answered by the component's exit
+  # alone; nothing replies to it.
   @doc false
-  @spec await_requested_stop(pid(), (term() -> term()), integer()) ::
+  @spec await_requested_stop(pid(), integer()) ::
           :stopped | :stopped_late | {:component_exit, term()}
-  def await_requested_stop(pid, stop, deadline) do
-    {reason, helper} = await_stopped(pid, stop, deadline)
-    Process.exit(helper, :kill)
+  def await_requested_stop(pid, deadline) do
+    reason = await_stopped(pid, deadline)
 
     case reason do
       @owner_stop_reason -> :stopped
@@ -1260,15 +1253,9 @@ defmodule LoopexDaemon.Service do
     end
   end
 
-  defp requested_stop(stop) do
-    stop.(@owner_stop_reason)
-  catch
-    _kind, _reason -> :ok
-  end
-
-  defp await_stopped(pid, stop, deadline) do
+  defp await_stopped(pid, deadline) do
     monitor = Process.monitor(pid)
-    helper = spawn(fn -> requested_stop(stop) end)
+    send(pid, {:system, {self(), :loopex_owner_stop}, {:terminate, @owner_stop_reason}})
 
     reason =
       receive do
@@ -1290,7 +1277,7 @@ defmodule LoopexDaemon.Service do
           end
       end
 
-    {reason, helper}
+    reason
   end
 
   # Concept: the runtime tree is ended by a helper calling
@@ -1316,13 +1303,7 @@ defmodule LoopexDaemon.Service do
       Process.unlink(supervisor)
 
       result =
-        await_requested_stop(
-          supervisor,
-          fn reason ->
-            Supervisor.stop(supervisor, reason, max(deadline - monotonic_ms(), 1))
-          end,
-          deadline
-        )
+        await_requested_stop(supervisor, deadline)
 
       flush_exit(supervisor)
       state = %{state | pids: Map.delete(state.pids, :runtime_supervisor)}
