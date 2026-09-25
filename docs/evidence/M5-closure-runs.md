@@ -21,7 +21,12 @@ values.
 
 ## The fast check under the floor pair, on Linux (serenity)
 
-`env -u MIX_BUILD_PATH MIX_BUILD_ROOT="/absolute/retained-work/M5-otp27-build" mise exec erlang@27.3.4 elixir@1.18.5-otp-27 -- bash scripts/check.sh`
+`env -u MIX_BUILD_PATH MIX_BUILD_ROOT="/absolute/retained-work/M5-otp27-build" LOOPEX_CHECK_ALONE=loopex_llm_reqllm mise exec erlang@27.3.4 elixir@1.18.5-otp-27 -- bash scripts/check.sh`
+
+The provider suite runs with the host to itself before the other applications
+share it, as hosted CI runs it. On serenity's twenty cores the default runs ten
+suites at once, and the provider suite's child VMs then missed the product's
+10 s deadline, just as they had on the hosted runner.
 
 | Field | Value |
 | --- | --- |
