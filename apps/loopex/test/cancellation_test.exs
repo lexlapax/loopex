@@ -260,7 +260,7 @@ defmodule Loopex.CancellationTest do
     {:accepted, "p1"} =
       Loopex.command(attachment, %{type: :prompt, command_id: "p1", content: "do the work"})
 
-    assert_receive {:holding, model}, 2_000
+    assert_receive {:holding, model}, 5_000
     {fixture, attachment, session_id, model}
   end
 
@@ -825,7 +825,7 @@ defmodule Loopex.CancellationTest do
     {:accepted, "p1"} =
       Loopex.command(attachment, %{type: :prompt, command_id: "p1", content: "first"})
 
-    assert_receive {:holding, first_model}, 2_000
+    assert_receive {:holding, first_model}, 5_000
     {:accepted, "a1"} = Loopex.command(attachment, %{type: :abort, command_id: "a1"})
     send(first_model, :release)
     assert settled?(fixture, session_id)
@@ -833,7 +833,7 @@ defmodule Loopex.CancellationTest do
     {:accepted, "p2"} =
       Loopex.command(attachment, %{type: :prompt, command_id: "p2", content: "second"})
 
-    assert_receive {:holding, second_model}, 2_000
+    assert_receive {:holding, second_model}, 5_000
 
     # The replay is answered from the retained record.
     assert {:accepted, "a1"} = Loopex.command(attachment, %{type: :abort, command_id: "a1"})

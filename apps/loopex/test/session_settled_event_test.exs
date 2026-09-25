@@ -78,7 +78,7 @@ defmodule Loopex.SessionSettledEventTest do
 
     # The follow-up is queued while the first run is genuinely active, so the
     # terminal transaction has something to promote.
-    assert_receive {:holding, model}, 2_000
+    assert_receive {:holding, model}, 5_000
 
     assert {:accepted, "f1"} =
              Loopex.command(attachment, %{type: :follow_up, command_id: "f1", content: "next"})

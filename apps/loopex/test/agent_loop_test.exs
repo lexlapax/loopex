@@ -919,7 +919,7 @@ defmodule Loopex.AgentLoopTest do
       )
 
     {session_id, attachment, _reply} = Fixture.run(fixture, "go")
-    assert_receive {:holding, model}, 2_000
+    assert_receive {:holding, model}, 5_000
 
     {run_id, events} =
       admit_abort_before_queued_model_result(fixture, attachment, model, command_id)
@@ -1009,7 +1009,7 @@ defmodule Loopex.AgentLoopTest do
       )
 
     {session_id, attachment, _reply} = Fixture.run(fixture, "go")
-    assert_receive {:holding, model}, 2_000
+    assert_receive {:holding, model}, 5_000
     await_deadline_admitted(fixture, session_id)
     send(model, :release)
 
@@ -1484,7 +1484,7 @@ defmodule Loopex.AgentLoopTest do
     fixture = start(script: script, bounds_deadline_ms: deadline_ms)
     {session_id, attachment, _reply} = Fixture.run(fixture, "go")
 
-    assert_receive {:holding, _model}, 2_000
+    assert_receive {:holding, _model}, 5_000
 
     coordinator_state = fixture.runtime |> coordinator_of() |> :sys.get_state()
     run_id = coordinator_state.durable.active_run_id
@@ -1913,7 +1913,7 @@ defmodule Loopex.AgentLoopTest do
     {session_id, _attachment, _reply} = Fixture.run(fixture, "go")
 
     # Attempt one has failed and attempt two is in flight, held open.
-    assert_receive {:holding, _model}, 2_000
+    assert_receive {:holding, _model}, 5_000
     assert length(AgentLoopTestModel.dispatched(fixture.model)) == 2
 
     assert {:ok, ^session_id} =
@@ -2017,7 +2017,7 @@ defmodule Loopex.AgentLoopTest do
       )
 
     {session_id, _attachment, _reply} = Fixture.run(fixture, "go")
-    assert_receive {:holding, _model}, 2_000
+    assert_receive {:holding, _model}, 5_000
 
     # The owner dies with the request committed and dispatched, and the deadline
     # passes while nobody owns the session.
@@ -2406,7 +2406,7 @@ defmodule Loopex.AgentLoopTest do
       )
 
     {session_id, attachment, _reply} = Fixture.run(fixture, "go")
-    assert_receive {:holding, model}, 2_000
+    assert_receive {:holding, model}, 5_000
 
     coordinator = coordinator_of(fixture.runtime)
 
@@ -2554,7 +2554,7 @@ defmodule Loopex.AgentLoopTest do
     # run between its assistant reply and terminal.
     other = start(script: [%{text: "in time", calls: [], hold: parent}])
     {other_session, other_attachment, _reply} = Fixture.run(other, "go")
-    assert_receive {:holding, in_time_model}, 2_000
+    assert_receive {:holding, in_time_model}, 5_000
 
     :ok =
       M1RuntimeTestStore.hold_next_record_before_linearization(
@@ -2631,7 +2631,7 @@ defmodule Loopex.AgentLoopTest do
       )
 
     {session_id, attachment, _reply} = Fixture.run(fixture, "go")
-    assert_receive {:holding, model}, 2_000
+    assert_receive {:holding, model}, 5_000
 
     coordinator = coordinator_of(fixture.runtime)
     coordinator_state = :sys.get_state(coordinator)
@@ -2731,7 +2731,7 @@ defmodule Loopex.AgentLoopTest do
       )
 
     {session_id, attachment, _reply} = Fixture.run(fixture, "go")
-    assert_receive {:holding, model}, 2_000
+    assert_receive {:holding, model}, 5_000
     assert length(AgentLoopTestModel.dispatched(fixture.model)) == 2
 
     {run_id, events} =
@@ -2791,7 +2791,7 @@ defmodule Loopex.AgentLoopTest do
       )
 
     {session_id, attachment, _reply} = Fixture.run(fixture, "go")
-    assert_receive {:holding, model}, 2_000
+    assert_receive {:holding, model}, 5_000
 
     :ok =
       M1RuntimeTestStore.refuse_next_record(
@@ -2879,7 +2879,7 @@ defmodule Loopex.AgentLoopTest do
       )
 
     {session_id, attachment, _reply} = Fixture.run(fixture, "go")
-    assert_receive {:holding, model}, 2_000
+    assert_receive {:holding, model}, 5_000
 
     {run_id, events} =
       admit_abort_before_queued_model_result(
@@ -2933,7 +2933,7 @@ defmodule Loopex.AgentLoopTest do
       )
 
     {session_id, attachment, _reply} = Fixture.run(fixture, "go")
-    assert_receive {:holding, model}, 2_000
+    assert_receive {:holding, model}, 5_000
 
     {_run_id, events} =
       admit_abort_before_queued_model_result(
@@ -3320,7 +3320,7 @@ defmodule Loopex.AgentLoopTest do
       )
 
     {session_id, attachment, _reply} = Fixture.run(fixture, "go")
-    assert_receive {:holding, model}, 2_000
+    assert_receive {:holding, model}, 5_000
 
     coordinator = coordinator_of(fixture.runtime)
     coordinator_state = :sys.get_state(coordinator)

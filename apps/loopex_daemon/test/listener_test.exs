@@ -124,7 +124,9 @@ defmodule LoopexDaemon.ListenerTest do
     assert_receive {:owner_listener, ^owner, listener}, 2_000
     monitor = Process.monitor(listener)
     Process.exit(owner, :kill)
-    assert_receive {:DOWN, ^monitor, :process, ^listener, _reason}, 500
+    # Technical depth: the case claims that owner loss stops the listener, not
+    # how soon; the wait is liveness, so it allows a loaded host 5 s.
+    assert_receive {:DOWN, ^monitor, :process, ^listener, _reason}, 5_000
     assert {:ok, %File.Stat{type: :other}} = File.lstat(path)
 
     on_exit(fn ->

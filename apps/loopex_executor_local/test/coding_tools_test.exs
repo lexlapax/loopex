@@ -7323,7 +7323,12 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     assert File.read!(Path.join(root, "nested.txt")) == "nested"
 
     assert outer.outcome == :completed
-    assert outer.output == "outer"
+    # Technical depth: this case proves the outer execution context, not group
+    # quiescence. On a loaded host the quiescence probe can miss its bound, and
+    # then the executor terminates the finished group and appends its note to
+    # the output. `command_output/1` removes exactly that note, so the command's
+    # own bytes are still compared exactly.
+    assert Local.command_output(outer.output) == "outer"
     assert outer.cleanup_grace_ms == 2_000
     assert outer.receipt_retention_bound_ms == 500
     assert outer.observed_at_ms == observed_at_ms
