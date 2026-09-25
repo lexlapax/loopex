@@ -757,7 +757,8 @@ defmodule LoopexDaemon.Service do
       runtime: state.edges.runtime,
       admission_wait_ms:
         Keyword.get(state.options, :admission_wait_ms, @default_admission_wait_ms),
-      teardown_ms: teardown_ms(state)
+      teardown_ms: teardown_ms(state),
+      diagnostic: Keyword.get(state.options, :diagnostic, :standard_error)
     }
 
     reporter = self()
@@ -785,14 +786,55 @@ defmodule LoopexDaemon.Service do
     with :ok <- freeze_lease_ops(plan.collaboration, plan.relay),
          {:ok, ^drain_id} <-
            Owner.barrier(plan.collaboration, {:quiescing, drain_id}, relay_control_deadline()),
-         {:ok, _census} <- quiesce(plan) do
+         {:ok, census} <- quiesce(plan) do
       Logger.debug("loopex daemon quiesce complete")
+      stop_line(plan.diagnostic, census)
       seal_and_close(plan, drain_id)
     else
       {:error, :connections_lost} -> {:fatal, :connections_lost}
       {:error, :runtime_unavailable} -> {:fatal, :drain_failed}
       _missing_acknowledgement -> {:fatal, :relay_lost}
     end
+  end
+
+  # Concept: an orderly stop reports what core quiesce answered as one line on
+  # standard error — the drain label, both budgets, the three counts and, for
+  # every session left unknown, its stage and the head a successor compares
+  # against. The line is operator evidence, not a restart input, and it is
+  # attempted once and never awaited, so a blocked device cannot hold the stop.
+  #
+  # Technical depth: the line is built and written by an unlinked,
+  # unmonitored writer, so a value the encoder refuses fails only that writer,
+  # never this drain; the VM halt ends a writer blocked on its device.
+  defp stop_line(device, census) do
+    _writer = spawn(fn -> IO.puts(device, JSON.encode!(stop_record(census))) end)
+    :ok
+  end
+
+  defp stop_record(census) do
+    unknown =
+      for {session_id, {:unknown, stage, head}} <- census.fences,
+          do: %{
+            stage: stage,
+            session_id: session_id,
+            owner_epoch: head.owner_epoch,
+            journal_version: head.journal_version
+          }
+
+    no_head =
+      for {session_id, {:unknown, :no_head}} <- census.fences,
+          do: %{stage: :no_head, session_id: session_id}
+
+    %{
+      record: "daemon_stop",
+      drain_id: census.drain_id,
+      budget_ms: census.budget_ms,
+      fence_budget_ms: census.fence_budget_ms,
+      settled: length(census.settled),
+      unsettled: length(census.unsettled),
+      absent: length(census.absent),
+      unknown: Enum.sort_by(unknown ++ no_head, & &1.session_id)
+    }
   end
 
   # The daemon owner is told when core quiesce is active, because losing the
@@ -1194,9 +1236,8 @@ defmodule LoopexDaemon.Service do
 
   defp orderly_stop_step(state, name, deadline), do: stop_classified(state, name, deadline)
 
-  # Concept: a helper asks the component to stop with the time that remains;
-  # this owner waits on the component itself until the absolute deadline and
-  # kills it then. A component killed at the deadline has not stopped in
+  # Concept: this owner asks the component to stop and waits on it until the
+  # absolute deadline, killing it then. A component killed at the deadline has not stopped in
   # time, which is its own class, never a clean exit.
   defp stop_classified(state, name, deadline) do
     case Map.fetch(state.pids, name) do
@@ -1280,8 +1321,8 @@ defmodule LoopexDaemon.Service do
     reason
   end
 
-  # Concept: the runtime tree is ended by a helper calling
-  # `Supervisor.stop/3` with what remains of the shared deadline, never by the
+  # Concept: the runtime tree is stopped by the same owner-sent request as any
+  # component, within what remains of the shared deadline, never by the
   # unbounded `Loopex.stop/1`; a tree still up at the deadline is killed and is
   # `runtime_lost`. A runtime monitor that fired before this step is a loss,
   # not something to flush away.
@@ -1404,8 +1445,6 @@ defmodule LoopexDaemon.Service do
     end
   end
 
-  # Concept: the placement lock is released last, by a bounded helper, so a
-  # blocked filesystem cannot hold the stop open.
   # Concept: the placement lock is released last, by a bounded helper, so a
   # blocked filesystem cannot hold the stop open. Exact `:ok` completes the
   # phase; a malformed result, an abnormal helper death or expiry is

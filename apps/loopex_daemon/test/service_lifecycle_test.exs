@@ -160,6 +160,20 @@ defmodule LoopexDaemon.ServiceLifecycleTest do
              receive_records(client, 1)
 
     assert Task.await(daemon.task, 30_000) == 0
+
+    assert %{
+             "record" => "daemon_stop",
+             "drain_id" => drain_id,
+             "budget_ms" => budget_ms,
+             "fence_budget_ms" => 130_000,
+             "settled" => settled,
+             "unsettled" => 0,
+             "absent" => absent,
+             "unknown" => []
+           } = JSON.decode!(await_diagnostic(daemon.diagnostic))
+
+    assert is_binary(drain_id) and is_integer(budget_ms)
+    assert is_integer(settled) and is_integer(absent)
     assert {:ok, %File.Stat{type: :other}} = File.lstat(options[:socket_path])
     assert Placement.live_owner(state_root) == :none
 
@@ -679,6 +693,37 @@ defmodule LoopexDaemon.ServiceLifecycleTest do
     assert Task.await(daemon.task, 40_000) == capacity
   end
 
+  # Concept: standard error is best effort; a device that never answers holds
+  # neither an orderly stop nor a fail-stop's exit status.
+  #
+  # Technical depth: the diagnostic device is suspended before each stop, so
+  # the stop line's and the fatal line's writers block on it; the statuses
+  # arrive regardless, and each line is written once the device resumes.
+  test "a blocked standard error holds neither the orderly stop nor a fatal status",
+       %{options: options} do
+    daemon = start_daemon(options)
+    _ready = await_ready(daemon.output)
+    _client = initialized(options[:socket_path])
+    :ok = :sys.suspend(daemon.diagnostic)
+
+    send(daemon.sentinel, {:daemon_signal, daemon.owner_ref, :sigterm})
+    assert Task.await(daemon.task, 30_000) == 0
+
+    :ok = :sys.resume(daemon.diagnostic)
+    assert %{"record" => "daemon_stop"} = JSON.decode!(await_diagnostic(daemon.diagnostic))
+
+    daemon = start_daemon(options)
+    _ready = await_ready(daemon.output)
+    :ok = :sys.suspend(daemon.diagnostic)
+    Process.exit(:sys.get_state(daemon.owner).pids.listener, :kill)
+
+    {:ok, listener_lost} = LoopexDaemon.ExitStatus.fetch(:listener_lost)
+    assert Task.await(daemon.task, 60_000) == listener_lost
+    :ok = :sys.resume(daemon.diagnostic)
+    assert await_diagnostic(daemon.diagnostic) == "loopex daemon fatal: listener_lost
+"
+  end
+
   test "losing the listener after readiness fail-stops with listener_lost",
        %{options: options, state_root: state_root} do
     daemon = start_daemon(options)
@@ -693,6 +738,7 @@ defmodule LoopexDaemon.ServiceLifecycleTest do
 
     {:ok, listener_lost} = LoopexDaemon.ExitStatus.fetch(:listener_lost)
     assert Task.await(daemon.task, 60_000) == listener_lost
+    assert await_diagnostic(daemon.diagnostic) == "loopex daemon fatal: listener_lost\n"
 
     # A fail-stop leaves the host placement lock to the daemon process's own
     # exit; here that process is this test's VM, which still holds it.
@@ -1953,16 +1999,45 @@ defmodule LoopexDaemon.ServiceLifecycleTest do
 
   defp start_daemon(options) do
     {:ok, output} = StringIO.open("")
+    {:ok, diagnostic} = StringIO.open("")
     test = self()
 
     task =
       Task.async(fn ->
-        Sentinel.run(options, output: output, install_signals: false, notify: test)
+        Sentinel.run(options,
+          output: output,
+          diagnostic: diagnostic,
+          install_signals: false,
+          notify: test
+        )
       end)
 
     assert_receive {:loopex_daemon_sentinel, sentinel, owner_ref, owner}, 1_000
-    %{task: task, sentinel: sentinel, owner_ref: owner_ref, owner: owner, output: output}
+
+    %{
+      task: task,
+      sentinel: sentinel,
+      owner_ref: owner_ref,
+      owner: owner,
+      output: output,
+      diagnostic: diagnostic
+    }
   end
+
+  defp await_diagnostic(device, attempts \\ 200)
+
+  defp await_diagnostic(device, attempts) when attempts > 0 do
+    case StringIO.contents(device) do
+      {"", ""} ->
+        Process.sleep(10)
+        await_diagnostic(device, attempts - 1)
+
+      {"", written} ->
+        written
+    end
+  end
+
+  defp await_diagnostic(device, 0), do: elem(StringIO.contents(device), 1)
 
   defp await_ready(output, attempts \\ 500)
 

@@ -3303,13 +3303,14 @@ first, then the artifact placement and the executor's own edges, and the
 runtime last within that chain, because it depends on all of them.
 
 **The stop order is the reverse, with one deliberate exception.** Reversed:
-listener, then the **connection registry**, then **every lease owner**, then
-the **relay**, then runtime,
-executor, workspace lease, transfers, then the tracing capability, custody and
-the registry — and then **the
-Store, last of all**, out of reverse order. The lease owners go before the
-relay because the relay is what holds their tickets, and stopping it first
-would discard a ticket an owner could still be waiting on. After every
+listener, then the **collaboration owner** — whose `terminate/2` kills every
+lease owner, then the connection registry, then the relay — then runtime,
+executor, workspace lease, transfers, the session index, then the tracing
+capability, custody and the credential registry — and then **the Store, last
+of all**, out of reverse order. By then the relay's tickets are already
+settled: successful `seal_after_quiesce` has returned every ticket as a real
+result or an unresolved shutdown abandonment, so ending the relay after the
+lease owners discards nothing. After every
 connection and request worker is gone, the owner/relay mailbox barrier freezes
 their exact pid/incarnation set and forbids later starts or mirror installs.
 That set is ended **all at once, not one at a time**: up to 512 of them
@@ -4275,8 +4276,8 @@ the one the operator page carries.
 **One process under this deadline is not like the others, and an earlier
 revision's justification was false for it.** That revision said "of the
 processes stopped here only the transfers owner runs a `terminate/2` at all",
-which forgets that **the runtime stop is inside the teardown**:
-`Supervisor.stop(runtime_supervisor, :normal, remaining)` brings down a tree
+which forgets that **the runtime stop is inside the teardown**: the owner's
+stop request to the runtime supervisor brings down a tree
 whose `OwnerGroup` children trap exits, carry `shutdown: :infinity` and have a
 `terminate/2` that stops their own worker supervisor with `:infinity`
 (`owner_group.ex:14-19`, `:50`, `:86-90`). Nothing bounds that from inside.
@@ -4602,46 +4603,39 @@ No timeout infers a payload or reconstructs one from the daemon owner's maps.
    `EXIT` is cleanup-only. Registry
    loss while this barrier is pending retains the existing
    `connections_lost` classification and precedence.
-4. **The connection registry stops, then every lease owner as one sweep, then
-   the admission relay**, inside
-   the teardown deadline. The registry goes first of the three and **not
-   before step 3**: step 3's stop records and closes go through the
-   buffer-control interface it owns, so stopping it earlier would leave the
-   daemon unable to write the record it promises. By the time it stops, every
-   connection it monitored is already gone. The registry stop and collective
-   owner sweep consume exactly the frozen set, so no later owner or mirror can
-   appear behind them. Every lease vanishes with those owners; the relay goes
-   after them because it is what holds their admission
-   ticket bookkeeping; successful `seal_after_quiesce` has already returned
-   every ticket as a real result or an unresolved shutdown abandonment, so
-   stopping the relay here discards no unknown row. Nothing durable is involved, and no client is left
-   holding a lease, because no connection survived step 3. Their exits are
-   consumed like any other the owner asks for — a lease owner stopped here
-   closes no controller attachment and produces no `control_owner_lost`,
-   because there is no attachment left to close.
+4. **The collaboration owner stops, and with it every lease owner, the
+   connection registry and the admission relay**, inside the teardown
+   deadline. The service owner stops the collaboration owner by the stop rule
+   above; the collaboration owner's `terminate/2` kills every remaining lease
+   owner, then the registry, then the relay, with untrappable kills it does
+   not await. This comes **after step 3**: step 3's stop records and closes go
+   through the buffer-control interface the registry owns, so ending it earlier
+   would leave the daemon unable to write the record it promises. By then every
+   connection the registry monitored is already gone, and the freeze barrier
+   has fixed the owner set, so no later owner or mirror can appear. Successful
+   `seal_after_quiesce` has already returned every ticket as a real result or
+   an unresolved shutdown abandonment, so ending the relay discards no unknown
+   row. Nothing durable is involved, and no client is left holding a lease,
+   because no connection survived step 3. The service owner observes only the
+   collaboration owner's exit; a lease owner killed here closes no controller
+   attachment and produces no `control_owner_lost`, because there is no
+   attachment left to close.
 5. **The runtime stops.** After the drain there is little left to end —
    **every** coordinator quiesce enumerated was terminated and then fenced
    inside core before `quiesce/1` returned, the settled ones included — so
    this step ends the tree rather than the
-   work. The helper calls
-   `Supervisor.stop(runtime_supervisor, :normal, remaining)` on the pid the
-   composition function handed it, where `remaining` is what is left of the
-   **shared `teardown_ms` deadline**, not a per-component grace. It does
-   **not** call `Loopex.Runtime.stop/1`: that is arity one and uses the
-   default `:infinity` timeout, which is exactly the bound this step exists to
-   supply.
-
-   `Supervisor.stop/3` is `GenServer.stop(supervisor, reason, timeout)`
-   (supervisor.ex:1152-1154 at the floor pair, :1197-1199 at the current
-   pair), so it is the same call the general rule above describes, made in the
-   same place — the helper — and its outcome is read the same way, from the
-   exit on the owner's link. What `:proc_lib.stop/3` does to *its* caller on
-   expiry, whatever shape that takes, is the helper's business and dies with
-   it. The owner's wait on the shared deadline expires, it kills the runtime supervisor with
-   `Process.exit(runtime_supervisor, :kill)`, and it reads the exit that
-   follows: `:normal` or `:shutdown` where the tree came down on its own;
-   `:killed` where the deadline kill ended it, with `runtime_lost` already
-   latched; anything else classified from its reason.
+   work. The owner stops the runtime supervisor — the pid the composition
+   function handed it — by the stop rule above: it monitors the supervisor and
+   sends it the `sys` terminate request with its own stop reason, waiting until
+   what is left of the **shared `teardown_ms` deadline**, not a per-component
+   grace. It does **not** call `Loopex.Runtime.stop/1`: that is arity one and
+   uses the default `:infinity` timeout, which is exactly the bound this step
+   exists to supply. A runtime monitor that already fired before this step is
+   `runtime_lost`. At the deadline the owner kills the supervisor with
+   `Process.exit(runtime_supervisor, :kill)`. Only the owner's own stop reason
+   is a clean stop; a tree that came down on its own (`:normal`, `:shutdown`
+   or any other reason) or was killed at the deadline is `runtime_lost`
+   (`service.ex` `stop_runtime_bounded/2`).
 
    **What "crash-equivalent" does and does not claim.** An earlier draft said
    the kill makes the tree crash-equivalent "by definition". That is true of
@@ -5594,9 +5588,12 @@ checks the retained root and Control pids in that order, so root loss remains
 `runtime_lost`, a Control rest-for-one restart remains `drain_failed`, and
 isolated dispatcher loss remains `runtime_lost` regardless of message order. That
 first component class terminates the helper and enters fail-stop; it cannot
-later be overwritten by a successful quiesce message. A helper exit or
-`{:error, :runtime_unavailable}` with no earlier
-component class is `drain_failed`. An earlier revision said `Control` "already
+later be overwritten by a successful quiesce message. A quiesce `{:error, :runtime_unavailable}` (including a caught exit from the
+call) with no earlier component class is `drain_failed`. The drain helper
+itself — which runs the admission wait, the freeze, the quiescing barrier,
+quiesce, the seal and the closes in that order — answers `:drained` or the
+class it selected; a helper that ends without an answer is `relay_lost`
+(`service.ex` `admitted_stop/2`). An earlier revision said `Control` "already
 holds every active session and its coordinator pid, so there is nowhere else
 this could live". It could not live there. `Control` is on the commit path of
 every coordinator in the runtime: a commit ends in `Control.post_commit/5`,
@@ -6226,36 +6223,37 @@ a trace or a telemetry span. Nothing here is a new logging plane: the daemon
 has no diagnostic surface of its own beyond these lines and the records it
 already sends on the wire, and the fatal-class map above is the whole
 vocabulary of what a **fatal** exit may say. The unique status remains the
-authoritative fatal result if stderr is blocked. Routine refusals and warnings
-use at most one unlinked monitored helper. While it is alive the owner queues
-no second line and retains only one boolean, `routine_diagnostic_dropped`; any
-additional attempt sets that bit. After an exact successful helper result and
-`DOWN`, the next eligible line includes
-`prior_routine_diagnostic_dropped:true` and clears the bit only if that line
-also succeeds. Helper failure keeps the bit set. A blocked IO device therefore
-costs one helper and one bit, never a queue, and never blocks admission,
-shutdown or the fatal watchdog. An **orderly** stop attempts
-exactly one line and no class: a census naming `drain_id`, `budget_ms`,
-`fence_budget_ms`, the three
-  counts quiesce returned and, for every session it left
-  `{:unknown, :abort, head}` or `{:unknown, :fence, head}`, the stage and that
-  session's id with the `owner_epoch` and `journal_version` core read
-— the values a successor compares against, and the only part of the census
-that is recovery data rather than a count. After successful quiesce, the owner
-starts an unlinked, monitored census helper and includes it in the existing
-shared `teardown_ms` pending set. The helper may complete at any point while
-teardown proceeds; it is killed at the shared deadline and is never awaited
-after the Store phase. Thus a healthy stderr receives exactly one census line,
-while a blocked or broken stderr may receive none and cannot delay connection
-teardown, marker release or exit `0`. A quiesce-helper crash is instead
-`drain_failed`: the sentinel attempts the bounded fatal line, the daemon claims
-no census and exits with status `108`.
+authoritative fatal result if stderr is blocked. As implemented in M5 the
+daemon writes three kinds of `stderr` line. Before the lifecycle sentinel
+starts, the command writes one bounded refusal line (`loopex daemon refused to
+start: <class>`) under a fixed wait. Once the sentinel runs, it writes the
+first latched fatal class — including `owner_lost` and a readiness hard halt —
+as one line, `loopex daemon fatal: <class>`, from an unlinked, unmonitored
+writer it never awaits, so a blocked device cannot delay the stop or the exit
+status (`sentinel.ex` `fatal_diagnostic/2`; `service_lifecycle_test.exs`,
+"losing the listener after readiness fail-stops with listener_lost"). After a
+successful quiesce, an orderly stop writes the **stop line**: one JSON
+`daemon_stop` record carrying `drain_id`, `budget_ms`, `fence_budget_ms`, the
+`settled`, `unsettled` and `absent` counts, and, for every session quiesce
+left `{:unknown, stage, head}`, the stage, session ID, `owner_epoch` and
+`journal_version` (a `{:unknown, :no_head}` session carries its stage and ID
+only). The drain helper builds and writes it from an unlinked, unmonitored
+writer it never awaits, so an encoder refusal or a blocked device fails only
+that writer (`service.ex` `stop_line/2`; `service_lifecycle_test.exs`, "a ready
+daemon serves a client and an orderly stop releases every exclusion" and "a
+blocked standard error holds neither the orderly stop nor a fatal status"). The
+routine-diagnostic helper and its dropped bit, which earlier revisions
+specified, were not built: the daemon's one routine warning and OTP's crash
+reports go through OTP's default logger handler on standard error, bounded by
+that handler's own overload protection; named limitation #24 in the concept
+plan records the difference.
 
 **Reverse cleanup.** Startup happens inside the owner, so a failure at any
 step unwinds what that step and its predecessors did, in reverse — and
 "predecessors" means **every process the startup started**, not the three an
-earlier revision named. If startup reached them, cleanup first stops and awaits
-the listener, then the connection registry, then the admission relay. A bound
+earlier revision named. If startup reached them, cleanup first stops the
+listener, then the collaboration owner, whose `terminate/2` kills the
+connection registry and the admission relay. A bound
 socket is **closed, and its path left in place** — reverse cleanup unlinks
 nothing, for the same reason no shutdown path does — a `daemon/` subdirectory
 this start created is removed **when it is empty**, by the matrix below — no
@@ -6270,23 +6268,24 @@ workspace lease, transfers where it exists — then the tracing capability,
   release. A
   `WriterLock.acquire/3` error after exclusive marker creation returns no Store
   pid or lock handle; cleanup cannot stop or release what it was never given.
-  Once every started component is confirmed gone, cleanup uses the same
-  unlinked monitored placement-release helper and fixed five-second deadline to
-  attempt the acquisition-specific handle's release. If cleanup cannot prove
-  the components gone, or that helper expires, the non-zero halt leaves the lock
+  Cleanup then uses the same unlinked monitored placement-release helper and
+  fixed five-second deadline to attempt the acquisition-specific handle's
+  release; if that helper fails or expires, the non-zero halt leaves the lock
   for stale-owner recovery. An already-latched startup class remains the exit
   class; a placement failure with no earlier class is `placement_lock_failed`.
 
-Each of those stops is the same call and the same discipline as a shutdown
-stop: the owner monitoring the component and sending it the `sys` terminate
-request with its stop reason itself, waiting on that monitor against **one
-shared teardown deadline** and killing
-on expiry, and — where a Store pid exists — **the same fixed 30 s phase** the orderly
-path gives it, for the same reason: this is the stop that attempts marker release,
-and a failed start that killed the Store mid-release would leave exactly the
-stale marker it is trying not to leave. Startup introduces no second teardown
-mechanism; it reuses the one the shutdown sequence defines, against the pid
-map it already holds.
+**Two cleanup forms, chosen by whether a class is already latched.** A stop
+requested before readiness (`operator_stop`) runs the orderly teardown itself,
+with its stop rule and shared deadline, so a component that does not stop in
+time is its class, never `0`. A startup failure already carries its class,
+which wins, so its reverse cleanup (`teardown/1`) needs no verdict: it sends
+each component an exit signal with reason `:shutdown`, waits up to 5 s for it
+(the Store its fixed 30 s phase, for the same reason as the orderly path: this
+is the stop that attempts marker release, and a failed start that killed the
+Store mid-release would leave exactly the stale marker it is trying not to
+leave), kills it on expiry, and discards the outcome. The runtime tree is
+stopped with the bounded stop under a 5 s deadline; it is never stopped with
+an unbounded call.
 
 The owner does this in its own start path rather than leaving it to a crash,
 because a crashing owner would take the links down without attempting release of a marker
@@ -6370,10 +6369,12 @@ children, a pid's liveness, a socket's EOF, or the daemon's own `stderr`.
   immediately. Those observations, rather than callback completion, prove
   healthy release. The case also asserts the
   negative that the stop rule exists for: **no fatal class is recorded
-  at any point during the stop**, and `stderr` carries **nothing but the one
-  census line** — `drain_id`, `budget_ms`, `fence_budget_ms`, three counts and no unknown-fence
-  heads, an idle daemon having none — **with no fatal
-  class in it**. Stopping every linked process deliberately produces an exit
+  at any point during the stop**, and the daemon's diagnostic device receives
+  **exactly one line**, the stop line — `drain_id`, `budget_ms`,
+  `fence_budget_ms` (130,000), the three counts and no unknown heads, an idle
+  daemon having none — and no fatal line (`service_lifecycle_test.exs`, "a
+  ready daemon serves a client and an orderly stop releases every
+  exclusion"). Stopping every linked process deliberately produces an exit
   from each, and every one of them must be consumed rather than classified.
   (Real process.)
 - **A real failure during an orderly stop is still classified.** The Store
@@ -6755,14 +6756,10 @@ children, a pid's liveness, a socket's EOF, or the daemon's own `stderr`.
   output deadline the daemon hard-halts with exact status `95`, emits no late
   readiness record, creates no connection or core state, and a successor
   reclaims the dead placement/marker and stale socket path before serving.
-  Separately, suspended stderr is given a burst of routine index and directory
-  warnings: at most one routine helper exists, the owner retains only the
-  dropped bit, and unaffected requests continue. After stderr resumes, the
-  next successful eligible line carries
-  `prior_routine_diagnostic_dropped:true`. Re-suspending it and killing the
-  runtime yields exact `runtime_lost` status `104` by the 35-second watchdog
-  without requiring a line; an orderly stop under the same blockage still
-  stops the Store, exits `0`, and permits a successor to open the root.
+  Separately, with the diagnostic device suspended, an orderly stop still
+  exits `0` and a lost listener still exits `listener_lost`; each line is
+  written once the device resumes (`service_lifecycle_test.exs`, "a blocked
+  standard error holds neither the orderly stop nor a fatal status").
 - **A lease owner's death is session-scoped, and the relay is what makes it
   safe.** A session is activated, a controller acquires it and an observer
   attaches; that session's lease owner is killed **while one of its admissions
@@ -7168,8 +7165,8 @@ linked and daemon-fatal, so it appears here rather than in the dynamic table.
 | **Workspace lease** | The composition function | Daemon owner | Orderly step 6 | `workspace_lease_lost` |
 | **Local executor** | The composition function | Daemon owner | Orderly step 6, before the lease | `executor_lost` |
 | **Runtime root** (a supervisor; its children are core's, below) | The composition function | Daemon owner | Orderly step 5 | `runtime_lost` |
-| **Admission relay** | Daemon owner, after the runtime | Daemon owner | Orderly step 4, after successful `seal_after_quiesce` has classified and removed every ticket and after the lease-owner sweep | `relay_lost`, daemon-fatal |
-| **Connection registry** | Daemon owner, beside the relay and before the listener | Daemon owner | Orderly step 4, first — after step 3's records and closes, which go through the buffer-control interface it owns | `connections_lost`, daemon-fatal: it owns every connection's monitor, the buffer-control interface and the bounded lease-holder routing mirror. Without it the daemon can neither release a slot, route owner loss nor stop writing to a gone peer. **No client can be told this class**, because the write goes through the interface that is gone |
+| **Admission relay** | Daemon owner, after the runtime | Daemon owner | Orderly step 4: killed by the collaboration owner's `terminate/2` after the lease owners and the registry, once successful `seal_after_quiesce` has classified and removed every ticket | `relay_lost`, daemon-fatal |
+| **Connection registry** | Daemon owner, beside the relay and before the listener | Daemon owner | Orderly step 4: killed by the collaboration owner's `terminate/2` after the lease owners — after step 3's records and closes, which go through the buffer-control interface it owns | `connections_lost`, daemon-fatal: it owns every connection's monitor, the buffer-control interface and the bounded lease-holder routing mirror. Without it the daemon can neither release a slot, route owner loss nor stop writing to a gone peer. **No client can be told this class**, because the write goes through the interface that is gone |
 | **Listener** | Daemon owner, after the connection registry; it starts parked on `startup_ref` and performs no accept until the exact readiness-write success and required-component liveness recheck have won and the lifecycle sentinel sends the exact release | Daemon owner | Step 1, after the relay cut: untrappable kill and exact linked `EXIT` within the shared transport-cut deadline, leaving the pathname | An owner-observed linked `EXIT` ordered into the sentinel before release authorization is startup class `listener_start_failed`, with no accepted client; after the sentinel's exact `begin_accept` send, an unexpected exit is daemon-fatal `listener_lost`, and the connection registry remains alive long enough to attempt `fatal:listener_lost` to initialized clients |
 
 **The daemon's dynamic processes, each with its bound:**
@@ -7180,9 +7177,9 @@ linked and daemon-fatal, so it appears here rather than in the dynamic table.
 | **Connections**, one per accepted client | Immediately after kernel `accept`, the listener records `accepted_at`, computes `initialize_deadline = accepted_at + 30_000` and reserves a provisional registry slot carrying both. The registry traps exits before serving, retains the exact daemon-owner pid, and starts the waiting connection with `GenServer.start_link/3` inside one serialized callback; an exact temporary-child `EXIT` is handled idempotently with its monitor `DOWN`. Before replying or consuming queued signals it monitors and binds the returned pid, prepares the updated row and unlinks it. The child monitors registry and listener from `init/1`, which performs no IO or external call. Thus a `nil` row means no child exists. Through handoff the listener temporarily monitors the connection and the connection monitors the listener. The provisional row retains `:listener_owned | :transferring | :connection_owned`; an abort in the middle waits for the exact transfer result and then requires listener close evidence or connection reap according to that result. Registry promotion retains the permanent connection monitor and deadline before acknowledgement; the connection then drops the listener monitor and acknowledges promotion so the listener can drop its temporary monitor. The registry owns the timer and initialize-complete CAS. The registry's acknowledged `transport_closing` gate refuses every later reservation or promotion | **512 occupied accepted slots** across provisional (`handing_off` or `aborting`), live and closing; a closed socket may retain a slot while request or holder cleanup remains | Every handoff and initialize continuation checks `now < initialize_deadline`; the timer only prompts. Expiry aborts and reaps a provisional row or closes a promoted uninitialized connection with EOF; queued-late completion loses. With no child, exact close acknowledgement or exact listener `DOWN` completes socket cleanup. A listener-owned abort requires that same listener close evidence plus child `DOWN`; a connection-owned abort requires exact connection `DOWN`; a transferring abort waits for the exact disposition, while listener death plus child reap closes either possible owner. Before promotion both sides send exact idempotent aborts on transfer failure, and daemon-owner listener loss aborts every provisional row for that listener incarnation. At the transport cut, every provisional or uninitialized row is marked for EOF close; after listener EXIT the registry reaps that fixed complete set before acknowledging. Abort changes `handing_off` to occupied `aborting`; the row and slot remain until the exact evidence for its no-child, listener-owned, connection-owned, transferring, or listener-death branch is complete. Promotion or exact reap makes a late abort a no-op. Afterwards `DOWN` moves live to closing, closes socket/buffer and starts a cleanup worker. The slot becomes free only when the relay has retired every origin, permit, worker and task, the cleanup worker has acknowledged both core owners, and the registry has consumed that worker's exact normal `DOWN` |
 | **Request workers**, one per dispatched request including lease operations, reads and transfers | Each first monitors its connection incarnation and acknowledges readiness. The connection then binds it and its monitor to the relay origin or lightweight permit before sending a descriptor or `go`. The connection separately monitors it. Mutation workers wait and never race independent calls into the lease owner | At most ADR 0023's **32 in-flight per occupied connection** | Before relay binding, parent `DOWN` ends the worker. Afterwards relay connection `DOWN` kills and reaps every nonterminal queued or executing worker, including one blocked in an infinite call, and selects one winning disposition. An origin with no compensating work may terminalize immediately; provisional acquire cleanup and release cancellation remain `settling(connection_lost, op_ref)` through their exact acknowledgement, while promotion retires the waiting worker and retains its relay task. Only exact settlement terminalizes the origin or permit, so no capacity charge leaks |
 | **Holder-cleanup workers**, one per closing live connection | Connection registry, monitored and keyed by `{connection_incarnation, cleanup_ref}` | At most 512, one per closing accepted slot | Exact acknowledgement sets `holder_cleanup_acked`; only the exact later normal `DOWN` sets `cleanup_worker_reaped`. Stale messages are ignored. Abnormal exit, normal exit without acknowledgement, or acknowledgement without normal `DOWN` by the bound is fatal `runtime_lost`, and the slot is never reused. Step 3 kills and reaps survivors at its deadline before fail-stop |
-| **Daemon quiesce caller** | Daemon owner, unlinked and monitored, only after the admission wait | Exactly one per orderly stop; it owns the one `Loopex.Runtime.quiesce/1` call and its parameterized absolute drain/fence deadlines | An earlier component loss terminates and reaps it while preserving that component's fatal class. Exact quiesce error, helper exit without the matching result, or helper result loss with no earlier component class becomes `drain_failed`; it never turns into orderly success |
+| **Daemon drain helper** | Daemon owner, unlinked and monitored, when the orderly stop begins | Exactly one per orderly stop; it runs the admission wait, the lease-operation freeze, the quiescing barrier, the one `Loopex.Runtime.quiesce/1` call, the seal and the closes, each under its own bound | An earlier component loss terminates it while preserving that component's fatal class. Quiesce `{:error, :runtime_unavailable}` or a caught exit from that call is `drain_failed`; the helper answers `:drained` or its selected class, and a helper that ends without an answer is `relay_lost` |
 | **Placement-release helper** | Daemon owner after Store stop, or the failed-start/offline command owner after its Store stop; unlinked and monitored with the exact acquisition handle | At most one, under `placement_release_ms: 5_000` | Exact `:ok` plus normal `DOWN` completes only the attempt. Malformed result or abnormal death selects `placement_lock_failed`; deadline hard-halts without awaiting it, and verified stale-owner recovery handles any complete residual |
-| **Output helpers** | Lifecycle sentinel for readiness and fatal diagnostics; daemon owner for routine diagnostics and the orderly census | At most one readiness helper, one first-fatal helper, one routine-diagnostic helper and one orderly-census helper. Readiness has an absolute 5-second deadline; fatal and routine output are unawaited; census output shares `teardown_ms`. A busy routine helper causes later lines to coalesce into the single `routine_diagnostic_dropped` bit | The helpers own no resource or disposition. The sentinel serializes readiness refusal, early death or deadline with startup stop, owner-reported component fatal and release authorization; only its winning release sends `begin_accept`. Deadline hard-halts as `readiness_write_failed` because a queued stdout request cannot be recalled safely. A raced component fatal or stop may coexist with a line already written but never opens the gate when it wins. Fatal output death is ignored. Routine output failure retains the dropped bit. Census output death or deadline omits only the best-effort line. None can delay the fatal status or orderly exit |
+| **Output writers** | Lifecycle sentinel for readiness and the first fatal line; the drain helper for the stop line | At most one readiness writer, under an absolute 5-second deadline, one fatal-line writer and one stop-line writer per daemon lifetime, the last two unlinked, unmonitored and never awaited | They own no resource or disposition. The sentinel serializes readiness refusal, early death or deadline with startup stop, owner-reported component fatal and release authorization; only its winning release sends `begin_accept`. Readiness deadline hard-halts as `readiness_write_failed` because a queued stdout request cannot be recalled safely. A raced component fatal or stop may coexist with a line already written but never opens the gate when it wins. The fatal line cannot delay the fatal status; the VM halt ends a writer blocked on its device. No routine-diagnostic writer exists (named limitation #24) |
 | **Relay tasks**, one per promoted primary ticket — the eight lease-authorized mutations, `session.create` and `session.attach`; **not** lightweight calls, duplicate-create waiters or replacement waiters | The relay, after recording the exact sequenced origin and capacity reservation/borrow and before acknowledging promotion | At most **16,384**: 512 occupied accepted slots times 32 active origin rows, with waiters starting no second task | Before orderly `quiescing`, a no-result death keeps its ticket and the relay exits `relay_lost`. During orderly quiescing it remains unresolved; after successful core quiesce, deferred `seal_after_quiesce` kills and reaps every survivor, lets a real result sent before `DOWN` win, terminalizes its waiters, returns every other exact ID as unresolved, and removes all origin rows before teardown |
 
 **Core's processes, as groups with their owner.** The runtime root supervises

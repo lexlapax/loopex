@@ -52,8 +52,15 @@ nothing else there:
 {"record":"daemon_ready","root":"/home/me/.loopex","socket":"/home/me/.loopex/daemon/daemon.sock","incarnation":"…","version":"0.2.0"}
 ```
 
-Logs go to standard error. A second daemon on the same root loses at the
-placement lock and exits `placement_active` (76) without touching the first.
+Logs go to standard error. There the daemon also writes one line when it
+stops. After an orderly stop, the line is a `daemon_stop` record: `drain_id`,
+`budget_ms`, `fence_budget_ms`, the `settled`, `unsettled` and `absent`
+session counts, and, for each session whose drain outcome is unknown, its
+stage, session ID, `owner_epoch` and `journal_version`. After a failure, the
+line is `loopex daemon fatal: <class>`. Both lines are best effort. A blocked
+standard error never delays the stop, and the exit status is authoritative. A
+second daemon on the same root loses at the placement lock and exits
+`placement_active` (76) without touching the first.
 
 <a id="operator-daemon-migration"></a>
 ## Moving a Released Root to the Daemon

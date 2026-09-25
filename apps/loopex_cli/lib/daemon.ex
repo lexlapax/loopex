@@ -104,7 +104,10 @@ defmodule LoopexCli.Daemon do
           resource_manifest: skills
         ] ++ grace
 
-      Sentinel.run(service_options, Keyword.take(options, [:output, :install_signals, :notify]))
+      Sentinel.run(
+        service_options,
+        Keyword.take(options, [:output, :diagnostic, :install_signals, :notify])
+      )
     else
       {:error, class} ->
         diagnostic("loopex daemon refused to start: #{class}")

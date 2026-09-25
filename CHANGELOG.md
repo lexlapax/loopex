@@ -28,6 +28,12 @@ changes generation one's schema digest while leaving its methods, record
 families, error codes, limits, schema manifest and vector bytes unchanged. The
 foreground server and independent Node client now offer the same exact name.
 
+The daemon writes one best-effort line to standard error when it stops. An
+orderly stop writes a JSON `daemon_stop` record carrying the drain label, both
+budgets, the three session counts and each unknown session's stage and head.
+A fail-stop writes `loopex daemon fatal: <class>`. Neither line is awaited, so
+a blocked standard error cannot delay the stop or change the exit status.
+
 Add `LoopexProtocol.Session.V2` as the daemon's distinct
 `loopex.experimental/2` metadata and negotiation contract. It retains the
 generation-one inventories and adds the four daemon methods, two daemon record

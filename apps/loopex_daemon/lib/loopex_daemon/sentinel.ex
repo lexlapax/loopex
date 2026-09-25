@@ -34,7 +34,8 @@ defmodule LoopexDaemon.Sentinel do
 
   ## Technical depth
 
-  `options` accepts `:output` for the readiness device, `:install_signals`
+  `options` accepts `:output` for the readiness device, `:diagnostic` for the
+  fatal-diagnostic device (default `:standard_error`), `:install_signals`
   (default `true`) and `:notify`, a pid told the exact owner reference once
   the gate is sent so a test can route a stop without an operating-system
   signal. A readiness deadline hard-halt returns its status immediately.
@@ -91,7 +92,8 @@ defmodule LoopexDaemon.Sentinel do
   end
 
   defp supervise(service_options, options, owner_ref) do
-    {:ok, owner} = Service.start(service_options)
+    diagnostic = Keyword.get(options, :diagnostic, :standard_error)
+    {:ok, owner} = Service.start(Keyword.put(service_options, :diagnostic, diagnostic))
     monitor = Process.monitor(owner)
     send(owner, {:go, owner_ref, self()})
 
@@ -105,6 +107,7 @@ defmodule LoopexDaemon.Sentinel do
       monitor: monitor,
       owner_ref: owner_ref,
       output: Keyword.get(options, :output, :stdio),
+      diagnostic: diagnostic,
       latched: nil,
       watchdog: nil
     })
@@ -137,7 +140,8 @@ defmodule LoopexDaemon.Sentinel do
           {:disposition, {:fatal, class, status}} ->
             await(latch(state, class, status))
 
-          {:hard_halt, _class, status} ->
+          {:hard_halt, class, status} ->
+            fatal_diagnostic(state.diagnostic, class)
             status
         end
 
@@ -150,7 +154,7 @@ defmodule LoopexDaemon.Sentinel do
 
       {:DOWN, ^monitor, :process, ^owner, _reason} ->
         {:ok, owner_lost} = ExitStatus.fetch(:owner_lost)
-        final_status(state, owner_lost)
+        final_status(latch(state, :owner_lost, owner_lost), owner_lost)
 
       {:sentinel_watchdog, ^owner_ref} ->
         Logger.debug("loopex daemon sentinel watchdog expired")
@@ -163,10 +167,23 @@ defmodule LoopexDaemon.Sentinel do
   defp latch(%{latched: nil} = state, class, status) do
     timer = Process.send_after(self(), {:sentinel_watchdog, state.owner_ref}, @fatal_watchdog_ms)
     Logger.debug("loopex daemon fatal class latched")
+    fatal_diagnostic(state.diagnostic, class)
     %{state | latched: {class, status}, watchdog: timer}
   end
 
   defp latch(state, _class, _status), do: state
+
+  # Concept: the first fatal class is also written to standard error, best
+  # effort: the line is attempted once and never awaited, so a blocked device
+  # cannot delay the stop or the exit status, which stays authoritative.
+  #
+  # Technical depth: the writer is unlinked and unmonitored; the VM halt ends
+  # it if the device never answers. The line carries only the class name.
+  defp fatal_diagnostic(device, class) do
+    line = "loopex daemon fatal: " <> Atom.to_string(class)
+    _writer = spawn(fn -> IO.puts(device, line) end)
+    :ok
+  end
 
   defp final_status(%{latched: {_class, status}}, _reported), do: status
   defp final_status(_state, reported), do: reported
