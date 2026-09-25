@@ -811,19 +811,23 @@ defmodule LoopexDaemon.Service do
     :ok
   end
 
-  defp stop_record(census) do
+  @doc false
+  # Concept: the stop line's record; session identities appear exactly as a
+  # client sees them on the wire.
+  @spec stop_record(map()) :: map()
+  def stop_record(census) do
     unknown =
       for {session_id, {:unknown, stage, head}} <- census.fences,
           do: %{
             stage: stage,
-            session_id: session_id,
+            session_id: LoopexProtocol.Wire.encode_identity(session_id),
             owner_epoch: head.owner_epoch,
             journal_version: head.journal_version
           }
 
     no_head =
       for {session_id, {:unknown, :no_head}} <- census.fences,
-          do: %{stage: :no_head, session_id: session_id}
+          do: %{stage: :no_head, session_id: LoopexProtocol.Wire.encode_identity(session_id)}
 
     %{
       record: "daemon_stop",

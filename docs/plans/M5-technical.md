@@ -6227,17 +6227,21 @@ authoritative fatal result if stderr is blocked. As implemented in M5 the
 daemon writes three kinds of `stderr` line. Before the lifecycle sentinel
 starts, the command writes one bounded refusal line (`loopex daemon refused to
 start: <class>`) under a fixed wait. Once the sentinel runs, it writes the
-first latched fatal class — including `owner_lost` and a readiness hard halt —
-as one line, `loopex daemon fatal: <class>`, from an unlinked, unmonitored
+first latched fatal class as one line (for `owner_lost` and a readiness hard
+halt it is attempted immediately before the status returns, so the halt that
+follows may cut it off), `loopex daemon fatal: <class>`, from an unlinked, unmonitored
 writer it never awaits, so a blocked device cannot delay the stop or the exit
 status (`sentinel.ex` `fatal_diagnostic/2`; `service_lifecycle_test.exs`,
 "losing the listener after readiness fail-stops with listener_lost"). After a
 successful quiesce, an orderly stop writes the **stop line**: one JSON
 `daemon_stop` record carrying `drain_id`, `budget_ms`, `fence_budget_ms`, the
 `settled`, `unsettled` and `absent` counts, and, for every session quiesce
-left `{:unknown, stage, head}`, the stage, session ID, `owner_epoch` and
-`journal_version` (a `{:unknown, :no_head}` session carries its stage and ID
-only). The drain helper builds and writes it from an unlinked, unmonitored
+left `{:unknown, stage, head}`, the stage, the session ID in its wire
+encoding, `owner_epoch` and `journal_version` (a `{:unknown, :no_head}` session
+carries its stage and ID only; `service_lifecycle_test.exs`, "the stop record
+renders unknown sessions with their stage and head"). The stop line records
+the drain, not the stop's outcome: a class latched later in the teardown adds
+its fatal line after it. The drain helper builds and writes it from an unlinked, unmonitored
 writer it never awaits, so an encoder refusal or a blocked device fails only
 that writer (`service.ex` `stop_line/2`; `service_lifecycle_test.exs`, "a ready
 daemon serves a client and an orderly stop releases every exclusion" and "a

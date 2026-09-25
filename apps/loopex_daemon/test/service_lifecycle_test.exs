@@ -693,6 +693,45 @@ defmodule LoopexDaemon.ServiceLifecycleTest do
     assert Task.await(daemon.task, 40_000) == capacity
   end
 
+  # Concept: the stop line names every session quiesce left unknown, with the
+  # head a successor compares against, in the identity clients see.
+  test "the stop record renders unknown sessions with their stage and head" do
+    census = %{
+      drain_id: "d",
+      budget_ms: 5_000,
+      fence_budget_ms: 130_000,
+      settled: ["a"],
+      unsettled: [],
+      absent: ["b"],
+      fences: %{
+        "a" => :committed,
+        "s_2" => {:unknown, :fence, %{owner_epoch: 3, journal_version: 9}},
+        "s_1" => {:unknown, :abort, %{owner_epoch: 1, journal_version: 4}},
+        <<255, 0>> => {:unknown, :no_head}
+      }
+    }
+
+    record = JSON.decode!(JSON.encode!(LoopexDaemon.Service.stop_record(census)))
+
+    assert record["settled"] == 1 and record["absent"] == 1 and record["unsettled"] == 0
+
+    assert record["unknown"] == [
+             %{"stage" => "no_head", "session_id" => "_wA"},
+             %{
+               "stage" => "abort",
+               "session_id" => "c18x",
+               "owner_epoch" => 1,
+               "journal_version" => 4
+             },
+             %{
+               "stage" => "fence",
+               "session_id" => "c18y",
+               "owner_epoch" => 3,
+               "journal_version" => 9
+             }
+           ]
+  end
+
   # Concept: standard error is best effort; a device that never answers holds
   # neither an orderly stop nor a fail-stop's exit status.
   #

@@ -52,13 +52,22 @@ nothing else there:
 {"record":"daemon_ready","root":"/home/me/.loopex","socket":"/home/me/.loopex/daemon/daemon.sock","incarnation":"…","version":"0.2.0"}
 ```
 
-Logs go to standard error. There the daemon also writes one line when it
-stops. After an orderly stop, the line is a `daemon_stop` record: `drain_id`,
-`budget_ms`, `fence_budget_ms`, the `settled`, `unsettled` and `absent`
-session counts, and, for each session whose drain outcome is unknown, its
-stage, session ID, `owner_epoch` and `journal_version`. After a failure, the
-line is `loopex daemon fatal: <class>`. Both lines are best effort. A blocked
-standard error never delays the stop, and the exit status is authoritative. A
+Logs go to standard error. When the drain of an orderly stop completes, the
+daemon writes a `daemon_stop` record there. The record holds:
+
+- `drain_id`, a label for this drain;
+- `budget_ms`, the cancellation budget derived from the sessions' committed
+  cleanup graces;
+- `fence_budget_ms`, the fixed 130,000 ms outer bound on fencing;
+- the `settled`, `unsettled` and `absent` session counts;
+- for each session whose drain outcome is unknown, its stage, its session ID
+  as clients see it, `owner_epoch` and `journal_version`.
+
+When a failure latches a class, the daemon writes
+`loopex daemon fatal: <class>`, including after a `daemon_stop` record if the
+teardown fails later. Both lines are attempted, never awaited. A blocked
+standard error never delays the stop, a halt can cut a line short, and the
+exit status is authoritative. A
 second daemon on the same root loses at the placement lock and exits
 `placement_active` (76) without touching the first.
 
