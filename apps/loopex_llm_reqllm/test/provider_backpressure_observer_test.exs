@@ -4,6 +4,13 @@ defmodule Loopex.LLM.ReqLLM.ProviderBackpressureObserverTest do
   use ExUnit.Case, async: true
   alias Loopex.LLM.ReqLLM.ProviderIsolationFixture, as: Fixture
 
+  # Technical depth: ExUnit's clock starts before `Fixture.new` compiles the
+  # synthetic worker (a watchdog of up to 50 s) and before the real child boots,
+  # while every wait below is bounded by the request's own 60 s deadline. This
+  # bound covers compile, deadline and cleanup, so the case's own deadlines,
+  # not ExUnit's, decide; it only catches a true hang.
+  @moduletag timeout: 150_000
+
   # Technical depth: every wait below spends the one request budget, which
   # must cover starting a companion BEAM and each staged proof on a machine
   # running the whole fast check at once; the case proves how writer calls are

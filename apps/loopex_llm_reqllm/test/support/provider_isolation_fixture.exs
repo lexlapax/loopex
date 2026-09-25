@@ -1156,9 +1156,10 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
   # compilation, not OS bootstrap or immediate response to parent death. It
   # only guards against a hung compile, so it sits just under ExUnit's 60 s
   # default rather than at ten seconds, which a loaded floor-pair run
-  # exceeded with the compile still progressing;
-  # it extends neither request deadlines nor ExUnit timeouts. Root cleanup is
-  # registered first, including for compiler failure.
+  # exceeded with the compile still progressing. It extends no request
+  # deadline, but it does run inside the caller's ExUnit timeout, so a case
+  # whose request deadline approaches 60 s carries a larger module timeout.
+  # Root cleanup is registered first, including for compiler failure.
   defp prepare_worker(root, source, paths) do
     preparation = Path.join(root, "prepare.escript")
 
