@@ -74,7 +74,11 @@ defmodule Loopex.Audit3RepairsTest do
   a cleanup its own supersession made unanswerable.
   """
 
-  use ExUnit.Case, async: true
+  # Serial: the held-read case needs Control to reach its read inside a real
+  # 700 ms authority and then answer inside Control's 1,000 ms read bound, so
+  # its window is wall-clock. Sharing the asynchronous pool on a loaded
+  # floor-pair run spent that authority before the read began.
+  use ExUnit.Case, async: false
 
   alias Loopex.AgentLoopFixture, as: Fixture
   alias Loopex.AgentLoopTestModel
