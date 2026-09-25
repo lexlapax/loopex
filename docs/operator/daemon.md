@@ -66,8 +66,9 @@ stop's outcome. The record holds:
   was read (a `no_head` session has none).
 
 When a failure latches a class, the daemon writes
-`loopex daemon fatal: <class>`, including after a `daemon_stop` record if the
-teardown fails later. Both lines are attempted, never awaited. A blocked
+`loopex daemon fatal: <class>`. A teardown that fails after quiesce attempts
+both lines. Both lines are attempted and never awaited, from separate
+writers, so their order is not guaranteed and either can be missing. A blocked
 standard error never delays the stop, a halt can cut a line short, and the
 exit status is authoritative. A
 second daemon on the same root loses at the placement lock and exits

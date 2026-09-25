@@ -3447,8 +3447,9 @@ for its own component's `DOWN`; an exit of any other
 owned component that arrives meanwhile stays queued on its link and is
 classified by the zero-wait loss check before the next step, which ends the
 orderly stop with that component's class. No helper process takes part in a step. Client
-frames and unrelated messages may wait, but lifecycle signals do
-not. Immediately before the first
+frames, unrelated messages and other components' exits wait while a step
+waits for its own component, at most until that step's deadline; every
+lifecycle signal is classified before the next step begins. Immediately before the first
 step-3 notification the owner drains already queued lifecycle signals once
 more. If a fatal class is latched, it sends that class where the connection
 interface still exists, sends no `operator_stop`, and continues through the
@@ -6240,8 +6241,10 @@ left `{:unknown, stage, head}`, the stage, the session ID in its wire
 encoding, `owner_epoch` and `journal_version` (a `{:unknown, :no_head}` session
 carries its stage and ID only; `service_lifecycle_test.exs`, "the stop record
 renders unknown sessions with their stage and head"). The stop line records
-the drain, not the stop's outcome: a class latched later in the teardown adds
-its fatal line after it. The drain helper builds and writes it from an unlinked, unmonitored
+the drain, not the stop's outcome: a class latched later in the teardown also
+attempts its fatal line. The two lines come from separate unawaited writers,
+so their order on the device is not guaranteed and either may be missing; the
+exit status is the authoritative result. The drain helper builds and writes it from an unlinked, unmonitored
 writer it never awaits, so an encoder refusal or a blocked device fails only
 that writer (`service.ex` `stop_line/2`; `service_lifecycle_test.exs`, "a ready
 daemon serves a client and an orderly stop releases every exclusion" and "a

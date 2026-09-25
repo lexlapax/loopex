@@ -17,7 +17,7 @@ values.
 | --- | --- |
 | Tested implementation SHA | Pending |
 | Source `VERSION` | `0.2.0` |
-| Administrative closure SHA | Pending |
+| Administrative closure SHA | Not recorded on this page: a commit cannot contain its own hash. It is located by the plans register's `Closed` transition and by the tag |
 
 ## The fast check under the floor pair, on Darwin
 

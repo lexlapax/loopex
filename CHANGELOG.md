@@ -34,8 +34,8 @@ The daemon writes best-effort stop lines to standard error:
   record. It carries the drain label, both budgets, the three session counts,
   and each unknown session's stage, encoded identity and, when one was read,
   its head.
-- When a class latches, `loopex daemon fatal: <class>`, even after a
-  `daemon_stop` record.
+- When a class latches, `loopex daemon fatal: <class>`. A teardown that fails
+  after quiesce attempts both lines, in no guaranteed order.
 
 Neither line is awaited, so a blocked standard error cannot delay the stop or
 change the exit status.
