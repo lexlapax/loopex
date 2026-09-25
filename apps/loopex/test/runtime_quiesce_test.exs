@@ -957,8 +957,18 @@ defmodule Loopex.RuntimeQuiesceTest do
     {_control, session_ids, coordinators} =
       install_probe_entries(fixture.runtime, 64, :settled_status)
 
+    # Only the termination cutoff, its projection and the reap are under test;
+    # every other phase gets a bound of seconds, within the relations `Quiesce`
+    # validates, so a loaded machine cannot end the drain on a bound this case
+    # does not examine.
     bounds =
       fast_bounds(%{
+        admission_ms: 4_000,
+        initial_gate_ms: 2_000,
+        status_census_ms: 2_000,
+        status_work_ms: 1_000,
+        fence_budget_ms: 2_000,
+        fence_reap_ms: 100,
         coordinator_termination_ms: 500,
         termination_projection_ms: 50,
         worker_reap_ms: 100
@@ -974,8 +984,11 @@ defmodule Loopex.RuntimeQuiesceTest do
     assert Map.keys(receive_probe_calls(:release, session_ids)) |> Enum.sort() == session_ids
     assert Map.keys(receive_probe_calls(:status, session_ids)) |> Enum.sort() == session_ids
     assert result.unsettled == session_ids
+
+    # One shared cutoff: at least the cutoff, and far below the 32 s that
+    # sixty-four sequential cutoffs of 500 ms would take.
     assert elapsed_ms >= bounds.coordinator_termination_ms - bounds.worker_reap_ms
-    assert elapsed_ms < 3_000
+    assert elapsed_ms < 10_000
     assert Enum.all?(coordinators, &(not Process.alive?(&1)))
   end
 
