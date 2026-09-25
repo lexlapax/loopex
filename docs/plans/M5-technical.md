@@ -6266,7 +6266,7 @@ therefore no client request has reached a lease operation. A kernel-backlog
 connection is closed when the listening socket closes and has no daemon pid or
 registry state to unwind — and **every pid the composition
 function returned is stopped in reverse start order** — runtime, executor,
-workspace lease, transfers where it exists — then the tracing capability,
+workspace lease, transfers where it exists, the session index — then the tracing capability,
   custody and credential registry, and, **where acquisition returned a Store
   pid**, the Store last, so its `terminate/2` invokes the best-effort marker
   release. A

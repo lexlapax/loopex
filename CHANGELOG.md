@@ -30,9 +30,10 @@ foreground server and independent Node client now offer the same exact name.
 
 The daemon writes best-effort stop lines to standard error:
 
-- When an orderly stop's drain completes, a JSON `daemon_stop` record. It
-  carries the drain label, both budgets, the three session counts, and each
-  unknown session's stage, encoded identity and head.
+- When core quiesce succeeds during an orderly stop, a JSON `daemon_stop`
+  record. It carries the drain label, both budgets, the three session counts,
+  and each unknown session's stage, encoded identity and, when one was read,
+  its head.
 - When a class latches, `loopex daemon fatal: <class>`, even after a
   `daemon_stop` record.
 

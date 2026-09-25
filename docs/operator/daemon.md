@@ -52,16 +52,18 @@ nothing else there:
 {"record":"daemon_ready","root":"/home/me/.loopex","socket":"/home/me/.loopex/daemon/daemon.sock","incarnation":"…","version":"0.2.0"}
 ```
 
-Logs go to standard error. When the drain of an orderly stop completes, the
-daemon writes a `daemon_stop` record there. The record holds:
+Logs go to standard error. When core quiesce succeeds during an orderly stop,
+the daemon writes a `daemon_stop` record there. It records the drain, not the
+stop's outcome. The record holds:
 
 - `drain_id`, a label for this drain;
 - `budget_ms`, the cancellation budget derived from the sessions' committed
   cleanup graces;
 - `fence_budget_ms`, the fixed 130,000 ms outer bound on fencing;
 - the `settled`, `unsettled` and `absent` session counts;
-- for each session whose drain outcome is unknown, its stage, its session ID
-  as clients see it, `owner_epoch` and `journal_version`.
+- for each session whose drain outcome is unknown, its stage and its session
+  ID as clients see it, plus `owner_epoch` and `journal_version` when a head
+  was read (a `no_head` session has none).
 
 When a failure latches a class, the daemon writes
 `loopex daemon fatal: <class>`, including after a `daemon_stop` record if the
