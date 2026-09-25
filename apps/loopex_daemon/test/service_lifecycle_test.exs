@@ -641,8 +641,15 @@ defmodule LoopexDaemon.ServiceLifecycleTest do
     assert_received :lease_owner_reported
     :ok = :sys.resume(relay)
 
-    assert [%{"request_id" => "observer-acquire", "code" => "control_held"}] =
-             receive_records(observer, 1)
+    # The observer's acquire is answered `control_held` if the lease owner
+    # settles it before the admission poll next reads the relay. If the poll
+    # instead sees it executing, which is not admission work, the freeze ends
+    # it without client output and the observer's first record is the stop.
+    # Either way it is never granted.
+    assert [record] = receive_records(observer, 1)
+
+    assert match?(%{"request_id" => "observer-acquire", "code" => "control_held"}, record) or
+             match?(%{"type" => "daemon.stopping", "reason" => "operator_stop"}, record)
 
     assert Task.await(daemon.task, 60_000) == 0
   end
