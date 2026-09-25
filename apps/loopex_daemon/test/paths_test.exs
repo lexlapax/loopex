@@ -48,7 +48,7 @@ defmodule LoopexDaemon.PathsTest do
 
     assert {:ok, ^expected} = Paths.socket_path_limit()
 
-    root = Path.join("/tmp", "lpb-#{System.unique_integer([:positive])}")
+    root = Loopex.TestTmp.Daemon.path("lpb-", "", "/tmp")
     on_exit(fn -> File.rm_rf(root) end)
     directory = Path.join(root, "daemon")
     File.mkdir_p!(directory)

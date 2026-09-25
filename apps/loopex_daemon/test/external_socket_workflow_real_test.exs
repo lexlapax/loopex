@@ -34,7 +34,12 @@ defmodule LoopexDaemon.ExternalSocketWorkflowRealTest do
     System.delete_env("LOOPEX_PROVIDER_API_KEY")
     if credential in [nil, ""], do: flunk("provider credential unavailable: evidence unavailable")
 
-    root = Path.join(System.tmp_dir!(), "ldr-#{System.unique_integer([:positive])}")
+    root =
+      Path.join(
+        System.tmp_dir!(),
+        "ldr-#{Loopex.TestTmp.Daemon.token()}"
+      )
+
     workspace = Path.join(root, "w")
     File.mkdir_p!(workspace)
     on_exit(fn -> File.rm_rf(root) end)

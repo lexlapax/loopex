@@ -12,7 +12,7 @@ defmodule LoopexDaemon.Test.DaemonSocketFixture do
     directory =
       Path.join(
         System.tmp_dir!(),
-        "#{prefix}-#{Base.encode16(:crypto.strong_rand_bytes(6), case: :lower)}"
+        "#{prefix}-#{Loopex.TestTmp.Daemon.token()}"
       )
 
     File.mkdir!(directory)

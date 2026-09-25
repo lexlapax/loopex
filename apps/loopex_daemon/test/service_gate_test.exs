@@ -15,7 +15,12 @@ defmodule LoopexDaemon.ServiceGateTest do
   # five-second gate deadline, and the root has no placement owner, Store
   # marker or daemon directory.
   test "an owner whose gate never opens ends within five seconds holding nothing" do
-    root = Path.join(System.tmp_dir!(), "lsg-#{System.unique_integer([:positive])}")
+    root =
+      Path.join(
+        System.tmp_dir!(),
+        "lsg-#{Loopex.TestTmp.Daemon.token()}"
+      )
+
     workspace = Path.join(root, "w")
     File.mkdir_p!(workspace)
     on_exit(fn -> File.rm_rf(root) end)

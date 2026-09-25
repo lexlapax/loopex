@@ -16,7 +16,12 @@ defmodule LoopexDaemon.CredentialCustodyTest do
   end
 
   setup do
-    root = Path.join(System.tmp_dir!(), "ldc-#{System.unique_integer([:positive])}")
+    root =
+      Path.join(
+        System.tmp_dir!(),
+        "ldc-#{Loopex.TestTmp.Daemon.token()}"
+      )
+
     workspace = Path.join(root, "w")
     File.mkdir_p!(workspace)
     on_exit(fn -> File.rm_rf(root) end)

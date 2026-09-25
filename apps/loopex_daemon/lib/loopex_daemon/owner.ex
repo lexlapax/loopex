@@ -4876,14 +4876,20 @@ defmodule LoopexDaemon.Owner do
 
   defp cancel_timer(nil, _operation_ref), do: :ok
 
-  defp cancel_timer(timer, operation_ref) do
+  # Concept: a cancelled step timer is not flushed from the mailbox; a
+  # deadline message that was already sent is ignored when it arrives,
+  # because `handle_info({:mirror_deadline, ...})` acts only on the
+  # operation's current `step_deadline`.
+  #
+  # Technical depth: a conditional `receive ... after 0` on the operation's
+  # fresh reference makes the compiler reserve and bind a receive marker in
+  # every caller that creates the reference and clear it unused. Combined
+  # with this process's synchronous calls and alias replies, that marker
+  # bookkeeping crashes or spins the VM on OTP 26–29; see
+  # `receive_marker_test.exs`.
+  defp cancel_timer(timer, _operation_ref) do
     _ = Process.cancel_timer(timer, async: false, info: false)
-
-    receive do
-      {:mirror_deadline, ^operation_ref, _deadline} -> :ok
-    after
-      0 -> :ok
-    end
+    :ok
   end
 
   defp incarnation, do: :crypto.strong_rand_bytes(@incarnation_bytes)

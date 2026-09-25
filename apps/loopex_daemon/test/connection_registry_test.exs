@@ -2651,7 +2651,7 @@ defmodule LoopexDaemon.ConnectionRegistryTest do
     directory =
       Path.join(
         System.tmp_dir!(),
-        "loopex-registry-socket-#{Base.encode16(:crypto.strong_rand_bytes(6), case: :lower)}"
+        "loopex-registry-socket-#{Loopex.TestTmp.Daemon.token()}"
       )
 
     File.mkdir!(directory)

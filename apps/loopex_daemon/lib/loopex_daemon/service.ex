@@ -907,6 +907,13 @@ defmodule LoopexDaemon.Service do
   # owned exit or runtime monitor that classifies as fatal kills the helper and
   # returns that class; an exit that classifies as ignorable is consumed and
   # the wait continues. `until` is an absolute monotonic instant or `:infinity`.
+  #
+  # The helper's `DOWN` is matched by its pid, which only this monitor
+  # watches, never by the monitor reference: a fresh reference received on in
+  # a callee makes the compiler bind a receive marker here that this function
+  # never uses, and that bookkeeping, in a process that also makes
+  # synchronous calls and takes alias replies, crashes or spins the VM on
+  # OTP 26–29 (`receive_marker_test.exs`).
   defp responsive(state, fun, until) do
     {helper, monitor} = spawn_monitor(fn -> exit({:responded, fun.()}) end)
     await_responsive(Map.put(state, :quiesce_active, false), helper, monitor, until)
@@ -914,10 +921,10 @@ defmodule LoopexDaemon.Service do
 
   defp await_responsive(state, helper, monitor, until) do
     receive do
-      {:DOWN, ^monitor, :process, ^helper, {:responded, result}} ->
+      {:DOWN, _monitor, :process, ^helper, {:responded, result}} ->
         {:ok, result}
 
-      {:DOWN, ^monitor, :process, ^helper, _reason} ->
+      {:DOWN, _monitor, :process, ^helper, _reason} ->
         :unavailable
 
       {:quiesce_active, ^helper, active} ->
@@ -960,7 +967,14 @@ defmodule LoopexDaemon.Service do
   defp end_responsive(helper, monitor, result) do
     Logger.debug("loopex daemon stop wait ended without its result")
     Process.exit(helper, :kill)
-    Process.demonitor(monitor, [:flush])
+    Process.demonitor(monitor)
+
+    receive do
+      {:DOWN, _monitor, :process, ^helper, _reason} -> :ok
+    after
+      0 -> :ok
+    end
+
     result
   end
 
@@ -1236,9 +1250,7 @@ defmodule LoopexDaemon.Service do
   @spec await_requested_stop(pid(), (term() -> term()), integer()) ::
           :stopped | :stopped_late | {:component_exit, term()}
   def await_requested_stop(pid, stop, deadline) do
-    monitor = Process.monitor(pid)
-    helper = spawn(fn -> requested_stop(stop) end)
-    reason = await_stopped(pid, monitor, deadline)
+    {reason, helper} = await_stopped(pid, stop, deadline)
     Process.exit(helper, :kill)
 
     case reason do
@@ -1254,25 +1266,31 @@ defmodule LoopexDaemon.Service do
     _kind, _reason -> :ok
   end
 
-  defp await_stopped(pid, monitor, deadline) do
-    receive do
-      {:DOWN, ^monitor, :process, ^pid, reason} -> reason
-    after
-      remaining_ms(deadline) ->
-        Logger.debug("loopex daemon teardown deadline reached")
-        Process.exit(pid, :kill)
+  defp await_stopped(pid, stop, deadline) do
+    monitor = Process.monitor(pid)
+    helper = spawn(fn -> requested_stop(stop) end)
 
-        receive do
-          # A component that took the stop just as the deadline fell still
-          # stopped as asked.
-          {:DOWN, ^monitor, :process, ^pid, @owner_stop_reason} -> @owner_stop_reason
-          {:DOWN, ^monitor, :process, ^pid, _reason} -> :stopped_late
-        after
-          @stop_wait_ms ->
-            Process.demonitor(monitor, [:flush])
-            :stopped_late
-        end
-    end
+    reason =
+      receive do
+        {:DOWN, ^monitor, :process, ^pid, reason} -> reason
+      after
+        remaining_ms(deadline) ->
+          Logger.debug("loopex daemon teardown deadline reached")
+          Process.exit(pid, :kill)
+
+          receive do
+            # A component that took the stop just as the deadline fell still
+            # stopped as asked.
+            {:DOWN, ^monitor, :process, ^pid, @owner_stop_reason} -> @owner_stop_reason
+            {:DOWN, ^monitor, :process, ^pid, _reason} -> :stopped_late
+          after
+            @stop_wait_ms ->
+              Process.demonitor(monitor, [:flush])
+              :stopped_late
+          end
+      end
+
+    {reason, helper}
   end
 
   # Concept: the runtime tree is ended by a helper calling

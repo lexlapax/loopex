@@ -20,7 +20,12 @@ defmodule LoopexDaemon.ServiceLifecycleTest do
   end
 
   setup do
-    root = Path.join(System.tmp_dir!(), "ldl-#{System.unique_integer([:positive])}")
+    root =
+      Path.join(
+        System.tmp_dir!(),
+        "ldl-#{Loopex.TestTmp.Daemon.token()}"
+      )
+
     workspace = Path.join(root, "w")
     File.mkdir_p!(workspace)
     on_exit(fn -> File.rm_rf(root) end)
@@ -888,6 +893,62 @@ defmodule LoopexDaemon.ServiceLifecycleTest do
                    1_000
 
     assert :binary.match(:erlang.term_to_binary(failed_state), marker) == :nomatch
+  end
+
+  # Concept: a create replayed on a state root that an earlier daemon lifetime
+  # already created the session on is answered with the recorded result, and
+  # activates nothing: the session is dormant in this lifetime until a resume.
+  # This is the mechanism behind the maximum-population test's intermittent
+  # `session_dormant`: a crashed earlier run left its root behind under a
+  # reused name, so every create on it was such a replay.
+  #
+  # Technical depth: two daemons run in turn on one root. The second
+  # daemon's create of the same command answers `accepted` with the same
+  # session identity, and an attach to it is refused `session_dormant`.
+  @tag timeout: 90_000
+  test "a create replayed in a later daemon lifetime leaves its session dormant",
+       %{options: options} do
+    create = fn client ->
+      :ok =
+        send_frame(client, %{
+          "method" => "session.create",
+          "request_id" => "create",
+          "command_id" => Wire.encode_identity("replayed-create"),
+          "session_options" => %{}
+        })
+
+      assert [%{"status" => "accepted", "session_id" => session_id}] = receive_records(client, 1)
+      session_id
+    end
+
+    attach = fn client, session_id ->
+      :ok =
+        send_frame(client, %{
+          "method" => "session.attach",
+          "request_id" => "attach",
+          "session_id" => session_id
+        })
+
+      receive_records(client, 1)
+    end
+
+    first = start_daemon(options)
+    _ready = await_ready(first.output)
+    client = initialized(options[:socket_path])
+    session_id = create.(client)
+    assert [%{"type" => "snapshot"}] = attach.(client, session_id)
+    :socket.close(client)
+    send(first.sentinel, {:daemon_signal, first.owner_ref, :sigterm})
+    assert Task.await(first.task, 60_000) == 0
+
+    second = start_daemon(options)
+    _ready = await_ready(second.output)
+    client = initialized(options[:socket_path])
+    assert create.(client) == session_id
+    assert [%{"code" => "session_dormant"}] = attach.(client, session_id)
+    :socket.close(client)
+    send(second.sentinel, {:daemon_signal, second.owner_ref, :sigterm})
+    assert Task.await(second.task, 60_000) == 0
   end
 
   # Concept: two daemons started at the same moment on one root produce one

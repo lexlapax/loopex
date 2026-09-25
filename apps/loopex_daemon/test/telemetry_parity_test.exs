@@ -3,7 +3,12 @@ Code.require_file("support/daemon_socket_fixture.exs", __DIR__)
 # The shared provider fixture's runtime helper refuses to load without an
 # isolated home; this suite supplies a temporary one rather than a real one.
 unless System.get_env("LOOPEX_HOME") do
-  home = Path.join(System.tmp_dir!(), "ldt-home-#{System.unique_integer([:positive])}")
+  home =
+    Path.join(
+      System.tmp_dir!(),
+      "ldt-home-#{Loopex.TestTmp.Daemon.token()}"
+    )
+
   File.mkdir_p!(home)
   System.put_env("LOOPEX_HOME", home)
   System.at_exit(fn _status -> File.rm_rf(home) end)
@@ -351,7 +356,12 @@ defmodule LoopexDaemon.TelemetryParityTest do
   end
 
   defp workspace_root(prefix) do
-    root = Path.join(System.tmp_dir!(), "#{prefix}-#{System.unique_integer([:positive])}")
+    root =
+      Path.join(
+        System.tmp_dir!(),
+        "#{prefix}-#{Loopex.TestTmp.Daemon.token()}"
+      )
+
     File.mkdir_p!(Path.join(root, "w"))
     File.write!(Path.join([root, "w", "note.txt"]), "parity\n")
     on_exit(fn -> File.rm_rf(root) end)

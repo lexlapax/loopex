@@ -41,6 +41,7 @@ defmodule LoopexDaemon.Sentinel do
   """
   @spec run(keyword(), keyword()) :: non_neg_integer()
   def run(service_options, options \\ []) when is_list(service_options) and is_list(options) do
+    preload_modules()
     owner_ref = make_ref()
 
     case install(Keyword.get(options, :install_signals, true), owner_ref) do
@@ -53,6 +54,40 @@ defmodule LoopexDaemon.Sentinel do
         {:ok, status} = ExitStatus.fetch(:signal_install_failed)
         status
     end
+  end
+
+  # Concept: every module the daemon's processes run is loaded before any of
+  # them starts, so no daemon process loads code lazily while it serves.
+  #
+  # Technical depth: a lazily loaded module makes the calling process wait on
+  # the code server with a monitored call. In the collaboration owner that
+  # wait, beside its alias replies, is one of the three conditions under
+  # which the OTP 26–29 receive-marker defect crashes or spins the VM
+  # (`receive_marker_test.exs`). The daemon's own applications and those it
+  # composes are listed by name; their module lists come from their loaded
+  # application specifications, and `:code.ensure_modules_loaded/1` loads
+  # them in one batch. An application whose specification is not loaded is
+  # skipped.
+  @preloaded_applications [
+    :loopex_protocol,
+    :loopex_telemetry,
+    :loopex,
+    :loopex_store_local,
+    :loopex_executor_local,
+    :loopex_llm_reqllm,
+    :loopex_composition,
+    :loopex_daemon
+  ]
+
+  defp preload_modules do
+    modules =
+      for application <- @preloaded_applications,
+          {:ok, modules} <- [:application.get_key(application, :modules)],
+          module <- modules,
+          do: module
+
+    _ = :code.ensure_modules_loaded(modules)
+    :ok
   end
 
   defp supervise(service_options, options, owner_ref) do

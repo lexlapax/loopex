@@ -1,7 +1,12 @@
 # The core runtime helper refuses to load without an isolated home; this suite
 # supplies a temporary one rather than a real one.
 unless System.get_env("LOOPEX_HOME") do
-  home = Path.join(System.tmp_dir!(), "ldi-home-#{System.unique_integer([:positive])}")
+  home =
+    Path.join(
+      System.tmp_dir!(),
+      "ldi-home-#{Loopex.TestTmp.Daemon.token()}"
+    )
+
   File.mkdir_p!(home)
   System.put_env("LOOPEX_HOME", home)
   System.at_exit(fn _status -> File.rm_rf(home) end)

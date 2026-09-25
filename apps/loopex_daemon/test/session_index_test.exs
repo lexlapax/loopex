@@ -125,7 +125,7 @@ defmodule LoopexDaemon.SessionIndexTest do
     path =
       Path.join(
         System.tmp_dir!(),
-        "loopex-daemon-live-index-#{label}-#{Base.encode16(:crypto.strong_rand_bytes(6), case: :lower)}"
+        "loopex-daemon-live-index-#{label}-#{Loopex.TestTmp.Daemon.token()}"
       )
 
     File.mkdir!(path)

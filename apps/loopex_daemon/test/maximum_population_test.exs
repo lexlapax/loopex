@@ -32,9 +32,18 @@ defmodule LoopexDaemon.MaximumPopulationTest do
   @tag :long_bound
   @tag timeout: 900_000
   test "an orderly stop at the full connection and attachment population" do
-    root = Path.join(System.tmp_dir!(), "lmp-#{System.unique_integer([:positive])}")
+    root =
+      Path.join(
+        System.tmp_dir!(),
+        "lmp-#{Loopex.TestTmp.Daemon.token()}"
+      )
+
+    # A fresh, never-reused root: a crashed earlier run can leave its Store
+    # behind, and a create replayed on it is answered historically, leaving the
+    # session dormant in this daemon lifetime.
+    File.mkdir!(root)
     workspace = Path.join(root, "w")
-    File.mkdir_p!(workspace)
+    File.mkdir!(workspace)
     on_exit(fn -> File.rm_rf(root) end)
     socket = Path.join([root, "s", "daemon", "d.sock"])
 
@@ -166,9 +175,18 @@ defmodule LoopexDaemon.MaximumPopulationTest do
   @tag :long_bound
   @tag timeout: 240_000
   test "T15: every step answers within its instant at the full population" do
-    root = Path.join(System.tmp_dir!(), "lms-#{System.unique_integer([:positive])}")
+    root =
+      Path.join(
+        System.tmp_dir!(),
+        "lms-#{Loopex.TestTmp.Daemon.token()}"
+      )
+
+    # A fresh, never-reused root: a crashed earlier run can leave its Store
+    # behind, and a create replayed on it is answered historically, leaving the
+    # session dormant in this daemon lifetime.
+    File.mkdir!(root)
     workspace = Path.join(root, "w")
-    File.mkdir_p!(workspace)
+    File.mkdir!(workspace)
     on_exit(fn -> File.rm_rf(root) end)
     socket = Path.join([root, "s", "daemon", "d.sock"])
 
@@ -234,15 +252,19 @@ defmodule LoopexDaemon.MaximumPopulationTest do
     on_exit(fn -> Enum.each(clients, &:socket.close/1) end)
 
     # Client i is attached to session rem(i, 8), and a connection may act only
-    # on its own session. Holders (clients 0-7) grant sessions 0-5 first. The
-    # bursts come only from the other clients of sessions whose lease stays
-    # held throughout, so every burst acquire is refused and no burst acquire
-    # contends for a free lease.
+    # on its own session. Holders (clients 0-5) are granted sessions 0-5 first.
+    # Burst one adds, in its middle, all 64 clients of each of sessions 6 and
+    # 7 acquiring that unheld session at once: exactly one of each 64 is
+    # granted and the rest are refused `control_held`.
     session_of = fn index -> rem(index, @sessions) end
     holder = &Enum.at(clients, &1)
     session = &Enum.at(sessions, &1)
     others = clients |> Enum.with_index() |> Enum.drop(@sessions)
     in_sessions = fn range -> Enum.filter(others, fn {_c, i} -> session_of.(i) in range end) end
+
+    all_in = fn range ->
+      clients |> Enum.with_index() |> Enum.filter(fn {_c, i} -> session_of.(i) in range end)
+    end
 
     grant = fn index ->
       case reply(holder.(index), "grant") do
@@ -265,11 +287,13 @@ defmodule LoopexDaemon.MaximumPopulationTest do
       end)
     end
 
-    # Burst one: the 252 other clients of sessions 2-5, with the grants of
-    # sessions 6 and 7 and the releases of sessions 0 and 1 in its middle.
+    # Burst one: the 252 other clients of sessions 2-5, with the 128
+    # contended acquires of sessions 6 and 7 and the releases of sessions 0
+    # and 1 in its middle.
     {first_half, second_half} = Enum.split(in_sessions.(2..5), 126)
+    contended = all_in.(6..7)
     burst.(first_half, "burst-1")
-    Enum.each(6..7, &send_acquire(holder.(&1), session.(&1), "grant"))
+    burst.(contended, "contended")
     # A session whose grant went missing has nothing to release; that is
     # recorded and judged after the distribution.
     released = Enum.filter(0..1, &Map.has_key?(epochs, &1))
@@ -279,7 +303,9 @@ defmodule LoopexDaemon.MaximumPopulationTest do
     burst_one =
       Enum.map(first_half ++ second_half, fn {client, _i} -> reply(client, "burst-1") end)
 
-    late = Enum.map(6..7, grant)
+    contention =
+      Enum.map(contended, fn {client, i} -> {session_of.(i), reply(client, "contended")} end)
+
     releases = Enum.map(released, &reply(holder.(&1), "release"))
 
     # Burst two: the 252 other clients of sessions 4-7, with the lease owners
@@ -335,9 +361,31 @@ defmodule LoopexDaemon.MaximumPopulationTest do
     end
 
     # Then the workload's own replies and the orderly stop.
-    assert Enum.all?(early ++ late, &match?({:ok, _epoch}, &1)), inspect(early ++ late)
+    assert Enum.all?(early, &match?({:ok, _epoch}, &1)), inspect(early)
     held? = &match?(%{"type" => "error", "code" => "control_held"}, &1)
-    assert Enum.all?(burst_one ++ burst_two, held?)
+    granted? = &match?(%{"type" => "result", "result" => %{"writer_epoch" => _}}, &1)
+    assert Enum.all?(burst_one, held?)
+
+    for index <- 6..7 do
+      replies = for {^index, record} <- contention, do: record
+      assert length(replies) == 64
+      assert Enum.count(replies, granted?) == 1, inspect(Enum.frequencies(replies))
+      assert Enum.count(replies, held?) == 63
+    end
+
+    # In burst two a contended session's winner, when it is one of the other
+    # clients, renews its own lease.
+    {two_held, two_contended} =
+      Enum.split_with(Enum.zip(in_sessions.(4..7), burst_two), fn {{_c, i}, _r} ->
+        session_of.(i) in 4..5
+      end)
+
+    assert Enum.all?(two_held, fn {_client, record} -> held?.(record) end)
+
+    assert Enum.all?(two_contended, fn {_client, record} ->
+             held?.(record) or granted?.(record)
+           end)
+
     assert length(releases) == 2 and Enum.all?(releases, &match?(%{"type" => "result"}, &1))
     assert Enum.all?(losses, owner_lost?)
     assert status == {:ok, 0}

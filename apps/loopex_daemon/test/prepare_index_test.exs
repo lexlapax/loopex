@@ -7,7 +7,12 @@ defmodule LoopexDaemon.PrepareIndexTest do
   alias LoopexDaemon.SessionIndex.Storage
 
   setup do
-    root = Path.join(System.tmp_dir!(), "lpi-#{System.unique_integer([:positive])}")
+    root =
+      Path.join(
+        System.tmp_dir!(),
+        "lpi-#{Loopex.TestTmp.Daemon.token()}"
+      )
+
     File.mkdir_p!(root)
     on_exit(fn -> File.rm_rf(root) end)
     %{root: root, uid: File.stat!(root).uid, daemon: Path.join(root, "daemon")}

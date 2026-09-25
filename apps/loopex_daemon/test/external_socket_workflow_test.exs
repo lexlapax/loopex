@@ -3,7 +3,12 @@ Code.require_file("support/daemon_socket_fixture.exs", __DIR__)
 # The shared provider fixture's runtime helper refuses to load without an
 # isolated home; this suite supplies a temporary one rather than a real one.
 unless System.get_env("LOOPEX_HOME") do
-  home = Path.join(System.tmp_dir!(), "ldx-home-#{System.unique_integer([:positive])}")
+  home =
+    Path.join(
+      System.tmp_dir!(),
+      "ldx-home-#{Loopex.TestTmp.Daemon.token()}"
+    )
+
   File.mkdir_p!(home)
   System.put_env("LOOPEX_HOME", home)
   System.at_exit(fn _status -> File.rm_rf(home) end)
@@ -41,7 +46,13 @@ defmodule LoopexDaemon.ExternalSocketWorkflowTest do
   @tag timeout: 180_000
   test "a Node observer takes over from a killed controller and aborts its run" do
     node = System.find_executable("node") || flunk("Node is unavailable on this host")
-    root = Path.join(System.tmp_dir!(), "ldx-#{System.unique_integer([:positive])}")
+
+    root =
+      Path.join(
+        System.tmp_dir!(),
+        "ldx-#{Loopex.TestTmp.Daemon.token()}"
+      )
+
     workspace = Path.join(root, "w")
     File.mkdir_p!(workspace)
     on_exit(fn -> File.rm_rf(root) end)
@@ -114,7 +125,12 @@ defmodule LoopexDaemon.ExternalSocketWorkflowTest do
   # as transient progress for that session, before the durable record of it.
   @tag timeout: 120_000
   test "an attached client receives the session's model progress before its durable answer" do
-    root = Path.join(System.tmp_dir!(), "ldp-#{System.unique_integer([:positive])}")
+    root =
+      Path.join(
+        System.tmp_dir!(),
+        "ldp-#{Loopex.TestTmp.Daemon.token()}"
+      )
+
     workspace = Path.join(root, "w")
     File.mkdir_p!(workspace)
     on_exit(fn -> File.rm_rf(root) end)

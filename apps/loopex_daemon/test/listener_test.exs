@@ -66,7 +66,12 @@ defmodule LoopexDaemon.ListenerTest do
   # initialize frame gets no reply, the connection closes, the registry
   # returns to empty and the listener keeps accepting.
   test "the real peer check closes a valid but mismatched credential before initialize" do
-    probe = Path.join(System.tmp_dir!(), "lpc-#{System.unique_integer([:positive])}")
+    probe =
+      Path.join(
+        System.tmp_dir!(),
+        "lpc-#{Loopex.TestTmp.Daemon.token()}"
+      )
+
     File.write!(probe, "")
     uid = File.stat!(probe).uid
     File.rm!(probe)
@@ -479,7 +484,7 @@ defmodule LoopexDaemon.ListenerTest do
     directory =
       Path.join(
         System.tmp_dir!(),
-        "loopex-listener-#{Base.encode16(:crypto.strong_rand_bytes(6), case: :lower)}"
+        "loopex-listener-#{Loopex.TestTmp.Daemon.token()}"
       )
 
     File.mkdir!(directory)

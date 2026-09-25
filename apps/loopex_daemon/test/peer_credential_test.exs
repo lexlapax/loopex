@@ -103,7 +103,7 @@ defmodule LoopexDaemon.PeerCredentialTest do
     path =
       Path.join(
         System.tmp_dir!(),
-        "loopex-daemon-peer-#{Base.encode16(:crypto.strong_rand_bytes(6), case: :lower)}"
+        "loopex-daemon-peer-#{Loopex.TestTmp.Daemon.token()}"
       )
 
     File.mkdir!(path)
