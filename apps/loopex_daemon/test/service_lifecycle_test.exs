@@ -1478,9 +1478,12 @@ defmodule LoopexDaemon.ServiceLifecycleTest do
     assert await_quiesce_wait(daemon.owner)
     Process.exit(children.control, :kill)
 
+    # The owner selects `drain_failed` only after finding the runtime root
+    # alive at the moment it classifies the loss (`runtime_lost` otherwise), so
+    # the status is the root-survival witness. The root's liveness after the
+    # daemon exits is not: it is linked to the stopping owner.
     {:ok, drain_failed} = LoopexDaemon.ExitStatus.fetch(:drain_failed)
     assert Task.await(daemon.task, 60_000) == drain_failed
-    assert Process.alive?(owner_state.edges.runtime_supervisor)
   end
 
   # Concept: the Store's stop is its own fixed 30 s phase; a Store still
