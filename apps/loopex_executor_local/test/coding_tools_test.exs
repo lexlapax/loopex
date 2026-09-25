@@ -4573,16 +4573,17 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
 
     # Four since ADR 0016's shared retention deadline: the job's cleanup episode,
     # a cancellation's own episode, the cooperative share inside both, and the
-    # one retention allowance every phase of a settlement draws on. Five since
+    # one retention allowance every phase of a settlement draws on. Six since
     # probes were contained inside the episode that bounds them: the instant
-    # `answer_within/3` opens for a caller that holds only a relative bound. A
-    # cleanup helper's KILL confirmation now waits until its episode's own
-    # instant instead of opening a shorter one, and an owner's probe opens no
-    # instant of its own; it is handed the episode's.
+    # `answer_within/3` opens for a caller that holds only a relative bound, and
+    # the short reaping wait of a cleanup helper whose KILL could not be sent,
+    # cut to what remains of its instant. A delivered KILL's confirmation waits
+    # until the episode's own instant and opens none, and an owner's probe
+    # opens no instant of its own; it is handed the episode's.
     # The helper's waits used to be measured on the same monotonic clock
     # outside this domain, which is how a probe's confirmation could outlast
     # the episode that started it.
-    assert length(instants) == 5,
+    assert length(instants) == 6,
            "the cleanup domain now opens #{length(instants)} instants against its own base; each " <>
              "one has to take that base, so a new one means this case needs to have been told " <>
              "about it"

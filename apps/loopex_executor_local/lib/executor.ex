@@ -6708,16 +6708,22 @@ defmodule Loopex.Executor.Local do
   # Concept: a real answer is kept when its guard is slow to confirm the KILL,
   # as long as the confirmation lands inside the probe's own episode.
   #
-  # Technical depth: the confirmation waits until the episode's `until`, so it
-  # can never carry the probe past it. It was cut to a fixed 250 ms, so a guard
-  # stalled for longer on a loaded host turned an answer that arrived with
-  # nearly the whole bound unspent into `:no_answer`. On the abandon and
-  # timeout paths what remains is already about the reserved allowance, so
-  # those paths are unchanged.
+  # Technical depth: when a KILL was delivered to the live guard, the
+  # confirmation waits until the episode's `until`, so it can never carry the
+  # probe past it. It was cut to a fixed 250 ms, so a guard stalled for longer
+  # on a loaded host turned an answer that arrived with nearly the whole bound
+  # unspent into `:no_answer`. When no KILL could be sent -- a helper that
+  # failed to start, or a guard already gone -- the verdict is `:error`
+  # whatever the wait observes, so the wait keeps the fixed `@helper_signal_ms`
+  # cut to what remains and only reaps the Port.
   defp kill_guarded_helper(port, collector, limit, {until, _bound, _probe} = episode) do
     {guard, sent} = kill_launch_guard(collector.guard, episode)
     collector = %{collector | guard: guard}
-    stop = until
+
+    stop =
+      if sent,
+        do: until,
+        else: cleanup_now_ms() + min(@helper_signal_ms, cleanup_remaining(until))
 
     case await_helper_guard_exit(port, collector, stop, limit, false) do
       {finished, true, false} when sent -> finish_guarded_helper(finished, limit)
