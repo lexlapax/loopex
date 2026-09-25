@@ -3312,12 +3312,13 @@ relay because the relay is what holds their tickets, and stopping it first
 would discard a ticket an owner could still be waiting on. After every
 connection and request worker is gone, the owner/relay mailbox barrier freezes
 their exact pid/incarnation set and forbids later starts or mirror installs.
-That set is stopped as **one collective sweep, not one at a time**, against the teardown deadline:
-up to 512 of them exist, and 512 sequential stops inside one teardown
-deadline is arithmetic that does not work. The sweep — every stop sent at once, one
-wait for all of the exits, a kill for whatever is left at the phase's end —
-and the disposition of a lease owner killed that way are written out with
-the teardown below. The
+That set is ended **all at once, not one at a time**: up to 512 of them
+exist, and 512 sequential stops inside one teardown deadline is arithmetic
+that does not work. The collaboration owner kills each lease owner that owns
+an unfinished barrier operation at the freeze, and kills every remaining one
+in its own `terminate/2` together with the registry and the relay; the
+disposition of a lease owner killed that way is written out with the
+teardown below. The
 Store is moved to the end because its `terminate/2` invokes the best-effort
 writer-marker release, and the live Store plus marker must outlive every
 operation the owner can end;
@@ -3367,18 +3368,22 @@ loss, classified by that component's running class, and ends the orderly stop
 as a fail-stop with the components not yet stopped. Then, for the step's
 component:
 
-1. The owner unlinks the component and calls `await_requested_stop/3`, which
-   monitors it and then spawns an unlinked helper that asks it to stop with
-   the owner's own stop reason, `{:shutdown, :loopex_owner_stop}`:
-   `GenServer.stop(pid, reason, remaining(deadline))`, or `Supervisor.stop/3`
-   for the runtime tree. The deadline is the shared teardown deadline, or the
-   Store's own fixed phase for the Store. Whatever that call raises, exits or
-   returns ends in the helper, and the owner never reads it.
+1. The owner unlinks the component and calls `await_requested_stop/2`, which
+   monitors it and then itself sends it the `sys` terminate request carrying
+   the owner's own stop reason, `{:shutdown, :loopex_owner_stop}` — the
+   message `GenServer.stop/3` and `Supervisor.stop/3` send, sent here by the
+   owner rather than by a helper. Signals from one sender arrive in order, so
+   the monitor is always in place before the component can act on the
+   request, and the `DOWN` reason is the component's real exit reason. (A stop
+   sent from a second process could overtake the monitor and turn a clean
+   stop into `:noproc`; that race was observed and is why no helper is used.)
+   The deadline is the shared teardown deadline, or the Store's own fixed
+   phase for the Store. Nothing replies to the terminate request; the
+   component's exit is its only answer.
 2. The owner waits for the component's `DOWN` until the absolute deadline.
    A component still alive then is killed, and the step is `:stopped_late`
    unless the `DOWN` that follows still carries the owner's stop reason — a
    component that finished the stop as the deadline fell stopped as asked.
-   The helper is then killed, so nothing it does outlives the step.
 3. **The monitor's `DOWN` reason alone decides the step.** Exactly the
    owner's stop reason is a clean stop. Any other reason — `:noproc` for a
    component already gone, `:normal` for one that ended on its own before or
@@ -3388,29 +3393,29 @@ component:
    runtime tree that did is `runtime_lost`. A late kill is likewise the
    component's running class. Because the reason is unique to the owner,
    `proc_lib:stop/3` counting a matching exit as success no longer lets a
-   component's own `:normal` exit pass as the stop, and a helper whose stop
-   call times out or raises no longer turns a stop that ended in time into a
-   loss.
+   component's own `:normal` exit pass as the stop.
 4. The component's `EXIT` on the link removed in step 1 is flushed, so it is
    never read later as a loss.
 
 Every component ignores its stop reason in `terminate/2`, and a
 `{:shutdown, _}` exit is not logged as an error by `GenServer` or
-`Supervisor`. The first failing step ends the teardown; the fail-stop that
-follows stops the executor and a live Store with the same helper, reason and
-deadline, where exits are cleanup only because the first fatal class is
-already latched. `service_lifecycle_test.exs` pins the rule: only the owner's
-stop reason is clean, an absent component is not, a component that answers
-the stop request by exiting `:normal` itself is its own exit, an independent
-`:normal` exit racing the request is its own exit, and a stop that ends within
-its deadline is clean whether its request timed out first or it ended just
-before the deadline.
+`Supervisor`. The first failing step ends the orderly teardown. The fail-stop that
+follows (`fail_stop/2`) kills the listener and the relay without awaiting
+them, stops only the executor (until the latched instant plus 5 s) and a live
+Store (within its own bound) with the same terminate request and reason, and
+leaves every other process to the VM halt; its exits are cleanup only because
+the first fatal class is already latched. `service_lifecycle_test.exs` pins
+the rule: only the owner's stop reason is clean, an absent component is not,
+a component that answers the stop request by exiting `:normal` itself is its
+own exit, and a stop that ends within its deadline — including one that ends
+just before it — is clean.
 
 **The probe.** A trapping `GenServer` whose `terminate/2` takes longer than
 the timeout passed to `GenServer.stop/3`, run at both toolchain pairs. The
 small values are not session cleanup grace: they model
-`remaining(teardown_deadline)` near the shared stop clock's end, which is the
-exact argument the adopted driver passes:
+`remaining(teardown_deadline)` near the shared stop clock's end, the argument
+an earlier driver passed to `GenServer.stop/3`. The table is kept as the
+reason the shipped owner no longer calls `GenServer.stop/3` at all:
 
 | stop timeout | `terminate/2` | what `GenServer.stop/3` did | `Process.alive?` right after | the link exit the owner then got |
 | --- | --- | --- | --- | --- |
@@ -3440,8 +3445,7 @@ inline design:
 for its own component's `DOWN`; an exit of any other
 owned component that arrives meanwhile stays queued on its link and is
 classified by the zero-wait loss check before the next step, which ends the
-orderly stop with that component's class. The helper sends the owner
-nothing and is killed when the step ends, so no helper outlives it. Client
+orderly stop with that component's class. No helper process takes part in a step. Client
 frames and unrelated messages may wait, but lifecycle signals do
 not. Immediately before the first
 step-3 notification the owner drains already queued lifecycle signals once
@@ -3453,19 +3457,20 @@ a later teardown failure still controls `stderr` and the non-zero exit.
 
 Two consequences the sequences below depend on, stated here once:
 
-- **A class recorded during a stop does not abort the sequence.** The owner
-  finishes stopping what remains — the components it has not reached still own
-  things worth ending — and then halts with that class instead of `0`. The
-  first class recorded wins and its latch signal has already armed the
-  sentinel; a later one does not overwrite it, so the
+- **A class recorded during a stop ends the orderly sequence.** The orderly
+  teardown halts at that step (`orderly_teardown/2` returns the class) and the
+  fail-stop above takes over: it stops the executor and a live Store and
+  leaves every other process to the VM halt, then exits with that class
+  instead of `0`. The first class recorded wins and its latch signal has
+  already armed the sentinel; a later one does not overwrite it, so the
   operator gets the reason the daemon went down for rather than the last thing
   that happened on the way out.
 - **"Already dead" is something the owner learns, not something it knows.**
   A component is known dead when its exit has been consumed or classified. A
   component that died before the sequence began was classified then and its
-  step is skipped; one that dies during the sequence is found at its own step,
-  where the helper's call fails in whatever way it fails — which the owner
-  never sees — and the wait reads the exit that is already queued. The owner
+  step is skipped; one that dies during the sequence is found by the zero-wait loss check
+  before its step, or at its own step as a `DOWN` reason other than the
+  owner's stop reason. The owner
   never assumes a component is gone from a class recorded earlier in the same
   sequence.
 
@@ -4201,40 +4206,17 @@ Store operation. A forced witness pauses each branch at the Store boundary and
 proves those two orders. Attach spans two processes and therefore uses the
 separate pending-reservation cut specified below.
 
-**The teardown stops the lease owners as a collective sweep, not one at a time.**
-Up to 512 of them exist, and stopping them in sequence inside one teardown
-deadline was arithmetic nobody did: the owner spawns one stop helper **per lease owner, all
-at once**, then waits in **one** loop until every one of those pids has
-produced an exit on the owner's own link — the same link it already holds, so
-the exits are `{:EXIT, pid, reason}` and not monitor `DOWN`s — **and** every
-monitored helper has produced its exact `DOWN`. The owner retains the injective
-`owner_pid -> {helper_pid, helper_ref}` map and the reverse helper-reference
-map. A lease-owner exit first makes it kill that owner's still-live helper and
-keep both charges until the helper `DOWN`; a helper `DOWN` first removes only
-the helper charge while the owner remains awaited. At the phase deadline the
-owner latches `drain_failed`, sends untrappable `:kill` to every remaining
-lease owner and helper at once, and consumes every exact owner exit and helper
-`DOWN` before continuing. Killing a helper at that point cannot lose a stop:
-the target is killed independently by the same deadline path. The forced
-witnesses cover owner-exit-first, helper-DOWN-first and deadline orders at the
-maximum population, return both populations to baseline, and leave no helper
-`DOWN` for the next teardown step.
-
-**Two rules bend exactly here, and only here.** The stop rule consumes one
-component's requested exit elsewhere; for this step it covers the **set** of
-lease-owner pids.
-And the reason rule bends with it: for a pid in that set **every** reason is
-consumed, not only the three. That is not an exception to classification but
-a consequence of the fatal map — **a lease owner has no daemon exit class at
-all**, its death being session-scoped, so there is nothing for a non-`:normal`
-reason to be classified *as*. Its session-scoped handling is a no-op here
-because step 3 has already closed every connection, so there is no controller
-attachment to close and no `control_owner_lost` to send. An earlier revision
-left the general rule in place over this step, which would have classified a
-lease owner's crash during the sweep into a class the map does not contain. And the two selective receives elsewhere match one pid; here the
-loop matches **any** pid in the set and removes it, which is the same
-discipline over a set rather than a singleton. Nothing else in the sequence
-sweeps, so nothing else needs either form.
+**Lease owners are ended by the collaboration owner, never swept by the
+service owner.** At the relay freeze, each lease owner that owns an unfinished
+barrier operation is killed by the collaboration owner (`shutdown_actor`,
+recorded so its exit is expected), and its operation is completed through the
+ordinary lost-owner path. Any lease owner still alive when the collaboration
+owner stops is killed in that owner's `terminate/2`, together with the
+registry and the relay, before the service owner's collaboration step
+observes the collaboration owner's own exit. No stop helper is spawned for a
+lease owner, and a lease owner has no daemon exit class — its death is
+session-scoped, and by then every connection has been closed, so there is no
+controller attachment to close and no `control_owner_lost` to send.
 
 The disposition of a killed lease owner is
 stated: it loses nothing durable — it holds a lease
@@ -4284,7 +4266,7 @@ named a number and derived an operator bound from it, which the maintainer
 withdrew with the rest of the arithmetic. What this plan fixes is the shape:
 **one deadline, `teardown_ms`, covering every non-Store action**. Its measured
 selection includes a healthy seal of the hard maximum 16,384 relay tasks, the
-512-connection collective close and retirement barrier, the lease-owner sweep,
+512-connection collective close and retirement barrier, the lease-owner kills,
 runtime stop/kill and edge cleanup on both toolchain pairs. Notification writes
 remain one attempt into an existing buffer and closes remain closes. The figure
 the implementation settles on, with the maximum-population timing evidence, is
@@ -4317,9 +4299,10 @@ is the deferred relay seal. It then covers every remaining non-Store action: the
 stop records, the connection closes, the relay's final mailbox barrier, and
 every stop from the lease owners through the registry. The listener was already
 killed and reaped under the transport-cut deadline and is not charged twice.
-Every helper under it is given `remaining(teardown_deadline)` and nothing
-else — no component has a budget of its own to spend — and the collective
-sweep above is what makes 512 lease owners fit inside it.
+Every stop under it waits `remaining(teardown_deadline)` and nothing
+else — no component has a budget of its own to spend — and lease owners cost
+it nothing, because the collaboration owner kills them rather than stopping
+them one at a time.
 
 **`budget_ms` is not knowable from the daemon's flags alone**, and the
 operator page says so rather than implying a constant. The composed
@@ -4715,9 +4698,10 @@ No timeout infers a payload or reconstructs one from the daemon owner's maps.
    executor first means the lease's death is observed by nobody, which is
    what an orderly stop wants.
 
-   **Each composed process stop through the Store uses a helper calling
-   `GenServer.stop(pid, :normal, bound)`, with the owner waiting on the
-   component's own link** — the same rule as step 5. The executor, workspace
+   **Each composed process stop through the Store uses the stop rule above:
+   the owner monitors the component, sends it the `sys` terminate request
+   with the owner's stop reason itself, and waits on that monitor** — the
+   same rule as step 5. The executor, workspace
    lease, transfers owner and Store are `GenServer`s
    (`apps/loopex_executor_local/lib/executor.ex:22`, `workspace_lease.ex:15`, `transfers.ex:26`,
    `local.ex:55`), so the same call fits those four. The later placement helper
@@ -5892,10 +5876,9 @@ unique status, starts the unawaited diagnostic helper, and owns the absolute
    accepts and admissions.
 3. **Stop the executor** — on every class but `executor_lost`, where it is
    the component that already died — under the same discipline as every other
-   stop: a monitored helper calling
-   `GenServer.stop(pid, :normal, remaining(deadline))`, the owner waiting on
-   its own link until the earlier of the executor deadline and the global
-   watchdog, killing on expiry. The listener/relay kills and registry message
+   stop: the owner monitors it, sends the `sys` terminate request with its
+   stop reason itself, and waits on that monitor until the earlier of the
+   executor deadline and the global watchdog, killing on expiry. The listener/relay kills and registry message
    add no awaited phase. This is not tidiness: the executor is
    the one linked process whose work reaches outside the VM, and stopping it
    is what tells its Port-owning workers to terminate the captured process
@@ -6295,8 +6278,9 @@ workspace lease, transfers where it exists — then the tracing capability,
   class; a placement failure with no earlier class is `placement_lock_failed`.
 
 Each of those stops is the same call and the same discipline as a shutdown
-stop: a monitored helper running `GenServer.stop(pid, :normal, …)`, the owner
-waiting on its own link against **one shared teardown deadline** and killing
+stop: the owner monitoring the component and sending it the `sys` terminate
+request with its stop reason itself, waiting on that monitor against **one
+shared teardown deadline** and killing
 on expiry, and — where a Store pid exists — **the same fixed 30 s phase** the orderly
 path gives it, for the same reason: this is the stop that attempts marker release,
 and a failed start that killed the Store mid-release would leave exactly the
@@ -6392,19 +6376,14 @@ children, a pid's liveness, a socket's EOF, or the daemon's own `stderr`.
   class in it**. Stopping every linked process deliberately produces an exit
   from each, and every one of them must be consumed rather than classified.
   (Real process.)
-- **A real failure during an orderly stop is still classified, and the
-  sequence still finishes.** The Store is made to fail while the listener is
-  being stopped. The case asserts three things, because the second and third
-  are what an earlier draft would have failed: the daemon exits with
-  `store_lost` rather than `operator_stop`, since the Store is not the
-  component being stopped and the operator is owed the reason it
-  actually went down for; **the sequence runs to its end**, reaching the
-  Store's own step — where the helper's stop meets `noproc` without reaching
-  the owner, while the owner consumes the already-queued Store exit — then
-  leaving the socket pathname; and the class reaches `stderr` with a non-zero exit
-  rather than the owner dying of `noproc` with no status, no message and a
-  socket file left behind. A second daemon opens the same root immediately
-  afterwards, which is what proves the path completed.
+- **A real failure during an orderly stop is still classified.** The Store
+  is killed the moment the collaboration owner is down, after the drain's
+  final check and before the Store's own step. The daemon exits `store_lost`,
+  never `0`: the Store is not the component being stopped, and the operator is
+  owed the reason the daemon actually went down for. The orderly sequence
+  halts at that class and the fail-stop takes over, stopping the executor and
+  leaving the rest to the VM halt (`service_lifecycle_test.exs`, "a Store lost
+  during the orderly teardown ends the stop as store_lost, not success").
 - **The fence is a Store fence, proved against a transaction in flight.**
   This is the case a terminated coordinator alone would fail. A session's
   terminal transaction is **paused inside the Store, before linearization**,
@@ -6895,7 +6874,7 @@ children, a pid's liveness, a socket's EOF, or the daemon's own `stderr`.
   residual follows stale-writer recovery.
 - **The stop timeout is exercised, not assumed.** A session is made to hold
   the runtime's teardown past the shared teardown deadline. The case asserts the
-  owner **survives** rather than dying of whatever the stop did to the helper,
+  owner **survives** rather than dying of a stop call's own timeout,
   latches `runtime_lost`, kills and reaps the runtime supervisor, still reaches
   the Store stop — the step a stop called inline would skip — and exits with
   exact status `104`, never `0`.
@@ -6907,25 +6886,12 @@ children, a pid's liveness, a socket's EOF, or the daemon's own `stderr`.
   ADR 0031's stale-marker rule: reclaim only when the recorded holder is proved
   dead, refuse when it is live or unverifiable. This is distinct from the
   healthy-Store orderly witness that exits `0` and reopens immediately.
-- **Zero and one millisecond remaining on the teardown clock exercise the
-  probe's real call path.** One case reaches the exact deadline and proves
-  `remaining(deadline) == 0` takes the immediate timeout branch without a
-  negative `after`, owner death or `owner_lost 109`. A second case is
-  controlled so a component stop receives exactly
-  `remaining(deadline) == 1`; its `terminate/2` is held for 50 ms. The helper
-  raises `ErlangError`/`:timeout_value`, but the owner survives, reaches the
-  absolute deadline, pre-latches that component's fatal class, kills and reaps
-  it, continues to the Store phase and exits with the class's non-zero status.
-  A paired zero-delay termination exits `:normal` before the deadline and
-  permits orderly status `0`. This proves helper outcome never classifies the
-  component and a deadline kill never becomes a false success.
-- **Target exit before helper `DOWN` leaves no helper behind.** The target's
-  `terminate/2` is held while the monitored stop helper is suspended; releasing
-  the target queues its linked `EXIT` while the helper cannot finish. The owner
-  consumes that target exit, kills and reaps the exact helper, and only then
-  starts the next component's helper. The paired timeout-kill order does the
-  same. Both cases assert one helper at a time, a return to baseline, and no
-  stale helper `DOWN` in the next stop.
+- **A stop at the deadline edge is decided by the exit reason alone.** A
+  component whose `terminate/2` runs longer than the time left is killed at
+  the absolute deadline and classified by its running class; one whose stop
+  ends just before the deadline is clean. There is no stop call whose own
+  timeout could raise or be misread, because the owner sends the terminate
+  request itself (`service_lifecycle_test.exs`, the stop-rule cases).
 - **Cleanup grace 1 ms exercises the drain clock, not component teardown.** A
   daemon composed with `cleanup_grace_ms: 1` — the smallest admitted value,
   since `0` is refused with `cleanup_grace_invalid` — has active in-flight work
@@ -7215,7 +7181,6 @@ linked and daemon-fatal, so it appears here rather than in the dynamic table.
 | **Request workers**, one per dispatched request including lease operations, reads and transfers | Each first monitors its connection incarnation and acknowledges readiness. The connection then binds it and its monitor to the relay origin or lightweight permit before sending a descriptor or `go`. The connection separately monitors it. Mutation workers wait and never race independent calls into the lease owner | At most ADR 0023's **32 in-flight per occupied connection** | Before relay binding, parent `DOWN` ends the worker. Afterwards relay connection `DOWN` kills and reaps every nonterminal queued or executing worker, including one blocked in an infinite call, and selects one winning disposition. An origin with no compensating work may terminalize immediately; provisional acquire cleanup and release cancellation remain `settling(connection_lost, op_ref)` through their exact acknowledgement, while promotion retires the waiting worker and retains its relay task. Only exact settlement terminalizes the origin or permit, so no capacity charge leaks |
 | **Holder-cleanup workers**, one per closing live connection | Connection registry, monitored and keyed by `{connection_incarnation, cleanup_ref}` | At most 512, one per closing accepted slot | Exact acknowledgement sets `holder_cleanup_acked`; only the exact later normal `DOWN` sets `cleanup_worker_reaped`. Stale messages are ignored. Abnormal exit, normal exit without acknowledgement, or acknowledgement without normal `DOWN` by the bound is fatal `runtime_lost`, and the slot is never reused. Step 3 kills and reaps survivors at its deadline before fail-stop |
 | **Daemon quiesce caller** | Daemon owner, unlinked and monitored, only after the admission wait | Exactly one per orderly stop; it owns the one `Loopex.Runtime.quiesce/1` call and its parameterized absolute drain/fence deadlines | An earlier component loss terminates and reaps it while preserving that component's fatal class. Exact quiesce error, helper exit without the matching result, or helper result loss with no earlier component class becomes `drain_failed`; it never turns into orderly success |
-| **Stop helpers**, one per stop | Daemon owner, `spawn_monitor` | One at a time outside the teardown's lease-owner sweep; a target exit first makes the owner kill and reap that helper before starting another. The collective sweep starts at most 512, retains each charge through exact `DOWN`, and after an owner exit kills that owner's remaining helper; its deadline kills every remaining owner and helper together before awaiting all exact exits and `DOWN`s | Its reason never classifies the component. Exact `DOWN` only releases the helper population charge |
 | **Placement-release helper** | Daemon owner after Store stop, or the failed-start/offline command owner after its Store stop; unlinked and monitored with the exact acquisition handle | At most one, under `placement_release_ms: 5_000` | Exact `:ok` plus normal `DOWN` completes only the attempt. Malformed result or abnormal death selects `placement_lock_failed`; deadline hard-halts without awaiting it, and verified stale-owner recovery handles any complete residual |
 | **Output helpers** | Lifecycle sentinel for readiness and fatal diagnostics; daemon owner for routine diagnostics and the orderly census | At most one readiness helper, one first-fatal helper, one routine-diagnostic helper and one orderly-census helper. Readiness has an absolute 5-second deadline; fatal and routine output are unawaited; census output shares `teardown_ms`. A busy routine helper causes later lines to coalesce into the single `routine_diagnostic_dropped` bit | The helpers own no resource or disposition. The sentinel serializes readiness refusal, early death or deadline with startup stop, owner-reported component fatal and release authorization; only its winning release sends `begin_accept`. Deadline hard-halts as `readiness_write_failed` because a queued stdout request cannot be recalled safely. A raced component fatal or stop may coexist with a line already written but never opens the gate when it wins. Fatal output death is ignored. Routine output failure retains the dropped bit. Census output death or deadline omits only the best-effort line. None can delay the fatal status or orderly exit |
 | **Relay tasks**, one per promoted primary ticket — the eight lease-authorized mutations, `session.create` and `session.attach`; **not** lightweight calls, duplicate-create waiters or replacement waiters | The relay, after recording the exact sequenced origin and capacity reservation/borrow and before acknowledging promotion | At most **16,384**: 512 occupied accepted slots times 32 active origin rows, with waiters starting no second task | Before orderly `quiescing`, a no-result death keeps its ticket and the relay exits `relay_lost`. During orderly quiescing it remains unresolved; after successful core quiesce, deferred `seal_after_quiesce` kills and reaps every survivor, lets a real result sent before `DOWN` win, terminalizes its waiters, returns every other exact ID as unresolved, and removes all origin rows before teardown |
