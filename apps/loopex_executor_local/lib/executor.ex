@@ -195,12 +195,11 @@ defmodule Loopex.Executor.Local do
   # the moment it is signalled -- pays one look rather than the whole window.
   @cooperative_poll_ms 25
 
-  # The wait for a cleanup helper's Port-owned guard to report its final exit.
-  # It is a fixed bound for the same reason `@abandon_confirmation_ms` is: it is
-  # asked only after the helper has answered or its own bound has expired, and a
-  # token-bound KILL has already been delivered to the still-live guard. It is
-  # also the most a probe holds back from its answer for that wait, and the wait
-  # is cut to whatever remains of the probe's own bound.
+  # The most a probe holds back from its answer for its guard to report the
+  # final exit after a token-bound KILL. The confirmation itself may use
+  # everything left of the probe's own bound: a guard stalled past this
+  # reservation after an early answer is still waited for, never past the
+  # bound, rather than discarding a real answer.
   @helper_signal_ms 250
 
   # The scheduling and delivery slack a cancellation's answer gets beyond the
@@ -6706,12 +6705,19 @@ defmodule Loopex.Executor.Local do
     :no_answer
   end
 
-  # The confirmation wait is the fixed `@helper_signal_ms` cut to what remains
-  # of the helper's own episode, so it can never carry the probe past it.
+  # Concept: a real answer is kept when its guard is slow to confirm the KILL,
+  # as long as the confirmation lands inside the probe's own episode.
+  #
+  # Technical depth: the confirmation waits until the episode's `until`, so it
+  # can never carry the probe past it. It was cut to a fixed 250 ms, so a guard
+  # stalled for longer on a loaded host turned an answer that arrived with
+  # nearly the whole bound unspent into `:no_answer`. On the abandon and
+  # timeout paths what remains is already about the reserved allowance, so
+  # those paths are unchanged.
   defp kill_guarded_helper(port, collector, limit, {until, _bound, _probe} = episode) do
     {guard, sent} = kill_launch_guard(collector.guard, episode)
     collector = %{collector | guard: guard}
-    stop = cleanup_now_ms() + min(@helper_signal_ms, cleanup_remaining(until))
+    stop = until
 
     case await_helper_guard_exit(port, collector, stop, limit, false) do
       {finished, true, false} when sent -> finish_guarded_helper(finished, limit)

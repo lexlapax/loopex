@@ -4573,15 +4573,16 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
 
     # Four since ADR 0016's shared retention deadline: the job's cleanup episode,
     # a cancellation's own episode, the cooperative share inside both, and the
-    # one retention allowance every phase of a settlement draws on. Six since
+    # one retention allowance every phase of a settlement draws on. Five since
     # probes were contained inside the episode that bounds them: the instant
-    # `answer_within/3` opens for a caller that holds only a relative bound, and
-    # a cleanup helper's KILL confirmation cut to what remains of its instant.
-    # An owner's probe opens no instant of its own; it is handed the episode's.
+    # `answer_within/3` opens for a caller that holds only a relative bound. A
+    # cleanup helper's KILL confirmation now waits until its episode's own
+    # instant instead of opening a shorter one, and an owner's probe opens no
+    # instant of its own; it is handed the episode's.
     # The helper's waits used to be measured on the same monotonic clock
     # outside this domain, which is how a probe's confirmation could outlast
     # the episode that started it.
-    assert length(instants) == 6,
+    assert length(instants) == 5,
            "the cleanup domain now opens #{length(instants)} instants against its own base; each " <>
              "one has to take that base, so a new one means this case needs to have been told " <>
              "about it"
@@ -5404,6 +5405,22 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
       assert receipt.cleanup_confirmation == :confirmed
       assert receipt.output == "descriptors:closed:closed;input:null\n"
     end
+  end
+
+  # Concept: a helper's real answer survives a guard that is slow to confirm
+  # its KILL, as long as the confirmation lands inside the probe's bound.
+  #
+  # Technical depth: the probe stops its own guard for half a second after
+  # answering, longer than the 250 ms the confirmation used to be cut to.
+  test "a helper answer is kept when its guard confirms the kill late" do
+    probe = """
+    guard=$(/bin/ps -o ppid= -p $PPID | tr -d ' ')
+    kill -STOP "$guard"
+    (sleep 0.5; kill -CONT "$guard") >/dev/null 2>&1 &
+    echo answered
+    """
+
+    assert {"answered\n", 0} = Local.answer_within("/bin/sh", ["-c", probe], 30_000)
   end
 
   test "commands and bounded helpers retain their actual distinct supervision groups" do

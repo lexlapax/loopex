@@ -40,6 +40,11 @@ The daemon writes best-effort stop lines to standard error:
 Neither line is awaited, so a blocked standard error cannot delay the stop or
 change the exit status.
 
+A cleanup helper's answer is kept when its guard is slow to confirm the KILL.
+The confirmation now waits until the end of the probe's own bound instead of
+a fixed 250 ms. Previously a guard stalled on a loaded host turned an early,
+real answer into `:no_answer`, and so into an unconfirmed cleanup.
+
 A resource-pack import reads each Git data command's output through
 `Loopex.Executor.Local.command_output/1`. That removes the note the executor
 appends when it terminates a command's confirmed-cleaned process group, which

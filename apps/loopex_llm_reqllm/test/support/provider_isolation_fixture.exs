@@ -1152,8 +1152,11 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
   # before request creation. No worker entry, dependency application startup,
   # model catalog lookup, socket, readiness frame or credential is pre-started.
   # The actual child still owns all those steps under the unchanged deadline.
-  # The compiler's ten-second fail-stop starts at its main entry and bounds
-  # compilation, not OS bootstrap or immediate response to parent death;
+  # The compiler's fifty-second fail-stop starts at its main entry and bounds
+  # compilation, not OS bootstrap or immediate response to parent death. It
+  # only guards against a hung compile, so it sits just under ExUnit's 60 s
+  # default rather than at ten seconds, which a loaded floor-pair run
+  # exceeded with the compile still progressing;
   # it extends neither request deadlines nor ExUnit timeouts. Root cleanup is
   # registered first, including for compiler failure.
   defp prepare_worker(root, source, paths) do
@@ -1169,7 +1172,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
     #!/usr/bin/env escript
     %%! +S 2:2 +SDcpu 1 +SDio 1 +A 2
     main([]) ->
-      spawn(fun() -> receive after 10000 -> erlang:halt(70) end end),
+      spawn(fun() -> receive after 50000 -> erlang:halt(70) end end),
       ok = code:add_paths(#{paths}),
       {ok, _} = application:ensure_all_started(elixir),
       'Elixir.Code':eval_string(base64:decode("#{Base.encode64(compiler)}")),
