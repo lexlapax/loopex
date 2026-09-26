@@ -5,15 +5,18 @@ to the exact technical depth needed to implement and verify it. Read the
 Concept document first, then follow only the technical links relevant to the
 work at hand.
 
-New here? [Developer documentation](developer/README.md) carries the reading
-order. This file is the index of what exists.
+New here? Running Loopex starts at the
+[operator getting-started guide](operator/getting-started.md). Building on Loopex
+or contributing to it starts at the
+[developer getting-started guide](developer/getting-started.md#concept). This file
+is the index of what exists.
 
 ## Directories
 
 | Directory | Contents |
 | --- | --- |
-| [operator/](operator/README.md) | Coding sessions, project-skill installation and admission, tools and policy, run diagrams, shutdown and recovery. |
-| [developer/](developer/README.md) | Architecture, embedded resource snapshots and commands, progressive context and replay, development method and retained evidence. |
+| [operator/](operator/README.md) | Runbooks for running Loopex: getting started, coding sessions and project skills, tools and policy, the daemon, the app server, observability, and how a run works. |
+| [developer/](developer/README.md) | Building on Loopex and contributing to it: getting started, architecture, embedding, the agent loop, protocols, the daemon, observability, compatibility, and the development method. |
 | [adr/](adr/README.md) | Numbered architecture decisions and their governance records. |
 | [plans/](plans/README.md) | Milestone register, lifecycle, plan templates, and current status. |
 | [evidence/](evidence/README.md) | Retained check-run and demonstration evidence, named by the revision it was taken at. |
@@ -35,6 +38,7 @@ pairing, link, review, code-documentation, and enforcement contracts.
 | --- | --- | --- | --- |
 | Product vision | [Vision](vision.md#concept) | [Vision technical depth](vision-technical.md#technical-depth) | Founding authority; the pair is one source. |
 | Capability guidance | [Roadmap](roadmap.md#concept) | [Roadmap technical depth](roadmap-technical.md#technical-depth) | Non-normative projection; accepted plans authorize work. |
+| Developer getting started | [Getting started](developer/getting-started.md#concept) | [Getting started technical depth](developer/getting-started-technical.md#technical-depth) | Two tracks: building on Loopex (embedding a runtime, driving the session protocol) and contributing (toolchain, checks, milestones). |
 | System architecture | [Architecture](developer/architecture.md#concept) | [Architecture technical depth](developer/architecture-technical.md#technical-depth) | Descriptive: applications, ports, truth planes, and invariants as implemented; accepted ADRs remain the deciding authority. |
 | Development method | [Development charter](developer/development-charter.md#concept) | [Charter technical depth](developer/development-charter-technical.md#technical-depth) | Shared development form and review expectations. |
 | Public session protocol | [App server protocol](developer/app-server-protocol.md#concept) | [Protocol technical depth](developer/app-server-protocol-technical.md#technical-depth) | The experimental wire generation; accepted ADR 0023 remains the deciding authority. |
@@ -117,11 +121,20 @@ whose path or explicit fragment does not resolve.
 - [Runtime operations and first run](operator/runtime.md#concept) — current
   source-tree features, exact working-loop demonstrations, credentials, events,
   shutdown, and recovery.
+- [Operator getting started](operator/getting-started.md) — from a source
+  checkout to a first coding session, a daemon, and a clean stop.
+- [The daemon](operator/daemon.md#concept) — running the durable local daemon,
+  connecting clients, observing and taking over a session, stopping it, and its
+  exit statuses.
+- [App server operations](operator/app-server.md#concept) — running the
+  foreground session-protocol server and driving it from a client.
+- [Observability](operator/observability.md#concept) — starting a trace session
+  and reading bounded, redacted telemetry.
 - [Agent loop and tools](developer/agent-loop-and-tools.md#concept) — the
   multi-turn loop, tool contract and registry, bounds, stream domains, host
   authority, artifacts, and project resources.
-- [Compatibility surfaces](developer/compatibility-surfaces.md#concept) — every
-  surface M2 touches, all unstable, none labelled or frozen, and what that means
+- [Compatibility surfaces](developer/compatibility-surfaces.md#concept) — what
+  each public surface promises today, what is experimental, and what that means
   for an embedder.
 - [Runtime and embedding](developer/runtime-and-embedding.md#concept) —
   application shape, ports, composition, commit ordering, embedded API, and

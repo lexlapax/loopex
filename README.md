@@ -30,131 +30,61 @@ while the session lives; a session "brain" can coordinate local or remote
 [Canonical milestone status and plan records](docs/plans/)
 <!-- loopex:readme-status:end -->
 
-M0 through M4 are closed and integrated. M5 is the durable-service milestone,
-built against the plan pair and ADRs 0031 to 0034 the maintainer accepted on
-2026-09-21; the M5 Durable Service section below says what it delivers, and the
-marked status capsule above and the canonical register carry its lifecycle
-state and any next candidate. M1 delivered the durability kernel:
-an explicit embedded runtime, durable local Store, canonical model boundary, trusted-local
-executor, thin reference client, durable events, and receipt reconciliation
-across a real runtime-process crash. What it deliberately did not deliver is a
-usable coding loop — that loop ran a fixed two turns, carried no conversation
-history, and exposed two demonstration tools, so the only way to drive it was a
-test selector.
+## What Loopex Provides
 
-M2 made that loop a command:
-`loopex` submits a prompt into a durable session, the answer streams as it is
-produced, the loop runs as many turns as the task needs while the model sees the
-whole conversation and the real output of every tool it ran, four coding tools
-act on a real workspace under a host policy that can refuse, a repository's own
-behaviour-shaping files reach the model only by an explicit decision taken at
-the terminal, and yesterday's session can be found and continued. Those bytes
-are part of the closed product baseline; the marked status capsule above and
-the canonical plan register carry the milestone state.
+At source version `0.2.0`, Loopex is a working single-machine coding harness
+and the runtime underneath it. It runs from a source checkout on macOS and
+Linux. It is not yet a published package, and its client protocol is
+experimental. [CHANGELOG.md](CHANGELOG.md) records how each capability arrived.
 
-Loopex remains source-tree milestone work, not an installable package or frozen
-public API. The annotated tag `v0.0.0-m2` identifies the exact integrated M2
-source snapshot only. Start with the
-[coding sessions guide](docs/operator/coding-sessions.md#concept) for the `loopex`
-command, or the [operator runtime guide](docs/operator/runtime.md#concept) for the
-embedded runtime beneath it and run the complete source-tree loop, or use the
-[developer embedding guide](docs/developer/runtime-and-embedding.md#concept) to
-understand the composition and commit ordering.
+- **A durable session runtime you can embed.** An Elixir host starts an
+  explicit runtime and owns its sessions. Each session has one serial owner and
+  an append-only journal in a local store. Intent is recorded before any effect
+  and facts before any publication, so a session survives a crash of its
+  process and replays on restart. A lost effect is reported as
+  `outcome_unknown` and reconciled, never blindly retried. See the
+  [embedding guide](docs/developer/runtime-and-embedding.md#concept).
+- **A coding loop at the terminal.** The `loopex` command runs a prompt as a
+  durable, multi-turn session and streams the answer as it is produced. The
+  model sees the whole conversation and the real output of every tool it ran.
+  Four coding tools (`read`, `write`, `edit`, `bash`) act on a real workspace
+  under a host policy that can allow, refuse or ask. Earlier sessions can be
+  listed and resumed. See [coding sessions](docs/operator/coding-sessions.md#concept).
+- **Governed model context.** A repository's instruction files and pinned Git
+  skills reach the model only after an explicit admission decision. They are
+  budgeted, provenance-typed data and never a grant of authority. Downloaded
+  skill files carry no permissions.
+- **A provider boundary that keeps the credential out of the session.** Model
+  calls go through a provider-neutral boundary. The reference adapter runs the
+  provider in a private companion process that receives the credential over a
+  bootstrap channel. Credentials never enter journals, events, progress or
+  diagnostics.
+- **Honest tool execution.** Every tool job is a durable operation with
+  attempts, fencing tokens and receipts. The trusted local executor supervises
+  each command's process group and reports exactly what it could confirm.
+- **Durable questions and bounded artifacts.** A host policy can answer a tool
+  request with a question instead of a verdict. The question stays as durable
+  session state, so it can be answered after the asking process is gone.
+  Clients read tool output back in verified, bounded chunks.
+- **Session protocols and an independent client.** A foreground app server
+  speaks the experimental session protocol over standard input and output. A
+  dependency-free [Node client](clients/node/README.md) drives a session end to
+  end over that protocol. See [app server operations](docs/operator/app-server.md#concept).
+- **A local daemon that outlives its clients.** `loopex daemon` owns every
+  session for one state root and keeps them running while no client is
+  connected. Several client processes reach it over a same-user Unix socket.
+  One client drives a session under a controller lease while others observe,
+  and a client can explicitly take over when the driver is lost. An orderly
+  stop drains work and reports what it stopped; a failure ends with a named
+  exit status. See the [daemon guide](docs/operator/daemon.md#concept).
+- **Observability without source changes.** A host can start a runtime-scoped
+  trace session and read telemetry spans that are bounded and redacted. See
+  [observability](docs/operator/observability.md#concept).
 
-The integrated post-closure repair line implements the accepted follow-up decisions for a
-private provider process, explicit local recovery handoff, versioned provider
-accounting, and bounded executor receipts. The
-[source qualification](docs/evidence/M2-ff17990-review-followup.md#final-repaired-source-06dadbb)
-and [integration disposition](docs/evidence/M2-recorded-limitations.md#final-repaired-source-integration)
-name the evidence and authority used for integration. Those repairs do not
-publish a package or label a public surface.
-
-M3 delivered pinned Git skill installation, project-only discovery,
-explicit manifest admission, and operator-selected instructions and supporting
-files in model context. Skills use the existing tool, policy and artifact paths;
-downloaded scripts and metadata grant no permissions. Fresh-process CLI recovery
-uses the exact retained skill snapshot with its configured provider and executor.
-Core repairs keep required context ahead of optional content, let acknowledgements
-continue while Store reads wait, and retire settled provider permits safely. See
-[project skills](docs/operator/coding-sessions.md#operator-sessions-skills) for
-the commands and [embedding resources](docs/developer/runtime-and-embedding.md#technical-embedding-resources)
-for the host API. The exact M3 product source
-`f45354572840636b473ad7e40e42355fdff4fc17` passed M3-only qualification
-on the macOS floor pair and Linux; the [M3 plan](docs/plans/M3.md#concept-m3-final-qualification-f453545)
-records that evidence and the separate lifecycle decision.
-
-M4 is closed. Its plan pair and its five prerequisite ADRs (0023, 0024, 0026,
-0028 and 0030) are accepted, the development floor is refreshed to Elixir
-1.18.5 with OTP 27.3.4, and its work is integrated on `main`. The runs that
-qualified the closure candidate are retained in
-[M4 closure runs](docs/evidence/M4-closure-runs.md).
-
-What M4 delivers is an operator-usable foreground server and an independent
-consumer over durable interactions and bounded artifact transfers, with runtime
-tracing and telemetry. Two applications join the eight: `loopex_telemetry` at
-the edge, owning the only Loopex-attached telemetry handler, and
-`loopex_app_server` as a client, serving the experimental session protocol over
-one foreground process on standard input and output. Core admits one external
-dependency, the telemetry event dispatcher the dependency doctrine names. A
-host policy can now answer a tool decision with a bounded question instead of a
-verdict; the runtime keeps that question as durable session state, so an
-operator can still answer it after the server process is gone, and the answer is
-evidence for a new host decision rather than an authorization. A caller holding
-an artifact reference can read it back in verified bounded chunks instead of
-fetching all of it.
-
-The independent consumer lives in [`clients/node`](clients/node/README.md)
-as plain JavaScript the pinned Node runs directly, with no build step, package
-manifest, lockfile or dependency; it drives a session end to end over the wire,
-selecting an admitted skill, answering the host policy's question, watching the
-authorization the host mints afterwards, and reading back a verified bounded
-transfer of what the tool produced.
-
-M4 also moved the source `VERSION` from `0.0.0` to `0.1.0`. That is a source
-version and nothing more: accepted
-[ADR 0023](docs/adr/0023-experimental-public-session-protocol.md#concept) keeps
-it independent of the negotiated protocol generation, and it is not a tag, a
-package, a publication or a compatibility freeze. The source-only `v0.1.0` tag
-**has been applied** to M4's exact `main` integration commit under the
-maintainer's separate release decision; it publishes no package, installer or
-service unit and freezes no surface. See the
-[M4 plan](docs/plans/M4.md#concept) for the accepted scope and its workstreams,
-[App server operations](docs/operator/app-server.md#concept) for driving it,
-and the [canonical register](docs/plans/README.md) for its current status.
-
-Since closure, `Loopex.AppServer.Host.serve/0` and the shipped `ask` and
-`allow-all` host policies replaced the test-tree fixture the operator guide
-used to name, `LoopexComposition` can wire bounded artifact transfers with
-`artifact_transfers: true`, and the local executor's launch guard writes each
-control frame as one line and one write. [CHANGELOG.md](CHANGELOG.md) records
-the detail.
-
-The repaired reference local executor requires `/bin/bash` for its internal
-supervision on Darwin and Linux; raw commands still use `/bin/sh`. See the
-[runtime prerequisite](docs/operator/tools-and-policy.md#operator-local-supervision-shell)
-before using the reference stack. Core and custom executors are unaffected.
-
-### M5 Durable Service
-
-`M5` delivers the durable-service rung: a local daemon
-that owns session lifetime for a state root, so sessions keep running while no
-client is connected; several independent client processes reaching one session
-over a Unix-domain socket; one of them driving while the others watch, with an
-explicit takeover when the driver dies; and all of it on the existing local
-store adapter within that adapter's documented limits. Read the
-[M5 plan](docs/plans/M5.md#concept) and its
-[technical companion](docs/plans/M5-technical.md#technical-depth) for the
-purpose, outcomes and how each one is proved.
-
-The four prerequisite decision records are ADRs
-[0031](docs/adr/0031-daemon-grade-store-selection-and-migration.md#concept),
-[0032](docs/adr/0032-daemon-attachment-residency-and-replay.md#concept),
-[0033](docs/adr/0033-collaboration-controller-lease-and-takeover.md#concept)
-and [0034](docs/adr/0034-provider-credential-handoff-over-bootstrap-channel.md#concept).
-The status capsule above and the
-[canonical register](docs/plans/README.md)
-carry the milestone and decision state; this section only says what the work
-delivers.
+**Where to start:** the [operator getting-started guide](docs/operator/getting-started.md)
+takes you from a checkout to a first session. The
+[developer getting-started guide](docs/developer/getting-started.md#concept)
+covers building on Loopex and contributing to it.
 
 The [roadmap](docs/roadmap.md#concept) is non-normative capability guidance;
 [CHANGELOG.md](CHANGELOG.md) records what changed.
@@ -227,8 +157,8 @@ without entering the kernel.
   quiescent generations with tested migration and exact rollback — code
   evolves, session history survives.
 - **A seven-tool coding surface** (`read write edit bash grep find ls`)
-  inside a system prompt budgeted under 1,000 tokens; M2 ships the first four
-  and measures them, and the rest follow the measurement.
+  inside a system prompt budgeted under 1,000 tokens. The first four ship
+  today; the rest follow measurement of those.
 
 ## Honest Posture
 
@@ -299,6 +229,10 @@ The roadmap is guidance. The commitment is an accepted plan.
 
 ## Start Here
 
+- [Operator getting started](docs/operator/getting-started.md) — from a
+  source checkout to a first coding session, a daemon and a clean stop.
+- [Developer getting started](docs/developer/getting-started.md#concept) — building on
+  Loopex (embedding, the session protocol) and contributing to it.
 - [DEVELOPMENT.md](DEVELOPMENT.md) — current bootstrap prerequisites and the
   two check commands.
 - [docs/developer/verification.md](docs/developer/verification.md#concept) and
@@ -324,7 +258,7 @@ The roadmap is guidance. The commitment is an accepted plan.
 - `docs/adr/` — architectural decisions, as they land.
 - [docs/plans/](docs/plans/) — canonical milestone status plus the accepted,
   active, and closed plan pairs, and the historical gate records beside them.
-- [CHANGELOG.md](CHANGELOG.md) — what changed, per milestone.
+- [CHANGELOG.md](CHANGELOG.md) — what changed in each release and milestone.
 
 ## License
 
