@@ -3384,9 +3384,14 @@ component:
    phase for the Store. Nothing replies to the terminate request; the
    component's exit is its only answer.
 2. The owner waits for the component's `DOWN` until the absolute deadline.
-   A component still alive then is killed, and the step is `:stopped_late`
-   unless the `DOWN` that follows still carries the owner's stop reason — a
-   component that finished the stop as the deadline fell stopped as asked.
+   A component still alive then is killed, and the owner then waits a
+   further bounded `@stop_wait_ms` (5,000 ms, `service.ex:66`) for the
+   `DOWN` of that kill; with none by then it drops the monitor. The step is
+   `:stopped_late` unless the `DOWN` that follows still carries the owner's
+   stop reason — a component that finished the stop as the deadline fell
+   stopped as asked. The post-kill reap is not part of the step's deadline:
+   a late step can end up to 5,000 ms after it, and its class is latched
+   only when that reap returns.
 3. **The monitor's `DOWN` reason alone decides the step.** Exactly the
    owner's stop reason is a clean stop. Any other reason — `:noproc` for a
    component already gone, `:normal` for one that ended on its own before or
@@ -3450,8 +3455,10 @@ owned component that arrives meanwhile stays queued on its link and is
 classified by the zero-wait loss check before the next step, which ends the
 orderly stop with that component's class. No helper process takes part in a step. Client
 frames, unrelated messages and other components' exits wait while a step
-waits for its own component, at most until that step's deadline; every
-lifecycle signal is classified before the next step begins. Immediately before the first
+waits for its own component: until that step's deadline and, when the
+component is killed at that deadline, for at most the further 5,000 ms
+post-kill reap of step 2. Every lifecycle signal is classified before the
+next step begins. Immediately before the first
 step-3 notification the owner drains already queued lifecycle signals once
 more. If a fatal class is latched, it sends that class where the connection
 interface still exists, sends no `operator_stop`, and continues through the
@@ -3833,7 +3840,9 @@ and placement release. `teardown_ms` already covers the post-quiesce seal,
 client close and retirement barriers, the final relay barrier and non-Store
 component stops. A stop that latches a fatal class is bounded by the prefix
 already spent plus the 35-second fail-stop watchdog, not by adding that watchdog
-to the whole successful expression.
+to the whole successful expression. For a component killed at its deadline, that
+prefix includes the at most 5,000 ms post-kill reap, since the class is latched
+only after it.
 
 The transport work after the relay acknowledgement normally overlaps the
 admission wait, but the two clocks do not share a start instant. Charging both

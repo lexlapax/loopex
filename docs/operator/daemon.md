@@ -268,7 +268,8 @@ that Control lost while core quiesce is running and the runtime itself still
 lives is `drain_failed`: the drain can no longer report which sessions it
 stopped. Every component the teardown stops shares the one `teardown_ms`
 deadline, and the Store then has its own 30 s; a component still running at
-its deadline is killed and the stop ends with that component's class, and a
+its deadline is killed, its exit is awaited for up to a further 5 s, and the
+stop then ends with that component's class, and a
 placement release that fails or does not finish in 5 s is
 `placement_lock_failed`, never `0`. A fatal class ends within 35 s of the first
 fatal.
