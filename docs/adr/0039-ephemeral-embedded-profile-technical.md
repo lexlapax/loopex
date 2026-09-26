@@ -57,7 +57,7 @@ The kernel's ports are unchanged; the profile chooses what fills each one:
   `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` and `OPENROUTER_API_KEY` explicitly.
 - The adapter installs no logger filter or handler, changes no group leader,
   and never restarts ReqLLM's supervision tree. It sets
-  `Logger.put_process_level(self(), :none)` only for its own model-attempt
+  `:logger.set_process_level(:none)` only for its own model-attempt
   process, so ReqLLM's stream-start error line, which is written in that
   process, is never emitted. Its only change to shared state
   is the two ReqLLM application settings it makes before first starting ReqLLM.
@@ -102,9 +102,9 @@ Concept: [Observable consequences](0039-ephemeral-embedded-profile.md#concept-ad
 | The memory store is a store | The store conformance suite's `:memory` kind is bound to `Loopex.Store.Memory` itself and passes unchanged |
 | The in-process adapter is a model | Mapping, option and error tests run against a scripted ReqLLM transport. The model streaming conformance suite runs against it. Real-provider lanes call a local Ollama model and one hosted provider |
 | The companion is unchanged | Every companion suite passes after the shared mapping is extracted |
-| Credentials stay out of every plane | A canary credential value is set. A run with tool calls, a provider error reply, a stream-start failure and a stream-task crash is driven. The value must be absent from every committed record, event, progress item, diagnostic, trace entry, captured log line and `IO.warn` output under the default logger configuration. The `ask` command runs with the primary logger level `:none` and `ERL_CRASH_DUMP=/dev/null`. No provider variable reaches a tool process, because the executor removes all four names |
+| Credentials stay out of every plane | A canary credential value is set, and a run with tool calls, a provider error reply, a stream-start failure and a stream-task crash is driven. **Required:** the value is absent from every committed record, event, progress item, diagnostic and trace entry in both profiles; absent from the stream-start log path in both profiles; and absent from all captured log and crash output under `ask`, which runs with the primary logger level `:none`, `ERL_CRASH_DUMP=/dev/null` and `ERL_CRASH_DUMP_SECONDS=0`. **Recorded, not required:** under a library host's default logger configuration, what the stream-task crash report contains, judged by the security review against the accepted gap. No provider variable reaches a tool process, because the executor removes all four names |
 | Hygiene holds | A `.env` in the working directory is not loaded, and no unverified-model warning is printed |
-| The profile is ephemeral and says so | After the runtime stops, or its caller exits, no file remains under the profile's temporary root, and the effective options name the profile |
+| The profile is ephemeral and says so | After the runtime stops, or its caller exits, no file remains under the profile's temporary root. The session value and `result` carry `profile: :ephemeral`, and `ask`'s JSON carries `"profile"` |
 | No default authority | Composition without `:policy` refuses with `host_policy_required` |
 | Core is unchanged | `git diff v0.2.0 -- apps/loopex/lib` is empty outside `apps/loopex/lib/mix/`, and `mix loopex.deps_budget` passes unchanged |
 | Independent review | A read-only security review of the ephemeral credential path names the tested SHA before closure |

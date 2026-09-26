@@ -75,6 +75,7 @@ runtime library (`apps/loopex/lib` outside `mix/`) is unchanged by M6.
 @type result :: %{
         text: String.t(),            # the run's last assistant.message_appended content
         outcome: :completed,
+        profile: :ephemeral,
         session_id: String.t(),
         run_id: String.t(),
         tools: [%{tool_id: String.t(), outcome: String.t()}]
@@ -110,8 +111,9 @@ runtime library (`apps/loopex/lib` outside `mix/`) is unchanged by M6.
   always performed.
 - **`start_session/1`** composes the ephemeral profile and starts one runtime,
   creates one session (`command_id` `"create"`), and attaches from sequence 0.
-  The session value is plain data plus the runtime reference; the runtime is
-  owned by a process linked to the caller.
+  The session value is a map with `session_id`, `profile: :ephemeral`, `model`,
+  `tools` and the runtime reference. The runtime is owned by a process linked
+  to the caller. `result` also carries `profile`.
 - **`ask/3`** refuses with `{:error, :run_open}` while an earlier run of the
   session has no `run.finished`, for example after `interaction_pending`.
   Otherwise it:
@@ -225,8 +227,8 @@ so `ollama:qwen3:14b` names id `qwen3:14b`. Any other prefix refuses as
 `{:composition, :unknown_provider}`.
 
 **Host hygiene** (ReqLLM 1.24.0 facts, applied before `ReqLLM` starts):
-- `Application.put_env(:req_llm, :load_dotenv, false)` and the same for
-  `:llm_db`, so starting ReqLLM never loads a `.env` from the working directory.
+- `Application.put_env(:req_llm, :load_dotenv, false, persistent: true)` and
+  the same for `:llm_db`, as the companion does (`provider_worker.ex:78-79`), so starting ReqLLM never loads a `.env` from the working directory.
 - `warn_unverified_models: false`.
 - Then `Application.ensure_all_started(:req_llm)`.
 
@@ -234,16 +236,36 @@ If `:req_llm` is already running in the host VM, the adapter uses it as it is
 and records that in the session's effective options. This is a named limitation:
 a host that started ReqLLM with dotenv enabled has already loaded its `.env`.
 
-**Errors.** Everything before `ReqLLM.stream_text/3` returns `{:ok, _}` returns
-`{:error, {:not_dispatched, "model_call_failed"}}`, which is the only form the
-coordinator retries (`@attempt_limit 2`). This covers model build, context,
-tools and options (`generation.ex:231-255`). Everything from `{:ok, stream}` on
-is `{:error, {:dispatched_or_unknown, "model_call_failed"}}`, as the companion
-classifies it.
+**Errors.** The boundary is the call to `ReqLLM.stream_text/3` itself, exactly
+where the companion places it (`req_llm.ex:416-453`, citing ADR 0018).
+- **Before the call:** a refusal the adapter raises before calling
+  `stream_text/3` returns `{:error, {:not_dispatched, "model_call_failed"}}`.
+  That covers model build, credential, context, tools and options, and a
+  deadline already elapsed. This is the only form the coordinator retries
+  (`@attempt_limit 2`).
+- **From the call on:** every return or raise from `stream_text/3`, including
+  `{:error, _}`, is `{:error, {:dispatched_or_unknown, "model_call_failed"}}`,
+  because ReqLLM may already have started the HTTP transport before it returns
+  an error (`deps/req_llm/lib/req_llm/streaming.ex:116-128`, `:172-175`). A
+  possibly delivered call is never retried.
 
 A stream that ends without its terminal event is checked through the metadata
 before success: `:error`, a status of 400 or more, or `finish_reason` in
 `[:incomplete, :cancelled, :error]` is not success.
+
+**In-flight cleanup.** The adapter consumes the stream in a child it starts with
+`ProviderLifetime.start_child/2`, and registers that child with
+`ProviderLifetime.register/2`, the same coordinator hook the companion bridge
+uses for its guardian (`provider_bridge.ex:207`, `:224`). So the coordinator's
+existing abort and deadline cleanup owns it. The child:
+- monitors ReqLLM's stream server for the call;
+- on stop, calls `StreamResponse.close/1`, which cancels the stream and stops
+  its metadata handle;
+- counts cleanup proved only when the stream server's `DOWN` is observed.
+  Otherwise the coordinator's existing unproved-cleanup path applies.
+
+Aborting mid-stream, reaching the deadline mid-stream, and `stop_session/1`
+therefore leave no ReqLLM stream server or Finch request task for that call.
 
 **Credential rule.**
 - The credential is read by `LoopexComposition.Ephemeral` once, from the
@@ -271,14 +293,16 @@ before success: `:error`, a status of 400 or more, or `finish_reason` in
 
   The profile answers them as follows:
   - **The stream-start log line** is written in the calling process, the
-    adapter's model attempt. The adapter sets `Logger.put_process_level(self(),
-    :none)` for the attempt's process, which is a process-scoped level, not a
+    adapter's model attempt. The adapter calls `:logger.set_process_level(:none)` for
+    the attempt's process (Erlang's API, which accepts `:none`). That is a
+    process-scoped level, not a
     logger filter or handler and not a change to the host's configuration. That
     line is therefore never emitted, in either profile.
   - **The `ask` command** closes the other two paths for its own process:
     - before composing, it sets the primary logger level to `:none` and renders
       its own lines to standard error;
-    - it sets `ERL_CRASH_DUMP=/dev/null` in its own environment at start;
+    - it sets `ERL_CRASH_DUMP=/dev/null` and `ERL_CRASH_DUMP_SECONDS=0` in its
+      own environment at start, matching the companion (`provider_worker.ex:72`);
     - the launcher also exports it when its first argument is `ask` or `-p`.
     The witness proves on both platforms that a crash dump is not written when
     the escript is run directly as well as through the launcher. If one
@@ -465,9 +489,14 @@ else on standard output:
 ```json
 {"schema": "loopex.ask/1", "session_id": "...", "run_id": "...",
  "outcome": "completed", "text": "...",
+ "profile": "ephemeral",
  "tools": [{"tool_id": "loopex.read", "outcome": "ok"}],
- "details": {}}
+ "details": {"reconciliation_ref": null, "cleanup_grace_ms": 5000}}
 ```
+
+Every key of the `run.finished` payload other than `run_id`, `outcome` and
+`command_id` is emitted in `details`, with `null` where the payload holds nil.
+`profile` is `"ephemeral"` or `"durable"`.
 
 `details` is the `run.finished` payload without `run_id`, `outcome` and
 `command_id` (`session_state.ex:2880-2897`, `:4566-4576`, `:6061-6075`):
@@ -560,7 +589,7 @@ Concept: [How each outcome is verified](M6.md#concept-plan-verification).
 | 2 | `apps/loopex_llm_reqllm/test/in_process_adapter_test.exs` (new), covering mapping, options, errors and deltas against a scripted ReqLLM transport. Also: the existing streaming conformance suite run against the new adapter; `apps/loopex_llm_reqllm/test/in_process_real_test.exs` (new, `real_provider`); the unchanged companion suites; `apps/loopex_executor_local/test/provider_environment_test.exs` (new) | Request and reply mapping, including tool calls, deltas, and identity from the inline model. `api_key`, `max_retries: 0` and `receive_timeout` are always passed. The `not_dispatched`/`dispatched_or_unknown` split. No catalog warning for any provider. `load_dotenv` is off, so a `.env` in the working directory is not loaded. A canary credential is absent from every record, event, progress item, diagnostic, trace entry, captured log line and `IO.warn` output on three driven paths: the stream-start failure, a stream-task crash and a provider error reply. The `ask` command's logger level and crash-dump setting. No provider variable reaches a `bash` child. Real calls to a local Ollama model and one hosted provider. The companion's behaviour is unchanged after the shared-mapping extraction | fast; release |
 | 3 | The store conformance suite with `:memory` bound to `Loopex.Store.Memory`; `apps/loopex_composition/test/ephemeral_profile_test.exs` (new) | The memory store passes every conformance case. The ephemeral profile refuses without a policy, creates its root `0700`, removes it on stop and on owner exit, composes no artifact store, and names its profile | fast |
 | 4 | `apps/loopex_cli/test/ask_command_test.exs` (new), `apps/loopex_cli/test/ask_exit_test.exs` (new), `apps/loopex_cli/test/ask_delegation_test.exs` (new), `apps/loopex_executor_local/test/read_only_tools_test.exs` (new), `apps/loopex_composition/test/skill_directories_test.exs` (new), `apps/loopex_composition/test/tool_preset_budget_test.exs` (new) | The grammar and refusals; `-p` identical to `ask`; a prompt from stdin; stdout carrying only the answer or only one JSON object; every exit status in the map, driven with a scripted model; the ephemeral profile with no `LOOPEX_HOME`; `--state-root` selecting the durable profile; the credential-discard order at dispatch; skill directories admitted and activated by path, refused when malformed, duplicated or more than four; `grep`/`find`/`ls` bounds, confinement and refusals; each tool preset's system-class projection measured under ADR 0017's limit; a separate OS process running `loopex -p` with a scripted model and reading its JSON, and driving the app server | fast |
-| 5 | The M5 suites and release lanes, unchanged except the version literal; `mix loopex.deps_budget`; `git diff v0.2.0 -- apps/loopex/lib ':(exclude)apps/loopex/lib/mix'` empty at the tested candidate, and the only paths added under `apps/loopex/lib/mix/tasks/` being the two closure tasks | The durable profile, the companion, the daemon and both protocol generations unchanged; the durable composition's active tools still the four; core's runtime library and dependency list unchanged. `VERSION` moving to `0.3.0` changes `Loopex.version()`, read from `VERSION` at compile time (`loopex.ex:28-42`), and with it the `daemon_ready` version and the durable `policy_identity` revision. The tests that assert the literal `"0.2.0"` read `Loopex.version()` instead. These are `readiness_test.exs:11-42`, `service_lifecycle_test.exs:139`, `daemon_command_test.exs:163,221` and `multi_client_workflow_test.exs:72`. This is the only change M6 makes to an M5 test's expectation | fast; release |
+| 5 | The M5 suites and release lanes, unchanged except the version literal; `mix loopex.deps_budget`; `git diff v0.2.0 -- apps/loopex/lib ':(exclude)apps/loopex/lib/mix'` empty at the tested candidate, and the only paths added under `apps/loopex/lib/mix/tasks/` being the two closure tasks | The durable profile, the companion, the daemon and both protocol generations unchanged; the durable composition's active tools still the four; core's runtime library and dependency list unchanged. `VERSION` moving to `0.3.0` changes `Loopex.version()`, read from `VERSION` at compile time (`loopex.ex:28-42`), and with it the `daemon_ready` version and the durable `policy_identity` revision. The tests that assert the literal `"0.2.0"` against the running build read `Loopex.version()` instead: `service_lifecycle_test.exs:139`, `daemon_command_test.exs:163,221` and `multi_client_workflow_test.exs:72`. `readiness_test.exs:11-42` passes the version as an argument to the pure encoder and stays unchanged. `scripts/check-release.sh:30`'s `release_version` moves to `0.3.0` as an explicit literal, so the release check still pins the intended release, and `DEVELOPMENT.md` states `0.3.0`. These are the only changes M6 makes to an M5 check's expectation | fast; release |
 | 6 | `apps/loopex/test/closure_tooling_test.exs` (new) and the shell fixture tests | Each closure command reproduces the M5 closure's checks on a fixture, with a failing case for each; M6's own closure uses only them | fast; closure |
 | — | An independent read-only security review of the ephemeral profile's credential path, naming the tested SHA | The credential rule and host hygiene hold, including in the logging paths | closure |
 
@@ -574,11 +603,17 @@ Concept: [How each outcome is verified](M6.md#concept-plan-verification).
   indexes as a scaffold.
 - **Release rows.** The manifest (`check-release.sh:135-157`) grows from nine
   real-provider rows to eleven, and its header comment changes with it:
-  - row 10, the ephemeral profile against a local Ollama model, driven through
-    `loopex -p --output json` from a separate OS process, which is also the
-    real-provider agent-delegation case;
-  - row 11, the ephemeral profile's embedded API against Anthropic, the
-    provider the release credential serves.
+  - row 10, `loopex_cli|test/ask_real_test.exs|ephemeral ask answers from a
+    local Ollama model through a separate process`. The ephemeral profile runs
+    against a local Ollama model, driven through `loopex -p --output json` from
+    a separate OS process, which is also the real-provider agent-delegation
+    case. It runs under `without_credential`: the manifest loop gains a
+    per-row credential mode, since today it runs every row under
+    `with_credential` (`check-release.sh:155`);
+  - row 11, `loopex_composition|test/ephemeral_real_test.exs|the embedded API
+    answers from Anthropic with the release credential`. The ephemeral
+    profile's embedded API runs against Anthropic, the provider the release
+    credential serves.
 - **Release credentials.** The release credential stays
   `LOOPEX_PROVIDER_API_KEY`, an Anthropic key.
   - `with_credential` passes it to row 11 as `ANTHROPIC_API_KEY` for that row's
@@ -622,7 +657,7 @@ Concept: [Rollout and compatibility](M6.md#concept-plan-rollout).
 | The companion adapter (M1/M5 rework) | Pure mapping moved to `Loopex.LLM.ReqLLM.Mapping`; behaviour unchanged | Private refactor |
 | Command line | `ask` and `-p` added; `refuse-all` selectable for `ask`, mapped to `LoopexCli.Policy.RefuseAll`; the launcher exports `ERL_CRASH_DUMP=/dev/null` for `ask` and `-p` only; every existing subcommand unchanged | Experimental |
 | Local executor (M2 rework) | `spawn_environment` removes the three per-provider credential variables as well as `LOOPEX_PROVIDER_API_KEY` | Hardening; no contract change |
-| Release check (M5 rework) | Three real-provider rows added; credential clearing and redaction cover the per-provider names; the Ollama precondition | Development tooling |
+| Release check (M5 rework) | Two real-provider rows added; `release_version` moved to `0.3.0`; credential clearing and redaction cover the per-provider names; the Ollama precondition | Development tooling |
 | Model strings | New `provider:model` grammar | Experimental |
 | Coding tools (M2 rework) | Three read-only tools defined; the durable default active set unchanged | Additive |
 | Store (M1 rework) | `Loopex.Store.Memory` promoted from the conformance test wrapper; the local store unchanged | Private; additive |

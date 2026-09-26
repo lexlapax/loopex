@@ -150,8 +150,12 @@ ephemeral profile answers each one as follows.
    can hold anything.
    - The ephemeral profile accepts that these reach the host's logger and
      crash-dump configuration, which the host owns.
-   - The adapter's witness drives each path with a canary credential and must
-     find it absent under the default logger configuration.
+   - The adapter's witness drives each path with a canary credential. It
+     requires the canary's absence from every committed plane, from the
+     stream-start line (which the adapter suppresses in its own attempt
+     process), and from all `ask` output. For crash reports under a library
+     host's default logger, it records what it observes rather than requiring
+     absence, because that output belongs to the host.
    - The reference `ask` command closes the paths itself: logger off, its own
      rendered lines, crash dumps disabled.
    - A library host is told the same obligation in the developer guide.
@@ -184,12 +188,14 @@ Technical depth: [Adapters and proofs](0039-ephemeral-embedded-profile-technical
 
   It needs no state root, no companion build and no store setup.
 - **Shells and agents.** They run `loopex ask "…"`, or `loopex -p "…"`, with
-  `--model`, `--output json|text`, `--skill <dir>` and a named policy. The exit
+  `--model`, `--output json|text`, `--skill-dir DIR` (at most four) and a named
+  policy. The exit
   status reports the run's outcome, not only whether the command started.
 - **Operators.** Nothing changes for them. `--state-root` on `ask`, or the
   durable composition in the API, selects today's behaviour exactly.
-- **Profile visibility.** A session always states which profile it ran under,
-  and an ephemeral session appears in no durable listing.
+- **Profile visibility.** The embedded API's session value and result, and
+  `ask`'s JSON, carry the profile, and an ephemeral session appears in no
+  durable listing.
 
 <a id="concept-adr-0039-compatibility"></a>
 ### Compatibility and Rollback
