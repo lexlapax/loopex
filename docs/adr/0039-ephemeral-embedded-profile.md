@@ -194,7 +194,8 @@ Technical depth: [Adapters and proofs](0039-ephemeral-embedded-profile-technical
 
 - **Embedding.** An Elixir host that depends on `loopex_composition` calls:
   - `LoopexComposition.Ephemeral.run/2` for one answer;
-  - `start_session/1`, `ask/3`, `history/1` and `stop_session/1` for a
+  - `start_session/1`, `ask/3`, `answer/3`, `last_result/1`, `history/1` and
+    `stop_session/1` for a
     conversation.
 
   It needs no state root, no companion build and no store setup.
