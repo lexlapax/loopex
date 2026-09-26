@@ -110,8 +110,8 @@ no built-in default, and a command that finds neither refuses with
 export LOOPEX_HOME="$HOME/.loopex"
 ```
 
-The command reads the provider credential from `LOOPEX_PROVIDER_API_KEY`, once,
-when it starts, and removes it from its own environment. Read it without echoing
+The command reads the provider credential from `LOOPEX_PROVIDER_API_KEY` once,
+when it composes the runtime, and removes it from its own environment. Read it without echoing
 it and without writing it to your shell history:
 
 ```bash
@@ -145,22 +145,22 @@ stance before choosing another.
 
 What you see, in order:
 
-1. A notice on standard error naming the active policy, printed at the first
-   tool call it decides.
-2. If the repository has an `AGENTS.md` at its root, its path, size and digest,
+1. If the repository has an `AGENTS.md` at its root, its path, size and digest,
    then `loopex: admit these project resources for this run? [y/N]`. Only `y` or
    `yes` admits it; anything else runs without it. See
    [project resources are your decision](coding-sessions.md#operator-sessions-project-trust).
-3. Your prompt echoed back as `> …`, from the journal rather than from what you
+   Selected skills are offered the same way.
+2. Your prompt echoed back as `> …`, from the journal rather than from what you
    typed.
-4. The answer streaming to standard output as the model writes it.
-5. Each tool call on standard error, such as `  · loopex.read (call_…)` and then
-   `  · loopex.read: ok`, or `denied` when the policy refuses it.
-6. One ending line, such as `loopex: done`.
+3. The answer streaming to standard output as the model writes it.
+4. At the first tool call, a notice on standard error naming the active policy;
+   then each tool call on standard error, such as `  · loopex.read (call_…)` and
+   then `  · loopex.read: ok`, or `denied` when the policy refuses it.
+5. One ending line, such as `loopex: done`.
 
-Standard output carries only the answer, so
-`loopex run … > answer.txt` keeps the answer and leaves the commentary on your
-terminal. The endings and what each one means are listed in
+Standard output carries your echoed prompt and the answer; tool lines and the
+ending go to standard error, so `loopex run … > answer.txt` keeps the
+conversation and leaves the commentary on your terminal. The endings and what each one means are listed in
 [stopping a task](coding-sessions.md#operator-sessions-stopping) and
 [one run, from prompt to answer](how-a-run-works.md#concept-run-flow).
 
@@ -183,8 +183,7 @@ When a tool produced more output than it may show the model, the tool line is
 followed by a ready-made retrieval command:
 
 ```text
-    output beyond the tool's bound was retained: 240113 bytes,
-    read it with `loopex artifact -- '3f9c1a…d80b'`
+    output beyond the tool's bound was retained: 240113 bytes, read it with `loopex artifact -- '3f9c1a…d80b'`
 ```
 
 Run that command to get the full bytes back; see
@@ -292,9 +291,9 @@ bound. After it exits, the offline commands work against the root again.
 | `loopex: :provider_credential_required` | `LOOPEX_PROVIDER_API_KEY` is missing, empty or too large | Export the key in this shell before the command |
 | `loopex: --policy is required; there is no default host authority` | `run` or `resume` was given no policy | Name `shell-allowlist` or `allow-all` |
 | `loopex: another loopex process (pid N) is using this state root; …` | Another command or a daemon holds the state root | Use the daemon's live forms, stop the other process, or pass another `--state-root` |
-| `loopex daemon refused to start: session_index_upgrade_required` (exit 85) | The root has offline sessions and no daemon index | Run `loopex daemon prepare-index` with nothing else holding the root |
-| `loopex daemon refused to start: placement_active` (exit 76) | Another daemon or command holds this root | Stop it, or use another state root |
-| `loopex: failed model_call_failed` | The provider call failed; its details are withheld on purpose | Check the key, the network and the provider's status, then run again |
+| `loopex daemon` exits 85 (`session_index_upgrade_required`) | The root has offline sessions and no daemon index | Run `loopex daemon prepare-index` with nothing else holding the root |
+| `loopex daemon` exits 76 (`placement_active`) | Another daemon or command holds this root | Stop it, or use another state root |
+| `loopex: failed model_call_failed (retryable …)` | The provider call failed; its details are withheld on purpose | Check the key, the network and the provider's status, then run again |
 
 Every `loopex daemon` exit status is listed in the
 [daemon reference](daemon.md#technical-depth).

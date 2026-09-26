@@ -256,12 +256,15 @@ generation offers the same transfers.
 once, when the transfer opens; each chunk then carries its own digest so a
 client can check what it received without the server re-reading the object.
 
-The transfer profile accepted in
-[ADR 0028](../adr/0028-bounded-artifact-retrieval.md#concept) caps objects at
-64 MiB; the opening verification at 60 seconds and 128 MiB of storage work;
-chunks at 32 KiB with five seconds per read; an open transfer's lifetime at ten
-minutes; and concurrency at two transfers per attachment and four per runtime.
-These are safety ceilings, not a service-level promise. A transfer belongs to
+The server caps objects at 64 MiB; the opening verification at 60 seconds and
+128 MiB of storage work; chunks at 32 KiB with five seconds per read; an open
+transfer's lifetime at ten minutes; and concurrency at two transfers per
+attachment and four per runtime. These are safety ceilings, not a service-level
+promise. Accepted [ADR 0028](../adr/0028-bounded-artifact-retrieval.md#concept)
+states the concurrency unit as the connection and adds 1 GiB of cumulative
+transfer work per connection; the implementation counts per attachment and
+enforces no cumulative work allowance. That divergence is recorded in the
+[M5 plan](../plans/M5.md#concept) and awaits a maintainer decision. A transfer belongs to
 the attachment that opened it and is released when that attachment goes.
 
 <a id="operator-app-server-limits"></a>

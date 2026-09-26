@@ -48,7 +48,7 @@ experimental. [CHANGELOG.md](CHANGELOG.md) records how each capability arrived.
   durable, multi-turn session and streams the answer as it is produced. The
   model sees the whole conversation and the real output of every tool it ran.
   Four coding tools (`read`, `write`, `edit`, `bash`) act on a real workspace
-  under a host policy that can allow, refuse or ask. Earlier sessions can be
+  under a host policy that can allow or refuse each call. Earlier sessions can be
   listed and resumed. See [coding sessions](docs/operator/coding-sessions.md#concept).
 - **Governed model context.** A repository's instruction files and pinned Git
   skills reach the model only after an explicit admission decision. They are
@@ -62,14 +62,16 @@ experimental. [CHANGELOG.md](CHANGELOG.md) records how each capability arrived.
 - **Honest tool execution.** Every tool job is a durable operation with
   attempts, fencing tokens and receipts. The trusted local executor supervises
   each command's process group and reports exactly what it could confirm.
-- **Durable questions and bounded artifacts.** A host policy can answer a tool
-  request with a question instead of a verdict. The question stays as durable
+- **Durable questions and bounded artifacts.** A host policy, such as the app
+  server's `ask` stance, can answer a tool request with a question instead of a
+  verdict. The question stays as durable
   session state, so it can be answered after the asking process is gone.
   Clients read tool output back in verified, bounded chunks.
 - **Session protocols and an independent client.** A foreground app server
-  speaks the experimental session protocol over standard input and output. A
-  dependency-free [Node client](clients/node/README.md) drives a session end to
-  end over that protocol. See [app server operations](docs/operator/app-server.md#concept).
+  speaks the experimental session protocol `loopex.experimental/1` over standard
+  input and output, and the daemon speaks `loopex.experimental/2` over its
+  socket. A dependency-free [Node client](clients/node/README.md) drives
+  sessions end to end over both. See [app server operations](docs/operator/app-server.md#concept).
 - **A local daemon that outlives its clients.** `loopex daemon` owns every
   session for one state root and keeps them running while no client is
   connected. Several client processes reach it over a same-user Unix socket.

@@ -52,7 +52,7 @@ starting from the founding vision and moving to the implemented subsystems.
 
 | Area | Concept | Technical depth | Notes |
 | --- | --- | --- | --- |
-| Getting started | [Developer documentation](README.md) | [DEVELOPMENT.md](../../DEVELOPMENT.md) | The developer index groups every page by reader; DEVELOPMENT.md has prerequisites, the toolchain pairs and the two check commands. |
+| Getting started | [Developer getting started](getting-started.md#concept) | [Getting started technical depth](getting-started-technical.md#technical-depth) | Two tracks, building on Loopex and contributing; [DEVELOPMENT.md](../../DEVELOPMENT.md) has prerequisites, the toolchain pairs and the two check commands, and the [developer index](README.md) groups every page by reader. |
 | Development method and portable clients | [Development charter](development-charter.md#concept-portable-development) | [Portable enforcement](development-charter-technical.md#technical-portable-development) | Also read `AGENTS.md`, [DEVELOPMENT.md](../../DEVELOPMENT.md), retained [smoke evidence](agent-adapter-smoke.md), and repository commands. |
 | Planning, running and closing a milestone | [Milestone guide](milestones.md#concept) | [Milestone mechanics](milestones-technical.md#technical-depth) | The four steps, the closure packet with its two SHAs and five-path confinement, and the pre-tag release proofs. The [plans index](../plans/README.md) owns lifecycle state. |
 | Which checks a change must pass | [Verification guide](verification.md#concept) | [Verification mechanics](verification-technical.md#technical-depth) | The three stages, the selection table by changed boundary, the honesty rules and the measured speed plan. |
@@ -127,7 +127,7 @@ them and `scripts/check-release.sh` runs them in a pass of its own.
 ### Gate-era routing notes
 
 These notes route readers of M3-era records; the retired gate machinery they
-describe no longer runs.
+describe no longer runs, except where a note restates a current rule.
 
 M3's implementation used focused checks under the reviewed
 [end-only full-gate cadence](#override-disposition-m3-implementation-gate-cadence-2026-09-10),

@@ -13,8 +13,9 @@ cost of proving a change is proportional to what the change could break.
 
 To use it: while editing, run the focused tests for what you touched; before
 merging, find the boundary your change touches in the
-[selection table](#concept-verification-selection) and add its row to the fast
-check; at closure and release, follow the [stages](#concept-verification-stages)
+[selection table](#concept-verification-selection) and run what its row names
+in addition to the fast check (or, for a documentation-only change, instead of
+it); at closure and release, follow the [stages](#concept-verification-stages)
 and the [milestone guide](milestones.md#concept). The commands themselves are
 described in [DEVELOPMENT.md](../../DEVELOPMENT.md).
 

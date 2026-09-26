@@ -21,6 +21,11 @@ courtesy — see [AGENTS.md](AGENTS.md) § Milestones and Checks and the
 
 ## [Unreleased]
 
+Revise the operator and developer documentation to describe current behaviour
+rather than milestone history, correcting statements the code contradicted, and
+add an operator getting-started runbook and a paired developer getting-started
+guide. The root README now states what Loopex provides at `0.2.0`.
+
 Rename the exact foreground protocol generation from
 `loopex.session.v1-experimental` to `loopex.experimental/1`, matching the
 generation-one schema and vector manifests that shipped in `0.1.0`. The rename

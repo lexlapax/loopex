@@ -79,7 +79,7 @@ nothing else there:
 ```
 
 Logs go to standard error at `info` level, so a running daemon's standard error
-carries only warnings, failures and its stop lines. A second daemon on the same
+carries its info-level logs, warnings, failures and stop lines. A second daemon on the same
 root loses at the placement lock and exits `placement_active` (76) without
 touching the first.
 
@@ -356,8 +356,9 @@ class ends the process within 35 s of the first fatal.
 | 110 | `prepare_index_interrupted` | The import was stopped |
 | 111 | `session_index_lost` | The running daemon's session index failed and the daemon fail-stopped |
 
-Each class occupies its own status, in the order listed. A refused start writes
-`loopex daemon refused to start: <class>` to standard error.
+Each class occupies its own status, in the order listed. An input refusal
+(65–75) writes `loopex daemon refused to start: <class>` to standard error; a
+later startup failure reports only its exit status.
 
 ## Related
 

@@ -16,7 +16,7 @@ how reports and decision questions are written, how much reasoning capability a
 task needs, and why every rule has to work from an ordinary checkout. Read it
 before creating or restructuring project documentation.
 
-It does not restate who decides what. Authority, autonomy tiers, milestones and
+It does not set who decides what. Authority, autonomy tiers, milestones and
 the two repository checks are set by the canonical
 [development contract](../../AGENTS.md); how a milestone runs is the
 [milestone guide](milestones.md#concept), and which checks a change must pass
