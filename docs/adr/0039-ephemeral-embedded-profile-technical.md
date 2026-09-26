@@ -14,7 +14,7 @@ The kernel's ports are unchanged; the profile chooses what fills each one:
 | --- | --- | --- |
 | `Loopex.Store` (six callbacks) | `Loopex.Store.Local` | `Loopex.Store.Memory`: a supervised process over `Loopex.Store.Local.State`, the conformance test wrapper `LoopexStoreLocalTest.Memory` promoted with its optional fault probe (active only when supplied, as `Loopex.Store.Local`'s is), so every conformance case proves it |
 | `Loopex.ArtifactStore` | `Loopex.Store.Local.Artifacts` | None; the runtime's existing `artifact_store: nil` behaviour (overflow truncated with the executor's notice, transfers unsupported) |
-| `Loopex.Model` (`complete/3`) | `Loopex.LLM.ReqLLM` through the companion bridge | `Loopex.LLM.ReqLLM.InProcess`, calling `ReqLLM.stream_text/3` in the coordinator's model attempt over the mapping it shares with the companion (`Loopex.LLM.ReqLLM.Mapping`) |
+| `Loopex.Model` (`complete/3`) | `Loopex.LLM.ReqLLM` through the companion bridge | `Loopex.LLM.ReqLLM.InProcess`. Its `complete/3` starts one provider child through the coordinator's provider-lifetime hook; that child calls `ReqLLM.stream_text/3` and drains the stream over the mapping it shares with the companion (`Loopex.LLM.ReqLLM.Mapping`) |
 | `Loopex.Executor` | `Loopex.Executor.Local`, ledger under the state root | `Loopex.Executor.Local`, ledger under the profile's temporary root |
 | `Loopex.Policy` | A named host policy | A policy module supplied by the host; the reference CLI maps `allow-all`, `shell-allowlist` and `refuse-all` to its own modules |
 
@@ -33,9 +33,13 @@ The kernel's ports are unchanged; the profile chooses what fills each one:
 - **Before starting ReqLLM:** `load_dotenv: false` for `:req_llm` and `:llm_db`,
   and `warn_unverified_models: false`.
 - **Error classes:**
-  - Everything before `stream_text/3` returns `{:ok, _}` is
-    `{:not_dispatched, "model_call_failed"}`.
-  - Everything after is `{:dispatched_or_unknown, "model_call_failed"}`.
+  - A refusal raised before `ReqLLM.stream_text/3` is called is
+    `{:not_dispatched, "model_call_failed"}`. That covers model build,
+    credential, context, tools and options, and an elapsed deadline.
+  - Every return or raise from that call, `{:error, _}` included, is
+    `{:dispatched_or_unknown, "model_call_failed"}`, as the companion
+    classifies it (`req_llm.ex:416-453`, citing ADR 0018), because ReqLLM may
+    already have started its transport.
   - A stream is not a success until its metadata shows no `:error`, no status
     of 400 or more, and no `finish_reason` of `:incomplete`, `:cancelled` or
     `:error`.
@@ -57,9 +61,9 @@ The kernel's ports are unchanged; the profile chooses what fills each one:
   `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` and `OPENROUTER_API_KEY` explicitly.
 - The adapter installs no logger filter or handler, changes no group leader,
   and never restarts ReqLLM's supervision tree. It sets
-  `:logger.set_process_level(:none)` only for its own model-attempt
-  process, so ReqLLM's stream-start error line, which is written in that
-  process, is never emitted. Its only change to shared state
+  `:logger.set_process_level(:none)` only in its own provider child, the
+  process that calls `ReqLLM.stream_text/3`, so ReqLLM's stream-start error
+  line, which is written in that process, is never emitted. Its only change to shared state
   is the two ReqLLM application settings it makes before first starting ReqLLM.
 
 <a id="technical-adr-0039-relation-0019"></a>
