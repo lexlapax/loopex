@@ -49,8 +49,8 @@ that its successor removes it on evidence rather than on a guess.
 | Verdict | Maintainer and developer usable | Source-operator usable | Ordinary local-operator usable |
 
 **Open reconciliations with M6** (refined before M7 opens):
-- **Provider selection.** M6's `provider:model` strings and its ephemeral
-  credential custodian, which resolves per-provider references just in time,
+- **Provider selection.** M6's `provider:model` strings, its credential-free
+  in-process adapter and its single-credential companion path in both profiles
   must be reconciled with this draft's provider profiles, its credential
   references and its `--provider`/`--role` selection.
 - **ADR 0028's transfer bound.** Accepted ADR 0028 counts artifact-transfer
@@ -60,8 +60,7 @@ that its successor removes it on evidence rather than on a guess.
   and developer pages. On 2026-09-26 the maintainer fixed the direction:
   implement the accepted per-connection count and allowance, not amend the ADR.
   The installed daemon serving several clients is where that bound starts to
-  matter, so M7 carries it as an outcome, with the daemon's `node_client` lane
-  and the operator page updated in the same change.
+  matter, so M7 carries it as outcome 7.
 - **Default home.** This draft's default home interacts with M6's rule that
   `ask` is ephemeral unless `--state-root` names a root, and with its
   statement that `LOOPEX_HOME` never switches profiles. Whether a configured
@@ -129,6 +128,7 @@ Technical depth: [Evidence obligations and mapping](m7-installed-durable-operato
 | 4 | **Operator lifecycle.** `version`, `paths`, `init`, `config`, `doctor`, `store backup`, `store restore`, `daemon status`, `daemon stop` and `daemon logs` beside the existing session commands, a daemon that starts on demand when a session command finds none, each command with a stable exit class | An operator diagnoses a missing configuration, a bad path, an unresolvable credential reference, a store fault, an unknown store format, a daemon that is not running and a version mismatch from the command output alone, never from internal files; two clients that start the daemon at once get one daemon |
 | 5 | **Packaged workflow.** The M5 daemon collaboration workflow driven entirely through the installed artifact | A real provider session, detach, observer attach, takeover, daemon restart, list, resume and completion, from the installed command on both supported platforms |
 | 6 | **Upgrade and rollback.** An exact reader boundary and recovery procedure between the `0.2` and `0.4` binaries over the unchanged root format | The `0.4` binary opens every `0.2` root unchanged and the `0.2` binary opens a root `0.4` has written; the `0.4` binary refuses a root whose marker names a format it does not know, by name, writing nothing; a backup taken under `0.4` restores under the previous release and serves the sessions it held |
+| 7 | **ADR 0028's transfer bound.** Artifact-transfer concurrency counted per connection, with the accepted 1 GiB cumulative transfer-work allowance per connection, as accepted ADR 0028 states, replacing the per-attachment count the implementation has used since `0.1.0` | Transfers from one connection across several attachments reach the per-connection limit and refuse beyond it; cumulative work past 1 GiB refuses; the daemon's `node_client` lane passes; the operator and developer pages drop the disclosed divergence |
 
 **The single acceptance demonstration** begins with an empty temporary home
 and the released archive on each supported platform: verify the artifact and
@@ -317,6 +317,7 @@ Every row reads `Open` while the draft is unregistered or `Open`.
 | 4 | Open | No `version`, `paths`, `init`, `config`, `doctor`, `store` or `daemon status`, `stop`, `logs` command exists; the daemon is started only by hand |
 | 5 | Open | No installed-artifact workflow exists; the M5 workflow runs from a source tree |
 | 6 | Open | No reader boundary or rollback proof exists between the `0.2` and `0.4` binaries |
+| 7 | Open | The implementation counts two transfers per attachment and enforces no cumulative allowance, diverging from accepted ADR 0028 since `0.1.0`; the maintainer fixed the direction on 2026-09-26: implement |
 
 ## Governance Records
 

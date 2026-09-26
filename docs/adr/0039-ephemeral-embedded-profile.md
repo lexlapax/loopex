@@ -7,33 +7,45 @@ Technical depth: [Profile composition, adapters and proofs](0039-ephemeral-embed
 - **Date:** 2026-09-26
 - **Decision owner:** Maintainer
 - **Supersedes:** in part.
-  - It scopes [ADR 0019](0019-host-owned-provider-protection.md#concept)'s
-    rules to the durable profile. Those rules are: every provider invocation in
-    a separate provider BEAM, and `LOOPEX_PROVIDER_API_KEY` as the only
-    credential source. 0019's technical companion itself says restoring
-    shared-VM provider handling "requires a new decision"; this is that
-    decision, for the ephemeral profile only.
-  - It likewise scopes
-    [ADR 0034](0034-provider-credential-handoff-over-bootstrap-channel.md#concept)'s
-    bootstrap-channel handoff to the durable profile.
-  - It supersedes one clause of
-    [ADR 0025](0025-resource-packs-and-skill-admission.md#concept): admitted
-    skill content no longer has to come only from the project's
-    `.agents/skills/<name>` in an operator-selected Git directory at an exact
-    commit. A caller may also name a skill directory outside the workspace,
-    such as `~/.agents/skills/<name>`, admitted under its own truthful
-    `user:<name>` identity. ADR 0025's admission record, the separation between
-    admission and activation, the limit of four selected skills and project
+  - It narrows one rule of
+    [ADR 0019](0019-host-owned-provider-protection.md#concept): every provider
+    invocation runs in a separate provider BEAM, except a call to a provider
+    that needs no credential in the ephemeral profile. 0019's technical
+    companion says restoring shared-VM provider handling "requires a new
+    decision"; this is that decision, for credential-free providers only.
+    0019's other rule, `LOOPEX_PROVIDER_API_KEY` as the only credential source,
+    is unchanged in both profiles.
+  - It supersedes two clauses of
+    [ADR 0025](0025-resource-packs-and-skill-admission.md#concept), in both
+    profiles:
+    - **Source.** Admitted skill content no longer has to come only from the
+      project's `.agents/skills/<name>`: a caller may also name a skill
+      directory outside the workspace, such as `~/.agents/skills/<name>`,
+      admitted as a user skill under its own `user:<name>` identity. 0025's
+      exclusion of configured or home roots is lifted for directories a caller
+      names, and only for them.
+    - **Name order.** 0025 refuses an ambiguous unqualified name and grants no
+      search order. Among the directories a caller names, a project skill now
+      takes precedence over a user skill of the same name, and the user skill
+      is reported as shadowed and never enters the manifest.
+
+    0025's admission record, the separation between admission and activation,
+    the limit of four selected skills, Git-sourced installation and project
     discovery's prompt are unchanged.
-  - All three accepted records stay byte-for-byte as accepted. For every
-    durable and daemon composition they govern exactly as before.
-- **Prerequisite for:** M6 outcomes 1 to 4, accepted before the in-process
-  model adapter, the memory store or the ephemeral composition is written
+  - [ADR 0034](0034-provider-credential-handoff-over-bootstrap-channel.md#concept)
+    is unchanged: every call that needs a credential, in either profile, uses
+    the companion and its bootstrap-channel handoff.
+  - All three accepted records stay byte-for-byte as accepted.
+- **Prerequisite for:** M6 outcomes 1 to 5, accepted before the in-process
+  model adapter, the memory store, the ephemeral composition, user skill
+  directories or the fixed policy revision is written
 
 <a id="concept-adr-0039-decision"></a>
 ### Context and Decision
 
 Technical depth: [Profile composition](0039-ephemeral-embedded-profile-technical.md#technical-adr-0039-decision).
+
+Technical depth: [The per-call process tree](0039-ephemeral-embedded-profile-technical.md#technical-adr-0039-tree).
 
 Loopex is meant to be a minimal coding harness on its own, and small enough to
 disappear inside a larger host. Every composition today is the durable one. It
@@ -65,10 +77,14 @@ loop.
      proved by the same store conformance suite. It holds every committed record
      for the life of the runtime and nothing after it. The profile composes no
      artifact store, so oversized tool output is truncated, not spilled;
-   - **an in-process model adapter** behind the unchanged model port. It calls
-     ReqLLM inside the host's VM. A `provider:model` string selects the model,
-     and the runtime holds only a reference to that provider's credential,
-     which a credential custodian resolves just before each call;
+   - **a model adapter chosen by credential.** A `provider:model` string selects
+     the model:
+     - a provider that needs no credential, a local Ollama server in M6, runs
+       through a new in-process adapter inside the host's VM;
+     - a provider that needs one runs through the existing companion adapter,
+       exactly as the durable profile does: a separate provider BEAM, the single
+       `LOOPEX_PROVIDER_API_KEY` handed off over the bootstrap channel, and the
+       built companion the host names;
    - **the local executor**, pointed at a temporary root and a named workspace.
 
    The profile is assembled by composition, not by core: composing edges is
@@ -84,71 +100,58 @@ loop.
 - A caller that needs recovery composes the durable profile, and nothing is
   migrated between the two.
 
-**Credential rule for the ephemeral profile.** It follows the vision's
-credential contract: Loopex holds references, the host owns custody, and
-resolution happens just in time at the model boundary.
-- **Custody:** each ephemeral runtime has one credential custodian, a process
-  the host owns through composition. The host supplies its resolver; the
-  default resolver reads the provider's own environment variable when asked.
-  The custodian keeps no value between calls.
-- **Reference only in runtime state:** the runtime's model configuration
-  carries the custodian and an opaque credential reference, never a value. No
-  runtime, coordinator, guard or status term ever holds the key.
-- **Resolution:** the adapter's provider call asks the custodian immediately
-  before dispatch, uses the value for that one call, and drops it when the call
-  ends. ReqLLM's own ambient key lookup is never used.
-- **Structural exclusion:** the value never enters a journal record, a public
-  event, progress, a diagnostic, a trace, a log line Loopex emits, a fixture or
-  an executor job. For the life of an ephemeral runtime, one named primary
-  logger filter removes any log event, crash reports included, that contains a
-  value the custodian has resolved and not yet released. That covers ReqLLM's
-  own processes, which hold the key while a call is in flight. Crash dumps
-  remain the host's VM configuration, as the vision's list excludes them.
-- **No key needed:** a provider that needs none, such as a local Ollama server,
-  resolves none.
-- **Missing key:** a provider whose credential cannot be resolved refuses at
-  composition, naming the reference and never a value, and again before
-  dispatch if it has since disappeared.
-- **Tool processes:** the local executor removes every provider credential name
-  from each tool process's environment, not only `LOOPEX_PROVIDER_API_KEY`.
-- **What the durable profile adds:** process isolation through the companion.
-  The ephemeral profile states plainly that it does not have it: the value is
-  in the host VM's memory for the duration of each call.
+**Credential rule.** No credential enters the host VM in either profile. The
+in-process adapter serves only providers that need none, and it refuses a
+credential-bearing provider rather than read a key. Every credential-bearing
+call keeps the companion's isolation, custody and trace exclusion unchanged, so
+the vision's structural exclusion of known credentials holds without a new
+mechanism.
 
-**Host hygiene for the ephemeral profile.** The adapter runs inside a host that
-may do other things, and ReqLLM loads a `.env` file when its application starts.
-So Loopex, not the OTP application graph, starts ReqLLM:
+**In-process calls own their whole process tree.** A provider call in the host
+VM creates processes inside ReqLLM that Loopex did not start: a stream server,
+an HTTP task and a metadata worker. Each call has one cleanup owner that stays
+responsive at every stage of the call. It finds every process the call created,
+ends them all, and acknowledges cleanup only after it has seen each one exit.
+If it cannot prove that, the kernel's existing unproved-cleanup path applies.
+
+**Host hygiene.** The in-process adapter runs inside a host that may do other
+things, and ReqLLM loads a `.env` file when its application starts. So Loopex,
+not the OTP application graph, starts ReqLLM:
 - no Loopex application lists ReqLLM for automatic start, so it cannot start
   before hygiene is in place;
-- composition turns off ReqLLM's automatic `.env` loading and its
-  unverified-model warning, then starts ReqLLM itself;
-- if ReqLLM is already running, composition refuses unless the host declares it
-  started ReqLLM itself and ReqLLM's `.env` loading is already off.
+- the first composition that needs ReqLLM turns off its automatic `.env`
+  loading and its unverified-model warning, then starts it, and records for the
+  life of the VM that Loopex started it;
+- a later composition finds that record and proceeds;
+- a ReqLLM that the host started itself is accepted only when the host declares
+  it and its `.env` loading is off; otherwise composition refuses.
 
 The settings are VM-global and stay for the life of the VM, because ReqLLM
-reads them only at its start; that is named, not restored. Every model is named
-inline, so no model catalog is consulted.
+reads them only at its start; that is named, not restored. Every in-process
+model is named inline, so no model catalog is consulted.
 
-**Skills named by path.** The ephemeral profile admits exactly the skill
-directories its caller names. The rules:
-- **No discovery.** It walks no directory on its own, so a headless caller is
-  never prompted.
-- **Two kinds of directory.** A directory at `.agents/skills/<name>` inside the
-  workspace is a project skill, `project:<name>`, the identity discovery
-  already gives. A directory outside the workspace, such as
-  `~/.agents/skills/<name>`, is a user skill, `user:<name>`, bound to the
-  content digest recorded when it is admitted. Any other directory inside the
-  workspace refuses, because it is neither.
+**Skills named by path.** Both profiles admit exactly the skill directories
+their caller names, beside the durable profile's existing installed and
+discovered skills. The rules:
+- **No discovery.** The ephemeral profile walks no directory on its own, so a
+  headless caller is never prompted.
+- **Two kinds of directory.** Classified against the workspace root:
+  - a directory at `.agents/skills/<name>` inside the workspace is a project
+    skill, `project:<name>`, the identity discovery already gives;
+  - a directory outside the workspace, such as `~/.agents/skills/<name>`, is a
+    user skill, `user:<name>`, bound to the content digest recorded when it is
+    admitted;
+  - any other directory inside the workspace refuses, because it is neither.
 - **Local wins.** When a project skill and a user skill share a name, the
-  project skill is admitted and the user skill is recorded as shadowed, not
-  admitted.
+  project skill is admitted and the user skill is reported as shadowed.
 - **Naming a directory is the host's admission decision.** It is recorded as
   ADR 0025's admission decision with `decision_source` `host_supplied`,
   `trust_scope` `project_skills` (the scope of skills admitted for this
   workspace's session), and the workspace binding. The host path is never
   recorded.
 - **Admitted, then each activated,** so ADR 0025's separation between admission
-  and activation holds, and its limit of four selected skills applies.
+  and activation holds, and its limit of four selected skills applies. In the
+  durable profile the admitted content is journaled like any admitted skill's.
 
 **Authority rule.** Neither profile has a default host authority. The caller
 always names the policy:
@@ -162,68 +165,56 @@ always names the policy:
 
 Technical depth: [Shared-state and diagnostic facts](0039-ephemeral-embedded-profile-technical.md#technical-adr-0039-relation-0019).
 
-ADR 0019 moved the provider out of the host VM for three reasons. The
-ephemeral profile answers each one as follows.
+ADR 0019 moved the provider out of the host VM for three reasons. For a
+credential-free call in the ephemeral profile they are answered as follows.
 
 1. **An adapter must not change the host's logger, group leaders or shared
-   ReqLLM supervision.** The ephemeral profile makes exactly two named changes
-   and no others:
-   - **One logger filter.** While an ephemeral runtime runs, it installs one
-     primary logger filter with a fixed Loopex id, which removes only events
-     that contain a credential value the custodian currently holds. It passes
-     every other event unchanged, and the last ephemeral runtime to stop
-     removes it. It installs no handler and changes no level.
-   - **ReqLLM's start.** It sets automatic `.env` loading and the
-     unverified-model warning off, then starts ReqLLM, as the host-hygiene rule
-     states.
-
-   It touches no group leader and never restarts ReqLLM's supervision tree. The
-   adapter's provider call sets only its own process's logger level.
+   ReqLLM supervision.** The in-process adapter installs no logger filter or
+   handler, changes no primary level and touches no group leader. Its one named
+   change to shared state is ReqLLM's start, under the host-hygiene rule. Each
+   call's own process silences its own logging.
 2. **ReqLLM's asynchronous diagnostics cannot be proved delivered or clean.**
-   ReqLLM's own failure paths can log inspected reasons, crash reports from its
-   stream and connection processes can carry request state, and a VM crash dump
-   can hold anything.
-   - The value filter excludes the known credential from every logged event,
-     crash reports included, in both the library and the command.
-   - The adapter's witness drives each path with a canary credential and
-     requires the canary's absence from every committed plane, from the
-     stream-start line, and from every captured log event, crash reports
-     included, under both a library host's default logger and `ask`.
-   - Crash dumps are VM configuration. The reference `ask` command disables
-     them; a library host is told in the developer guide that a crash dump can
-     hold any in-flight value.
-   - Request data other than the credential, such as prompts and tool output,
-     can still reach the host's logger through ReqLLM's failure paths. That
-     output belongs to the host, and the developer guide says so.
-3. **`LOOPEX_PROVIDER_API_KEY` is the only credential source.** In the ephemeral
-   profile the host's custodian resolves each provider's own credential just in
-   time. The durable profile keeps the single source.
+   With no credential in the VM, what those diagnostics can carry is request
+   data: prompts, tool output and the model's reply, which the host supplied or
+   the host's own session produced. It can reach the host's logger and crash
+   dumps, which the host owns. The developer guide says so, and the `ask`
+   command turns its own logger off and disables crash dumps.
+3. **`LOOPEX_PROVIDER_API_KEY` is the only credential source.** Unchanged.
 
-What the ephemeral profile gives up is process isolation for the credential
-while a call is in flight, and for provider diagnostics other than the
-credential. That trade is the point of the profile, and it is stated wherever
-the profile is offered.
+What the ephemeral profile gives up, for credential-free calls only, is process
+isolation for request data and for provider diagnostics. That trade is stated
+wherever the profile is offered.
 
 **The `ask` command's machine contract.** Other agents and scripts parse it, so
 it belongs to this decision as an experimental surface:
-- **JSON:** `--output json` writes exactly one JSON object, schema
-  `loopex.ask/1`, with a closed set of members. It carries the session and run
-  ids, the profile, the outcome, the final text, each tool's id and outcome,
-  any shadowed skill names, and a `details` object whose members are fixed per
-  outcome. A `run.finished` field that is not in that set is not emitted, and
-  every string and list has a stated bound.
+- **JSON:** `--output json` writes exactly one JSON object and nothing else on
+  standard output. Its members are exactly:
+  - `schema`, always `loopex.ask/1`;
+  - `session_id`, `run_id`, `profile` and `outcome`;
+  - `text` and `text_truncated`;
+  - `tools`, each with its tool id and outcome, and `tools_truncated`;
+  - `shadowed_skills`;
+  - `cleanup`: whether stopping proved every process ended, and if not, the
+    kept temporary root and what remained unproved;
+  - `details`, whose members are fixed per outcome.
+
+  A `run.finished` field outside that set is not emitted. Every string and
+  list has a stated bound, and a longer answer or tool list is cut and flagged.
+  A refusal before the run writes nothing to standard output.
 - **Exit status:** `0` completed; `1` refused before the run; `2` failed; `3`
   bound reached; `4` outcome unknown; `5` cancelled; `6` no ending within the
   wait; `130` the existing interrupt. The values avoid the daemon's 65–111 and
-  the launcher's 127.
+  the launcher's 127. An unproved cleanup does not change the status; it is
+  reported in `cleanup` and on standard error.
 - **Versioning:** a change to either, including a new member, is a new schema
   name under the 0.x policy.
 
-**Model selection.** A `provider:model` string selects the model:
-`ollama:<model>`, `openai:<model>`, `anthropic:<model>` or
-`openrouter:<model>`.
+**Model selection.** A `provider:model` string selects the model. In M6 the
+in-process adapter serves `ollama:<model>`; any other provider the companion
+serves goes through the companion.
 - When none is given, the ephemeral profile uses `LOOPEX_MODEL`, and then the
-  local default `ollama:llama3.2`, so the profile works with no key.
+  local default `ollama:llama3.2`, so the profile works with no key and no
+  companion.
 - The durable profile keeps its pinned reference model unless a model is named,
   and a named model must be served by its single credential.
 
@@ -235,19 +226,21 @@ Technical depth: [Adapters and proofs](0039-ephemeral-embedded-profile-technical
 - **Embedding.** An Elixir host that depends on `loopex_composition` calls:
   - `LoopexComposition.Ephemeral.run/2` for one answer;
   - `start_session/1`, `ask/3`, `answer/3`, `last_result/1`, `history/1` and
-    `stop_session/1` for a
-    conversation.
+    `stop_session/1` for a conversation.
 
-  It needs no state root, no companion build and no store setup. When stopping
-  cannot prove that every provider and tool process has ended,
-  `stop_session/1` returns an error, keeps the temporary root and names it,
-  rather than deleting what an in-flight effect might still use.
+  With a local model it needs no state root, no companion build, no credential
+  and no store setup. A hosted model needs what the companion always needs: the
+  built companion and `LOOPEX_PROVIDER_API_KEY`. When stopping cannot prove
+  that every provider and tool process has ended, `stop_session/1` returns an
+  error, keeps the temporary root and names it, rather than deleting what an
+  in-flight effect might still use.
 - **Shells and agents.** They run `loopex ask "…"`, or `loopex -p "…"`, with
   `--model`, `--output json|text`, `--skill-dir DIR` (at most four, project or
   user skill directories) and a named policy. The exit status reports the run's
   outcome, not only whether the command started.
-- **Operators.** Nothing changes for them. `--state-root` on `ask`, or the
-  durable composition in the API, selects today's behaviour exactly.
+- **Operators.** `--state-root` on `ask`, or the durable composition in the
+  API, selects today's behaviour, plus the named skill directories and the
+  optional model, bound, sampling and active-tool options.
 - **Profile visibility.** The embedded API's session value and result, and
   `ask`'s JSON, carry the profile, and an ephemeral session appears in no
   durable listing.
@@ -258,24 +251,28 @@ Technical depth: [Adapters and proofs](0039-ephemeral-embedded-profile-technical
 Technical depth: [Compatibility mechanics](0039-ephemeral-embedded-profile-technical.md#technical-adr-0039-compatibility).
 
 This is additive:
-- **Unchanged:** the durable profile, the public session protocol, the store
-  format, the executor protocol, the daemon and core's runtime library.
+- **Unchanged:** the public session protocol, the store format, the executor
+  protocol, the daemon, the companion and core's runtime library.
 - **Experimental** under the 0.x policy:
   - the embedded API;
   - the `ask` command;
   - `ResourcePacks.read_directories/2`;
   - the durable composition's optional model, bounds, sampling and active-tool
     options, whose defaults reproduce M5.
-- **New edge modules behind unchanged ports:** the memory store, the
-  in-process adapter and the credential custodian. Core's dependency budget is
-  unchanged.
+- **New edge modules behind unchanged ports:** the memory store and the
+  in-process adapter. Core's dependency budget is unchanged.
 - **Durable policy revision:** the durable composition's default policy
   identity keeps the revision it had in `0.2`, fixed rather than derived from
   the release version, so a pending interaction recorded under either release
   recovers under the other.
-- **Rollback:** remove the profile. No durable byte depends on it, and a `0.2`
-  binary opens and resumes every root `0.3` writes, pending interactions
-  included.
+- **Rollback** to `0.2`: remove the profile. No durable byte depends on it, and
+  a `0.2` binary opens and resumes every root `0.3` writes, with two named
+  exceptions that each leave a truthful record:
+  - a call to a tool only `0.3` defines, such as `grep`, that is still pending
+    when the root is resumed under `0.2`: the call is committed as a failed
+    `unknown_tool` call and the run continues;
+  - a user skill admitted under `0.3`: its admitted content is already in the
+    journal, so it is replayed as recorded, but `0.2` cannot admit a new one.
 
 ## Governance Record
 

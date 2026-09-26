@@ -208,8 +208,8 @@ before the M7 or M8 outcome that depends on it.
 
 0039 is the one Proposed M6 prerequisite, proposed with the M6 plan on
 2026-09-26. It adds an ephemeral composition profile beside the durable one,
-over the same kernel: a memory store, an in-process model adapter whose
-credential a host-owned custodian resolves just in time, and the local executor
-on a temporary root. It leaves 0019 and 0034 unchanged for every durable and
-daemon composition, and supersedes only 0025's project-only skill source
-clause, for user skill directories.
+over the same kernel: a memory store, a model adapter chosen by credential (an
+in-process adapter for credential-free local models, the companion for every
+other), and the local executor on a temporary root. It narrows 0019 only for
+credential-free providers in the ephemeral profile, leaves 0034 unchanged, and
+supersedes 0025's source and name-order clauses for named skill directories.
